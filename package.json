@@ -20,7 +20,7 @@
     "@tanstack/vue-query": "5.90.2",
     "@vueuse/nuxt": "13.3.0",
     "@wagmi/vue": "0.2.10",
-    "axios": "1.13.4",
+    "axios": "1.13.5",
     "chart.js": "4.5.1",
     "chartjs-plugin-annotation": "3.1.0",
 "luxon": "3.4.4",
