@@ -231,7 +231,7 @@ watch(address, () => {
 
 <template>
   <div class="flex gap-32">
-    <div class="flex flex-col gap-16 w-full">
+    <div class="flex flex-col gap-16 w-full laptop:sticky laptop:top-[104px] laptop:self-start">
       <BaseBackButton class="laptop:!hidden" />
       <VaultForm
         title="Open earn position"
@@ -311,6 +311,7 @@ watch(address, () => {
         <VaultFormInfoBlock
           v-if="vault && asset"
           :loading="isEstimatesLoading"
+          variant="card"
         >
           <SummaryRow
             label="Projected earnings per month"

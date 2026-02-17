@@ -198,7 +198,7 @@ const onClick = () => {
           </div>
         </div>
         <div
-          class="flex flex-wrap items-center gap-8"
+          class="grid grid-cols-3 gap-8"
           @click.stop
         >
           <UiButton
@@ -320,7 +320,7 @@ const onClick = () => {
           </div>
         </div>
         <div
-          class="flex flex-wrap items-center gap-8"
+          class="grid grid-cols-3 gap-8"
           @click.stop
         >
           <UiButton

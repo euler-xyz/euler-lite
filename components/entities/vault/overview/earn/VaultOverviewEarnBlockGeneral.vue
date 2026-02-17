@@ -35,11 +35,11 @@ const feeDisplay = computed(() => {
 </script>
 
 <template>
-  <div class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card">
+  <div class="bg-surface-secondary rounded-xl flex flex-col gap-16 p-24 shadow-card">
     <p class="text-h3 text-content-primary">
       Overview
     </p>
-    <div class="flex flex-col items-start gap-24">
+    <div class="flex flex-col items-start gap-16">
       <div
         v-if="isDeprecated && deprecationReason"
         class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
@@ -81,10 +81,12 @@ const feeDisplay = computed(() => {
       <VaultOverviewLabelValue
         label="Price"
         :value="priceDisplay"
+        orientation="horizontal"
       />
       <VaultOverviewLabelValue
         label="Performance fee"
         :value="feeDisplay"
+        orientation="horizontal"
       />
       <VaultOverviewLabelValue
         v-if="enableEntityBrandingDisplay"

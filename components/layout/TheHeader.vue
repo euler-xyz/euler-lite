@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onClickOutside } from '@vueuse/core'
+import { onClickOutside, useWindowScroll } from '@vueuse/core'
 import { offset, useFloating } from '@floating-ui/vue'
 import { useAppKit } from '@reown/appkit/vue'
 import { useAccount } from '@wagmi/vue'
@@ -17,6 +17,10 @@ const modal = useModal()
 const route = useRoute()
 const { docsUrl, tosUrl, xUrl, discordUrl, telegramUrl, githubUrl, appTitle, enableEarnPage, enableLendPage, enableExplorePage } = useDeployConfig()
 const menuItems = getMenuItems(enableEarnPage, enableLendPage, enableExplorePage)
+
+// Scroll-aware header background
+const { y: scrollY } = useWindowScroll()
+const isScrolled = computed(() => scrollY.value > 0)
 
 const links = computed(() => [
   docsUrl ? { title: 'Docs', url: docsUrl } : null,
@@ -69,12 +73,13 @@ onClickOutside(reference, () => {
 
 <template>
   <header
-    class="sticky top-0 right-0 left-0 z-[101] min-h-[72px] border-b border-line-default py-16 px-24 mobile:min-h-[56px] mobile:border-b-0 mobile:p-16 flex items-center justify-between bg-header backdrop-blur-[20px]"
+    class="sticky top-0 right-0 left-0 z-[101] min-h-[72px] py-16 px-12 mobile:min-h-[56px] mobile:p-12 flex justify-between laptop:grid laptop:grid-cols-[1fr_auto_1fr] items-center transition-[background-color,border-color,backdrop-filter] duration-300"
+    :class="[isScrolled ? 'bg-header backdrop-blur-[20px] border-b border-line-default' : 'border-b border-transparent']"
   >
     <!-- Left: Logo -->
     <button
       ref="reference"
-      class="flex items-center gap-8 relative cursor-pointer outline-none flex-shrink-0"
+      class="flex items-center gap-8 relative cursor-pointer outline-none laptop:flex-shrink-0 min-w-0"
       @click="onLogoClick"
     >
       <img
@@ -149,27 +154,25 @@ onClickOutside(reference, () => {
     </button>
 
     <!-- Center: Navigation -->
-    <div class="flex flex-1 justify-center mobile:!hidden">
-      <div class="flex">
-        <NuxtLink
-          v-for="item in menuItems"
-          :key="item.name"
-          :to="'/' + item.name"
-          class="flex gap-8 text-[13px] font-medium no-underline py-10 px-16 rounded-8 text-content-secondary items-center justify-center hover:text-content-primary hover:bg-surface-secondary transition-all"
-          :class="[getIsMenuItemActive(item) ? 'bg-surface-secondary text-content-primary' : '']"
-        >
-          <UiIcon
-            class="!w-18 !h-18"
-            :class="[getIsMenuItemActive(item) ? 'text-accent-600' : 'text-content-muted']"
-            :name="item.icon"
-          />
-          <span>{{ item.label }}</span>
-        </NuxtLink>
-      </div>
+    <div class="flex justify-center mobile:!hidden">
+      <NuxtLink
+        v-for="item in menuItems"
+        :key="item.name"
+        :to="'/' + item.name"
+        class="flex gap-8 text-[13px] font-medium no-underline py-10 px-16 rounded-8 text-content-secondary items-center justify-center hover:text-content-primary hover:bg-surface-secondary transition-all"
+        :class="[getIsMenuItemActive(item) ? 'bg-surface-secondary text-content-primary' : '']"
+      >
+        <UiIcon
+          class="!w-18 !h-18"
+          :class="[getIsMenuItemActive(item) ? 'text-accent-600' : 'text-content-muted']"
+          :name="item.icon"
+        />
+        <span>{{ item.label }}</span>
+      </NuxtLink>
     </div>
 
     <!-- Right: Wallet -->
-    <div class="flex flex-nowrap gap-8 min-w-0">
+    <div class="flex flex-nowrap gap-8 justify-end laptop:flex-shrink-0 min-w-0">
       <UiButton
         class="py-6 px-12"
         icon="arrow-down"
@@ -178,10 +181,7 @@ onClickOutside(reference, () => {
         icon-right
         @click="onChainButtonClick"
       >
-        <BaseAvatar
-          :src="`/chains/${chainId}.webp`"
-          :label="String(chainId)"
-        />
+        <BaseAvatar :src="`/chains/${chainId}.webp`" :label="String(chainId)" />
       </UiButton>
       <UiButton
         class="min-w-0 [&>span]:truncate"

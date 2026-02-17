@@ -143,9 +143,13 @@ const onClick = (e: Event) => {
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 
-  &.is-disabled, &.is-loading {
+  &.is-loading {
     pointer-events: none;
     opacity: 0.6;
+  }
+
+  &.is-disabled {
+    pointer-events: none;
   }
 
   &.is-rounded {

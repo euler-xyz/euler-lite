@@ -45,7 +45,7 @@ watchEffect(async () => {
     <p class="text-p2 text-neutral-500 mb-16">
       Savings are supply-only deposits that earn you yield. They are not used as collateral to back a borrowing position.
     </p>
-    <div class="flex flex-1 p-8 rounded-12 mb-16 border border-line-default bg-card">
+    <div class="flex flex-1 p-8 rounded-12 mb-48 border border-line-default bg-card">
       <div
         v-if="isConnected && (!isDepositsLoaded || (!isReady && earnItems.length === 0))"
         class="flex flex-1 justify-center items-center"

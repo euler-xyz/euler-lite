@@ -35,7 +35,7 @@ const sortedBrevisRewards = computed(() => {
       <p class="text-p2 text-neutral-500 mb-16">
         Rewards distributed via Merkl, with updates every 8-12 hours
       </p>
-      <div class="flex flex-1 rounded-12 p-8 mb-16 border border-line-default bg-card">
+      <div class="flex flex-1 rounded-12 p-8 mb-48 border border-line-default bg-card">
         <div
           v-if="isRewardsLoading"
           class="flex flex-1 min-h-[100px] justify-center items-center"
@@ -77,7 +77,7 @@ const sortedBrevisRewards = computed(() => {
       <p class="text-p2 text-neutral-500 mb-16">
         Rewards distributed via Incentra incentive campaigns
       </p>
-      <div class="flex flex-1 rounded-12 p-8 mb-16 border border-line-default bg-card">
+      <div class="flex flex-1 rounded-12 p-8 mb-48 border border-line-default bg-card">
         <div
           v-if="isBrevisRewardsLoading"
           class="flex flex-1 min-h-[100px] justify-center items-center"

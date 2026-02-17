@@ -5,11 +5,11 @@ defineProps<{ title?: string, loading?: boolean }>()
 <template>
   <form
     v-bind="$attrs"
-    class="flex flex-col gap-16 mobile:min-h-[calc(100dvh-100px)]"
+    class="flex flex-col gap-16"
   >
     <h1
       v-if="title"
-      class="text-p1 pb-4"
+      class="text-h2 text-content-primary pb-4"
     >
       {{ title }}
     </h1>

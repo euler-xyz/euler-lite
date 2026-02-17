@@ -216,8 +216,8 @@
   --ui-button-primary-background-color: var(--accent-500);
   --ui-button-primary-color: #0a0a0a;
   --ui-button-primary-active-background-color: var(--accent-400);
-  --ui-button-primary-disabled-background-color: #262626;
-  --ui-button-primary-disabled-color: #525252;
+  --ui-button-primary-disabled-background-color: rgba(196, 155, 100, 0.15);
+  --ui-button-primary-disabled-color: rgba(196, 155, 100, 0.4);
 
   --ui-button-primary-stroke-background-color: transparent;
   --ui-button-primary-stroke-color: #fafafa;
