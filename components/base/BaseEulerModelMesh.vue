@@ -20,39 +20,80 @@ const VERT_WORLD_POS = `
 vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
 `
 
-// Declarations + noise function in fragment common block
+// Declarations: hash, cell helpers
 const FRAG_DECL = `
 varying vec3 vWorldPos;
 uniform float uReveal;
 
-float _hash3(vec3 p) {
+float _h1(vec3 p) {
   p = fract(p * vec3(443.8975, 397.2973, 491.1871));
   p += dot(p.zxy, p.yxz + 19.19);
   return fract(p.x * p.y * p.z);
 }
-`
 
-// Early discard at start of main() — radial reveal: center appears first, then outward.
-// Small noise on the threshold creates an organic, slightly fuzzy crystallization edge.
-const FRAG_EARLY_DISCARD = `
-if (uReveal < 0.9999) {
-  float _r = length(vWorldPos);
-  float _noise = _hash3(vWorldPos * 9.0) * 0.16;
-  if (_r + _noise > uReveal * 1.75) discard;
+// Warp world-space coords so cells are irregular, not grid-aligned
+vec3 _warp(vec3 p) {
+  return p + vec3(
+    sin(p.y * 4.1 + p.z * 2.3) * 0.09,
+    sin(p.z * 3.7 + p.x * 2.8) * 0.09,
+    sin(p.x * 4.5 + p.y * 1.9) * 0.09
+  );
 }
 `
 
-// Edge glow: injected just before main() closes (after fog_fragment).
-// Creates a blue crystallization boundary that tracks the reveal wavefront.
+// Early discard: cell-based shard reveal.
+// Each cell (quantised warped-space position) gets a unique reveal time
+// that blends radial distance (center-first) with per-cell randomness.
+const FRAG_EARLY_DISCARD = `
+if (uReveal < 0.9999) {
+  const float _S = 4.5;
+  vec3 _wp = _warp(vWorldPos);
+  vec3 _cell = floor(_wp * _S);
+  float _cid  = _h1(_cell);
+  float _rad  = length(vWorldPos) / 1.75;
+  // 65% radial (center first) + 35% per-cell randomness
+  float _when = mix(_rad, _cid, 0.35);
+  if (_when > uReveal * 1.06) discard;
+}
+`
+
+// Kintsugi gold seams: injected after fog_fragment (gl_FragColor is set).
+// Two layers:
+//   1. Wave glow  — bright gold burns along seams as the wavefront sweeps past
+//   2. Residual   — faint permanent gold seam once the shard has settled
 const FRAG_EDGE_GLOW = `
-if (uReveal > 0.01 && uReveal < 0.985) {
-  float _r2 = length(vWorldPos);
-  float _wave = uReveal * 1.75;
-  float _dist = _wave - _r2;
-  if (_dist > 0.0 && _dist < 0.18) {
-    float _glow = pow(1.0 - _dist / 0.18, 1.8) * (1.0 - uReveal * 0.4);
-    gl_FragColor.rgb += vec3(0.15, 0.45, 1.0) * _glow * 3.0;
-  }
+{
+  const float _S = 4.5;
+  vec3 _wp = _warp(vWorldPos);
+  vec3 _cf = fract(_wp * _S);
+
+  // How close to any cell face (0 = on edge, 0.5 = cell centre)
+  float _ex = min(_cf.x, 1.0 - _cf.x);
+  float _ey = min(_cf.y, 1.0 - _cf.y);
+  float _ez = min(_cf.z, 1.0 - _cf.z);
+  float _edgeness = min(_ex, min(_ey, _ez));
+  float _onEdge = 1.0 - smoothstep(0.0, 0.055, _edgeness);
+
+  // This cell's reveal time (same formula as discard)
+  vec3 _cell = floor(_wp * _S);
+  float _cid  = _h1(_cell);
+  float _rad  = length(vWorldPos) / 1.75;
+  float _when = mix(_rad, _cid, 0.35);
+
+  // Wave proximity: brightest right as the wavefront crosses this cell
+  float _waveDist = abs(_when - uReveal);
+  float _wave = smoothstep(0.28, 0.0, _waveDist) * smoothstep(0.0, 0.04, uReveal);
+
+  // Residual seam: fades from strong → subtle as reveal completes
+  float _residual = _onEdge * mix(0.22, 0.055, smoothstep(0.6, 1.0, uReveal));
+
+  // Gold palette: deep amber core → bright yellow-white at peak
+  vec3 _goldDeep   = vec3(0.9,  0.55, 0.02);
+  vec3 _goldBright = vec3(1.0,  0.92, 0.45);
+  vec3 _goldColor  = mix(_goldDeep, _goldBright, _wave);
+
+  float _intensity = _onEdge * _wave * 5.5 + _residual;
+  gl_FragColor.rgb += _goldColor * _intensity;
 }
 `
 
