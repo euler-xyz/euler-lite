@@ -20,80 +20,77 @@ const VERT_WORLD_POS = `
 vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
 `
 
-// Declarations: hash, cell helpers
+// Declarations: 2D Voronoi helpers (used for organic shard crack patterns)
 const FRAG_DECL = `
 varying vec3 vWorldPos;
 uniform float uReveal;
 
-float _h1(vec3 p) {
-  p = fract(p * vec3(443.8975, 397.2973, 491.1871));
-  p += dot(p.zxy, p.yxz + 19.19);
-  return fract(p.x * p.y * p.z);
+// 2D hash utilities
+vec2 _h22(vec2 p) {
+  p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+  return fract(sin(p) * 43758.5453);
+}
+float _h21(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
-// Warp world-space coords so cells are irregular, not grid-aligned
-vec3 _warp(vec3 p) {
-  return p + vec3(
-    sin(p.y * 4.1 + p.z * 2.3) * 0.09,
-    sin(p.z * 3.7 + p.x * 2.8) * 0.09,
-    sin(p.x * 4.5 + p.y * 1.9) * 0.09
-  );
+// 2D Voronoi — returns (dist_to_nearest_seed, dist_to_edge, cell_id 0-1)
+// dist_to_edge is 0 exactly on crack lines, grows into each shard interior
+vec3 _vor(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  float d1 = 1e5, d2 = 1e5;
+  vec2 bi;
+  for (int x = -2; x <= 2; x++) {
+    for (int y = -2; y <= 2; y++) {
+      vec2 n  = vec2(float(x), float(y));
+      vec2 pt = _h22(i + n) * 0.8 + 0.1;
+      float d = length(n + pt - f);
+      if (d < d1) { d2 = d1; d1 = d; bi = i + n; }
+      else if (d < d2) { d2 = d; }
+    }
+  }
+  return vec3(d1, d2 - d1, _h21(bi));
 }
 `
 
-// Early discard: cell-based shard reveal.
-// Each cell (quantised warped-space position) gets a unique reveal time
-// that blends radial distance (center-first) with per-cell randomness.
+// Early discard: each Voronoi cell assembles at its own time.
+// 40% radial bias (center-first, loosely) + 60% per-cell random = organic feel.
 const FRAG_EARLY_DISCARD = `
 if (uReveal < 0.9999) {
-  const float _S = 4.5;
-  vec3 _wp = _warp(vWorldPos);
-  vec3 _cell = floor(_wp * _S);
-  float _cid  = _h1(_cell);
-  float _rad  = length(vWorldPos) / 1.75;
-  // 65% radial (center first) + 35% per-cell randomness
-  float _when = mix(_rad, _cid, 0.35);
-  if (_when > uReveal * 1.06) discard;
+  vec3 _v = _vor(vWorldPos.xy * 2.5);
+  float _rad  = length(vWorldPos.xy) / 1.4;
+  float _when = mix(_rad, _v.z, 0.6);
+  if (_when > uReveal * 1.05) discard;
 }
 `
 
-// Kintsugi gold seams: injected after fog_fragment (gl_FragColor is set).
-// Two layers:
-//   1. Wave glow  — bright gold burns along seams as the wavefront sweeps past
-//   2. Residual   — faint permanent gold seam once the shard has settled
+// Kintsugi gold seams injected after fog_fragment:
+//   Wave glow  — bright gold floods the crack as the shard assembles
+//   Residual   — permanent faint gold seam (the repaired crack stays visible)
 const FRAG_EDGE_GLOW = `
 {
-  const float _S = 4.5;
-  vec3 _wp = _warp(vWorldPos);
-  vec3 _cf = fract(_wp * _S);
+  vec3 _v   = _vor(vWorldPos.xy * 2.5);
+  float _rad  = length(vWorldPos.xy) / 1.4;
+  float _when = mix(_rad, _v.z, 0.6);
 
-  // How close to any cell face (0 = on edge, 0.5 = cell centre)
-  float _ex = min(_cf.x, 1.0 - _cf.x);
-  float _ey = min(_cf.y, 1.0 - _cf.y);
-  float _ez = min(_cf.z, 1.0 - _cf.z);
-  float _edgeness = min(_ex, min(_ey, _ez));
-  float _onEdge = 1.0 - smoothstep(0.0, 0.055, _edgeness);
+  // Crack mask: 1 on the seam line, 0 in shard interior
+  // Thicker seam (0.13) = real lacquer width, not a hairline
+  float _seam = 1.0 - smoothstep(0.0, 0.13, _v.y);
 
-  // This cell's reveal time (same formula as discard)
-  vec3 _cell = floor(_wp * _S);
-  float _cid  = _h1(_cell);
-  float _rad  = length(vWorldPos) / 1.75;
-  float _when = mix(_rad, _cid, 0.35);
+  // Wave front: brightest right as the crack fills with gold
+  float _wave = smoothstep(0.32, 0.0, abs(_when - uReveal))
+              * smoothstep(0.0, 0.05, uReveal);
 
-  // Wave proximity: brightest right as the wavefront crosses this cell
-  float _waveDist = abs(_when - uReveal);
-  float _wave = smoothstep(0.28, 0.0, _waveDist) * smoothstep(0.0, 0.04, uReveal);
+  // Residual: strong while assembling → settles to subtle permanent seam
+  float _residual = _seam * mix(0.28, 0.07, smoothstep(0.55, 1.0, uReveal));
 
-  // Residual seam: fades from strong → subtle as reveal completes
-  float _residual = _onEdge * mix(0.22, 0.055, smoothstep(0.6, 1.0, uReveal));
-
-  // Gold palette: deep amber core → bright yellow-white at peak
-  vec3 _goldDeep   = vec3(0.9,  0.55, 0.02);
-  vec3 _goldBright = vec3(1.0,  0.92, 0.45);
+  // Gold palette — deep amber to bright hot gold at the wave peak
+  vec3 _goldDeep   = vec3(0.82, 0.48, 0.02);
+  vec3 _goldBright = vec3(1.0,  0.88, 0.38);
   vec3 _goldColor  = mix(_goldDeep, _goldBright, _wave);
 
-  float _intensity = _onEdge * _wave * 5.5 + _residual;
-  gl_FragColor.rgb += _goldColor * _intensity;
+  gl_FragColor.rgb += _goldColor * (_seam * _wave * 6.0 + _residual);
 }
 `
 
@@ -153,6 +150,9 @@ loader.load(
   err => console.error('[EulerModel] load error:', err),
 )
 
+// Track the exact moment reveal completes so idle rotation starts from 0 (no snap)
+let revealCompletedAt = -1
+
 // --- Render loop ---
 const { onBeforeRender } = useLoop()
 onBeforeRender(({ elapsed }) => {
@@ -161,12 +161,14 @@ onBeforeRender(({ elapsed }) => {
 
   if (!model.value) return
 
-  // Always rotate so dissolve → idle transition is seamless
-  model.value.rotation.y = elapsed * 0.4
-  // Only float once fully revealed
   if (props.reveal >= 1) {
-    model.value.position.y = Math.sin(elapsed * 0.6) * 0.06
+    // Record the first frame where reveal is complete
+    if (revealCompletedAt < 0) revealCompletedAt = elapsed
+    const t = elapsed - revealCompletedAt
+    model.value.rotation.y = t * 0.4
+    model.value.position.y = Math.sin(t * 0.6) * 0.06
   }
+  // No rotation during dissolve — world positions stay stable for the crack shader
 })
 </script>
 
