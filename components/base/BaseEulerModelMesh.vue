@@ -120,8 +120,10 @@ onBeforeRender(({ elapsed }) => {
 
   if (!model.value) return
 
+  // Always rotate so dissolve → idle transition is seamless
+  model.value.rotation.y = elapsed * 0.4
+  // Only float once fully revealed
   if (props.reveal >= 1) {
-    model.value.rotation.y = elapsed * 0.4
     model.value.position.y = Math.sin(elapsed * 0.6) * 0.06
   }
 })
