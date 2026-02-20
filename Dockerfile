@@ -41,5 +41,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # can be the primary process. Doppler must be a statically linked binary
 # since distroless has no shell or dynamic linker beyond what Node needs.
 # Verify with: docker run --rm <image> ./doppler --version
-ENTRYPOINT []
-CMD ["./doppler", "run", "--", "/nodejs/bin/node", ".output/server/index.mjs"]
+ENTRYPOINT ["./doppler", "run", "--"]
+CMD ["/nodejs/bin/node", ".output/server/index.mjs"]

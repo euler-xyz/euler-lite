@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - master
+      - app_runner_update
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
