@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { useLoop } from '@tresjs/core'
 
-const GRAPH_END = 0.8
-const CONVERGE_END = 1.4
-const CRYSTAL_END = 1.6
+const GRAPH_END = 1.2
+const CONVERGE_END = 2.2
+const CRYSTAL_END = 2.8
 
 const reveal = ref(0)
 const graphProgress = reactive({ graphT: 0, convergeT: 0, crystalT: 0 })
