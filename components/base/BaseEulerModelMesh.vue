@@ -9,28 +9,51 @@ const props = defineProps<{
 }>()
 
 const model = shallowRef<THREE.Group | null>(null)
-
-// Track all injected uReveal uniforms to update reactively
 const revealUniforms: Array<{ uReveal: { value: number } }> = []
 
-const VERT_INJECT = `
+// --- Shader snippets injected via onBeforeCompile ---
+
+const VERT_DECL = `
 varying vec3 vWorldPos;
 `
-const VERT_MAIN_INJECT = `
+const VERT_WORLD_POS = `
 vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
 `
-const FRAG_INJECT = `
+
+// Declarations + noise function in fragment common block
+const FRAG_DECL = `
 varying vec3 vWorldPos;
 uniform float uReveal;
 
-float hash3(vec3 p) {
+float _hash3(vec3 p) {
   p = fract(p * vec3(443.8975, 397.2973, 491.1871));
   p += dot(p.zxy, p.yxz + 19.19);
   return fract(p.x * p.y * p.z);
 }
 `
-const FRAG_MAIN_INJECT = `
-if (uReveal < 0.9999 && hash3(vWorldPos * 4.0) > uReveal) discard;
+
+// Early discard at start of main() — radial reveal: center appears first, then outward.
+// Small noise on the threshold creates an organic, slightly fuzzy crystallization edge.
+const FRAG_EARLY_DISCARD = `
+if (uReveal < 0.9999) {
+  float _r = length(vWorldPos);
+  float _noise = _hash3(vWorldPos * 9.0) * 0.16;
+  if (_r + _noise > uReveal * 1.75) discard;
+}
+`
+
+// Edge glow: injected just before main() closes (after fog_fragment).
+// Creates a blue crystallization boundary that tracks the reveal wavefront.
+const FRAG_EDGE_GLOW = `
+if (uReveal > 0.01 && uReveal < 0.985) {
+  float _r2 = length(vWorldPos);
+  float _wave = uReveal * 1.75;
+  float _dist = _wave - _r2;
+  if (_dist > 0.0 && _dist < 0.18) {
+    float _glow = pow(1.0 - _dist / 0.18, 1.8) * (1.0 - uReveal * 0.4);
+    gl_FragColor.rgb += vec3(0.15, 0.45, 1.0) * _glow * 3.0;
+  }
+}
 `
 
 function applyDissolveShader(mesh: THREE.Mesh) {
@@ -40,17 +63,22 @@ function applyDissolveShader(mesh: THREE.Mesh) {
   const mat = mesh.material as THREE.MeshStandardMaterial
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uReveal = uniforms.uReveal
+
+    // Vertex: world position varying
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\n${VERT_INJECT}`)
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${VERT_MAIN_INJECT}`)
+      .replace('#include <common>', `#include <common>\n${VERT_DECL}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${VERT_WORLD_POS}`)
+
+    // Fragment: declarations, early discard, edge glow
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${FRAG_INJECT}`)
-      .replace('void main() {', `void main() {\n${FRAG_MAIN_INJECT}`)
+      .replace('#include <common>', `#include <common>\n${FRAG_DECL}`)
+      .replace('void main() {', `void main() {\n${FRAG_EARLY_DISCARD}`)
+      .replace('#include <fog_fragment>', `#include <fog_fragment>\n${FRAG_EDGE_GLOW}`)
   }
   mat.needsUpdate = true
 }
 
-// Load GLB with local Draco decoder
+// --- Load GLB ---
 const draco = new DRACOLoader()
 draco.setDecoderPath('/draco/')
 draco.preload()
@@ -84,15 +112,14 @@ loader.load(
   err => console.error('[EulerModel] load error:', err),
 )
 
+// --- Render loop ---
 const { onBeforeRender } = useLoop()
 onBeforeRender(({ elapsed }) => {
-  // Sync dissolve uniforms every frame
   for (const u of revealUniforms)
     u.uReveal.value = props.reveal
 
   if (!model.value) return
 
-  // Only animate idle rotation/float once fully revealed
   if (props.reveal >= 1) {
     model.value.rotation.y = elapsed * 0.4
     model.value.position.y = Math.sin(elapsed * 0.6) * 0.06
