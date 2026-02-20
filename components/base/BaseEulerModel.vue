@@ -34,5 +34,11 @@ import { TresCanvas } from '@tresjs/core'
 <style scoped>
 :deep(canvas) {
   background: transparent !important;
+  animation: canvas-fadein 0.1s ease-in 0.08s both;
+}
+
+@keyframes canvas-fadein {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 </style>
