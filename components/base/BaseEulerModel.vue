@@ -30,3 +30,9 @@ import { TresCanvas } from '@tresjs/core'
     <BaseEulerModelScene />
   </TresCanvas>
 </template>
+
+<style scoped>
+:deep(canvas) {
+  background: transparent !important;
+}
+</style>
