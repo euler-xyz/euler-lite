@@ -126,7 +126,7 @@ const open = () => {
     gap: 6px;
     flex-grow: 1;
     min-height: 36px;
-    color: var(--content-secondary);
+    color: var(--text-secondary);
     font-size: 14px;
     font-weight: 400;
     padding: 6px 16px;
@@ -187,7 +187,7 @@ const open = () => {
     min-height: 36px;
     font-size: 14px;
     font-weight: 400;
-    color: var(--content-secondary);
+    color: var(--text-secondary);
     background: var(--bg-surface);
     border: 1px solid var(--border-default);
     border-radius: 100px;
