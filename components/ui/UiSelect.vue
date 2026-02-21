@@ -126,21 +126,19 @@ const open = () => {
     gap: 6px;
     flex-grow: 1;
     min-height: 36px;
-    color: var(--ui-select-field-color);
+    color: var(--content-secondary);
     font-size: 14px;
     font-weight: 400;
     padding: 6px 16px;
-    background: var(--ui-select-field-background-color);
-    border: 1px solid var(--neutral-300);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
     border-radius: 100px;
     cursor: pointer;
     transition: all 0.15s ease;
-    box-shadow: var(--ui-input-shadow);
 
     &:hover {
-      border-color: var(--neutral-400);
-      background: var(--neutral-50);
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+      border-color: var(--border-emphasis);
+      background: var(--bg-surface-secondary);
     }
 
     &:focus {
@@ -185,21 +183,21 @@ const open = () => {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 16px;
+    padding: 6px 16px;
+    min-height: 36px;
     font-size: 14px;
     font-weight: 400;
-    background: var(--ui-select-chip-background-color);
-    border: 1px solid var(--neutral-300);
+    color: var(--content-secondary);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
     border-radius: 100px;
     cursor: pointer;
     white-space: nowrap;
     transition: all 0.15s ease;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 
     &:hover {
-      border-color: var(--neutral-400);
-      background: var(--neutral-50);
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+      border-color: var(--border-emphasis);
+      background: var(--bg-surface-secondary);
     }
 
     &--active {
@@ -207,12 +205,10 @@ const open = () => {
       background: var(--ui-select-chip-active-background-color);
       color: var(--ui-select-chip-active-color);
       border-color: transparent;
-      box-shadow: 0 1px 3px rgba(196, 155, 100, 0.3);
 
       &:hover {
         background: var(--accent-600);
         border-color: transparent;
-        box-shadow: 0 2px 6px rgba(196, 155, 100, 0.4);
       }
     }
   }
