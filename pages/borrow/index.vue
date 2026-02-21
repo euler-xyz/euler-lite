@@ -357,7 +357,7 @@ const sortedBorrowList = computed(() => {
           icon="search"
           clearable
           :full-width="false"
-          class="w-[200px] shrink-0"
+          class="w-[200px] shrink-0 text-[14px]"
         />
       </template>
       <template #filters>

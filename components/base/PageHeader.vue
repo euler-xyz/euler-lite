@@ -15,7 +15,7 @@ defineProps({
 
 <template>
   <div class="mb-24 animate-fade-in-up">
-    <!-- Row 1: icon + title + search -->
+    <!-- Row 1: icon + title -->
     <div class="flex items-center gap-12 mb-12">
       <SvgIcon
         :name="icon || 'arrow-big'"
@@ -29,13 +29,16 @@ defineProps({
       <h1 class="text-h3 text-content-primary">
         {{ title }}
       </h1>
-      <div class="flex-1" />
-      <slot name="search" />
     </div>
 
-    <!-- Row 2: filters -->
-    <div class="flex items-center gap-8 overflow-x-auto pb-2">
-      <slot name="filters" />
+    <!-- Row 2: filters (scrollable) + search pinned right -->
+    <div class="flex items-center gap-8">
+      <div class="flex items-center gap-8 overflow-x-auto flex-1 pb-2">
+        <slot name="filters" />
+      </div>
+      <div class="shrink-0 text-[14px]">
+        <slot name="search" />
+      </div>
     </div>
   </div>
 </template>
