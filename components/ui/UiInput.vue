@@ -100,7 +100,7 @@ const classes = computed(() => {
     width: 100%;
     min-height: 44px;
     padding: 12px 16px;
-    font-size: 16px;
+    font-size: 14px;
     line-height: 20px;
     font-weight: 400;
     color: var(--ui-input-color);
