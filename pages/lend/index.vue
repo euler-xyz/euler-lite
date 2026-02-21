@@ -250,16 +250,16 @@ const sortedList = computed(() => {
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
     <PageHeader
       title="Lend"
-      arrow-down
+      description="Earn yield on assets by lending them out."
     >
       <template #search>
         <UiInput
           v-model="searchQuery"
-          placeholder="Search by asset, market, curator..."
+          placeholder="Search"
           icon="search"
           clearable
           :full-width="false"
-          class="w-[200px] shrink-0 text-[14px]"
+          class="w-[200px] shrink-0"
         />
       </template>
       <template #filters>

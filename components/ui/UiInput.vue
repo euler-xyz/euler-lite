@@ -151,7 +151,7 @@ const classes = computed(() => {
   &.is-compact {
     border-radius: 0px;
     box-shadow: none;
-    border-color: var(--border-subtle);
+    border-color: var(--border-default);
 
     #{$block}__field {
       min-height: 36px;

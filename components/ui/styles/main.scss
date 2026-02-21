@@ -181,7 +181,7 @@
 
   // Input
   --ui-input-background-color: #ffffff;
-  --ui-input-border-color: var(--neutral-300);
+  --ui-input-border-color: var(--border-default);
   --ui-input-focus-border-color: var(--accent-500);
   --ui-input-error-border-color: var(--error-500);
   --ui-input-disabled-border-color: var(--neutral-200);
@@ -289,7 +289,7 @@
 
   // Input
   --ui-input-background-color: #141414;
-  --ui-input-border-color: #404040;
+  --ui-input-border-color: var(--border-default);
   --ui-input-color: #fafafa;
   --ui-input-placeholder-color: #525252;
   --ui-input-label-color: #a3a3a3;

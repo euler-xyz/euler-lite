@@ -187,16 +187,16 @@ const sortedList = computed(() => {
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
     <PageHeader
       title="Earn"
-      arrow-right
+      description="Deposit once, earn passive yield across multiple professionally curated strategies."
     >
       <template #search>
         <UiInput
           v-model="searchQuery"
-          placeholder="Search by asset, market, curator..."
+          placeholder="Search"
           icon="search"
           clearable
           :full-width="false"
-          class="w-[200px] shrink-0 text-[14px]"
+          class="w-[200px] shrink-0"
         />
       </template>
       <template #filters>

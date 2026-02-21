@@ -4,31 +4,26 @@ defineProps({
     type: String,
     default: '',
   },
-  icon: {
+  description: {
     type: String,
     default: '',
   },
-  arrowDown: Boolean,
-  arrowRight: Boolean,
 })
 </script>
 
 <template>
-  <div class="mb-24 animate-fade-in-up">
-    <!-- Row 1: icon + title -->
-    <div class="flex items-center gap-12 mb-12">
-      <SvgIcon
-        :name="icon || 'arrow-big'"
-        class="text-accent-600 !w-20 !h-20 shrink-0"
-        :class="[
-          !icon && arrowRight ? '-rotate-90' : '',
-          !icon && arrowDown && !arrowRight ? 'rotate-0' : '',
-          !icon && !arrowDown && !arrowRight ? 'rotate-180' : '',
-        ]"
-      />
-      <h1 class="text-h3 text-content-primary">
+  <div class="mb-48 animate-fade-in-up">
+    <!-- Row 1: title + description -->
+    <div class="mb-20">
+      <h1 class="text-h1 text-content-primary mb-8">
         {{ title }}
       </h1>
+      <p
+        v-if="description"
+        class="text-[16px] font-medium text-content-tertiary"
+      >
+        {{ description }}
+      </p>
     </div>
 
     <!-- Row 2: filters (scrollable) + search pinned right -->

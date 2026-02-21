@@ -208,11 +208,11 @@ const onClick = (e: Event) => {
   }
 
   &--medium {
-    font-size: 14px;
+    font-size: 13px;
     line-height: 20px;
-    min-width: 36px;
-    min-height: 36px;
-    padding: 8px 16px;
+    min-width: 32px;
+    min-height: 32px;
+    padding: 6px 16px;
     border-radius: 0px;
 
     &.is-icon-only {

@@ -174,7 +174,6 @@ onClickOutside(reference, () => {
     <!-- Right: Wallet -->
     <div class="flex flex-nowrap gap-8 justify-end laptop:flex-shrink-0 min-w-0">
       <UiButton
-        class="py-6 px-12"
         icon="arrow-down"
         variant="secondary"
         size="medium"
@@ -187,14 +186,14 @@ onClickOutside(reference, () => {
         />
       </UiButton>
       <UiButton
-        class="min-w-0 [&>span]:truncate"
+        class="min-w-0 [&>span]:truncate font-semibold"
         :icon="isConnected ? 'arrow-down' : 'plus'"
         :variant="isConnected ? 'secondary' : 'primary'"
         size="medium"
         :icon-right="isConnected"
         @click="onWalletButtonClick"
       >
-        {{ isConnected ? `${address?.slice(0, 6)}...${address?.slice(-4)}` : 'Connect wallet' }}
+        {{ isConnected ? `${address?.slice(0, 6)}...${address?.slice(-4)}` : 'Connect Wallet' }}
       </UiButton>
       <UiButton
         class="flex-shrink-0"
