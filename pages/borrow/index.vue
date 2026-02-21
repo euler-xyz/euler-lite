@@ -349,29 +349,19 @@ const sortedBorrowList = computed(() => {
 
 <template>
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
-    <BasePageHeader
-      title="Borrow"
-      description="Borrow against your collateral"
-      class="mb-24"
-    />
-
-    <div class="mb-16">
-      <h3 class="text-h3 mb-16 text-neutral-900">
-        Discover vaults
-      </h3>
-      <div class="mb-8">
+    <PageHeader title="Borrow">
+      <template #toolbar>
         <UiInput
           v-model="searchQuery"
           placeholder="Search by asset, market, curator..."
           icon="search"
           clearable
+          class="w-[280px] shrink-0"
         />
-      </div>
-      <div class="flex justify-start items-center w-full gap-8 flex-wrap">
         <VaultSortButton
           v-model="sortBy"
           v-model:dir="sortDir"
-          class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
+          class="shrink-0"
           :options="['Recommended', 'Liquidity', 'Total Borrowed', 'Utilization', 'Borrow APY', 'Net APY', 'Max ROE']"
           :disable-dir="sortBy === 'Recommended'"
           title="Sorting type"
@@ -380,7 +370,7 @@ const sortedBorrowList = computed(() => {
           v-if="enableEntityBranding"
           :key="`risk-managers-${chainId}`"
           v-model="selectedRiskManagers"
-          class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
+          class="shrink-0"
           :options="riskManagerOptions"
           placeholder="Risk manager"
           title="Risk manager"
@@ -391,7 +381,7 @@ const sortedBorrowList = computed(() => {
           v-if="enableEntityBranding"
           :key="`markets-${chainId}`"
           v-model="selectedMarkets"
-          class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
+          class="shrink-0"
           :options="marketOptions"
           placeholder="Market"
           title="Market"
@@ -401,7 +391,7 @@ const sortedBorrowList = computed(() => {
         <UiSelect
           :key="`collateral-${chainId}`"
           v-model="selectedCollateral"
-          class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
+          class="shrink-0"
           :options="collateralAssetOptions"
           placeholder="Collateral asset"
           title="Collateral asset"
@@ -412,7 +402,7 @@ const sortedBorrowList = computed(() => {
         <UiSelect
           :key="`debt-${chainId}`"
           v-model="selectedDebt"
-          class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
+          class="shrink-0"
           :options="debtAssetOptions"
           placeholder="Debt asset"
           title="Debt asset"
@@ -426,8 +416,8 @@ const sortedBorrowList = computed(() => {
           @remove="removeCustomFilter"
           @add="openCustomFilterModal"
         />
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <div class="flex flex-col flex-1">
       <UiLoader
