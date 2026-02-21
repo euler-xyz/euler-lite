@@ -67,7 +67,7 @@ const open = () => {
     :class="['ui-select', { 'ui-select--chips': chipOptions && chipOptions.length > 0 }]"
   >
     <div
-      class="flex items-center gap-6 shrink-0 min-h-36 text-content-secondary text-[14px] py-6 px-16 bg-surface border border-line-default rounded-none cursor-pointer hover:border-line-emphasis hover:bg-surface-secondary transition-all"
+      class="flex items-center gap-6 shrink-0 min-h-36 text-content-secondary text-[14px] py-6 px-13 bg-surface border border-line-default rounded-none cursor-pointer hover:border-line-emphasis hover:bg-surface-secondary transition-all"
       @click="open"
     >
       <UiIcon
