@@ -17,12 +17,26 @@ body {
   font-weight: 400;
   font-size: 14px;
   line-height: 20px;
-  letter-spacing: 0;
+  letter-spacing: -0.01em;
   -ms-text-size-adjust: 100%;
   -webkit-text-size-adjust: 100%;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   transition: background-color var(--trs-default);
+}
+
+// Sharp typography
+.text-h1, .text-h2, .text-h3, .text-h4 {
+  letter-spacing: -0.02em;
+}
+
+.text-h5, .text-h6 {
+  letter-spacing: -0.01em;
+}
+
+// Tabular numerals for financial data
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
 
 .icon {

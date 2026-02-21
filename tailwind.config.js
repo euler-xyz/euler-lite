@@ -14,7 +14,7 @@ module.exports = {
     extend: {
       spacing: {
         ...Object.fromEntries(
-          Array.from({ length: 101 }, (_, i) => [i, `${i}px`]),
+          Array.from({ length: 101 }, (_, i) => [i, i >= 12 ? `${Math.round(i * 1.25)}px` : `${i}px`]),
         ),
       },
 
@@ -158,9 +158,18 @@ module.exports = {
       },
 
       borderRadius: {
-        8: '8px',
-        12: '12px',
-        16: '16px',
+        'DEFAULT': '0px',
+        'none': '0px',
+        'sm': '0px',
+        'md': '0px',
+        'lg': '0px',
+        'xl': '0px',
+        '2xl': '0px',
+        '3xl': '0px',
+        '8': '0px',
+        '12': '0px',
+        '16': '0px',
+        'full': '9999px',
       },
 
       fontSize: {

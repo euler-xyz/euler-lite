@@ -83,7 +83,7 @@ const classes = computed(() => {
   width: 100%;
   background-color: var(--ui-input-background-color);
   border: 1px solid var(--ui-input-border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   box-shadow: var(--ui-input-shadow);
   transition: border-color var(--trs-fast), box-shadow var(--trs-fast);
 
@@ -149,7 +149,7 @@ const classes = computed(() => {
   }
 
   &.is-compact {
-    border-radius: 100px;
+    border-radius: 0px;
     box-shadow: none;
     border-color: var(--border-subtle);
 

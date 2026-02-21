@@ -114,7 +114,7 @@ watchEffect(async () => {
 
 <template>
   <NuxtLink
-    class="block no-underline text-content-primary bg-surface rounded-12 border border-line-default shadow-card hover:shadow-card-hover hover:border-line-emphasis transition-all"
+    class="block no-underline text-content-primary bg-surface rounded-12 border border-line-default hover:shadow-card-hover hover:border-line-emphasis transition-all"
     :class="isGeoBlocked ? 'opacity-50' : ''"
     :to="`/lend/${vault.address}`"
   >

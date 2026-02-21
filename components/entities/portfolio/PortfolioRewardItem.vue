@@ -115,7 +115,7 @@ const onClaimClick = async () => {
 
 <template>
   <div
-    class="bg-surface rounded-xl border border-line-subtle shadow-card p-16"
+    class="bg-surface rounded-xl border border-line-default p-16"
   >
     <div
       class="flex flex-col gap-12"

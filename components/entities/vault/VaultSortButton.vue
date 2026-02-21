@@ -46,7 +46,7 @@ const toggleDir = (e: Event) => {
     <span class="whitespace-nowrap overflow-hidden text-ellipsis">{{ placeholder }}</span>
     <span
       v-if="model"
-      class="inline-flex justify-center items-center text-accent-700 text-[14px] font-medium py-2 px-8 bg-accent-300/30 rounded-[100px]"
+      class="inline-flex justify-center items-center text-accent-700 text-[11px] font-semibold uppercase tracking-[0.06em] py-2 px-8 bg-accent-300/30 rounded-[100px]"
     >{{ model }}</span>
     <button
       class="flex items-center justify-center w-20 h-20 rounded-full transition-all"

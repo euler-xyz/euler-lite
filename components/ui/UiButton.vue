@@ -135,7 +135,7 @@ const onClick = (e: Event) => {
   padding: 10px 16px;
   font-weight: 500;
   text-align: center;
-  border-radius: 10px;
+  border-radius: 0px;
   cursor: pointer;
   user-select: none;
   border: none;
@@ -200,7 +200,7 @@ const onClick = (e: Event) => {
     min-width: 32px;
     min-height: 32px;
     padding: 8px 12px;
-    border-radius: 8px;
+    border-radius: 0px;
 
     &.is-icon-only {
       padding: 8px;
@@ -213,7 +213,7 @@ const onClick = (e: Event) => {
     min-width: 36px;
     min-height: 36px;
     padding: 8px 16px;
-    border-radius: 10px;
+    border-radius: 0px;
 
     &.is-icon-only {
       padding: 10px;
@@ -226,7 +226,7 @@ const onClick = (e: Event) => {
     min-width: 44px;
     min-height: 44px;
     padding: 12px 24px;
-    border-radius: 12px;
+    border-radius: 0px;
 
     #{$block}__icon {
       width: 20px;
@@ -244,7 +244,7 @@ const onClick = (e: Event) => {
     min-width: 52px;
     min-height: 52px;
     padding: 16px 28px;
-    border-radius: 14px;
+    border-radius: 0px;
 
     #{$block}__icon {
       width: 24px;

@@ -37,12 +37,12 @@
   --ui-button-primary-stroke-disabled-background-color: var(--neutral-50);
 
   // Secondary Button
-  --ui-button-secondary-background-color: var(--neutral-100);
+  --ui-button-secondary-background-color: #ffffff;
   --ui-button-secondary-color: var(--neutral-800);
-  --ui-button-secondary-border-color: var(--neutral-200);
-  --ui-button-secondary-hover-background-color: var(--neutral-200);
-  --ui-button-secondary-hover-border-color: var(--neutral-300);
-  --ui-button-secondary-active-background-color: var(--neutral-200);
+  --ui-button-secondary-border-color: var(--border-default);
+  --ui-button-secondary-hover-background-color: var(--neutral-100);
+  --ui-button-secondary-hover-border-color: var(--border-emphasis);
+  --ui-button-secondary-active-background-color: var(--neutral-100);
   --ui-button-secondary-focus-outline-color: var(--accent-400);
   --ui-button-secondary-disabled-background-color: var(--neutral-100);
   --ui-button-secondary-disabled-color: var(--neutral-400);
@@ -149,11 +149,11 @@
   --ui-toast-background-color: #ffffff;
   --ui-toast-box-shadow: var(--shadow-lg);
   
-  --ui-toast-info-border-color: rgba(196, 155, 100, 0.3);
-  --ui-toast-info-background-color: rgba(196, 155, 100, 0.1);
+  --ui-toast-info-border-color: rgba(34, 192, 155, 0.3);
+  --ui-toast-info-background-color: rgba(34, 192, 155, 0.08);
   --ui-toast-info-text-color: var(--accent-700);
-  --ui-toast-info-splitter-color: rgba(196, 155, 100, 0.3);
-  --ui-toast-info-action-background-color: rgba(196, 155, 100, 0.1);
+  --ui-toast-info-splitter-color: rgba(34, 192, 155, 0.3);
+  --ui-toast-info-action-background-color: rgba(34, 192, 155, 0.08);
 
   --ui-toast-success-border-color: rgba(5, 150, 105, 0.3);
   --ui-toast-success-background-color: var(--success-100);
@@ -197,15 +197,15 @@
   --ui-input-error-color: var(--error-500);
 
   // Input shadows and depth
-  --ui-input-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), inset 0 1px 2px rgba(0, 0, 0, 0.02);
-  --ui-input-focus-shadow: 0 0 0 3px rgba(196, 155, 100, 0.15), 0 1px 2px rgba(0, 0, 0, 0.05);
-  --ui-input-error-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
-  
+  --ui-input-shadow: none;
+  --ui-input-focus-shadow: 0 0 0 2px rgba(34, 192, 155, 0.25);
+  --ui-input-error-shadow: 0 0 0 2px rgba(220, 38, 38, 0.2);
+
   // Form container shadows
   --ui-form-field-background: var(--neutral-50);
   --ui-form-field-border-color: var(--neutral-200);
-  --ui-form-field-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), inset 0 1px 2px rgba(0, 0, 0, 0.02);
-  --ui-form-field-focus-shadow: 0 0 0 2px rgba(196, 155, 100, 0.2), 0 2px 4px rgba(0, 0, 0, 0.06);
+  --ui-form-field-shadow: none;
+  --ui-form-field-focus-shadow: 0 0 0 2px rgba(34, 192, 155, 0.2);
 }
 
 // ============================================
@@ -214,10 +214,10 @@
 [data-theme="dark"] {
   // Buttons
   --ui-button-primary-background-color: var(--accent-500);
-  --ui-button-primary-color: #0a0a0a;
+  --ui-button-primary-color: #ffffff;
   --ui-button-primary-active-background-color: var(--accent-400);
-  --ui-button-primary-disabled-background-color: rgba(196, 155, 100, 0.15);
-  --ui-button-primary-disabled-color: rgba(196, 155, 100, 0.4);
+  --ui-button-primary-disabled-background-color: rgba(34, 192, 155, 0.15);
+  --ui-button-primary-disabled-color: rgba(34, 192, 155, 0.4);
 
   --ui-button-primary-stroke-background-color: transparent;
   --ui-button-primary-stroke-color: #fafafa;
@@ -296,13 +296,13 @@
   --ui-input-icon-color: #737373;
 
   // Input shadows and depth
-  --ui-input-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), inset 0 1px 2px rgba(0, 0, 0, 0.2);
-  --ui-input-focus-shadow: 0 0 0 3px rgba(212, 169, 90, 0.25), 0 1px 2px rgba(0, 0, 0, 0.3);
-  --ui-input-error-shadow: 0 0 0 3px rgba(220, 38, 38, 0.2);
-  
+  --ui-input-shadow: none;
+  --ui-input-focus-shadow: 0 0 0 2px rgba(34, 192, 155, 0.3);
+  --ui-input-error-shadow: 0 0 0 2px rgba(220, 38, 38, 0.25);
+
   // Form container shadows
   --ui-form-field-background: #1a1a1a;
   --ui-form-field-border-color: #333333;
-  --ui-form-field-shadow: 0 1px 3px rgba(0, 0, 0, 0.4), inset 0 1px 2px rgba(0, 0, 0, 0.2);
-  --ui-form-field-focus-shadow: 0 0 0 2px rgba(212, 169, 90, 0.3), 0 2px 4px rgba(0, 0, 0, 0.4);
+  --ui-form-field-shadow: none;
+  --ui-form-field-focus-shadow: 0 0 0 2px rgba(34, 192, 155, 0.3);
 }

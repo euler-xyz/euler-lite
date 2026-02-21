@@ -95,7 +95,7 @@ const onClick = () => {
 
 <template>
   <div
-    class="block no-underline bg-surface rounded-xl border border-line-subtle shadow-card cursor-pointer transition-all duration-default ease-default hover:shadow-card-hover hover:border-line-emphasis"
+    class="block no-underline bg-surface rounded-xl border border-line-default cursor-pointer transition-all duration-default ease-default hover:shadow-card-hover hover:border-line-emphasis"
     @click="onClick"
   >
     <div class="flex py-16 px-16 pb-12 border-b border-line-default">

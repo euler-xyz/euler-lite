@@ -19,12 +19,12 @@
   --primary-800: #243b53;
   --primary-900: #102a43;
 
-  // Accent - Sophisticated Gold/Bronze (for CTAs, APY highlights)
-  --accent-300: #e8d5b7;
-  --accent-400: #d4a574;
-  --accent-500: #c49b64;
-  --accent-600: #a88347;
-  --accent-700: #8b6914;
+  // Accent - Teal
+  --accent-300: #b8ede3;
+  --accent-400: #6dd9bf;
+  --accent-500: #22c09b;
+  --accent-600: #1a9679;
+  --accent-700: #136b57;
 
   // Neutral - Warm Grays
   --neutral-50: #fafafa;
@@ -60,8 +60,8 @@
   // Interactive shadows
   --shadow-button: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-button-hover: 0 4px 12px rgba(0, 0, 0, 0.1);
-  --shadow-card: var(--shadow-sm);
-  --shadow-card-hover: var(--shadow-md);
+  --shadow-card: none;
+  --shadow-card-hover: 0 2px 8px rgba(0, 0, 0, 0.08);
 
   // ============================================
   // ANIMATION TIMING (Apple-style)
@@ -78,11 +78,11 @@
   // ============================================
   // BORDER RADIUS (Refined, Apple-like)
   // ============================================
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
-  --radius-xl: 12px;
-  --radius-2xl: 16px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
   --radius-full: 9999px;
 
   // ============================================
@@ -123,14 +123,14 @@
   --euler-dark-900: 210 11% 32%;   // Body text (--neutral-600)
   --euler-dark-1000: 210 11% 15%;  // Primary text (--neutral-800)
 
-  // Accent palette - Gold/Bronze for institutional look
-  --aquamarine-300: 36 56% 35%;    // Dark gold
-  --aquamarine-500: 36 56% 50%;    // Medium gold
-  --aquamarine-600: 36 56% 55%;    // Gold
-  --aquamarine-700: 36 56% 58%;    // Primary accent (gold)
-  --aquamarine-800: 36 56% 65%;    // Lighter gold
-  --aquamarine-900: 36 56% 75%;    // Very light gold
-  --aquamarine-1000: 36 56% 30%;   // Gold for text on light bg
+  // Accent palette - Teal
+  --aquamarine-300: 163 70% 22%;    // Dark teal
+  --aquamarine-500: 163 70% 35%;    // Medium teal
+  --aquamarine-600: 163 70% 40%;    // Teal
+  --aquamarine-700: 163 70% 44%;    // Primary accent (teal)
+  --aquamarine-800: 163 65% 57%;    // Lighter teal
+  --aquamarine-900: 163 60% 75%;    // Very light teal
+  --aquamarine-1000: 163 70% 20%;   // Teal for text on light bg
 
   --teal-light-100: 235, 249, 249;
   --teal-light-300: 177, 230, 231;
@@ -227,13 +227,13 @@
   // ============================================
   
   // Backgrounds
-  --bg-body: var(--neutral-50);
+  --bg-body: #f3f3f3;
   --bg-surface: #ffffff;
-  --bg-surface-secondary: var(--neutral-50);
+  --bg-surface-secondary: #efefef;
   --bg-surface-elevated: #ffffff;
   --bg-card: #ffffff;
   --bg-card-hover: var(--neutral-50);
-  --bg-header: rgba(255, 255, 255, 0.85);
+  --bg-header: rgba(255, 255, 255, 0.90);
   
   // Text
   --c-text: var(--neutral-800);
@@ -245,9 +245,9 @@
   --text-accent: var(--accent-600);
   
   // Borders
-  --border-default: var(--neutral-200);
-  --border-subtle: rgba(0, 0, 0, 0.06);
-  --border-emphasis: var(--neutral-300);
+  --border-default: #e0e0e0;
+  --border-subtle: rgba(0, 0, 0, 0.07);
+  --border-emphasis: #cacaca;
 
   // Grid
   --header-h: 72px;
@@ -285,12 +285,12 @@
   --neutral-800: #e5e5e5;
   --neutral-900: #fafafa;
 
-  // Accent - Keep gold but slightly brighter for dark bg
-  --accent-300: #f5e6c8;
-  --accent-400: #e8c078;
-  --accent-500: #d4a95a;
-  --accent-600: #c49b64;
-  --accent-700: #a88347;
+  // Accent - Teal (brighter for dark bg)
+  --accent-300: #d0f5ed;
+  --accent-400: #6dd9bf;
+  --accent-500: #22c09b;
+  --accent-600: #1a9679;
+  --accent-700: #136b57;
 
   // Semantic backgrounds
   --bg-body: #0a0a0a;
@@ -311,9 +311,9 @@
   --text-accent: var(--accent-500);
 
   // Borders
-  --border-default: #262626;
-  --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-emphasis: #404040;
+  --border-default: #2e2e2e;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-emphasis: #3a3a3a;
 
   // Shadows - deeper for dark mode
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);

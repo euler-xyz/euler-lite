@@ -159,8 +159,8 @@ onClickOutside(reference, () => {
         v-for="item in menuItems"
         :key="item.name"
         :to="'/' + item.name"
-        class="flex gap-8 text-[13px] font-medium no-underline py-10 px-16 rounded-8 text-content-secondary items-center justify-center hover:text-content-primary hover:bg-surface-secondary transition-all"
-        :class="[getIsMenuItemActive(item) ? 'bg-surface-secondary text-content-primary' : '']"
+        class="flex gap-8 text-[13px] font-medium no-underline py-8 px-14 rounded-8 text-content-secondary items-center justify-center transition-all"
+        :class="[getIsMenuItemActive(item) ? 'bg-white border border-line-default shadow-sm text-content-primary' : 'hover:bg-surface-secondary hover:text-content-primary']"
       >
         <UiIcon
           class="!w-18 !h-18"
@@ -181,7 +181,10 @@ onClickOutside(reference, () => {
         icon-right
         @click="onChainButtonClick"
       >
-        <BaseAvatar :src="`/chains/${chainId}.webp`" :label="String(chainId)" />
+        <BaseAvatar
+          :src="`/chains/${chainId}.webp`"
+          :label="String(chainId)"
+        />
       </UiButton>
       <UiButton
         class="min-w-0 [&>span]:truncate"

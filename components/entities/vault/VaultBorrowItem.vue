@@ -187,7 +187,7 @@ const linkPath = computed(
 <template>
   <NuxtLink
     :to="linkPath"
-    class="grid gap-x-16 mobile:block no-underline text-content-primary bg-surface rounded-12 border border-line-default shadow-card hover:shadow-card-hover hover:border-line-emphasis transition-all"
+    class="grid gap-x-16 mobile:block no-underline text-content-primary bg-surface rounded-12 border border-line-default hover:shadow-card-hover hover:border-line-emphasis transition-all"
     :class="[
       enableEntityBranding ? '' : 'grid-cols-5',
       (isGeoBlocked || isPairEffectivelyBlocked) ? 'opacity-50' : '',
