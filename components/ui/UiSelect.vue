@@ -67,15 +67,15 @@ const open = () => {
     :class="['ui-select', { 'ui-select--chips': chipOptions && chipOptions.length > 0 }]"
   >
     <div
-      class="ui-select__field"
+      class="flex items-center gap-6 shrink-0 min-h-36 text-content-secondary text-[14px] py-6 px-16 bg-surface border border-line-default rounded-[100px] cursor-pointer hover:border-line-emphasis hover:bg-surface-secondary transition-all"
       @click="open"
     >
       <UiIcon
         v-if="icon"
         :name="icon"
-        class="ui-select__icon"
+        class="!w-16 !h-16 text-content-tertiary"
       />
-      <span class="ui-select__text">{{ displayText }}</span>
+      <span class="whitespace-nowrap overflow-hidden text-ellipsis">{{ displayText }}</span>
       <span
         v-if="plusText"
         class="ui-select__plus"
@@ -83,7 +83,7 @@ const open = () => {
       <UiIcon
         v-if="model.length < 3 && !icon"
         name="arrow-down"
-        class="ui-select__arrow"
+        class="!w-16 !h-16 ml-auto -mr-4 text-content-secondary"
       />
     </div>
     <template v-if="chipOptions && chipOptions.length > 0">
@@ -118,44 +118,6 @@ const open = () => {
     &::-webkit-scrollbar {
       display: none;
     }
-  }
-
-  &__field {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-grow: 1;
-    min-height: 36px;
-    color: var(--text-secondary);
-    font-size: 14px;
-    font-weight: 400;
-    padding: 6px 16px;
-    background: var(--bg-surface);
-    border: 1px solid var(--border-default);
-    border-radius: 100px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-
-    &:hover {
-      border-color: var(--border-emphasis);
-      background: var(--bg-surface-secondary);
-    }
-
-    &:focus {
-      border-color: var(--accent-500);
-      box-shadow: var(--ui-input-focus-shadow);
-    }
-  }
-
-  &__icon {
-    width: 16px;
-    height: 16px;
-  }
-
-  &__text {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   &__plus {
