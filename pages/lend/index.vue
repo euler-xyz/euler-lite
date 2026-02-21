@@ -258,7 +258,7 @@ const sortedList = computed(() => {
           placeholder="Search by asset, market, curator..."
           icon="search"
           clearable
-          class="w-[280px] shrink-0"
+          class="w-[200px] shrink-0"
         />
       </template>
       <template #filters>
