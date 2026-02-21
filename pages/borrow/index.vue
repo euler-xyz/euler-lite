@@ -350,7 +350,7 @@ const sortedBorrowList = computed(() => {
 <template>
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
     <PageHeader title="Borrow">
-      <template #toolbar>
+      <template #search>
         <UiInput
           v-model="searchQuery"
           placeholder="Search by asset, market, curator..."
@@ -358,6 +358,8 @@ const sortedBorrowList = computed(() => {
           clearable
           class="w-[280px] shrink-0"
         />
+      </template>
+      <template #filters>
         <VaultSortButton
           v-model="sortBy"
           v-model:dir="sortDir"

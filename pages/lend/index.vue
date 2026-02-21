@@ -252,7 +252,7 @@ const sortedList = computed(() => {
       title="Lend"
       arrow-down
     >
-      <template #toolbar>
+      <template #search>
         <UiInput
           v-model="searchQuery"
           placeholder="Search by asset, market, curator..."
@@ -260,6 +260,8 @@ const sortedList = computed(() => {
           clearable
           class="w-[280px] shrink-0"
         />
+      </template>
+      <template #filters>
         <VaultSortButton
           v-model="sortBy"
           v-model:dir="sortDir"

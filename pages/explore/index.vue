@@ -274,7 +274,7 @@ const isLoading = computed(() =>
       title="Explore"
       icon="nodes"
     >
-      <template #toolbar>
+      <template #search>
         <UiInput
           v-model="searchQuery"
           placeholder="Search by asset, market, curator..."
@@ -282,6 +282,8 @@ const isLoading = computed(() =>
           clearable
           class="w-[280px] shrink-0"
         />
+      </template>
+      <template #filters>
         <VaultSortButton
           v-model="sortBy"
           v-model:dir="sortDir"
