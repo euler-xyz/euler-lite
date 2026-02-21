@@ -356,6 +356,7 @@ const sortedBorrowList = computed(() => {
           placeholder="Search by asset, market, curator..."
           icon="search"
           clearable
+          :full-width="false"
           class="w-[200px] shrink-0"
         />
       </template>
