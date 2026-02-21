@@ -270,27 +270,18 @@ const isLoading = computed(() =>
 
 <template>
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
-    <BasePageHeader
+    <PageHeader
       title="Explore"
-      description="Discover markets structure and collateral relationships."
-      class="mb-24"
       icon="nodes"
-    />
-
-    <div class="mb-16 -mx-16">
-      <h3 class="text-h3 mb-16 pl-16 text-content-primary">
-        Discover markets
-      </h3>
-      <div class="px-16 mb-8">
+    >
+      <template #toolbar>
         <UiInput
           v-model="searchQuery"
           placeholder="Search by asset, market, curator..."
           icon="search"
           clearable
-          compact
+          class="w-[280px] shrink-0"
         />
-      </div>
-      <div class="flex items-center flex-wrap gap-8 px-16">
         <VaultSortButton
           v-model="sortBy"
           v-model:dir="sortDir"
@@ -332,8 +323,8 @@ const isLoading = computed(() =>
           @remove="removeCustomFilter"
           @add="openCustomFilterModal"
         />
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <div class="flex flex-col flex-1">
       <UiLoader
