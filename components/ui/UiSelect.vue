@@ -67,7 +67,7 @@ const open = () => {
     :class="['ui-select', { 'ui-select--chips': chipOptions && chipOptions.length > 0 }]"
   >
     <div
-      class="flex items-center gap-6 shrink-0 min-h-36 text-content-secondary text-[14px] py-6 px-16 bg-surface border border-line-default rounded-[100px] cursor-pointer hover:border-line-emphasis hover:bg-surface-secondary transition-all"
+      class="flex items-center gap-6 shrink-0 min-h-36 text-content-secondary text-[14px] py-6 px-16 bg-surface border border-line-default rounded-none cursor-pointer hover:border-line-emphasis hover:bg-surface-secondary transition-all"
       @click="open"
     >
       <UiIcon
@@ -131,7 +131,7 @@ const open = () => {
     margin-left: auto;
     margin-right: -10px;
     background: var(--ui-select-plus-background-color);
-    border-radius: 100px;
+    border-radius: 0;
   }
 
   &__arrow {
@@ -152,7 +152,7 @@ const open = () => {
     color: var(--text-secondary);
     background: var(--bg-surface);
     border: 1px solid var(--border-default);
-    border-radius: 100px;
+    border-radius: 0;
     cursor: pointer;
     white-space: nowrap;
     transition: all 0.15s ease;

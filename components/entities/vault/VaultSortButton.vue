@@ -36,7 +36,7 @@ const toggleDir = (e: Event) => {
 
 <template>
   <div
-    class="relative flex items-center gap-6 flex-shrink-0 min-h-36 text-content-secondary py-6 pl-16 pr-8 bg-surface border border-line-default rounded-[100px] cursor-pointer hover:border-line-emphasis hover:bg-surface-secondary transition-all"
+    class="relative flex items-center gap-6 flex-shrink-0 min-h-36 text-content-secondary py-6 pl-16 pr-8 bg-surface border border-line-default rounded-none cursor-pointer hover:border-line-emphasis hover:bg-surface-secondary transition-all"
     @click="open"
   >
     <UiIcon
@@ -46,7 +46,7 @@ const toggleDir = (e: Event) => {
     <span class="whitespace-nowrap overflow-hidden text-ellipsis">{{ placeholder }}</span>
     <span
       v-if="model"
-      class="inline-flex justify-center items-center text-accent-700 text-[11px] font-semibold uppercase tracking-[0.06em] py-2 px-8 bg-accent-300/30 rounded-[100px]"
+      class="inline-flex justify-center items-center text-accent-700 text-[11px] font-semibold uppercase tracking-[0.06em] py-2 px-8 bg-accent-300/30 rounded-none"
     >{{ model }}</span>
     <button
       class="flex items-center justify-center w-20 h-20 rounded-full transition-all"
