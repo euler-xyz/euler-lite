@@ -34,6 +34,6 @@ const emit = defineEmits<{
       name="plus"
       class="!w-14 !h-14"
     />
-    Add filter
+    Filter
   </button>
 </template>
