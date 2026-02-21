@@ -228,8 +228,8 @@ const renderChart = async () => {
         {
           label: 'Supply APY',
           data: supplyAPYValues,
-          borderColor: '#c49b64',
-          backgroundColor: 'rgba(196, 155, 100, 0.15)',
+          borderColor: '#22c09b',
+          backgroundColor: 'rgba(34, 192, 155, 0.15)',
           borderWidth: 2.5,
           pointRadius: 0,
           pointHoverRadius: 6,

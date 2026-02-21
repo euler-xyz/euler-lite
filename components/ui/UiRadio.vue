@@ -162,7 +162,7 @@ const onClick = () => {
       border-radius: 50%;
       transform: scale(0);
       transition: transform 0.15s ease;
-      box-shadow: 0 1px 2px rgba(196, 155, 100, 0.3);
+      box-shadow: 0 1px 2px rgba(var(--accent-500-rgb), 0.3);
     }
 
     svg {

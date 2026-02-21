@@ -92,7 +92,7 @@ onClickOutside(reference, () => {
         <span class="text-[10px] text-content-tertiary leading-tight">Powered by Euler</span>
       </div>
       <SvgIcon
-        class="!w-18 !h-18 transition-transform duration-fast text-content-tertiary"
+        class="!w-14 !h-14 transition-transform duration-fast text-content-muted"
         :class="[isSocialsTooltipVisible ? 'rotate-180' : '']"
         name="arrow-down"
       />
@@ -159,8 +159,8 @@ onClickOutside(reference, () => {
         v-for="item in menuItems"
         :key="item.name"
         :to="'/' + item.name"
-        class="flex gap-8 text-[13px] font-medium no-underline py-8 px-14 rounded-8 text-content-secondary items-center justify-center transition-all"
-        :class="[getIsMenuItemActive(item) ? 'bg-white border border-line-default shadow-sm text-content-primary' : 'hover:bg-surface-secondary hover:text-content-primary']"
+        class="flex gap-8 text-[13px] font-medium no-underline py-8 px-14 rounded-8 text-neutral-800 items-center justify-center transition-all"
+        :class="[getIsMenuItemActive(item) ? 'bg-surface border border-line-default shadow-sm text-content-primary' : 'hover:bg-surface-secondary hover:text-content-primary']"
       >
         <UiIcon
           class="!w-18 !h-18"

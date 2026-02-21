@@ -95,7 +95,7 @@ const handleClose = () => {
             </div>
             <div
               v-else-if="getOptionType(option) === 'saving'"
-              class="ml-6 text-[12px] leading-[16px] py-4 px-8 rounded-8 bg-[#CBC0951A] text-yellow-600"
+              class="ml-6 text-[12px] leading-[16px] py-4 px-8 rounded-8 bg-[#A1F4E01A] text-aquamarine-700"
             >
               Savings
             </div>

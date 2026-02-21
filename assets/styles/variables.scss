@@ -23,8 +23,12 @@
   --accent-300: #b8ede3;
   --accent-400: #6dd9bf;
   --accent-500: #22c09b;
+  --accent-500-rgb: 34, 192, 155;
   --accent-600: #1a9679;
   --accent-700: #136b57;
+
+  // Focus ring shadow using accent color
+  --shadow-focus-accent: 0 0 0 3px rgba(34, 192, 155, 0.15), 0 2px 4px rgba(0, 0, 0, 0.06);
 
   // Neutral - Warm Grays
   --neutral-50: #fafafa;
