@@ -36,7 +36,7 @@ const toggleDir = (e: Event) => {
 
 <template>
   <div
-    class="relative flex items-center gap-6 flex-shrink-0 min-h-36 text-content-secondary py-6 pl-13 pr-8 bg-surface border border-line-default rounded-none cursor-pointer hover:border-line-emphasis hover:bg-surface-secondary transition-all"
+    class="relative flex items-center gap-6 flex-shrink-0 min-h-36 text-content-secondary py-6 pl-12 pr-8 bg-surface border border-line-default rounded-none cursor-pointer hover:border-line-emphasis hover:bg-surface-secondary transition-all"
     @click="open"
   >
     <UiIcon
