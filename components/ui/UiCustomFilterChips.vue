@@ -27,7 +27,7 @@ const emit = defineEmits<{
     />
   </div>
   <button
-    class="flex items-center gap-6 shrink-0 min-h-36 py-6 px-16 bg-surface border border-line-default rounded-none cursor-pointer hover:border-line-emphasis hover:bg-surface-secondary transition-all text-content-secondary text-[14px]"
+    class="flex items-center gap-6 shrink-0 min-h-36 py-6 px-10 bg-transparent border border-line-default rounded-none cursor-pointer hover:border-line-emphasis hover:bg-surface-secondary transition-all text-content-secondary text-[14px]"
     @click="emit('add')"
   >
     <UiIcon
