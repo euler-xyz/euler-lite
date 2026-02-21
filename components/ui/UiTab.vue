@@ -71,12 +71,12 @@ const onClick = () => {
   }
 
   &__badge {
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 600;
     line-height: 20px;
-    padding: 2px 6px;
+    padding: 1px 6px;
     background-color: var(--ui-tab-badge-background-color);
-    border-radius: 8px;
+    border-radius: 0;
   }
 
   &.is-active {

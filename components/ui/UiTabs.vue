@@ -182,7 +182,7 @@ defineExpose({
 .ui-tabs {
   position: relative;
   $block: &;
-  border-radius: 16px;
+  border-radius: 0;
   --ui-tabs-gradient-color: rgba(0, 0, 0, 0.35);
 
   &.is-rounded {
@@ -203,7 +203,7 @@ defineExpose({
     #{$block}__wrapper {
       box-shadow: none;
       background-color: var(--ui-tabs-pills-background-color);
-      border-radius: 12px;
+      border-radius: 0;
       padding: 4px 0;
       border-bottom: none;
     }
@@ -228,11 +228,11 @@ defineExpose({
     #{$block}__block {
       min-height: 44px;
       background-color: var(--ui-tabs-block-background-color);
-      border-radius: 12px;
+      border-radius: 0;
       width: auto;
       bottom: auto;
       max-width: none;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), inset 0 0 0 1px var(--border-default);
     }
   }
 

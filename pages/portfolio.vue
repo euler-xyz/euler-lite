@@ -92,7 +92,7 @@ onDeactivated(() => {
       </div>
     </div>
 
-    <div class="flex mobile:flex-col gap-16 p-16 rounded-12 mx-16 border border-line-default bg-card shadow-card">
+    <div class="flex mobile:flex-col gap-16 p-16 mx-16 border border-line-default bg-surface shadow-sm">
       <!-- Hero: Net Asset Value -->
       <div class="flex flex-col w-[200px] shrink-0 pr-16 mobile:w-auto mobile:pr-0 border-r mobile:border-r-0 mobile:border-b border-line-default mobile:pb-16">
         <div class="flex items-center gap-4 text-p3 text-content-tertiary mb-4 whitespace-nowrap">
@@ -209,8 +209,8 @@ onDeactivated(() => {
       v-model="tabsModel"
       pills
       :list="tabs"
-      class="mx-16 mt-32 border border-line-default rounded-12"
-      style="--ui-tabs-pills-background-color: transparent; --ui-tabs-block-background-color: var(--bg-card-hover)"
+      class="mx-16 mt-32 border border-line-default"
+      style="--ui-tabs-pills-background-color: transparent; --ui-tabs-block-background-color: var(--bg-surface)"
     />
 
     <NuxtPage />
