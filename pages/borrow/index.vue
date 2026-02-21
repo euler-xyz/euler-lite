@@ -391,27 +391,17 @@ const sortedBorrowList = computed(() => {
           modal-input-placeholder="Search market"
           icon="bank"
         />
-        <UiSelect
-          :key="`collateral-${chainId}`"
-          v-model="selectedCollateral"
-          class="shrink-0"
-          :options="collateralAssetOptions"
-          placeholder="Collateral asset"
-          title="Collateral asset"
-          modal-input-placeholder="Search asset"
+        <UiDualSelect
+          :key="`assets-${chainId}`"
+          v-model:collateral="selectedCollateral"
+          v-model:debt="selectedDebt"
+          :options-a="collateralAssetOptions"
+          :options-b="debtAssetOptions"
+          label-a="Collateral asset"
+          label-b="Debt asset"
+          placeholder="Assets"
           icon="wallet"
-          show-selected-options
-        />
-        <UiSelect
-          :key="`debt-${chainId}`"
-          v-model="selectedDebt"
           class="shrink-0"
-          :options="debtAssetOptions"
-          placeholder="Debt asset"
-          title="Debt asset"
-          modal-input-placeholder="Search asset"
-          icon="wallet"
-          show-selected-options
         />
         <UiCustomFilterChips
           :filters="customFilters"
