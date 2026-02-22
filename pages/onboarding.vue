@@ -35,12 +35,11 @@ watch(isConnected, (value) => {
       style="background: radial-gradient(ellipse 80% 60% at 50% 100%, var(--accent-400) 0%, transparent 70%); opacity: 0.15;"
     />
     <div class="flex flex-col items-center gap-24 w-full max-w-[360px] px-24">
-      <!-- 3D model -->
-      <div class="w-full aspect-square">
-        <ClientOnly>
-          <BaseEulerModel />
-        </ClientOnly>
-      </div>
+      <img
+        src="/logo.png"
+        alt="Logo"
+        class="w-64 h-64"
+      >
 
       <div class="flex flex-col items-center gap-8">
         <h1 class="text-h1 text-content-primary text-center text-balance">

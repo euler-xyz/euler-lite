@@ -10,8 +10,8 @@ defineEmits(['close'])
     title="Settings"
     @close="$emit('close')"
   >
-    <div class="mb-20 rounded-16 border border-euler-dark-600 bg-euler-dark-500 p-16">
-      <div class="flex items-center justify-between">
+    <div class="divide-y divide-euler-dark-600">
+      <div class="flex items-center justify-between py-16">
         <div>
           <div class="text-p2">
             Theme
@@ -25,9 +25,7 @@ defineEmits(['close'])
           @update:model-value="toggleTheme"
         />
       </div>
-    </div>
-    <div class="mb-20 rounded-16 border border-euler-dark-600 bg-euler-dark-500 p-16">
-      <div class="flex items-center justify-between">
+      <div class="flex items-center justify-between py-16">
         <div>
           <div class="text-p2">
             Intrinsic APY
@@ -41,9 +39,7 @@ defineEmits(['close'])
           @update:model-value="updateSetting('enableIntrinsicApy', $event ?? false)"
         />
       </div>
-    </div>
-    <div class="mb-20 rounded-16 border border-euler-dark-600 bg-euler-dark-500 p-16">
-      <div class="flex items-center justify-between">
+      <div class="flex items-center justify-between py-16">
         <div>
           <div class="text-p2">
             Rewards
@@ -57,8 +53,8 @@ defineEmits(['close'])
           @update:model-value="updateSetting('enableRewardsApy', $event ?? false)"
         />
       </div>
+      <Permit2Settings />
+      <SlippageSettings />
     </div>
-    <Permit2Settings />
-    <SlippageSettings />
   </BaseModalWrapper>
 </template>

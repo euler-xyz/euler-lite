@@ -114,32 +114,31 @@ watchEffect(async () => {
 
 <template>
   <NuxtLink
-    class="block no-underline text-content-primary bg-surface rounded-12 border border-line-default hover:shadow-card-hover hover:border-line-emphasis transition-all"
-    :class="isGeoBlocked ? 'opacity-50' : ''"
+    class="grid items-center gap-x-16 py-16 px-20 mobile:block no-underline text-content-primary border-b border-line-default last:border-b-0 hover:bg-card-hover transition-all"
+    :class="[
+      enableEntityBranding ? 'grid-cols-[2fr_repeat(4,1fr)]' : 'grid-cols-[2fr_repeat(3,1fr)]',
+      isGeoBlocked ? 'opacity-50' : '',
+    ]"
     :to="`/lend/${vault.address}`"
   >
-    <div class="flex pb-12 p-16 border-b border-line-subtle">
+    <!-- Asset -->
+    <div class="flex items-center mobile:mb-12">
+      <SvgIcon
+        v-if="isFeatured"
+        name="star"
+        class="!w-16 !h-16 text-accent-600 mr-4 shrink-0"
+        title="Featured Vault"
+      />
       <AssetAvatar
         :asset="vault.asset"
-        size="40"
+        size="30"
       />
-      <div class="flex-grow ml-12">
+      <div class="flex-grow ml-12 min-w-0">
         <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-8">
           <VaultDisplayName
             :name="displayName"
             :is-unverified="isUnverified"
           />
-          <span
-            v-if="isFeatured"
-            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5"
-            title="Featured Vault"
-          >
-            <SvgIcon
-              name="star"
-              class="!w-14 !h-14"
-            />
-            Featured
-          </span>
           <span
             v-if="isGeoBlocked"
             class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
@@ -167,13 +166,84 @@ watchEffect(async () => {
           {{ vault.asset.symbol }}
         </div>
       </div>
-      <div class="flex flex-col items-end">
-        <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
+    </div>
+
+    <!-- Desktop stats (single row) -->
+    <div class="flex items-center gap-4 mobile:!hidden">
+      <div class="mr-6">
+        <VaultPoints :vault="vault" />
+      </div>
+      <div class="text-p2 flex items-center text-accent-600 font-semibold">
+        <SvgIcon
+          v-if="hasRewards"
+          class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
+          name="sparks"
+          @click="onSupplyInfoIconClick"
+        />
+        {{ formatNumber(supplyApyWithRewards) }}%
+      </div>
+      <SvgIcon
+        class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+        name="info-circle"
+        @click="onSupplyInfoIconClick"
+      />
+    </div>
+
+    <div class="flex items-center gap-4 mobile:!hidden">
+      <div class="text-p2 text-content-primary">
+        {{ prices.totalSupply }}
+      </div>
+      <VaultWarningIcon
+        :warning="supplyCapWarning"
+        tooltip-placement="top-start"
+      />
+    </div>
+
+    <div class="mobile:!hidden">
+      <div
+        v-if="isBorrowable"
+        class="text-p2 text-content-primary"
+      >
+        {{ prices.liquidity }}
+      </div>
+      <div
+        v-else
+        class="text-p2 text-content-muted"
+      >
+        -
+      </div>
+    </div>
+
+    <div
+      v-if="enableEntityBranding"
+      class="flex items-center justify-end gap-4 mobile:!hidden"
+    >
+      <template v-if="isBorrowable">
+        <UiRadialProgress
+          :value="utilization"
+          :max="100"
+        />
+        <div class="text-p2 text-content-primary">
+          {{ compactNumber(utilization, 2, 2) }}%
+        </div>
+        <VaultWarningIcon :warning="utilisationWarning" />
+      </template>
+      <div
+        v-else
+        class="text-p2 text-content-muted"
+      >
+        -
+      </div>
+    </div>
+
+    <!-- Mobile layout -->
+    <div class="hidden mobile:!flex mobile:py-12 mobile:justify-between mobile:border-b mobile:border-line-subtle">
+      <div>
+        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
           Supply APY
           <SvgIcon
-            class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+            class="!w-16 !h-16 text-content-muted"
             name="info-circle"
-            @click="onSupplyInfoIconClick"
           />
         </div>
         <div class="flex items-center">
@@ -183,106 +253,36 @@ watchEffect(async () => {
           <div class="text-p2 flex items-center text-accent-600 font-semibold">
             <SvgIcon
               v-if="hasRewards"
-              class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
+              class="!w-20 !h-20 text-accent-500 mr-4"
               name="sparks"
-              @click="onSupplyInfoIconClick"
             />
             {{ formatNumber(supplyApyWithRewards) }}%
           </div>
         </div>
       </div>
-    </div>
-    <div
-      class="flex-1 flex py-12 px-16 pb-12 justify-between mobile:border-b mobile:border-line-subtle"
-    >
-      <div
-        v-if="enableEntityBranding"
-        class="flex-1 mr-16"
-      >
-        <div class="text-content-tertiary text-p3 mb-4">Risk manager</div>
-        <div
-          v-if="entityName"
-          class="flex items-center gap-6"
-        >
-          <BaseAvatar
-            class="icon--20"
-            :label="entityName"
-            :src="entityLogos"
-          />
-          <span class="text-p2 text-content-primary truncate">{{ entityName }}</span>
-        </div>
-        <div
-          v-else
-          class="text-p2 text-content-primary"
-        >-</div>
-      </div>
-      <div class="flex-1">
-        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-          Total supply
-          <VaultWarningIcon
-            :warning="supplyCapWarning"
-            tooltip-placement="top-start"
-          />
-        </div>
+      <div class="flex flex-col items-end">
+        <div class="text-content-tertiary text-p3 mb-4">Total supply</div>
         <div class="text-p2 text-content-primary">
           {{ prices.totalSupply }}
         </div>
       </div>
+    </div>
+
+    <div class="hidden mobile:!flex mobile:flex-col gap-12 py-12 pb-16">
       <div
         v-if="isBorrowable"
-        class="flex-1 flex flex-col items-center mobile:items-end"
+        class="flex w-full justify-between"
       >
-        <div class="text-content-tertiary text-p3 mb-4">
-          Available liquidity
-        </div>
+        <div class="text-content-tertiary text-p3">Available liquidity</div>
         <div class="text-p2 text-content-primary">
           {{ prices.liquidity }}
         </div>
       </div>
       <div
-        v-if="isBorrowable"
-        class="flex flex-col flex-1 mobile:!hidden"
-        :class="
-          isConnected ? 'justify-center items-center' : 'items-end text-right'
-        "
-      >
-        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-          Utilization
-          <VaultWarningIcon :warning="utilisationWarning" />
-        </div>
-        <div class="flex gap-8 justify-end items-center text-right">
-          <UiRadialProgress
-            :value="utilization"
-            :max="100"
-          />
-          <div class="text-p2 text-content-primary">
-            {{ compactNumber(utilization, 2, 2) }}%
-          </div>
-        </div>
-      </div>
-      <div
-        v-if="isConnected"
-        class="flex flex-col flex-1 items-end text-right mobile:!hidden"
-      >
-        <div class="text-content-tertiary text-p3 mb-4">In wallet</div>
-        <BaseLoadableContent
-          :loading="isBalancesLoading"
-          style="min-width: 70px; height: 20px"
-        >
-          <div class="text-p2 text-content-primary whitespace-nowrap">
-            {{ prices.walletBalance }}
-          </div>
-        </BaseLoadableContent>
-      </div>
-    </div>
-    <div class="hidden mobile:flex mobile:flex-col gap-12 py-12 px-16 pb-16">
-      <div
         v-if="enableEntityBranding"
         class="flex w-full justify-between"
       >
-        <div class="flex-1">
-          <div class="text-content-tertiary text-p3">Risk manager</div>
-        </div>
+        <div class="text-content-tertiary text-p3">Risk manager</div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
           <template v-if="entityName">
             <BaseAvatar
@@ -302,13 +302,11 @@ watchEffect(async () => {
         v-if="isBorrowable"
         class="flex w-full justify-between"
       >
-        <div class="flex-1">
-          <div class="text-content-tertiary text-p3 flex items-center gap-4">
-            Utilization
-            <VaultWarningIcon :warning="utilisationWarning" />
-          </div>
+        <div class="text-content-tertiary text-p3 flex items-center gap-4">
+          Utilization
+          <VaultWarningIcon :warning="utilisationWarning" />
         </div>
-        <div class="flex gap-8 justify-end items-center text-right flex-1">
+        <div class="flex gap-8 justify-end items-center">
           <UiRadialProgress
             :value="utilization"
             :max="100"
@@ -322,9 +320,7 @@ watchEffect(async () => {
         v-if="isConnected"
         class="flex w-full justify-between"
       >
-        <div class="flex-1">
-          <div class="text-content-tertiary text-p3">In wallet</div>
-        </div>
+        <div class="text-content-tertiary text-p3">In wallet</div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
           <BaseLoadableContent
             :loading="isBalancesLoading"

@@ -185,7 +185,7 @@ module.exports = {
       },
 
       maxWidth: {
-        'container': '1000px',
+        'container': '1280px',
         'container-narrow': '800px',
       },
 

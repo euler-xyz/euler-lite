@@ -80,32 +80,31 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
 
 <template>
   <NuxtLink
-    class="block no-underline bg-surface rounded-xl border border-line-default transition-all duration-default ease-default hover:shadow-card-hover hover:border-line-emphasis"
-    :class="isGeoBlocked ? 'opacity-50' : ''"
+    class="grid items-center gap-x-16 py-16 px-20 mobile:block no-underline border-b border-line-default last:border-b-0 transition-all duration-default ease-default hover:bg-card-hover"
+    :class="[
+      enableEntityBranding ? 'grid-cols-[2fr_repeat(4,1fr)]' : 'grid-cols-[2fr_repeat(3,1fr)]',
+      isGeoBlocked ? 'opacity-50' : '',
+    ]"
     :to="`/earn/${vault.address}`"
   >
-    <div class="flex py-16 px-16 pb-12 border-b border-line-default">
+    <!-- Asset -->
+    <div class="flex items-center mobile:mb-12">
+      <SvgIcon
+        v-if="isFeatured"
+        name="star"
+        class="!w-16 !h-16 text-accent-600 mr-4 shrink-0"
+        title="Featured Vault"
+      />
       <AssetAvatar
         :asset="vault.asset"
-        size="40"
+        size="30"
       />
-      <div class="flex-grow ml-12">
+      <div class="flex-grow ml-12 min-w-0">
         <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-8">
           <VaultDisplayName
             :name="displayName"
             :is-unverified="isUnverified"
           />
-          <span
-            v-if="isFeatured"
-            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5"
-            title="Featured Vault"
-          >
-            <SvgIcon
-              name="star"
-              class="!w-14 !h-14"
-            />
-            Featured
-          </span>
           <span
             v-if="isGeoBlocked"
             class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
@@ -122,13 +121,70 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
           {{ vault.asset.symbol }}
         </div>
       </div>
-      <div class="flex flex-col items-end">
-        <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
+    </div>
+
+    <!-- Desktop stats (single row) -->
+    <div class="flex items-center gap-4 mobile:!hidden">
+      <div class="text-p2 flex items-center text-accent-600">
+        <div class="mr-6">
+          <VaultPoints :vault="vault" />
+        </div>
+        <SvgIcon
+          v-if="hasRewards"
+          class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
+          name="sparks"
+          @click="onSupplyInfoIconClick"
+        />
+        {{ formatNumber(nanoToValue(vault.interestRateInfo.supplyAPY, 25) + totalRewardsAPY) }}%
+      </div>
+      <SvgIcon
+        class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+        name="info-circle"
+        @click="onSupplyInfoIconClick"
+      />
+    </div>
+
+    <div
+      v-if="enableEntityBranding"
+      class="mobile:!hidden"
+    >
+      <div
+        v-if="entityName"
+        class="flex items-center gap-6"
+      >
+        <BaseAvatar
+          class="icon--20"
+          :label="entityName"
+          :src="entityLogos"
+        />
+        <span class="text-p2 text-content-primary truncate">{{ entityName }}</span>
+      </div>
+      <div
+        v-else
+        class="text-p2 text-content-primary"
+      >-</div>
+    </div>
+
+    <div class="mobile:!hidden">
+      <div class="text-p2 text-content-primary">
+        {{ prices.totalSupply }}
+      </div>
+    </div>
+
+    <div class="flex items-end mobile:!hidden">
+      <div class="text-p2 text-content-primary">
+        {{ prices.liquidity }}
+      </div>
+    </div>
+
+    <!-- Mobile layout -->
+    <div class="hidden mobile:!flex mobile:py-12 mobile:justify-between mobile:border-b mobile:border-line-subtle">
+      <div>
+        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
           Supply APY
           <SvgIcon
-            class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+            class="!w-16 !h-16 text-content-muted"
             name="info-circle"
-            @click="onSupplyInfoIconClick"
           />
         </div>
         <div class="text-p2 flex items-center text-accent-600">
@@ -137,75 +193,32 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
           </div>
           <SvgIcon
             v-if="hasRewards"
-            class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
+            class="!w-20 !h-20 text-accent-600 mr-4"
             name="sparks"
-            @click="onSupplyInfoIconClick"
           />
           {{ formatNumber(nanoToValue(vault.interestRateInfo.supplyAPY, 25) + totalRewardsAPY) }}%
         </div>
       </div>
-    </div>
-    <div class="flex py-12 px-16 pb-12 mobile:border-b mobile:border-line-subtle mobile:pb-12">
-      <div
-        v-if="enableEntityBranding"
-        class="flex-1"
-      >
-        <div class="text-content-tertiary text-p3 mb-4">Capital allocator</div>
-        <div
-          v-if="entityName"
-          class="flex items-center gap-6"
-        >
-          <BaseAvatar
-            class="icon--20"
-            :label="entityName"
-            :src="entityLogos"
-          />
-          <span class="text-p2 text-content-primary truncate">{{ entityName }}</span>
-        </div>
-        <div
-          v-else
-          class="text-p2 text-content-primary"
-        >-</div>
-      </div>
-      <div class="flex-1">
+      <div class="flex flex-col items-end">
         <div class="text-content-tertiary text-p3 mb-4">Total supply</div>
         <div class="text-p2 text-content-primary">
           {{ prices.totalSupply }}
         </div>
       </div>
-      <div class="flex-1 flex flex-col items-center mobile:items-end">
-        <div class="text-content-tertiary text-p3 mb-4">
-          Available liquidity
-        </div>
+    </div>
+
+    <div class="hidden mobile:!flex mobile:flex-col gap-12 py-12 pb-16">
+      <div class="flex w-full justify-between">
+        <div class="text-content-tertiary text-p3">Available liquidity</div>
         <div class="text-p2 text-content-primary">
           {{ prices.liquidity }}
         </div>
       </div>
-      <div class="flex flex-col flex-1 items-end text-right mobile:!hidden">
-        <template v-if="isConnected">
-          <div class="text-content-tertiary text-p3 mb-4">In wallet</div>
-          <BaseLoadableContent
-            :loading="isBalancesLoading"
-            style="width: 70px; height: 20px"
-          >
-            <div class="text-p2 text-content-primary">
-              {{ prices.walletBalance }}
-            </div>
-          </BaseLoadableContent>
-        </template>
-      </div>
-    </div>
-    <div
-      v-if="enableEntityBranding || isConnected"
-      class="hidden mobile:flex mobile:flex-col gap-12 py-12 px-16 pb-16"
-    >
       <div
         v-if="enableEntityBranding"
         class="flex w-full justify-between"
       >
-        <div class="flex-1">
-          <div class="text-content-tertiary text-p3">Capital allocator</div>
-        </div>
+        <div class="text-content-tertiary text-p3">Capital allocator</div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
           <template v-if="entityName">
             <BaseAvatar
@@ -225,9 +238,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
         v-if="isConnected"
         class="flex w-full justify-between"
       >
-        <div class="flex-1">
-          <div class="text-content-tertiary text-p3">In wallet</div>
-        </div>
+        <div class="text-content-tertiary text-p3">In wallet</div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
           <BaseLoadableContent
             :loading="isBalancesLoading"

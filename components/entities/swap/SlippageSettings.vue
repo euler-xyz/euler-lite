@@ -76,7 +76,7 @@ watch(customInput, () => {
 </script>
 
 <template>
-  <div class="mb-20 rounded-16 border border-euler-dark-600 bg-euler-dark-500 p-16">
+  <div class="py-16">
     <div class="flex flex-col gap-8">
       <div class="text-p2">
         Slippage settings
@@ -84,7 +84,7 @@ watch(customInput, () => {
       <div class="text-p3 text-euler-dark-700">
         Default slippage for swaps
       </div>
-      <div class="flex flex-wrap gap-8 rounded-[32px] bg-euler-dark-600 p-6">
+      <div class="flex flex-wrap gap-8 rounded-6 bg-euler-dark-600 p-6">
         <button
           v-for="option in slippagePresets"
           :key="option.value"

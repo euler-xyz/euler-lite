@@ -349,93 +349,95 @@ const sortedBorrowList = computed(() => {
 
 <template>
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
-    <PageHeader
-      title="Borrow"
-      description="Borrow against your collateral"
-    >
-      <template #search>
-        <UiInput
-          v-model="searchQuery"
-          placeholder="Search"
-          icon="search"
-          clearable
-          :full-width="false"
-          class="w-[200px] shrink-0"
-        />
-      </template>
-      <template #filters>
-        <VaultSortButton
-          v-model="sortBy"
-          v-model:dir="sortDir"
-          class="shrink-0"
-          :options="['Recommended', 'Liquidity', 'Total Borrowed', 'Utilization', 'Borrow APY', 'Net APY', 'Max ROE']"
-          :disable-dir="sortBy === 'Recommended'"
-          title="Sorting type"
-        />
-        <UiSelect
-          v-if="enableEntityBranding"
-          :key="`risk-managers-${chainId}`"
-          v-model="selectedRiskManagers"
-          class="shrink-0"
-          :options="riskManagerOptions"
-          placeholder="Risk manager"
-          title="Risk manager"
-          modal-input-placeholder="Search risk manager"
-          icon="shield"
-        />
-        <UiSelect
-          v-if="enableEntityBranding"
-          :key="`markets-${chainId}`"
-          v-model="selectedMarkets"
-          class="shrink-0"
-          :options="marketOptions"
-          placeholder="Market"
-          title="Market"
-          modal-input-placeholder="Search market"
-          icon="bank"
-        />
-        <UiDualSelect
-          :key="`assets-${chainId}`"
-          v-model:collateral="selectedCollateral"
-          v-model:debt="selectedDebt"
-          :options-a="collateralAssetOptions"
-          :options-b="debtAssetOptions"
-          label-a="Collateral asset"
-          label-b="Debt asset"
-          placeholder="Assets"
-          icon="wallet"
-          class="shrink-0"
-        />
-        <UiCustomFilterChips
-          :filters="customFilters"
-          chip-class="shrink-0"
-          @remove="removeCustomFilter"
-          @add="openCustomFilterModal"
-        />
-      </template>
-    </PageHeader>
-
-    <div class="flex flex-col flex-1">
-      <UiLoader
-        v-if="isLoading"
-        class="flex-1 self-center justify-self-center"
-      />
-
-      <VaultsBorrowList
-        v-else-if="sortedBorrowList.length"
-        :items="sortedBorrowList"
-      />
-
-      <div
-        v-else
-        class="flex flex-col flex-1 gap-3 items-center justify-center text-neutral-500"
+    <div class="bg-surface border border-line-default rounded-6 flex flex-col flex-1">
+      <PageHeader
+        title="Borrow"
+        description="Borrow against your collateral"
       >
-        <UiIcon
-          name="search"
-          class="!w-24 !h-24"
+        <template #search>
+          <UiInput
+            v-model="searchQuery"
+            placeholder="Search"
+            icon="search"
+            clearable
+            :full-width="false"
+            class="w-[200px] shrink-0"
+          />
+        </template>
+        <template #filters>
+          <VaultSortButton
+            v-model="sortBy"
+            v-model:dir="sortDir"
+            class="shrink-0"
+            :options="['Recommended', 'Liquidity', 'Total Borrowed', 'Utilization', 'Borrow APY', 'Net APY', 'Max ROE']"
+            :disable-dir="sortBy === 'Recommended'"
+            title="Sorting type"
+          />
+          <UiSelect
+            v-if="enableEntityBranding"
+            :key="`risk-managers-${chainId}`"
+            v-model="selectedRiskManagers"
+            class="shrink-0"
+            :options="riskManagerOptions"
+            placeholder="Risk manager"
+            title="Risk manager"
+            modal-input-placeholder="Search risk manager"
+            icon="shield"
+          />
+          <UiSelect
+            v-if="enableEntityBranding"
+            :key="`markets-${chainId}`"
+            v-model="selectedMarkets"
+            class="shrink-0"
+            :options="marketOptions"
+            placeholder="Market"
+            title="Market"
+            modal-input-placeholder="Search market"
+            icon="bank"
+          />
+          <UiDualSelect
+            :key="`assets-${chainId}`"
+            v-model:collateral="selectedCollateral"
+            v-model:debt="selectedDebt"
+            :options-a="collateralAssetOptions"
+            :options-b="debtAssetOptions"
+            label-a="Collateral asset"
+            label-b="Debt asset"
+            placeholder="Assets"
+            icon="wallet"
+            class="shrink-0"
+          />
+          <UiCustomFilterChips
+            :filters="customFilters"
+            chip-class="shrink-0"
+            @remove="removeCustomFilter"
+            @add="openCustomFilterModal"
+          />
+        </template>
+      </PageHeader>
+
+      <div class="flex flex-col flex-1 p-20 pt-16">
+        <UiLoader
+          v-if="isLoading"
+          class="flex-1 self-center justify-self-center"
         />
-        <div class="text-center max-w-[180px]">
-          No markets were found by these filters
+
+        <VaultsBorrowList
+          v-else-if="sortedBorrowList.length"
+          :items="sortedBorrowList"
+        />
+
+        <div
+          v-else
+          class="flex flex-col flex-1 gap-3 items-center justify-center text-neutral-500"
+        >
+          <UiIcon
+            name="search"
+            class="!w-24 !h-24"
+          />
+          <div class="text-center max-w-[180px]">
+            No markets were found by these filters
+          </div>
         </div>
       </div>
     </div>

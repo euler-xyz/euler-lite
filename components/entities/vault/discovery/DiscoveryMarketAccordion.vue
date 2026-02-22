@@ -326,12 +326,12 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-8">
+  <div class="flex flex-col">
     <article
       v-for="market in markets"
       :key="market.id"
-      class="bg-surface rounded-12 border border-line-default shadow-card transition-all"
-      :class="isExpanded(market.id) ? 'shadow-card-hover border-line-emphasis' : 'hover:shadow-card-hover hover:border-line-emphasis'"
+      class="border-b border-line-default last:border-b-0 transition-all"
+      :class="isExpanded(market.id) ? 'bg-card-hover' : 'hover:bg-card-hover'"
     >
       <!-- Collapsed Row Card -->
       <DiscoveryMarketCard

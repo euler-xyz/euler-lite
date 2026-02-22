@@ -270,86 +270,88 @@ const isLoading = computed(() =>
 
 <template>
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
-    <PageHeader
-      title="Explore"
-      description="Discover markets structure and collateral relationships."
-    >
-      <template #search>
-        <UiInput
-          v-model="searchQuery"
-          placeholder="Search"
-          icon="search"
-          clearable
-          :full-width="false"
-          class="w-[200px] shrink-0"
-        />
-      </template>
-      <template #filters>
-        <VaultSortButton
-          v-model="sortBy"
-          v-model:dir="sortDir"
-          :options="['Recommended', 'Best Net APY', 'Total Supply', 'Total Borrowed', 'Available Liquidity']"
-          :disable-dir="sortBy === 'Recommended'"
-          title="Sorting type"
-        />
-        <UiSelect
-          v-if="enableEntityBranding"
-          :key="`risk-managers-${chainId}`"
-          v-model="selectedRiskManagers"
-          :options="riskManagerOptions"
-          placeholder="Risk manager"
-          title="Risk manager"
-          modal-input-placeholder="Search risk manager"
-          icon="shield"
-        />
-        <UiSelect
-          v-if="enableEntityBranding"
-          :key="`markets-${chainId}`"
-          v-model="selectedMarkets"
-          :options="marketOptions"
-          placeholder="Market"
-          title="Market"
-          modal-input-placeholder="Search market"
-          icon="bank"
-        />
-        <UiSelect
-          :key="`assets-${chainId}`"
-          v-model="selectedAssets"
-          :options="assetOptions"
-          placeholder="Asset"
-          title="Asset"
-          modal-input-placeholder="Search asset"
-          icon="wallet"
-        />
-        <UiCustomFilterChips
-          :filters="customFilters"
-          @remove="removeCustomFilter"
-          @add="openCustomFilterModal"
-        />
-      </template>
-    </PageHeader>
-
-    <div class="flex flex-col flex-1">
-      <UiLoader
-        v-if="isLoading"
-        class="flex-1 self-center justify-self-center"
-      />
-
-      <DiscoveryMarketAccordion
-        v-else-if="sortedMarkets.length"
-        :markets="sortedMarkets"
-      />
-
-      <div
-        v-else
-        class="flex flex-col flex-1 gap-3 items-center justify-center text-content-tertiary"
+    <div class="bg-surface border border-line-default rounded-6 flex flex-col flex-1">
+      <PageHeader
+        title="Explore"
+        description="Discover markets structure and collateral relationships."
       >
-        <UiIcon
-          name="search"
-          class="!w-24 !h-24"
+        <template #search>
+          <UiInput
+            v-model="searchQuery"
+            placeholder="Search"
+            icon="search"
+            clearable
+            :full-width="false"
+            class="w-[200px] shrink-0"
+          />
+        </template>
+        <template #filters>
+          <VaultSortButton
+            v-model="sortBy"
+            v-model:dir="sortDir"
+            :options="['Recommended', 'Best Net APY', 'Total Supply', 'Total Borrowed', 'Available Liquidity']"
+            :disable-dir="sortBy === 'Recommended'"
+            title="Sorting type"
+          />
+          <UiSelect
+            v-if="enableEntityBranding"
+            :key="`risk-managers-${chainId}`"
+            v-model="selectedRiskManagers"
+            :options="riskManagerOptions"
+            placeholder="Risk manager"
+            title="Risk manager"
+            modal-input-placeholder="Search risk manager"
+            icon="shield"
+          />
+          <UiSelect
+            v-if="enableEntityBranding"
+            :key="`markets-${chainId}`"
+            v-model="selectedMarkets"
+            :options="marketOptions"
+            placeholder="Market"
+            title="Market"
+            modal-input-placeholder="Search market"
+            icon="bank"
+          />
+          <UiSelect
+            :key="`assets-${chainId}`"
+            v-model="selectedAssets"
+            :options="assetOptions"
+            placeholder="Asset"
+            title="Asset"
+            modal-input-placeholder="Search asset"
+            icon="wallet"
+          />
+          <UiCustomFilterChips
+            :filters="customFilters"
+            @remove="removeCustomFilter"
+            @add="openCustomFilterModal"
+          />
+        </template>
+      </PageHeader>
+
+      <div class="flex flex-col flex-1 p-20 pt-16">
+        <UiLoader
+          v-if="isLoading"
+          class="flex-1 self-center justify-self-center"
         />
-        <div class="text-center max-w-[180px]">
-          No markets were found by these filters
+
+        <DiscoveryMarketAccordion
+          v-else-if="sortedMarkets.length"
+          :markets="sortedMarkets"
+        />
+
+        <div
+          v-else
+          class="flex flex-col flex-1 gap-3 items-center justify-center text-content-tertiary"
+        >
+          <UiIcon
+            name="search"
+            class="!w-24 !h-24"
+          />
+          <div class="text-center max-w-[180px]">
+            No markets were found by these filters
+          </div>
         </div>
       </div>
     </div>

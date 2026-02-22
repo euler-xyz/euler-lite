@@ -35,11 +35,28 @@ loader.load(
 )
 
 const BASE_Y = (90 * Math.PI) / 180
+const { x: mouseX, y: mouseY } = useMouseInElement(document.documentElement)
+
+// Normalized -1 to 1
+const nx = computed(() => (mouseX.value / window.innerWidth) * 2 - 1)
+const ny = computed(() => (mouseY.value / window.innerHeight) * 2 - 1)
+
+const currentRotY = ref(BASE_Y)
+const currentRotX = ref(0)
 
 const { onBeforeRender } = useLoop()
-onBeforeRender(({ elapsed }) => {
+onBeforeRender(({ elapsed, delta }) => {
   if (!model.value) return
-  model.value.rotation.y = BASE_Y + elapsed * 0.4
+
+  const targetY = BASE_Y + nx.value * 0.35
+  const targetX = -ny.value * 0.2
+
+  const t = 1 - Math.pow(0.04, delta)
+  currentRotY.value += (targetY - currentRotY.value) * t
+  currentRotX.value += (targetX - currentRotX.value) * t
+
+  model.value.rotation.y = currentRotY.value
+  model.value.rotation.x = currentRotX.value
   model.value.position.y = Math.sin(elapsed * 0.6) * 0.06
 })
 </script>

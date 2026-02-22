@@ -7,20 +7,18 @@ const onToggle = (value: boolean | undefined) => {
 </script>
 
 <template>
-  <div class="mb-20 rounded-16 border border-euler-dark-600 bg-euler-dark-500 p-16">
-    <div class="flex items-center justify-between">
-      <div>
-        <div class="text-p2">
-          permit2 approvals
-        </div>
-        <div class="text-p3 text-euler-dark-700">
-          Use gasless token approvals
-        </div>
+  <div class="flex items-center justify-between py-16">
+    <div>
+      <div class="text-p2">
+        permit2 approvals
       </div>
-      <UiSwitch
-        :model-value="permit2Enabled"
-        @update:model-value="onToggle"
-      />
+      <div class="text-p3 text-euler-dark-700">
+        Use gasless token approvals
+      </div>
     </div>
+    <UiSwitch
+      :model-value="permit2Enabled"
+      @update:model-value="onToggle"
+    />
   </div>
 </template>

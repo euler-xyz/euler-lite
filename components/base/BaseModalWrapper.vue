@@ -22,13 +22,9 @@ defineEmits(['close'])
       v-if="title || close"
       class="flex justify-between mb-12 items-center h-36"
     >
-      <div
-        v-if="close"
-        class="w-36"
-      />
       <p
         v-if="title"
-        class="flex text-center text-p2 items-center gap-8"
+        class="flex text-h4 items-center gap-8"
       >
         <SvgIcon
           v-if="warning"

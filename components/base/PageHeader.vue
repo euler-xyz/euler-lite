@@ -12,9 +12,9 @@ defineProps({
 </script>
 
 <template>
-  <div class="mb-48 animate-fade-in-up">
+  <div class="bg-surface-secondary rounded-t-6 border-b border-line-default p-20 pb-16 animate-fade-in-up">
     <!-- Row 1: title + description -->
-    <div class="mb-20">
+    <div class="mb-16">
       <h1 class="text-h1 text-content-primary mb-8">
         {{ title }}
       </h1>
