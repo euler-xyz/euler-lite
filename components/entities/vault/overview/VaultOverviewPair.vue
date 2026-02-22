@@ -8,7 +8,6 @@ defineProps<{ pair: AnyBorrowVaultPair | AccountBorrowPosition, desktopOverview?
 <template>
   <div
     class="flex flex-col"
-    :class="[desktopOverview ? 'gap-16' : 'gap-12']"
   >
     <VaultOverviewPairBlockGeneral
       :pair="pair"

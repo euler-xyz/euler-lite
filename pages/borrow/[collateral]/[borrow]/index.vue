@@ -353,7 +353,7 @@ watch(formTab, () => {
 </script>
 
 <template>
-  <div class="flex gap-32">
+  <div class="flex gap-32 max-w-[1000px] mx-auto">
     <div class="flex flex-col gap-16 w-full">
       <BaseBackButton class="laptop:!hidden" />
       <VaultForm
@@ -788,54 +788,56 @@ watch(formTab, () => {
       v-if="pair"
       class="w-full min-w-0 mobile:hidden"
     >
-      <UiTabs
-        v-if="tabs.length"
-        v-model="tab"
-        class="mb-12 min-w-0"
-        :list="tabs"
-      >
-        <template #default="{ tab: slotTab }">
-          <div class="flex items-center gap-8">
-            <AssetAvatar :asset="slotTab.assets" />
+      <div class="bg-surface border border-line-default rounded-6 shadow-sm">
+        <UiTabs
+          v-if="tabs.length"
+          v-model="tab"
+          class="mb-12 min-w-0"
+          :list="tabs"
+        >
+          <template #default="{ tab: slotTab }">
+            <div class="flex items-center gap-8">
+              <AssetAvatar :asset="slotTab.assets" />
 
-            {{ slotTab.label }}
-          </div>
-        </template>
-      </UiTabs>
-      <Transition
-        name="page"
-        mode="out-in"
-      >
-        <VaultOverviewPair
-          v-if="!tab"
-          :pair="pair"
-          style="flex-grow: 1"
-          desktop-overview
-        />
-        <SecuritizeVaultOverview
-          v-else-if="tab === 'collateral' && isSecuritizeCollateral"
-          :vault="(pair.collateral as SecuritizeVault)"
-          desktop-overview
-        />
-        <VaultOverview
-          v-else-if="tab === 'collateral'"
-          :vault="(pair.collateral as Vault)"
-          desktop-overview
-          @vault-click="(address: string) => router.push(`/lend/${address}`)"
-        />
-        <VaultOverview
-          v-else-if="tab === 'multiply-collateral' && multiply.multiplySupplyVault.value"
-          :vault="multiply.multiplySupplyVault.value"
-          desktop-overview
-          @vault-click="(address: string) => router.push(`/lend/${address}`)"
-        />
-        <VaultOverview
-          v-else-if="tab === 'borrow'"
-          :vault="pair.borrow"
-          desktop-overview
-          @vault-click="(address: string) => router.push(`/lend/${address}`)"
-        />
-      </Transition>
+              {{ slotTab.label }}
+            </div>
+          </template>
+        </UiTabs>
+        <Transition
+          name="page"
+          mode="out-in"
+        >
+          <VaultOverviewPair
+            v-if="!tab"
+            :pair="pair"
+            style="flex-grow: 1"
+            desktop-overview
+          />
+          <SecuritizeVaultOverview
+            v-else-if="tab === 'collateral' && isSecuritizeCollateral"
+            :vault="(pair.collateral as SecuritizeVault)"
+            desktop-overview
+          />
+          <VaultOverview
+            v-else-if="tab === 'collateral'"
+            :vault="(pair.collateral as Vault)"
+            desktop-overview
+            @vault-click="(address: string) => router.push(`/lend/${address}`)"
+          />
+          <VaultOverview
+            v-else-if="tab === 'multiply-collateral' && multiply.multiplySupplyVault.value"
+            :vault="multiply.multiplySupplyVault.value"
+            desktop-overview
+            @vault-click="(address: string) => router.push(`/lend/${address}`)"
+          />
+          <VaultOverview
+            v-else-if="tab === 'borrow'"
+            :vault="pair.borrow"
+            desktop-overview
+            @vault-click="(address: string) => router.push(`/lend/${address}`)"
+          />
+        </Transition>
+      </div>
     </div>
   </div>
 </template>

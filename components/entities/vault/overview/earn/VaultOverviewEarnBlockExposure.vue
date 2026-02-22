@@ -93,7 +93,7 @@ load()
 <template>
   <div
     v-if="exposureList.length"
-    class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card"
+    class="flex flex-col gap-24 p-24 border-b border-line-default last:border-b-0"
   >
     <div>
       <p class="text-h3 text-content-primary mb-12">

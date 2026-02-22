@@ -202,7 +202,7 @@
   --ui-input-error-shadow: 0 0 0 2px rgba(220, 38, 38, 0.2);
 
   // Form container shadows
-  --ui-form-field-background: var(--neutral-50);
+  --ui-form-field-background: var(--bg-surface);
   --ui-form-field-border-color: var(--neutral-200);
   --ui-form-field-shadow: none;
   --ui-form-field-focus-shadow: 0 0 0 2px rgba(34, 192, 155, 0.2);
@@ -301,7 +301,7 @@
   --ui-input-error-shadow: 0 0 0 2px rgba(220, 38, 38, 0.25);
 
   // Form container shadows
-  --ui-form-field-background: #1a1a1a;
+  --ui-form-field-background: var(--bg-surface);
   --ui-form-field-border-color: #333333;
   --ui-form-field-shadow: none;
   --ui-form-field-focus-shadow: 0 0 0 2px rgba(34, 192, 155, 0.3);

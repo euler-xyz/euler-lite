@@ -642,7 +642,7 @@ watch(address, () => {
 </script>
 
 <template>
-  <div class="flex gap-32">
+  <div class="flex gap-32 max-w-[1000px] mx-auto">
     <div class="flex flex-col gap-16 w-full laptop:sticky laptop:top-[104px] laptop:self-start">
       <BaseBackButton class="laptop:!hidden" />
       <VaultForm
@@ -853,19 +853,21 @@ watch(address, () => {
     </div>
 
     <div class="w-full hidden laptop:!block">
-      <!-- EVK Vault Overview -->
-      <VaultOverview
-        v-if="features.hasOverview && vault && vaultType === 'evk'"
-        :vault="vault"
-        desktop-overview
-        @vault-click="(address: string) => router.push(`/lend/${address}`)"
-      />
-      <!-- Securitize Vault Overview -->
-      <SecuritizeVaultOverview
-        v-if="features.hasOverview && securitizeVault && vaultType === 'securitize'"
-        :vault="securitizeVault"
-        desktop-overview
-      />
+      <div class="bg-surface border border-line-default rounded-6 shadow-sm">
+        <!-- EVK Vault Overview -->
+        <VaultOverview
+          v-if="features.hasOverview && vault && vaultType === 'evk'"
+          :vault="vault"
+          desktop-overview
+          @vault-click="(address: string) => router.push(`/lend/${address}`)"
+        />
+        <!-- Securitize Vault Overview -->
+        <SecuritizeVaultOverview
+          v-if="features.hasOverview && securitizeVault && vaultType === 'securitize'"
+          :vault="securitizeVault"
+          desktop-overview
+        />
+      </div>
     </div>
   </div>
 </template>

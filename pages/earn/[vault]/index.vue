@@ -230,7 +230,7 @@ watch(address, () => {
 </script>
 
 <template>
-  <div class="flex gap-32">
+  <div class="flex gap-32 max-w-[1000px] mx-auto">
     <div class="flex flex-col gap-16 w-full laptop:sticky laptop:top-[104px] laptop:self-start">
       <BaseBackButton class="laptop:!hidden" />
       <VaultForm
@@ -350,12 +350,14 @@ watch(address, () => {
       </VaultForm>
     </div>
     <div class="w-full mobile:hidden">
-      <VaultOverviewEarn
-        v-if="vault"
-        :vault="vault as EarnVault"
-        desktop-overview
-        @vault-click="(address: string) => router.push(`/lend/${address}`)"
-      />
+      <div class="bg-surface border border-line-default rounded-6 shadow-sm">
+        <VaultOverviewEarn
+          v-if="vault"
+          :vault="vault as EarnVault"
+          desktop-overview
+          @vault-click="(address: string) => router.push(`/lend/${address}`)"
+        />
+      </div>
     </div>
   </div>
 </template>

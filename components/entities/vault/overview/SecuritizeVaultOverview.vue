@@ -152,11 +152,10 @@ const supplyCapPercentageDisplay = computed(() => {
 <template>
   <div
     class="flex flex-col"
-    :class="[desktopOverview ? 'gap-16' : 'gap-12']"
   >
     <!-- Overview -->
     <div
-      class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card"
+      class="flex flex-col gap-24 p-24 border-b border-line-default last:border-b-0"
     >
       <p class="text-h3 text-content-primary">
         Overview
@@ -288,7 +287,7 @@ const supplyCapPercentageDisplay = computed(() => {
 
     <!-- Statistics -->
     <div
-      class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card"
+      class="flex flex-col gap-24 p-24 border-b border-line-default last:border-b-0"
     >
       <p class="text-h3 text-content-primary">
         Statistics
@@ -320,7 +319,7 @@ const supplyCapPercentageDisplay = computed(() => {
 
     <!-- Risk Parameters -->
     <div
-      class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card"
+      class="flex flex-col gap-24 p-24 border-b border-line-default last:border-b-0"
     >
       <p class="text-h3 text-content-primary">
         Risk parameters
@@ -360,7 +359,7 @@ const supplyCapPercentageDisplay = computed(() => {
 
     <!-- Addresses -->
     <div
-      class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card"
+      class="flex flex-col gap-24 p-24 border-b border-line-default last:border-b-0"
     >
       <p class="text-h3 text-content-primary">
         Addresses

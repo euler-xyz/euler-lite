@@ -10,7 +10,6 @@ const { vault } = defineProps<{ vault: EarnVault, desktopOverview?: boolean }>()
 <template>
   <div
     class="flex flex-col"
-    :class="[desktopOverview ? 'gap-16' : 'gap-12']"
   >
     <VaultOverviewEarnBlockGeneral
       :vault="vault"

@@ -145,7 +145,7 @@ const formatAdapterPrice = (adapter: OracleAdapterEntry) => {
 </script>
 
 <template>
-  <div class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card">
+  <div class="flex flex-col gap-24 p-24 border-b border-line-default last:border-b-0">
     <p class="text-h3 text-content-primary">
       Oracles
     </p>

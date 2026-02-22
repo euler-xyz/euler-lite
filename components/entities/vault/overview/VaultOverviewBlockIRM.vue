@@ -414,7 +414,7 @@ watch(theme, async () => {
 <template>
   <div
     v-if="hasValidIRM"
-    class="bg-surface-secondary rounded-xl flex flex-col gap-16 p-24 shadow-card"
+    class="flex flex-col gap-16 p-24 border-b border-line-default last:border-b-0"
   >
     <div class="flex justify-between items-center flex-wrap gap-12">
       <div class="flex items-center gap-8">
