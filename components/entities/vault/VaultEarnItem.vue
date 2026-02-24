@@ -171,7 +171,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
       </div>
     </div>
 
-    <div class="flex items-end mobile:!hidden">
+    <div class="flex items-center justify-end mobile:!hidden">
       <div class="text-p2 text-content-primary">
         {{ prices.liquidity }}
       </div>

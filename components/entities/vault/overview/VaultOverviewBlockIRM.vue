@@ -52,8 +52,8 @@ const chartColors = computed(() => isDark.value
   ? {
       text: '#a3a3a3',
       textMuted: '#737373',
-      gridLine: 'rgba(255, 255, 255, 0.06)',
-      axisLine: 'rgba(255, 255, 255, 0.1)',
+      gridLine: 'rgba(255, 255, 255, 0.03)',
+      axisLine: 'rgba(255, 255, 255, 0.06)',
       tooltip: {
         bg: 'rgba(26, 26, 26, 0.95)',
         border: '#404040',
@@ -61,6 +61,10 @@ const chartColors = computed(() => isDark.value
         textMuted: '#a3a3a3',
       },
       currentLine: '#a3a3a3',
+      borrowCurve: '#f59e0b',
+      borrowFill: 'rgba(245, 158, 11, 0.1)',
+      supplyCurve: '#22c09b',
+      supplyFill: 'rgba(34, 192, 155, 0.1)',
     }
   : {
       text: '#737373',
@@ -74,6 +78,10 @@ const chartColors = computed(() => isDark.value
         textMuted: '#525252',
       },
       currentLine: '#262626',
+      borrowCurve: '#f59e0b',
+      borrowFill: 'rgba(245, 158, 11, 0.1)',
+      supplyCurve: '#22c09b',
+      supplyFill: 'rgba(34, 192, 155, 0.1)',
     })
 
 const { EVM_PROVIDER_URL } = useEulerConfig()
@@ -216,8 +224,8 @@ const renderChart = async () => {
         {
           label: 'Borrow APY',
           data: borrowAPYValues,
-          borderColor: '#059669',
-          backgroundColor: 'rgba(5, 150, 105, 0.15)',
+          borderColor: chartColors.value.borrowCurve,
+          backgroundColor: chartColors.value.borrowFill,
           borderWidth: 2.5,
           pointRadius: 0,
           pointHoverRadius: 6,
@@ -228,8 +236,8 @@ const renderChart = async () => {
         {
           label: 'Supply APY',
           data: supplyAPYValues,
-          borderColor: '#22c09b',
-          backgroundColor: 'rgba(34, 192, 155, 0.15)',
+          borderColor: chartColors.value.supplyCurve,
+          backgroundColor: chartColors.value.supplyFill,
           borderWidth: 2.5,
           pointRadius: 0,
           pointHoverRadius: 6,

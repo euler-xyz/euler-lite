@@ -4,9 +4,9 @@
   --brand-accent-hue: calc(var(--brand-hue) - 45deg);
 
   // ============================================
-  // INSTITUTIONAL COLOR PALETTE
+  // EULER BRAND COLOR PALETTE
   // ============================================
-  
+
   // Primary - Professional Navy
   --primary-50: #f0f4f8;
   --primary-100: #d9e2ec;
@@ -19,13 +19,13 @@
   --primary-800: #243b53;
   --primary-900: #102a43;
 
-  // Accent - Teal
-  --accent-300: #b8ede3;
-  --accent-400: #6dd9bf;
-  --accent-500: #22c09b;
-  --accent-500-rgb: 34, 192, 155;
-  --accent-600: #1a9679;
-  --accent-700: #136b57;
+  // Accent - Euler Aquamarine (brand color #2AE5B9)
+  --accent-300: #0e4e3f;
+  --accent-400: #167a62;
+  --accent-500: #1c997c;
+  --accent-500-rgb: 28, 153, 124;
+  --accent-600: #23c09b;
+  --accent-700: #2ae5b9;
 
   // Focus ring shadow using accent color
   --shadow-focus-accent: 0 0 0 3px rgba(34, 192, 155, 0.15), 0 2px 4px rgba(0, 0, 0, 0.06);
@@ -43,13 +43,13 @@
   --neutral-900: #171717;
 
   // Semantic Colors
-  --success-100: #d1fae5;
-  --success-500: #059669;
-  --success-600: #047857;
-  --warning-100: #fef3c7;
-  --warning-500: #d97706;
-  --error-100: #fee2e2;
-  --error-500: #dc2626;
+  --success-100: #62ad4f33;
+  --success-500: #62ad4f;
+  --success-600: #4e8a3f;
+  --warning-100: #ecc03333;
+  --warning-500: #ecc033;
+  --error-100: #c0272333;
+  --error-500: #c02723;
 
   // ============================================
   // SHADOW SYSTEM (Apple-like depth)
@@ -100,7 +100,7 @@
   --red-800: 217, 125, 123;
   --red-1000: 242, 212, 211;
 
-  --green-600: 98, 173, 75;
+  --green-600: 98, 173, 79;
   --green-1000: 224, 239, 220;
 
   --yellow-600: 236, 192, 51;
@@ -112,32 +112,32 @@
   --yellow-warning-700: 223, 178, 4;
   --slice-of-heaven-300: 197, 198, 247;
 
-  --border-primary: 0 0% 90%;
+  --border-primary: 211 15% 90%;
 
-  // Brand palette - INSTITUTIONAL LIGHT THEME
+  // Brand palette - LIGHT THEME
   // (Re-mapped: 100=darkest, 1000=lightest for light theme)
-  --euler-dark-100: 0 0% 98%;      // Near white - page bg
-  --euler-dark-200: 0 0% 96%;      // Slightly darker - subtle bg
-  --euler-dark-300: 0 0% 98%;      // Body background
-  --euler-dark-400: 0 0% 100%;     // Card background (white)
-  --euler-dark-500: 0 0% 100%;     // Card/surface background
-  --euler-dark-600: 0 0% 90%;      // Borders
-  --euler-dark-700: 210 11% 71%;   // Muted text (--neutral-400)
-  --euler-dark-800: 210 9% 45%;    // Secondary text (--neutral-500)
-  --euler-dark-900: 210 11% 32%;   // Body text (--neutral-600)
-  --euler-dark-1000: 210 11% 15%;  // Primary text (--neutral-800)
+  --euler-dark-100: 211 20% 98%;     // Near white - page bg
+  --euler-dark-200: 211 15% 96%;     // Slightly darker - subtle bg
+  --euler-dark-300: 211 20% 98%;     // Body background
+  --euler-dark-400: 0 0% 100%;       // Card background (white)
+  --euler-dark-500: 0 0% 100%;       // Card/surface background
+  --euler-dark-600: 211 15% 90%;     // Borders
+  --euler-dark-700: 211 11% 71%;     // Muted text
+  --euler-dark-800: 211 9% 45%;      // Secondary text
+  --euler-dark-900: 211 11% 32%;     // Body text
+  --euler-dark-1000: 211 11% 15%;    // Primary text
 
-  // Accent palette - Teal
-  --aquamarine-300: 163 70% 22%;    // Dark teal
-  --aquamarine-500: 163 70% 35%;    // Medium teal
-  --aquamarine-600: 163 70% 40%;    // Teal
-  --aquamarine-700: 163 70% 44%;    // Primary accent (teal)
-  --aquamarine-800: 163 65% 57%;    // Lighter teal
-  --aquamarine-900: 163 60% 75%;    // Very light teal
-  --aquamarine-1000: 163 70% 20%;   // Teal for text on light bg
+  // Accent palette - Euler Aquamarine HSL
+  --aquamarine-300: 166 69% 18%;     // Dark aquamarine
+  --aquamarine-500: 166 69% 36%;     // Medium aquamarine
+  --aquamarine-600: 166 69% 45%;     // Aquamarine
+  --aquamarine-700: 166 78% 53%;     // Primary accent (aquamarine)
+  --aquamarine-800: 166 78% 66%;     // Lighter aquamarine
+  --aquamarine-900: 166 79% 79%;     // Very light aquamarine
+  --aquamarine-1000: 166 69% 28%;    // Aquamarine for text on light bg
 
-  --teal-light-100: 235, 249, 249;
-  --teal-light-300: 177, 230, 231;
+  --teal-light-100: 225, 249, 244;
+  --teal-light-300: 161, 244, 224;
 
   // RGB Colors
   --c-white: rgb(var(--white));

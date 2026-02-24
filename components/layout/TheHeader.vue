@@ -159,8 +159,8 @@ onClickOutside(reference, () => {
         v-for="item in menuItems"
         :key="item.name"
         :to="'/' + item.name"
-        class="flex gap-8 text-[13px] font-medium no-underline py-8 px-14 rounded-8 text-neutral-800 items-center justify-center transition-all"
-        :class="[getIsMenuItemActive(item) ? 'bg-surface border border-line-default shadow-sm text-content-primary' : 'hover:bg-surface-secondary hover:text-content-primary']"
+        class="flex gap-8 text-[13px] font-medium no-underline py-8 px-14 rounded-8 text-neutral-800 items-center justify-center border border-transparent transition-[color,background-color,border-color]"
+        :class="[getIsMenuItemActive(item) ? 'bg-surface !border-line-default shadow-sm text-content-primary' : 'hover:bg-surface-secondary hover:text-content-primary']"
       >
         <UiIcon
           class="!w-18 !h-18"

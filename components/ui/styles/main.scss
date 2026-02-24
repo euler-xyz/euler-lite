@@ -8,13 +8,13 @@
   --ui-loader-animation: ui-animation-spin 1s infinite linear;
 
   // ============================================
-  // INSTITUTIONAL LIGHT THEME UI COMPONENTS
+  // LIGHT THEME UI COMPONENTS
   // ============================================
 
   --ui-radial-progress-active-color: var(--accent-500);
   --ui-radial-progress-background-color: var(--neutral-200);
 
-  // Primary Button - Gold accent
+  // Primary Button - Aquamarine accent
   --ui-button-primary-background-color: var(--accent-500);
   --ui-button-primary-color: #ffffff;
   --ui-button-primary-active-background-color: var(--accent-600);
@@ -58,17 +58,17 @@
   // Red/Danger Buttons
   --ui-button-red-background-color: var(--error-100);
   --ui-button-red-color: var(--error-500);
-  --ui-button-red-border-color: rgba(220, 38, 38, 0.2);
-  --ui-button-red-hover-background-color: rgba(220, 38, 38, 0.15);
+  --ui-button-red-border-color: rgba(192, 39, 35, 0.2);
+  --ui-button-red-hover-background-color: rgba(192, 39, 35, 0.15);
   --ui-button-red-focus-outline-color: var(--error-500);
-  --ui-button-red-focus-active-background-color: rgba(220, 38, 38, 0.2);
+  --ui-button-red-focus-active-background-color: rgba(192, 39, 35, 0.2);
   --ui-button-red-disabled-background-color: var(--neutral-100);
   --ui-button-red-disabled-color: var(--neutral-400);
 
   --ui-button-red-destructive-color: var(--error-500);
   --ui-button-red-destructive-hover-background-color: var(--error-100);
-  --ui-button-red-destructive-hover-border-color: rgba(220, 38, 38, 0.3);
-  --ui-button-red-destructive-active-background-color: rgba(220, 38, 38, 0.15);
+  --ui-button-red-destructive-hover-border-color: rgba(192, 39, 35, 0.3);
+  --ui-button-red-destructive-active-background-color: rgba(192, 39, 35, 0.15);
   --ui-button-red-destructive-focus-outline-color: var(--error-500);
   --ui-button-red-destructive-disabled-color: var(--neutral-400);
 
@@ -149,29 +149,29 @@
   --ui-toast-background-color: #ffffff;
   --ui-toast-box-shadow: var(--shadow-lg);
   
-  --ui-toast-info-border-color: rgba(34, 192, 155, 0.3);
-  --ui-toast-info-background-color: rgba(34, 192, 155, 0.08);
+  --ui-toast-info-border-color: rgba(42, 229, 185, 0.3);
+  --ui-toast-info-background-color: rgba(42, 229, 185, 0.1);
   --ui-toast-info-text-color: var(--accent-700);
-  --ui-toast-info-splitter-color: rgba(34, 192, 155, 0.3);
-  --ui-toast-info-action-background-color: rgba(34, 192, 155, 0.08);
+  --ui-toast-info-splitter-color: rgba(42, 229, 185, 0.3);
+  --ui-toast-info-action-background-color: rgba(42, 229, 185, 0.1);
 
-  --ui-toast-success-border-color: rgba(5, 150, 105, 0.3);
+  --ui-toast-success-border-color: rgba(98, 173, 79, 0.3);
   --ui-toast-success-background-color: var(--success-100);
   --ui-toast-success-text-color: var(--success-600);
-  --ui-toast-success-splitter-color: rgba(5, 150, 105, 0.3);
-  --ui-toast-success-action-background-color: rgba(5, 150, 105, 0.1);
+  --ui-toast-success-splitter-color: rgba(98, 173, 79, 0.3);
+  --ui-toast-success-action-background-color: rgba(98, 173, 79, 0.1);
 
-  --ui-toast-warning-border-color: rgba(217, 119, 6, 0.3);
+  --ui-toast-warning-border-color: rgba(236, 192, 51, 0.3);
   --ui-toast-warning-background-color: var(--warning-100);
   --ui-toast-warning-text-color: var(--warning-500);
-  --ui-toast-warning-splitter-color: rgba(217, 119, 6, 0.3);
-  --ui-toast-warning-action-background-color: rgba(217, 119, 6, 0.1);
+  --ui-toast-warning-splitter-color: rgba(236, 192, 51, 0.3);
+  --ui-toast-warning-action-background-color: rgba(236, 192, 51, 0.1);
 
-  --ui-toast-error-border-color: rgba(220, 38, 38, 0.3);
+  --ui-toast-error-border-color: rgba(192, 39, 35, 0.3);
   --ui-toast-error-background-color: var(--error-100);
   --ui-toast-error-text-color: var(--error-500);
-  --ui-toast-error-splitter-color: rgba(220, 38, 38, 0.3);
-  --ui-toast-error-action-background-color: rgba(220, 38, 38, 0.1);
+  --ui-toast-error-splitter-color: rgba(192, 39, 35, 0.3);
+  --ui-toast-error-action-background-color: rgba(192, 39, 35, 0.1);
 
   --ui-toast-neutral-border-color: var(--neutral-200);
   --ui-toast-neutral-background-color: #ffffff;
@@ -197,15 +197,15 @@
   --ui-input-error-color: var(--error-500);
 
   // Input shadows and depth
-  --ui-input-shadow: none;
-  --ui-input-focus-shadow: 0 0 0 2px rgba(34, 192, 155, 0.25);
-  --ui-input-error-shadow: 0 0 0 2px rgba(220, 38, 38, 0.2);
+  --ui-input-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), inset 0 1px 2px rgba(0, 0, 0, 0.02);
+  --ui-input-focus-shadow: 0 0 0 3px rgba(42, 229, 185, 0.15), 0 1px 2px rgba(0, 0, 0, 0.05);
+  --ui-input-error-shadow: 0 0 0 3px rgba(192, 39, 35, 0.1);
 
   // Form container shadows
-  --ui-form-field-background: var(--bg-surface);
+  --ui-form-field-background: var(--neutral-50);
   --ui-form-field-border-color: var(--neutral-200);
-  --ui-form-field-shadow: none;
-  --ui-form-field-focus-shadow: 0 0 0 2px rgba(34, 192, 155, 0.2);
+  --ui-form-field-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), inset 0 1px 2px rgba(0, 0, 0, 0.02);
+  --ui-form-field-focus-shadow: 0 0 0 2px rgba(42, 229, 185, 0.2), 0 2px 4px rgba(0, 0, 0, 0.06);
 }
 
 // ============================================
@@ -296,13 +296,13 @@
   --ui-input-icon-color: #737373;
 
   // Input shadows and depth
-  --ui-input-shadow: none;
-  --ui-input-focus-shadow: 0 0 0 2px rgba(34, 192, 155, 0.3);
-  --ui-input-error-shadow: 0 0 0 2px rgba(220, 38, 38, 0.25);
+  --ui-input-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), inset 0 1px 2px rgba(0, 0, 0, 0.2);
+  --ui-input-focus-shadow: 0 0 0 3px rgba(42, 229, 185, 0.25), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --ui-input-error-shadow: 0 0 0 3px rgba(192, 39, 35, 0.2);
 
   // Form container shadows
   --ui-form-field-background: var(--bg-surface);
   --ui-form-field-border-color: #333333;
-  --ui-form-field-shadow: none;
-  --ui-form-field-focus-shadow: 0 0 0 2px rgba(34, 192, 155, 0.3);
+  --ui-form-field-shadow: 0 1px 3px rgba(0, 0, 0, 0.4), inset 0 1px 2px rgba(0, 0, 0, 0.2);
+  --ui-form-field-focus-shadow: 0 0 0 2px rgba(42, 229, 185, 0.3), 0 2px 4px rgba(0, 0, 0, 0.4);
 }
