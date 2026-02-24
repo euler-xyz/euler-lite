@@ -19,20 +19,17 @@ const sortedBorrowPositions = computed(() => {
 </script>
 
 <template>
-  <div
-    class="flex mx-16 p-8 rounded-12 border border-line-default bg-surface shadow-card"
-    :class="sortedBorrowPositions.length === 0 ? 'flex-1' : ''"
-  >
+  <div class="flex flex-col flex-1">
     <div
       v-if="isConnected && (!isPositionsLoaded || (!isReady && sortedBorrowPositions.length === 0))"
-      class="flex flex-1 justify-center items-center"
+      class="flex flex-1 justify-center items-center py-48"
     >
       <UiLoader class="text-content-tertiary" />
     </div>
 
     <div
       v-else-if="sortedBorrowPositions.length === 0"
-      class="flex flex-1 justify-center items-center"
+      class="flex flex-1 justify-center items-center py-48"
     >
       <div class="flex flex-col gap-8 items-center text-content-tertiary">
         <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-surface-secondary">
@@ -47,20 +44,28 @@ const sortedBorrowPositions = computed(() => {
       </div>
     </div>
 
-    <div
-      v-else
-      class="w-full"
-    >
+    <template v-else>
+      <!-- Column headers -->
+      <div class="sticky top-[72px] z-10 grid items-center gap-x-16 pt-16 py-8 px-20 bg-surface border-b border-line-default text-content-tertiary text-p3 mobile:!hidden grid-cols-[2fr_repeat(5,1fr)]">
+        <div class="pl-[42px]">
+          Pair
+        </div>
+        <div>Net APY</div>
+        <div>ROE</div>
+        <div>Net asset value</div>
+        <div>Debt</div>
+        <div>Health</div>
+      </div>
       <PortfolioList
         :items="sortedBorrowPositions"
         type="borrow"
       />
       <div
         v-if="!isReady"
-        class="flex justify-center items-center mt-12"
+        class="flex justify-center items-center py-12"
       >
         <UiLoader class="text-content-tertiary" />
       </div>
-    </div>
+    </template>
   </div>
 </template>

@@ -11,7 +11,7 @@ defineProps<{
 
 <template>
   <div
-    class="flex flex-col gap-8"
+    :class="['flex flex-col', (type === 'rewards' || type === 'brevis-rewards') ? 'gap-8 p-16' : '']"
   >
     <template v-if="type === 'lend'">
       <PortfolioSavingItem

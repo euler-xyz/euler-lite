@@ -36,95 +36,105 @@ watchEffect(async () => {
 </script>
 
 <template>
-  <div class="mx-16">
-    <div class="flex justify-between items-center mb-8">
-      <h3 class="text-h3 font-normal text-neutral-800">
-        Managed lending
-      </h3>
-    </div>
-    <p class="text-p2 text-neutral-500 mb-16">
-      Savings are supply-only deposits that earn you yield. They are not used as collateral to back a borrowing position.
-    </p>
-    <div class="flex flex-1 p-8 rounded-12 mb-48 border border-line-default bg-card">
+  <div class="flex flex-col flex-1">
+    <!-- Managed lending section -->
+    <div>
+      <div class="px-20 py-16 border-b border-line-default">
+        <h2 class="text-h2 text-content-primary mb-4">
+          Managed lending
+        </h2>
+        <p class="text-p3 text-content-tertiary">
+          Savings deposited into curated earn vaults that earn yield. Not used as collateral to back a borrow position.
+        </p>
+      </div>
+
       <div
         v-if="isConnected && (!isDepositsLoaded || (!isReady && earnItems.length === 0))"
-        class="flex flex-1 justify-center items-center"
+        class="flex justify-center items-center py-32"
       >
-        <UiLoader class="text-neutral-500 my-8" />
+        <UiLoader class="text-content-tertiary" />
       </div>
       <div
         v-else-if="earnItems.length === 0"
-        class="flex flex-1 justify-center items-center"
+        class="flex justify-center items-center py-32"
       >
-        <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
-          <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
+        <div class="flex flex-col gap-8 items-center text-content-tertiary">
+          <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-surface-secondary">
             <SvgIcon name="search" />
           </div>
           <template v-if="isConnected">
-            You don't have savings yet
+            You don't have managed lending positions yet
           </template>
           <template v-else>
-            Connect your wallet to see your savings
+            Connect your wallet to see your positions
           </template>
         </div>
       </div>
-      <div
-        v-else
-        class="flex-1"
-      >
+      <template v-else>
+        <!-- Column headers -->
+        <div class="sticky top-[72px] z-10 grid items-center gap-x-16 pt-16 py-8 px-20 bg-surface border-b border-line-default text-content-tertiary text-p3 mobile:!hidden grid-cols-[2fr_repeat(3,1fr)]">
+          <div class="pl-[42px]">
+            Asset
+          </div>
+          <div>Supply APY</div>
+          <div>Supply value</div>
+          <div>Projected/month</div>
+        </div>
         <PortfolioList
           :items="sortedEarnItems"
           type="earn"
         />
-        <div
-          v-if="!isReady"
-          class="flex justify-center items-center mt-12"
-        >
-          <UiLoader class="text-neutral-500" />
-        </div>
-      </div>
+      </template>
     </div>
 
-    <div class="flex justify-between items-center mb-8">
-      <h3 class="text-h3 font-normal text-neutral-800">
-        Direct lending
-      </h3>
-    </div>
-    <p class="text-p2 text-neutral-500 mb-16">
-      Savings are supply-only deposits on your main account that earn you yield. They are not used as collateral to back a borrowing position.
-    </p>
-    <div class="flex flex-1 p-8 rounded-12 border border-line-default bg-card">
+    <!-- Direct lending section -->
+    <div class="border-t border-line-default">
+      <div class="px-20 py-16 border-b border-line-default">
+        <h2 class="text-h2 text-content-primary mb-4">
+          Direct lending
+        </h2>
+        <p class="text-p3 text-content-tertiary">
+          Supply-only deposits on your main account that earn yield. Not used as collateral to back a borrow position.
+        </p>
+      </div>
+
       <div
         v-if="isConnected && (!isDepositsLoaded || !isReady)"
-        class="flex flex-1 justify-center items-center"
+        class="flex justify-center items-center py-32"
       >
-        <UiLoader class="text-neutral-500 my-8" />
+        <UiLoader class="text-content-tertiary" />
       </div>
       <div
         v-else-if="lendItems.length === 0"
-        class="flex flex-1 justify-center items-center"
+        class="flex justify-center items-center py-32"
       >
-        <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
-          <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
+        <div class="flex flex-col gap-8 items-center text-content-tertiary">
+          <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-surface-secondary">
             <SvgIcon name="search" />
           </div>
           <template v-if="isConnected">
-            You don't have savings yet
+            You don't have direct lending positions yet
           </template>
           <template v-else>
-            Connect your wallet to see your savings
+            Connect your wallet to see your positions
           </template>
         </div>
       </div>
-      <div
-        v-else
-        class="flex-1"
-      >
+      <template v-else>
+        <!-- Column headers -->
+        <div class="sticky top-[72px] z-10 grid items-center gap-x-16 pt-16 py-8 px-20 bg-surface border-b border-line-default text-content-tertiary text-p3 mobile:!hidden grid-cols-[2fr_repeat(3,1fr)]">
+          <div class="pl-[42px]">
+            Asset
+          </div>
+          <div>Supply APY</div>
+          <div>Supply value</div>
+          <div>Projected/month</div>
+        </div>
         <PortfolioList
           :items="sortedLendItems"
           type="lend"
         />
-      </div>
+      </template>
     </div>
   </div>
 </template>

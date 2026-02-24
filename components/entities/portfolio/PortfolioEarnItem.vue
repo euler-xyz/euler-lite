@@ -7,7 +7,7 @@ import type { EarnVault } from '~/entities/vault'
 import { VaultOverviewModal, VaultSupplyApyModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { formatNumber, formatCompactUsdValue, compactNumber } from '~/utils/string-utils'
-import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
+import { nanoToValue } from '~/utils/crypto-utils'
 
 const { position } = defineProps<{ position: AccountDepositPosition }>()
 const modal = useModal()
@@ -15,7 +15,7 @@ const modal = useModal()
 const { address } = useAccount()
 const { portfolioAddress } = useEulerAccount()
 const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
-const subAccountIndex = computed(() => {
+const _subAccountIndex = computed(() => {
   if (!ownerAddress.value || !position.subAccount) return 0
   return getSubAccountIndex(ownerAddress.value, position.subAccount)
 })
@@ -95,113 +95,107 @@ const onClick = () => {
 
 <template>
   <div
-    class="block no-underline bg-surface rounded-xl border border-line-default cursor-pointer transition-all duration-default ease-default hover:shadow-card-hover hover:border-line-emphasis"
+    class="grid items-center gap-x-16 py-16 px-20 mobile:block text-content-primary border-b border-line-default last:border-b-0 hover:bg-card-hover transition-all cursor-pointer grid-cols-[2fr_repeat(3,1fr)]"
+    :class="isGeoBlocked ? 'opacity-50' : ''"
     @click="onClick"
   >
-    <div class="flex py-16 px-16 pb-12 border-b border-line-default">
-      <div
-        class="flex w-full"
-      >
-        <AssetAvatar
-          :asset="vault.asset"
-          size="40"
-        />
-        <div class="flex-grow ml-12">
-          <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-            <VaultDisplayName
-              :name="displayName"
-              :is-unverified="isUnverified"
-            />
-            <span
-              v-if="isGeoBlocked"
-              class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-              title="This vault is not available in your region"
-            >
-              <SvgIcon
-                name="warning"
-                class="!w-14 !h-14"
-              />
-              Restricted
-            </span>
-          </div>
-          <div class="text-h5 text-content-primary">
-            {{ vault.asset.symbol }}
-          </div>
-        </div>
-        <div class="flex flex-col items-end">
-          <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-            Supply APY
-            <SvgIcon
-              class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-              name="info-circle"
-              @click.stop="onSupplyInfoIconClick"
-            />
-          </div>
-          <div
-            class="text-p2 flex text-accent-600 tabular-nums"
+    <!-- Asset -->
+    <div class="flex items-center gap-12 min-w-0 mobile:mb-12">
+      <AssetAvatar
+        :asset="vault.asset"
+        size="30"
+      />
+      <div class="min-w-0">
+        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-8">
+          <VaultDisplayName
+            :name="displayName"
+            :is-unverified="isUnverified"
+          />
+          <span
+            v-if="isGeoBlocked"
+            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
+            title="This vault is not available in your region"
           >
             <SvgIcon
-              v-if="rewardsExist"
-              name="sparks"
-              class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
-              @click.stop="onSupplyInfoIconClick"
+              name="warning"
+              class="!w-14 !h-14"
             />
-            {{ formatNumber(supplyApyWithRewards) }}%
-          </div>
+            Restricted
+          </span>
+        </div>
+        <div class="text-h5 text-content-primary">
+          {{ vault.asset.symbol }}
         </div>
       </div>
     </div>
-    <div class="flex py-12 px-16 pb-16">
-      <div
-        class="flex flex-col gap-12 w-full"
-      >
-        <div class="flex justify-between">
-          <div class="text-content-tertiary text-p3">
-            Supply value
-          </div>
-          <div class="flex justify-between gap-8 text-right">
-            <div class="text-content-primary text-p3 tabular-nums">
-              {{ supplyValueDisplay }}
-            </div>
-            <div
-              v-if="hasPrice"
-              class="text-content-tertiary text-p3"
-            >
-              ~ <span class="tabular-nums">{{ roundAndCompactTokens(position.assets, vault.asset.decimals) }}</span> {{ vault.asset.symbol }}
-            </div>
-          </div>
+
+    <!-- Supply APY -->
+    <div class="flex items-center gap-4 mobile:!hidden">
+      <div class="text-p2 flex items-center text-accent-600 font-semibold tabular-nums">
+        <SvgIcon
+          v-if="rewardsExist"
+          name="sparks"
+          class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
+          @click.stop="onSupplyInfoIconClick"
+        />
+        {{ formatNumber(supplyApyWithRewards) }}%
+      </div>
+      <SvgIcon
+        class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+        name="info-circle"
+        @click.stop="onSupplyInfoIconClick"
+      />
+    </div>
+
+    <!-- Supply value -->
+    <div class="text-p2 text-content-primary tabular-nums mobile:!hidden">
+      {{ supplyValueDisplay }}
+    </div>
+
+    <!-- Projected/month -->
+    <div class="text-p2 text-content-primary tabular-nums mobile:!hidden">
+      {{ hasPrice ? `$${projectedEarningsPerMonth}` : '—' }}
+    </div>
+
+    <!-- Mobile layout -->
+    <div class="hidden mobile:!flex mobile:py-12 mobile:justify-between mobile:border-b mobile:border-line-subtle">
+      <div>
+        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+          Supply APY
+          <SvgIcon
+            class="!w-16 !h-16 text-content-muted"
+            name="info-circle"
+          />
         </div>
-        <div
-          v-if="hasPrice"
-          class="flex justify-between"
-        >
-          <div class="text-content-tertiary text-p3">
-            Projected earnings per month
-          </div>
-          <div class="flex justify-between gap-8 text-right">
-            <div class="text-content-primary text-p3 tabular-nums">
-              ${{ projectedEarningsPerMonth }}
-            </div>
-          </div>
+        <div class="text-p2 flex items-center text-accent-600 font-semibold tabular-nums">
+          <SvgIcon
+            v-if="rewardsExist"
+            class="!w-20 !h-20 text-accent-500 mr-4"
+            name="sparks"
+          />
+          {{ formatNumber(supplyApyWithRewards) }}%
         </div>
-        <div
-          class="flex justify-between items-center gap-8"
-          @click.stop
-        >
-          <UiButton
-            :to="isGeoBlocked ? undefined : `/earn/${vault.address}/`"
-            :disabled="isGeoBlocked"
-            rounded
-          >
-            Supply
-          </UiButton>
-          <UiButton
-            variant="primary-stroke"
-            :to="`/earn/${vault.address}/${subAccountIndex}/withdraw`"
-            rounded
-          >
-            Withdraw
-          </UiButton>
+      </div>
+      <div class="flex flex-col items-end">
+        <div class="text-content-tertiary text-p3 mb-4">
+          Supply value
+        </div>
+        <div class="text-p2 text-content-primary tabular-nums">
+          {{ supplyValueDisplay }}
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="hasPrice"
+      class="hidden mobile:!flex mobile:flex-col gap-12 py-12 pb-16"
+    >
+      <div class="flex w-full justify-between">
+        <div class="text-content-tertiary text-p3">
+          Projected earnings/month
+        </div>
+        <div class="text-p2 text-content-primary tabular-nums">
+          ${{ projectedEarningsPerMonth }}
         </div>
       </div>
     </div>

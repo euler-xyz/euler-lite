@@ -125,7 +125,7 @@ watchEffect(() => {
   updateCollateralValue()
 })
 
-const collateralValueDisplay = computed(() => {
+const _collateralValueDisplay = computed(() => {
   return collateralValue.value.hasPrice
     ? formatCompactUsdValue(collateralValue.value.usd)
     : `${roundAndCompactTokens(collateralItems.value[0]?.assets ?? 0n, BigInt(position.collateral.decimals))} ${position.collateral.asset.symbol}`
@@ -281,171 +281,125 @@ onMounted(() => {
 <template>
   <NuxtLink
     :to="`/position/${subAccountIndex}`"
-    class="block no-underline bg-surface rounded-xl border border-line-default transition-all duration-default ease-default hover:shadow-card-hover hover:border-line-emphasis"
+    class="grid items-center gap-x-16 py-16 px-20 mobile:block no-underline text-content-primary border-b border-line-default last:border-b-0 hover:bg-card-hover transition-all grid-cols-[2fr_repeat(5,1fr)]"
+    :class="isGeoBlocked ? 'opacity-50' : ''"
   >
-    <div class="flex py-16 px-16 pb-12 border-b border-line-default">
-      <div
-        class="flex flex-col gap-12 items-start w-full"
-      >
-        <div
-          class="text-h6 text-content-secondary bg-surface-secondary py-4 px-12 rounded-8 border border-line-default"
-        >
-          Position {{ subAccountIndex }}
-        </div>
-        <div class="flex gap-12 w-full">
-          <AssetAvatar
-            :asset="[position.collateral.asset, position.borrow.asset]"
-            size="40"
+    <!-- Pair -->
+    <div class="flex items-center gap-12 min-w-0">
+      <AssetAvatar
+        :asset="[position.collateral.asset, position.borrow.asset]"
+        size="30"
+      />
+      <div class="min-w-0">
+        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-8">
+          <VaultDisplayName
+            :name="pairName"
+            :is-unverified="isAnyUnverified"
           />
-          <div class="flex-grow min-w-0">
-            <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-              <VaultDisplayName
-                :name="pairName"
-                :is-unverified="isAnyUnverified"
-              />
-              <span
-                v-if="isGeoBlocked"
-                class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-                title="This vault is not available in your region"
-              >
-                <SvgIcon
-                  name="warning"
-                  class="!w-14 !h-14"
-                />
-                Restricted
-              </span>
-            </div>
-            <div class="text-h5 text-content-primary truncate">
-              {{ pairSymbols }}
-            </div>
-          </div>
-          <div class="flex gap-16 items-start shrink-0">
-            <div class="flex flex-col items-end">
-              <div class="text-content-tertiary text-p3 mb-4">
-                Net APY
-              </div>
-              <div
-                class="text-p2 tabular-nums"
-                :class="[netAPY >= 0 ? 'text-accent-600' : 'text-error-500']"
-              >
-                {{ Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
-              </div>
-            </div>
-            <div class="flex flex-col items-end">
-              <div class="text-content-tertiary text-p3 mb-4">
-                ROE
-              </div>
-              <div
-                class="text-p2 tabular-nums"
-                :class="[roe >= 0 ? 'text-accent-600' : 'text-error-500']"
-              >
-                {{ Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}
-              </div>
-            </div>
-          </div>
+          <span
+            v-if="isGeoBlocked"
+            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
+            title="This vault is not available in your region"
+          >
+            <SvgIcon
+              name="warning"
+              class="!w-14 !h-14"
+            />
+            Restricted
+          </span>
+          <span class="text-p5 text-content-muted bg-surface-secondary rounded-6 px-6 py-2 border border-line-default shrink-0">
+            #{{ subAccountIndex }}
+          </span>
         </div>
-
+        <div class="text-h5 text-content-primary truncate">
+          {{ pairSymbols }}
+        </div>
       </div>
     </div>
-    <div class="flex py-12 px-16 pb-16">
-      <div
-        class="flex flex-col gap-12 w-full"
+
+    <!-- Net APY -->
+    <div
+      class="text-p2 font-semibold tabular-nums mobile:!hidden"
+      :class="[netAPY >= 0 ? 'text-accent-600' : 'text-error-500']"
+    >
+      {{ Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
+    </div>
+
+    <!-- ROE -->
+    <div
+      class="text-p2 font-semibold tabular-nums mobile:!hidden"
+      :class="[roe >= 0 ? 'text-accent-600' : 'text-error-500']"
+    >
+      {{ Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}
+    </div>
+
+    <!-- Net asset value -->
+    <div class="text-p2 text-content-primary tabular-nums mobile:!hidden">
+      {{ netAssetValueDisplay }}
+    </div>
+
+    <!-- Debt -->
+    <div class="text-p2 text-content-primary tabular-nums mobile:!hidden">
+      {{ borrowedValueDisplay }}
+    </div>
+
+    <!-- Health -->
+    <div class="flex items-center gap-6 mobile:!hidden">
+      <span
+        v-if="hasQueryFailure"
+        class="text-warning-500 text-p2"
+      >Unknown</span>
+      <span
+        v-else
+        class="text-p2 text-content-primary tabular-nums"
       >
+        {{ formatNumber(nanoToValue(position.health, 18)) }}
+      </span>
+      <VaultWarningIcon :warning="utilisationWarning" />
+    </div>
+
+    <!-- Mobile stats -->
+    <div class="hidden mobile:!flex mobile:py-12 mobile:justify-between mobile:border-b mobile:border-line-subtle">
+      <div>
+        <div class="text-content-tertiary text-p3 mb-4">Net APY</div>
         <div
-          v-if="hasQueryFailure"
-          class="flex items-center gap-6 text-warning-500 text-p4"
+          class="text-p2 font-semibold tabular-nums"
+          :class="[netAPY >= 0 ? 'text-accent-600' : 'text-error-500']"
         >
-          <UiIcon
-            name="info-circle"
-            class="!w-14 !h-14 shrink-0"
-          />
-          Oracle pricing unavailable. Some details may be missing.
+          {{ Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
         </div>
-        <div class="flex justify-between">
-          <div class="text-content-tertiary text-p3">
-            Net asset value
-          </div>
-          <div class="flex justify-between gap-8 text-right">
-            <div class="text-content-primary text-p3 tabular-nums">
-              {{ netAssetValueDisplay }}
-            </div>
-          </div>
+      </div>
+      <div class="flex flex-col items-end">
+        <div class="text-content-tertiary text-p3 mb-4">ROE</div>
+        <div
+          class="text-p2 font-semibold tabular-nums"
+          :class="[roe >= 0 ? 'text-accent-600' : 'text-error-500']"
+        >
+          {{ Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}
         </div>
-        <div class="flex justify-between">
-          <div class="text-content-tertiary text-p3">
-            My Debt
-          </div>
-          <div class="flex justify-between gap-8 text-right">
-            <div class="text-content-primary text-p3 tabular-nums">
-              {{ borrowedValueDisplay }}
-            </div>
-            <div
-              v-if="borrowedValueInfo.hasPrice"
-              class="text-content-tertiary text-p3"
-            >
-              ~ <span class="tabular-nums">{{ roundAndCompactTokens(position.borrowed, position.borrow.decimals) }}</span>
-              {{ position.borrow.asset.symbol }}
-            </div>
-          </div>
+      </div>
+    </div>
+
+    <div class="hidden mobile:!flex mobile:flex-col gap-12 py-12 pb-16">
+      <div class="flex w-full justify-between">
+        <div class="text-content-tertiary text-p3">Net asset value</div>
+        <div class="text-p2 text-content-primary tabular-nums">{{ netAssetValueDisplay }}</div>
+      </div>
+      <div class="flex w-full justify-between">
+        <div class="text-content-tertiary text-p3">Debt</div>
+        <div class="text-p2 text-content-primary tabular-nums">{{ borrowedValueDisplay }}</div>
+      </div>
+      <div class="flex w-full justify-between">
+        <div class="text-content-tertiary text-p3 flex items-center gap-4">
+          Health
+          <VaultWarningIcon :warning="utilisationWarning" />
         </div>
-        <div class="flex justify-between">
-          <div class="text-content-tertiary text-p3">
-            Collateral value
-          </div>
-          <div class="flex justify-between gap-8 text-right">
-            <div class="text-content-primary text-p3 tabular-nums">
-              {{ collateralValueDisplay }}
-            </div>
-            <div
-              v-if="collateralValue.hasPrice"
-              class="text-content-tertiary text-p3"
-            >
-              ~ <span class="tabular-nums">{{ roundAndCompactTokens(collateralItems[0].assets, position.collateral.decimals) }}</span>
-              {{ position.collateral.asset.symbol }} {{ collateralItems.length > 1 ? '& others' : '' }}
-            </div>
-          </div>
-        </div>
-        <div class="flex justify-between">
-          <div class="text-content-tertiary text-p3">
-            Health score
-            <VaultWarningIcon
-              :warning="utilisationWarning"
-              tooltip-placement="top-start"
-            />
-          </div>
-          <div class="text-content-primary text-p3">
-            <span
-              v-if="hasQueryFailure"
-              class="text-warning-500"
-            >Unknown</span>
-            <template v-else>
-              {{ formatNumber(nanoToValue(position.health, 18)) }}
-            </template>
-          </div>
-        </div>
-        <div class="flex justify-between">
-          <div class="text-content-tertiary text-p3">
-            Your LTV
-          </div>
-          <template v-if="hasQueryFailure">
-            <span class="text-warning-500 text-p3">Unknown</span>
-          </template>
-          <template v-else>
-            <div class="flex justify-between items-center gap-16">
-              <UiProgress
-                style="width: 111px"
-                :model-value="nanoToValue(position.userLTV, 18)"
-                :max="nanoToValue(position.liquidationLTV, 2)"
-                :color="nanoToValue(position.userLTV, 18) >= (nanoToValue(position.liquidationLTV, 2) - 2) ? 'danger' : undefined"
-                size="small"
-              />
-              <div class="flex justify-between gap-8 text-right">
-                <div class="text-content-primary text-p3 tabular-nums">
-                  {{ formatNumber(nanoToValue(position.userLTV, 18), 2) }}/{{ nanoToValue(position.liquidationLTV, 2) }}%
-                </div>
-              </div>
-            </div>
-          </template>
+        <div class="text-p2 text-content-primary tabular-nums">
+          <span
+            v-if="hasQueryFailure"
+            class="text-warning-500"
+          >Unknown</span>
+          <template v-else>{{ formatNumber(nanoToValue(position.health, 18)) }}</template>
         </div>
       </div>
     </div>

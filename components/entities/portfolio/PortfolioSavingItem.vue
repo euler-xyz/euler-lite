@@ -5,7 +5,7 @@ import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { getAssetUsdValue, formatAssetValue } from '~/services/pricing/priceProvider'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, compactNumber, formatCompactUsdValue, formatSmartAmount } from '~/utils/string-utils'
-import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
+import { nanoToValue } from '~/utils/crypto-utils'
 import { type AccountDepositPosition, getSubAccountIndex } from '~/entities/account'
 import { VaultOverviewModal, VaultSupplyApyModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -16,7 +16,7 @@ const modal = useModal()
 const { address } = useAccount()
 const { portfolioAddress } = useEulerAccount()
 const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
-const subAccountIndex = computed(() => {
+const _subAccountIndex = computed(() => {
   if (!ownerAddress.value || !position.subAccount) return 0
   return getSubAccountIndex(ownerAddress.value, position.subAccount)
 })
@@ -130,221 +130,113 @@ const onClick = () => {
 </script>
 
 <template>
-  <!-- Securitize vault display -->
   <div
-    v-if="isSecuritize"
-    class="block no-underline bg-surface rounded-xl border border-line-default cursor-pointer transition-all duration-default ease-default hover:shadow-card-hover hover:border-line-emphasis"
+    class="grid items-center gap-x-16 py-16 px-20 mobile:block text-content-primary border-b border-line-default last:border-b-0 hover:bg-card-hover transition-all cursor-pointer grid-cols-[2fr_repeat(3,1fr)]"
+    :class="isGeoBlocked ? 'opacity-50' : ''"
     @click="onClick"
   >
-    <div class="flex py-16 px-16 pb-12 border-b border-line-default">
-      <div class="flex w-full">
-        <AssetAvatar
-          :asset="vault.asset"
-          size="40"
-        />
-        <div class="flex-grow ml-12">
-          <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-            <VaultDisplayName
-              :name="displayName"
-              :is-unverified="isUnverified"
+    <!-- Asset -->
+    <div class="flex items-center gap-12 min-w-0 mobile:mb-12">
+      <AssetAvatar
+        :asset="vault.asset"
+        size="30"
+      />
+      <div class="min-w-0">
+        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-8">
+          <VaultDisplayName
+            :name="displayName"
+            :is-unverified="isUnverified"
+          />
+          <VaultWarningIcon
+            v-if="!isSecuritize"
+            :warning="utilisationWarning"
+            tooltip-placement="top-start"
+          />
+          <span
+            v-if="isGeoBlocked"
+            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
+            title="This vault is not available in your region"
+          >
+            <SvgIcon
+              name="warning"
+              class="!w-14 !h-14"
             />
-            <span
-              v-if="isGeoBlocked"
-              class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-              title="This vault is not available in your region"
-            >
-              <SvgIcon
-                name="warning"
-                class="!w-14 !h-14"
-              />
-              Restricted
-            </span>
-          </div>
-          <div class="text-h5 text-content-primary">
-            {{ vault.asset.symbol }}
-          </div>
+            Restricted
+          </span>
         </div>
-        <div class="flex flex-col items-end">
-          <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-            Supply APY
-            <SvgIcon
-              class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-              name="info-circle"
-              @click.stop="onSupplyInfoIconClick"
-            />
-          </div>
-          <div class="text-p2 flex text-accent-600 tabular-nums">
-            <SvgIcon
-              v-if="rewardsExist"
-              name="sparks"
-              class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
-              @click.stop="onSupplyInfoIconClick"
-            />
-            {{ formatNumber(supplyApyWithRewards) }}%
-          </div>
+        <div class="text-h5 text-content-primary">
+          {{ vault.asset.symbol }}
         </div>
       </div>
     </div>
-    <div class="flex py-12 px-16 pb-16">
-      <div class="flex flex-col gap-12 w-full">
-        <div class="flex justify-between">
-          <div class="text-content-tertiary text-p3">
-            Supply value
-          </div>
-          <div class="flex justify-between gap-8 text-right">
-            <div class="text-content-primary text-p3 tabular-nums">
-              {{ formatSmartAmount(assetAmount) }} {{ vault.asset.symbol }}
-            </div>
-          </div>
-        </div>
-        <div
-          class="grid grid-cols-3 gap-8"
-          @click.stop
-        >
-          <UiButton
-            :to="isGeoBlocked ? undefined : `/lend/${vault.address}/`"
-            :disabled="isGeoBlocked"
-            rounded
-          >
-            Supply
-          </UiButton>
-          <UiButton
-            variant="primary-stroke"
-            :to="`/lend/${vault.address}/${subAccountIndex}/withdraw`"
-            rounded
-          >
-            Withdraw
-          </UiButton>
-          <UiButton
-            variant="primary-stroke"
-            :to="isGeoBlocked ? undefined : `/lend/${vault.address}/${subAccountIndex}/swap`"
-            :disabled="isGeoBlocked"
-            rounded
-          >
-            Asset swap
-          </UiButton>
-        </div>
-      </div>
-    </div>
-  </div>
 
-  <!-- Regular vault display -->
-  <div
-    v-else
-    class="block no-underline bg-surface rounded-xl border border-line-default cursor-pointer transition-all duration-default ease-default hover:shadow-card-hover hover:border-line-emphasis"
-    @click="onClick"
-  >
-    <div class="flex py-16 px-16 pb-12 border-b border-line-default">
-      <div class="flex w-full">
-        <AssetAvatar
-          :asset="vault.asset"
-          size="40"
+    <!-- Supply APY -->
+    <div class="flex items-center gap-4 mobile:!hidden">
+      <div class="text-p2 flex items-center text-accent-600 font-semibold tabular-nums">
+        <SvgIcon
+          v-if="rewardsExist"
+          name="sparks"
+          class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
+          @click.stop="onSupplyInfoIconClick"
         />
-        <div class="flex-grow ml-12">
-          <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-            <VaultDisplayName
-              :name="displayName"
-              :is-unverified="isUnverified"
-            />
-            <VaultWarningIcon
-              :warning="utilisationWarning"
-              tooltip-placement="top-start"
-            />
-            <span
-              v-if="isGeoBlocked"
-              class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-              title="This vault is not available in your region"
-            >
-              <SvgIcon
-                name="warning"
-                class="!w-14 !h-14"
-              />
-              Restricted
-            </span>
-          </div>
-          <div class="text-h5 text-content-primary">
-            {{ vault.asset.symbol }}
-          </div>
+        {{ formatNumber(supplyApyWithRewards) }}%
+      </div>
+      <SvgIcon
+        class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+        name="info-circle"
+        @click.stop="onSupplyInfoIconClick"
+      />
+    </div>
+
+    <!-- Supply value -->
+    <div class="text-p2 text-content-primary tabular-nums mobile:!hidden">
+      {{ isSecuritize ? `${formatSmartAmount(assetAmount)} ${vault.asset.symbol}` : supplyValueDisplay }}
+    </div>
+
+    <!-- Projected/month -->
+    <div class="text-p2 text-content-primary tabular-nums mobile:!hidden">
+      {{ (!isSecuritize && hasPrice) ? `$${projectedEarningsPerMonth}` : '—' }}
+    </div>
+
+    <!-- Mobile layout -->
+    <div class="hidden mobile:!flex mobile:py-12 mobile:justify-between mobile:border-b mobile:border-line-subtle">
+      <div>
+        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+          Supply APY
+          <SvgIcon
+            class="!w-16 !h-16 text-content-muted"
+            name="info-circle"
+          />
         </div>
-        <div class="flex flex-col items-end">
-          <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-            Supply APY
-            <SvgIcon
-              class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-              name="info-circle"
-              @click.stop="onSupplyInfoIconClick"
-            />
-          </div>
-          <div class="text-p2 flex text-accent-600 tabular-nums">
-            <SvgIcon
-              v-if="rewardsExist"
-              name="sparks"
-              class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
-              @click.stop="onSupplyInfoIconClick"
-            />
-            {{ formatNumber(supplyApyWithRewards) }}%
-          </div>
+        <div class="text-p2 flex items-center text-accent-600 font-semibold tabular-nums">
+          <SvgIcon
+            v-if="rewardsExist"
+            class="!w-20 !h-20 text-accent-500 mr-4"
+            name="sparks"
+          />
+          {{ formatNumber(supplyApyWithRewards) }}%
+        </div>
+      </div>
+      <div class="flex flex-col items-end">
+        <div class="text-content-tertiary text-p3 mb-4">
+          Supply value
+        </div>
+        <div class="text-p2 text-content-primary tabular-nums">
+          {{ isSecuritize ? `${formatSmartAmount(assetAmount)} ${vault.asset.symbol}` : supplyValueDisplay }}
         </div>
       </div>
     </div>
-    <div class="flex py-12 px-16 pb-16">
-      <div class="flex flex-col gap-12 w-full">
-        <div class="flex justify-between">
-          <div class="text-content-tertiary text-p3">
-            Supply value
-          </div>
-          <div class="flex justify-between gap-8 text-right">
-            <div class="text-content-primary text-p3 tabular-nums">
-              {{ supplyValueDisplay }}
-            </div>
-            <div
-              v-if="regularVault && hasPrice"
-              class="text-content-tertiary text-p3"
-            >
-              ~ <span class="tabular-nums">{{ roundAndCompactTokens(position.assets, regularVault.decimals) }}</span>
-              {{ vault.asset.symbol }}
-            </div>
-          </div>
+
+    <div
+      v-if="!isSecuritize && hasPrice"
+      class="hidden mobile:!flex mobile:flex-col gap-12 py-12 pb-16"
+    >
+      <div class="flex w-full justify-between">
+        <div class="text-content-tertiary text-p3">
+          Projected earnings/month
         </div>
-        <div
-          v-if="hasPrice"
-          class="flex justify-between"
-        >
-          <div class="text-content-tertiary text-p3">
-            Projected earnings per month
-          </div>
-          <div class="flex justify-between gap-8 text-right">
-            <div class="text-content-primary text-p3 tabular-nums">
-              ${{ projectedEarningsPerMonth }}
-            </div>
-          </div>
-        </div>
-        <div
-          class="grid grid-cols-3 gap-8"
-          @click.stop
-        >
-          <UiButton
-            :to="isGeoBlocked ? undefined : `/lend/${vault.address}/`"
-            :disabled="isGeoBlocked"
-            rounded
-          >
-            Supply
-          </UiButton>
-          <UiButton
-            variant="primary-stroke"
-            :to="`/lend/${vault.address}/${subAccountIndex}/withdraw`"
-            rounded
-          >
-            Withdraw
-          </UiButton>
-          <UiButton
-            variant="primary-stroke"
-            :to="isGeoBlocked ? undefined : `/lend/${vault.address}/${subAccountIndex}/swap`"
-            :disabled="isGeoBlocked"
-            rounded
-          >
-            Asset swap
-          </UiButton>
+        <div class="text-p2 text-content-primary tabular-nums">
+          ${{ projectedEarningsPerMonth }}
         </div>
       </div>
     </div>
