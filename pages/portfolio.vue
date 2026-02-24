@@ -208,18 +208,18 @@ onDeactivated(() => {
             </div>
           </div>
         </div>
-        <!-- end header card -->
-
-        <UiTabs
-          v-model="tabsModel"
-          pills
-          :list="tabs"
-          class="border border-line-default"
-          style="--ui-tabs-pills-background-color: transparent; --ui-tabs-block-background-color: var(--bg-surface)"
-        />
-
-        <NuxtPage />
       </div>
+      <!-- end header card -->
+
+      <UiTabs
+        v-model="tabsModel"
+        pills
+        :list="tabs"
+        class="border border-line-default"
+        style="--ui-tabs-pills-background-color: transparent; --ui-tabs-block-background-color: var(--bg-surface)"
+      />
+
+      <NuxtPage />
     </div>
   </section>
 </template>
