@@ -190,7 +190,7 @@ watchEffect(async () => {
     </div>
 
     <div class="flex items-center gap-4 mobile:!hidden">
-      <div class="text-p2 text-content-primary">
+      <div class="text-p2 text-content-primary tabular-nums">
         {{ prices.totalSupply }}
       </div>
       <VaultWarningIcon
@@ -223,7 +223,7 @@ watchEffect(async () => {
           :value="utilization"
           :max="100"
         />
-        <div class="text-p2 text-content-primary">
+        <div class="text-p2 text-content-primary tabular-nums">
           {{ compactNumber(utilization, 2, 2) }}%
         </div>
         <VaultWarningIcon :warning="utilisationWarning" />
@@ -262,7 +262,7 @@ watchEffect(async () => {
       </div>
       <div class="flex flex-col items-end">
         <div class="text-content-tertiary text-p3 mb-4">Total supply</div>
-        <div class="text-p2 text-content-primary">
+        <div class="text-p2 text-content-primary tabular-nums">
           {{ prices.totalSupply }}
         </div>
       </div>
@@ -274,7 +274,7 @@ watchEffect(async () => {
         class="flex w-full justify-between"
       >
         <div class="text-content-tertiary text-p3">Available liquidity</div>
-        <div class="text-p2 text-content-primary">
+        <div class="text-p2 text-content-primary tabular-nums">
           {{ prices.liquidity }}
         </div>
       </div>
@@ -311,7 +311,7 @@ watchEffect(async () => {
             :value="utilization"
             :max="100"
           />
-          <div class="text-p2 text-content-primary">
+          <div class="text-p2 text-content-primary tabular-nums">
             {{ compactNumber(utilization, 2, 2) }}%
           </div>
         </div>

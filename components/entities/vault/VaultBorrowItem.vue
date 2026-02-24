@@ -280,7 +280,7 @@ const linkPath = computed(
     </div>
 
     <div class="flex items-center gap-4 mobile:!hidden">
-      <div class="text-p2 text-content-primary">
+      <div class="text-p2 text-content-primary tabular-nums">
         {{ liquidityDisplay }}
       </div>
       <VaultWarningIcon
@@ -290,7 +290,7 @@ const linkPath = computed(
     </div>
 
     <div class="mobile:!hidden">
-      <div class="text-p2 text-content-primary">
+      <div class="text-p2 text-content-primary tabular-nums">
         {{ formatNumber(netApy, 2, 2) }}%
       </div>
     </div>
@@ -299,7 +299,7 @@ const linkPath = computed(
       v-if="enableEntityBranding"
       class="mobile:!hidden"
     >
-      <div class="text-p2 text-content-primary">
+      <div class="text-p2 text-content-primary tabular-nums">
         {{ compactNumber(maxLTV, 2, 2) }}%
       </div>
     </div>
@@ -309,7 +309,7 @@ const linkPath = computed(
         :value="utilization"
         :max="100"
       />
-      <div class="text-p2 text-content-primary">
+      <div class="text-p2 text-content-primary tabular-nums">
         {{ compactNumber(utilization, 2, 2) }}%
       </div>
       <VaultWarningIcon :warning="utilisationWarning" />
@@ -377,19 +377,19 @@ const linkPath = computed(
             tooltip-placement="top-start"
           />
         </div>
-        <div class="text-p2 text-content-primary">
+        <div class="text-p2 text-content-primary tabular-nums">
           {{ liquidityDisplay }}
         </div>
       </div>
       <div class="flex w-full justify-between">
         <div class="text-content-tertiary text-p3">Net APY</div>
-        <div class="text-p2 text-content-primary">
+        <div class="text-p2 text-content-primary tabular-nums">
           {{ formatNumber(netApy, 2, 2) }}%
         </div>
       </div>
       <div class="flex w-full justify-between">
         <div class="text-content-tertiary text-p3">Max LTV</div>
-        <div class="text-p2 text-content-primary">
+        <div class="text-p2 text-content-primary tabular-nums">
           {{ compactNumber(maxLTV, 2, 2) }}%
         </div>
       </div>
@@ -403,7 +403,7 @@ const linkPath = computed(
             :value="utilization"
             :max="100"
           />
-          <div class="text-p2 text-content-primary">
+          <div class="text-p2 text-content-primary tabular-nums">
             {{ compactNumber(utilization, 2, 2) }}%
           </div>
         </div>

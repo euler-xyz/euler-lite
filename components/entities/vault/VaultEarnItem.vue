@@ -166,13 +166,13 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
     </div>
 
     <div class="mobile:!hidden">
-      <div class="text-p2 text-content-primary">
+      <div class="text-p2 text-content-primary tabular-nums">
         {{ prices.totalSupply }}
       </div>
     </div>
 
     <div class="flex items-center justify-end mobile:!hidden">
-      <div class="text-p2 text-content-primary">
+      <div class="text-p2 text-content-primary tabular-nums">
         {{ prices.liquidity }}
       </div>
     </div>
@@ -201,7 +201,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
       </div>
       <div class="flex flex-col items-end">
         <div class="text-content-tertiary text-p3 mb-4">Total supply</div>
-        <div class="text-p2 text-content-primary">
+        <div class="text-p2 text-content-primary tabular-nums">
           {{ prices.totalSupply }}
         </div>
       </div>
@@ -210,7 +210,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
     <div class="hidden mobile:!flex mobile:flex-col gap-12 py-12 pb-16">
       <div class="flex w-full justify-between">
         <div class="text-content-tertiary text-p3">Available liquidity</div>
-        <div class="text-p2 text-content-primary">
+        <div class="text-p2 text-content-primary tabular-nums">
           {{ prices.liquidity }}
         </div>
       </div>
