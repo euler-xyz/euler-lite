@@ -6,7 +6,7 @@ const updateSize = (el: HTMLElement) => {
   let currentFontSize = parseInt(el.style.fontSize)
   const maxFontSize = parseInt(el.dataset?.maxFontSize || '100')
   if (isOverflowed(el)) {
-    while (isOverflowed(el)) {
+    while (isOverflowed(el) && currentFontSize > 1) {
       el.style.fontSize = (currentFontSize - 1) + 'px'
       currentFontSize--
     }

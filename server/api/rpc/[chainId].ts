@@ -1,4 +1,5 @@
 import { createError, getMethod, readBody, setResponseHeader, setResponseStatus } from 'h3'
+import { createRateLimiter } from '~/server/utils/rate-limit'
 import { resolveRpcUrl } from '~/server/utils/rpc'
 import { isAbortError } from '~/utils/errorHandling'
 
@@ -23,6 +24,12 @@ const ALLOWED_METHODS = new Set([
 
 const MAX_BATCH_SIZE = 100
 const UPSTREAM_TIMEOUT_MS = 30_000
+
+const rateLimiter = createRateLimiter({
+  max: 200,
+  windowMs: 60_000,
+  label: 'rpc',
+})
 
 interface JsonRpcRequest {
   jsonrpc?: string
@@ -90,6 +97,9 @@ export default defineEventHandler(async (event) => {
       throw createError({ statusCode: 403, statusMessage: `Method not allowed: ${body?.method ?? 'unknown'}` })
     }
   }
+
+  const cost = isBatch ? body.length : 1
+  rateLimiter.consume(event, cost)
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)

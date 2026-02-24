@@ -1,6 +1,7 @@
 import type { Address, Hash } from 'viem'
 import { encodeFunctionData } from 'viem'
 import type { OperationsContext, OperationHelpers } from '../types'
+import { buildSwapVerifierData } from './verify'
 import { evcEnableCollateralAbi, evcEnableControllerAbi } from '~/abis/evc'
 import { vaultBorrowAbi, vaultRedeemAbi, vaultWithdrawAbi } from '~/abis/vault'
 import { SaHooksBuilder } from '~/entities/saHooksSDK'
@@ -9,7 +10,9 @@ import { convertSaHooksToEVCCalls, type EVCCall } from '~/utils/evc-converter'
 import { getNewSubAccount } from '~/entities/account'
 import { buildCollateralCleanupCalls } from '~/utils/collateral-cleanup'
 import type { TxPlan } from '~/entities/txPlan'
-import type { SwapApiQuote } from '~/entities/swap'
+import { type SwapApiQuote, SwapperMode, SwapVerificationType } from '~/entities/swap'
+import { logWarn } from '~/utils/errorHandling'
+import { assertSwapperAllowed } from '~/utils/swap-validation'
 
 export const createSupplyBorrowSwapBuilders = (
   ctx: OperationsContext,
@@ -35,6 +38,8 @@ export const createSupplyBorrowSwapBuilders = (
 
     const userAddr = ctx.address.value as Address
     const swapVerifierAddress = ctx.eulerPeripheryAddresses.value.swapVerifier as Address
+
+    assertSwapperAllowed(quote.swap.swapperAddress, ctx.eulerPeripheryAddresses.value.swapper)
 
     const { steps, permitCall, usesPermit2 } = await helpers.prepareTokenApproval({
       assetAddr: inputTokenAddress,
@@ -80,11 +85,21 @@ export const createSupplyBorrowSwapBuilders = (
     })
 
     // Verify min output and skim into vault
+    if (quote.verify.type !== SwapVerificationType.SkimMin) {
+      throw new Error('Swap verifier type mismatch')
+    }
+
+    const verifierData = buildSwapVerifierData({ quote, swapperMode: SwapperMode.EXACT_IN, isRepay: false })
+    if (verifierData.toLowerCase() !== quote.verify.verifierData.toLowerCase()) {
+      logWarn('swap-supply', 'SwapVerifier data mismatch')
+      throw new Error('SwapVerifier data mismatch')
+    }
+
     evcCalls.push({
       targetContract: quote.verify.verifierAddress,
       onBehalfOfAccount: quote.verify.account,
       value: 0n,
-      data: quote.verify.verifierData,
+      data: verifierData,
     })
 
     steps.push(helpers.buildEvcBatchStep({
@@ -127,6 +142,8 @@ export const createSupplyBorrowSwapBuilders = (
     const userAddr = ctx.address.value as Address
     const evcAddress = ctx.eulerCoreAddresses.value.evc as Address
     const swapVerifierAddress = ctx.eulerPeripheryAddresses.value.swapVerifier as Address
+
+    assertSwapperAllowed(swapQuote.swap.swapperAddress, ctx.eulerPeripheryAddresses.value.swapper)
 
     const subAccountAddr = (subAccount || await getNewSubAccount(ctx.address.value)) as Address
 
@@ -176,11 +193,21 @@ export const createSupplyBorrowSwapBuilders = (
     })
 
     // Verify min output and skim into collateral vault
+    if (swapQuote.verify.type !== SwapVerificationType.SkimMin) {
+      throw new Error('Swap verifier type mismatch')
+    }
+
+    const verifierData = buildSwapVerifierData({ quote: swapQuote, swapperMode: SwapperMode.EXACT_IN, isRepay: false })
+    if (verifierData.toLowerCase() !== swapQuote.verify.verifierData.toLowerCase()) {
+      logWarn('swap-borrow', 'SwapVerifier data mismatch')
+      throw new Error('SwapVerifier data mismatch')
+    }
+
     evcCalls.push({
       targetContract: swapQuote.verify.verifierAddress,
       onBehalfOfAccount: swapQuote.verify.account,
       value: 0n,
-      data: swapQuote.verify.verifierData,
+      data: verifierData,
     })
 
     // Enable controller
@@ -258,6 +285,8 @@ export const createSupplyBorrowSwapBuilders = (
     const withdrawFromAddr = subAccount ? (subAccount as Address) : userAddr
     const swapperAddress = quote.swap.swapperAddress as Address
 
+    assertSwapperAllowed(swapperAddress, ctx.eulerPeripheryAddresses.value.swapper)
+
     const tos = await helpers.prepareTos(userAddr)
 
     const hooks = new SaHooksBuilder()
@@ -291,11 +320,21 @@ export const createSupplyBorrowSwapBuilders = (
     })
 
     // Verify min output
+    if (quote.verify.type !== SwapVerificationType.TransferMin) {
+      throw new Error('Swap verifier type mismatch')
+    }
+
+    const verifierData = buildSwapVerifierData({ quote, swapperMode: SwapperMode.EXACT_IN, isRepay: false })
+    if (verifierData.toLowerCase() !== quote.verify.verifierData.toLowerCase()) {
+      logWarn('swap-withdraw', 'SwapVerifier data mismatch')
+      throw new Error('SwapVerifier data mismatch')
+    }
+
     evcCalls.push({
       targetContract: quote.verify.verifierAddress,
       onBehalfOfAccount: userAddr,
       value: 0n,
-      data: quote.verify.verifierData,
+      data: verifierData,
     })
 
     // Pyth price updates (when position has borrows)
@@ -339,6 +378,8 @@ export const createSupplyBorrowSwapBuilders = (
     const redeemFromAddr = subAccount ? (subAccount as Address) : userAddr
     const swapperAddress = quote.swap.swapperAddress as Address
 
+    assertSwapperAllowed(swapperAddress, ctx.eulerPeripheryAddresses.value.swapper)
+
     const tos = await helpers.prepareTos(userAddr)
 
     const hooks = new SaHooksBuilder()
@@ -372,11 +413,21 @@ export const createSupplyBorrowSwapBuilders = (
     })
 
     // Verify min output
+    if (quote.verify.type !== SwapVerificationType.TransferMin) {
+      throw new Error('Swap verifier type mismatch')
+    }
+
+    const redeemVerifierData = buildSwapVerifierData({ quote, swapperMode: SwapperMode.EXACT_IN, isRepay: false })
+    if (redeemVerifierData.toLowerCase() !== quote.verify.verifierData.toLowerCase()) {
+      logWarn('swap-redeem', 'SwapVerifier data mismatch')
+      throw new Error('SwapVerifier data mismatch')
+    }
+
     evcCalls.push({
       targetContract: quote.verify.verifierAddress,
       onBehalfOfAccount: userAddr,
       value: 0n,
-      data: quote.verify.verifierData,
+      data: redeemVerifierData,
     })
 
     // Pyth price updates

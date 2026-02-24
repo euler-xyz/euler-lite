@@ -1,62 +1,17 @@
 import type { Address, Hash } from 'viem'
 import { encodeFunctionData } from 'viem'
-import { adjustForInterest } from '../helpers'
 import type { OperationsContext, OperationHelpers } from '../types'
+import { buildSwapVerifierData, getSwapInputAmount } from './verify'
 import { evcDisableCollateralAbi, evcDisableControllerAbi, evcEnableCollateralAbi, evcEnableControllerAbi } from '~/abis/evc'
 import { vaultBorrowAbi, vaultTransferFromMaxAbi, vaultWithdrawAbi } from '~/abis/vault'
 import { SaHooksBuilder } from '~/entities/saHooksSDK'
-import { swapperAbi, swapVerifierAbi } from '~/entities/euler/abis'
+import { swapperAbi } from '~/entities/euler/abis'
 import type { EVCCall } from '~/utils/evc-converter'
 import { sumCallValues } from '~/utils/pyth'
 import { logWarn } from '~/utils/errorHandling'
+import { assertSwapperAllowed } from '~/utils/swap-validation'
 import type { TxPlan } from '~/entities/txPlan'
 import { type SwapApiQuote, SwapperMode, SwapVerificationType } from '~/entities/swap'
-
-const getSwapInputAmount = (quote: SwapApiQuote, swapperMode: SwapperMode) => {
-  const amountIn = BigInt(quote.amountIn || 0)
-  const amountInMax = BigInt(quote.amountInMax || 0)
-  if (swapperMode === SwapperMode.EXACT_IN) return amountIn
-  return amountInMax > 0n ? amountInMax : amountIn
-}
-
-const buildSwapVerifierData = ({
-  quote,
-  swapperMode,
-  isRepay,
-  targetDebt = 0n,
-  currentDebt = 0n,
-}: {
-  quote: SwapApiQuote
-  swapperMode: SwapperMode
-  isRepay: boolean
-  targetDebt?: bigint
-  currentDebt?: bigint
-}) => {
-  let functionName: 'verifyAmountMinAndSkim' | 'verifyDebtMax'
-  let amount: bigint
-
-  if (isRepay) {
-    functionName = 'verifyDebtMax'
-    if (swapperMode === SwapperMode.TARGET_DEBT) {
-      amount = targetDebt
-    }
-    else {
-      amount = currentDebt - BigInt(quote.amountOutMin || 0)
-      if (amount < 0n) amount = 0n
-      amount = adjustForInterest(amount)
-    }
-  }
-  else {
-    functionName = 'verifyAmountMinAndSkim'
-    amount = BigInt(quote.amountOutMin || 0)
-  }
-
-  return encodeFunctionData({
-    abi: swapVerifierAbi,
-    functionName,
-    args: [quote.verify.vault, quote.verify.account, amount, BigInt(quote.verify.deadline || 0)],
-  })
-}
 
 export const createCrossAssetSwapBuilders = (
   ctx: OperationsContext,
@@ -91,6 +46,8 @@ export const createCrossAssetSwapBuilders = (
 
     const userAddr = ctx.address.value as Address
     const evcAddress = ctx.eulerCoreAddresses.value.evc as Address
+
+    assertSwapperAllowed(quote.swap.swapperAddress, ctx.eulerPeripheryAddresses.value.swapper)
 
     const tos = await helpers.prepareTos(userAddr)
 

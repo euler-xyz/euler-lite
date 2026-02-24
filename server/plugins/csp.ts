@@ -64,6 +64,8 @@ const CONNECT_SRC_BASE = [
   // External data APIs
   'https://yields.llama.fi',
   'https://api-v2.pendle.finance',
+  // Reown AppKit SDK version check
+  'https://registry.npmjs.org',
   // RPC providers (wildcard — operators configure per chain)
   'https://*.quiknode.pro',
   'https://*.alchemy.com',
@@ -84,7 +86,7 @@ function buildCsp(nonce: string, extraConnectSrc: string[]): string {
 
   const directives = [
     'default-src \'self\'',
-    `script-src 'self' 'nonce-${nonce}' 'wasm-unsafe-eval' https://static.cloudflareinsights.com`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval' https://static.cloudflareinsights.com`,
     'style-src \'unsafe-inline\' \'self\'',
     'object-src \'none\'',
     'base-uri \'self\'',

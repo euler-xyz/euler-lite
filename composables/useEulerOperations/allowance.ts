@@ -46,7 +46,6 @@ export const createAllowanceHelpers = (ctx: OperationsContext, permit2: Permit2H
     const tokenKey = normalizeAddress(token)
     const cached = allowanceSlotIndexCache.get(tokenKey)
     if (cached !== undefined) {
-      console.info('[resolveAllowanceSlotIndex] cache hit', { token: tokenKey, slotIndex: cached.toString() })
       return cached
     }
 
@@ -66,7 +65,6 @@ export const createAllowanceHelpers = (ctx: OperationsContext, permit2: Permit2H
           ],
         })
         if (value === maxUint256) {
-          console.info('[resolveAllowanceSlotIndex] found slot', { token: tokenKey, slotIndex: slotIndex.toString(), slot })
           allowanceSlotIndexCache.set(tokenKey, slotIndex)
           return true
         }

@@ -13,6 +13,7 @@ import type { TxPlan, TxStep } from '~/entities/txPlan'
 import type { SwapApiQuote } from '~/entities/swap'
 import { SwapperMode, SwapVerificationType } from '~/entities/swap'
 import { logWarn } from '~/utils/errorHandling'
+import { assertSwapperAllowed } from '~/utils/swap-validation'
 
 export const createVaultBuilders = (
   ctx: OperationsContext,
@@ -541,6 +542,10 @@ export const createVaultBuilders = (
       const amountInMax = BigInt(q.amountInMax || 0)
       if (mode === SwapperMode.EXACT_IN) return amountIn
       return amountInMax > 0n ? amountInMax : amountIn
+    }
+
+    if (hasSwap) {
+      assertSwapperAllowed(quote!.swap.swapperAddress, ctx.eulerPeripheryAddresses.value!.swapper)
     }
 
     const borrowRecipient = hasSwap ? quote!.swap.swapperAddress : userAddr
