@@ -150,10 +150,10 @@ const onUnlockClick = async () => {
         rEUL
       </h4>
       <div class="flex flex-col gap-8 ml-auto text-right">
-        <p class="text-p2">
+        <p class="text-p2 tabular-nums">
           {{ reulToken ? `${formatNumber(unlockableAmount, 6)} rEUL` : '...' }}
         </p>
-        <p class="text-p3 text-euler-dark-900">
+        <p class="text-p3 text-euler-dark-900 tabular-nums">
           {{ reulToken ? `of ${formatNumber(amount, 6)} rEUL` : '...' }}
         </p>
       </div>
@@ -164,7 +164,7 @@ const onUnlockClick = async () => {
           Maturity date
         </div>
         <div class="text-right flex flex-col gap-4 text-p2">
-          <div>
+          <div class="tabular-nums">
             in {{ daysUntilMaturity }} days
           </div>
           <div class="text-euler-dark-900">

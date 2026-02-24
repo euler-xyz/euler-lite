@@ -325,7 +325,7 @@ onMounted(() => {
                 Net APY
               </div>
               <div
-                class="text-p2"
+                class="text-p2 tabular-nums"
                 :class="[netAPY >= 0 ? 'text-accent-600' : 'text-error-500']"
               >
                 {{ Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
@@ -336,7 +336,7 @@ onMounted(() => {
                 ROE
               </div>
               <div
-                class="text-p2"
+                class="text-p2 tabular-nums"
                 :class="[roe >= 0 ? 'text-accent-600' : 'text-error-500']"
               >
                 {{ Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}
@@ -366,7 +366,7 @@ onMounted(() => {
             Net asset value
           </div>
           <div class="flex justify-between gap-8 text-right">
-            <div class="text-content-primary text-p3">
+            <div class="text-content-primary text-p3 tabular-nums">
               {{ netAssetValueDisplay }}
             </div>
           </div>
@@ -376,14 +376,14 @@ onMounted(() => {
             My Debt
           </div>
           <div class="flex justify-between gap-8 text-right">
-            <div class="text-content-primary text-p3">
+            <div class="text-content-primary text-p3 tabular-nums">
               {{ borrowedValueDisplay }}
             </div>
             <div
               v-if="borrowedValueInfo.hasPrice"
               class="text-content-tertiary text-p3"
             >
-              ~ {{ roundAndCompactTokens(position.borrowed, position.borrow.decimals) }}
+              ~ <span class="tabular-nums">{{ roundAndCompactTokens(position.borrowed, position.borrow.decimals) }}</span>
               {{ position.borrow.asset.symbol }}
             </div>
           </div>
@@ -393,14 +393,14 @@ onMounted(() => {
             Collateral value
           </div>
           <div class="flex justify-between gap-8 text-right">
-            <div class="text-content-primary text-p3">
+            <div class="text-content-primary text-p3 tabular-nums">
               {{ collateralValueDisplay }}
             </div>
             <div
               v-if="collateralValue.hasPrice"
               class="text-content-tertiary text-p3"
             >
-              ~ {{ roundAndCompactTokens(collateralItems[0].assets, position.collateral.decimals) }}
+              ~ <span class="tabular-nums">{{ roundAndCompactTokens(collateralItems[0].assets, position.collateral.decimals) }}</span>
               {{ position.collateral.asset.symbol }} {{ collateralItems.length > 1 ? '& others' : '' }}
             </div>
           </div>
@@ -440,7 +440,7 @@ onMounted(() => {
                 size="small"
               />
               <div class="flex justify-between gap-8 text-right">
-                <div class="text-content-primary text-p3">
+                <div class="text-content-primary text-p3 tabular-nums">
                   {{ formatNumber(nanoToValue(position.userLTV, 18), 2) }}/{{ nanoToValue(position.liquidationLTV, 2) }}%
                 </div>
               </div>

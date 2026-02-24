@@ -252,7 +252,7 @@ const linkPath = computed(
 
     <!-- Desktop stats (single row) -->
     <div class="flex items-center gap-4 mobile:!hidden">
-      <div class="text-p2 flex items-center text-accent-600 font-semibold">
+      <div class="text-p2 flex items-center text-accent-600 font-semibold tabular-nums">
         <SvgIcon
           v-if="hasRewards"
           class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
@@ -269,7 +269,7 @@ const linkPath = computed(
     </div>
 
     <div class="flex items-center gap-4 mobile:!hidden">
-      <div class="text-p2 text-accent-600 font-semibold">
+      <div class="text-p2 text-accent-600 font-semibold tabular-nums">
         {{ formatNumber(maxRoe, 2, 2) }}%
       </div>
       <SvgIcon
@@ -325,7 +325,7 @@ const linkPath = computed(
             name="info-circle"
           />
         </div>
-        <div class="text-p2 flex items-center text-accent-600 font-semibold">
+        <div class="text-p2 flex items-center text-accent-600 font-semibold tabular-nums">
           <SvgIcon
             v-if="hasRewards"
             class="!w-20 !h-20 text-accent-500 mr-4"
@@ -342,7 +342,7 @@ const linkPath = computed(
             name="info-circle"
           />
         </div>
-        <div class="text-p2 text-accent-600 font-semibold">
+        <div class="text-p2 text-accent-600 font-semibold tabular-nums">
           {{ formatNumber(maxRoe, 2, 2) }}%
         </div>
       </div>
@@ -365,7 +365,7 @@ const linkPath = computed(
           </template>
           <div
             v-else
-            class="text-p2 text-content-primary"
+            class="text-p2 text-content-primary tabular-nums"
           >-</div>
         </div>
       </div>

@@ -138,7 +138,7 @@ const onClick = () => {
             />
           </div>
           <div
-            class="text-p2 flex text-accent-600"
+            class="text-p2 flex text-accent-600 tabular-nums"
           >
             <SvgIcon
               v-if="rewardsExist"
@@ -160,14 +160,14 @@ const onClick = () => {
             Supply value
           </div>
           <div class="flex justify-between gap-8 text-right">
-            <div class="text-content-primary text-p3">
+            <div class="text-content-primary text-p3 tabular-nums">
               {{ supplyValueDisplay }}
             </div>
             <div
               v-if="hasPrice"
               class="text-content-tertiary text-p3"
             >
-              ~ {{ roundAndCompactTokens(position.assets, vault.asset.decimals) }} {{ vault.asset.symbol }}
+              ~ <span class="tabular-nums">{{ roundAndCompactTokens(position.assets, vault.asset.decimals) }}</span> {{ vault.asset.symbol }}
             </div>
           </div>
         </div>
@@ -179,7 +179,7 @@ const onClick = () => {
             Projected earnings per month
           </div>
           <div class="flex justify-between gap-8 text-right">
-            <div class="text-content-primary text-p3">
+            <div class="text-content-primary text-p3 tabular-nums">
               ${{ projectedEarningsPerMonth }}
             </div>
           </div>

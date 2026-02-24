@@ -137,10 +137,10 @@ const onClaimClick = async () => {
           {{ reward.token.symbol === 'WTAC' ? 'TAC' : reward.token.symbol }}
         </h4>
         <div class="flex flex-col gap-8 ml-auto text-right">
-          <p class="text-p2 text-content-primary">
+          <p class="text-p2 text-content-primary tabular-nums">
             {{ formatUsdValue(amountInUsd) }}
           </p>
-          <p class="text-p3 text-content-tertiary">
+          <p class="text-p3 text-content-tertiary tabular-nums">
             ~ {{ amountToClaim < 0.01 ? '< 0.01' : formatNumber(amountToClaim, 2) }} {{ reward.token.symbol }}
           </p>
         </div>

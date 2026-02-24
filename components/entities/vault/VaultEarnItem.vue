@@ -161,7 +161,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
       </div>
       <div
         v-else
-        class="text-p2 text-content-primary"
+        class="text-p2 text-content-primary tabular-nums"
       >-</div>
     </div>
 
@@ -187,7 +187,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
             name="info-circle"
           />
         </div>
-        <div class="text-p2 flex items-center text-accent-600">
+        <div class="text-p2 flex items-center text-accent-600 tabular-nums">
           <div class="mr-6">
             <VaultPoints :vault="vault" />
           </div>
@@ -230,7 +230,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
           </template>
           <div
             v-else
-            class="text-p2 text-content-primary"
+            class="text-p2 text-content-primary tabular-nums"
           >-</div>
         </div>
       </div>
@@ -244,7 +244,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
             :loading="isBalancesLoading"
             style="min-width: 70px; height: 20px"
           >
-            <div class="text-p2 text-content-primary whitespace-nowrap">
+            <div class="text-p2 text-content-primary tabular-nums whitespace-nowrap">
               {{ prices.walletBalance }}
             </div>
           </BaseLoadableContent>

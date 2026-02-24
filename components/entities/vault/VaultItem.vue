@@ -173,7 +173,7 @@ watchEffect(async () => {
       <div class="mr-6">
         <VaultPoints :vault="vault" />
       </div>
-      <div class="text-p2 flex items-center text-accent-600 font-semibold">
+      <div class="text-p2 flex items-center text-accent-600 font-semibold tabular-nums">
         <SvgIcon
           v-if="hasRewards"
           class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
@@ -202,7 +202,7 @@ watchEffect(async () => {
     <div class="mobile:!hidden">
       <div
         v-if="isBorrowable"
-        class="text-p2 text-content-primary"
+        class="text-p2 text-content-primary tabular-nums"
       >
         {{ prices.liquidity }}
       </div>
@@ -250,7 +250,7 @@ watchEffect(async () => {
           <div class="mr-6">
             <VaultPoints :vault="vault" />
           </div>
-          <div class="text-p2 flex items-center text-accent-600 font-semibold">
+          <div class="text-p2 flex items-center text-accent-600 font-semibold tabular-nums">
             <SvgIcon
               v-if="hasRewards"
               class="!w-20 !h-20 text-accent-500 mr-4"
@@ -294,7 +294,7 @@ watchEffect(async () => {
           </template>
           <div
             v-else
-            class="text-p2 text-content-primary"
+            class="text-p2 text-content-primary tabular-nums"
           >-</div>
         </div>
       </div>
@@ -326,7 +326,7 @@ watchEffect(async () => {
             :loading="isBalancesLoading"
             style="min-width: 70px; height: 20px"
           >
-            <div class="text-p2 text-content-primary whitespace-nowrap">
+            <div class="text-p2 text-content-primary tabular-nums whitespace-nowrap">
               {{ prices.walletBalance }}
             </div>
           </BaseLoadableContent>
