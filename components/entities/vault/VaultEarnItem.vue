@@ -125,13 +125,13 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
 
     <!-- Desktop stats (single row) -->
     <div class="flex items-center gap-4 mobile:!hidden">
-      <div class="text-p2 flex items-center text-accent-600">
-        <div class="mr-6">
-          <VaultPoints :vault="vault" />
-        </div>
+      <div class="mr-6">
+        <VaultPoints :vault="vault" />
+      </div>
+      <div class="text-p2 flex items-center text-accent-600 font-semibold tabular-nums">
         <SvgIcon
           v-if="hasRewards"
-          class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
+          class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
           name="sparks"
           @click="onSupplyInfoIconClick"
         />
@@ -187,16 +187,18 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
             name="info-circle"
           />
         </div>
-        <div class="text-p2 flex items-center text-accent-600 tabular-nums">
+        <div class="flex items-center">
           <div class="mr-6">
             <VaultPoints :vault="vault" />
           </div>
-          <SvgIcon
-            v-if="hasRewards"
-            class="!w-20 !h-20 text-accent-600 mr-4"
-            name="sparks"
-          />
-          {{ formatNumber(nanoToValue(vault.interestRateInfo.supplyAPY, 25) + totalRewardsAPY) }}%
+          <div class="text-p2 flex items-center text-accent-600 font-semibold tabular-nums">
+            <SvgIcon
+              v-if="hasRewards"
+              class="!w-20 !h-20 text-accent-500 mr-4"
+              name="sparks"
+            />
+            {{ formatNumber(nanoToValue(vault.interestRateInfo.supplyAPY, 25) + totalRewardsAPY) }}%
+          </div>
         </div>
       </div>
       <div class="flex flex-col items-end">
