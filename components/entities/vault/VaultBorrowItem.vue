@@ -196,9 +196,9 @@ const linkPath = computed(
     <!-- Asset pair -->
     <div class="flex items-center mobile:mb-12">
       <SvgIcon
-        v-if="isFeatured"
         name="star"
         class="!w-16 !h-16 text-accent-600 mr-4 shrink-0"
+        :class="{ invisible: !isFeatured }"
         title="Featured Vault"
       />
       <AssetAvatar
@@ -254,8 +254,8 @@ const linkPath = computed(
     <div class="flex items-center gap-4 mobile:!hidden">
       <div class="text-p2 flex items-center text-accent-600 font-semibold tabular-nums">
         <SvgIcon
-          v-if="hasRewards"
           class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
+          :class="{ invisible: !hasRewards }"
           name="sparks"
           @click="onBorrowInfoIconClick"
         />
