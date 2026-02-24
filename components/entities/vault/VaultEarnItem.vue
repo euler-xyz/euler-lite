@@ -88,7 +88,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
     :to="`/earn/${vault.address}`"
   >
     <!-- Asset -->
-    <div class="flex items-center mobile:mb-12">
+    <div class="flex items-center mobile:mb-12 min-w-0">
       <SvgIcon
         name="star"
         class="!w-16 !h-16 text-accent-600 mr-4 shrink-0"
@@ -125,9 +125,6 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
 
     <!-- Desktop stats (single row) -->
     <div class="flex items-center gap-4 mobile:!hidden">
-      <div class="mr-6">
-        <VaultPoints :vault="vault" />
-      </div>
       <div class="text-p2 flex items-center text-accent-600 font-semibold tabular-nums">
         <SvgIcon
           class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
@@ -142,6 +139,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
         name="info-circle"
         @click="onSupplyInfoIconClick"
       />
+      <VaultPoints :vault="vault" />
     </div>
 
     <div
@@ -171,7 +169,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
       </div>
     </div>
 
-    <div class="flex items-center justify-end mobile:!hidden">
+    <div class="flex items-center mobile:!hidden">
       <div class="text-p2 text-content-primary tabular-nums">
         {{ prices.liquidity }}
       </div>

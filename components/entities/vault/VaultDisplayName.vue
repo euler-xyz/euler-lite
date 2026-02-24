@@ -16,5 +16,8 @@ const { name, isUnverified = false } = defineProps<{
     />
     Unknown
   </span>
-  <span v-else>{{ name }}</span>
+  <span
+    v-else
+    class="truncate min-w-0"
+  >{{ name }}</span>
 </template>

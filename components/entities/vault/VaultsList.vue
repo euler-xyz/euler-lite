@@ -13,14 +13,15 @@ const { enableEntityBranding } = useDeployConfig()
       class="sticky top-[72px] z-10 grid items-center gap-x-16 pt-16 py-8 px-20 bg-surface border-b border-line-default text-content-tertiary text-p3 mobile:!hidden"
       :class="enableEntityBranding ? 'grid-cols-[2fr_repeat(4,1fr)]' : 'grid-cols-[2fr_repeat(3,1fr)]'"
     >
-      <div>Asset</div>
-      <div>Supply APY</div>
+      <div class="pl-20">
+        Asset
+      </div>
+      <div class="pl-[24px]">
+        Supply APY
+      </div>
       <div>Total supply</div>
       <div>Available liquidity</div>
-      <div
-        v-if="enableEntityBranding"
-        class="text-right"
-      >
+      <div v-if="enableEntityBranding">
         Utilization
       </div>
     </div>

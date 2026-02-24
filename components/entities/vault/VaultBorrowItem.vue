@@ -194,7 +194,7 @@ const linkPath = computed(
     ]"
   >
     <!-- Asset pair -->
-    <div class="flex items-center mobile:mb-12">
+    <div class="flex items-center mobile:mb-12 min-w-0">
       <SvgIcon
         name="star"
         class="!w-16 !h-16 text-accent-600 mr-4 shrink-0"
@@ -304,7 +304,7 @@ const linkPath = computed(
       </div>
     </div>
 
-    <div class="flex items-center justify-end gap-4 mobile:!hidden">
+    <div class="flex items-center gap-4 mobile:!hidden">
       <UiRadialProgress
         :value="utilization"
         :max="100"

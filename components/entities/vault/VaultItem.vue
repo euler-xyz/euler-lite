@@ -122,7 +122,7 @@ watchEffect(async () => {
     :to="`/lend/${vault.address}`"
   >
     <!-- Asset -->
-    <div class="flex items-center mobile:mb-12">
+    <div class="flex items-center mobile:mb-12 min-w-0">
       <SvgIcon
         name="star"
         class="!w-16 !h-16 text-accent-600 mr-4 shrink-0"
@@ -170,9 +170,6 @@ watchEffect(async () => {
 
     <!-- Desktop stats (single row) -->
     <div class="flex items-center gap-4 mobile:!hidden">
-      <div class="mr-6">
-        <VaultPoints :vault="vault" />
-      </div>
       <div class="text-p2 flex items-center text-accent-600 font-semibold tabular-nums">
         <SvgIcon
           class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
@@ -187,6 +184,7 @@ watchEffect(async () => {
         name="info-circle"
         @click="onSupplyInfoIconClick"
       />
+      <VaultPoints :vault="vault" />
     </div>
 
     <div class="flex items-center gap-4 mobile:!hidden">
@@ -216,7 +214,7 @@ watchEffect(async () => {
 
     <div
       v-if="enableEntityBranding"
-      class="flex items-center justify-end gap-4 mobile:!hidden"
+      class="flex items-center gap-4 mobile:!hidden"
     >
       <template v-if="isBorrowable">
         <UiRadialProgress
