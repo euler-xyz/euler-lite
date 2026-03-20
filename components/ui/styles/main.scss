@@ -213,96 +213,96 @@
 // DARK THEME UI COMPONENTS
 // ============================================
 [data-theme="dark"] {
-  // Buttons — brand: #23C09B bg, #020508 text, hover #A1F4E0
-  --ui-button-primary-background-color: #23c09b;
-  --ui-button-primary-color: #020508;
-  --ui-button-primary-active-background-color: #a1f4e0;
-  --ui-button-primary-disabled-background-color: #14304e;
-  --ui-button-primary-disabled-color: #435971;
+  // Buttons — institutional gold
+  --ui-button-primary-background-color: var(--accent-500);
+  --ui-button-primary-color: #0a0a0a;
+  --ui-button-primary-active-background-color: var(--accent-400);
+  --ui-button-primary-disabled-background-color: #262626;
+  --ui-button-primary-disabled-color: #525252;
 
-  // Ghost/stroke — brand: transparent + #14304E border
+  // Ghost/stroke
   --ui-button-primary-stroke-background-color: transparent;
-  --ui-button-primary-stroke-color: #ddfbf4;
-  --ui-button-primary-stroke-border-color: #14304e;
-  --ui-button-primary-stroke-hover-background-color: #0c1d2f;
-  --ui-button-primary-stroke-active-background-color: #10263e;
-  --ui-button-primary-stroke-disabled-background-color: #0c1d2f;
-  --ui-button-primary-stroke-disabled-color: #435971;
+  --ui-button-primary-stroke-color: #fafafa;
+  --ui-button-primary-stroke-border-color: #404040;
+  --ui-button-primary-stroke-hover-background-color: #1a1a1a;
+  --ui-button-primary-stroke-active-background-color: #262626;
+  --ui-button-primary-stroke-disabled-background-color: #1a1a1a;
+  --ui-button-primary-stroke-disabled-color: #525252;
 
-  // Secondary — brand: #10263E bg, #DDFBF4 text, hover #14304E
-  --ui-button-secondary-background-color: #10263e;
-  --ui-button-secondary-color: #ddfbf4;
-  --ui-button-secondary-border-color: #14304e;
-  --ui-button-secondary-hover-background-color: #14304e;
-  --ui-button-secondary-hover-border-color: #435971;
-  --ui-button-secondary-active-background-color: #14304e;
+  // Secondary
+  --ui-button-secondary-background-color: #1a1a1a;
+  --ui-button-secondary-color: #fafafa;
+  --ui-button-secondary-border-color: #262626;
+  --ui-button-secondary-hover-background-color: #262626;
+  --ui-button-secondary-hover-border-color: #404040;
+  --ui-button-secondary-active-background-color: #333333;
 
-  --ui-button-secondary-ghost-color: #a1acb8;
-  --ui-button-secondary-ghost-hover-background-color: #0c1d2f;
-  --ui-button-secondary-ghost-active-background-color: #10263e;
+  --ui-button-secondary-ghost-color: #a3a3a3;
+  --ui-button-secondary-ghost-hover-background-color: #1a1a1a;
+  --ui-button-secondary-ghost-active-background-color: #262626;
 
   // Checkbox
-  --ui-checkbox-background-color: #08131f;
-  --ui-checkbox-box-shadow-color: #14304e;
-  --ui-checkbox-hover-background-color: #0c1d2f;
-  --ui-checkbox-color: #020508;
-  --ui-checkbox-label-color: #f7f7f8;
+  --ui-checkbox-background-color: #141414;
+  --ui-checkbox-box-shadow-color: #404040;
+  --ui-checkbox-hover-background-color: #1a1a1a;
+  --ui-checkbox-color: #0a0a0a;
+  --ui-checkbox-label-color: #fafafa;
 
   // Switch
-  --ui-switch-background-color: #10263e;
-  --ui-switch-indicator-background-color: #435971;
-  --ui-switch-hover-background-color: #14304e;
-  --ui-switch-hover-indicator-background-color: #728395;
-  --ui-switch-hover-checked-indicator-background-color: #0c1d2f;
-  --ui-switch-checked-indicator-background-color: #08131f;
+  --ui-switch-background-color: #262626;
+  --ui-switch-indicator-background-color: #525252;
+  --ui-switch-hover-background-color: #404040;
+  --ui-switch-hover-indicator-background-color: #737373;
+  --ui-switch-hover-checked-indicator-background-color: #0a0a0a;
+  --ui-switch-checked-indicator-background-color: #0a0a0a;
 
   // Footnote/Tooltip
-  --ui-footnote-floating-background-color: #0c1d2f;
-  --ui-footnote-arrow-background-color: #0c1d2f;
+  --ui-footnote-floating-background-color: #1a1a1a;
+  --ui-footnote-arrow-background-color: #1a1a1a;
 
   // Progress
-  --ui-progress-background-color: #10263e;
+  --ui-progress-background-color: #262626;
 
   // Radio
-  --ui-radio-field-background-color: #08131f;
-  --ui-radio-field-border-color: #14304e;
-  --ui-radio-hover-background-color: #0c1d2f;
+  --ui-radio-field-background-color: #141414;
+  --ui-radio-field-border-color: #404040;
+  --ui-radio-hover-background-color: #1a1a1a;
 
   // Range
-  --ui-range-value-background-color: #0c1d2f;
-  --ui-range-track-background-color: #10263e;
-  --ui-range-thumb-background-color: #f7f7f8;
-  --ui-range-step-color: #728395;
-  --ui-range-step-even-color: #435971;
+  --ui-range-value-background-color: #1a1a1a;
+  --ui-range-track-background-color: #262626;
+  --ui-range-thumb-background-color: #fafafa;
+  --ui-range-step-color: #737373;
+  --ui-range-step-even-color: #525252;
 
   // Select
-  --ui-select-field-color: #f7f7f8;
-  --ui-select-field-background-color: #08131f;
-  --ui-select-chip-background-color: #0c1d2f;
-  --ui-select-chip-active-background-color: #2ae5b9;
-  --ui-select-chip-active-color: #020508;
+  --ui-select-field-color: #fafafa;
+  --ui-select-field-background-color: #141414;
+  --ui-select-chip-background-color: #1a1a1a;
+  --ui-select-chip-active-background-color: var(--accent-500);
+  --ui-select-chip-active-color: #0a0a0a;
 
   // Tabs
-  --ui-tabs-pills-background-color: #0c1d2f;
-  --ui-tabs-block-background-color: #10263e;
-  --ui-tab-badge-background-color: #10263e;
-  --ui-tab-active-pill-badge-background-color: #081522;
-  --ui-tab-text-color: #728395;
-  --ui-tab-active-text-color: #f7f7f8;
+  --ui-tabs-pills-background-color: #1a1a1a;
+  --ui-tabs-block-background-color: #262626;
+  --ui-tab-badge-background-color: #262626;
+  --ui-tab-active-pill-badge-background-color: #404040;
+  --ui-tab-text-color: #737373;
+  --ui-tab-active-text-color: #fafafa;
 
   // Toast
-  --ui-toast-background-color: #0c1d2f;
-  --ui-toast-neutral-background-color: #0c1d2f;
-  --ui-toast-neutral-border-color: #14304e;
-  --ui-toast-neutral-text-color: #f7f7f8;
+  --ui-toast-background-color: #1a1a1a;
+  --ui-toast-neutral-background-color: #1a1a1a;
+  --ui-toast-neutral-border-color: #404040;
+  --ui-toast-neutral-text-color: #fafafa;
 
   // Input
-  --ui-input-background-color: #08131f;
-  --ui-input-border-color: #14304e;
-  --ui-input-color: #f7f7f8;
-  --ui-input-placeholder-color: #435971;
-  --ui-input-label-color: #a1acb8;
-  --ui-input-icon-color: #728395;
+  --ui-input-background-color: #141414;
+  --ui-input-border-color: #404040;
+  --ui-input-color: #fafafa;
+  --ui-input-placeholder-color: #525252;
+  --ui-input-label-color: #a3a3a3;
+  --ui-input-icon-color: #737373;
 
   // Input shadows and depth
   --ui-input-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), inset 0 1px 2px rgba(0, 0, 0, 0.2);
@@ -310,8 +310,8 @@
   --ui-input-error-shadow: 0 0 0 3px rgba(var(--error-rgb), 0.2);
 
   // Form container shadows
-  --ui-form-field-background: #0c1d2f;
-  --ui-form-field-border-color: #14304e;
+  --ui-form-field-background: #1a1a1a;
+  --ui-form-field-border-color: #333333;
   --ui-form-field-shadow: 0 1px 3px rgba(0, 0, 0, 0.4), inset 0 1px 2px rgba(0, 0, 0, 0.2);
   --ui-form-field-focus-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.25), 0 2px 4px rgba(0, 0, 0, 0.4);
 }

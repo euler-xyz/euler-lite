@@ -18,28 +18,28 @@
   //
   // ════════════════════════════════════════════════════════════════
 
-  // — Brand Accent (buttons, links, focus rings, highlights) ——————
-  --accent-100: #e6faf5;
-  --accent-300: #0e4e3f;
-  --accent-400: #167a62;
-  --accent-500: #1c997c;
-  --accent-600: #23c09b;
-  --accent-700: #2ae5b9;
-  --accent-rgb: 28, 153, 124;          // ← RGB of --accent-500
+  // — Brand Accent (Institutional Gold — #DBA751) —————————————————
+  --accent-100: #faf2e6;
+  --accent-300: #efd8b3;
+  --accent-400: #e6c084;
+  --accent-500: #dba751;
+  --accent-600: #cb8d2a;
+  --accent-700: #94671e;
+  --accent-rgb: 219, 167, 81;           // ← RGB of --accent-500
 
   // — Status Colors ———————————————————————————————————————————————
-  --success-rgb: 98, 173, 79;
+  --success-rgb: 5, 150, 105;
   --success-100: rgba(var(--success-rgb), 0.2);
-  --success-500: #62ad4f;
-  --success-600: #4e8a3f;
+  --success-500: #059669;
+  --success-600: #047857;
 
-  --warning-rgb: 236, 192, 51;
+  --warning-rgb: 217, 119, 6;
   --warning-100: rgba(var(--warning-rgb), 0.2);
-  --warning-500: #ecc033;
+  --warning-500: #d97706;
 
-  --error-rgb: 192, 39, 35;
+  --error-rgb: 220, 38, 38;
   --error-100: rgba(var(--error-rgb), 0.2);
-  --error-500: #c02723;
+  --error-500: #dc2626;
 
   // — Primary Palette (Navy) —————————————————————————————————————
   --primary-50: #f0f4f8;
@@ -116,10 +116,10 @@
   // CHART COLORS (for Chart.js canvas rendering)
   // Read these via getComputedStyle in JavaScript.
   // ============================================
-  --chart-line-a: #62ad4f;
-  --chart-fill-a: rgba(98, 173, 79, 0.15);
-  --chart-line-b: #1c997c;
-  --chart-fill-b: rgba(28, 153, 124, 0.15);
+  --chart-line-a: #059669;
+  --chart-fill-a: rgba(5, 150, 105, 0.15);
+  --chart-line-b: #dba751;
+  --chart-fill-b: rgba(219, 167, 81, 0.15);
   --chart-text: #737373;
   --chart-text-muted: #525252;
   --chart-grid: #f5f5f5;
@@ -135,10 +135,10 @@
   // ============================================
   // GRAPH COLORS (for SVG topology visualizations)
   // ============================================
-  --graph-edge: #4b5563;
-  --graph-edge-mutual: #6b7280;
-  --graph-node-bg: #1f2937;
-  --graph-node-border: #4b5563;
+  --graph-edge: #737373;
+  --graph-edge-mutual: #a3a3a3;
+  --graph-node-bg: #262626;
+  --graph-node-border: #737373;
   --graph-node-text: #ffffff;
 
 }
@@ -195,49 +195,49 @@
 // DARK THEME
 // ============================================
 [data-theme="dark"] {
-  // — Brand Accent (brighter for dark backgrounds) ————————————————
-  --accent-100: #0a3d30;
-  --accent-300: #a1f4e0;
-  --accent-400: #66eccd;
-  --accent-500: #2ae5b9;
-  --accent-600: #23c09b;
-  --accent-700: #1c997c;
-  --accent-rgb: 42, 229, 185;          // ← RGB of dark --accent-500
+  // — Brand Accent (gold, brighter for dark backgrounds) ——————————
+  --accent-100: #362812;
+  --accent-300: #f2dfbf;
+  --accent-400: #e8c58d;
+  --accent-500: #dfaf62;
+  --accent-600: #d89e41;
+  --accent-700: #be8427;
+  --accent-rgb: 223, 175, 98;           // ← RGB of dark --accent-500
 
-  // Override neutral palette — brand-aligned
-  --neutral-50: #08131f;
-  --neutral-100: #0c1d2f;
-  --neutral-200: #10263e;
-  --neutral-300: #14304e;
-  --neutral-400: #435971;
-  --neutral-500: #728395;
-  --neutral-600: #a1acb8;
-  --neutral-700: #ddfbf4;
-  --neutral-800: #f7f7f8;
-  --neutral-900: #f7f7f8;
+  // Override neutral palette — pure grays
+  --neutral-50: #0a0a0a;
+  --neutral-100: #171717;
+  --neutral-200: #262626;
+  --neutral-300: #404040;
+  --neutral-400: #525252;
+  --neutral-500: #737373;
+  --neutral-600: #a3a3a3;
+  --neutral-700: #d4d4d4;
+  --neutral-800: #e5e5e5;
+  --neutral-900: #fafafa;
 
-  // Semantic backgrounds — matches brand palette
-  --bg-body: #08131f;
-  --bg-surface: #08131f;
-  --bg-surface-secondary: #0c1d2f;
-  --bg-surface-elevated: #10263e;
-  --bg-card: #0c1d2f;
-  --bg-card-hover: #10263e;
-  --bg-header: rgba(8, 19, 31, 0.85);
+  // Semantic backgrounds — pure dark grays
+  --bg-body: #0a0a0a;
+  --bg-surface: #111111;
+  --bg-surface-secondary: #161616;
+  --bg-surface-elevated: #1c1c1c;
+  --bg-card: #161616;
+  --bg-card-hover: #1c1c1c;
+  --bg-header: rgba(17, 17, 17, 0.9);
 
-  // Text — brand hierarchy
-  --c-text: #f7f7f8;
-  --text-primary: #f7f7f8;
-  --text-secondary: #ddfbf4;
-  --text-tertiary: #a1acb8;
-  --text-muted: #728395;
-  --text-inverse: #08131f;
+  // Text
+  --c-text: #fafafa;
+  --text-primary: #fafafa;
+  --text-secondary: #a3a3a3;
+  --text-tertiary: #737373;
+  --text-muted: #525252;
+  --text-inverse: #0a0a0a;
   --text-accent: var(--accent-500);
 
   // Borders
-  --border-default: #14304e;
+  --border-default: #262626;
   --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-emphasis: #435971;
+  --border-emphasis: #404040;
 
   // Shadows - deeper for dark mode
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
@@ -254,35 +254,35 @@
   --accent-shadow-md: 0 1px 3px rgba(var(--accent-rgb), 0.35);
   --accent-shadow-lg: 0 2px 6px rgba(var(--accent-rgb), 0.45);
 
-  // Focus ring — brand yellow for high visibility
-  --focus-ring: #ecc033;
+  // Focus ring
+  --focus-ring: var(--accent-500);
 
   // Skeleton for dark mode
   --skeleton-background: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.05) 25%, rgba(255, 255, 255, 0) 50%);
   --skeleton-background-gray: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.03) 25%, rgba(255, 255, 255, 0) 50%);
 
-  // Chart colors (dark theme)
-  --chart-line-a: #62ad4f;
-  --chart-fill-a: rgba(98, 173, 79, 0.15);
-  --chart-line-b: #2ae5b9;
-  --chart-fill-b: rgba(42, 229, 185, 0.15);
-  --chart-text: #a1acb8;
-  --chart-text-muted: #728395;
+  // Chart colors (dark theme — gold accent)
+  --chart-line-a: #059669;
+  --chart-fill-a: rgba(5, 150, 105, 0.15);
+  --chart-line-b: #dfaf62;
+  --chart-fill-b: rgba(223, 175, 98, 0.15);
+  --chart-text: #a3a3a3;
+  --chart-text-muted: #737373;
   --chart-grid: rgba(255, 255, 255, 0.04);
   --chart-axis: rgba(255, 255, 255, 0.08);
-  --chart-tooltip-bg: rgba(12, 29, 47, 0.95);
-  --chart-tooltip-border: #14304e;
-  --chart-tooltip-text: #f7f7f8;
-  --chart-tooltip-text-muted: #a1acb8;
-  --chart-annotation-line: #a1acb8;
-  --chart-annotation-bg: rgba(20, 48, 78, 0.85);
+  --chart-tooltip-bg: rgba(26, 26, 26, 0.95);
+  --chart-tooltip-border: #404040;
+  --chart-tooltip-text: #fafafa;
+  --chart-tooltip-text-muted: #a3a3a3;
+  --chart-annotation-line: #a3a3a3;
+  --chart-annotation-bg: rgba(82, 82, 82, 0.85);
   --chart-annotation-text: #ffffff;
 
-  // Graph colors (dark theme)
-  --graph-edge: #435971;
-  --graph-edge-mutual: #728395;
-  --graph-node-bg: #0c1d2f;
-  --graph-node-border: #435971;
-  --graph-node-text: #f7f7f8;
+  // Graph colors (dark theme — pure grays)
+  --graph-edge: #525252;
+  --graph-edge-mutual: #737373;
+  --graph-node-bg: #171717;
+  --graph-node-border: #525252;
+  --graph-node-text: #fafafa;
 
 }
