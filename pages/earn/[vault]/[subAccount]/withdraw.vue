@@ -193,12 +193,10 @@ const send = async () => {
     isSubmitting.value = false
   }
 }
-const updateEstimates = useDebounceFn(async () => {
+const updateEstimates = () => {
   clearSimulationError()
   estimatesError.value = ''
-  if (!vault.value) {
-    return
-  }
+  if (!vault.value) return
   try {
     if (assetsBalance.value < amountFixed.value.value) {
       throw new Error('Not enough balance')
@@ -207,15 +205,13 @@ const updateEstimates = useDebounceFn(async () => {
     estimateSupplyAPY.value = nanoToValue(vault.value.interestRateInfo.supplyAPY, 25)
   }
   catch (e) {
-    console.warn(e)
+    logWarn('earn-withdraw/estimates', e)
     delta.value = assetsBalance.value || 0n
     estimateSupplyAPY.value = nanoToValue(vault.value.interestRateInfo.supplyAPY, 25)
     estimatesError.value = (e as { message: string }).message
   }
-  finally {
-    isEstimatesLoading.value = false
-  }
-}, 500)
+  isEstimatesLoading.value = false
+}
 
 load()
 
@@ -236,14 +232,7 @@ watch([isConnected, effectiveAddress], async () => {
     await updateBalance()
   }
 })
-watch(amount, async () => {
-  clearSimulationError()
-  if (!vault.value) {
-    return
-  }
-  if (!isEstimatesLoading.value) {
-    isEstimatesLoading.value = true
-  }
+watch(amount, () => {
   updateEstimates()
 })
 </script>

@@ -5,7 +5,7 @@ import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal, VaultSupplyApyModal, VaultUnverifiedDisclaimerModal, SwapTokenSelector, SlippageSettingsModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
-import { computeAPYs, getCurrentLiquidationLTV, type SecuritizeVault, type Vault, type VaultAsset } from '~/entities/vault'
+import { getProjectedRates, getCurrentLiquidationLTV, type SecuritizeVault, type Vault, type VaultAsset } from '~/entities/vault'
 import { isSecuritizeVault } from '~/entities/vault/factory'
 import { getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { collectPythFeedIds } from '~/entities/oracle'
@@ -491,28 +491,22 @@ const send = async () => {
 }
 
 const updateEstimates = useDebounceFn(async () => {
-  if (!isVaultLoaded.value) {
-    return
-  }
+  if (!isVaultLoaded.value) return
   try {
     if (features.value.hasInterestRate && evkVault.value) {
-      await updateVault(evkVault.value.address)
-      if (!asset.value?.address) {
-        return
-      }
-      const [, supplyAPY] = await computeAPYs(
-        evkVault.value.interestRateInfo.borrowSPY,
-        evkVault.value.interestRateInfo.cash + valueToNano(amount.value, evkVault.value.decimals),
+      const projected = await getProjectedRates(
+        evkVault.value.address,
+        evkVault.value.interestRateInfo.cash,
         evkVault.value.interestRateInfo.borrows,
-        evkVault.value.interestFee,
+        valueToNano(amount.value, evkVault.value.decimals),
+        0n,
       )
-      estimateSupplyAPY.value = supplyAPY + valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
+      estimateSupplyAPY.value = projected.supplyAPY + valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
       monthlyEarnings.value = !amount.value
         ? 0
         : (+(amount.value || 0) * nanoToValue(estimateSupplyAPY.value, 27)) / 12
     }
     else {
-      // For vaults without interest rate computation
       estimateSupplyAPY.value = valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
       monthlyEarnings.value = !amount.value
         ? 0
@@ -520,7 +514,7 @@ const updateEstimates = useDebounceFn(async () => {
     }
   }
   catch (e) {
-    console.warn(e)
+    logWarn('lend-supply/estimates', e)
   }
   finally {
     isEstimatesLoading.value = false

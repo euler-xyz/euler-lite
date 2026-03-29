@@ -7,7 +7,7 @@ import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
-import { getNetAPY } from '~/entities/vault'
+import { getNetAPY, getProjectedRates } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
@@ -193,7 +193,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     }
   }
 
-  const updateEstimates = useDebounceFn(async () => {
+  const updateSyncEstimates = () => {
     clearSimulationError()
     estimatesError.value = ''
     if (!position.value || !collateralVault.value || !borrowVault.value) return
@@ -204,18 +204,6 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       if (borrowedFixed.value.lt(amountFixed.value)) {
         throw new Error('You repaying more than required')
       }
-      const [supplyUsd, borrowUsd] = await Promise.all([
-        getAssetUsdValueOrZero((position.value.supplied || 0n), collateralVault.value, 'off-chain'),
-        getAssetUsdValueOrZero((position.value.borrowed || 0n) - valueToNano(amount.value, borrowVault.value.decimals), borrowVault.value, 'off-chain'),
-      ])
-      _estimateNetAPY.value = getNetAPY(
-        supplyUsd,
-        collateralSupplyApy.value,
-        borrowUsd,
-        borrowApy.value,
-        collateralSupplyRewardApy.value || null,
-        borrowRewardApy.value || null,
-      )
       // Use on-chain LTV to derive total collateral value (multi-collateral aware)
       const totalValue = getTotalCollateralValue(position.value!)
       const collateralValueFl = totalValue !== null
@@ -242,9 +230,48 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       }
     }
     catch (e: unknown) {
-      logWarn('walletRepay/estimates', e)
+      logWarn('walletRepay/syncEstimates', e)
       hasEstimate.value = false
       estimatesError.value = (e as { message: string }).message
+    }
+  }
+
+  const updateAsyncEstimates = useDebounceFn(async () => {
+    if (!position.value || !collateralVault.value || !borrowVault.value) {
+      isEstimatesLoading.value = false
+      return
+    }
+    try {
+      const repayNano = valueToNano(amount.value, borrowVault.value.decimals)
+      const remainingBorrow = (position.value.borrowed || 0n) - repayNano
+
+      const [projected, supplyUsd, borrowUsd] = await Promise.all([
+        getProjectedRates(
+          borrowVault.value.address,
+          borrowVault.value.interestRateInfo.cash,
+          borrowVault.value.interestRateInfo.borrows,
+          repayNano,
+          -repayNano,
+        ),
+        getAssetUsdValueOrZero(position.value.supplied || 0n, collateralVault.value, 'off-chain'),
+        getAssetUsdValueOrZero(remainingBorrow > 0n ? remainingBorrow : 0n, borrowVault.value, 'off-chain'),
+      ])
+
+      const currentRawBorrowApy = nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25)
+      const projectedRawBorrowApy = nanoToValue(projected.borrowAPY, 25)
+      const projectedBorrowApy = borrowApy.value + (projectedRawBorrowApy - currentRawBorrowApy)
+
+      _estimateNetAPY.value = getNetAPY(
+        supplyUsd,
+        collateralSupplyApy.value,
+        borrowUsd,
+        projectedBorrowApy,
+        collateralSupplyRewardApy.value || null,
+        borrowRewardApy.value || null,
+      )
+    }
+    catch (e) {
+      logWarn('walletRepay/asyncEstimates', e)
     }
     finally {
       isEstimatesLoading.value = false
@@ -289,10 +316,11 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       }
     }
     if (!collateralVault.value) return
+    updateSyncEstimates()
     if (!isEstimatesLoading.value) {
       isEstimatesLoading.value = true
     }
-    updateEstimates()
+    updateAsyncEstimates()
   })
 
   const initEstimates = () => {

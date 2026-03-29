@@ -9,7 +9,9 @@ import { useToast } from '~/components/ui/composables/useToast'
 import {
   type AnyBorrowVaultPair,
   type Vault,
+  type ProjectedRates,
   convertAssetsToShares,
+  getProjectedRates,
 } from '~/entities/vault'
 import {
   getAssetUsdValue,
@@ -271,23 +273,84 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     return multiplySupplyValueUsd.value + (multiplyLongValueUsd.value || 0)
   })
 
+  // --- Projected rates ---
+  const projectedSupplyRates = ref<ProjectedRates | null>(null)
+  const projectedLongRates = ref<ProjectedRates | null>(null)
+  const projectedBorrowRates = ref<ProjectedRates | null>(null)
+
+  watchEffect(async () => {
+    const supply = multiplySupplyVault.value
+    const short = multiplyShortVault.value
+    const long = multiplyLongVault.value
+    const supplyNano = multiplySupplyAmountNano.value
+    const debtNano = multiplyDebtAmountNano.value
+    const swapOut = multiplySwapAmountOut.value
+
+    if (!supply || !short || !long || !supplyNano || !debtNano) {
+      projectedSupplyRates.value = null
+      projectedLongRates.value = null
+      projectedBorrowRates.value = null
+      return
+    }
+
+    try {
+      const supplyAndLongSameVault = normalizeAddress(supply.address) === normalizeAddress(long.address)
+
+      if (supplyAndLongSameVault) {
+        // Combined delta for supply + long vault
+        const [combined, shortResult] = await Promise.all([
+          getProjectedRates(supply.address, supply.interestRateInfo.cash, supply.interestRateInfo.borrows, supplyNano + swapOut, 0n),
+          getProjectedRates(short.address, short.interestRateInfo.cash, short.interestRateInfo.borrows, -debtNano, debtNano),
+        ])
+        projectedSupplyRates.value = combined
+        projectedLongRates.value = combined
+        projectedBorrowRates.value = shortResult
+      }
+      else {
+        const [supplyResult, shortResult, longResult] = await Promise.all([
+          getProjectedRates(supply.address, supply.interestRateInfo.cash, supply.interestRateInfo.borrows, supplyNano, 0n),
+          getProjectedRates(short.address, short.interestRateInfo.cash, short.interestRateInfo.borrows, -debtNano, debtNano),
+          getProjectedRates(long.address, long.interestRateInfo.cash, long.interestRateInfo.borrows, swapOut, 0n),
+        ])
+        projectedSupplyRates.value = supplyResult
+        projectedLongRates.value = longResult
+        projectedBorrowRates.value = shortResult
+      }
+    }
+    catch (e) {
+      logWarn('multiply/projectedRates', e)
+      projectedSupplyRates.value = null
+      projectedLongRates.value = null
+      projectedBorrowRates.value = null
+    }
+  })
+
   // --- APYs ---
   const multiplySupplyApy = computed(() => {
     if (!multiplySupplyVault.value) return null
-    const base = nanoToValue(multiplySupplyVault.value.interestRateInfo.supplyAPY || 0n, 25)
-    return withIntrinsicSupplyApy(base, multiplySupplyVault.value.asset.address) + getSupplyRewardApy(multiplySupplyVault.value.address)
+    const currentRaw = nanoToValue(multiplySupplyVault.value.interestRateInfo.supplyAPY || 0n, 25)
+    const base = withIntrinsicSupplyApy(currentRaw, multiplySupplyVault.value.asset.address) + getSupplyRewardApy(multiplySupplyVault.value.address)
+    if (!projectedSupplyRates.value) return base
+    const projectedRaw = nanoToValue(projectedSupplyRates.value.supplyAPY, 25)
+    return base + (projectedRaw - currentRaw)
   })
 
   const multiplyLongApy = computed(() => {
     if (!multiplyLongVault.value) return null
-    const base = nanoToValue(multiplyLongVault.value.interestRateInfo.supplyAPY || 0n, 25)
-    return withIntrinsicSupplyApy(base, multiplyLongVault.value.asset.address) + getSupplyRewardApy(multiplyLongVault.value.address)
+    const currentRaw = nanoToValue(multiplyLongVault.value.interestRateInfo.supplyAPY || 0n, 25)
+    const base = withIntrinsicSupplyApy(currentRaw, multiplyLongVault.value.asset.address) + getSupplyRewardApy(multiplyLongVault.value.address)
+    if (!projectedLongRates.value) return base
+    const projectedRaw = nanoToValue(projectedLongRates.value.supplyAPY, 25)
+    return base + (projectedRaw - currentRaw)
   })
 
   const multiplyBorrowApy = computed(() => {
     if (!multiplyShortVault.value) return null
-    const base = nanoToValue(multiplyShortVault.value.interestRateInfo.borrowAPY || 0n, 25)
-    return withIntrinsicBorrowApy(base, multiplyShortVault.value.asset.address) - getBorrowRewardApy(multiplyShortVault.value.address, multiplySupplyVault.value?.address)
+    const currentRaw = nanoToValue(multiplyShortVault.value.interestRateInfo.borrowAPY || 0n, 25)
+    const base = withIntrinsicBorrowApy(currentRaw, multiplyShortVault.value.asset.address) - getBorrowRewardApy(multiplyShortVault.value.address, multiplySupplyVault.value?.address)
+    if (!projectedBorrowRates.value) return base
+    const projectedRaw = nanoToValue(projectedBorrowRates.value.borrowAPY, 25)
+    return base + (projectedRaw - currentRaw)
   })
 
   const multiplyWeightedSupplyApy = computed(() => {

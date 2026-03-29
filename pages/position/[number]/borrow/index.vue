@@ -4,7 +4,7 @@ import { FixedPoint } from '~/utils/fixed-point'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
-import { type BorrowVaultPair, getNetAPY, type VaultAsset } from '~/entities/vault'
+import { type BorrowVaultPair, getNetAPY, getProjectedRates, type VaultAsset } from '~/entities/vault'
 import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
 import { getAssetUsdValueOrZero, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatio } from '~/services/pricing/priceProvider'
 import { getTotalCollateralValue } from '~/utils/position-estimates'
@@ -22,7 +22,7 @@ const _route = useRoute()
 const modal = useModal()
 const { error } = useToast()
 const { buildBorrowPlan, executeTxPlan } = useEulerOperations()
-const { getBorrowVaultPair, updateVault } = useVaults()
+const { getBorrowVaultPair } = useVaults()
 const { isConnected, address } = useAccount()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, getPositionBySubAccountIndex } = useEulerAccount()
@@ -338,44 +338,62 @@ const onBorrowInput = async () => {
 const onLtvInput = () => {
   isLtvDriven.value = true
 }
-const updateEstimates = useDebounceFn(async () => {
-  if (!pair.value) {
-    return
-  }
-  await Promise.all([updateVault(collateralVault.value!.address), updateVault(borrowVault.value!.address)])
+const updateSyncEstimates = () => {
+  if (!pair.value) return
   try {
-    // Use LTV from the ratio-based slider (accounts for all collaterals)
     const newLtvFloat = ltvFixed.value.toUnsafeFloat()
     health.value = newLtvFloat <= 0
       ? Infinity
       : (Number(pair.value?.liquidationLTV || 0n) / 100) / newLtvFloat
     liquidationPrice.value = health.value < 1 ? undefined : priceFixed.value.toUnsafeFloat() / health.value
-    // borrowAmount is the ADDITIONAL borrow; estimate Net APY using total borrow
-    const existingBorrow = nanoToValue(position.value?.borrowed || 0n, borrowVault.value!.decimals)
+  }
+  catch (e) {
+    logWarn('borrow-more/syncEstimates', e)
+    health.value = undefined
+    liquidationPrice.value = undefined
+  }
+}
+
+const updateAsyncEstimates = useDebounceFn(async () => {
+  if (!pair.value || !borrowVault.value || !collateralVault.value) return
+  try {
+    const additionalBorrowNano = valueToNano(borrowAmount.value || '0', borrowVault.value.decimals)
+    const existingBorrow = nanoToValue(position.value?.borrowed || 0n, borrowVault.value.decimals)
     const totalBorrow = existingBorrow + (+borrowAmount.value || 0)
-    const [collateralUsd, borrowUsd] = await Promise.all([
+
+    const [borrowProjected, collateralUsd, borrowUsd] = await Promise.all([
+      getProjectedRates(
+        borrowVault.value.address,
+        borrowVault.value.interestRateInfo.cash,
+        borrowVault.value.interestRateInfo.borrows,
+        -additionalBorrowNano,
+        additionalBorrowNano,
+      ),
       getAssetUsdValueOrZero(+collateralAmount.value || 0, collateralVault.value!, 'off-chain'),
       getAssetUsdValueOrZero(totalBorrow, borrowVault.value!, 'off-chain'),
     ])
+
+    const currentRawBorrowApy = nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25)
+    const projectedRawBorrowApy = nanoToValue(borrowProjected.borrowAPY, 25)
+    const projectedBorrowApy = borrowApy.value + (projectedRawBorrowApy - currentRawBorrowApy)
+
     netAPY.value = getNetAPY(
       collateralUsd,
       collateralSupplyApy.value,
       borrowUsd,
-      borrowApy.value,
+      projectedBorrowApy,
       collateralSupplyRewardApy.value || null,
       borrowRewardApy.value || null,
     )
   }
   catch (e) {
-    console.warn(e)
-    health.value = undefined
-    liquidationPrice.value = undefined
+    logWarn('borrow-more/asyncEstimates', e)
     netAPY.value = undefined
   }
   finally {
     isEstimatesLoading.value = false
   }
-}, 1000)
+}, 500)
 
 watch(isPositionsLoaded, (val) => {
   if (val) {
@@ -393,10 +411,11 @@ watch([collateralAmount, borrowAmount], async () => {
   if (!pair.value) {
     return
   }
+  updateSyncEstimates()
   if (!isEstimatesLoading.value) {
     isEstimatesLoading.value = true
   }
-  updateEstimates()
+  updateAsyncEstimates()
 })
 </script>
 

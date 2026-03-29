@@ -11,6 +11,7 @@ import {
   type Vault,
   type SecuritizeVault,
   type VaultAsset,
+  getProjectedRates,
 } from '~/entities/vault'
 import { isSecuritizeVault } from '~/entities/vault/factory'
 import { getSubAccountAddress } from '~/entities/account'
@@ -423,12 +424,10 @@ const send = async () => {
     isSubmitting.value = false
   }
 }
-const updateEstimates = useDebounceFn(async () => {
+const updateSyncEstimates = () => {
   clearSimulationError()
   estimatesError.value = ''
-  if (!vault.value) {
-    return
-  }
+  if (!vault.value) return
   try {
     if (assetsBalance.value < amountFixed.value.value) {
       throw new Error('Not enough balance')
@@ -442,13 +441,34 @@ const updateEstimates = useDebounceFn(async () => {
     }
 
     delta.value = assetsBalance.value - amountFixed.value.value
-    estimateSupplyAPY.value = vault.value.interestRateInfo.supplyAPY
   }
   catch (e) {
-    console.warn(e)
+    logWarn('lend-withdraw/syncEstimates', e)
     delta.value = assetsBalance.value || 0n
-    estimateSupplyAPY.value = vault.value?.interestRateInfo.supplyAPY || 0n
     estimatesError.value = (e as { message: string }).message
+  }
+}
+
+const updateAsyncEstimates = useDebounceFn(async () => {
+  if (!vault.value || isSecuritizeVaultType.value) {
+    isEstimatesLoading.value = false
+    return
+  }
+  try {
+    const v = vault.value as Vault
+    const amountNano = valueToNano(amount.value, v.decimals)
+    const projected = await getProjectedRates(
+      v.address,
+      v.interestRateInfo.cash,
+      v.interestRateInfo.borrows,
+      -amountNano,
+      0n,
+    )
+    estimateSupplyAPY.value = projected.supplyAPY
+  }
+  catch (e) {
+    logWarn('lend-withdraw/asyncEstimates', e)
+    estimateSupplyAPY.value = (vault.value as Vault)?.interestRateInfo.supplyAPY || 0n
   }
   finally {
     isEstimatesLoading.value = false
@@ -464,14 +484,12 @@ watch([isConnected, effectiveAddress], async () => {
   }
 })
 watch(amount, async () => {
-  clearSimulationError()
-  if (!vault.value) {
-    return
-  }
+  updateSyncEstimates()
+  if (!vault.value) return
   if (!isEstimatesLoading.value) {
     isEstimatesLoading.value = true
   }
-  updateEstimates()
+  updateAsyncEstimates()
   if (needsSwap.value) {
     resetSwapQuoteState()
     requestSwapQuote()
