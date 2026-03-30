@@ -77,6 +77,7 @@ export const clearStaleBackendCache = () => {
  */
 export const clearBackendCache = () => {
   priceCache.clear()
+  inFlight.clear()
 
   // Cancel pending batch: resolve all with undefined so callers get no data
   // rather than stale cross-chain prices
@@ -106,6 +107,12 @@ let pendingRequests: PendingRequest[] = []
 let batchTimeout: ReturnType<typeof setTimeout> | null = null
 
 /**
+ * In-flight fetch promises keyed by `chainId:address` (lowercase).
+ * Prevents duplicate network requests for addresses already being fetched.
+ */
+const inFlight = new Map<string, Promise<BackendPriceData | undefined>>()
+
+/**
  * Execute all pending requests as a batched call.
  */
 const executeBatch = async () => {
@@ -125,19 +132,42 @@ const executeBatch = async () => {
 
   // Execute batched requests for each chain
   for (const [chainId, chainRequests] of byChain.entries()) {
-    const addresses = [...new Set(chainRequests.map(r => r.address))]
+    // Split: piggyback on in-flight vs need new fetch
+    const needFetch: PendingRequest[] = []
+    for (const req of chainRequests) {
+      const flightKey = getCacheKey(req.address, chainId)
+      const existing = inFlight.get(flightKey)
+      if (existing) {
+        existing.then(data => req.resolve(data), err => req.reject(err))
+      }
+      else {
+        needFetch.push(req)
+      }
+    }
+
+    if (needFetch.length === 0) continue
+
+    const addresses = [...new Set(needFetch.map(r => r.address))]
+
+    // Register in-flight promises so later batches piggyback
+    const fetchPromise = fetchBackendPricesBatch(addresses, chainId)
+    for (const addr of addresses) {
+      const flightKey = getCacheKey(addr, chainId)
+      const addrPromise = fetchPromise.then(results => results?.get(addr.toLowerCase()))
+      inFlight.set(flightKey, addrPromise)
+      addrPromise.finally(() => inFlight.delete(flightKey))
+    }
 
     try {
-      const results = await fetchBackendPricesBatch(addresses, chainId)
+      const results = await fetchPromise
 
-      // Resolve each pending request
-      for (const req of chainRequests) {
+      for (const req of needFetch) {
         const data = results?.get(req.address.toLowerCase())
         req.resolve(data)
       }
     }
     catch (err) {
-      for (const req of chainRequests) {
+      for (const req of needFetch) {
         req.reject(err)
       }
     }
