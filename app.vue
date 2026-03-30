@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
+import { useModal } from '~/components/ui/composables/useModal'
+import { MigrationAnnouncementModal } from '#components'
 
 const route = useRoute()
 const router = useRouter()
@@ -71,8 +73,24 @@ watch(route, () => {
   })
 }, { immediate: true })
 
+const checkMigrationAnnouncement = () => {
+  const { migrationAnnouncementUrl } = useDeployConfig()
+  if (!migrationAnnouncementUrl) return
+
+  const seen = useLocalStorage('migration-announcement-seen', false)
+  if (seen.value) return
+
+  const modal = useModal()
+  modal.open(MigrationAnnouncementModal, {
+    props: {
+      announcementUrl: migrationAnnouncementUrl,
+    },
+  })
+}
+
 await loadEulerConfig()
 checkOnboarding()
+onMounted(checkMigrationAnnouncement)
 
 watch(chainId, () => {
   resetVaultsState()
