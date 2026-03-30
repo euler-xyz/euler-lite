@@ -70,7 +70,6 @@ function parseEnvOrigins(): { connect: string[], img: string[] } {
   const connectVars = [
     env('EULER_API_URL', 'NUXT_PUBLIC_EULER_API_URL'),
     env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL'),
-    env('PRICE_API_URL', 'NUXT_PUBLIC_PRICE_API_URL'),
     // Pyth Hermes is proxied through /api/pyth/updates — no external origin needed
     // Dynamic per-chain URLs (RPC for wagmi, subgraph for GraphQL)
     ...scanDynamicEnvUrls(),

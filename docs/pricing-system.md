@@ -19,11 +19,11 @@ The pricing functions support two price sources:
 
 ### Backend Configuration
 
-Configure the backend URL in `entities/config.ts`:
+Configure the backend URL via environment variable:
 
 ```bash
 # In .env or Doppler
-PRICE_API_URL=https://api.example.com/prices  # Empty = disabled
+EULER_API_URL=https://your-euler-api.com  # Empty = prices disabled (on-chain only)
 ```
 
 Use `usePriceBackend()` composable to access the configuration:
@@ -40,12 +40,12 @@ const price = await getAssetUsdPrice(vault, 'off-chain', backendConfig.value)
 The backend client (`services/pricing/backendClient.ts`) provides price fetching with automatic optimizations:
 
 **Types:**
-- `BackendPriceData` - Response shape: `{ address, price: number, source, symbol, timestamp }`
-- `BackendPriceResponse` - `Record<string, BackendPriceData>` keyed by lowercase address
+- `BackendPriceData` - Response shape: `{ chainId, address, symbol, priceUsd: number, source, timestamp: string }`
 
 **API Endpoint:**
-- URL: `GET /v1/prices?chainId={chainId}&assets={addr1},{addr2},...`
-- Response: Flat object keyed by lowercase address
+- URL: `GET /v3/prices?chainId={chainId}&addresses={addr1},{addr2},...`
+- Response: `{ data: BackendPriceData[], meta: { ... } }`
+- Max 100 addresses per request (chunked automatically)
 
 **Caching:**
 - TTL: 60 seconds

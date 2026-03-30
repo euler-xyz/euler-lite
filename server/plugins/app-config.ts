@@ -40,7 +40,6 @@ function readAppConfig() {
     appUrl: env('NUXT_PUBLIC_APP_URL'),
     eulerApiUrl: env('EULER_API_URL', 'NUXT_PUBLIC_EULER_API_URL'),
     swapApiUrl: env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL'),
-    priceApiUrl: env('PRICE_API_URL', 'NUXT_PUBLIC_PRICE_API_URL'),
   }
 }
 

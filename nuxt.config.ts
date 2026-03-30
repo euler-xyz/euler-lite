@@ -133,7 +133,6 @@ export default defineNuxtConfig({
       pythHermesUrl: '',
       eulerApiUrl: '',
       swapApiUrl: '',
-      priceApiUrl: '',
     },
   },
 

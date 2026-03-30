@@ -14,7 +14,6 @@ interface EulerApiToken {
   symbol: string
   decimals: number
   logoURI: string
-  metadata?: { provider: string }
 }
 
 interface TokenEntry {
@@ -42,16 +41,32 @@ async function fetchEulerApi(chainId: number): Promise<TokenEntry[]> {
   if (cached) return cached
 
   try {
-    const url = process.env.EULER_API_URL || process.env.NUXT_PUBLIC_EULER_API_URL
-    if (!url) return []
+    const baseUrl = process.env.EULER_API_URL || process.env.NUXT_PUBLIC_EULER_API_URL
+    if (!baseUrl) return []
 
-    const resp = await fetchWithTimeout(`${url}/v1/tokens?chainId=${chainId}`, TIMEOUT_MS)
-    if (!resp.ok) {
-      throw new Error(`Euler API returned ${resp.status}`)
+    const PAGE_LIMIT = 100
+    const allTokens: EulerApiToken[] = []
+    let offset = 0
+    let hasMore = true
+
+    while (hasMore) {
+      const resp = await fetchWithTimeout(
+        `${baseUrl}/v3/tokens?chainId=${chainId}&limit=${PAGE_LIMIT}&offset=${offset}`,
+        TIMEOUT_MS,
+      )
+      if (!resp.ok) {
+        throw new Error(`Euler API returned ${resp.status}`)
+      }
+
+      const body = await resp.json()
+      const page: EulerApiToken[] = body.data || []
+      allTokens.push(...page)
+      offset += PAGE_LIMIT
+      hasMore = body.meta?.hasMore === true
+        || (body.meta?.total != null && offset < body.meta.total)
     }
 
-    const data = (await resp.json()) as EulerApiToken[]
-    const tokens: TokenEntry[] = data.map(t => ({
+    const tokens: TokenEntry[] = allTokens.map(t => ({
       chainId: t.chainId,
       address: t.address,
       name: t.name,

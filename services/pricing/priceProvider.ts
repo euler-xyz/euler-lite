@@ -222,7 +222,7 @@ export const getUnitOfAccountUsdRate = async (
         vault.unitOfAccount as `0x${string}`,
       )
       if (backendPrice) {
-        const rate = backendPriceToBigInt(backendPrice.price)
+        const rate = backendPriceToBigInt(backendPrice.priceUsd)
         if (rate > 0n) return rate
       }
     }
@@ -272,7 +272,7 @@ const usesUtilsLensPricing = (vault: AnyVault | null | undefined): boolean => {
  * Convert backend price data to PriceResult format.
  */
 const backendPriceToPriceResult = (data: BackendPriceData): PriceResult | undefined => {
-  const mid = backendPriceToBigInt(data.price)
+  const mid = backendPriceToBigInt(data.priceUsd)
   if (mid <= 0n) return undefined
   return { amountOutMid: mid, amountOutAsk: mid, amountOutBid: mid }
 }

@@ -7,26 +7,19 @@ import { logWarn } from '~/utils/errorHandling'
 // -------------------------------------------
 
 /**
- * Response shape from the price backend (indexer /v1/prices endpoint).
+ * Price entry from the v3 /prices endpoint.
  */
 export type BackendPriceData = {
-  /** Asset address */
+  chainId: number
   address: string
-  /** Price in USD as number */
-  price: number
-  /** Price source (e.g., "pyth", "defillama") */
-  source: string
-  /** Asset symbol */
   symbol: string
-  /** Unix timestamp when this price was recorded */
-  timestamp: number
+  priceUsd: number
+  source: string
+  timestamp: string // ISO-8601
 }
 
-/**
- * Response from /v1/prices endpoint.
- * Flat object keyed by lowercase address.
- */
-export type BackendPriceResponse = Record<string, BackendPriceData>
+/** Max addresses per v3 /prices request. */
+const V3_MAX_ADDRESSES = 100
 
 // -------------------------------------------
 // Configuration
@@ -190,43 +183,42 @@ const fetchBackendPricesBatch = async (
   }
 
   try {
-    // Build request URL
-    const url = new URL('/v1/prices', backendEndpoint)
-    url.searchParams.set('chainId', String(effectiveChainId))
-    url.searchParams.set('assets', missingAddresses.join(','))
-
-    const response = await fetch(url.toString(), {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-      },
-    })
-
-    if (!response.ok) {
-      return results.size > 0 ? results : undefined
+    // v3 API caps at 100 addresses per request — chunk and fetch in parallel
+    const chunks: Address[][] = []
+    for (let i = 0; i < missingAddresses.length; i += V3_MAX_ADDRESSES) {
+      chunks.push(missingAddresses.slice(i, i + V3_MAX_ADDRESSES))
     }
 
-    const data: BackendPriceResponse = await response.json()
+    const fetchChunk = async (chunk: Address[]) => {
+      const url = new URL('/v3/prices', backendEndpoint)
+      url.searchParams.set('chainId', String(effectiveChainId))
+      url.searchParams.set('addresses', chunk.join(','))
 
-    // Map response to results and update cache
-    // Response is a flat object keyed by address
-    for (const [address, priceData] of Object.entries(data)) {
-      const normalizedAddr = address.toLowerCase()
-      results.set(normalizedAddr, priceData)
-
-      // Update cache
-      const key = getCacheKey(address, effectiveChainId)
-      priceCache.set(key, {
-        data: priceData,
-        fetchedAt: now,
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
       })
+
+      if (!response.ok) return
+
+      const body = await response.json()
+      const prices: BackendPriceData[] = body.data || []
+
+      for (const priceData of prices) {
+        const normalizedAddr = priceData.address.toLowerCase()
+        results.set(normalizedAddr, priceData)
+
+        const key = getCacheKey(priceData.address, effectiveChainId)
+        priceCache.set(key, { data: priceData, fetchedAt: now })
+      }
     }
 
-    return results
+    await Promise.allSettled(chunks.map(fetchChunk))
+
+    return results.size > 0 ? results : undefined
   }
   catch (err) {
     logWarn('backendClient/fetchPrices', err)
-    // Return cached results if we have any
     return results.size > 0 ? results : undefined
   }
 }
@@ -290,9 +282,8 @@ export const fetchBackendPrice = async (
 const _ONE_18 = 10n ** 18n
 
 /**
- * Convert backend price to bigint (18 decimals).
- * Accepts both string (legacy) and number (current API) formats.
- * Use this to convert backend prices to the same format as on-chain prices.
+ * Convert a USD price to bigint (18 decimals).
+ * Accepts both string and number formats.
  */
 export const backendPriceToBigInt = (price: string | number): bigint => {
   try {

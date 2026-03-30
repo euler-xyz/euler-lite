@@ -214,7 +214,7 @@ watch(selectedAsset, async () => {
       ? resolveWrappedNativeAddress(chainId.value!) || selectedAsset.value.address
       : selectedAsset.value.address
     const priceData = await fetchBackendPrice(priceAddr as Address)
-    swapAssetUsdPrice.value = priceData?.price
+    swapAssetUsdPrice.value = priceData?.priceUsd
   }
   else {
     swapAssetUsdPrice.value = undefined

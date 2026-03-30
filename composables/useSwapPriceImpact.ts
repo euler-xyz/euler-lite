@@ -18,9 +18,9 @@ const getTokenUsdValue = async (
     return getAssetUsdValue(amount, vault, 'off-chain')
   }
   const priceData = await fetchBackendPrice(tokenAddress as Address)
-  if (!priceData?.price) return undefined
+  if (!priceData?.priceUsd) return undefined
   const tokenAmount = Number(formatUnits(amount, decimals))
-  return tokenAmount * priceData.price
+  return tokenAmount * priceData.priceUsd
 }
 
 export const useSwapPriceImpact = (options: {
