@@ -449,11 +449,14 @@ const updateSyncEstimates = () => {
   }
 }
 
+const estimatesGuard = createRaceGuard()
+
 const updateAsyncEstimates = useDebounceFn(async () => {
   if (!vault.value || isSecuritizeVaultType.value) {
     isEstimatesLoading.value = false
     return
   }
+  const gen = estimatesGuard.next()
   try {
     const v = vault.value as Vault
     const amountNano = valueToNano(amount.value, v.decimals)
@@ -464,14 +467,18 @@ const updateAsyncEstimates = useDebounceFn(async () => {
       -amountNano,
       0n,
     )
+    if (estimatesGuard.isStale(gen)) return
     estimateSupplyAPY.value = projected?.supplyAPY ?? v.interestRateInfo.supplyAPY
   }
   catch (e) {
+    if (estimatesGuard.isStale(gen)) return
     logWarn('lend-withdraw/asyncEstimates', e)
     estimateSupplyAPY.value = (vault.value as Vault)?.interestRateInfo.supplyAPY || 0n
   }
   finally {
-    isEstimatesLoading.value = false
+    if (!estimatesGuard.isStale(gen)) {
+      isEstimatesLoading.value = false
+    }
   }
 }, 500)
 
