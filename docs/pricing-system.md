@@ -53,7 +53,7 @@ The backend client (`services/pricing/backendClient.ts`) provides price fetching
 - Stale entries cleared automatically
 
 **Request Batching:**
-- 50ms debounce window
+- 100ms debounce window
 - Requests grouped by chainId
 - Addresses deduplicated within batch
 
@@ -411,7 +411,7 @@ Located in `utils/pyth.ts`:
 - `collectPythFeedsFromVaults(vaults, maxDepth?)` - Collect from multiple vaults, deduplicated
 
 **Price/Update Fetching:**
-- `fetchPythUpdateData(feedIds, endpoint)` - Fetch update data via `/api/pyth/updates` proxy (50ms batching, 15s cache)
+- `fetchPythUpdateData(feedIds, endpoint)` - Fetch update data via `/api/pyth/updates` proxy (100ms batching, 15s cache)
 - `fetchPythPrices(feedIds, endpoint, cacheTtlMs?)` - Fetch actual price values
 
 **Batch Building:**

@@ -244,7 +244,7 @@ The backend (`services/pricing/backendClient.ts`) provides off-chain prices from
 
 - **Endpoint**: `GET /v3/prices?chainId={id}&addresses={addr1,addr2,...}`
 - **Response**: `{ data: [{ chainId, address, symbol, priceUsd, source, timestamp }], meta }`
-- **Batching**: Requests within a 50ms window are combined into a single HTTP call
+- **Batching**: Requests within a 100ms window are combined into a single HTTP call
 - **Cache**: 60-second TTL per asset per chain
 
 The backend is a **soft fallback** - on-chain pricing is always available. The backend is preferred for display-only values (portfolio totals) because it avoids the latency of multiple RPC calls.
@@ -308,7 +308,7 @@ This is a `staticCall` - no transaction is sent, no gas is spent, and the state 
 
 `fetchPythUpdateData()` fetches price update payloads from the Pyth Hermes API with two optimizations:
 
-- **Request batching**: Multiple calls within a 50ms window are grouped by endpoint, with all unique feed IDs combined into a single HTTP request.
+- **Request batching**: Multiple calls within a 100ms window are grouped by endpoint, with all unique feed IDs combined into a single HTTP request.
 - **Caching**: Results are cached for 15 seconds to avoid redundant network requests when multiple vaults share the same Pyth feeds.
 
 ### Where Pyth Simulation Is Used
