@@ -33,7 +33,7 @@
     "@reown/appkit-adapter-wagmi": "1.8.19",
     "@tanstack/vue-query": "5.95.2",
     "@vueuse/nuxt": "13.3.0",
-    "@wagmi/core": "^2.22.1",
+    "@wagmi/core": "^3.4.1",
     "@wagmi/vue": "0.5.1",
     "axios": "1.13.6",
     "chart.js": "4.5.1",
