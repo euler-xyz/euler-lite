@@ -494,23 +494,40 @@ const updateEstimates = useDebounceFn(async () => {
   if (!isVaultLoaded.value) return
   try {
     if (features.value.hasInterestRate && evkVault.value) {
-      const projected = await getProjectedRates(
-        evkVault.value.address,
-        evkVault.value.interestRateInfo.cash,
-        evkVault.value.interestRateInfo.borrows,
-        valueToNano(amount.value, evkVault.value.decimals),
-        0n,
-      )
-      estimateSupplyAPY.value = projected.supplyAPY + valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
-      monthlyEarnings.value = !amount.value
+      // When swapping, use the swap output amount (vault-asset denominated)
+      const supplyNano = needsSwap.value
+        ? BigInt(swapEffectiveQuote.value?.amountOut || 0)
+        : valueToNano(amount.value, evkVault.value.decimals)
+
+      if (needsSwap.value && !supplyNano) {
+        // No swap quote yet — skip projection, keep current rate
+        estimateSupplyAPY.value = evkVault.value.interestRateInfo.supplyAPY + valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
+      }
+      else {
+        const projected = await getProjectedRates(
+          evkVault.value.address,
+          evkVault.value.interestRateInfo.cash,
+          evkVault.value.interestRateInfo.borrows,
+          supplyNano,
+          0n,
+        )
+        const rawAPY = projected?.supplyAPY ?? evkVault.value.interestRateInfo.supplyAPY
+        estimateSupplyAPY.value = rawAPY + valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
+      }
+
+      const supplyAmount = needsSwap.value
+        ? nanoToValue(BigInt(swapEffectiveQuote.value?.amountOut || 0), Number(evkVault.value.decimals))
+        : +(amount.value || 0)
+      monthlyEarnings.value = supplyAmount <= 0
         ? 0
-        : (+(amount.value || 0) * nanoToValue(estimateSupplyAPY.value, 27)) / 12
+        : supplyAmount * (nanoToValue(estimateSupplyAPY.value, 27) / 12)
     }
     else {
       estimateSupplyAPY.value = valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
-      monthlyEarnings.value = !amount.value
+      const supplyAmount = +(amount.value || 0)
+      monthlyEarnings.value = supplyAmount <= 0
         ? 0
-        : (+(amount.value || 0) * nanoToValue(estimateSupplyAPY.value, 27)) / 12
+        : supplyAmount * (nanoToValue(estimateSupplyAPY.value, 27) / 12)
     }
   }
   catch (e) {

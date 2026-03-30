@@ -507,10 +507,9 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
         getAssetUsdValueOrZero(position.value!.borrowed || 0n, borrowVault.value!, 'off-chain'),
       ])
 
-      const projectedSupplyApy = withIntrinsicSupplyApy(
-        nanoToValue(projected.supplyAPY, 25),
-        collateralVault.value?.asset.address,
-      )
+      const projectedSupplyApy = projected
+        ? withIntrinsicSupplyApy(nanoToValue(projected.supplyAPY, 25), collateralVault.value?.asset.address)
+        : collateralSupplyApy.value
 
       estimateNetAPY.value = getNetAPY(
         collateralUsd,

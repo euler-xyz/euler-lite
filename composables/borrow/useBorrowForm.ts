@@ -518,18 +518,18 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         ),
         borrowNeedsSwap.value && borrowSwapAssetUsdPrice.value
           ? Promise.resolve((+collateralAmount.value || 0) * borrowSwapAssetUsdPrice.value)
-          : getAssetUsdValueOrZero(+collateralAmount.value || 0, collateralVault.value!, 'off-chain'),
-        getAssetUsdValueOrZero(+borrowAmount.value || 0, borrowVault.value!, 'off-chain'),
+          : getAssetUsdValueOrZero(collateralAmountNano, collateralVault.value!, 'off-chain'),
+        getAssetUsdValueOrZero(borrowAmountNano, borrowVault.value!, 'off-chain'),
       ])
 
       // Apply projected rate deltas on top of current APYs (which include intrinsic APY)
-      const currentRawSupplyApy = nanoToValue(collateralVault.value.interestRateInfo.supplyAPY, 25)
-      const projectedRawSupplyApy = nanoToValue(collateralProjected.supplyAPY, 25)
-      const projectedSupplyApy = collateralSupplyApy.value + (projectedRawSupplyApy - currentRawSupplyApy)
+      const projectedSupplyApy = collateralProjected
+        ? collateralSupplyApy.value + (nanoToValue(collateralProjected.supplyAPY, 25) - nanoToValue(collateralVault.value.interestRateInfo.supplyAPY, 25))
+        : collateralSupplyApy.value
 
-      const currentRawBorrowApy = nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25)
-      const projectedRawBorrowApy = nanoToValue(borrowProjected.borrowAPY, 25)
-      const projectedBorrowApy = borrowApy.value + (projectedRawBorrowApy - currentRawBorrowApy)
+      const projectedBorrowApy = borrowProjected
+        ? borrowApy.value + (nanoToValue(borrowProjected.borrowAPY, 25) - nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25))
+        : borrowApy.value
 
       netAPY.value = getNetAPY(
         collateralUsdValue,

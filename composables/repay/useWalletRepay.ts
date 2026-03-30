@@ -257,9 +257,9 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
         getAssetUsdValueOrZero(remainingBorrow > 0n ? remainingBorrow : 0n, borrowVault.value, 'off-chain'),
       ])
 
-      const currentRawBorrowApy = nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25)
-      const projectedRawBorrowApy = nanoToValue(projected.borrowAPY, 25)
-      const projectedBorrowApy = borrowApy.value + (projectedRawBorrowApy - currentRawBorrowApy)
+      const projectedBorrowApy = projected
+        ? borrowApy.value + (nanoToValue(projected.borrowAPY, 25) - nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25))
+        : borrowApy.value
 
       _estimateNetAPY.value = getNetAPY(
         supplyUsd,

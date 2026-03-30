@@ -373,9 +373,9 @@ const updateAsyncEstimates = useDebounceFn(async () => {
       getAssetUsdValueOrZero(totalBorrow, borrowVault.value!, 'off-chain'),
     ])
 
-    const currentRawBorrowApy = nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25)
-    const projectedRawBorrowApy = nanoToValue(borrowProjected.borrowAPY, 25)
-    const projectedBorrowApy = borrowApy.value + (projectedRawBorrowApy - currentRawBorrowApy)
+    const projectedBorrowApy = borrowProjected
+      ? borrowApy.value + (nanoToValue(borrowProjected.borrowAPY, 25) - nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25))
+      : borrowApy.value
 
     netAPY.value = getNetAPY(
       collateralUsd,

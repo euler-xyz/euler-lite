@@ -9,27 +9,25 @@ export interface ProjectedRates {
   borrowAPY: bigint // 27 decimals
 }
 
-const ZERO_RATES: ProjectedRates = { supplyAPY: 0n, borrowAPY: 0n }
-
 export const getProjectedRates = async (
   vaultAddress: string,
   currentCash: bigint,
   currentBorrows: bigint,
   cashDelta: bigint,
   borrowsDelta: bigint,
-): Promise<ProjectedRates> => {
+): Promise<ProjectedRates | null> => {
   const { client: rpcClient } = useRpcClient()
   const { eulerLensAddresses } = useEulerAddresses()
 
   if (!eulerLensAddresses.value?.vaultLens) {
-    return ZERO_RATES
+    return null
   }
 
   const adjustedCash = currentCash + cashDelta < 0n ? 0n : currentCash + cashDelta
   const adjustedBorrows = currentBorrows + borrowsDelta < 0n ? 0n : currentBorrows + borrowsDelta
 
   if (adjustedCash === 0n && adjustedBorrows === 0n) {
-    return ZERO_RATES
+    return { supplyAPY: 0n, borrowAPY: 0n }
   }
 
   const result = await rpcClient.value!.readContract({
@@ -41,7 +39,7 @@ export const getProjectedRates = async (
   }) as Record<string, any>
 
   if (result.queryFailure || !result.interestRateInfo?.length) {
-    return ZERO_RATES
+    return null
   }
 
   const info = result.interestRateInfo[0]

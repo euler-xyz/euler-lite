@@ -464,7 +464,7 @@ const updateAsyncEstimates = useDebounceFn(async () => {
       -amountNano,
       0n,
     )
-    estimateSupplyAPY.value = projected.supplyAPY
+    estimateSupplyAPY.value = projected?.supplyAPY ?? v.interestRateInfo.supplyAPY
   }
   catch (e) {
     logWarn('lend-withdraw/asyncEstimates', e)
