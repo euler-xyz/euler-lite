@@ -43,10 +43,13 @@ export default defineEventHandler((event) => {
     allowedOrigins = parseAllowedOrigins()
   }
 
-  const rawCountry = event.node.req.headers['x-country-code']
-  const country = (typeof rawCountry === 'string' && /^[A-Z]{2}$/.test(rawCountry))
-    ? rawCountry
-    : undefined
+  // Strip any client-supplied x-country-code to prevent geo-blocking bypass.
+  // The authoritative value comes from Cloudflare's CF-IPCountry header which is
+  // set by their edge network and cannot be modified by clients.
+  delete event.node.req.headers['x-country-code']
+
+  const cfCountry = (event.node.req.headers['cf-ipcountry'] as string | undefined)?.toUpperCase()
+  const country = (cfCountry && /^[A-Z]{2}$/.test(cfCountry) && cfCountry !== 'XX') ? cfCountry : undefined
   if (country) {
     setResponseHeader(event, 'x-country-code', country)
   }
