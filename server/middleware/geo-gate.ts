@@ -18,7 +18,7 @@ export default defineEventHandler((event) => {
   // DEV_GEO_COUNTRY allows simulating any country for testing geo-blocks locally.
   if (!country && process.env.DOPPLER_ENVIRONMENT === 'dev') {
     const devCountry = process.env.DEV_GEO_COUNTRY?.toUpperCase()
-    if (devCountry && /^[A-Z]{2}$/.test(devCountry)) {
+    if (devCountry && /^[A-Z]{2}$/.test(devCountry) && devCountry !== 'XX') {
       country = devCountry
     }
   }
