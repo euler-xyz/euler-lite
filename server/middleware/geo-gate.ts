@@ -25,7 +25,8 @@ export default defineEventHandler((event) => {
 
   // Fail-closed: deny access when country cannot be determined.
   // This prevents bypassing geo-blocks by omitting or spoofing headers.
-  if (!country) {
+  // In dev without DEV_GEO_COUNTRY set, allow the request through.
+  if (!country && process.env.DOPPLER_ENVIRONMENT !== 'dev') {
     console.warn('[geo-gate] Blocked: country undetermined', {
       cfCountry: cfCountry || 'absent',
       path: url.pathname,
