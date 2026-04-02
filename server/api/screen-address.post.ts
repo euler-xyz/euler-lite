@@ -29,7 +29,8 @@ export default defineEventHandler(async (event) => {
   const screeningUri = process.env.WALLET_SCREENING_URI
 
   if (!screeningUri) {
-    return { addressIsSuspicious: false }
+    console.warn('[screen-address] WALLET_SCREENING_URI is not set — failing closed')
+    return { addressIsSuspicious: true }
   }
 
   const controller = new AbortController()
@@ -44,9 +45,8 @@ export default defineEventHandler(async (event) => {
     })
 
     if (!resp.ok) {
-      console.warn('[screen-address] TRM API returned', resp.status)
-      // Fail open on API errors (same as current client-side behavior)
-      return { addressIsSuspicious: false }
+      console.warn('[screen-address] TRM API returned', resp.status, '— failing closed')
+      return { addressIsSuspicious: true }
     }
 
     const data = await resp.json()
@@ -60,13 +60,12 @@ export default defineEventHandler(async (event) => {
   }
   catch (error) {
     if (isAbortError(error)) {
-      console.warn('[screen-address] TRM API timeout')
+      console.warn('[screen-address] TRM API timeout — failing closed')
     }
     else {
-      console.warn('[screen-address] TRM API error:', error)
+      console.warn('[screen-address] TRM API error — failing closed:', error)
     }
-    // Fail open on errors (same as current client-side behavior)
-    return { addressIsSuspicious: false }
+    return { addressIsSuspicious: true }
   }
   finally {
     clearTimeout(timeout)
