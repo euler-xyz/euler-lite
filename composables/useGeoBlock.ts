@@ -4,12 +4,22 @@ import { SANCTIONED_COUNTRIES, COUNTRY_GROUPS } from '~/entities/constants'
 
 // undefined = not yet loaded, null = loaded but country unknown, string = loaded with country
 const country = ref<string | null | undefined>(undefined)
+let loadingCountry = false
 
 export const useGeoBlock = () => {
   const loadCountry = async () => {
-    if (!import.meta.client) return
-    const detected = await detectCountry()
-    country.value = detected ?? null
+    if (!import.meta.client || loadingCountry) return
+    loadingCountry = true
+    try {
+      const detected = await detectCountry()
+      country.value = detected ?? null
+    }
+    catch {
+      country.value = null
+    }
+    finally {
+      loadingCountry = false
+    }
   }
 
   return { country, loadCountry }
