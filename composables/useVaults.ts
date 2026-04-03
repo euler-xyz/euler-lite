@@ -381,10 +381,6 @@ const getVault = async (address: string): Promise<Vault> => {
     throw new Error('[getVault] Address is a securitize vault, use getSecuritizeVault instead')
   }
 
-  if (isVaultNotExplorable(normalizedAddress)) {
-    throw new Error('[getVault] Address is a non-explorable vault')
-  }
-
   // If vault is already in registry as EVK, return it directly
   // This prevents overwriting escrow vaults (which have verified: true) with fetchVault results
   if (vaultType === 'evk') {
@@ -404,7 +400,7 @@ const getVault = async (address: string): Promise<Vault> => {
     }
   }
 
-  if (verifiedVaultAddresses.value.includes(normalizedAddress)) {
+  if (verifiedVaultAddresses.value.includes(normalizedAddress) && !isVaultNotExplorable(normalizedAddress)) {
     await until(computed(() => registryGetVault(normalizedAddress))).toBeTruthy()
   }
   else {
@@ -418,10 +414,6 @@ const getVault = async (address: string): Promise<Vault> => {
 const getEarnVault = async (address: string): Promise<EarnVault> => {
   const { getEarnVaults, getVault: registryGetVault, set: registrySet } = useVaultRegistry()
   const normalizedAddress = getAddress(address)
-
-  if (isEarnVaultNotExplorable(normalizedAddress)) {
-    throw new Error('[getEarnVault] Address is a non-explorable earn vault')
-  }
 
   // For custom labels repo, skip waiting and fetch directly
   const { isCustomLabelsRepo } = useDeployConfig()

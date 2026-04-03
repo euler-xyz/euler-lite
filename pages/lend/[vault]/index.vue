@@ -14,7 +14,6 @@ import { fetchBackendPrice } from '~/services/pricing/backendClient'
 import type { TxPlan } from '~/entities/txPlan'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
-import { isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
@@ -223,10 +222,6 @@ const needsRefresh = (v: Vault | undefined): boolean => {
       }
     }
     catch (e) {
-      if (isVaultNotExplorableLend(vaultAddress)) {
-        await navigateTo({ name: 'lend' }, { replace: true })
-        return
-      }
       // If EVK vault load fails, try as securitize vault
       console.warn('[lend] EVK vault load failed, trying securitize:', e)
       securitizeVault.value = await getSecuritizeVault(vaultAddress)
