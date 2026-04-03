@@ -3,19 +3,12 @@ const props = defineProps<{
   announcementUrl: string
 }>()
 const emits = defineEmits(['close'])
-
-const seen = useLocalStorage('migration-announcement-seen', false)
-seen.value = true
-
-const handleClose = () => {
-  emits('close')
-}
 </script>
 
 <template>
   <BaseModalWrapper
     title="We've upgraded the Euler app"
-    @close="handleClose"
+    :close="false"
   >
     <div class="flex flex-col gap-16">
       <p class="text-secondary text-p3">
@@ -55,7 +48,7 @@ const handleClose = () => {
         size="xlarge"
         rounded
         variant="primary"
-        @click="handleClose"
+        @click="emits('close')"
       >
         Got it
       </UiButton>

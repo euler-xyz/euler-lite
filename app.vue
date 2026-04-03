@@ -5,6 +5,10 @@ import { MigrationAnnouncementModal } from '#components'
 
 const route = useRoute()
 const router = useRouter()
+const { migrationAnnouncementUrl } = useDeployConfig()
+const migrationAnnouncementSeen = useLocalStorage('migration-announcement-seen', false)
+const modal = useModal()
+
 const { loadEulerConfig, chainId } = useEulerAddresses()
 const { loadVaults, isReady: isVaultsReady, resetVaultsState, refreshVaults } = useVaults()
 const { loadTokenList, isLoaded: isTokenListLoaded } = useTokenList()
@@ -74,14 +78,11 @@ watch(route, () => {
 }, { immediate: true })
 
 const checkMigrationAnnouncement = () => {
-  const { migrationAnnouncementUrl } = useDeployConfig()
-  if (!migrationAnnouncementUrl) return
+  if (!migrationAnnouncementUrl || migrationAnnouncementSeen.value) return
 
-  const seen = useLocalStorage('migration-announcement-seen', false)
-  if (seen.value) return
-
-  const modal = useModal()
   modal.open(MigrationAnnouncementModal, {
+    isNotClosable: true,
+    onClose: () => { migrationAnnouncementSeen.value = true },
     props: {
       announcementUrl: migrationAnnouncementUrl,
     },
@@ -90,6 +91,7 @@ const checkMigrationAnnouncement = () => {
 
 await loadEulerConfig()
 checkOnboarding()
+// onMounted (not synchronous like checkOnboarding) because the modal system requires the DOM
 onMounted(checkMigrationAnnouncement)
 
 watch(chainId, () => {

@@ -53,7 +53,7 @@ export const useDeployConfig = () => {
     enableFuul: isEnabled(rc.configEnableFuul),
 
     // Migration announcement (opt-in: non-empty URL enables the modal)
-    migrationAnnouncementUrl: String(rc.configMigrationAnnouncementUrl || ''),
+    migrationAnnouncementUrl: rc.configMigrationAnnouncementUrl || '',
 
     // External token lists (defaults in server/api/token-list.get.ts)
     uniswapTokenListUrl: rc.configUniswapTokenListUrl || '',
