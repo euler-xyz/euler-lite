@@ -43,7 +43,6 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
-      id-token: write
     steps:
       - name: Get PR info
         id: pr-info
@@ -110,7 +109,6 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
-      id-token: write
     steps:
       - name: Get PR info
         id: pr-info
@@ -177,7 +175,6 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
-      id-token: write
     steps:
       - name: Get PR info
         id: pr-info
