@@ -8,6 +8,7 @@ import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import type { TxPlan } from '~/entities/txPlan'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
+import { isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
 import { formatNumber, compactNumber } from '~/utils/string-utils'
@@ -70,6 +71,10 @@ const fetchBalance = async () => {
     }
   }
   catch (e) {
+    if (isEarnVaultNotExplorable(vaultAddress)) {
+      await navigateTo({ name: 'earn' }, { replace: true })
+      return
+    }
     showError('Unable to load Vault')
     logWarn('[earn] failed to load vault', e)
   }
