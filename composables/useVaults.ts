@@ -420,7 +420,7 @@ const getEarnVault = async (address: string): Promise<EarnVault> => {
   if (isCustomLabelsRepo.value) {
     const { earnVaults } = useEulerLabels()
 
-    if (earnVaults.value.includes(normalizedAddress)) {
+    if (earnVaults.value.includes(normalizedAddress) && !isEarnVaultNotExplorable(normalizedAddress)) {
       await until(computed(() => registryGetVault(normalizedAddress))).toBeTruthy()
     }
     else {
