@@ -43,10 +43,23 @@ export default defineEventHandler((event) => {
     allowedOrigins = parseAllowedOrigins()
   }
 
-  const rawCountry = event.node.req.headers['x-country-code']
-  const country = (typeof rawCountry === 'string' && /^[A-Z]{2}$/.test(rawCountry))
-    ? rawCountry
-    : undefined
+  // Strip any client-supplied x-country-code to prevent geo-blocking bypass.
+  // The authoritative value comes from Cloudflare's CF-IPCountry header which is
+  // set by their edge network and cannot be modified by clients.
+  delete event.node.req.headers['x-country-code']
+
+  const cfCountry = (event.node.req.headers['cf-ipcountry'] as string | undefined)?.toUpperCase()
+  let country = (cfCountry && /^[A-Z]{2}$/.test(cfCountry) && cfCountry !== 'XX') ? cfCountry : undefined
+
+  // In dev, Cloudflare is not in the request path so cf-ipcountry is never set.
+  // Mirror geo-gate.ts: use DEV_GEO_COUNTRY so x-country-code is set in the response.
+  if (!country && process.env.DOPPLER_ENVIRONMENT === 'dev') {
+    const devCountry = process.env.DEV_GEO_COUNTRY?.toUpperCase()
+    if (devCountry && /^[A-Z]{2}$/.test(devCountry) && devCountry !== 'XX') {
+      country = devCountry
+    }
+  }
+
   if (country) {
     setResponseHeader(event, 'x-country-code', country)
   }
