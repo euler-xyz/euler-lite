@@ -23,8 +23,10 @@ if (campaign.vault_address) {
   try {
     vault.value = await getVault(campaign.vault_address)
   }
-  catch {
-    // vault may be non-explorable or unavailable; component renders without vault info
+  catch (e) {
+    if (!(e instanceof Error && e.message.includes('non-explorable'))) {
+      logWarn('PortfolioBrevisRewardItem/getVault', e)
+    }
   }
 }
 const isClaiming = ref(false)
