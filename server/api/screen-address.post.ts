@@ -1,6 +1,7 @@
 import { createError, readBody } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { isAbortError } from '~/utils/errorHandling'
+import { logWarn } from '~/server/utils/log'
 
 const SCREENING_TIMEOUT_MS = 5000
 
@@ -44,7 +45,7 @@ export default defineEventHandler(async (event) => {
     })
 
     if (!resp.ok) {
-      console.warn('[screen-address] TRM API returned', resp.status)
+      logWarn('screen-address', 'TRM API returned', resp.status)
       // Fail open on API errors (same as current client-side behavior)
       return { addressIsSuspicious: false }
     }
@@ -53,17 +54,17 @@ export default defineEventHandler(async (event) => {
     const isSuspicious = Boolean(data?.addressIsSuspicious)
 
     if (isSuspicious) {
-      console.warn('[screen-address] Flagged address:', address)
+      logWarn('screen-address', 'Flagged address:', address)
     }
 
     return { addressIsSuspicious: isSuspicious }
   }
   catch (error) {
     if (isAbortError(error)) {
-      console.warn('[screen-address] TRM API timeout')
+      logWarn('screen-address', 'TRM API timeout')
     }
     else {
-      console.warn('[screen-address] TRM API error:', error)
+      logWarn('screen-address', 'TRM API error:', error)
     }
     // Fail open on errors (same as current client-side behavior)
     return { addressIsSuspicious: false }
