@@ -51,7 +51,7 @@ export default defineEventHandler((event) => {
   }
 
   // Block sanctioned countries
-  if (SANCTIONED_COUNTRIES.includes(country)) {
+  if (country && SANCTIONED_COUNTRIES.includes(country)) {
     console.warn('[geo-gate] Blocked sanctioned country', {
       country,
       path: url.pathname,
