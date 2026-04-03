@@ -45,6 +45,11 @@ let interval: NodeJS.Timeout | null = null
 const checkOnboarding = () => {
   const isOnboardingCompleted = useLocalStorage('is-onboarding-completed', false)
   if (!isOnboardingCompleted.value) {
+    const isDeepLink = route.path !== '/' && route.path !== '/onboarding'
+    if (isDeepLink) {
+      isOnboardingCompleted.value = true
+      return
+    }
     router.push('/onboarding')
   }
 }
