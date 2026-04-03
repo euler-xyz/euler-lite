@@ -18,7 +18,15 @@ const { chainId: siteChainId } = useEulerAddresses()
 const { chainId: walletChainId, switchChain } = useWagmi()
 const { runSimulation, simulationError } = useTxPlanSimulation()
 
-const vault = ref(campaign.vault_address ? await getVault(campaign.vault_address) : undefined)
+const vault = ref<Awaited<ReturnType<typeof getVault>> | undefined>(undefined)
+if (campaign.vault_address) {
+  try {
+    vault.value = await getVault(campaign.vault_address)
+  }
+  catch {
+    // vault may be non-explorable or unavailable; component renders without vault info
+  }
+}
 const isClaiming = ref(false)
 const isPreparing = ref(false)
 const plan = ref<TxPlan | null>(null)
