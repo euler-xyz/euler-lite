@@ -15,6 +15,6 @@ export async function screenAddress(
     return Boolean(data?.addressIsSuspicious)
   }
   catch {
-    return false
+    return true
   }
 }
