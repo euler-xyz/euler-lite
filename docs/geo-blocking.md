@@ -54,7 +54,7 @@ The `x-country-code` response header is set by `server/middleware/cors.ts`, whic
 
 Detection is cached for 5 minutes to avoid repeated network calls.
 
-```
+```text
 Browser → HEAD / → cors.ts strips client x-country-code
                  → reads CF-IPCountry: DE
                  → sets response x-country-code: DE
@@ -80,7 +80,7 @@ All API requests first pass through the server-side geo-gate, which applies the 
 
 The gate reads `CF-IPCountry` from the Cloudflare edge header. Special values `XX` (unknown IP) and `T1` (Tor exit node) are treated as an undetermined country. If the country cannot be determined **and** the environment is not `dev`, the request is rejected with HTTP 451 (fail-closed). In dev, unknown country is allowed through so local development is not blocked.
 
-```
+```text
 Request → cors.ts (strip client x-country-code, set response x-country-code from CF-IPCountry)
         → geo-gate.ts (read CF-IPCountry)
             ├─ country determined → check SANCTIONED_COUNTRIES → block or allow
@@ -99,7 +99,7 @@ The function `isVaultBlockedByCountry(vaultAddress)` evaluates three layers in o
 
 Defined in `entities/constants.ts` as `SANCTIONED_COUNTRIES`. Users from these countries are blocked from **all** vaults unconditionally:
 
-```
+```text
 AF, CF, CU, KP, CD, ET, IR, IQ, LB, LY, ML, MM, NI, RU, SO, SS, SD, SY, VE, YE, ZW
 ```
 
@@ -304,13 +304,14 @@ Existing positions in blocked vaults show the "Restricted" chip. No chip for sof
 
 ## Data Flow
 
-```
+```text
 App Startup
   │
   ├─ loadCountry() ─► HEAD / ─► cors.ts sets x-country-code from CF-IPCountry
   │                  ◄─────────── x-country-code: DE ──────────────────────────
   │                  country ref: "DE" (5-min cache)
-  │                  undefined → null (fail-closed) on unknown/error
+  │                  undefined → null (fail-closed) on unknown/error (prod)
+  │                  undefined → "--" (non-null sentinel, fail-open) on unknown in dev
   │
   └─ loadLabels() ──► euler-labels data source (GitHub or S3/CDN) ─► products.json ─► product.block
                                                                     product.vaultOverrides[addr].block
