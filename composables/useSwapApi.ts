@@ -8,6 +8,7 @@ import {
   SwapperMode,
 } from '~/entities/swap'
 import { EXCLUDED_SWAP_PROVIDERS, SWAP_DEFAULT_DEADLINE_SECONDS } from '~/entities/constants'
+import { COWSWAP_PROVIDER_NAME, isCowSwapSupportedChain } from '~/entities/cowswap'
 
 export interface SwapApiRequestInput {
   chainId?: number
@@ -116,7 +117,7 @@ export const useSwapApi = () => {
     return parseSwapApiResponse(response.data)
   }
 
-  const getSwapProviders = async (): Promise<string[]> => {
+  const getSwapProviders = async (options?: { includeCowSwap?: boolean }): Promise<string[]> => {
     if (!chainId.value) {
       return []
     }
@@ -130,7 +131,11 @@ export const useSwapApi = () => {
         },
       )
       const providers = parseSwapProvidersResponse(response.data)
-      return providers.filter(p => !EXCLUDED_SWAP_PROVIDERS.has(p.toLowerCase()))
+      const includeCow = options?.includeCowSwap && isCowSwapSupportedChain(chainId.value ?? 0)
+      return providers.filter(p =>
+        !EXCLUDED_SWAP_PROVIDERS.has(p)
+        && (p.toLowerCase() !== COWSWAP_PROVIDER_NAME || includeCow),
+      )
     }
     catch (error) {
       logWarn('swapApi/providers', error)

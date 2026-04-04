@@ -69,6 +69,16 @@ export const EVC_ABI = [
     stateMutability: 'view',
     type: 'function',
   },
+  {
+    inputs: [
+      { name: 'addressPrefix', type: 'bytes19' },
+      { name: 'nonceNamespace', type: 'uint256' },
+    ],
+    name: 'getNonce',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
 ] as const
 
 export type BatchItem = {

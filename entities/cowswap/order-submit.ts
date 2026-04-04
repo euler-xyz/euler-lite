@@ -1,0 +1,86 @@
+import type { Address, Hex } from 'viem'
+import type { CowSwapOrderPayload, CowSwapOrderUid } from './types'
+
+const coerceOrderUid = (data: unknown): CowSwapOrderUid => {
+  if (typeof data === 'string') return data
+  if (data && typeof data === 'object' && 'uid' in data) {
+    const uid = (data as { uid?: unknown }).uid
+    if (typeof uid === 'string') return uid
+  }
+  throw new Error('Unexpected CoW order response format')
+}
+
+export const submitCowSwapOrder = async (
+  payload: CowSwapOrderPayload,
+  orderbookUrl: string,
+): Promise<CowSwapOrderUid> => {
+  const res = await fetch(`${orderbookUrl}/api/v1/orders`, {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`CoW API ${res.status}: ${text.slice(0, 500)}`)
+  }
+
+  const data: unknown = await res.json()
+  return coerceOrderUid(data)
+}
+
+// EIP-712 typed data for order cancellation
+const COW_CANCEL_TYPES = {
+  OrderCancellations: [
+    { name: 'orderUids', type: 'bytes[]' },
+  ],
+} as const
+
+export type CancelCowSwapOrderParams = {
+  orderUid: CowSwapOrderUid
+  orderbookUrl: string
+  settlementContract: Address
+  chainId: number
+  signTypedData: (params: { domain: object, types: object, primaryType: string, message: object }) => Promise<Hex>
+}
+
+export const cancelCowSwapOrder = async (params: CancelCowSwapOrderParams): Promise<void> => {
+  const domain = {
+    name: 'Gnosis Protocol',
+    version: 'v2',
+    chainId: BigInt(params.chainId),
+    verifyingContract: params.settlementContract,
+  }
+
+  const message = {
+    orderUids: [params.orderUid],
+  }
+
+  const signature = await params.signTypedData({
+    domain,
+    types: COW_CANCEL_TYPES,
+    primaryType: 'OrderCancellations',
+    message,
+  })
+
+  const res = await fetch(`${params.orderbookUrl}/api/v1/orders`, {
+    method: 'DELETE',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      orderUids: [params.orderUid],
+      signature,
+      signingScheme: 'eip712',
+    }),
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`CoW cancel API ${res.status}: ${text.slice(0, 500)}`)
+  }
+}
