@@ -37,94 +37,108 @@ const eulerApiCache = createTtlCache<TokenEntry[]>({ ttlMs: CACHE_TTL_MS })
 const uniswapCache = createTtlCache<TokenEntry[]>({ ttlMs: CACHE_TTL_MS })
 const defillamaCache = createTtlCache<TokenEntry[]>({ ttlMs: CACHE_TTL_MS })
 
-async function fetchEulerApi(chainId: number): Promise<TokenEntry[]> {
+const eulerInFlight = new Map<string, Promise<TokenEntry[]>>()
+const uniswapInFlight = new Map<string, Promise<TokenEntry[]>>()
+const defillamaInFlight = new Map<string, Promise<TokenEntry[]>>()
+
+function fetchEulerApi(chainId: number): Promise<TokenEntry[]> {
   const key = String(chainId)
   const cached = eulerApiCache.get(key)
-  if (cached) return cached
+  if (cached) return Promise.resolve(cached)
 
-  try {
-    const url = process.env.EULER_API_URL || process.env.NUXT_PUBLIC_EULER_API_URL
-    if (!url) return []
+  const existing = eulerInFlight.get(key)
+  if (existing) return existing
 
-    const resp = await fetchWithTimeout(`${url}/v1/tokens?chainId=${chainId}`, TIMEOUT_MS)
-    if (!resp.ok) {
-      throw new Error(`Euler API returned ${resp.status}`)
-    }
+  const url = process.env.EULER_API_URL || process.env.NUXT_PUBLIC_EULER_API_URL
+  if (!url) return Promise.resolve([])
 
-    const data = (await resp.json()) as EulerApiToken[]
-    const tokens: TokenEntry[] = data.map(t => ({
-      chainId: t.chainId,
-      address: t.address,
-      name: t.name,
-      symbol: t.symbol,
-      decimals: t.decimals,
-      logoURI: t.logoURI || undefined,
-    }))
+  const promise = fetchWithTimeout(`${url}/v1/tokens?chainId=${chainId}`, TIMEOUT_MS)
+    .then(async (resp) => {
+      if (!resp.ok) throw new Error(`Euler API returned ${resp.status}`)
+      const data = (await resp.json()) as EulerApiToken[]
+      const tokens: TokenEntry[] = data.map(t => ({
+        chainId: t.chainId,
+        address: t.address,
+        name: t.name,
+        symbol: t.symbol,
+        decimals: t.decimals,
+        logoURI: t.logoURI || undefined,
+      }))
+      eulerApiCache.set(key, tokens)
+      return tokens
+    })
+    .catch((err: unknown) => {
+      logWarn('token-list', 'Euler API fetch failed:', err instanceof Error ? err.message : err, 'for chain', chainId)
+      return eulerApiCache.getStale(key) || []
+    })
+    .finally(() => { eulerInFlight.delete(key) })
 
-    eulerApiCache.set(key, tokens)
-    return tokens
-  }
-  catch (err) {
-    logWarn('token-list', 'Euler API fetch failed:', err instanceof Error ? err.message : err, 'for chain', chainId)
-    return eulerApiCache.getStale(key) || []
-  }
+  eulerInFlight.set(key, promise)
+  return promise
 }
 
-async function fetchUniswap(): Promise<TokenEntry[]> {
+function fetchUniswap(): Promise<TokenEntry[]> {
   const url = process.env.NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL || 'https://tokens.uniswap.org'
 
   const cached = uniswapCache.get('all')
-  if (cached) return cached
+  if (cached) return Promise.resolve(cached)
 
-  try {
-    const resp = await fetchWithTimeout(url, TIMEOUT_MS)
-    if (!resp.ok) {
-      throw new Error(`Uniswap upstream returned ${resp.status}`)
-    }
+  const existing = uniswapInFlight.get('all')
+  if (existing) return existing
 
-    const data = await resp.json()
-    const tokens: TokenEntry[] = data.tokens || []
-    uniswapCache.set('all', tokens)
-    return tokens
-  }
-  catch (err) {
-    logWarn('token-list', 'Uniswap fetch failed:', err instanceof Error ? err.message : err)
-    return uniswapCache.getStale('all') || []
-  }
+  const promise = fetchWithTimeout(url, TIMEOUT_MS)
+    .then(async (resp) => {
+      if (!resp.ok) throw new Error(`Uniswap upstream returned ${resp.status}`)
+      const data = await resp.json()
+      const tokens: TokenEntry[] = data.tokens || []
+      uniswapCache.set('all', tokens)
+      return tokens
+    })
+    .catch((err: unknown) => {
+      logWarn('token-list', 'Uniswap fetch failed:', err instanceof Error ? err.message : err)
+      return uniswapCache.getStale('all') || []
+    })
+    .finally(() => { uniswapInFlight.delete('all') })
+
+  uniswapInFlight.set('all', promise)
+  return promise
 }
 
-async function fetchDefillama(chainId: number): Promise<TokenEntry[]> {
+function fetchDefillama(chainId: number): Promise<TokenEntry[]> {
   const key = String(chainId)
   const cached = defillamaCache.get(key)
-  if (cached) return cached
+  if (cached) return Promise.resolve(cached)
 
-  try {
-    const baseUrl = process.env.NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL || DEFILLAMA_DEFAULT_URL
-    const url = `${baseUrl}/tokenlists-${chainId}.json`
-    const resp = await fetchWithTimeout(url, TIMEOUT_MS)
-    if (!resp.ok) {
-      throw new Error(`DefiLlama upstream returned ${resp.status}`)
-    }
+  const existing = defillamaInFlight.get(key)
+  if (existing) return existing
 
-    const data = await resp.json()
+  const baseUrl = process.env.NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL || DEFILLAMA_DEFAULT_URL
+  const url = `${baseUrl}/tokenlists-${chainId}.json`
 
-    // DefiLlama format: object keyed by address → normalize to array
-    const tokens: TokenEntry[] = (Object.values(data) as Record<string, unknown>[]).map(entry => ({
-      chainId: Number(entry.chainId) || chainId,
-      address: entry.address as string,
-      name: entry.name as string,
-      symbol: entry.symbol as string,
-      decimals: entry.decimals as number,
-      logoURI: (entry.logoURI || entry.logoURI2) as string | undefined,
-    }))
+  const promise = fetchWithTimeout(url, TIMEOUT_MS)
+    .then(async (resp) => {
+      if (!resp.ok) throw new Error(`DefiLlama upstream returned ${resp.status}`)
+      const data = await resp.json()
+      // DefiLlama format: object keyed by address → normalize to array
+      const tokens: TokenEntry[] = (Object.values(data) as Record<string, unknown>[]).map(entry => ({
+        chainId: Number(entry.chainId) || chainId,
+        address: entry.address as string,
+        name: entry.name as string,
+        symbol: entry.symbol as string,
+        decimals: entry.decimals as number,
+        logoURI: (entry.logoURI || entry.logoURI2) as string | undefined,
+      }))
+      defillamaCache.set(key, tokens)
+      return tokens
+    })
+    .catch((err: unknown) => {
+      logWarn('token-list', 'DefiLlama fetch failed:', err instanceof Error ? err.message : err, 'for chain', chainId)
+      return defillamaCache.getStale(key) || []
+    })
+    .finally(() => { defillamaInFlight.delete(key) })
 
-    defillamaCache.set(key, tokens)
-    return tokens
-  }
-  catch (err) {
-    logWarn('token-list', 'DefiLlama fetch failed:', err instanceof Error ? err.message : err, 'for chain', chainId)
-    return defillamaCache.getStale(key) || []
-  }
+  defillamaInFlight.set(key, promise)
+  return promise
 }
 
 /** Merge two token arrays, deduplicating by chain+address. Primary entries take precedence. */
@@ -176,9 +190,9 @@ export default defineEventHandler(async (event) => {
   // defillamaStale is intentionally excluded: DefiLlama is supplementary; Euler or Uniswap
   // stale data is sufficient to justify returning a response without a cold await.
   if (eulerStale !== undefined || uniswapStale !== undefined) {
-    if (eulerFresh === undefined && chainId) void fetchEulerApi(chainId).catch(err => logWarn('token-list', 'Background Euler revalidation failed:', err instanceof Error ? err.message : err))
-    if (uniswapFresh === undefined) void fetchUniswap().catch(err => logWarn('token-list', 'Background Uniswap revalidation failed:', err instanceof Error ? err.message : err))
-    if (defillamaFresh === undefined && chainId) void fetchDefillama(chainId).catch(err => logWarn('token-list', 'Background DefiLlama revalidation failed:', err instanceof Error ? err.message : err))
+    if (eulerFresh === undefined && chainId) void fetchEulerApi(chainId)
+    if (uniswapFresh === undefined) void fetchUniswap()
+    if (defillamaFresh === undefined && chainId) void fetchDefillama(chainId)
 
     const euler = eulerFresh ?? eulerStale ?? []
     const uniswap = uniswapFresh ?? uniswapStale ?? []

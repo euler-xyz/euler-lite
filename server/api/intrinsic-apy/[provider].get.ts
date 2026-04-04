@@ -31,22 +31,31 @@ const PROVIDER_URLS: Record<string, string> = {
 const PENDLE_API_BASE = 'https://api-v2.pendle.finance/core/v2'
 
 const cache = createTtlCache<unknown>({ ttlMs: CACHE_TTL_MS, maxEntries: 200 })
+const inFlight = new Map<string, Promise<unknown>>()
 
-const fetchUpstream = async (url: string, cacheKey: string): Promise<unknown> => {
+const fetchUpstream = (url: string, cacheKey: string): Promise<unknown> => {
+  const existing = inFlight.get(cacheKey)
+  if (existing) return existing
+
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS)
-  try {
-    const resp = await fetch(url, { signal: controller.signal })
-    if (!resp.ok) {
-      throw createError({ statusCode: 502, statusMessage: `Upstream returned ${resp.status}` })
-    }
-    const data = await resp.json()
-    cache.set(cacheKey, data)
-    return data
-  }
-  finally {
-    clearTimeout(timeout)
-  }
+
+  const promise = fetch(url, { signal: controller.signal })
+    .then(async (resp) => {
+      if (!resp.ok) {
+        throw createError({ statusCode: 502, statusMessage: `Upstream returned ${resp.status}` })
+      }
+      const data = await resp.json()
+      cache.set(cacheKey, data)
+      return data
+    })
+    .finally(() => {
+      clearTimeout(timeout)
+      inFlight.delete(cacheKey)
+    })
+
+  inFlight.set(cacheKey, promise)
+  return promise
 }
 
 export default defineEventHandler(async (event) => {
