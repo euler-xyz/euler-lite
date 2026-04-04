@@ -48,15 +48,46 @@ When both collateral AND borrow vault in a pair are restricted, the pair is trea
 
 **File**: `services/country.ts`
 
-The user's country is detected by sending a `HEAD` request to the application's origin and reading the `x-country-code` response header (set by the CDN/reverse proxy). The result is normalized to uppercase ISO 3166-1 alpha-2 (e.g. `US`, `DE`, `GB`).
+The user's country is detected by sending a `HEAD` request to the application's origin and reading the `x-country-code` response header. The result is normalized to uppercase ISO 3166-1 alpha-2 (e.g. `US`, `DE`, `GB`).
 
-Detection is cached for 5 minutes to avoid repeated network calls. On failure, `null` is cached (the user is not blocked when detection fails).
+The `x-country-code` response header is set by `server/middleware/cors.ts`, which reads Cloudflare's `CF-IPCountry` edge header (immutably set by Cloudflare's network). Any client-supplied `x-country-code` request header is stripped by `cors.ts` before processing, preventing bypass.
+
+Detection is cached for 5 minutes to avoid repeated network calls.
 
 ```
-Browser → HEAD / → CDN returns x-country-code: DE → stored as "DE"
+Browser → HEAD / → cors.ts strips client x-country-code
+                 → reads CF-IPCountry: DE
+                 → sets response x-country-code: DE
+        ← x-country-code: DE ← stored as "DE"
 ```
 
-**Initialization**: `app.vue` calls `useGeoBlock().loadCountry()` on startup. The detected country is stored in a module-level `ref` in `composables/useGeoBlock.ts`, making it available to all blocking checks synchronously after initial load.
+**Fail-closed**: When country detection fails or the country cannot be determined, the detected country is stored as `null`. All blocking and restriction checks treat `null` as blocked (fail-closed). Only the intermediate loading state (`undefined`, before the initial HEAD request completes) leaves checks permissive.
+
+**Initialization**: `app.vue` calls `useGeoBlock().loadCountry()` on startup. The detected country is stored in a module-level `ref` in `composables/useGeoBlock.ts`:
+- `undefined` — not yet loaded (checks return `false`, permissive during initial load)
+- `null` — loaded, country unknown or detection failed (checks return `true`, fail-closed)
+- `string` — loaded with a known country code
+
+A concurrency guard (`loadingCountry`) prevents duplicate in-flight requests if `loadCountry()` is called multiple times.
+
+**Local development**: In development (`DOPPLER_ENVIRONMENT=dev`), Cloudflare is not in the request path so `CF-IPCountry` is never set. Set `DEV_GEO_COUNTRY=GB` (or any ISO country code) in `.env` to simulate a country for geo-block testing. Without it, the server allows requests through in dev rather than blocking.
+
+## Server-Side Geo-Gate
+
+**File**: `server/middleware/geo-gate.ts`
+
+All API requests first pass through the server-side geo-gate, which applies the same sanctioned-country check at the edge before any client-side logic runs.
+
+The gate reads `CF-IPCountry` from the Cloudflare edge header. Special values `XX` (unknown IP) and `T1` (Tor exit node) are treated as an undetermined country. If the country cannot be determined **and** the environment is not `dev`, the request is rejected with HTTP 451 (fail-closed). In dev, unknown country is allowed through so local development is not blocked.
+
+```
+Request → cors.ts (strip client x-country-code, set response x-country-code from CF-IPCountry)
+        → geo-gate.ts (read CF-IPCountry)
+            ├─ country determined → check SANCTIONED_COUNTRIES → block or allow
+            └─ country undetermined
+                ├─ dev env → allow
+                └─ prod env → HTTP 451 (fail-closed)
+```
 
 ## Blocking Rules
 
@@ -276,8 +307,10 @@ Existing positions in blocked vaults show the "Restricted" chip. No chip for sof
 ```
 App Startup
   │
-  ├─ loadCountry() ─► HEAD request ─► x-country-code header ─► country ref ("DE")
-  │                                                              (5-min cache)
+  ├─ loadCountry() ─► HEAD / ─► cors.ts sets x-country-code from CF-IPCountry
+  │                  ◄─────────── x-country-code: DE ──────────────────────────
+  │                  country ref: "DE" (5-min cache)
+  │                  undefined → null (fail-closed) on unknown/error
   │
   └─ loadLabels() ──► euler-labels data source (GitHub or S3/CDN) ─► products.json ─► product.block
                                                                     product.vaultOverrides[addr].block
@@ -286,7 +319,16 @@ App Startup
                                                                        earnVaultRestrictions map
                                                    (5-min cache)
 
+Server-Side (every API request):
+  geo-gate.ts reads CF-IPCountry
+  ├─ unknown/XX/T1 + prod → HTTP 451 (fail-closed)
+  ├─ unknown + dev → allow
+  └─ known country → check SANCTIONED_COUNTRIES → block or allow
+
 Runtime Check: isVaultBlockedByCountry("0x1234...")
+  │
+  ├─ country === undefined (loading) → false (permissive)
+  ├─ country === null (unknown, fail-closed) → true (blocked)
   │
   ├─ 1. SANCTIONED_COUNTRIES includes "DE"?  ─► yes → blocked
   │
@@ -301,6 +343,9 @@ Runtime Check: isVaultBlockedByCountry("0x1234...")
   └─ 4. Not blocked → return false
 
 Runtime Check: isVaultRestrictedByCountry("0x1234...")
+  │
+  ├─ country === undefined (loading) → false (permissive)
+  ├─ country === null (unknown, fail-closed) → true (restricted)
   │
   ├─ 1. getVaultRestricted("0x1234...")
   │     └─ product.vaultOverrides["0x1234..."]?.restricted (no product fallback)
@@ -326,6 +371,7 @@ All blocking and restriction configuration lives outside the app codebase:
 | Per-vault restrictions | `euler-labels` repo — `products.json` `vaultOverrides[addr].restricted` | Soft-restricts one vault (no product fallback) |
 | Earn vault blocks | `euler-labels` repo — `earn-vaults.json` `block` field | Hard-blocks specific earn vaults |
 | Earn vault restrictions | `euler-labels` repo — `earn-vaults.json` `restricted` field | Soft-restricts specific earn vaults |
+| Dev country simulation | `.env` — `DEV_GEO_COUNTRY=GB` | Simulates a country in dev (no effect outside dev) |
 
 Changes to `products.json` or `earn-vaults.json` in the euler-labels data source (GitHub repo or S3/CDN) take effect within 5 minutes (the label cache TTL) without any app deployment.
 
@@ -333,7 +379,9 @@ Changes to `products.json` or `earn-vaults.json` in the euler-labels data source
 
 | File | Role |
 |------|------|
-| `services/country.ts` | Country detection from `x-country-code` header |
+| `services/country.ts` | Client-side country detection via HEAD request and `x-country-code` response header |
+| `server/middleware/cors.ts` | Strips client `x-country-code`, derives authoritative value from `CF-IPCountry`, emits as response header |
+| `server/middleware/geo-gate.ts` | Server-side sanctioned-country block; fail-closed on unknown country in prod |
 | `composables/useGeoBlock.ts` | Core blocking logic, `isVaultBlockedByCountry`, `isVaultRestrictedByCountry`, `getVaultTags` |
 | `composables/useEulerLabels.ts` | Label fetching, `getVaultBlock`, `getEarnVaultBlock`, `getVaultRestricted`, `getEarnVaultRestricted` |
 | `entities/constants.ts` | `SANCTIONED_COUNTRIES`, `COUNTRY_GROUPS` (EU/EEA/EFTA) |
