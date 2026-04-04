@@ -340,8 +340,8 @@ const loadVaultsFromCache = async (categorized: CategorizedVaults, generation: n
     isEarnUpdating.value = false
     isSecuritizeLoading.value = false
     isSecuritizeUpdating.value = false
-    // Escrow flags intentionally NOT cleared — escrow vaults are loaded
-    // later by fetchNeededEscrowVaults in the background load phase.
+    isEscrowLoading.value = false
+    isEscrowUpdating.value = false
     loadedChainId.value = chainId.value
     return true
   }
