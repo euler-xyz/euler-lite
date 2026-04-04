@@ -31,6 +31,7 @@ interface CategorizedVaults {
   evkAddresses: string[]
   earnAddresses: string[]
   securitizeAddresses: string[]
+  escrowAddresses: string[]
 }
 
 const isReady = ref(false)
@@ -277,12 +278,13 @@ const loadVaultsFromCache = async (categorized: CategorizedVaults, generation: n
   const { verifiedVaultAddresses, earnVaults: earnVaultAddresses } = useEulerLabels()
   const { set: registrySet } = useVaultRegistry()
 
-  const allAddresses = [...categorized.evkAddresses, ...categorized.earnAddresses, ...categorized.securitizeAddresses]
+  const allAddresses = [...categorized.evkAddresses, ...categorized.earnAddresses, ...categorized.securitizeAddresses, ...categorized.escrowAddresses]
   if (allAddresses.length === 0) return false
 
   const evkSet = new Set(categorized.evkAddresses.map(a => a.toLowerCase()))
   const earnSet = new Set(categorized.earnAddresses.map(a => a.toLowerCase()))
   const securitizeSet = new Set(categorized.securitizeAddresses.map(a => a.toLowerCase()))
+  const escrowSet = new Set(categorized.escrowAddresses.map(a => a.toLowerCase()))
 
   try {
     const cacheMap = await $fetch<Record<string, string>>(
@@ -318,6 +320,15 @@ const loadVaultsFromCache = async (categorized: CategorizedVaults, generation: n
           registrySet(vaultAddress, processRawEarnVaultData(raw, vaultAddress, earnVaultAddresses.value), 'earn')
           count++
         }
+        else if (escrowSet.has(addrLower)) {
+          const raw = decodeFunctionResult({
+            abi: eulerVaultLensABI,
+            functionName: 'getVaultInfoFull',
+            data: hex as Hex,
+          }) as Record<string, unknown>
+          registrySet(vaultAddress, processRawVaultData(raw, vaultAddress, undefined, { verified: true, vaultCategory: 'escrow' }), 'evk')
+          count++
+        }
         else if (securitizeSet.has(addrLower)) {
           const raw = decodeFunctionResult({
             abi: eulerUtilsLensABI,
@@ -342,6 +353,7 @@ const loadVaultsFromCache = async (categorized: CategorizedVaults, generation: n
     isSecuritizeUpdating.value = false
     isEscrowLoading.value = false
     isEscrowUpdating.value = false
+    isEscrowLoadedOnce.value = true
     loadedChainId.value = chainId.value
     return true
   }
@@ -371,10 +383,15 @@ const loadVaults = async () => {
     isEscrowUpdating.value = true
     isEscrowLoading.value = true
 
-    // Phase 1: Fetch vault factories (escrow addresses fetched in Phase 2)
-    const factories = await fetchVaultFactories(explorableVaultAddresses)
+    // Phase 1: Fetch vault factories + escrow addresses in parallel
+    const [factories, escrowAddresses] = await Promise.all([
+      fetchVaultFactories(explorableVaultAddresses),
+      fetchEscrowAddresses(),
+    ])
 
     if (loadGeneration.value !== generation) return
+
+    setEscrowAddresses(escrowAddresses)
 
     // Separate EVK vaults from Securitize vaults based on factory
     const evkAddresses: string[] = []
@@ -397,6 +414,7 @@ const loadVaults = async () => {
       evkAddresses,
       earnAddresses: explorableEarnAddresses,
       securitizeAddresses,
+      escrowAddresses,
     }, generation)
 
     if (loadGeneration.value !== generation) return
@@ -405,18 +423,15 @@ const loadVaults = async () => {
     // Runs silently (no loading spinners) when cache provided an early render.
     const silent = cacheHit
 
-    // Signals for coordination
+    // Signals for coordination — escrow vault info needs EVK + Earn to determine
+    // which escrow vaults are actually used as collateral
     let evkResolve: () => void = () => {}
     let earnResolve: () => void = () => {}
-    let escrowAddrsResolve: (addrs: string[]) => void = () => {}
     const evkLoaded = new Promise<void>((resolve) => {
       evkResolve = resolve
     })
     const earnLoaded = new Promise<void>((resolve) => {
       earnResolve = resolve
-    })
-    const escrowAddrsLoaded = new Promise<string[]>((resolve) => {
-      escrowAddrsResolve = resolve
     })
 
     await Promise.all([
@@ -429,18 +444,9 @@ const loadVaults = async () => {
         evkResolve()
       })(),
       updateSecuritizeVaults(securitizeAddresses, generation, silent),
-      // Escrow addresses - fetch in parallel, populate set when ready
-      (async () => {
-        const addrs = await fetchEscrowAddresses()
-        if (loadGeneration.value !== generation) {
-          escrowAddrsResolve([]) // Unblock downstream even if stale
-          return
-        }
-        setEscrowAddresses(addrs)
-        escrowAddrsResolve(addrs)
-      })(),
-      // Escrow vault info - waits for EVK, Earn, AND escrow addresses
-      Promise.all([evkLoaded, earnLoaded, escrowAddrsLoaded]).then(async () => {
+      // Escrow vault info - escrow addresses already fetched in Phase 1,
+      // waits for EVK + Earn to know which escrow vaults are needed as collateral
+      Promise.all([evkLoaded, earnLoaded]).then(async () => {
         const neededEscrowAddresses = extractNeededEscrowAddresses()
         await fetchNeededEscrowVaults(neededEscrowAddresses, generation)
       }),
