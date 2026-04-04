@@ -172,11 +172,13 @@ export default defineEventHandler(async (event) => {
   const uniswapStale = uniswapCache.getStale('all')
   const defillamaStale = key ? defillamaCache.getStale(key) : undefined
 
-  // Have stale data — return it immediately and revalidate in background
+  // Have stale data — return it immediately and revalidate in background.
+  // defillamaStale is intentionally excluded: DefiLlama is supplementary; Euler or Uniswap
+  // stale data is sufficient to justify returning a response without a cold await.
   if (eulerStale !== undefined || uniswapStale !== undefined) {
-    if (eulerFresh === undefined && chainId) void fetchEulerApi(chainId)
-    if (uniswapFresh === undefined) void fetchUniswap().catch(() => {})
-    if (defillamaFresh === undefined && chainId) void fetchDefillama(chainId)
+    if (eulerFresh === undefined && chainId) void fetchEulerApi(chainId).catch(err => logWarn('token-list', 'Background Euler revalidation failed:', err instanceof Error ? err.message : err))
+    if (uniswapFresh === undefined) void fetchUniswap().catch(err => logWarn('token-list', 'Background Uniswap revalidation failed:', err instanceof Error ? err.message : err))
+    if (defillamaFresh === undefined && chainId) void fetchDefillama(chainId).catch(err => logWarn('token-list', 'Background DefiLlama revalidation failed:', err instanceof Error ? err.message : err))
 
     const euler = eulerFresh ?? eulerStale ?? []
     const uniswap = uniswapFresh ?? uniswapStale ?? []
