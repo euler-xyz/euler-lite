@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { COWSWAP_PROVIDER_NAME } from '~/entities/cowswap'
+
 type SwapRouteBadgeTone = 'best' | 'worse'
 
 type SwapRouteItem = {
@@ -13,6 +15,10 @@ type SwapRouteItem = {
 }
 
 const VISIBLE_COUNT = 3
+
+const isCowItem = (item: SwapRouteItem) =>
+  item.provider.toLowerCase().includes(COWSWAP_PROVIDER_NAME)
+  || item.routeLabel?.toLowerCase().includes(COWSWAP_PROVIDER_NAME)
 
 const props = withDefaults(defineProps<{
   title?: string
@@ -37,9 +43,19 @@ const emit = defineEmits<{
 const expanded = ref(false)
 
 const hasMore = computed(() => props.items.length > VISIBLE_COUNT)
-const visibleItems = computed(() =>
-  expanded.value ? props.items : props.items.slice(0, VISIBLE_COUNT),
-)
+const visibleItems = computed(() => {
+  if (expanded.value) return props.items
+
+  const top = props.items.slice(0, VISIBLE_COUNT)
+  if (top.some(isCowItem)) return top
+
+  const cow = props.items.find(isCowItem)
+  if (!cow) return top
+
+  return top.length >= VISIBLE_COUNT
+    ? [...top.slice(0, VISIBLE_COUNT - 1), cow]
+    : [...top, cow]
+})
 
 const onSelect = (provider: string) => {
   emit('select', provider)

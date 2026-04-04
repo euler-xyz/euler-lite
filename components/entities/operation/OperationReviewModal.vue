@@ -233,7 +233,7 @@ const permit2DisclaimerText = 'You are granting the permit2 contract unlimited a
 <template>
   <BaseModalWrapper
     title="Transaction review"
-    @close="$emit('close')"
+    @close="!internalSubmitting && $emit('close')"
   >
     <div class="flex flex-col gap-24">
       <!-- Transaction Steps -->

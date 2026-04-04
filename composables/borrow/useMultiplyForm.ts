@@ -1,11 +1,11 @@
 import type { Ref, ComputedRef } from 'vue'
 import { useAccount } from '@wagmi/vue'
-import { formatUnits, type Address } from 'viem'
+import { erc20Abi, formatUnits, maxUint256, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { createRaceGuard } from '~/utils/race-guard'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal } from '#components'
+import { OperationReviewModal, CowSwapReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
 import {
   type AnyBorrowVaultPair,
@@ -23,6 +23,8 @@ import {
   conservativePriceRatioNumber,
 } from '~/services/pricing/priceProvider'
 import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
+import { COWSWAP_PROVIDER_NAME, type CowSwapExecuteParams, deriveCowSwapBuyAmountFromQuote, getCowSwapChainConfig, isCowSwapSupportedChain } from '~/entities/cowswap'
+import { useCowSwapExecution, useCowSwapOrderStatus } from '~/composables/cowswap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
@@ -92,9 +94,55 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
   const {
     runSimulation: runMultiplySimulation,
-    simulationError: multiplySimulationError,
+    simulationError: baseSimulationError,
     clearSimulationError: clearMultiplySimulationError,
   } = useTxPlanSimulation()
+  const multiplySimulationError = computed(() => baseSimulationError.value)
+
+  // --- CowSwap ---
+  const { client: rpcClient } = useRpcClient()
+  const { chainId: currentChainId } = useEulerAddresses()
+  const cowSwapExecution = useCowSwapExecution()
+  const cowSwapOrderbookUrl = computed(() => {
+    const config = getCowSwapChainConfig(currentChainId.value ?? 0)
+    return config?.orderbookUrl
+  })
+  const cowSwapOrderStatus = useCowSwapOrderStatus(cowSwapExecution.orderUid, cowSwapOrderbookUrl)
+
+  const isCowSwapProvider = computed(() =>
+    multiplySelectedProvider.value?.toLowerCase() === COWSWAP_PROVIDER_NAME
+    || (!multiplySelectedProvider.value && multiplyEffectiveQuote.value?.route?.some(r => r.providerName?.toLowerCase() === COWSWAP_PROVIDER_NAME)),
+  )
+
+  const cowSwapStatusLabel = computed(() => {
+    if (!isCowSwapProvider.value || cowSwapExecution.status.value === 'idle') return null
+    switch (cowSwapExecution.status.value) {
+      case 'approving_collateral': return 'Approving collateral...'
+      case 'signing_permit': return 'Sign EVC permit in wallet...'
+      case 'signing_order': return 'Sign CoW order in wallet...'
+      case 'submitting': return 'Submitting order...'
+      case 'submitted': {
+        const orderType = cowSwapOrderStatus.orderStatus.value?.type
+        return orderType && orderType !== 'unknown'
+          ? `Order ${orderType}`
+          : 'Order submitted, waiting for fill...'
+      }
+      default: return null
+    }
+  })
+
+  // Watch for CowSwap order completion
+  watch(() => cowSwapOrderStatus.orderStatus.value, (orderStatusVal) => {
+    if (!orderStatusVal?.terminal) return
+    if (orderStatusVal.type === 'traded' || orderStatusVal.type === 'fulfilled') {
+      refreshAllPositions(eulerLensAddresses.value, address.value || '')
+      modal.close()
+      cowSwapExecution.reset()
+      setTimeout(() => {
+        router.replace('/portfolio')
+      }, 400)
+    }
+  })
 
   const multiplyPriceInvert = usePriceInvert(
     () => multiplyShortVault.value?.asset.symbol,
@@ -118,7 +166,28 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     reset: resetMultiplyQuoteStateInternal,
     requestQuotes: requestMultiplyQuotes,
     selectProvider: selectMultiplyQuote,
-  } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+  } = useSwapQuotesParallel({
+    amountField: 'amountOut',
+    compare: 'max',
+    includeCowSwap: true,
+    // CoW quotes return amountOut in vault shares (buyToken = vault address).
+    // Convert to underlying using the vault's exchange rate from lens data.
+    transformQuote: (quote, provider) => {
+      if (provider.toLowerCase() !== COWSWAP_PROVIDER_NAME) return quote
+      const vault = multiplyLongVault.value
+      if (!vault || vault.totalShares <= 0n) return quote
+      const convert = (val: string) => {
+        const shares = BigInt(val || '0')
+        if (shares <= 0n) return val
+        return (shares * vault.totalAssets / vault.totalShares).toString()
+      }
+      return {
+        ...quote,
+        amountOut: convert(quote.amountOut),
+        amountOutMin: convert(quote.amountOutMin),
+      }
+    },
+  })
   // --- Form state ---
   const multiplyInputAmount = ref('')
   const multiplier = ref(1)
@@ -541,6 +610,53 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     if (multiplyDebtAmountNano.value > 0n && (multiplyShortVault.value.totalCash || 0n) < multiplyDebtAmountNano.value) {
       return 'Not enough liquidity in the vault'
     }
+    if (isCowSwapProvider.value && isMultiplySavingCollateral.value) {
+      return 'CoW Swap is not available when using savings as collateral'
+    }
+    if (isCowSwapProvider.value && multiplyLongVault.value && multiplySupplyVault.value
+      && normalizeAddress(multiplySupplyVault.value.address) !== normalizeAddress(multiplyLongVault.value.address)) {
+      return 'CoW Swap is not available when margin vault differs from the long vault'
+    }
+
+    // CowSwap pre-flight checks: since we can't simulate the full tx, validate
+    // on-chain constraints locally to increase probability of solver success.
+    if (isCowSwapProvider.value && multiplyDebtAmountNano.value > 0n && multiplySwapAmountOut.value > 0n) {
+      const collateralVault = multiplySupplyVault.value
+      const borrowVault = multiplyShortVault.value
+      const depositTotal = multiplySupplyAmountNano.value + multiplySwapAmountOut.value
+
+      // Supply cap: collateral deposit + swap proceeds must fit
+      if (collateralVault.supplyCap < maxUint256 && collateralVault.supplyCap > 0n) {
+        if (collateralVault.supply + depositTotal > collateralVault.supplyCap) {
+          return 'Supply cap would be exceeded on the collateral vault'
+        }
+      }
+
+      // Borrow cap
+      if (borrowVault.borrowCap < maxUint256 && borrowVault.borrowCap > 0n) {
+        if (borrowVault.borrow + multiplyDebtAmountNano.value > borrowVault.borrowCap) {
+          return 'Borrow cap would be exceeded'
+        }
+      }
+
+      // Cash available to borrow
+      if (borrowVault.totalCash < multiplyDebtAmountNano.value) {
+        return 'Not enough liquidity to borrow'
+      }
+
+      // LTV check
+      if (multiplyNextLtv.value !== null && multiplyBorrowLtv.value > 0) {
+        if (multiplyNextLtv.value > multiplyBorrowLtv.value) {
+          return 'Position would exceed maximum LTV'
+        }
+      }
+
+      // Health score
+      if (multiplyNextHealth.value !== null && multiplyNextHealth.value < 1) {
+        return 'Position would be immediately liquidatable'
+      }
+    }
+
     return null
   })
 
@@ -725,9 +841,135 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   }
 
   // --- Actions: submit & send ---
+  const submitCowSwapMultiply = async () => {
+    if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) return
+    if (!multiplyInputAmount.value || multiplyDebtAmountNano.value <= 0n) return
+    if (multiplyErrorText.value) return
+
+    const quote = multiplySelectedQuote.value
+    if (!quote) return
+
+    const chainId = currentChainId.value ?? 0
+    if (!isCowSwapSupportedChain(chainId)) return
+
+    let subAccount: string
+    try {
+      subAccount = await resolvePendingSubAccount()
+    }
+    catch (e) {
+      logWarn('multiply/cowswap/resolveSubaccount', e)
+      error('Unable to resolve position')
+      return
+    }
+
+    const supplyAmountNano = valueToNano(multiplyInputAmount.value || '0', multiplySupplyVault.value.asset.decimals)
+    const debtAmount = multiplyDebtAmountNano.value
+    const validTo = Math.floor(Date.now() / 1000) + 900
+
+    // deriveCowSwapBuyAmountFromQuote returns underlying amounts (transformed by the quote system),
+    // but the CoW order needs vault shares since buyToken = vault address.
+    // Convert underlying back to shares using the vault's exchange rate.
+    const underlyingBuyAmount = deriveCowSwapBuyAmountFromQuote({
+      amountOutMin: quote.amountOutMin,
+      amountOut: quote.amountOut,
+    })
+    const { totalAssets, totalShares } = multiplyLongVault.value
+    const buyAmount = totalAssets > 0n
+      ? underlyingBuyAmount * totalShares / totalAssets
+      : underlyingBuyAmount
+
+    const cowParams: CowSwapExecuteParams = {
+      chainId,
+      sellToken: multiplyShortVault.value.asset.address as Address,
+      buyToken: multiplyLongVault.value.address as Address,
+      sellAmount: debtAmount,
+      buyAmount,
+      validTo,
+      collateralToken: multiplySupplyVault.value.asset.address as Address,
+      wrapper: {
+        owner: address.value as Address,
+        account: subAccount as Address,
+        deadline: validTo,
+        collateralVault: multiplySupplyVault.value.address as Address,
+        borrowVault: multiplyShortVault.value.address as Address,
+        collateralAmount: supplyAmountNano,
+        borrowAmount: debtAmount,
+      },
+    }
+
+    let needsApproval = true
+    try {
+      const client = rpcClient.value
+      if (client) {
+        const currentAllowance = await client.readContract({
+          address: multiplySupplyVault.value.asset.address as Address,
+          abi: erc20Abi,
+          functionName: 'allowance',
+          args: [address.value as Address, multiplySupplyVault.value.address as Address],
+        }) as bigint
+        needsApproval = currentAllowance < supplyAmountNano
+      }
+    }
+    catch {
+      // Default to showing approval step
+    }
+
+    modal.open(CowSwapReviewModal, {
+      props: {
+        collateralAsset: multiplySupplyVault.value.asset,
+        collateralAmount: multiplyInputAmount.value,
+        collateralVaultName: multiplySupplyProduct.name || multiplySupplyVault.value.asset.symbol,
+        borrowAsset: multiplyShortVault.value.asset,
+        borrowAmount: multiplyShortAmount.value || formatUnits(debtAmount, Number(multiplyShortVault.value.asset.decimals)),
+        borrowVaultName: multiplyShortProduct.name || multiplyShortVault.value.asset.symbol,
+        swapOutAmount: multiplyLongAmount.value,
+        swapOutMinAmount: quote.amountOutMin
+          ? trimTrailingZeros(formatUnits(BigInt(quote.amountOutMin), Number(multiplyLongVault.value.asset.decimals)))
+          : multiplyLongAmount.value,
+        needsApproval,
+        subAccount,
+        executionStatus: cowSwapExecution.status,
+        executionError: cowSwapExecution.error,
+        explorerUrl: cowSwapExecution.explorerUrl,
+        orderStatus: cowSwapOrderStatus.orderStatus,
+        onConfirm: async () => {
+          try {
+            await cowSwapExecution.executeAsync(cowParams)
+          }
+          catch (e) {
+            logWarn('multiply/cowswap/execute', e)
+          }
+        },
+        onCancel: async () => {
+          try {
+            await cowSwapExecution.cancelOrder()
+            modal.close()
+          }
+          catch (e) {
+            logWarn('multiply/cowswap/cancel', e)
+            error('Failed to cancel order')
+          }
+        },
+      },
+    })
+  }
+
   const submitMultiply = async () => {
     if (isOperationBlocked.value) return
     if (isMultiplyPreparing.value || isGeoBlocked.value || isMultiplyRestricted.value) return
+
+    // CowSwap branch: skip plan building and simulation
+    if (isCowSwapProvider.value) {
+      isMultiplyPreparing.value = true
+      try {
+        await submitCowSwapMultiply()
+      }
+      finally {
+        isMultiplyPreparing.value = false
+      }
+      return
+    }
+
     isMultiplyPreparing.value = true
     try {
       if (isMultiplySubmitting.value || !isConnected.value) return
@@ -816,10 +1058,9 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           swapToAmount: quote ? multiplyLongAmount.value : undefined,
           swapMode: quote ? SwapperMode.EXACT_IN : undefined,
           subAccount,
-          onConfirm: () => {
-            setTimeout(() => {
-              sendMultiply()
-            }, 400)
+          submittingLabel: 'Submitting...',
+          onConfirm: async () => {
+            await sendMultiply()
           },
         },
       })
@@ -1030,6 +1271,12 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     multiplySupplyProduct,
     multiplyLongProduct,
     multiplyShortProduct,
+
+    // CowSwap
+    isCowSwapProvider,
+    cowSwapExecution,
+    cowSwapOrderStatus,
+    cowSwapStatusLabel,
 
     // Actions
     onMultiplyInput,

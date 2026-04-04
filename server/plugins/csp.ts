@@ -142,6 +142,9 @@ const CONNECT_SRC_BASE = [
   'https://cca-lite.coinbase.com',
   // External data APIs
   'https://api.fuul.xyz',
+  // CoW Protocol orderbook
+  'https://barn.api.cow.fi',
+  'https://api.cow.fi',
   // Reown AppKit SDK version check
   'https://registry.npmjs.org',
   // RPC providers (wildcard — operators configure per chain)

@@ -15,6 +15,8 @@ import { isAbortError } from '~/utils/errorHandling'
 type SwapQuotesParallelOptions = {
   amountField: SwapQuoteAmountField
   compare: SwapQuoteCompare
+  transformQuote?: (quote: SwapApiQuote, provider: string) => SwapApiQuote
+  includeCowSwap?: boolean
 }
 
 type SwapQuotesRequestOptions = {
@@ -123,7 +125,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     providersCount.value = 0
 
     try {
-      const providers = requestOptions.providers ?? await getSwapProviders()
+      const providers = requestOptions.providers ?? await getSwapProviders({ includeCowSwap: options.includeCowSwap })
       if (guard.isStale(gen)) {
         return
       }
@@ -149,7 +151,8 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
 
           const best = pickBestQuote(data, options.amountField, options.compare)
           if (best) {
-            upsertQuote(provider, best)
+            const transformed = options.transformQuote ? options.transformQuote(best, provider) : best
+            upsertQuote(provider, transformed)
           }
         }
         catch (err) {
