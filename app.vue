@@ -104,9 +104,9 @@ watch(chainId, () => {
   resetBalances()
   const targetChainId = chainId.value
   const labelsPromise = loadLabels()
-  void loadTokenList()
+  const tokenListPromise = loadTokenList()
   void loadCountry()
-  void labelsPromise.then(() => {
+  void Promise.all([labelsPromise, tokenListPromise]).then(() => {
     if (chainId.value !== targetChainId) return
     void loadVaults()
   })

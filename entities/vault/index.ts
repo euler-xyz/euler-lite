@@ -29,6 +29,9 @@ export {
   fetchEarnVault,
   fetchVaults,
   fetchEarnVaults,
+  processRawVaultData,
+  processRawEarnVaultData,
+  processRawSecuritizeVaultData,
 } from './fetcher'
 
 // Pricing

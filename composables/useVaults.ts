@@ -1,4 +1,4 @@
-import { getAddress, zeroAddress } from 'viem'
+import { getAddress, zeroAddress, decodeFunctionResult, type Hex } from 'viem'
 import { useVaultRegistry } from './useVaultRegistry'
 import { logWarn } from '~/utils/errorHandling'
 import {
@@ -14,10 +14,24 @@ import {
   fetchVaults,
   clearPriceCaches,
   type Vault,
+  processRawVaultData,
+  processRawEarnVaultData,
+  processRawSecuritizeVaultData,
 } from '~/entities/vault'
+import {
+  eulerVaultLensABI,
+  eulerEarnVaultLensABI,
+  eulerUtilsLensABI,
+} from '~/entities/euler/abis'
 import { fetchVaultFactories, isSecuritizeVault } from '~/entities/vault/factory'
 import { getProductByVault, isVaultNotExplorable, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import { getEulerRouterGovernor } from '~/entities/oracle'
+
+interface CategorizedVaults {
+  evkAddresses: string[]
+  earnAddresses: string[]
+  securitizeAddresses: string[]
+}
 
 const isReady = ref(false)
 const isEVKLoading = ref(false)
@@ -214,10 +228,11 @@ const fetchNeededEscrowVaults = async (addresses: string[], generation: number):
   })
 }
 
-const updateSecuritizeVaults = async (securitizeAddresses: string[], generation: number, silent = false) => {
+const updateSecuritizeVaults = async (securitizeAddresses: string[], generation?: number, silent = false) => {
   const { set: registrySet } = useVaultRegistry()
+  const gen = generation ?? loadGeneration.value
 
-  if (!securitizeAddresses.length || loadGeneration.value !== generation) {
+  if (!securitizeAddresses.length || loadGeneration.value !== gen) {
     return
   }
 
@@ -231,7 +246,7 @@ const updateSecuritizeVaults = async (securitizeAddresses: string[], generation:
       securitizeAddresses.map(addr => fetchSecuritizeVault(addr)),
     )
 
-    if (loadGeneration.value !== generation) return
+    if (loadGeneration.value !== gen) return
 
     results.forEach((result, index) => {
       if (result.status === 'fulfilled') {
@@ -246,10 +261,92 @@ const updateSecuritizeVaults = async (securitizeAddresses: string[], generation:
     logWarn('useVaults/updateSecuritizeVaults', e)
   }
   finally {
-    if (!silent && loadGeneration.value === generation) {
+    if (!silent && loadGeneration.value === gen) {
       isSecuritizeUpdating.value = false
       isSecuritizeLoading.value = false
     }
+  }
+}
+
+/**
+ * Populate vault state from the server-side vault cache.
+ * Returns true if the cache had data, false if cold.
+ */
+const loadVaultsFromCache = async (categorized: CategorizedVaults, generation: number): Promise<boolean> => {
+  const { chainId } = useEulerAddresses()
+  const { verifiedVaultAddresses, earnVaults: earnVaultAddresses } = useEulerLabels()
+  const { set: registrySet } = useVaultRegistry()
+
+  const allAddresses = [...categorized.evkAddresses, ...categorized.earnAddresses, ...categorized.securitizeAddresses]
+  if (allAddresses.length === 0) return false
+
+  const evkSet = new Set(categorized.evkAddresses.map(a => a.toLowerCase()))
+  const earnSet = new Set(categorized.earnAddresses.map(a => a.toLowerCase()))
+  const securitizeSet = new Set(categorized.securitizeAddresses.map(a => a.toLowerCase()))
+
+  try {
+    const cacheMap = await $fetch<Record<string, string>>(
+      `/api/vault-cache/${chainId.value}`,
+      { method: 'POST', body: { vaults: allAddresses } },
+    )
+
+    // Chain switch happened during $fetch — discard stale results
+    if (loadGeneration.value !== generation) return false
+
+    const entries = Object.entries(cacheMap)
+    if (entries.length === 0) return false
+
+    let count = 0
+    for (const [vaultAddress, hex] of entries) {
+      const addrLower = vaultAddress.toLowerCase()
+      try {
+        if (evkSet.has(addrLower)) {
+          const raw = decodeFunctionResult({
+            abi: eulerVaultLensABI,
+            functionName: 'getVaultInfoFull',
+            data: hex as Hex,
+          }) as Record<string, unknown>
+          registrySet(vaultAddress, processRawVaultData(raw, vaultAddress, verifiedVaultAddresses.value), 'evk')
+          count++
+        }
+        else if (earnSet.has(addrLower)) {
+          const raw = decodeFunctionResult({
+            abi: eulerEarnVaultLensABI,
+            functionName: 'getVaultInfoFull',
+            data: hex as Hex,
+          }) as Record<string, unknown>
+          registrySet(vaultAddress, processRawEarnVaultData(raw, vaultAddress, earnVaultAddresses.value), 'earn')
+          count++
+        }
+        else if (securitizeSet.has(addrLower)) {
+          const raw = decodeFunctionResult({
+            abi: eulerUtilsLensABI,
+            functionName: 'getVaultInfoERC4626',
+            data: hex as Hex,
+          }) as Record<string, unknown>
+          registrySet(vaultAddress, processRawSecuritizeVaultData(raw, vaultAddress, verifiedVaultAddresses.value), 'securitize')
+          count++
+        }
+      }
+      catch { /* skip malformed cache entries */ }
+    }
+
+    if (count === 0) return false
+
+    isReady.value = true
+    isEVKLoading.value = false
+    isEVKUpdating.value = false
+    isEarnLoading.value = false
+    isEarnUpdating.value = false
+    isSecuritizeLoading.value = false
+    isSecuritizeUpdating.value = false
+    isEscrowLoading.value = false
+    isEscrowUpdating.value = false
+    loadedChainId.value = chainId.value
+    return true
+  }
+  catch {
+    return false
   }
 }
 
@@ -295,9 +392,18 @@ const loadVaults = async () => {
       }
     })
 
-    // Phase 2: Fetch all vault types + escrow addresses in parallel
-    // Escrow vault info fetch starts when EVK, Earn, AND escrow addresses are all ready
-    // (need EVK collateralLTVs + Earn strategies to know which escrow vaults are needed)
+    // Try vault cache — gives an early render while the full load continues below
+    const cacheHit = await loadVaultsFromCache({
+      evkAddresses,
+      earnAddresses: explorableEarnAddresses,
+      securitizeAddresses,
+    }, generation)
+
+    if (loadGeneration.value !== generation) return
+
+    // Phase 2: Fetch all vault types + escrow addresses in parallel.
+    // Runs silently (no loading spinners) when cache provided an early render.
+    const silent = cacheHit
 
     // Signals for coordination
     let evkResolve: () => void = () => {}
@@ -315,14 +421,14 @@ const loadVaults = async () => {
 
     await Promise.all([
       (async () => {
-        await updateEarnVaults(explorableEarnAddresses, generation)
+        await updateEarnVaults(explorableEarnAddresses, generation, silent)
         earnResolve()
       })(),
       (async () => {
-        await updateEVKVaults(evkAddresses, generation)
+        await updateEVKVaults(evkAddresses, generation, silent)
         evkResolve()
       })(),
-      updateSecuritizeVaults(securitizeAddresses, generation),
+      updateSecuritizeVaults(securitizeAddresses, generation, silent),
       // Escrow addresses - fetch in parallel, populate set when ready
       (async () => {
         const addrs = await fetchEscrowAddresses()

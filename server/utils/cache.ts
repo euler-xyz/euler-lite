@@ -35,7 +35,10 @@ export function createTtlCache<T>(options: TtlCacheOptions) {
     get(key: string): T | undefined {
       const entry = map.get(key)
       if (!entry) return undefined
-      if ((Date.now() - entry.timestamp) >= ttlMs) return undefined
+      if ((Date.now() - entry.timestamp) >= ttlMs) {
+        map.delete(key)
+        return undefined
+      }
       return entry.data
     },
 
@@ -47,6 +50,14 @@ export function createTtlCache<T>(options: TtlCacheOptions) {
     set(key: string, data: T): void {
       map.set(key, { data, timestamp: Date.now() })
       evictOldest()
+    },
+
+    /** Remove all entries whose TTL has expired. */
+    deleteExpired(): void {
+      const now = Date.now()
+      for (const [key, entry] of map) {
+        if ((now - entry.timestamp) >= ttlMs) map.delete(key)
+      }
     },
   }
 }

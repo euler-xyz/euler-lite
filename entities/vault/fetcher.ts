@@ -93,6 +93,111 @@ export const processRawVaultData = (
 }
 
 /**
+ * Process raw earn vault lens data into an EarnVault object.
+ * APY and pricing are NOT included — the caller is expected to fill those in
+ * (e.g. via background refresh). Used by the vault cache fast path.
+ */
+export const processRawEarnVaultData = (
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- raw lens data with dynamic shape
+  raw: any,
+  vaultAddress: string,
+  verifiedEarnVaults?: string[],
+): EarnVault => {
+  const strategies = (raw.strategies as EarnVaultStrategyInfo[]).map(strategy => ({
+    strategy: strategy.strategy,
+    allocatedAssets: strategy.allocatedAssets,
+    availableAssets: strategy.availableAssets,
+    currentAllocationCap: strategy.currentAllocationCap,
+    pendingAllocationCap: strategy.pendingAllocationCap,
+    pendingAllocationCapValidAt: strategy.pendingAllocationCapValidAt,
+    removableAt: strategy.removableAt,
+    info: strategy.info,
+  }))
+
+  return {
+    verified: verifiedEarnVaults?.includes(vaultAddress) ?? false,
+    type: 'earn',
+    address: raw.vault,
+    name: raw.vaultName,
+    symbol: raw.vaultSymbol,
+    decimals: raw.vaultDecimals,
+    totalShares: raw.totalShares,
+    totalAssets: raw.totalAssets,
+    lostAssets: raw.lostAssets,
+    availableAssets: raw.availableAssets,
+    timelock: raw.timelock,
+    performanceFee: raw.performanceFee,
+    feeReceiver: raw.feeReceiver,
+    owner: raw.owner,
+    creator: raw.creator,
+    curator: raw.curator,
+    guardian: raw.guardian,
+    evc: raw.evc,
+    permit2: raw.permit2,
+    pendingTimelock: raw.pendingTimelock,
+    pendingTimelockValidAt: raw.pendingTimelockValidAt,
+    pendingGuardian: raw.pendingGuardian,
+    pendingGuardianValidAt: raw.pendingGuardianValidAt,
+    supplyQueue: raw.supplyQueue,
+    asset: {
+      address: raw.asset,
+      name: raw.assetName,
+      symbol: raw.assetSymbol,
+      decimals: raw.assetDecimals,
+    },
+    strategies,
+    interestRateInfo: {
+      borrowAPY: 0n,
+      borrowSPY: 0n,
+      borrows: 0n,
+      cash: raw.totalAssets as bigint,
+      supplyAPY: 0n,
+    },
+  } as EarnVault
+}
+
+/**
+ * Process raw securitize vault lens data into a SecuritizeVault object.
+ * governorAdmin, supplyCap, and assetPriceInfo are NOT included — these
+ * require separate RPC calls and will be filled in by background refresh.
+ */
+export const processRawSecuritizeVaultData = (
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- raw lens data with dynamic shape
+  raw: any,
+  vaultAddress: string,
+  verifiedVaultAddresses?: string[],
+): SecuritizeVault => {
+  return {
+    type: 'securitize',
+    verified: verifiedVaultAddresses?.includes(vaultAddress) ?? false,
+    address: raw.vault,
+    name: raw.vaultName,
+    symbol: raw.vaultSymbol,
+    decimals: raw.vaultDecimals,
+    totalShares: raw.totalShares,
+    totalAssets: raw.totalAssets,
+    isEVault: raw.isEVault,
+    asset: {
+      address: raw.asset,
+      name: raw.assetName,
+      symbol: raw.assetSymbol,
+      decimals: raw.assetDecimals,
+    },
+    governorAdmin: zeroAddress,
+    supplyCap: 0n,
+    supply: raw.totalAssets,
+    borrow: 0n,
+    interestRateInfo: {
+      borrowAPY: 0n,
+      borrowSPY: 0n,
+      borrows: 0n,
+      cash: raw.totalAssets,
+      supplyAPY: 0n,
+    },
+  } as SecuritizeVault
+}
+
+/**
  * Fetch vault using EVC batchSimulation with Pyth updates.
  * This ensures fresh Pyth prices are available when querying vault info.
  *

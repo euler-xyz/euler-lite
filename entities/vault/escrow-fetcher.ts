@@ -4,11 +4,12 @@ import { resolveAssetPriceInfo, resolveFullAssetPriceInfo, resolveUnitOfAccountP
 import { processRawVaultData, fetchVault } from './fetcher'
 import { logWarn } from '~/utils/errorHandling'
 import { USD_ADDRESS } from '~/entities/constants'
-import { BATCH_SIZE_RPC_CALLS } from '~/entities/tuning-constants'
+import { BATCH_SIZE_VAULT_FETCH } from '~/entities/tuning-constants'
 import {
   eulerPerspectiveABI,
   eulerVaultLensABI,
 } from '~/entities/euler/abis'
+import { batchLensCalls } from '~/utils/multicall'
 
 export const fetchEscrowVault = async (vaultAddress: string): Promise<Vault> => {
   const { rpcUrl } = useRpcClient()
@@ -93,7 +94,7 @@ export const fetchEscrowVaults = async function* (): AsyncGenerator<
   unknown
 > {
   const { client: rpcClient, rpcUrl } = useRpcClient()
-  const { eulerPeripheryAddresses, eulerLensAddresses, chainId } = useEulerAddresses()
+  const { eulerPeripheryAddresses, eulerLensAddresses, eulerCoreAddresses, chainId } = useEulerAddresses()
 
   const startChainId = chainId.value
 
@@ -130,32 +131,95 @@ export const fetchEscrowVaults = async function* (): AsyncGenerator<
     verifiedVaults = []
   }
 
-  const batchSize = BATCH_SIZE_RPC_CALLS
+  const batchSize = BATCH_SIZE_VAULT_FETCH
+
+  const fetchBatch = async (batchAddresses: string[]): Promise<Vault[]> => {
+    if (eulerCoreAddresses.value?.evc) {
+      const calls = batchAddresses.map(vaultAddress => ({
+        functionName: 'getVaultInfoFull',
+        args: [vaultAddress],
+      }))
+
+      const results = await batchLensCalls<Record<string, unknown>>(
+        eulerCoreAddresses.value.evc,
+        eulerLensAddresses.value!.vaultLens,
+        eulerVaultLensABI,
+        calls,
+        rpcUrl.value,
+      )
+
+      const vaults: Vault[] = []
+      const failedAddresses: string[] = []
+
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i]
+        if (result.success && result.result) {
+          try {
+            vaults.push(processRawVaultData(result.result as Record<string, unknown>, batchAddresses[i], undefined, { verified: true, vaultCategory: 'escrow' }))
+          }
+          catch (e) {
+            logWarn('escrow/processResult', e, { severity: 'error' })
+            failedAddresses.push(batchAddresses[i])
+          }
+        }
+        else {
+          failedAddresses.push(batchAddresses[i])
+        }
+      }
+
+      if (failedAddresses.length > 0) {
+        logWarn('escrow/fetchBatch', `Retrying ${failedAddresses.length} failed escrow vaults individually`)
+        const retries = await Promise.all(
+          failedAddresses.map(async (addr) => {
+            try {
+              const raw = await client.readContract({
+                address: eulerLensAddresses.value!.vaultLens as Address,
+                abi: eulerVaultLensABI,
+                functionName: 'getVaultInfoFull',
+                args: [addr],
+              }) as Record<string, unknown>
+              return processRawVaultData(raw, addr, undefined, { verified: true, vaultCategory: 'escrow' })
+            }
+            catch (e) {
+              logWarn('escrow/fetchIndividual', e, { severity: 'error' })
+              return undefined
+            }
+          }),
+        )
+        vaults.push(...retries.filter((v): v is Vault => !!v))
+      }
+
+      return vaults
+    }
+
+    // Fallback: individual readContract calls
+    const res = await Promise.all(
+      batchAddresses.map(async (vaultAddress) => {
+        try {
+          const raw = await client.readContract({
+            address: eulerLensAddresses.value!.vaultLens as Address,
+            abi: eulerVaultLensABI,
+            functionName: 'getVaultInfoFull',
+            args: [vaultAddress],
+          }) as Record<string, unknown>
+          return processRawVaultData(raw, vaultAddress, undefined, { verified: true, vaultCategory: 'escrow' })
+        }
+        catch (e) {
+          logWarn('escrow/fetchVault', e, { severity: 'error' })
+          return undefined
+        }
+      }),
+    )
+    return res.filter((v): v is Vault => !!v)
+  }
 
   for (let i = 0; i < verifiedVaults.length; i += batchSize) {
-    if (chainId.value !== startChainId) {
-      return
-    }
+    if (chainId.value !== startChainId) return
+
     const batch = verifiedVaults.slice(i, i + batchSize)
-    const batchPromises = batch.map(async (vaultAddress) => {
-      try {
-        const raw = await client.readContract({
-          address: eulerLensAddresses.value!.vaultLens as Address,
-          abi: eulerVaultLensABI,
-          functionName: 'getVaultInfoFull',
-          args: [vaultAddress],
-        }) as Record<string, unknown>
+    let validVaults = await fetchBatch(batch)
 
-        return processRawVaultData(raw, vaultAddress, undefined, { verified: true, vaultCategory: 'escrow' })
-      }
-      catch (e) {
-        logWarn('escrow/fetchVault', e, { severity: 'error' })
-        return undefined
-      }
-    })
-
-    const res = await Promise.all(batchPromises)
-    let validVaults = res.filter(o => !!o) as Vault[]
+    if (chainId.value !== startChainId) return
 
     const utilsLensAddress = eulerLensAddresses.value!.utilsLens
     validVaults = await Promise.all(
@@ -170,7 +234,6 @@ export const fetchEscrowVaults = async function* (): AsyncGenerator<
 
     validVaults = await Promise.all(
       validVaults.map(async (vault) => {
-        // Refetch price if missing or query failed (0n is valid - very small price)
         if (
           !vault.liabilityPriceInfo
           || vault.liabilityPriceInfo.queryFailure

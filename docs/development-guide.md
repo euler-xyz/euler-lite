@@ -85,6 +85,7 @@ External metadata (contract addresses, labels, oracle checks) is fetched through
 | `GET /api/oracle-adapter?chainId=X&address=0x...` | Per-adapter JSON from oracle-checks | 5 min | `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` |
 | `GET /api/token-list?chainId=X` | Euler API + Uniswap + DefiLlama token lists | 5 min | `EULER_API_URL`, `NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL`, `NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL` |
 | `GET /api/pyth/updates?ids[]=...` | Pyth Hermes (`/v2/updates/price/latest`) | No cache | `PYTH_HERMES_URL` (server-only) |
+| `POST /api/vault-cache/:chainId` | In-memory (populated by RPC proxy interception) | 5 min | — |
 
 All endpoints use rate limiting and return stale cached data when upstream is unavailable (except `/api/pyth/updates` which requires real-time data and returns no-store cache headers). The shared caching utility is in `server/utils/cache.ts`.
 
@@ -105,6 +106,24 @@ The `/api/pyth/updates` endpoint proxies Pyth Hermes price update requests throu
 - **Rate limit**: 600 requests per 60-second window
 - **Validation**: Feed IDs must match `0x[64 hex chars]` format, max 100 per request
 - **Env var**: `PYTH_HERMES_URL` (server-only; not exposed to client)
+
+### Vault Cache (Fast First Load)
+
+The vault cache reduces time to first load by serving previously-seen vault data from an in-memory server-side cache. It works passively — no pre-warming schedule, no client push, no idle RPC calls.
+
+**How it works:**
+
+1. **Cache population** — The RPC proxy (`server/api/rpc/[chainId].ts`) passively intercepts vault lens calls as they flow through. When it detects an EVC `batchSimulation` targeting the vault lens, or a direct `getVaultInfoFull`/`getVaultInfoERC4626` call to a known lens address, it decodes the response and stores the raw hex result per vault address. This is a fire-and-forget side effect that never blocks or modifies the response.
+
+2. **Cache serving** — `POST /api/vault-cache/:chainId` accepts `{ vaults: string[] }` and returns `{ [address]: hex }` for whichever vaults have fresh data (within 5-minute TTL). Stale entries are swept on every request.
+
+3. **Client integration** — Inside `loadVaults()`, after factory detection, the client queries the vault cache. On a hit, it decodes hex per vault type (EVK, Earn, Securitize), populates the registry, and sets `isReady = true` for an immediate render. The full RPC load then continues silently in the background (including escrow vaults, pricing, and Pyth simulation).
+
+**Intercepted patterns:** EVK/Escrow via EVC `batchSimulation`, Earn via direct `getVaultInfoFull` to earnLens, Securitize via direct `getVaultInfoERC4626` to utilsLens. Both single JSON-RPC requests and batch arrays (from viem's HTTP transport batching) are handled.
+
+**Cache characteristics:** 5-minute TTL, 5000 max entries, stale entries auto-deleted on access and swept on every `/api/vault-cache` request. The server is the only writer (reads from its own proxy traffic) — no client push, no attack surface.
+
+**Key files:** `server/utils/vault-cache-store.ts` (shared cache), `server/api/vault-cache/[chainId].post.ts` (read endpoint), `server/api/rpc/[chainId].ts` (write via interception).
 
 ## Code layout (high level)
 
