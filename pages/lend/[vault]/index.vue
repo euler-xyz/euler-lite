@@ -705,6 +705,16 @@ watch(swapSelectedQuote, () => {
   clearSimulationError()
 })
 
+// Re-run estimates when swap quote resolves — supplyNano depends on amountOut
+watch(swapEffectiveQuote, () => {
+  if (needsSwap.value && swapEffectiveQuote.value) {
+    if (!isEstimatesLoading.value) {
+      isEstimatesLoading.value = true
+    }
+    updateEstimates()
+  }
+})
+
 // Update USD value when monthlyEarnings or vault changes
 watchEffect(async () => {
   if (!vault.value || !monthlyEarnings.value) {
