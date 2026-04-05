@@ -610,11 +610,10 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
           plan: plan.value || undefined,
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
-          onConfirm: () => {
-            setTimeout(() => {
-              send()
-            }, 400)
+          onConfirm: async () => {
+            await send()
           },
+          submittingLabel: 'Submitting...',
         },
       })
     }

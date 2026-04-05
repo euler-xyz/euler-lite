@@ -134,10 +134,9 @@ const submit = async () => {
         asset: asset.value,
         amount: amount.value,
         plan: plan.value || undefined,
-        onConfirm: () => {
-          setTimeout(() => {
-            send()
-          }, 400)
+        submittingLabel: 'Submitting...',
+        onConfirm: async () => {
+          await send()
         },
       },
     })

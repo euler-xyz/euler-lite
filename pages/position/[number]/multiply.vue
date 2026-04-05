@@ -642,10 +642,9 @@ const submitMultiply = async () => {
           swapToAsset: quote ? multiplyLongVault.value.asset : undefined,
           swapToAmount: quote ? multiplyLongAmount.value : undefined,
           subAccount,
-          onConfirm: () => {
-            setTimeout(() => {
-              sendMultiply()
-            }, 400)
+          submittingLabel: 'Submitting...',
+          onConfirm: async () => {
+            await sendMultiply()
           },
         },
       })
