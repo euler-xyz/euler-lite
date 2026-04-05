@@ -280,7 +280,7 @@ The Nuxt server layer (`server/api/`) proxies requests to external services (RPC
 |---|---|
 | **CORS** (`server/middleware/cors.ts`) | Restricts API access to configured origins |
 | **Body size limits** (`server/middleware/body-limit.ts`) | Caps request payloads (1 MB RPC, 2 MB Tenderly) |
-| **Geo-blocking** (`server/middleware/geo-gate.ts`) | Blocks sanctioned countries via Cloudflare headers |
+| **Geo-blocking** (`server/middleware/geo-gate.ts`) | Blocks sanctioned countries via Cloudflare `CF-IPCountry`; fails closed (HTTP 451) if country is undetermined in prod |
 | **RPC method whitelist** (`server/api/rpc/[chainId].ts`) | Only 16 safe read/send methods are proxied |
 | **Rate limiting** (`server/utils/rate-limit.ts`) | Per-IP cost-based budgets (see below) |
 | **Swap verifier validation** (`utils/swap-validation.ts`) | Validates swap verifier addresses against known config |
@@ -293,6 +293,8 @@ The app includes a built-in per-IP rate limiter as a defense-in-depth measure. D
 - **All other proxies**: 1,000 requests (token list, Pyth updates, labels, oracle adapter, euler chains, intrinsic APY, TOS)
 - **Tenderly simulate**: 10 requests
 - **Address screening**: 10 requests
+
+**Wallet screening fail-closed**: `server/api/screen-address.post.ts` proxies address checks to the TRM API (configured via `WALLET_SCREENING_URI`). If the env var is not set, or the TRM API returns an error or times out, the endpoint returns `addressIsSuspicious: true` — the app fails closed rather than open. Operators must set `WALLET_SCREENING_URI` or all users will be treated as suspicious.
 
 **Important**: This is a best-effort safeguard, not a security boundary. It catches accidental abuse (e.g. a client stuck in a retry loop) but will not stop a determined attacker. Known limitations:
 
