@@ -546,14 +546,6 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     }
     await requestMultiplyQuotes(requestParams, {
       errorMessage: 'Unable to fetch swap quote. Multiply feature is not available for this asset.',
-      logContext: {
-        fromVault: multiplyShortVault.value?.address,
-        toVault: multiplyLongVault.value?.address,
-        amount: formatUnits(debtAmount, Number(multiplyShortVault.value.asset.decimals)),
-        slippage: multiplySlippage.value,
-        swapperMode: SwapperMode.EXACT_IN,
-        isRepay: false,
-      },
     })
   }, 500)
 

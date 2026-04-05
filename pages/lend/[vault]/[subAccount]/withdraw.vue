@@ -217,13 +217,6 @@ const requestSwapQuote = useDebounceFn(async () => {
     isRepay: false,
     targetDebt: 0n,
     currentDebt: 0n,
-  }, {
-    logContext: {
-      tokenIn: asset.value.address,
-      tokenOut: selectedOutputAsset.value.address,
-      amount: amount.value,
-      slippage: swapSlippage.value,
-    },
   })
 }, 500)
 

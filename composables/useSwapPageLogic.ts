@@ -40,7 +40,7 @@ export interface UseSwapPageLogicOptions {
    * Build the swap-API params for a given input amount.
    * Return `null` to skip the request (e.g. amount exceeds debt).
    */
-  buildQuoteRequest: (amount: bigint) => { params: SwapApiRequestInput, logContext: Record<string, unknown> } | null
+  buildQuoteRequest: (amount: bigint) => { params: SwapApiRequestInput } | null
   /** Build the TxPlan for the current swap (same-asset or quote-based). Must throw on failure. */
   buildPlan: () => Promise<TxPlan>
   /** Page-specific balance validation error. Receives the parsed nano amount. */
@@ -237,7 +237,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     }
 
     toAmount.value = ''
-    await requestQuotes(request.params, { logContext: request.logContext })
+    await requestQuotes(request.params)
   }, 500)
 
   // ── Input handlers ─────────────────────────────────────────────────────

@@ -400,13 +400,6 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       isRepay: false,
       targetDebt: 0n,
       currentDebt: 0n,
-    }, {
-      logContext: {
-        tokenIn: borrowSelectedAsset.value.address,
-        tokenOut: collateralVault.value.asset.address,
-        amount: collateralAmount.value,
-        slippage: borrowSwapSlippage.value,
-      },
     })
   }, 500)
 

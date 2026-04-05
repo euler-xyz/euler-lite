@@ -364,12 +364,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       return
     }
 
-    await requestSwapQuotes(params, {
-      logContext: {
-        amount: amount.value,
-        slippage: swapSlippage.value,
-      },
-    })
+    await requestSwapQuotes(params)
   }, 500)
 
   const openSwapTokenSelector = (currentAddress?: string, onSelect?: (a: VaultAsset, meta?: SwapTokenSelectMeta) => void) => {
