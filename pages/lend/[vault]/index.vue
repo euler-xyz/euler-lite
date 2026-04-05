@@ -25,6 +25,7 @@ import { formatNumber, compactNumber, formatSmartAmount } from '~/utils/string-u
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import { createRaceGuard } from '~/utils/race-guard'
 
 // Type definitions for vault display
 type VaultType = 'evk' | 'securitize'
@@ -490,8 +491,11 @@ const send = async () => {
   }
 }
 
+const estimatesGuard = createRaceGuard()
+
 const updateEstimates = useDebounceFn(async () => {
   if (!isVaultLoaded.value) return
+  const gen = estimatesGuard.next()
   try {
     if (features.value.hasInterestRate && evkVault.value) {
       // When swapping, use the swap output amount (vault-asset denominated)
@@ -511,6 +515,7 @@ const updateEstimates = useDebounceFn(async () => {
           supplyNano,
           0n,
         )
+        if (estimatesGuard.isStale(gen)) return
         const rawAPY = projected?.supplyAPY ?? evkVault.value.interestRateInfo.supplyAPY
         estimateSupplyAPY.value = rawAPY + valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
       }
@@ -531,10 +536,13 @@ const updateEstimates = useDebounceFn(async () => {
     }
   }
   catch (e) {
+    if (estimatesGuard.isStale(gen)) return
     logWarn('lend-supply/estimates', e)
   }
   finally {
-    isEstimatesLoading.value = false
+    if (!estimatesGuard.isStale(gen)) {
+      isEstimatesLoading.value = false
+    }
   }
 }, 500)
 
