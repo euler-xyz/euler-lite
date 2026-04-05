@@ -122,10 +122,9 @@ const onUnlockClick = async () => {
           maturityDate: formattedDate.value,
           daysUntilMaturity: daysUntilMaturity.value,
         },
-        onConfirm: () => {
-          setTimeout(() => {
-            unlock()
-          }, 400)
+        submittingLabel: 'Unlocking...',
+        onConfirm: async () => {
+          await unlock()
         },
       },
     })

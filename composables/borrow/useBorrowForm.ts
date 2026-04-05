@@ -581,11 +581,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             plan: plan.value || undefined,
             swapToAsset: collateralVault.value.asset,
             swapToAmount: borrowSwapEstimatedCollateral.value,
-            onConfirm: () => {
-              setTimeout(() => {
-                send()
-              }, 400)
+            onConfirm: async () => {
+              await send()
             },
+            submittingLabel: 'Submitting...',
           },
         })
         return
@@ -651,11 +650,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
           plan: plan.value || undefined,
           supplyingAssetForBorrow: collateralVault.value?.asset,
           supplyingAmount: collateralAmount.value,
-          onConfirm: () => {
-            setTimeout(() => {
-              send()
-            }, 400)
+          onConfirm: async () => {
+            await send()
           },
+          submittingLabel: 'Submitting...',
         },
       })
     }

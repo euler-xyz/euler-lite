@@ -466,11 +466,10 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
             swapToAsset: showSwapAmounts ? toVault.value?.asset : undefined,
             swapToAmount: showSwapAmounts ? toAmount.value : undefined,
             plan: plan.value || undefined,
-            onConfirm: () => {
-              setTimeout(() => {
-                send()
-              }, 400)
+            onConfirm: async () => {
+              await send()
             },
+            submittingLabel: 'Submitting...',
           },
         })
       })

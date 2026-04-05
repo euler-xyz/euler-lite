@@ -571,11 +571,10 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
             hasBorrows: (position.value?.borrowed || 0n) > 0n,
             swapToAsset: options.needsSwap.value ? options.getSwapToAsset() : undefined,
             swapToAmount: options.needsSwap.value ? swapEstimatedOutput.value : undefined,
-            onConfirm: () => {
-              setTimeout(() => {
-                send()
-              }, 400)
+            onConfirm: async () => {
+              await send()
             },
+            submittingLabel: 'Submitting...',
           },
         })
       })
