@@ -51,9 +51,10 @@ export default defineEventHandler((event) => {
   const cfCountry = (event.node.req.headers['cf-ipcountry'] as string | undefined)?.toUpperCase()
   let country = (cfCountry && /^[A-Z]{2}$/.test(cfCountry) && cfCountry !== 'XX') ? cfCountry : undefined
 
-  // In dev, Cloudflare is not in the request path so cf-ipcountry is never set.
-  // Mirror geo-gate.ts: use DEV_GEO_COUNTRY so x-country-code is set in the response.
-  if (!country && process.env.DOPPLER_ENVIRONMENT === 'dev') {
+  // When Cloudflare is not in the request path (local dev, PR previews, etc.)
+  // cf-ipcountry is never set. Mirror geo-gate.ts: use DEV_GEO_COUNTRY as a
+  // fallback regardless of environment so x-country-code is set in the response.
+  if (!country) {
     const devCountry = process.env.DEV_GEO_COUNTRY?.toUpperCase()
     if (devCountry && /^[A-Z]{2}$/.test(devCountry) && devCountry !== 'XX') {
       country = devCountry
