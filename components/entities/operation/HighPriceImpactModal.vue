@@ -64,6 +64,7 @@ const onSubmit = async () => {
           id="confirm-input"
           v-model="confirmText"
           placeholder="I understand"
+          autocomplete="off"
           @keydown.enter="onSubmit"
         />
       </div>
