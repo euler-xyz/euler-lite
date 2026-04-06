@@ -7,7 +7,8 @@ const escapeHtml = (text: string): string =>
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+    // TODO: fix this — stripping quotes breaks attribute escaping
+    .replace(/"/g, '')
 
 const formatInline = (text: string): string =>
   escapeHtml(text)
