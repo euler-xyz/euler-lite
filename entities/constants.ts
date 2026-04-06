@@ -63,6 +63,12 @@ export const EUR_ADDRESS: Address = '0x00000000000000000000000000000000000003d2'
 export const BTC_ADDRESS: Address = '0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB'
 export const ETH_ADDRESS: Address = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
 
+// Tokens that revert when changing a non-zero allowance to another non-zero value.
+// For these tokens, approve must be reset to 0 before setting a new value.
+export const APPROVE_RESET_REQUIRED_TOKENS = new Set<string>([
+  '0xdac17f958d2ee523a2206206994597c13d831ec7', // USDT on Ethereum
+])
+
 // ERC-20 allowance slot candidates checked during simulation state-override probing.
 // Sequential range (0..ALLOWANCE_MAX_SEQUENTIAL_SLOT) covers standard ERC-20 layouts
 // and OZ Upgradeable tokens where inherited contracts shift the base slot index.

@@ -20,7 +20,7 @@ import {
   conservativePriceRatioNumber,
 } from '~/services/pricing/priceProvider'
 import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
-import { COWSWAP_PROVIDER_NAME, type CowSwapExecuteParams, deriveCowSwapBuyAmountFromQuote, getCowSwapChainConfig, isCowSwapSupportedChain } from '~/entities/cowswap'
+import { COWSWAP_PROVIDER_NAME, COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapExecuteParams, deriveCowSwapBuyAmountFromQuote, getCowSwapChainConfig, isCowSwapSupportedChain } from '~/entities/cowswap'
 import { useCowSwapExecution, useCowSwapOrderStatus } from '~/composables/cowswap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
@@ -752,6 +752,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
   // --- Actions: submit & send ---
   const submitCowSwapMultiply = async () => {
+    cowSwapExecution.reset()
     if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) return
     if (!multiplyInputAmount.value || multiplyDebtAmountNano.value <= 0n) return
     if (multiplyErrorText.value) return
@@ -774,7 +775,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
     const supplyAmountNano = valueToNano(multiplyInputAmount.value || '0', multiplySupplyVault.value.asset.decimals)
     const debtAmount = multiplyDebtAmountNano.value
-    const validTo = Math.floor(Date.now() / 1000) + 900
+    const validTo = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
 
     // deriveCowSwapBuyAmountFromQuote returns underlying amounts (transformed by the quote system),
     // but the CoW order needs vault shares since buyToken = vault address.
@@ -807,21 +808,33 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       },
     }
 
-    let needsApproval = true
+    let needsCollateralApproval = true
+    let needsSellTokenApproval = true
     try {
       const client = rpcClient.value
       if (client) {
-        const currentAllowance = await client.readContract({
+        const chainConfig = getCowSwapChainConfig(chainId)
+        const collateralAllowance = await client.readContract({
           address: multiplySupplyVault.value.asset.address as Address,
           abi: erc20Abi,
           functionName: 'allowance',
           args: [address.value as Address, multiplySupplyVault.value.address as Address],
         }) as bigint
-        needsApproval = currentAllowance < supplyAmountNano
+        needsCollateralApproval = collateralAllowance < supplyAmountNano
+
+        if (chainConfig) {
+          const sellTokenAllowance = await client.readContract({
+            address: multiplyShortVault.value.asset.address as Address,
+            abi: erc20Abi,
+            functionName: 'allowance',
+            args: [address.value as Address, chainConfig.vaultRelayer],
+          }) as bigint
+          needsSellTokenApproval = sellTokenAllowance < debtAmount
+        }
       }
     }
     catch {
-      // Default to showing approval step
+      // Default to showing approval steps
     }
 
     modal.open(CowSwapReviewModal, {
@@ -836,7 +849,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         swapOutMinAmount: quote.amountOutMin
           ? trimTrailingZeros(formatUnits(BigInt(quote.amountOutMin), Number(multiplyLongVault.value.asset.decimals)))
           : multiplyLongAmount.value,
-        needsApproval,
+        needsCollateralApproval,
+        needsSellTokenApproval,
         subAccount,
         executionStatus: cowSwapExecution.status,
         executionError: cowSwapExecution.error,
