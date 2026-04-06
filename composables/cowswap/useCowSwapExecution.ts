@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { erc20Abi, type Address, type Hex } from 'viem'
+import type { Address, Hex } from 'viem'
 import { useSignTypedData, useWriteContract } from '@wagmi/vue'
 import { EVC_ABI } from '~/abis/evc'
 import { OPEN_POSITION_WRAPPER_ABI } from '~/abis/cowswap-wrapper'
@@ -26,6 +26,7 @@ export const useCowSwapExecution = () => {
   const { client: rpcClient } = useRpcClient()
   const { writeContractAsync } = useWriteContract()
   const { signTypedDataAsync } = useSignTypedData()
+  const { prepareTokenApproval } = useEulerOperations()
 
   const status = ref<CowSwapExecutionStatus>('idle')
   const orderUid = ref<CowSwapOrderUid | undefined>()
@@ -61,28 +62,36 @@ export const useCowSwapExecution = () => {
 
     error.value = null
 
+    const executeApprovalSteps = async (token: Address, spender: Address, amount: bigint) => {
+      const { steps } = await prepareTokenApproval({
+        assetAddr: token,
+        spenderAddr: spender,
+        userAddr: userAddress as Address,
+        amount,
+        directApproval: true,
+      })
+      for (const step of steps) {
+        const tx = await writeContractAsync({
+          address: step.to as Address,
+          abi: step.abi,
+          functionName: step.functionName,
+          args: step.args as unknown[],
+        })
+        await client.waitForTransactionReceipt({ hash: tx })
+      }
+    }
+
     try {
-      // Step 1: Approve collateral token to collateral vault (exact amount, if needed)
       status.value = 'approving_collateral'
 
+      // Approve collateral token → vault (for the deposit)
       if (params.wrapper.collateralAmount > 0n) {
-        const allowance = await client.readContract({
-          address: params.collateralToken,
-          abi: erc20Abi,
-          functionName: 'allowance',
-          args: [userAddress as Address, params.wrapper.collateralVault],
-        })
-
-        if (allowance < params.wrapper.collateralAmount) {
-          const approveTx = await writeContractAsync({
-            address: params.collateralToken,
-            abi: erc20Abi,
-            functionName: 'approve',
-            args: [params.wrapper.collateralVault, params.wrapper.collateralAmount],
-          })
-          await client.waitForTransactionReceipt({ hash: approveTx })
-        }
+        await executeApprovalSteps(params.collateralToken, params.wrapper.collateralVault, params.wrapper.collateralAmount)
       }
+
+      // Approve sell token → vault relayer (for CoW settlement to pull borrowed tokens).
+      // The wrapper borrows sellToken to the user, then settlement pulls it via vault relayer.
+      await executeApprovalSteps(params.sellToken, chainConfig.vaultRelayer, params.sellAmount)
 
       // Step 2: Fetch EVC nonce for permit
       status.value = 'signing_permit'

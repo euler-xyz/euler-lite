@@ -51,6 +51,7 @@ export const useEulerOperations = () => {
     ...execution,
     buildSimulationStateOverride: allowance.buildSimulationStateOverride,
     buildEvcBatchStep: helpers.buildEvcBatchStep,
+    prepareTokenApproval: helpers.prepareTokenApproval,
     ...vault,
     ...repay,
     ...swaps,

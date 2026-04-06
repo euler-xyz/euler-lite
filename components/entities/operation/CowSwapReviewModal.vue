@@ -12,7 +12,8 @@ const props = defineProps<{
   borrowVaultName: string
   swapOutAmount: string
   swapOutMinAmount: string
-  needsApproval: boolean
+  needsCollateralApproval: boolean
+  needsSellTokenApproval: boolean
   subAccount: string
   executionStatus: CowSwapExecutionStatus
   executionError: Error | null
@@ -36,7 +37,7 @@ const isCancelling = ref(false)
 
 const executionLabel = computed(() => {
   switch (props.executionStatus) {
-    case 'approving_collateral': return 'Approving collateral — confirm in wallet...'
+    case 'approving_collateral': return 'Approving tokens — confirm in wallet...'
     case 'signing_permit': return 'Sign EVC permit in wallet...'
     case 'signing_order': return 'Sign CoW order in wallet...'
     case 'submitting': return 'Submitting order to CoW Protocol...'
@@ -63,15 +64,28 @@ const signSteps = computed<DisplayStep[]>(() => {
   const result: DisplayStep[] = []
   let idx = 1
 
-  if (props.needsApproval) {
+  if (props.needsCollateralApproval) {
     result.push({
       index: idx++,
-      label: 'Approve',
+      label: 'Approve for deposit',
       isSeparateTx: true,
       assetInfo: {
         symbol: props.collateralAsset.symbol,
         address: props.collateralAsset.address,
         amount: props.collateralAmount,
+      },
+    })
+  }
+
+  if (props.needsSellTokenApproval) {
+    result.push({
+      index: idx++,
+      label: 'Approve for swap',
+      isSeparateTx: true,
+      assetInfo: {
+        symbol: props.borrowAsset.symbol,
+        address: props.borrowAsset.address,
+        amount: props.borrowAmount,
       },
     })
   }
