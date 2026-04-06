@@ -77,7 +77,7 @@ See: `composables/guards/useTosGuard.ts`
 
 ## Failure handling
 
-- If `/api/tos` is unreachable and no cached content exists, `tosLoadFailed` is set to `true`. The app **fails open** — operations are not blocked, so users can still repay/withdraw. The TOS signing will happen on a future operation when the endpoint recovers.
+- If `/api/tos` is unreachable and no cached content exists, `tosLoadFailed` is set to `true`. The app **fails closed** — operations are blocked with "Unable to load Terms of Use".
 - If the `TermsOfUseSigner` contract read fails, `hasSigned` is set to `false` and the modal will show.
 
 ## Key files
