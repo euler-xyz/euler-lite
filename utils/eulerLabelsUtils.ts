@@ -20,6 +20,19 @@ import {
   notExplorableEarnVaults,
 } from '~/utils/eulerLabelsState'
 
+// ── Internal helpers ─────────────────────────────────────────
+
+function isHttpUrl(value: string): boolean {
+  if (!value) return false
+  try {
+    const { protocol } = new URL(value)
+    return protocol === 'http:' || protocol === 'https:'
+  }
+  catch {
+    return false
+  }
+}
+
 // ── Normalization helpers ────────────────────────────────────
 
 export const extractVaultOverrides = (raw: Record<string, unknown>): Record<string, EulerLabelVaultOverride> => {
@@ -75,6 +88,7 @@ export const normalizeEntities = (data: Record<string, EulerLabelEntity>) => {
     normalized[key] = {
       ...entity,
       addresses: normalizedAddresses,
+      url: isHttpUrl(entity.url) ? entity.url : '',
     }
   })
   return normalized
