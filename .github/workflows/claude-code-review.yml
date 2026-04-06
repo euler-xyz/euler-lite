@@ -43,6 +43,7 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
+      id-token: write
     steps:
       - name: Get PR info
         id: pr-info
@@ -78,8 +79,6 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: Run /claude-review-stack to review this PR, then use /inline-pr-comments to post findings as a consolidated PR review with inline comments.
-          track_progress: true
-          use_sticky_comment: false
           claude_args: --model ${{ env.CLAUDE_OPUS_MODEL }}
 
   review-business:
@@ -109,6 +108,7 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
+      id-token: write
     steps:
       - name: Get PR info
         id: pr-info
@@ -144,8 +144,6 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: Run /claude-review-business to review this PR, then use /inline-pr-comments to post findings as a consolidated PR review with inline comments.
-          track_progress: true
-          use_sticky_comment: false
           claude_args: --model ${{ env.CLAUDE_OPUS_MODEL }}
 
   review-security:
@@ -175,6 +173,7 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
+      id-token: write
     steps:
       - name: Get PR info
         id: pr-info
@@ -210,7 +209,5 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: Run /claude-review-security to review this PR, then use /inline-pr-comments to post findings as a consolidated PR review with inline comments.
-          track_progress: true
-          use_sticky_comment: false
           claude_args: --model ${{ env.CLAUDE_OPUS_MODEL }}
 # AI PR Review - trigger test
