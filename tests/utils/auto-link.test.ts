@@ -7,7 +7,7 @@ import { autoLink } from '~/utils/autoLink'
 const hasInjectedStyleAttr = (html: string) => /<a[^>]* style=/.test(html)
 
 describe('autoLink — XSS injection prevention', () => {
-  it('does not inject a style attribute when " terminates the URL (VULN-01/02 pattern)', () => {
+  it('does not inject a style attribute when " terminates the URL', () => {
     const input = '[XSS](https://euler.finance"style="color:#ffffff;background:#0000cc")'
     const result = autoLink(input)
 
@@ -19,7 +19,7 @@ describe('autoLink — XSS injection prevention', () => {
     expect(result).not.toContain('href="https://euler.finance"style=')
   })
 
-  it('does not create a full-page overlay via portfolioNotice pattern (VULN-05)', () => {
+  it('does not create a full-page overlay when " is used in a portfolioNotice URL', () => {
     const input = '[CLICK-TO-VERIFY-WALLET](https://attacker.com"style="position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:2147483647")'
     const result = autoLink(input)
 
