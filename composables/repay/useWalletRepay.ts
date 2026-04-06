@@ -3,6 +3,7 @@ import { useAccount } from '@wagmi/vue'
 import { formatUnits } from 'viem'
 import { FixedPoint } from '~/utils/fixed-point'
 import { logWarn } from '~/utils/errorHandling'
+import { createRaceGuard } from '~/utils/race-guard'
 import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
@@ -236,11 +237,13 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     }
   }
 
+  const asyncEstimatesGuard = createRaceGuard()
   const updateAsyncEstimates = useDebounceFn(async () => {
     if (!position.value || !collateralVault.value || !borrowVault.value) {
       isEstimatesLoading.value = false
       return
     }
+    const gen = asyncEstimatesGuard.next()
     try {
       const repayNano = valueToNano(amount.value, borrowVault.value.decimals)
       const remainingBorrow = (position.value.borrowed || 0n) - repayNano
@@ -257,6 +260,8 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
         getAssetUsdValueOrZero(remainingBorrow > 0n ? remainingBorrow : 0n, borrowVault.value, 'off-chain'),
       ])
 
+      if (asyncEstimatesGuard.isStale(gen)) return
+
       const projectedBorrowApy = projected
         ? borrowApy.value + (nanoToValue(projected.borrowAPY, 25) - nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25))
         : borrowApy.value
@@ -271,10 +276,13 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       )
     }
     catch (e) {
+      if (asyncEstimatesGuard.isStale(gen)) return
       logWarn('walletRepay/asyncEstimates', e)
     }
     finally {
-      isEstimatesLoading.value = false
+      if (!asyncEstimatesGuard.isStale(gen)) {
+        isEstimatesLoading.value = false
+      }
     }
   }, 500)
 

@@ -3,6 +3,7 @@ import { useAccount } from '@wagmi/vue'
 import { getAddress, formatUnits, zeroAddress, type Address } from 'viem'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { logWarn } from '~/utils/errorHandling'
+import { createRaceGuard } from '~/utils/race-guard'
 import { computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
 import { FixedPoint } from '~/utils/fixed-point'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -495,8 +496,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   }
 
   // Async estimates (projected rates, USD prices, net APY) are debounced
+  const asyncEstimatesGuard = createRaceGuard()
   const updateAsyncEstimates = useDebounceFn(async () => {
     if (!pair.value || !collateralVault.value || !borrowVault.value) return
+    const gen = asyncEstimatesGuard.next()
     try {
       const collateralAmountNano = valueToNano(collateralAmount.value || '0', collateralVault.value.decimals)
       const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value.decimals)
@@ -522,6 +525,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         getAssetUsdValueOrZero(borrowAmountNano, borrowVault.value!, 'off-chain'),
       ])
 
+      if (asyncEstimatesGuard.isStale(gen)) return
+
       // Apply projected rate deltas on top of current APYs (which include intrinsic APY)
       const projectedSupplyApy = collateralProjected
         ? collateralSupplyApy.value + (nanoToValue(collateralProjected.supplyAPY, 25) - nanoToValue(collateralVault.value.interestRateInfo.supplyAPY, 25))
@@ -541,11 +546,14 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       )
     }
     catch (e) {
+      if (asyncEstimatesGuard.isStale(gen)) return
       logWarn('borrow/asyncEstimates', e)
       netAPY.value = undefined
     }
     finally {
-      isEstimatesLoading.value = false
+      if (!asyncEstimatesGuard.isStale(gen)) {
+        isEstimatesLoading.value = false
+      }
     }
   }, 500)
 

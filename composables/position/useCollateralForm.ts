@@ -2,6 +2,7 @@ import type { ComputedRef } from 'vue'
 import { useAccount } from '@wagmi/vue'
 import { formatUnits, type Address, type Abi, zeroAddress } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
+import { createRaceGuard } from '~/utils/race-guard'
 import { FixedPoint } from '~/utils/fixed-point'
 import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -482,11 +483,13 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     }
   }
 
+  const asyncEstimatesGuard = createRaceGuard()
   const updateAsyncEstimates = useDebounceFn(async () => {
     if (!collateralVault.value || !borrowVault.value) {
       isEstimatesLoading.value = false
       return
     }
+    const gen = asyncEstimatesGuard.next()
     try {
       const amountNano = valueToNano(amount.value, collateralVault.value.decimals)
       const cashDelta = options.mode === 'supply' ? amountNano : -amountNano
@@ -507,6 +510,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
         getAssetUsdValueOrZero(position.value!.borrowed || 0n, borrowVault.value!, 'off-chain'),
       ])
 
+      if (asyncEstimatesGuard.isStale(gen)) return
+
       const projectedSupplyApy = projected
         ? withIntrinsicSupplyApy(nanoToValue(projected.supplyAPY, 25), collateralVault.value?.asset.address)
         : collateralSupplyApy.value
@@ -521,11 +526,14 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       )
     }
     catch (e) {
+      if (asyncEstimatesGuard.isStale(gen)) return
       logWarn('collateral/asyncEstimates', e)
       estimateNetAPY.value = netAPY.value
     }
     finally {
-      isEstimatesLoading.value = false
+      if (!asyncEstimatesGuard.isStale(gen)) {
+        isEstimatesLoading.value = false
+      }
     }
   }, 500)
 

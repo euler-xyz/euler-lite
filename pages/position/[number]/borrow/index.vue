@@ -16,6 +16,7 @@ import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros }
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import { createRaceGuard } from '~/utils/race-guard'
 
 const router = useRouter()
 const _route = useRoute()
@@ -354,8 +355,10 @@ const updateSyncEstimates = () => {
   }
 }
 
+const asyncEstimatesGuard = createRaceGuard()
 const updateAsyncEstimates = useDebounceFn(async () => {
   if (!pair.value || !borrowVault.value || !collateralVault.value) return
+  const gen = asyncEstimatesGuard.next()
   try {
     const additionalBorrowNano = valueToNano(borrowAmount.value || '0', borrowVault.value.decimals)
     const existingBorrow = nanoToValue(position.value?.borrowed || 0n, borrowVault.value.decimals)
@@ -373,6 +376,8 @@ const updateAsyncEstimates = useDebounceFn(async () => {
       getAssetUsdValueOrZero(totalBorrow, borrowVault.value!, 'off-chain'),
     ])
 
+    if (asyncEstimatesGuard.isStale(gen)) return
+
     const projectedBorrowApy = borrowProjected
       ? borrowApy.value + (nanoToValue(borrowProjected.borrowAPY, 25) - nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25))
       : borrowApy.value
@@ -387,11 +392,14 @@ const updateAsyncEstimates = useDebounceFn(async () => {
     )
   }
   catch (e) {
+    if (asyncEstimatesGuard.isStale(gen)) return
     logWarn('borrow-more/asyncEstimates', e)
     netAPY.value = undefined
   }
   finally {
-    isEstimatesLoading.value = false
+    if (!asyncEstimatesGuard.isStale(gen)) {
+      isEstimatesLoading.value = false
+    }
   }
 }, 500)
 
