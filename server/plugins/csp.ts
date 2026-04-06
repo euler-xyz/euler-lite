@@ -140,7 +140,7 @@ function buildCsp(nonce: string, extraConnectSrc: string[], envOrigins: { connec
   const directives = [
     'default-src \'self\'',
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval' https://static.cloudflareinsights.com`,
-    `style-src 'nonce-${nonce}' 'self'`,
+    'style-src \'unsafe-inline\' \'self\'',
     'object-src \'none\'',
     'base-uri \'self\'',
     `connect-src ${connectSrc.join(' ')}`,
@@ -160,9 +160,7 @@ function buildCsp(nonce: string, extraConnectSrc: string[], envOrigins: { connec
 
 function injectNonce(chunks: string[], nonce: string): string[] {
   return chunks.map(chunk =>
-    chunk
-      .replace(/<script(?=[\s>])/g, `<script nonce="${nonce}"`)
-      .replace(/<style(?=[\s>])/g, `<style nonce="${nonce}"`),
+    chunk.replace(/<script(?=[\s>])/g, `<script nonce="${nonce}"`),
   )
 }
 
