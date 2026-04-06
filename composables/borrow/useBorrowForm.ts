@@ -501,7 +501,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     if (!pair.value || !collateralVault.value || !borrowVault.value) return
     const gen = asyncEstimatesGuard.next()
     try {
-      const collateralAmountNano = valueToNano(collateralAmount.value || '0', collateralVault.value.decimals)
+      // When swapping, use the quote output amount (collateral-vault-asset denominated)
+      const collateralAmountNano = borrowNeedsSwap.value
+        ? borrowSwapEffectiveQuote.value ? BigInt(borrowSwapEffectiveQuote.value.amountOut || 0) : 0n
+        : valueToNano(collateralAmount.value || '0', collateralVault.value.decimals)
       const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value.decimals)
 
       const [collateralProjected, borrowProjected, collateralUsdValue, borrowUsdValue] = await Promise.all([
@@ -862,6 +865,17 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   watch(borrowSwapEffectiveQuote, () => {
     if (borrowNeedsSwap.value && collateralAmount.value && +ltv.value > 0) {
       onCollateralInput()
+    }
+    // Re-run projected rate estimates when quote resolves — collateralAmountNano depends on amountOut
+    if (borrowNeedsSwap.value) {
+      if (borrowSwapEffectiveQuote.value) {
+        if (!isEstimatesLoading.value) isEstimatesLoading.value = true
+        updateAsyncEstimates()
+      }
+      else {
+        isEstimatesLoading.value = true
+        updateAsyncEstimates()
+      }
     }
   })
 

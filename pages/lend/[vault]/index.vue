@@ -715,10 +715,16 @@ watch(swapSelectedQuote, () => {
 
 // Re-run estimates when swap quote resolves — supplyNano depends on amountOut
 watch(swapEffectiveQuote, () => {
-  if (needsSwap.value && swapEffectiveQuote.value) {
+  if (!needsSwap.value) return
+  if (swapEffectiveQuote.value) {
     if (!isEstimatesLoading.value) {
       isEstimatesLoading.value = true
     }
+    updateEstimates()
+  }
+  else {
+    // quote was cleared (slippage change, manual refresh) — queue estimate so loading is always cleared
+    isEstimatesLoading.value = true
     updateEstimates()
   }
 })
