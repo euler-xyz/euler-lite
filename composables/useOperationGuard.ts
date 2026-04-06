@@ -3,6 +3,7 @@ import { useAccount, useChainId } from '@wagmi/vue'
 import type { Address } from 'viem'
 import { useKeyring, KeyringFlowState } from '~/composables/useKeyring'
 import { useTosGuard } from '~/composables/guards/useTosGuard'
+import { useUnverifiedVaultGuard } from '~/composables/guards/useUnverifiedVaultGuard'
 import { registerOperationGuard, unregisterOperationGuard, registerOperationBlocker, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
 import { injectKeyringCredential } from '~/utils/keyring-injection'
 import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
@@ -18,6 +19,9 @@ export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | 
 
   // --- TOS guard (global, not vault-specific) ---
   useTosGuard()
+
+  // --- Unverified vault guard ---
+  useUnverifiedVaultGuard(addresses)
 
   // --- Keyring guard ---
   const keyringVaultAddress = computed(() =>
