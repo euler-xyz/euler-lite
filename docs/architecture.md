@@ -307,7 +307,13 @@ The app includes a built-in per-IP rate limiter as a defense-in-depth measure. D
 1. **Geo-gate** (`server/middleware/geo-gate.ts`) reads `CF-IPCountry` to enforce sanctioned-country blocks. Without Cloudflare, the country cannot be determined and all API requests are rejected with HTTP 451.
 2. **Rate limiter** (`server/utils/rate-limit.ts`) uses `CF-Connecting-IP` as the trusted client IP. Without Cloudflare, `CF-Connecting-IP` is absent and all API requests are rejected with HTTP 403.
 
-Both checks are bypassed only in `dev` (`DOPPLER_ENVIRONMENT=dev`), where Cloudflare is not in the path and `DEV_GEO_COUNTRY` can be used to simulate a country for geo-block testing.
+Bypass behaviour per environment:
+
+| Environment | Geo-gate | Rate limiter |
+|---|---|---|
+| `prd` | CF required; fail-closed (HTTP 451) if absent. `DEV_GEO_COUNTRY` bypasses fail-closed if set. | CF required; fail-closed (HTTP 403) if absent. |
+| `stg` | CF required; fail-closed (HTTP 451) if absent. `DEV_GEO_COUNTRY` bypasses fail-closed if set. | CF **not** required; falls back to `X-Forwarded-For`. |
+| `dev` | CF not required; falls back to `DEV_GEO_COUNTRY`, then allows through if unset. | CF not required; falls back to `X-Forwarded-For`. |
 
 ## 📱 Mobile-First Architecture
 
