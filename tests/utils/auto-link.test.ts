@@ -4,7 +4,7 @@ import { autoLink } from '~/utils/autoLink'
 // Helper: assert no <a> element carries an unescaped style attribute.
 // If the href-injection attack works, the broken href closes early and
 // the parser creates a second attribute like style="position:fixed;...".
-const hasInjectedStyleAttr = (html: string) => /<a[^>]* style=/.test(html)
+const hasInjectedStyleAttr = (html: string) => /<a[^>]*style=/.test(html)
 
 describe('autoLink — XSS injection prevention', () => {
   it('does not inject a style attribute when " terminates the URL', () => {
