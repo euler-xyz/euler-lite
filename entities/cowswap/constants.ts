@@ -3,8 +3,9 @@ import type { Address } from 'viem'
 export const COWSWAP_PROVIDER_NAME = 'cow'
 export const COWSWAP_MIN_BUY_AMOUNT = 1n
 export const COWSWAP_APPDATA_VERSION = '0.9.0'
+export const COWSWAP_ORDER_DEADLINE_SECONDS = 900 // 15 minutes
 export const COWSWAP_ORDER_POLL_INTERVAL_MS = 3000
-export const COWSWAP_ORDER_POLL_MAX_DURATION_MS = 120_000
+export const COWSWAP_ORDER_POLL_MAX_DURATION_MS = (COWSWAP_ORDER_DEADLINE_SECONDS + 60) * 1000 // deadline + 1 min buffer
 
 export type CowSwapChainConfig = {
   orderbookUrl: string
