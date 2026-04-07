@@ -52,7 +52,7 @@ watchEffect(async () => {
     <p class="text-h3 text-content-primary">
       Overview
     </p>
-    <div class="flex flex-col items-start gap-24">
+    <div class="flex flex-col gap-20">
       <div
         v-if="isDeprecated && deprecationReason"
         class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
@@ -84,97 +84,92 @@ watchEffect(async () => {
           </p>
         </div>
       </div>
-      <div
+      <!-- eslint-disable vue/no-v-html -- trusted label content -->
+      <p
         v-if="description"
-        class="w-full rounded-12 p-16 bg-surface-tertiary"
-      >
-        <!-- eslint-disable vue/no-v-html -- trusted label content -->
-        <p
-          class="text-p3 text-content-secondary auto-link"
-          v-html="autoLink(description)"
-        />
-        <!-- eslint-enable vue/no-v-html -->
-      </div>
-      <VaultOverviewLabelValue
-        label="Price"
-        :value="priceDisplay"
+        class="text-p2 text-content-secondary auto-link"
+        v-html="autoLink(description)"
       />
-      <VaultOverviewLabelValue label="Market">
-        <NuxtLink
-          v-if="marketProductKey"
-          :to="{ name: 'explore-market', params: { market: marketProductKey } }"
-          class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
-        >
-          {{ product.name }}
-        </NuxtLink>
-        <template v-else>
-          {{ product.name || '-' }}
-        </template>
-      </VaultOverviewLabelValue>
-      <VaultOverviewLabelValue
-        v-if="enableEntityBrandingDisplay"
-        label="Risk manager"
-      >
-        <VaultTypeChip
-          v-if="!isGovernorVerified"
-          :vault="vault"
-          type="unknown"
+      <!-- eslint-enable vue/no-v-html -->
+      <div class="grid grid-cols-2 gap-x-32 gap-y-24">
+        <VaultOverviewLabelValue
+          label="Price"
+          :value="priceDisplay"
         />
-        <div
-          v-else-if="entities.length"
-          class="flex flex-col gap-16"
-        >
-          <div
-            v-for="(entity, idx) in entities"
-            :key="idx"
-            class="flex items-center gap-8"
-            :class="{ 'opacity-20': isGovernanceLimited }"
+        <VaultOverviewLabelValue label="Market">
+          <NuxtLink
+            v-if="marketProductKey"
+            :to="{ name: 'explore-market', params: { market: marketProductKey } }"
+            class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
           >
-            <BaseAvatar
-              :label="entity.name"
-              :src="getEulerLabelEntityLogo(entity.logo)"
-            />
-            <a
-              :href="entity.url"
-              target="_blank"
-              class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
-            >{{ entity.name }}</a>
+            {{ product.name }}
+          </NuxtLink>
+          <template v-else>
+            {{ product.name || '-' }}
+          </template>
+        </VaultOverviewLabelValue>
+        <VaultOverviewLabelValue
+          v-if="enableEntityBrandingDisplay"
+          label="Risk manager"
+        >
+          <VaultTypeChip
+            v-if="!isGovernorVerified"
+            :vault="vault"
+            type="unknown"
+            class="w-fit"
+          />
+          <div
+            v-else-if="entities.length"
+            class="flex flex-col gap-8"
+          >
+            <div
+              v-for="(entity, idx) in entities"
+              :key="idx"
+              class="flex items-center gap-8"
+              :class="{ 'opacity-20': isGovernanceLimited }"
+            >
+              <BaseAvatar
+                :label="entity.name"
+                :src="getEulerLabelEntityLogo(entity.logo)"
+              />
+              <a
+                :href="entity.url"
+                target="_blank"
+                class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
+              >{{ entity.name }}</a>
+            </div>
+            <span
+              v-if="isGovernanceLimited"
+              class="text-p3 text-content-tertiary"
+            >Limited risk management</span>
           </div>
-          <span
-            v-if="isGovernanceLimited"
-            class="text-p3 text-content-tertiary"
-          >Limited risk management</span>
-        </div>
-        <div v-else>
-          -
-        </div>
-      </VaultOverviewLabelValue>
-      <VaultOverviewLabelValue
-        v-if="enableVaultTypeDisplay"
-        label="Vault type"
-      >
-        <VaultTypeBadges :vault-address="vault.address" />
-      </VaultOverviewLabelValue>
-      <VaultOverviewLabelValue label="Can be borrowed">
-        <div class="flex items-center gap-8">
-          <div>
+          <div v-else>
+            -
+          </div>
+        </VaultOverviewLabelValue>
+        <VaultOverviewLabelValue
+          v-if="enableVaultTypeDisplay"
+          label="Vault type"
+        >
+          <VaultTypeBadges :vault-address="vault.address" />
+        </VaultOverviewLabelValue>
+        <VaultOverviewLabelValue label="Can be borrowed">
+          <div class="flex items-center gap-8">
             <UiIcon :name="borrowCount ? 'green-tick' : 'red-cross'" />
+            <span class="text-p2 text-content-primary">
+              {{ borrowCount ? `Yes in ${borrowCount} markets` : 'No' }}
+            </span>
           </div>
-          <span class="text-p2 text-content-primary">
-            {{ borrowCount ? `Yes in ${borrowCount} markets` : 'No' }}
-          </span>
-        </div>
-      </VaultOverviewLabelValue>
-      <VaultOverviewLabelValue label="Can be used as collateral">
-        <div class="flex items-center gap-8">
-          <div>
+        </VaultOverviewLabelValue>
+        <VaultOverviewLabelValue label="Can be used as collateral">
+          <div class="flex items-center gap-8">
             <UiIcon :name="collateralCount ? 'green-tick' : 'red-cross'" />
+            <span class="text-p2 text-content-primary">
+              {{ collateralCount ? `Yes in ${collateralCount} markets` : 'No' }}
+            </span>
           </div>
-          <span class="text-p2 text-content-primary">
-            {{ collateralCount ? `Yes in ${collateralCount} markets` : 'No' }}
-          </span>
-        </div>
-      </VaultOverviewLabelValue>
+        </VaultOverviewLabelValue>
+      </div>
     </div>
   </div>
 </template>

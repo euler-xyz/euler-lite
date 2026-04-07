@@ -121,7 +121,7 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: LTVRampConfig) => {
     <p class="text-h3 text-content-primary">
       Overview
     </p>
-    <div class="flex flex-col items-start gap-24">
+    <div class="flex flex-col gap-20">
       <div
         v-if="isDeprecated"
         class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
@@ -150,109 +150,107 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: LTVRampConfig) => {
           </p>
         </div>
       </div>
-      <VaultOverviewLabelValue
-        label="Price"
-      >
-        <template v-if="price !== null">
-          {{ formatSignificant(priceInvert.invertValue(price), 4) }}
-          <span class="text-content-tertiary">{{ priceInvert.displaySymbol }}</span>
-          <button
-            type="button"
-            class="ml-4 text-content-tertiary hover:text-content-primary transition-colors inline-flex"
-            @click.stop="priceInvert.toggle"
-          >
-            <SvgIcon
-              name="swap-horizontal"
-              class="!w-12 !h-12"
-            />
-          </button>
-        </template>
-        <template v-else>
-          <span class="flex items-center text-warning-500">
-            <SvgIcon
-              name="warning"
-              class="mr-2 !w-20 !h-20"
-            />
-            Unknown
-          </span>
-        </template>
-      </VaultOverviewLabelValue>
-      <VaultOverviewLabelValue>
-        <template #label>
+      <div class="grid grid-cols-2 gap-x-32 gap-y-24">
+        <VaultOverviewLabelValue label="Price">
+          <template v-if="price !== null">
+            {{ formatSignificant(priceInvert.invertValue(price), 4) }}
+            <span class="text-content-tertiary">{{ priceInvert.displaySymbol }}</span>
+            <button
+              type="button"
+              class="ml-4 text-content-tertiary hover:text-content-primary transition-colors inline-flex"
+              @click.stop="priceInvert.toggle"
+            >
+              <SvgIcon
+                name="swap-horizontal"
+                class="!w-12 !h-12"
+              />
+            </button>
+          </template>
+          <template v-else>
+            <span class="flex items-center text-warning-500">
+              <SvgIcon
+                name="warning"
+                class="mr-2 !w-20 !h-20"
+              />
+              Unknown
+            </span>
+          </template>
+        </VaultOverviewLabelValue>
+        <VaultOverviewLabelValue
+          v-if="isBorrowable"
+          label="Max multiplier"
+          :value="`${formatNumber(maxMultiplier, 2, 2)}x`"
+        />
+        <VaultOverviewLabelValue>
+          <template #label>
+            <span class="flex items-center gap-4">
+              Net APY
+              <SvgIcon
+                class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                name="info-circle"
+                @click="onNetApyInfoIconClick"
+              />
+            </span>
+          </template>
           <span class="flex items-center gap-4">
-            Net APY
             <SvgIcon
-              class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-              name="info-circle"
+              v-if="hasSupplyRewards(pair.collateral.address) || hasBorrowRewards(pair.borrow.address, pair.collateral.address) || hasLoopingRewards(pair.borrow.address, pair.collateral.address)"
+              class="!w-20 !h-20 text-accent-500 cursor-pointer"
+              name="sparks"
               @click="onNetApyInfoIconClick"
             />
+            {{ formatNumber(netApy) }}%
           </span>
-        </template>
-        <span class="flex items-center gap-4">
-          <SvgIcon
-            v-if="hasSupplyRewards(pair.collateral.address) || hasBorrowRewards(pair.borrow.address, pair.collateral.address) || hasLoopingRewards(pair.borrow.address, pair.collateral.address)"
-            class="!w-20 !h-20 text-accent-500 cursor-pointer"
-            name="sparks"
-            @click="onNetApyInfoIconClick"
-          />
-          {{ formatNumber(netApy) }}%
-        </span>
-      </VaultOverviewLabelValue>
-      <VaultOverviewLabelValue
-        v-if="isBorrowable"
-      >
-        <template #label>
+        </VaultOverviewLabelValue>
+        <VaultOverviewLabelValue v-if="isBorrowable">
+          <template #label>
+            <span class="flex items-center gap-4">
+              Max ROE
+              <SvgIcon
+                class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                name="info-circle"
+                @click="onMaxRoeInfoIconClick"
+              />
+            </span>
+          </template>
           <span class="flex items-center gap-4">
-            Max ROE
             <SvgIcon
-              class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-              name="info-circle"
+              v-if="hasSupplyRewards(pair.collateral.address) || hasBorrowRewards(pair.borrow.address, pair.collateral.address) || hasLoopingRewards(pair.borrow.address, pair.collateral.address)"
+              class="!w-20 !h-20 text-accent-500 cursor-pointer"
+              name="sparks"
               @click="onMaxRoeInfoIconClick"
             />
+            {{ formatNumber(maxRoe) }}%
           </span>
-        </template>
-        <span class="flex items-center gap-4">
-          <SvgIcon
-            v-if="hasSupplyRewards(pair.collateral.address) || hasBorrowRewards(pair.borrow.address, pair.collateral.address) || hasLoopingRewards(pair.borrow.address, pair.collateral.address)"
-            class="!w-20 !h-20 text-accent-500 cursor-pointer"
-            name="sparks"
-            @click="onMaxRoeInfoIconClick"
-          />
-          {{ formatNumber(maxRoe) }}%
-        </span>
-      </VaultOverviewLabelValue>
-      <VaultOverviewLabelValue
-        v-if="isBorrowable"
-        label="Max multiplier"
-        :value="`${formatNumber(maxMultiplier, 2, 2)}x`"
-      />
-      <VaultOverviewLabelValue
-        label="Max LTV"
-        :value="`${formatNumber(nanoToValue(pair.borrowLTV, 2), 2)}%`"
-      />
-      <VaultOverviewLabelValue>
-        <template #label>
+        </VaultOverviewLabelValue>
+        <VaultOverviewLabelValue
+          label="Max LTV"
+          :value="`${formatNumber(nanoToValue(pair.borrowLTV, 2), 2)}%`"
+        />
+        <VaultOverviewLabelValue>
+          <template #label>
+            <span class="flex items-center gap-4">
+              Liquidation LTV
+              <SvgIcon
+                v-if="isRamping"
+                class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                name="info-circle"
+                @click.stop.prevent="onRampDownInfoIconClick($event, pair as AnyBorrowVaultPair)"
+              />
+            </span>
+          </template>
           <span class="flex items-center gap-4">
-            Liquidation LTV
             <SvgIcon
               v-if="isRamping"
-              class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-              name="info-circle"
+              name="arrow-top-right"
+              class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
+              title="Liquidation LTV ramping down"
               @click.stop.prevent="onRampDownInfoIconClick($event, pair as AnyBorrowVaultPair)"
             />
+            {{ `${formatNumber(nanoToValue(currentLiquidationLTV, 2), 2)}%` }}
           </span>
-        </template>
-        <span class="flex items-center gap-4">
-          <SvgIcon
-            v-if="isRamping"
-            name="arrow-top-right"
-            class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
-            title="Liquidation LTV ramping down"
-            @click.stop.prevent="onRampDownInfoIconClick($event, pair as AnyBorrowVaultPair)"
-          />
-          {{ `${formatNumber(nanoToValue(currentLiquidationLTV, 2), 2)}%` }}
-        </span>
-      </VaultOverviewLabelValue>
+        </VaultOverviewLabelValue>
+      </div>
     </div>
   </div>
 </template>
