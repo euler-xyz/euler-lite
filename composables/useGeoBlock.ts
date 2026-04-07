@@ -2,14 +2,23 @@ import { detectCountry } from '~/services/country'
 import { getVaultBlock, getEarnVaultBlock, getVaultRestricted, getEarnVaultRestricted, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import { SANCTIONED_COUNTRIES, COUNTRY_GROUPS } from '~/entities/constants'
 
-const country = ref<string | null>(null)
+// undefined = not yet loaded, null = loaded but country unknown, string = loaded with country
+const country = ref<string | null | undefined>(undefined)
+let loadingCountry = false
 
 export const useGeoBlock = () => {
   const loadCountry = async () => {
-    if (!import.meta.client) return
-    const detected = await detectCountry()
-    if (detected) {
-      country.value = detected
+    if (!import.meta.client || loadingCountry) return
+    loadingCountry = true
+    try {
+      const detected = await detectCountry()
+      country.value = detected ?? null
+    }
+    catch {
+      country.value = null
+    }
+    finally {
+      loadingCountry = false
     }
   }
 
@@ -25,7 +34,8 @@ const expandBlockList = (codes: readonly string[]): string[] => {
 }
 
 export const isVaultBlockedByCountry = (vaultAddress: string): boolean => {
-  if (!country.value) return false
+  if (country.value === undefined) return false // still loading
+  if (country.value === null) return true // loaded, country unknown
 
   // Sanctioned countries are always blocked
   if (isCountryInList(SANCTIONED_COUNTRIES)) return true
@@ -44,7 +54,8 @@ export const isAnyVaultBlockedByCountry = (...addresses: string[]): boolean => {
 }
 
 export const isVaultRestrictedByCountry = (vaultAddress: string): boolean => {
-  if (!country.value) return false
+  if (country.value === undefined) return false // still loading
+  if (country.value === null) return true // loaded, country unknown
 
   const vaultRestricted = getVaultRestricted(vaultAddress)
   if (vaultRestricted?.length && isCountryInList(expandBlockList(vaultRestricted))) return true

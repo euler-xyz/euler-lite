@@ -146,20 +146,10 @@ export const useSwapApi = () => {
     return quotes[0] || null
   }
 
-  const logSwapFailure = async (payload: unknown) => {
-    try {
-      await axios.post(`${baseUrl}/log`, payload)
-    }
-    catch (error) {
-      logWarn('swapApi/log', error)
-    }
-  }
-
   return {
     baseUrl,
     getSwapQuote,
     getSwapQuotes,
     getSwapProviders,
-    logSwapFailure,
   }
 }

@@ -16,7 +16,7 @@ import {
   type Vault,
 } from '~/entities/vault'
 import { fetchVaultFactories, isSecuritizeVault } from '~/entities/vault/factory'
-import { getProductByVault, isVaultNotExplorable } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, isVaultNotExplorable, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import { getEulerRouterGovernor } from '~/entities/oracle'
 
 const isReady = ref(false)
@@ -262,12 +262,20 @@ const loadVaults = async () => {
   const generation = loadGeneration.value
   const startChainId = chainId.value
 
+  // Filter out non-explorable vaults before any on-chain work
+  const explorableVaultAddresses = verifiedVaultAddresses.value.filter(
+    addr => !isVaultNotExplorable(addr),
+  )
+  const explorableEarnAddresses = earnVaultAddresses.value.filter(
+    addr => !isEarnVaultNotExplorable(addr),
+  )
+
   try {
     isEscrowUpdating.value = true
     isEscrowLoading.value = true
 
     // Phase 1: Fetch vault factories (escrow addresses fetched in Phase 2)
-    const factories = await fetchVaultFactories(verifiedVaultAddresses.value)
+    const factories = await fetchVaultFactories(explorableVaultAddresses)
 
     if (loadGeneration.value !== generation) return
 
@@ -275,7 +283,7 @@ const loadVaults = async () => {
     const evkAddresses: string[] = []
     const securitizeAddresses: string[] = []
 
-    verifiedVaultAddresses.value.forEach((addr) => {
+    explorableVaultAddresses.forEach((addr) => {
       const normalizedAddr = addr.toLowerCase()
       const factory = factories.get(normalizedAddr)
 
@@ -307,7 +315,7 @@ const loadVaults = async () => {
 
     await Promise.all([
       (async () => {
-        await updateEarnVaults(earnVaultAddresses.value, generation)
+        await updateEarnVaults(explorableEarnAddresses, generation)
         earnResolve()
       })(),
       (async () => {
@@ -392,7 +400,7 @@ const getVault = async (address: string): Promise<Vault> => {
     }
   }
 
-  if (verifiedVaultAddresses.value.includes(normalizedAddress)) {
+  if (verifiedVaultAddresses.value.includes(normalizedAddress) && !isVaultNotExplorable(normalizedAddress)) {
     await until(computed(() => registryGetVault(normalizedAddress))).toBeTruthy()
   }
   else {
@@ -412,7 +420,7 @@ const getEarnVault = async (address: string): Promise<EarnVault> => {
   if (isCustomLabelsRepo.value) {
     const { earnVaults } = useEulerLabels()
 
-    if (earnVaults.value.includes(normalizedAddress)) {
+    if (earnVaults.value.includes(normalizedAddress) && !isEarnVaultNotExplorable(normalizedAddress)) {
       await until(computed(() => registryGetVault(normalizedAddress))).toBeTruthy()
     }
     else {

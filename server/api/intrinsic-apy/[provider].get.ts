@@ -1,5 +1,7 @@
 import { createError, getRouterParam, getQuery } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
+import { createTtlCache } from '~/server/utils/cache'
+import { logWarn } from '~/server/utils/log'
 
 const TIMEOUT_MS = 10_000
 const CACHE_TTL_MS = 5 * 60 * 1000
@@ -28,38 +30,32 @@ const PROVIDER_URLS: Record<string, string> = {
 
 const PENDLE_API_BASE = 'https://api-v2.pendle.finance/core/v2'
 
-interface CacheEntry {
-  data: unknown
-  expiresAt: number
-}
+const cache = createTtlCache<unknown>({ ttlMs: CACHE_TTL_MS, maxEntries: 200 })
+const inFlight = new Map<string, Promise<unknown>>()
 
-const MAX_CACHE_ENTRIES = 200
-const cache = new Map<string, CacheEntry>()
+const fetchUpstream = (url: string, cacheKey: string): Promise<unknown> => {
+  const existing = inFlight.get(cacheKey)
+  if (existing) return existing
 
-const pruneExpired = () => {
-  const now = Date.now()
-  for (const [key, entry] of cache) {
-    if (now > entry.expiresAt) cache.delete(key)
-  }
-}
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS)
 
-const getCached = (key: string): unknown | undefined => {
-  const entry = cache.get(key)
-  if (!entry) return undefined
-  if (Date.now() > entry.expiresAt) {
-    cache.delete(key)
-    return undefined
-  }
-  return entry.data
-}
+  const promise = fetch(url, { signal: controller.signal })
+    .then(async (resp) => {
+      if (!resp.ok) {
+        throw createError({ statusCode: 502, statusMessage: `Upstream returned ${resp.status}` })
+      }
+      const data = await resp.json()
+      cache.set(cacheKey, data)
+      return data
+    })
+    .finally(() => {
+      clearTimeout(timeout)
+      inFlight.delete(cacheKey)
+    })
 
-const setCache = (key: string, data: unknown) => {
-  if (cache.size >= MAX_CACHE_ENTRIES) pruneExpired()
-  if (cache.size >= MAX_CACHE_ENTRIES) {
-    const oldest = cache.keys().next().value
-    if (oldest) cache.delete(oldest)
-  }
-  cache.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS })
+  inFlight.set(cacheKey, promise)
+  return promise
 }
 
 export default defineEventHandler(async (event) => {
@@ -112,32 +108,26 @@ export default defineEventHandler(async (event) => {
     cacheKey = provider
   }
 
-  const cached = getCached(cacheKey)
-  if (cached !== undefined) return cached
+  const fresh = cache.get(cacheKey)
+  if (fresh !== undefined) return fresh
 
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS)
+  const stale = cache.getStale(cacheKey)
+  if (stale !== undefined) {
+    void fetchUpstream(url, cacheKey).catch((err) => {
+      logWarn(`intrinsic-apy/${provider}`, 'background revalidation failed:', err instanceof Error ? err.message : err)
+    })
+    return stale
+  }
 
+  // Cold — await
   try {
-    const resp = await fetch(url, { signal: controller.signal })
-
-    if (!resp.ok) {
-      throw createError({ statusCode: 502, statusMessage: `Upstream ${provider} returned ${resp.status}` })
-    }
-
-    const data = await resp.json()
-    setCache(cacheKey, data)
-    return data
+    return await fetchUpstream(url, cacheKey)
   }
   catch (error) {
     if (error && typeof error === 'object' && 'statusCode' in error) {
       throw error
     }
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    console.warn(`[intrinsic-apy/${provider}] error:`, message)
+    logWarn(`intrinsic-apy/${provider}`, 'upstream error:', error instanceof Error ? error.message : error)
     throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
-  }
-  finally {
-    clearTimeout(timeout)
   }
 })
