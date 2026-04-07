@@ -280,39 +280,48 @@ export const buildPythUpdateCallsFromFeeds = async (
   })
 
   const client = getPublicClient(providerUrl)
+
+  const settled = await Promise.all(
+    [...grouped.values()].map(async ({ pythAddress, feedIds: feedSet }) => {
+      const updateData = await fetchPythUpdateData([...feedSet], hermesEndpoint)
+      if (!updateData.length) return null
+
+      let fee = 0n
+      try {
+        fee = await client.readContract({
+          address: pythAddress,
+          abi: PYTH_ABI,
+          functionName: 'getUpdateFee',
+          args: [updateData],
+        }) as bigint
+      }
+      catch (err) {
+        console.warn('[buildPythUpdateCalls] getUpdateFee failed', err)
+        return null
+      }
+
+      return {
+        call: {
+          targetContract: pythAddress,
+          onBehalfOfAccount: sender,
+          value: fee,
+          data: encodeFunctionData({
+            abi: PYTH_ABI,
+            functionName: 'updatePriceFeeds',
+            args: [updateData],
+          }) as Hex,
+        } satisfies EVCCall,
+        fee,
+      }
+    }),
+  )
+
   const calls: EVCCall[] = []
   let totalFee = 0n
-
-  for (const [, { pythAddress, feedIds: feedSet }] of grouped.entries()) {
-    const updateData = await fetchPythUpdateData([...feedSet], hermesEndpoint)
-    if (!updateData.length) continue
-
-    let fee = 0n
-    try {
-      fee = await client.readContract({
-        address: pythAddress,
-        abi: PYTH_ABI,
-        functionName: 'getUpdateFee',
-        args: [updateData],
-      }) as bigint
-    }
-    catch (err) {
-      console.warn('[buildPythUpdateCalls] getUpdateFee failed', err)
-      continue
-    }
-
-    calls.push({
-      targetContract: pythAddress,
-      onBehalfOfAccount: sender,
-      value: fee,
-      data: encodeFunctionData({
-        abi: PYTH_ABI,
-        functionName: 'updatePriceFeeds',
-        args: [updateData],
-      }) as Hex,
-    })
-
-    totalFee += fee
+  for (const result of settled) {
+    if (!result) continue
+    calls.push(result.call)
+    totalFee += result.fee
   }
 
   return { calls, totalFee }
@@ -417,38 +426,48 @@ export const buildPythBatchItems = async (
   })
 
   const client = getPublicClient(providerUrl)
+
+  const settled = await Promise.all(
+    [...grouped.entries()].map(async ([pythAddress, feedSet]) => {
+      const updateData = await fetchPythUpdateData([...feedSet], hermesEndpoint)
+      if (!updateData.length) return null
+
+      let fee = 0n
+      try {
+        fee = await client.readContract({
+          address: pythAddress,
+          abi: PYTH_ABI,
+          functionName: 'getUpdateFee',
+          args: [updateData],
+        }) as bigint
+      }
+      catch (err) {
+        console.warn('[buildPythBatchItems] getUpdateFee failed', err)
+        return null
+      }
+
+      return {
+        item: {
+          targetContract: pythAddress,
+          onBehalfOfAccount: zeroAddress,
+          value: fee,
+          data: encodeFunctionData({
+            abi: PYTH_ABI,
+            functionName: 'updatePriceFeeds',
+            args: [updateData],
+          }),
+        } satisfies BatchItem,
+        fee,
+      }
+    }),
+  )
+
   const items: BatchItem[] = []
   let totalFee = 0n
-
-  for (const [pythAddress, feedSet] of grouped.entries()) {
-    const updateData = await fetchPythUpdateData([...feedSet], hermesEndpoint)
-    if (!updateData.length) continue
-
-    let fee = 0n
-    try {
-      fee = await client.readContract({
-        address: pythAddress,
-        abi: PYTH_ABI,
-        functionName: 'getUpdateFee',
-        args: [updateData],
-      }) as bigint
-    }
-    catch (err) {
-      console.warn('[buildPythBatchItems] getUpdateFee failed', err)
-      continue
-    }
-
-    items.push({
-      targetContract: pythAddress,
-      onBehalfOfAccount: zeroAddress,
-      value: fee,
-      data: encodeFunctionData({
-        abi: PYTH_ABI,
-        functionName: 'updatePriceFeeds',
-        args: [updateData],
-      }),
-    })
-    totalFee += fee
+  for (const result of settled) {
+    if (!result) continue
+    items.push(result.item)
+    totalFee += result.fee
   }
 
   return { items, totalFee }
@@ -482,38 +501,48 @@ export const buildPythBatchItemsFromFeeds = async (
   })
 
   const client = getPublicClient(providerUrl)
+
+  const settled = await Promise.all(
+    [...grouped.entries()].map(async ([pythAddress, feedSet]) => {
+      const updateData = await fetchPythUpdateData([...feedSet], hermesEndpoint)
+      if (!updateData.length) return null
+
+      let fee = 0n
+      try {
+        fee = await client.readContract({
+          address: pythAddress,
+          abi: PYTH_ABI,
+          functionName: 'getUpdateFee',
+          args: [updateData],
+        }) as bigint
+      }
+      catch (err) {
+        console.warn('[buildPythBatchItemsFromFeeds] getUpdateFee failed', err)
+        return null
+      }
+
+      return {
+        item: {
+          targetContract: pythAddress,
+          onBehalfOfAccount: zeroAddress,
+          value: fee,
+          data: encodeFunctionData({
+            abi: PYTH_ABI,
+            functionName: 'updatePriceFeeds',
+            args: [updateData],
+          }),
+        } satisfies BatchItem,
+        fee,
+      }
+    }),
+  )
+
   const items: BatchItem[] = []
   let totalFee = 0n
-
-  for (const [pythAddress, feedSet] of grouped.entries()) {
-    const updateData = await fetchPythUpdateData([...feedSet], hermesEndpoint)
-    if (!updateData.length) continue
-
-    let fee = 0n
-    try {
-      fee = await client.readContract({
-        address: pythAddress,
-        abi: PYTH_ABI,
-        functionName: 'getUpdateFee',
-        args: [updateData],
-      }) as bigint
-    }
-    catch (err) {
-      console.warn('[buildPythBatchItemsFromFeeds] getUpdateFee failed', err)
-      continue
-    }
-
-    items.push({
-      targetContract: pythAddress,
-      onBehalfOfAccount: zeroAddress,
-      value: fee,
-      data: encodeFunctionData({
-        abi: PYTH_ABI,
-        functionName: 'updatePriceFeeds',
-        args: [updateData],
-      }),
-    })
-    totalFee += fee
+  for (const result of settled) {
+    if (!result) continue
+    items.push(result.item)
+    totalFee += result.fee
   }
 
   return { items, totalFee }

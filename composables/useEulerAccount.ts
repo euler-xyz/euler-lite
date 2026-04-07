@@ -159,7 +159,9 @@ export const useEulerAccount = () => {
     lensAddresses: EulerLensAddresses,
     walletAddress: string,
   ) => {
-    if (fetchInProgress) return
+    if (fetchInProgress) {
+      return
+    }
     fetchInProgress = true
     try {
       const gen = positionGuard.current()

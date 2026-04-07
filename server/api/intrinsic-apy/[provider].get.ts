@@ -109,7 +109,9 @@ export default defineEventHandler(async (event) => {
   }
 
   const fresh = cache.get(cacheKey)
-  if (fresh !== undefined) return fresh
+  if (fresh !== undefined) {
+    return fresh
+  }
 
   const stale = cache.getStale(cacheKey)
   if (stale !== undefined) {

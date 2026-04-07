@@ -43,7 +43,9 @@ export default defineEventHandler(async (event) => {
   const key = `${chainId}:${address.toLowerCase()}`
 
   const cached = cache.get(key)
-  if (cached !== undefined) return cached
+  if (cached !== undefined) {
+    return cached
+  }
 
   try {
     const resp = await fetchWithTimeout(getUpstreamUrl(chainId, address), TIMEOUT_MS)
