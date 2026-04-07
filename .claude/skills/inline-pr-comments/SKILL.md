@@ -39,12 +39,12 @@ Use this context to:
 ### Step 2: Collect All Findings
 
 Complete the full review. Collect:
-- **Summary** — Overall assessment, architecture concerns, non-diff observations, BLOCKING issue count
+- **Summary** — Overall assessment, architecture concerns, non-diff observations, CRITICAL issue count
 - **Inline comments** — Specific issues on changed lines (path, line, body)
 
 Mark each finding with a severity prefix:
-- `🔴 BLOCKING:` — must be fixed before merge (incorrect logic, security issue, data loss risk)
-- `🟡 WARNING:` — should be fixed but won't block merge (bad pattern, fragile code)
+- `🚨 CRITICAL:` — must be fixed before merge (incorrect logic, security issue, data loss risk)
+- `⚠️ WARNING:` — should be fixed but won't block merge (bad pattern, fragile code)
 - `💬 SUGGESTION:` — optional improvement (style, minor optimisation)
 
 ### Step 3: Build Review JSON
@@ -53,27 +53,27 @@ Write a JSON file to `/tmp/review.json`:
 
 ```json
 {
-  "body": "## Review Summary\n\nOverall assessment here.\n\n**Blocking issues: N**\n\n## Observations Outside This PR\n- `file:line`: description",
+  "body": "## Review Summary\n\nOverall assessment here.\n\n**Critical issues: N**\n\n## Observations Outside This PR\n- `file:line`: description",
   "event": "COMMENT",
   "comments": [
     {
       "path": "composables/repay/useWalletRepay.ts",
       "line": 42,
-      "body": "🔴 BLOCKING: Issue description here"
+      "body": "🚨 CRITICAL: Issue description here"
     },
     {
       "path": "utils/fixed-point.ts",
       "start_line": 10,
       "line": 15,
       "side": "RIGHT",
-      "body": "🟡 WARNING: Multi-line comment"
+      "body": "⚠️ WARNING: Multi-line comment"
     }
   ]
 }
 ```
 
 **Fields:**
-- `body` — Markdown review summary (required), must include blocking issue count
+- `body` — Markdown review summary (required), must include critical issue count
 - `event` — Always `"COMMENT"` (never APPROVE or REQUEST_CHANGES)
 - `comments` — Array of inline comment objects (can be empty)
   - `path` — File path relative to repo root
@@ -81,7 +81,32 @@ Write a JSON file to `/tmp/review.json`:
   - `start_line` + `line` + `side: "RIGHT"` — For multi-line comments on added/changed lines
   - `body` — Markdown-formatted feedback with severity prefix
 
-### Step 4: Submit the Review
+### Step 4: Write sentinel if critical issues found
+
+Before submitting, count `🚨 CRITICAL:` occurrences and write a sentinel file. This must happen BEFORE the API call so the CI shell step can read it even if the API call fails.
+
+```bash
+python3 -c "
+import json, sys
+
+with open('/tmp/review.json') as f:
+    data = json.load(f)
+
+body = data.get('body', '')
+comments = data.get('comments', [])
+
+count = body.count('🚨 CRITICAL:') + sum(1 for c in comments if '🚨 CRITICAL:' in c.get('body', ''))
+
+if count > 0:
+    with open('/tmp/claude_critical', 'w') as f:
+        f.write(str(count))
+    print(f'Sentinel written — {count} critical issue(s)')
+else:
+    print('No critical issues')
+"
+```
+
+### Step 5: Submit the Review
 
 ```bash
 gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --input /tmp/review.json

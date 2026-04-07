@@ -62,8 +62,8 @@ Read the diff carefully. Focus only on changed lines and their immediate context
 ### Step 3: Classify findings
 
 For each issue found:
-- `🔴 BLOCKING:` — broken pattern that will cause runtime errors, hydration mismatches, or type safety regressions
-- `🟡 WARNING:` — bad practice that should be fixed but won't immediately break
+- `🚨 CRITICAL:` — broken pattern that will cause runtime errors, hydration mismatches, or type safety regressions
+- `⚠️ WARNING:` — bad practice that should be fixed but won't immediately break
 - `💬 SUGGESTION:` — minor improvement
 
 Skip nits about formatting, comment style, or ordering unless they create confusion.

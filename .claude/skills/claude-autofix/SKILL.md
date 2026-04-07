@@ -1,111 +1,113 @@
 ---
 name: claude-autofix
-description: Read open review feedback on the current PR and implement fixes directly in the codebase
+description: Read 🚨 CRITICAL review findings on the current PR, implement fixes on a new branch, open a fix PR, and comment the link on the original PR
 ---
 
 # Auto-fix PR Review Comments
 
-Read all open review feedback on the current PR and implement fixes directly in the codebase.
+Read all `🚨 CRITICAL:` findings from review feedback on the current PR, implement fixes on a new branch, open a PR targeting the original PR branch, and comment the link back.
 
 ## Instructions
 
-### Step 1: Gather all review feedback
+### Step 1: Gather critical findings
 
 ```bash
-# Inline review comments (line-specific)
+# Inline review comments — filter to CRITICAL only
 gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/comments" \
-  --jq '.[] | {id: .id, path: .path, line: .line, body: .body, user: .user.login}'
+  --jq '.[] | select(.body // "" | contains("🚨 CRITICAL:")) | {id: .id, path: .path, line: .line, body: .body, user: .user.login}'
 
-# Review summaries (overall assessments)
+# Review summaries — filter to CRITICAL only
 gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" \
-  --jq '.[] | select(.state != "DISMISSED") | {id: .id, state: .state, body: .body, user: .user.login}'
-
-# General PR comments
-gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
-  --jq '.[] | {id: .id, body: .body, user: .user.login}'
+  --jq '.[] | select(.state != "DISMISSED" and (.body // "" | contains("🚨 CRITICAL:"))) | {id: .id, body: .body, user: .user.login}'
 ```
 
-### Step 2: Triage feedback — be conservative
+If there are no `🚨 CRITICAL:` findings, post a comment saying there is nothing to fix and stop.
 
-For each piece of feedback, **read the actual code at the referenced location first**, then decide:
+### Step 2: Triage — be conservative
+
+For each `🚨 CRITICAL:` finding, **read the actual code at the referenced location first**, then decide:
 
 **Implement only if ALL of the following are true:**
 1. The issue actually exists in the code (verify by reading the file — don't trust the review blindly)
-2. The correct fix is unambiguous — there is one obvious, safe resolution
-3. The fix is self-contained and does not require understanding a product or UX decision
-4. No human reviewer has pushed back on or disagreed with this finding
+2. The correct fix is unambiguous — one obvious, safe resolution
+3. The fix is self-contained and does not require a product or UX decision
+4. No human reviewer has pushed back on this finding
 
 **Skip — and note in summary — if any of the following apply:**
-- The flagged code looks correct after reading it in context (false positive)
+- The flagged code looks correct in context (false positive)
 - The fix would change observable behaviour beyond what the comment describes
-- Multiple reviewers contradict each other on this point
-- The fix requires a product decision ("should this round up or down?")
-- It's a question, a `💬 SUGGESTION:`, or a style preference
-- You are not confident the original finding was correct
+- Reviewers contradict each other on this point
+- You are not confident the finding is correct
 
-**When in doubt, skip it.** A skipped item costs the author 30 seconds to review. A bad auto-fix costs everyone much more.
+**When in doubt, skip it.**
 
-### Step 3: Implement fixes
+If all critical findings are false positives after triage, post a comment on the PR via `gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments"` explaining why each was skipped, and stop — do not create a branch or PR.
 
-Read the relevant files, make the fixes. Follow the existing code patterns — don't refactor surrounding code.
+### Step 3: Apply fixes
 
-For each fix:
-1. Read the file at the referenced path
-2. Understand the context
-3. Apply the minimal change that resolves the feedback
-4. Do not "improve" surrounding code beyond what was requested
+For each finding that passed triage, use your file editing tools to apply the fix. Read the file, understand the context, make the minimal change.
 
-### Step 4: Commit
+### Steps 4–7: Branch, commit, open PR, and comment
 
-Stage only the specific files you edited — never `git add .` or `git add -A`:
+**Run this entire block as a single bash script** — shell variables (`FIX_BRANCH`, `FIX_PR_URL`) must persist across all steps and will not survive if run as separate commands.
 
-```bash
-# Stage each file you modified explicitly
-git add composables/repay/useWalletRepay.ts utils/fixed-point.ts
-git status  # verify only intended files are staged before committing
-git commit -m "fix: address PR review comments"
-git push origin HEAD
+Before running, write the actual fix summary to `/tmp/fix-pr-body.md` with the real list of what you fixed and what you skipped. Do not use placeholder text. Example:
+
 ```
+## Auto-fix for PR #123
 
-If there are multiple logical groups of fixes (e.g. stack hygiene vs business logic), split into separate commits, staging the relevant files for each:
-
-```bash
-git add composables/repay/useMaxRepay.ts
-git commit -m "fix: correct bigint arithmetic in repay flow"
-
-git add pages/position/index.vue
-git commit -m "fix: resolve stack hygiene review findings"
-
-git push origin HEAD
-```
-
-Always run `git status` before committing to confirm only the expected files are staged.
-
-### Step 5: Post a summary comment
-
-Write the summary to a temp file first, then post — do not use heredoc inside `$()` inside a quoted string (shell parsing failure):
-
-```bash
-cat > /tmp/autofix-summary.md << 'EOF'
-## Auto-fix Summary
+This PR implements fixes for `🚨 CRITICAL:` findings from the AI review on #123.
 
 ### Fixed
-- [list each fix with file:line reference]
+- `utils/autoLink.ts:11`: Restored `&quot;` HTML entity for double-quote escaping
 
 ### Skipped
-- [list each item skipped and why — question, contradiction, style preference, etc.]
+- `useRepay.ts:88`: false positive — denominator is always non-zero per vault invariant
 
-If any skipped items need human input, please clarify and re-run `@claude fix`.
+> Generated by `@claude fix`. Review carefully before merging.
+```
+
+Then run the following as a single script:
+
+```bash
+set -e
+
+# create fix branch
+FIX_BRANCH="fix/claude-${PR_NUMBER}-$(date +%s)"
+git checkout -b "$FIX_BRANCH"
+
+# stage ONLY the exact files you edited in Step 3 — substitute real paths below, never use git add . or git add -A
+git add <path/to/file-you-changed.ts> <path/to/another-file.vue>
+git status
+git commit -m "fix: address critical PR review findings"
+git push origin "$FIX_BRANCH"
+
+# open fix PR, capture URL from stdout
+FIX_PR_URL=$(gh pr create \
+  --title "fix: auto-fix critical findings from PR #${PR_NUMBER}" \
+  --body-file /tmp/fix-pr-body.md \
+  --base "$HEAD_REF" \
+  --head "$FIX_BRANCH")
+
+# comment link on original PR
+cat > /tmp/autofix-comment.md << EOF
+## 🤖 Auto-fix PR opened
+
+I've opened a fix PR for the \`🚨 CRITICAL:\` findings: $FIX_PR_URL
+
+Please review the changes before merging. You can close the fix PR if the proposed fixes aren't right.
 EOF
 
 gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
   --method POST \
-  -F body=@/tmp/autofix-summary.md
+  -F body=@/tmp/autofix-comment.md
 ```
+
+If the commit is rejected by the pre-commit hook (lint-staged), run `npx eslint --fix` on the changed files, re-stage them, and rerun the full script.
 
 ## Important Constraints
 
+- Only fix `🚨 CRITICAL:` findings — never `⚠️ WARNING:` or `💬 SUGGESTION:`
 - Never commit secrets, `.env` files, or unrelated files
 - Never force-push or amend commits — always create new commits
-- If a fix would require understanding a product decision or changing behaviour beyond the review comment scope, skip it and note it in the summary
-- If the same issue appears in multiple places but the review only flagged one, fix all occurrences (and note this in the summary)
+- Never push directly to the original PR branch — always use the fix branch

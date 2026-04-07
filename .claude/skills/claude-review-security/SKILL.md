@@ -55,8 +55,8 @@ git diff origin/$BASE_REF...HEAD
 
 ### Step 3: Classify findings
 
-- `🔴 BLOCKING:` — secret exposure risk, XSS vector, geo-blocking bypass, RPC URL leakage to client
-- `🟡 WARNING:` — potential exposure path that requires specific conditions, missing `simulateContract`, missing guard
+- `🚨 CRITICAL:` — secret exposure risk, XSS vector, geo-blocking bypass, RPC URL leakage to client
+- `⚠️ WARNING:` — potential exposure path that requires specific conditions, missing `simulateContract`, missing guard
 - `💬 SUGGESTION:` — defence-in-depth improvement, better validation
 
 ### Step 4: Post findings

@@ -62,8 +62,8 @@ Also read any composables in `composables/repay/`, `composables/borrow/`, `compo
 
 ### Step 3: Classify findings
 
-- `🔴 BLOCKING:` — incorrect financial calculation, missing guard that could cause fund loss, silent failure on transaction error, broken repay/borrow flow
-- `🟡 WARNING:` — imprecise rounding, missing edge case (zero balance, max uint), fragile assumption about vault decimals
+- `🚨 CRITICAL:` — incorrect financial calculation, missing guard that could cause fund loss, silent failure on transaction error, broken repay/borrow flow
+- `⚠️ WARNING:` — imprecise rounding, missing edge case (zero balance, max uint), fragile assumption about vault decimals
 - `💬 SUGGESTION:` — clarity improvement, better use of existing utility
 
 ### Step 4: Post findings
