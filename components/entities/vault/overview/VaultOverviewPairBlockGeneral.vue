@@ -176,6 +176,11 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: LTVRampConfig) => {
             </span>
           </template>
         </VaultOverviewLabelValue>
+        <VaultOverviewLabelValue
+          v-if="isBorrowable"
+          label="Max multiplier"
+          :value="`${formatNumber(maxMultiplier, 2, 2)}x`"
+        />
         <VaultOverviewLabelValue>
           <template #label>
             <span class="flex items-center gap-4">
@@ -218,11 +223,6 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: LTVRampConfig) => {
             {{ formatNumber(maxRoe) }}%
           </span>
         </VaultOverviewLabelValue>
-        <VaultOverviewLabelValue
-          v-if="isBorrowable"
-          label="Max multiplier"
-          :value="`${formatNumber(maxMultiplier, 2, 2)}x`"
-        />
         <VaultOverviewLabelValue
           label="Max LTV"
           :value="`${formatNumber(nanoToValue(pair.borrowLTV, 2), 2)}%`"
