@@ -1,5 +1,5 @@
 # ── Build stage 
-FROM node:20.12.2 AS builder
+FROM node:24.14.1 AS builder
 
 WORKDIR /usr/src/app
 COPY package.json package-lock.json ./
@@ -11,7 +11,7 @@ RUN npm run build
 RUN (curl -Ls --tlsv1.2 --proto "=https" --retry 3 https://cli.doppler.com/install.sh || wget -t 3 -qO- https://cli.doppler.com/install.sh) | sh -s -- --no-package-manager --no-install
 
 # ── Production stage (distroless: no shell, no tools, non-root) ──
-FROM gcr.io/distroless/nodejs20-debian12:nonroot AS production
+FROM gcr.io/distroless/nodejs24-debian12:nonroot AS production
 
 ENV MODE=production
 ENV NODE_ENV=production
