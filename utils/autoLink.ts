@@ -27,7 +27,7 @@ export const formatEulerLabelText = (text: string): string => {
       formatted += `<a href="${match[2]}" target="_blank" rel="noopener noreferrer">${escapeHtml(match[1])}</a>`
     }
     else {
-      formatted += `<a href="${match[0]}" target="_blank" rel="noopener noreferrer">${escapeHtml(match[0])}</a>`
+      formatted += `<a href="${match[0]}" target="_blank">${match[0]}</a>`
     }
 
     lastIndex = index + match[0].length
