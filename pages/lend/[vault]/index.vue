@@ -5,7 +5,7 @@ import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal, VaultSupplyApyModal, VaultUnverifiedDisclaimerModal, SwapTokenSelector, SlippageSettingsModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
-import { computeAPYs, getCurrentLiquidationLTV, type SecuritizeVault, type Vault, type VaultAsset } from '~/entities/vault'
+import { getProjectedRates, getCurrentLiquidationLTV, type SecuritizeVault, type Vault, type VaultAsset } from '~/entities/vault'
 import { isSecuritizeVault } from '~/entities/vault/factory'
 import { getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { collectPythFeedIds } from '~/entities/oracle'
@@ -25,6 +25,7 @@ import { formatNumber, compactNumber, formatSmartAmount } from '~/utils/string-u
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import { createRaceGuard } from '~/utils/race-guard'
 
 // Type definitions for vault display
 type VaultType = 'evk' | 'securitize'
@@ -489,40 +490,58 @@ const send = async () => {
   }
 }
 
+const estimatesGuard = createRaceGuard()
+
 const updateEstimates = useDebounceFn(async () => {
-  if (!isVaultLoaded.value) {
-    return
-  }
+  if (!isVaultLoaded.value) return
+  const gen = estimatesGuard.next()
   try {
     if (features.value.hasInterestRate && evkVault.value) {
-      await updateVault(evkVault.value.address)
-      if (!asset.value?.address) {
-        return
+      // When swapping, use the swap output amount (vault-asset denominated)
+      const supplyNano = needsSwap.value
+        ? BigInt(swapEffectiveQuote.value?.amountOut || 0)
+        : valueToNano(amount.value, evkVault.value.decimals)
+
+      if (needsSwap.value && !supplyNano) {
+        // No swap quote yet — skip projection, keep current rate
+        estimateSupplyAPY.value = evkVault.value.interestRateInfo.supplyAPY + valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
       }
-      const [, supplyAPY] = await computeAPYs(
-        evkVault.value.interestRateInfo.borrowSPY,
-        evkVault.value.interestRateInfo.cash + valueToNano(amount.value, evkVault.value.decimals),
-        evkVault.value.interestRateInfo.borrows,
-        evkVault.value.interestFee,
-      )
-      estimateSupplyAPY.value = supplyAPY + valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
-      monthlyEarnings.value = !amount.value
+      else {
+        const projected = await getProjectedRates(
+          evkVault.value.address,
+          evkVault.value.interestRateInfo.cash,
+          evkVault.value.interestRateInfo.borrows,
+          supplyNano,
+          0n,
+        )
+        if (estimatesGuard.isStale(gen)) return
+        const rawAPY = projected?.supplyAPY ?? evkVault.value.interestRateInfo.supplyAPY
+        estimateSupplyAPY.value = rawAPY + valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
+      }
+
+      const supplyAmount = needsSwap.value
+        ? nanoToValue(BigInt(swapEffectiveQuote.value?.amountOut || 0), Number(evkVault.value.decimals))
+        : +(amount.value || 0)
+      monthlyEarnings.value = supplyAmount <= 0
         ? 0
-        : (+(amount.value || 0) * nanoToValue(estimateSupplyAPY.value, 27)) / 12
+        : supplyAmount * (nanoToValue(estimateSupplyAPY.value, 27) / 12)
     }
     else {
-      // For vaults without interest rate computation
       estimateSupplyAPY.value = valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
-      monthlyEarnings.value = !amount.value
+      const supplyAmount = +(amount.value || 0)
+      monthlyEarnings.value = supplyAmount <= 0
         ? 0
-        : (+(amount.value || 0) * nanoToValue(estimateSupplyAPY.value, 27)) / 12
+        : supplyAmount * (nanoToValue(estimateSupplyAPY.value, 27) / 12)
     }
   }
   catch (e) {
-    console.warn(e)
+    if (estimatesGuard.isStale(gen)) return
+    logWarn('lend-supply/estimates', e)
   }
   finally {
-    isEstimatesLoading.value = false
+    if (!estimatesGuard.isStale(gen)) {
+      isEstimatesLoading.value = false
+    }
   }
 }, 500)
 
@@ -616,13 +635,6 @@ const requestSwapQuote = useDebounceFn(async () => {
     isRepay: false,
     targetDebt: 0n,
     currentDebt: 0n,
-  }, {
-    logContext: {
-      tokenIn: selectedAsset.value.address,
-      tokenOut: asset.value.address,
-      amount: amount.value,
-      slippage: swapSlippage.value,
-    },
   })
 }, 500)
 
@@ -691,6 +703,22 @@ watch(swapSlippage, () => {
 
 watch(swapSelectedQuote, () => {
   clearSimulationError()
+})
+
+// Re-run estimates when swap quote resolves — supplyNano depends on amountOut
+watch(swapEffectiveQuote, () => {
+  if (!needsSwap.value) return
+  if (swapEffectiveQuote.value) {
+    if (!isEstimatesLoading.value) {
+      isEstimatesLoading.value = true
+    }
+    updateEstimates()
+  }
+  else {
+    // quote was cleared (slippage change, manual refresh) — queue estimate so loading is always cleared
+    isEstimatesLoading.value = true
+    updateEstimates()
+  }
 })
 
 // Update USD value when monthlyEarnings or vault changes

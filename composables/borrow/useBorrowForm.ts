@@ -3,6 +3,7 @@ import { useAccount } from '@wagmi/vue'
 import { getAddress, formatUnits, zeroAddress, type Address } from 'viem'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { logWarn } from '~/utils/errorHandling'
+import { createRaceGuard } from '~/utils/race-guard'
 import { computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
 import { FixedPoint } from '~/utils/fixed-point'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -33,7 +34,7 @@ import type { TxPlan } from '~/entities/txPlan'
 import { getUtilisationWarning, getBorrowCapWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { getVaultTags, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
-import { getNetAPY } from '~/entities/vault'
+import { getNetAPY, getProjectedRates } from '~/entities/vault'
 
 export interface UseBorrowFormOptions {
   pair: Ref<AnyBorrowVaultPair | undefined>
@@ -92,7 +93,6 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const { address, isConnected } = useAccount()
   const { refreshAllPositions } = useEulerAccount()
   const { eulerLensAddresses, chainId } = useEulerAddresses()
-  const { updateVault } = useVaults()
   const { fetchSingleBalance } = useWallets()
 
   const {
@@ -400,13 +400,6 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       isRepay: false,
       targetDebt: 0n,
       currentDebt: 0n,
-    }, {
-      logContext: {
-        tokenIn: borrowSelectedAsset.value.address,
-        tokenOut: collateralVault.value.asset.address,
-        amount: collateralAmount.value,
-        slippage: borrowSwapSlippage.value,
-      },
     })
   }, 500)
 
@@ -474,16 +467,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   }
 
   // --- Actions: estimates ---
-  const updateEstimates = useDebounceFn(async () => {
-    if (!pair.value) {
-      return
-    }
-    try {
-      await Promise.all([updateVault(collateralVault.value!.address), updateVault(borrowVault.value!.address)])
-    }
-    catch (e) {
-      logWarn('borrow/updateEstimates', e, { severity: 'error' })
-    }
+
+  // Synchronous estimates (health, liq price) update instantly on every input
+  const updateSyncEstimates = () => {
+    if (!pair.value) return
     try {
       health.value = computeNextHealth(
         Number(pair.value?.liquidationLTV || 0n) / 100,
@@ -493,29 +480,78 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         priceFixed.value.toUnsafeFloat(),
         health.value,
       ) ?? undefined
-      const collateralUsdValue = borrowNeedsSwap.value && borrowSwapAssetUsdPrice.value
-        ? (+collateralAmount.value || 0) * borrowSwapAssetUsdPrice.value
-        : await getAssetUsdValueOrZero(+collateralAmount.value || 0, collateralVault.value!, 'off-chain')
-      const borrowUsdValue = await getAssetUsdValueOrZero(+borrowAmount.value || 0, borrowVault.value!, 'off-chain')
+    }
+    catch (e) {
+      logWarn('borrow/syncEstimates', e)
+      health.value = undefined
+      liquidationPrice.value = undefined
+    }
+  }
+
+  // Async estimates (projected rates, USD prices, net APY) are debounced
+  const asyncEstimatesGuard = createRaceGuard()
+  const updateAsyncEstimates = useDebounceFn(async () => {
+    if (!pair.value || !collateralVault.value || !borrowVault.value) return
+    const gen = asyncEstimatesGuard.next()
+    try {
+      // When swapping, use the quote output amount (collateral-vault-asset denominated)
+      const collateralAmountNano = borrowNeedsSwap.value
+        ? borrowSwapEffectiveQuote.value ? BigInt(borrowSwapEffectiveQuote.value.amountOut || 0) : 0n
+        : valueToNano(collateralAmount.value || '0', collateralVault.value.decimals)
+      const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value.decimals)
+
+      const [collateralProjected, borrowProjected, collateralUsdValue, borrowUsdValue] = await Promise.all([
+        getProjectedRates(
+          collateralVault.value.address,
+          collateralVault.value.interestRateInfo.cash,
+          collateralVault.value.interestRateInfo.borrows,
+          collateralAmountNano,
+          0n,
+        ),
+        getProjectedRates(
+          borrowVault.value.address,
+          borrowVault.value.interestRateInfo.cash,
+          borrowVault.value.interestRateInfo.borrows,
+          -borrowAmountNano,
+          borrowAmountNano,
+        ),
+        borrowNeedsSwap.value && borrowSwapAssetUsdPrice.value
+          ? Promise.resolve((+collateralAmount.value || 0) * borrowSwapAssetUsdPrice.value)
+          : getAssetUsdValueOrZero(collateralAmountNano, collateralVault.value!, 'off-chain'),
+        getAssetUsdValueOrZero(borrowAmountNano, borrowVault.value!, 'off-chain'),
+      ])
+
+      if (asyncEstimatesGuard.isStale(gen)) return
+
+      // Apply projected rate deltas on top of current APYs (which include intrinsic APY)
+      const projectedSupplyApy = collateralProjected
+        ? collateralSupplyApy.value + (nanoToValue(collateralProjected.supplyAPY, 25) - nanoToValue(collateralVault.value.interestRateInfo.supplyAPY, 25))
+        : collateralSupplyApy.value
+
+      const projectedBorrowApy = borrowProjected
+        ? borrowApy.value + (nanoToValue(borrowProjected.borrowAPY, 25) - nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25))
+        : borrowApy.value
+
       netAPY.value = getNetAPY(
         collateralUsdValue,
-        collateralSupplyApy.value,
+        projectedSupplyApy,
         borrowUsdValue,
-        borrowApy.value,
+        projectedBorrowApy,
         collateralSupplyRewardApy.value || null,
         borrowRewardApy.value || null,
       )
     }
     catch (e) {
-      logWarn('borrow/estimates', e)
-      health.value = undefined
-      liquidationPrice.value = undefined
+      if (asyncEstimatesGuard.isStale(gen)) return
+      logWarn('borrow/asyncEstimates', e)
       netAPY.value = undefined
     }
     finally {
-      isEstimatesLoading.value = false
+      if (!asyncEstimatesGuard.isStale(gen)) {
+        isEstimatesLoading.value = false
+      }
     }
-  }, 1000)
+  }, 500)
 
   // --- Actions: submit & send ---
   const buildSwapBorrowPlanFromQuote = async (quote: SwapApiQuote, planOptions: { includePermit2Call?: boolean } = {}): Promise<TxPlan> => {
@@ -757,10 +793,11 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     if (!pair.value) {
       return
     }
+    updateSyncEstimates()
     if (!isEstimatesLoading.value) {
       isEstimatesLoading.value = true
     }
-    updateEstimates()
+    updateAsyncEstimates()
   })
 
   watch(savingCollateral, (val) => {
@@ -819,6 +856,17 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   watch(borrowSwapEffectiveQuote, () => {
     if (borrowNeedsSwap.value && collateralAmount.value && +ltv.value > 0) {
       onCollateralInput()
+    }
+    // Re-run projected rate estimates when quote resolves — collateralAmountNano depends on amountOut
+    if (borrowNeedsSwap.value) {
+      if (borrowSwapEffectiveQuote.value) {
+        if (!isEstimatesLoading.value) isEstimatesLoading.value = true
+        updateAsyncEstimates()
+      }
+      else {
+        isEstimatesLoading.value = true
+        updateAsyncEstimates()
+      }
     }
   })
 
@@ -909,7 +957,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     onRefreshBorrowSwapQuotes,
     submit,
     send,
-    updateEstimates,
+    updateEstimates: () => {
+      updateSyncEstimates()
+      updateAsyncEstimates()
+    },
     updateBorrowSwapAssetBalance,
     resetOnTabSwitch,
   }

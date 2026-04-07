@@ -14,9 +14,11 @@ export default defineEventHandler((event) => {
   const cfCountry = (event.node.req.headers['cf-ipcountry'] as string | undefined)?.toUpperCase()
   let country = (cfCountry && /^[A-Z]{2}$/.test(cfCountry) && cfCountry !== 'XX') ? cfCountry : undefined
 
-  // In dev, Cloudflare is not in the request path so cf-ipcountry is never set.
-  // DEV_GEO_COUNTRY allows simulating any country for testing geo-blocks locally.
-  if (!country && process.env.DOPPLER_ENVIRONMENT === 'dev') {
+  // When Cloudflare is not in the request path (local dev, PR previews, etc.)
+  // cf-ipcountry is never set. DEV_GEO_COUNTRY allows injecting a country code
+  // as a fallback regardless of environment, so preview deployments aren't
+  // universally fail-closed when no CF header is present.
+  if (!country) {
     const devCountry = process.env.DEV_GEO_COUNTRY?.toUpperCase()
     if (devCountry && /^[A-Z]{2}$/.test(devCountry) && devCountry !== 'XX') {
       country = devCountry
@@ -25,7 +27,7 @@ export default defineEventHandler((event) => {
 
   // Fail-closed: deny access when country cannot be determined.
   // This prevents bypassing geo-blocks by omitting or spoofing headers.
-  // In dev without DEV_GEO_COUNTRY set, allow the request through.
+  // In dev (DOPPLER_ENVIRONMENT=dev) without DEV_GEO_COUNTRY set, allow through.
   if (!country && process.env.DOPPLER_ENVIRONMENT !== 'dev') {
     console.warn('[geo-gate] Blocked: country undetermined', {
       cfCountry: cfCountry || 'absent',
@@ -51,7 +53,7 @@ export default defineEventHandler((event) => {
   }
 
   // Block sanctioned countries
-  if (SANCTIONED_COUNTRIES.includes(country)) {
+  if (country && SANCTIONED_COUNTRIES.includes(country)) {
     console.warn('[geo-gate] Blocked sanctioned country', {
       country,
       path: url.pathname,

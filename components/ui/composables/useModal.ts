@@ -1,4 +1,4 @@
-import { useScrollLock, useEventBus } from '@vueuse/core'
+import { useEventBus } from '@vueuse/core'
 import type { Raw } from 'vue'
 
 export interface ModalData {
@@ -12,10 +12,27 @@ export interface ModalData {
   [key: string]: any // eslint-disable-line
 }
 
+let scrollLocked = false
+
+function lockScroll() {
+  if (scrollLocked) return
+  scrollLocked = true
+  const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth
+  document.body.style.overflow = 'hidden'
+  if (scrollbarWidth > 0) {
+    document.body.style.paddingRight = `${scrollbarWidth}px`
+  }
+}
+
+function unlockScroll() {
+  scrollLocked = false
+  document.body.style.overflow = ''
+  document.body.style.paddingRight = ''
+}
+
 let popstateHandler: EventListener | undefined
 const list: { id: number, component: Raw<Component>, data: ModalData }[] = reactive([])
 const hasModal = computed(() => list.length > 0)
-const lock = useScrollLock(document.body)
 const bus = useEventBus<string>('modal')
 
 export const useModal = () => {
@@ -45,7 +62,7 @@ export const useModal = () => {
     }
 
     if (!data.noLock) {
-      lock.value = true
+      lockScroll()
     }
 
     if (data.absolute) {
@@ -70,8 +87,8 @@ export const useModal = () => {
       window.history.back()
     }
 
-    if (!hasModal.value) {
-      lock.value = false
+    if (!list.some(item => !item.data.noLock)) {
+      unlockScroll()
     }
 
     bus.emit('close')

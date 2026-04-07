@@ -2,6 +2,7 @@ import type { ComputedRef } from 'vue'
 import { useAccount } from '@wagmi/vue'
 import { formatUnits, type Address, type Abi, zeroAddress } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
+import { createRaceGuard } from '~/utils/race-guard'
 import { FixedPoint } from '~/utils/fixed-point'
 import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -10,6 +11,7 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { eulerAccountLensABI } from '~/entities/euler/abis'
 import {
   getNetAPY,
+  getProjectedRates,
   type Vault,
   type SecuritizeVault,
   type VaultAsset,
@@ -364,12 +366,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       return
     }
 
-    await requestSwapQuotes(params, {
-      logContext: {
-        amount: amount.value,
-        slippage: swapSlippage.value,
-      },
-    })
+    await requestSwapQuotes(params)
   }, 500)
 
   const openSwapTokenSelector = (currentAddress?: string, onSelect?: (a: VaultAsset, meta?: SwapTokenSelectMeta) => void) => {
@@ -417,14 +414,12 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   )
 
   // --- Estimates ---
-  const updateEstimates = useDebounceFn(async () => {
+  const updateSyncEstimates = () => {
     clearSimulationError()
     estimatesError.value = ''
     if (!collateralVault.value) return
 
     try {
-      const amountNano = valueToNano(amount.value, collateralVault.value.decimals)
-
       // Derive total collateral value from position's on-chain LTV (multi-collateral aware),
       // then adjust for the collateral delta using the single collateral's price.
       const totalValue = getTotalCollateralValue(position.value!)
@@ -468,24 +463,6 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
         needsSwap: options.needsSwap.value,
       })
 
-      const adjustedCollateral = options.mode === 'supply'
-        ? collateralAssets.value + amountNano
-        : collateralAssets.value - amountNano
-
-      const [collateralUsd, borrowedUsd] = await Promise.all([
-        getCollateralValueUsdLocal(adjustedCollateral),
-        getAssetUsdValueOrZero(position.value!.borrowed || 0n, borrowVault.value!, 'off-chain'),
-      ])
-
-      estimateNetAPY.value = getNetAPY(
-        collateralUsd,
-        collateralSupplyApy.value,
-        borrowedUsd,
-        borrowApy.value,
-        collateralSupplyRewardApy.value || null,
-        borrowRewardApy.value || null,
-      )
-
       estimateUserLTV.value = userLtvFixed.value
       // liquidationLTV is in basis points (e.g. 8600 = 86%). Convert to 18-decimal
       // percentage (8600 * 10^16 = 86 * 10^18) to match userLtvFixed's 18 decimals.
@@ -494,14 +471,64 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
         : FixedPoint.fromValue(position.value!.liquidationLTV * (10n ** 16n), 18).div(userLtvFixed).value
     }
     catch (e: unknown) {
-      logWarn('collateral/estimates', e)
-      estimateNetAPY.value = netAPY.value
+      logWarn('collateral/syncEstimates', e)
       estimateUserLTV.value = position.value!.userLTV
       estimateHealth.value = position.value!.health
       estimatesError.value = (e as { message: string }).message
     }
-    finally {
+  }
+
+  const asyncEstimatesGuard = createRaceGuard()
+  const updateAsyncEstimates = useDebounceFn(async () => {
+    if (!collateralVault.value || !borrowVault.value) {
       isEstimatesLoading.value = false
+      return
+    }
+    const gen = asyncEstimatesGuard.next()
+    try {
+      const amountNano = valueToNano(amount.value, collateralVault.value.decimals)
+      const cashDelta = options.mode === 'supply' ? amountNano : -amountNano
+
+      const [projected, collateralUsd, borrowedUsd] = await Promise.all([
+        getProjectedRates(
+          collateralVault.value.address,
+          collateralVault.value.interestRateInfo.cash,
+          collateralVault.value.interestRateInfo.borrows,
+          cashDelta,
+          0n,
+        ),
+        getCollateralValueUsdLocal(
+          options.mode === 'supply'
+            ? collateralAssets.value + amountNano
+            : collateralAssets.value - amountNano,
+        ),
+        getAssetUsdValueOrZero(position.value!.borrowed || 0n, borrowVault.value!, 'off-chain'),
+      ])
+
+      if (asyncEstimatesGuard.isStale(gen)) return
+
+      const projectedSupplyApy = projected
+        ? withIntrinsicSupplyApy(nanoToValue(projected.supplyAPY, 25), collateralVault.value?.asset.address)
+        : collateralSupplyApy.value
+
+      estimateNetAPY.value = getNetAPY(
+        collateralUsd,
+        projectedSupplyApy,
+        borrowedUsd,
+        borrowApy.value,
+        collateralSupplyRewardApy.value || null,
+        borrowRewardApy.value || null,
+      )
+    }
+    catch (e) {
+      if (asyncEstimatesGuard.isStale(gen)) return
+      logWarn('collateral/asyncEstimates', e)
+      estimateNetAPY.value = netAPY.value
+    }
+    finally {
+      if (!asyncEstimatesGuard.isStale(gen)) {
+        isEstimatesLoading.value = false
+      }
     }
   }, 500)
 
@@ -647,10 +674,11 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
   watch(amount, async () => {
     if (!collateralVault.value) return
+    updateSyncEstimates()
     if (!isEstimatesLoading.value) {
       isEstimatesLoading.value = true
     }
-    updateEstimates()
+    updateAsyncEstimates()
     if (options.needsSwap.value) {
       resetSwapQuoteState()
       requestSwapQuote()
@@ -744,6 +772,9 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     loadSelectedCollateral,
     submit,
     send,
-    updateEstimates,
+    updateEstimates: () => {
+      updateSyncEstimates()
+      updateAsyncEstimates()
+    },
   }
 }
