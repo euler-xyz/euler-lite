@@ -87,7 +87,7 @@ export const useModal = () => {
       window.history.back()
     }
 
-    if (!hasModal.value) {
+    if (!list.some(item => !item.data.noLock)) {
       unlockScroll()
     }
 
