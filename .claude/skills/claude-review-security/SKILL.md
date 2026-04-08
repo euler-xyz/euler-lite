@@ -59,6 +59,6 @@ git diff origin/$BASE_REF...HEAD
 - `⚠️ WARNING:` — potential exposure path that requires specific conditions, missing `simulateContract`, missing guard
 - `💬 SUGGESTION:` — defence-in-depth improvement, better validation
 
-### Step 4: Post findings
+### Step 4: Return findings
 
-Hand off all findings to /inline-pr-comments. Include a summary of the security surface reviewed.
+Return all findings as structured text to the orchestrator. Do NOT call /inline-pr-comments — the orchestrator collects findings from all three reviews and posts them in a single consolidated review. Include a summary of the security surface reviewed.

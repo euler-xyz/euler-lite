@@ -2,7 +2,7 @@ name: Claude Code Review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review]
     paths:
       - '**.vue'
       - '**.ts'
@@ -11,21 +11,27 @@ on:
       - 'nuxt.config.*'
   issue_comment:
     types: [created]
+  pull_request_review_comment:
+    types: [created]
 
 env:
   CLAUDE_OPUS_MODEL: claude-opus-4-6
+  CLAUDE_SONNET_MODEL: claude-sonnet-4-6
 
 jobs:
-  review-stack:
-    name: Review / Stack Hygiene
+  review:
+    name: Review
     concurrency:
-      group: claude-review-stack-${{ github.event.pull_request.number || github.event.issue.number }}
+      group: claude-review-${{ github.event.pull_request.number || github.event.issue.number }}
       cancel-in-progress: true
+    outputs:
+      has_critical: ${{ steps.critical-check.outputs.has_critical }}
     if: |
       (
         github.event_name == 'pull_request' &&
         github.event.pull_request.draft == false &&
-        github.event.pull_request.head.repo.full_name == github.repository
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.user.type != 'Bot'
       ) ||
       (
         github.event_name == 'issue_comment' &&
@@ -37,11 +43,11 @@ jobs:
         )
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
       pull-requests: write
-      issues: write
+      actions: read
       id-token: write
     steps:
       - name: Get PR info
@@ -70,180 +76,66 @@ jobs:
           ref: ${{ steps.pr-info.outputs.head_sha }}
           fetch-depth: 0
 
-      - name: Run Stack Hygiene Review
+      - name: Run Reviews
         uses: anthropics/claude-code-action@v1
         env:
           PR_NUMBER: ${{ steps.pr-info.outputs.pr_number }}
           BASE_REF: ${{ steps.pr-info.outputs.base_ref }}
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: Run /claude-review-stack to review this PR, then use /inline-pr-comments to post findings as a consolidated PR review with inline comments.
-          claude_args: --model ${{ env.CLAUDE_OPUS_MODEL }}
-
-      - name: Fail if critical issues found
-        run: |
-          if [ -f /tmp/claude_critical ]; then
-            count=$(cat /tmp/claude_critical)
-            echo "::error::Review found $count critical issue(s) that must be resolved before merging."
-            exit 1
-          fi
-
-  review-business:
-    name: Review / Business Logic
-    concurrency:
-      group: claude-review-business-${{ github.event.pull_request.number || github.event.issue.number }}
-      cancel-in-progress: true
-    if: |
-      (
-        github.event_name == 'pull_request' &&
-        github.event.pull_request.draft == false &&
-        github.event.pull_request.head.repo.full_name == github.repository
-      ) ||
-      (
-        github.event_name == 'issue_comment' &&
-        github.event.issue.pull_request &&
-        startsWith(github.event.comment.body, '@claude review') &&
-        (
-          github.event.comment.author_association == 'MEMBER' ||
-          github.event.comment.author_association == 'OWNER'
-        )
-      )
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-      pull-requests: write
-      issues: write
-      id-token: write
-    steps:
-      - name: Get PR info
-        id: pr-info
-        uses: actions/github-script@v7
-        with:
-          script: |
-            if (context.eventName === 'issue_comment') {
-              const { data: pr } = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: context.issue.number
-              });
-              core.setOutput('head_sha', pr.head.sha);
-              core.setOutput('pr_number', context.issue.number);
-              core.setOutput('base_ref', pr.base.ref);
-            } else {
-              core.setOutput('head_sha', context.payload.pull_request.head.sha);
-              core.setOutput('pr_number', context.payload.pull_request.number);
-              core.setOutput('base_ref', context.payload.pull_request.base.ref);
+          use_sticky_comment: "true"
+          track_progress: "true"
+          settings: |
+            {
+              "permissions": {
+                "allow": ["Bash(git diff *)", "Bash(gh api *)", "Bash(python3 *)", "Read", "Glob", "Grep"]
+              }
             }
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.pr-info.outputs.head_sha }}
-          fetch-depth: 0
-
-      - name: Run Business Logic Review
-        uses: anthropics/claude-code-action@v1
-        env:
-          PR_NUMBER: ${{ steps.pr-info.outputs.pr_number }}
-          BASE_REF: ${{ steps.pr-info.outputs.base_ref }}
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: Run /claude-review-business to review this PR, then use /inline-pr-comments to post findings as a consolidated PR review with inline comments.
+          prompt: |
+            First, create three tasks upfront before doing anything else: "Stack review", "Business review", "Security review".
+            Then use agent teams to run /claude-review-stack, /claude-review-business, and /claude-review-security in parallel.
+            Mark each task complete only when that specific agent returns its findings.
+            Once all three are marked complete, use /inline-pr-comments once to post a single consolidated PR review with inline comments.
           claude_args: --model ${{ env.CLAUDE_OPUS_MODEL }}
 
       - name: Fail if critical issues found
+        id: critical-check
         run: |
           if [ -f /tmp/claude_critical ]; then
             count=$(cat /tmp/claude_critical)
-            echo "::error::Review found $count critical issue(s) that must be resolved before merging."
-            exit 1
-          fi
-
-  review-security:
-    name: Review / Security
-    concurrency:
-      group: claude-review-security-${{ github.event.pull_request.number || github.event.issue.number }}
-      cancel-in-progress: true
-    if: |
-      (
-        github.event_name == 'pull_request' &&
-        github.event.pull_request.draft == false &&
-        github.event.pull_request.head.repo.full_name == github.repository
-      ) ||
-      (
-        github.event_name == 'issue_comment' &&
-        github.event.issue.pull_request &&
-        startsWith(github.event.comment.body, '@claude review') &&
-        (
-          github.event.comment.author_association == 'MEMBER' ||
-          github.event.comment.author_association == 'OWNER'
-        )
-      )
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-      pull-requests: write
-      issues: write
-      id-token: write
-    steps:
-      - name: Get PR info
-        id: pr-info
-        uses: actions/github-script@v7
-        with:
-          script: |
-            if (context.eventName === 'issue_comment') {
-              const { data: pr } = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: context.issue.number
-              });
-              core.setOutput('head_sha', pr.head.sha);
-              core.setOutput('pr_number', context.issue.number);
-              core.setOutput('base_ref', pr.base.ref);
-            } else {
-              core.setOutput('head_sha', context.payload.pull_request.head.sha);
-              core.setOutput('pr_number', context.payload.pull_request.number);
-              core.setOutput('base_ref', context.payload.pull_request.base.ref);
-            }
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.pr-info.outputs.head_sha }}
-          fetch-depth: 0
-
-      - name: Run Security Review
-        uses: anthropics/claude-code-action@v1
-        env:
-          PR_NUMBER: ${{ steps.pr-info.outputs.pr_number }}
-          BASE_REF: ${{ steps.pr-info.outputs.base_ref }}
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: Run /claude-review-security to review this PR, then use /inline-pr-comments to post findings as a consolidated PR review with inline comments.
-          claude_args: --model ${{ env.CLAUDE_OPUS_MODEL }}
-
-      - name: Fail if critical issues found
-        run: |
-          if [ -f /tmp/claude_critical ]; then
-            count=$(cat /tmp/claude_critical)
+            echo "has_critical=true" >> $GITHUB_OUTPUT
             echo "::error::Review found $count critical issue(s) that must be resolved before merging."
             exit 1
           fi
 
   autofix:
     name: Auto-fix / Open PR
+    needs: [review]
     concurrency:
-      group: claude-autofix-${{ github.event.issue.number }}
-      cancel-in-progress: true
+      group: claude-autofix-${{ github.event.issue.number || github.event.pull_request.number }}
+      cancel-in-progress: false
     if: |
-      github.event_name == 'issue_comment' &&
-      github.event.issue.pull_request &&
-      startsWith(github.event.comment.body, '@claude fix') &&
+      always() &&
+      needs.review.result != 'cancelled' &&
       (
-        github.event.comment.author_association == 'MEMBER' ||
-        github.event.comment.author_association == 'OWNER'
+        (
+          needs.review.outputs.has_critical == 'true' &&
+          github.event_name == 'pull_request'
+        ) ||
+        (
+          startsWith(github.event.comment.body, '@claude fix') &&
+          (
+            (
+              github.event_name == 'issue_comment' &&
+              github.event.issue.pull_request &&
+              (
+                github.event.comment.author_association == 'MEMBER' ||
+                github.event.comment.author_association == 'OWNER'
+              )
+            ) ||
+            github.event_name == 'pull_request_review_comment'
+          )
+        )
       )
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -251,23 +143,44 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
+      actions: read
       id-token: write
     steps:
+      - name: Check commenter permission
+        if: github.event_name == 'pull_request_review_comment'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: context.actor
+            });
+            if (!['admin', 'write'].includes(data.permission)) {
+              core.setFailed(`${context.actor} does not have write access.`);
+            }
+
       - name: Get PR info
         id: pr-info
         uses: actions/github-script@v7
         with:
           script: |
-            const { data: pr } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.issue.number
-            });
+            let pr;
+            if (context.eventName === 'pull_request' || context.eventName === 'pull_request_review_comment') {
+              pr = context.payload.pull_request;
+            } else {
+              const { data } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number
+              });
+              pr = data;
+            }
             core.setOutput('head_sha', pr.head.sha);
-            core.setOutput('pr_number', context.issue.number);
+            core.setOutput('pr_number', pr.number);
             core.setOutput('base_ref', pr.base.ref);
             core.setOutput('head_ref', pr.head.ref);
-            if (pr.head.repo.full_name !== context.repo.full_name) {
+            if (pr.head.repo?.full_name !== `${context.repo.owner}/${context.repo.repo}`) {
               core.setFailed('Cannot auto-fix: PR is from a fork. Push access is required.');
             }
 
@@ -287,23 +200,36 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          use_sticky_comment: "true"
+          track_progress: "true"
+          settings: |
+            {
+              "permissions": {
+                "allow": ["Bash(git *)", "Bash(gh *)", "Bash(python3 *)", "Read", "Write", "Edit", "Glob", "Grep"]
+              }
+            }
           prompt: Run /claude-autofix to implement fixes for critical issues found in the review for this PR, open a fix PR, and comment the link on this PR.
           claude_args: --model ${{ env.CLAUDE_OPUS_MODEL }}
 
   interactive:
     name: Interactive
     concurrency:
-      group: claude-interactive-${{ github.event.issue.number }}
+      group: claude-interactive-${{ github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: true
     if: |
-      github.event_name == 'issue_comment' &&
-      github.event.issue.pull_request &&
       startsWith(github.event.comment.body, '@claude') &&
       !contains(github.event.comment.body, '@claude review') &&
       !contains(github.event.comment.body, '@claude fix') &&
       (
-        github.event.comment.author_association == 'MEMBER' ||
-        github.event.comment.author_association == 'OWNER'
+        (
+          github.event_name == 'issue_comment' &&
+          github.event.issue.pull_request &&
+          (
+            github.event.comment.author_association == 'MEMBER' ||
+            github.event.comment.author_association == 'OWNER'
+          )
+        ) ||
+        github.event_name == 'pull_request_review_comment'
       )
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -311,20 +237,41 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
+      actions: read
       id-token: write
     steps:
+      - name: Check commenter permission
+        if: github.event_name == 'pull_request_review_comment'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: context.actor
+            });
+            if (!['admin', 'write'].includes(data.permission)) {
+              core.setFailed(`${context.actor} does not have write access.`);
+            }
+
       - name: Get PR info
         id: pr-info
         uses: actions/github-script@v7
         with:
           script: |
-            const { data: pr } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.issue.number
-            });
+            let pr;
+            if (context.eventName === 'pull_request_review_comment') {
+              pr = context.payload.pull_request;
+            } else {
+              const { data } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number
+              });
+              pr = data;
+            }
             core.setOutput('head_sha', pr.head.sha);
-            core.setOutput('pr_number', context.issue.number);
+            core.setOutput('pr_number', pr.number);
             core.setOutput('base_ref', pr.base.ref);
 
       - name: Checkout repository
@@ -338,13 +285,20 @@ jobs:
         env:
           PR_NUMBER: ${{ steps.pr-info.outputs.pr_number }}
           BASE_REF: ${{ steps.pr-info.outputs.base_ref }}
-          USER_COMMENT: ${{ github.event.comment.body }}
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          use_sticky_comment: "true"
+          track_progress: "true"
+          settings: |
+            {
+              "permissions": {
+                "allow": ["Bash(git diff *)", "Bash(gh api *)", "Read", "Glob", "Grep"]
+              }
+            }
           prompt: |
             A team member commented on this PR: "${{ github.event.comment.body }}"
 
             You have access to the full repository. Focus your response on the context of this PR and the changed files.
             Use git diff origin/$BASE_REF...HEAD to understand what changed.
             Post your response as a comment on PR #$PR_NUMBER using gh api.
-          claude_args: --model ${{ env.CLAUDE_OPUS_MODEL }}
+          claude_args: --model ${{ env.CLAUDE_SONNET_MODEL }}
