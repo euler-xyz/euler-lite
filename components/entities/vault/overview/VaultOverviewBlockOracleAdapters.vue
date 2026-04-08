@@ -152,6 +152,9 @@ const hoveredChecksAdapter = ref<(typeof adapterViews.value)[0] | null>(null)
 const tooltipStyle = ref<CSSProperties>({})
 const TOOLTIP_WIDTH = 520
 let hideTimer: ReturnType<typeof setTimeout> | null = null
+onUnmounted(() => {
+  if (hideTimer) clearTimeout(hideTimer)
+})
 
 const onChecksMouseEnter = (adapter: (typeof adapterViews.value)[0], event: MouseEvent) => {
   if (!adapter.checks?.length) return
