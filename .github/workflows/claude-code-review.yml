@@ -202,6 +202,7 @@ jobs:
           BASE_REF: ${{ steps.pr-info.outputs.base_ref }}
           HEAD_REF: ${{ steps.pr-info.outputs.head_ref }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
         with:
           anthropic_api_key: ${{ secrets.LLM_API_KEY }}
           use_sticky_comment: "true"
@@ -212,7 +213,10 @@ jobs:
                 "allow": ["Bash(git *)", "Bash(gh *)", "Bash(python3 *)", "Read", "Write", "Edit", "Glob", "Grep"]
               }
             }
-          prompt: Run /claude-autofix to implement fixes for critical issues found in the review for this PR, open a fix PR, and comment the link on this PR.
+          prompt: |
+            Check the COMMENT_BODY env var.
+            If it contains specific instructions after "@claude fix" (e.g. "@claude fix move apiSecret to server-only config"), implement exactly those instructions on the PR branch, commit, push, and post a comment on PR #$PR_NUMBER summarising what was done.
+            If COMMENT_BODY is empty or is just "@claude fix" with no further instructions, run /claude-autofix to implement fixes for all critical issues found in the review, open a fix PR, and comment the link on this PR.
           claude_args: --model ${{ env.CLAUDE_OPUS_MODEL }}
 
   interactive:
