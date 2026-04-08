@@ -70,6 +70,7 @@ onActivated(async () => {
   checkTab()
   await updateBalances()
   updatePositions()
+  if (interval.value) clearInterval(interval.value)
   interval.value = setInterval(updatePositions, POLL_INTERVAL_30S_MS)
 })
 onDeactivated(() => {

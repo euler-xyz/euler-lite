@@ -580,10 +580,9 @@ const disableCollateral = async (vault: Vault) => {
         plan: plan || undefined,
         subAccount: position.value?.subAccount,
         hasBorrows: (position.value?.borrowed || 0n) > 0n,
-        onConfirm: () => {
-          setTimeout(() => {
-            send(vault.address)
-          }, 400)
+        submittingLabel: 'Submitting...',
+        onConfirm: async () => {
+          await send(vault.address)
         },
       },
     })

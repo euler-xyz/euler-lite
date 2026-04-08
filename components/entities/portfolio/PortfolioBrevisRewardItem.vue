@@ -89,10 +89,9 @@ const onClaimClick = async () => {
         amount: rewardAmount.value,
         campaignInfo: campaign,
         plan: plan.value || undefined,
-        onConfirm: () => {
-          setTimeout(() => {
-            claim()
-          }, 400)
+        submittingLabel: 'Claiming...',
+        onConfirm: async () => {
+          await claim()
         },
       },
     })

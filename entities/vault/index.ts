@@ -51,9 +51,11 @@ export {
 // APY computations
 export {
   computeAPYs,
+  getProjectedRates,
   getNetAPY,
   getRoe,
 } from './apy'
+export type { ProjectedRates } from './apy'
 
 // Utility functions
 export {
