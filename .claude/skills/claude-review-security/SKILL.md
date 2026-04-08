@@ -47,7 +47,7 @@ git diff origin/$BASE_REF...HEAD
 - RPC URLs are not logged to console or included in error messages surfaced to users
 - No RPC endpoint constructed from user-supplied input without validation
 - Wallet connection flows don't expose private keys or mnemonics in state/logs
-- `simulateContract` used before `writeContract` to catch reverts before wallet prompt — prevents confusing failed transactions
+- `simulateTxPlan` is opt-in, not mandatory — do not flag `executeTxPlan` calls without prior simulation as violations; flag only if a new flow explicitly skips simulation where it was previously used in the same composable
 
 **Dependency / Supply Chain**
 - New `npm` packages are well-known and actively maintained — flag any obscure packages touching crypto/wallet code

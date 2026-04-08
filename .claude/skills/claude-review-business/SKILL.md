@@ -52,7 +52,7 @@ Also read any composables in `composables/repay/`, `composables/borrow/`, `compo
 
 **Flow Correctness**
 - `useGeoBlock` checked before allowing any transaction that moves funds — new flows must not bypass geo-blocking
-- Operation guard registry (`utils/operationGuardRegistry.ts`) consulted for any new operations — guards prevent invalid state transitions
+- Operation guard registry (`utils/operationGuardRegistry.ts`) consulted for any new operations — two distinct mechanisms: `isOperationBlocked` is the hard gate that prevents execution; `applyOperationGuards` transforms the tx plan but does not block. Check that new flows call `isOperationBlocked` before submission and pass the plan through `applyOperationGuards`
 - Error states (wallet rejection, RPC failure, slippage exceeded) handled and surfaced to user — no silent failures
 - Loading/pending states correctly tracked so UI doesn't allow double-submission
 
