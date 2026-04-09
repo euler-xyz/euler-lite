@@ -152,12 +152,106 @@ const hoveredChecksAdapter = ref<(typeof adapterViews.value)[0] | null>(null)
 const tooltipStyle = ref<CSSProperties>({})
 const TOOLTIP_WIDTH = 520
 let hideTimer: ReturnType<typeof setTimeout> | null = null
+
+const isMobile = ref(false)
+const updateIsMobile = () => {
+  isMobile.value = window.innerWidth < 768
+}
+onMounted(() => {
+  updateIsMobile()
+  window.addEventListener('resize', updateIsMobile)
+})
 onUnmounted(() => {
+  window.removeEventListener('resize', updateIsMobile)
   if (hideTimer) clearTimeout(hideTimer)
 })
 
+// ── Bottom sheet swipe-to-close (mirrors BaseModalWrapper) ───────────────────
+const sheetEl = ref<HTMLElement>()
+const sheetDragY = ref(0)
+let sheetStartY = 0
+
+const isAnyDescendantScrolled = () => {
+  if (!sheetEl.value) return false
+  for (const el of sheetEl.value.querySelectorAll('*')) {
+    if ((el as HTMLElement).scrollTop > 0) return true
+  }
+  return false
+}
+
+const onSheetPointerDown = (e: PointerEvent) => {
+  if (e.pointerType !== 'touch') return
+  if (isAnyDescendantScrolled()) return
+  sheetStartY = e.clientY
+  sheetDragY.value = 0
+  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+}
+const onSheetPointerMove = (e: PointerEvent) => {
+  if (!(e.currentTarget as HTMLElement).hasPointerCapture(e.pointerId)) return
+  sheetDragY.value = Math.max(0, e.clientY - sheetStartY)
+}
+const onSheetPointerUp = (e: PointerEvent) => {
+  if (!(e.currentTarget as HTMLElement).hasPointerCapture(e.pointerId)) return
+  if (sheetDragY.value > 80) hoveredChecksAdapter.value = null
+  sheetDragY.value = 0
+}
+const onSheetPointerCancel = () => {
+  sheetDragY.value = 0
+}
+
+const isTouchTargetScrolled = (target: EventTarget | null): boolean => {
+  let el = target as HTMLElement | null
+  while (el && el !== sheetEl.value) {
+    if (el.scrollTop > 0) return true
+    el = el.parentElement
+  }
+  return false
+}
+
+let scrollTouchStartY = 0
+let scrollGestureDecided = false
+let scrollDragActive = false
+
+const onScrollTouchStart = (e: TouchEvent) => {
+  scrollTouchStartY = e.touches[0].clientY
+  scrollGestureDecided = false
+  scrollDragActive = false
+}
+const onScrollTouchMove = (e: TouchEvent) => {
+  const delta = e.touches[0].clientY - scrollTouchStartY
+  if (!scrollGestureDecided) {
+    scrollGestureDecided = true
+    if (delta > 0 && !isTouchTargetScrolled(e.target)) scrollDragActive = true
+  }
+  if (!scrollDragActive) return
+  e.preventDefault()
+  sheetDragY.value = Math.max(0, delta)
+}
+const onScrollTouchEnd = () => {
+  scrollGestureDecided = false
+  if (!scrollDragActive) return
+  scrollDragActive = false
+  if (sheetDragY.value > 80) hoveredChecksAdapter.value = null
+  sheetDragY.value = 0
+}
+const onScrollTouchCancel = () => {
+  scrollGestureDecided = false
+  scrollDragActive = false
+  sheetDragY.value = 0
+}
+
+const sheetDragStyle = computed(() => ({
+  transform: sheetDragY.value ? `translateY(${sheetDragY.value}px)` : undefined,
+  transition: sheetDragY.value ? 'none' : 'transform 0.3s ease',
+}))
+
+const onChecksClick = (adapter: (typeof adapterViews.value)[0]) => {
+  if (!isMobile.value || !adapter.checks?.length) return
+  hoveredChecksAdapter.value = hoveredChecksAdapter.value === adapter ? null : adapter
+}
+
 const onChecksMouseEnter = (adapter: (typeof adapterViews.value)[0], event: MouseEvent) => {
-  if (!adapter.checks?.length) return
+  if (isMobile.value || !adapter.checks?.length) return
   if (hideTimer) {
     clearTimeout(hideTimer)
     hideTimer = null
@@ -174,6 +268,7 @@ const onChecksMouseEnter = (adapter: (typeof adapterViews.value)[0], event: Mous
 }
 
 const onChecksMouseLeave = () => {
+  if (isMobile.value) return
   hideTimer = setTimeout(() => {
     hoveredChecksAdapter.value = null
   }, 150)
@@ -233,7 +328,7 @@ const onTooltipMouseLeave = () => {
             />
           </button>
         </div>
-        <div class="grid grid-cols-4 gap-12 text-p3">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-12 text-p3">
           <div class="flex flex-col gap-4">
             <span class="text-content-tertiary">Provider</span>
             <div class="flex items-center gap-8">
@@ -251,14 +346,15 @@ const onTooltipMouseLeave = () => {
               <span class="text-content-primary">{{ adapter.provider || 'Unknown' }}</span>
             </div>
           </div>
-          <div class="flex flex-col gap-4">
+          <div class="flex flex-col gap-4 order-3 md:order-2">
             <span class="text-content-tertiary">Methodology</span>
             <span class="text-content-primary">{{ adapter.methodology || 'Unknown' }}</span>
           </div>
           <div
-            class="flex flex-col gap-4"
+            class="flex flex-col gap-4 order-4 md:order-3"
             @mouseenter="onChecksMouseEnter(adapter, $event)"
             @mouseleave="onChecksMouseLeave"
+            @click.stop="onChecksClick(adapter)"
           >
             <span class="text-content-tertiary">Checks</span>
             <span
@@ -287,7 +383,7 @@ const onTooltipMouseLeave = () => {
               </span>
             </span>
           </div>
-          <div class="flex flex-col gap-4">
+          <div class="flex flex-col gap-4 order-2 md:order-4">
             <span class="text-content-tertiary">Price</span>
             <span
               v-if="isPriceLoading"
@@ -337,42 +433,79 @@ const onTooltipMouseLeave = () => {
   </div>
 
   <Teleport to="body">
-    <div
-      v-if="hoveredChecksAdapter?.checks?.length"
-      class="fixed z-[9999] bg-surface-secondary rounded-xl p-16 shadow-card border border-line-subtle overflow-y-auto overflow-x-hidden"
-      :style="[tooltipStyle, { width: `${TOOLTIP_WIDTH}px` }]"
-      @mouseenter="onTooltipMouseEnter"
-      @mouseleave="onTooltipMouseLeave"
-    >
-      <p class="text-p3 font-medium text-content-primary mb-12">
-        Checks
-      </p>
-      <div class="flex flex-col gap-10">
+    <template v-if="hoveredChecksAdapter?.checks?.length">
+      <!-- Mobile backdrop -->
+      <div
+        v-if="isMobile"
+        class="fixed inset-0 z-[9998] bg-black/50"
+        @click="hoveredChecksAdapter = null"
+      />
+      <!-- Tooltip (desktop) / Bottom sheet (mobile) -->
+      <div
+        ref="sheetEl"
+        class="fixed z-[9999] bg-surface-secondary border border-line-subtle overflow-x-hidden"
+        :class="isMobile
+          ? 'bottom-0 left-0 right-0 rounded-t-2xl max-h-[70vh] shadow-card flex flex-col'
+          : 'rounded-xl p-16 shadow-card overflow-y-auto'"
+        :style="isMobile ? sheetDragStyle : [tooltipStyle, { width: `${TOOLTIP_WIDTH}px` }]"
+        @mouseenter="onTooltipMouseEnter"
+        @mouseleave="onTooltipMouseLeave"
+      >
+        <!-- Drag handle zone (mobile only) -->
         <div
-          v-for="check in hoveredChecksAdapter.checks"
-          :key="check.id"
-          class="flex items-start gap-10"
+          v-if="isMobile"
+          class="shrink-0 px-24 pt-12 touch-none select-none"
+          @pointerdown="onSheetPointerDown"
+          @pointermove="onSheetPointerMove"
+          @pointerup="onSheetPointerUp"
+          @pointercancel="onSheetPointerCancel"
         >
-          <span
-            class="flex-shrink-0 w-20 h-20 rounded-full flex items-center justify-center mt-8"
-            :class="check.pass ? 'bg-success-500' : 'bg-error-500'"
+          <div class="w-32 h-4 rounded-full bg-line-subtle mx-auto mb-16" />
+          <p class="text-p3 font-medium text-content-primary mb-12">
+            Checks
+          </p>
+        </div>
+        <p
+          v-else
+          class="text-p3 font-medium text-content-primary mb-12"
+        >
+          Checks
+        </p>
+        <!-- Scroll container -->
+        <div
+          class="flex flex-col gap-10 overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          :class="isMobile ? 'px-24 pb-24' : ''"
+          @touchstart="onScrollTouchStart"
+          @touchmove="onScrollTouchMove"
+          @touchend="onScrollTouchEnd"
+          @touchcancel="onScrollTouchCancel"
+        >
+          <div
+            v-for="check in hoveredChecksAdapter.checks"
+            :key="check.id"
+            class="flex items-start gap-10"
           >
-            <SvgIcon
-              :name="check.pass ? 'check' : 'x'"
-              class="!w-10 !h-10 text-white"
-            />
-          </span>
-          <div>
-            <p class="text-p3 font-medium text-content-primary">
-              {{ check.id }}
-            </p>
-            <p class="text-p3 text-content-secondary break-words">
-              {{ check.message }}
-            </p>
+            <span
+              class="flex-shrink-0 w-20 h-20 rounded-full flex items-center justify-center mt-8"
+              :class="check.pass ? 'bg-success-500' : 'bg-error-500'"
+            >
+              <SvgIcon
+                :name="check.pass ? 'check' : 'x'"
+                class="!w-10 !h-10 text-white"
+              />
+            </span>
+            <div class="min-w-0">
+              <p class="text-p3 font-medium text-content-primary break-words">
+                {{ check.id }}
+              </p>
+              <p class="text-p3 text-content-secondary break-words">
+                {{ check.message }}
+              </p>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </template>
   </Teleport>
 </template>
 
