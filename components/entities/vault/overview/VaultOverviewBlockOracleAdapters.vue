@@ -174,17 +174,8 @@ const sheetEl = ref<HTMLElement>()
 const sheetDragY = ref(0)
 let sheetStartY = 0
 
-const isAnyDescendantScrolled = () => {
-  if (!sheetEl.value) return false
-  for (const el of sheetEl.value.querySelectorAll('*')) {
-    if ((el as HTMLElement).scrollTop > 0) return true
-  }
-  return false
-}
-
 const onSheetPointerDown = (e: PointerEvent) => {
   if (e.pointerType !== 'touch') return
-  if (isAnyDescendantScrolled()) return
   sheetStartY = e.clientY
   sheetDragY.value = 0
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
@@ -333,6 +324,7 @@ const onTooltipMouseLeave = () => {
             <button
               :class="$style.copyBtn"
               class="text-content-muted"
+              aria-label="Copy address"
               @click="onCopyClick(adapter.oracle)"
             >
               <SvgIcon
@@ -542,6 +534,12 @@ const onTooltipMouseLeave = () => {
 
   &:active {
     color: var(--text-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-accent-600);
+    outline-offset: 2px;
+    border-radius: 4px;
   }
 }
 </style>
