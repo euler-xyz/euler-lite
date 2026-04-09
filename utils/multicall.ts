@@ -28,8 +28,15 @@ const TRANSPORT_ERROR_NAMES = new Set([
 ])
 
 const isTransportError = (err: unknown): boolean => {
-  if (!(err instanceof BaseError)) return true // Unknown error — treat as transport to be safe
+  // Non-viem errors (e.g. TypeError from a misconfigured client) are treated as transport errors.
+  // This is intentionally conservative: suppressing retries against an already-broken endpoint is
+  // safer than amplifying load by retrying every address individually.
+  if (!(err instanceof BaseError)) return true
+  // Walk to the deepest BaseError in the chain. If walk() returns a non-BaseError (e.g. a
+  // TypeError: Failed to fetch buried as the root cause), that is by definition a network-level
+  // failure — treat it as a transport error.
   const root = err.walk()
+  if (!(root instanceof BaseError)) return true
   return TRANSPORT_ERROR_NAMES.has(root.name)
 }
 
