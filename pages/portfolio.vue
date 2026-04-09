@@ -109,8 +109,8 @@ watch(portfolioRefreshCounter, () => {
 
     <PortfolioShowAllHint />
 
-    <div class="flex flex-col gap-16 p-16 rounded-12 mx-16 border border-line-default bg-card shadow-card">
-      <div class="flex justify-between items-center">
+    <div class="flex flex-col gap-16 p-16 rounded-12 mx-16 border border-line-default bg-card shadow-card laptop:flex-row laptop:gap-0 laptop:divide-x laptop:divide-line-default laptop:p-0">
+      <div class="flex justify-between items-center laptop:flex-col laptop:items-start laptop:gap-4 laptop:flex-1 laptop:p-16">
         <div class="flex items-center gap-4 text-p2 text-content-secondary">
           Portfolio Net APY
           <UiFootnote
@@ -129,7 +129,7 @@ watch(portfolioRefreshCounter, () => {
           </div>
         </BaseLoadableContent>
       </div>
-      <div class="flex justify-between items-center">
+      <div class="flex justify-between items-center laptop:flex-col laptop:items-start laptop:gap-4 laptop:flex-1 laptop:p-16">
         <div class="flex items-center gap-4 text-p2 text-content-secondary">
           Portfolio ROE
           <UiFootnote
@@ -148,7 +148,7 @@ watch(portfolioRefreshCounter, () => {
           </div>
         </BaseLoadableContent>
       </div>
-      <div class="flex justify-between items-center">
+      <div class="flex justify-between items-center laptop:flex-col laptop:items-start laptop:gap-4 laptop:flex-1 laptop:p-16">
         <div class="text-p2 text-content-secondary">
           Net asset value
         </div>
@@ -164,12 +164,12 @@ watch(portfolioRefreshCounter, () => {
               v-if="totalSuppliedValueInfo.hasMissingPrices || totalBorrowedValueInfo.hasMissingPrices"
               title="Incomplete pricing"
               text="Some assets in your portfolio don't have price data available. The displayed value may be higher than shown."
-              tooltip-placement="top-end"
+              tooltip-placement="bottom-end"
             />
           </div>
         </BaseLoadableContent>
       </div>
-      <div class="flex justify-between items-center">
+      <div class="flex justify-between items-center laptop:flex-col laptop:items-start laptop:gap-4 laptop:flex-1 laptop:p-16">
         <div class="text-p2 text-content-secondary">
           Total supplied value
         </div>
@@ -184,12 +184,12 @@ watch(portfolioRefreshCounter, () => {
               v-if="totalSuppliedValueInfo.hasMissingPrices"
               title="Incomplete pricing"
               text="Some supplied assets don't have price data available. The displayed value may be higher than shown."
-              tooltip-placement="top-end"
+              tooltip-placement="bottom-end"
             />
           </div>
         </BaseLoadableContent>
       </div>
-      <div class="flex justify-between items-center">
+      <div class="flex justify-between items-center laptop:flex-col laptop:items-start laptop:gap-4 laptop:flex-1 laptop:p-16">
         <div class="text-p2 text-content-secondary">
           Total borrowed value
         </div>
@@ -204,7 +204,7 @@ watch(portfolioRefreshCounter, () => {
               v-if="totalBorrowedValueInfo.hasMissingPrices"
               title="Incomplete pricing"
               text="Some borrowed assets don't have price data available. The displayed value may be higher than shown."
-              tooltip-placement="top-end"
+              tooltip-placement="bottom-end"
             />
           </div>
         </BaseLoadableContent>
@@ -213,7 +213,9 @@ watch(portfolioRefreshCounter, () => {
 
     <UiTabs
       v-model="tabsModel"
+      class="mx-16"
       rounded
+      pills
       :list="tabs"
     />
 
