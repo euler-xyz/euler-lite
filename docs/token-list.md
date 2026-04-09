@@ -36,6 +36,14 @@ The Euler API is the blocking call. Uniswap and DefiLlama are non-blocking: if t
 
 **Deduplication**: tokens are merged with Euler taking priority. If the same `chainId:address` appears in multiple sources, the higher-priority entry wins. This ensures Euler's metadata (name, symbol, decimals, logo URL) takes precedence over supplemental sources.
 
+**Error contract**:
+
+| Status | Condition | Body |
+|--------|-----------|------|
+| `200` | At least one source returned tokens | `{ tokens: TokenEntry[] }` |
+| `400` | `chainId` is missing, non-numeric, zero, or negative | `{ statusCode: 400, statusMessage: "chainId is required and must be a positive integer" }` |
+| `502` | All sources returned empty (Euler down, no stale data, supplemental caches cold) | `{ statusCode: 502, statusMessage: "Upstream error" }` |
+
 ## Client Composable
 
 **`composables/useTokenList.ts`**
