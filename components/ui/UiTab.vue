@@ -87,6 +87,7 @@ const onClick = () => {
 
   &.is-pill {
     min-height: 44px;
+    padding-bottom: 6px;
 
     &:hover {
       box-shadow: none;
@@ -94,6 +95,10 @@ const onClick = () => {
 
     &.is-active {
       box-shadow: none;
+
+      .ui-tab__badge {
+        background-color: var(--ui-tab-active-pill-badge-background-color);
+      }
     }
   }
 
