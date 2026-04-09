@@ -102,7 +102,8 @@ const updateEVKVaults = async (vaultAddresses: string[], generation?: number, si
       result.vaults.forEach((vault) => {
         const existing = registryGetVault(vault.address) as Vault | undefined
         const vaultCategory = existing?.vaultCategory
-        registrySet(vault.address, vaultCategory ? { ...vault, vaultCategory } : vault, 'evk')
+        const verified = vaultCategory === 'escrow' ? true : vault.verified
+        registrySet(vault.address, vaultCategory ? { ...vault, vaultCategory, verified } : vault, 'evk')
       })
 
       if (!silent) {
