@@ -64,7 +64,7 @@ function scanDynamicEnvUrls(): string[] {
 }
 
 /** Derive CSP origins from URL env vars so deployers don't need to duplicate them. */
-function parseEnvOrigins(): { connect: string[], img: string[] } {
+function parseEnvOrigins(): { connect: string[] } {
   // Labels, oracle checks, token lists, and euler-chains are proxied through
   // server /api/* endpoints, so their origins are not needed in connect-src.
   const connectVars = [
@@ -75,14 +75,9 @@ function parseEnvOrigins(): { connect: string[], img: string[] } {
     // Dynamic per-chain URLs (RPC for wagmi, subgraph for GraphQL)
     ...scanDynamicEnvUrls(),
   ]
-  const imgVars = [
-    process.env.NUXT_PUBLIC_CONFIG_LABELS_BASE_URL,
-    env('LOGO_URL', 'NUXT_PUBLIC_CONFIG_LOGO_URL'),
-  ]
 
   const connect = [...new Set(connectVars.map(safeOrigin).filter(Boolean))] as string[]
-  const img = [...new Set(imgVars.map(safeOrigin).filter(Boolean))] as string[]
-  return { connect, img }
+  return { connect }
 }
 
 const CONNECT_SRC_BASE = [
@@ -127,15 +122,13 @@ const CONNECT_SRC_BASE = [
   'wss://relay.walletconnect.org',
 ]
 
-function buildCsp(nonce: string, extraConnectSrc: string[], envOrigins: { connect: string[], img: string[] }): string {
+function buildCsp(nonce: string, extraConnectSrc: string[], envOrigins: { connect: string[] }): string {
   const connectSrc = [
     ...CONNECT_SRC_BASE,
     ...(isDev ? CONNECT_SRC_DEV : []),
     ...extraConnectSrc,
     ...envOrigins.connect,
   ]
-
-  const imgSuffix = envOrigins.img.map(o => ` ${o}`).join('')
 
   const directives = [
     'default-src \'self\'',
@@ -147,7 +140,9 @@ function buildCsp(nonce: string, extraConnectSrc: string[], envOrigins: { connec
     'font-src \'self\' https://fonts.reown.com',
     'frame-src \'self\' https://verify.walletconnect.org https://verify.walletconnect.com',
     'frame-ancestors \'none\'',
-    `img-src 'self' data: blob: https://raw.githubusercontent.com https://storage.googleapis.com https://token-images.euler.finance https://assets.coingecko.com https://token-icons.llamao.fi https://tokens.1inch.io${imgSuffix}`,
+    // Token logos come from arbitrary CDNs (CoinGecko, DefiLlama, Uniswap, etc.)
+    // that cannot be whitelisted upfront. Images are passive content — no script execution risk.
+    'img-src \'self\' data: blob: https:',
     'manifest-src \'self\'',
     'media-src \'self\'',
     'worker-src \'self\' blob:',
