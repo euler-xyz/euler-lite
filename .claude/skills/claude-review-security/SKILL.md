@@ -28,7 +28,7 @@ git diff origin/$BASE_REF...HEAD
 
 **Environment Variable & Secret Exposure**
 - No API keys, RPC auth tokens, or secrets assigned to `NUXT_PUBLIC_*` env vars (those are client-exposed)
-- No new keys added to `window.__CHAIN_CONFIG__` or any other `window.*` injection — recent fix (Dec 2024) explicitly removed RPC URLs from this object
+- No new keys added to `window.__CHAIN_CONFIG__` or any other `window.*` injection — RPC URLs must not be included in this object
 - `runtimeConfig.public.*` only contains truly public, non-sensitive values
 - Server-only secrets accessed via `runtimeConfig.*` (non-public), never in `pages/` or `composables/` that run client-side
 
