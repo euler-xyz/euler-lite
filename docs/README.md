@@ -74,6 +74,13 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Operation guard registry for automatic TxPlan injection
 - UI components (badges, alerts, verification flow)
 
+### 🪙 [Token List](./token-list.md)
+
+- Three-source token list (Euler API, DefiLlama, Uniswap)
+- Euler-first blocking strategy with lazy supplemental sources
+- One-shot 15s retry for supplemental data pickup
+- CSP considerations for logo URLs
+
 ### 🌍 [Geo-Blocking](./geo-blocking.md)
 
 - Country detection and sanctioned country lists
