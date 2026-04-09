@@ -106,7 +106,7 @@ onClickOutside(reference, () => {
     border-radius: 12px;
     background-color: var(--ui-footnote-floating-background-color);
     box-shadow: 0 8px 32px var(--ui-footnote-floating-box-shadow-color);
-    z-index: 1;
+    z-index: 10;
   }
 
   &__floating-content {
