@@ -275,24 +275,20 @@ const { isSlow } = useSlowLoading(isLoading)
     <BasePageHeader
       title="Explore"
       description="Discover markets structure and collateral relationships."
-      class="mb-24"
+      class="mb-16"
       icon="nodes"
     />
 
     <div class="mb-16 -mx-16">
-      <h3 class="text-h3 mb-16 pl-16 text-content-primary">
-        Discover markets
-      </h3>
-      <div class="px-16 mb-8">
+      <div class="flex items-center flex-wrap gap-8 px-16">
         <UiInput
           v-model="searchQuery"
           placeholder="Search by asset, market, curator..."
           icon="search"
           clearable
           compact
+          class="flex-1 min-w-[200px] mobile:basis-full"
         />
-      </div>
-      <div class="flex items-center flex-wrap gap-8 px-16">
         <VaultSortButton
           v-model="sortBy"
           v-model:dir="sortDir"
