@@ -43,6 +43,7 @@ const cacheState = {
 
 let latestOpportunitiesRequestId = 0
 let latestRewardsRequestId = 0
+let erc20FetchedForChainId = 0
 
 const loadTokens = async (chainId: number, isInitialLoading = true, forceRefresh = false) => {
   const now = Date.now()
@@ -190,6 +191,12 @@ const loadOpportunities = async (chainId: number, isInitialLoading = true, force
     const knownEarnVaults = earnAddrs.length > 0
       ? new Set(earnAddrs.map(addr => addr.toLowerCase()))
       : undefined
+
+    // Claim ERC20 fetch for this chainId before any async work so that the
+    // earnVaults watcher (fired concurrently on mount) doesn't duplicate the call.
+    if (knownEarnVaults) {
+      erc20FetchedForChainId = chainId
+    }
 
     const fetches: Promise<Opportunity[]>[] = [fetchAllPages(eulerUrl)]
     if (knownEarnVaults) {
@@ -372,12 +379,17 @@ export const useMerkl = () => {
   }, { immediate: true })
 
   // Re-fetch opportunities when Earn vault labels become available,
-  // so ERC20LOGPROCESSOR campaigns are properly filtered
-  watch(earnVaults, (val, oldVal) => {
-    if (enableMerkl && val.length > 0 && oldVal.length === 0 && chainId.value) {
+  // so ERC20LOGPROCESSOR campaigns are properly filtered.
+  // { immediate: true } catches the case where labels are already loaded by the time
+  // the watcher is registered (e.g. component remounts after a chain switch).
+  // erc20FetchedForChainId is set optimistically before the async call so that
+  // concurrent watcher fires from other component mounts skip the duplicate fetch.
+  watch(earnVaults, (val) => {
+    if (enableMerkl && val.length > 0 && chainId.value
+      && erc20FetchedForChainId !== chainId.value) {
       loadOpportunities(chainId.value, false, true)
     }
-  })
+  }, { immediate: true })
 
   watch([isConnected, chainId], (val, oldVal) => {
     const [connected, currentChainId] = val
@@ -388,6 +400,7 @@ export const useMerkl = () => {
       merklCampaigns.value = new Map()
       rewards.value = []
       cacheState.opportunities = { chainId: 0, timestamp: 0 }
+      erc20FetchedForChainId = 0
       cacheState.rewards = { chainId: 0, address: '', timestamp: 0 }
     }
 
@@ -399,7 +412,11 @@ export const useMerkl = () => {
     }
 
     if (enableMerkl && !isLoaded.value) {
-      loadOpportunities(chainId.value)
+      // Skip if the earnVaults watcher already initiated the fetch synchronously
+      // (happens when earn labels are loaded before this watcher fires on mount)
+      if (erc20FetchedForChainId !== chainId.value) {
+        loadOpportunities(chainId.value)
+      }
       loadTokens(chainId.value)
       loadRewards(chainId.value)
       isLoaded.value = true
