@@ -2,7 +2,7 @@ name: Build, Push & Deploy
 on:
   push:
     branches:
-      - institutional-theme
+      - master
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
