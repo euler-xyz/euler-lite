@@ -87,7 +87,6 @@ const onClick = () => {
 
   &.is-pill {
     min-height: 44px;
-    padding-bottom: 6px;
 
     &:hover {
       box-shadow: none;
