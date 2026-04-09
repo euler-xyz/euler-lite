@@ -100,6 +100,9 @@ const adapterViews = computed(() => adapters.value.map((adapter) => {
     provider,
     methodology: meta?.methodology || (isERC4626 ? 'Exchange Rate' : undefined),
     logo: getOracleProviderLogo(provider, name),
+    label: meta?.label
+      ? { primary: meta.label.split('(')[0].trimEnd(), suffix: meta.label.includes('(') ? meta.label.slice(meta.label.indexOf('(')).trim() : undefined }
+      : undefined,
     checks,
     checksStatus: getChecksStatus(checks),
     failedChecks: checks?.filter(c => !c.pass) ?? [],
@@ -306,27 +309,38 @@ const onTooltipMouseLeave = () => {
         :key="getAdapterKey(adapter)"
         class="w-full rounded-xl bg-surface p-16 flex flex-col gap-12 border border-line-subtle"
       >
-        <div class="flex flex-wrap items-center gap-8">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-8">
           <div class="p2 text-content-primary">
-            {{ resolveSymbol(adapter.base) }}/{{ resolveSymbol(adapter.quote) }}
+            <template v-if="adapter.label">
+              {{ adapter.label.primary }}
+              <span
+                v-if="adapter.label.suffix"
+                class="text-content-tertiary ml-2"
+              >{{ adapter.label.suffix }}</span>
+            </template>
+            <template v-else>
+              {{ resolveSymbol(adapter.base) }}/{{ resolveSymbol(adapter.quote) }}
+            </template>
           </div>
-          <NuxtLink
-            :to="getExplorerAddressLink(adapter.oracle)"
-            class="text-accent-600 underline cursor-pointer hover:text-accent-500"
-            target="_blank"
-          >
-            {{ shortenAddress(adapter.oracle) }}
-          </NuxtLink>
-          <button
-            :class="$style.copyBtn"
-            class="text-content-muted"
-            @click="onCopyClick(adapter.oracle)"
-          >
-            <SvgIcon
-              class="!w-18 !h-18"
-              name="copy"
-            />
-          </button>
+          <div class="flex items-center gap-8 flex-shrink-0">
+            <NuxtLink
+              :to="getExplorerAddressLink(adapter.oracle)"
+              class="text-accent-600 underline cursor-pointer hover:text-accent-500"
+              target="_blank"
+            >
+              {{ shortenAddress(adapter.oracle) }}
+            </NuxtLink>
+            <button
+              :class="$style.copyBtn"
+              class="text-content-muted"
+              @click="onCopyClick(adapter.oracle)"
+            >
+              <SvgIcon
+                class="!w-18 !h-18"
+                name="copy"
+              />
+            </button>
+          </div>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-12 text-p3">
           <div class="flex flex-col gap-4">
@@ -352,9 +366,13 @@ const onTooltipMouseLeave = () => {
           </div>
           <div
             class="flex flex-col gap-4 order-4 md:order-3"
+            :role="isMobile && adapter.checks?.length ? 'button' : undefined"
+            :tabindex="isMobile && adapter.checks?.length ? 0 : undefined"
             @mouseenter="onChecksMouseEnter(adapter, $event)"
             @mouseleave="onChecksMouseLeave"
             @click.stop="onChecksClick(adapter)"
+            @keydown.enter.stop="onChecksClick(adapter)"
+            @keydown.space.stop.prevent="onChecksClick(adapter)"
           >
             <span class="text-content-tertiary">Checks</span>
             <span
@@ -410,8 +428,8 @@ const onTooltipMouseLeave = () => {
           class="flex flex-col gap-6 border-t border-line-subtle pt-12 text-p3"
         >
           <div
-            v-for="check in adapter.failedChecks"
-            :key="check.id"
+            v-for="(check, i) in adapter.failedChecks"
+            :key="`${check.id}-${i}`"
             class="flex items-start gap-8"
           >
             <SvgIcon
@@ -481,13 +499,17 @@ const onTooltipMouseLeave = () => {
           @touchcancel="onScrollTouchCancel"
         >
           <div
-            v-for="check in hoveredChecksAdapter.checks"
-            :key="check.id"
+            v-for="(check, i) in hoveredChecksAdapter.checks"
+            :key="`${check.id}-${i}`"
             class="flex items-start gap-10"
           >
             <span
               class="flex-shrink-0 w-20 h-20 rounded-full flex items-center justify-center mt-8"
-              :class="check.pass ? 'bg-success-500' : 'bg-error-500'"
+              :class="{
+                'bg-success-500': check.pass,
+                'bg-error-500': !check.pass && check.severity === OracleAdapterCheckSeverity.High,
+                'bg-warning-500': !check.pass && check.severity !== OracleAdapterCheckSeverity.High,
+              }"
             >
               <SvgIcon
                 :name="check.pass ? 'check' : 'x'"
