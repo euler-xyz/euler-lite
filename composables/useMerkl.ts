@@ -161,7 +161,7 @@ const loadOpportunities = async (chainId: number, isInitialLoading = true, force
     // ERC20LOGPROCESSOR is fetched without mainProtocolId filter (unreliable tagging by Merkl)
     // and filtered client-side against known Earn vault addresses from labels.
     // Merkl API caps items at 100, so we paginate ERC20LOGPROCESSOR to get all results.
-    const fetchAllPages = async (baseUrl: string): Promise<Opportunity[]> => {
+    const fetchAllPages = async (baseUrl: string): Promise<{ data: Opportunity[], complete: boolean }> => {
       const pageSize = 100
       const allData: Opportunity[] = []
       let page = 0
@@ -176,11 +176,11 @@ const loadOpportunities = async (chainId: number, isInitialLoading = true, force
         }
         catch (error) {
           logWarn('merkl/fetchOpportunity', error)
-          break
+          return { data: allData, complete: false }
         }
       }
 
-      return allData
+      return { data: allData, complete: true }
     }
 
     // Always fetch EULER campaigns. Only fetch ERC20LOGPROCESSOR when Earn vault
@@ -192,27 +192,24 @@ const loadOpportunities = async (chainId: number, isInitialLoading = true, force
       ? new Set(earnAddrs.map(addr => addr.toLowerCase()))
       : undefined
 
-    // Claim ERC20 fetch for this chainId before any async work so that the
-    // earnVaults watcher (fired concurrently on mount) doesn't duplicate the call.
-    if (knownEarnVaults) {
-      erc20FetchedForChainId = chainId
-    }
-
-    const fetches: Promise<Opportunity[]>[] = [fetchAllPages(eulerUrl)]
+    const fetches: Promise<{ data: Opportunity[], complete: boolean }>[] = [fetchAllPages(eulerUrl)]
     if (knownEarnVaults) {
       const erc20Url = `${MERKL_API_BASE_URL}/opportunities/?chainId=${chainId}&type=ERC20LOGPROCESSOR&campaigns=true`
       fetches.push(fetchAllPages(erc20Url))
     }
 
-    const [eulerData, erc20Data = []] = await Promise.all(fetches)
+    const results = await Promise.all(fetches)
 
     if (requestId !== latestOpportunitiesRequestId) return
+
+    const allComplete = results.every(r => r.complete)
+    const [eulerResult, erc20Result] = results
 
     const merged = new Map<string, RewardCampaign[]>()
 
     for (const { data, type } of [
-      { data: eulerData, type: 'EULER' as const },
-      { data: erc20Data, type: 'ERC20LOGPROCESSOR' as const },
+      { data: eulerResult.data, type: 'EULER' as const },
+      { data: erc20Result?.data ?? [], type: 'ERC20LOGPROCESSOR' as const },
     ]) {
       const partial = processOpportunitiesToCampaigns(data, type, type === 'ERC20LOGPROCESSOR' ? knownEarnVaults : undefined)
       for (const [vault, campaigns] of partial) {
@@ -223,7 +220,11 @@ const loadOpportunities = async (chainId: number, isInitialLoading = true, force
     }
 
     merklCampaigns.value = merged
-    cacheState.opportunities = { chainId, timestamp: Date.now() }
+    // Only cache when all pages were fetched successfully — partial results
+    // from a mid-pagination failure should not be treated as a complete dataset.
+    if (allComplete) {
+      cacheState.opportunities = { chainId, timestamp: Date.now() }
+    }
   }
   catch (e) {
     logWarn('merkl/loadOpportunities', e)
@@ -382,11 +383,13 @@ export const useMerkl = () => {
   // so ERC20LOGPROCESSOR campaigns are properly filtered.
   // { immediate: true } catches the case where labels are already loaded by the time
   // the watcher is registered (e.g. component remounts after a chain switch).
-  // erc20FetchedForChainId is set optimistically before the async call so that
-  // concurrent watcher fires from other component mounts skip the duplicate fetch.
+  // erc20FetchedForChainId is set synchronously before the async call and only here
+  // (never inside loadOpportunities) so it is always claimed against correct chain
+  // data, and concurrent watcher fires from other component mounts skip the duplicate.
   watch(earnVaults, (val) => {
     if (enableMerkl && val.length > 0 && chainId.value
       && erc20FetchedForChainId !== chainId.value) {
+      erc20FetchedForChainId = chainId.value
       loadOpportunities(chainId.value, false, true)
     }
   }, { immediate: true })
