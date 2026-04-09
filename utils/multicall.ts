@@ -16,13 +16,21 @@ export type BatchLensResult<T = unknown> = {
 }
 
 /**
- * Check if an error is a transport-level failure (HTTP error, network down, timeout)
- * vs an on-chain revert that could be retried individually.
+ * Check if an error is a transport/provider-level failure (HTTP error, network down,
+ * timeout, RPC rate limit) vs an on-chain revert that could be retried individually.
  */
+const TRANSPORT_ERROR_NAMES = new Set([
+  'HttpRequestError',
+  'TimeoutError',
+  'WebSocketRequestError',
+  'LimitExceededRpcError', // JSON-RPC -32005 (provider rate limit)
+  'ResourceUnavailableRpcError', // JSON-RPC -32002 (provider temporarily unavailable)
+])
+
 const isTransportError = (err: unknown): boolean => {
   if (!(err instanceof BaseError)) return true // Unknown error — treat as transport to be safe
   const root = err.walk()
-  return root.name === 'HttpRequestError' || root.name === 'TimeoutError' || root.name === 'WebSocketRequestError'
+  return TRANSPORT_ERROR_NAMES.has(root.name)
 }
 
 /**
