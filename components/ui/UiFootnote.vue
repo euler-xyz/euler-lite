@@ -27,8 +27,10 @@ const { floatingStyles, update } = useFloating(reference, floating, {
   ],
 })
 
+const isMobile = computed(() => width.value < 768)
+
 const onClick = () => {
-  if (width.value < 768) {
+  if (isMobile.value) {
     modal.open(customModal || UiFootnoteModal, {
       props: {
         modalTitle: title,
@@ -36,9 +38,18 @@ const onClick = () => {
       },
     })
   }
-  else {
-    isVisible.value = !isVisible.value
+}
+
+const onMouseEnter = () => {
+  if (!isMobile.value) {
+    isVisible.value = true
     update()
+  }
+}
+
+const onMouseLeave = () => {
+  if (!isMobile.value) {
+    isVisible.value = false
   }
 }
 
@@ -52,6 +63,8 @@ onClickOutside(reference, () => {
     ref="reference"
     class="ui-footnote"
     @click.stop.prevent="onClick"
+    @mouseenter="onMouseEnter"
+    @mouseleave="onMouseLeave"
   >
     <SvgIcon
       class="ui-footnote__icon"
