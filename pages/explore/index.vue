@@ -287,7 +287,7 @@ const { isSlow } = useSlowLoading(isLoading)
           icon="search"
           clearable
           compact
-          class="flex-1 min-w-[200px]"
+          class="flex-1 min-w-[200px] mobile:basis-full"
         />
         <VaultSortButton
           v-model="sortBy"
