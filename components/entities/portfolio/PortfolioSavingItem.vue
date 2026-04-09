@@ -200,7 +200,7 @@ const onClick = () => {
           </div>
         </div>
         <div
-          class="flex items-center gap-8 [&>*]:whitespace-nowrap"
+          class="flex flex-wrap items-center gap-8 laptop:flex-nowrap laptop:[&>*]:whitespace-nowrap"
           @click.stop
         >
           <UiButton
@@ -331,7 +331,7 @@ const onClick = () => {
           </div>
         </div>
         <div
-          class="flex items-center gap-8 [&>*]:whitespace-nowrap"
+          class="flex flex-wrap items-center gap-8 laptop:flex-nowrap laptop:[&>*]:whitespace-nowrap"
           @click.stop
         >
           <UiButton

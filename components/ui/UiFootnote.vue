@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onClickOutside, useWindowSize } from '@vueuse/core'
+import { onClickOutside } from '@vueuse/core'
 import { flip, offset, shift, useFloating, type AlignedPlacement } from '@floating-ui/vue'
 import { useModal } from '~/components/ui/composables/useModal'
 import { UiFootnoteModal } from '#components'
@@ -17,7 +17,6 @@ const floating = ref(null)
 const isVisible = ref(false)
 
 const modal = useModal()
-const { width } = useWindowSize()
 const { floatingStyles, update } = useFloating(reference, floating, {
   placement: tooltipPlacement,
   middleware: [
@@ -27,10 +26,10 @@ const { floatingStyles, update } = useFloating(reference, floating, {
   ],
 })
 
-const isMobile = computed(() => width.value < 768)
+const canHover = typeof window !== 'undefined' && window.matchMedia('(hover: hover)').matches
 
 const onClick = () => {
-  if (isMobile.value) {
+  if (!canHover) {
     modal.open(customModal || UiFootnoteModal, {
       props: {
         modalTitle: title,
@@ -41,14 +40,14 @@ const onClick = () => {
 }
 
 const onMouseEnter = () => {
-  if (!isMobile.value) {
+  if (canHover) {
     isVisible.value = true
     update()
   }
 }
 
 const onMouseLeave = () => {
-  if (!isMobile.value) {
+  if (canHover) {
     isVisible.value = false
   }
 }

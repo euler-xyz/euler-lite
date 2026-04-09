@@ -705,6 +705,7 @@ watch([isConnected, isSpyMode], () => {
       <div class="flex items-center gap-12">
         <NuxtLink
           to="/portfolio"
+          aria-label="Back to portfolio"
           class="flex items-center justify-center self-stretch px-8 rounded-8 border border-line-default bg-surface-elevated hover:bg-card-hover transition-colors text-content-secondary hover:text-content-primary flex-shrink-0"
         >
           <UiIcon
