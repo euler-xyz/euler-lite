@@ -296,7 +296,13 @@ const { isSlow } = useSlowLoading(isLoading)
         <VaultSortButton
           v-model="sortBy"
           v-model:dir="sortDir"
-          :options="['Recommended', 'Best Max ROE', 'Total Supply', 'Total Borrowed', 'Available Liquidity']"
+          :options="[
+            { label: 'Recommended', icon: 'sparks' },
+            { label: 'Best Max ROE', icon: 'percent' },
+            { label: 'Total Supply', icon: 'lend-outline' },
+            { label: 'Total Borrowed', icon: 'borrow-outline' },
+            { label: 'Available Liquidity', icon: 'wallet' },
+          ]"
           :disable-dir="sortBy === 'Recommended'"
           title="Sorting type"
         />

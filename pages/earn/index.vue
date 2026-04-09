@@ -210,7 +210,11 @@ const sortedList = computed(() => {
         <VaultSortButton
           v-model="sortBy"
           v-model:dir="sortDir"
-          :options="['Total Supply', 'Liquidity', 'Supply APY']"
+          :options="[
+            { label: 'Total Supply', icon: 'lend-outline' },
+            { label: 'Liquidity', icon: 'wallet' },
+            { label: 'Supply APY', icon: 'percent' },
+          ]"
           title="Sorting type"
         />
         <UiSelect

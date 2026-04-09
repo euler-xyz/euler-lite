@@ -382,7 +382,15 @@ const sortedBorrowList = computed(() => {
           v-model="sortBy"
           v-model:dir="sortDir"
           class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
-          :options="['Recommended', 'Liquidity', 'Total Borrowed', 'Utilization', 'Borrow APY', 'Net APY', 'Max ROE']"
+          :options="[
+            { label: 'Recommended', icon: 'sparks' },
+            { label: 'Liquidity', icon: 'wallet' },
+            { label: 'Total Borrowed', icon: 'borrow-outline' },
+            { label: 'Utilization', icon: 'pulse' },
+            { label: 'Borrow APY', icon: 'percent' },
+            { label: 'Net APY', icon: 'percent' },
+            { label: 'Max ROE', icon: 'percent' },
+          ]"
           :disable-dir="sortBy === 'Recommended'"
           title="Sorting type"
         />
