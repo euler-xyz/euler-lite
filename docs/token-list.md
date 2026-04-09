@@ -4,7 +4,7 @@ The token list provides token metadata (name, symbol, decimals, logo URL) used a
 
 ## Architecture
 
-```
+```text
 Client (composables/useTokenList.ts)
   |
   |  GET /api/token-list?chainId=X  (on chain switch + 15s retry)
@@ -34,7 +34,7 @@ Three data sources, each with its own 5-minute TTL cache and in-flight request d
 
 The Euler API is the blocking call. Uniswap and DefiLlama are non-blocking: if their cache is warm they're included immediately, otherwise a background fetch is fired and the response is returned without waiting.
 
-**Deduplication**: tokens are merged with Euler taking priority. If the same `chainId:address` appears in multiple sources, the higher-priority entry wins. This ensures Euler's logo URLs (from known, CSP-safe domains) are preferred.
+**Deduplication**: tokens are merged with Euler taking priority. If the same `chainId:address` appears in multiple sources, the higher-priority entry wins. This ensures Euler's metadata (name, symbol, decimals, logo URL) takes precedence over supplemental sources.
 
 ## Client Composable
 

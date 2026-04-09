@@ -169,10 +169,13 @@ export default defineEventHandler(async (event) => {
   rateLimiter.consume(event)
 
   const query = getQuery(event)
-  const chainId = query.chainId ? Number(query.chainId) : null
+  const chainId = Number(query.chainId)
+  if (!Number.isInteger(chainId) || chainId <= 0) {
+    throw createError({ statusCode: 400, statusMessage: 'chainId is required and must be a positive integer' })
+  }
 
   // --- Primary source: Euler API (always awaited) ---
-  const euler = chainId ? await fetchEulerApi(chainId) : []
+  const euler = await fetchEulerApi(chainId)
 
   // --- Supplemental: Uniswap (best-effort, non-blocking) ---
   let uniswap = uniswapCache.get('all')
@@ -182,11 +185,11 @@ export default defineEventHandler(async (event) => {
   }
 
   // --- Supplemental: DefiLlama (best-effort, non-blocking) ---
-  const key = chainId ? String(chainId) : null
-  let defillama = key ? defillamaCache.get(key) : ([] as TokenEntry[])
+  const key = String(chainId)
+  let defillama = defillamaCache.get(key)
   if (defillama === undefined) {
-    if (chainId) void fetchDefillama(chainId)
-    defillama = key ? (defillamaCache.getStale(key) ?? []) : []
+    void fetchDefillama(chainId)
+    defillama = defillamaCache.getStale(key) ?? []
   }
 
   // Priority: Euler API > DefiLlama > Uniswap
