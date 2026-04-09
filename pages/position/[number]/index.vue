@@ -740,7 +740,7 @@ watch([isConnected, isSpyMode], () => {
           <div class="text-h4 text-content-primary">
             Position summary
           </div>
-          <div class="flex justify-between items-center mt-6">
+          <div class="flex justify-between items-center">
             <div class="flex items-center gap-4 text-p2 text-content-secondary">
               Net APY
               <SvgIcon
@@ -793,15 +793,15 @@ watch([isConnected, isSpyMode], () => {
             </div>
           </div>
         </div>
-        <div class="rounded-12 bg-card border border-line-default shadow-card p-16 laptop:flex-1">
-          <div class="text-h4 text-neutral-800 mb-16">
+        <div class="flex flex-col gap-16 rounded-12 bg-card border border-line-default shadow-card p-16 laptop:flex-1">
+          <div class="text-h4 text-content-primary">
             Position risk
           </div>
-          <div class="flex justify-between gap-8 flex-wrap mb-16">
-            <div class="text-neutral-500 text-p3">
+          <div class="flex justify-between gap-8 flex-wrap">
+            <div class="text-content-secondary text-p3">
               Health score
             </div>
-            <div class="text-neutral-800 text-p3">
+            <div class="text-content-primary text-p3">
               <span
                 v-if="hasQueryFailure"
                 class="text-warning-500"
@@ -811,11 +811,11 @@ watch([isConnected, isSpyMode], () => {
               </template>
             </div>
           </div>
-          <div class="flex justify-between gap-8 flex-wrap mb-16">
-            <div class="text-neutral-500 text-p3">
+          <div class="flex justify-between gap-8 flex-wrap">
+            <div class="text-content-secondary text-p3">
               Time to liquidation
             </div>
-            <div class="text-neutral-800 text-p3">
+            <div class="text-content-primary text-p3">
               <span
                 v-if="hasQueryFailure"
                 class="text-warning-500"
@@ -825,11 +825,11 @@ watch([isConnected, isSpyMode], () => {
               </template>
             </div>
           </div>
-          <div class="flex justify-between gap-8 flex-wrap mb-12">
-            <div class="text-neutral-500 text-p3">
+          <div class="flex justify-between gap-8 flex-wrap">
+            <div class="text-content-secondary text-p3">
               Liquidation LTV
             </div>
-            <div class="text-neutral-800 text-p3">
+            <div class="text-content-primary text-p3">
               <span
                 v-if="hasQueryFailure"
                 class="text-warning-500"
