@@ -42,7 +42,7 @@ The Euler API is the blocking call. Uniswap and DefiLlama are non-blocking: if t
 |--------|-----------|------|
 | `200` | At least one source returned tokens | `{ tokens: TokenEntry[] }` |
 | `400` | `chainId` is missing, non-numeric, zero, or negative | `{ statusCode: 400, statusMessage: "chainId is required and must be a positive integer" }` |
-| `502` | All sources returned empty (Euler down, no stale data, supplemental caches cold) | `{ statusCode: 502, statusMessage: "Upstream error" }` |
+| `502` | Merged token list is empty after combining all sources | `{ statusCode: 502, statusMessage: "Upstream error" }` |
 
 ## Client Composable
 
