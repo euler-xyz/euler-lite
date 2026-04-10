@@ -116,10 +116,16 @@ const feeDisplay = computed(() => {
                 :src="getEulerLabelEntityLogo(entity.logo)"
               />
               <a
+                v-if="entity.url"
                 :href="entity.url"
                 target="_blank"
+                rel="noopener noreferrer"
                 class="text-p2 text-neutral-800 hover:text-accent-600 underline transition-colors"
               >{{ entity.name }}</a>
+              <span
+                v-else
+                class="text-p2 text-neutral-800"
+              >{{ entity.name }}</span>
             </div>
           </div>
           <VaultTypeChip

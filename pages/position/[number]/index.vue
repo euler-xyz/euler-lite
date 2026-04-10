@@ -835,7 +835,7 @@ watch([isConnected, isSpyMode], () => {
                 class="text-warning-500"
               >Unknown</span>
               <template v-else>
-                {{ formatNumber(nanoToValue(position.userLTV, 18), 2) }}/{{ nanoToValue(position.liquidationLTV, 2) }}%
+                {{ formatNumber(nanoToValue(position.userLTV, 18), 2) }}% / {{ nanoToValue(position.liquidationLTV, 2) }}%
               </template>
             </div>
           </div>

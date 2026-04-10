@@ -113,6 +113,7 @@ const handleTenderlySimulate = async () => {
 const internalSubmitting = ref(false)
 
 const handleConfirm = async () => {
+  if (internalSubmitting.value) return
   const result = onConfirm()
   // If onConfirm returns a promise, keep the modal open with a loading state
   // and let the caller close it via modal.close(). Otherwise close immediately
