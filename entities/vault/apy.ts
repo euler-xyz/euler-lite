@@ -1,8 +1,53 @@
 import { parseUnits, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { SECONDS_IN_YEAR, TARGET_TIME_AGO } from '~/entities/constants'
-import { eulerUtilsLensABI } from '~/entities/euler/abis'
+import { eulerUtilsLensABI, eulerVaultLensABI } from '~/entities/euler/abis'
 import { vaultConvertToAssetsAbi } from '~/abis/vault'
+
+export interface ProjectedRates {
+  supplyAPY: bigint // 27 decimals
+  borrowAPY: bigint // 27 decimals
+}
+
+export const getProjectedRates = async (
+  vaultAddress: string,
+  currentCash: bigint,
+  currentBorrows: bigint,
+  cashDelta: bigint,
+  borrowsDelta: bigint,
+): Promise<ProjectedRates | null> => {
+  const { client: rpcClient } = useRpcClient()
+  const { eulerLensAddresses } = useEulerAddresses()
+
+  if (!eulerLensAddresses.value?.vaultLens) {
+    return null
+  }
+
+  const adjustedCash = currentCash + cashDelta < 0n ? 0n : currentCash + cashDelta
+  const adjustedBorrows = currentBorrows + borrowsDelta < 0n ? 0n : currentBorrows + borrowsDelta
+
+  if (adjustedCash === 0n && adjustedBorrows === 0n) {
+    return { supplyAPY: 0n, borrowAPY: 0n }
+  }
+
+  const result = await rpcClient.value!.readContract({
+    address: eulerLensAddresses.value.vaultLens as Address,
+    abi: eulerVaultLensABI,
+    functionName: 'getVaultInterestRateModelInfo',
+    args: [vaultAddress as Address, [adjustedCash], [adjustedBorrows]],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic lens contract return
+  }) as Record<string, any>
+
+  if (result.queryFailure || !result.interestRateInfo?.length) {
+    return null
+  }
+
+  const info = result.interestRateInfo[0]
+  return {
+    supplyAPY: info.supplyAPY as bigint,
+    borrowAPY: info.borrowAPY as bigint,
+  }
+}
 
 export const computeAPYs = (borrowSPY: bigint, cash: bigint, borrows: bigint, interestFee: bigint) => {
   const { client: rpcClient } = useRpcClient()

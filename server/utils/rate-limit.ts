@@ -15,24 +15,30 @@ interface RateLimiterConfig {
   label: string
 }
 
-// NOTE: This rate limiter is a best-effort defense-in-depth measure, not a
-// security boundary. Known limitations:
+// NOTE: This rate limiter relies on Cloudflare being in the request path for
+// production (DOPPLER_ENVIRONMENT=prd). CF-Connecting-IP is set by Cloudflare's
+// edge and cannot be spoofed by clients going through Cloudflare. In production,
+// requests arriving without this header are rejected fail-closed, which closes
+// the X-Forwarded-For rotation attack that was possible via the old fallback path.
 //
+// Residual limitation: an attacker who knows the origin IP and bypasses Cloudflare
+// can still manually set CF-Connecting-IP with rotating values. Closing that fully
+// requires network-level enforcement (allowlisting Cloudflare's IP ranges at the
+// origin firewall).
+//
+// In dev and stg, Cloudflare is not always in the request path, so the CF
+// requirement is not enforced and X-Forwarded-For / socket is used instead.
+//
+// Remaining known limitation:
 // - In-memory state is per-process. If Nitro runs multiple workers the
 //   effective limit is multiplied by the worker count.
-// - Without Cloudflare (or another trusted reverse proxy), the X-Forwarded-For
-//   fallback is client-controlled and trivially spoofable. Attackers can bypass
-//   the limit by varying the header value on each request.
-//
-// For production deployments, run the app behind a reverse proxy (Cloudflare,
-// Nginx, etc.) that performs its own rate limiting and sets a trusted client IP
-// header. See docs/architecture.md for deployment recommendations.
 
 /**
  * Extract the client IP from an H3 event.
  *
- * Prefers CF-Connecting-IP (set by Cloudflare, cannot be spoofed by the
- * client), falls back to X-Forwarded-For, then the raw socket address.
+ * Prefers CF-Connecting-IP (set by Cloudflare, cannot be spoofed by clients
+ * going through Cloudflare), falls back to X-Forwarded-For, then the raw
+ * socket address.
  */
 export function getClientIp(event: H3Event): string {
   const cfIp = event.node.req.headers['cf-connecting-ip']
@@ -70,8 +76,22 @@ export function createRateLimiter(config: RateLimiterConfig) {
     /**
      * Consume `cost` units from the client's rate-limit budget.
      * Throws a 429 error when the budget is exceeded.
+     * In production, throws 403 if the request did not arrive via Cloudflare.
      */
     consume(event: H3Event, cost = 1): void {
+      // In production, CF-Connecting-IP must be present. Requests that arrive
+      // without it bypassed Cloudflare entirely — reject them fail-closed.
+      // Outside production (stg, preview, dev) Cloudflare may not be in the
+      // path, so the check is skipped.
+      const cfIp = event.node.req.headers['cf-connecting-ip']
+      // Fail-closed in production when CF-Connecting-IP is absent.
+      // stg and dev are exempt: they don't always run behind Cloudflare.
+      const hasCfIp = typeof cfIp === 'string' && !!cfIp.trim()
+      if (!hasCfIp && process.env.DOPPLER_ENVIRONMENT === 'prd') {
+        console.warn('[rate-limit] Blocked: CF-Connecting-IP absent, request bypassed Cloudflare')
+        throw createError({ statusCode: 403, statusMessage: 'Forbidden' })
+      }
+
       const ip = getClientIp(event)
       const now = Date.now()
       const entry = map.get(ip)

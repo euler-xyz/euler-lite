@@ -18,13 +18,12 @@ type SwapQuotesParallelOptions = {
 }
 
 type SwapQuotesRequestOptions = {
-  logContext?: Record<string, unknown>
   providers?: string[]
   errorMessage?: string
 }
 
 export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
-  const { getSwapQuotes, getSwapProviders, logSwapFailure } = useSwapApi()
+  const { getSwapQuotes, getSwapProviders } = useSwapApi()
 
   const quoteCards = ref<SwapQuoteCard[]>([])
   const selectedProvider = ref<string | null>(null)
@@ -143,16 +142,9 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
           if (isAbortError(err)) {
             return
           }
-          const axiosErr = err as { response?: { status?: number }, message?: string }
+          const axiosErr = err as { response?: { status?: number } }
           if (axiosErr.response?.status === 429) {
             rateLimitedCount += 1
-          }
-          if (requestOptions.logContext) {
-            logSwapFailure({
-              reason: axiosErr.message || 'Unknown error',
-              provider,
-              ...requestOptions.logContext,
-            })
           }
         }
         finally {

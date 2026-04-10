@@ -292,11 +292,10 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
           transferAmounts,
-          onConfirm: () => {
-            setTimeout(() => {
-              send()
-            }, 400)
+          onConfirm: async () => {
+            await send()
           },
+          submittingLabel: 'Submitting...',
         },
       })
     }

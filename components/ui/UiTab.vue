@@ -94,6 +94,10 @@ const onClick = () => {
 
     &.is-active {
       box-shadow: none;
+
+      .ui-tab__badge {
+        background-color: var(--ui-tab-active-pill-badge-background-color);
+      }
     }
   }
 
