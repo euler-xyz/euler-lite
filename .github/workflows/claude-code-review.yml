@@ -43,9 +43,9 @@ jobs:
     env:
       ANTHROPIC_BASE_URL: ${{ secrets.LLM_BASE_URL }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.LLM_API_KEY }}
-      ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ vars.LLM_REVIEW_MODEL || 'anthropic/claude-sonnet-4.6' }}
-      ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.LLM_COORDINATOR_MODEL || 'anthropic/claude-sonnet-4.6' }}
-      CLAUDE_CODE_SUBAGENT_MODEL: ${{ vars.LLM_REVIEW_MODEL || 'anthropic/claude-sonnet-4.6' }}
+      ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ vars.LLM_REVIEW_MODEL || 'anthropic/claude-opus-4.6' }}
+      ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.LLM_COORDINATOR_MODEL || 'anthropic/claude-opus-4.6' }}
+      CLAUDE_CODE_SUBAGENT_MODEL: ${{ vars.LLM_REVIEW_MODEL || 'anthropic/claude-opus-4.6' }}
     permissions:
       contents: read
       pull-requests: write
@@ -90,7 +90,7 @@ jobs:
           settings: |
             {
               "permissions": {
-                "allow": ["Bash(git diff *)", "Bash(gh api *)", "Bash(python3 *)", "Read", "Glob", "Grep"]
+                "allow": ["Bash(git diff *)", "Bash(gh api repos/*)", "Read", "Write", "Glob", "Grep", "WebFetch"]
               }
             }
           prompt: |
@@ -102,11 +102,13 @@ jobs:
       - name: Fail if critical issues found
         id: critical-check
         run: |
-          if [ -f /tmp/claude_critical ]; then
-            count=$(cat /tmp/claude_critical)
-            echo "has_critical=true" >> $GITHUB_OUTPUT
-            echo "::error::Review found $count critical issue(s) that must be resolved before merging."
-            exit 1
+          if [ -f /tmp/review.json ]; then
+            count=$(python3 -c "import json; d=json.load(open('/tmp/review.json')); b=d.get('body',''); cs=d.get('comments',[]); print(b.count('🚨 CRITICAL:') + sum(1 for c in cs if '🚨 CRITICAL:' in c.get('body','')))")
+            if [ "$count" -gt 0 ]; then
+              echo "has_critical=true" >> $GITHUB_OUTPUT
+              echo "::error::Review found $count critical issue(s) that must be resolved before merging."
+              exit 1
+            fi
           fi
 
   autofix:
@@ -143,9 +145,9 @@ jobs:
     env:
       ANTHROPIC_BASE_URL: ${{ secrets.LLM_BASE_URL }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.LLM_API_KEY }}
-      ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ vars.LLM_REVIEW_MODEL || 'anthropic/claude-sonnet-4.6' }}
-      ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.LLM_COORDINATOR_MODEL || 'anthropic/claude-sonnet-4.6' }}
-      CLAUDE_CODE_SUBAGENT_MODEL: ${{ vars.LLM_REVIEW_MODEL || 'anthropic/claude-sonnet-4.6' }}
+      ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ vars.LLM_REVIEW_MODEL || 'anthropic/claude-opus-4.6' }}
+      ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.LLM_COORDINATOR_MODEL || 'anthropic/claude-opus-4.6' }}
+      CLAUDE_CODE_SUBAGENT_MODEL: ${{ vars.LLM_REVIEW_MODEL || 'anthropic/claude-opus-4.6' }}
     permissions:
       contents: write
       pull-requests: write
@@ -213,7 +215,7 @@ jobs:
           settings: |
             {
               "permissions": {
-                "allow": ["Bash(git *)", "Bash(gh *)", "Bash(python3 *)", "Read", "Write", "Edit", "Glob", "Grep"]
+                "allow": ["Bash(git *)", "Bash(gh *)", "Bash(python3 /tmp/*)", "Read", "Write", "Edit", "Glob", "Grep"]
               }
             }
           prompt: |
@@ -227,6 +229,7 @@ jobs:
       group: claude-interactive-${{ github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: true
     if: |
+      github.event.sender.type != 'Bot' &&
       startsWith(github.event.comment.body, '@claude') &&
       !contains(github.event.comment.body, '@claude review') &&
       !contains(github.event.comment.body, '@claude fix') &&
@@ -246,9 +249,9 @@ jobs:
     env:
       ANTHROPIC_BASE_URL: ${{ secrets.LLM_BASE_URL }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.LLM_API_KEY }}
-      ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ vars.LLM_REVIEW_MODEL || 'anthropic/claude-sonnet-4.6' }}
-      ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.LLM_COORDINATOR_MODEL || 'anthropic/claude-sonnet-4.6' }}
-      CLAUDE_CODE_SUBAGENT_MODEL: ${{ vars.LLM_REVIEW_MODEL || 'anthropic/claude-sonnet-4.6' }}
+      ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ vars.LLM_REVIEW_MODEL || 'anthropic/claude-opus-4.6' }}
+      ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.LLM_COORDINATOR_MODEL || 'anthropic/claude-opus-4.6' }}
+      CLAUDE_CODE_SUBAGENT_MODEL: ${{ vars.LLM_REVIEW_MODEL || 'anthropic/claude-opus-4.6' }}
     permissions:
       contents: read
       pull-requests: write

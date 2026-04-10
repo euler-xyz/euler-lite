@@ -49,13 +49,25 @@ git diff origin/$BASE_REF...HEAD
 - Wallet connection flows don't expose private keys or mnemonics in state/logs
 - `simulateTxPlan` is opt-in, not mandatory — do not flag `executeTxPlan` calls without prior simulation as violations; flag only if a new flow explicitly skips simulation where it was previously used in the same composable
 
+**Transaction Flow Safety**
+- Funds are always sent to the user's own address — flag any flow where the recipient is mutable, derived from external input, or could be redirected
+- Output amounts are verified against expected minimums before submission — slippage tolerance must be enforced on every swap leg
+- Token approvals are granted only to known, audited contract addresses (Euler vault/EVC addresses, known routers) — never to arbitrary or user-supplied addresses
+- Approvals must never be unlimited (`type(uint256).max`) unless the contract is trusted and the pattern is already established in the codebase; flag any new unlimited approval
+- Signed message deadlines (`deadline` / `expiry` fields) are reasonable — not `type(uint256).max` or an unbounded far-future timestamp; flag any hardcoded or unconstrained deadline
+
+**Wallet Screening / Terms Gate**
+- New transaction flows check wallet screening status before allowing submission — the screening composable must be consulted, not bypassed
+- Terms of use acceptance is verified before any fund-moving transaction — new flows must not skip the terms gate that existing flows enforce
+- Screening and terms checks must be consistently applied — flag any new flow that omits them where equivalent flows include them
+
 **Dependency / Supply Chain**
 - New `npm` packages are well-known and actively maintained — flag any obscure packages touching crypto/wallet code
 - No `postinstall` scripts in newly added packages that could execute arbitrary code
 
 ### Step 3: Classify findings
 
-- `🚨 CRITICAL:` — secret exposure risk, XSS vector, geo-blocking bypass, RPC URL leakage to client
+- `🚨 CRITICAL:` — secret exposure risk, XSS vector, geo-blocking bypass, RPC URL leakage to client, funds sent to wrong recipient, unlimited approval to untrusted address, missing screening/terms gate on fund-moving transaction
 - `⚠️ WARNING:` — potential exposure path that requires specific conditions, missing `simulateContract`, missing guard
 - `💬 SUGGESTION:` — defence-in-depth improvement, better validation
 

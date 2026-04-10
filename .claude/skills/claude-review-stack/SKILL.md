@@ -59,6 +59,22 @@ Read the diff carefully. Focus only on changed lines and their immediate context
 - `v-for` always has `:key` bound to a stable, unique value (not array index for dynamic lists)
 - No inline styles — Tailwind classes only; no `style=""` attribute unless truly dynamic
 
+**Code Reuse**
+
+Before evaluating any finding related to missing logic, duplication, or new helpers, read the relevant directories so you can compare against what already exists:
+
+```bash
+# List all utility and composable files so you know what exists
+find utils/ composables/ entities/ -name "*.ts" | sort
+```
+
+Then read the files most likely to overlap with the diff's domain (e.g. if the diff touches borrow flows, read `composables/borrow/` and `utils/` files related to borrow/position math).
+
+- Inline logic that already exists as a named utility in `utils/` should be replaced with the utility call, not left inline
+- Flag duplicate implementations even if the new one is slightly different — the canonical version is the one already in `utils/` or `composables/`
+- If a pattern appears more than once in the diff and no utility exists, flag it as a candidate for extraction rather than accepting the duplication
+- New helper functions must not shadow or partially replicate existing ones — check for name collisions and functional overlap before accepting a new abstraction
+
 ### Step 3: Classify findings
 
 For each issue found:

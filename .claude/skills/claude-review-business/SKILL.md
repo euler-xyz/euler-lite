@@ -21,6 +21,18 @@ euler-lite is the frontend for Euler v2, a modular DeFi lending protocol. Key do
 
 ## Instructions
 
+### Step 0: Fetch relevant protocol skills
+
+Fetch the euler-xyz skill files whose domain overlaps with the diff. If in doubt, always fetch `euler-vaults`.
+
+- `euler-vaults` — vault operations, EVC orchestration, risk management, batching: `https://raw.githubusercontent.com/euler-xyz/agent-skills/77b444666398f8471747edf014aeed832831ee5e/skills/euler-vaults/SKILL.md`
+- `euler-irm-oracles` — oracle adapters, price feed configuration, IRM types: `https://raw.githubusercontent.com/euler-xyz/agent-skills/77b444666398f8471747edf014aeed832831ee5e/skills/euler-irm-oracles/SKILL.md`
+- `euler-earn` — EulerEarn yield aggregation, allocator roles: `https://raw.githubusercontent.com/euler-xyz/agent-skills/77b444666398f8471747edf014aeed832831ee5e/skills/euler-earn/SKILL.md`
+- `euler-advanced` — hooks, flash loans, debt mechanics, reward systems: `https://raw.githubusercontent.com/euler-xyz/agent-skills/77b444666398f8471747edf014aeed832831ee5e/skills/euler-advanced/SKILL.md`
+- `euler-data` — subgraph queries, contract interfaces, deployment tooling: `https://raw.githubusercontent.com/euler-xyz/agent-skills/77b444666398f8471747edf014aeed832831ee5e/skills/euler-data/SKILL.md`
+
+Protocol docs: https://docs.euler.finance — cross-check any flow that diverges from documented semantics.
+
 ### Step 1: Get the diff
 
 ```bash

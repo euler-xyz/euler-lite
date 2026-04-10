@@ -81,32 +81,7 @@ Write a JSON file to `/tmp/review.json`:
   - `start_line` + `line` + `side: "RIGHT"` — For multi-line comments on added/changed lines
   - `body` — Markdown-formatted feedback with severity prefix
 
-### Step 4: Write sentinel if critical issues found
-
-Before submitting, count `🚨 CRITICAL:` occurrences and write a sentinel file. This must happen BEFORE the API call so the CI shell step can read it even if the API call fails.
-
-```bash
-python3 -c "
-import json, sys
-
-with open('/tmp/review.json') as f:
-    data = json.load(f)
-
-body = data.get('body', '')
-comments = data.get('comments', [])
-
-count = body.count('🚨 CRITICAL:') + sum(1 for c in comments if '🚨 CRITICAL:' in c.get('body', ''))
-
-if count > 0:
-    with open('/tmp/claude_critical', 'w') as f:
-        f.write(str(count))
-    print(f'Sentinel written — {count} critical issue(s)')
-else:
-    print('No critical issues')
-"
-```
-
-### Step 5: Submit the Review
+### Step 4: Submit the Review
 
 ```bash
 gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --input /tmp/review.json
