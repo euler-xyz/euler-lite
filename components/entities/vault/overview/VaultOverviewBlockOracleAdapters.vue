@@ -239,9 +239,24 @@ const sheetDragStyle = computed(() => ({
   transition: sheetDragY.value ? 'none' : 'transform 0.3s ease',
 }))
 
-const onChecksClick = (adapter: (typeof adapterViews.value)[0]) => {
-  if (!isMobile.value || !adapter.checks?.length) return
-  hoveredChecksAdapter.value = hoveredChecksAdapter.value === adapter ? null : adapter
+const onChecksClick = (adapter: (typeof adapterViews.value)[0], event?: MouseEvent | KeyboardEvent) => {
+  if (!adapter.checks?.length) return
+  if (hoveredChecksAdapter.value === adapter) {
+    hoveredChecksAdapter.value = null
+    return
+  }
+  // On desktop, position the tooltip using the trigger element's bounding rect
+  if (!isMobile.value && event?.currentTarget) {
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+    const left = Math.min(rect.left, window.innerWidth - TOOLTIP_WIDTH - 16)
+    const spaceBelow = window.innerHeight - rect.bottom - 16
+    const spaceAbove = rect.top - 16
+    const flipUp = spaceAbove > spaceBelow
+    tooltipStyle.value = flipUp
+      ? { top: `${rect.top - 8}px`, left: `${left}px`, transform: 'translateY(-100%)', maxHeight: `${spaceAbove}px` }
+      : { top: `${rect.bottom + 8}px`, left: `${left}px`, transform: 'none', maxHeight: `${spaceBelow}px` }
+  }
+  hoveredChecksAdapter.value = adapter
 }
 
 const onChecksMouseEnter = (adapter: (typeof adapterViews.value)[0], event: MouseEvent) => {
@@ -358,13 +373,13 @@ const onTooltipMouseLeave = () => {
           </div>
           <div
             class="flex flex-col gap-4 order-4 md:order-3"
-            :role="isMobile && adapter.checks?.length ? 'button' : undefined"
-            :tabindex="isMobile && adapter.checks?.length ? 0 : undefined"
+            :role="adapter.checks?.length ? 'button' : undefined"
+            :tabindex="adapter.checks?.length ? 0 : undefined"
             @mouseenter="onChecksMouseEnter(adapter, $event)"
             @mouseleave="onChecksMouseLeave"
-            @click.stop="onChecksClick(adapter)"
-            @keydown.enter.stop="onChecksClick(adapter)"
-            @keydown.space.stop.prevent="onChecksClick(adapter)"
+            @click.stop="onChecksClick(adapter, $event)"
+            @keydown.enter.stop="onChecksClick(adapter, $event)"
+            @keydown.space.stop.prevent="onChecksClick(adapter, $event)"
           >
             <span class="text-content-tertiary">Checks</span>
             <span
