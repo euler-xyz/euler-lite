@@ -6,7 +6,6 @@ import { isAbortError } from '~/utils/errorHandling'
 const ALLOWED_METHODS = new Set([
   'eth_call',
   'eth_estimateGas',
-  'eth_sendRawTransaction',
   'eth_getTransactionReceipt',
   'eth_getTransactionByHash',
   'eth_blockNumber',
