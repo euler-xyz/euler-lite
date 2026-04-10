@@ -281,7 +281,7 @@ The Nuxt server layer (`server/api/`) proxies requests to external services (RPC
 | **CORS** (`server/middleware/cors.ts`) | Restricts API access to configured origins |
 | **Body size limits** (`server/middleware/body-limit.ts`) | Caps request payloads (1 MB RPC, 2 MB Tenderly) |
 | **Geo-blocking** (`server/middleware/geo-gate.ts`) | Blocks sanctioned countries via Cloudflare `CF-IPCountry`; fails closed (HTTP 451) if country is undetermined in prod |
-| **RPC method whitelist** (`server/api/rpc/[chainId].ts`) | Only 16 safe read/send methods are proxied |
+| **RPC method whitelist** (`server/api/rpc/[chainId].ts`) | Only 15 safe read-only methods are proxied |
 | **Rate limiting** (`server/utils/rate-limit.ts`) | Per-IP cost-based budgets (see below); fails closed (HTTP 403) if `CF-Connecting-IP` is absent in prod |
 | **Swap verifier validation** (`utils/swap-validation.ts`) | Validates swap verifier addresses against known config |
 
