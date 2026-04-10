@@ -157,6 +157,7 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: LTVRampConfig) => {
             <span class="text-content-tertiary">{{ priceInvert.displaySymbol }}</span>
             <button
               type="button"
+              aria-label="Invert price display"
               class="ml-4 text-content-tertiary hover:text-content-primary transition-colors inline-flex"
               @click.stop="priceInvert.toggle"
             >

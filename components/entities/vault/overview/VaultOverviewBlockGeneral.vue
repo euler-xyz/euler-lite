@@ -133,10 +133,16 @@ watchEffect(async () => {
                 :src="getEulerLabelEntityLogo(entity.logo)"
               />
               <a
+                v-if="entity.url"
                 :href="entity.url"
                 target="_blank"
+                rel="noopener noreferrer"
                 class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
               >{{ entity.name }}</a>
+              <span
+                v-else
+                class="text-p2 text-content-primary"
+              >{{ entity.name }}</span>
             </div>
             <span
               v-if="isGovernanceLimited"
