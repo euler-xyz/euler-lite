@@ -59,8 +59,8 @@ const render = async () => {
     return
   }
   const x = ((model.value - min) / (max - min)) * trackBox.width
-  styles.trackActive.width = `${Math.min(x, trackBox.width)}px`
   const thumbX = Math.max(0, Math.min(x - 10, trackBox.width - 20))
+  styles.trackActive.width = `${thumbX + 10}px`
   styles.thumb.transform = `translate(${thumbX}px, -50%)`
 }
 const onPointerDown = () => {
