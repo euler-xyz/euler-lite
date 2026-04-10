@@ -51,7 +51,7 @@ export const cancelCowSwapOrder = async (params: CancelCowSwapOrderParams): Prom
   const domain = {
     name: 'Gnosis Protocol',
     version: 'v2',
-    chainId: BigInt(params.chainId),
+    chainId: params.chainId,
     verifyingContract: params.settlementContract,
   }
 

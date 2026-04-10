@@ -845,6 +845,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       amountOutMin: quote.amountOutMin,
       amountOut: quote.amountOut,
     })
+    if (!underlyingBuyAmount || underlyingBuyAmount <= 0n) {
+      error('Invalid quote: no minimum buy amount')
+      return
+    }
     const { totalAssets, totalShares } = multiplyLongVault.value
     const buyAmount = totalAssets > 0n
       ? underlyingBuyAmount * totalShares / totalAssets
