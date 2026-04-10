@@ -45,7 +45,7 @@ const feeDisplay = computed(() => {
     <p class="text-h3 text-content-primary">
       Overview
     </p>
-    <div class="flex flex-col items-start gap-24">
+    <div class="flex flex-col gap-20">
       <div
         v-if="isDeprecated && deprecationReason"
         class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
@@ -77,72 +77,71 @@ const feeDisplay = computed(() => {
           </p>
         </div>
       </div>
-      <div
+      <!-- eslint-disable vue/no-v-html -- trusted label content -->
+      <p
         v-if="earnDescription"
-        class="w-full rounded-12 p-16 bg-surface-tertiary"
-      >
-        <!-- eslint-disable vue/no-v-html -- trusted label content -->
-        <p
-          class="text-p3 text-content-secondary auto-link"
-          v-html="autoLink(earnDescription)"
-        />
-        <!-- eslint-enable vue/no-v-html -->
-      </div>
-      <div
+        class="text-p2 text-content-secondary auto-link"
+        v-html="autoLink(earnDescription)"
+      />
+      <p
         v-if="product.description"
-        class="w-full rounded-12 p-16 bg-surface-tertiary"
-      >
-        <!-- eslint-disable vue/no-v-html -- trusted label content -->
-        <p
-          class="text-p3 text-content-secondary auto-link"
-          v-html="autoLink(product.description)"
+        class="text-p2 text-content-secondary auto-link"
+        v-html="autoLink(product.description)"
+      />
+      <!-- eslint-enable vue/no-v-html -->
+      <div class="grid grid-cols-2 gap-x-32 gap-y-24">
+        <VaultOverviewLabelValue
+          label="Price"
+          :value="priceDisplay"
         />
-        <!-- eslint-enable vue/no-v-html -->
-      </div>
-      <VaultOverviewLabelValue
-        label="Price"
-        :value="priceDisplay"
-      />
-      <VaultOverviewLabelValue
-        label="Performance fee"
-        :value="feeDisplay"
-      />
-      <VaultOverviewLabelValue
-        v-if="enableEntityBrandingDisplay"
-        label="Capital allocator"
-      >
-        <div
-          v-if="entities.length && isOwnerVerified"
-          class="flex flex-col gap-16"
+        <VaultOverviewLabelValue
+          label="Performance fee"
+          :value="feeDisplay"
+        />
+        <VaultOverviewLabelValue
+          v-if="enableEntityBrandingDisplay"
+          label="Capital allocator"
         >
           <div
-            v-for="(entity, idx) in entities"
-            :key="idx"
-            class="flex items-center gap-8"
+            v-if="entities.length && isOwnerVerified"
+            class="flex flex-col gap-8"
           >
-            <BaseAvatar
-              :label="entity.name"
-              :src="getEulerLabelEntityLogo(entity.logo)"
-            />
-            <a
-              :href="entity.url"
-              target="_blank"
-              class="text-p2 text-neutral-800 hover:text-accent-600 underline transition-colors"
-            >{{ entity.name }}</a>
+            <div
+              v-for="(entity, idx) in entities"
+              :key="idx"
+              class="flex items-center gap-8"
+            >
+              <BaseAvatar
+                :label="entity.name"
+                :src="getEulerLabelEntityLogo(entity.logo)"
+              />
+              <a
+                v-if="entity.url"
+                :href="entity.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-p2 text-neutral-800 hover:text-accent-600 underline transition-colors"
+              >{{ entity.name }}</a>
+              <span
+                v-else
+                class="text-p2 text-neutral-800"
+              >{{ entity.name }}</span>
+            </div>
           </div>
-        </div>
-        <VaultTypeChip
-          v-else
-          :vault="vault"
-          type="unknown"
-        />
-      </VaultOverviewLabelValue>
-      <VaultOverviewLabelValue
-        v-if="enableVaultTypeDisplay"
-        label="Vault type"
-      >
-        <VaultTypeBadges :vault-address="vault.address" />
-      </VaultOverviewLabelValue>
+          <VaultTypeChip
+            v-else
+            :vault="vault"
+            type="unknown"
+            class="w-fit"
+          />
+        </VaultOverviewLabelValue>
+        <VaultOverviewLabelValue
+          v-if="enableVaultTypeDisplay"
+          label="Vault type"
+        >
+          <VaultTypeBadges :vault-address="vault.address" />
+        </VaultOverviewLabelValue>
+      </div>
     </div>
   </div>
 </template>

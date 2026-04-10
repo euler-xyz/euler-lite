@@ -6,9 +6,6 @@ import { resetCountryCache } from '~/services/country'
 import { screenAddress } from '~/services/trm'
 import { getDefaultPageRoute } from '~/entities/menu'
 
-// Track last screened address to avoid duplicate API calls
-let lastScreenedAddress: string | null = null
-
 export const useAddressScreen = () => {
   const modal = useModal()
   const { disconnect } = useDisconnect()
@@ -38,16 +35,10 @@ export const useAddressScreen = () => {
       return false
     }
 
-    if (lastScreenedAddress === address.toLowerCase()) {
-      return false
-    }
-
     isScreening.value = true
     try {
       const vpnIsUsed = await detectVpn()
       const isRestricted = await screenAddress(address, vpnIsUsed)
-
-      lastScreenedAddress = address.toLowerCase()
 
       if (isRestricted) {
         await disconnect()
@@ -62,7 +53,6 @@ export const useAddressScreen = () => {
   }
 
   const resetScreeningCache = () => {
-    lastScreenedAddress = null
     resetVpnCache()
     resetCountryCache()
   }

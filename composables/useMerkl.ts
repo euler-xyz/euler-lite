@@ -9,6 +9,7 @@ import { mapMerklSubType } from '~/entities/reward-campaign'
 import type { TxPlan } from '~/entities/txPlan'
 import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_30S_MS } from '~/entities/tuning-constants'
 import { logWarn } from '~/utils/errorHandling'
+import { earnVaults } from '~/utils/eulerLabelsState'
 
 const {
   MERKL_API_BASE_URL,
@@ -42,6 +43,7 @@ const cacheState = {
 
 let latestOpportunitiesRequestId = 0
 let latestRewardsRequestId = 0
+let erc20FetchedForChainId = 0
 
 const loadTokens = async (chainId: number, isInitialLoading = true, forceRefresh = false) => {
   const now = Date.now()
@@ -73,6 +75,7 @@ const loadTokens = async (chainId: number, isInitialLoading = true, forceRefresh
 const processOpportunitiesToCampaigns = (
   opportunities: Opportunity[],
   opType: 'EULER' | 'ERC20LOGPROCESSOR',
+  knownVaultAddresses?: Set<string>,
 ): Map<string, RewardCampaign[]> => {
   const campaignMap = new Map<string, RewardCampaign[]>()
   const now = Math.floor(Date.now() / 1000)
@@ -81,6 +84,13 @@ const processOpportunitiesToCampaigns = (
     if (opportunity.status !== 'LIVE') continue
     if (!opportunity.campaigns?.length) continue
     if (!opportunity.aprRecord?.breakdowns) continue
+
+    // For ERC20LOGPROCESSOR: filter against known Earn vault addresses
+    // since this endpoint returns campaigns for all protocols
+    if (opType === 'ERC20LOGPROCESSOR' && knownVaultAddresses) {
+      const opportunityAddress = opportunity.identifier?.toLowerCase()
+      if (!opportunityAddress || !knownVaultAddresses.has(opportunityAddress)) continue
+    }
 
     // Build APR map from aprRecord breakdowns (keyed by campaign ID)
     // This is the actual computed APR, not the stale campaign.apr field
@@ -147,32 +157,61 @@ const loadOpportunities = async (chainId: number, isInitialLoading = true, force
       isOpportunitiesLoading.value = true
     }
 
-    // Fetch from both endpoints: EULER type for standard vaults and ERC20LOGPROCESSOR for Earn vaults
-    const urls = [
-      { url: `${MERKL_API_BASE_URL}/opportunities/?chainId=${chainId}&type=EULER&campaigns=true`, type: 'EULER' as const },
-      { url: `${MERKL_API_BASE_URL}/opportunities/?chainId=${chainId}&mainProtocolId=euler&campaigns=true&type=ERC20LOGPROCESSOR`, type: 'ERC20LOGPROCESSOR' as const },
-    ]
+    // Fetch from both endpoints: EULER type for standard vaults and ERC20LOGPROCESSOR for Earn vaults.
+    // ERC20LOGPROCESSOR is fetched without mainProtocolId filter (unreliable tagging by Merkl)
+    // and filtered client-side against known Earn vault addresses from labels.
+    // Merkl API caps items at 100, so we paginate ERC20LOGPROCESSOR to get all results.
+    const fetchAllPages = async (baseUrl: string): Promise<{ data: Opportunity[], complete: boolean }> => {
+      const pageSize = 100
+      const allData: Opportunity[] = []
+      let page = 0
 
-    const results = await Promise.all(
-      urls.map(async ({ url, type }) => {
+      while (true) {
         try {
-          const res = await axios.get(url)
-          const data: Opportunity[] = Array.isArray(res.data) ? res.data : []
-          return { data, type }
+          const res = await axios.get(`${baseUrl}&items=${pageSize}&page=${page}`)
+          const results: Opportunity[] = Array.isArray(res.data) ? res.data : []
+          allData.push(...results)
+          if (results.length < pageSize) break
+          page++
         }
         catch (error) {
           logWarn('merkl/fetchOpportunity', error)
-          return { data: [] as Opportunity[], type }
+          return { data: allData, complete: false }
         }
-      }),
-    )
+      }
+
+      return { data: allData, complete: true }
+    }
+
+    // Always fetch EULER campaigns. Only fetch ERC20LOGPROCESSOR when Earn vault
+    // labels are available for client-side filtering (the earnVaults watcher will
+    // trigger a force-refresh once labels load).
+    const eulerUrl = `${MERKL_API_BASE_URL}/opportunities/?chainId=${chainId}&type=EULER&campaigns=true`
+    const earnAddrs = earnVaults.value
+    const knownEarnVaults = earnAddrs.length > 0
+      ? new Set(earnAddrs.map(addr => addr.toLowerCase()))
+      : undefined
+
+    const fetches: Promise<{ data: Opportunity[], complete: boolean }>[] = [fetchAllPages(eulerUrl)]
+    if (knownEarnVaults) {
+      const erc20Url = `${MERKL_API_BASE_URL}/opportunities/?chainId=${chainId}&type=ERC20LOGPROCESSOR&campaigns=true`
+      fetches.push(fetchAllPages(erc20Url))
+    }
+
+    const results = await Promise.all(fetches)
 
     if (requestId !== latestOpportunitiesRequestId) return
 
+    const allComplete = results.every(r => r.complete)
+    const [eulerResult, erc20Result] = results
+
     const merged = new Map<string, RewardCampaign[]>()
 
-    for (const { data, type } of results) {
-      const partial = processOpportunitiesToCampaigns(data, type)
+    for (const { data, type } of [
+      { data: eulerResult.data, type: 'EULER' as const },
+      { data: erc20Result?.data ?? [], type: 'ERC20LOGPROCESSOR' as const },
+    ]) {
+      const partial = processOpportunitiesToCampaigns(data, type, type === 'ERC20LOGPROCESSOR' ? knownEarnVaults : undefined)
       for (const [vault, campaigns] of partial) {
         const existing = merged.get(vault)
         if (existing) existing.push(...campaigns)
@@ -181,7 +220,11 @@ const loadOpportunities = async (chainId: number, isInitialLoading = true, force
     }
 
     merklCampaigns.value = merged
-    cacheState.opportunities = { chainId, timestamp: Date.now() }
+    // Only cache when all pages were fetched successfully — partial results
+    // from a mid-pagination failure should not be treated as a complete dataset.
+    if (allComplete) {
+      cacheState.opportunities = { chainId, timestamp: Date.now() }
+    }
   }
   catch (e) {
     logWarn('merkl/loadOpportunities', e)
@@ -336,6 +379,21 @@ export const useMerkl = () => {
     }
   }, { immediate: true })
 
+  // Re-fetch opportunities when Earn vault labels become available,
+  // so ERC20LOGPROCESSOR campaigns are properly filtered.
+  // { immediate: true } catches the case where labels are already loaded by the time
+  // the watcher is registered (e.g. component remounts after a chain switch).
+  // erc20FetchedForChainId is set synchronously before the async call and only here
+  // (never inside loadOpportunities) so it is always claimed against correct chain
+  // data, and concurrent watcher fires from other component mounts skip the duplicate.
+  watch(earnVaults, (val) => {
+    if (enableMerkl && val.length > 0 && chainId.value
+      && erc20FetchedForChainId !== chainId.value) {
+      erc20FetchedForChainId = chainId.value
+      loadOpportunities(chainId.value, false, true)
+    }
+  }, { immediate: true })
+
   watch([isConnected, chainId], (val, oldVal) => {
     const [connected, currentChainId] = val
     const [oldConnected, oldChainId] = oldVal ?? [undefined, undefined]
@@ -345,6 +403,7 @@ export const useMerkl = () => {
       merklCampaigns.value = new Map()
       rewards.value = []
       cacheState.opportunities = { chainId: 0, timestamp: 0 }
+      erc20FetchedForChainId = 0
       cacheState.rewards = { chainId: 0, address: '', timestamp: 0 }
     }
 
@@ -356,7 +415,11 @@ export const useMerkl = () => {
     }
 
     if (enableMerkl && !isLoaded.value) {
-      loadOpportunities(chainId.value)
+      // Skip if the earnVaults watcher already initiated the fetch synchronously
+      // (happens when earn labels are loaded before this watcher fires on mount)
+      if (erc20FetchedForChainId !== chainId.value) {
+        loadOpportunities(chainId.value)
+      }
       loadTokens(chainId.value)
       loadRewards(chainId.value)
       isLoaded.value = true

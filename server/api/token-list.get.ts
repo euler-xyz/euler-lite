@@ -169,48 +169,35 @@ export default defineEventHandler(async (event) => {
   rateLimiter.consume(event)
 
   const query = getQuery(event)
-  const chainId = query.chainId ? Number(query.chainId) : null
-  const key = chainId ? String(chainId) : null
-
-  const eulerFresh = key ? eulerApiCache.get(key) : []
-  const uniswapFresh = uniswapCache.get('all')
-  const defillamaFresh = key ? defillamaCache.get(key) : []
-
-  // All data is fresh — return immediately
-  if (eulerFresh !== undefined && uniswapFresh !== undefined && defillamaFresh !== undefined) {
-    return { tokens: deduplicateTokens(eulerFresh, deduplicateTokens(defillamaFresh, uniswapFresh)) }
+  const chainId = Number(query.chainId)
+  if (!Number.isInteger(chainId) || chainId <= 0) {
+    throw createError({ statusCode: 400, statusMessage: 'chainId is required and must be a positive integer' })
   }
 
-  // Check stale fallbacks
-  const eulerStale = key ? eulerApiCache.getStale(key) : undefined
-  const uniswapStale = uniswapCache.getStale('all')
-  const defillamaStale = key ? defillamaCache.getStale(key) : undefined
+  // --- Primary source: Euler API (always awaited) ---
+  const euler = await fetchEulerApi(chainId)
 
-  // Have stale data — return it immediately and revalidate in background.
-  // defillamaStale is intentionally excluded: DefiLlama is supplementary; Euler or Uniswap
-  // stale data is sufficient to justify returning a response without a cold await.
-  if (eulerStale !== undefined || uniswapStale !== undefined) {
-    if (eulerFresh === undefined && chainId) void fetchEulerApi(chainId)
-    if (uniswapFresh === undefined) void fetchUniswap()
-    if (defillamaFresh === undefined && chainId) void fetchDefillama(chainId)
-
-    const euler = eulerFresh ?? eulerStale ?? []
-    const uniswap = uniswapFresh ?? uniswapStale ?? []
-    const defillama = defillamaFresh ?? defillamaStale ?? []
-    return { tokens: deduplicateTokens(euler, deduplicateTokens(defillama, uniswap)) }
+  // --- Supplemental: Uniswap (best-effort, non-blocking) ---
+  let uniswap = uniswapCache.get('all')
+  if (uniswap === undefined) {
+    void fetchUniswap()
+    uniswap = uniswapCache.getStale('all') ?? []
   }
 
-  // Completely cold — await all sources in parallel; all three handle errors internally
-  const [euler, uniswap, defillama] = await Promise.all([
-    chainId ? fetchEulerApi(chainId) : Promise.resolve([]),
-    fetchUniswap(),
-    chainId ? fetchDefillama(chainId) : Promise.resolve([]),
-  ])
-
-  if (euler.length === 0 && uniswap.length === 0 && defillama.length === 0) {
-    throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
+  // --- Supplemental: DefiLlama (best-effort, non-blocking) ---
+  const key = String(chainId)
+  let defillama = defillamaCache.get(key)
+  if (defillama === undefined) {
+    void fetchDefillama(chainId)
+    defillama = defillamaCache.getStale(key) ?? []
   }
 
   // Priority: Euler API > DefiLlama > Uniswap
-  return { tokens: deduplicateTokens(euler, deduplicateTokens(defillama, uniswap)) }
+  const tokens = deduplicateTokens(euler, deduplicateTokens(defillama, uniswap))
+
+  if (tokens.length === 0) {
+    throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
+  }
+
+  return { tokens }
 })

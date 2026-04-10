@@ -463,10 +463,14 @@ export const fetchVaults = async function* (
 
       const vaults: Vault[] = []
       const failedAddresses: string[] = []
+      let hasTransportError = false
 
       for (let i = 0; i < results.length; i++) {
         const result = results[i]
-        if (result.success && result.result) {
+        if (result.transportError) {
+          hasTransportError = true
+        }
+        else if (result.success && result.result) {
           // batchLensCalls returns decoded result directly (viem unwraps single outputs)
           const raw = result.result as Record<string, unknown>
           const vault = processVaultResult(raw, batchAddresses[i])
@@ -482,8 +486,8 @@ export const fetchVaults = async function* (
         }
       }
 
-      // Retry failed items individually
-      if (failedAddresses.length > 0) {
+      // Only retry individually for on-chain reverts, not transport errors (403, network failures)
+      if (failedAddresses.length > 0 && !hasTransportError) {
         logWarn('vault/fetchBatch', `Retrying ${failedAddresses.length} failed vaults individually`)
         const retryResults = await Promise.all(
           failedAddresses.map(addr => fetchVaultIndividually(addr)),
@@ -493,6 +497,9 @@ export const fetchVaults = async function* (
             vaults.push(vault)
           }
         }
+      }
+      else if (hasTransportError) {
+        logWarn('vault/fetchBatch', `Skipping individual retries — RPC transport error`)
       }
 
       return vaults

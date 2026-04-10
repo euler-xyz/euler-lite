@@ -31,7 +31,7 @@ const styles = reactive({
     width: `0px`,
   },
   thumb: {
-    transform: `translate(-10px, -50%)`,
+    transform: `translate(0px, -50%)`,
   },
 })
 
@@ -59,8 +59,9 @@ const render = async () => {
     return
   }
   const x = ((model.value - min) / (max - min)) * trackBox.width
-  styles.trackActive.width = `${Math.min(x, trackBox.width)}px`
-  styles.thumb.transform = `translate(calc(${Math.min(x, trackBox.width)}px - 10px), -50%)`
+  const thumbX = Math.max(0, Math.min(x - 10, trackBox.width - 20))
+  styles.trackActive.width = `${thumbX + 10}px`
+  styles.thumb.transform = `translate(${thumbX}px, -50%)`
 }
 const onPointerDown = () => {
   if (!trackBox && trackEl.value) {
