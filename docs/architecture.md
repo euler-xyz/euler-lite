@@ -280,9 +280,9 @@ The Nuxt server layer (`server/api/`) proxies requests to external services (RPC
 |---|---|
 | **CORS** (`server/middleware/cors.ts`) | Restricts API access to configured origins |
 | **Body size limits** (`server/middleware/body-limit.ts`) | Caps request payloads (1 MB RPC, 2 MB Tenderly) |
-| **Geo-blocking** (`server/middleware/geo-gate.ts`) | Blocks sanctioned countries via Cloudflare headers |
-| **RPC method whitelist** (`server/api/rpc/[chainId].ts`) | Only 16 safe read/send methods are proxied |
-| **Rate limiting** (`server/utils/rate-limit.ts`) | Per-IP cost-based budgets (see below) |
+| **Geo-blocking** (`server/middleware/geo-gate.ts`) | Blocks sanctioned countries via Cloudflare `CF-IPCountry`; fails closed (HTTP 451) if country is undetermined in prod |
+| **RPC method whitelist** (`server/api/rpc/[chainId].ts`) | Only 15 safe read-only methods are proxied |
+| **Rate limiting** (`server/utils/rate-limit.ts`) | Per-IP cost-based budgets (see below); fails closed (HTTP 403) if `CF-Connecting-IP` is absent in prod |
 | **Swap verifier validation** (`utils/swap-validation.ts`) | Validates swap verifier addresses against known config |
 
 #### Rate Limiting
@@ -294,18 +294,26 @@ The app includes a built-in per-IP rate limiter as a defense-in-depth measure. D
 - **Tenderly simulate**: 10 requests
 - **Address screening**: 10 requests
 
+**Wallet screening fail-closed**: `server/api/screen-address.post.ts` proxies address checks to the TRM API (configured via `WALLET_SCREENING_URI`). If the env var is not set, or the TRM API returns an error or times out, the endpoint returns `addressIsSuspicious: true` — the app fails closed rather than open. Operators must set `WALLET_SCREENING_URI` or all users will be treated as suspicious.
+
 **Important**: This is a best-effort safeguard, not a security boundary. It catches accidental abuse (e.g. a client stuck in a retry loop) but will not stop a determined attacker. Known limitations:
 
 - **In-memory state is per-process** — if Nitro spawns multiple workers, each gets its own budget, effectively multiplying the limit.
-- **IP detection depends on the network layer** — behind Cloudflare, the limiter uses `CF-Connecting-IP` (reliable, not spoofable). Without a trusted reverse proxy, it falls back to `X-Forwarded-For`, which is client-controlled and trivially spoofable.
 
-#### Deployment Recommendations
+#### Cloudflare Requirement
 
-For production, operators should run the app behind a reverse proxy that handles rate limiting at the infrastructure level:
+**Production deployments must be behind Cloudflare.** This is a hard requirement, not a recommendation — two independent server features depend on it:
 
-- **Cloudflare**: Recommended. Provides rate limiting, DDoS protection, geo-headers, and a trustworthy `CF-Connecting-IP` header out of the box.
-- **Nginx / Caddy / HAProxy**: Configure `limit_req` (Nginx) or equivalent, and ensure the proxy forwards the real client IP in a header the app can trust.
-- **No reverse proxy**: The built-in rate limiter still provides basic protection against casual abuse, but should not be relied upon as the sole defense for API keys and upstream service quotas.
+1. **Geo-gate** (`server/middleware/geo-gate.ts`) reads `CF-IPCountry` to enforce sanctioned-country blocks. Without Cloudflare, the country cannot be determined and all API requests are rejected with HTTP 451.
+2. **Rate limiter** (`server/utils/rate-limit.ts`) uses `CF-Connecting-IP` as the trusted client IP. Without Cloudflare, `CF-Connecting-IP` is absent and all API requests are rejected with HTTP 403.
+
+Bypass behaviour per environment:
+
+| Environment | Geo-gate | Rate limiter |
+|---|---|---|
+| `prd` | CF required; fail-closed (HTTP 451) if absent. `DEV_GEO_COUNTRY` bypasses fail-closed if set. | CF required; fail-closed (HTTP 403) if absent. |
+| `stg` | CF required; fail-closed (HTTP 451) if absent. `DEV_GEO_COUNTRY` bypasses fail-closed if set. | CF **not** required; falls back to `X-Forwarded-For`. |
+| `dev` | CF not required; falls back to `DEV_GEO_COUNTRY`, then allows through if unset. | CF not required; falls back to `X-Forwarded-For`. |
 
 ## 📱 Mobile-First Architecture
 

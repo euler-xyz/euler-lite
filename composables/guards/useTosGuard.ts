@@ -112,11 +112,12 @@ export const useTosGuard = () => {
     }
   }
 
-  // Register/unregister blocker
-  // When TOS fails to load, we fail open — don't block operations (user might need to repay etc.)
-  // The TOS signing will happen on a future operation when the endpoint recovers.
+  // Register/unregister blocker — fail closed
   const updateBlockerRegistration = () => {
-    if (isTermsRequired.value && !tosLoadFailed.value) {
+    if (enableTosSignature && tosLoadFailed.value) {
+      registerOperationBlocker('tos', 'Unable to load Terms of Use')
+    }
+    else if (isTermsRequired.value) {
       registerOperationBlocker('tos', 'Terms of Use acceptance required')
     }
     else {

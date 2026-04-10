@@ -5,7 +5,7 @@ import { VaultSortTypeModal } from '#components'
 const model = defineModel<string>({ required: true })
 const dir = defineModel<'desc' | 'asc'>('dir', { default: 'desc' })
 const props = defineProps<{
-  options: string[]
+  options: { label: string, icon?: string }[]
   placeholder?: string
   title?: string
   disableDir?: boolean

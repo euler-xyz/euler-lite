@@ -6,7 +6,7 @@ export interface Opportunity {
   description: string
   howToSteps: string[]
   status: 'LIVE' | 'PAST'
-  action: 'LEND' | 'BORROW'
+  action: string
   tvl: number
   apr: number
   dailyRewards: number

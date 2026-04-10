@@ -6,9 +6,10 @@ import { flip, offset, shift, useFloating } from '@floating-ui/vue'
 
 import { isOperationBlocked, operationBlockReason } from '~/utils/operationGuardRegistry'
 import { useModal } from '~/components/ui/composables/useModal'
-import { AcknowledgeTermsModal } from '#components'
+import { AcknowledgeTermsModal, VaultUnverifiedDisclaimerModal } from '#components'
 import type { KeyringFlowState, CredentialData } from '~/composables/useKeyring'
 import type { TosGuardState } from '~/composables/guards/useTosGuard'
+import type { UnverifiedVaultGuardState } from '~/composables/guards/useUnverifiedVaultGuard'
 
 interface KeyringGuardState {
   needsVerification: boolean
@@ -29,6 +30,7 @@ const modal = useModal()
 
 const keyringGuard = inject<KeyringGuardState | null>('keyring-guard', null)
 const tosGuard = inject<TosGuardState | null>('tos-guard', null)
+const unverifiedVaultGuard = inject<UnverifiedVaultGuardState | null>('unverified-vault-guard', null)
 
 const reference = ref(null)
 const floating = ref(null)
@@ -85,6 +87,20 @@ const showTosFlow = computed(() =>
   !showKeyringFlow.value && tosGuard?.isTermsRequired === true && !tosGuard?.tosLoadFailed,
 )
 
+const showUnverifiedVaultFlow = computed(() =>
+  !showKeyringFlow.value && !showTosFlow.value && unverifiedVaultGuard?.isAcknowledgmentRequired === true,
+)
+
+const openUnverifiedVaultModal = () => {
+  modal.open(VaultUnverifiedDisclaimerModal, {
+    props: {
+      acceptAction: () => {
+        unverifiedVaultGuard?.acknowledgeRisk()
+      },
+    },
+  })
+}
+
 const openTermsModal = () => {
   modal.open(AcknowledgeTermsModal, {
     props: {
@@ -129,6 +145,17 @@ const openTermsModal = () => {
         @click="openTermsModal"
       >
         Accept Terms Of Use
+      </UiButton>
+    </template>
+
+    <!-- Unverified vault acknowledgment flow -->
+    <template v-else-if="showUnverifiedVaultFlow">
+      <UiButton
+        size="large"
+        variant="red"
+        @click="openUnverifiedVaultModal"
+      >
+        Acknowledge Unverified Vault Risk
       </UiButton>
     </template>
 

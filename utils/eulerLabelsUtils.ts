@@ -5,7 +5,7 @@ import {
   type EulerLabelVaultOverride,
 } from '~/entities/euler/labels'
 import type { EarnVault, Vault } from '~/entities/vault'
-import type { OracleAdapterMeta } from '~/entities/oracle'
+import { type OracleAdapterMeta, OracleAdapterCheckSeverity } from '~/entities/oracle'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import {
   products,
@@ -19,6 +19,23 @@ import {
   earnVaultNotices,
   notExplorableEarnVaults,
 } from '~/utils/eulerLabelsState'
+
+// ── Internal helpers ─────────────────────────────────────────
+
+// This check reflects internal indexing state,
+// not an oracle health signal surfaced to end users.
+const SUPPRESSED_CHECK_ID = 'Adapter whitelist'
+
+function isHttpUrl(value: string): boolean {
+  if (!value) return false
+  try {
+    const { protocol } = new URL(value)
+    return protocol === 'http:' || protocol === 'https:'
+  }
+  catch {
+    return false
+  }
+}
 
 // ── Normalization helpers ────────────────────────────────────
 
@@ -75,6 +92,7 @@ export const normalizeEntities = (data: Record<string, EulerLabelEntity>) => {
     normalized[key] = {
       ...entity,
       addresses: normalizedAddresses,
+      url: isHttpUrl(entity.url) ? entity.url : '',
     }
   })
   return normalized
@@ -103,7 +121,19 @@ export const normalizeOracleAdapters = (data: unknown) => {
       provider: typeof raw.provider === 'string' ? raw.provider : undefined,
       methodology: typeof raw.methodology === 'string' ? raw.methodology : undefined,
       label: typeof raw.label === 'string' ? raw.label : undefined,
-      checks: Array.isArray(raw.checks) ? raw.checks.filter((v): v is string => typeof v === 'string') : undefined,
+      checks: Array.isArray(raw.checks)
+        ? raw.checks
+            .filter((v): v is Record<string, unknown> => !!v && typeof v === 'object')
+            .filter(c => c.id !== SUPPRESSED_CHECK_ID)
+            .map(c => ({
+              id: typeof c.id === 'string' ? c.id : '',
+              message: typeof c.message === 'string' ? c.message : '',
+              pass: typeof c.pass === 'boolean' ? c.pass : false,
+              severity: Object.values(OracleAdapterCheckSeverity).includes(c.severity as OracleAdapterCheckSeverity)
+                ? c.severity as OracleAdapterCheckSeverity
+                : OracleAdapterCheckSeverity.Info,
+            }))
+        : undefined,
     }
 
     normalized[meta.oracle.toLowerCase()] = meta

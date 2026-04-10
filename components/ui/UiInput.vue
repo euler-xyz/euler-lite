@@ -15,6 +15,7 @@ const props = withDefaults(
     icon?: string
     clearable?: boolean
     compact?: boolean
+    autocomplete?: string
   }>(),
   {
     type: 'text',
@@ -58,6 +59,7 @@ const classes = computed(() => {
       :disabled="disabled"
       :name="name"
       :placeholder="placeholder"
+      :autocomplete="autocomplete"
       :aria-invalid="error"
       :aria-disabled="disabled"
       :class="['ui-input__field', icon && 'icon', showClear && 'has-clear']"

@@ -7,15 +7,12 @@
  * accessible to the client synchronously via window.__CHAIN_CONFIG__.
  */
 export default defineNitroPlugin((nitroApp) => {
-  const rpcUrls: Record<string, string> = {}
   const enabledChainIds: number[] = []
 
   for (const [key, value] of Object.entries(process.env)) {
     const rpcMatch = key.match(/^RPC_URL_HTTP_(\d+)$/)
     if (rpcMatch && value) {
-      const chainId = Number(rpcMatch[1])
-      enabledChainIds.push(chainId)
-      rpcUrls[String(chainId)] = value
+      enabledChainIds.push(Number(rpcMatch[1]))
     }
   }
 
@@ -29,7 +26,7 @@ export default defineNitroPlugin((nitroApp) => {
 
   enabledChainIds.sort((a, b) => a - b)
 
-  const scriptTag = `<script>window.__CHAIN_CONFIG__=${JSON.stringify({ enabledChainIds, subgraphUris, rpcUrls })}</script>`
+  const scriptTag = `<script>window.__CHAIN_CONFIG__=${JSON.stringify({ enabledChainIds, subgraphUris })}</script>`
 
   nitroApp.hooks.hook('render:html', (html) => {
     html.head.push(scriptTag)

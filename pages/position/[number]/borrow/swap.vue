@@ -203,14 +203,6 @@ const swap = useSwapPageLogic({
         targetDebt: 0n,
         currentDebt: currentDebt.value,
       },
-      logContext: {
-        fromVault: fromVault.value.address,
-        toVault: toVault.value.address,
-        amount: fromAmount.value,
-        slippage: slippage.value,
-        swapperMode: SwapperMode.TARGET_DEBT,
-        isRepay: true,
-      },
     }
   },
 

@@ -145,11 +145,14 @@ const updateBorrowPositions = async (
       rpcUrl.value,
     )
 
+    let hasTransportError = false
     for (let i = 0; i < results.length; i++) {
-      if (results[i].success && results[i].result) {
+      if (results[i].transportError) hasTransportError = true
+      else if (results[i].success && results[i].result) {
         accountInfoMap.set(nonPythEntries[i].key, results[i].result!)
       }
     }
+    if (hasTransportError) logWarn('useAccountPositions/accountInfo', 'RPC transport error — account info results may be incomplete')
   }
 
   if (positionGuard.isStale(gen)) return
@@ -308,13 +311,16 @@ const updateBorrowPositions = async (
       rpcUrl.value,
     )
 
+    let hasTransportError = false
     for (let i = 0; i < collateralResults.length; i++) {
       const r = collateralResults[i]
-      if (r.success && r.result) {
+      if (r.transportError) hasTransportError = true
+      else if (r.success && r.result) {
         const key = `${processed[i].entry.subAccount}:${processed[i].collateralAddress}`
         collateralAssets.set(key, toBigInt(r.result.assets))
       }
     }
+    if (hasTransportError) logWarn('useAccountPositions/collateralInfo', 'RPC transport error — collateral asset results may be incomplete')
   }
 
   if (positionGuard.isStale(gen)) return
@@ -515,8 +521,13 @@ const updateSavingsPositions = async (
       rpcUrl.value,
     )
 
+    let hasTransportError = false
     for (let i = 0; i < results.length; i++) {
       const r = results[i]
+      if (r.transportError) {
+        hasTransportError = true
+        continue
+      }
       if (!r.success || !r.result) continue
 
       const res = r.result
@@ -529,6 +540,7 @@ const updateSavingsPositions = async (
         assets: res.vaultAccountInfo.assets,
       } as AccountDepositPosition)
     }
+    if (hasTransportError) logWarn('useAccountPositions/depositInfo', 'RPC transport error — deposit position results may be incomplete')
   }
 
   if (positionGuard.isStale(gen)) return

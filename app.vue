@@ -1,8 +1,14 @@
 <script setup lang="ts">
-import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
+import { POLL_INTERVAL_60S_MS, TOKEN_LIST_RETRY_DELAY_MS } from '~/entities/tuning-constants'
+import { useModal } from '~/components/ui/composables/useModal'
+import { MigrationAnnouncementModal } from '#components'
 
 const route = useRoute()
 const router = useRouter()
+const { migrationAnnouncementUrl } = useDeployConfig()
+const migrationAnnouncementSeen = useLocalStorage('migration-announcement-seen', false)
+const modal = useModal()
+
 const { loadEulerConfig, chainId } = useEulerAddresses()
 const { loadVaults, isReady: isVaultsReady, resetVaultsState, refreshVaults } = useVaults()
 const { loadTokenList, isLoaded: isTokenListLoaded } = useTokenList()
@@ -41,10 +47,16 @@ useHead({
 const isMenuVisible = ref(true)
 const isHeaderVisible = ref(true)
 let interval: NodeJS.Timeout | null = null
+let tokenListRetryTimeout: NodeJS.Timeout | null = null
 
 const checkOnboarding = () => {
   const isOnboardingCompleted = useLocalStorage('is-onboarding-completed', false)
   if (!isOnboardingCompleted.value) {
+    const isDeepLink = route.path !== '/' && route.path !== '/onboarding'
+    if (isDeepLink) {
+      isOnboardingCompleted.value = true
+      return
+    }
     router.push('/onboarding')
   }
 }
@@ -71,16 +83,42 @@ watch(route, () => {
   })
 }, { immediate: true })
 
+const checkMigrationAnnouncement = () => {
+  if (!migrationAnnouncementUrl || migrationAnnouncementSeen.value) return
+
+  modal.open(MigrationAnnouncementModal, {
+    isNotClosable: true,
+    onClose: () => { migrationAnnouncementSeen.value = true },
+    props: {
+      announcementUrl: migrationAnnouncementUrl,
+    },
+  })
+}
+
 await loadEulerConfig()
 checkOnboarding()
+// onMounted (not synchronous like checkOnboarding) because the modal system requires the DOM
+onMounted(checkMigrationAnnouncement)
 
 watch(chainId, () => {
   resetVaultsState()
   resetBalances()
+  if (tokenListRetryTimeout) {
+    clearTimeout(tokenListRetryTimeout)
+    tokenListRetryTimeout = null
+  }
   const targetChainId = chainId.value
   const labelsPromise = loadLabels()
   void loadTokenList()
   void loadCountry()
+  // One-shot retry after 15s to pick up supplemental token sources
+  // (Uniswap/DefiLlama background fetches complete on the server by then)
+  tokenListRetryTimeout = setTimeout(async () => {
+    tokenListRetryTimeout = null
+    if (chainId.value !== targetChainId) return
+    await loadTokenList(true)
+    updateBalances()
+  }, TOKEN_LIST_RETRY_DELAY_MS)
   void labelsPromise.then(() => {
     if (chainId.value !== targetChainId) return
     void loadVaults()
@@ -125,6 +163,9 @@ watch(portfolioRefreshCounter, () => {
 onUnmounted(() => {
   if (interval) {
     clearInterval(interval)
+  }
+  if (tokenListRetryTimeout) {
+    clearTimeout(tokenListRetryTimeout)
   }
 })
 </script>

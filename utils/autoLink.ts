@@ -1,4 +1,4 @@
-const LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|https?:\/\/[^\s<>"')\]]+/g
+const LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^\s)"]+)\)|https?:\/\/[^\s<>"')\]]+/g
 const BOLD_RE = /\*\*(.+?)\*\*/g
 const NEWLINE_RE = /\r?\n/g
 
@@ -23,10 +23,10 @@ export const formatEulerLabelText = (text: string): string => {
     formatted += formatInline(text.slice(lastIndex, index))
 
     if (match[1] && match[2]) {
-      formatted += `<a href="${match[2]}" target="_blank" rel="noopener noreferrer">${escapeHtml(match[1])}</a>`
+      formatted += `<a href="${escapeHtml(match[2])}" target="_blank" rel="noopener noreferrer">${escapeHtml(match[1])}</a>`
     }
     else {
-      formatted += `<a href="${match[0]}" target="_blank" rel="noopener noreferrer">${escapeHtml(match[0])}</a>`
+      formatted += `<a href="${escapeHtml(match[0])}" target="_blank" rel="noopener noreferrer">${escapeHtml(match[0])}</a>`
     }
 
     lastIndex = index + match[0].length

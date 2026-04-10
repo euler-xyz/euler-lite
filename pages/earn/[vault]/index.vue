@@ -134,10 +134,9 @@ const submit = async () => {
         asset: asset.value,
         amount: amount.value,
         plan: plan.value || undefined,
-        onConfirm: () => {
-          setTimeout(() => {
-            send()
-          }, 400)
+        submittingLabel: 'Submitting...',
+        onConfirm: async () => {
+          await send()
         },
       },
     })
@@ -169,27 +168,23 @@ const send = async () => {
     isSubmitting.value = false
   }
 }
-const updateEstimates = useDebounceFn(async () => {
-  if (!vault.value) {
-    return
-  }
+const updateEstimates = async () => {
+  if (!vault.value) return
   try {
     await updateEarnVault(vault.value.address)
-    if (!asset.value?.address) {
-      return
-    }
+    if (!asset.value?.address) return
     estimateSupplyAPY.value = nanoToValue(vault.value.interestRateInfo.supplyAPY, 25) + totalRewardsAPY.value
     monthlyEarnings.value = !amount.value
       ? 0
       : +(amount.value || 0) * (estimateSupplyAPY.value / 12 / 100)
   }
   catch (e) {
-    console.warn(e)
+    logWarn('earn-supply/estimates', e)
   }
   finally {
     isEstimatesLoading.value = false
   }
-}, 500)
+}
 const onSupplyInfoIconClick = () => {
   modal.open(VaultSupplyApyModal, {
     props: {
@@ -214,14 +209,8 @@ watchEffect(async () => {
   monthlyEarningsUsd.value = await getAssetUsdValueOrZero(monthlyEarnings.value, vault.value, 'off-chain')
 })
 
-watch(amount, async () => {
+watch(amount, () => {
   clearSimulationError()
-  if (!vault.value) {
-    return
-  }
-  if (!isEstimatesLoading.value) {
-    isEstimatesLoading.value = true
-  }
   updateEstimates()
 })
 

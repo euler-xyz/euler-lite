@@ -84,6 +84,7 @@ const loadTokenList = async (forceRefresh = false) => {
 
     const gen = guard.next()
     isLoading.value = true
+    isLoaded.value = false
 
     const res = await axios.get('/api/token-list', { params: { chainId } })
     if (guard.isStale(gen)) return

@@ -20,7 +20,7 @@ defineProps({
 <template>
   <div class="flex items-center animate-fade-in-up">
     <div
-      class="w-[52px] h-[52px] rounded-[14px] mr-16 bg-gradient-to-br from-accent-300/30 to-accent-400/40 flex items-center justify-center text-accent-600 flex-shrink-0 shadow-sm"
+      class="w-[64px] h-[64px] mobile:w-[48px] mobile:h-[48px] rounded-[16px] mobile:rounded-[12px] mr-16 mobile:mr-12 bg-gradient-to-br from-accent-300/30 to-accent-400/40 flex items-center justify-center text-accent-600 flex-shrink-0 shadow-sm"
       :class="[
         !icon && arrowRight ? '[&>svg]:-rotate-90' : '',
         !icon && arrowDown && !arrowRight ? '[&>svg]:rotate-0' : '',
@@ -29,14 +29,14 @@ defineProps({
     >
       <SvgIcon
         :name="icon || 'arrow-big'"
-        :class="icon ? '!w-28 !h-28' : ''"
+        :class="icon ? '!w-40 !h-40' : '!w-36 !h-36'"
       />
     </div>
     <div>
-      <h1 class="text-h3 mb-4 text-content-primary">
+      <h1 class="text-h2 mobile:text-h3 mb-4 text-content-primary">
         {{ title }}
       </h1>
-      <p class="text-content-tertiary">
+      <p class="text-content-tertiary text-lg mobile:text-p3">
         {{ description }}
       </p>
     </div>

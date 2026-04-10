@@ -21,7 +21,7 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, amount, onConfirm, plan, swapToAsset, swapToAmount, supplyingAssetForBorrow, supplyingAmount, transferAmounts } = defineProps<{
+const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, amount, onConfirm, plan, swapToAsset, swapToAmount, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel } = defineProps<{
   type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
@@ -33,11 +33,13 @@ const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, 
   swapToAmount?: number | string
   campaignInfo?: Campaign
   reulUnlockInfo?: REULUnlockInfo
-  onConfirm: () => void
+  onConfirm: () => void | Promise<void>
   subAccount?: string
   hasBorrows?: boolean
   /** Known amounts for transferFromMax steps, keyed by vault address (lowercase) */
   transferAmounts?: Record<string, string>
+  /** Label shown on the button while executing */
+  submittingLabel?: string
 }>()
 
 const { address: walletAddress, chainId: currentChainId } = useWagmi()
@@ -108,9 +110,26 @@ const handleTenderlySimulate = async () => {
   }
 }
 
-const handleConfirm = () => {
-  emits('close')
-  onConfirm()
+const internalSubmitting = ref(false)
+
+const handleConfirm = async () => {
+  if (internalSubmitting.value) return
+  const result = onConfirm()
+  // If onConfirm returns a promise, keep the modal open with a loading state
+  // and let the caller close it via modal.close(). Otherwise close immediately
+  // (backwards-compatible with existing sync callbacks).
+  if (result && typeof (result as Promise<void>).then === 'function') {
+    internalSubmitting.value = true
+    try {
+      await result
+    }
+    finally {
+      internalSubmitting.value = false
+    }
+  }
+  else {
+    emits('close')
+  }
 }
 
 const displaySteps = computed((): DisplayStep[] => {
@@ -305,10 +324,11 @@ const permit2DisclaimerText = 'You are granting the permit2 contract unlimited a
         variant="primary"
         size="xlarge"
         rounded
-        :disabled="isSpyMode"
+        :disabled="isSpyMode || internalSubmitting"
+        :loading="internalSubmitting"
         @click="handleConfirm"
       >
-        {{ isSpyMode ? 'Spy mode (read-only)' : btnLabel }}
+        {{ isSpyMode ? 'Spy mode (read-only)' : (internalSubmitting && submittingLabel ? submittingLabel : btnLabel) }}
       </UiButton>
     </div>
   </BaseModalWrapper>

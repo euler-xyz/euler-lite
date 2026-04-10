@@ -123,6 +123,9 @@ export default defineNuxtConfig({
       configEnableMerkl: '',
       configEnableIncentra: '',
       configEnableFuul: '',
+      // Migration announcement: set to a tweet/announcement URL to show a
+      // one-time modal explaining the app upgrade. Empty = disabled (default).
+      configMigrationAnnouncementUrl: '',
       // External token list URLs for swap token selector
       configUniswapTokenListUrl: '',
       configDefillamaTokenListUrl: '',

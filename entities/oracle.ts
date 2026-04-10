@@ -53,6 +53,20 @@ export type OracleAdapterEntry = {
   quote: Address
 }
 
+export enum OracleAdapterCheckSeverity {
+  High = 'HIGH',
+  Medium = 'MEDIUM',
+  Low = 'LOW',
+  Info = 'INFO',
+}
+
+export type OracleAdapterCheck = {
+  id: string
+  message: string
+  pass: boolean
+  severity: OracleAdapterCheckSeverity
+}
+
 export type OracleAdapterMeta = {
   oracle: Address
   base?: Address
@@ -61,7 +75,15 @@ export type OracleAdapterMeta = {
   provider?: string
   methodology?: string
   label?: string
-  checks?: string[]
+  checks?: OracleAdapterCheck[]
+}
+
+export function getChecksStatus(checks: OracleAdapterCheck[] | undefined): 'positive' | 'warning' | 'negative' | null {
+  if (!checks?.length) return null
+  const failed = checks.filter(c => !c.pass)
+  if (!failed.length) return 'positive'
+  if (failed.some(c => c.severity === OracleAdapterCheckSeverity.High)) return 'negative'
+  return 'warning'
 }
 
 type OracleAdapterOptions = {
