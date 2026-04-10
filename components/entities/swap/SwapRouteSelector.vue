@@ -116,7 +116,19 @@ const onSelect = (provider: string) => {
                 >
                   {{ item.badge.label }}
                 </p>
-                <span class="truncate">{{ item.routeLabel || '-' }}</span>
+                <span class="flex items-center gap-8">
+                  <span
+                    v-if="isCowItem(item)"
+                    class="flex items-center gap-2 text-success-600"
+                  >
+                    <SvgIcon
+                      name="gas"
+                      class="!w-12 !h-12"
+                    />
+                    Gasless
+                  </span>
+                  <span class="truncate">{{ item.routeLabel || '-' }}</span>
+                </span>
               </div>
             </div>
           </button>
