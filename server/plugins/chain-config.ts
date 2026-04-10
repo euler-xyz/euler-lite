@@ -26,7 +26,17 @@ export default defineNitroPlugin((nitroApp) => {
 
   enabledChainIds.sort((a, b) => a - b)
 
-  const scriptTag = `<script>window.__CHAIN_CONFIG__=${JSON.stringify({ enabledChainIds, subgraphUris })}</script>`
+  const enabledSet = new Set(enabledChainIds)
+  const rawDeprecated = process.env.DEPRECATED_CHAINS?.trim()
+  const deprecatedChainIds = rawDeprecated
+    ? rawDeprecated
+        .split(',')
+        .map(s => Number(s.trim()))
+        .filter(id => !Number.isNaN(id) && enabledSet.has(id))
+        .sort((a, b) => a - b)
+    : []
+
+  const scriptTag = `<script>window.__CHAIN_CONFIG__=${JSON.stringify({ enabledChainIds, deprecatedChainIds, subgraphUris })}</script>`
 
   nitroApp.hooks.hook('render:html', (html) => {
     html.head.push(scriptTag)
