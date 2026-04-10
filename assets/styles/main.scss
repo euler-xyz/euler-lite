@@ -9,6 +9,26 @@ html {
   &.rtl {
     direction: rtl;
   }
+
+}
+
+// Page-level scrollbar — dark mode only, light mode uses browser default
+html[data-theme="dark"] {
+  scrollbar-color: var(--neutral-400) var(--neutral-200);
+
+  &::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background-color: var(--neutral-400);
+    border-radius: 9999px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background-color: var(--neutral-200);
+  }
 }
 
 body {

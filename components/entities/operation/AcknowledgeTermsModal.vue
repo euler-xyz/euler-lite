@@ -5,6 +5,8 @@ const props = defineProps<{
 }>()
 const emits = defineEmits(['close'])
 
+const { tosUrl, privacyPolicyUrl, riskDisclosuresUrl } = useDeployConfig()
+
 const terms = [
   {
     icon: 'map-pin-off',
@@ -56,19 +58,19 @@ const onAccept = () => {
       <div class="text-p3 text-content-secondary">
         By accessing or using Euler's products and services, I agree to the
         <a
-          href="https://www.euler.finance/terms"
+          :href="tosUrl"
           target="_blank"
           rel="noopener noreferrer"
           class="text-accent-500 underline cursor-pointer hover:text-accent-600"
         >Terms of Use</a>,
         <a
-          href="https://www.euler.finance/privacy"
+          :href="privacyPolicyUrl"
           target="_blank"
           rel="noopener noreferrer"
           class="text-accent-500 underline cursor-pointer hover:text-accent-600"
         >Privacy Policy</a>, and
         <a
-          href="https://www.euler.finance/risk"
+          :href="riskDisclosuresUrl"
           target="_blank"
           rel="noopener noreferrer"
           class="text-accent-500 underline cursor-pointer hover:text-accent-600"

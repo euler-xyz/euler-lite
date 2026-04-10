@@ -1,11 +1,17 @@
 <script setup lang="ts">
 const emits = defineEmits(['close'])
-const { cancelAction } = defineProps<{
-  cancelAction: () => void
+const { cancelAction, acceptAction } = defineProps<{
+  cancelAction?: () => void
+  acceptAction?: () => void
 }>()
 
+const handleAccept = () => {
+  acceptAction?.()
+  emits('close')
+}
+
 const handleCancel = () => {
-  cancelAction()
+  cancelAction?.()
   emits('close')
 }
 </script>
@@ -32,7 +38,7 @@ const handleCancel = () => {
         size="large"
         rounded
         variant="primary-stroke"
-        @click="emits('close')"
+        @click="handleAccept"
       >
         Yes
       </UiButton>

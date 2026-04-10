@@ -580,10 +580,9 @@ const disableCollateral = async (vault: Vault) => {
         plan: plan || undefined,
         subAccount: position.value?.subAccount,
         hasBorrows: (position.value?.borrowed || 0n) > 0n,
-        onConfirm: () => {
-          setTimeout(() => {
-            send(vault.address)
-          }, 400)
+        submittingLabel: 'Submitting...',
+        onConfirm: async () => {
+          await send(vault.address)
         },
       },
     })
@@ -703,8 +702,20 @@ watch([isConnected, isSpyMode], () => {
       </div>
     </template>
     <template v-else-if="position">
-      <div class="text-h6 text-content-secondary bg-surface-elevated py-4 px-12 rounded-8 border border-line-default self-start">
-        Position {{ positionIndex }}
+      <div class="flex items-center gap-12">
+        <NuxtLink
+          to="/portfolio"
+          aria-label="Back to portfolio"
+          class="flex items-center justify-center self-stretch px-8 rounded-8 border border-line-default bg-surface-elevated hover:bg-card-hover transition-colors text-content-secondary hover:text-content-primary flex-shrink-0"
+        >
+          <UiIcon
+            name="arrow-left"
+            class="!w-16 !h-16"
+          />
+        </NuxtLink>
+        <div class="text-h6 text-content-secondary bg-surface-elevated py-4 px-12 rounded-8 border border-line-default">
+          Position {{ positionIndex }}
+        </div>
       </div>
 
       <VaultLabelsAndAssets
@@ -723,117 +734,119 @@ watch([isConnected, isSpyMode], () => {
 
       <div
         v-if="!hasNoBorrow"
-        class="flex flex-col gap-16 p-16 rounded-12 border border-line-default bg-card shadow-card"
+        class="flex flex-col gap-16 laptop:flex-row laptop:items-stretch"
       >
-        <div class="flex justify-between items-center">
-          <div class="flex items-center gap-4 text-p2 text-content-secondary">
-            Net APY
-            <SvgIcon
-              class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
-              name="info-circle"
-              @click="onNetApyInfoClick"
-            />
+        <div class="flex flex-col gap-16 p-16 rounded-12 border border-line-default bg-card shadow-card laptop:flex-1">
+          <div class="text-h4 text-content-primary">
+            Position summary
           </div>
-          <div
-            class="text-h5 flex items-center gap-4"
-            :class="[netAPY >= 0 ? 'text-accent-600' : 'text-error-500']"
-          >
-            <SvgIcon
-              v-if="hasSupplyRewards(collateralVault?.address || '') || hasBorrowRewards(borrowVault?.address || '', collateralVault?.address || '')"
-              class="!w-20 !h-20 text-accent-500 cursor-pointer"
-              name="sparks"
-              @click="onNetApyInfoClick"
-            />
-            {{ Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
+          <div class="flex justify-between items-center">
+            <div class="flex items-center gap-4 text-p2 text-content-secondary">
+              Net APY
+              <SvgIcon
+                class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
+                name="info-circle"
+                @click="onNetApyInfoClick"
+              />
+            </div>
+            <div
+              class="text-h5 flex items-center gap-4"
+              :class="[netAPY >= 0 ? 'text-accent-600' : 'text-error-500']"
+            >
+              <SvgIcon
+                v-if="hasSupplyRewards(collateralVault?.address || '') || hasBorrowRewards(borrowVault?.address || '', collateralVault?.address || '')"
+                class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                name="sparks"
+                @click="onNetApyInfoClick"
+              />
+              {{ Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
+            </div>
           </div>
-        </div>
-        <div class="flex justify-between items-center">
-          <div class="flex items-center gap-4 text-p2 text-content-secondary">
-            ROE
-            <SvgIcon
-              class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
-              name="info-circle"
-              @click="onRoeInfoClick"
-            />
+          <div class="flex justify-between items-center">
+            <div class="flex items-center gap-4 text-p2 text-content-secondary">
+              ROE
+              <SvgIcon
+                class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
+                name="info-circle"
+                @click="onRoeInfoClick"
+              />
+            </div>
+            <div
+              class="text-h5 flex items-center gap-4"
+              :class="[roe >= 0 ? 'text-accent-600' : 'text-error-500']"
+            >
+              <SvgIcon
+                v-if="hasSupplyRewards(collateralVault?.address || '') || hasBorrowRewards(borrowVault?.address || '', collateralVault?.address || '')"
+                class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                name="sparks"
+                @click="onRoeInfoClick"
+              />
+              {{ Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}
+            </div>
           </div>
-          <div
-            class="text-h5 flex items-center gap-4"
-            :class="[roe >= 0 ? 'text-accent-600' : 'text-error-500']"
-          >
-            <SvgIcon
-              v-if="hasSupplyRewards(collateralVault?.address || '') || hasBorrowRewards(borrowVault?.address || '', collateralVault?.address || '')"
-              class="!w-20 !h-20 text-accent-500 cursor-pointer"
-              name="sparks"
-              @click="onRoeInfoClick"
-            />
-            {{ Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}
-          </div>
-        </div>
-        <div class="flex justify-between items-center">
-          <div class="text-p2 text-content-secondary">
-            Net asset value
-          </div>
-          <div class="text-h5 text-content-primary">
-            {{ isCollateralsLoading ? '-' : netAssetValue.hasPrice ? formatCompactUsdValue(netAssetValue.usd) : '-' }}
-          </div>
-        </div>
-      </div>
-      <div
-        v-if="!hasNoBorrow"
-        class="rounded-12 bg-card border border-line-default shadow-card p-16"
-      >
-        <div class="text-h4 text-neutral-800 mb-16">
-          Position risk
-        </div>
-        <div class="flex justify-between gap-8 flex-wrap mb-16">
-          <div class="text-neutral-500 text-p3">
-            Health score
-          </div>
-          <div class="text-neutral-800 text-p3">
-            <span
-              v-if="hasQueryFailure"
-              class="text-warning-500"
-            >Unknown</span>
-            <template v-else>
-              {{ formatHealthScore(nanoToValue(position.health, 18)) }}
-            </template>
+          <div class="flex justify-between items-center">
+            <div class="text-p2 text-content-secondary">
+              Net asset value
+            </div>
+            <div class="text-h5 text-content-primary">
+              {{ isCollateralsLoading ? '-' : netAssetValue.hasPrice ? formatCompactUsdValue(netAssetValue.usd) : '-' }}
+            </div>
           </div>
         </div>
-        <div class="flex justify-between gap-8 flex-wrap mb-16">
-          <div class="text-neutral-500 text-p3">
-            Time to liquidation
+        <div class="flex flex-col gap-16 rounded-12 bg-card border border-line-default shadow-card p-16 laptop:flex-1">
+          <div class="text-h4 text-content-primary">
+            Position risk
           </div>
-          <div class="text-neutral-800 text-p3">
-            <span
-              v-if="hasQueryFailure"
-              class="text-warning-500"
-            >Unknown</span>
-            <template v-else>
-              {{ timeToLiquidationDisplay }}
-            </template>
+          <div class="flex justify-between gap-8 flex-wrap">
+            <div class="text-content-secondary text-p3">
+              Health score
+            </div>
+            <div class="text-content-primary text-p3">
+              <span
+                v-if="hasQueryFailure"
+                class="text-warning-500"
+              >Unknown</span>
+              <template v-else>
+                {{ formatHealthScore(nanoToValue(position.health, 18)) }}
+              </template>
+            </div>
           </div>
+          <div class="flex justify-between gap-8 flex-wrap">
+            <div class="text-content-secondary text-p3">
+              Time to liquidation
+            </div>
+            <div class="text-content-primary text-p3">
+              <span
+                v-if="hasQueryFailure"
+                class="text-warning-500"
+              >Unknown</span>
+              <template v-else>
+                {{ timeToLiquidationDisplay }}
+              </template>
+            </div>
+          </div>
+          <div class="flex justify-between gap-8 flex-wrap">
+            <div class="text-content-secondary text-p3">
+              Liquidation LTV
+            </div>
+            <div class="text-content-primary text-p3">
+              <span
+                v-if="hasQueryFailure"
+                class="text-warning-500"
+              >Unknown</span>
+              <template v-else>
+                {{ formatNumber(nanoToValue(position.userLTV, 18), 2) }}/{{ nanoToValue(position.liquidationLTV, 2) }}%
+              </template>
+            </div>
+          </div>
+          <UiProgress
+            v-if="!hasQueryFailure"
+            :model-value="nanoToValue(position.userLTV, 18)"
+            :max="nanoToValue(position.liquidationLTV, 2)"
+            :color="nanoToValue(position.userLTV, 18) >= (nanoToValue(position.liquidationLTV, 2) - 2) ? 'danger' : undefined"
+            size="small"
+          />
         </div>
-        <div class="flex justify-between gap-8 flex-wrap mb-12">
-          <div class="text-neutral-500 text-p3">
-            Liquidation LTV
-          </div>
-          <div class="text-neutral-800 text-p3">
-            <span
-              v-if="hasQueryFailure"
-              class="text-warning-500"
-            >Unknown</span>
-            <template v-else>
-              {{ formatNumber(nanoToValue(position.userLTV, 18), 2) }}/{{ nanoToValue(position.liquidationLTV, 2) }}%
-            </template>
-          </div>
-        </div>
-        <UiProgress
-          v-if="!hasQueryFailure"
-          :model-value="nanoToValue(position.userLTV, 18)"
-          :max="nanoToValue(position.liquidationLTV, 2)"
-          :color="nanoToValue(position.userLTV, 18) >= (nanoToValue(position.liquidationLTV, 2) - 2) ? 'danger' : undefined"
-          size="small"
-        />
       </div>
       <div
         v-if="!hasNoBorrow"

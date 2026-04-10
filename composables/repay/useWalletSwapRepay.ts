@@ -8,7 +8,7 @@ import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
-import { getNetAPY, type Vault, type VaultAsset } from '~/entities/vault'
+import { getNetAPY, getProjectedRates, type Vault, type VaultAsset } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
@@ -313,18 +313,29 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   // --- Estimates ---
   const estimatesGuard = createRaceGuard()
 
-  const updateEstimates = useDebounceFn(async () => {
+  const getDebtRepaidNano = (): bigint => {
+    if (!borrowVault.value) return 0n
+    let debtRepaidNano: bigint
+    if (direction.value === SwapperMode.TARGET_DEBT && debtAmount.value) {
+      debtRepaidNano = valueToNano(debtAmount.value, borrowVault.value.asset.decimals)
+    }
+    else {
+      debtRepaidNano = estimatedDebtRepaid.value
+    }
+    const currentDebt = getCurrentDebt()
+    return debtRepaidNano > currentDebt ? currentDebt : debtRepaidNano
+  }
+
+  const updateSyncEstimates = () => {
     clearSimulationError()
     estimatesError.value = ''
     if (!position.value || !collateralVault.value || !borrowVault.value) return
-    const gen = estimatesGuard.next()
 
     try {
       if (!oraclePriceRatio.value || !Number.isFinite(oraclePriceRatio.value) || oraclePriceRatio.value <= 0) {
         throw new Error('Price data unavailable')
       }
 
-      // Balance check only for EXACT_IN (for TARGET_DEBT, the needed amount comes from the quote)
       if (direction.value === SwapperMode.EXACT_IN) {
         if (selectedAssetBalance.value < valueToNano(amount.value, selectedAsset.value?.decimals)) {
           throw new Error('Not enough balance')
@@ -335,20 +346,6 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
         throw new Error('No swap quote available')
       }
 
-      let debtRepaidNano: bigint
-      if (direction.value === SwapperMode.TARGET_DEBT && debtAmount.value) {
-        debtRepaidNano = valueToNano(debtAmount.value, borrowVault.value.asset.decimals)
-      }
-      else {
-        debtRepaidNano = estimatedDebtRepaid.value
-      }
-
-      const currentDebt = getCurrentDebt()
-      if (debtRepaidNano > currentDebt) {
-        debtRepaidNano = currentDebt
-      }
-
-      // Balance check for TARGET_DEBT after quote
       if (direction.value === SwapperMode.TARGET_DEBT && quotes.effectiveQuote.value) {
         const neededInput = BigInt(quotes.effectiveQuote.value.amountInMax || quotes.effectiveQuote.value.amountIn || 0)
         if (selectedAssetBalance.value < neededInput) {
@@ -356,24 +353,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
         }
       }
 
-      const nextBorrowed = currentDebt - debtRepaidNano
-      const [supplyUsd, borrowUsd] = await Promise.all([
-        getAssetUsdValueOrZero(position.value.supplied || 0n, collateralVault.value, 'off-chain'),
-        getAssetUsdValueOrZero(nextBorrowed > 0n ? nextBorrowed : 0n, borrowVault.value, 'off-chain'),
-      ])
-      if (estimatesGuard.isStale(gen)) return
-
-      _estimateNetAPY.value = getNetAPY(
-        supplyUsd,
-        collateralSupplyApy.value,
-        borrowUsd,
-        borrowApy.value,
-        collateralSupplyRewardApy.value || null,
-        borrowRewardApy.value || null,
-      )
-
+      const debtRepaidNano = getDebtRepaidNano()
       const debtRepaidFixed = FixedPoint.fromValue(debtRepaidNano, Number(borrowVault.value.decimals))
-      // Use on-chain LTV to derive total collateral value (multi-collateral aware)
       const totalValue = getTotalCollateralValue(position.value!)
       const collateralValueFl = totalValue !== null
         ? totalValue
@@ -400,10 +381,52 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       }
     }
     catch (e: unknown) {
-      if (estimatesGuard.isStale(gen)) return
-      logWarn('walletSwapRepay/estimates', e)
+      logWarn('walletSwapRepay/syncEstimates', e)
       hasEstimate.value = false
       estimatesError.value = (e as { message: string }).message
+    }
+  }
+
+  const updateAsyncEstimates = useDebounceFn(async () => {
+    if (!position.value || !collateralVault.value || !borrowVault.value) {
+      isEstimatesLoading.value = false
+      return
+    }
+    const gen = estimatesGuard.next()
+    try {
+      const debtRepaidNano = getDebtRepaidNano()
+      const currentDebt = getCurrentDebt()
+      const nextBorrowed = currentDebt - debtRepaidNano
+
+      const [projected, supplyUsd, borrowUsd] = await Promise.all([
+        getProjectedRates(
+          borrowVault.value.address,
+          borrowVault.value.interestRateInfo.cash,
+          borrowVault.value.interestRateInfo.borrows,
+          debtRepaidNano,
+          -debtRepaidNano,
+        ),
+        getAssetUsdValueOrZero(position.value.supplied || 0n, collateralVault.value, 'off-chain'),
+        getAssetUsdValueOrZero(nextBorrowed > 0n ? nextBorrowed : 0n, borrowVault.value, 'off-chain'),
+      ])
+      if (estimatesGuard.isStale(gen)) return
+
+      const projectedBorrowApy = projected
+        ? borrowApy.value + (nanoToValue(projected.borrowAPY, 25) - nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25))
+        : borrowApy.value
+
+      _estimateNetAPY.value = getNetAPY(
+        supplyUsd,
+        collateralSupplyApy.value,
+        borrowUsd,
+        projectedBorrowApy,
+        collateralSupplyRewardApy.value || null,
+        borrowRewardApy.value || null,
+      )
+    }
+    catch (e: unknown) {
+      if (estimatesGuard.isStale(gen)) return
+      logWarn('walletSwapRepay/asyncEstimates', e)
     }
     finally {
       if (!estimatesGuard.isStale(gen)) {
@@ -493,7 +516,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     if (selectedAsset.value?.address) {
       selectedAssetBalance.value = await fetchSingleBalance(selectedAsset.value.address)
       if (needsSwap.value) {
-        updateEstimates()
+        updateSyncEstimates()
+        updateAsyncEstimates()
       }
     }
   })
@@ -520,10 +544,11 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       }
     }
 
+    updateSyncEstimates()
     if (!isEstimatesLoading.value) {
       isEstimatesLoading.value = true
     }
-    updateEstimates()
+    updateAsyncEstimates()
   })
 
   // --- Build plan ---
@@ -610,11 +635,10 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
           plan: plan.value || undefined,
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
-          onConfirm: () => {
-            setTimeout(() => {
-              send()
-            }, 400)
+          onConfirm: async () => {
+            await send()
           },
+          submittingLabel: 'Submitting...',
         },
       })
     }

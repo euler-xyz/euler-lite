@@ -11,6 +11,7 @@ import {
   type Vault,
   type SecuritizeVault,
   type VaultAsset,
+  getProjectedRates,
 } from '~/entities/vault'
 import { isSecuritizeVault } from '~/entities/vault/factory'
 import { getSubAccountAddress } from '~/entities/account'
@@ -217,13 +218,6 @@ const requestSwapQuote = useDebounceFn(async () => {
     isRepay: false,
     targetDebt: 0n,
     currentDebt: 0n,
-  }, {
-    logContext: {
-      tokenIn: asset.value.address,
-      tokenOut: selectedOutputAsset.value.address,
-      amount: amount.value,
-      slippage: swapSlippage.value,
-    },
   })
 }, 500)
 
@@ -361,10 +355,9 @@ const submit = async () => {
           plan: plan.value || undefined,
           swapToAsset: needsSwap.value ? selectedOutputAsset.value : undefined,
           swapToAmount: needsSwap.value ? swapEstimatedOutput.value : undefined,
-          onConfirm: () => {
-            setTimeout(() => {
-              send()
-            }, 400)
+          submittingLabel: 'Submitting...',
+          onConfirm: async () => {
+            await send()
           },
         },
       })
@@ -423,12 +416,10 @@ const send = async () => {
     isSubmitting.value = false
   }
 }
-const updateEstimates = useDebounceFn(async () => {
+const updateSyncEstimates = () => {
   clearSimulationError()
   estimatesError.value = ''
-  if (!vault.value) {
-    return
-  }
+  if (!vault.value) return
   try {
     if (assetsBalance.value < amountFixed.value.value) {
       throw new Error('Not enough balance')
@@ -442,16 +433,44 @@ const updateEstimates = useDebounceFn(async () => {
     }
 
     delta.value = assetsBalance.value - amountFixed.value.value
-    estimateSupplyAPY.value = vault.value.interestRateInfo.supplyAPY
   }
   catch (e) {
-    console.warn(e)
+    logWarn('lend-withdraw/syncEstimates', e)
     delta.value = assetsBalance.value || 0n
-    estimateSupplyAPY.value = vault.value?.interestRateInfo.supplyAPY || 0n
     estimatesError.value = (e as { message: string }).message
   }
-  finally {
+}
+
+const estimatesGuard = createRaceGuard()
+
+const updateAsyncEstimates = useDebounceFn(async () => {
+  if (!vault.value || isSecuritizeVaultType.value) {
     isEstimatesLoading.value = false
+    return
+  }
+  const gen = estimatesGuard.next()
+  try {
+    const v = vault.value as Vault
+    const amountNano = valueToNano(amount.value, v.decimals)
+    const projected = await getProjectedRates(
+      v.address,
+      v.interestRateInfo.cash,
+      v.interestRateInfo.borrows,
+      -amountNano,
+      0n,
+    )
+    if (estimatesGuard.isStale(gen)) return
+    estimateSupplyAPY.value = projected?.supplyAPY ?? v.interestRateInfo.supplyAPY
+  }
+  catch (e) {
+    if (estimatesGuard.isStale(gen)) return
+    logWarn('lend-withdraw/asyncEstimates', e)
+    estimateSupplyAPY.value = (vault.value as Vault)?.interestRateInfo.supplyAPY || 0n
+  }
+  finally {
+    if (!estimatesGuard.isStale(gen)) {
+      isEstimatesLoading.value = false
+    }
   }
 }, 500)
 
@@ -464,14 +483,12 @@ watch([isConnected, effectiveAddress], async () => {
   }
 })
 watch(amount, async () => {
-  clearSimulationError()
-  if (!vault.value) {
-    return
-  }
+  updateSyncEstimates()
+  if (!vault.value) return
   if (!isEstimatesLoading.value) {
     isEstimatesLoading.value = true
   }
-  updateEstimates()
+  updateAsyncEstimates()
   if (needsSwap.value) {
     resetSwapQuoteState()
     requestSwapQuote()

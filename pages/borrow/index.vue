@@ -360,29 +360,33 @@ const sortedBorrowList = computed(() => {
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
     <BasePageHeader
       title="Borrow"
-      description="Borrow against your collateral"
-      class="mb-24"
+      description="Discover vaults, borrow against your collateral."
+      class="mb-16"
     />
 
     <div class="mb-16">
-      <h3 class="text-h3 mb-16 text-neutral-900">
-        Discover vaults
-      </h3>
-      <div class="mb-8">
+      <div class="flex justify-start items-center w-full gap-8 flex-wrap">
         <UiInput
           v-model="searchQuery"
           placeholder="Search by asset, market, curator..."
           icon="search"
           clearable
           compact
+          class="flex-1 min-w-[200px] mobile:basis-full"
         />
-      </div>
-      <div class="flex justify-start items-center w-full gap-8 flex-wrap">
         <VaultSortButton
           v-model="sortBy"
           v-model:dir="sortDir"
           class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
-          :options="['Recommended', 'Liquidity', 'Total Borrowed', 'Utilization', 'Borrow APY', 'Net APY', 'Max ROE']"
+          :options="[
+            { label: 'Recommended', icon: 'sparks' },
+            { label: 'Liquidity', icon: 'wallet' },
+            { label: 'Total Borrowed', icon: 'borrow-outline' },
+            { label: 'Utilization', icon: 'pulse' },
+            { label: 'Borrow APY', icon: 'percent' },
+            { label: 'Net APY', icon: 'percent' },
+            { label: 'Max ROE', icon: 'percent' },
+          ]"
           :disable-dir="sortBy === 'Recommended'"
           title="Sorting type"
         />

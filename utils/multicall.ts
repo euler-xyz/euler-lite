@@ -1,4 +1,4 @@
-import { encodeFunctionData, decodeFunctionResult, zeroAddress, type Address, type Hex, type Abi } from 'viem'
+import { encodeFunctionData, decodeFunctionResult, zeroAddress, type Address, type Hex, type Abi, BaseError } from 'viem'
 import { EVC_ABI, type BatchItem, type BatchItemResult } from '~/abis/evc'
 import { getPublicClient } from '~/utils/public-client'
 
@@ -6,6 +6,38 @@ export type MulticallResult<T = unknown> = {
   success: boolean
   result: T | null
   error?: Error
+}
+
+export type BatchLensResult<T = unknown> = {
+  success: boolean
+  result: T | null
+  /** True when the entire RPC request failed (e.g. 403, network error) vs individual call revert */
+  transportError?: boolean
+}
+
+/**
+ * Check if an error is a transport/provider-level failure (HTTP error, network down,
+ * timeout, RPC rate limit) vs an on-chain revert that could be retried individually.
+ */
+const TRANSPORT_ERROR_NAMES = new Set([
+  'HttpRequestError',
+  'TimeoutError',
+  'WebSocketRequestError',
+  'LimitExceededRpcError', // JSON-RPC -32005 (provider rate limit)
+  'ResourceUnavailableRpcError', // JSON-RPC -32002 (provider temporarily unavailable)
+])
+
+const isTransportError = (err: unknown): boolean => {
+  // Non-viem errors (e.g. TypeError from a misconfigured client) are treated as transport errors.
+  // This is intentionally conservative: suppressing retries against an already-broken endpoint is
+  // safer than amplifying load by retrying every address individually.
+  if (!(err instanceof BaseError)) return true
+  // Walk to the deepest BaseError in the chain. If walk() returns a non-BaseError (e.g. a
+  // TypeError: Failed to fetch buried as the root cause), that is by definition a network-level
+  // failure — treat it as a transport error.
+  const root = err.walk()
+  if (!(root instanceof BaseError)) return true
+  return TRANSPORT_ERROR_NAMES.has(root.name)
 }
 
 /**
@@ -32,43 +64,36 @@ export const evcBatchCall = async (
   const client = getPublicClient(rpcUrl)
   const totalValue = items.reduce((sum, item) => sum + item.value, 0n)
 
-  try {
-    const callData = encodeFunctionData({
-      abi: EVC_ABI,
-      functionName: 'batchSimulation',
-      args: [items],
-    })
+  // Errors (403, network failures, timeouts) propagate to callers so they can
+  // distinguish "RPC is down" from "individual call reverted on-chain".
+  const callData = encodeFunctionData({
+    abi: EVC_ABI,
+    functionName: 'batchSimulation',
+    args: [items],
+  })
 
-    const result = await client.call({
-      to: evcAddress as Address,
-      data: callData,
-      value: totalValue,
-      ...(totalValue > 0n ? { stateOverride: [{ address: zeroAddress as `0x${string}`, balance: totalValue }] } : {}),
-    })
+  const result = await client.call({
+    to: evcAddress as Address,
+    data: callData,
+    value: totalValue,
+    ...(totalValue > 0n ? { stateOverride: [{ address: zeroAddress as `0x${string}`, balance: totalValue }] } : {}),
+  })
 
-    if (!result.data) {
-      return items.map(() => ({
-        success: false,
-        result: '0x',
-      }))
-    }
-
-    const decoded = decodeFunctionResult({
-      abi: EVC_ABI,
-      functionName: 'batchSimulation',
-      data: result.data,
-    })
-
-    const batchResults = decoded[0] as unknown as BatchItemResult[]
-    return batchResults
-  }
-  catch (err) {
-    console.warn('[evcBatchCall] batchSimulation failed:', err)
+  if (!result.data) {
     return items.map(() => ({
       success: false,
       result: '0x',
     }))
   }
+
+  const decoded = decodeFunctionResult({
+    abi: EVC_ABI,
+    functionName: 'batchSimulation',
+    data: result.data,
+  })
+
+  const batchResults = decoded[0] as unknown as BatchItemResult[]
+  return batchResults
 }
 
 /**
@@ -94,7 +119,7 @@ const executeLensChunk = async <T>(
   lensAbi: Abi | readonly unknown[],
   calls: Array<{ functionName: string, args: unknown[] }>,
   rpcUrl: string,
-): Promise<Array<{ success: boolean, result: T | null }>> => {
+): Promise<Array<BatchLensResult<T>>> => {
   const items: BatchItem[] = calls.map((call) => {
     const callData = encodeFunctionData({
       abi: lensAbi as Abi,
@@ -104,7 +129,17 @@ const executeLensChunk = async <T>(
     return buildBatchItem(lensAddress, callData)
   })
 
-  const batchResults = await evcBatchCall(evcAddress, items, rpcUrl)
+  let batchResults: BatchItemResult[]
+  try {
+    batchResults = await evcBatchCall(evcAddress, items, rpcUrl)
+  }
+  catch (err) {
+    if (isTransportError(err)) {
+      return calls.map(() => ({ success: false, result: null, transportError: true }))
+    }
+    // On-chain revert of the whole batch (e.g. out of gas) — let caller retry individually
+    return calls.map(() => ({ success: false, result: null }))
+  }
 
   return batchResults.map((result, index) => {
     if (!result.success) {
@@ -145,7 +180,7 @@ export const batchLensCalls = async <T>(
   calls: Array<{ functionName: string, args: unknown[] }>,
   rpcUrl: string,
   batchSize = 25,
-): Promise<Array<{ success: boolean, result: T | null }>> => {
+): Promise<Array<BatchLensResult<T>>> => {
   if (calls.length === 0) {
     return []
   }
@@ -154,11 +189,21 @@ export const batchLensCalls = async <T>(
     return executeLensChunk<T>(evcAddress, lensAddress, lensAbi, calls, rpcUrl)
   }
 
-  const allResults: Array<{ success: boolean, result: T | null }> = []
+  const allResults: Array<BatchLensResult<T>> = []
   for (let i = 0; i < calls.length; i += batchSize) {
     const chunk = calls.slice(i, i + batchSize)
     const chunkResults = await executeLensChunk<T>(evcAddress, lensAddress, lensAbi, chunk, rpcUrl)
     allResults.push(...chunkResults)
+
+    // Stop processing further chunks if the RPC endpoint itself is failing
+    if (chunkResults.some(r => r.transportError)) {
+      // Mark remaining calls as transport errors
+      const remaining = calls.length - (i + chunk.length)
+      for (let j = 0; j < remaining; j++) {
+        allResults.push({ success: false, result: null, transportError: true })
+      }
+      break
+    }
   }
   return allResults
 }

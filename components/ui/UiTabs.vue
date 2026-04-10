@@ -228,7 +228,8 @@ defineExpose({
     #{$block}__block {
       min-height: 44px;
       background-color: var(--ui-tabs-block-background-color);
-      border-radius: 12px;
+      border-radius: 12px 12px 0 0;
+      border-bottom: 2px solid var(--accent-600);
       width: auto;
       bottom: auto;
       max-width: none;

@@ -10,50 +10,165 @@ const {
   close?: boolean
   warning?: boolean
 }>()
-defineEmits(['close'])
+const emit = defineEmits(['close'])
+
+const modalEl = ref<HTMLElement>()
+const dragY = ref(0)
+let startY = 0
+
+// Walk every descendant of the modal to see if anything is scrolled down.
+// Covers both BaseModalWrapper's own scroll container AND any nested scroll
+// containers inside slot content (e.g. a long list inside a modal).
+const isAnyDescendantScrolled = () => {
+  if (!modalEl.value) return false
+  for (const el of modalEl.value.querySelectorAll('*')) {
+    if ((el as HTMLElement).scrollTop > 0) return true
+  }
+  return false
+}
+
+// --- Drag handle zone (pill + header) ---
+const onPointerDown = (e: PointerEvent) => {
+  if (e.pointerType !== 'touch') return
+  if (isAnyDescendantScrolled()) return
+  startY = e.clientY
+  dragY.value = 0
+  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+}
+const onPointerMove = (e: PointerEvent) => {
+  if (!(e.currentTarget as HTMLElement).hasPointerCapture(e.pointerId)) return
+  dragY.value = Math.max(0, e.clientY - startY)
+}
+const onPointerUp = (e: PointerEvent) => {
+  if (!(e.currentTarget as HTMLElement).hasPointerCapture(e.pointerId)) return
+  if (dragY.value > 80) emit('close')
+  dragY.value = 0
+}
+const onPointerCancel = () => {
+  dragY.value = 0
+}
+
+// --- Scroll container touch handling ---
+// Walk up from the touch target to find if any ancestor within the modal
+// is scrolled. This catches nested scroll containers inside slot content.
+const isTouchTargetScrolled = (target: EventTarget | null): boolean => {
+  let el = target as HTMLElement | null
+  while (el && el !== modalEl.value) {
+    if (el.scrollTop > 0) return true
+    el = el.parentElement
+  }
+  return false
+}
+
+let scrollTouchStartY = 0
+let scrollGestureDecided = false
+let scrollDragActive = false
+
+const onScrollTouchStart = (e: TouchEvent) => {
+  scrollTouchStartY = e.touches[0].clientY
+  scrollGestureDecided = false
+  scrollDragActive = false
+}
+const onScrollTouchMove = (e: TouchEvent) => {
+  const delta = e.touches[0].clientY - scrollTouchStartY
+
+  if (!scrollGestureDecided) {
+    scrollGestureDecided = true
+    // Only take over if swiping down AND no ancestor of the touch target is scrolled
+    if (delta > 0 && !isTouchTargetScrolled(e.target)) {
+      scrollDragActive = true
+    }
+  }
+
+  if (!scrollDragActive) return
+  e.preventDefault()
+  dragY.value = Math.max(0, delta)
+}
+const onScrollTouchEnd = () => {
+  scrollGestureDecided = false
+  if (!scrollDragActive) return
+  scrollDragActive = false
+  if (dragY.value > 80) emit('close')
+  dragY.value = 0
+}
+const onScrollTouchCancel = () => {
+  scrollGestureDecided = false
+  scrollDragActive = false
+  dragY.value = 0
+}
+
+const dragStyle = computed(() => ({
+  transform: dragY.value ? `translateY(${dragY.value}px)` : undefined,
+  transition: dragY.value ? 'none' : 'transform 0.3s ease',
+}))
 </script>
 
 <template>
   <div
-    class="flex flex-col absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 p-16 min-w-[min(375px,100vw)] max-w-[600px] overflow-auto [scrollbar-width:none] max-h-[85dvh] rounded-16 mobile:top-auto mobile:left-0 mobile:bottom-0 mobile:w-full mobile:min-w-full mobile:max-h-[95dvh] mobile:translate-x-0 mobile:translate-y-0 mobile:rounded-t-16 mobile:rounded-b-0 bg-card [&::-webkit-scrollbar]:hidden"
+    ref="modalEl"
+    class="flex flex-col absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 min-w-[min(375px,100vw)] max-w-[600px] max-h-[85dvh] rounded-16 mobile:top-auto mobile:left-0 mobile:bottom-0 mobile:w-full mobile:min-w-full mobile:max-h-[95dvh] mobile:translate-x-0 mobile:translate-y-0 mobile:rounded-t-16 mobile:rounded-b-0 bg-card"
     :class="[full ? 'min-h-[85dvh] mobile:min-h-[95dvh] min-w-[min(600px,100vw)]' : '']"
+    :style="dragStyle"
   >
+    <!-- Drag zone: pill + header, outside the scroll container -->
     <div
-      v-if="title || close"
-      class="flex justify-between mb-12 items-center h-36"
+      class="shrink-0 px-16 pt-12 mobile:pt-0 touch-none select-none"
+      @pointerdown="onPointerDown"
+      @pointermove="onPointerMove"
+      @pointerup="onPointerUp"
+      @pointercancel="onPointerCancel"
+    >
+      <div class="hidden mobile:flex justify-center py-8">
+        <div class="w-36 h-4 rounded-full bg-surface-subtle" />
+      </div>
+
+      <div
+        v-if="title || close"
+        class="flex justify-between mb-12 items-center h-36"
+      >
+        <div
+          v-if="close"
+          class="w-36"
+        />
+        <p
+          v-if="title"
+          class="flex text-center text-h4 items-center gap-8"
+        >
+          <SvgIcon
+            v-if="warning"
+            name="warning"
+            class="!w-20 !h-20 text-warning-500"
+          />
+          {{ title }}
+        </p>
+        <UiButton
+          v-if="close"
+          variant="primary-stroke"
+          icon="close"
+          name="cross"
+          icon-only
+          @click="$emit('close')"
+        />
+      </div>
+    </div>
+
+    <!-- Scroll container -->
+    <div
+      class="flex flex-col overflow-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden px-16 pb-16"
+      :class="[full ? 'flex-grow min-h-0' : '']"
+      @touchstart="onScrollTouchStart"
+      @touchmove="onScrollTouchMove"
+      @touchend="onScrollTouchEnd"
+      @touchcancel="onScrollTouchCancel"
     >
       <div
-        v-if="close"
-        class="w-36"
-      />
-      <p
-        v-if="title"
-        class="flex text-center text-h4 items-center gap-8"
+        class="flex flex-col"
+        :class="[full ? 'flex-grow min-h-0 overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden' : '']"
       >
-        <SvgIcon
-          v-if="warning"
-          name="warning"
-          class="!w-20 !h-20 text-warning-500"
-        />
-        {{ title }}
-      </p>
-      <UiButton
-        v-if="close"
-        variant="primary-stroke"
-        icon="close"
-        name="cross"
-        icon-only
-        @click="$emit('close')"
-      />
-    </div>
+        <slot />
+      </div>
 
-    <div
-      class="flex flex-col"
-      :class="[full ? 'flex-grow min-h-0 overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden' : '']"
-    >
-      <slot />
+      <slot name="bottom" />
     </div>
-
-    <slot name="bottom" />
   </div>
 </template>

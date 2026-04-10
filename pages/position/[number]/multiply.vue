@@ -552,14 +552,6 @@ const requestMultiplyQuote = useDebounceFn(async () => {
   }
   await requestMultiplyQuotes(requestParams, {
     errorMessage: 'Unable to fetch swap quote. Multiply feature is not available for this asset.',
-    logContext: {
-      fromVault: multiplyShortVault.value?.address,
-      toVault: multiplyLongVault.value?.address,
-      amount: formatUnits(debtAmount, Number(multiplyShortVault.value.asset.decimals)),
-      slippage: multiplySlippage.value,
-      swapperMode: SwapperMode.EXACT_IN,
-      isRepay: false,
-    },
   })
 }, 500)
 
@@ -642,10 +634,9 @@ const submitMultiply = async () => {
           swapToAsset: quote ? multiplyLongVault.value.asset : undefined,
           swapToAmount: quote ? multiplyLongAmount.value : undefined,
           subAccount,
-          onConfirm: () => {
-            setTimeout(() => {
-              sendMultiply()
-            }, 400)
+          submittingLabel: 'Submitting...',
+          onConfirm: async () => {
+            await sendMultiply()
           },
         },
       })
