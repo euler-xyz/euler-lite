@@ -119,6 +119,7 @@ const feeDisplay = computed(() => {
                 v-if="entity.url"
                 :href="entity.url"
                 target="_blank"
+                rel="noopener noreferrer"
                 class="text-p2 text-neutral-800 hover:text-accent-600 underline transition-colors"
               >{{ entity.name }}</a>
               <span
