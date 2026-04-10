@@ -111,3 +111,4 @@ If the commit is rejected by the pre-commit hook (lint-staged), run `npx eslint 
 - Never commit secrets, `.env` files, or unrelated files
 - Never force-push or amend commits — always create new commits
 - Never push directly to the original PR branch — always use the fix branch
+- Never add `Co-Authored-By` trailers to commit messages
