@@ -43,7 +43,7 @@ watchEffect(async () => {
       </h3>
     </div>
     <p class="text-p2 text-neutral-500 mb-16">
-      Supply-only positions that earn you yield. They are not used as collateral to back a borrowing position.
+      Passive yield earned across professionally curated strategies.
     </p>
     <div class="flex flex-1 p-8 rounded-12 mb-16 border border-line-default bg-card">
       <div
@@ -91,7 +91,7 @@ watchEffect(async () => {
       </h3>
     </div>
     <p class="text-p2 text-neutral-500 mb-16">
-      Supply-only positions on your main account that earn you yield. They are not used as collateral to back a borrowing position.
+      Yield earned by lending assets directly to borrowers.
     </p>
     <div class="flex flex-1 p-8 rounded-12 border border-line-default bg-card">
       <div

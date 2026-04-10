@@ -109,111 +109,126 @@ watch(portfolioRefreshCounter, () => {
 
     <PortfolioShowAllHint />
 
-    <div class="flex flex-col gap-16 p-16 rounded-12 mx-16 border border-line-default bg-card shadow-card">
-      <div class="flex justify-between items-center">
-        <div class="flex items-center gap-4 text-p2 text-content-secondary">
-          Portfolio Net APY
-          <UiFootnote
-            title="Portfolio Net APY"
-            text="Net annual percentage yield across all positions. Calculated as total net yield (supply income minus borrow costs) divided by total supplied value."
-            tooltip-placement="bottom-start"
-            class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
-          />
+    <div class="flex flex-col gap-16 mx-16 laptop:flex-row laptop:items-stretch">
+      <div class="flex flex-col gap-16 p-16 rounded-12 border border-line-default bg-card shadow-card laptop:flex-1">
+        <div class="text-h4 text-content-primary">
+          Portfolio performance
         </div>
-        <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
-          <div
-            class="text-h5"
-            :class="[portfolioNetApy >= 0 ? 'text-accent-600' : 'text-error-500']"
-          >
-            {{ Number.isFinite(portfolioNetApy) ? `${formatNumber(portfolioNetApy)}%` : '-' }}
-          </div>
-        </BaseLoadableContent>
-      </div>
-      <div class="flex justify-between items-center">
-        <div class="flex items-center gap-4 text-p2 text-content-secondary">
-          Portfolio ROE
-          <UiFootnote
-            title="Portfolio ROE"
-            text="Return on equity across all positions. Calculated as total net yield divided by total equity (supplied value minus borrowed value)."
-            tooltip-placement="bottom-start"
-            class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
-          />
-        </div>
-        <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
-          <div
-            class="text-h5"
-            :class="[portfolioRoe >= 0 ? 'text-accent-600' : 'text-error-500']"
-          >
-            {{ Number.isFinite(portfolioRoe) ? `${formatNumber(portfolioRoe)}%` : '-' }}
-          </div>
-        </BaseLoadableContent>
-      </div>
-      <div class="flex justify-between items-center">
-        <div class="text-p2 text-content-secondary">
-          Net asset value
-        </div>
-        <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
-          <div class="flex items-center gap-4 text-h5 text-content-primary">
-            {{ (() => {
-              const netValue = totalSuppliedValueInfo.total - totalBorrowedValueInfo.total
-              const hasMissing = totalSuppliedValueInfo.hasMissingPrices || totalBorrowedValueInfo.hasMissingPrices
-              if (netValue === 0 && hasMissing) return '—'
-              return formatCompactUsdValue(netValue)
-            })() }}
+        <div class="flex justify-between items-center">
+          <div class="flex items-center gap-4 text-p2 text-content-secondary">
+            Net APY
             <UiFootnote
-              v-if="totalSuppliedValueInfo.hasMissingPrices || totalBorrowedValueInfo.hasMissingPrices"
-              title="Incomplete pricing"
-              text="Some assets in your portfolio don't have price data available. The displayed value may be higher than shown."
-              tooltip-placement="top-end"
+              title="Portfolio Net APY"
+              text="Net annual percentage yield across all positions. Calculated as total net yield (supply income minus borrow costs) divided by total supplied value."
+              tooltip-placement="bottom-start"
+              class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
             />
           </div>
-        </BaseLoadableContent>
-      </div>
-      <div class="flex justify-between items-center">
-        <div class="text-p2 text-content-secondary">
-          Total supplied value
+          <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
+            <div
+              class="text-h5"
+              :class="[portfolioNetApy >= 0 ? 'text-accent-600' : 'text-error-500']"
+            >
+              {{ Number.isFinite(portfolioNetApy) ? `${formatNumber(portfolioNetApy)}%` : '-' }}
+            </div>
+          </BaseLoadableContent>
         </div>
-        <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
-          <div class="flex items-center gap-4 text-h5 text-content-primary">
-            {{ (() => {
-              const { total, hasMissingPrices } = totalSuppliedValueInfo
-              if (total === 0 && hasMissingPrices) return '—'
-              return formatCompactUsdValue(total)
-            })() }}
+        <div class="flex justify-between items-center">
+          <div class="flex items-center gap-4 text-p2 text-content-secondary">
+            ROE
+            <UiFootnote
+              title="Portfolio ROE"
+              text="Return on equity across all positions. Calculated as total net yield divided by total equity (supplied value minus borrowed value)."
+              tooltip-placement="bottom-start"
+              class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
+            />
+          </div>
+          <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
+            <div
+              class="text-h5"
+              :class="[portfolioRoe >= 0 ? 'text-accent-600' : 'text-error-500']"
+            >
+              {{ Number.isFinite(portfolioRoe) ? `${formatNumber(portfolioRoe)}%` : '-' }}
+            </div>
+          </BaseLoadableContent>
+        </div>
+      </div>
+      <div class="flex flex-col gap-16 p-16 rounded-12 border border-line-default bg-card shadow-card laptop:flex-1">
+        <div class="text-h4 text-content-primary">
+          Portfolio value
+        </div>
+        <div class="flex justify-between items-center">
+          <div class="flex items-center gap-4 text-p2 text-content-secondary">
+            Total supplied
             <UiFootnote
               v-if="totalSuppliedValueInfo.hasMissingPrices"
               title="Incomplete pricing"
               text="Some supplied assets don't have price data available. The displayed value may be higher than shown."
-              tooltip-placement="top-end"
+              tooltip-placement="bottom-end"
+              class="[--ui-footnote-icon-color:var(--warning-500)]"
             />
           </div>
-        </BaseLoadableContent>
-      </div>
-      <div class="flex justify-between items-center">
-        <div class="text-p2 text-content-secondary">
-          Total borrowed value
+          <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
+            <div class="text-h5 text-content-primary">
+              {{ (() => {
+                const { total, hasMissingPrices } = totalSuppliedValueInfo
+                if (total === 0 && hasMissingPrices) return '—'
+                return formatCompactUsdValue(total)
+              })() }}
+            </div>
+          </BaseLoadableContent>
         </div>
-        <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
-          <div class="flex items-center gap-4 text-h5 text-content-primary">
-            {{ (() => {
-              const { total, hasMissingPrices } = totalBorrowedValueInfo
-              if (total === 0 && hasMissingPrices) return '—'
-              return formatCompactUsdValue(total)
-            })() }}
+        <div class="flex justify-between items-center">
+          <div class="flex items-center gap-4 text-p2 text-content-secondary">
+            Total borrowed
             <UiFootnote
               v-if="totalBorrowedValueInfo.hasMissingPrices"
               title="Incomplete pricing"
               text="Some borrowed assets don't have price data available. The displayed value may be higher than shown."
-              tooltip-placement="top-end"
+              tooltip-placement="bottom-end"
+              class="[--ui-footnote-icon-color:var(--warning-500)]"
             />
           </div>
-        </BaseLoadableContent>
+          <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
+            <div class="text-h5 text-content-primary">
+              {{ (() => {
+                const { total, hasMissingPrices } = totalBorrowedValueInfo
+                if (total === 0 && hasMissingPrices) return '—'
+                return formatCompactUsdValue(total)
+              })() }}
+            </div>
+          </BaseLoadableContent>
+        </div>
+        <div class="flex justify-between items-center">
+          <div class="flex items-center gap-4 text-p2 text-content-secondary">
+            Net asset value
+            <UiFootnote
+              v-if="totalSuppliedValueInfo.hasMissingPrices || totalBorrowedValueInfo.hasMissingPrices"
+              title="Incomplete pricing"
+              text="Some assets in your portfolio don't have price data available. The displayed value may be higher than shown."
+              tooltip-placement="bottom-end"
+              class="[--ui-footnote-icon-color:var(--warning-500)]"
+            />
+          </div>
+          <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
+            <div class="text-h5 text-content-primary">
+              {{ (() => {
+                const netValue = totalSuppliedValueInfo.total - totalBorrowedValueInfo.total
+                const hasMissing = totalSuppliedValueInfo.hasMissingPrices || totalBorrowedValueInfo.hasMissingPrices
+                if (netValue === 0 && hasMissing) return '—'
+                return formatCompactUsdValue(netValue)
+              })() }}
+            </div>
+          </BaseLoadableContent>
+        </div>
       </div>
     </div>
 
     <UiTabs
       v-model="tabsModel"
+      class="mx-16"
       rounded
+      pills
       :list="tabs"
     />
 

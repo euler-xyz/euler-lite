@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onClickOutside, useWindowSize } from '@vueuse/core'
+import { onClickOutside } from '@vueuse/core'
 import { flip, offset, shift, useFloating, type AlignedPlacement } from '@floating-ui/vue'
 import { useModal } from '~/components/ui/composables/useModal'
 import { UiFootnoteModal } from '#components'
@@ -17,7 +17,6 @@ const floating = ref(null)
 const isVisible = ref(false)
 
 const modal = useModal()
-const { width } = useWindowSize()
 const { floatingStyles, update } = useFloating(reference, floating, {
   placement: tooltipPlacement,
   middleware: [
@@ -27,8 +26,10 @@ const { floatingStyles, update } = useFloating(reference, floating, {
   ],
 })
 
+const canHover = typeof window !== 'undefined' && window.matchMedia('(hover: hover)').matches
+
 const onClick = () => {
-  if (width.value < 768) {
+  if (!canHover) {
     modal.open(customModal || UiFootnoteModal, {
       props: {
         modalTitle: title,
@@ -36,9 +37,18 @@ const onClick = () => {
       },
     })
   }
-  else {
-    isVisible.value = !isVisible.value
+}
+
+const onMouseEnter = () => {
+  if (canHover) {
+    isVisible.value = true
     update()
+  }
+}
+
+const onMouseLeave = () => {
+  if (canHover) {
+    isVisible.value = false
   }
 }
 
@@ -52,6 +62,8 @@ onClickOutside(reference, () => {
     ref="reference"
     class="ui-footnote"
     @click.stop.prevent="onClick"
+    @mouseenter="onMouseEnter"
+    @mouseleave="onMouseLeave"
   >
     <SvgIcon
       class="ui-footnote__icon"
@@ -106,7 +118,7 @@ onClickOutside(reference, () => {
     border-radius: 12px;
     background-color: var(--ui-footnote-floating-background-color);
     box-shadow: 0 8px 32px var(--ui-footnote-floating-box-shadow-color);
-    z-index: 1;
+    z-index: 10;
   }
 
   &__floating-content {
