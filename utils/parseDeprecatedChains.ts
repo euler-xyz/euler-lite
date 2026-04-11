@@ -3,7 +3,9 @@ export function parseDeprecatedChains(rawEnv: string | undefined, enabledSet: Se
   if (!raw) return []
   return raw
     .split(',')
-    .map(s => Number(s.trim()))
-    .filter(id => !Number.isNaN(id) && enabledSet.has(id))
+    .map(s => s.trim())
+    .filter(s => /^\d+$/.test(s))
+    .map(s => parseInt(s, 10))
+    .filter(id => enabledSet.has(id))
     .sort((a, b) => a - b)
 }

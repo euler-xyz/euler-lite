@@ -7,8 +7,9 @@ const props = defineProps<{
 </script>
 
 <template>
-  <div
-    class="flex items-center py-12 font-semibold leading-20 text-[16px] cursor-pointer"
+  <button
+    type="button"
+    class="flex items-center w-full py-12 font-semibold leading-20 text-[16px] cursor-pointer"
     :class="props.deprecated ? 'text-content-tertiary' : ''"
   >
     <BaseAvatar
@@ -18,5 +19,5 @@ const props = defineProps<{
       :label="props.name"
     />
     {{ props.name }}
-  </div>
+  </button>
 </template>

@@ -46,8 +46,10 @@ const onClick = (chainId: number) => {
       />
 
       <template v-if="deprecatedChains.length">
-        <div
-          class="flex items-center justify-between pt-12 pb-8 cursor-pointer text-content-secondary"
+        <button
+          type="button"
+          class="flex items-center justify-between w-full pt-12 pb-8 cursor-pointer text-content-secondary"
+          :aria-expanded="showDeprecated"
           @click="showDeprecated = !showDeprecated"
         >
           <span class="text-[14px] font-medium">Deprecated chains</span>
@@ -56,7 +58,7 @@ const onClick = (chainId: number) => {
             class="!w-16 !h-16 transition-transform duration-fast"
             :class="showDeprecated ? 'rotate-180' : ''"
           />
-        </div>
+        </button>
 
         <template v-if="showDeprecated">
           <ChainSelectorItem
