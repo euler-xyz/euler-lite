@@ -1,14 +1,6 @@
 name: Claude Code Review
 
 on:
-  pull_request:
-    types: [opened, reopened, ready_for_review]
-    paths:
-      - '**.vue'
-      - '**.ts'
-      - '**.js'
-      - 'package.json'
-      - 'nuxt.config.*'
   issue_comment:
     types: [created]
   pull_request_review_comment:
@@ -23,20 +15,12 @@ jobs:
     outputs:
       has_critical: ${{ steps.critical-check.outputs.has_critical }}
     if: |
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '@claude review') &&
       (
-        github.event_name == 'pull_request' &&
-        github.event.pull_request.draft == false &&
-        github.event.pull_request.head.repo.full_name == github.repository &&
-        github.event.pull_request.user.type != 'Bot'
-      ) ||
-      (
-        github.event_name == 'issue_comment' &&
-        github.event.issue.pull_request &&
-        startsWith(github.event.comment.body, '@claude review') &&
-        (
-          github.event.comment.author_association == 'MEMBER' ||
-          github.event.comment.author_association == 'OWNER'
-        )
+        github.event.comment.author_association == 'MEMBER' ||
+        github.event.comment.author_association == 'OWNER'
       )
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -119,25 +103,17 @@ jobs:
     if: |
       always() &&
       needs.review.result != 'cancelled' &&
+      startsWith(github.event.comment.body, '@claude fix') &&
       (
         (
-          needs.review.outputs.has_critical == 'true' &&
-          github.event_name == 'pull_request'
-        ) ||
-        (
-          startsWith(github.event.comment.body, '@claude fix') &&
+          github.event_name == 'issue_comment' &&
+          github.event.issue.pull_request &&
           (
-            (
-              github.event_name == 'issue_comment' &&
-              github.event.issue.pull_request &&
-              (
-                github.event.comment.author_association == 'MEMBER' ||
-                github.event.comment.author_association == 'OWNER'
-              )
-            ) ||
-            github.event_name == 'pull_request_review_comment'
+            github.event.comment.author_association == 'MEMBER' ||
+            github.event.comment.author_association == 'OWNER'
           )
-        )
+        ) ||
+        github.event_name == 'pull_request_review_comment'
       )
     runs-on: ubuntu-latest
     timeout-minutes: 30
