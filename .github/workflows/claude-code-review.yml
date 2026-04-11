@@ -180,6 +180,7 @@ jobs:
           HEAD_REF: ${{ steps.pr-info.outputs.head_ref }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMENT_BODY: ${{ github.event.comment.body }}
+          FIX_SCOPE: ${{ contains(github.event.comment.body, 'fix all') && 'all' || 'criticals' }}
           EVENT_NAME: ${{ github.event_name }}
           INLINE_FILE: ${{ github.event.comment.path }}
           INLINE_DIFF_HUNK: ${{ github.event.comment.diff_hunk }}
@@ -196,15 +197,17 @@ jobs:
             }
           prompt: |
             Check the COMMENT_BODY env var.
-            If it starts with "@claude fix" and contains specific instructions after it (e.g. "@claude fix move apiSecret to server-only config"), implement exactly those instructions, then commit and push directly to the current PR branch ($HEAD_REF), and post a comment on PR #$PR_NUMBER summarising what was done. Do NOT open a new PR.
-            If it is exactly "@claude fix" with no further instructions:
-            - If EVENT_NAME is "pull_request_review_comment": this is an inline comment on a specific finding. Use the context below to scope the fix to only that finding, then commit and push directly to the current PR branch ($HEAD_REF), and post a comment on PR #$PR_NUMBER summarising what was done. Do NOT open a new PR.
+
+            If it starts with "@claude fix" and contains specific instructions after it that are not "criticals" or "all" (e.g. "@claude fix move apiSecret to server-only config"), implement exactly those instructions, then commit and push directly to the current PR branch ($HEAD_REF), and post a comment on PR #$PR_NUMBER summarising what was done. Do NOT open a new PR.
+
+            If COMMENT_BODY is "@claude fix", "@claude fix criticals", or "@claude fix all" (or this job was triggered automatically after a review found critical issues):
+            - FIX_SCOPE is already set: "criticals" fixes only 🔴 Critical findings; "all" fixes 🔴 Critical and 🟠 Major findings from all reviewers including CodeRabbit.
+            - If EVENT_NAME is "pull_request_review_comment": scope the fix to only the finding at the inline comment location, then commit and push directly to the current PR branch ($HEAD_REF), and post a comment on PR #$PR_NUMBER summarising what was done. Do NOT open a new PR.
               - File: $INLINE_FILE
               - Diff hunk: $INLINE_DIFF_HUNK
               - If INLINE_REPLY_TO_ID is set, fetch the parent comment body with: gh api repos/${{ github.repository }}/pulls/comments/$INLINE_REPLY_TO_ID --jq '.body' — that is the finding being addressed.
-              - If INLINE_REPLY_TO_ID is not set, this is a new inline comment rather than a reply. Use INLINE_FILE and INLINE_DIFF_HUNK to identify what issue is being flagged at that location and fix it.
-            - Otherwise: run /claude-autofix to implement fixes for all critical issues found in the review, open a fix PR, and comment the link on this PR.
-            If COMMENT_BODY does not start with "@claude fix" (e.g. this job was triggered automatically after a review found critical issues): run /claude-autofix to implement fixes for all critical issues found in the review, open a fix PR, and comment the link on this PR.
+              - If INLINE_REPLY_TO_ID is not set, use INLINE_FILE and INLINE_DIFF_HUNK to identify the issue at that location and fix it.
+            - Otherwise: run /claude-autofix to implement fixes, open a fix PR, and comment the link on this PR.
 
   interactive:
     name: Interactive

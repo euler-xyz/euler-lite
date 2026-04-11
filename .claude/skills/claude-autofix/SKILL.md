@@ -1,31 +1,47 @@
 ---
 name: claude-autofix
-description: Read 🔴 Critical review findings on the current PR, implement fixes on a new branch, open a fix PR, and comment the link on the original PR
+description: Read review findings on the current PR at the requested scope (criticals / all), implement fixes on a new branch, open a fix PR, and comment the link on the original PR
 ---
 
 # Auto-fix PR Review Comments
 
-Read all `🔴 Critical:` findings from review feedback on the current PR, implement fixes on a new branch, open a PR targeting the original PR branch, and comment the link back.
+Read review findings from the current PR at the scope set by `FIX_SCOPE` (default: `criticals`), implement fixes on a new branch, open a PR targeting the original PR branch, and comment the link back.
 
 ## Instructions
 
-### Step 1: Gather critical findings
+### Step 1: Determine scope and gather findings
 
+Read the `FIX_SCOPE` env var and run the matching commands below. Both filter patterns match Claude's colon format (`🔴 Critical:`, `🟠 Major:`) and CodeRabbit's pipe format (`| 🔴 Critical`, `| 🟠 Major`).
+
+**If `FIX_SCOPE=criticals` (default):**
 ```bash
-# Inline review comments — filter to CRITICAL only
+# Inline review comments — criticals only
 gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/comments" \
-  --jq '.[] | select(.body // "" | contains("🔴 Critical:")) | {id: .id, path: .path, line: .line, body: .body, user: .user.login}'
+  --jq '.[] | select(.body // "" | contains("🔴 Critical")) | {id: .id, path: .path, line: .line, body: .body, user: .user.login}'
 
-# Review summaries — filter to CRITICAL only
+# Review summaries — criticals only
 gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" \
-  --jq '.[] | select(.state != "DISMISSED" and (.body // "" | contains("🔴 Critical:"))) | {id: .id, body: .body, user: .user.login}'
+  --jq '.[] | select(.state != "DISMISSED" and (.body // "" | contains("🔴 Critical"))) | {id: .id, body: .body, user: .user.login}'
 ```
 
-If there are no `🔴 Critical:` findings, post a comment saying there is nothing to fix and stop.
+**If `FIX_SCOPE=all`:**
+```bash
+# Inline review comments — criticals and majors
+gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/comments" \
+  --jq '.[] | select(.body // "" | (contains("🔴 Critical") or contains("🟠 Major"))) | {id: .id, path: .path, line: .line, body: .body, user: .user.login}'
+
+# Review summaries — criticals and majors
+gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" \
+  --jq '.[] | select(.state != "DISMISSED" and (.body // "" | (contains("🔴 Critical") or contains("🟠 Major")))) | {id: .id, body: .body, user: .user.login}'
+```
+
+If there are no findings after filtering, post a comment saying there is nothing to fix and stop.
 
 ### Step 2: Triage — be conservative
 
-For each `🔴 Critical:` finding, **read the actual code at the referenced location first**, then decide:
+For each finding, **read the actual code at the referenced location first**, then decide:
+
+**CodeRabbit findings** are prefixed with `⚠️ Potential issue` to signal uncertainty. Apply extra scrutiny: the issue must be clearly present in the code before acting. If you are not certain, skip it.
 
 **Implement only if ALL of the following are true:**
 1. The issue actually exists in the code (verify by reading the file — don't trust the review blindly)
@@ -33,15 +49,18 @@ For each `🔴 Critical:` finding, **read the actual code at the referenced loca
 3. The fix is self-contained and does not require a product or UX decision
 4. No human reviewer has pushed back on this finding
 
-**Skip — and note in summary — if any of the following apply:**
+**Skip — with a written reason — if any of the following apply:**
 - The flagged code looks correct in context (false positive)
+- The finding is marked `⚠️ Potential issue` and you cannot confirm the issue exists
 - The fix would change observable behaviour beyond what the comment describes
 - Reviewers contradict each other on this point
 - You are not confident the finding is correct
 
 **When in doubt, skip it.**
 
-If all critical findings are false positives after triage, post a comment on the PR via `gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments"` explaining why each was skipped, and stop — do not create a branch or PR.
+For every skipped finding, record the specific reason (e.g. "false positive — X is guaranteed by Y", "cannot confirm issue exists in current code", "fix requires product decision"). Vague reasons like "skipped" are not acceptable.
+
+If all findings are skipped after triage, post a comment on the PR via `gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments"` explaining why each was skipped, and stop — do not create a branch or PR.
 
 ### Step 3: Apply fixes
 
@@ -51,12 +70,12 @@ For each finding that passed triage, use your file editing tools to apply the fi
 
 **Run this entire block as a single bash script** — shell variables (`FIX_BRANCH`, `FIX_PR_URL`) must persist across all steps and will not survive if run as separate commands.
 
-Before running, write the actual fix summary to `/tmp/fix-pr-body.md` with the real list of what you fixed and what you skipped. Do not use placeholder text. Example:
+Before running, write the actual fix summary to `/tmp/fix-pr-body.md` with the real list of what you fixed and what you skipped. Do not use placeholder text. Use `FIX_SCOPE` to describe the scope accurately (`criticals` → "🔴 Critical findings", `all` → "🔴 Critical and 🟠 Major findings"). Example:
 
 ```
 ## Auto-fix for PR #123
 
-This PR implements fixes for `🔴 Critical:` findings from the AI review on #123.
+This PR implements fixes for 🔴 Critical findings from the AI review on #123.
 
 ### Fixed
 - `utils/autoLink.ts:11`: Restored `&quot;` HTML entity for double-quote escaping
@@ -79,12 +98,12 @@ git checkout -b "$FIX_BRANCH"
 # stage ONLY the exact files you edited in Step 3 — substitute real paths below, never use git add . or git add -A
 git add <path/to/file-you-changed.ts> <path/to/another-file.vue>
 git status
-git commit -m "fix: address critical PR review findings"
+git commit -m "fix: address PR review findings"
 git push origin "$FIX_BRANCH"
 
 # open fix PR, capture URL from stdout
 FIX_PR_URL=$(gh pr create \
-  --title "fix: auto-fix critical findings from PR #${PR_NUMBER}" \
+  --title "fix: auto-fix review findings from PR #${PR_NUMBER}" \
   --body-file /tmp/fix-pr-body.md \
   --base "$HEAD_REF" \
   --head "$FIX_BRANCH")
@@ -93,7 +112,7 @@ FIX_PR_URL=$(gh pr create \
 cat > /tmp/autofix-comment.md << EOF
 ## 🤖 Auto-fix PR opened
 
-I've opened a fix PR for the \`🔴 Critical:\` findings: $FIX_PR_URL
+I've opened a fix PR for the review findings: $FIX_PR_URL
 
 Please review the changes before merging. You can close the fix PR if the proposed fixes aren't right.
 EOF
@@ -107,7 +126,7 @@ If the commit is rejected by the pre-commit hook (lint-staged), run `npx eslint 
 
 ## Important Constraints
 
-- Only fix `🔴 Critical:` findings — never `⚠️ WARNING:` or `💬 SUGGESTION:`
+- Only fix findings within the requested scope — never fix `🧹 Nitpick:` findings regardless of scope
 - Never commit secrets, `.env` files, or unrelated files
 - Never force-push or amend commits — always create new commits
 - Never push directly to the original PR branch — always use the fix branch
