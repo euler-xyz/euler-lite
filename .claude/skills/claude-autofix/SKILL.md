@@ -1,11 +1,11 @@
 ---
 name: claude-autofix
-description: Read 🚨 CRITICAL review findings on the current PR, implement fixes on a new branch, open a fix PR, and comment the link on the original PR
+description: Read 🔴 Critical review findings on the current PR, implement fixes on a new branch, open a fix PR, and comment the link on the original PR
 ---
 
 # Auto-fix PR Review Comments
 
-Read all `🚨 CRITICAL:` findings from review feedback on the current PR, implement fixes on a new branch, open a PR targeting the original PR branch, and comment the link back.
+Read all `🔴 Critical:` findings from review feedback on the current PR, implement fixes on a new branch, open a PR targeting the original PR branch, and comment the link back.
 
 ## Instructions
 
@@ -14,18 +14,18 @@ Read all `🚨 CRITICAL:` findings from review feedback on the current PR, imple
 ```bash
 # Inline review comments — filter to CRITICAL only
 gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/comments" \
-  --jq '.[] | select(.body // "" | contains("🚨 CRITICAL:")) | {id: .id, path: .path, line: .line, body: .body, user: .user.login}'
+  --jq '.[] | select(.body // "" | contains("🔴 Critical:")) | {id: .id, path: .path, line: .line, body: .body, user: .user.login}'
 
 # Review summaries — filter to CRITICAL only
 gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" \
-  --jq '.[] | select(.state != "DISMISSED" and (.body // "" | contains("🚨 CRITICAL:"))) | {id: .id, body: .body, user: .user.login}'
+  --jq '.[] | select(.state != "DISMISSED" and (.body // "" | contains("🔴 Critical:"))) | {id: .id, body: .body, user: .user.login}'
 ```
 
-If there are no `🚨 CRITICAL:` findings, post a comment saying there is nothing to fix and stop.
+If there are no `🔴 Critical:` findings, post a comment saying there is nothing to fix and stop.
 
 ### Step 2: Triage — be conservative
 
-For each `🚨 CRITICAL:` finding, **read the actual code at the referenced location first**, then decide:
+For each `🔴 Critical:` finding, **read the actual code at the referenced location first**, then decide:
 
 **Implement only if ALL of the following are true:**
 1. The issue actually exists in the code (verify by reading the file — don't trust the review blindly)
@@ -56,7 +56,7 @@ Before running, write the actual fix summary to `/tmp/fix-pr-body.md` with the r
 ```
 ## Auto-fix for PR #123
 
-This PR implements fixes for `🚨 CRITICAL:` findings from the AI review on #123.
+This PR implements fixes for `🔴 Critical:` findings from the AI review on #123.
 
 ### Fixed
 - `utils/autoLink.ts:11`: Restored `&quot;` HTML entity for double-quote escaping
@@ -93,7 +93,7 @@ FIX_PR_URL=$(gh pr create \
 cat > /tmp/autofix-comment.md << EOF
 ## 🤖 Auto-fix PR opened
 
-I've opened a fix PR for the \`🚨 CRITICAL:\` findings: $FIX_PR_URL
+I've opened a fix PR for the \`🔴 Critical:\` findings: $FIX_PR_URL
 
 Please review the changes before merging. You can close the fix PR if the proposed fixes aren't right.
 EOF
@@ -107,7 +107,7 @@ If the commit is rejected by the pre-commit hook (lint-staged), run `npx eslint 
 
 ## Important Constraints
 
-- Only fix `🚨 CRITICAL:` findings — never `⚠️ WARNING:` or `💬 SUGGESTION:`
+- Only fix `🔴 Critical:` findings — never `⚠️ WARNING:` or `💬 SUGGESTION:`
 - Never commit secrets, `.env` files, or unrelated files
 - Never force-push or amend commits — always create new commits
 - Never push directly to the original PR branch — always use the fix branch

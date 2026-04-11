@@ -67,9 +67,9 @@ git diff origin/$BASE_REF...HEAD
 
 ### Step 3: Classify findings
 
-- `🚨 CRITICAL:` — secret exposure risk, XSS vector, geo-blocking bypass, RPC URL leakage to client, funds sent to wrong recipient, unlimited approval to untrusted address, missing screening/terms gate on fund-moving transaction
-- `⚠️ WARNING:` — potential exposure path that requires specific conditions, missing `simulateContract`, missing guard
-- `💬 SUGGESTION:` — defence-in-depth improvement, better validation
+- `🔴 Critical:` — secret exposure risk, XSS vector, geo-blocking bypass, RPC URL leakage to client, funds sent to wrong recipient, unlimited approval to untrusted address, missing screening/terms gate on fund-moving transaction
+- `🟠 Major:` — potential exposure path that requires specific conditions, missing `simulateContract`, missing guard
+- `🧹 Nitpick:` — defence-in-depth improvement, better validation
 
 ### Step 4: Return findings
 

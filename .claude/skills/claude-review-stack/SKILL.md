@@ -78,9 +78,9 @@ Then read the files most likely to overlap with the diff's domain (e.g. if the d
 ### Step 3: Classify findings
 
 For each issue found:
-- `🚨 CRITICAL:` — broken pattern that will cause runtime errors, hydration mismatches, or type safety regressions
-- `⚠️ WARNING:` — bad practice that should be fixed but won't immediately break
-- `💬 SUGGESTION:` — minor improvement
+- `🔴 Critical:` — broken pattern that will cause runtime errors, hydration mismatches, or type safety regressions
+- `🟠 Major:` — bad practice that should be fixed but won't immediately break
+- `🧹 Nitpick:` — minor improvement
 
 Skip nits about formatting, comment style, or ordering unless they create confusion.
 

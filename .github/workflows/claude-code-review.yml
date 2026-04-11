@@ -81,7 +81,7 @@ jobs:
         id: critical-check
         run: |
           if [ ! -f /tmp/review.json ]; then exit 1; fi
-          count=$(python3 -c "import json; d=json.load(open('/tmp/review.json')); b=d.get('body',''); cs=d.get('comments',[]); print(b.count('🚨 CRITICAL:') + sum(1 for c in cs if '🚨 CRITICAL:' in c.get('body','')))")
+          count=$(python3 -c "import json; d=json.load(open('/tmp/review.json')); b=d.get('body',''); cs=d.get('comments',[]); print(b.count('🔴 Critical:') + sum(1 for c in cs if '🔴 Critical:' in c.get('body','')))")
           if [ "$count" -gt 0 ]; then
             echo "has_critical=true" >> $GITHUB_OUTPUT
             echo "::error::Review found $count critical issue(s) that must be resolved before merging."

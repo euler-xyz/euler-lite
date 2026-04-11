@@ -43,9 +43,9 @@ Complete the full review. Collect:
 - **Inline comments** — Specific issues on changed lines (path, line, body)
 
 Mark each finding with a severity prefix:
-- `🚨 CRITICAL:` — must be fixed before merge (incorrect logic, security issue, data loss risk)
-- `⚠️ WARNING:` — should be fixed but won't block merge (bad pattern, fragile code)
-- `💬 SUGGESTION:` — optional improvement (style, minor optimisation)
+- `🔴 Critical:` — must be fixed before merge (incorrect logic, security issue, data loss risk)
+- `🟠 Major:` — should be fixed but won't block merge (bad pattern, fragile code)
+- `🧹 Nitpick:` — optional improvement (style, minor optimisation)
 
 ### Step 3: Build Review JSON
 
@@ -59,14 +59,14 @@ Write a JSON file to `/tmp/review.json`:
     {
       "path": "composables/repay/useWalletRepay.ts",
       "line": 42,
-      "body": "🚨 CRITICAL: Issue description here"
+      "body": "🔴 Critical: Issue description here"
     },
     {
       "path": "utils/fixed-point.ts",
       "start_line": 10,
       "line": 15,
       "side": "RIGHT",
-      "body": "⚠️ WARNING: Multi-line comment"
+      "body": "🟠 Major: Multi-line comment"
     }
   ]
 }
