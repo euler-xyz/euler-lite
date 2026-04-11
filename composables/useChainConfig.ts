@@ -38,14 +38,7 @@ function scanEnv(): ChainConfig {
   enabledChainIds.sort((a, b) => a - b)
 
   const enabledSet = new Set(enabledChainIds)
-  const rawDeprecated = process.env.DEPRECATED_CHAINS?.trim()
-  const deprecatedChainIds = rawDeprecated
-    ? rawDeprecated
-        .split(',')
-        .map(s => Number(s.trim()))
-        .filter(id => !Number.isNaN(id) && enabledSet.has(id))
-        .sort((a, b) => a - b)
-    : []
+  const deprecatedChainIds = parseDeprecatedChains(process.env.DEPRECATED_CHAINS, enabledSet)
 
   return { enabledChainIds, deprecatedChainIds, subgraphUris }
 }

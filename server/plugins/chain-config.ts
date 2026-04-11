@@ -6,6 +6,8 @@
  * The config is embedded as a <script> tag in the HTML head, making it
  * accessible to the client synchronously via window.__CHAIN_CONFIG__.
  */
+import { parseDeprecatedChains } from '../../utils/parseDeprecatedChains'
+
 export default defineNitroPlugin((nitroApp) => {
   const enabledChainIds: number[] = []
 
@@ -27,14 +29,7 @@ export default defineNitroPlugin((nitroApp) => {
   enabledChainIds.sort((a, b) => a - b)
 
   const enabledSet = new Set(enabledChainIds)
-  const rawDeprecated = process.env.DEPRECATED_CHAINS?.trim()
-  const deprecatedChainIds = rawDeprecated
-    ? rawDeprecated
-        .split(',')
-        .map(s => Number(s.trim()))
-        .filter(id => !Number.isNaN(id) && enabledSet.has(id))
-        .sort((a, b) => a - b)
-    : []
+  const deprecatedChainIds = parseDeprecatedChains(process.env.DEPRECATED_CHAINS, enabledSet)
 
   const scriptTag = `<script>window.__CHAIN_CONFIG__=${JSON.stringify({ enabledChainIds, deprecatedChainIds, subgraphUris })}</script>`
 
