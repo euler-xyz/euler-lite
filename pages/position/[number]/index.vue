@@ -703,16 +703,7 @@ watch([isConnected, isSpyMode], () => {
     </template>
     <template v-else-if="position">
       <div class="flex items-center gap-12">
-        <NuxtLink
-          to="/portfolio"
-          aria-label="Back to portfolio"
-          class="flex items-center justify-center self-stretch px-8 rounded-8 border border-line-default bg-surface-elevated hover:bg-card-hover transition-colors text-content-secondary hover:text-content-primary flex-shrink-0"
-        >
-          <UiIcon
-            name="arrow-left"
-            class="!w-16 !h-16"
-          />
-        </NuxtLink>
+        <BaseBackIconButton exact />
         <div class="text-h6 text-content-secondary bg-surface-elevated py-4 px-12 rounded-8 border border-line-default">
           Position {{ positionIndex }}
         </div>

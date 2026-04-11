@@ -428,6 +428,8 @@ watch([collateralAmount, borrowAmount], async () => {
 
 <template>
   <VaultForm
+    back
+    :back-fallback="`/position/${positionIndex}`"
     title="Borrow more"
     description="Borrow additional assets against your existing collateral."
     :loading="isLoading || isPositionsLoading"

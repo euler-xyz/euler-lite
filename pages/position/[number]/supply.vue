@@ -15,6 +15,7 @@ import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useCollateralForm } from '~/composables/position/useCollateralForm'
 
+const positionIndex = usePositionIndex()
 const { isConnected, address } = useAccount()
 const { isSpyMode } = useSpyMode()
 const { fetchSingleBalance } = useWallets()
@@ -224,6 +225,8 @@ watch(selectedAsset, async () => {
 
 <template>
   <VaultForm
+    back
+    :back-fallback="`/position/${positionIndex}`"
     title="Supply collateral"
     description="Add collateral to improve your health score and reduce liquidation risk."
     :loading="form.isLoading.value"

@@ -756,16 +756,16 @@ watch(address, () => {
       <UiLoader />
     </div>
     <template v-else>
-      <BaseBackButton class="laptop:!hidden mb-16" />
-
       <!-- Vault header -->
-      <VaultLabelsAndAssets
-        v-if="asset && (vault || securitizeVault)"
-        class="mb-24"
-        :vault="(vault || securitizeVault)!"
-        :assets="assets"
-        size="large"
-      />
+      <div class="flex items-center gap-12 mb-24">
+        <BaseBackIconButton fallback="/lend" />
+        <VaultLabelsAndAssets
+          v-if="asset && (vault || securitizeVault)"
+          :vault="(vault || securitizeVault)!"
+          :assets="assets"
+          size="large"
+        />
+      </div>
 
       <div class="flex gap-32">
         <div class="hidden laptop:!block laptop:flex-[55] min-w-0">

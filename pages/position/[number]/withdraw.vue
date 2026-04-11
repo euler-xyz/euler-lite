@@ -17,6 +17,7 @@ import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useCollateralForm } from '~/composables/position/useCollateralForm'
 
+const positionIndex = usePositionIndex()
 const { address } = useAccount()
 const { buildWithdrawPlan, buildWithdrawAndSwapPlan } = useEulerOperations()
 const { refreshAllPositions } = useEulerAccount()
@@ -171,6 +172,8 @@ watch(selectedOutputAsset, () => {
 
 <template>
   <VaultForm
+    back
+    :back-fallback="`/position/${positionIndex}`"
     title="Withdraw collateral"
     description="Remove collateral from your position. Your health score will decrease."
     :loading="form.isLoading.value"

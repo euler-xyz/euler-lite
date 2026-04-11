@@ -309,6 +309,8 @@ watch(formTab, () => {
 
 <template>
   <VaultForm
+    back
+    :back-fallback="`/position/${positionIndex}`"
     :loading="isLoading || isPositionsLoading"
     title="Repay position"
     description="Reduce your debt using tokens from your wallet, collateral, or savings."

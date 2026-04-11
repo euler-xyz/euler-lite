@@ -378,16 +378,16 @@ watch(formTab, () => {
       <UiLoader />
     </div>
     <template v-else>
-      <BaseBackButton class="laptop:!hidden mb-16" />
-
-      <VaultLabelsAndAssets
-        v-if="collateralVault && borrowVault"
-        class="mb-24"
-        :vault="collateralVault"
-        :pair-vault="borrowVault"
-        :assets="pairAssets as VaultAsset[]"
-        size="large"
-      />
+      <div class="flex items-center gap-12 mb-24">
+        <BaseBackIconButton fallback="/borrow" />
+        <VaultLabelsAndAssets
+          v-if="collateralVault && borrowVault"
+          :vault="collateralVault"
+          :pair-vault="borrowVault"
+          :assets="pairAssets as VaultAsset[]"
+          size="large"
+        />
+      </div>
 
       <div class="flex gap-32">
         <div

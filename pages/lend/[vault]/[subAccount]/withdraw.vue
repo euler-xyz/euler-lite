@@ -520,6 +520,8 @@ watch(swapSelectedQuote, () => {
 
 <template>
   <VaultForm
+    back
+    :back-fallback="`/lend/${vaultAddress}`"
     title="Withdraw savings"
     description="Withdraw your supplied assets back to your wallet."
     class="flex flex-col gap-16"

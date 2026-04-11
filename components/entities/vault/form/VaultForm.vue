@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineProps<{ title?: string, description?: string, loading?: boolean }>()
+defineProps<{ title?: string, description?: string, loading?: boolean, back?: boolean, backFallback?: string }>()
 </script>
 
 <template>
@@ -7,13 +7,22 @@ defineProps<{ title?: string, description?: string, loading?: boolean }>()
     v-bind="$attrs"
     class="flex flex-col mobile:min-h-[calc(100dvh-100px)] laptop:max-h-[calc(100dvh-88px)] laptop:overflow-clip laptop:px-16"
   >
-    <div v-if="title || description">
-      <h1
-        v-if="title"
-        class="text-p1 pb-4"
+    <div v-if="back || title || description">
+      <div
+        v-if="back || title"
+        class="flex items-center gap-12 pb-4"
       >
-        {{ title }}
-      </h1>
+        <BaseBackIconButton
+          v-if="back"
+          :fallback="backFallback"
+        />
+        <h1
+          v-if="title"
+          class="text-p1"
+        >
+          {{ title }}
+        </h1>
+      </div>
       <p
         v-if="description"
         class="text-p3 text-content-secondary pb-8"

@@ -774,6 +774,8 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
 
 <template>
   <VaultForm
+    back
+    :back-fallback="`/position/${positionIndex}`"
     title="Multiply"
     description="Increase your exposure by looping collateral through borrowing."
     :loading="isLoading || isPositionsLoading"

@@ -228,15 +228,15 @@ watch(address, () => {
       <UiLoader />
     </div>
     <template v-else>
-      <BaseBackButton class="laptop:!hidden mb-16" />
-
-      <VaultLabelsAndAssets
-        v-if="asset"
-        class="mb-24"
-        :vault="vault"
-        :assets="assets"
-        size="large"
-      />
+      <div class="flex items-center gap-12 mb-24">
+        <BaseBackIconButton fallback="/earn" />
+        <VaultLabelsAndAssets
+          v-if="asset"
+          :vault="vault"
+          :assets="assets"
+          size="large"
+        />
+      </div>
 
       <div class="flex gap-32">
         <div class="hidden laptop:!block laptop:flex-[55] min-w-0">

@@ -238,6 +238,8 @@ watch(amount, () => {
 
 <template>
   <VaultForm
+    back
+    :back-fallback="`/earn/${vaultAddress}`"
     title="Withdraw savings"
     description="Withdraw your supplied assets back to your wallet."
     class="flex flex-col gap-16"

@@ -181,6 +181,8 @@ watch([() => route.params.vault, () => route.query.to], () => {
 <template>
   <div class="flex gap-32">
     <VaultForm
+      back
+      :back-fallback="`/lend/${getVaultAddress()}`"
       title="Rebalance savings"
       description="Move your supplied assets from one vault to another."
       class="flex flex-col gap-16 w-full"
