@@ -41,20 +41,14 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            if (context.eventName === 'issue_comment') {
-              const { data: pr } = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: context.issue.number
-              });
-              core.setOutput('head_sha', pr.head.sha);
-              core.setOutput('pr_number', context.issue.number);
-              core.setOutput('base_ref', pr.base.ref);
-            } else {
-              core.setOutput('head_sha', context.payload.pull_request.head.sha);
-              core.setOutput('pr_number', context.payload.pull_request.number);
-              core.setOutput('base_ref', context.payload.pull_request.base.ref);
-            }
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            core.setOutput('head_sha', pr.head.sha);
+            core.setOutput('pr_number', context.issue.number);
+            core.setOutput('base_ref', pr.base.ref);
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -183,6 +177,10 @@ jobs:
           HEAD_REF: ${{ steps.pr-info.outputs.head_ref }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMENT_BODY: ${{ github.event.comment.body }}
+          EVENT_NAME: ${{ github.event_name }}
+          INLINE_FILE: ${{ github.event.comment.path }}
+          INLINE_DIFF_HUNK: ${{ github.event.comment.diff_hunk }}
+          INLINE_REPLY_TO_ID: ${{ github.event.comment.in_reply_to_id }}
         with:
           anthropic_api_key: ${{ secrets.LLM_API_KEY }}
           use_sticky_comment: "true"
@@ -196,7 +194,13 @@ jobs:
           prompt: |
             Check the COMMENT_BODY env var.
             If it contains specific instructions after "@claude fix" (e.g. "@claude fix move apiSecret to server-only config"), implement exactly those instructions, then commit and push directly to the current PR branch ($HEAD_REF), and post a comment on PR #$PR_NUMBER summarising what was done. Do NOT open a new PR.
-            If COMMENT_BODY is empty or is just "@claude fix" with no further instructions, run /claude-autofix to implement fixes for all critical issues found in the review, open a fix PR, and comment the link on this PR.
+            If COMMENT_BODY is empty or is just "@claude fix" with no further instructions:
+            - If EVENT_NAME is "pull_request_review_comment": this is an inline comment on a specific finding. Use the context below to scope the fix to only that finding, then commit and push directly to the current PR branch ($HEAD_REF), and post a comment on PR #$PR_NUMBER summarising what was done. Do NOT open a new PR.
+              - File: $INLINE_FILE
+              - Diff hunk: $INLINE_DIFF_HUNK
+              - If INLINE_REPLY_TO_ID is set, fetch the parent comment body with: gh api repos/${{ github.repository }}/pulls/comments/$INLINE_REPLY_TO_ID --jq '.body' — that is the finding being addressed.
+              - If INLINE_REPLY_TO_ID is not set, this is a new inline comment rather than a reply. Use INLINE_FILE and INLINE_DIFF_HUNK to identify what issue is being flagged at that location and fix it.
+            - Otherwise: run /claude-autofix to implement fixes for all critical issues found in the review, open a fix PR, and comment the link on this PR.
 
   interactive:
     name: Interactive
@@ -279,6 +283,7 @@ jobs:
         env:
           PR_NUMBER: ${{ steps.pr-info.outputs.pr_number }}
           BASE_REF: ${{ steps.pr-info.outputs.base_ref }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
         with:
           anthropic_api_key: ${{ secrets.LLM_API_KEY }}
           use_sticky_comment: "true"
@@ -290,7 +295,7 @@ jobs:
               }
             }
           prompt: |
-            A team member commented on this PR: "${{ github.event.comment.body }}"
+            A team member commented on this PR (see COMMENT_BODY env var).
 
             You have access to the full repository. Focus your response on the context of this PR and the changed files.
             Use git diff origin/$BASE_REF...HEAD to understand what changed.
