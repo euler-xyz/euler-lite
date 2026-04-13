@@ -14,7 +14,7 @@ import {
   type ChartData,
 } from 'chart.js'
 import annotationPlugin from 'chartjs-plugin-annotation'
-import { formatUnits, type Address, type Abi } from 'viem'
+import { formatUnits, zeroAddress, type Address, type Abi } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
 import { BPS_BASE } from '~/entities/tuning-constants'
@@ -62,7 +62,7 @@ const hasValidIRM = computed(() => {
   )
   return hasExposure
     && vault.interestRateModelAddress
-    && vault.interestRateModelAddress !== '0x0000000000000000000000000000000000000000'
+    && vault.interestRateModelAddress !== zeroAddress
 })
 
 const irmTypeLabel = computed(() => {
@@ -393,6 +393,16 @@ const renderChart = async () => {
 
 onMounted(async () => {
   if (hasValidIRM.value) {
+    await nextTick()
+    await renderChart()
+  }
+})
+
+// Re-render chart when hasValidIRM transitions false → true after mount.
+// This happens when the vault registry loads collateral vaults asynchronously
+// after the component has already mounted with an empty registry.
+watch(hasValidIRM, async (newVal) => {
+  if (newVal && !chartData.value) {
     await nextTick()
     await renderChart()
   }

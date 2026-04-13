@@ -32,6 +32,12 @@ export type CollateralVaultResolver =
  *    collateral vault has outstanding supply — meaning existing borrows can
  *    still accrue interest even after `borrowLTV` has been set to zero mid
  *    ramp-down.
+ *
+ * Note: `collateral.totalAssets > 0n` is an intentional over-approximation.
+ * It checks whether the collateral vault has *any* deposits, not whether those
+ * deposits are actively backing borrows on *this* vault. This errs on the side
+ * of showing the IRM chart (false positive) rather than hiding it (false
+ * negative), and matches the heuristic used by the original inline code.
  */
 const isLiveExposure = (
   ltv: VaultCollateralLTV,
