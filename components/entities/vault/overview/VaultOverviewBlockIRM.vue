@@ -14,12 +14,13 @@ import {
   type ChartData,
 } from 'chart.js'
 import annotationPlugin from 'chartjs-plugin-annotation'
-import { formatUnits, type Address, type Abi } from 'viem'
+import { formatUnits, zeroAddress, type Address, type Abi } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
 import { BPS_BASE } from '~/entities/tuning-constants'
-import type { Vault } from '~/entities/vault'
-import { getVaultUtilization } from '~/entities/vault'
+import type { Vault, SecuritizeVault } from '~/entities/vault'
+import { getVaultUtilization, hasCollateralExposure } from '~/entities/vault'
+import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { eulerVaultLensABI } from '~/entities/euler/abis'
 
 // Register Chart.js components
@@ -47,11 +48,21 @@ const { getChartColors, isDark } = useThemeColors()
 
 const { client: rpcClient } = useRpcClient()
 const { eulerLensAddresses } = useEulerAddresses()
+const { get: registryGet } = useVaultRegistry()
 
-// Check if IRM is valid (not zero address)
+// Only render the IRM chart for vaults that have live borrow-side exposure —
+// either currently borrowable, or still accruing interest on existing debt
+// while the liquidation LTV ramps down. This mirrors the visibility rule of
+// the "Collateral exposure" block and correctly excludes collateral-only
+// vaults that may still carry a non-zero interestRateModelAddress.
 const hasValidIRM = computed(() => {
-  return vault.interestRateModelAddress
-    && vault.interestRateModelAddress !== '0x0000000000000000000000000000000000000000'
+  const hasExposure = hasCollateralExposure(
+    vault,
+    addr => registryGet(addr)?.vault as Vault | SecuritizeVault | undefined,
+  )
+  return hasExposure
+    && vault.interestRateModelAddress
+    && vault.interestRateModelAddress !== zeroAddress
 })
 
 const irmTypeLabel = computed(() => {
@@ -382,6 +393,16 @@ const renderChart = async () => {
 
 onMounted(async () => {
   if (hasValidIRM.value) {
+    await nextTick()
+    await renderChart()
+  }
+})
+
+// Re-render chart when hasValidIRM transitions false → true after mount.
+// This happens when the vault registry loads collateral vaults asynchronously
+// after the component has already mounted with an empty registry.
+watch(hasValidIRM, async (newVal) => {
+  if (newVal && !chartData.value) {
     await nextTick()
     await renderChart()
   }
