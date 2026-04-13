@@ -22,19 +22,7 @@ const market = computed(() =>
 </script>
 
 <template>
-  <section class="flex flex-col min-h-[calc(100dvh-178px)]">
-    <!-- Back link -->
-    <NuxtLink
-      to="/explore"
-      class="flex items-center gap-4 text-p3 text-content-tertiary hover:text-accent-600 transition-colors mb-16"
-    >
-      <UiIcon
-        name="arrow-left"
-        class="!w-16 !h-16"
-      />
-      Back to Explore
-    </NuxtLink>
-
+  <section class="relative flex flex-col min-h-[calc(100dvh-178px)]">
     <!-- Loading -->
     <UiLoader
       v-if="isLoading"
@@ -63,6 +51,14 @@ const market = computed(() =>
 
     <!-- Market page -->
     <template v-else>
+      <BackButton
+        class="hidden tablet:inline-flex tablet:absolute tablet:top-0 tablet:right-full tablet:mr-12"
+        fallback="/explore"
+      />
+      <BackButton
+        class="tablet:hidden mb-16"
+        fallback="/explore"
+      />
       <DiscoveryMarketAccordion
         :markets="[market]"
         :initial-expanded="[market.id]"
