@@ -33,7 +33,7 @@ const emits = defineEmits(['close'])
       </ul>
 
       <p class="text-secondary text-p3">
-        You can still access the previous app by clicking the link in the top-left corner,
+        You can still access the legacy app by clicking the link in the top-left corner,
         but please note that it will no longer be maintained.
       </p>
 

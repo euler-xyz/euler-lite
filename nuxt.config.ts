@@ -126,9 +126,9 @@ export default defineNuxtConfig({
       // Migration announcement: set to a tweet/announcement URL to show a
       // one-time modal explaining the app upgrade. Empty = disabled (default).
       configMigrationAnnouncementUrl: '',
-      // Migration: link to the previous app shown in the header dropdown.
+      // Migration: link to the legacy app shown in the header dropdown.
       // Empty = no link rendered (default).
-      configMigrationOldAppUrl: '',
+      configMigrationLegacyAppUrl: '',
       // External token list URLs for swap token selector
       configUniswapTokenListUrl: '',
       configDefillamaTokenListUrl: '',
