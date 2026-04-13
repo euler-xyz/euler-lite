@@ -965,11 +965,12 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         onCancel: async () => {
           try {
             await cowSwapExecution.cancelOrder()
-            modal.close()
+            // Don't close modal — polling will detect 'cancelled' terminal state
+            // and the order watcher will clean up
           }
           catch (e) {
             logWarn('multiply/cowswap/cancel', e)
-            error('Failed to cancel order')
+            // error.value in cowSwapExecution feeds the executionError toast in the modal
           }
         },
       },
