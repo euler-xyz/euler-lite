@@ -32,6 +32,9 @@ export const useCowSwapExecution = () => {
   const orderUid = ref<CowSwapOrderUid | undefined>()
   const submissionChainId = ref<number | undefined>()
   const error = ref<Error | null>(null)
+  // Set immediately after a successful cancel API call so the UI can reflect
+  // the cancelled state before polling detects the terminal 'cancelled' status.
+  const locallyCancelled = ref(false)
 
   const isPending = computed(() => status.value !== 'idle' && status.value !== 'submitted')
   const explorerUrl = computed(() => {
@@ -224,6 +227,7 @@ export const useCowSwapExecution = () => {
           }) as Hex
         },
       })
+      locallyCancelled.value = true
     }
     catch (err) {
       const wrapped = err instanceof Error ? err : new Error(String(err))
@@ -238,6 +242,7 @@ export const useCowSwapExecution = () => {
     orderUid.value = undefined
     submissionChainId.value = undefined
     error.value = null
+    locallyCancelled.value = false
   }
 
   return {
@@ -249,5 +254,6 @@ export const useCowSwapExecution = () => {
     isPending,
     explorerUrl,
     error,
+    locallyCancelled,
   }
 }

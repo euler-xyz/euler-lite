@@ -911,6 +911,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         collateralAsset: multiplySupplyVault.value.asset,
         collateralAmount: multiplyInputAmount.value,
         collateralVaultName: multiplySupplyProduct.name || multiplySupplyVault.value.asset.symbol,
+        collateralVaultSymbol: multiplySupplyVault.value.symbol,
         borrowAsset: multiplyShortVault.value.asset,
         borrowAmount: multiplyShortAmount.value || formatUnits(debtAmount, Number(multiplyShortVault.value.asset.decimals)),
         borrowVaultName: multiplyShortProduct.name || multiplyShortVault.value.asset.symbol,
@@ -925,6 +926,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         executionError: cowSwapExecution.error,
         explorerUrl: cowSwapExecution.explorerUrl,
         orderStatus: cowSwapOrderStatus.orderStatus,
+        locallyCancelled: cowSwapExecution.locallyCancelled,
         onConfirm: async () => {
           try {
             await cowSwapExecution.executeAsync(cowParams)
