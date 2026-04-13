@@ -136,9 +136,9 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     if (orderStatusVal.type === 'traded' || orderStatusVal.type === 'fulfilled') {
       refreshAllPositions(eulerLensAddresses.value, address.value || '')
       modal.close()
-      cowSwapExecution.reset()
       setTimeout(() => {
         router.replace('/portfolio')
+        cowSwapExecution.reset()
       }, 400)
     }
     else {
