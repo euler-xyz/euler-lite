@@ -703,12 +703,12 @@ watch([isConnected, isSpyMode], () => {
     </template>
     <template v-else-if="position">
       <BackButton
-        class="hidden laptop:inline-flex laptop:absolute laptop:top-2 laptop:right-full laptop:mr-12"
+        class="hidden tablet:inline-flex tablet:absolute tablet:top-2 tablet:right-full tablet:mr-12"
         always-fallback
       />
       <div class="flex items-center gap-12">
         <BackButton
-          class="laptop:hidden"
+          class="tablet:hidden"
           always-fallback
         />
         <h1 class="text-p1">

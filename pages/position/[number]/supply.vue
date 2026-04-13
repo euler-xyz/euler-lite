@@ -226,7 +226,7 @@ watch(selectedAsset, async () => {
 <template>
   <div class="relative">
     <BackButton
-      class="hidden laptop:inline-flex laptop:absolute laptop:top-20 laptop:right-full laptop:mr-4"
+      class="hidden tablet:inline-flex tablet:absolute tablet:top-20 tablet:right-full tablet:mr-4"
       :fallback="`/position/${positionIndex}`"
     />
     <VaultForm

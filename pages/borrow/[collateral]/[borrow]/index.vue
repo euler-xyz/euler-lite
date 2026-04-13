@@ -379,7 +379,7 @@ watch(formTab, () => {
     </div>
     <template v-else>
       <BackButton
-        class="hidden laptop:inline-flex laptop:absolute laptop:top-8 laptop:right-full laptop:mr-12"
+        class="hidden tablet:inline-flex tablet:absolute tablet:top-8 tablet:right-full tablet:mr-12"
         fallback="/borrow"
       />
       <VaultLabelsAndAssets

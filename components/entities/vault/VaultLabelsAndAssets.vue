@@ -94,7 +94,7 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
   >
     <BackButton
       v-if="back"
-      class="laptop:hidden"
+      class="tablet:hidden"
       :fallback="backFallback"
     />
     <AssetAvatar
