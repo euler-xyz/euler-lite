@@ -95,4 +95,55 @@ jobs:
           task-definition: ${{ steps.render-task-def.outputs.task-definition }}
           service: ${{ secrets.ECS_SERVICE }}
           cluster: ${{ secrets.ECS_CLUSTER }}
-          wait-for-service-stability: true
+          wait-for-service-stability: false
+
+      - name: Wait for ECS service stability and stream events
+        env:
+          ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
+          ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
+        run: |
+          set -euo pipefail
+
+          echo "Waiting for ECS service stability..."
+          timeout_seconds=900
+          poll_interval_seconds=15
+          deadline=$((SECONDS + timeout_seconds))
+
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            echo ""
+            echo "Recent ECS service events:"
+            aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" \
+              --services "$ECS_SERVICE" \
+              --query "services[0].events" \
+              --output table || true
+
+            primary_rollout_state=$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" \
+              --services "$ECS_SERVICE" \
+              --query "services[0].deployments[?status==\`PRIMARY\`].rolloutState | [0]" \
+              --output text)
+
+            primary_rollout_reason=$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" \
+              --services "$ECS_SERVICE" \
+              --query "services[0].deployments[?status==\`PRIMARY\`].rolloutStateReason | [0]" \
+              --output text)
+
+            if [ "$primary_rollout_state" = "COMPLETED" ]; then
+              echo "ECS rollout completed."
+              exit 0
+            fi
+
+            if [ "$primary_rollout_state" = "FAILED" ]; then
+              echo "ECS rollout failed: $primary_rollout_reason"
+              exit 1
+            fi
+
+            echo "Current rollout state: $primary_rollout_state"
+            [ "$primary_rollout_reason" != "None" ] && echo "Reason: $primary_rollout_reason"
+            sleep "$poll_interval_seconds"
+          done
+
+          echo "Timed out waiting for ECS service stability after ${timeout_seconds}s."
+          exit 1
