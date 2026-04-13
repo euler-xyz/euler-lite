@@ -12,6 +12,7 @@
  * docs/architecture.md (Clickjacking & Framing Defenses) first.
  */
 import { describe, it, expect } from 'vitest'
+import type { H3Event } from 'h3'
 import { buildCsp } from '~/server/plugins/csp'
 import { applySecurityHeaders } from '~/server/middleware/security-headers'
 import { ANTI_CLICKJACK_SCRIPT } from '~/server/plugins/00-anti-clickjack'
@@ -71,7 +72,7 @@ describe('applySecurityHeaders', () => {
             },
           },
         },
-      } as never,
+      } as unknown as H3Event,
       headers,
     }
   }
