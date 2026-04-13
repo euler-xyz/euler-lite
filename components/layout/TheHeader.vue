@@ -151,7 +151,7 @@ onClickOutside(wrapperRef, () => {
             <a
               v-if="migrationLegacyAppUrl"
               :href="migrationLegacyAppUrl"
-              class="block mb-12 pb-12 border-b border-line-default text-content-primary hover:text-accent-600 transition-colors"
+              class="block pb-12 border-b border-line-default text-content-primary hover:text-accent-600 transition-colors"
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -159,7 +159,7 @@ onClickOutside(wrapperRef, () => {
             </a>
             <div
               v-if="links.length"
-              class="mb-12"
+              class="mb-12 pt-5"
             >
               <p class="mb-8 text-content-tertiary text-h6 text-left">
                 Resources
