@@ -175,8 +175,17 @@ const wrapperSteps = computed<DisplayStep[]>(() => {
   return result
 })
 
-const handleConfirm = () => {
-  props.onConfirm()
+const internalSubmitting = ref(false)
+
+const handleConfirm = async () => {
+  if (internalSubmitting.value) return
+  internalSubmitting.value = true
+  try {
+    await Promise.resolve(props.onConfirm())
+  }
+  finally {
+    internalSubmitting.value = false
+  }
 }
 
 const handleCancel = async () => {
@@ -265,8 +274,8 @@ const handleCancel = async () => {
         variant="primary"
         size="xlarge"
         rounded
-        :disabled="isExecuting"
-        :loading="isExecuting"
+        :disabled="isExecuting || internalSubmitting"
+        :loading="isExecuting || internalSubmitting"
         @click="handleConfirm"
       >
         {{ isExecuting ? executionLabel : 'Confirm & Sign' }}
