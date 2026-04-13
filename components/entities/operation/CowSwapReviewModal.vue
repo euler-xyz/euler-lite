@@ -7,6 +7,7 @@ const props = defineProps<{
   collateralAsset: VaultAsset
   collateralAmount: string
   collateralVaultName: string
+  collateralVaultSymbol: string
   borrowAsset: VaultAsset
   borrowAmount: string
   borrowVaultName: string
@@ -19,6 +20,7 @@ const props = defineProps<{
   executionError: Error | null
   explorerUrl: string | undefined
   orderStatus: CowSwapOrderStatus | null
+  locallyCancelled: boolean
   onConfirm: () => void
   onCancel: () => void
 }>()
@@ -46,6 +48,9 @@ const executionLabel = computed(() => {
 })
 
 const orderStatusLabel = computed(() => {
+  // Optimistic cancel state — shown immediately after a successful cancel API call,
+  // before CoW's polling reports the terminal 'cancelled' status.
+  if (props.locallyCancelled) return 'Order cancelled'
   if (!props.orderStatus) return 'Waiting for solver...'
   switch (props.orderStatus.type) {
     case 'open': return 'Order open — waiting for solver...'
@@ -58,6 +63,23 @@ const orderStatusLabel = computed(() => {
     case 'expired': return 'Order expired'
     default: return 'Waiting for solver...'
   }
+})
+
+const walletWarningsDescription = computed(() => {
+  const parts: string[] = []
+  // The CoW order is signed with the buyToken set to the vault address and
+  // the buyAmount denominated in vault shares. Wallets display those raw values
+  // — they differ from the underlying-asset amounts shown in this modal.
+  parts.push(
+    `The CoW order is signed with buy amounts in ${props.collateralVaultSymbol} shares. `
+    + `The amounts shown above are in ${props.collateralAsset.symbol} (underlying).`,
+  )
+  // The CoW order receiver is the sub-account — some wallets (e.g. Rabby) flag
+  // this as "receiver differs from sender". It is expected — you can verify
+  // that the first 19 bytes (38 hex chars after "0x") of the receiver match
+  // your wallet address.
+  parts.push('The CoW order receiver is your sub-account, not your main wallet — your wallet may flag this as a mismatch. You can verify the first 19 bytes (38 hex chars after "0x") of the receiver match your wallet address.')
+  return parts.join(' ')
 })
 
 const signSteps = computed<DisplayStep[]>(() => {
@@ -218,6 +240,16 @@ const handleCancel = async () => {
         <OperationStepsList :steps="wrapperSteps" />
       </div>
 
+      <!-- Wallet signing notes (pre-submission) -->
+      <UiToast
+        v-if="!isSubmitted"
+        title="Your wallet may show warnings"
+        :description="walletWarningsDescription"
+        variant="info"
+        size="compact"
+        persistent
+      />
+
       <!-- Execution progress -->
       <UiToast
         v-if="executionLabel"
@@ -247,7 +279,7 @@ const handleCancel = async () => {
         </a>
 
         <UiButton
-          v-if="!orderStatus?.terminal"
+          v-if="!orderStatus?.terminal && !locallyCancelled"
           variant="secondary"
           size="xlarge"
           rounded
