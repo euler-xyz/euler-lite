@@ -65,6 +65,7 @@ const socials = computed(
     ].filter(Boolean) as Array<{ name: string, url: string }>,
 )
 
+const wrapperRef = ref(null)
 const reference = ref(null)
 const floating = ref(null)
 const isSocialsTooltipVisible = ref(false)
@@ -95,7 +96,7 @@ const getIsMenuItemActive = (link: MenuItem) => {
   return route.name?.toString().startsWith(link.name)
 }
 
-onClickOutside(reference, () => {
+onClickOutside(wrapperRef, () => {
   isSocialsTooltipVisible.value = false
 })
 </script>
@@ -105,30 +106,35 @@ onClickOutside(reference, () => {
     class="sticky top-0 right-0 left-0 z-[101] min-h-[72px] border-b border-line-default py-16 px-24 mobile:min-h-[56px] mobile:border-b-0 mobile:p-16 flex items-center justify-between bg-header backdrop-blur-[20px]"
   >
     <!-- Left: Logo -->
-    <button
-      ref="reference"
-      class="flex items-center gap-8 relative cursor-pointer outline-none flex-shrink-0"
-      @click="onLogoClick"
+    <div
+      ref="wrapperRef"
+      class="relative flex-shrink-0"
     >
-      <LogoBrand class="text-accent-600" />
-      <div
-        v-if="enableAppTitle || enablePoweredByEuler"
-        class="flex flex-col items-start mr-4 mobile:hidden"
+      <button
+        ref="reference"
+        class="flex items-center gap-8 cursor-pointer outline-none"
+        @click="onLogoClick"
       >
-        <span
-          v-if="enableAppTitle"
-          class="text-[14px] font-semibold text-content-primary leading-tight"
-        >{{ appTitle }}</span>
-        <span
-          v-if="enablePoweredByEuler"
-          class="text-[10px] text-content-tertiary leading-tight"
-        >Powered by Euler</span>
-      </div>
-      <SvgIcon
-        class="!w-18 !h-18 transition-transform duration-fast text-content-tertiary"
-        :class="[isSocialsTooltipVisible ? 'rotate-180' : '']"
-        name="arrow-down"
-      />
+        <LogoBrand class="text-accent-600" />
+        <div
+          v-if="enableAppTitle || enablePoweredByEuler"
+          class="flex flex-col items-start mr-4 mobile:hidden"
+        >
+          <span
+            v-if="enableAppTitle"
+            class="text-[14px] font-semibold text-content-primary leading-tight"
+          >{{ appTitle }}</span>
+          <span
+            v-if="enablePoweredByEuler"
+            class="text-[10px] text-content-tertiary leading-tight"
+          >Powered by Euler</span>
+        </div>
+        <SvgIcon
+          class="!w-18 !h-18 transition-transform duration-fast text-content-tertiary"
+          :class="[isSocialsTooltipVisible ? 'rotate-180' : '']"
+          name="arrow-down"
+        />
+      </button>
       <Transition
         name="tooltip"
         @enter="update"
@@ -189,7 +195,7 @@ onClickOutside(reference, () => {
           </div>
         </div>
       </Transition>
-    </button>
+    </div>
 
     <!-- Center: Navigation -->
     <div class="flex flex-1 justify-center mobile:!hidden">

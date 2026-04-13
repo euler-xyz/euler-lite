@@ -1,6 +1,7 @@
 <script setup lang="ts">
 const props = defineProps<{
   announcementUrl: string
+  legacyAppUrl?: string
 }>()
 const emits = defineEmits(['close'])
 </script>
@@ -31,7 +32,10 @@ const emits = defineEmits(['close'])
         </li>
       </ul>
 
-      <p class="text-secondary text-p3">
+      <p
+        v-if="props.legacyAppUrl"
+        class="text-secondary text-p3"
+      >
         The legacy app is accessible via the link in the top-left corner but is no longer maintained.
       </p>
 
