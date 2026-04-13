@@ -1,4 +1,4 @@
-const OPEN_POSITION_PARAMS_COMPONENTS = [
+export const OPEN_POSITION_PARAMS_COMPONENTS = [
   { name: 'owner', type: 'address' },
   { name: 'account', type: 'address' },
   { name: 'deadline', type: 'uint256' },
