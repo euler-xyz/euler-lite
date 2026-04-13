@@ -15,8 +15,8 @@ import type { TxPlan } from '~/entities/txPlan'
 import { valueToNano } from '~/utils/crypto-utils'
 import { trimTrailingZeros } from '~/utils/string-utils'
 import { amountToPercent, percentToAmountNano } from '~/utils/repayUtils'
-import { isOpDisabled, OP_REPAY } from '~/utils/vault-hooks'
-import { getHookDisabledWarning } from '~/composables/useVaultWarnings'
+import { findBlockingDisabledOp, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
+import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 import type { Vault } from '~/entities/vault'
 
 interface UseWalletRepayOptions {
@@ -91,14 +91,29 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     }
     return FixedPoint.fromValue(0n, 18)
   })
-  const hookWarning = computed(() => {
-    if (!borrowVault.value) return null
-    return getHookDisabledWarning(borrowVault.value as Vault, OP_REPAY)
+  // Wallet repay touches the liability vault (OP_REPAY). A full repay also
+  // sweeps residual collateral shares back to the main account via
+  // transferFromMax (OP_TRANSFER on the collateral vault) before disabling
+  // the controller — include that step when the amount reaches the debt.
+  const walletRepayPlannedOps = computed<PlannedOp[]>(() => {
+    const steps: PlannedOp[] = []
+    if (borrowVault.value) steps.push({ vault: borrowVault.value as Vault, op: OP_REPAY })
+    const amountNano = borrowVault.value
+      ? valueToNano(amount.value || '0', borrowVault.value.asset.decimals)
+      : 0n
+    const currentDebt = position.value?.borrowed ?? 0n
+    const isFullRepay = amountNano > 0n && amountNano >= currentDebt
+    if (isFullRepay && collateralVault.value && 'hookedOps' in collateralVault.value) {
+      steps.push({ vault: collateralVault.value as Vault, op: OP_TRANSFER })
+    }
+    return steps
   })
+
+  const hookWarning = computed(() => getPlanHookDisabledWarning(walletRepayPlannedOps.value))
 
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
-    if (borrowVault.value && isOpDisabled(borrowVault.value as Vault, OP_REPAY)) return true
+    if (findBlockingDisabledOp(walletRepayPlannedOps.value)) return true
     return !(+amount.value) || !!estimatesError.value || isEstimatesLoading.value
   })
 

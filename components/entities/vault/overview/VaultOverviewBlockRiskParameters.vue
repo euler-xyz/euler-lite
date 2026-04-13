@@ -187,12 +187,18 @@ const openHooksModal = () => {
         <template #label>
           <span class="flex items-center gap-4">
             {{ hooksRowLabel }}
-            <SvgIcon
+            <button
               v-if="showHooksInfoIcon"
-              class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-              name="info-circle"
+              type="button"
+              :aria-label="`${hooksRowLabel} details`"
+              class="inline-flex shrink-0 outline-none text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
               @click="openHooksModal"
-            />
+            >
+              <SvgIcon
+                class="!w-16 !h-16"
+                name="info-circle"
+              />
+            </button>
           </span>
         </template>
         {{ hooksRowValue }}

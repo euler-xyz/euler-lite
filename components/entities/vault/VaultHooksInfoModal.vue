@@ -96,6 +96,8 @@ const handleClose = () => {
           {{ getSpecialAddressLabel(vault.hookTarget) || shortenAddress(vault.hookTarget) }}
         </NuxtLink>
         <button
+          type="button"
+          aria-label="Copy hook target address"
           class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary"
           @click="onCopyClick(vault.hookTarget)"
         >
