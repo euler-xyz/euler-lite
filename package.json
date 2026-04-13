@@ -64,7 +64,8 @@
   "overrides": {
     "serialize-javascript": "7.0.4",
     "unhead": "2.1.12",
-    "nitro": "^2.0.0"
+    "nitro": "^2.0.0",
+    "@nuxt/kit": "3.17.4"
   },
   "license": "MIT"
 }
