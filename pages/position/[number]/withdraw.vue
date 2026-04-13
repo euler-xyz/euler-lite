@@ -352,6 +352,7 @@ watch(selectedOutputAsset, () => {
           <VaultFormSubmit
             :disabled="form.submitDisabled.value"
             :loading="form.isSubmitting.value || form.isPreparing.value"
+            :disabled-reason="form.hookBlockedReason.value ?? undefined"
           >
             {{ form.submitLabel }}
           </VaultFormSubmit>

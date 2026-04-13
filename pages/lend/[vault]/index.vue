@@ -26,6 +26,7 @@ import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { createRaceGuard } from '~/utils/race-guard'
+import { getOpBlockedReason, isOpDisabled, OP_DEPOSIT } from '~/utils/vault-hooks'
 
 // Type definitions for vault display
 type VaultType = 'evk' | 'securitize'
@@ -278,12 +279,17 @@ const errorText = computed(() => {
 })
 const isSupplyCapReached = computed(() => evkVault.value ? getIsSupplyCapReached(evkVault.value) : false)
 const assets = computed(() => [asset.value!])
+const hookBlockedReason = computed(() =>
+  evkVault.value ? getOpBlockedReason(evkVault.value, OP_DEPOSIT) : null,
+)
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value) return false
+  if (hookBlockedReason.value) return true
   if (activeBalance.value < valueToNano(amount.value, activeAsset.value?.decimals)) return true
   if (isLoading.value || !(+amount.value)) return true
   if (needsSwap.value && !swapSelectedQuote.value) return true
   if (isSupplyCapReached.value) return true
+  if (evkVault.value && isOpDisabled(evkVault.value, OP_DEPOSIT)) return true
   return false
 })
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vaultAddress))
@@ -964,6 +970,7 @@ watch(address, () => {
               <VaultFormSubmit
                 :disabled="reviewSupplyDisabled"
                 :loading="isSubmitting || isPreparing"
+                :disabled-reason="hookBlockedReason ?? undefined"
               >
                 {{ reviewSupplyLabel }}
               </VaultFormSubmit>

@@ -218,6 +218,16 @@ const reviewRepayDisabled = computed(() => {
   return collateral.isSubmitDisabled.value
 })
 
+const reviewRepayDisabledReason = computed(() => {
+  if (formTab.value === 'wallet') {
+    return walletSwap.needsSwap.value
+      ? (walletSwap.hookBlockedReason.value ?? undefined)
+      : (wallet.hookBlockedReason.value ?? undefined)
+  }
+  if (formTab.value === 'savings') return savings.hookBlockedReason.value ?? undefined
+  return collateral.hookBlockedReason.value ?? undefined
+})
+
 const onSubmitForm = async () => {
   if (isOperationBlocked.value) return
   if (formTab.value === 'wallet') {
@@ -556,6 +566,7 @@ watch(formTab, () => {
             <VaultFormSubmit
               :disabled="reviewRepayDisabled"
               :loading="isSubmitting || isPreparing"
+              :disabled-reason="reviewRepayDisabledReason"
             >
               {{ reviewRepayLabel }}
             </VaultFormSubmit>
@@ -734,6 +745,7 @@ watch(formTab, () => {
             <VaultFormSubmit
               :disabled="reviewRepayDisabled"
               :loading="isSubmitting || isPreparing"
+              :disabled-reason="reviewRepayDisabledReason"
             >
               {{ reviewRepayLabel }}
             </VaultFormSubmit>
@@ -904,6 +916,7 @@ watch(formTab, () => {
             <VaultFormSubmit
               :disabled="reviewRepayDisabled"
               :loading="isSubmitting || isPreparing"
+              :disabled-reason="reviewRepayDisabledReason"
             >
               {{ reviewRepayLabel }}
             </VaultFormSubmit>

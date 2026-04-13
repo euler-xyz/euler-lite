@@ -11,6 +11,7 @@ import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
 import { nanoToValue } from '~/utils/crypto-utils'
+import { isOpDisabled, OP_DEPOSIT } from '~/utils/vault-hooks'
 
 defineOptions({
   name: 'LendPage',
@@ -104,7 +105,8 @@ watch(chainId, (newChainId, oldChainId) => {
 const borrowableVaults = computed(() => {
   return list.value.filter(vault =>
     !isVaultNotExplorableLend(vault.address)
-    && borrowList.value.some(pair => pair.borrow.address === vault.address),
+    && borrowList.value.some(pair => pair.borrow.address === vault.address)
+    && !isOpDisabled(vault, OP_DEPOSIT),
   )
 })
 

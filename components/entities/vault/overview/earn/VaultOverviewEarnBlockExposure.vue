@@ -9,6 +9,15 @@ import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/stri
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
+import type { VaultWarning } from '~/composables/useVaultWarnings'
+import {
+  getOpMeta,
+  isOpDisabled,
+  OP_DEPOSIT,
+  OP_MINT,
+  OP_REDEEM,
+  OP_WITHDRAW,
+} from '~/utils/vault-hooks'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
@@ -147,6 +156,18 @@ const getExposureAssetAmount = (exposure: typeof exposureList.value[0]) => {
   return `${roundAndCompactTokens(exposure.allocatedAssets, exposure.info.assetDecimals)} ${exposure.info.assetSymbol}`
 }
 
+const getStrategyHookWarning = (strategyVault: Vault): VaultWarning | null => {
+  const bits = [OP_DEPOSIT, OP_MINT, OP_WITHDRAW, OP_REDEEM].filter(bit => isOpDisabled(strategyVault, bit))
+  if (bits.length === 0) return null
+  const names = bits.map(bit => getOpMeta(bit)?.name ?? '')
+  const verb = names.length === 1 ? 'is' : 'are'
+  return {
+    level: 'high',
+    title: 'Strategy operations disabled',
+    message: `${names.join(', ')} ${verb} disabled on this strategy. The Earn vault may be unable to deposit into or withdraw from it, which can affect allocation and exits.`,
+  }
+}
+
 load()
 </script>
 
@@ -182,15 +203,23 @@ load()
           class="px-16 pt-16 pb-12 border-b border-line-subtle flex items-center justify-between"
         >
           <template v-if="row.vault">
-            <VaultLabelsAndAssets
-              :vault="row.vault"
-              :assets="[{
-                address: row.exposure.info.asset,
-                decimals: row.exposure.info.assetDecimals,
-                name: row.exposure.info.assetName,
-                symbol: row.exposure.info.assetSymbol,
-              }]"
-            />
+            <div class="flex items-center gap-8 min-w-0">
+              <VaultLabelsAndAssets
+                :vault="row.vault"
+                :assets="[{
+                  address: row.exposure.info.asset,
+                  decimals: row.exposure.info.assetDecimals,
+                  name: row.exposure.info.assetName,
+                  symbol: row.exposure.info.assetSymbol,
+                }]"
+              />
+              <span @click.stop.prevent>
+                <VaultWarningIcon
+                  v-if="getStrategyHookWarning(row.vault)"
+                  :warning="getStrategyHookWarning(row.vault)"
+                />
+              </span>
+            </div>
           </template>
           <template v-else>
             <div class="flex items-center gap-12">

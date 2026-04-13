@@ -26,6 +26,7 @@ import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import { getOpBlockedReason, OP_REDEEM, OP_WITHDRAW } from '~/utils/vault-hooks'
 
 const router = useRouter()
 const route = useRoute()
@@ -105,8 +106,17 @@ const amountFixed = computed(() => {
     Number(asset.value?.decimals || 0),
   )
 })
+const effectiveWithdrawOp = computed(() => {
+  const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
+  return isMax ? OP_REDEEM : OP_WITHDRAW
+})
+const hookBlockedReason = computed(() => {
+  if (!vault.value || isSecuritizeVaultType.value) return null
+  return getOpBlockedReason(vault.value as Vault, effectiveWithdrawOp.value)
+})
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value) return false
+  if (hookBlockedReason.value) return true
   if (assetsBalance.value < amountFixed.value.value) return true
   if (isLoading.value || amountFixed.value.isZero() || amountFixed.value.isNegative()) return true
   if (estimatesError.value) return true
@@ -666,6 +676,7 @@ watch(swapSelectedQuote, () => {
           <VaultFormSubmit
             :loading="isSubmitting || isPreparing"
             :disabled="reviewWithdrawDisabled"
+            :disabled-reason="hookBlockedReason ?? undefined"
           >
             Review Withdraw
           </VaultFormSubmit>

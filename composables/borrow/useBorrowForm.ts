@@ -35,6 +35,7 @@ import { getUtilisationWarning, getBorrowCapWarning, getSupplyCapWarning } from 
 import { getVaultTags, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { getNetAPY, getProjectedRates } from '~/entities/vault'
+import { getPlanBlockedReason, isOpDisabled, OP_BORROW, OP_DEPOSIT, type PlannedOp } from '~/utils/vault-hooks'
 
 export interface UseBorrowFormOptions {
   pair: Ref<AnyBorrowVaultPair | undefined>
@@ -343,14 +344,29 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const isSupplyCapReached = computed(() => collateralVault.value ? getIsSupplyCapReached(collateralVault.value) : false)
   const isBorrowCapReached = computed(() => borrowVault.value ? getIsBorrowCapReached(borrowVault.value) : false)
 
+  const hookBlockedReason = computed(() => {
+    const steps: PlannedOp[] = []
+    // Borrow flow: collateral OP_DEPOSIT (when depositing fresh) + liability OP_BORROW.
+    // For simplicity, check OP_DEPOSIT on collateral (covers the common path) —
+    // savings-sourced borrow uses OP_TRANSFER instead but useBorrowBySavingForm
+    // is a separate code path not routed through here.
+    if (collateralVault.value && !('type' in collateralVault.value)) {
+      steps.push({ vault: collateralVault.value, op: OP_DEPOSIT })
+    }
+    if (borrowVault.value) steps.push({ vault: borrowVault.value, op: OP_BORROW })
+    return getPlanBlockedReason(steps)
+  })
+
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
+    if (hookBlockedReason.value) return true
     if (borrowActiveBalance.value < valueToNano(collateralAmount.value, borrowActiveAssetDecimals.value)) return true
     if (!(+collateralAmount.value)) return true
     if ((borrowVault.value?.supply || 0n) < valueToNano(borrowAmount.value, borrowVault.value?.decimals)) return true
     if (!valueToNano(borrowAmount.value, borrowVault.value?.decimals)) return true
     if (borrowNeedsSwap.value && !borrowSwapSelectedQuote.value) return true
     if (isSupplyCapReached.value || isBorrowCapReached.value) return true
+    if (borrowVault.value && isOpDisabled(borrowVault.value, OP_BORROW)) return true
     return false
   })
 
@@ -914,6 +930,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     errorText,
     isSubmitDisabled,
     isBorrowSwapRestricted,
+    hookBlockedReason,
 
     // Computed: warnings
     borrowFormWarnings,

@@ -844,6 +844,7 @@ watch(formTab, () => {
                 v-if="formTab === 'borrow'"
                 :disabled="reviewBorrowDisabled"
                 :loading="borrow.isSubmitting.value || borrow.isPreparing.value"
+                :disabled-reason="borrow.hookBlockedReason.value ?? undefined"
               >
                 {{ reviewBorrowLabel }}
               </VaultFormSubmit>
@@ -851,6 +852,7 @@ watch(formTab, () => {
                 v-else-if="formTab === 'multiply'"
                 :disabled="reviewMultiplyDisabled"
                 :loading="multiply.isMultiplySubmitting.value || multiply.isMultiplyPreparing.value"
+                :disabled-reason="multiply.hookBlockedReason.value ?? undefined"
               >
                 {{ reviewMultiplyLabel }}
               </VaultFormSubmit>

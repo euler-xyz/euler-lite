@@ -84,6 +84,7 @@ export const processRawVaultData = (
     unitOfAccountDecimals: raw.unitOfAccountDecimals,
     interestRateModelAddress: raw.interestRateModel,
     hookTarget: raw.hookTarget,
+    hookedOps: raw.hookedOperations ?? 0n,
     irmInfo: raw.irmInfo
       ? {
           interestRateModelInfo: raw.irmInfo.interestRateModelInfo,

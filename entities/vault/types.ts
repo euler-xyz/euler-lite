@@ -112,6 +112,7 @@ export interface Vault {
   unitOfAccountDecimals?: bigint
   interestRateModelAddress: string
   hookTarget: string
+  hookedOps: bigint
   irmInfo?: VaultIRMInfo
   // Vault category: 'escrow' for escrow vaults, undefined/'standard' for regular EVK vaults
   vaultCategory?: 'standard' | 'escrow'
