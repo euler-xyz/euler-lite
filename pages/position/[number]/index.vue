@@ -703,7 +703,7 @@ watch([isConnected, isSpyMode], () => {
     </template>
     <template v-else-if="position">
       <div class="flex items-center gap-12">
-        <BaseBackIconButton exact />
+        <BackButton always-fallback />
         <div class="text-h6 text-content-secondary bg-surface-elevated py-4 px-12 rounded-8 border border-line-default">
           Position {{ positionIndex }}
         </div>

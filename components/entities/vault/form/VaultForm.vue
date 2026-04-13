@@ -12,7 +12,7 @@ defineProps<{ title?: string, description?: string, loading?: boolean, back?: bo
         v-if="back || title"
         class="flex items-center gap-12 pb-4"
       >
-        <BaseBackIconButton
+        <BackButton
           v-if="back"
           :fallback="backFallback"
         />

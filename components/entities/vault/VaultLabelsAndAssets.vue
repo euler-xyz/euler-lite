@@ -4,12 +4,14 @@ import type { EarnVault, SecuritizeVault, Vault, VaultAsset } from '~/entities/v
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 
-const { vault, assets, size, assetsLabel, pairVault } = defineProps<{
+const { vault, assets, size, assetsLabel, pairVault, back, backFallback } = defineProps<{
   vault?: Vault | EarnVault | SecuritizeVault
   assets: VaultAsset[]
   size?: 'large'
   assetsLabel?: string
   pairVault?: Vault
+  back?: boolean
+  backFallback?: string
 }>()
 const normalizeAddress = (address?: string) => {
   if (!address) return ''
@@ -87,48 +89,56 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
 <template>
   <div
     v-if="vault"
-    :class="[size === 'large' ? 'gap-16' : 'gap-12']"
-    class="flex items-center"
+    class="flex items-center gap-12"
   >
-    <AssetAvatar
-      :asset="assets"
-      :size="size === 'large' ? '46' : '38'"
+    <BackButton
+      v-if="back"
+      :fallback="backFallback"
     />
+    <div
+      :class="[size === 'large' ? 'gap-16' : 'gap-12']"
+      class="flex items-center"
+    >
+      <AssetAvatar
+        :asset="assets"
+        :size="size === 'large' ? '46' : '38'"
+      />
 
-    <div>
-      <div class="flex items-center gap-8 mb-4">
-        <span class="text-content-tertiary">
-          <VaultDisplayName
-            :name="pairVault ? displayLabel : displayName"
-            :is-unverified="(!!vault && 'verified' in vault && !vault.verified) || !!(pairVault && 'verified' in pairVault && !pairVault.verified)"
-          />
-        </span>
-        <span
-          v-if="isDeprecated"
-          class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-        >
-          <SvgIcon
-            name="warning"
-            class="!w-14 !h-14"
-          />
-          Deprecated
-        </span>
-        <span
-          v-if="isRestricted"
-          class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-          title="This vault is not available in your region"
-        >
-          <SvgIcon
-            name="warning"
-            class="!w-14 !h-14"
-          />
-          Restricted
-        </span>
+      <div>
+        <div class="flex items-center gap-8 mb-4">
+          <span class="text-content-tertiary">
+            <VaultDisplayName
+              :name="pairVault ? displayLabel : displayName"
+              :is-unverified="(!!vault && 'verified' in vault && !vault.verified) || !!(pairVault && 'verified' in pairVault && !pairVault.verified)"
+            />
+          </span>
+          <span
+            v-if="isDeprecated"
+            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
+          >
+            <SvgIcon
+              name="warning"
+              class="!w-14 !h-14"
+            />
+            Deprecated
+          </span>
+          <span
+            v-if="isRestricted"
+            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
+            title="This vault is not available in your region"
+          >
+            <SvgIcon
+              name="warning"
+              class="!w-14 !h-14"
+            />
+            Restricted
+          </span>
+        </div>
+
+        <p class="text-p2 font-semibold text-content-primary">
+          {{ displayAssetsLabel }}
+        </p>
       </div>
-
-      <p class="text-p2 font-semibold text-content-primary">
-        {{ displayAssetsLabel }}
-      </p>
     </div>
   </div>
 </template>

@@ -757,15 +757,15 @@ watch(address, () => {
     </div>
     <template v-else>
       <!-- Vault header -->
-      <div class="flex items-center gap-12 mb-24">
-        <BaseBackIconButton fallback="/lend" />
-        <VaultLabelsAndAssets
-          v-if="asset && (vault || securitizeVault)"
-          :vault="(vault || securitizeVault)!"
-          :assets="assets"
-          size="large"
-        />
-      </div>
+      <VaultLabelsAndAssets
+        v-if="asset && (vault || securitizeVault)"
+        back
+        back-fallback="/lend"
+        class="mb-24"
+        :vault="(vault || securitizeVault)!"
+        :assets="assets"
+        size="large"
+      />
 
       <div class="flex gap-32">
         <div class="hidden laptop:!block laptop:flex-[55] min-w-0">

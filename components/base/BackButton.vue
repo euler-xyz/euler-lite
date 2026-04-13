@@ -1,13 +1,15 @@
 <script setup lang="ts">
-const props = withDefaults(defineProps<{ fallback?: string, exact?: boolean }>(), { fallback: '/portfolio', exact: false })
+const props = withDefaults(defineProps<{ fallback?: string, alwaysFallback?: boolean }>(), { fallback: '/portfolio', alwaysFallback: false })
 const router = useRouter()
 
+const safeFallback = computed(() => props.fallback.startsWith('/') ? props.fallback : '/portfolio')
+
 function goBack() {
-  if (!props.exact && window.history.state?.back) {
+  if (!props.alwaysFallback && window.history.state?.back) {
     router.back()
   }
   else {
-    navigateTo(props.fallback)
+    navigateTo(safeFallback.value)
   }
 }
 </script>
