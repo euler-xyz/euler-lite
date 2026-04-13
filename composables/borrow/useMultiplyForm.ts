@@ -142,6 +142,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         router.replace('/portfolio')
       }, 400)
     }
+    else {
+      // Terminal non-success states (cancelled, expired, etc.)
+      cowSwapExecution.reset()
+    }
   })
 
   const multiplyPriceInvert = usePriceInvert(

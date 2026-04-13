@@ -6,18 +6,9 @@ import {
   type Address,
   type Hex,
 } from 'viem'
+import { OPEN_POSITION_PARAMS_COMPONENTS } from '~/abis/cowswap-wrapper'
 import { COWSWAP_APPDATA_VERSION } from './constants'
 import type { CowSwapOpenPositionParams, CowSwapOrderPayload } from './types'
-
-const OPEN_POSITION_PARAMS_ABI = [
-  { name: 'owner', type: 'address' },
-  { name: 'account', type: 'address' },
-  { name: 'deadline', type: 'uint256' },
-  { name: 'collateralVault', type: 'address' },
-  { name: 'borrowVault', type: 'address' },
-  { name: 'collateralAmount', type: 'uint256' },
-  { name: 'borrowAmount', type: 'uint256' },
-] as const
 
 const COW_ORDER_TYPES = {
   Order: [
@@ -41,7 +32,7 @@ const COW_ORDER_TYPES = {
 const WRAPPER_DATA_ABI = [
   {
     type: 'tuple',
-    components: OPEN_POSITION_PARAMS_ABI,
+    components: OPEN_POSITION_PARAMS_COMPONENTS,
   },
   { type: 'bytes' },
 ] as const
