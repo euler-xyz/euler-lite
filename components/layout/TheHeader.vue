@@ -101,7 +101,7 @@ onClickOutside(reference, () => {
 
 <template>
   <header
-    class="sticky top-0 right-0 left-0 z-[101] min-h-[72px] border-b border-line-default py-16 px-24 mobile:min-h-[56px] mobile:border-b-0 mobile:p-16 flex items-center justify-between bg-header backdrop-blur-[20px]"
+    class="relative sticky top-0 right-0 left-0 z-[101] min-h-[72px] border-b border-line-default py-16 px-24 mobile:min-h-[56px] mobile:border-b-0 mobile:p-16 flex items-center justify-between bg-header backdrop-blur-[20px]"
   >
     <!-- Left: Logo -->
     <button
@@ -182,8 +182,8 @@ onClickOutside(reference, () => {
     </button>
 
     <!-- Center: Navigation -->
-    <div class="absolute left-1/2 -translate-x-1/2 mobile:!hidden">
-      <div class="flex">
+    <div class="absolute left-1/2 -translate-x-1/2 pointer-events-none mobile:!hidden">
+      <div class="flex pointer-events-auto">
         <NuxtLink
           v-for="item in menuItems"
           :key="item.name"
