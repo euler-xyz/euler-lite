@@ -48,12 +48,21 @@ export default defineEventHandler(async (event) => {
   const timeout = setTimeout(() => controller.abort(), 10_000)
 
   try {
-    const response = await fetch(buildIngestUrl(sentryDsn), {
-      method: 'POST',
-      headers: { 'Content-Type': contentType },
-      body,
-      signal: controller.signal,
-    })
+    let response: Response
+    try {
+      response = await fetch(buildIngestUrl(sentryDsn), {
+        method: 'POST',
+        headers: { 'Content-Type': contentType },
+        body,
+        signal: controller.signal,
+      })
+    }
+    catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw createError({ statusCode: 504, statusMessage: 'Sentry ingest timeout' })
+      }
+      throw createError({ statusCode: 502, statusMessage: 'Sentry ingest unreachable' })
+    }
 
     if (!response.ok) {
       throw createError({ statusCode: response.status, statusMessage: 'Sentry ingest error' })

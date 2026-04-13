@@ -31,7 +31,7 @@
     "@pythnetwork/price-service-client": "1.11.0",
     "@reown/appkit": "1.8.19",
     "@reown/appkit-adapter-wagmi": "1.8.19",
-    "@sentry/nuxt": "^10.47.0",
+    "@sentry/nuxt": "10.48.0",
     "@tanstack/query-core": "5.96.0",
     "@tanstack/vue-query": "5.96.0",
     "@vueuse/nuxt": "14.2.1",
