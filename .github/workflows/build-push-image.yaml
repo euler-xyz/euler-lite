@@ -3,7 +3,6 @@ on:
   push:
     branches:
       - master
-      - feat/deploy_github_actions_update
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
