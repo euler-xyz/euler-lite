@@ -49,7 +49,11 @@ function initializeWagmi() {
   const modal = () => {
     const nuxtApp = useNuxtApp()
     const open = nuxtApp.$openWalletModal as (() => void) | undefined
-    open?.()
+    if (!open) {
+      console.warn('[useWagmi] $openWalletModal not available — wallet plugin may not have loaded')
+      return
+    }
+    open()
   }
 
   useAccountEffect({

@@ -29,17 +29,9 @@ const hasPersistedWalletSession = (): boolean => {
       try {
         const parsed = JSON.parse(storeRaw)
         if (parsed?.state?.current) return true
-        if (Array.isArray(parsed?.state?.connections) && parsed.state.connections.length > 0) return true
       }
       catch {
         // Malformed store — treat as no session.
-      }
-    }
-
-    for (let i = 0; i < window.localStorage.length; i++) {
-      const key = window.localStorage.key(i)
-      if (key && key.startsWith('wc@2:client:')) {
-        return true
       }
     }
   }
