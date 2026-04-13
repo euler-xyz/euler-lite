@@ -9,7 +9,7 @@ const rateLimiter = createRateLimiter({
 
 function buildIngestUrl(dsn: string): string {
   const url = new URL(dsn)
-  const projectId = url.pathname.replace('/', '')
+  const projectId = url.pathname.slice(1)
   return `https://${url.hostname}/api/${projectId}/envelope/`
 }
 
