@@ -36,6 +36,7 @@ const {
   enableExplorePage,
   enablePoweredByEuler,
   enableAppTitle,
+  migrationOldAppUrl,
 } = useDeployConfig()
 const menuItems = getMenuItems(
   enableEarnPage,
@@ -141,6 +142,15 @@ onClickOutside(reference, () => {
           @click.stop
         >
           <div class="flex flex-col gap-4 w-full">
+            <a
+              v-if="migrationOldAppUrl"
+              :href="migrationOldAppUrl"
+              class="block mb-12 pb-12 border-b border-line-default text-content-primary hover:text-accent-600 transition-colors"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <span class="text-h6">Go to the previous app</span>
+            </a>
             <div
               v-if="links.length"
               class="mb-12"

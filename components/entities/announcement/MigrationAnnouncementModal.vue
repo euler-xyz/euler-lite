@@ -32,6 +32,11 @@ const emits = defineEmits(['close'])
         </li>
       </ul>
 
+      <p class="text-secondary text-p3">
+        You can still access the previous app by clicking the link in the top-left corner,
+        but please note that it will no longer be maintained.
+      </p>
+
       <a
         v-if="props.announcementUrl"
         :href="props.announcementUrl"
