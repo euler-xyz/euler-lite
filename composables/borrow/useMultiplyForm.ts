@@ -95,8 +95,6 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     simulationError: baseSimulationError,
     clearSimulationError: clearMultiplySimulationError,
   } = useTxPlanSimulation()
-  const multiplySimulationError = computed(() => baseSimulationError.value)
-
   // --- CowSwap ---
   const { client: rpcClient } = useRpcClient()
   const { chainId: currentChainId } = useEulerAddresses()
@@ -111,6 +109,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     multiplySelectedProvider.value?.toLowerCase() === COWSWAP_PROVIDER_NAME
     || (!multiplySelectedProvider.value && multiplyEffectiveQuote.value?.route?.some(r => r.providerName?.toLowerCase() === COWSWAP_PROVIDER_NAME)),
   )
+
+  const multiplySimulationError = computed(() => isCowSwapProvider.value ? null : baseSimulationError.value)
 
   const cowSwapStatusLabel = computed(() => {
     if (!isCowSwapProvider.value || cowSwapExecution.status.value === 'idle') return null
