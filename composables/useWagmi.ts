@@ -1,5 +1,4 @@
 import { useAccount, useAccountEffect, useDisconnect, useBalance, useSwitchChain, useEnsName } from '@wagmi/vue'
-import { useAppKit } from '@reown/appkit/vue'
 import { formatUnits, getAddress, isAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { truncate } from '~/utils/string-utils'
@@ -43,7 +42,15 @@ function initializeWagmi() {
   const { data: balanceData, isLoading: isLoadingBalance, refetch: refetchBalance } = useBalance({
     address: wagmiAddress,
   })
-  const { open: modal } = useAppKit()
+
+  // AppKit may be deferred-initialized (see plugins/00.wagmi.ts). Route
+  // through the plugin-provided helper so the AppKit singleton is created
+  // only on first connect for signed-out visitors.
+  const modal = () => {
+    const nuxtApp = useNuxtApp()
+    const open = nuxtApp.$openWalletModal as (() => void) | undefined
+    open?.()
+  }
 
   useAccountEffect({
     onConnect: ({ address }) => {

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { onClickOutside } from '@vueuse/core'
 import { offset, useFloating } from '@floating-ui/vue'
-import { useAppKit } from '@reown/appkit/vue'
 import { useAccount } from '@wagmi/vue'
 import {
   WalletDisconnectModal,
@@ -11,8 +10,8 @@ import {
 import { useModal } from '~/components/ui/composables/useModal'
 import { type MenuItem, getMenuItems } from '~/entities/menu'
 
-// AppKit modal controls
-const { open } = useAppKit()
+// Wallet connect modal (lazy-initializes AppKit on first call)
+const { connect } = useWagmi()
 
 // Wagmi account info
 const { address, isConnected } = useAccount()
@@ -78,7 +77,7 @@ const onWalletButtonClick = () => {
     modal.open(WalletDisconnectModal)
   }
   else {
-    open()
+    connect()
   }
 }
 const onChainButtonClick = () => {
