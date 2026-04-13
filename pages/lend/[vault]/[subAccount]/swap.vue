@@ -45,7 +45,7 @@ const toCollateralOptions = computed(() => {
 })
 
 const getVaultAddress = () => route.params.vault as string
-const vaultAddress = route.params.vault as string
+const vaultAddress = computed(() => route.params.vault as string)
 
 // ── Position ─────────────────────────────────────────────────────────────
 const savingPosition = computed(() => {
