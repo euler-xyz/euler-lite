@@ -519,158 +519,166 @@ watch(swapSelectedQuote, () => {
 </script>
 
 <template>
-  <VaultForm
-    title="Withdraw savings"
-    description="Withdraw your supplied assets back to your wallet."
-    class="flex flex-col gap-16"
-    :loading="isLoading"
-    @submit.prevent="submit"
-  >
-    <template v-if="vault && asset">
-      <VaultLabelsAndAssets
-        :vault="vault"
-        :assets="[asset]"
-        size="large"
-      />
+  <div class="relative">
+    <BackButton
+      class="hidden tablet:inline-flex tablet:absolute tablet:top-20 tablet:right-full tablet:mr-4"
+      :fallback="`/lend/${vaultAddress}`"
+    />
+    <VaultForm
+      back
+      :back-fallback="`/lend/${vaultAddress}`"
+      title="Withdraw savings"
+      description="Withdraw your supplied assets back to your wallet."
+      class="flex flex-col gap-16"
+      :loading="isLoading"
+      @submit.prevent="submit"
+    >
+      <template v-if="vault && asset">
+        <VaultLabelsAndAssets
+          :vault="vault"
+          :assets="[asset]"
+          size="large"
+        />
 
-      <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
-        <div class="flex flex-col gap-16 w-full">
-          <AssetInput
-            v-if="asset"
-            v-model="amount"
-            label="Withdraw amount"
-            :asset="asset"
-            :vault="(vault as Vault)"
-            :balance="assetsBalance"
-            maxable
-          />
-
-          <!-- Receive as token selector -->
-          <div class="flex items-center gap-8">
-            <span class="text-p3 text-content-tertiary">Receive as</span>
-            <button
-              type="button"
-              class="flex items-center gap-6 bg-card text-p3 font-semibold px-12 h-36 rounded-[40px] whitespace-nowrap"
-              @click="openSwapTokenSelector"
-            >
-              <AssetAvatar
-                :asset="{ address: selectedOutputAsset?.address || asset.address, symbol: selectedOutputAsset?.symbol || asset.symbol }"
-                size="20"
-              />
-              {{ selectedOutputAsset?.symbol || asset.symbol }}
-              <SvgIcon
-                class="text-content-tertiary !w-16 !h-16"
-                name="arrow-down"
-              />
-            </button>
-          </div>
-
-          <!-- Swap info block -->
-          <template v-if="needsSwap && selectedOutputAsset">
-            <SwapRouteSelector
-              :items="swapRouteItems"
-              :selected-provider="swapSelectedProvider"
-              :status-label="swapQuotesStatusLabel"
-              :is-loading="isSwapQuoteLoading"
-              empty-message="Enter amount to fetch quotes"
-              @select="selectSwapQuote"
-              @refresh="onRefreshSwapQuotes"
+        <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
+          <div class="flex flex-col gap-16 w-full">
+            <AssetInput
+              v-if="asset"
+              v-model="amount"
+              label="Withdraw amount"
+              :asset="asset"
+              :vault="(vault as Vault)"
+              :balance="assetsBalance"
+              maxable
             />
 
-            <VaultFormInfoBlock
-              v-if="swapEstimatedOutput"
-              :loading="isSwapQuoteLoading"
-              variant="card"
-            >
-              <SwapDetailsSummary
-                :input-display="swapInputDisplay"
-                :output-display="swapOutputDisplay"
-                :price-impact="swapPriceImpact"
-                :slippage="swapSlippage"
-                :routed-via="swapRoutedVia"
-                @open-slippage-settings="openSlippageSettings"
+            <!-- Receive as token selector -->
+            <div class="flex items-center gap-8">
+              <span class="text-p3 text-content-tertiary">Receive as</span>
+              <button
+                type="button"
+                class="flex items-center gap-6 bg-card text-p3 font-semibold px-12 h-36 rounded-[40px] whitespace-nowrap"
+                @click="openSwapTokenSelector"
+              >
+                <AssetAvatar
+                  :asset="{ address: selectedOutputAsset?.address || asset.address, symbol: selectedOutputAsset?.symbol || asset.symbol }"
+                  size="20"
+                />
+                {{ selectedOutputAsset?.symbol || asset.symbol }}
+                <SvgIcon
+                  class="text-content-tertiary !w-16 !h-16"
+                  name="arrow-down"
+                />
+              </button>
+            </div>
+
+            <!-- Swap info block -->
+            <template v-if="needsSwap && selectedOutputAsset">
+              <SwapRouteSelector
+                :items="swapRouteItems"
+                :selected-provider="swapSelectedProvider"
+                :status-label="swapQuotesStatusLabel"
+                :is-loading="isSwapQuoteLoading"
+                empty-message="Enter amount to fetch quotes"
+                @select="selectSwapQuote"
+                @refresh="onRefreshSwapQuotes"
               />
-            </VaultFormInfoBlock>
+
+              <VaultFormInfoBlock
+                v-if="swapEstimatedOutput"
+                :loading="isSwapQuoteLoading"
+                variant="card"
+              >
+                <SwapDetailsSummary
+                  :input-display="swapInputDisplay"
+                  :output-display="swapOutputDisplay"
+                  :price-impact="swapPriceImpact"
+                  :slippage="swapSlippage"
+                  :routed-via="swapRoutedVia"
+                  @open-slippage-settings="openSlippageSettings"
+                />
+              </VaultFormInfoBlock>
+
+              <UiToast
+                v-if="swapQuoteError"
+                title="Swap quote"
+                variant="warning"
+                :description="swapQuoteError"
+                size="compact"
+              />
+            </template>
 
             <UiToast
-              v-if="swapQuoteError"
-              title="Swap quote"
+              v-if="isUnknownSwapToken && needsSwap"
+              title="Unknown token"
+              description="This token is not on any recognized token list. It could be fraudulent or malicious. Verify the contract address before proceeding."
               variant="warning"
-              :description="swapQuoteError"
               size="compact"
             />
-          </template>
 
-          <UiToast
-            v-if="isUnknownSwapToken && needsSwap"
-            title="Unknown token"
-            description="This token is not on any recognized token list. It could be fraudulent or malicious. Verify the contract address before proceeding."
-            variant="warning"
-            size="compact"
-          />
-
-          <UiToast
-            v-show="estimatesError"
-            title="Error"
-            variant="error"
-            :description="estimatesError"
-            size="compact"
-          />
-          <UiToast
-            v-if="simulationError"
-            title="Error"
-            variant="error"
-            :description="simulationError"
-            size="compact"
-          />
-
-          <VaultWarningBanner :warnings="withdrawWarnings" />
-        </div>
-
-        <VaultFormInfoBlock
-          :loading="isEstimatesLoading"
-          variant="card"
-          class="w-full laptop:max-w-[360px]"
-        >
-          <SummaryRow label="Supply APY">
-            <SummaryValue
-              :before="supplyAPYDisplay"
-              :after="estimateSupplyAPYDisplay"
-              suffix="%"
+            <UiToast
+              v-show="estimatesError"
+              title="Error"
+              variant="error"
+              :description="estimatesError"
+              size="compact"
             />
-          </SummaryRow>
-          <SummaryRow
-            v-if="!isSecuritizeVaultType"
-            label="Supplied"
+            <UiToast
+              v-if="simulationError"
+              title="Error"
+              variant="error"
+              :description="simulationError"
+              size="compact"
+            />
+
+            <VaultWarningBanner :warnings="withdrawWarnings" />
+          </div>
+
+          <VaultFormInfoBlock
+            :loading="isEstimatesLoading"
+            variant="card"
+            class="w-full laptop:max-w-[360px]"
           >
-            <SummaryValue
-              :before="`$${formatNumber(assetsBalanceUsd)}`"
-              :after="amount && delta !== assetsBalance && delta >= 0n ? `$${formatNumber(deltaUsd)}` : undefined"
-            />
-          </SummaryRow>
-          <SummaryRow label="Available for withdraw">
-            <p
-              v-if="asset"
-              class="text-p2 flex items-center gap-4"
+            <SummaryRow label="Supply APY">
+              <SummaryValue
+                :before="supplyAPYDisplay"
+                :after="estimateSupplyAPYDisplay"
+                suffix="%"
+              />
+            </SummaryRow>
+            <SummaryRow
+              v-if="!isSecuritizeVaultType"
+              label="Supplied"
             >
-              {{ formatSmartAmount(nanoToValue(assetsBalance, asset.decimals)) }} <span class="text-p3 text-content-tertiary">{{ asset.symbol }}</span>
-              <span
-                v-if="!isSecuritizeVaultType"
-                class="text-p3 text-content-tertiary"
-              >≈ ${{ formatNumber(assetsBalanceUsd) }}</span>
-            </p>
-          </SummaryRow>
-        </VaultFormInfoBlock>
+              <SummaryValue
+                :before="`$${formatNumber(assetsBalanceUsd)}`"
+                :after="amount && delta !== assetsBalance && delta >= 0n ? `$${formatNumber(deltaUsd)}` : undefined"
+              />
+            </SummaryRow>
+            <SummaryRow label="Available for withdraw">
+              <p
+                v-if="asset"
+                class="text-p2 flex items-center gap-4"
+              >
+                {{ formatSmartAmount(nanoToValue(assetsBalance, asset.decimals)) }} <span class="text-p3 text-content-tertiary">{{ asset.symbol }}</span>
+                <span
+                  v-if="!isSecuritizeVaultType"
+                  class="text-p3 text-content-tertiary"
+                >≈ ${{ formatNumber(assetsBalanceUsd) }}</span>
+              </p>
+            </SummaryRow>
+          </VaultFormInfoBlock>
 
-        <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
-          <VaultFormSubmit
-            :loading="isSubmitting || isPreparing"
-            :disabled="reviewWithdrawDisabled"
-          >
-            Review Withdraw
-          </VaultFormSubmit>
+          <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
+            <VaultFormSubmit
+              :loading="isSubmitting || isPreparing"
+              :disabled="reviewWithdrawDisabled"
+            >
+              Review Withdraw
+            </VaultFormSubmit>
+          </div>
         </div>
-      </div>
-    </template>
-  </VaultForm>
+      </template>
+    </VaultForm>
+  </div>
 </template>
