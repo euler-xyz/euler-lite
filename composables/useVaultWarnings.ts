@@ -164,23 +164,23 @@ export const getIsBorrowCapReached = (vault: Vault): boolean => {
 const hookDisabledCopy = (op: bigint): { title: string, message: string } | null => {
   switch (op) {
     case OP_DEPOSIT:
-      return { title: 'Deposits disabled', message: 'The vault governor has disabled deposits. New deposits will fail.' }
+      return { title: 'Deposits disabled', message: 'The vault risk manager has disabled deposits. New deposits will fail.' }
     case OP_MINT:
-      return { title: 'Minting disabled', message: 'The vault governor has disabled share minting.' }
+      return { title: 'Minting disabled', message: 'The vault risk manager has disabled share minting.' }
     case OP_WITHDRAW:
-      return { title: 'Withdrawals disabled', message: 'The vault governor has disabled withdrawals. Withdrawals will fail.' }
+      return { title: 'Withdrawals disabled', message: 'The vault risk manager has disabled withdrawals. Withdrawals will fail.' }
     case OP_REDEEM:
-      return { title: 'Redemptions disabled', message: 'The vault governor has disabled share redemptions. Redemptions will fail.' }
+      return { title: 'Redemptions disabled', message: 'The vault risk manager has disabled share redemptions. Redemptions will fail.' }
     case OP_TRANSFER:
-      return { title: 'Share transfers disabled', message: 'The vault governor has disabled share transfers. Flows that route shares between sub-accounts will fail.' }
+      return { title: 'Share transfers disabled', message: 'The vault risk manager has disabled share transfers. Flows that route shares between sub-accounts will fail.' }
     case OP_SKIM:
-      return { title: 'Skim disabled', message: 'The vault governor has disabled skim. Flows that mint shares for unaccounted assets (repay with shares, same-asset swap) will fail.' }
+      return { title: 'Skim disabled', message: 'The vault risk manager has disabled skim. Flows that mint shares for unaccounted assets (repay with shares, same-asset swap) will fail.' }
     case OP_BORROW:
-      return { title: 'Borrowing disabled', message: 'The vault governor has disabled borrowing. New borrows will fail.' }
+      return { title: 'Borrowing disabled', message: 'The vault risk manager has disabled borrowing. New borrows will fail.' }
     case OP_REPAY:
-      return { title: 'Repayments disabled', message: 'The vault governor has disabled repayments. Repayments will fail.' }
+      return { title: 'Repayments disabled', message: 'The vault risk manager has disabled repayments. Repayments will fail.' }
     case OP_REPAY_WITH_SHARES:
-      return { title: 'Repay with shares disabled', message: 'The vault governor has disabled repaying debt with vault shares. Same-asset and savings repay flows will fail.' }
+      return { title: 'Repay with shares disabled', message: 'The vault risk manager has disabled repaying debt with vault shares. Same-asset and savings repay flows will fail.' }
     default:
       return null
   }

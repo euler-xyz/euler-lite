@@ -29,7 +29,7 @@ export interface VaultOpMeta {
 
 // Human-facing metadata for every EVK hook operation.
 // `affectedFlows` lists the euler-lite user flows that call the op; used to
-// explain blast-radius when a governor has paused or hooked the op.
+// explain blast-radius when a risk manager has paused or hooked the op.
 export const VAULT_OPS: readonly VaultOpMeta[] = [
   {
     bit: OP_DEPOSIT,

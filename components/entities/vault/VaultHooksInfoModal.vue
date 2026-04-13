@@ -37,10 +37,10 @@ const title = computed(() => {
 
 const intro = computed(() => {
   if (pausedKind.value === 'full') {
-    return 'All user-facing operations on this vault have been disabled by its governor. This typically indicates a freshly-deployed vault that has not been activated yet, or a full pause.'
+    return 'All user-facing operations on this vault have been disabled by its risk manager. This typically indicates a freshly-deployed vault that has not been activated yet, or a full pause.'
   }
   if (pausedKind.value === 'status-check') {
-    return 'The vault-status check has been disabled. This check is performed on every operation that touches the vault, so every operation reverts until the governor re-enables it.'
+    return 'The vault-status check has been disabled. This check is performed on every operation that touches the vault, so every operation reverts until the risk manager re-enables it.'
   }
   if (isHookDisabling(vault)) {
     return 'The following operations will revert on this vault.'
