@@ -7,10 +7,10 @@ import type { Vault } from '~/entities/vault'
 import { getSupplyCapPercentage, getBorrowCapPercentage } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import {
-  areAllUserOpsHooked,
   decodeHookedOps,
   formatHookedOpsSummary,
   isHookDisabling,
+  isVaultEffectivelyPaused,
 } from '~/utils/vault-hooks'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultHooksInfoModal } from '#components'
@@ -82,7 +82,7 @@ const hooksRowLabel = computed(() =>
 
 const hooksRowValue = computed(() => {
   if (vault.hookedOps === 0n) return 'None'
-  if (isHookDisabling(vault) && areAllUserOpsHooked(vault.hookedOps)) return 'Paused'
+  if (isVaultEffectivelyPaused(vault)) return 'Paused'
   return formatHookedOpsSummary(hookedUserOps.value)
 })
 

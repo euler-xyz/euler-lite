@@ -49,7 +49,7 @@ export const VAULT_OPS: readonly VaultOpMeta[] = [
     bit: OP_WITHDRAW,
     name: 'Withdraw',
     description: 'Withdrawing assets from the vault',
-    affectedFlows: ['Withdraw', 'Repay with shares', 'Same-asset swap', 'Cross-asset swap', 'Savings repay'],
+    affectedFlows: ['Same-asset repay', 'Same-asset swap', 'Cross-asset swap', 'Savings repay'],
     internal: false,
   },
   {
@@ -78,29 +78,29 @@ export const VAULT_OPS: readonly VaultOpMeta[] = [
   {
     bit: OP_SKIM,
     name: 'Skim',
-    description: 'Pulling unaccounted assets into the vault',
-    affectedFlows: ['Same-asset swap (target)', 'Savings repay', 'Repay with shares', 'Swap & borrow (supply side)'],
+    description: 'Minting shares to a recipient for assets already transferred into the vault but not yet accounted for',
+    affectedFlows: ['Same-asset swap (target)', 'Savings repay', 'Same-asset repay', 'Swap & borrow (supply side)'],
     internal: false,
   },
   {
     bit: OP_BORROW,
     name: 'Borrow',
     description: 'Borrowing assets from the vault',
-    affectedFlows: ['Borrow', 'Multiply', 'Swap & borrow', 'Borrow-by-saving'],
+    affectedFlows: ['Multiply', 'Swap & borrow', 'Borrow-by-saving'],
     internal: false,
   },
   {
     bit: OP_REPAY,
     name: 'Repay',
     description: 'Repaying debt',
-    affectedFlows: ['Repay', 'Swap & repay'],
+    affectedFlows: ['Swap & repay'],
     internal: false,
   },
   {
     bit: OP_REPAY_WITH_SHARES,
     name: 'Repay with shares',
-    description: 'Repaying debt using vault shares (same-asset / savings repay)',
-    affectedFlows: ['Repay with shares', 'Savings repay'],
+    description: 'Repaying debt using vault shares',
+    affectedFlows: ['Same-asset repay', 'Savings repay'],
     internal: false,
   },
   {
@@ -114,13 +114,13 @@ export const VAULT_OPS: readonly VaultOpMeta[] = [
     bit: OP_LIQUIDATE,
     name: 'Liquidate',
     description: 'Liquidating unhealthy positions',
-    affectedFlows: ['Liquidation'],
+    affectedFlows: [],
     internal: false,
   },
   {
     bit: OP_FLASHLOAN,
     name: 'Flash loan',
-    description: 'Executing flash loans (not used by euler-lite directly)',
+    description: 'Executing flash loans',
     affectedFlows: [],
     internal: false,
   },
@@ -157,8 +157,20 @@ export const isHookDisabling = (vault: Vault): boolean =>
 export const isOpHooked = (vault: Vault, bit: bigint): boolean =>
   (vault.hookedOps & bit) !== 0n
 
-export const isOpDisabled = (vault: Vault, bit: bigint): boolean =>
-  isOpHooked(vault, bit) && isHookDisabling(vault)
+// The EVC calls checkVaultStatus at the end of every batch that touches the
+// vault. If OP_VAULT_STATUS_CHECK is hooked and the hook target is zero,
+// EVERY user operation on the vault reverts — treat the vault as fully
+// paused regardless of which user-op bits are actually set.
+export const isVaultEffectivelyPaused = (vault: Vault): boolean => {
+  if (!isHookDisabling(vault)) return false
+  if (isOpHooked(vault, OP_VAULT_STATUS_CHECK)) return true
+  return areAllUserOpsHooked(vault.hookedOps)
+}
+
+export const isOpDisabled = (vault: Vault, bit: bigint): boolean => {
+  if (!isHookDisabling(vault)) return false
+  return isOpHooked(vault, bit) || isOpHooked(vault, OP_VAULT_STATUS_CHECK)
+}
 
 export const decodeHookedOps = (
   hookedOps: bigint,
