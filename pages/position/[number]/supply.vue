@@ -347,13 +347,7 @@ watch(selectedAsset, async () => {
             :description="form.simulationError.value"
             size="compact"
           />
-          <UiToast
-            v-if="form.hookWarning.value"
-            :title="form.hookWarning.value.title"
-            :description="form.hookWarning.value.message"
-            variant="error"
-            size="compact"
-          />
+          <VaultWarningBanner :warnings="[form.hookWarning.value]" />
         </div>
 
         <VaultFormInfoBlock

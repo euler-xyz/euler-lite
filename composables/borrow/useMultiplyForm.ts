@@ -35,7 +35,7 @@ import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { useMultiplyCollateralOptions } from '~/composables/useMultiplyCollateralOptions'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isOpDisabled, OP_BORROW, OP_DEPOSIT, type PlannedOp } from '~/utils/vault-hooks'
+import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 
 type MultiplyPlanParams = {
   supplyVaultAddress: string
@@ -547,17 +547,30 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const isSupplyCapReached = computed(() => multiplySupplyVault.value ? getIsSupplyCapReached(multiplySupplyVault.value) : false)
   const isBorrowCapReached = computed(() => multiplyShortVault.value ? getIsBorrowCapReached(multiplyShortVault.value) : false)
 
+  // Multiply supply side: savings-sourced transfers existing shares (OP_TRANSFER);
+  // fresh-supply deposits new assets (OP_DEPOSIT). The short vault is always
+  // borrowed from, and any swap path touches OP_SKIM on the long vault via the
+  // SkimMin verifier (skipped on same-asset multiply).
   const multiplyPlannedOps = computed<PlannedOp[]>(() => {
     const steps: PlannedOp[] = []
-    if (multiplySupplyVault.value) steps.push({ vault: multiplySupplyVault.value, op: OP_DEPOSIT })
+    if (multiplySupplyVault.value) {
+      steps.push({
+        vault: multiplySupplyVault.value,
+        op: isMultiplySavingCollateral.value ? OP_TRANSFER : OP_DEPOSIT,
+      })
+    }
     if (multiplyShortVault.value) steps.push({ vault: multiplyShortVault.value, op: OP_BORROW })
+    const isSameAsset = multiplyLongVault.value && multiplyShortVault.value
+      && normalizeAddress(multiplyLongVault.value.asset.address) === normalizeAddress(multiplyShortVault.value.asset.address)
+    if (multiplyLongVault.value && multiplySelectedQuote.value && !isSameAsset) {
+      steps.push({ vault: multiplyLongVault.value, op: OP_SKIM })
+    }
     return steps
   })
 
   const isMultiplySubmitDisabled = computed(() => {
     if (!isConnected.value) return false
-    if (multiplySupplyVault.value && isOpDisabled(multiplySupplyVault.value, OP_DEPOSIT)) return true
-    if (multiplyShortVault.value && isOpDisabled(multiplyShortVault.value, OP_BORROW)) return true
+    if (findBlockingDisabledOp(multiplyPlannedOps.value)) return true
     if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) return true
     if (!multiplyInputAmount.value || multiplyDebtAmountNano.value <= 0n) return true
     if (multiplyErrorText.value) return true

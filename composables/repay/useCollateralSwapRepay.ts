@@ -19,8 +19,8 @@ import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createRaceGuard } from '~/utils/race-guard'
-import { isOpDisabled, OP_REPAY } from '~/utils/vault-hooks'
-import { getHookDisabledWarning } from '~/composables/useVaultWarnings'
+import { findBlockingDisabledOp, OP_REPAY, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
+import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 
 interface UseCollateralSwapRepayOptions {
   position: Ref<AccountBorrowPosition | undefined>
@@ -206,16 +206,21 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     return health.nextHealth.value < 1
   })
 
-  // --- Hook-disabled warning ---
-  const hookWarning = computed(() => {
-    if (!borrowVault.value) return null
-    return getHookDisabledWarning(borrowVault.value as Vault, OP_REPAY)
+  // Collateral-swap repay: withdraw from source vault, swap, then repay the
+  // liability. Same-asset path skips the swap but still withdraws + repays.
+  const collateralSwapRepayPlannedOps = computed<PlannedOp[]>(() => {
+    const steps: PlannedOp[] = []
+    if (sourceVault.value) steps.push({ vault: sourceVault.value as Vault, op: OP_WITHDRAW })
+    if (borrowVault.value) steps.push({ vault: borrowVault.value as Vault, op: OP_REPAY })
+    return steps
   })
+
+  const hookWarning = computed(() => getPlanHookDisabledWarning(collateralSwapRepayPlannedOps.value))
 
   // --- Submit disabled ---
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
-    if (borrowVault.value && isOpDisabled(borrowVault.value as Vault, OP_REPAY)) return true
+    if (findBlockingDisabledOp(collateralSwapRepayPlannedOps.value)) return true
     if (!sourceVault.value || !borrowVault.value) return true
     if (!core.debtAmount.value && !core.amount.value) return true
     if (core.isSameAsset.value) {

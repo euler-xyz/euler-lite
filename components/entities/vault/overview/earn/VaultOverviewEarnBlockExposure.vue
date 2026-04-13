@@ -113,10 +113,14 @@ const getExposureVaultByAddress = (address: string) => {
 }
 
 const exposureRows = computed(() => {
-  return exposureList.value.map(exposure => ({
-    exposure,
-    vault: getExposureVaultByAddress(exposure.info.vault),
-  }))
+  return exposureList.value.map((exposure) => {
+    const strategyVault = getExposureVaultByAddress(exposure.info.vault)
+    return {
+      exposure,
+      vault: strategyVault,
+      hookWarning: strategyVault ? getStrategyHookWarning(strategyVault) : null,
+    }
+  })
 })
 
 const getAllocationPercentage = (exposure: EarnVaultStrategyInfo) => {
@@ -213,11 +217,11 @@ load()
                   symbol: row.exposure.info.assetSymbol,
                 }]"
               />
-              <span @click.stop.prevent>
-                <VaultWarningIcon
-                  v-if="getStrategyHookWarning(row.vault)"
-                  :warning="getStrategyHookWarning(row.vault)"
-                />
+              <span
+                v-if="row.hookWarning"
+                @click.stop.prevent
+              >
+                <VaultWarningIcon :warning="row.hookWarning" />
               </span>
             </div>
           </template>

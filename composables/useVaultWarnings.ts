@@ -166,7 +166,7 @@ const hookDisabledCopy = (op: bigint): { title: string, message: string } | null
     case OP_DEPOSIT:
       return { title: 'Deposits disabled', message: 'The vault risk manager has disabled deposits. New deposits will fail.' }
     case OP_MINT:
-      return { title: 'Minting disabled', message: 'The vault risk manager has disabled share minting.' }
+      return { title: 'Minting disabled', message: 'The vault risk manager has disabled share minting. Minting shares directly will fail.' }
     case OP_WITHDRAW:
       return { title: 'Withdrawals disabled', message: 'The vault risk manager has disabled withdrawals. Withdrawals will fail.' }
     case OP_REDEEM:
