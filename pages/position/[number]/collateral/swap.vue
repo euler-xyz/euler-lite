@@ -462,7 +462,11 @@ const nextLiquidationPrice = computed(() => {
 </script>
 
 <template>
-  <div class="flex gap-32">
+  <div class="relative flex gap-32">
+    <BackButton
+      class="hidden laptop:inline-flex laptop:absolute laptop:top-20 laptop:right-full laptop:mr-4"
+      :fallback="`/position/${positionIndex}`"
+    />
     <VaultForm
       back
       :back-fallback="`/position/${positionIndex}`"

@@ -773,173 +773,179 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
 </script>
 
 <template>
-  <VaultForm
-    back
-    :back-fallback="`/position/${positionIndex}`"
-    title="Multiply"
-    description="Increase your exposure by looping collateral through borrowing."
-    :loading="isLoading || isPositionsLoading"
-    class="flex flex-col gap-16 w-full"
-    @submit.prevent="submitMultiply"
-  >
-    <template v-if="position && multiplySupplyVault && multiplyLongVault && multiplyShortVault">
-      <VaultLabelsAndAssets
-        :vault="multiplyLongVault"
-        :assets="pairAssets as VaultAsset[]"
-        :assets-label="pairAssetsLabel"
-        size="large"
-      />
+  <div class="relative">
+    <BackButton
+      class="hidden laptop:inline-flex laptop:absolute laptop:top-20 laptop:right-full laptop:mr-4"
+      :fallback="`/position/${positionIndex}`"
+    />
+    <VaultForm
+      back
+      :back-fallback="`/position/${positionIndex}`"
+      title="Multiply"
+      description="Increase your exposure by looping collateral through borrowing."
+      :loading="isLoading || isPositionsLoading"
+      class="flex flex-col gap-16 w-full"
+      @submit.prevent="submitMultiply"
+    >
+      <template v-if="position && multiplySupplyVault && multiplyLongVault && multiplyShortVault">
+        <VaultLabelsAndAssets
+          :vault="multiplyLongVault"
+          :assets="pairAssets as VaultAsset[]"
+          :assets-label="pairAssetsLabel"
+          size="large"
+        />
 
-      <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
-        <div class="flex flex-col gap-16 w-full">
-          <UiRange
-            v-model="multiplier"
-            label="Multiplier"
-            :step="0.1"
-            :min="multiplyMinMultiplier"
-            :max="multiplyMaxMultiplier"
-            :number-filter="(n: number) => `${formatNumber(n, 2, 0)}x`"
-            @update:model-value="onMultiplierInput"
-          />
+        <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
+          <div class="flex flex-col gap-16 w-full">
+            <UiRange
+              v-model="multiplier"
+              label="Multiplier"
+              :step="0.1"
+              :min="multiplyMinMultiplier"
+              :max="multiplyMaxMultiplier"
+              :number-filter="(n: number) => `${formatNumber(n, 2, 0)}x`"
+              @update:model-value="onMultiplierInput"
+            />
 
-          <SwapRouteSelector
-            :items="multiplyRouteItems"
-            :selected-provider="multiplySelectedProvider"
-            :status-label="multiplyQuotesStatusLabel"
-            :is-loading="isMultiplyQuoteLoading"
-            :empty-message="multiplyRouteEmptyMessage"
-            @select="selectMultiplyQuote"
-            @refresh="onRefreshMultiplyQuotes"
-          />
+            <SwapRouteSelector
+              :items="multiplyRouteItems"
+              :selected-provider="multiplySelectedProvider"
+              :status-label="multiplyQuotesStatusLabel"
+              :is-loading="isMultiplyQuoteLoading"
+              :empty-message="multiplyRouteEmptyMessage"
+              @select="selectMultiplyQuote"
+              @refresh="onRefreshMultiplyQuotes"
+            />
 
-          <AssetInput
-            v-model="multiplyLongAmount"
-            :desc="multiplyLongProduct.name"
-            label="Long"
-            :asset="multiplyLongVault.asset"
-            :vault="(multiplyLongVault as Vault)"
-            :readonly="true"
-          />
+            <AssetInput
+              v-model="multiplyLongAmount"
+              :desc="multiplyLongProduct.name"
+              label="Long"
+              :asset="multiplyLongVault.asset"
+              :vault="(multiplyLongVault as Vault)"
+              :readonly="true"
+            />
 
-          <AssetInput
-            v-model="multiplyShortAmount"
-            :desc="multiplyShortProduct.name"
-            label="Short"
-            :asset="multiplyShortVault.asset"
-            :vault="multiplyShortVault"
-            :readonly="true"
-          />
+            <AssetInput
+              v-model="multiplyShortAmount"
+              :desc="multiplyShortProduct.name"
+              label="Short"
+              :asset="multiplyShortVault.asset"
+              :vault="multiplyShortVault"
+              :readonly="true"
+            />
 
-          <UiToast
-            v-if="isGeoBlocked"
-            title="Region restricted"
-            description="This operation is not available in your region. You can still repay existing debt."
-            variant="warning"
-            size="compact"
-          />
-          <UiToast
-            v-if="!isGeoBlocked && isMultiplyRestricted"
-            title="Asset restricted"
-            description="Multiply is not available for this pair in your region."
-            variant="warning"
-            size="compact"
-          />
-          <UiToast
-            v-show="multiplyErrorText"
-            title="Error"
-            variant="error"
-            :description="multiplyErrorText || ''"
-            size="compact"
-          />
-          <UiToast
-            v-if="multiplySimulationError"
-            title="Error"
-            variant="error"
-            :description="multiplySimulationError"
-            size="compact"
-          />
+            <UiToast
+              v-if="isGeoBlocked"
+              title="Region restricted"
+              description="This operation is not available in your region. You can still repay existing debt."
+              variant="warning"
+              size="compact"
+            />
+            <UiToast
+              v-if="!isGeoBlocked && isMultiplyRestricted"
+              title="Asset restricted"
+              description="Multiply is not available for this pair in your region."
+              variant="warning"
+              size="compact"
+            />
+            <UiToast
+              v-show="multiplyErrorText"
+              title="Error"
+              variant="error"
+              :description="multiplyErrorText || ''"
+              size="compact"
+            />
+            <UiToast
+              v-if="multiplySimulationError"
+              title="Error"
+              variant="error"
+              :description="multiplySimulationError"
+              size="compact"
+            />
 
-          <UiToast
-            v-if="multiplyQuoteError"
-            title="Swap quote"
-            variant="warning"
-            :description="multiplyQuoteError"
-            size="compact"
-          />
+            <UiToast
+              v-if="multiplyQuoteError"
+              title="Swap quote"
+              variant="warning"
+              :description="multiplyQuoteError"
+              size="compact"
+            />
 
-          <VaultFormSubmit
-            :disabled="reviewMultiplyDisabled"
-            :loading="isSubmitting || isPreparing"
+            <VaultFormSubmit
+              :disabled="reviewMultiplyDisabled"
+              :loading="isSubmitting || isPreparing"
+            >
+              Review Multiply
+            </VaultFormSubmit>
+          </div>
+
+          <VaultFormInfoBlock
+            :loading="isMultiplyQuoteLoading"
+            variant="card"
+            class="w-full laptop:max-w-[360px]"
           >
-            Review Multiply
-          </VaultFormSubmit>
+            <SummaryRow label="ROE">
+              <SummaryValue
+                :before="multiplyRoeBefore !== null ? formatNumber(multiplyRoeBefore) : undefined"
+                :after="multiplyRoeAfter !== null && multiplySwapReady ? formatNumber(multiplyRoeAfter) : undefined"
+                suffix="%"
+              />
+            </SummaryRow>
+            <SummaryRow
+              label="Swap price"
+              align-top
+            >
+              <SummaryPriceValue
+                :value="multiplyCurrentPrice ? formatSmartAmount(priceInvert.invertValue(multiplyCurrentPrice.value)) : undefined"
+                :symbol="priceInvert.displaySymbol"
+                invertible
+                @invert="priceInvert.toggle"
+              />
+            </SummaryRow>
+            <SummaryRow label="Liq. price">
+              <SummaryPriceValue
+                :before="multiplyCurrentLiquidationPrice !== null ? formatSmartAmount(priceInvert.invertValue(multiplyCurrentLiquidationPrice)) : undefined"
+                :after="multiplyNextLiquidationPrice !== null && multiplySwapReady ? formatSmartAmount(priceInvert.invertValue(multiplyNextLiquidationPrice)) : undefined"
+                :symbol="priceInvert.displaySymbol"
+                invertible
+                @invert="priceInvert.toggle"
+              />
+            </SummaryRow>
+            <SummaryRow label="Liq. buffer">
+              <SummaryValue
+                :before="formatLiqBuffer(priceInvert.invertValue(multiplyPriceRatio), priceInvert.invertValue(multiplyCurrentLiquidationPrice))"
+                :after="multiplyNextLiquidationPrice !== null && multiplySwapReady
+                  ? formatLiqBuffer(priceInvert.invertValue(multiplyPriceRatio), priceInvert.invertValue(multiplyNextLiquidationPrice))
+                  : undefined"
+                suffix="%"
+              />
+            </SummaryRow>
+            <SummaryRow label="LTV">
+              <SummaryValue
+                :before="multiplyCurrentLtv !== null ? formatNumber(multiplyCurrentLtv) : undefined"
+                :after="multiplyNextLtv !== null && multiplySwapReady ? formatNumber(multiplyNextLtv) : undefined"
+                suffix="%"
+              />
+            </SummaryRow>
+            <SummaryRow label="Health score">
+              <SummaryValue
+                :before="multiplyCurrentHealth !== null ? formatHealthScore(multiplyCurrentHealth) : undefined"
+                :after="multiplyNextHealth !== null && multiplySwapReady ? formatHealthScore(multiplyNextHealth) : undefined"
+              />
+            </SummaryRow>
+            <SwapDetailsSummary
+              :input-display="multiplySwapSummary?.from ?? null"
+              :output-display="multiplySwapSummary?.to ?? null"
+              :price-impact="multiplyPriceImpact"
+              :slippage="multiplySlippage"
+              :routed-via="multiplyRoutedVia"
+              :multiplied-price-impact="multipliedPriceImpact"
+              @open-slippage-settings="openSlippageSettings"
+            />
+          </VaultFormInfoBlock>
         </div>
-
-        <VaultFormInfoBlock
-          :loading="isMultiplyQuoteLoading"
-          variant="card"
-          class="w-full laptop:max-w-[360px]"
-        >
-          <SummaryRow label="ROE">
-            <SummaryValue
-              :before="multiplyRoeBefore !== null ? formatNumber(multiplyRoeBefore) : undefined"
-              :after="multiplyRoeAfter !== null && multiplySwapReady ? formatNumber(multiplyRoeAfter) : undefined"
-              suffix="%"
-            />
-          </SummaryRow>
-          <SummaryRow
-            label="Swap price"
-            align-top
-          >
-            <SummaryPriceValue
-              :value="multiplyCurrentPrice ? formatSmartAmount(priceInvert.invertValue(multiplyCurrentPrice.value)) : undefined"
-              :symbol="priceInvert.displaySymbol"
-              invertible
-              @invert="priceInvert.toggle"
-            />
-          </SummaryRow>
-          <SummaryRow label="Liq. price">
-            <SummaryPriceValue
-              :before="multiplyCurrentLiquidationPrice !== null ? formatSmartAmount(priceInvert.invertValue(multiplyCurrentLiquidationPrice)) : undefined"
-              :after="multiplyNextLiquidationPrice !== null && multiplySwapReady ? formatSmartAmount(priceInvert.invertValue(multiplyNextLiquidationPrice)) : undefined"
-              :symbol="priceInvert.displaySymbol"
-              invertible
-              @invert="priceInvert.toggle"
-            />
-          </SummaryRow>
-          <SummaryRow label="Liq. buffer">
-            <SummaryValue
-              :before="formatLiqBuffer(priceInvert.invertValue(multiplyPriceRatio), priceInvert.invertValue(multiplyCurrentLiquidationPrice))"
-              :after="multiplyNextLiquidationPrice !== null && multiplySwapReady
-                ? formatLiqBuffer(priceInvert.invertValue(multiplyPriceRatio), priceInvert.invertValue(multiplyNextLiquidationPrice))
-                : undefined"
-              suffix="%"
-            />
-          </SummaryRow>
-          <SummaryRow label="LTV">
-            <SummaryValue
-              :before="multiplyCurrentLtv !== null ? formatNumber(multiplyCurrentLtv) : undefined"
-              :after="multiplyNextLtv !== null && multiplySwapReady ? formatNumber(multiplyNextLtv) : undefined"
-              suffix="%"
-            />
-          </SummaryRow>
-          <SummaryRow label="Health score">
-            <SummaryValue
-              :before="multiplyCurrentHealth !== null ? formatHealthScore(multiplyCurrentHealth) : undefined"
-              :after="multiplyNextHealth !== null && multiplySwapReady ? formatHealthScore(multiplyNextHealth) : undefined"
-            />
-          </SummaryRow>
-          <SwapDetailsSummary
-            :input-display="multiplySwapSummary?.from ?? null"
-            :output-display="multiplySwapSummary?.to ?? null"
-            :price-impact="multiplyPriceImpact"
-            :slippage="multiplySlippage"
-            :routed-via="multiplyRoutedVia"
-            :multiplied-price-impact="multipliedPriceImpact"
-            @open-slippage-settings="openSlippageSettings"
-          />
-        </VaultFormInfoBlock>
-      </div>
-    </template>
-  </VaultForm>
+      </template>
+    </VaultForm>
+  </div>
 </template>

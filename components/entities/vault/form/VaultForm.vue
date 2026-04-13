@@ -14,6 +14,7 @@ defineProps<{ title?: string, description?: string, loading?: boolean, back?: bo
       >
         <BackButton
           v-if="back"
+          class="laptop:hidden"
           :fallback="backFallback"
         />
         <h1

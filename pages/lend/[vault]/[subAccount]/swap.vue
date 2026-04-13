@@ -180,7 +180,11 @@ watch([() => route.params.vault, () => route.query.to], () => {
 </script>
 
 <template>
-  <div class="flex gap-32">
+  <div class="relative flex gap-32">
+    <BackButton
+      class="hidden laptop:inline-flex laptop:absolute laptop:top-20 laptop:right-full laptop:mr-4"
+      :fallback="`/lend/${vaultAddress}`"
+    />
     <VaultForm
       back
       :back-fallback="`/lend/${vaultAddress}`"

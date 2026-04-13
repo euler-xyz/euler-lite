@@ -89,56 +89,53 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
 <template>
   <div
     v-if="vault"
-    class="flex items-center gap-12"
+    :class="[size === 'large' ? 'gap-16' : 'gap-12']"
+    class="flex items-center"
   >
     <BackButton
       v-if="back"
+      class="laptop:hidden"
       :fallback="backFallback"
     />
-    <div
-      :class="[size === 'large' ? 'gap-16' : 'gap-12']"
-      class="flex items-center"
-    >
-      <AssetAvatar
-        :asset="assets"
-        :size="size === 'large' ? '46' : '38'"
-      />
+    <AssetAvatar
+      :asset="assets"
+      :size="size === 'large' ? '46' : '38'"
+    />
 
-      <div>
-        <div class="flex items-center gap-8 mb-4">
-          <span class="text-content-tertiary">
-            <VaultDisplayName
-              :name="pairVault ? displayLabel : displayName"
-              :is-unverified="(!!vault && 'verified' in vault && !vault.verified) || !!(pairVault && 'verified' in pairVault && !pairVault.verified)"
-            />
-          </span>
-          <span
-            v-if="isDeprecated"
-            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-          >
-            <SvgIcon
-              name="warning"
-              class="!w-14 !h-14"
-            />
-            Deprecated
-          </span>
-          <span
-            v-if="isRestricted"
-            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-            title="This vault is not available in your region"
-          >
-            <SvgIcon
-              name="warning"
-              class="!w-14 !h-14"
-            />
-            Restricted
-          </span>
-        </div>
-
-        <p class="text-p2 font-semibold text-content-primary">
-          {{ displayAssetsLabel }}
-        </p>
+    <div>
+      <div class="flex items-center gap-8 mb-4">
+        <span class="text-content-tertiary">
+          <VaultDisplayName
+            :name="pairVault ? displayLabel : displayName"
+            :is-unverified="(!!vault && 'verified' in vault && !vault.verified) || !!(pairVault && 'verified' in pairVault && !pairVault.verified)"
+          />
+        </span>
+        <span
+          v-if="isDeprecated"
+          class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
+        >
+          <SvgIcon
+            name="warning"
+            class="!w-14 !h-14"
+          />
+          Deprecated
+        </span>
+        <span
+          v-if="isRestricted"
+          class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
+          title="This vault is not available in your region"
+        >
+          <SvgIcon
+            name="warning"
+            class="!w-14 !h-14"
+          />
+          Restricted
+        </span>
       </div>
+
+      <p class="text-p2 font-semibold text-content-primary">
+        {{ displayAssetsLabel }}
+      </p>
     </div>
   </div>
 </template>

@@ -370,7 +370,7 @@ watch(formTab, () => {
 </script>
 
 <template>
-  <div>
+  <div class="relative">
     <div
       v-if="!pair"
       class="flex justify-center items-center min-h-[50dvh]"
@@ -378,6 +378,10 @@ watch(formTab, () => {
       <UiLoader />
     </div>
     <template v-else>
+      <BackButton
+        class="hidden laptop:inline-flex laptop:absolute laptop:top-8 laptop:right-full laptop:mr-12"
+        fallback="/borrow"
+      />
       <VaultLabelsAndAssets
         v-if="collateralVault && borrowVault"
         back
