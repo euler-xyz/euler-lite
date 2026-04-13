@@ -182,7 +182,7 @@ onClickOutside(reference, () => {
     </button>
 
     <!-- Center: Navigation -->
-    <div class="flex flex-1 justify-center mobile:!hidden">
+    <div class="absolute left-1/2 -translate-x-1/2 mobile:!hidden">
       <div class="flex">
         <NuxtLink
           v-for="item in menuItems"
