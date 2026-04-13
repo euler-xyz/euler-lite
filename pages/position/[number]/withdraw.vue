@@ -135,7 +135,10 @@ const pairAssetsLabel = usePositionPairLabel(form.position)
 // Withdraw-specific computeds
 const withdrawWarnings = computed(() => {
   if (!form.borrowVault.value) return []
-  return [getUtilisationWarning(form.borrowVault.value, 'borrow')]
+  return [
+    form.hookWarning.value,
+    getUtilisationWarning(form.borrowVault.value, 'borrow'),
+  ]
 })
 
 const onSelectOutputAsset = (newAsset: VaultAsset, meta?: SwapTokenSelectMeta) => {
@@ -352,7 +355,6 @@ watch(selectedOutputAsset, () => {
           <VaultFormSubmit
             :disabled="form.submitDisabled.value"
             :loading="form.isSubmitting.value || form.isPreparing.value"
-            :disabled-reason="form.hookBlockedReason.value ?? undefined"
           >
             {{ form.submitLabel }}
           </VaultFormSubmit>

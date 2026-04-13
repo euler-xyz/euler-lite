@@ -15,7 +15,8 @@ import type { TxPlan } from '~/entities/txPlan'
 import { valueToNano } from '~/utils/crypto-utils'
 import { trimTrailingZeros } from '~/utils/string-utils'
 import { amountToPercent, percentToAmountNano } from '~/utils/repayUtils'
-import { getOpBlockedReason, OP_REPAY } from '~/utils/vault-hooks'
+import { isOpDisabled, OP_REPAY } from '~/utils/vault-hooks'
+import { getHookDisabledWarning } from '~/composables/useVaultWarnings'
 import type { Vault } from '~/entities/vault'
 
 interface UseWalletRepayOptions {
@@ -90,14 +91,14 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     }
     return FixedPoint.fromValue(0n, 18)
   })
-  const hookBlockedReason = computed(() => {
+  const hookWarning = computed(() => {
     if (!borrowVault.value) return null
-    return getOpBlockedReason(borrowVault.value as Vault, OP_REPAY)
+    return getHookDisabledWarning(borrowVault.value as Vault, OP_REPAY)
   })
 
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
-    if (hookBlockedReason.value) return true
+    if (borrowVault.value && isOpDisabled(borrowVault.value as Vault, OP_REPAY)) return true
     return !(+amount.value) || !!estimatesError.value || isEstimatesLoading.value
   })
 
@@ -361,7 +362,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     estimatesError,
     isEstimatesLoading,
     isSubmitDisabled,
-    hookBlockedReason,
+    hookWarning,
     amountFixed,
     borrowedFixed,
     suppliedFixed,

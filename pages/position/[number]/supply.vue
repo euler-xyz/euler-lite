@@ -347,6 +347,13 @@ watch(selectedAsset, async () => {
             :description="form.simulationError.value"
             size="compact"
           />
+          <UiToast
+            v-if="form.hookWarning.value"
+            :title="form.hookWarning.value.title"
+            :description="form.hookWarning.value.message"
+            variant="error"
+            size="compact"
+          />
         </div>
 
         <VaultFormInfoBlock
@@ -409,7 +416,6 @@ watch(selectedAsset, async () => {
           <VaultFormSubmit
             :disabled="form.submitDisabled.value"
             :loading="form.isSubmitting.value || form.isPreparing.value"
-            :disabled-reason="form.hookBlockedReason.value ?? undefined"
           >
             {{ form.submitLabel }}
           </VaultFormSubmit>

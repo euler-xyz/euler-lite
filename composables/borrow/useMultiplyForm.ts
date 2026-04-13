@@ -30,12 +30,12 @@ import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
 import { calculateRoe, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
 import { computeMaxMultiplier, computeMinMultiplier, computeWeightedSupplyApy, computeLeverageDebt } from '~/utils/multiply-math'
 import type { TxPlan } from '~/entities/txPlan'
-import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
+import { getPlanHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { useMultiplyCollateralOptions } from '~/composables/useMultiplyCollateralOptions'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { getPlanBlockedReason, OP_BORROW, OP_DEPOSIT, type PlannedOp } from '~/utils/vault-hooks'
+import { isOpDisabled, OP_BORROW, OP_DEPOSIT, type PlannedOp } from '~/utils/vault-hooks'
 
 type MultiplyPlanParams = {
   supplyVaultAddress: string
@@ -547,16 +547,17 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const isSupplyCapReached = computed(() => multiplySupplyVault.value ? getIsSupplyCapReached(multiplySupplyVault.value) : false)
   const isBorrowCapReached = computed(() => multiplyShortVault.value ? getIsBorrowCapReached(multiplyShortVault.value) : false)
 
-  const hookBlockedReason = computed(() => {
+  const multiplyPlannedOps = computed<PlannedOp[]>(() => {
     const steps: PlannedOp[] = []
     if (multiplySupplyVault.value) steps.push({ vault: multiplySupplyVault.value, op: OP_DEPOSIT })
     if (multiplyShortVault.value) steps.push({ vault: multiplyShortVault.value, op: OP_BORROW })
-    return getPlanBlockedReason(steps)
+    return steps
   })
 
   const isMultiplySubmitDisabled = computed(() => {
     if (!isConnected.value) return false
-    if (hookBlockedReason.value) return true
+    if (multiplySupplyVault.value && isOpDisabled(multiplySupplyVault.value, OP_DEPOSIT)) return true
+    if (multiplyShortVault.value && isOpDisabled(multiplyShortVault.value, OP_BORROW)) return true
     if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) return true
     if (!multiplyInputAmount.value || multiplyDebtAmountNano.value <= 0n) return true
     if (multiplyErrorText.value) return true
@@ -571,6 +572,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const multiplyFormWarnings = computed(() => {
     if (!multiplyShortVault.value) return []
     return [
+      getPlanHookDisabledWarning(multiplyPlannedOps.value),
       getUtilisationWarning(multiplyShortVault.value, 'borrow'),
       getBorrowCapWarning(multiplyShortVault.value),
     ]
@@ -1006,7 +1008,6 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     multiplyErrorText,
     isMultiplySubmitDisabled,
     multiplyFormWarnings,
-    hookBlockedReason,
 
     // Product labels
     multiplySupplyProduct,

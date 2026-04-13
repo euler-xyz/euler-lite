@@ -218,14 +218,14 @@ const reviewRepayDisabled = computed(() => {
   return collateral.isSubmitDisabled.value
 })
 
-const reviewRepayDisabledReason = computed(() => {
+const activeHookWarning = computed(() => {
   if (formTab.value === 'wallet') {
     return walletSwap.needsSwap.value
-      ? (walletSwap.hookBlockedReason.value ?? undefined)
-      : (wallet.hookBlockedReason.value ?? undefined)
+      ? (walletSwap.hookWarning.value ?? null)
+      : (wallet.hookWarning.value ?? null)
   }
-  if (formTab.value === 'savings') return savings.hookBlockedReason.value ?? undefined
-  return collateral.hookBlockedReason.value ?? undefined
+  if (formTab.value === 'savings') return savings.hookWarning.value ?? null
+  return collateral.hookWarning.value ?? null
 })
 
 const onSubmitForm = async () => {
@@ -557,6 +557,13 @@ watch(formTab, () => {
           </VaultFormInfoBlock>
 
           <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
+            <UiToast
+              v-if="activeHookWarning"
+              :title="activeHookWarning.title"
+              :description="activeHookWarning.message"
+              variant="error"
+              size="compact"
+            />
             <VaultFormInfoButton
               :pair="position"
               :disabled="isLoading || isSubmitting"
@@ -566,7 +573,6 @@ watch(formTab, () => {
             <VaultFormSubmit
               :disabled="reviewRepayDisabled"
               :loading="isSubmitting || isPreparing"
-              :disabled-reason="reviewRepayDisabledReason"
             >
               {{ reviewRepayLabel }}
             </VaultFormSubmit>
@@ -736,6 +742,13 @@ watch(formTab, () => {
           </VaultFormInfoBlock>
 
           <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
+            <UiToast
+              v-if="activeHookWarning"
+              :title="activeHookWarning.title"
+              :description="activeHookWarning.message"
+              variant="error"
+              size="compact"
+            />
             <VaultFormInfoButton
               :pair="position"
               :disabled="isLoading || isSubmitting"
@@ -745,7 +758,6 @@ watch(formTab, () => {
             <VaultFormSubmit
               :disabled="reviewRepayDisabled"
               :loading="isSubmitting || isPreparing"
-              :disabled-reason="reviewRepayDisabledReason"
             >
               {{ reviewRepayLabel }}
             </VaultFormSubmit>
@@ -907,6 +919,13 @@ watch(formTab, () => {
           </VaultFormInfoBlock>
 
           <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
+            <UiToast
+              v-if="activeHookWarning"
+              :title="activeHookWarning.title"
+              :description="activeHookWarning.message"
+              variant="error"
+              size="compact"
+            />
             <VaultFormInfoButton
               :pair="position"
               :disabled="isLoading || isSubmitting"
@@ -916,7 +935,6 @@ watch(formTab, () => {
             <VaultFormSubmit
               :disabled="reviewRepayDisabled"
               :loading="isSubmitting || isPreparing"
-              :disabled-reason="reviewRepayDisabledReason"
             >
               {{ reviewRepayLabel }}
             </VaultFormSubmit>

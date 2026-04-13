@@ -235,22 +235,3 @@ export const findBlockingDisabledOp = (
   }
   return null
 }
-
-const getVaultDisplayName = (vault: Vault): string =>
-  vault.name || vault.symbol || vault.asset?.symbol || 'vault'
-
-// Human-readable reason for a single (vault, op) pair that would revert.
-// `null` when the op is not disabled. Used as a tooltip / inline error.
-export const getOpBlockedReason = (vault: Vault, op: bigint): string | null => {
-  if (!isOpDisabled(vault, op)) return null
-  const meta = getOpMeta(op)
-  const name = meta?.name ?? 'This operation'
-  return `${name} is currently disabled on the ${getVaultDisplayName(vault)} vault.`
-}
-
-// Human-readable reason for a multi-step flow. Returns the first blocking op.
-export const getPlanBlockedReason = (steps: readonly PlannedOp[]): string | null => {
-  const blocking = findBlockingDisabledOp(steps)
-  if (!blocking) return null
-  return getOpBlockedReason(blocking.vault, blocking.op)
-}

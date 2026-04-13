@@ -1,5 +1,19 @@
 import { maxUint256 } from 'viem'
 import { getVaultUtilization, type Vault } from '~/entities/vault'
+import {
+  findBlockingDisabledOp,
+  isOpDisabled,
+  OP_BORROW,
+  OP_DEPOSIT,
+  OP_MINT,
+  OP_REDEEM,
+  OP_REPAY,
+  OP_REPAY_WITH_SHARES,
+  OP_SKIM,
+  OP_TRANSFER,
+  OP_WITHDRAW,
+  type PlannedOp,
+} from '~/utils/vault-hooks'
 
 export type WarningLevel = 'info' | 'high' | 'critical'
 export type WarningContext = 'lend' | 'borrow' | 'general'
@@ -145,4 +159,41 @@ export const getIsBorrowCapReached = (vault: Vault): boolean => {
   const percentage = getBorrowCapPercentage(vault)
 
   return percentage >= 100
+}
+
+const hookDisabledCopy = (op: bigint): { title: string, message: string } | null => {
+  switch (op) {
+    case OP_DEPOSIT:
+      return { title: 'Deposits disabled', message: 'The vault governor has disabled deposits. New deposits will fail.' }
+    case OP_MINT:
+      return { title: 'Minting disabled', message: 'The vault governor has disabled share minting.' }
+    case OP_WITHDRAW:
+      return { title: 'Withdrawals disabled', message: 'The vault governor has disabled withdrawals. Withdrawals will fail.' }
+    case OP_REDEEM:
+      return { title: 'Redemptions disabled', message: 'The vault governor has disabled share redemptions. Redemptions will fail.' }
+    case OP_TRANSFER:
+      return { title: 'Share transfers disabled', message: 'The vault governor has disabled share transfers. Flows that route shares between sub-accounts will fail.' }
+    case OP_SKIM:
+      return { title: 'Skim disabled', message: 'The vault governor has disabled skim. Flows that mint shares for unaccounted assets (repay with shares, same-asset swap) will fail.' }
+    case OP_BORROW:
+      return { title: 'Borrowing disabled', message: 'The vault governor has disabled borrowing. New borrows will fail.' }
+    case OP_REPAY:
+      return { title: 'Repayments disabled', message: 'The vault governor has disabled repayments. Repayments will fail.' }
+    case OP_REPAY_WITH_SHARES:
+      return { title: 'Repay with shares disabled', message: 'The vault governor has disabled repaying debt with vault shares. Same-asset and savings repay flows will fail.' }
+    default:
+      return null
+  }
+}
+
+export const getHookDisabledWarning = (vault: Vault, op: bigint): VaultWarning | null => {
+  if (!isOpDisabled(vault, op)) return null
+  const copy = hookDisabledCopy(op) ?? { title: 'Operation disabled', message: 'This operation is currently disabled on the vault.' }
+  return { level: 'critical', ...copy }
+}
+
+export const getPlanHookDisabledWarning = (steps: readonly PlannedOp[]): VaultWarning | null => {
+  const blocking = findBlockingDisabledOp(steps)
+  if (!blocking) return null
+  return getHookDisabledWarning(blocking.vault, blocking.op)
 }

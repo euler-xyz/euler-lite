@@ -21,7 +21,8 @@ import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
 import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
-import { getOpBlockedReason, OP_REPAY } from '~/utils/vault-hooks'
+import { isOpDisabled, OP_REPAY } from '~/utils/vault-hooks'
+import { getHookDisabledWarning } from '~/composables/useVaultWarnings'
 
 interface UseWalletSwapRepayOptions {
   position: Ref<AccountBorrowPosition | undefined>
@@ -204,15 +205,12 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     return false
   })
 
-  const hookBlockedReason = computed(() => {
+  const hookWarning = computed(() => {
     if (!borrowVault.value) return null
-    return getOpBlockedReason(borrowVault.value as Vault, OP_REPAY)
+    return getHookDisabledWarning(borrowVault.value as Vault, OP_REPAY)
   })
 
   const disabledReason = computed(() => {
-    if (hookBlockedReason.value) {
-      return hookBlockedReason.value
-    }
     if (isRepayExceedsDebt.value) {
       return 'You repaying more than required'
     }
@@ -221,7 +219,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
-    if (hookBlockedReason.value) return true
+    if (borrowVault.value && isOpDisabled(borrowVault.value as Vault, OP_REPAY)) return true
     if (direction.value === SwapperMode.EXACT_IN && !(+amount.value)) return true
     if (direction.value === SwapperMode.TARGET_DEBT && !(+debtAmount.value)) return true
     if (isRepayExceedsDebt.value) return true
@@ -725,7 +723,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     isSubmitDisabled,
     isRepayExceedsDebt,
     disabledReason,
-    hookBlockedReason,
+    hookWarning,
 
     // Actions
     onAmountInput,

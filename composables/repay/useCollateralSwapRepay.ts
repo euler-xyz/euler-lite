@@ -19,7 +19,8 @@ import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createRaceGuard } from '~/utils/race-guard'
-import { getOpBlockedReason, OP_REPAY } from '~/utils/vault-hooks'
+import { isOpDisabled, OP_REPAY } from '~/utils/vault-hooks'
+import { getHookDisabledWarning } from '~/composables/useVaultWarnings'
 
 interface UseCollateralSwapRepayOptions {
   position: Ref<AccountBorrowPosition | undefined>
@@ -205,16 +206,16 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     return health.nextHealth.value < 1
   })
 
-  // --- Hook-disabled reason ---
-  const hookBlockedReason = computed(() => {
+  // --- Hook-disabled warning ---
+  const hookWarning = computed(() => {
     if (!borrowVault.value) return null
-    return getOpBlockedReason(borrowVault.value as Vault, OP_REPAY)
+    return getHookDisabledWarning(borrowVault.value as Vault, OP_REPAY)
   })
 
   // --- Submit disabled ---
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
-    if (hookBlockedReason.value) return true
+    if (borrowVault.value && isOpDisabled(borrowVault.value as Vault, OP_REPAY)) return true
     if (!sourceVault.value || !borrowVault.value) return true
     if (!core.debtAmount.value && !core.amount.value) return true
     if (core.isSameAsset.value) {
@@ -229,9 +230,6 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   })
 
   const disabledReason = computed(() => {
-    if (hookBlockedReason.value) {
-      return hookBlockedReason.value
-    }
     if (core.isRepayExceedsDebt.value) {
       return 'You repaying more than required'
     }
@@ -461,7 +459,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     // Submit
     isSubmitDisabled,
     disabledReason,
-    hookBlockedReason,
+    hookWarning,
     isRepayExceedsDebt: core.isRepayExceedsDebt,
     // Handlers
     onAmountInput: core.onAmountInput,

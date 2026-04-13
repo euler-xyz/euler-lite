@@ -216,7 +216,7 @@ if (!props.persistent && props.duration > 0) {
   // Structure
   &__body {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
   }
 
   &__icon {

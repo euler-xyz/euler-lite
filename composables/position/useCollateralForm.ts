@@ -34,7 +34,8 @@ import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { formatSmartAmount } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
-import { getOpBlockedReason, OP_DEPOSIT, OP_WITHDRAW } from '~/utils/vault-hooks'
+import { isOpDisabled, OP_DEPOSIT, OP_WITHDRAW } from '~/utils/vault-hooks'
+import { getHookDisabledWarning } from '~/composables/useVaultWarnings'
 
 export interface UseCollateralFormOptions {
   mode: 'supply' | 'withdraw'
@@ -402,16 +403,17 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     options.needsSwap.value && isVaultRestrictedByCountry(collateralVault.value?.address || ''),
   )
 
-  const hookBlockedReason = computed(() => {
+  const collateralOp = computed(() => options.mode === 'supply' ? OP_DEPOSIT : OP_WITHDRAW)
+
+  const hookWarning = computed(() => {
     // Securitize collateral doesn't implement hooks.
     if (!collateralVault.value || !('hookedOps' in collateralVault.value)) return null
-    const op = options.mode === 'supply' ? OP_DEPOSIT : OP_WITHDRAW
-    return getOpBlockedReason(collateralVault.value as Vault, op)
+    return getHookDisabledWarning(collateralVault.value as Vault, collateralOp.value)
   })
 
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
-    if (hookBlockedReason.value) return true
+    if (collateralVault.value && 'hookedOps' in collateralVault.value && isOpDisabled(collateralVault.value as Vault, collateralOp.value)) return true
     if (options.effectiveBalance.value < valueToNano(amount.value, asset.value?.decimals)) return true
     if (isLoading.value || !(+amount.value) || !!estimatesError.value || isEstimatesLoading.value) return true
     if (options.needsSwap.value && !swapSelectedQuote.value) return true
@@ -774,7 +776,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     isSubmitDisabled,
     submitDisabled,
     submitLabel,
-    hookBlockedReason,
+    hookWarning,
     simulationError,
     clearSimulationError,
 

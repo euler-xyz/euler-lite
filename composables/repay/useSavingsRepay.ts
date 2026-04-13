@@ -17,7 +17,8 @@ import { useRepaySwapDetails } from '~/composables/repay/useRepaySwapDetails'
 import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics'
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
 import { createRaceGuard } from '~/utils/race-guard'
-import { getPlanBlockedReason, OP_REPAY_WITH_SHARES, OP_SKIM, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
+import { findBlockingDisabledOp, OP_REPAY_WITH_SHARES, OP_SKIM, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
+import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 
 interface UseSavingsRepayOptions {
   position: Ref<AccountBorrowPosition | undefined>
@@ -147,22 +148,23 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     nextBorrowValueUsd: core.nextBorrowValueUsd,
   })
 
-  // --- Hook-disabled reason ---
-  // Savings repay: savings.OP_WITHDRAW + liability.OP_SKIM + liability.OP_REPAY_WITH_SHARES
-  const hookBlockedReason = computed(() => {
+  // Savings repay touches: savings.OP_WITHDRAW + liability.OP_SKIM + liability.OP_REPAY_WITH_SHARES
+  const savingsRepayPlannedOps = computed<PlannedOp[]>(() => {
     const steps: PlannedOp[] = []
     if (sourceVault.value) steps.push({ vault: sourceVault.value as Vault, op: OP_WITHDRAW })
     if (borrowVault.value) {
       steps.push({ vault: borrowVault.value as Vault, op: OP_SKIM })
       steps.push({ vault: borrowVault.value as Vault, op: OP_REPAY_WITH_SHARES })
     }
-    return getPlanBlockedReason(steps)
+    return steps
   })
+
+  const hookWarning = computed(() => getPlanHookDisabledWarning(savingsRepayPlannedOps.value))
 
   // --- Submit disabled ---
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
-    if (hookBlockedReason.value) return true
+    if (findBlockingDisabledOp(savingsRepayPlannedOps.value)) return true
     if (!sourceVault.value || !borrowVault.value) return true
     if (!core.debtAmount.value && !core.amount.value) return true
     if (core.isRepayExceedsDebt.value) return true
@@ -174,9 +176,6 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   })
 
   const disabledReason = computed(() => {
-    if (hookBlockedReason.value) {
-      return hookBlockedReason.value
-    }
     if (core.isRepayExceedsDebt.value) {
       return 'You repaying more than required'
     }
@@ -399,7 +398,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     // Submit
     isSubmitDisabled,
     disabledReason,
-    hookBlockedReason,
+    hookWarning,
     isRepayExceedsDebt: core.isRepayExceedsDebt,
     // Handlers
     onAmountInput: core.onAmountInput,
