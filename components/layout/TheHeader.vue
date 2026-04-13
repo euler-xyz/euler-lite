@@ -171,6 +171,7 @@ onClickOutside(wrapperRef, () => {
                 :href="link.url"
                 class="flex gap-4 mb-4 text-content-primary hover:text-accent-600 transition-colors"
                 target="_blank"
+                rel="noopener noreferrer"
               >
                 <span class="text-h6">{{ link.title }}</span>
               </a>
@@ -185,6 +186,7 @@ onClickOutside(wrapperRef, () => {
                 :href="item.url"
                 class="flex justify-center items-center p-8 text-content-secondary bg-surface-secondary w-36 h-36 rounded-[32px] border border-line-default hover:bg-card-hover transition-colors"
                 target="_blank"
+                rel="noopener noreferrer"
               >
                 <SvgIcon
                   class="!w-20 !h-20"
