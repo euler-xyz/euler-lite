@@ -18,13 +18,6 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Data flow patterns
 - Technology decisions
 
-### 📁 [Project Structure](./project-structure.md)
-
-- Folder organization
-- File naming conventions
-- Key directories explanation
-- Component organization
-
 ### 🚀 [Development Guide](./development-guide.md)
 
 - Development workflow
