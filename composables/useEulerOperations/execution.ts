@@ -49,6 +49,7 @@ export const createExecutionHelpers = (ctx: OperationsContext, allowanceHelpers:
     }
 
     triggerPortfolioRefresh()
+    setTimeout(triggerPortfolioRefresh, 5000)
     return lastHash
   }
 
