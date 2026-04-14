@@ -17,7 +17,7 @@ import { useRepaySwapDetails } from '~/composables/repay/useRepaySwapDetails'
 import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics'
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
 import { createRaceGuard } from '~/utils/race-guard'
-import { findBlockingDisabledOp, OP_REPAY_WITH_SHARES, OP_SKIM, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
+import { findBlockingDisabledOp, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 
 interface UseSavingsRepayOptions {
@@ -148,13 +148,27 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     nextBorrowValueUsd: core.nextBorrowValueUsd,
   })
 
-  // Savings repay touches: savings.OP_WITHDRAW + liability.OP_SKIM + liability.OP_REPAY_WITH_SHARES
+  // Savings repay: savings.WITHDRAW + liability.SKIM + liability.REPAY_WITH_SHARES.
+  // Full repay additionally sweeps collateral + savings shares back via
+  // transferFromMax (OP_TRANSFER on collateral and savings vaults).
+  const isEffectivelyFullRepay = computed(() => {
+    if (!position.value || (position.value.borrowed ?? 0n) <= 0n) return false
+    const repaid = core.debtRepaid.value
+    return repaid !== null && repaid >= (position.value.borrowed ?? 0n)
+  })
+
   const savingsRepayPlannedOps = computed<PlannedOp[]>(() => {
     const steps: PlannedOp[] = []
     if (sourceVault.value) steps.push({ vault: sourceVault.value as Vault, op: OP_WITHDRAW })
     if (borrowVault.value) {
       steps.push({ vault: borrowVault.value as Vault, op: OP_SKIM })
       steps.push({ vault: borrowVault.value as Vault, op: OP_REPAY_WITH_SHARES })
+    }
+    if (isEffectivelyFullRepay.value) {
+      if (collateralVault.value && 'hookedOps' in collateralVault.value) {
+        steps.push({ vault: collateralVault.value as Vault, op: OP_TRANSFER })
+      }
+      if (sourceVault.value) steps.push({ vault: sourceVault.value as Vault, op: OP_TRANSFER })
     }
     return steps
   })
