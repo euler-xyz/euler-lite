@@ -63,6 +63,10 @@ export interface UseSwapPageLogicOptions {
   swapperMode: SwapperMode
   /** Override the displayed side marked as estimated in the review modal. */
   reviewSwapEstimatedSide?: 'input' | 'output'
+  /** Include CowSwap provider in swap quotes (Ethereum mainnet only) */
+  includeCowSwap?: boolean
+  /** Transform individual quotes (e.g. vault shares → underlying conversion) */
+  transformQuote?: (quote: SwapApiQuote, provider: string) => SwapApiQuote
 }
 
 export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
@@ -86,6 +90,8 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     sameAssetModalType = 'transfer',
     swapperMode,
     reviewSwapEstimatedSide,
+    includeCowSwap,
+    transformQuote,
   } = options
 
   const otherAmountField: SwapQuoteAmountField = displayAmountField === 'amountIn' ? 'amountOut' : 'amountIn'
@@ -124,7 +130,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     reset: resetQuoteStateInternal,
     requestQuotes,
     selectProvider,
-  } = useSwapQuotesParallel({ amountField, compare })
+  } = useSwapQuotesParallel({ amountField, compare, includeCowSwap, transformQuote })
   // ── Vault products & price invert ──────────────────────────────────────
   const fromProduct = useEulerProductOfVault(computed(() => fromVault.value?.address || ''))
   const toProduct = useEulerProductOfVault(computed(() => toVault.value?.address || ''))
