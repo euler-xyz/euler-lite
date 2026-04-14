@@ -15,7 +15,7 @@ import {
 } from '~/entities/vault'
 import { isSecuritizeVault } from '~/entities/vault/factory'
 import { getSubAccountAddress } from '~/entities/account'
-import { getUtilisationWarning } from '~/composables/useVaultWarnings'
+import { getHookDisabledWarning, getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import type { TxPlan } from '~/entities/txPlan'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
@@ -26,6 +26,7 @@ import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import { isOpDisabled, OP_REDEEM, OP_WITHDRAW } from '~/utils/vault-hooks'
 
 const router = useRouter()
 const route = useRoute()
@@ -63,7 +64,10 @@ const isSecuritizeVaultType = computed(() => vault.value && 'type' in vault.valu
 
 const withdrawWarnings = computed(() => {
   if (!vault.value || isSecuritizeVaultType.value) return []
-  return [getUtilisationWarning(vault.value as Vault, 'lend')]
+  return [
+    getHookDisabledWarning(vault.value as Vault, effectiveWithdrawOp.value),
+    getUtilisationWarning(vault.value as Vault, 'lend'),
+  ]
 })
 const assetsBalance = ref(0n)
 const sharesBalance = ref(0n)
@@ -105,8 +109,13 @@ const amountFixed = computed(() => {
     Number(asset.value?.decimals || 0),
   )
 })
+const effectiveWithdrawOp = computed(() => {
+  const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
+  return isMax ? OP_REDEEM : OP_WITHDRAW
+})
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value) return false
+  if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return true
   if (assetsBalance.value < amountFixed.value.value) return true
   if (isLoading.value || amountFixed.value.isZero() || amountFixed.value.isNegative()) return true
   if (estimatesError.value) return true

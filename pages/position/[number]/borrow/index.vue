@@ -5,7 +5,8 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
 import { type BorrowVaultPair, getNetAPY, getProjectedRates, type VaultAsset } from '~/entities/vault'
-import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
+import { getHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
+import { isOpDisabled, OP_BORROW } from '~/utils/vault-hooks'
 import { getAssetUsdValueOrZero, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatio } from '~/services/pricing/priceProvider'
 import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
@@ -80,6 +81,7 @@ const errorText = computed(() => {
 })
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value) return false
+  if (pair.value?.borrow && isOpDisabled(pair.value.borrow, OP_BORROW)) return true
 
   const currentSupplied = position.value?.supplied || 0n
   const newCollateralAmount = valueToNano(collateralAmount.value, collateralVault.value?.asset?.decimals)
@@ -106,6 +108,7 @@ useOperationGuard(computed(() => [borrowVault.value?.address, collateralVault.va
 const borrowWarnings = computed(() => {
   if (!borrowVault.value) return []
   return [
+    getHookDisabledWarning(borrowVault.value, OP_BORROW),
     getUtilisationWarning(borrowVault.value, 'borrow'),
     getBorrowCapWarning(borrowVault.value),
   ]

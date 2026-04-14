@@ -11,6 +11,7 @@ import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
 import { nanoToValue } from '~/utils/crypto-utils'
+import { isOpDisabled, OP_DEPOSIT } from '~/utils/vault-hooks'
 
 defineOptions({
   name: 'LendPage',
@@ -104,10 +105,13 @@ watch(chainId, (newChainId, oldChainId) => {
   }
 })
 
+// Lend listing only checks OP_DEPOSIT: it shows a vault as long as depositing is possible,
+// regardless of OP_TRANSFER state. Contrast with borrow/index.vue which checks both.
 const borrowableVaults = computed(() => {
   return list.value.filter(vault =>
     !isVaultNotExplorableLend(vault.address)
-    && borrowList.value.some(pair => pair.borrow.address === vault.address),
+    && borrowList.value.some(pair => pair.borrow.address === vault.address)
+    && !isOpDisabled(vault, OP_DEPOSIT),
   )
 })
 

@@ -21,6 +21,8 @@ import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
 import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
+import { findBlockingDisabledOp, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
+import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 
 interface UseWalletSwapRepayOptions {
   position: Ref<AccountBorrowPosition | undefined>
@@ -203,6 +205,20 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     return false
   })
 
+  // Swap & repay: the swapper multicall internally calls repay() on the
+  // borrow vault (OP_REPAY). Full repay additionally sweeps collateral
+  // shares back to the main account via transferFromMax (OP_TRANSFER).
+  const walletSwapRepayPlannedOps = computed<PlannedOp[]>(() => {
+    const steps: PlannedOp[] = []
+    if (borrowVault.value) steps.push({ vault: borrowVault.value, op: OP_REPAY })
+    if (isFullRepay.value && collateralVault.value) {
+      steps.push({ vault: collateralVault.value as Vault, op: OP_TRANSFER })
+    }
+    return steps
+  })
+
+  const hookWarning = computed(() => getPlanHookDisabledWarning(walletSwapRepayPlannedOps.value))
+
   const disabledReason = computed(() => {
     if (isRepayExceedsDebt.value) {
       return 'You repaying more than required'
@@ -212,6 +228,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
+    if (findBlockingDisabledOp(walletSwapRepayPlannedOps.value)) return true
     if (direction.value === SwapperMode.EXACT_IN && !(+amount.value)) return true
     if (direction.value === SwapperMode.TARGET_DEBT && !(+debtAmount.value)) return true
     if (isRepayExceedsDebt.value) return true
@@ -715,6 +732,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     isSubmitDisabled,
     isRepayExceedsDebt,
     disabledReason,
+    hookWarning,
 
     // Actions
     onAmountInput,

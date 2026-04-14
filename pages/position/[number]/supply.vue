@@ -355,6 +355,7 @@ watch(selectedAsset, async () => {
               :description="form.simulationError.value"
               size="compact"
             />
+            <VaultWarningBanner :warnings="[form.hookWarning.value]" />
           </div>
 
           <VaultFormInfoBlock

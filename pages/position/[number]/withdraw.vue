@@ -136,7 +136,10 @@ const pairAssetsLabel = usePositionPairLabel(form.position)
 // Withdraw-specific computeds
 const withdrawWarnings = computed(() => {
   if (!form.borrowVault.value) return []
-  return [getUtilisationWarning(form.borrowVault.value, 'borrow')]
+  return [
+    form.hookWarning.value,
+    getUtilisationWarning(form.borrowVault.value, 'borrow'),
+  ]
 })
 
 const onSelectOutputAsset = (newAsset: VaultAsset, meta?: SwapTokenSelectMeta) => {

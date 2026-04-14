@@ -218,6 +218,16 @@ const reviewRepayDisabled = computed(() => {
   return collateral.isSubmitDisabled.value
 })
 
+const activeHookWarning = computed(() => {
+  if (formTab.value === 'wallet') {
+    return walletSwap.needsSwap.value
+      ? walletSwap.hookWarning.value
+      : wallet.hookWarning.value
+  }
+  if (formTab.value === 'savings') return savings.hookWarning.value
+  return collateral.hookWarning.value
+})
+
 const onSubmitForm = async () => {
   if (isOperationBlocked.value) return
   if (formTab.value === 'wallet') {
@@ -343,6 +353,15 @@ watch(formTab, () => {
           rounded
           pills
           :list="formTabs"
+        />
+
+        <UiToast
+          v-if="activeHookWarning"
+          :title="activeHookWarning.title"
+          :description="activeHookWarning.message"
+          variant="error"
+          size="compact"
+          class="mb-16"
         />
 
         <template v-if="formTab === 'wallet'">

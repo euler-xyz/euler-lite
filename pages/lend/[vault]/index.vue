@@ -7,7 +7,7 @@ import { OperationReviewModal, VaultSupplyApyModal, VaultUnverifiedDisclaimerMod
 import { useToast } from '~/components/ui/composables/useToast'
 import { getProjectedRates, getCurrentLiquidationLTV, type SecuritizeVault, type Vault, type VaultAsset } from '~/entities/vault'
 import { isSecuritizeVault } from '~/entities/vault/factory'
-import { getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
+import { getHookDisabledWarning, getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { collectPythFeedIds } from '~/entities/oracle'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import { fetchBackendPrice } from '~/services/pricing/backendClient'
@@ -26,6 +26,7 @@ import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { createRaceGuard } from '~/utils/race-guard'
+import { isOpDisabled, OP_DEPOSIT } from '~/utils/vault-hooks'
 
 // Type definitions for vault display
 type VaultType = 'evk' | 'securitize'
@@ -280,6 +281,7 @@ const isSupplyCapReached = computed(() => evkVault.value ? getIsSupplyCapReached
 const assets = computed(() => [asset.value!])
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value) return false
+  if (evkVault.value && isOpDisabled(evkVault.value, OP_DEPOSIT)) return true
   if (activeBalance.value < valueToNano(amount.value, activeAsset.value?.decimals)) return true
   if (isLoading.value || !(+amount.value)) return true
   if (needsSwap.value && !swapSelectedQuote.value) return true
@@ -311,6 +313,7 @@ const estimateSupplyAPYDisplay = computed(() => {
 const lendWarnings = computed(() => {
   if (!evkVault.value) return []
   return [
+    getHookDisabledWarning(evkVault.value, OP_DEPOSIT),
     getUtilisationWarning(evkVault.value, 'lend'),
     getSupplyCapWarning(evkVault.value),
   ]
