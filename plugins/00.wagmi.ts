@@ -4,6 +4,44 @@ import type { AppKitNetwork } from '@reown/appkit/networks'
 import { WagmiAdapter } from '@reown/appkit-adapter-wagmi'
 import { getNetworksByChainIds } from '~/entities/chainRegistry'
 
+/**
+ * Detects whether the user has previously connected a wallet on this origin.
+ *
+ * AppKit / Wagmi eagerly probe injected providers and attempt silent reconnect
+ * at startup. For users in "default EVM wallet" modes (notably Phantom), that
+ * probe can surface an unsolicited connection prompt on every page visit — even
+ * when the visitor has never connected. To avoid that we only eagerly initialize
+ * AppKit when we know the user previously connected. Otherwise we defer AppKit
+ * creation until the user explicitly clicks "Connect Wallet".
+ */
+const hasPersistedWalletSession = (): boolean => {
+  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+    return false
+  }
+
+  try {
+    if (window.localStorage.getItem('wagmi.recentConnectorId')) {
+      return true
+    }
+
+    const storeRaw = window.localStorage.getItem('wagmi.store')
+    if (storeRaw) {
+      try {
+        const parsed = JSON.parse(storeRaw)
+        if (parsed?.state?.current) return true
+      }
+      catch {
+        // Malformed store — treat as no session.
+      }
+    }
+  }
+  catch {
+    // localStorage may be blocked (Safari private mode, etc.) — treat as no session.
+  }
+
+  return false
+}
+
 export default defineNuxtPlugin((nuxtApp) => {
   const envConfig = useEnvConfig()
   const projectId = envConfig.appKitProjectId
@@ -47,15 +85,39 @@ export default defineNuxtPlugin((nuxtApp) => {
     customRpcUrls,
   })
 
-  createAppKit({
-    adapters: [wagmiAdapter],
-    networks,
-    projectId: projectId || '',
-    metadata,
-    themeVariables: {
-      '--w3m-font-family': 'inherit',
-    },
-  })
-
   nuxtApp.vueApp.use(WagmiPlugin, { config: wagmiAdapter.wagmiConfig })
+
+  let appKitInstance: ReturnType<typeof createAppKit> | null = null
+  const ensureAppKit = () => {
+    if (appKitInstance) return appKitInstance
+    appKitInstance = createAppKit({
+      adapters: [wagmiAdapter],
+      networks,
+      projectId: projectId || '',
+      metadata,
+      themeVariables: {
+        '--w3m-font-family': 'inherit',
+      },
+    })
+    return appKitInstance
+  }
+
+  const openWalletModal = () => {
+    const kit = ensureAppKit()
+    kit.open()
+  }
+
+  // Returning users who previously connected get the full modal up front so
+  // silent reconnect works as before. First-time / signed-out visitors don't
+  // pay that cost until they actually ask to connect.
+  if (hasPersistedWalletSession()) {
+    ensureAppKit()
+  }
+
+  return {
+    provide: {
+      ensureAppKit,
+      openWalletModal,
+    },
+  }
 })

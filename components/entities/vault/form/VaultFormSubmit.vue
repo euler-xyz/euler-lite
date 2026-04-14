@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { inject } from 'vue'
 import { useAccount } from '@wagmi/vue'
-import { useAppKit } from '@reown/appkit/vue'
 import { flip, offset, shift, useFloating } from '@floating-ui/vue'
 
 import { isOperationBlocked, operationBlockReason } from '~/utils/operationGuardRegistry'
@@ -23,9 +22,8 @@ interface KeyringGuardState {
 
 const props = defineProps<{ disabled?: boolean, loading?: boolean, disabledReason?: string }>()
 const { isConnected } = useAccount()
-const { open } = useAppKit()
 const { chainId: _chainId } = useEulerAddresses()
-const { chainId, switchChain } = useWagmi()
+const { chainId, switchChain, connect } = useWagmi()
 const modal = useModal()
 
 const keyringGuard = inject<KeyringGuardState | null>('keyring-guard', null)
@@ -74,7 +72,7 @@ const onClick = (e: Event) => {
   }
   if (!isConnected.value) {
     e.preventDefault()
-    open()
+    connect()
     return
   }
 }
