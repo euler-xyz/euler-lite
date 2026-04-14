@@ -49,7 +49,7 @@ export const VAULT_OPS: readonly VaultOpMeta[] = [
     bit: OP_WITHDRAW,
     name: 'Withdraw',
     description: 'Withdrawing assets from the vault',
-    affectedFlows: ['Same-asset repay', 'Same-asset swap', 'Cross-asset swap', 'Savings repay'],
+    affectedFlows: ['Withdraw', 'Same-asset repay', 'Same-asset swap', 'Cross-asset swap', 'Savings repay'],
     internal: false,
   },
   {
@@ -86,14 +86,14 @@ export const VAULT_OPS: readonly VaultOpMeta[] = [
     bit: OP_BORROW,
     name: 'Borrow',
     description: 'Borrowing assets from the vault',
-    affectedFlows: ['Multiply', 'Swap & borrow', 'Borrow-by-saving'],
+    affectedFlows: ['Borrow', 'Multiply', 'Swap & borrow', 'Borrow-by-saving'],
     internal: false,
   },
   {
     bit: OP_REPAY,
     name: 'Repay',
     description: 'Repaying debt',
-    affectedFlows: ['Swap & repay'],
+    affectedFlows: ['Wallet repay', 'Swap & repay'],
     internal: false,
   },
   {

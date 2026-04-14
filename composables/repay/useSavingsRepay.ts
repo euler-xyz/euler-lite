@@ -5,7 +5,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
-import { isEVKVault, type Vault } from '~/entities/vault'
+import { isEVKVault, type Vault, type SecuritizeVault } from '~/entities/vault'
 import { getAssetUsdValue } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
@@ -62,6 +62,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   const { buildSwapPlan, buildSavingsRepayPlan, buildSavingsFullRepayPlan, buildSwapFullRepayPlan, executeTxPlan } = useEulerOperations()
   const { refreshAllPositions } = useEulerAccount()
   const { eulerLensAddresses } = useEulerAddresses()
+  const { getVault: registryGetVault } = useVaultRegistry()
 
   // --- Savings options ---
   const { savingsPositions, savingsVaults, savingsOptions, getSavingsPosition } = useRepaySavingsOptions()
@@ -171,8 +172,13 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
       steps.push({ vault: borrowVault.value as Vault, op: OP_REPAY_WITH_SHARES })
     }
     if (isEffectivelyFullRepay.value) {
-      if (collateralVault.value && isEVKVault(collateralVault.value)) {
-        steps.push({ vault: collateralVault.value, op: OP_TRANSFER })
+      // Full repay sweeps all enabled collaterals via transferFromMax.
+      const collateralAddresses = position.value?.collaterals ?? []
+      for (const addr of collateralAddresses) {
+        const vault = registryGetVault(addr) as Vault | SecuritizeVault | undefined
+        if (vault && isEVKVault(vault)) {
+          steps.push({ vault, op: OP_TRANSFER })
+        }
       }
       if (sourceVault.value) steps.push({ vault: sourceVault.value as Vault, op: OP_TRANSFER })
     }

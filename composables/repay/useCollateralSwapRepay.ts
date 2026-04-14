@@ -231,8 +231,12 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
         steps.push({ vault: borrowVault.value as Vault, op: OP_REPAY })
       }
     }
-    if (isEffectivelyFullRepay.value && collateralVault.value && isEVKVault(collateralVault.value)) {
-      steps.push({ vault: collateralVault.value, op: OP_TRANSFER })
+    if (isEffectivelyFullRepay.value) {
+      for (const vault of repayCollateralVaults.value) {
+        if (isEVKVault(vault)) {
+          steps.push({ vault, op: OP_TRANSFER })
+        }
+      }
     }
     return steps
   })
