@@ -1,6 +1,7 @@
 import type { Ref, ComputedRef } from 'vue'
 import { useAccount } from '@wagmi/vue'
 import { erc20Abi, formatUnits, maxUint256, type Address } from 'viem'
+import type { DisplayStep } from '~/utils/stepDecoding'
 import { logWarn } from '~/utils/errorHandling'
 import { createRaceGuard } from '~/utils/race-guard'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
@@ -935,22 +936,48 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       // Default to showing approval steps
     }
 
+    const collateralAsset = multiplySupplyVault.value.asset
+    const borrowAsset = multiplyShortVault.value.asset
+    const borrowAmountStr = multiplyShortAmount.value || formatUnits(debtAmount, Number(borrowAsset.decimals))
+    const swapOutMinAmount = quote.amountOutMin
+      ? trimTrailingZeros(formatUnits(BigInt(quote.amountOutMin), Number(multiplyLongVault.value.asset.decimals)))
+      : multiplyLongAmount.value
+
+    const signSteps: DisplayStep[] = []
+    let idx = 1
+    if (needsCollateralApproval) {
+      signSteps.push({ index: idx++, label: 'Approve for deposit', isSeparateTx: true, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: multiplyInputAmount.value } })
+    }
+    if (needsSellTokenApproval) {
+      signSteps.push({ index: idx++, label: 'Approve for swap', isSeparateTx: true, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: borrowAmountStr } })
+    }
+    signSteps.push({ index: idx++, label: 'Sign EVC permit', isSeparateTx: false })
+    signSteps.push({ index: idx++, label: 'Sign CoW order', isSeparateTx: false })
+
+    const collateralVaultName = multiplySupplyProduct.name || collateralAsset.symbol
+    const borrowVaultName = multiplyShortProduct.name || borrowAsset.symbol
+    let wIdx = 1
+    const wrapperSteps: DisplayStep[] = [
+      { index: wIdx++, label: 'Enable collateral', labelSuffix: collateralVaultName, isSeparateTx: false },
+      { index: wIdx++, label: 'Enable controller', labelSuffix: borrowVaultName, isSeparateTx: false },
+      { index: wIdx++, label: 'Deposit collateral', isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: multiplyInputAmount.value } },
+      { index: wIdx++, label: 'Borrow', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: borrowAmountStr } },
+      { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: borrowAmountStr }, toAssetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: multiplyLongAmount.value } },
+      { index: wIdx++, label: 'Deposit min.', isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: swapOutMinAmount } },
+    ]
+
+    const collateralVaultSymbol = multiplySupplyVault.value.symbol
+    const walletWarningsDescription
+      = `The CoW order is signed with buy amounts in ${collateralVaultSymbol} shares. `
+      + `The amounts shown above are in ${collateralAsset.symbol} (underlying). `
+      + 'The CoW order receiver is your sub-account, not your main wallet — your wallet may flag this as a mismatch. '
+      + 'You can verify the first 19 bytes (38 hex chars after "0x") of the receiver match your wallet address.'
+
     modal.open(CowSwapReviewModal, {
       props: {
-        collateralAsset: multiplySupplyVault.value.asset,
-        collateralAmount: multiplyInputAmount.value,
-        collateralVaultName: multiplySupplyProduct.name || multiplySupplyVault.value.asset.symbol,
-        collateralVaultSymbol: multiplySupplyVault.value.symbol,
-        borrowAsset: multiplyShortVault.value.asset,
-        borrowAmount: multiplyShortAmount.value || formatUnits(debtAmount, Number(multiplyShortVault.value.asset.decimals)),
-        borrowVaultName: multiplyShortProduct.name || multiplyShortVault.value.asset.symbol,
-        swapOutAmount: multiplyLongAmount.value,
-        swapOutMinAmount: quote.amountOutMin
-          ? trimTrailingZeros(formatUnits(BigInt(quote.amountOutMin), Number(multiplyLongVault.value.asset.decimals)))
-          : multiplyLongAmount.value,
-        needsCollateralApproval,
-        needsSellTokenApproval,
-        subAccount,
+        signSteps,
+        wrapperSteps,
+        walletWarningsDescription,
         executionStatus: cowSwapExecution.status,
         executionError: cowSwapExecution.error,
         explorerUrl: cowSwapExecution.explorerUrl,
@@ -967,12 +994,9 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         onCancel: async () => {
           try {
             await cowSwapExecution.cancelOrder()
-            // Don't close modal — polling will detect 'cancelled' terminal state
-            // and the order watcher will clean up
           }
           catch (e) {
             logWarn('multiply/cowswap/cancel', e)
-            // error.value in cowSwapExecution feeds the executionError toast in the modal
           }
         },
       },

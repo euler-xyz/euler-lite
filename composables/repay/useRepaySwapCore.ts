@@ -3,7 +3,7 @@ import { formatUnits, type Address } from 'viem'
 import type { Vault, SecuritizeVault } from '~/entities/vault'
 import { getAssetUsdValue } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
-import { SwapperMode } from '~/entities/swap'
+import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
 import { valueToNano } from '~/utils/crypto-utils'
 import { trimTrailingZeros } from '~/utils/string-utils'
@@ -28,6 +28,8 @@ export interface UseRepaySwapCoreOptions {
   getCurrentDebt: () => bigint
   getQuoteAccounts: () => QuoteAccounts
   onQuoteReceived?: (amountOut: bigint, direction: SwapperMode) => boolean
+  includeCowSwap?: boolean
+  transformQuote?: (quote: SwapApiQuote, provider: string) => SwapApiQuote
 }
 
 export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
@@ -52,7 +54,11 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
   const debtPercent = ref(0)
 
   // --- Quotes ---
-  const quotes = useSwapRepayQuotes({ direction })
+  const quotes = useSwapRepayQuotes({
+    direction,
+    includeCowSwap: options.includeCowSwap,
+    transformQuote: options.transformQuote,
+  })
 
   // --- Derived ---
   const isSameAsset = computed(() => {

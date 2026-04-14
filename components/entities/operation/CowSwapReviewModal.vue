@@ -1,21 +1,11 @@
 <script setup lang="ts">
-import type { VaultAsset } from '~/entities/vault'
 import type { DisplayStep } from '~/utils/stepDecoding'
 import type { CowSwapExecutionStatus, CowSwapOrderStatus } from '~/entities/cowswap'
 
 const props = defineProps<{
-  collateralAsset: VaultAsset
-  collateralAmount: string
-  collateralVaultName: string
-  collateralVaultSymbol: string
-  borrowAsset: VaultAsset
-  borrowAmount: string
-  borrowVaultName: string
-  swapOutAmount: string
-  swapOutMinAmount: string
-  needsCollateralApproval: boolean
-  needsSellTokenApproval: boolean
-  subAccount: string
+  signSteps: DisplayStep[]
+  wrapperSteps: DisplayStep[]
+  walletWarningsDescription?: string
   executionStatus: CowSwapExecutionStatus
   executionError: Error | null
   explorerUrl: string | undefined
@@ -40,6 +30,7 @@ const isCancelling = ref(false)
 const executionLabel = computed(() => {
   switch (props.executionStatus) {
     case 'approving_collateral': return 'Approving tokens — confirm in wallet...'
+    case 'fetching_inbox': return 'Fetching order receiver...'
     case 'signing_permit': return 'Sign EVC permit in wallet...'
     case 'signing_order': return 'Sign CoW order in wallet...'
     case 'submitting': return 'Submitting order to CoW Protocol...'
@@ -48,8 +39,6 @@ const executionLabel = computed(() => {
 })
 
 const orderStatusLabel = computed(() => {
-  // Optimistic cancel state — shown immediately after a successful cancel API call,
-  // before CoW's polling reports the terminal 'cancelled' status.
   if (props.locallyCancelled) return 'Order cancelled'
   if (!props.orderStatus) return 'Waiting for solver...'
   switch (props.orderStatus.type) {
@@ -63,138 +52,6 @@ const orderStatusLabel = computed(() => {
     case 'expired': return 'Order expired'
     default: return 'Waiting for solver...'
   }
-})
-
-const walletWarningsDescription = computed(() => {
-  const parts: string[] = []
-  // The CoW order is signed with the buyToken set to the vault address and
-  // the buyAmount denominated in vault shares. Wallets display those raw values
-  // — they differ from the underlying-asset amounts shown in this modal.
-  parts.push(
-    `The CoW order is signed with buy amounts in ${props.collateralVaultSymbol} shares. `
-    + `The amounts shown above are in ${props.collateralAsset.symbol} (underlying).`,
-  )
-  // The CoW order receiver is the sub-account — some wallets (e.g. Rabby) flag
-  // this as "receiver differs from sender". It is expected — you can verify
-  // that the first 19 bytes (38 hex chars after "0x") of the receiver match
-  // your wallet address.
-  parts.push('The CoW order receiver is your sub-account, not your main wallet — your wallet may flag this as a mismatch. You can verify the first 19 bytes (38 hex chars after "0x") of the receiver match your wallet address.')
-  return parts.join(' ')
-})
-
-const signSteps = computed<DisplayStep[]>(() => {
-  const result: DisplayStep[] = []
-  let idx = 1
-
-  if (props.needsCollateralApproval) {
-    result.push({
-      index: idx++,
-      label: 'Approve for deposit',
-      isSeparateTx: true,
-      assetInfo: {
-        symbol: props.collateralAsset.symbol,
-        address: props.collateralAsset.address,
-        amount: props.collateralAmount,
-      },
-    })
-  }
-
-  if (props.needsSellTokenApproval) {
-    result.push({
-      index: idx++,
-      label: 'Approve for swap',
-      isSeparateTx: true,
-      assetInfo: {
-        symbol: props.borrowAsset.symbol,
-        address: props.borrowAsset.address,
-        amount: props.borrowAmount,
-      },
-    })
-  }
-
-  result.push({
-    index: idx++,
-    label: 'Sign EVC permit',
-    isSeparateTx: false,
-  })
-
-  result.push({
-    index: idx++,
-    label: 'Sign CoW order',
-    isSeparateTx: false,
-  })
-
-  return result
-})
-
-const wrapperSteps = computed<DisplayStep[]>(() => {
-  const result: DisplayStep[] = []
-  let idx = 1
-
-  result.push({
-    index: idx++,
-    label: 'Enable collateral',
-    labelSuffix: props.collateralVaultName,
-    isSeparateTx: false,
-  })
-
-  result.push({
-    index: idx++,
-    label: 'Enable controller',
-    labelSuffix: props.borrowVaultName,
-    isSeparateTx: false,
-  })
-
-  result.push({
-    index: idx++,
-    label: 'Deposit collateral',
-    isSeparateTx: false,
-    assetInfo: {
-      symbol: props.collateralAsset.symbol,
-      address: props.collateralAsset.address,
-      amount: props.collateralAmount,
-    },
-  })
-
-  result.push({
-    index: idx++,
-    label: 'Borrow',
-    isSeparateTx: false,
-    assetInfo: {
-      symbol: props.borrowAsset.symbol,
-      address: props.borrowAsset.address,
-      amount: props.borrowAmount,
-    },
-  })
-
-  result.push({
-    index: idx++,
-    label: 'Swap',
-    isSeparateTx: false,
-    assetInfo: {
-      symbol: props.borrowAsset.symbol,
-      address: props.borrowAsset.address,
-      amount: props.borrowAmount,
-    },
-    toAssetInfo: {
-      symbol: props.collateralAsset.symbol,
-      address: props.collateralAsset.address,
-      amount: props.swapOutAmount,
-    },
-  })
-
-  result.push({
-    index: idx++,
-    label: 'Deposit min.',
-    isSeparateTx: false,
-    assetInfo: {
-      symbol: props.collateralAsset.symbol,
-      address: props.collateralAsset.address,
-      amount: props.swapOutMinAmount,
-    },
-  })
-
-  return result
 })
 
 const internalSubmitting = ref(false)
@@ -242,7 +99,7 @@ const handleCancel = async () => {
 
       <!-- Wallet signing notes (pre-submission) -->
       <UiToast
-        v-if="!isSubmitted"
+        v-if="!isSubmitted && walletWarningsDescription"
         title="Your wallet may show warnings"
         :description="walletWarningsDescription"
         variant="info"
