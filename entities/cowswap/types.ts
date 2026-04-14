@@ -45,6 +45,7 @@ export type CowSwapOrderUid = string
 export type CowSwapExecutionStatus =
   | 'idle'
   | 'approving_collateral'
+  | 'fetching_inbox'
   | 'signing_permit'
   | 'signing_order'
   | 'submitting'
@@ -60,7 +61,7 @@ export type CowSwapOpenPositionParams = {
   borrowAmount: bigint
 }
 
-export type CowSwapExecuteParams = {
+export type CowSwapOpenPositionExecuteParams = {
   chainId: number
   sellToken: Address
   buyToken: Address
@@ -70,6 +71,52 @@ export type CowSwapExecuteParams = {
   collateralToken: Address
   wrapper: CowSwapOpenPositionParams
 }
+
+// --- Collateral Swap ---
+
+export type CowSwapCollateralSwapParams = {
+  owner: Address
+  account: Address
+  deadline: number
+  fromVault: Address
+  toVault: Address
+  fromAmount: bigint
+  disableSourceCollateral: boolean
+}
+
+export type CowSwapCollateralSwapExecuteParams = {
+  chainId: number
+  sellToken: Address
+  buyToken: Address
+  sellAmount: bigint
+  buyAmount: bigint
+  validTo: number
+  wrapper: CowSwapCollateralSwapParams
+}
+
+// --- Close Position ---
+
+export type CowSwapClosePositionParams = {
+  owner: Address
+  account: Address
+  deadline: number
+  borrowVault: Address
+  collateralVault: Address
+  collateralAmount: bigint
+}
+
+export type CowSwapClosePositionExecuteParams = {
+  chainId: number
+  sellToken: Address
+  buyToken: Address
+  sellAmount: bigint
+  buyAmount: bigint
+  validTo: number
+  orderKind: 'buy' | 'sell'
+  wrapper: CowSwapClosePositionParams
+}
+
+// --- Shared ---
 
 export type CowSwapOrderPayload = {
   sellToken: Address
