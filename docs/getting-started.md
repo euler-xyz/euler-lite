@@ -38,7 +38,7 @@ Welcome to the Euler Lite project! This guide will help you get up and running w
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 24+
 - npm or yarn package manager
 - Git
 - Basic knowledge of Vue.js and TypeScript
@@ -143,7 +143,7 @@ NUXT_PUBLIC_SUBGRAPH_URI_1=https://your-subgraph.com
 
 ### Build Errors
 
-- Ensure Node.js version is 18+
+- Ensure Node.js version is 24+
 - Clear `node_modules` and reinstall dependencies
 - Check TypeScript compilation errors
 

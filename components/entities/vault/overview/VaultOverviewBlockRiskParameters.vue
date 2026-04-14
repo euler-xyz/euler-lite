@@ -6,8 +6,18 @@ import { vaultConvertToAssetsAbi } from '~/abis/vault'
 import type { Vault } from '~/entities/vault'
 import { getSupplyCapPercentage, getBorrowCapPercentage } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
+import {
+  decodeHookedOps,
+  formatHookedOpsSummary,
+  isHookDisabling,
+  isVaultEffectivelyPaused,
+} from '~/utils/vault-hooks'
+import { useModal } from '~/components/ui/composables/useModal'
+import { VaultHooksInfoModal } from '#components'
 
 const { vault } = defineProps<{ vault: Vault }>()
+
+const modal = useModal()
 
 const { client: rpcClient } = useRpcClient()
 const { borrowList } = useVaults()
@@ -63,6 +73,26 @@ const load = async () => {
 }
 
 load()
+
+const hookedUserOps = computed(() => decodeHookedOps(vault.hookedOps))
+
+const hooksRowLabel = computed(() =>
+  isHookDisabling(vault) ? 'Disabled operations' : 'Hooked operations',
+)
+
+const hooksRowValue = computed(() => {
+  if (vault.hookedOps === 0n) return 'None'
+  if (isVaultEffectivelyPaused(vault)) return 'Paused'
+  return formatHookedOpsSummary(hookedUserOps.value)
+})
+
+const showHooksInfoIcon = computed(() => vault.hookedOps !== 0n)
+
+const openHooksModal = () => {
+  modal.open(VaultHooksInfoModal, {
+    props: { vault },
+  })
+}
 </script>
 
 <template>
@@ -153,6 +183,26 @@ load()
         :value="`${formatNumber(nanoToValue(vault.interestFee, 2))}%`"
         orientation="horizontal"
       />
+      <VaultOverviewLabelValue orientation="horizontal">
+        <template #label>
+          <span class="flex items-center gap-4">
+            {{ hooksRowLabel }}
+            <button
+              v-if="showHooksInfoIcon"
+              type="button"
+              :aria-label="`${hooksRowLabel} details`"
+              class="inline-flex shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 focus-visible:rounded"
+              @click="openHooksModal"
+            >
+              <SvgIcon
+                class="!w-16 !h-16"
+                name="info-circle"
+              />
+            </button>
+          </span>
+        </template>
+        {{ hooksRowValue }}
+      </VaultOverviewLabelValue>
     </div>
   </div>
 </template>

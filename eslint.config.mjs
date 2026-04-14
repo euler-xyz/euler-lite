@@ -17,6 +17,7 @@ export default withNuxt(
       '@typescript-eslint/no-explicit-any': 'warn',
       'vue/require-explicit-emits': 'error',
       'vue/no-unused-refs': 'warn',
+      'vue/no-template-target-blank': 'error',
     },
   },
   {

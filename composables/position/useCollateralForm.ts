@@ -12,6 +12,7 @@ import { eulerAccountLensABI } from '~/entities/euler/abis'
 import {
   getNetAPY,
   getProjectedRates,
+  isEVKVault,
   type Vault,
   type SecuritizeVault,
   type VaultAsset,
@@ -34,6 +35,8 @@ import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { formatSmartAmount } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
+import { isOpDisabled, OP_DEPOSIT, OP_WITHDRAW } from '~/utils/vault-hooks'
+import { getHookDisabledWarning } from '~/composables/useVaultWarnings'
 
 export interface UseCollateralFormOptions {
   mode: 'supply' | 'withdraw'
@@ -401,8 +404,17 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     options.needsSwap.value && isVaultRestrictedByCountry(collateralVault.value?.address || ''),
   )
 
+  const collateralOp = computed(() => options.mode === 'supply' ? OP_DEPOSIT : OP_WITHDRAW)
+
+  const hookWarning = computed(() => {
+    // Securitize collateral doesn't implement hooks — skip non-EVK vaults.
+    if (!collateralVault.value || !isEVKVault(collateralVault.value)) return null
+    return getHookDisabledWarning(collateralVault.value, collateralOp.value)
+  })
+
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
+    if (collateralVault.value && isEVKVault(collateralVault.value) && isOpDisabled(collateralVault.value, collateralOp.value)) return true
     if (options.effectiveBalance.value < valueToNano(amount.value, asset.value?.decimals)) return true
     if (isLoading.value || !(+amount.value) || !!estimatesError.value || isEstimatesLoading.value) return true
     if (options.needsSwap.value && !swapSelectedQuote.value) return true
@@ -765,6 +777,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     isSubmitDisabled,
     submitDisabled,
     submitLabel,
+    hookWarning,
     simulationError,
     clearSimulationError,
 

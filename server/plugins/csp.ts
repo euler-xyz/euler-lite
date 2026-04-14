@@ -122,7 +122,7 @@ const CONNECT_SRC_BASE = [
   'wss://relay.walletconnect.org',
 ]
 
-function buildCsp(nonce: string, extraConnectSrc: string[], envOrigins: { connect: string[] }): string {
+export function buildCsp(nonce: string, extraConnectSrc: string[], envOrigins: { connect: string[] }): string {
   const connectSrc = [
     ...CONNECT_SRC_BASE,
     ...(isDev ? CONNECT_SRC_DEV : []),

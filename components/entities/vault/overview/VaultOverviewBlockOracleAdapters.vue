@@ -500,10 +500,10 @@ const onTooltipMouseLeave = () => {
         <div
           class="flex flex-col gap-10 overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           :class="isMobile ? 'px-24 pb-24' : ''"
-          @touchstart="onScrollTouchStart"
+          @touchstart.passive="onScrollTouchStart"
           @touchmove="onScrollTouchMove"
-          @touchend="onScrollTouchEnd"
-          @touchcancel="onScrollTouchCancel"
+          @touchend.passive="onScrollTouchEnd"
+          @touchcancel.passive="onScrollTouchCancel"
         >
           <div
             v-for="(check, i) in hoveredChecksAdapter.checks"

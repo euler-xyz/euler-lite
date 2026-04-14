@@ -18,7 +18,7 @@ const route = useRoute()
 const modal = useModal()
 const { error } = useToast()
 const { buildSupplyPlan, executeTxPlan } = useEulerOperations()
-const { getEarnVault } = useVaults()
+const { getEarnVault, updateEarnVault } = useVaults()
 const { isConnected, address } = useAccount()
 const { fetchSingleBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
@@ -168,9 +168,11 @@ const send = async () => {
     isSubmitting.value = false
   }
 }
-const updateEstimates = () => {
+const updateEstimates = async () => {
   if (!vault.value) return
   try {
+    await updateEarnVault(vault.value.address)
+    if (!asset.value?.address) return
     estimateSupplyAPY.value = nanoToValue(vault.value.interestRateInfo.supplyAPY, 25) + totalRewardsAPY.value
     monthlyEarnings.value = !amount.value
       ? 0
@@ -179,7 +181,9 @@ const updateEstimates = () => {
   catch (e) {
     logWarn('earn-supply/estimates', e)
   }
-  isEstimatesLoading.value = false
+  finally {
+    isEstimatesLoading.value = false
+  }
 }
 const onSupplyInfoIconClick = () => {
   modal.open(VaultSupplyApyModal, {
@@ -216,7 +220,7 @@ watch(address, () => {
 </script>
 
 <template>
-  <div>
+  <div class="relative">
     <div
       v-if="!vault"
       class="flex justify-center items-center min-h-[50dvh]"
@@ -224,10 +228,14 @@ watch(address, () => {
       <UiLoader />
     </div>
     <template v-else>
-      <BaseBackButton class="laptop:!hidden mb-16" />
-
+      <BackButton
+        class="hidden tablet:inline-flex tablet:absolute tablet:top-8 tablet:right-full tablet:mr-12"
+        fallback="/earn"
+      />
       <VaultLabelsAndAssets
         v-if="asset"
+        back
+        back-fallback="/earn"
         class="mb-24"
         :vault="vault"
         :assets="assets"

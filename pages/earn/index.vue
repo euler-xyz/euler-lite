@@ -5,7 +5,7 @@ import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import type { EarnVault } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import { getProductByVault, getEntitiesByEarnVault, isVaultFeatured, isVaultDeprecated, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getEntitiesByEarnVault, isVaultFeatured, isVaultDeprecated, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
@@ -24,14 +24,17 @@ const list = computed(() => getEarnVaults().filter(v => v.verified && !isEarnVau
 
 const { enableEntityBranding } = useDeployConfig()
 
-const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<EarnVault>(vault => [
-  vault.asset.symbol,
-  vault.asset.name,
-  vault.name,
-  getProductByVault(vault.address).name,
-  getProductByVault(vault.address).description,
-  ...getEntitiesByEarnVault(vault).map(e => e.name),
-])
+const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<EarnVault>((vault) => {
+  const product = applyVaultOverrides(getProductByVault(vault.address), vault.address)
+  return [
+    vault.asset.symbol,
+    vault.asset.name,
+    vault.name,
+    product.name,
+    product.description,
+    ...getEntitiesByEarnVault(vault).map(e => e.name),
+  ]
+})
 
 const selectedCollateral = ref<string[]>([])
 const selectedCurators = ref<string[]>([])

@@ -17,7 +17,7 @@ export type {
   EarnVault,
   CollateralOption,
 } from './types'
-export { isSecuritizeBorrowPair } from './types'
+export { isSecuritizeBorrowPair, isEVKVault } from './types'
 
 // Factory detection — imported directly from ~/entities/vault/factory to avoid circular dependency
 // (factory.ts → useVaultRegistry → index.ts → factory.ts)
@@ -47,6 +47,16 @@ export {
   isLiquidationLTVRamping,
   getRampTimeRemaining,
 } from './ltv'
+
+// Collateral exposure (borrow-side pair derivation)
+export {
+  getCollateralExposurePairs,
+  hasCollateralExposure,
+} from './collateral-exposure'
+export type {
+  CollateralExposurePair,
+  CollateralVaultResolver,
+} from './collateral-exposure'
 
 // APY computations
 export {

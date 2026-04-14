@@ -2,13 +2,13 @@
 import { useVaults } from '~/composables/useVaults'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
-import { getVaultUtilization } from '~/entities/vault'
-import type { AnyBorrowVaultPair, BorrowVaultPair } from '~/entities/vault'
+import { getVaultUtilization, isSecuritizeBorrowPair, type AnyBorrowVaultPair, type BorrowVaultPair } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import { getProductByVault, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
+import { isOpDisabled, OP_BORROW, OP_DEPOSIT, OP_TRANSFER } from '~/utils/vault-hooks'
 
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy } = useRewardsApy()
@@ -51,23 +51,32 @@ const { enableEntityBranding } = useDeployConfig()
 const { entities } = useEulerLabels()
 
 const activeBorrowList = computed(() =>
-  borrowList.value.filter(pair =>
-    !isVaultNotExplorableBorrow(pair.borrow.address)
-    && !isVaultNotExplorableBorrow(pair.collateral.address),
-  ),
+  borrowList.value.filter((pair) => {
+    if (isVaultNotExplorableBorrow(pair.borrow.address)) return false
+    if (isVaultNotExplorableBorrow(pair.collateral.address)) return false
+    if (isOpDisabled(pair.borrow, OP_BORROW)) return false
+    // Securitize collateral has no hookedOps — only check EVK collateral.
+    // Fresh-deposit needs OP_DEPOSIT, savings-sourced needs OP_TRANSFER.
+    // Hide only when BOTH paths are blocked; the form guards the active path.
+    if (!isSecuritizeBorrowPair(pair) && isOpDisabled(pair.collateral, OP_DEPOSIT) && isOpDisabled(pair.collateral, OP_TRANSFER)) return false
+    return true
+  }),
 )
 
-const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<AnyBorrowVaultPair>(pair => [
-  pair.collateral.asset.symbol,
-  pair.collateral.asset.name,
-  pair.collateral.name,
-  pair.borrow.asset.symbol,
-  pair.borrow.asset.name,
-  pair.borrow.name,
-  getProductByVault(pair.collateral.address).name,
-  getProductByVault(pair.collateral.address).description,
-  ...getEntitiesByVault(pair.borrow).map(e => e.name),
-])
+const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<AnyBorrowVaultPair>((pair) => {
+  const product = applyVaultOverrides(getProductByVault(pair.collateral.address), pair.collateral.address)
+  return [
+    pair.collateral.asset.symbol,
+    pair.collateral.asset.name,
+    pair.collateral.name,
+    pair.borrow.asset.symbol,
+    pair.borrow.asset.name,
+    pair.borrow.name,
+    product.name,
+    product.description,
+    ...getEntitiesByVault(pair.borrow).map(e => e.name),
+  ]
+})
 
 const selectedCollateral = ref<string[]>([])
 const selectedDebt = ref<string[]>([])

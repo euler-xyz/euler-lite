@@ -6,11 +6,12 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { getVaultUtilization } from '~/entities/vault'
 import type { Vault } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import { getProductByVault, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
 import { nanoToValue } from '~/utils/crypto-utils'
+import { isOpDisabled, OP_DEPOSIT } from '~/utils/vault-hooks'
 
 defineOptions({
   name: 'LendPage',
@@ -31,14 +32,17 @@ const { getBalance } = useWallets()
 
 const { enableEntityBranding } = useDeployConfig()
 
-const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<Vault>(vault => [
-  vault.asset.symbol,
-  vault.asset.name,
-  vault.name,
-  getProductByVault(vault.address).name,
-  getProductByVault(vault.address).description,
-  ...getEntitiesByVault(vault).map(e => e.name),
-])
+const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<Vault>((vault) => {
+  const product = applyVaultOverrides(getProductByVault(vault.address), vault.address)
+  return [
+    vault.asset.symbol,
+    vault.asset.name,
+    vault.name,
+    product.name,
+    product.description,
+    ...getEntitiesByVault(vault).map(e => e.name),
+  ]
+})
 
 const selectedCollateral = ref<string[]>([])
 const selectedMarkets = ref<string[]>([])
@@ -101,10 +105,13 @@ watch(chainId, (newChainId, oldChainId) => {
   }
 })
 
+// Lend listing only checks OP_DEPOSIT: it shows a vault as long as depositing is possible,
+// regardless of OP_TRANSFER state. Contrast with borrow/index.vue which checks both.
 const borrowableVaults = computed(() => {
   return list.value.filter(vault =>
     !isVaultNotExplorableLend(vault.address)
-    && borrowList.value.some(pair => pair.borrow.address === vault.address),
+    && borrowList.value.some(pair => pair.borrow.address === vault.address)
+    && !isOpDisabled(vault, OP_DEPOSIT),
   )
 })
 
