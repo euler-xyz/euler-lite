@@ -166,6 +166,10 @@ export default defineNuxtConfig({
   nitro: {
     compressPublicAssets: true,
     esbuild: { options: { target: 'esnext' } },
+    routeRules: {
+      '/_nuxt/**': { headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } },
+      '/**': { headers: { 'Cache-Control': 'no-store' } },
+    },
   },
 
   vite: {
