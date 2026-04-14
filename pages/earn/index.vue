@@ -5,7 +5,7 @@ import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import type { EarnVault } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import { getProductByVault, getEntitiesByEarnVault, isVaultFeatured, isVaultDeprecated, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, getVaultProductName, getEntitiesByEarnVault, isVaultFeatured, isVaultDeprecated, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
@@ -28,7 +28,7 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<EarnVault>(va
   vault.asset.symbol,
   vault.asset.name,
   vault.name,
-  getProductByVault(vault.address).name,
+  getVaultProductName(vault.address),
   getProductByVault(vault.address).description,
   ...getEntitiesByEarnVault(vault).map(e => e.name),
 ])

@@ -6,7 +6,7 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { getVaultUtilization } from '~/entities/vault'
 import type { Vault } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import { getProductByVault, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, getVaultProductName, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
@@ -35,7 +35,7 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<Vault>(vault 
   vault.asset.symbol,
   vault.asset.name,
   vault.name,
-  getProductByVault(vault.address).name,
+  getVaultProductName(vault.address),
   getProductByVault(vault.address).description,
   ...getEntitiesByVault(vault).map(e => e.name),
 ])
