@@ -15,6 +15,9 @@ import type { TxPlan } from '~/entities/txPlan'
 import { valueToNano } from '~/utils/crypto-utils'
 import { trimTrailingZeros } from '~/utils/string-utils'
 import { amountToPercent, percentToAmountNano } from '~/utils/repayUtils'
+import { findBlockingDisabledOp, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
+import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
+import type { Vault } from '~/entities/vault'
 
 interface UseWalletRepayOptions {
   position: Ref<AccountBorrowPosition | undefined>
@@ -88,8 +91,39 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     }
     return FixedPoint.fromValue(0n, 18)
   })
+  const { getVault: registryGetVault } = useVaultRegistry()
+
+  // Wallet repay touches the liability vault (OP_REPAY). A full repay also
+  // sweeps residual collateral shares back to the main account via
+  // transferFromMax (OP_TRANSFER) on EVERY enabled collateral vault before
+  // disabling the controller — check all of them, not just the primary.
+  const walletRepayPlannedOps = computed<PlannedOp[]>(() => {
+    const steps: PlannedOp[] = []
+    if (borrowVault.value) steps.push({ vault: borrowVault.value, op: OP_REPAY })
+    const amountNano = borrowVault.value
+      ? valueToNano(amount.value || '0', borrowVault.value.asset.decimals)
+      : 0n
+    const currentDebt = position.value?.borrowed ?? 0n
+    // Treat as full repay if the amount meets or exceeds the snapshot debt, or if
+    // the user selected the max amount (100%). The latter catches the case where
+    // accrued interest since the snapshot means amountNano < currentDebt at submit
+    // time even though the user intends to repay in full.
+    const isFullRepay = amountNano > 0n && (amountNano >= currentDebt || walletRepayPercent.value >= 100)
+    if (isFullRepay) {
+      const collAddrs = position.value?.collaterals ?? (collateralVault.value ? [collateralVault.value.address] : [])
+      for (const addr of collAddrs) {
+        const v = registryGetVault(addr) as Vault | undefined
+        if (v) steps.push({ vault: v, op: OP_TRANSFER })
+      }
+    }
+    return steps
+  })
+
+  const hookWarning = computed(() => getPlanHookDisabledWarning(walletRepayPlannedOps.value))
+
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
+    if (findBlockingDisabledOp(walletRepayPlannedOps.value)) return true
     return !(+amount.value) || !!estimatesError.value || isEstimatesLoading.value
   })
 
@@ -102,25 +136,25 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     try {
       const amountNano = valueToNano(amount.value || '0', borrowVault.value.asset.decimals)
       const currentDebt = position.value.borrowed || 0n
-      const shouldFullRepay = amountNano >= currentDebt
+      const shouldFullRepay = amountNano >= currentDebt || walletRepayPercent.value >= 100
 
       try {
         plan.value = shouldFullRepay
           ? await buildFullRepayPlan(
-            borrowVault.value.address,
-            borrowVault.value.asset.address,
-            amountNano,
-            position.value.subAccount,
-            position.value.collaterals ?? [collateralVault.value.address],
-            { includePermit2Call: false },
-          )
+              borrowVault.value.address,
+              borrowVault.value.asset.address,
+              amountNano,
+              position.value.subAccount,
+              position.value.collaterals ?? [collateralVault.value.address],
+              { includePermit2Call: false },
+            )
           : await buildRepayPlan(
-            borrowVault.value.address,
-            borrowVault.value.asset.address,
-            amountNano,
-            position.value.subAccount,
-            { includePermit2Call: false },
-          )
+              borrowVault.value.address,
+              borrowVault.value.asset.address,
+              amountNano,
+              position.value.subAccount,
+              { includePermit2Call: false },
+            )
       }
       catch (e) {
         logWarn('walletRepay/buildPlan', e)
@@ -159,23 +193,23 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
 
       const amountNano = valueToNano(amount.value, borrowVault.value.asset.decimals)
       const currentDebt = position.value.borrowed || 0n
-      const isFullRepay = amountNano >= currentDebt
+      const isFullRepay = amountNano >= currentDebt || walletRepayPercent.value >= 100
       const txPlan = isFullRepay
         ? await buildFullRepayPlan(
-          borrowVault.value.address,
-          borrowVault.value.asset.address,
-          amountNano,
-          position.value.subAccount,
-          position.value.collaterals ?? [collateralVault.value.address],
-          { includePermit2Call: true },
-        )
+            borrowVault.value.address,
+            borrowVault.value.asset.address,
+            amountNano,
+            position.value.subAccount,
+            position.value.collaterals ?? [collateralVault.value.address],
+            { includePermit2Call: true },
+          )
         : await buildRepayPlan(
-          borrowVault.value.address,
-          borrowVault.value.asset.address,
-          amountNano,
-          position.value.subAccount,
-          { includePermit2Call: true },
-        )
+            borrowVault.value.address,
+            borrowVault.value.asset.address,
+            amountNano,
+            position.value.subAccount,
+            { includePermit2Call: true },
+          )
       await executeTxPlan(txPlan)
 
       modal.close()
@@ -353,6 +387,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     estimatesError,
     isEstimatesLoading,
     isSubmitDisabled,
+    hookWarning,
     amountFixed,
     borrowedFixed,
     suppliedFixed,

@@ -695,27 +695,25 @@ watch([isConnected, isSpyMode], () => {
 </script>
 
 <template>
-  <section class="flex flex-col gap-16 min-h-[calc(100dvh-178px)]">
+  <section class="relative flex flex-col gap-16 min-h-[calc(100dvh-178px)]">
     <template v-if="isPositionsLoading">
       <div class="h-[calc(100dvh-178px)] flex items-center justify-center">
         <UiLoader class="text-neutral-500" />
       </div>
     </template>
     <template v-else-if="position">
+      <BackButton
+        class="hidden tablet:inline-flex tablet:absolute tablet:top-2 tablet:right-full tablet:mr-12"
+        always-fallback
+      />
       <div class="flex items-center gap-12">
-        <NuxtLink
-          to="/portfolio"
-          aria-label="Back to portfolio"
-          class="flex items-center justify-center self-stretch px-8 rounded-8 border border-line-default bg-surface-elevated hover:bg-card-hover transition-colors text-content-secondary hover:text-content-primary flex-shrink-0"
-        >
-          <UiIcon
-            name="arrow-left"
-            class="!w-16 !h-16"
-          />
-        </NuxtLink>
-        <div class="text-h6 text-content-secondary bg-surface-elevated py-4 px-12 rounded-8 border border-line-default">
+        <BackButton
+          class="tablet:hidden"
+          always-fallback
+        />
+        <h1 class="text-p1">
           Position {{ positionIndex }}
-        </div>
+        </h1>
       </div>
 
       <VaultLabelsAndAssets

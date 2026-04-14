@@ -217,6 +217,10 @@ const usesPermit2 = computed(() => {
   return plan?.steps?.some(step => step.label?.includes('Permit2')) ?? false
 })
 
+const hasTenderlyFailedSimulation = computed(() => {
+  return !!(tenderlyUrl.value && tenderlyError.value)
+})
+
 const permit2DisclaimerText = 'You are granting the permit2 contract unlimited access to your tokens. This is a safe, one-time setup — permit2 (by Uniswap) is a widely trusted and audited contract that replaces repeated approval transactions with gasless signatures. Each future transaction still requires your explicit signature, limited in both amount and duration.'
 </script>
 
@@ -257,13 +261,21 @@ const permit2DisclaimerText = 'You are granting the permit2 contract unlimited a
           :href="tenderlyUrl"
           target="_blank"
           rel="noopener noreferrer"
-          class="flex items-center gap-6 text-p3 text-success-500 hover:text-success-600 transition-colors"
+          class="flex items-center gap-6 text-p3 transition-colors"
+          :class="hasTenderlyFailedSimulation
+            ? 'text-error-500 hover:text-error-600'
+            : 'text-success-500 hover:text-success-600'"
         >
           <SvgIcon
-            name="check-circle"
+            :name="hasTenderlyFailedSimulation ? 'warning-circle' : 'check-circle'"
             class="!w-16 !h-16"
           />
-          View simulation
+          {{ hasTenderlyFailedSimulation ? 'Simulation failed' : 'View simulation' }}
+          <SvgIcon
+            v-if="hasTenderlyFailedSimulation"
+            name="arrow-top-right"
+            class="!w-14 !h-14"
+          />
         </a>
         <button
           v-else-if="tenderlyEnabled"
@@ -289,7 +301,7 @@ const permit2DisclaimerText = 'You are granting the permit2 contract unlimited a
 
       <!-- Tenderly error -->
       <UiToast
-        v-if="tenderlyError"
+        v-if="tenderlyError && !hasTenderlyFailedSimulation"
         title="Simulation failed"
         variant="warning"
         :description="tenderlyError"

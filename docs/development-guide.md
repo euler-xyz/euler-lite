@@ -4,7 +4,7 @@ This guide covers the concrete steps and scripts needed to work on this reposito
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 24+
 - npm (or yarn/pnpm if you prefer)
 
 ## Install and run
@@ -124,7 +124,7 @@ The `/api/pyth/updates` endpoint proxies Pyth Hermes price update requests throu
 
 ## Troubleshooting
 
-- If the app fails to start, ensure Node 18+ and reinstall deps.
+- If the app fails to start, ensure Node 24+ and reinstall deps.
 - If blockchain calls fail, verify `RPC_URL_HTTP_<chainId>` env vars and check that matching `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` is set.
 - If token logos don't load, verify `EULER_API_URL` (or `NUXT_PUBLIC_EULER_API_URL`) is set. Token data is fetched server-side via `/api/token-list` which aggregates Euler API, Uniswap, and DefiLlama sources with fallback.
 

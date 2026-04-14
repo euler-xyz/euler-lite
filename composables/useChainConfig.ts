@@ -11,6 +11,7 @@
 
 interface ChainConfig {
   enabledChainIds: number[]
+  deprecatedChainIds: number[]
   subgraphUris: Record<string, string>
 }
 
@@ -36,7 +37,10 @@ function scanEnv(): ChainConfig {
 
   enabledChainIds.sort((a, b) => a - b)
 
-  return { enabledChainIds, subgraphUris }
+  const enabledSet = new Set(enabledChainIds)
+  const deprecatedChainIds = parseDeprecatedChains(process.env.DEPRECATED_CHAINS, enabledSet)
+
+  return { enabledChainIds, deprecatedChainIds, subgraphUris }
 }
 
 export const useChainConfig = (): ChainConfig => {
@@ -51,7 +55,7 @@ export const useChainConfig = (): ChainConfig => {
   /* eslint-enable @typescript-eslint/no-explicit-any */
   }
   else {
-    cached = { enabledChainIds: [], subgraphUris: {} }
+    cached = { enabledChainIds: [], deprecatedChainIds: [], subgraphUris: {} }
   }
 
   return cached!

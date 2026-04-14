@@ -45,6 +45,7 @@ const toCollateralOptions = computed(() => {
 })
 
 const getVaultAddress = () => route.params.vault as string
+const vaultAddress = computed(() => route.params.vault as string)
 
 // ── Position ─────────────────────────────────────────────────────────────
 const savingPosition = computed(() => {
@@ -179,8 +180,14 @@ watch([() => route.params.vault, () => route.query.to], () => {
 </script>
 
 <template>
-  <div class="flex gap-32">
+  <div class="relative flex gap-32">
+    <BackButton
+      class="hidden tablet:inline-flex tablet:absolute tablet:top-20 tablet:right-full tablet:mr-4"
+      :fallback="`/lend/${vaultAddress}`"
+    />
     <VaultForm
+      back
+      :back-fallback="`/lend/${vaultAddress}`"
       title="Rebalance savings"
       description="Move your supplied assets from one vault to another."
       class="flex flex-col gap-16 w-full"

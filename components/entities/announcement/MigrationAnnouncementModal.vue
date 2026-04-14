@@ -1,36 +1,43 @@
 <script setup lang="ts">
 const props = defineProps<{
   announcementUrl: string
+  legacyAppUrl?: string
 }>()
 const emits = defineEmits(['close'])
 </script>
 
 <template>
   <BaseModalWrapper
-    title="We've upgraded the Euler app"
+    title="The Euler app has a new interface"
     :close="false"
   >
     <div class="flex flex-col gap-16">
       <p class="text-secondary text-p3">
-        We've replaced the previous interface with a lighter version while we build the
-        next-generation Euler app. Everything works the same — lending, borrowing, and
-        earn are all fully supported.
+        We've streamlined the app for speed and reliability. All core functionality —
+        lending, borrowing, and earn — is fully supported.
       </p>
 
       <ul class="flex flex-col gap-8 text-p3 text-secondary">
         <li class="flex items-start gap-8">
           <span class="text-accent shrink-0">&#10003;</span>
-          <span>All features you rely on are fully supported</span>
+          <span>More reliable with fewer dependencies</span>
         </li>
         <li class="flex items-start gap-8">
           <span class="text-accent shrink-0">&#10003;</span>
-          <span>More reliable with fewer backend dependencies</span>
+          <span>Access to all your existing positions</span>
         </li>
         <li class="flex items-start gap-8">
           <span class="text-accent shrink-0">&#10003;</span>
-          <span>A completely new app is in development</span>
+          <span>A next-generation app is in development</span>
         </li>
       </ul>
+
+      <p
+        v-if="props.legacyAppUrl"
+        class="text-secondary text-p3"
+      >
+        The legacy app is accessible via the link in the top-left corner but is no longer maintained.
+      </p>
 
       <a
         v-if="props.announcementUrl"

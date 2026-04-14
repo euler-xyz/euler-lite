@@ -17,6 +17,7 @@ import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useCollateralForm } from '~/composables/position/useCollateralForm'
 
+const positionIndex = usePositionIndex()
 const { address } = useAccount()
 const { buildWithdrawPlan, buildWithdrawAndSwapPlan } = useEulerOperations()
 const { refreshAllPositions } = useEulerAccount()
@@ -135,7 +136,10 @@ const pairAssetsLabel = usePositionPairLabel(form.position)
 // Withdraw-specific computeds
 const withdrawWarnings = computed(() => {
   if (!form.borrowVault.value) return []
-  return [getUtilisationWarning(form.borrowVault.value, 'borrow')]
+  return [
+    form.hookWarning.value,
+    getUtilisationWarning(form.borrowVault.value, 'borrow'),
+  ]
 })
 
 const onSelectOutputAsset = (newAsset: VaultAsset, meta?: SwapTokenSelectMeta) => {
@@ -170,193 +174,201 @@ watch(selectedOutputAsset, () => {
 </script>
 
 <template>
-  <VaultForm
-    title="Withdraw collateral"
-    description="Remove collateral from your position. Your health score will decrease."
-    :loading="form.isLoading.value"
-    @submit.prevent="form.submit"
-  >
-    <template v-if="form.collateralVault.value && form.asset.value">
-      <VaultLabelsAndAssets
-        :vault="form.collateralVault.value"
-        :assets="[form.asset.value]"
-        :assets-label="pairAssetsLabel"
-        size="large"
-      />
+  <div class="relative">
+    <BackButton
+      class="hidden tablet:inline-flex tablet:absolute tablet:top-20 tablet:right-full tablet:mr-4"
+      :fallback="`/position/${positionIndex}`"
+    />
+    <VaultForm
+      back
+      :back-fallback="`/position/${positionIndex}`"
+      title="Withdraw collateral"
+      description="Remove collateral from your position. Your health score will decrease."
+      :loading="form.isLoading.value"
+      @submit.prevent="form.submit"
+    >
+      <template v-if="form.collateralVault.value && form.asset.value">
+        <VaultLabelsAndAssets
+          :vault="form.collateralVault.value"
+          :assets="[form.asset.value]"
+          :assets-label="pairAssetsLabel"
+          size="large"
+        />
 
-      <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
-        <div class="flex flex-col gap-16 w-full">
-          <AssetInput
-            v-if="form.position.value && form.asset.value"
-            v-model="form.amount.value"
-            label="Withdraw amount"
-            :asset="form.asset.value"
-            :vault="(form.collateralVault.value as Vault)"
-            :balance="form.collateralAssets.value"
-            maxable
-          />
-
-          <!-- Receive as token selector -->
-          <div class="flex items-center gap-8">
-            <span class="text-p3 text-content-tertiary">Receive as</span>
-            <button
-              type="button"
-              class="flex items-center gap-6 bg-card text-p3 font-semibold px-12 h-36 rounded-[40px] whitespace-nowrap"
-              @click="openSwapTokenSelector"
-            >
-              <AssetAvatar
-                :asset="{ address: selectedOutputAsset?.address || form.asset.value.address, symbol: selectedOutputAsset?.symbol || form.asset.value.symbol }"
-                size="20"
-              />
-              {{ selectedOutputAsset?.symbol || form.asset.value.symbol }}
-              <SvgIcon
-                class="text-content-tertiary !w-16 !h-16"
-                name="arrow-down"
-              />
-            </button>
-          </div>
-
-          <!-- Swap info block -->
-          <template v-if="needsSwap && selectedOutputAsset">
-            <SwapRouteSelector
-              :items="form.swapRouteItems.value"
-              :selected-provider="form.swapSelectedProvider.value"
-              :status-label="form.swapQuotesStatusLabel.value"
-              :is-loading="form.isSwapQuoteLoading.value"
-              empty-message="Enter amount to fetch quotes"
-              @select="form.selectSwapQuote"
-              @refresh="form.onRefreshSwapQuotes"
+        <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
+          <div class="flex flex-col gap-16 w-full">
+            <AssetInput
+              v-if="form.position.value && form.asset.value"
+              v-model="form.amount.value"
+              label="Withdraw amount"
+              :asset="form.asset.value"
+              :vault="(form.collateralVault.value as Vault)"
+              :balance="form.collateralAssets.value"
+              maxable
             />
 
-            <VaultFormInfoBlock
-              v-if="form.swapEstimatedOutput.value"
-              :loading="form.isSwapQuoteLoading.value"
-              variant="card"
-            >
-              <SwapDetailsSummary
-                :input-display="form.swapInputDisplay.value"
-                :output-display="form.swapOutputDisplay.value"
-                :price-impact="form.swapPriceImpact.value"
-                :slippage="form.swapSlippage.value"
-                :routed-via="form.swapRoutedVia.value"
-                @open-slippage-settings="form.openSlippageSettings"
+            <!-- Receive as token selector -->
+            <div class="flex items-center gap-8">
+              <span class="text-p3 text-content-tertiary">Receive as</span>
+              <button
+                type="button"
+                class="flex items-center gap-6 bg-card text-p3 font-semibold px-12 h-36 rounded-[40px] whitespace-nowrap"
+                @click="openSwapTokenSelector"
+              >
+                <AssetAvatar
+                  :asset="{ address: selectedOutputAsset?.address || form.asset.value.address, symbol: selectedOutputAsset?.symbol || form.asset.value.symbol }"
+                  size="20"
+                />
+                {{ selectedOutputAsset?.symbol || form.asset.value.symbol }}
+                <SvgIcon
+                  class="text-content-tertiary !w-16 !h-16"
+                  name="arrow-down"
+                />
+              </button>
+            </div>
+
+            <!-- Swap info block -->
+            <template v-if="needsSwap && selectedOutputAsset">
+              <SwapRouteSelector
+                :items="form.swapRouteItems.value"
+                :selected-provider="form.swapSelectedProvider.value"
+                :status-label="form.swapQuotesStatusLabel.value"
+                :is-loading="form.isSwapQuoteLoading.value"
+                empty-message="Enter amount to fetch quotes"
+                @select="form.selectSwapQuote"
+                @refresh="form.onRefreshSwapQuotes"
               />
-            </VaultFormInfoBlock>
+
+              <VaultFormInfoBlock
+                v-if="form.swapEstimatedOutput.value"
+                :loading="form.isSwapQuoteLoading.value"
+                variant="card"
+              >
+                <SwapDetailsSummary
+                  :input-display="form.swapInputDisplay.value"
+                  :output-display="form.swapOutputDisplay.value"
+                  :price-impact="form.swapPriceImpact.value"
+                  :slippage="form.swapSlippage.value"
+                  :routed-via="form.swapRoutedVia.value"
+                  @open-slippage-settings="form.openSlippageSettings"
+                />
+              </VaultFormInfoBlock>
+
+              <UiToast
+                v-if="form.swapQuoteError.value"
+                title="Swap quote"
+                variant="warning"
+                :description="form.swapQuoteError.value"
+                size="compact"
+              />
+            </template>
 
             <UiToast
-              v-if="form.swapQuoteError.value"
-              title="Swap quote"
+              v-if="isUnknownSwapToken && needsSwap"
+              title="Unknown token"
+              description="This token is not on any recognized token list. It could be fraudulent or malicious. Verify the contract address before proceeding."
               variant="warning"
-              :description="form.swapQuoteError.value"
               size="compact"
             />
-          </template>
 
-          <UiToast
-            v-if="isUnknownSwapToken && needsSwap"
-            title="Unknown token"
-            description="This token is not on any recognized token list. It could be fraudulent or malicious. Verify the contract address before proceeding."
-            variant="warning"
-            size="compact"
-          />
+            <UiToast
+              v-if="form.isGeoBlocked.value"
+              title="Region restricted"
+              description="This operation is not available in your region. You can still repay existing debt."
+              variant="warning"
+              size="compact"
+            />
+            <UiToast
+              v-if="!form.isGeoBlocked.value && form.isSwapRestricted.value"
+              title="Swap restricted"
+              description="Swapping from this vault is not available in your region. You can withdraw the vault's underlying asset directly."
+              variant="warning"
+              size="compact"
+            />
+            <UiToast
+              v-show="form.estimatesError.value"
+              title="Error"
+              variant="error"
+              :description="form.estimatesError.value"
+              size="compact"
+            />
+            <UiToast
+              v-if="form.simulationError.value"
+              title="Error"
+              variant="error"
+              :description="form.simulationError.value"
+              size="compact"
+            />
 
-          <UiToast
-            v-if="form.isGeoBlocked.value"
-            title="Region restricted"
-            description="This operation is not available in your region. You can still repay existing debt."
-            variant="warning"
-            size="compact"
-          />
-          <UiToast
-            v-if="!form.isGeoBlocked.value && form.isSwapRestricted.value"
-            title="Swap restricted"
-            description="Swapping from this vault is not available in your region. You can withdraw the vault's underlying asset directly."
-            variant="warning"
-            size="compact"
-          />
-          <UiToast
-            v-show="form.estimatesError.value"
-            title="Error"
-            variant="error"
-            :description="form.estimatesError.value"
-            size="compact"
-          />
-          <UiToast
-            v-if="form.simulationError.value"
-            title="Error"
-            variant="error"
-            :description="form.simulationError.value"
-            size="compact"
-          />
+            <VaultWarningBanner :warnings="withdrawWarnings" />
+          </div>
 
-          <VaultWarningBanner :warnings="withdrawWarnings" />
-        </div>
-
-        <VaultFormInfoBlock
-          v-if="form.position.value && form.borrowVault.value"
-          :loading="form.isEstimatesLoading.value"
-          variant="card"
-          class="w-full laptop:max-w-[360px]"
-        >
-          <SummaryRow label="Net APY">
-            <SummaryValue
-              :before="formatNumber(form.netAPY.value)"
-              :after="formatNumber(form.estimateNetAPY.value)"
-              suffix="%"
-            />
-          </SummaryRow>
-          <SummaryRow label="Oracle price">
-            <SummaryPriceValue
-              :value="!form.priceFixed.value.isZero() ? formatSmartAmount(form.priceInvert.invertValue(form.priceFixed.value.toUnsafeFloat())) : undefined"
-              :symbol="form.priceInvert.displaySymbol"
-              invertible
-              @invert="form.priceInvert.toggle"
-            />
-          </SummaryRow>
-          <SummaryRow label="Liq. price">
-            <SummaryPriceValue
-              :before="form.liquidationPrice.value != null ? formatSmartAmount(form.priceInvert.invertValue(form.liquidationPrice.value)!) : undefined"
-              :after="form.estimateLiquidationPrice.value != null ? formatSmartAmount(form.priceInvert.invertValue(form.estimateLiquidationPrice.value)!) : undefined"
-              :symbol="form.priceInvert.displaySymbol"
-              invertible
-              @invert="form.priceInvert.toggle"
-            />
-          </SummaryRow>
-          <SummaryRow label="Liq. buffer">
-            <SummaryValue
-              :before="formatLiqBuffer(form.priceInvert.invertValue(form.priceFixed.value.toUnsafeFloat()), form.priceInvert.invertValue(form.liquidationPrice.value))"
-              :after="formatLiqBuffer(form.priceInvert.invertValue(form.priceFixed.value.toUnsafeFloat()), form.priceInvert.invertValue(form.estimateLiquidationPrice.value))"
-              suffix="%"
-            />
-          </SummaryRow>
-          <SummaryRow label="LTV">
-            <SummaryValue
-              :before="formatNumber(nanoToValue(form.position.value.userLTV, 18))"
-              :after="formatNumber(nanoToValue(form.estimateUserLTV.value, 18))"
-              suffix="%"
-            />
-          </SummaryRow>
-          <SummaryRow label="Health score">
-            <SummaryValue
-              :before="formatHealthScore(nanoToValue(form.position.value.health, 18))"
-              :after="formatHealthScore(nanoToValue(form.estimateHealth.value, 18))"
-            />
-          </SummaryRow>
-        </VaultFormInfoBlock>
-
-        <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
-          <VaultFormInfoButton
-            :disabled="form.isLoading.value || form.isSubmitting.value"
-            :vault="form.collateralVault.value"
-          />
-          <VaultFormSubmit
-            :disabled="form.submitDisabled.value"
-            :loading="form.isSubmitting.value || form.isPreparing.value"
+          <VaultFormInfoBlock
+            v-if="form.position.value && form.borrowVault.value"
+            :loading="form.isEstimatesLoading.value"
+            variant="card"
+            class="w-full laptop:max-w-[360px]"
           >
-            {{ form.submitLabel }}
-          </VaultFormSubmit>
+            <SummaryRow label="Net APY">
+              <SummaryValue
+                :before="formatNumber(form.netAPY.value)"
+                :after="formatNumber(form.estimateNetAPY.value)"
+                suffix="%"
+              />
+            </SummaryRow>
+            <SummaryRow label="Oracle price">
+              <SummaryPriceValue
+                :value="!form.priceFixed.value.isZero() ? formatSmartAmount(form.priceInvert.invertValue(form.priceFixed.value.toUnsafeFloat())) : undefined"
+                :symbol="form.priceInvert.displaySymbol"
+                invertible
+                @invert="form.priceInvert.toggle"
+              />
+            </SummaryRow>
+            <SummaryRow label="Liq. price">
+              <SummaryPriceValue
+                :before="form.liquidationPrice.value != null ? formatSmartAmount(form.priceInvert.invertValue(form.liquidationPrice.value)!) : undefined"
+                :after="form.estimateLiquidationPrice.value != null ? formatSmartAmount(form.priceInvert.invertValue(form.estimateLiquidationPrice.value)!) : undefined"
+                :symbol="form.priceInvert.displaySymbol"
+                invertible
+                @invert="form.priceInvert.toggle"
+              />
+            </SummaryRow>
+            <SummaryRow label="Liq. buffer">
+              <SummaryValue
+                :before="formatLiqBuffer(form.priceInvert.invertValue(form.priceFixed.value.toUnsafeFloat()), form.priceInvert.invertValue(form.liquidationPrice.value))"
+                :after="formatLiqBuffer(form.priceInvert.invertValue(form.priceFixed.value.toUnsafeFloat()), form.priceInvert.invertValue(form.estimateLiquidationPrice.value))"
+                suffix="%"
+              />
+            </SummaryRow>
+            <SummaryRow label="LTV">
+              <SummaryValue
+                :before="formatNumber(nanoToValue(form.position.value.userLTV, 18))"
+                :after="formatNumber(nanoToValue(form.estimateUserLTV.value, 18))"
+                suffix="%"
+              />
+            </SummaryRow>
+            <SummaryRow label="Health score">
+              <SummaryValue
+                :before="formatHealthScore(nanoToValue(form.position.value.health, 18))"
+                :after="formatHealthScore(nanoToValue(form.estimateHealth.value, 18))"
+              />
+            </SummaryRow>
+          </VaultFormInfoBlock>
+
+          <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
+            <VaultFormInfoButton
+              :disabled="form.isLoading.value || form.isSubmitting.value"
+              :vault="form.collateralVault.value"
+            />
+            <VaultFormSubmit
+              :disabled="form.submitDisabled.value"
+              :loading="form.isSubmitting.value || form.isPreparing.value"
+            >
+              {{ form.submitLabel }}
+            </VaultFormSubmit>
+          </div>
         </div>
-      </div>
-    </template>
-  </VaultForm>
+      </template>
+    </VaultForm>
+  </div>
 </template>

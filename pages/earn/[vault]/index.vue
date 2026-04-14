@@ -220,7 +220,7 @@ watch(address, () => {
 </script>
 
 <template>
-  <div>
+  <div class="relative">
     <div
       v-if="!vault"
       class="flex justify-center items-center min-h-[50dvh]"
@@ -228,10 +228,14 @@ watch(address, () => {
       <UiLoader />
     </div>
     <template v-else>
-      <BaseBackButton class="laptop:!hidden mb-16" />
-
+      <BackButton
+        class="hidden tablet:inline-flex tablet:absolute tablet:top-8 tablet:right-full tablet:mr-12"
+        fallback="/earn"
+      />
       <VaultLabelsAndAssets
         v-if="asset"
+        back
+        back-fallback="/earn"
         class="mb-24"
         :vault="vault"
         :assets="assets"
