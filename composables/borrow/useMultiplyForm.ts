@@ -23,8 +23,8 @@ import {
   conservativePriceRatioNumber,
 } from '~/services/pricing/priceProvider'
 import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
-import { COWSWAP_PROVIDER_NAME, COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapExecuteParams, deriveCowSwapBuyAmountFromQuote, getCowSwapChainConfig, isCowSwapSupportedChain } from '~/entities/cowswap'
-import { useCowSwapExecution, useCowSwapOrderStatus } from '~/composables/cowswap'
+import { COWSWAP_PROVIDER_NAME, COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapOpenPositionExecuteParams, deriveCowSwapBuyAmountFromQuote, getCowSwapChainConfig, isCowSwapSupportedChain } from '~/entities/cowswap'
+import { useCowSwapOpenPositionExecution, useCowSwapOrderStatus } from '~/composables/cowswap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
@@ -100,7 +100,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   // --- CowSwap ---
   const { client: rpcClient } = useRpcClient()
   const { chainId: currentChainId } = useEulerAddresses()
-  const cowSwapExecution = useCowSwapExecution()
+  const cowSwapExecution = useCowSwapOpenPositionExecution()
   const cowSwapOrderbookUrl = computed(() => {
     const config = getCowSwapChainConfig(currentChainId.value ?? 0)
     return config?.orderbookUrl
@@ -887,7 +887,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       ? underlyingBuyAmount * totalShares / totalAssets
       : underlyingBuyAmount
 
-    const cowParams: CowSwapExecuteParams = {
+    const cowParams: CowSwapOpenPositionExecuteParams = {
       chainId,
       sellToken: multiplyShortVault.value.asset.address as Address,
       buyToken: multiplyLongVault.value.address as Address,
