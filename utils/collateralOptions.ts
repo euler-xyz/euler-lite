@@ -1,4 +1,4 @@
-import { getProductByVault } from '~/utils/eulerLabelsUtils'
+import { getVaultProductName } from '~/utils/eulerLabelsUtils'
 import { getVaultTags, type VaultTagContext } from '~/composables/useGeoBlock'
 import type { CollateralOption, Vault } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
@@ -31,7 +31,6 @@ export async function buildCollateralOption(params: {
   tagContext: VaultTagContext
 }): Promise<CollateralOption> {
   const { vault, type, amount, priceAmount, apy, tagContext } = params
-  const product = getProductByVault(vault.address)
   const { tags, disabled } = getVaultTags(vault.address, tagContext)
 
   return {
@@ -41,7 +40,7 @@ export async function buildCollateralOption(params: {
     apy,
     symbol: vault.asset.symbol,
     assetAddress: vault.asset.address,
-    label: product.name || vault.name,
+    label: getVaultProductName(vault.address) || vault.name,
     vaultAddress: vault.address,
     tags,
     disabled,

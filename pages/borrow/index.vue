@@ -5,7 +5,7 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { getVaultUtilization } from '~/entities/vault'
 import type { AnyBorrowVaultPair, BorrowVaultPair } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import { getProductByVault, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
@@ -57,17 +57,20 @@ const activeBorrowList = computed(() =>
   ),
 )
 
-const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<AnyBorrowVaultPair>(pair => [
-  pair.collateral.asset.symbol,
-  pair.collateral.asset.name,
-  pair.collateral.name,
-  pair.borrow.asset.symbol,
-  pair.borrow.asset.name,
-  pair.borrow.name,
-  getProductByVault(pair.collateral.address).name,
-  getProductByVault(pair.collateral.address).description,
-  ...getEntitiesByVault(pair.borrow).map(e => e.name),
-])
+const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<AnyBorrowVaultPair>((pair) => {
+  const product = applyVaultOverrides(getProductByVault(pair.collateral.address), pair.collateral.address)
+  return [
+    pair.collateral.asset.symbol,
+    pair.collateral.asset.name,
+    pair.collateral.name,
+    pair.borrow.asset.symbol,
+    pair.borrow.asset.name,
+    pair.borrow.name,
+    product.name,
+    product.description,
+    ...getEntitiesByVault(pair.borrow).map(e => e.name),
+  ]
+})
 
 const selectedCollateral = ref<string[]>([])
 const selectedDebt = ref<string[]>([])
