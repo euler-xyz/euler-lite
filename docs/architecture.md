@@ -315,6 +315,32 @@ Bypass behaviour per environment:
 | `stg` | CF required; fail-closed (HTTP 451) if absent. `DEV_GEO_COUNTRY` bypasses fail-closed if set. | CF **not** required; falls back to `X-Forwarded-For`. |
 | `dev` | CF not required; falls back to `DEV_GEO_COUNTRY`, then allows through if unset. | CF not required; falls back to `X-Forwarded-For`. |
 
+### Clickjacking & Framing Defenses
+
+The app is a wallet-bearing DeFi interface. Loading it inside an attacker-controlled `<iframe>` could let the attacker overlay invisible elements on top of transaction approval buttons (UI-redressing / clickjacking). Four independent layers prevent this, following a defense-in-depth model:
+
+| Layer | Mechanism | Implementation |
+|---|---|---|
+| **HTTP header — legacy** | `X-Frame-Options: DENY` | `server/middleware/security-headers.ts` |
+| **HTTP header — modern** | `Content-Security-Policy: frame-ancestors 'none'` | `server/plugins/csp.ts` |
+| **HTTP header — opener isolation** | `Cross-Origin-Opener-Policy: same-origin-allow-popups` | `server/middleware/security-headers.ts` |
+| **Inline script — last resort** | JS frame-busting: hides the page and navigates `window.top` | `server/plugins/00-anti-clickjack.ts` |
+
+**Why all four?**
+
+- `X-Frame-Options` is the universally-supported legacy header; some older user agents or edge workers only check this one.
+- `frame-ancestors 'none'` is the modern CSP equivalent and takes precedence in browsers that support CSP Level 2+. It is set alongside `X-Frame-Options` for belt-and-suspenders coverage.
+- `Cross-Origin-Opener-Policy: same-origin-allow-popups` prevents a cross-origin page from retaining a `window.opener` reference to ours after the user navigates away. `same-origin-allow-popups` (rather than `same-origin`) is the strictest value that still allows Reown AppKit and Coinbase Wallet SDK to open wallet connection popups.
+- The inline script is the last line of defense in case a CDN, edge worker, or proxy strips the headers. It detects `window.self !== window.top`, hides the document root immediately, and attempts `window.top.location` navigation. Because `csp.ts` runs after `00-anti-clickjack.ts` in alphabetical Nitro plugin order, every `<script>` in `html.head` (including this one) already has a per-request CSP nonce injected before the response is sent.
+
+**Wallet popup compatibility**
+
+`COOP: same-origin` would fully isolate the browsing context but breaks popup-based wallet connection flows (Reown AppKit, Coinbase Wallet SDK). `same-origin-allow-popups` is the correct trade-off: it isolates the opener reference from cross-origin navigations while preserving same-origin popup handles.
+
+**Regression coverage**
+
+`tests/server/security.test.ts` locks in all four layers with pure-function unit tests (no Nitro boot required). The tests assert that `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy`, and the frame-busting script content cannot silently regress. Do not weaken these assertions without reviewing the threat model above.
+
 ## 📱 Mobile-First Architecture
 
 ### Responsive Design Principles

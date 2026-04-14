@@ -48,6 +48,16 @@ export {
   getRampTimeRemaining,
 } from './ltv'
 
+// Collateral exposure (borrow-side pair derivation)
+export {
+  getCollateralExposurePairs,
+  hasCollateralExposure,
+} from './collateral-exposure'
+export type {
+  CollateralExposurePair,
+  CollateralVaultResolver,
+} from './collateral-exposure'
+
 // APY computations
 export {
   computeAPYs,

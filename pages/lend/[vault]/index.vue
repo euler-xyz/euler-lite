@@ -748,7 +748,7 @@ watch(address, () => {
 </script>
 
 <template>
-  <div>
+  <div class="relative">
     <div
       v-if="!isVaultLoaded"
       class="flex justify-center items-center min-h-[50dvh]"
@@ -756,11 +756,15 @@ watch(address, () => {
       <UiLoader />
     </div>
     <template v-else>
-      <BaseBackButton class="laptop:!hidden mb-16" />
-
+      <BackButton
+        class="hidden tablet:inline-flex tablet:absolute tablet:top-8 tablet:right-full tablet:mr-12"
+        fallback="/lend"
+      />
       <!-- Vault header -->
       <VaultLabelsAndAssets
         v-if="asset && (vault || securitizeVault)"
+        back
+        back-fallback="/lend"
         class="mb-24"
         :vault="(vault || securitizeVault)!"
         :assets="assets"

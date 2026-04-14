@@ -237,86 +237,94 @@ watch(amount, () => {
 </script>
 
 <template>
-  <VaultForm
-    title="Withdraw savings"
-    description="Withdraw your supplied assets back to your wallet."
-    class="flex flex-col gap-16"
-    :loading="isLoading"
-    @submit.prevent="submit"
-  >
-    <template v-if="vault && asset">
-      <VaultLabelsAndAssets
-        :vault="vault"
-        :assets="[asset]"
-        size="large"
-      />
+  <div class="relative">
+    <BackButton
+      class="hidden tablet:inline-flex tablet:absolute tablet:top-20 tablet:right-full tablet:mr-4"
+      :fallback="`/earn/${vaultAddress}`"
+    />
+    <VaultForm
+      back
+      :back-fallback="`/earn/${vaultAddress}`"
+      title="Withdraw savings"
+      description="Withdraw your supplied assets back to your wallet."
+      class="flex flex-col gap-16"
+      :loading="isLoading"
+      @submit.prevent="submit"
+    >
+      <template v-if="vault && asset">
+        <VaultLabelsAndAssets
+          :vault="vault"
+          :assets="[asset]"
+          size="large"
+        />
 
-      <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
-        <div class="flex flex-col gap-16 w-full">
-          <AssetInput
-            v-if="asset"
-            v-model="amount"
-            label="Withdraw amount"
-            :asset="asset"
-            :vault="vault"
-            :balance="assetsBalance"
-            maxable
-          />
-
-          <UiToast
-            v-show="estimatesError"
-            title="Error"
-            variant="error"
-            :description="estimatesError"
-            size="compact"
-          />
-          <UiToast
-            v-if="simulationError"
-            title="Error"
-            variant="error"
-            :description="simulationError"
-            size="compact"
-          />
-        </div>
-
-        <VaultFormInfoBlock
-          :loading="isEstimatesLoading"
-          variant="card"
-          class="w-full laptop:max-w-[360px]"
-        >
-          <SummaryRow label="Supply APY">
-            <SummaryValue
-              :before="supplyAPYDisplay"
-              :after="estimateSupplyAPYDisplay"
-              suffix="%"
-            />
-          </SummaryRow>
-          <SummaryRow label="Supplied">
-            <SummaryValue
-              :before="`$${formatNumber(assetsBalanceUsd)}`"
-              :after="amount && delta !== assetsBalance && delta >= 0n ? `$${formatNumber(deltaUsd)}` : undefined"
-            />
-          </SummaryRow>
-          <SummaryRow label="Available for withdraw">
-            <p
+        <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
+          <div class="flex flex-col gap-16 w-full">
+            <AssetInput
               v-if="asset"
-              class="text-p2 flex items-center gap-4"
-            >
-              {{ formatSmartAmount(nanoToValue(assetsBalance, asset.decimals)) }} <span class="text-p3 text-content-tertiary">{{ asset.symbol }}</span>
-              <span class="text-p3 text-content-tertiary">&asymp; ${{ formatNumber(assetsBalanceUsd) }}</span>
-            </p>
-          </SummaryRow>
-        </VaultFormInfoBlock>
+              v-model="amount"
+              label="Withdraw amount"
+              :asset="asset"
+              :vault="vault"
+              :balance="assetsBalance"
+              maxable
+            />
 
-        <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
-          <VaultFormSubmit
-            :loading="isSubmitting || isPreparing"
-            :disabled="reviewWithdrawDisabled"
+            <UiToast
+              v-show="estimatesError"
+              title="Error"
+              variant="error"
+              :description="estimatesError"
+              size="compact"
+            />
+            <UiToast
+              v-if="simulationError"
+              title="Error"
+              variant="error"
+              :description="simulationError"
+              size="compact"
+            />
+          </div>
+
+          <VaultFormInfoBlock
+            :loading="isEstimatesLoading"
+            variant="card"
+            class="w-full laptop:max-w-[360px]"
           >
-            Review Withdraw
-          </VaultFormSubmit>
+            <SummaryRow label="Supply APY">
+              <SummaryValue
+                :before="supplyAPYDisplay"
+                :after="estimateSupplyAPYDisplay"
+                suffix="%"
+              />
+            </SummaryRow>
+            <SummaryRow label="Supplied">
+              <SummaryValue
+                :before="`$${formatNumber(assetsBalanceUsd)}`"
+                :after="amount && delta !== assetsBalance && delta >= 0n ? `$${formatNumber(deltaUsd)}` : undefined"
+              />
+            </SummaryRow>
+            <SummaryRow label="Available for withdraw">
+              <p
+                v-if="asset"
+                class="text-p2 flex items-center gap-4"
+              >
+                {{ formatSmartAmount(nanoToValue(assetsBalance, asset.decimals)) }} <span class="text-p3 text-content-tertiary">{{ asset.symbol }}</span>
+                <span class="text-p3 text-content-tertiary">&asymp; ${{ formatNumber(assetsBalanceUsd) }}</span>
+              </p>
+            </SummaryRow>
+          </VaultFormInfoBlock>
+
+          <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
+            <VaultFormSubmit
+              :loading="isSubmitting || isPreparing"
+              :disabled="reviewWithdrawDisabled"
+            >
+              Review Withdraw
+            </VaultFormSubmit>
+          </div>
         </div>
-      </div>
-    </template>
-  </VaultForm>
+      </template>
+    </VaultForm>
+  </div>
 </template>
