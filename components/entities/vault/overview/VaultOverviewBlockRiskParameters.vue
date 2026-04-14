@@ -191,7 +191,7 @@ const openHooksModal = () => {
               v-if="showHooksInfoIcon"
               type="button"
               :aria-label="`${hooksRowLabel} details`"
-              class="inline-flex shrink-0 outline-none text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+              class="inline-flex shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 focus-visible:rounded"
               @click="openHooksModal"
             >
               <SvgIcon
