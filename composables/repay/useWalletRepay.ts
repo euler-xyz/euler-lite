@@ -91,10 +91,12 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     }
     return FixedPoint.fromValue(0n, 18)
   })
+  const { getVault: registryGetVault } = useVaultRegistry()
+
   // Wallet repay touches the liability vault (OP_REPAY). A full repay also
   // sweeps residual collateral shares back to the main account via
-  // transferFromMax (OP_TRANSFER on the collateral vault) before disabling
-  // the controller — include that step when the amount reaches the debt.
+  // transferFromMax (OP_TRANSFER) on EVERY enabled collateral vault before
+  // disabling the controller — check all of them, not just the primary.
   const walletRepayPlannedOps = computed<PlannedOp[]>(() => {
     const steps: PlannedOp[] = []
     if (borrowVault.value) steps.push({ vault: borrowVault.value, op: OP_REPAY })
@@ -107,8 +109,12 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     // accrued interest since the snapshot means amountNano < currentDebt at submit
     // time even though the user intends to repay in full.
     const isFullRepay = amountNano > 0n && (amountNano >= currentDebt || walletRepayPercent.value >= 100)
-    if (isFullRepay && collateralVault.value) {
-      steps.push({ vault: collateralVault.value as Vault, op: OP_TRANSFER })
+    if (isFullRepay) {
+      const collAddrs = position.value?.collaterals ?? (collateralVault.value ? [collateralVault.value.address] : [])
+      for (const addr of collAddrs) {
+        const v = registryGetVault(addr) as Vault | undefined
+        if (v) steps.push({ vault: v, op: OP_TRANSFER })
+      }
     }
     return steps
   })

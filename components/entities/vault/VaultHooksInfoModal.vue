@@ -96,7 +96,7 @@ const handleClose = () => {
         <button
           type="button"
           aria-label="Copy hook target address"
-          class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary"
+          class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 focus-visible:rounded"
           @click="onCopyClick(vault.hookTarget)"
         >
           <SvgIcon
