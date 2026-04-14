@@ -1,5 +1,6 @@
 import { createError, getHeader, readRawBody } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
+import { isAbortError } from '~/utils/errorHandling'
 
 const rateLimiter = createRateLimiter({
   max: 30,
@@ -58,14 +59,14 @@ export default defineEventHandler(async (event) => {
       })
     }
     catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') {
+      if (isAbortError(error)) {
         throw createError({ statusCode: 504, statusMessage: 'Sentry ingest timeout' })
       }
       throw createError({ statusCode: 502, statusMessage: 'Sentry ingest unreachable' })
     }
 
     if (!response.ok) {
-      throw createError({ statusCode: response.status, statusMessage: 'Sentry ingest error' })
+      throw createError({ statusCode: 502, statusMessage: 'Sentry ingest error' })
     }
   }
   finally {

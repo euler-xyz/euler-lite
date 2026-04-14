@@ -176,13 +176,18 @@ export default defineNuxtConfig({
   telemetry: false,
   eslint: { config: { stylistic: true } },
 
-  sentry: {
-    sourceMapsUploadOptions: {
-      org: 'euler',
-      project: 'euler-lite',
-      authToken: process.env.SENTRY_AUTH_TOKEN,
-    },
-  },
+  ...(process.env.SENTRY_AUTH_TOKEN
+    ? {
+        sentry: {
+          sourceMapsUploadOptions: {
+            org: 'euler',
+            project: 'euler-lite',
+            authToken: process.env.SENTRY_AUTH_TOKEN,
+            filesToDeleteAfterUpload: ['**/*.map'],
+          },
+        },
+      }
+    : {}),
 
   svgSprite: {
     elementClass: 'icon',
