@@ -1,0 +1,161 @@
+import type { Address, Abi, Hex } from 'viem'
+import { CLOSE_POSITION_WRAPPER_ABI } from '~/abis/cowswap-wrapper'
+import { logWarn } from '~/utils/errorHandling'
+import {
+  type CowSwapClosePositionExecuteParams,
+  type CowSwapOrderUid,
+  getCowSwapChainConfig,
+  buildClosePositionWrapperData,
+  buildCowSwapAppData,
+  buildCowSwapOrderTypedData,
+  buildCowSwapOrderPayload,
+  encodeOrderDataForInbox,
+  buildInboxSignature,
+  verifyInboxDomainSeparator,
+  INBOX_DOMAIN_NAME,
+  INBOX_DOMAIN_VERSION,
+} from '~/entities/cowswap'
+import { useCowSwapExecutionCore } from './useCowSwapExecutionCore'
+
+export const useCowSwapClosePositionExecution = () => {
+  const core = useCowSwapExecutionCore()
+
+  const executeAsync = async (params: CowSwapClosePositionExecuteParams): Promise<CowSwapOrderUid> => {
+    core.requireWallet()
+    const client = core.requireRpc()
+    const chainConfig = getCowSwapChainConfig(params.chainId)
+    if (!chainConfig) throw new Error(`CowSwap not supported on chain ${params.chainId}`)
+
+    if (params.sellAmount <= 0n) throw new Error('Sell amount must be greater than zero')
+    if (params.buyAmount <= 0n) throw new Error('Buy amount must be greater than zero')
+
+    core.error.value = null
+
+    try {
+      // Step 1: Fetch Inbox address and domain separator
+      core.status.value = 'fetching_inbox'
+
+      const wrapperAddress = chainConfig.closePositionWrapper
+      const [inboxAddress, inboxDomainSep] = await client.readContract({
+        address: wrapperAddress,
+        abi: CLOSE_POSITION_WRAPPER_ABI as unknown as Abi,
+        functionName: 'getInboxAddressAndDomainSeparator',
+        args: [params.wrapper.owner, params.wrapper.account],
+      }) as [Address, Hex]
+
+      // Verify the domain separator matches our expectation
+      verifyInboxDomainSeparator(inboxAddress, params.chainId, inboxDomainSep)
+
+      // Step 2: No user-side approvals needed (Inbox handles internally)
+      // Fetch EVC nonce + permit data, sign EVC permit
+      core.status.value = 'signing_permit'
+
+      const wrapperParams = {
+        owner: params.wrapper.owner,
+        account: params.wrapper.account,
+        deadline: BigInt(params.wrapper.deadline),
+        borrowVault: params.wrapper.borrowVault,
+        collateralVault: params.wrapper.collateralVault,
+        collateralAmount: params.wrapper.collateralAmount,
+      }
+
+      const { nonce, nonceNamespace, permitCalldata, evcAddress } = await core.fetchNonceAndPermitData(
+        wrapperAddress,
+        CLOSE_POSITION_WRAPPER_ABI as unknown as Abi,
+        wrapperParams as unknown as Record<string, unknown>,
+        params.chainId,
+      )
+
+      const permitSignature = await core.signEvcPermit({
+        permitCalldata,
+        chainId: params.chainId,
+        evcAddress,
+        wrapperAddress,
+        nonceNamespace,
+        nonce,
+        deadline: params.wrapper.deadline,
+      })
+
+      // Step 3: Build wrapperData + appData
+      core.status.value = 'signing_order'
+
+      const wrapperData = buildClosePositionWrapperData(params.wrapper, permitSignature)
+      const { appDataString, appDataHash } = buildCowSwapAppData(
+        wrapperData,
+        wrapperAddress,
+        'euler_position_close',
+      )
+
+      // Build order typed data with Inbox domain (name='Inbox', version='1')
+      const orderTypedData = buildCowSwapOrderTypedData({
+        chainId: params.chainId,
+        settlementContract: chainConfig.settlementContract,
+        sellToken: params.sellToken,
+        buyToken: params.buyToken,
+        receiver: inboxAddress,
+        sellAmount: params.sellAmount,
+        buyAmount: params.buyAmount,
+        validTo: params.validTo,
+        appDataHash,
+        kind: params.orderKind,
+        domainName: INBOX_DOMAIN_NAME,
+        domainVersion: INBOX_DOMAIN_VERSION,
+        verifyingContract: inboxAddress,
+      })
+
+      // Sign the CoW order (user signs over Inbox domain)
+      const ecdsaSignature = await core.signOrderTypedData(orderTypedData) as Hex
+
+      // Step 4: Build EIP-1271 signature = concat(ecdsaSig, orderEncodeData)
+      const orderEncodeData = encodeOrderDataForInbox({
+        sellToken: params.sellToken,
+        buyToken: params.buyToken,
+        receiver: inboxAddress,
+        sellAmount: params.sellAmount,
+        buyAmount: params.buyAmount,
+        validTo: params.validTo,
+        appData: appDataHash,
+        feeAmount: 0n,
+        kind: params.orderKind,
+        partiallyFillable: false,
+        sellTokenBalance: 'erc20',
+        buyTokenBalance: 'erc20',
+      })
+
+      const inboxSig = buildInboxSignature(ecdsaSignature, orderEncodeData)
+
+      // Step 5: Submit (eip1271, from=inboxAddress)
+      core.status.value = 'submitting'
+
+      const payload = buildCowSwapOrderPayload(
+        orderTypedData,
+        inboxSig,
+        inboxAddress,
+        appDataString,
+        appDataHash,
+        { signingScheme: 'eip1271' },
+      )
+
+      return await core.submitAndFinalize(payload, chainConfig.orderbookUrl, params.chainId)
+    }
+    catch (err) {
+      const wrapped = err instanceof Error ? err : new Error(String(err))
+      core.error.value = wrapped
+      core.status.value = 'idle'
+      logWarn('cowswap/closePosition', wrapped)
+      throw wrapped
+    }
+  }
+
+  return {
+    executeAsync,
+    cancelOrder: core.cancelOrder,
+    reset: core.reset,
+    status: core.status,
+    orderUid: core.orderUid,
+    isPending: core.isPending,
+    explorerUrl: core.explorerUrl,
+    error: core.error,
+    locallyCancelled: core.locallyCancelled,
+  }
+}
