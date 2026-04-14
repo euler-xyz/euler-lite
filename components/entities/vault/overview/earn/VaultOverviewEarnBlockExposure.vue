@@ -187,23 +187,22 @@ load()
           class="px-16 pt-16 pb-12 border-b border-line-subtle flex items-center justify-between"
         >
           <template v-if="row.vault">
-            <div class="flex items-center gap-8 min-w-0">
-              <VaultLabelsAndAssets
-                :vault="row.vault"
-                :assets="[{
-                  address: row.exposure.info.asset,
-                  decimals: row.exposure.info.assetDecimals,
-                  name: row.exposure.info.assetName,
-                  symbol: row.exposure.info.assetSymbol,
-                }]"
-              />
+            <VaultLabelsAndAssets
+              :vault="row.vault"
+              :assets="[{
+                address: row.exposure.info.asset,
+                decimals: row.exposure.info.assetDecimals,
+                name: row.exposure.info.assetName,
+                symbol: row.exposure.info.assetSymbol,
+              }]"
+            >
               <span
                 v-if="row.hookWarning"
                 @click.stop.prevent
               >
                 <VaultWarningIcon :warning="row.hookWarning" />
               </span>
-            </div>
+            </VaultLabelsAndAssets>
           </template>
           <template v-else>
             <div class="flex items-center gap-12">

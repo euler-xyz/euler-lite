@@ -413,36 +413,20 @@ const getVault = async (address: string): Promise<Vault> => {
   return registryGetVault(normalizedAddress) as Vault
 }
 const getEarnVault = async (address: string): Promise<EarnVault> => {
-  const { getEarnVaults, getVault: registryGetVault, set: registrySet } = useVaultRegistry()
+  const { getVault: registryGetVault, set: registrySet } = useVaultRegistry()
   const normalizedAddress = getAddress(address)
+  const { earnVaults } = useEulerLabels()
 
-  // For custom labels repo, skip waiting and fetch directly
-  const { isCustomLabelsRepo } = useDeployConfig()
-  if (isCustomLabelsRepo.value) {
-    const { earnVaults } = useEulerLabels()
-
-    if (earnVaults.value.includes(normalizedAddress) && !isEarnVaultNotExplorable(normalizedAddress)) {
-      await until(computed(() => registryGetVault(normalizedAddress))).toBeTruthy()
-    }
-    else {
-      const vault = await fetchEarnVault(normalizedAddress)
-      registrySet(normalizedAddress, vault, 'earn')
-      return vault
-    }
+  if (earnVaults.value.includes(normalizedAddress) && !isEarnVaultNotExplorable(normalizedAddress)) {
+    await until(computed(() => registryGetVault(normalizedAddress))).toBeTruthy()
   }
   else {
-    // Wait for earn vaults to be loaded from governed perspective
-    await until(computed(() => getEarnVaults().length > 0)).toBeTruthy()
+    const vault = await fetchEarnVault(normalizedAddress)
+    registrySet(normalizedAddress, vault, 'earn')
+    return vault
   }
 
-  const existingVault = registryGetVault(normalizedAddress)
-  if (existingVault) {
-    return existingVault as EarnVault
-  }
-
-  const vault = await fetchEarnVault(normalizedAddress)
-  registrySet(normalizedAddress, vault, 'earn')
-  return vault
+  return registryGetVault(normalizedAddress) as EarnVault
 }
 const updateVault = async (vaultAddress: string): Promise<Vault | SecuritizeVault> => {
   const { set: registrySet, isKnownEscrowAddress, getType } = useVaultRegistry()

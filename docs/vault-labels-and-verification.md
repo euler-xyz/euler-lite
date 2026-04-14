@@ -215,8 +215,6 @@ Structure: `Array<string | EarnVaultEntry>` — each entry is either a plain add
 | `description` | `string` | No | Custom description displayed on earn vault items and overview pages |
 | `portfolioNotice` | `string` | No | Operational notice shown on portfolio position cards. Supports auto-linked URLs and **bold** formatting. |
 
-**Note**: This file is optional. If missing, earn vaults are loaded from the `eulerEarnGovernedPerspective` on-chain contract instead.
-
 ---
 
 ### Oracle Adapter Files (oracle-checks repo)
