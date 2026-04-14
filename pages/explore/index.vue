@@ -2,7 +2,7 @@
 import { useMarketGroups } from '~/composables/useMarketGroups'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
-import { getProductByVault, getVaultProductName, getEntitiesByVault, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useBestMaxROE } from '~/composables/useBestMaxROE'
@@ -29,9 +29,9 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<MarketGroup>(
   ...group.vaults.flatMap((vault) => {
     const addr = isVaultType(vault) ? vault.address : ''
     if (!addr) return []
-    const product = getProductByVault(addr)
+    const product = applyVaultOverrides(getProductByVault(addr), addr)
     return [
-      getVaultProductName(addr),
+      product.name,
       product.description,
       ...getEntitiesByVault(vault as Vault).map(e => e.name),
     ]

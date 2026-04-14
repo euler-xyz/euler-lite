@@ -316,7 +316,6 @@ export const applyVaultOverrides = (product: EulerLabelProduct, vaultAddress: st
 }
 
 export const getVaultProductName = (vaultAddress: string): string => {
-  const normalized = normalizeAddress(vaultAddress)
-  const product = getProductByVault(normalized)
-  return product.vaultOverrides?.[normalized]?.name ?? product.name
+  const product = getProductByVault(vaultAddress)
+  return applyVaultOverrides(product, vaultAddress).name
 }
