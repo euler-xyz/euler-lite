@@ -312,8 +312,14 @@ const onToVaultChange = (selectedIndex: number) => {
 </script>
 
 <template>
-  <div class="flex gap-32">
+  <div class="relative flex gap-32">
+    <BackButton
+      class="hidden tablet:inline-flex tablet:absolute tablet:top-20 tablet:right-full tablet:mr-4"
+      :fallback="`/position/${positionIndex}`"
+    />
     <VaultForm
+      back
+      :back-fallback="`/position/${positionIndex}`"
       title="Refinance debt"
       description="Move your debt to a different vault, potentially for a better rate."
       class="flex flex-col gap-16 w-full"

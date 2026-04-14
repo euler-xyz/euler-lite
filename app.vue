@@ -5,7 +5,7 @@ import { MigrationAnnouncementModal } from '#components'
 
 const route = useRoute()
 const router = useRouter()
-const { migrationAnnouncementUrl } = useDeployConfig()
+const { migrationAnnouncementUrl, migrationLegacyAppUrl } = useDeployConfig()
 const migrationAnnouncementSeen = useLocalStorage('migration-announcement-seen', false)
 const modal = useModal()
 
@@ -91,6 +91,7 @@ const checkMigrationAnnouncement = () => {
     onClose: () => { migrationAnnouncementSeen.value = true },
     props: {
       announcementUrl: migrationAnnouncementUrl,
+      legacyAppUrl: migrationLegacyAppUrl,
     },
   })
 }

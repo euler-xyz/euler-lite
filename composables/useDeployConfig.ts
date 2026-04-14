@@ -54,6 +54,8 @@ export const useDeployConfig = () => {
 
     // Migration announcement (opt-in: non-empty URL enables the modal)
     migrationAnnouncementUrl: rc.configMigrationAnnouncementUrl || '',
+    // Migration: link to legacy app shown in the header dropdown
+    migrationLegacyAppUrl: rc.configMigrationLegacyAppUrl || '',
 
     // External token lists (defaults in server/api/token-list.get.ts)
     uniswapTokenListUrl: rc.configUniswapTokenListUrl || '',

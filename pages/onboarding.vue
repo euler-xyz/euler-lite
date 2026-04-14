@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { useAccount } from '@wagmi/vue'
-import { useAppKit } from '@reown/appkit/vue'
 import { getDefaultPageRoute } from '~/entities/menu'
 
 const { isConnected } = useAccount()
 
-const { open } = useAppKit()
+const { connect } = useWagmi()
 const {
   appTitle,
   appDescription,
@@ -22,7 +21,7 @@ const defaultPageRoute = getDefaultPageRoute(
 const isOnboardingCompleted = useLocalStorage('is-onboarding-completed', false)
 
 const onConnectWalletClick = () => {
-  open()
+  connect()
 }
 
 const onConnectLaterClick = () => {
