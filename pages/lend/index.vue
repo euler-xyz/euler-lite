@@ -102,6 +102,8 @@ watch(chainId, (newChainId, oldChainId) => {
   }
 })
 
+// Lend listing only checks OP_DEPOSIT: it shows a vault as long as depositing is possible,
+// regardless of OP_TRANSFER state. Contrast with borrow/index.vue which checks both.
 const borrowableVaults = computed(() => {
   return list.value.filter(vault =>
     !isVaultNotExplorableLend(vault.address)

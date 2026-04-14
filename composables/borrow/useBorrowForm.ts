@@ -349,7 +349,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   // fresh-deposit  → buildBorrowPlan deposits new assets (OP_DEPOSIT).
   const borrowPlannedOps = computed<PlannedOp[]>(() => {
     const steps: PlannedOp[] = []
-    if (collateralVault.value && 'hookedOps' in collateralVault.value) {
+    if (collateralVault.value) {
       steps.push({
         vault: collateralVault.value,
         op: isSavingCollateral.value ? OP_TRANSFER : OP_DEPOSIT,

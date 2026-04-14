@@ -210,8 +210,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   // shares back to the main account via transferFromMax (OP_TRANSFER).
   const walletSwapRepayPlannedOps = computed<PlannedOp[]>(() => {
     const steps: PlannedOp[] = []
-    if (borrowVault.value) steps.push({ vault: borrowVault.value as Vault, op: OP_REPAY })
-    if (isFullRepay.value && collateralVault.value && 'hookedOps' in collateralVault.value) {
+    if (borrowVault.value) steps.push({ vault: borrowVault.value, op: OP_REPAY })
+    if (isFullRepay.value && collateralVault.value) {
       steps.push({ vault: collateralVault.value as Vault, op: OP_TRANSFER })
     }
     return steps

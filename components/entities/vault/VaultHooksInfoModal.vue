@@ -10,9 +10,9 @@ import {
 import { getExplorerLink } from '~/utils/block-explorer'
 import { getSpecialAddressLabel } from '~/utils/special-addresses'
 import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
-import { useEulerAddresses } from '~/composables/useEulerAddresses'
+import { truncate } from '~/utils/string-utils'
 
-const emits = defineEmits(['close'])
+const emits = defineEmits<{ close: [] }>()
 const { vault } = defineProps<{ vault: Vault }>()
 
 const { chainId } = useEulerAddresses()
@@ -59,10 +59,8 @@ const hookTargetLabel = computed(() => {
   return 'Third-party hook contract'
 })
 
-const shortenAddress = (address: string) => `${address.slice(0, 6)}...${address.slice(-4)}`
-
 const onCopyClick = (address: string) => {
-  navigator.clipboard.writeText(address)
+  navigator.clipboard.writeText(address).catch(() => {})
 }
 
 const handleClose = () => {
@@ -93,7 +91,7 @@ const handleClose = () => {
           rel="noopener noreferrer"
           class="text-accent-600 underline cursor-pointer hover:text-accent-500"
         >
-          {{ getSpecialAddressLabel(vault.hookTarget) || shortenAddress(vault.hookTarget) }}
+          {{ getSpecialAddressLabel(vault.hookTarget) || truncate(vault.hookTarget) }}
         </NuxtLink>
         <button
           type="button"

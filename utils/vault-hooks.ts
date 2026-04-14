@@ -1,4 +1,4 @@
-import { zeroAddress } from 'viem'
+import { getAddress, zeroAddress } from 'viem'
 import type { Vault } from '~/entities/vault'
 
 // EVK hook operation bit constants. Source of truth:
@@ -151,8 +151,14 @@ const ALL_USER_OPS_MASK = VAULT_OPS
   .filter(op => !op.internal)
   .reduce((acc, op) => acc | op.bit, 0n)
 
-export const isHookDisabling = (vault: Vault): boolean =>
-  vault.hookTarget === zeroAddress
+export const isHookDisabling = (vault: Vault): boolean => {
+  try {
+    return getAddress(vault.hookTarget) === zeroAddress
+  }
+  catch {
+    return false
+  }
+}
 
 export const isOpHooked = (vault: Vault, bit: bigint): boolean =>
   (vault.hookedOps & bit) !== 0n

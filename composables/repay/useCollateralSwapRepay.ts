@@ -5,7 +5,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
-import type { Vault } from '~/entities/vault'
+import { isEVKVault, type Vault } from '~/entities/vault'
 import { getAssetUsdValue, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
@@ -231,8 +231,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
         steps.push({ vault: borrowVault.value as Vault, op: OP_REPAY })
       }
     }
-    if (isEffectivelyFullRepay.value && collateralVault.value && 'hookedOps' in collateralVault.value) {
-      steps.push({ vault: collateralVault.value as Vault, op: OP_TRANSFER })
+    if (isEffectivelyFullRepay.value && collateralVault.value && isEVKVault(collateralVault.value)) {
+      steps.push({ vault: collateralVault.value, op: OP_TRANSFER })
     }
     return steps
   })

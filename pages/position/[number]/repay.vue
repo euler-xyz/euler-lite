@@ -221,11 +221,11 @@ const reviewRepayDisabled = computed(() => {
 const activeHookWarning = computed(() => {
   if (formTab.value === 'wallet') {
     return walletSwap.needsSwap.value
-      ? (walletSwap.hookWarning.value ?? null)
-      : (wallet.hookWarning.value ?? null)
+      ? walletSwap.hookWarning.value
+      : wallet.hookWarning.value
   }
-  if (formTab.value === 'savings') return savings.hookWarning.value ?? null
-  return collateral.hookWarning.value ?? null
+  if (formTab.value === 'savings') return savings.hookWarning.value
+  return collateral.hookWarning.value
 })
 
 const onSubmitForm = async () => {
@@ -353,6 +353,15 @@ watch(formTab, () => {
           rounded
           pills
           :list="formTabs"
+        />
+
+        <UiToast
+          v-if="activeHookWarning"
+          :title="activeHookWarning.title"
+          :description="activeHookWarning.message"
+          variant="error"
+          size="compact"
+          class="mb-16"
         />
 
         <template v-if="formTab === 'wallet'">
@@ -564,7 +573,6 @@ watch(formTab, () => {
             </VaultFormInfoBlock>
 
             <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
-              <VaultWarningBanner :warnings="[activeHookWarning]" />
               <VaultFormInfoButton
                 :pair="position"
                 :disabled="isLoading || isSubmitting"
@@ -743,7 +751,6 @@ watch(formTab, () => {
             </VaultFormInfoBlock>
 
             <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
-              <VaultWarningBanner :warnings="[activeHookWarning]" />
               <VaultFormInfoButton
                 :pair="position"
                 :disabled="isLoading || isSubmitting"
@@ -914,7 +921,6 @@ watch(formTab, () => {
             </VaultFormInfoBlock>
 
             <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
-              <VaultWarningBanner :warnings="[activeHookWarning]" />
               <VaultFormInfoButton
                 :pair="position"
                 :disabled="isLoading || isSubmitting"

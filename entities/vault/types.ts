@@ -145,6 +145,11 @@ export const isSecuritizeBorrowPair = (pair: AnyBorrowVaultPair): pair is Securi
   return 'type' in pair.collateral && pair.collateral.type === 'securitize'
 }
 
+// Type guard to narrow a vault union to an EVK Vault (has hookedOps, hookTarget)
+export const isEVKVault = (vault: Vault | SecuritizeVault): vault is Vault => {
+  return !('type' in vault && vault.type === 'securitize')
+}
+
 export interface VaultIteratorResult<T> {
   vaults: T[]
   isFinished: boolean

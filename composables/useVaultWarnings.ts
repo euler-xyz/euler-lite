@@ -2,7 +2,9 @@ import { maxUint256 } from 'viem'
 import { getVaultUtilization, type Vault } from '~/entities/vault'
 import {
   findBlockingDisabledOp,
+  getOpMeta,
   isOpDisabled,
+  isOpHooked,
   OP_BORROW,
   OP_DEPOSIT,
   OP_MINT,
@@ -11,6 +13,7 @@ import {
   OP_REPAY_WITH_SHARES,
   OP_SKIM,
   OP_TRANSFER,
+  OP_VAULT_STATUS_CHECK,
   OP_WITHDRAW,
   type PlannedOp,
 } from '~/utils/vault-hooks'
@@ -185,6 +188,8 @@ const hookDisabledCopy = (op: bigint): { title: string, message: string } | null
       return { title: 'Repayments disabled', message: 'The vault risk manager has disabled repayments. Repayments will fail.' }
     case OP_REPAY_WITH_SHARES:
       return { title: 'Repay with shares disabled', message: 'The vault risk manager has disabled repaying debt with vault shares. Same-asset and savings repay flows will fail.' }
+    // OP_PULL_DEBT, OP_LIQUIDATE, and OP_FLASHLOAN are intentionally omitted:
+    // they are not triggered by any euler-lite user flow.
     default:
       return null
   }
@@ -192,6 +197,11 @@ const hookDisabledCopy = (op: bigint): { title: string, message: string } | null
 
 export const getHookDisabledWarning = (vault: Vault, op: bigint): VaultWarning | null => {
   if (!isOpDisabled(vault, op)) return null
+  // When OP_VAULT_STATUS_CHECK is hooked the entire vault is effectively
+  // paused — show a generic "paused" message instead of op-specific copy.
+  if (isOpHooked(vault, OP_VAULT_STATUS_CHECK)) {
+    return { level: 'critical', title: 'Vault paused', message: 'All operations on this vault are currently disabled because the vault-status check has been paused by the risk manager.' }
+  }
   const copy = hookDisabledCopy(op) ?? { title: 'Operation disabled', message: 'This operation is currently disabled on the vault.' }
   return { level: 'critical', ...copy }
 }
@@ -200,4 +210,16 @@ export const getPlanHookDisabledWarning = (steps: readonly PlannedOp[]): VaultWa
   const blocking = findBlockingDisabledOp(steps)
   if (!blocking) return null
   return getHookDisabledWarning(blocking.vault, blocking.op)
+}
+
+export const getStrategyHookWarning = (strategyVault: Vault): VaultWarning | null => {
+  const bits = [OP_DEPOSIT, OP_MINT, OP_WITHDRAW, OP_REDEEM, OP_SKIM].filter(bit => isOpDisabled(strategyVault, bit))
+  if (bits.length === 0) return null
+  const names = bits.map(bit => getOpMeta(bit)?.name).filter(Boolean) as string[]
+  const verb = names.length === 1 ? 'is' : 'are'
+  return {
+    level: 'critical',
+    title: 'Strategy operations disabled',
+    message: `${names.join(', ')} ${verb} disabled on this strategy. The Earn vault may be unable to deposit into or withdraw from it, which can affect allocation and exits.`,
+  }
 }
