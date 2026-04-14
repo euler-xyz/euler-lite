@@ -1,7 +1,7 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 
 export default defineNuxtConfig({
-  modules: ['@nuxtjs/tailwindcss', '@nuxt/eslint', '@gvade/nuxt3-svg-sprite', '@vueuse/nuxt'],
+  modules: ['@nuxtjs/tailwindcss', '@nuxt/eslint', '@gvade/nuxt3-svg-sprite', '@vueuse/nuxt', '@sentry/nuxt/module'],
   ssr: false,
 
   components: [
@@ -140,12 +140,13 @@ export default defineNuxtConfig({
       eulerApiUrl: '',
       swapApiUrl: '',
       priceApiUrl: '',
+      sentryDsn: '', // set via NUXT_PUBLIC_SENTRY_DSN
     },
   },
 
   sourcemap: {
     server: false,
-    client: false,
+    client: process.env.SENTRY_AUTH_TOKEN ? 'hidden' : false,
   },
 
   devServer: {
@@ -174,6 +175,19 @@ export default defineNuxtConfig({
 
   telemetry: false,
   eslint: { config: { stylistic: true } },
+
+  ...(process.env.SENTRY_AUTH_TOKEN
+    ? {
+        sentry: {
+          sourceMapsUploadOptions: {
+            org: 'euler',
+            project: 'euler-lite',
+            authToken: process.env.SENTRY_AUTH_TOKEN,
+            filesToDeleteAfterUpload: ['**/*.map'],
+          },
+        },
+      }
+    : {}),
 
   svgSprite: {
     elementClass: 'icon',

@@ -18,8 +18,8 @@ export interface CollateralExposurePair {
  * Resolves a collateral vault by address. Returns `undefined` when the
  * collateral is unknown (not yet loaded in the vault registry).
  */
-export type CollateralVaultResolver =
-  (address: string) => Vault | SecuritizeVault | undefined
+export type CollateralVaultResolver
+  = (address: string) => Vault | SecuritizeVault | undefined
 
 /**
  * Internal predicate: is this collateral/LTV combination "live" — i.e. does it
