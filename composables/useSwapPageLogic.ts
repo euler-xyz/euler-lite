@@ -58,6 +58,10 @@ export interface UseSwapPageLogicOptions {
   computePriceImpact?: (quote: SwapApiQuote) => Promise<number | null>
   /** Modal type when from/to share the same underlying asset. Default 'transfer'; borrow uses 'swap'. */
   sameAssetModalType?: 'transfer' | 'swap'
+  /** Include CowSwap provider in swap quotes (Ethereum mainnet only) */
+  includeCowSwap?: boolean
+  /** Transform individual quotes (e.g. vault shares → underlying conversion) */
+  transformQuote?: (quote: SwapApiQuote, provider: string) => SwapApiQuote
 }
 
 export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
@@ -117,7 +121,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     reset: resetQuoteStateInternal,
     requestQuotes,
     selectProvider,
-  } = useSwapQuotesParallel({ amountField, compare })
+  } = useSwapQuotesParallel({ amountField, compare, includeCowSwap: options.includeCowSwap, transformQuote: options.transformQuote })
 
   // ── Vault products & price invert ──────────────────────────────────────
   const fromProduct = useEulerProductOfVault(computed(() => fromVault.value?.address || ''))

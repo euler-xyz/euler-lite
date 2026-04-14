@@ -1,4 +1,5 @@
 import type { Ref } from 'vue'
+import type { SwapApiQuote } from '~/entities/swap'
 import { SwapperMode } from '~/entities/swap'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 
@@ -6,11 +7,15 @@ import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
  * Wraps two useSwapQuotesParallel instances (exact-in + target-debt) and provides
  * direction-aware computed properties. Used by both collateral-swap and savings tabs.
  */
-export const useSwapRepayQuotes = (options: { direction: Ref<SwapperMode> }) => {
-  const { direction } = options
+export const useSwapRepayQuotes = (options: {
+  direction: Ref<SwapperMode>
+  includeCowSwap?: boolean
+  transformQuote?: (quote: SwapApiQuote, provider: string) => SwapApiQuote
+}) => {
+  const { direction, includeCowSwap, transformQuote } = options
 
-  const exactInQuotes = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
-  const targetDebtQuotes = useSwapQuotesParallel({ amountField: 'amountIn', compare: 'min' })
+  const exactInQuotes = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max', includeCowSwap, transformQuote })
+  const targetDebtQuotes = useSwapQuotesParallel({ amountField: 'amountIn', compare: 'min', includeCowSwap, transformQuote })
 
   const isExactIn = computed(() => direction.value === SwapperMode.EXACT_IN)
 
