@@ -4,6 +4,7 @@ import {
   findBlockingDisabledOp,
   getOpMeta,
   isOpDisabled,
+  isOpHooked,
   OP_BORROW,
   OP_DEPOSIT,
   OP_MINT,
@@ -12,6 +13,7 @@ import {
   OP_REPAY_WITH_SHARES,
   OP_SKIM,
   OP_TRANSFER,
+  OP_VAULT_STATUS_CHECK,
   OP_WITHDRAW,
   type PlannedOp,
 } from '~/utils/vault-hooks'
@@ -191,6 +193,11 @@ const hookDisabledCopy = (op: bigint): { title: string, message: string } | null
 
 export const getHookDisabledWarning = (vault: Vault, op: bigint): VaultWarning | null => {
   if (!isOpDisabled(vault, op)) return null
+  // When OP_VAULT_STATUS_CHECK is hooked the entire vault is effectively
+  // paused — show a generic "paused" message instead of op-specific copy.
+  if (isOpHooked(vault, OP_VAULT_STATUS_CHECK)) {
+    return { level: 'critical', title: 'Vault paused', message: 'All operations on this vault are currently disabled because the vault-status check has been paused by the risk manager.' }
+  }
   const copy = hookDisabledCopy(op) ?? { title: 'Operation disabled', message: 'This operation is currently disabled on the vault.' }
   return { level: 'critical', ...copy }
 }
@@ -204,7 +211,7 @@ export const getPlanHookDisabledWarning = (steps: readonly PlannedOp[]): VaultWa
 export const getStrategyHookWarning = (strategyVault: Vault): VaultWarning | null => {
   const bits = [OP_DEPOSIT, OP_MINT, OP_WITHDRAW, OP_REDEEM, OP_SKIM].filter(bit => isOpDisabled(strategyVault, bit))
   if (bits.length === 0) return null
-  const names = bits.map(bit => getOpMeta(bit)?.name ?? '')
+  const names = bits.map(bit => getOpMeta(bit)?.name).filter(Boolean) as string[]
   const verb = names.length === 1 ? 'is' : 'are'
   return {
     level: 'critical',

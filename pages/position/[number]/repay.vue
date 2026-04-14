@@ -355,6 +355,15 @@ watch(formTab, () => {
           :list="formTabs"
         />
 
+        <UiToast
+          v-if="activeHookWarning"
+          :title="activeHookWarning.title"
+          :description="activeHookWarning.message"
+          variant="error"
+          size="compact"
+          class="mb-16"
+        />
+
         <template v-if="formTab === 'wallet'">
           <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
             <div class="flex flex-col gap-16 w-full">
@@ -564,13 +573,6 @@ watch(formTab, () => {
             </VaultFormInfoBlock>
 
             <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
-              <UiToast
-                v-if="activeHookWarning"
-                :title="activeHookWarning.title"
-                :description="activeHookWarning.message"
-                variant="error"
-                size="compact"
-              />
               <VaultFormInfoButton
                 :pair="position"
                 :disabled="isLoading || isSubmitting"
@@ -749,13 +751,6 @@ watch(formTab, () => {
             </VaultFormInfoBlock>
 
             <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
-              <UiToast
-                v-if="activeHookWarning"
-                :title="activeHookWarning.title"
-                :description="activeHookWarning.message"
-                variant="error"
-                size="compact"
-              />
               <VaultFormInfoButton
                 :pair="position"
                 :disabled="isLoading || isSubmitting"
@@ -926,13 +921,6 @@ watch(formTab, () => {
             </VaultFormInfoBlock>
 
             <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
-              <UiToast
-                v-if="activeHookWarning"
-                :title="activeHookWarning.title"
-                :description="activeHookWarning.message"
-                variant="error"
-                size="compact"
-              />
               <VaultFormInfoButton
                 :pair="position"
                 :disabled="isLoading || isSubmitting"

@@ -56,8 +56,9 @@ const activeBorrowList = computed(() =>
     if (isVaultNotExplorableBorrow(pair.collateral.address)) return false
     if (isOpDisabled(pair.borrow, OP_BORROW)) return false
     // Securitize collateral has no hookedOps — only check EVK collateral.
-    // Exclude if OP_DEPOSIT (fresh) or OP_TRANSFER (savings-sourced) is disabled.
-    if (!isSecuritizeBorrowPair(pair) && (isOpDisabled(pair.collateral, OP_DEPOSIT) || isOpDisabled(pair.collateral, OP_TRANSFER))) return false
+    // Fresh-deposit needs OP_DEPOSIT, savings-sourced needs OP_TRANSFER.
+    // Hide only when BOTH paths are blocked; the form guards the active path.
+    if (!isSecuritizeBorrowPair(pair) && isOpDisabled(pair.collateral, OP_DEPOSIT) && isOpDisabled(pair.collateral, OP_TRANSFER)) return false
     return true
   }),
 )
