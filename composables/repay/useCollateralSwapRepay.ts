@@ -19,7 +19,7 @@ import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createRaceGuard } from '~/utils/race-guard'
-import { findBlockingDisabledOp, OP_REPAY, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
+import { findBlockingDisabledOp, OP_REPAY, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 
 interface UseCollateralSwapRepayOptions {
@@ -206,12 +206,32 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     return health.nextHealth.value < 1
   })
 
-  // Collateral-swap repay: withdraw from source vault, swap, then repay the
-  // liability. Same-asset path skips the swap but still withdraws + repays.
+  // Collateral-swap repay. Same-asset path: source.WITHDRAW + liability.SKIM
+  // + liability.REPAY_WITH_SHARES. Cross-asset path: source.WITHDRAW + swap +
+  // liability.REPAY (done by swapper). Full repay: + collateral.TRANSFER.
+  const isEffectivelyFullRepay = computed(() => {
+    if (!position.value || (position.value.borrowed ?? 0n) <= 0n) return false
+    const repaid = core.debtRepaid.value
+    return repaid !== null && repaid >= (position.value.borrowed ?? 0n)
+  })
+
   const collateralSwapRepayPlannedOps = computed<PlannedOp[]>(() => {
     const steps: PlannedOp[] = []
     if (sourceVault.value) steps.push({ vault: sourceVault.value as Vault, op: OP_WITHDRAW })
-    if (borrowVault.value) steps.push({ vault: borrowVault.value as Vault, op: OP_REPAY })
+    if (borrowVault.value) {
+      if (core.isSameAsset.value) {
+        // Same-asset: withdraw → skim → repayWithShares
+        steps.push({ vault: borrowVault.value as Vault, op: OP_SKIM })
+        steps.push({ vault: borrowVault.value as Vault, op: OP_REPAY_WITH_SHARES })
+      }
+      else {
+        // Cross-asset: swapper internally calls repay
+        steps.push({ vault: borrowVault.value as Vault, op: OP_REPAY })
+      }
+    }
+    if (isEffectivelyFullRepay.value && collateralVault.value && 'hookedOps' in collateralVault.value) {
+      steps.push({ vault: collateralVault.value as Vault, op: OP_TRANSFER })
+    }
     return steps
   })
 

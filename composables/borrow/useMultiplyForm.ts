@@ -560,10 +560,17 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       })
     }
     if (multiplyShortVault.value) steps.push({ vault: multiplyShortVault.value, op: OP_BORROW })
-    const isSameAsset = multiplyLongVault.value && multiplyShortVault.value
-      && normalizeAddress(multiplyLongVault.value.asset.address) === normalizeAddress(multiplyShortVault.value.asset.address)
-    if (multiplyLongVault.value && multiplySelectedQuote.value && !isSameAsset) {
-      steps.push({ vault: multiplyLongVault.value, op: OP_SKIM })
+    const isSameVault = multiplySupplyVault.value && multiplyLongVault.value
+      && normalizeAddress(multiplySupplyVault.value.address) === normalizeAddress(multiplyLongVault.value.address)
+    if (multiplyLongVault.value && !isSameVault) {
+      if (multiplySelectedQuote.value) {
+        // Cross-asset: verifyAmountMinAndSkim calls skim() on the long vault
+        steps.push({ vault: multiplyLongVault.value, op: OP_SKIM })
+      }
+      else if (multiplyDebtAmountNano.value > 0n) {
+        // Same-asset without swap: borrowed assets deposited directly
+        steps.push({ vault: multiplyLongVault.value, op: OP_DEPOSIT })
+      }
     }
     return steps
   })
