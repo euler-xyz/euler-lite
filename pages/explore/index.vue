@@ -264,8 +264,7 @@ const sortedMarkets = computed(() => {
 
 const isLoading = computed(() =>
   isEVKUpdating.value || isEarnUpdating.value || isSecuritizeUpdating.value || isEscrowUpdating.value
-  || (isResolvingTVL.value && marketGroups.value.length === 0)
-  || marketGroups.value.length === 0,
+  || isResolvingTVL.value,
 )
 const { isSlow } = useSlowLoading(isLoading)
 </script>

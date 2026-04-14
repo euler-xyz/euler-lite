@@ -13,7 +13,7 @@ const { isEVKUpdating, isEarnUpdating, isSecuritizeUpdating, isEscrowUpdating } 
 
 const isLoading = computed(() =>
   isEVKUpdating.value || isEarnUpdating.value || isSecuritizeUpdating.value || isEscrowUpdating.value
-  || isResolvingTVL.value || marketGroups.value.length === 0,
+  || isResolvingTVL.value,
 )
 
 const market = computed(() =>
