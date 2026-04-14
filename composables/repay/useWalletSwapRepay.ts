@@ -70,6 +70,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const { isConnected, address } = useAccount()
   const { fetchSingleBalance } = useWallets()
   const { slippage } = useSlippage()
+  const { getVault: registryGetVault } = useVaultRegistry()
 
   // --- State ---
   const selectedAsset = ref<VaultAsset | undefined>()
@@ -211,8 +212,12 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const walletSwapRepayPlannedOps = computed<PlannedOp[]>(() => {
     const steps: PlannedOp[] = []
     if (borrowVault.value) steps.push({ vault: borrowVault.value, op: OP_REPAY })
-    if (isFullRepay.value && collateralVault.value) {
-      steps.push({ vault: collateralVault.value as Vault, op: OP_TRANSFER })
+    if (isFullRepay.value) {
+      const collAddrs = position.value?.collaterals ?? (collateralVault.value ? [collateralVault.value.address] : [])
+      for (const addr of collAddrs) {
+        const v = registryGetVault(addr) as Vault | undefined
+        if (v) steps.push({ vault: v, op: OP_TRANSFER })
+      }
     }
     return steps
   })

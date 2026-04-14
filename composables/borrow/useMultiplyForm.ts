@@ -560,9 +560,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       })
     }
     if (multiplyShortVault.value) steps.push({ vault: multiplyShortVault.value, op: OP_BORROW })
-    const isSameVault = multiplySupplyVault.value && multiplyLongVault.value
-      && normalizeAddress(multiplySupplyVault.value.address) === normalizeAddress(multiplyLongVault.value.address)
-    if (multiplyLongVault.value && !isSameVault) {
+    if (multiplyLongVault.value) {
       if (multiplySelectedQuote.value) {
         // Cross-asset: verifyAmountMinAndSkim calls skim() on the long vault
         steps.push({ vault: multiplyLongVault.value, op: OP_SKIM })
