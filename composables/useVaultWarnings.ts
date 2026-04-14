@@ -213,7 +213,7 @@ export const getPlanHookDisabledWarning = (steps: readonly PlannedOp[]): VaultWa
 }
 
 export const getStrategyHookWarning = (strategyVault: Vault): VaultWarning | null => {
-  const bits = [OP_DEPOSIT, OP_MINT, OP_WITHDRAW, OP_REDEEM, OP_SKIM].filter(bit => isOpDisabled(strategyVault, bit))
+  const bits = [OP_DEPOSIT, OP_MINT, OP_WITHDRAW, OP_REDEEM].filter(bit => isOpDisabled(strategyVault, bit))
   if (bits.length === 0) return null
   const names = bits.map(bit => getOpMeta(bit)?.name).filter(Boolean) as string[]
   const verb = names.length === 1 ? 'is' : 'are'
