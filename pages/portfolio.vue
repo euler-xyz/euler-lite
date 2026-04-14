@@ -63,10 +63,8 @@ const updatePositions = async () => {
 }
 
 watch(tabsModel, checkTab, { immediate: true })
-const isActive = ref(false)
 
 onActivated(async () => {
-  isActive.value = true
   checkTab()
   await updateBalances()
   updatePositions()
@@ -74,7 +72,6 @@ onActivated(async () => {
   interval.value = setInterval(updatePositions, POLL_INTERVAL_30S_MS)
 })
 onDeactivated(() => {
-  isActive.value = false
   if (interval.value) {
     clearInterval(interval.value)
     interval.value = null
@@ -82,9 +79,7 @@ onDeactivated(() => {
 })
 
 watch(portfolioRefreshCounter, () => {
-  if (isActive.value) {
-    updatePositions()
-  }
+  updatePositions()
 })
 </script>
 

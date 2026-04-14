@@ -66,9 +66,10 @@ export const ETH_ADDRESS: Address = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
 // ERC-20 allowance slot candidates checked during simulation state-override probing.
 // Sequential range (0..ALLOWANCE_MAX_SEQUENTIAL_SLOT) covers standard ERC-20 layouts
 // and OZ Upgradeable tokens where inherited contracts shift the base slot index.
-// ALLOWANCE_EXTRA_SLOT_CANDIDATES holds non-sequential slots (e.g. ERC-7201 namespaced
-// storage for OpenZeppelin 5.x). Add entries there for any exotic token layouts.
-export const ALLOWANCE_MAX_SEQUENTIAL_SLOT = 500
+// Tokens using unstructured/namespaced storage (ERC-7201) won't be found by sequential
+// probing — simulation falls back to the non-blocking error path for those.
+// ALLOWANCE_EXTRA_SLOT_CANDIDATES holds non-sequential slots for known exotic layouts.
+export const ALLOWANCE_MAX_SEQUENTIAL_SLOT = 20
 export const ALLOWANCE_EXTRA_SLOT_CANDIDATES: bigint[] = []
 export const PERMIT2_SIG_WINDOW = 60n * 60n
 
