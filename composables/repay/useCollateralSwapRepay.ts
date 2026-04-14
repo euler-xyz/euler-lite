@@ -2,10 +2,13 @@ import type { Ref, ComputedRef } from 'vue'
 import { useAccount } from '@wagmi/vue'
 import { zeroAddress, type Address, type Abi } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
+import type { DisplayStep } from '~/utils/stepDecoding'
 import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal } from '#components'
+import { OperationReviewModal, CowSwapReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
 import { isEVKVault, type Vault } from '~/entities/vault'
+import { COWSWAP_PROVIDER_NAME, COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapClosePositionExecuteParams, getCowSwapChainConfig } from '~/entities/cowswap'
+import { useCowSwapClosePositionExecution, useCowSwapOrderStatus } from '~/composables/cowswap'
 import { getAssetUsdValue, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
@@ -115,11 +118,25 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     slippage,
     clearSimulationError,
     getCurrentDebt,
+    includeCowSwap: true,
     getQuoteAccounts: () => {
       const subAccount = (position.value?.subAccount || address.value || zeroAddress) as Address
       return { accountIn: subAccount, accountOut: subAccount }
     },
   })
+
+  // --- CowSwap close position ---
+  const { chainId: currentChainId } = useEulerAddresses()
+  const cowModal = useModal()
+  const cowSwapExecution = useCowSwapClosePositionExecution()
+  const cowSwapOrderbookUrl = computed(() => getCowSwapChainConfig(currentChainId.value ?? 0)?.orderbookUrl)
+  const cowSwapOrderStatus = useCowSwapOrderStatus(
+    computed(() => cowSwapExecution.orderUid.value),
+    cowSwapOrderbookUrl,
+  )
+  const isCowSwapProvider = computed(() =>
+    core.quotes.selectedProvider.value?.toLowerCase() === COWSWAP_PROVIDER_NAME,
+  )
 
   // --- Swap details ---
   const details = useRepaySwapDetails({
@@ -387,9 +404,117 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     })
   }
 
+  const submitCowSwapClosePosition = () => {
+    if (!position.value || !borrowVault.value || !sourceVault.value || !core.quotes.selectedQuote.value) return
+
+    cowSwapExecution.reset()
+
+    const chainId = currentChainId.value ?? 0
+    const chainConfig = getCowSwapChainConfig(chainId)
+    if (!chainConfig) return
+
+    const validTo = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
+    const currentDebt = getCurrentDebt()
+    const swapMode = core.direction.value
+
+    let targetDebt = 0n
+    if (swapMode === SwapperMode.TARGET_DEBT && core.debtAmount.value) {
+      const debtAmountNano = valueToNano(core.debtAmount.value, borrowVault.value.asset.decimals)
+      targetDebt = debtAmountNano >= currentDebt ? 0n : currentDebt - debtAmountNano
+    }
+
+    const isFullRepay = targetDebt === 0n && swapMode === SwapperMode.TARGET_DEBT
+    const sellAmount = BigInt(core.quotes.selectedQuote.value.amountIn)
+    const buyAmount = isFullRepay
+      ? currentDebt + (currentDebt / 1000n) // +0.1% buffer for interest
+      : BigInt(core.quotes.selectedQuote.value.amountOutMin || core.quotes.selectedQuote.value.amountOut || '1')
+
+    const cowParams: CowSwapClosePositionExecuteParams = {
+      chainId,
+      sellToken: sourceVault.value.address as Address,
+      buyToken: borrowVault.value.asset.address as Address,
+      sellAmount,
+      buyAmount,
+      validTo,
+      orderKind: isFullRepay ? 'buy' : 'sell',
+      wrapper: {
+        owner: (address.value || zeroAddress) as Address,
+        account: position.value.subAccount as Address,
+        deadline: validTo,
+        borrowVault: borrowVault.value.address as Address,
+        collateralVault: sourceVault.value.address as Address,
+        collateralAmount: sellAmount,
+      },
+    }
+
+    const sourceAsset = sourceVault.value.asset
+    const borrowAsset = borrowVault.value.asset
+
+    const signSteps: DisplayStep[] = []
+    let idx = 1
+    signSteps.push({ index: idx++, label: 'Sign EVC permit', isSeparateTx: false })
+    signSteps.push({ index: idx++, label: 'Sign CoW order', isSeparateTx: false })
+
+    let wIdx = 1
+    const wrapperSteps: DisplayStep[] = [
+      { index: wIdx++, label: 'Transfer collateral to Inbox', isSeparateTx: false, assetInfo: { symbol: sourceVault.value.symbol || sourceAsset.symbol, amount: core.amount.value } },
+      { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: sourceAsset.symbol, amount: core.amount.value }, toAssetInfo: { symbol: borrowAsset.symbol, amount: core.debtAmount.value || '?' } },
+      { index: wIdx++, label: 'Repay debt', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol } },
+    ]
+
+    const walletWarningsDescription
+      = 'The CoW order operates on vault shares. The amounts shown above are in underlying assets. '
+      + 'The CoW order receiver is a temporary Inbox contract — your wallet will flag this as an unfamiliar address. '
+      + 'The Inbox holds funds only during settlement and returns them to your position.'
+
+    cowModal.open(CowSwapReviewModal, {
+      props: {
+        signSteps,
+        wrapperSteps,
+        walletWarningsDescription,
+        executionStatus: cowSwapExecution.status,
+        executionError: cowSwapExecution.error,
+        explorerUrl: cowSwapExecution.explorerUrl,
+        orderStatus: cowSwapOrderStatus.orderStatus,
+        locallyCancelled: cowSwapExecution.locallyCancelled,
+        onConfirm: async () => {
+          try {
+            await cowSwapExecution.executeAsync(cowParams)
+          }
+          catch (e) {
+            logWarn('collateralSwapRepay/cowswap/execute', e)
+          }
+        },
+        onCancel: async () => {
+          try {
+            await cowSwapExecution.cancelOrder()
+          }
+          catch (e) {
+            logWarn('collateralSwapRepay/cowswap/cancel', e)
+          }
+        },
+      },
+    })
+  }
+
+  // Watch for CowSwap order completion
+  watch(() => cowSwapOrderStatus.orderStatus.value, (status) => {
+    if (!status?.terminal) return
+    if (status.type === 'traded' || status.type === 'fulfilled') {
+      refreshAllPositions(eulerLensAddresses.value, address.value as string)
+      setTimeout(() => router.replace('/portfolio'), 400)
+    }
+  })
+
   const submit = async () => {
     if (isPreparing.value || isSubmitting.value || !position.value || !borrowVault.value || !sourceVault.value) return
     if (!core.isSameAsset.value && !core.quotes.selectedQuote.value) return
+
+    // CowSwap path: skip plan building and simulation
+    if (isCowSwapProvider.value) {
+      submitCowSwapClosePosition()
+      return
+    }
 
     isPreparing.value = true
     try {
