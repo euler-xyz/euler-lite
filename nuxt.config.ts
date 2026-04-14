@@ -140,7 +140,7 @@ export default defineNuxtConfig({
       eulerApiUrl: '',
       swapApiUrl: '',
       priceApiUrl: '',
-      sentryDsn: '',
+      sentryDsn: '', // set via NUXT_PUBLIC_SENTRY_DSN
     },
   },
 
