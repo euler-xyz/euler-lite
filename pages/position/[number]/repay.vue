@@ -564,13 +564,7 @@ watch(formTab, () => {
             </VaultFormInfoBlock>
 
             <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
-              <UiToast
-                v-if="activeHookWarning"
-                :title="activeHookWarning.title"
-                :description="activeHookWarning.message"
-                variant="error"
-                size="compact"
-              />
+              <VaultWarningBanner :warnings="[activeHookWarning]" />
               <VaultFormInfoButton
                 :pair="position"
                 :disabled="isLoading || isSubmitting"
@@ -749,13 +743,7 @@ watch(formTab, () => {
             </VaultFormInfoBlock>
 
             <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
-              <UiToast
-                v-if="activeHookWarning"
-                :title="activeHookWarning.title"
-                :description="activeHookWarning.message"
-                variant="error"
-                size="compact"
-              />
+              <VaultWarningBanner :warnings="[activeHookWarning]" />
               <VaultFormInfoButton
                 :pair="position"
                 :disabled="isLoading || isSubmitting"
@@ -926,13 +914,7 @@ watch(formTab, () => {
             </VaultFormInfoBlock>
 
             <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
-              <UiToast
-                v-if="activeHookWarning"
-                :title="activeHookWarning.title"
-                :description="activeHookWarning.message"
-                variant="error"
-                size="compact"
-              />
+              <VaultWarningBanner :warnings="[activeHookWarning]" />
               <VaultFormInfoButton
                 :pair="position"
                 :disabled="isLoading || isSubmitting"

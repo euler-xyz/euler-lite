@@ -209,6 +209,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   // Collateral-swap repay. Same-asset path: source.WITHDRAW + liability.SKIM
   // + liability.REPAY_WITH_SHARES. Cross-asset path: source.WITHDRAW + swap +
   // liability.REPAY (done by swapper). Full repay: + collateral.TRANSFER.
+  // Heuristic: for cross-asset paths, core.debtRepaid uses the quote's
+  // amountOut (pre-slippage). See useSavingsRepay for the precision note.
   const isEffectivelyFullRepay = computed(() => {
     if (!position.value || (position.value.borrowed ?? 0n) <= 0n) return false
     const repaid = core.debtRepaid.value

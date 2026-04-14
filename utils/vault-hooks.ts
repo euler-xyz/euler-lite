@@ -206,8 +206,8 @@ export const getOpMeta = (bit: bigint): VaultOpMeta | undefined =>
 //   buildSupplyPlan              [{ target, OP_DEPOSIT }]
 //   buildWithdrawPlan            [{ target, OP_WITHDRAW }]
 //   buildRedeemPlan              [{ target, OP_REDEEM }]
-//   buildBorrowPlan (fresh)      [{ coll, OP_DEPOSIT }, { coll, OP_TRANSFER }, { liab, OP_BORROW }]
-//   buildBorrowPlan (shares)     [{ coll, OP_TRANSFER }, { liab, OP_BORROW }]
+//   buildBorrowPlan (fresh)      [{ coll, OP_DEPOSIT }, { liab, OP_BORROW }]  (deposit goes directly to sub-account via recipient param)
+//   buildBorrowBySavingPlan      [{ coll, OP_TRANSFER }, { liab, OP_BORROW }]
 //   buildRepayPlan               [{ liab, OP_REPAY }]
 //   buildFullRepayPlan           [{ liab, OP_REPAY }, { coll, OP_TRANSFER }]
 //   buildSameAsset*Repay         [{ savings, OP_WITHDRAW }, { liab, OP_SKIM }, { liab, OP_REPAY_WITH_SHARES }]
@@ -220,7 +220,6 @@ export const getOpMeta = (bit: bigint): VaultOpMeta | undefined =>
 //   buildWithdraw/RedeemAndSwap  [{ src, OP_WITHDRAW|OP_REDEEM }]
 //   buildSwapAndBorrowPlan       [{ liab, OP_BORROW }]
 //   buildSwapAndRepayPlan        [{ liab, OP_REPAY }]
-//   buildBorrowBySavingPlan      [{ savings, OP_TRANSFER }, { liab, OP_BORROW }]
 export interface PlannedOp {
   vault: Vault
   op: bigint

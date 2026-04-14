@@ -161,6 +161,10 @@ export const getIsBorrowCapReached = (vault: Vault): boolean => {
   return percentage >= 100
 }
 
+// Copy for every user-facing op. Some ops (OP_MINT, OP_REDEEM, OP_TRANSFER,
+// OP_SKIM, OP_REPAY_WITH_SHARES) aren't checked as primary form-level ops
+// today but are included here so that getPlanHookDisabledWarning can surface
+// them when they appear as secondary steps in multi-step PlannedOp lists.
 const hookDisabledCopy = (op: bigint): { title: string, message: string } | null => {
   switch (op) {
     case OP_DEPOSIT:

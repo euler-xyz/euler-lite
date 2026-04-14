@@ -151,6 +151,12 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   // Savings repay: savings.WITHDRAW + liability.SKIM + liability.REPAY_WITH_SHARES.
   // Full repay additionally sweeps collateral + savings shares back via
   // transferFromMax (OP_TRANSFER on collateral and savings vaults).
+  // Heuristic: for cross-asset paths, core.debtRepaid uses the quote's
+  // amountOut (pre-slippage). At the exact debt boundary, the on-chain
+  // execution may land on either side. Over-estimating triggers the
+  // OP_TRANSFER check for a partial repay (harmless — the warning is
+  // accurate since a full close would also need OP_TRANSFER). Under-
+  // estimating omits the check for a true full repay — extremely narrow.
   const isEffectivelyFullRepay = computed(() => {
     if (!position.value || (position.value.borrowed ?? 0n) <= 0n) return false
     const repaid = core.debtRepaid.value

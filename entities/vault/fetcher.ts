@@ -1,4 +1,4 @@
-import { zeroAddress, type Address } from 'viem'
+import { getAddress, zeroAddress, type Address } from 'viem'
 import type {
   Vault,
   SecuritizeVault,
@@ -83,7 +83,7 @@ export const processRawVaultData = (
     unitOfAccountSymbol: raw.unitOfAccountSymbol,
     unitOfAccountDecimals: raw.unitOfAccountDecimals,
     interestRateModelAddress: raw.interestRateModel,
-    hookTarget: raw.hookTarget,
+    hookTarget: getAddress(raw.hookTarget),
     hookedOps: raw.hookedOperations ?? 0n,
     irmInfo: raw.irmInfo
       ? {
