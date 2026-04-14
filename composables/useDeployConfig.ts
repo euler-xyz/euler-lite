@@ -30,14 +30,6 @@ export const useDeployConfig = () => {
     labelsRepo: rc.configLabelsRepo || 'euler-xyz/euler-labels',
     labelsRepoBranch: rc.configLabelsRepoBranch || 'master',
     labelsBaseUrl,
-    isCustomLabelsRepo: computed(() => {
-      if (labelsBaseUrl) {
-        return !labelsBaseUrl.includes('master')
-      }
-      const repo = rc.configLabelsRepo || 'euler-xyz/euler-labels'
-      const branch = rc.configLabelsRepoBranch || 'master'
-      return repo !== 'euler-xyz/euler-labels' || branch !== 'master'
-    }),
 
     // Feature flags: all enabled by default, set env var to 'false' to disable
     enableTosSignature: !!rc.configTosMdUrl,
