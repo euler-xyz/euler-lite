@@ -694,6 +694,10 @@ export const useVaults = () => {
   const isEarnVaultOwnerVerified = (earnVault: EarnVault): boolean => {
     const { entities } = useEulerLabels()
 
+    if (!earnVault.verified) {
+      return false
+    }
+
     const product = getProductByVault(earnVault.address)
     if (!product.name) {
       return true
