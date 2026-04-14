@@ -221,11 +221,11 @@ const reviewRepayDisabled = computed(() => {
 const activeHookWarning = computed(() => {
   if (formTab.value === 'wallet') {
     return walletSwap.needsSwap.value
-      ? (walletSwap.hookWarning.value ?? null)
-      : (wallet.hookWarning.value ?? null)
+      ? walletSwap.hookWarning.value
+      : wallet.hookWarning.value
   }
-  if (formTab.value === 'savings') return savings.hookWarning.value ?? null
-  return collateral.hookWarning.value ?? null
+  if (formTab.value === 'savings') return savings.hookWarning.value
+  return collateral.hookWarning.value
 })
 
 const onSubmitForm = async () => {

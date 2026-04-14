@@ -406,14 +406,14 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const collateralOp = computed(() => options.mode === 'supply' ? OP_DEPOSIT : OP_WITHDRAW)
 
   const hookWarning = computed(() => {
-    // Securitize collateral doesn't implement hooks.
-    if (!collateralVault.value || !('hookedOps' in collateralVault.value)) return null
+    // Securitize collateral doesn't implement hooks — hookedOps will be nullish.
+    if (!collateralVault.value || (collateralVault.value as Vault).hookedOps == null) return null
     return getHookDisabledWarning(collateralVault.value as Vault, collateralOp.value)
   })
 
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
-    if (collateralVault.value && 'hookedOps' in collateralVault.value && isOpDisabled(collateralVault.value as Vault, collateralOp.value)) return true
+    if (collateralVault.value && (collateralVault.value as Vault).hookedOps != null && isOpDisabled(collateralVault.value as Vault, collateralOp.value)) return true
     if (options.effectiveBalance.value < valueToNano(amount.value, asset.value?.decimals)) return true
     if (isLoading.value || !(+amount.value) || !!estimatesError.value || isEstimatesLoading.value) return true
     if (options.needsSwap.value && !swapSelectedQuote.value) return true

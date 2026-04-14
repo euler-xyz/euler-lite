@@ -9,15 +9,7 @@ import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/stri
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
-import type { VaultWarning } from '~/composables/useVaultWarnings'
-import {
-  getOpMeta,
-  isOpDisabled,
-  OP_DEPOSIT,
-  OP_MINT,
-  OP_REDEEM,
-  OP_WITHDRAW,
-} from '~/utils/vault-hooks'
+import { getStrategyHookWarning } from '~/composables/useVaultWarnings'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
@@ -158,18 +150,6 @@ const getExposureUsdPrice = (exposure: typeof exposureList.value[0]) => {
 
 const getExposureAssetAmount = (exposure: typeof exposureList.value[0]) => {
   return `${roundAndCompactTokens(exposure.allocatedAssets, exposure.info.assetDecimals)} ${exposure.info.assetSymbol}`
-}
-
-const getStrategyHookWarning = (strategyVault: Vault): VaultWarning | null => {
-  const bits = [OP_DEPOSIT, OP_MINT, OP_WITHDRAW, OP_REDEEM].filter(bit => isOpDisabled(strategyVault, bit))
-  if (bits.length === 0) return null
-  const names = bits.map(bit => getOpMeta(bit)?.name ?? '')
-  const verb = names.length === 1 ? 'is' : 'are'
-  return {
-    level: 'high',
-    title: 'Strategy operations disabled',
-    message: `${names.join(', ')} ${verb} disabled on this strategy. The Earn vault may be unable to deposit into or withdraw from it, which can affect allocation and exits.`,
-  }
 }
 
 load()

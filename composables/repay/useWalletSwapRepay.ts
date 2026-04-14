@@ -207,7 +207,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
   const hookWarning = computed(() => {
     if (!borrowVault.value) return null
-    return getHookDisabledWarning(borrowVault.value as Vault, OP_REPAY)
+    return getHookDisabledWarning(borrowVault.value, OP_REPAY)
   })
 
   const disabledReason = computed(() => {
@@ -219,7 +219,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
-    if (borrowVault.value && isOpDisabled(borrowVault.value as Vault, OP_REPAY)) return true
+    if (borrowVault.value && isOpDisabled(borrowVault.value, OP_REPAY)) return true
     if (direction.value === SwapperMode.EXACT_IN && !(+amount.value)) return true
     if (direction.value === SwapperMode.TARGET_DEBT && !(+debtAmount.value)) return true
     if (isRepayExceedsDebt.value) return true

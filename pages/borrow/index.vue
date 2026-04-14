@@ -8,7 +8,7 @@ import { getProductByVault, getEntitiesByVault, isVaultFeatured, isVaultDeprecat
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
-import { isOpDisabled, OP_BORROW, OP_DEPOSIT } from '~/utils/vault-hooks'
+import { isOpDisabled, OP_BORROW, OP_DEPOSIT, OP_TRANSFER } from '~/utils/vault-hooks'
 
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy } = useRewardsApy()
@@ -56,7 +56,8 @@ const activeBorrowList = computed(() =>
     if (isVaultNotExplorableBorrow(pair.collateral.address)) return false
     if (isOpDisabled(pair.borrow, OP_BORROW)) return false
     // Securitize collateral has no hookedOps — only check EVK collateral.
-    if (!isSecuritizeBorrowPair(pair) && isOpDisabled(pair.collateral, OP_DEPOSIT)) return false
+    // Exclude if OP_DEPOSIT (fresh) or OP_TRANSFER (savings-sourced) is disabled.
+    if (!isSecuritizeBorrowPair(pair) && (isOpDisabled(pair.collateral, OP_DEPOSIT) || isOpDisabled(pair.collateral, OP_TRANSFER))) return false
     return true
   }),
 )

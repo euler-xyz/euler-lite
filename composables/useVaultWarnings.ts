@@ -2,6 +2,7 @@ import { maxUint256 } from 'viem'
 import { getVaultUtilization, type Vault } from '~/entities/vault'
 import {
   findBlockingDisabledOp,
+  getOpMeta,
   isOpDisabled,
   OP_BORROW,
   OP_DEPOSIT,
@@ -181,6 +182,8 @@ const hookDisabledCopy = (op: bigint): { title: string, message: string } | null
       return { title: 'Repayments disabled', message: 'The vault risk manager has disabled repayments. Repayments will fail.' }
     case OP_REPAY_WITH_SHARES:
       return { title: 'Repay with shares disabled', message: 'The vault risk manager has disabled repaying debt with vault shares. Same-asset and savings repay flows will fail.' }
+    // OP_PULL_DEBT, OP_LIQUIDATE, and OP_FLASHLOAN are intentionally omitted:
+    // they are not triggered by any euler-lite user flow.
     default:
       return null
   }
@@ -196,4 +199,16 @@ export const getPlanHookDisabledWarning = (steps: readonly PlannedOp[]): VaultWa
   const blocking = findBlockingDisabledOp(steps)
   if (!blocking) return null
   return getHookDisabledWarning(blocking.vault, blocking.op)
+}
+
+export const getStrategyHookWarning = (strategyVault: Vault): VaultWarning | null => {
+  const bits = [OP_DEPOSIT, OP_MINT, OP_WITHDRAW, OP_REDEEM, OP_SKIM].filter(bit => isOpDisabled(strategyVault, bit))
+  if (bits.length === 0) return null
+  const names = bits.map(bit => getOpMeta(bit)?.name ?? '')
+  const verb = names.length === 1 ? 'is' : 'are'
+  return {
+    level: 'critical',
+    title: 'Strategy operations disabled',
+    message: `${names.join(', ')} ${verb} disabled on this strategy. The Earn vault may be unable to deposit into or withdraw from it, which can affect allocation and exits.`,
+  }
 }
