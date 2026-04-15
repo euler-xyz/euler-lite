@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import type { Address, Hex, Abi } from 'viem'
+import type { Address, Hex } from 'viem'
 import { useSignTypedData, useWriteContract } from '@wagmi/vue'
 import { EVC_ABI } from '~/abis/evc'
 import { logWarn } from '~/utils/errorHandling'
@@ -82,10 +82,11 @@ export const useCowSwapExecutionCore = () => {
   }
 
   /** Fetch EVC nonce and call wrapper.encodePermitData(). */
+  /** Fetch EVC nonce and call wrapper.encodePermitData(). */
   const fetchNonceAndPermitData = async (
     wrapperAddress: Address,
-    wrapperAbi: Abi,
-    wrapperParams: Record<string, unknown>,
+    wrapperAbi: readonly unknown[],
+    wrapperParams: unknown,
     flowChainId: number,
   ) => {
     const userAddress = requireWallet()

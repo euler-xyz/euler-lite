@@ -28,9 +28,8 @@ import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/util
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
-import { COWSWAP_PROVIDER_NAME, COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapCollateralSwapExecuteParams, getCowSwapChainConfig, isCowSwapSupportedChain } from '~/entities/cowswap'
-import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus } from '~/composables/cowswap'
-import { CowSwapReviewModal } from '#components'
+import { COWSWAP_PROVIDER_NAME, COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapCollateralSwapExecuteParams, getCowSwapChainConfig } from '~/entities/cowswap'
+import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
 
 const route = useRoute()
 const { isConnected, address } = useAccount()
@@ -266,33 +265,14 @@ const submitCowSwapCollateralSwap = () => {
     + 'The CoW order receiver is your sub-account, not your main wallet — your wallet may flag this as a mismatch. '
     + 'You can verify the first 19 bytes (38 hex chars after "0x") of the receiver match your wallet address.'
 
-  cowModal.open(CowSwapReviewModal, {
-    props: {
-      signSteps,
-      wrapperSteps,
-      walletWarningsDescription,
-      executionStatus: cowSwapExecution.status,
-      executionError: cowSwapExecution.error,
-      explorerUrl: cowSwapExecution.explorerUrl,
-      orderStatus: cowSwapOrderStatus.orderStatus,
-      locallyCancelled: cowSwapExecution.locallyCancelled,
-      onConfirm: async () => {
-        try {
-          await cowSwapExecution.executeAsync(cowParams)
-        }
-        catch (e) {
-          logWarn('collateralSwap/cowswap/execute', e)
-        }
-      },
-      onCancel: async () => {
-        try {
-          await cowSwapExecution.cancelOrder()
-        }
-        catch (e) {
-          logWarn('collateralSwap/cowswap/cancel', e)
-        }
-      },
-    },
+  openCowSwapReviewModal(cowModal, {
+    signSteps,
+    wrapperSteps,
+    walletWarningsDescription,
+    execution: cowSwapExecution,
+    orderStatus: cowSwapOrderStatus,
+    executeParams: cowParams,
+    logPrefix: 'collateralSwap/cowswap',
   })
 }
 
