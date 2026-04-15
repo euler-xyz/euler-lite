@@ -43,6 +43,10 @@ export const useWallets = () => {
       return
     }
 
+    // Capture chainId up-front so we can (a) filter out stale cross-chain
+    // token-list entries and (b) discard results if the chain changes mid-fetch.
+    const currentChainId = chainId.value
+
     // Collect unique underlying asset addresses from ALL vaults (evk, earn, securitize)
     // plus external token list tokens for the swap selector
     // Note: We only fetch underlying token balances, NOT vault share balances
@@ -61,9 +65,13 @@ export const useWallets = () => {
       }
     })
 
-    // Include token list addresses (for swap selector zero-balance filtering)
+    // Include token list addresses (for swap selector zero-balance filtering).
+    // Defensive filter: only accept entries matching the active chain, so that
+    // a stale useTokenList singleton from a previous chain can never contaminate
+    // the RPC batch with foreign-chain addresses.
     const { getAllTokens } = useTokenList()
     for (const token of getAllTokens()) {
+      if (token.chainId !== currentChainId) continue
       try {
         addresses.add(getAddress(token.address))
       }
@@ -83,7 +91,6 @@ export const useWallets = () => {
       return
     }
 
-    const currentChainId = chainId.value
     isFetching.value = true
 
     try {
@@ -99,7 +106,7 @@ export const useWallets = () => {
       }
 
       const chunkResults = await Promise.all(
-        chunks.map(async (batch) => {
+        chunks.map(async (batch, chunkIndex) => {
           try {
             return await client.readContract({
               address: utilsLensAddress,
@@ -108,8 +115,24 @@ export const useWallets = () => {
               args: [targetAddress, batch],
             }) as bigint[]
           }
-          catch {
-            logWarn('wallets/batchFetch', `Lens tokenBalances failed for chunk of ${batch.length}, using zero fallback`)
+          catch (e) {
+            logWarn(
+              'wallets/batchFetch',
+              `Lens tokenBalances failed, using zero fallback`,
+              {
+                data: {
+                  chainId: currentChainId,
+                  lens: utilsLensAddress,
+                  target: targetAddress,
+                  totalTokens: tokenAddresses.length,
+                  chunkIndex,
+                  chunkCount: chunks.length,
+                  chunkSize: batch.length,
+                  sampleTokens: batch.slice(0, 3),
+                  error: e,
+                },
+              },
+            )
             return batch.map(() => 0n)
           }
         }),
