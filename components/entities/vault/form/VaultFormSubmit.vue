@@ -43,12 +43,17 @@ const { floatingStyles, update } = useFloating(reference, floating, {
   ],
 })
 
-const effectiveDisabledReason = computed(() =>
-  props.disabledReason || operationBlockReason.value,
-)
+const GENERIC_DISABLED_REASON = 'This operation is currently disabled. Check the messages above for details.'
+
+const effectiveDisabledReason = computed(() => {
+  if (props.disabledReason) return props.disabledReason
+  if (operationBlockReason.value) return operationBlockReason.value
+  if (_disabled.value && !props.loading) return GENERIC_DISABLED_REASON
+  return undefined
+})
 
 const showTooltip = () => {
-  if (_disabled.value && effectiveDisabledReason.value) {
+  if (_disabled.value && !props.loading && effectiveDisabledReason.value) {
     isTooltipVisible.value = true
     update()
   }
@@ -178,7 +183,7 @@ const openTermsModal = () => {
       </UiButton>
       <Transition name="tooltip">
         <div
-          v-if="isTooltipVisible && _disabled && effectiveDisabledReason"
+          v-if="isTooltipVisible && _disabled && !loading && effectiveDisabledReason"
           ref="floating"
           :style="floatingStyles"
           class="vault-form-submit__tooltip"
