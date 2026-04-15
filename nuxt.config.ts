@@ -53,9 +53,15 @@ export default defineNuxtConfig({
           property: 'og:type',
           content: 'website',
         },
+        // og:image / twitter:image are injected at SSR by
+        // server/plugins/app-config.ts from NUXT_PUBLIC_CONFIG_SOCIAL_IMAGE_URL.
+        // Not declared here so forks without that env var get no (broken) tag.
+        // twitter:card is set to summary_large_image because our share image
+        // is landscape (1200x630+); forks without an image will see a basic
+        // link preview — configure NUXT_PUBLIC_CONFIG_SOCIAL_IMAGE_URL to enable.
         {
           name: 'twitter:card',
-          content: 'summary',
+          content: 'summary_large_image',
         },
         {
           name: 'twitter:title',
@@ -105,6 +111,9 @@ export default defineNuxtConfig({
       configGithubUrl: '',
       configAppTitle: 'Euler Lite',
       configAppDescription: 'Lightweight interface for Euler Finance lending and borrowing.',
+      // Absolute URL to an image used for social share previews (og:image /
+      // twitter:image). Empty default so forks don't inherit our branding.
+      configSocialImageUrl: '',
       configLabelsRepo: 'euler-xyz/euler-labels',
       configLabelsRepoBranch: 'master',
       configOracleChecksRepo: 'euler-xyz/oracle-checks',

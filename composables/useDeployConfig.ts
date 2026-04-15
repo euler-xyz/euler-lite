@@ -25,6 +25,7 @@ export const useDeployConfig = () => {
     appTitle: envConfig.appTitle,
     appDescription: envConfig.appDescription,
     logoUrl: envConfig.logoUrl,
+    socialImageUrl: envConfig.socialImageUrl,
 
     // Repos (labelsRepo/branch/baseUrl still needed for logo URL construction)
     labelsRepo: rc.configLabelsRepo || 'euler-xyz/euler-labels',
