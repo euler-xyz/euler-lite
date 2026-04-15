@@ -45,6 +45,7 @@ export default defineNuxtRouteMiddleware((to) => {
   // route.query.network watcher.
   if (fallbackChainId) {
     changeCurrentChainId(fallbackChainId)
+    localStorage.setItem('chainId', String(fallbackChainId))
   }
 
   if (rewrittenPath || !queryChainId || queryChainId !== fallbackChainId || needsNormalization) {
