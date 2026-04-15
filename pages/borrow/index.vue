@@ -369,7 +369,7 @@ const sortedBorrowList = computed(() => {
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
     <BasePageHeader
       title="Borrow"
-      description="Discover vaults, borrow against your collateral."
+      description="Borrow against your assets in isolated lending markets."
       class="mb-16"
     />
 
