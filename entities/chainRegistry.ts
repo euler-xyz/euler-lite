@@ -26,10 +26,18 @@ for (const [key, chain] of Object.entries(allChains)) {
   }
 }
 
+// Aliases for legacy slugs that don't match the viem export key or chain name.
+// Add here whenever a legacy URL surfaces that isn't auto-resolved.
+const LEGACY_CHAIN_ALIASES: ReadonlyMap<string, number> = new Map([
+  ['arbitrumone', 42161],
+  ['bnbsmartchain', 56],
+  ['lineamainnet', 59144],
+])
+
 export const getChainIdByName = (name: string): number | undefined => {
   const normalized = name.trim().toLowerCase().replace(/\s+/g, '-')
   if (!normalized) return undefined
-  return nameToChainId.get(normalized)
+  return LEGACY_CHAIN_ALIASES.get(normalized) ?? nameToChainId.get(normalized)
 }
 
 export const parseChainId = (value: unknown): number | null => {
