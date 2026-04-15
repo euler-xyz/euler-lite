@@ -9,7 +9,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
 import { getNetAPY, getProjectedRates, type Vault, type VaultAsset } from '~/entities/vault'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
+import { getAssetUsdValue, getAssetUsdValueOrZero, getTokenUsdValue } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
 import { valueToNano } from '~/utils/crypto-utils'
@@ -187,6 +187,40 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       return FixedPoint.fromValue(BigInt(Math.round(ratio * 1e18)), 18)
     }
     return FixedPoint.fromValue(0n, 18)
+  })
+
+  // --- USD values for source/debt comparison (used by onSourceMax) ---
+  // Source may be an arbitrary wallet token (possibly without a vault), so
+  // fall back to backend-price feed via getTokenUsdValue.
+  const sourceValueUsdGuard = createRaceGuard()
+  const sourceValueUsd = ref<number | null>(null)
+  watchEffect(async () => {
+    if (!selectedAsset.value || selectedAssetBalance.value <= 0n) {
+      sourceValueUsd.value = null
+      return
+    }
+    const gen = sourceValueUsdGuard.next()
+    const result = (await getTokenUsdValue(
+      selectedAssetBalance.value,
+      Number(selectedAsset.value.decimals),
+      selectedAsset.value.address,
+      null,
+    )) ?? null
+    if (sourceValueUsdGuard.isStale(gen)) return
+    sourceValueUsd.value = result
+  })
+
+  const borrowValueUsdGuard = createRaceGuard()
+  const borrowValueUsd = ref<number | null>(null)
+  watchEffect(async () => {
+    if (!borrowVault.value || !position.value) {
+      borrowValueUsd.value = null
+      return
+    }
+    const gen = borrowValueUsdGuard.next()
+    const result = (await getAssetUsdValue(position.value.borrowed, borrowVault.value, 'off-chain')) ?? null
+    if (borrowValueUsdGuard.isStale(gen)) return
+    borrowValueUsd.value = result
   })
 
   // --- Validation ---
@@ -533,6 +567,37 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     requestQuote()
   }
 
+  // Max on source input: if source is worth at least as much as the debt,
+  // behave like Max on debt (TARGET_DEBT with full debt). Otherwise default
+  // to EXACT_IN with full source balance. Prevents accidental over-repay.
+  const onSourceMax = () => {
+    if (!selectedAsset.value || !borrowVault.value || !position.value) return
+    const currentDebt = getCurrentDebt()
+    if (currentDebt <= 0n) return
+
+    const sourceDecimals = Number(selectedAsset.value.decimals)
+    const borrowDecimals = Number(borrowVault.value.asset.decimals)
+
+    // No swap: source asset == borrow asset, 1:1 comparison in native units
+    if (!needsSwap.value) {
+      const cap = selectedAssetBalance.value < currentDebt ? selectedAssetBalance.value : currentDebt
+      amount.value = trimTrailingZeros(formatUnits(cap, sourceDecimals))
+      onAmountInput()
+      return
+    }
+
+    // Swap: compare USD values
+    const srcUsd = sourceValueUsd.value
+    const debtUsd = borrowValueUsd.value
+    if (srcUsd !== null && debtUsd !== null && srcUsd > debtUsd) {
+      debtAmount.value = trimTrailingZeros(formatUnits(currentDebt, borrowDecimals))
+      onDebtInput()
+      return
+    }
+    amount.value = trimTrailingZeros(formatUnits(selectedAssetBalance.value, sourceDecimals))
+    onAmountInput()
+  }
+
   // Refresh selected asset balance and re-validate when wallet address changes
   watch(address, async () => {
     if (selectedAsset.value?.address) {
@@ -742,6 +807,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     // Actions
     onAmountInput,
     onDebtInput,
+    onSourceMax,
     onPercentInput,
     onSelectSwapAsset,
     onRefreshSwapQuotes,

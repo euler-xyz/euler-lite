@@ -22,6 +22,7 @@ const props = defineProps<{
   priceOverride?: number // USD unit price for assets without a vault (e.g., swap-to-deposit)
   swappable?: boolean // When true, asset pill shows dropdown arrow and emits click-asset
   selectedSource?: 'wallet' | 'saving' // Source indicator chip when multiple collateral options exist
+  maxHandler?: () => void // When provided, replaces the default "Max" button behavior
 }>()
 const emits = defineEmits(['input', 'change-collateral', 'click-asset'])
 const model = defineModel<string>({ default: '' })
@@ -99,6 +100,10 @@ const price = computed(() => {
 
 const hasPrice = computed(() => price.value !== null)
 const setMax = () => {
+  if (props.maxHandler) {
+    props.maxHandler()
+    return
+  }
   model.value = trimTrailingZeros(formatUnits(props.balance ?? 0n, Number(props.asset.decimals)))
   emitInputNow()
   if (inputEl.value) {
