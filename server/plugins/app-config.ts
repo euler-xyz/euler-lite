@@ -85,7 +85,9 @@ function injectSocialImage(html: { head: string[] }, socialImageUrl: string) {
   // Only injected when env var is set so forks without one don't ship
   // broken/empty preview tags. Crawlers (X, Slack, Discord) fetch the image
   // directly from this absolute URL; the SPA useHead mirrors this for runtime.
-  if (!socialImageUrl) return
+  // Require https:// so a misconfigured env var can't emit http://, data:, or
+  // javascript: URIs — X and Slack reject non-https og:image anyway.
+  if (!socialImageUrl.startsWith('https://')) return
   const url = escapeHtml(socialImageUrl)
   html.head.push(
     `<meta property="og:image" content="${url}">`
