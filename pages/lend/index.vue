@@ -259,7 +259,7 @@ const sortedList = computed(() => {
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
     <BasePageHeader
       title="Lend"
-      description="Discover vaults, earn yield on assets by lending them out."
+      description="Supply assets to isolated lending markets. Earn yield from borrower demand."
       class="mb-16"
       arrow-down
     />

@@ -191,7 +191,7 @@ const sortedList = computed(() => {
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
     <BasePageHeader
       title="Earn"
-      description="Discover vaults, deposit once, earn passive yield across multiple professionally curated strategies."
+      description="One deposit, diversified yield. Curators allocate your capital across multiple lending strategies."
       class="mb-16"
       arrow-right
     />
