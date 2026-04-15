@@ -84,13 +84,16 @@ export default defineNuxtPlugin((nuxtApp) => {
   // with its own Blockchain API (see extendWagmiTransports in appkit-utils);
   // that's additive and fine.
   const transports: Record<number, Transport> = {}
+  const batchConfig = { batch: { batchSize: 100, wait: 100 } }
   for (const network of networks) {
     const chainId = Number(network.id)
     const publicHttp = network.rpcUrls?.default?.http ?? []
     transports[chainId] = fallback(
       [
-        http(`/api/rpc/${chainId}`, { batch: { batchSize: 100, wait: 100 } }),
-        ...publicHttp.map(url => http(url)),
+        http(`/api/rpc/${chainId}`, batchConfig),
+        // Public fallback gets the same batch config so a proxy outage doesn't
+        // explode into 50-100× more individual requests to the public endpoint.
+        ...publicHttp.map(url => http(url, batchConfig)),
       ],
       { retryCount: 0 },
     )
