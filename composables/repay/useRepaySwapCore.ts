@@ -376,6 +376,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
   const resetCore = () => {
     amount.value = ''
     debtAmount.value = ''
+    debtPercent.value = 0
     quotes.reset()
   }
 
