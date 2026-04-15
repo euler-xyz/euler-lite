@@ -272,8 +272,16 @@ export const useWallets = () => {
     }
   }
 
-  // isLoading only true on initial load, not on background refreshes
-  const isLoading = computed(() => !isLoaded.value && isFetching.value)
+  // isLoading is true during initial load (and during the "waiting for the
+  // active chain's vaults to finish loading" window that precedes it), but
+  // stays false during background refreshes. Including the loadedChainId
+  // check prevents the UI from flashing "0" balances between resetBalances()
+  // and the actual fetch firing on chain switch — because updateBalances is
+  // gated on loadedChainId === chainId, there's a real window where neither
+  // isLoaded nor isFetching is true yet, and the balances Map is empty.
+  const isLoading = computed(() =>
+    !isLoaded.value && (isFetching.value || loadedChainId.value !== chainId.value),
+  )
 
   return {
     balances,
