@@ -1,4 +1,5 @@
 import { WagmiPlugin } from '@wagmi/vue'
+import { fallback, http, type Transport } from 'viem'
 import { createAppKit } from '@reown/appkit/vue'
 import type { AppKitNetwork } from '@reown/appkit/networks'
 import { WagmiAdapter } from '@reown/appkit-adapter-wagmi'
@@ -74,15 +75,31 @@ export default defineNuxtPlugin((nuxtApp) => {
     icons: normalizedAppUrl ? [`${normalizedAppUrl}/manifest-img.png`] : [],
   }
 
-  const customRpcUrls: Record<string, { url: string }[]> = {}
-  for (const chainId of enabledChainIds) {
-    customRpcUrls[`eip155:${chainId}`] = [{ url: `/api/rpc/${chainId}` }]
+  // Explicit transports per chain: proxy first, chain's default public RPC as
+  // fallback. Using `transports` (not `customRpcUrls`) lets us cap the outer
+  // fallback retryCount at 0 — otherwise viem retries the whole [proxy, public]
+  // cycle 3× by default, turning one 429 into 8 HTTP requests.
+  //
+  // On Reown-supported chains AppKit still wraps this in an outer fallback
+  // with its own Blockchain API (see extendWagmiTransports in appkit-utils);
+  // that's additive and fine.
+  const transports: Record<number, Transport> = {}
+  for (const network of networks) {
+    const chainId = Number(network.id)
+    const publicHttp = network.rpcUrls?.default?.http ?? []
+    transports[chainId] = fallback(
+      [
+        http(`/api/rpc/${chainId}`, { batch: { batchSize: 100, wait: 100 } }),
+        ...publicHttp.map(url => http(url)),
+      ],
+      { retryCount: 0 },
+    )
   }
 
   const wagmiAdapter = new WagmiAdapter({
     networks,
     projectId: projectId || '',
-    customRpcUrls,
+    transports,
   })
 
   nuxtApp.vueApp.use(WagmiPlugin, { config: wagmiAdapter.wagmiConfig })

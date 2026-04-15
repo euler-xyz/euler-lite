@@ -10,8 +10,18 @@
  */
 import { randomBytes } from 'node:crypto'
 import { setResponseHeader } from 'h3'
+import * as allChains from '@reown/appkit/networks'
+import type { AppKitNetwork } from '@reown/appkit/networks'
 
 const isDev = process.env.DOPPLER_ENVIRONMENT === 'dev'
+
+/** Map of chainId → AppKit/viem chain definition, used to look up each
+ *  enabled chain's default public RPC URL(s) for the CSP connect-src list. */
+const chainById = new Map<number, AppKitNetwork>(
+  (Object.values(allChains) as unknown[])
+    .filter((v): v is AppKitNetwork => v != null && typeof v === 'object' && 'id' in v)
+    .map((chain): [number, AppKitNetwork] => [Number((chain as AppKitNetwork).id), chain as AppKitNetwork]),
+)
 
 /** Origins only allowed in dev deployments. */
 const CONNECT_SRC_DEV = [
@@ -61,6 +71,27 @@ function scanDynamicEnvUrls(): string[] {
     }
   }
   return urls
+}
+
+/**
+ * Derive connect-src origins for each enabled chain's default public RPC URL.
+ * Wagmi uses these as a fallback when /api/rpc/{chainId} is unavailable
+ * (configured explicitly in plugins/00.wagmi.ts). Auto-deriving from the chain
+ * definition means new chains "just work" without a CSP update.
+ */
+function parseChainPublicRpcOrigins(): string[] {
+  const origins = new Set<string>()
+  for (const key of Object.keys(process.env)) {
+    const match = key.match(/^RPC_URL_HTTP_(\d+)$/)
+    if (!match) continue
+    const chain = chainById.get(Number(match[1]))
+    const urls = chain?.rpcUrls?.default?.http ?? []
+    for (const url of urls) {
+      const origin = safeOrigin(url)
+      if (origin) origins.add(origin)
+    }
+  }
+  return [...origins]
 }
 
 /** Derive CSP origins from URL env vars so deployers don't need to duplicate them. */
@@ -122,12 +153,18 @@ const CONNECT_SRC_BASE = [
   'wss://relay.walletconnect.org',
 ]
 
-export function buildCsp(nonce: string, extraConnectSrc: string[], envOrigins: { connect: string[] }): string {
+export function buildCsp(
+  nonce: string,
+  extraConnectSrc: string[],
+  envOrigins: { connect: string[] },
+  chainPublicOrigins: string[],
+): string {
   const connectSrc = [
     ...CONNECT_SRC_BASE,
     ...(isDev ? CONNECT_SRC_DEV : []),
     ...extraConnectSrc,
     ...envOrigins.connect,
+    ...chainPublicOrigins,
   ]
 
   const directives = [
@@ -168,6 +205,7 @@ function stripCspMeta(chunks: string[]): string[] {
 export default defineNitroPlugin((nitroApp) => {
   const extraConnectSrc = parseExtraConnectSrc()
   const envOrigins = parseEnvOrigins()
+  const chainPublicOrigins = parseChainPublicRpcOrigins()
 
   nitroApp.hooks.hook('render:html', (html, { event }) => {
     const nonce = randomBytes(16).toString('base64')
@@ -181,6 +219,6 @@ export default defineNitroPlugin((nitroApp) => {
     html.bodyPrepend = injectNonce(html.bodyPrepend, nonce)
     html.bodyAppend = injectNonce(html.bodyAppend, nonce)
 
-    setResponseHeader(event, 'Content-Security-Policy', buildCsp(nonce, extraConnectSrc, envOrigins))
+    setResponseHeader(event, 'Content-Security-Policy', buildCsp(nonce, extraConnectSrc, envOrigins, chainPublicOrigins))
   })
 })
