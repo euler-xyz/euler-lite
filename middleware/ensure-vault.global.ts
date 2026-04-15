@@ -2,19 +2,9 @@ import { getAddress } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { useToast } from '~/components/ui/composables/useToast'
 import { getDefaultPageRoute } from '~/entities/menu'
+import { parseChainId } from '~/entities/chainRegistry'
 
 const normalizeParam = (value: unknown) => (Array.isArray(value) ? value[0] : value)
-
-const parseChainId = (value: unknown): number | null => {
-  const normalized = normalizeParam(value)
-  const parsed = typeof normalized === 'string'
-    ? Number.parseInt(normalized, 10)
-    : typeof normalized === 'number'
-      ? normalized
-      : NaN
-
-  return Number.isFinite(parsed) ? parsed : null
-}
 
 const getDefaultRoute = () => {
   const { enableEarnPage, enableLendPage, enableExplorePage } = useDeployConfig()
