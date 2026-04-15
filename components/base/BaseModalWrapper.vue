@@ -154,8 +154,8 @@ const dragStyle = computed(() => ({
 
     <!-- Scroll container -->
     <div
-      class="flex flex-col overflow-x-hidden overflow-y-auto overscroll-contain styled-scrollbar px-16 pb-16"
-      :class="[full ? 'flex-grow min-h-0' : '']"
+      class="flex flex-col overflow-x-hidden overscroll-contain px-16 pb-16"
+      :class="[full ? 'flex-grow min-h-0' : 'overflow-y-auto styled-scrollbar']"
       @touchstart="onScrollTouchStart"
       @touchmove="onScrollTouchMove"
       @touchend="onScrollTouchEnd"

@@ -54,7 +54,7 @@ const onAccept = () => {
     title="Acknowledge terms"
     @close="onReject"
   >
-    <div class="flex flex-col gap-24 full flex-grow min-h-0 [scrollbar-width:none]">
+    <div class="flex flex-col gap-24 full flex-grow min-h-0">
       <div class="text-p3 text-content-secondary">
         By accessing or using Euler's products and services, I agree to the
         <a
