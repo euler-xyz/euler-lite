@@ -180,13 +180,13 @@ const handleClose = () => {
               ><img
                 v-if="PROVIDER_LOGOS[campaign.source]"
                 :src="PROVIDER_LOGOS[campaign.source]"
-                class="w-14 h-14 inline-block align-middle mr-2"
+                class="w-14 h-14 inline-block align-middle mr-2 bg-white rounded-sm p-1"
                 :alt="PROVIDER_LABELS[campaign.source]"
               >{{ PROVIDER_LABELS[campaign.source] || campaign.source }}</a><template v-else>
                 <img
                   v-if="PROVIDER_LOGOS[campaign.source]"
                   :src="PROVIDER_LOGOS[campaign.source]"
-                  class="w-14 h-14 inline-block align-middle mr-2"
+                  class="w-14 h-14 inline-block align-middle mr-2 bg-white rounded-sm p-1"
                   :alt="PROVIDER_LABELS[campaign.source]"
                 >{{ PROVIDER_LABELS[campaign.source] || campaign.source }}
               </template>{{ campaign.endDate ? `, ends ${campaign.endDate.toFormat('MMMM dd, yyyy')}` : '' }})
@@ -252,13 +252,13 @@ const handleClose = () => {
               ><img
                 v-if="PROVIDER_LOGOS[campaign.source]"
                 :src="PROVIDER_LOGOS[campaign.source]"
-                class="w-14 h-14 inline-block align-middle mr-2"
+                class="w-14 h-14 inline-block align-middle mr-2 bg-white rounded-sm p-1"
                 :alt="PROVIDER_LABELS[campaign.source]"
               >{{ PROVIDER_LABELS[campaign.source] || campaign.source }}</a><template v-else>
                 <img
                   v-if="PROVIDER_LOGOS[campaign.source]"
                   :src="PROVIDER_LOGOS[campaign.source]"
-                  class="w-14 h-14 inline-block align-middle mr-2"
+                  class="w-14 h-14 inline-block align-middle mr-2 bg-white rounded-sm p-1"
                   :alt="PROVIDER_LABELS[campaign.source]"
                 >{{ PROVIDER_LABELS[campaign.source] || campaign.source }}
               </template>{{ campaign.endDate ? `, ends ${campaign.endDate.toFormat('MMMM dd, yyyy')}` : '' }})
@@ -313,13 +313,13 @@ const handleClose = () => {
                   ><img
                     v-if="PROVIDER_LOGOS[campaign.source]"
                     :src="PROVIDER_LOGOS[campaign.source]"
-                    class="w-14 h-14 inline-block align-middle mr-2"
+                    class="w-14 h-14 inline-block align-middle mr-2 bg-white rounded-sm p-1"
                     :alt="PROVIDER_LABELS[campaign.source]"
                   >{{ PROVIDER_LABELS[campaign.source] || campaign.source }}</a><template v-else>
                     <img
                       v-if="PROVIDER_LOGOS[campaign.source]"
                       :src="PROVIDER_LOGOS[campaign.source]"
-                      class="w-14 h-14 inline-block align-middle mr-2"
+                      class="w-14 h-14 inline-block align-middle mr-2 bg-white rounded-sm p-1"
                       :alt="PROVIDER_LABELS[campaign.source]"
                     >{{ PROVIDER_LABELS[campaign.source] || campaign.source }}
                   </template>{{ campaign.endDate ? `, ends ${campaign.endDate.toFormat('MMMM dd, yyyy')}` : '' }})
