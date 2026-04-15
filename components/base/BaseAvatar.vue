@@ -43,7 +43,7 @@ const images = computed(() => {
 </script>
 
 <template>
-  <div class="relative flex items-center">
+  <div class="relative flex items-center shrink-0">
     <template
       v-for="(image, idx) in images"
       :key="idx"

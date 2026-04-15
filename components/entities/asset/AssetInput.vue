@@ -184,7 +184,7 @@ const openChooseCollateralModal = () => {
         ref="inputEl"
         v-text-fit
         :value="model"
-        class="text-h1 text-content-primary w-full h-40 outline-none placeholder:text-content-tertiary"
+        class="text-h1 text-content-primary w-full min-w-0 h-40 outline-none placeholder:text-content-tertiary"
         type="text"
         placeholder="0.00"
         maxlength="24"
@@ -198,7 +198,7 @@ const openChooseCollateralModal = () => {
       >
 
       <div
-        class="bg-card text-p3 font-semibold gap-8 flex items-center justify-center px-12 min-h-36 py-6 rounded-[40px] whitespace-nowrap cursor-pointer"
+        class="bg-card text-p3 font-semibold gap-8 flex items-center justify-center px-12 min-h-36 py-6 rounded-[40px] whitespace-nowrap cursor-pointer shrink-0"
         @click="swappable ? emits('click-asset') : openChooseCollateralModal()"
       >
         <AssetAvatar
