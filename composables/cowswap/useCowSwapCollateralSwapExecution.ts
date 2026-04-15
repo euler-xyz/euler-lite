@@ -1,4 +1,3 @@
-import type { Abi } from 'viem'
 import { COLLATERAL_SWAP_WRAPPER_ABI } from '~/abis/cowswap-wrapper'
 import { logWarn } from '~/utils/errorHandling'
 import {
@@ -46,8 +45,8 @@ export const useCowSwapCollateralSwapExecution = () => {
 
       const { nonce, nonceNamespace, permitCalldata, evcAddress } = await core.fetchNonceAndPermitData(
         wrapperAddress,
-        COLLATERAL_SWAP_WRAPPER_ABI as unknown as Abi,
-        wrapperParams as unknown as Record<string, unknown>,
+        COLLATERAL_SWAP_WRAPPER_ABI,
+        wrapperParams,
         params.chainId,
       )
 
