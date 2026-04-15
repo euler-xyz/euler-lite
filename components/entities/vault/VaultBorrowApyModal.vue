@@ -138,13 +138,13 @@ const handleClose = () => {
             ><img
               v-if="PROVIDER_LOGOS[reward.source]"
               :src="PROVIDER_LOGOS[reward.source]"
-              class="w-14 h-14 inline-block align-middle mr-2"
+              class="w-14 h-14 inline-block align-middle mr-2 bg-white rounded-sm p-1"
               :alt="PROVIDER_LABELS[reward.source]"
             >{{ PROVIDER_LABELS[reward.source] || reward.source }}</a><template v-else>
               <img
                 v-if="PROVIDER_LOGOS[reward.source]"
                 :src="PROVIDER_LOGOS[reward.source]"
-                class="w-14 h-14 inline-block align-middle mr-2"
+                class="w-14 h-14 inline-block align-middle mr-2 bg-white rounded-sm p-1"
                 :alt="PROVIDER_LABELS[reward.source]"
               >{{ PROVIDER_LABELS[reward.source] || reward.source }}
             </template>{{ reward.isCollateralSpecific ? ', collateral bonus' : '' }}{{ reward.endDate ? `, ends ${reward.endDate.toFormat('MMMM dd, yyyy')}` : '' }})
