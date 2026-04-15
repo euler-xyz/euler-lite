@@ -170,14 +170,46 @@ export default defineNuxtConfig({
       : {}),
   },
 
+  experimental: {
+    // Reload the app immediately when any chunk fails to load (including
+    // lazy components outside route navigation). 'automatic-immediate'
+    // enables Nuxt's built-in chunk-reload-immediate.client plugin which
+    // calls reloadNuxtApp({ persistState: true }) on app:chunkError, with
+    // a 10s TTL guard to prevent reload loops. Primary recovery path for
+    // "Failed to fetch dynamically imported module" errors after deploys.
+    emitRouteChunkError: 'automatic-immediate',
+  },
+
   compatibilityDate: '2024-08-29',
 
   nitro: {
     compressPublicAssets: true,
     esbuild: { options: { target: 'esnext' } },
     routeRules: {
-      '/_nuxt/**': { headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } },
-      '/**': { headers: { 'Cache-Control': 'no-store' } },
+      // Hashed build assets are content-addressed and safe to cache forever
+      // at both the browser and the CDN. CDN-Cache-Control must be set here
+      // explicitly — Nitro merges route rules with defu, so the catch-all
+      // 'no-store' below would otherwise leak onto /_nuxt/* and disable
+      // edge caching for every chunk.
+      '/_nuxt/**': {
+        headers: {
+          'Cache-Control': 'public, max-age=31536000, immutable',
+          'CDN-Cache-Control': 'public, max-age=31536000, immutable',
+          'Cloudflare-CDN-Cache-Control': 'public, max-age=31536000, immutable',
+        },
+      },
+      // HTML and API responses must not be cached by browsers or CDNs — stale
+      // HTML referencing previous-build chunk hashes is the primary cause of
+      // "Failed to fetch dynamically imported module" errors after deploys.
+      // CDN-Cache-Control is honoured by compliant CDNs and overrides any
+      // edge-side cache rules that may ignore the origin Cache-Control.
+      '/**': {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+          'CDN-Cache-Control': 'no-store',
+          'Cloudflare-CDN-Cache-Control': 'no-store',
+        },
+      },
     },
   },
 
