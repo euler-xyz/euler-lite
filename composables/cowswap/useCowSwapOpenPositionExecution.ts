@@ -1,4 +1,3 @@
-import type { Abi } from 'viem'
 import { OPEN_POSITION_WRAPPER_ABI } from '~/abis/cowswap-wrapper'
 import { logWarn } from '~/utils/errorHandling'
 import {
@@ -50,8 +49,8 @@ export const useCowSwapOpenPositionExecution = () => {
 
       const { nonce, nonceNamespace, permitCalldata, evcAddress } = await core.fetchNonceAndPermitData(
         wrapperAddress,
-        OPEN_POSITION_WRAPPER_ABI as unknown as Abi,
-        wrapperParams as unknown as Record<string, unknown>,
+        OPEN_POSITION_WRAPPER_ABI,
+        wrapperParams,
         params.chainId,
       )
 

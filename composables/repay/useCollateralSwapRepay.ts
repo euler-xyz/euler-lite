@@ -4,11 +4,11 @@ import { zeroAddress, type Address, type Abi } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import type { DisplayStep } from '~/utils/stepDecoding'
 import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal, CowSwapReviewModal } from '#components'
+import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
 import { getCashLimitedWithdrawAmount, isEVKVault, type Vault } from '~/entities/vault'
 import { COWSWAP_PROVIDER_NAME, COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapClosePositionExecuteParams, getCowSwapChainConfig } from '~/entities/cowswap'
-import { useCowSwapClosePositionExecution, useCowSwapOrderStatus } from '~/composables/cowswap'
+import { useCowSwapClosePositionExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
 import { getAssetUsdValue, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
@@ -486,33 +486,14 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       + 'The CoW order receiver is a temporary Inbox contract — your wallet will flag this as an unfamiliar address. '
       + 'The Inbox holds funds only during settlement and returns them to your position.'
 
-    cowModal.open(CowSwapReviewModal, {
-      props: {
-        signSteps,
-        wrapperSteps,
-        walletWarningsDescription,
-        executionStatus: cowSwapExecution.status,
-        executionError: cowSwapExecution.error,
-        explorerUrl: cowSwapExecution.explorerUrl,
-        orderStatus: cowSwapOrderStatus.orderStatus,
-        locallyCancelled: cowSwapExecution.locallyCancelled,
-        onConfirm: async () => {
-          try {
-            await cowSwapExecution.executeAsync(cowParams)
-          }
-          catch (e) {
-            logWarn('collateralSwapRepay/cowswap/execute', e)
-          }
-        },
-        onCancel: async () => {
-          try {
-            await cowSwapExecution.cancelOrder()
-          }
-          catch (e) {
-            logWarn('collateralSwapRepay/cowswap/cancel', e)
-          }
-        },
-      },
+    openCowSwapReviewModal(cowModal, {
+      signSteps,
+      wrapperSteps,
+      walletWarningsDescription,
+      execution: cowSwapExecution,
+      orderStatus: cowSwapOrderStatus,
+      executeParams: cowParams,
+      logPrefix: 'collateralSwapRepay/cowswap',
     })
   }
 

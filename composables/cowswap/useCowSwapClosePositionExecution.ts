@@ -1,4 +1,4 @@
-import type { Address, Abi, Hex } from 'viem'
+import type { Address, Hex } from 'viem'
 import { CLOSE_POSITION_WRAPPER_ABI } from '~/abis/cowswap-wrapper'
 import { logWarn } from '~/utils/errorHandling'
 import {
@@ -38,7 +38,7 @@ export const useCowSwapClosePositionExecution = () => {
       const wrapperAddress = chainConfig.closePositionWrapper
       const [inboxAddress, inboxDomainSep] = await client.readContract({
         address: wrapperAddress,
-        abi: CLOSE_POSITION_WRAPPER_ABI as unknown as Abi,
+        abi: CLOSE_POSITION_WRAPPER_ABI as readonly unknown[],
         functionName: 'getInboxAddressAndDomainSeparator',
         args: [params.wrapper.owner, params.wrapper.account],
       }) as [Address, Hex]
@@ -61,8 +61,8 @@ export const useCowSwapClosePositionExecution = () => {
 
       const { nonce, nonceNamespace, permitCalldata, evcAddress } = await core.fetchNonceAndPermitData(
         wrapperAddress,
-        CLOSE_POSITION_WRAPPER_ABI as unknown as Abi,
-        wrapperParams as unknown as Record<string, unknown>,
+        CLOSE_POSITION_WRAPPER_ABI,
+        wrapperParams,
         params.chainId,
       )
 
