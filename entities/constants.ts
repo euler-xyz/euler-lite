@@ -14,7 +14,7 @@ export const ERROR_MESSAGE_MAP: Record<string, string> = {
   ERC4626ExceededMaxDeposit: 'Deposit exceeds vault limits.',
   ERC4626ExceededMaxWithdraw: 'Withdraw exceeds vault limits.',
   ERC4626ExceededMaxRedeem: 'Redeem exceeds vault limits.',
-  Swapper_SwapError: 'Swap failed. This is commonly caused by slippage — the price moved beyond your tolerance. Try increasing slippage tolerance or refreshing the quote.',
+  Swapper_SwapError: 'Swap failed. This usually means slippage exceeded your tolerance or the swap provider returned a quote that could not be executed. Try increasing slippage tolerance, refreshing the quote, or selecting a different swap provider.',
   SwapVerifier_skimMin: 'Swap received less than the minimum amount. Increase slippage tolerance or refresh the quote.',
   SwapVerifier_depositMin: 'Swap deposited less than the minimum amount. Increase slippage tolerance or refresh the quote.',
   SwapVerifier_debtMax: 'Swap repaid less debt than required. Increase slippage tolerance or refresh the quote.',

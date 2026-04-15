@@ -33,6 +33,11 @@ describe('tx-errors: Swapper_SwapError decoding', () => {
     expect(getTxErrorMessage(err)).toMatch(/slippage/i)
   })
 
+  it('hints to try a different swap provider for Swapper_SwapError', () => {
+    const err = buildRevertError(encodeSwapperSwapError('0xdeadbeef'))
+    expect(getTxErrorMessage(err)).toMatch(/swap provider/i)
+  })
+
   it('appends the inner Error(string) reason when present', () => {
     const inner = encodeErrorString('Too little received')
     const err = buildRevertError(encodeSwapperSwapError(inner))
