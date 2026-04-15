@@ -182,7 +182,7 @@ const handleSelectCustomToken = () => {
           clearable
         />
       </div>
-      <div class="flex-1 min-h-0 overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div class="flex-1 min-h-0 overflow-auto styled-scrollbar">
         <div
           v-for="opt in filteredOptions"
           :key="opt.asset.address"

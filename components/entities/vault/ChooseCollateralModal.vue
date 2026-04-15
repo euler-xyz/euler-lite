@@ -64,7 +64,7 @@ const handleClose = () => {
         clearable
       />
     </div>
-    <div class="flex-1 overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div class="flex-1 min-h-0 overflow-auto styled-scrollbar">
       <div
         v-for="{ option, idx } in filteredOptions"
         :key="`options-${idx}`"
