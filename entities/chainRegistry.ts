@@ -27,7 +27,7 @@ for (const [key, chain] of Object.entries(allChains)) {
 }
 
 export const getChainIdByName = (name: string): number | undefined => {
-  const normalized = name.trim().toLowerCase()
+  const normalized = name.trim().toLowerCase().replace(/\s+/g, '-')
   if (!normalized) return undefined
   return nameToChainId.get(normalized)
 }

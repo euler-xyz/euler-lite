@@ -55,6 +55,6 @@ export default defineNuxtRouteMiddleware((to) => {
         network: fallbackChainId,
       },
       hash: to.hash,
-    })
+    }, { replace: true })
   }
 })
