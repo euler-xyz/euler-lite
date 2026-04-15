@@ -16,7 +16,7 @@ const decodeRevertBytes = (raw: Hex | undefined): string | undefined => {
   if (selector === ERROR_STRING_SELECTOR) {
     try {
       const [reason] = decodeAbiParameters([{ type: 'string' }], payload)
-      return reason as string
+      return reason
     }
     catch {
       return undefined
@@ -35,7 +35,7 @@ const decodeSwapperInnerReason = (raw: Hex | undefined): string | undefined => {
       [{ type: 'address' }, { type: 'bytes' }],
       `0x${raw.slice(10)}` as Hex,
     )
-    return decodeRevertBytes(innerBytes as Hex)
+    return decodeRevertBytes(innerBytes)
   }
   catch {
     return undefined
