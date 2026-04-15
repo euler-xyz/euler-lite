@@ -1,7 +1,52 @@
-import { BaseError, ContractFunctionRevertedError, formatUnits } from 'viem'
+import { BaseError, ContractFunctionRevertedError, decodeAbiParameters, formatUnits, type Hex } from 'viem'
 import { ERROR_MESSAGE_MAP, ERROR_SIGNATURE_MAP, NON_BLOCKING_SIMULATION_ERRORS } from '~/entities/constants'
 import { hasGuard, getGuardMeta } from '~/utils/operationGuardRegistry'
 import { getChainById } from '~/entities/chainRegistry'
+
+const SWAPPER_SWAP_ERROR_SELECTOR = '0x436fa211'
+const ERROR_STRING_SELECTOR = '0x08c379a0' // Solidity Error(string)
+
+// Decode raw revert data into a human reason — either a standard Error(string) message
+// or the name of a known custom error from ERROR_SIGNATURE_MAP.
+const decodeRevertBytes = (raw: Hex | undefined): string | undefined => {
+  if (!raw || raw.length < 10) return undefined
+  const selector = raw.slice(0, 10).toLowerCase()
+  const payload = `0x${raw.slice(10)}` as Hex
+
+  if (selector === ERROR_STRING_SELECTOR) {
+    try {
+      const [reason] = decodeAbiParameters([{ type: 'string' }], payload)
+      return reason as string
+    }
+    catch {
+      return undefined
+    }
+  }
+
+  return ERROR_SIGNATURE_MAP[selector]
+}
+
+// If raw data is Swapper_SwapError(address,bytes), decode and return the inner revert reason
+// (the raw error surfaced by the underlying DEX/aggregator call).
+const decodeSwapperInnerReason = (raw: Hex | undefined): string | undefined => {
+  if (!raw || !raw.toLowerCase().startsWith(SWAPPER_SWAP_ERROR_SELECTOR)) return undefined
+  try {
+    const [, innerBytes] = decodeAbiParameters(
+      [{ type: 'address' }, { type: 'bytes' }],
+      `0x${raw.slice(10)}` as Hex,
+    )
+    return decodeRevertBytes(innerBytes as Hex)
+  }
+  catch {
+    return undefined
+  }
+}
+
+const getRawRevertData = (error: unknown): Hex | undefined => {
+  if (!(error instanceof BaseError)) return undefined
+  const revertError = error.walk(err => err instanceof ContractFunctionRevertedError)
+  return revertError instanceof ContractFunctionRevertedError ? revertError.raw : undefined
+}
 
 const parseErrorCodeFromMessage = (message: string) => {
   const match = message.match(/execution reverted: (.+)$/i)
@@ -94,7 +139,12 @@ export const getTxErrorMessage = (error: unknown) => {
 
   const code = extractErrorCode(error)
   if (code) {
-    return ERROR_MESSAGE_MAP[code] || `Transaction simulation failed: ${formatErrorCode(code)}`
+    const base = ERROR_MESSAGE_MAP[code] || `Transaction simulation failed: ${formatErrorCode(code)}`
+    if (code === 'Swapper_SwapError') {
+      const innerReason = decodeSwapperInnerReason(getRawRevertData(error))
+      if (innerReason) return `${base} (${innerReason})`
+    }
+    return base
   }
   return 'Transaction simulation failed.'
 }
