@@ -41,6 +41,15 @@ useHead({
     { property: 'og:description', content: envConfig.appDescription },
     { name: 'twitter:title', content: envConfig.appTitle },
     { name: 'twitter:description', content: envConfig.appDescription },
+    // Crawlers (X, Slack, Discord) read these from the server-rendered HTML,
+    // which is patched by server/plugins/app-config.ts. These entries keep
+    // the SPA in sync after hydration when the env var changes at runtime.
+    ...(envConfig.socialImageUrl
+      ? [
+          { property: 'og:image', content: envConfig.socialImageUrl },
+          { name: 'twitter:image', content: envConfig.socialImageUrl },
+        ]
+      : []),
   ],
 })
 

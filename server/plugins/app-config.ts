@@ -35,6 +35,7 @@ function readAppConfig() {
     appTitle: env('APP_TITLE', 'NUXT_PUBLIC_CONFIG_APP_TITLE') || DEFAULTS.appTitle,
     appDescription: env('APP_DESCRIPTION', 'NUXT_PUBLIC_CONFIG_APP_DESCRIPTION') || DEFAULTS.appDescription,
     logoUrl: env('LOGO_URL', 'NUXT_PUBLIC_CONFIG_LOGO_URL'),
+    socialImageUrl: env('SOCIAL_IMAGE_URL', 'NUXT_PUBLIC_CONFIG_SOCIAL_IMAGE_URL'),
     pythHermesUrl: env('PYTH_HERMES_URL', 'NUXT_PUBLIC_PYTH_HERMES_URL') ? 'proxy' : '',
     appKitProjectId: env('APPKIT_PROJECT_ID', 'NUXT_PUBLIC_APP_KIT_PROJECT_ID'),
     appUrl: env('NUXT_PUBLIC_APP_URL'),
@@ -80,6 +81,18 @@ function patchMeta(html: { head: string[] }, appConfig: ReturnType<typeof readAp
   })
 }
 
+function injectSocialImage(html: { head: string[] }, socialImageUrl: string) {
+  // Only injected when env var is set so forks without one don't ship
+  // broken/empty preview tags. Crawlers (X, Slack, Discord) fetch the image
+  // directly from this absolute URL; the SPA useHead mirrors this for runtime.
+  if (!socialImageUrl) return
+  const url = escapeHtml(socialImageUrl)
+  html.head.push(
+    `<meta property="og:image" content="${url}">`
+    + `<meta name="twitter:image" content="${url}">`,
+  )
+}
+
 export default defineNitroPlugin((nitroApp) => {
   const appConfig = readAppConfig()
   const scriptTag = `<script>window.__APP_CONFIG__=${JSON.stringify(appConfig)}</script>`
@@ -87,5 +100,6 @@ export default defineNitroPlugin((nitroApp) => {
   nitroApp.hooks.hook('render:html', (html) => {
     html.head.push(scriptTag)
     patchMeta(html, appConfig)
+    injectSocialImage(html, appConfig.socialImageUrl)
   })
 })
