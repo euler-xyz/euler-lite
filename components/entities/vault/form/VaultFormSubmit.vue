@@ -43,8 +43,18 @@ const { floatingStyles, update } = useFloating(reference, floating, {
   ],
 })
 
+const needToSwitchChain = computed(() => {
+  return isConnected.value && chainId.value !== _chainId.value
+})
+const _disabled = computed(() => {
+  if (isOperationBlocked.value) return true
+  return props.disabled && !needToSwitchChain.value
+})
+
 const GENERIC_DISABLED_REASON = 'This operation is currently disabled. Check the messages above for details.'
 
+// Tooltip is only shown while `_disabled && !loading`, so the generic fallback
+// guarantees `effectiveDisabledReason` is truthy in that window.
 const effectiveDisabledReason = computed(() => {
   if (props.disabledReason) return props.disabledReason
   if (operationBlockReason.value) return operationBlockReason.value
@@ -53,7 +63,7 @@ const effectiveDisabledReason = computed(() => {
 })
 
 const showTooltip = () => {
-  if (_disabled.value && !props.loading && effectiveDisabledReason.value) {
+  if (_disabled.value && !props.loading) {
     isTooltipVisible.value = true
     update()
   }
@@ -62,13 +72,6 @@ const hideTooltip = () => {
   isTooltipVisible.value = false
 }
 
-const needToSwitchChain = computed(() => {
-  return isConnected.value && chainId.value !== _chainId.value
-})
-const _disabled = computed(() => {
-  if (isOperationBlocked.value) return true
-  return props.disabled && !needToSwitchChain.value
-})
 const onClick = (e: Event) => {
   if (needToSwitchChain.value) {
     e.preventDefault()
@@ -183,7 +186,7 @@ const openTermsModal = () => {
       </UiButton>
       <Transition name="tooltip">
         <div
-          v-if="isTooltipVisible && _disabled && !loading && effectiveDisabledReason"
+          v-show="isTooltipVisible && _disabled && !loading"
           ref="floating"
           :style="floatingStyles"
           class="vault-form-submit__tooltip"
