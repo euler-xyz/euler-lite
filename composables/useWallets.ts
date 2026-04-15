@@ -14,7 +14,7 @@ const lastFetchAddress = ref<string | null>(null)
 let fetchPromise: Promise<void> | null = null
 
 export const useWallets = () => {
-  const { isReady } = useVaults()
+  const { loadedChainId } = useVaults()
   const { getByType } = useVaultRegistry()
   const { address, isConnected } = useWagmi()
   const { eulerLensAddresses } = useEulerAddresses()
@@ -32,8 +32,21 @@ export const useWallets = () => {
       return
     }
 
-    // Guard: vaults must be ready
-    if (!isReady.value) {
+    // Capture chainId up-front so we can (a) filter out stale cross-chain
+    // token-list entries and (b) discard results if the chain changes mid-fetch.
+    const currentChainId = chainId.value
+
+    // Guard: the vault registry must hold vaults for THIS chain. Checking
+    // `isReady` alone is not enough — on chain switch, `eulerLensAddresses`
+    // recomputes to the new chain's lens synchronously, which can trigger
+    // our watcher *before* app.vue's chainId watcher has run
+    // resetVaultsState(). In that window `isReady` is still true (from the
+    // previous chain) and the registry still holds the previous chain's
+    // vaults, which would be sent cross-chain to the new chain's lens.
+    // `loadedChainId` is only set to the actual loaded chain after a
+    // successful loadVaults() and cleared to null on reset, so comparing
+    // it to the current chainId is the reliable gate.
+    if (loadedChainId.value !== currentChainId) {
       return
     }
 
@@ -42,10 +55,6 @@ export const useWallets = () => {
     if (!utilsLensAddress) {
       return
     }
-
-    // Capture chainId up-front so we can (a) filter out stale cross-chain
-    // token-list entries and (b) discard results if the chain changes mid-fetch.
-    const currentChainId = chainId.value
 
     // Collect unique underlying asset addresses from ALL vaults (evk, earn, securitize)
     // plus external token list tokens for the swap selector
@@ -172,7 +181,7 @@ export const useWallets = () => {
   // Check if we need to fetch on each call
   const needsFetch = () => {
     return (isConnected.value || isSpyMode.value)
-      && isReady.value
+      && loadedChainId.value === chainId.value
       && !!balanceAddress.value
       && !!eulerLensAddresses.value?.utilsLens
       && (lastFetchChainId.value !== chainId.value || !isLoaded.value || lastFetchAddress.value !== balanceAddress.value)
@@ -184,8 +193,10 @@ export const useWallets = () => {
     fetchPromise = updateBalances()
   }
 
-  // Retry when dependencies become ready (e.g. vaults load after cold start)
-  watch([isReady, () => balanceAddress.value, () => eulerLensAddresses.value?.utilsLens], () => {
+  // Retry when dependencies become ready (e.g. vaults load after cold start).
+  // Watching loadedChainId (instead of the less-specific isReady) ensures we
+  // only fire once the registry is confirmed to hold vaults for the active chain.
+  watch([loadedChainId, () => balanceAddress.value, () => eulerLensAddresses.value?.utilsLens], () => {
     if (needsFetch() && !fetchPromise) {
       fetchPromise = updateBalances()
     }
