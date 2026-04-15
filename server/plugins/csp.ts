@@ -81,9 +81,11 @@ function scanDynamicEnvUrls(): string[] {
  */
 function parseChainPublicRpcOrigins(): string[] {
   const origins = new Set<string>()
-  for (const key of Object.keys(process.env)) {
+  for (const [key, value] of Object.entries(process.env)) {
     const match = key.match(/^RPC_URL_HTTP_(\d+)$/)
-    if (!match) continue
+    // Require a non-empty value so empty placeholder env vars don't widen
+    // connect-src for chains that chain-config.ts correctly treats as disabled.
+    if (!match || !value) continue
     const chain = chainById.get(Number(match[1]))
     const urls = chain?.rpcUrls?.default?.http ?? []
     for (const url of urls) {
