@@ -41,6 +41,7 @@ const form = useCollateralForm({
   mode: 'withdraw',
   needsSwap,
   effectiveBalance: computed(() => form.collateralAssets.value),
+  effectiveAsset: computed(() => form.asset.value),
 
   computePriceFixed: (_pos, borrowVault, collateralVault) => {
     const collateralPrice = borrowVault && collateralVault
