@@ -80,10 +80,10 @@ const hasValidIRM = computed(() => {
 const SECONDS_PER_YEAR = 31_557_600 // 365.25 days
 const MAX_UINT32 = 4_294_967_295
 
-const formatSpyToApy = (spy: bigint): string => {
-  const apy = Number(formatUnits(spy, 27)) * SECONDS_PER_YEAR * 100
-  return `${apy.toFixed(2)}%`
-}
+// Key borrow APY values derived from the chart data (populated in renderChart)
+const chartRateAtZero = ref<number | null>(null)
+const chartRateAtKink = ref<number | null>(null)
+const chartRateAtMax = ref<number | null>(null)
 
 const formatKinkPercent = (kink: bigint): string => {
   const percent = Number(kink) / MAX_UINT32 * 100
@@ -165,11 +165,13 @@ const irmParamsDisplay = computed<Array<{ label: string, value: string }>>(() =>
   const decoded = decodedIRMParams.value
   if (!decoded) return []
 
+  const fmtRate = (rate: number | null) => rate !== null ? `${rate.toFixed(2)}%` : '-'
+
   if (decoded.type === 'kink') {
     return [
-      { label: 'Base rate', value: formatSpyToApy(decoded.baseRate) },
-      { label: 'Slope 1', value: formatSpyToApy(decoded.slope1) },
-      { label: 'Slope 2', value: formatSpyToApy(decoded.slope2) },
+      { label: 'Base rate', value: fmtRate(chartRateAtZero.value) },
+      { label: 'Rate at kink', value: fmtRate(chartRateAtKink.value) },
+      { label: 'Max rate', value: fmtRate(chartRateAtMax.value) },
       { label: 'Kink', value: formatKinkPercent(decoded.kink) },
     ]
   }
@@ -184,11 +186,10 @@ const irmParamsDisplay = computed<Array<{ label: string, value: string }>>(() =>
   }
   if (decoded.type === 'kinky') {
     return [
-      { label: 'Base rate', value: formatSpyToApy(decoded.baseRate) },
-      { label: 'Slope', value: formatSpyToApy(decoded.slope) },
-      { label: 'Shape', value: `${Number(decoded.shape)}` },
+      { label: 'Base rate', value: fmtRate(chartRateAtZero.value) },
+      { label: 'Rate at kink', value: fmtRate(chartRateAtKink.value) },
+      { label: 'Max rate', value: fmtRate(chartRateAtMax.value) },
       { label: 'Kink', value: formatKinkPercent(decoded.kink) },
-      { label: 'Rate cap', value: formatSpyToApy(decoded.cutoff) },
     ]
   }
   return []
@@ -322,6 +323,10 @@ const renderChart = async () => {
       supplyAPYValues.push(parseAPY(rate.supplyAPY))
     })
 
+    // Store key borrow APY values for the params display
+    chartRateAtZero.value = borrowAPYValues[0] ?? null
+    chartRateAtMax.value = borrowAPYValues[borrowAPYValues.length - 1] ?? null
+
     // Current utilization
     const currentUtilization = getVaultUtilization(vault)
 
@@ -339,6 +344,12 @@ const renderChart = async () => {
     // For KINKY IRM, derive kink utilization from decoded params
     if (kinkUtilization === null && decodedIRMParams.value?.type === 'kinky') {
       kinkUtilization = Number(decodedIRMParams.value.kink) / MAX_UINT32 * 100
+    }
+
+    // Store borrow APY at the kink utilization for the params display
+    if (kinkUtilization !== null) {
+      const kinkIndex = Math.round(kinkUtilization)
+      chartRateAtKink.value = borrowAPYValues[kinkIndex] ?? null
     }
 
     // Set chart data
@@ -574,7 +585,7 @@ watch(isDark, async () => {
         <p class="text-h3 text-content-primary">
           Interest rate model
         </p>
-        <div class="inline-flex items-center py-0 px-4 rounded-4 bg-accent-300/30 text-accent-700 text-[12px] font-medium capitalize">
+        <div class="irm-type-chip inline-flex items-center py-2 px-8 rounded-8 text-[13px] font-medium">
           {{ irmTypeLabel }}
         </div>
         <UiFootnote
@@ -623,3 +634,15 @@ watch(isDark, async () => {
     </div>
   </div>
 </template>
+
+<style scoped lang="scss">
+.irm-type-chip {
+  background-color: rgba(var(--accent-rgb), 0.15);
+  color: var(--accent-600);
+
+  [data-theme="dark"] & {
+    background-color: rgba(var(--accent-rgb), 0.2);
+    color: var(--accent-500);
+  }
+}
+</style>
