@@ -32,7 +32,7 @@ import {
   hasCollateralExposure,
 } from '~/entities/vault'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { eulerVaultLensABI } from '~/entities/euler/abis'
+import { eulerUtilsLensABI, eulerVaultLensABI } from '~/entities/euler/abis'
 
 // Register Chart.js components
 ChartJS.register(
@@ -83,6 +83,11 @@ const MAX_UINT32 = 4_294_967_295
 const chartRateAtZero = ref<number | null>(null)
 const chartRateAtKink = ref<number | null>(null)
 const chartRateAtMax = ref<number | null>(null)
+// Adaptive-only: APY bounds on rate-at-target, computed via UtilsLens.computeAPYs
+// so values match exactly what the vault will accrue (APR × year is the wrong
+// conversion — see AdaptiveCurveIRMParams, baseline uses daily compounding).
+const adaptiveMinRateAPY = ref<number | null>(null)
+const adaptiveMaxRateAPY = ref<number | null>(null)
 
 const formatKinkPercent = (kink: bigint): string => {
   const percent = Number(kink) / MAX_UINT32 * 100
@@ -92,11 +97,6 @@ const formatKinkPercent = (kink: bigint): string => {
 const formatWadPercent = (wad: bigint): string => {
   const percent = Number(formatUnits(wad, 18)) * 100
   return `${percent.toFixed(2)}%`
-}
-
-const formatWadPerSecToApy = (wadPerSec: bigint): string => {
-  const apy = Number(formatUnits(wadPerSec, 18)) * SECONDS_PER_YEAR * 100
-  return `${apy.toFixed(2)}%`
 }
 
 const irmModelType = computed(() => Number(vault.irmInfo?.interestRateModelInfo?.interestRateModelType))
@@ -176,9 +176,9 @@ const irmParamsDisplay = computed<Array<{ label: string, value: string }>>(() =>
   }
   if (decoded.type === 'adaptive') {
     return [
-      { label: 'Target utilization', value: formatWadPercent(decoded.targetUtilization) },
-      { label: 'Min rate', value: formatWadPerSecToApy(decoded.minRateAtTarget) },
-      { label: 'Max rate', value: formatWadPerSecToApy(decoded.maxRateAtTarget) },
+      { label: 'Min rate at kink', value: fmtRate(adaptiveMinRateAPY.value) },
+      { label: 'Max rate at kink', value: fmtRate(adaptiveMaxRateAPY.value) },
+      { label: 'Kink', value: formatWadPercent(decoded.targetUtilization) },
       { label: 'Curve steepness', value: `${Number(formatUnits(decoded.curveSteepness, 18)).toFixed(2)}x` },
       { label: 'Adjustment speed', value: `${(Number(formatUnits(decoded.adjustmentSpeed, 18)) * SECONDS_PER_YEAR).toFixed(1)}x/yr` },
     ]
@@ -262,6 +262,33 @@ const parseAPY = (apy: bigint): number => {
   return Number(formatUnits(apy, 27)) * 100
 }
 
+// Convert a wad-scaled per-second rate into a properly-compounded APY % by
+// round-tripping through UtilsLens.computeAPYs — same math the vault itself
+// uses, so Min/Max rate cells match on-chain accrual for large rates instead
+// of silently collapsing to APR.
+const fetchAdaptiveBorrowAPY = async (wadPerSec: bigint): Promise<number | null> => {
+  const utilsLens = eulerLensAddresses.value?.utilsLens
+  if (!utilsLens || wadPerSec === 0n) {
+    return wadPerSec === 0n ? 0 : null
+  }
+  try {
+    const client = rpcClient.value!
+    const result = await client.readContract({
+      address: utilsLens as Address,
+      abi: eulerUtilsLensABI as Abi,
+      functionName: 'computeAPYs',
+      // cash/borrows don't influence borrowAPY; interestFee only affects supplyAPY.
+      args: [wadPerSec, 1n, 0n, 0n],
+    }) as readonly [bigint, bigint]
+    const [borrowAPY] = result
+    return Number(formatUnits(borrowAPY, 27)) * 100
+  }
+  catch (e) {
+    logWarn('VaultOverviewBlockIRM/fetchAdaptiveBorrowAPY', e)
+    return null
+  }
+}
+
 // Fetch interest rate model data
 const fetchIRMData = async (kinkFraction: number | null) => {
   if (!eulerLensAddresses.value?.vaultLens) {
@@ -310,6 +337,18 @@ const renderChart = async () => {
       : null
     const kinkUtilization = kinkFraction !== null ? kinkFraction * 100 : null
 
+    // Kick off the adaptive-only APY-bound reads in parallel with the curve
+    // fetch so they don't add sequential latency. Reset first so a failed
+    // lookup doesn't leave stale values on the display.
+    adaptiveMinRateAPY.value = null
+    adaptiveMaxRateAPY.value = null
+    const adaptiveAPYsPromise = decoded?.type === 'adaptive'
+      ? Promise.all([
+          fetchAdaptiveBorrowAPY(decoded.minRateAtTarget),
+          fetchAdaptiveBorrowAPY(decoded.maxRateAtTarget),
+        ])
+      : null
+
     const data = await fetchIRMData(kinkFraction)
 
     if (!data || !data.irmData?.interestRateInfo) {
@@ -319,6 +358,12 @@ const renderChart = async () => {
     }
 
     const { irmData, kinkIndex } = data
+
+    if (adaptiveAPYsPromise) {
+      const [minAPY, maxAPY] = await adaptiveAPYsPromise
+      adaptiveMinRateAPY.value = minAPY
+      adaptiveMaxRateAPY.value = maxAPY
+    }
 
     // Read chart colors from CSS variables (theme-aware)
     const colors = getChartColors()
