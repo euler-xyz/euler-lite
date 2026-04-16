@@ -217,20 +217,44 @@ const irmTooltip = computed<{ title: string, text: string } | null>(() => {
   return null
 })
 
-// Generate cash and borrows data points for chart (0-100% utilization)
-const generateChartDataPoints = () => {
+// Generate cash and borrows data points for chart (0-100% utilization).
+// When `kinkFraction` is provided (in 0..1), injects an extra sample at the
+// exact kink so the rendered curve bends there and the annotation + kink-rate
+// readout land on a real data point instead of the nearest integer-percent
+// neighbour. Returns the index of the kink sample, or null when none was added.
+const generateChartDataPoints = (kinkFraction: number | null) => {
   const amountPoints = 100
-  const borrowsData: bigint[] = [BigInt(0)]
+  const TOTAL = 2 ** 32
+  const TOTAL_BIG = BigInt(TOTAL)
+  const borrowsData: bigint[] = [0n]
 
   for (let i = 1; i <= amountPoints; i += 1) {
-    const borrow: bigint = BigInt(Math.floor((i / amountPoints) * 2 ** 32))
-    borrowsData.push(borrow)
+    borrowsData.push(BigInt(Math.floor((i / amountPoints) * TOTAL)))
   }
 
   const cashData = [...borrowsData]
   cashData.reverse()
 
-  return { cashData, borrowsData }
+  let kinkIndex: number | null = null
+  if (kinkFraction !== null && kinkFraction > 0 && kinkFraction < 1) {
+    const kinkBorrows = BigInt(Math.floor(kinkFraction * TOTAL))
+    const kinkCash = TOTAL_BIG - kinkBorrows
+
+    // Keep the arrays sorted by borrows so the plotted line stays monotonic.
+    let idx = borrowsData.findIndex(b => b >= kinkBorrows)
+    if (idx < 0) idx = borrowsData.length
+
+    if (idx < borrowsData.length && borrowsData[idx] === kinkBorrows) {
+      kinkIndex = idx
+    }
+    else {
+      borrowsData.splice(idx, 0, kinkBorrows)
+      cashData.splice(idx, 0, kinkCash)
+      kinkIndex = idx
+    }
+  }
+
+  return { cashData, borrowsData, kinkIndex }
 }
 
 // Parse APY from bigint (27 decimals) to percentage number
@@ -239,7 +263,7 @@ const parseAPY = (apy: bigint): number => {
 }
 
 // Fetch interest rate model data
-const fetchIRMData = async () => {
+const fetchIRMData = async (kinkFraction: number | null) => {
   if (!eulerLensAddresses.value?.vaultLens) {
     return null
   }
@@ -247,7 +271,7 @@ const fetchIRMData = async () => {
   try {
     const client = rpcClient.value!
 
-    const { cashData, borrowsData } = generateChartDataPoints()
+    const { cashData, borrowsData, kinkIndex } = generateChartDataPoints(kinkFraction)
 
     // Fetch general interest rate model info
     const irmData = await client.readContract({
@@ -260,6 +284,7 @@ const fetchIRMData = async () => {
 
     return {
       irmData,
+      kinkIndex,
     }
   }
   catch (error) {
@@ -276,7 +301,16 @@ const renderChart = async () => {
   hasError.value = false
 
   try {
-    const data = await fetchIRMData()
+    // Derive kink utilization (0..1) from decoded params for KINK and KINKY types.
+    // This drives BOTH the annotation line position and the extra sample injected
+    // into the sweep so the curve bends at the exact kink.
+    const decoded = decodedIRMParams.value
+    const kinkFraction = (decoded && (decoded.type === 'kink' || decoded.type === 'kinky'))
+      ? Number(decoded.kink) / MAX_UINT32
+      : null
+    const kinkUtilization = kinkFraction !== null ? kinkFraction * 100 : null
+
+    const data = await fetchIRMData(kinkFraction)
 
     if (!data || !data.irmData?.interestRateInfo) {
       hasError.value = true
@@ -284,42 +318,41 @@ const renderChart = async () => {
       return
     }
 
-    const { irmData } = data
+    const { irmData, kinkIndex } = data
 
     // Read chart colors from CSS variables (theme-aware)
     const colors = getChartColors()
 
-    // Prepare chart data
+    // Prepare chart data. With a kink sample injected, index → utilization is no
+    // longer i/(N-1). Regular samples keep integer-percent labels (so the every-
+    // 10% tick rule still fires). The injected sample gets a two-decimal label
+    // reflecting the exact kink utilization, which deliberately doesn't match
+    // the integer-tick rule — no stray tick at a non-round utilization.
     const labels: string[] = []
     const borrowAPYValues: number[] = []
     const supplyAPYValues: number[] = []
 
     irmData.interestRateInfo.forEach((rate: { borrowAPY: bigint, supplyAPY: bigint }, i: number) => {
-      const utilization = ((i / (irmData.interestRateInfo.length - 1)) * 100).toFixed(0)
-      labels.push(utilization)
+      if (kinkIndex !== null && i === kinkIndex && kinkUtilization !== null) {
+        labels.push(kinkUtilization.toFixed(2))
+      }
+      else {
+        const originalIndex = kinkIndex !== null && i > kinkIndex ? i - 1 : i
+        labels.push(originalIndex.toFixed(0))
+      }
       borrowAPYValues.push(parseAPY(rate.borrowAPY))
       supplyAPYValues.push(parseAPY(rate.supplyAPY))
     })
 
-    // Store key borrow APY values for the params display
+    // Store key borrow APY values for the params display.
     chartRateAtZero.value = borrowAPYValues[0] ?? null
     chartRateAtMax.value = borrowAPYValues[borrowAPYValues.length - 1] ?? null
+    chartRateAtKink.value = kinkIndex !== null
+      ? borrowAPYValues[kinkIndex] ?? null
+      : null
 
     // Current utilization
     const currentUtilization = getVaultUtilization(vault)
-
-    // Derive kink utilization from decoded params for both KINK and KINKY types
-    let kinkUtilization: number | null = null
-    const decoded = decodedIRMParams.value
-    if (decoded && (decoded.type === 'kink' || decoded.type === 'kinky')) {
-      kinkUtilization = Number(decoded.kink) / MAX_UINT32 * 100
-    }
-
-    // Store borrow APY at the kink utilization for the params display
-    if (kinkUtilization !== null) {
-      const kinkIndex = Math.round(kinkUtilization)
-      chartRateAtKink.value = borrowAPYValues[kinkIndex] ?? null
-    }
 
     // Set chart data
     chartData.value = {
@@ -376,7 +409,7 @@ const renderChart = async () => {
       },
     }
 
-    if (kinkUtilization !== null) {
+    if (kinkUtilization !== null && kinkIndex !== null) {
       const labelsAreClose = Math.abs(currentUtilization - kinkUtilization) < 20
       const currentIsLower = currentUtilization <= kinkUtilization
       const yOffset = labelsAreClose ? 24 : 0
@@ -385,10 +418,15 @@ const renderChart = async () => {
         annotations.currentLine.label.yAdjust = yOffset
       }
 
+      // Anchor to the injected sample's label so the line lands exactly on the
+      // kink data point. Using the raw kink percent here would miss the sample
+      // because the category axis positions by label match, not numeric value.
+      const kinkLabel = labels[kinkIndex]
+
       annotations.kinkLine = {
         type: 'line',
-        xMin: kinkUtilization.toFixed(0),
-        xMax: kinkUtilization.toFixed(0),
+        xMin: kinkLabel,
+        xMax: kinkLabel,
         borderColor: colors.lineA,
         borderWidth: 1,
         borderDash: [5, 5],
