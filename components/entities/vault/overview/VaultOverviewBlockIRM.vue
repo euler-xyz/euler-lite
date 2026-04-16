@@ -22,7 +22,6 @@ import {
   ADAPTIVE_CURVE_IRM_COMPONENTS,
   KINKY_IRM_COMPONENTS,
 } from '~/entities/constants'
-import { BPS_BASE } from '~/entities/tuning-constants'
 import {
   type Vault,
   type SecuritizeVault,
@@ -259,29 +258,8 @@ const fetchIRMData = async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic lens contract return
     }) as Record<string, any>
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic lens contract return
-    let kinkData: Record<string, any> | null = null
-    const modelType = Number(irmData.interestRateModelInfo?.interestRateModelType)
-
-    // Fetch kink-specific data if applicable
-    if (modelType === INTEREST_RATE_MODEL_TYPE.KINK) {
-      try {
-        kinkData = await client.readContract({
-          address: eulerLensAddresses.value.vaultLens as Address,
-          abi: eulerVaultLensABI as Abi,
-          functionName: 'getVaultKinkInterestRateModelInfo',
-          args: [vault.address],
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic lens contract return
-        }) as Record<string, any>
-      }
-      catch (e) {
-        logWarn('VaultOverviewBlockIRM/fetchKinkIRM', e)
-      }
-    }
-
     return {
       irmData,
-      kinkData,
     }
   }
   catch (error) {
@@ -306,7 +284,7 @@ const renderChart = async () => {
       return
     }
 
-    const { irmData, kinkData } = data
+    const { irmData } = data
 
     // Read chart colors from CSS variables (theme-aware)
     const colors = getChartColors()
@@ -330,20 +308,11 @@ const renderChart = async () => {
     // Current utilization
     const currentUtilization = getVaultUtilization(vault)
 
-    // Kink utilization if available
+    // Derive kink utilization from decoded params for both KINK and KINKY types
     let kinkUtilization: number | null = null
-    if (kinkData?.interestRateInfo && kinkData.interestRateInfo.length > 1) {
-      const kinkInfo = kinkData.interestRateInfo[1]
-      const kinkCash = kinkData.interestRateInfo[0]?.cash || 0n
-      const kinkBorrows = kinkInfo?.borrows || 0n
-      if (kinkCash > 0n) {
-        kinkUtilization = Number((kinkBorrows * BPS_BASE) / kinkCash) / 100
-      }
-    }
-
-    // For KINKY IRM, derive kink utilization from decoded params
-    if (kinkUtilization === null && decodedIRMParams.value?.type === 'kinky') {
-      kinkUtilization = Number(decodedIRMParams.value.kink) / MAX_UINT32 * 100
+    const decoded = decodedIRMParams.value
+    if (decoded && (decoded.type === 'kink' || decoded.type === 'kinky')) {
+      kinkUtilization = Number(decoded.kink) / MAX_UINT32 * 100
     }
 
     // Store borrow APY at the kink utilization for the params display
