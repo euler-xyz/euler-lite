@@ -80,6 +80,18 @@ export default defineEventHandler((event) => {
   // response (including preflights) for one origin to another.
   setResponseHeader(event, 'Vary', 'Origin')
 
+  // Endpoints under /api/public/ are intentionally public.
+  if (url.pathname.startsWith('/api/public/')) {
+    setResponseHeader(event, 'Access-Control-Allow-Origin', '*')
+    setResponseHeader(event, 'Access-Control-Allow-Methods', 'GET, OPTIONS')
+    setResponseHeader(event, 'Access-Control-Allow-Headers', 'Content-Type')
+    if (event.node.req.method === 'OPTIONS') {
+      setResponseHeader(event, 'Access-Control-Max-Age', 86400)
+      return sendNoContent(event)
+    }
+    return
+  }
+
   const origin = event.node.req.headers.origin
 
   if (origin && allowedOrigins.has(origin)) {
