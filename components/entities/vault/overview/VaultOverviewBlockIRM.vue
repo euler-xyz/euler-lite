@@ -14,12 +14,24 @@ import {
   type ChartData,
 } from 'chart.js'
 import annotationPlugin from 'chartjs-plugin-annotation'
-import { formatUnits, zeroAddress, type Address, type Abi } from 'viem'
+import { formatUnits, zeroAddress, decodeAbiParameters, type Address, type Abi, type Hex } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
-import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
+import {
+  INTEREST_RATE_MODEL_TYPE,
+  KINK_IRM_COMPONENTS,
+  ADAPTIVE_CURVE_IRM_COMPONENTS,
+  KINKY_IRM_COMPONENTS,
+} from '~/entities/constants'
 import { BPS_BASE } from '~/entities/tuning-constants'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
-import { getVaultUtilization, hasCollateralExposure } from '~/entities/vault'
+import {
+  type Vault,
+  type SecuritizeVault,
+  type KinkIRMParams,
+  type AdaptiveCurveIRMParams,
+  type KinkyIRMParams,
+  getVaultUtilization,
+  hasCollateralExposure,
+} from '~/entities/vault'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { eulerVaultLensABI } from '~/entities/euler/abis'
 
@@ -65,15 +77,144 @@ const hasValidIRM = computed(() => {
     && vault.interestRateModelAddress !== zeroAddress
 })
 
+const SECONDS_PER_YEAR = 31_557_600 // 365.25 days
+const MAX_UINT32 = 4_294_967_295
+
+const formatSpyToApy = (spy: bigint): string => {
+  const apy = Number(formatUnits(spy, 27)) * SECONDS_PER_YEAR * 100
+  return `${apy.toFixed(2)}%`
+}
+
+const formatKinkPercent = (kink: bigint): string => {
+  const percent = Number(kink) / MAX_UINT32 * 100
+  return `${percent.toFixed(2)}%`
+}
+
+const formatWadPercent = (wad: bigint): string => {
+  const percent = Number(formatUnits(wad, 18)) * 100
+  return `${percent.toFixed(2)}%`
+}
+
+const formatWadPerSecToApy = (wadPerSec: bigint): string => {
+  const apy = Number(formatUnits(wadPerSec, 18)) * SECONDS_PER_YEAR * 100
+  return `${apy.toFixed(2)}%`
+}
+
+const irmModelType = computed(() => Number(vault.irmInfo?.interestRateModelInfo?.interestRateModelType))
+
 const irmTypeLabel = computed(() => {
-  const modelType = Number(vault.irmInfo?.interestRateModelInfo?.interestRateModelType)
-  if (modelType === INTEREST_RATE_MODEL_TYPE.KINK) {
-    return 'Kink'
-  }
-  else if (modelType === INTEREST_RATE_MODEL_TYPE.ADAPTIVE_CURVE) {
-    return 'Adaptive'
-  }
+  const type = irmModelType.value
+  if (type === INTEREST_RATE_MODEL_TYPE.KINK) return 'Kink'
+  if (type === INTEREST_RATE_MODEL_TYPE.ADAPTIVE_CURVE) return 'Adaptive'
+  if (type === INTEREST_RATE_MODEL_TYPE.KINKY) return 'Kinky'
   return 'Interest Rate Model'
+})
+
+type DecodedIRMParams
+  = ({ type: 'kink' } & KinkIRMParams)
+    | ({ type: 'adaptive' } & AdaptiveCurveIRMParams)
+    | ({ type: 'kinky' } & KinkyIRMParams)
+
+const decodedIRMParams = computed<DecodedIRMParams | null>(() => {
+  const params = vault.irmInfo?.interestRateModelInfo?.interestRateModelParams
+  if (!params || params === '0x') return null
+
+  const type = irmModelType.value
+
+  try {
+    if (type === INTEREST_RATE_MODEL_TYPE.KINK) {
+      const [decoded] = decodeAbiParameters(
+        [{ type: 'tuple', components: [...KINK_IRM_COMPONENTS] }],
+        params as Hex,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- viem decode returns dynamic shape
+      ) as any[]
+      return { type: 'kink', baseRate: decoded.baseRate, slope1: decoded.slope1, slope2: decoded.slope2, kink: decoded.kink }
+    }
+    if (type === INTEREST_RATE_MODEL_TYPE.ADAPTIVE_CURVE) {
+      const [decoded] = decodeAbiParameters(
+        [{ type: 'tuple', components: [...ADAPTIVE_CURVE_IRM_COMPONENTS] }],
+        params as Hex,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- viem decode returns dynamic shape
+      ) as any[]
+      return {
+        type: 'adaptive',
+        targetUtilization: decoded.targetUtilization,
+        initialRateAtTarget: decoded.initialRateAtTarget,
+        minRateAtTarget: decoded.minRateAtTarget,
+        maxRateAtTarget: decoded.maxRateAtTarget,
+        curveSteepness: decoded.curveSteepness,
+        adjustmentSpeed: decoded.adjustmentSpeed,
+      }
+    }
+    if (type === INTEREST_RATE_MODEL_TYPE.KINKY) {
+      const [decoded] = decodeAbiParameters(
+        [{ type: 'tuple', components: [...KINKY_IRM_COMPONENTS] }],
+        params as Hex,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- viem decode returns dynamic shape
+      ) as any[]
+      return { type: 'kinky', baseRate: decoded.baseRate, slope: decoded.slope, shape: decoded.shape, kink: decoded.kink, cutoff: decoded.cutoff }
+    }
+  }
+  catch (e) {
+    logWarn('VaultOverviewBlockIRM/decodeParams', e)
+  }
+  return null
+})
+
+const irmParamsDisplay = computed<Array<{ label: string, value: string }>>(() => {
+  const decoded = decodedIRMParams.value
+  if (!decoded) return []
+
+  if (decoded.type === 'kink') {
+    return [
+      { label: 'Base rate', value: formatSpyToApy(decoded.baseRate) },
+      { label: 'Slope 1', value: formatSpyToApy(decoded.slope1) },
+      { label: 'Slope 2', value: formatSpyToApy(decoded.slope2) },
+      { label: 'Kink', value: formatKinkPercent(decoded.kink) },
+    ]
+  }
+  if (decoded.type === 'adaptive') {
+    return [
+      { label: 'Target utilization', value: formatWadPercent(decoded.targetUtilization) },
+      { label: 'Min rate', value: formatWadPerSecToApy(decoded.minRateAtTarget) },
+      { label: 'Max rate', value: formatWadPerSecToApy(decoded.maxRateAtTarget) },
+      { label: 'Curve steepness', value: `${Number(formatUnits(decoded.curveSteepness, 18)).toFixed(2)}x` },
+      { label: 'Adjustment speed', value: `${(Number(formatUnits(decoded.adjustmentSpeed, 18)) * SECONDS_PER_YEAR).toFixed(1)}x/yr` },
+    ]
+  }
+  if (decoded.type === 'kinky') {
+    return [
+      { label: 'Base rate', value: formatSpyToApy(decoded.baseRate) },
+      { label: 'Slope', value: formatSpyToApy(decoded.slope) },
+      { label: 'Shape', value: `${Number(decoded.shape)}` },
+      { label: 'Kink', value: formatKinkPercent(decoded.kink) },
+      { label: 'Rate cap', value: formatSpyToApy(decoded.cutoff) },
+    ]
+  }
+  return []
+})
+
+const irmTooltip = computed<{ title: string, text: string } | null>(() => {
+  const type = irmModelType.value
+  if (type === INTEREST_RATE_MODEL_TYPE.KINK) {
+    return {
+      title: 'Kink IRM',
+      text: 'A two-slope interest rate model. Rates increase gradually below the kink utilization point, then steeply above it to discourage over-borrowing.',
+    }
+  }
+  if (type === INTEREST_RATE_MODEL_TYPE.ADAPTIVE_CURVE) {
+    return {
+      title: 'Adaptive Curve IRM',
+      text: 'A dynamic interest rate model that automatically adjusts rates toward a target utilization. When utilization exceeds the target, rates increase. When below, they decrease.',
+    }
+  }
+  if (type === INTEREST_RATE_MODEL_TYPE.KINKY) {
+    return {
+      title: 'Kinky IRM',
+      text: 'A non-linear interest rate model with a kink point and curved rate progression. Unlike the standard Kink model, rates follow a smooth curve controlled by a shape parameter and are capped at a maximum rate.',
+    }
+  }
+  return null
 })
 
 // Generate cash and borrows data points for chart (0-100% utilization)
@@ -193,6 +334,11 @@ const renderChart = async () => {
       if (kinkCash > 0n) {
         kinkUtilization = Number((kinkBorrows * BPS_BASE) / kinkCash) / 100
       }
+    }
+
+    // For KINKY IRM, derive kink utilization from decoded params
+    if (kinkUtilization === null && decodedIRMParams.value?.type === 'kinky') {
+      kinkUtilization = Number(decodedIRMParams.value.kink) / MAX_UINT32 * 100
     }
 
     // Set chart data
@@ -431,6 +577,12 @@ watch(isDark, async () => {
         <div class="inline-flex items-center py-0 px-4 rounded-4 bg-accent-300/30 text-accent-700 text-[12px] font-medium capitalize">
           {{ irmTypeLabel }}
         </div>
+        <UiFootnote
+          v-if="irmTooltip"
+          :title="irmTooltip.title"
+          :text="irmTooltip.text"
+          class="[--ui-footnote-icon-color:var(--text-muted)] hover:[--ui-footnote-icon-color:var(--text-secondary)]"
+        />
       </div>
     </div>
 
@@ -456,6 +608,18 @@ watch(isDark, async () => {
           :options="chartOptions"
         />
       </div>
+    </div>
+
+    <div
+      v-if="irmParamsDisplay.length"
+      class="grid grid-cols-2 sm:grid-cols-3 gap-16"
+    >
+      <VaultOverviewLabelValue
+        v-for="param in irmParamsDisplay"
+        :key="param.label"
+        :label="param.label"
+        :value="param.value"
+      />
     </div>
   </div>
 </template>
