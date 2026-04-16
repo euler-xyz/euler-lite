@@ -258,7 +258,7 @@ const submitCowSwapCollateralSwap = () => {
     ...(isMaxSwap.value ? [{ index: wIdx++, label: 'Disable collateral', labelSuffix: fromAsset.symbol, isSeparateTx: false }] : []),
     { index: wIdx++, label: 'Transfer to wallet', isSeparateTx: false, assetInfo: { symbol: fromVault.value.symbol || fromAsset.symbol, address: fromAsset.address, amount: fromAmountStr } },
     { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: fromAsset.symbol, address: fromAsset.address, amount: fromAmountStr }, toAssetInfo: { symbol: toAsset.symbol, address: toAsset.address, amount: toAmount.value } },
-    { index: wIdx++, label: 'Deposit into position', isSeparateTx: false, assetInfo: { symbol: toAsset.symbol, address: toAsset.address, amount: toAmount.value } },
+    { index: wIdx++, label: 'Verify min received', isSeparateTx: false, assetInfo: { symbol: toAsset.symbol, address: toAsset.address, amount: toAmount.value } },
   ]
 
   const walletWarningsDescription

@@ -444,7 +444,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     const wrapperSteps: DisplayStep[] = [
       { index: wIdx++, label: 'Transfer collateral to Inbox', isSeparateTx: false, assetInfo: { symbol: sourceVault.value.symbol || sourceAsset.symbol, address: sourceAsset.address, amount: core.amount.value } },
       { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: sourceAsset.symbol, address: sourceAsset.address, amount: core.amount.value }, toAssetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: core.debtAmount.value || '?' } },
-      { index: wIdx++, label: 'Repay debt', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address } },
+      { index: wIdx++, label: 'Repay', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address } },
     ]
 
     const walletWarningsDescription
