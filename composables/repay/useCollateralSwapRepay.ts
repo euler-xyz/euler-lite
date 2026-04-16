@@ -442,9 +442,9 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
     let wIdx = 1
     const wrapperSteps: DisplayStep[] = [
-      { index: wIdx++, label: 'Transfer collateral to Inbox', isSeparateTx: false, assetInfo: { symbol: sourceVault.value.symbol || sourceAsset.symbol, amount: core.amount.value } },
-      { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: sourceAsset.symbol, amount: core.amount.value }, toAssetInfo: { symbol: borrowAsset.symbol, amount: core.debtAmount.value || '?' } },
-      { index: wIdx++, label: 'Repay debt', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol } },
+      { index: wIdx++, label: 'Transfer collateral to Inbox', isSeparateTx: false, assetInfo: { symbol: sourceVault.value.symbol || sourceAsset.symbol, address: sourceAsset.address, amount: core.amount.value } },
+      { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: sourceAsset.symbol, address: sourceAsset.address, amount: core.amount.value }, toAssetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: core.debtAmount.value || '?' } },
+      { index: wIdx++, label: 'Repay debt', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address } },
     ]
 
     const walletWarningsDescription

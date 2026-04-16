@@ -248,7 +248,7 @@ const submitCowSwapCollateralSwap = () => {
 
   const signSteps: DisplayStep[] = []
   let idx = 1
-  signSteps.push({ index: idx++, label: 'Approve for swap', isSeparateTx: true, assetInfo: { symbol: fromVault.value.symbol || fromAsset.symbol, address: fromVault.value.address, amount: fromAmountStr } })
+  signSteps.push({ index: idx++, label: 'Approve for swap', isSeparateTx: true, assetInfo: { symbol: fromVault.value.symbol || fromAsset.symbol, address: fromAsset.address, amount: fromAmountStr } })
   signSteps.push({ index: idx++, label: 'Sign EVC permit', isSeparateTx: false })
   signSteps.push({ index: idx++, label: 'Sign CoW order', isSeparateTx: false })
 
@@ -256,8 +256,9 @@ const submitCowSwapCollateralSwap = () => {
   const wrapperSteps: DisplayStep[] = [
     { index: wIdx++, label: 'Enable collateral', labelSuffix: toAsset.symbol, isSeparateTx: false },
     ...(isMaxSwap.value ? [{ index: wIdx++, label: 'Disable collateral', labelSuffix: fromAsset.symbol, isSeparateTx: false }] : []),
-    { index: wIdx++, label: 'Transfer to owner', isSeparateTx: false, assetInfo: { symbol: fromVault.value.symbol || fromAsset.symbol, amount: fromAmountStr } },
-    { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: fromAsset.symbol, amount: fromAmountStr }, toAssetInfo: { symbol: toAsset.symbol, amount: toAmount.value } },
+    { index: wIdx++, label: 'Transfer to wallet', isSeparateTx: false, assetInfo: { symbol: fromVault.value.symbol || fromAsset.symbol, address: fromAsset.address, amount: fromAmountStr } },
+    { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: fromAsset.symbol, address: fromAsset.address, amount: fromAmountStr }, toAssetInfo: { symbol: toAsset.symbol, address: toAsset.address, amount: toAmount.value } },
+    { index: wIdx++, label: 'Deposit into position', isSeparateTx: false, assetInfo: { symbol: toAsset.symbol, address: toAsset.address, amount: toAmount.value } },
   ]
 
   const walletWarningsDescription
