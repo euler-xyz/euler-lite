@@ -81,7 +81,7 @@ export type CowSwapCollateralSwapParams = {
   fromVault: Address
   toVault: Address
   fromAmount: bigint
-  disableSourceCollateral: boolean
+  toAmount: bigint
 }
 
 export type CowSwapCollateralSwapExecuteParams = {

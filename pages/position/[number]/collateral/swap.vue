@@ -251,7 +251,7 @@ const submitCowSwapCollateralSwap = () => {
       fromVault: fromVault.value.address as Address,
       toVault: toVault.value.address as Address,
       fromAmount: sellAmount,
-      disableSourceCollateral: isMaxSwap.value,
+      toAmount: buyAmount,
     },
   }
 
@@ -268,7 +268,6 @@ const submitCowSwapCollateralSwap = () => {
   let wIdx = 1
   const wrapperSteps: DisplayStep[] = [
     { index: wIdx++, label: 'Enable collateral', labelSuffix: toAsset.symbol, isSeparateTx: false },
-    ...(isMaxSwap.value ? [{ index: wIdx++, label: 'Disable collateral', labelSuffix: fromAsset.symbol, isSeparateTx: false }] : []),
     { index: wIdx++, label: 'Transfer to wallet', isSeparateTx: false, assetInfo: { symbol: fromVault.value.symbol || fromAsset.symbol, address: fromAsset.address, amount: fromAmountStr } },
     { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: fromAsset.symbol, address: fromAsset.address, amount: fromAmountStr }, toAssetInfo: { symbol: toAsset.symbol, address: toAsset.address, amount: toAmount.value } },
     { index: wIdx++, label: 'Verify min received', isSeparateTx: false, assetInfo: { symbol: toAsset.symbol, address: toAsset.address, amount: toAmount.value } },
