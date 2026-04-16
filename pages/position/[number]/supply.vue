@@ -296,7 +296,6 @@ watch(selectedAsset, async () => {
               />
 
               <VaultFormInfoBlock
-                v-if="form.swapEstimatedOutput.value"
                 :loading="form.isSwapQuoteLoading.value"
                 variant="card"
               >

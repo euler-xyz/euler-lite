@@ -515,7 +515,6 @@ watch(formTab, () => {
                   />
 
                   <VaultFormInfoBlock
-                    v-if="borrow.borrowSwapEstimatedCollateral.value"
                     :loading="borrow.isBorrowSwapQuoteLoading.value"
                     variant="card"
                   >
