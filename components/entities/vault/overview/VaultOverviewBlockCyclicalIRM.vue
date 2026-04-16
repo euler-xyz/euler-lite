@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { decodeAbiParameters, formatUnits, zeroAddress, type Hex } from 'viem'
-import { INTEREST_RATE_MODEL_TYPE, FIXED_CYCLICAL_BINARY_IRM_COMPONENTS, SECONDS_IN_YEAR } from '~/entities/constants'
+import { FIXED_CYCLICAL_BINARY_IRM_COMPONENTS, SECONDS_IN_YEAR } from '~/entities/constants'
 import type { Vault, SecuritizeVault, CyclicalNoteInfo } from '~/entities/vault'
 import { hasCollateralExposure } from '~/entities/vault'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -9,18 +9,14 @@ const { vault } = defineProps<{ vault: Vault }>()
 
 const { get: registryGet } = useVaultRegistry()
 
-const isCyclicalIRM = computed(() => {
-  return Number(vault.irmInfo?.interestRateModelInfo?.interestRateModelType)
-    === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY
-})
-
+// Parent already gates rendering to cyclical IRM vaults via v-if,
+// so this component only checks collateral exposure and IRM address.
 const hasValidIRM = computed(() => {
   const hasExposure = hasCollateralExposure(
     vault,
     addr => registryGet(addr)?.vault as Vault | SecuritizeVault | undefined,
   )
   return hasExposure
-    && isCyclicalIRM.value
     && vault.interestRateModelAddress
     && vault.interestRateModelAddress !== zeroAddress
 })
@@ -33,7 +29,7 @@ const cyclicalInfo = computed((): CyclicalNoteInfo | null => {
       [{ type: 'tuple', components: FIXED_CYCLICAL_BINARY_IRM_COMPONENTS }],
       params as Hex,
     )
-    return decoded as unknown as CyclicalNoteInfo
+    return decoded as CyclicalNoteInfo
   }
   catch {
     return null
@@ -47,9 +43,16 @@ const cycleLength = computed(() => {
   return cyclicalInfo.value.primaryDuration + cyclicalInfo.value.secondaryDuration
 })
 
+const hasStarted = computed(() => {
+  const info = cyclicalInfo.value
+  if (!info) return false
+  const nowSec = BigInt(Math.floor(now.value.getTime() / 1000))
+  return nowSec >= info.startTimestamp
+})
+
 const currentCycleStart = computed(() => {
   const info = cyclicalInfo.value
-  if (!info || cycleLength.value === 0n) return 0n
+  if (!info || cycleLength.value === 0n || !hasStarted.value) return 0n
   const nowSec = BigInt(Math.floor(now.value.getTime() / 1000))
   const elapsed = nowSec - info.startTimestamp
   const cycleIndex = elapsed / cycleLength.value
@@ -100,8 +103,8 @@ const dayInCycle = computed(() => {
 })
 
 const fixedRatePercent = computed(() => {
-  if (cycleLength.value === 0n) return 0
-  return (Number(cyclicalInfo.value!.primaryDuration) / Number(cycleLength.value)) * 100
+  if (!cyclicalInfo.value || cycleLength.value === 0n) return 0
+  return (Number(cyclicalInfo.value.primaryDuration) / Number(cycleLength.value)) * 100
 })
 
 const clampedPercent = computed(() => Math.min(Math.max(percentComplete.value, 0), 100))
@@ -173,8 +176,8 @@ const formatCyclicalDateShort = (startTimestamp: bigint, endTimestamp: bigint): 
   return `${month} ${day}${suffix}, ${endDate.getFullYear()} ${timeStr}`
 }
 
-const formatAPY = (apy: number): string => {
-  return apy.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const formatPercent = (value: number): string => {
+  return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 const formatDuration = (days: number): string => {
@@ -217,8 +220,19 @@ const phaseLabel = computed(() => {
       </div>
     </div>
 
+    <!-- Pre-start notice -->
+    <div
+      v-if="!hasStarted && cyclicalInfo"
+      class="text-p3 text-content-secondary"
+    >
+      First cycle starts {{ formatCyclicalDate(cyclicalInfo.startTimestamp) }}
+    </div>
+
     <!-- Current cycle -->
-    <div class="flex flex-col gap-12">
+    <div
+      v-if="hasStarted"
+      class="flex flex-col gap-12"
+    >
       <p class="text-p3 text-content-tertiary font-medium uppercase tracking-wide text-[11px]">
         Current cycle
       </p>
@@ -254,19 +268,22 @@ const phaseLabel = computed(() => {
         </VaultOverviewLabelValue>
         <VaultOverviewLabelValue label="Fixed APY">
           <span class="text-p3 text-content-primary">
-            {{ formatAPY(fixedBorrowAPY) }}%
+            {{ formatPercent(fixedBorrowAPY) }}%
           </span>
         </VaultOverviewLabelValue>
         <VaultOverviewLabelValue label="Repayment APY">
           <span class="text-p3 text-content-primary">
-            {{ formatAPY(repaymentBorrowAPY) }}%
+            {{ formatPercent(repaymentBorrowAPY) }}%
           </span>
         </VaultOverviewLabelValue>
       </div>
     </div>
 
     <!-- Progress -->
-    <div class="flex flex-col gap-12 mt-12">
+    <div
+      v-if="hasStarted"
+      class="flex flex-col gap-12 mt-12"
+    >
       <p class="text-p3 text-content-tertiary font-medium uppercase tracking-wide text-[11px]">
         Progress
       </p>
@@ -325,7 +342,7 @@ const phaseLabel = computed(() => {
           day {{ Math.floor(dayInCycle) }} of {{ Math.round(cycleLengthDays) }}
         </span>
         <span class="text-content-tertiary">
-          {{ formatAPY(percentComplete) }}% complete
+          {{ formatPercent(percentComplete) }}% complete
         </span>
       </div>
     </div>
