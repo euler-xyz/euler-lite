@@ -87,7 +87,7 @@ const resetVaultsState = () => {
 }
 
 const updateEVKVaults = async (vaultAddresses: string[], generation?: number, silent = false) => {
-  const { set: registrySet, getVault: registryGetVault } = useVaultRegistry()
+  const { setMany: registrySetMany, getVault: registryGetVault } = useVaultRegistry()
   const gen = generation ?? loadGeneration.value
 
   try {
@@ -99,12 +99,16 @@ const updateEVKVaults = async (vaultAddresses: string[], generation?: number, si
     for await (const result of fetchVaults(vaultAddresses)) {
       if (loadGeneration.value !== gen) return
 
-      result.vaults.forEach((vault) => {
+      registrySetMany(result.vaults.map((vault) => {
         const existing = registryGetVault(vault.address) as Vault | undefined
         const vaultCategory = existing?.vaultCategory
         const verified = vaultCategory === 'escrow' ? true : vault.verified
-        registrySet(vault.address, vaultCategory ? { ...vault, vaultCategory, verified } : vault, 'evk')
-      })
+        return {
+          address: vault.address,
+          vault: vaultCategory ? { ...vault, vaultCategory, verified } : vault,
+          type: 'evk' as const,
+        }
+      }))
 
       if (!silent) {
         isEVKLoading.value = false
@@ -125,7 +129,7 @@ const updateEVKVaults = async (vaultAddresses: string[], generation?: number, si
   }
 }
 const updateEarnVaults = async (vaultAddresses: string[], generation?: number, silent = false) => {
-  const { set: registrySet } = useVaultRegistry()
+  const { setMany: registrySetMany } = useVaultRegistry()
   const gen = generation ?? loadGeneration.value
 
   try {
@@ -137,9 +141,11 @@ const updateEarnVaults = async (vaultAddresses: string[], generation?: number, s
     for await (const result of fetchEarnVaults(vaultAddresses)) {
       if (loadGeneration.value !== gen) return
 
-      result.vaults.forEach((vault) => {
-        registrySet(vault.address, vault, 'earn')
-      })
+      registrySetMany(result.vaults.map(vault => ({
+        address: vault.address,
+        vault,
+        type: 'earn' as const,
+      })))
 
       if (!silent) {
         isEarnLoading.value = false
@@ -193,7 +199,7 @@ const extractNeededEscrowAddresses = (): string[] => {
  * Used for lazy loading - only fetch info for escrow vaults actually used as collateral.
  */
 const fetchNeededEscrowVaults = async (addresses: string[], generation: number): Promise<void> => {
-  const { set: registrySet } = useVaultRegistry()
+  const { setMany: registrySetMany } = useVaultRegistry()
 
   if (!addresses.length || loadGeneration.value !== generation) {
     return
@@ -205,18 +211,20 @@ const fetchNeededEscrowVaults = async (addresses: string[], generation: number):
 
   if (loadGeneration.value !== generation) return
 
+  const entries: Array<{ address: string, vault: Vault, type: 'evk' }> = []
   results.forEach((result) => {
     if (result.status === 'fulfilled') {
-      registrySet(result.value.address, result.value, 'evk')
+      entries.push({ address: result.value.address, vault: result.value, type: 'evk' })
     }
     else {
       logWarn('useVaults/escrow', result.reason)
     }
   })
+  registrySetMany(entries)
 }
 
 const updateSecuritizeVaults = async (securitizeAddresses: string[], generation: number, silent = false) => {
-  const { set: registrySet } = useVaultRegistry()
+  const { setMany: registrySetMany } = useVaultRegistry()
 
   if (!securitizeAddresses.length || loadGeneration.value !== generation) {
     return
@@ -234,14 +242,16 @@ const updateSecuritizeVaults = async (securitizeAddresses: string[], generation:
 
     if (loadGeneration.value !== generation) return
 
+    const entries: Array<{ address: string, vault: SecuritizeVault, type: 'securitize' }> = []
     results.forEach((result, index) => {
       if (result.status === 'fulfilled') {
-        registrySet(result.value.address, result.value, 'securitize')
+        entries.push({ address: result.value.address, vault: result.value, type: 'securitize' })
       }
       else {
         logWarn(`useVaults/updateSecuritizeVaults/${securitizeAddresses[index]}`, result.reason)
       }
     })
+    registrySetMany(entries)
   }
   catch (e) {
     logWarn('useVaults/updateSecuritizeVaults', e)
