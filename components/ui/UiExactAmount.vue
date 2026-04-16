@@ -1,67 +1,34 @@
 <script setup lang="ts">
-import { offset, flip, shift, useFloating } from '@floating-ui/vue'
-
-const { exact } = defineProps<{
+defineProps<{
   exact: string
 }>()
-
-const reference = ref(null)
-const floating = ref(null)
-const isVisible = ref(false)
-
-const { floatingStyles, update } = useFloating(reference, floating, {
-  placement: 'top',
-  middleware: [
-    offset(8),
-    flip({ padding: 8 }),
-    shift({ padding: 8 }),
-  ],
-})
-
-const canHover = typeof window !== 'undefined' && window.matchMedia('(hover: hover)').matches
-
-const onMouseEnter = () => {
-  if (canHover) {
-    isVisible.value = true
-    update()
-  }
-}
-
-const onMouseLeave = () => {
-  if (canHover) {
-    isVisible.value = false
-  }
-}
 </script>
 
 <template>
-  <span
-    ref="reference"
-    class="ui-exact-amount"
-    @mouseenter="onMouseEnter"
-    @mouseleave="onMouseLeave"
-  >
+  <span class="ui-exact-amount">
     <slot />
-    <Transition name="tooltip">
-      <div
-        v-show="isVisible"
-        ref="floating"
-        :style="floatingStyles"
-        class="ui-exact-amount__floating"
-        @click.stop
-      >
-        {{ exact }}
-      </div>
-    </Transition>
+    <span class="ui-exact-amount__tip">
+      {{ exact }}
+    </span>
   </span>
 </template>
 
 <style lang="scss">
 .ui-exact-amount {
-  cursor: default;
+  position: relative;
 
-  &__floating {
-    position: relative;
+  &__tip {
+    display: none;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ui-exact-amount:hover .ui-exact-amount__tip {
+    display: block;
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
     max-width: 500px;
     width: max-content;
     padding: 6px 10px;
@@ -76,6 +43,7 @@ const onMouseLeave = () => {
     color: var(--text-primary);
     pointer-events: none;
     word-break: break-all;
+    white-space: nowrap;
   }
 }
 </style>
