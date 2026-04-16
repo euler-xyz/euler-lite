@@ -43,6 +43,11 @@ export interface UseCollateralFormOptions {
 
   needsSwap: ComputedRef<boolean>
   effectiveBalance: ComputedRef<bigint>
+  // Asset whose decimals match `effectiveBalance`. In swap mode this is the
+  // "pay with" token (differs from collateralVault.asset). Used to convert
+  // the user-entered amount into the same unit as effectiveBalance for the
+  // balance check — without this the comparison silently mixes decimals.
+  effectiveAsset: ComputedRef<VaultAsset | undefined>
 
   computePriceFixed: (
     position: NonNullable<ReturnType<ReturnType<typeof useEulerAccount>['getPositionBySubAccountIndex']>>,
@@ -415,7 +420,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
     if (collateralVault.value && isEVKVault(collateralVault.value) && isOpDisabled(collateralVault.value, collateralOp.value)) return true
-    if (options.effectiveBalance.value < valueToNano(amount.value, asset.value?.decimals)) return true
+    if (options.effectiveBalance.value < valueToNano(amount.value, options.effectiveAsset.value?.decimals)) return true
     if (isLoading.value || !(+amount.value) || !!estimatesError.value || isEstimatesLoading.value) return true
     if (options.needsSwap.value && !swapSelectedQuote.value) return true
     return false
