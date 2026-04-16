@@ -73,6 +73,9 @@ const irmTypeLabel = computed(() => {
   else if (modelType === INTEREST_RATE_MODEL_TYPE.ADAPTIVE_CURVE) {
     return 'Adaptive'
   }
+  else if (modelType === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY) {
+    return 'Cyclical note'
+  }
   return 'Interest Rate Model'
 })
 

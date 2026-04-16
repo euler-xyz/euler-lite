@@ -85,7 +85,16 @@ export const PERMIT2_SIG_WINDOW = 60n * 60n
 export const INTEREST_RATE_MODEL_TYPE = {
   KINK: 1,
   ADAPTIVE_CURVE: 2,
+  FIXED_CYCLICAL_BINARY: 4,
 } as const
+
+export const FIXED_CYCLICAL_BINARY_IRM_COMPONENTS = [
+  { name: 'primaryRate', type: 'uint256' },
+  { name: 'secondaryRate', type: 'uint256' },
+  { name: 'primaryDuration', type: 'uint256' },
+  { name: 'secondaryDuration', type: 'uint256' },
+  { name: 'startTimestamp', type: 'uint256' },
+] as const
 
 export const ORACLE_DETAILED_INFO_COMPONENTS = [
   { name: 'oracle', type: 'address' },
