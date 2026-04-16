@@ -406,6 +406,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
   const submitCowSwapClosePosition = () => {
     if (!position.value || !borrowVault.value || !sourceVault.value || !core.quotes.selectedQuote.value) return
+    if (isHealthInsufficient.value) return
+    if (core.isRepayExceedsDebt.value) return
 
     cowSwapExecution.reset()
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useAccount } from '@wagmi/vue'
-import { erc20Abi, getAddress, zeroAddress, type Address, type Abi } from 'viem'
+import { erc20Abi, getAddress, maxUint256, zeroAddress, type Address, type Abi } from 'viem'
 import type { AccountBorrowPosition } from '~/entities/account'
 import { eulerAccountLensABI } from '~/entities/euler/abis'
 import type {
@@ -221,8 +221,34 @@ const isCowSwapProvider = computed(() =>
   selectedProvider.value?.toLowerCase() === COWSWAP_PROVIDER_NAME,
 )
 
+// Pre-flight checks for CoW orders (replaces simulation which isn't possible)
+const cowSwapErrorText = computed(() => {
+  if (!isCowSwapProvider.value || !fromVault.value || !toVault.value || !selectedQuote.value) return null
+
+  // Sell amount must not exceed collateral balance
+  const inputNano = valueToNano(fromAmount.value || '0', fromVault.value.asset.decimals)
+  if (inputNano > balance.value) return 'Sell amount exceeds collateral balance'
+
+  // Destination vault supply cap
+  const toV = toVault.value
+  if (toV.supplyCap < maxUint256 && toV.supplyCap > 0n) {
+    const buyUnderlying = BigInt(selectedQuote.value.amountOut || '0')
+    if (toV.supply + buyUnderlying > toV.supplyCap) {
+      return 'Supply cap would be exceeded on the destination vault'
+    }
+  }
+
+  // Post-swap health
+  if (nextHealth.value !== null && nextHealth.value < 1) {
+    return 'Position would be immediately liquidatable after swap'
+  }
+
+  return null
+})
+
 const submitCowSwapCollateralSwap = async () => {
   if (!position.value || !fromVault.value || !toVault.value || !selectedQuote.value) return
+  if (cowSwapErrorText.value) return
 
   cowSwapExecution.reset()
 
@@ -684,10 +710,10 @@ const nextLiquidationPrice = computed(() => {
               size="compact"
             />
             <UiToast
-              v-show="errorText"
+              v-show="errorText || cowSwapErrorText"
               title="Error"
               variant="error"
-              :description="errorText || ''"
+              :description="cowSwapErrorText || errorText || ''"
               size="compact"
             />
             <UiToast
