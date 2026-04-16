@@ -181,7 +181,7 @@ const send = async () => {
 
     modal.close()
     setTimeout(() => {
-      router.replace('/portfolio/saving')
+      router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
     }, 400)
   }
   catch (e) {
