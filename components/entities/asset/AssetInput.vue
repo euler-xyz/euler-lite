@@ -252,7 +252,7 @@ const openChooseCollateralModal = () => {
         <p @click="setMax">
           <UiExactAmount
             class="text-content-tertiary"
-            :exact="formatExactAmount(balance ?? 0n, asset?.decimals || 18n, asset.symbol)"
+            :exact="formatExactAmount(balance ?? 0n, asset?.decimals ?? 18n, asset.symbol)"
           >
             {{ formatSmartAmount(friendlyBalance) }} {{ asset.symbol }}
           </UiExactAmount> <span
