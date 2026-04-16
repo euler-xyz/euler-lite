@@ -201,10 +201,10 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     const wrapperSteps: DisplayStep[] = [
       { index: wIdx++, label: 'Enable collateral', labelSuffix: collateralVaultName, isSeparateTx: false },
       { index: wIdx++, label: 'Enable controller', labelSuffix: borrowVaultName, isSeparateTx: false },
-      { index: wIdx++, label: 'Deposit collateral', isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: options.multiplyInputAmount.value } },
+      { index: wIdx++, label: 'Supply', isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: options.multiplyInputAmount.value } },
       { index: wIdx++, label: 'Borrow', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: borrowAmountStr } },
       { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: borrowAmountStr }, toAssetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: options.multiplyLongAmount.value } },
-      { index: wIdx++, label: 'Deposit min.', isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: swapOutMinAmount } },
+      { index: wIdx++, label: 'Verify min received', isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: swapOutMinAmount } },
     ]
 
     const walletWarningsDescription
