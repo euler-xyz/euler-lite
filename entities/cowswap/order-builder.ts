@@ -71,7 +71,7 @@ export const buildCollateralSwapWrapperData = (
     fromVault: params.fromVault,
     toVault: params.toVault,
     fromAmount: params.fromAmount,
-    disableSourceCollateral: params.disableSourceCollateral,
+    toAmount: params.toAmount,
   },
   permitSignature,
 ])
