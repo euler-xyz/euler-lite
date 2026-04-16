@@ -234,8 +234,20 @@ const submitCowSwapCollateralSwap = async () => {
   if (!getCowSwapChainConfig(chainId)) return
 
   const validTo = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
-  const sellAmount = BigInt(selectedQuote.value.amountIn)
-  const buyAmount = BigInt(selectedQuote.value.amountOutMin || selectedQuote.value.amountOut || '1')
+
+  // Quote amounts are in underlying tokens (swap API was called with asset addresses).
+  // CoW order operates on vault shares (sellToken/buyToken = vault addresses).
+  // Convert underlying → shares using each vault's exchange rate.
+  const underlyingSellAmount = BigInt(selectedQuote.value.amountIn)
+  const underlyingBuyAmount = BigInt(selectedQuote.value.amountOutMin || selectedQuote.value.amountOut || '1')
+
+  const fromTA = fromVault.value.totalAssets
+  const fromTS = fromVault.value.totalShares
+  const sellAmount = fromTA > 0n ? underlyingSellAmount * fromTS / fromTA : underlyingSellAmount
+
+  const toTA = toVault.value.totalAssets
+  const toTS = toVault.value.totalShares
+  const buyAmount = toTA > 0n ? underlyingBuyAmount * toTS / toTA : underlyingBuyAmount
 
   const cowParams: CowSwapCollateralSwapExecuteParams = {
     chainId,
@@ -255,7 +267,7 @@ const submitCowSwapCollateralSwap = async () => {
     },
   }
 
-  // Check if approval is already sufficient
+  // Check if approval is already sufficient (allowance is in vault shares)
   let needsApproval = true
   try {
     const client = rpcClient.value
