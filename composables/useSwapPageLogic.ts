@@ -151,10 +151,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
       return
     }
     const formatted = formatUnits(amount, Number(toVault.value.decimals))
-    const numericValue = Number(formatted)
-    toAmount.value = numericValue < 0.01
-      ? formatSignificant(formatted, 3)
-      : formatSignificant(formatted)
+    toAmount.value = formatSmartAmount(formatted)
   }, { immediate: true })
 
   // ── Quote state helpers ────────────────────────────────────────────────
