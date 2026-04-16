@@ -38,6 +38,9 @@ export const useFuul = () => {
   const { client: rpcClient } = useRpcClient()
   const { chainId } = useEulerAddresses()
   const { enableFuul } = useDeployConfig()
+  const { spyAddress } = useSpyMode()
+
+  const effectiveAddress = computed(() => spyAddress.value || wagmiAddress.value || '')
 
   const unclaimedFuulRewards = computed(() =>
     fuulClaimableEntries.value.flatMap(entry => entry.claimable_rewards),
@@ -257,7 +260,7 @@ export const useFuul = () => {
     }
   }
 
-  watch(wagmiAddress, (val, oldVal) => {
+  watch(effectiveAddress, (val, oldVal) => {
     if (val) {
       address.value = val
     }
