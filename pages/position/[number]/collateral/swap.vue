@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useAccount } from '@wagmi/vue'
-import { getAddress, zeroAddress, type Address, type Abi } from 'viem'
+import { erc20Abi, getAddress, zeroAddress, type Address, type Abi } from 'viem'
 import type { AccountBorrowPosition } from '~/entities/account'
 import { eulerAccountLensABI } from '~/entities/euler/abis'
 import type {
@@ -225,7 +225,7 @@ const isCowSwapProvider = computed(() =>
   selectedProvider.value?.toLowerCase() === COWSWAP_PROVIDER_NAME,
 )
 
-const submitCowSwapCollateralSwap = () => {
+const submitCowSwapCollateralSwap = async () => {
   if (!position.value || !fromVault.value || !toVault.value || !selectedQuote.value) return
 
   cowSwapExecution.reset()
@@ -255,13 +255,33 @@ const submitCowSwapCollateralSwap = () => {
     },
   }
 
+  // Check if approval is already sufficient
+  let needsApproval = true
+  try {
+    const client = rpcClient.value
+    if (client) {
+      const currentAllowance = await client.readContract({
+        address: fromVault.value.address as Address,
+        abi: erc20Abi,
+        functionName: 'allowance',
+        args: [address.value as Address, chainConfig.vaultRelayer],
+      }) as bigint
+      needsApproval = currentAllowance < sellAmount
+    }
+  }
+  catch {
+    // Default to showing approval step
+  }
+
   const fromAsset = fromVault.value.asset
   const toAsset = toVault.value.asset
   const fromAmountStr = fromAmount.value
 
   const signSteps: DisplayStep[] = []
   let idx = 1
-  signSteps.push({ index: idx++, label: 'Approve for swap', isSeparateTx: true, assetInfo: { symbol: fromVault.value.symbol || fromAsset.symbol, address: fromAsset.address, amount: fromAmountStr } })
+  if (needsApproval) {
+    signSteps.push({ index: idx++, label: 'Approve for swap', isSeparateTx: true, assetInfo: { symbol: fromVault.value.symbol || fromAsset.symbol, address: fromAsset.address, amount: fromAmountStr } })
+  }
   signSteps.push({ index: idx++, label: 'Sign EVC permit', isSeparateTx: false })
   signSteps.push({ index: idx++, label: 'Sign CoW order', isSeparateTx: false })
 
