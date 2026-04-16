@@ -2,21 +2,22 @@
 export const themeHue = 150
 
 // Intrinsic APY sources (data mapping, not deployment config)
-export type IntrinsicApySourceConfig =
-  | { provider: 'defillama', address: string, chainId: number, poolId: string, useSpotApy?: boolean }
-  | { provider: 'pendle', address: string, chainId: number, pendleMarket: string, crossChainSourceChainId?: number }
-  | { provider: 'securitize', address: string, chainId: number, symbol: string, yieldField: 'nav_yield_30d' | 'distribution_yield' }
-  | { provider: 'stablewatch', address: string, chainId: number }
-  | { provider: 'etherfi', address: string, chainId: number }
-  | { provider: 'renzo', address: string, chainId: number, renzoVariant: 'ezETH' | 'pzETH' }
-  | { provider: 'midas', address: string, chainId: number, midasKey: string }
-  | { provider: 'yo', address: string, chainId: number }
-  | { provider: 'spark', address: string, chainId: number }
-  | { provider: 'puffer', address: string, chainId: number }
-  | { provider: 'treehouse', address: string, chainId: number }
-  | { provider: 'ondo', address: string, chainId: number }
-  | { provider: 'benqi', address: string, chainId: number }
-  | { provider: 'avant', address: string, chainId: number }
+export type IntrinsicApySourceConfig
+  = | { provider: 'defillama', address: string, chainId: number, poolId: string, useSpotApy?: boolean }
+    | { provider: 'pendle', address: string, chainId: number, pendleMarket: string, crossChainSourceChainId?: number }
+    | { provider: 'securitize', address: string, chainId: number, symbol: string, yieldField: 'nav_yield_30d' | 'distribution_yield' }
+    | { provider: 'stablewatch', address: string, chainId: number }
+    | { provider: 'etherfi', address: string, chainId: number }
+    | { provider: 'renzo', address: string, chainId: number, renzoVariant: 'ezETH' | 'pzETH' }
+    | { provider: 'midas', address: string, chainId: number, midasKey: string }
+    | { provider: 'yo', address: string, chainId: number }
+    | { provider: 'spark', address: string, chainId: number }
+    | { provider: 'puffer', address: string, chainId: number }
+    | { provider: 'treehouse', address: string, chainId: number }
+    | { provider: 'ondo', address: string, chainId: number }
+    | { provider: 'benqi', address: string, chainId: number }
+    | { provider: 'avant', address: string, chainId: number }
+    | { provider: 'infinifi', address: string, chainId: number, infinifiVariant: 'locked' | 'staked', infinifiLockedKey?: string }
 
 export const intrinsicApySources: readonly IntrinsicApySourceConfig[] = [
   // DefiLlama pools — Ethereum (1)
@@ -261,4 +262,9 @@ export const intrinsicApySources: readonly IntrinsicApySourceConfig[] = [
 
   // Avant — savUSD
   { provider: 'avant', chainId: 43114, address: '0x06d47F3fb376649c3A9Dafe069B3D6E35572219E' },
+
+  // InfiniFi — 4w locked, 13w locked, siUSD staked
+  { provider: 'infinifi', chainId: 1, address: '0x66bCF6151D5558AfB47c38B20663589843156078', infinifiVariant: 'locked', infinifiLockedKey: '0x66bCF6151D5558AfB47c38B20663589843156078' },
+  { provider: 'infinifi', chainId: 1, address: '0xbd3f9814eB946E617f1d774A6762cDbec0bf087A', infinifiVariant: 'locked', infinifiLockedKey: '0xbd3f9814eB946E617f1d774A6762cDbec0bf087A' },
+  { provider: 'infinifi', chainId: 1, address: '0xDBDC1Ef57537E34680B898E1FEBD3D68c7389bCB', infinifiVariant: 'staked' },
 ]

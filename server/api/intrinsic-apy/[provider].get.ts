@@ -26,6 +26,7 @@ const PROVIDER_URLS: Record<string, string> = {
   yo: 'https://api.yo.xyz/api/v1/vault/stats',
   securitize: 'https://public-feed.securitize.io/asset-stats',
   stablewatch: 'https://api.stablewatch.io/api/pools',
+  infinifi: 'https://eth-api.infinifi.xyz/api/protocol/data',
 }
 
 const PENDLE_API_BASE = 'https://api-v2.pendle.finance/core/v2'
