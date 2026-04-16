@@ -132,10 +132,11 @@ export const useSwapApi = () => {
       )
       const providers = parseSwapProvidersResponse(response.data)
       const includeCow = options?.includeCowSwap && isCowSwapSupportedChain(chainId.value ?? 0)
-      return providers.filter(p =>
-        !EXCLUDED_SWAP_PROVIDERS.has(p)
-        && (p.toLowerCase() !== COWSWAP_PROVIDER_NAME || includeCow),
-      )
+      return providers.filter((p) => {
+        const normalized = p.toLowerCase()
+        return !EXCLUDED_SWAP_PROVIDERS.has(normalized)
+          && (normalized !== COWSWAP_PROVIDER_NAME || includeCow)
+      })
     }
     catch (error) {
       logWarn('swapApi/providers', error)

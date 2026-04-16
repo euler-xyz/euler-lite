@@ -1,11 +1,11 @@
 import type { Ref, ComputedRef } from 'vue'
 import { useAccount } from '@wagmi/vue'
-import { erc20Abi, formatUnits, maxUint256, type Address } from 'viem'
+import { formatUnits, maxUint256, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { createRaceGuard } from '~/utils/race-guard'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal, CowSwapReviewModal } from '#components'
+import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
 import {
   type AnyBorrowVaultPair,
@@ -23,8 +23,8 @@ import {
   conservativePriceRatioNumber,
 } from '~/services/pricing/priceProvider'
 import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
-import { COWSWAP_PROVIDER_NAME, COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapExecuteParams, deriveCowSwapBuyAmountFromQuote, getCowSwapChainConfig, isCowSwapSupportedChain } from '~/entities/cowswap'
-import { useCowSwapExecution, useCowSwapOrderStatus } from '~/composables/cowswap'
+import { COWSWAP_PROVIDER_NAME } from '~/entities/cowswap'
+import { useMultiplyCowSwap } from '~/composables/borrow/useMultiplyCowSwap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
@@ -96,56 +96,6 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     simulationError: baseSimulationError,
     clearSimulationError: clearMultiplySimulationError,
   } = useTxPlanSimulation()
-  // --- CowSwap ---
-  const { client: rpcClient } = useRpcClient()
-  const { chainId: currentChainId } = useEulerAddresses()
-  const cowSwapExecution = useCowSwapExecution()
-  const cowSwapOrderbookUrl = computed(() => {
-    const config = getCowSwapChainConfig(currentChainId.value ?? 0)
-    return config?.orderbookUrl
-  })
-  const cowSwapOrderStatus = useCowSwapOrderStatus(cowSwapExecution.orderUid, cowSwapOrderbookUrl)
-
-  const isCowSwapProvider = computed(() =>
-    multiplySelectedProvider.value?.toLowerCase() === COWSWAP_PROVIDER_NAME
-    || (!multiplySelectedProvider.value && multiplyEffectiveQuote.value?.route?.some(r => r.providerName?.toLowerCase() === COWSWAP_PROVIDER_NAME)),
-  )
-
-  const multiplySimulationError = computed(() => isCowSwapProvider.value ? null : baseSimulationError.value)
-
-  const cowSwapStatusLabel = computed(() => {
-    if (!isCowSwapProvider.value || cowSwapExecution.status.value === 'idle') return null
-    switch (cowSwapExecution.status.value) {
-      case 'approving_collateral': return 'Approving collateral...'
-      case 'signing_permit': return 'Sign EVC permit in wallet...'
-      case 'signing_order': return 'Sign CoW order in wallet...'
-      case 'submitting': return 'Submitting order...'
-      case 'submitted': {
-        const orderType = cowSwapOrderStatus.orderStatus.value?.type
-        return orderType && orderType !== 'unknown'
-          ? `Order ${orderType}`
-          : 'Order submitted, waiting for fill...'
-      }
-      default: return null
-    }
-  })
-
-  // Watch for CowSwap order completion
-  watch(() => cowSwapOrderStatus.orderStatus.value, (orderStatusVal) => {
-    if (!orderStatusVal?.terminal) return
-    if (orderStatusVal.type === 'traded' || orderStatusVal.type === 'fulfilled') {
-      refreshAllPositions(eulerLensAddresses.value, address.value || '')
-      modal.close()
-      setTimeout(() => {
-        router.replace('/portfolio')
-        cowSwapExecution.reset()
-      }, 400)
-    }
-    else {
-      // Terminal non-success states (cancelled, expired, etc.)
-      cowSwapExecution.reset()
-    }
-  })
 
   const multiplyPriceInvert = usePriceInvert(
     () => multiplyShortVault.value?.asset.symbol,
@@ -844,141 +794,29 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     }
   }
 
+  // --- CowSwap ---
+  const cowSwap = useMultiplyCowSwap({
+    multiplySelectedProvider: computed(() => multiplySelectedProvider.value),
+    multiplyEffectiveQuote: computed(() => multiplyEffectiveQuote.value),
+    multiplySelectedQuote: computed(() => multiplySelectedQuote.value),
+    multiplySupplyVault: computed(() => multiplySupplyVault.value),
+    multiplyLongVault,
+    multiplyShortVault,
+    multiplySupplyProduct: computed(() => multiplySupplyProduct),
+    multiplyShortProduct: computed(() => multiplyShortProduct),
+    multiplyInputAmount,
+    multiplyShortAmount: computed(() => multiplyShortAmount.value),
+    multiplyLongAmount: computed(() => multiplyLongAmount.value),
+    multiplyDebtAmountNano: computed(() => multiplyDebtAmountNano.value),
+    multiplyErrorText,
+    resolvePendingSubAccount,
+    refreshAllPositions,
+    eulerLensAddresses,
+  })
+  const { isCowSwapProvider, cowSwapExecution, cowSwapOrderStatus, cowSwapStatusLabel, submitCowSwapMultiply } = cowSwap
+  const multiplySimulationError = computed(() => isCowSwapProvider.value ? null : baseSimulationError.value)
+
   // --- Actions: submit & send ---
-  const submitCowSwapMultiply = async () => {
-    cowSwapExecution.reset()
-    if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) return
-    if (!multiplyInputAmount.value || multiplyDebtAmountNano.value <= 0n) return
-    if (multiplyErrorText.value) return
-
-    const quote = multiplySelectedQuote.value
-    if (!quote) return
-
-    const chainId = currentChainId.value ?? 0
-    if (!isCowSwapSupportedChain(chainId)) return
-
-    let subAccount: string
-    try {
-      subAccount = await resolvePendingSubAccount()
-    }
-    catch (e) {
-      logWarn('multiply/cowswap/resolveSubaccount', e)
-      error('Unable to resolve position')
-      return
-    }
-
-    const supplyAmountNano = valueToNano(multiplyInputAmount.value || '0', multiplySupplyVault.value.asset.decimals)
-    const debtAmount = multiplyDebtAmountNano.value
-    const validTo = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
-
-    // deriveCowSwapBuyAmountFromQuote returns underlying amounts (transformed by the quote system),
-    // but the CoW order needs vault shares since buyToken = vault address.
-    // Convert underlying back to shares using the vault's exchange rate.
-    const underlyingBuyAmount = deriveCowSwapBuyAmountFromQuote({
-      amountOutMin: quote.amountOutMin,
-      amountOut: quote.amountOut,
-    })
-    if (!underlyingBuyAmount || underlyingBuyAmount <= 0n) {
-      error('Invalid quote: no minimum buy amount')
-      return
-    }
-    const { totalAssets, totalShares } = multiplyLongVault.value
-    const buyAmount = totalAssets > 0n
-      ? underlyingBuyAmount * totalShares / totalAssets
-      : underlyingBuyAmount
-
-    const cowParams: CowSwapExecuteParams = {
-      chainId,
-      sellToken: multiplyShortVault.value.asset.address as Address,
-      buyToken: multiplyLongVault.value.address as Address,
-      sellAmount: debtAmount,
-      buyAmount,
-      validTo,
-      collateralToken: multiplySupplyVault.value.asset.address as Address,
-      wrapper: {
-        owner: address.value as Address,
-        account: subAccount as Address,
-        deadline: validTo,
-        collateralVault: multiplySupplyVault.value.address as Address,
-        borrowVault: multiplyShortVault.value.address as Address,
-        collateralAmount: supplyAmountNano,
-        borrowAmount: debtAmount,
-      },
-    }
-
-    let needsCollateralApproval = true
-    let needsSellTokenApproval = true
-    try {
-      const client = rpcClient.value
-      if (client) {
-        const chainConfig = getCowSwapChainConfig(chainId)
-        const collateralAllowance = await client.readContract({
-          address: multiplySupplyVault.value.asset.address as Address,
-          abi: erc20Abi,
-          functionName: 'allowance',
-          args: [address.value as Address, multiplySupplyVault.value.address as Address],
-        }) as bigint
-        needsCollateralApproval = collateralAllowance < supplyAmountNano
-
-        if (chainConfig) {
-          const sellTokenAllowance = await client.readContract({
-            address: multiplyShortVault.value.asset.address as Address,
-            abi: erc20Abi,
-            functionName: 'allowance',
-            args: [address.value as Address, chainConfig.vaultRelayer],
-          }) as bigint
-          needsSellTokenApproval = sellTokenAllowance < debtAmount
-        }
-      }
-    }
-    catch {
-      // Default to showing approval steps
-    }
-
-    modal.open(CowSwapReviewModal, {
-      props: {
-        collateralAsset: multiplySupplyVault.value.asset,
-        collateralAmount: multiplyInputAmount.value,
-        collateralVaultName: multiplySupplyProduct.name || multiplySupplyVault.value.asset.symbol,
-        collateralVaultSymbol: multiplySupplyVault.value.symbol,
-        borrowAsset: multiplyShortVault.value.asset,
-        borrowAmount: multiplyShortAmount.value || formatUnits(debtAmount, Number(multiplyShortVault.value.asset.decimals)),
-        borrowVaultName: multiplyShortProduct.name || multiplyShortVault.value.asset.symbol,
-        swapOutAmount: multiplyLongAmount.value,
-        swapOutMinAmount: quote.amountOutMin
-          ? trimTrailingZeros(formatUnits(BigInt(quote.amountOutMin), Number(multiplyLongVault.value.asset.decimals)))
-          : multiplyLongAmount.value,
-        needsCollateralApproval,
-        needsSellTokenApproval,
-        subAccount,
-        executionStatus: cowSwapExecution.status,
-        executionError: cowSwapExecution.error,
-        explorerUrl: cowSwapExecution.explorerUrl,
-        orderStatus: cowSwapOrderStatus.orderStatus,
-        locallyCancelled: cowSwapExecution.locallyCancelled,
-        onConfirm: async () => {
-          try {
-            await cowSwapExecution.executeAsync(cowParams)
-          }
-          catch (e) {
-            logWarn('multiply/cowswap/execute', e)
-          }
-        },
-        onCancel: async () => {
-          try {
-            await cowSwapExecution.cancelOrder()
-            // Don't close modal — polling will detect 'cancelled' terminal state
-            // and the order watcher will clean up
-          }
-          catch (e) {
-            logWarn('multiply/cowswap/cancel', e)
-            // error.value in cowSwapExecution feeds the executionError toast in the modal
-          }
-        },
-      },
-    })
-  }
-
   const submitMultiply = async () => {
     if (isOperationBlocked.value) return
     if (isMultiplyPreparing.value || isGeoBlocked.value || isMultiplyRestricted.value) return

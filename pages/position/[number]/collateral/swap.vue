@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useAccount } from '@wagmi/vue'
-import { getAddress, zeroAddress, type Address, type Abi } from 'viem'
+import { erc20Abi, getAddress, maxUint256, zeroAddress, type Address, type Abi } from 'viem'
 import type { AccountBorrowPosition } from '~/entities/account'
 import { eulerAccountLensABI } from '~/entities/euler/abis'
 import type {
@@ -15,16 +15,21 @@ import {
   conservativePriceRatioNumber,
   getCollateralUsdValueOrZero,
 } from '~/services/pricing/priceProvider'
+import { logWarn } from '~/utils/errorHandling'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
 import { SwapperMode } from '~/entities/swap'
 import type { SwapApiQuote } from '~/entities/swap'
 import type { TxPlan } from '~/entities/txPlan'
+import type { DisplayStep } from '~/utils/stepDecoding'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
+import { useModal } from '~/components/ui/composables/useModal'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
+import { COWSWAP_PROVIDER_NAME, COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapCollateralSwapExecuteParams, getCowSwapChainConfig } from '~/entities/cowswap'
+import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
 
 const route = useRoute()
 const { isConnected, address } = useAccount()
@@ -95,9 +100,22 @@ const isMaxSwap = computed(() => {
 })
 
 // ── Shared swap logic (must be before any code that uses its outputs) ────
+const { chainId: currentChainId } = useEulerAddresses()
+const cowModal = useModal()
+const cowSwapExecution = useCowSwapCollateralSwapExecution()
+const cowSwapOrderbookUrl = computed(() => {
+  const config = getCowSwapChainConfig(currentChainId.value ?? 0)
+  return config?.orderbookUrl
+})
+const cowSwapOrderStatus = useCowSwapOrderStatus(
+  computed(() => cowSwapExecution.orderUid.value),
+  cowSwapOrderbookUrl,
+)
+
 const swap = useSwapPageLogic({
   amountField: 'amountOut',
   compare: 'max',
+  includeCowSwap: true,
   fromVault,
   toVault,
   balance,
@@ -184,9 +202,165 @@ const {
   isQuoteLoading, quoteError, quotesStatusLabel, selectedProvider, selectedQuote,
   fromProduct, toProduct, swapPriceInvert, currentPrice, swapSummary, priceImpact, routedVia,
   swapRouteItems, swapRouteEmptyMessage,
-  selectProvider, onFromInput, onRefreshQuotes, submit, openSlippageSettings,
+  selectProvider, onFromInput, onRefreshQuotes, submit: swapSubmit, openSlippageSettings,
   normalizeAddress, clearSimulationError, resetQuoteState,
 } = swap
+
+// ── CowSwap collateral swap ─────────────────────────────────────────────
+const isCowSwapProvider = computed(() =>
+  selectedProvider.value?.toLowerCase() === COWSWAP_PROVIDER_NAME,
+)
+
+// Pre-flight checks for CoW orders (replaces simulation which isn't possible)
+const cowSwapErrorText = computed(() => {
+  if (!isCowSwapProvider.value || !fromVault.value || !toVault.value || !selectedQuote.value) return null
+
+  // Sell amount must not exceed collateral balance
+  const inputNano = valueToNano(fromAmount.value || '0', fromVault.value.asset.decimals)
+  if (inputNano > balance.value) return 'Sell amount exceeds collateral balance'
+
+  // Destination vault supply cap
+  const toV = toVault.value
+  if (toV.supplyCap < maxUint256 && toV.supplyCap > 0n) {
+    const buyUnderlying = BigInt(selectedQuote.value.amountOut || '0')
+    if (toV.supply + buyUnderlying > toV.supplyCap) {
+      return 'Supply cap would be exceeded on the destination vault'
+    }
+  }
+
+  // Post-swap health
+  if (nextHealth.value !== null && nextHealth.value < 1) {
+    return 'Position would be immediately liquidatable after swap'
+  }
+
+  return null
+})
+
+const submitCowSwapCollateralSwap = async () => {
+  if (!position.value || !fromVault.value || !toVault.value || !selectedQuote.value) return
+  if (cowSwapErrorText.value) return
+
+  cowSwapExecution.reset()
+
+  const chainId = currentChainId.value ?? 0
+  const chainConfig = getCowSwapChainConfig(chainId)
+  if (!chainConfig) return
+
+  const validTo = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
+
+  // Quote amounts are in underlying tokens (swap API was called with asset addresses).
+  // CoW order operates on vault shares (sellToken/buyToken = vault addresses).
+  // Convert underlying → shares using each vault's exchange rate.
+  const underlyingSellAmount = BigInt(selectedQuote.value.amountIn)
+  const underlyingBuyAmount = BigInt(selectedQuote.value.amountOutMin || selectedQuote.value.amountOut || '1')
+
+  const fromTA = fromVault.value.totalAssets
+  const fromTS = fromVault.value.totalShares
+  const sellAmount = fromTA > 0n ? underlyingSellAmount * fromTS / fromTA : underlyingSellAmount
+
+  const toTA = toVault.value.totalAssets
+  const toTS = toVault.value.totalShares
+  const buyAmount = toTA > 0n ? underlyingBuyAmount * toTS / toTA : underlyingBuyAmount
+
+  const cowParams: CowSwapCollateralSwapExecuteParams = {
+    chainId,
+    sellToken: fromVault.value.address as Address,
+    buyToken: toVault.value.address as Address,
+    sellAmount,
+    buyAmount,
+    validTo,
+    wrapper: {
+      owner: (address.value || zeroAddress) as Address,
+      account: position.value.subAccount as Address,
+      deadline: validTo,
+      fromVault: fromVault.value.address as Address,
+      toVault: toVault.value.address as Address,
+      fromAmount: sellAmount,
+      toAmount: buyAmount,
+    },
+  }
+
+  // Check if approval is already sufficient (allowance is in vault shares)
+  let needsApproval = true
+  try {
+    const client = rpcClient.value
+    if (client) {
+      const currentAllowance = await client.readContract({
+        address: fromVault.value.address as Address,
+        abi: erc20Abi,
+        functionName: 'allowance',
+        args: [address.value as Address, chainConfig.vaultRelayer],
+      }) as bigint
+      needsApproval = currentAllowance < sellAmount
+    }
+  }
+  catch {
+    // Default to showing approval step
+  }
+
+  const fromAsset = fromVault.value.asset
+  const toAsset = toVault.value.asset
+  const fromAmountStr = fromAmount.value
+
+  const signSteps: DisplayStep[] = []
+  let idx = 1
+  if (needsApproval) {
+    signSteps.push({ index: idx++, label: 'Approve for swap', isSeparateTx: true, assetInfo: { symbol: fromVault.value.symbol || fromAsset.symbol, address: fromAsset.address, amount: fromAmountStr } })
+  }
+  signSteps.push({ index: idx++, label: 'Sign EVC permit', isSeparateTx: false })
+  signSteps.push({ index: idx++, label: 'Sign CoW order', isSeparateTx: false })
+
+  let wIdx = 1
+  const wrapperSteps: DisplayStep[] = [
+    { index: wIdx++, label: 'Enable collateral', labelSuffix: toAsset.symbol, isSeparateTx: false },
+    { index: wIdx++, label: 'Transfer to wallet', isSeparateTx: false, assetInfo: { symbol: fromVault.value.symbol || fromAsset.symbol, address: fromAsset.address, amount: fromAmountStr } },
+    { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: fromAsset.symbol, address: fromAsset.address, amount: fromAmountStr }, toAssetInfo: { symbol: toAsset.symbol, address: toAsset.address, amount: toAmount.value } },
+    { index: wIdx++, label: 'Verify min received', isSeparateTx: false, assetInfo: { symbol: toAsset.symbol, address: toAsset.address, amount: toAmount.value } },
+  ]
+
+  const walletWarningsDescription
+    = 'The CoW order operates on vault shares. The amounts shown above are in underlying assets. '
+    + 'The CoW order receiver is your sub-account, not your main wallet — your wallet may flag this as a mismatch. '
+    + 'You can verify the first 19 bytes (38 hex chars after "0x") of the receiver match your wallet address.'
+
+  openCowSwapReviewModal(cowModal, {
+    signSteps,
+    wrapperSteps,
+    walletWarningsDescription,
+    execution: cowSwapExecution,
+    orderStatus: cowSwapOrderStatus,
+    executeParams: cowParams,
+    logPrefix: 'collateralSwap/cowswap',
+  })
+}
+
+const submit = () => {
+  if (isCowSwapProvider.value) {
+    submitCowSwapCollateralSwap()
+  }
+  else {
+    swapSubmit()
+  }
+}
+
+// Watch for CowSwap order completion
+const router = useRouter()
+const { refreshAllPositions } = useEulerAccount()
+
+watch(() => cowSwapOrderStatus.orderStatus.value, (status) => {
+  if (!status?.terminal) return
+  if (status.type === 'traded' || status.type === 'fulfilled') {
+    refreshAllPositions(eulerLensAddresses.value, address.value as string)
+    cowModal.close()
+    setTimeout(() => {
+      router.replace('/portfolio')
+      cowSwapExecution.reset()
+    }, 400)
+  }
+  else {
+    cowSwapExecution.reset()
+  }
+})
 
 // ── Position loading ─────────────────────────────────────────────────────
 const getSelectedCollateralAddress = () =>
@@ -534,10 +708,10 @@ const nextLiquidationPrice = computed(() => {
               size="compact"
             />
             <UiToast
-              v-show="errorText"
+              v-show="errorText || cowSwapErrorText"
               title="Error"
               variant="error"
-              :description="errorText || ''"
+              :description="cowSwapErrorText || errorText || ''"
               size="compact"
             />
             <UiToast

@@ -6,9 +6,9 @@ import {
   type Address,
   type Hex,
 } from 'viem'
-import { OPEN_POSITION_PARAMS_COMPONENTS } from '~/abis/cowswap-wrapper'
+import { OPEN_POSITION_PARAMS_COMPONENTS, COLLATERAL_SWAP_PARAMS_COMPONENTS, CLOSE_POSITION_PARAMS_COMPONENTS } from '~/abis/cowswap-wrapper'
 import { COWSWAP_APPDATA_VERSION } from './constants'
-import type { CowSwapOpenPositionParams, CowSwapOrderPayload } from './types'
+import type { CowSwapOpenPositionParams, CowSwapCollateralSwapParams, CowSwapClosePositionParams, CowSwapOrderPayload, CowSwapOrderSigningScheme } from './types'
 
 const COW_ORDER_TYPES = {
   Order: [
@@ -37,7 +37,7 @@ const WRAPPER_DATA_ABI = [
   { type: 'bytes' },
 ] as const
 
-export const buildCowSwapWrapperData = (
+export const buildOpenPositionWrapperData = (
   params: CowSwapOpenPositionParams,
   permitSignature: Hex,
 ): Hex => encodeAbiParameters(WRAPPER_DATA_ABI, [
@@ -53,12 +53,60 @@ export const buildCowSwapWrapperData = (
   permitSignature,
 ])
 
+// --- Collateral Swap ---
+
+const COLLATERAL_SWAP_WRAPPER_DATA_ABI = [
+  { type: 'tuple', components: COLLATERAL_SWAP_PARAMS_COMPONENTS },
+  { type: 'bytes' },
+] as const
+
+export const buildCollateralSwapWrapperData = (
+  params: CowSwapCollateralSwapParams,
+  permitSignature: Hex,
+): Hex => encodeAbiParameters(COLLATERAL_SWAP_WRAPPER_DATA_ABI, [
+  {
+    owner: params.owner,
+    account: params.account,
+    deadline: BigInt(params.deadline),
+    fromVault: params.fromVault,
+    toVault: params.toVault,
+    fromAmount: params.fromAmount,
+    toAmount: params.toAmount,
+  },
+  permitSignature,
+])
+
+// --- Close Position ---
+
+const CLOSE_POSITION_WRAPPER_DATA_ABI = [
+  { type: 'tuple', components: CLOSE_POSITION_PARAMS_COMPONENTS },
+  { type: 'bytes' },
+] as const
+
+export const buildClosePositionWrapperData = (
+  params: CowSwapClosePositionParams,
+  permitSignature: Hex,
+): Hex => encodeAbiParameters(CLOSE_POSITION_WRAPPER_DATA_ABI, [
+  {
+    owner: params.owner,
+    account: params.account,
+    deadline: BigInt(params.deadline),
+    borrowVault: params.borrowVault,
+    collateralVault: params.collateralVault,
+    collateralAmount: params.collateralAmount,
+  },
+  permitSignature,
+])
+
+// --- Shared Builders ---
+
 export const buildCowSwapAppData = (
   wrapperData: Hex,
   wrapperAddress: Address,
+  appCode = 'euler_position_open',
 ): { appDataString: string, appDataHash: Hex } => {
   const appData = {
-    appCode: 'euler_position_open',
+    appCode,
     version: COWSWAP_APPDATA_VERSION,
     metadata: {
       wrappers: [
@@ -87,14 +135,18 @@ export type CowSwapOrderTypedDataParams = {
   buyAmount: bigint
   validTo: number
   appDataHash: Hex
+  kind?: 'sell' | 'buy'
+  domainName?: string
+  domainVersion?: string
+  verifyingContract?: Address
 }
 
 export const buildCowSwapOrderTypedData = (params: CowSwapOrderTypedDataParams) => {
   const domain = {
-    name: 'Gnosis Protocol',
-    version: 'v2',
+    name: params.domainName ?? 'Gnosis Protocol',
+    version: params.domainVersion ?? 'v2',
     chainId: BigInt(params.chainId),
-    verifyingContract: getAddress(params.settlementContract),
+    verifyingContract: getAddress(params.verifyingContract ?? params.settlementContract),
   }
 
   const message = {
@@ -106,7 +158,7 @@ export const buildCowSwapOrderTypedData = (params: CowSwapOrderTypedDataParams) 
     validTo: params.validTo,
     appData: params.appDataHash,
     feeAmount: 0n,
-    kind: 'sell',
+    kind: params.kind ?? 'sell',
     partiallyFillable: false,
     sellTokenBalance: 'erc20',
     buyTokenBalance: 'erc20',
@@ -123,16 +175,17 @@ export const buildCowSwapOrderTypedData = (params: CowSwapOrderTypedDataParams) 
 export const buildCowSwapOrderPayload = (
   typedData: ReturnType<typeof buildCowSwapOrderTypedData>,
   signature: string,
-  owner: Address,
+  from: Address,
   appDataString: string,
   appDataHash: Hex,
+  options?: { signingScheme?: CowSwapOrderSigningScheme },
 ): CowSwapOrderPayload => {
   const { message } = typedData
 
   return {
     sellToken: message.sellToken,
     buyToken: message.buyToken,
-    from: owner,
+    from,
     receiver: message.receiver,
     sellAmount: message.sellAmount.toString(),
     buyAmount: message.buyAmount.toString(),
@@ -143,7 +196,7 @@ export const buildCowSwapOrderPayload = (
     sellTokenBalance: message.sellTokenBalance,
     buyTokenBalance: message.buyTokenBalance,
     signature,
-    signingScheme: 'eip712',
+    signingScheme: options?.signingScheme ?? 'eip712',
     onchainOrder: false,
     appData: appDataString,
     appDataHash,
