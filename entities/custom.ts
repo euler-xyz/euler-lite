@@ -2,21 +2,21 @@
 export const themeHue = 150
 
 // Intrinsic APY sources (data mapping, not deployment config)
-export type IntrinsicApySourceConfig =
-  | { provider: 'defillama', address: string, chainId: number, poolId: string, useSpotApy?: boolean }
-  | { provider: 'pendle', address: string, chainId: number, pendleMarket: string, crossChainSourceChainId?: number }
-  | { provider: 'securitize', address: string, chainId: number, symbol: string, yieldField: 'nav_yield_30d' | 'distribution_yield' }
-  | { provider: 'stablewatch', address: string, chainId: number }
-  | { provider: 'etherfi', address: string, chainId: number }
-  | { provider: 'renzo', address: string, chainId: number, renzoVariant: 'ezETH' | 'pzETH' }
-  | { provider: 'midas', address: string, chainId: number, midasKey: string }
-  | { provider: 'yo', address: string, chainId: number }
-  | { provider: 'spark', address: string, chainId: number }
-  | { provider: 'puffer', address: string, chainId: number }
-  | { provider: 'treehouse', address: string, chainId: number }
-  | { provider: 'ondo', address: string, chainId: number }
-  | { provider: 'benqi', address: string, chainId: number }
-  | { provider: 'avant', address: string, chainId: number }
+export type IntrinsicApySourceConfig
+  = | { provider: 'defillama', address: string, chainId: number, poolId: string, useSpotApy?: boolean }
+    | { provider: 'pendle', address: string, chainId: number, pendleMarket: string, crossChainSourceChainId?: number }
+    | { provider: 'securitize', address: string, chainId: number, symbol: string, yieldField: 'nav_yield_30d' | 'distribution_yield' }
+    | { provider: 'stablewatch', address: string, chainId: number }
+    | { provider: 'etherfi', address: string, chainId: number }
+    | { provider: 'renzo', address: string, chainId: number, renzoVariant: 'ezETH' | 'pzETH' }
+    | { provider: 'midas', address: string, chainId: number, midasKey: string }
+    | { provider: 'yo', address: string, chainId: number }
+    | { provider: 'spark', address: string, chainId: number }
+    | { provider: 'puffer', address: string, chainId: number }
+    | { provider: 'treehouse', address: string, chainId: number }
+    | { provider: 'ondo', address: string, chainId: number }
+    | { provider: 'benqi', address: string, chainId: number }
+    | { provider: 'avant', address: string, chainId: number }
 
 export const intrinsicApySources: readonly IntrinsicApySourceConfig[] = [
   // DefiLlama pools — Ethereum (1)
