@@ -409,7 +409,15 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     }
 
     const isFullRepay = targetDebt === 0n && swapMode === SwapperMode.TARGET_DEBT
-    const sellAmount = BigInt(core.quotes.selectedQuote.value.amountIn)
+
+    // Quote amountIn is in underlying tokens, but CoW sellToken = collateralVault (shares).
+    // Convert underlying → shares using the vault's exchange rate.
+    const underlyingSellAmount = BigInt(core.quotes.selectedQuote.value.amountIn)
+    const srcTA = sourceVault.value.totalAssets
+    const srcTS = sourceVault.value.totalShares
+    const sellAmount = srcTA > 0n ? underlyingSellAmount * srcTS / srcTA : underlyingSellAmount
+
+    // buyToken = borrowVault.asset() (underlying) — no conversion needed
     const buyAmount = isFullRepay
       ? currentDebt + (currentDebt / 1000n) // +0.1% buffer for interest
       : BigInt(core.quotes.selectedQuote.value.amountOutMin || core.quotes.selectedQuote.value.amountOut || '1')
