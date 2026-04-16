@@ -493,7 +493,14 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     if (!status?.terminal) return
     if (status.type === 'traded' || status.type === 'fulfilled') {
       refreshAllPositions(eulerLensAddresses.value, address.value as string)
-      setTimeout(() => router.replace('/portfolio'), 400)
+      cowModal.close()
+      setTimeout(() => {
+        router.replace('/portfolio')
+        cowSwapExecution.reset()
+      }, 400)
+    }
+    else {
+      cowSwapExecution.reset()
     }
   })
 
