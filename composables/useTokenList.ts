@@ -82,6 +82,15 @@ const loadTokenList = async (forceRefresh = false) => {
       return
     }
 
+    // When switching chains, wipe stale cross-chain data immediately so
+    // consumers calling getAllTokens()/hasToken() during the refetch
+    // window see "empty" rather than the previous chain's tokens.
+    if (loadState.chainId !== chainId) {
+      tokenMap.value = new Map()
+      loadState.rawTokens = []
+      loadState.chainId = 0
+    }
+
     const gen = guard.next()
     isLoading.value = true
     isLoaded.value = false
