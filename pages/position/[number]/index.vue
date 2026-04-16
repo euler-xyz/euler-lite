@@ -21,7 +21,7 @@ import {
 import { type AccountBorrowPosition, isPositionEligibleForLiquidation } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
 import { formatTtl, nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
-import { formatNumber, formatHealthScore, formatUsdValue, formatCompactUsdValue } from '~/utils/string-utils'
+import { formatNumber, formatHealthScore, formatUsdValue, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { getVaultNotice } from '~/utils/eulerLabelsUtils'
 import { VaultOverviewModal, OperationReviewModal, VaultSupplyApyModal, VaultBorrowApyModal, VaultNetApyModal, PortfolioRoeModal } from '#components'
@@ -892,17 +892,23 @@ watch([isConnected, isSpyMode], () => {
               </div>
               <div class="flex justify-between gap-8 justify-self-end">
                 <div class="text-neutral-800 text-p3">
-                  {{ borrowMarketValue.hasPrice
-                    ? formatCompactUsdValue(borrowMarketValue.usd)
-                    : `${roundAndCompactTokens(position.borrowed, borrowVault?.decimals ?? 0n)} ${borrowVault?.asset?.symbol}`
-                  }}
+                  <template v-if="borrowMarketValue.hasPrice">
+                    {{ formatCompactUsdValue(borrowMarketValue.usd) }}
+                  </template>
+                  <UiExactAmount
+                    v-else
+                    :exact="formatExactAmount(position.borrowed, borrowVault?.decimals ?? 0n, borrowVault?.asset?.symbol)"
+                  >
+                    {{ roundAndCompactTokens(position.borrowed, borrowVault?.decimals ?? 0n) }} {{ borrowVault?.asset?.symbol }}
+                  </UiExactAmount>
                 </div>
-                <div
+                <UiExactAmount
                   v-if="borrowMarketValue.hasPrice"
                   class="text-neutral-500 text-p3"
+                  :exact="formatExactAmount(position.borrowed, borrowVault?.decimals ?? 0n, borrowVault?.asset?.symbol)"
                 >
                   ~ {{ roundAndCompactTokens(position.borrowed, borrowVault?.decimals ?? 0n) }} {{ borrowVault?.asset?.symbol }}
-                </div>
+                </UiExactAmount>
               </div>
             </div>
             <div class="flex justify-between gap-8 flex-wrap mb-12">
@@ -1057,18 +1063,24 @@ watch([isConnected, isSpyMode], () => {
                 </div>
                 <div class="flex justify-between gap-8 justify-self-end">
                   <div class="text-content-primary text-p3">
-                    {{ collateral.value.hasPrice
-                      ? formatCompactUsdValue(collateral.value.usd)
-                      : `${roundAndCompactTokens(collateral.assets, collateral.vault.decimals)} ${collateral.vault.asset.symbol}`
-                    }}
+                    <template v-if="collateral.value.hasPrice">
+                      {{ formatCompactUsdValue(collateral.value.usd) }}
+                    </template>
+                    <UiExactAmount
+                      v-else
+                      :exact="formatExactAmount(collateral.assets, collateral.vault.decimals, collateral.vault.asset.symbol)"
+                    >
+                      {{ roundAndCompactTokens(collateral.assets, collateral.vault.decimals) }} {{ collateral.vault.asset.symbol }}
+                    </UiExactAmount>
                   </div>
-                  <div
+                  <UiExactAmount
                     v-if="collateral.value.hasPrice"
                     class="text-content-tertiary text-p3"
+                    :exact="formatExactAmount(collateral.assets, collateral.vault.decimals, collateral.vault.asset.symbol)"
                   >
                     ~ {{ roundAndCompactTokens(collateral.assets, collateral.vault.decimals) }}
                     {{ collateral.vault.asset.symbol }}
-                  </div>
+                  </UiExactAmount>
                 </div>
               </div>
               <div class="flex justify-between gap-8 flex-wrap mb-16">

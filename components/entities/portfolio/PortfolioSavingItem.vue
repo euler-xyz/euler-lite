@@ -5,7 +5,7 @@ import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { getAssetUsdValue, formatAssetValue } from '~/services/pricing/priceProvider'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated, getVaultNotice } from '~/utils/eulerLabelsUtils'
-import { formatNumber, compactNumber, formatCompactUsdValue, formatSmartAmount } from '~/utils/string-utils'
+import { formatNumber, compactNumber, formatCompactUsdValue, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { type AccountDepositPosition, getSubAccountIndex } from '~/entities/account'
 import { VaultOverviewModal, VaultSupplyApyModal } from '#components'
@@ -195,7 +195,9 @@ const onClick = () => {
           </div>
           <div class="flex justify-between gap-8 text-right">
             <div class="text-content-primary text-p3">
-              {{ formatSmartAmount(assetAmount) }} {{ vault.asset.symbol }}
+              <UiExactAmount :exact="formatExactAmount(position.assets, vault.asset.decimals, vault.asset.symbol)">
+                {{ formatSmartAmount(assetAmount) }} {{ vault.asset.symbol }}
+              </UiExactAmount>
             </div>
           </div>
         </div>
@@ -308,13 +310,14 @@ const onClick = () => {
             <div class="text-content-primary text-p3">
               {{ supplyValueDisplay }}
             </div>
-            <div
+            <UiExactAmount
               v-if="hasPrice"
               class="text-content-tertiary text-p3"
+              :exact="formatExactAmount(position.assets, vault.decimals, vault.asset.symbol)"
             >
               ~ {{ roundAndCompactTokens(position.assets, vault.decimals) }}
               {{ vault.asset.symbol }}
-            </div>
+            </UiExactAmount>
           </div>
         </div>
         <div

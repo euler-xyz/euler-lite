@@ -3,7 +3,7 @@ import { formatUnits } from 'viem'
 import type { Vault, SecuritizeVault, VaultAsset, CollateralOption, EarnVault } from '~/entities/vault'
 import { getAssetUsdPrice } from '~/services/pricing/priceProvider'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { compactNumber, formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
+import { compactNumber, formatSmartAmount, trimTrailingZeros, formatExactAmount } from '~/utils/string-utils'
 import { ChooseCollateralModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 
@@ -250,7 +250,12 @@ const openChooseCollateralModal = () => {
         :loading="balanceLoading ?? false"
       >
         <p @click="setMax">
-          <span class="text-content-tertiary">{{ formatSmartAmount(friendlyBalance) }} {{ asset.symbol }}</span> <span
+          <UiExactAmount
+            class="text-content-tertiary"
+            :exact="formatExactAmount(balance ?? 0n, asset?.decimals || 18n, asset.symbol)"
+          >
+            {{ formatSmartAmount(friendlyBalance) }} {{ asset.symbol }}
+          </UiExactAmount> <span
             class="text-accent-500 font-semibold px-4 cursor-pointer select-none text-[12px] leading-[16px]"
           >Max</span> <!-- TODO: button -->
         </p>
