@@ -45,12 +45,13 @@ const isNativeWrap = computed(() => {
 })
 
 const activeBalance = computed(() => (needsSwap.value || isNativeWrap.value) ? selectedAssetBalance.value : balance.value)
-const _activeAsset = computed(() => needsSwap.value ? selectedAsset.value : form.asset.value)
+const activeAsset = computed(() => (needsSwap.value || isNativeWrap.value) && selectedAsset.value ? selectedAsset.value : form.asset.value)
 
 const form = useCollateralForm({
   mode: 'supply',
   needsSwap,
   effectiveBalance: activeBalance,
+  effectiveAsset: activeAsset,
 
   computePriceFixed: (_pos, borrowVault, collateralVault) => {
     const collateralPrice = borrowVault && collateralVault

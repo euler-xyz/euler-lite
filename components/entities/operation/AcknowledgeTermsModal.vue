@@ -54,7 +54,7 @@ const onAccept = () => {
     title="Acknowledge terms"
     @close="onReject"
   >
-    <div class="flex flex-col gap-24 full flex-grow [scrollbar-width:none]">
+    <div class="flex flex-col gap-24 full flex-grow min-h-0">
       <div class="text-p3 text-content-secondary">
         By accessing or using Euler's products and services, I agree to the
         <a
@@ -78,7 +78,7 @@ const onAccept = () => {
         I further represent and warrant:
       </div>
 
-      <div class="bg-surface-secondary rounded-12 overflow-auto flex-1 [scrollbar-width:none]">
+      <div class="bg-surface-secondary rounded-12 overflow-y-auto flex-1 styled-scrollbar">
         <div
           v-for="(term, index) in terms"
           :key="index"

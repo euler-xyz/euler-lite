@@ -273,7 +273,7 @@ const { isSlow } = useSlowLoading(isLoading)
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
     <BasePageHeader
       title="Explore"
-      description="Discover markets structure and collateral relationships."
+      description="Discover lending markets across Euler. Filter by asset, risk manager, or market type."
       class="mb-16"
       icon="nodes"
     />

@@ -12,8 +12,17 @@ export const ERROR_MESSAGE_MAP: Record<string, string> = {
   NotEnoughLiquidity: 'Not enough liquidity in the vault.',
   E_TransferFromFailed: 'Token transfer failed.',
   ERC4626ExceededMaxDeposit: 'Deposit exceeds vault limits.',
+  ERC4626ExceededMaxMint: 'Mint exceeds vault limits.',
   ERC4626ExceededMaxWithdraw: 'Withdraw exceeds vault limits.',
   ERC4626ExceededMaxRedeem: 'Redeem exceeds vault limits.',
+  SlippageExceeded: 'Slippage exceeded your tolerance. Increase slippage tolerance or refresh the quote.',
+  Swapper_SwapError: 'Swap failed. Try increasing slippage tolerance, refreshing the quote, or selecting a different swap provider.',
+  Swapper_UnknownHandler: 'Swap provider is not registered. Try selecting a different swap provider.',
+  SwapVerifier_skimMin: 'Swap received less than the minimum amount. Increase slippage tolerance or refresh the quote.',
+  SwapVerifier_depositMin: 'Swap deposited less than the minimum amount. Increase slippage tolerance or refresh the quote.',
+  SwapVerifier_transferMin: 'Swap transferred less than the minimum amount. Increase slippage tolerance or refresh the quote.',
+  SwapVerifier_debtMax: 'Swap repaid less debt than required. Increase slippage tolerance or refresh the quote.',
+  SwapVerifier_pastDeadline: 'Swap quote expired before execution. Refresh the quote and try again.',
   INSUFFICIENT_BALANCE: 'Insufficient balance.',
   INSUFFICIENT_ALLOWANCE: 'Insufficient allowance.',
   TRANSFER_FROM_FAILED: 'Token transfer failed.',
@@ -72,9 +81,10 @@ export const APPROVE_RESET_REQUIRED_TOKENS = new Set<string>([
 // ERC-20 allowance slot candidates checked during simulation state-override probing.
 // Sequential range (0..ALLOWANCE_MAX_SEQUENTIAL_SLOT) covers standard ERC-20 layouts
 // and OZ Upgradeable tokens where inherited contracts shift the base slot index.
-// ALLOWANCE_EXTRA_SLOT_CANDIDATES holds non-sequential slots (e.g. ERC-7201 namespaced
-// storage for OpenZeppelin 5.x). Add entries there for any exotic token layouts.
-export const ALLOWANCE_MAX_SEQUENTIAL_SLOT = 500
+// Tokens using unstructured/namespaced storage (ERC-7201) won't be found by sequential
+// probing — simulation falls back to the non-blocking error path for those.
+// ALLOWANCE_EXTRA_SLOT_CANDIDATES holds non-sequential slots for known exotic layouts.
+export const ALLOWANCE_MAX_SEQUENTIAL_SLOT = 20
 export const ALLOWANCE_EXTRA_SLOT_CANDIDATES: bigint[] = []
 export const PERMIT2_SIG_WINDOW = 60n * 60n
 

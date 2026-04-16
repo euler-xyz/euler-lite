@@ -131,6 +131,7 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
           />
           Restricted
         </span>
+        <slot />
       </div>
 
       <p class="text-p2 font-semibold text-content-primary">

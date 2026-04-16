@@ -30,7 +30,21 @@ const { isSpyMode, spyAddress } = useSpyMode()
 
 const interval: Ref<NodeJS.Timeout | null> = ref(null)
 
-const tabsModel = ref(route.name as string)
+// Drive the tab selection directly off the route so there is no stored state
+// to drift out of sync with the URL while PortfolioPage is kept-alive.
+// Initialising a separate ref and syncing it via `router.replace` in
+// `onActivated` queued a second nested navigation while the first inner
+// `<NuxtPage>` swap was still in flight. On prod (where child routes are
+// async-imported chunks) that produced a timing race with the `out-in` page
+// transition, leaving the inner slot empty.
+const tabsModel = computed<string>({
+  get: () => route.name as string,
+  set: (value) => {
+    if (route.name !== value) {
+      router.replace({ name: value })
+    }
+  },
+})
 
 const tabs = computed(() => [
   {
@@ -50,31 +64,19 @@ const tabs = computed(() => [
   },
 ])
 
-const checkTab = () => {
-  if (route.name !== tabsModel.value) {
-    router.replace({ name: tabsModel.value })
-  }
-}
-
 const updatePositions = async () => {
   const targetAddress = isSpyMode.value ? spyAddress.value : address.value
   if (!targetAddress) return
   await refreshAllPositions(eulerLensAddresses.value, targetAddress)
 }
 
-watch(tabsModel, checkTab, { immediate: true })
-const isActive = ref(false)
-
 onActivated(async () => {
-  isActive.value = true
-  checkTab()
   await updateBalances()
   updatePositions()
   if (interval.value) clearInterval(interval.value)
   interval.value = setInterval(updatePositions, POLL_INTERVAL_30S_MS)
 })
 onDeactivated(() => {
-  isActive.value = false
   if (interval.value) {
     clearInterval(interval.value)
     interval.value = null
@@ -82,9 +84,7 @@ onDeactivated(() => {
 })
 
 watch(portfolioRefreshCounter, () => {
-  if (isActive.value) {
-    updatePositions()
-  }
+  updatePositions()
 })
 </script>
 
@@ -232,6 +232,10 @@ watch(portfolioRefreshCounter, () => {
       :list="tabs"
     />
 
-    <NuxtPage />
+    <!-- transition disabled on the nested page: the global `mode: 'out-in'`
+         page transition (nuxt.config.ts) interacts poorly with keep-alive and
+         async-imported child chunks on prod, occasionally leaving the inner
+         slot empty when toggling between top-level pages. -->
+    <NuxtPage :transition="false" />
   </section>
 </template>
