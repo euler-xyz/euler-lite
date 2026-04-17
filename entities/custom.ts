@@ -17,6 +17,7 @@ export type IntrinsicApySourceConfig
     | { provider: 'ondo', address: string, chainId: number }
     | { provider: 'benqi', address: string, chainId: number }
     | { provider: 'avant', address: string, chainId: number }
+    | { provider: 'infinifi', address: string, chainId: number, infinifiVariant: 'locked' | 'staked', infinifiLockedKey?: string }
 
 export const intrinsicApySources: readonly IntrinsicApySourceConfig[] = [
   // DefiLlama pools — Ethereum (1)
@@ -51,7 +52,6 @@ export const intrinsicApySources: readonly IntrinsicApySourceConfig[] = [
   { provider: 'defillama', chainId: 1, address: '0xc8CF6D7991f15525488b2A83Df53468D682Ba4B0', poolId: '0f67a08c-3f24-4a4b-963e-541f5a5c0364' },
   { provider: 'defillama', chainId: 1, address: '0xcf62F905562626CfcDD2261162a51fd02Fc9c5b6', poolId: '42523cca-14b0-44f6-95fb-4781069520a5' },
   { provider: 'defillama', chainId: 1, address: '0xd5F7838F5C461fefF7FE49ea5ebaF7728bB0ADfa', poolId: 'b9f2f00a-ba96-4589-a171-dde979a23d87' },
-  { provider: 'defillama', chainId: 1, address: '0xDBDC1Ef57537E34680B898E1FEBD3D68c7389bCB', poolId: '8fa2e60e-365a-41fc-8d50-fadde5041f94' },
   { provider: 'defillama', chainId: 1, address: '0xDcEe70654261AF21C44c093C300eD3Bb97b78192', poolId: '423681e3-4787-40ce-ae43-e9f67c5269b3' },
   { provider: 'defillama', chainId: 1, address: '0xE72B141DF173b999AE7c1aDcbF60Cc9833Ce56a8', poolId: '4e6cd326-72d5-4680-8d2f-3481d50e8bb1' },
   { provider: 'defillama', chainId: 1, address: '0xf1C9acDc66974dFB6dEcB12aA385b9cD01190E38', poolId: '4d01599c-69ae-41a3-bae1-5fab896f04c8' },
@@ -261,4 +261,9 @@ export const intrinsicApySources: readonly IntrinsicApySourceConfig[] = [
 
   // Avant — savUSD
   { provider: 'avant', chainId: 43114, address: '0x06d47F3fb376649c3A9Dafe069B3D6E35572219E' },
+
+  // InfiniFi — 4w locked, 13w locked, siUSD staked
+  { provider: 'infinifi', chainId: 1, address: '0x66bCF6151D5558AfB47c38B20663589843156078', infinifiVariant: 'locked', infinifiLockedKey: '0x66bCF6151D5558AfB47c38B20663589843156078' },
+  { provider: 'infinifi', chainId: 1, address: '0xbd3f9814eB946E617f1d774A6762cDbec0bf087A', infinifiVariant: 'locked', infinifiLockedKey: '0xbd3f9814eB946E617f1d774A6762cDbec0bf087A' },
+  { provider: 'infinifi', chainId: 1, address: '0xDBDC1Ef57537E34680B898E1FEBD3D68c7389bCB', infinifiVariant: 'staked' },
 ]

@@ -17,22 +17,31 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <SummaryRow label="Swap in">
+  <SummaryRow
+    v-if="inputDisplay"
+    label="Swap in"
+  >
     <p class="text-p2 text-right">
-      {{ inputDisplay ?? '-' }}
+      {{ inputDisplay }}
     </p>
   </SummaryRow>
-  <SummaryRow label="Swap out">
+  <SummaryRow
+    v-if="outputDisplay"
+    label="Swap out"
+  >
     <p class="text-p2 text-right">
-      {{ outputDisplay ?? '-' }}
+      {{ outputDisplay }}
     </p>
   </SummaryRow>
-  <SummaryRow label="Price impact">
+  <SummaryRow
+    v-if="priceImpact !== null"
+    label="Price impact"
+  >
     <p
       class="text-p2"
       :class="{ 'text-error-500': isPriceImpactWarning(priceImpact) }"
     >
-      {{ priceImpact !== null ? `${formatNumber(priceImpact, 2, 2)}%` : '-' }}
+      {{ formatNumber(priceImpact, 2, 2) }}%
     </p>
   </SummaryRow>
   <SummaryRow
@@ -59,9 +68,12 @@ const emit = defineEmits<{
       />
     </button>
   </SummaryRow>
-  <SummaryRow label="Routed via">
+  <SummaryRow
+    v-if="routedVia"
+    label="Routed via"
+  >
     <p class="text-p2 text-right">
-      {{ routedVia ?? '-' }}
+      {{ routedVia }}
     </p>
   </SummaryRow>
 </template>

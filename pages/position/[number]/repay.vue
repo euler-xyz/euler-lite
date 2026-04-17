@@ -562,7 +562,7 @@ watch(formTab, () => {
                 />
               </SummaryRow>
               <SwapDetailsSummary
-                v-if="walletSwap.needsSwap.value && walletSwap.swapEstimatedOutput.value"
+                v-if="walletSwap.needsSwap.value && (walletSwap.swapEstimatedOutput.value || walletSwap.quotes.quoteError.value)"
                 :input-display="walletSwap.swapInputDisplay.value"
                 :output-display="walletSwap.swapOutputDisplay.value"
                 :price-impact="walletSwap.swapPriceImpact.value"
