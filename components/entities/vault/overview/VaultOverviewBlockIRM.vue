@@ -236,6 +236,7 @@ const generateChartDataPoints = (kinkFraction: number | null) => {
   cashData.reverse()
 
   let kinkIndex: number | null = null
+  let kinkInjected = false
   if (kinkFraction !== null && kinkFraction > 0 && kinkFraction < 1) {
     const kinkBorrows = BigInt(Math.floor(kinkFraction * TOTAL))
     const kinkCash = TOTAL_BIG - kinkBorrows
@@ -251,10 +252,11 @@ const generateChartDataPoints = (kinkFraction: number | null) => {
       borrowsData.splice(idx, 0, kinkBorrows)
       cashData.splice(idx, 0, kinkCash)
       kinkIndex = idx
+      kinkInjected = true
     }
   }
 
-  return { cashData, borrowsData, kinkIndex }
+  return { cashData, borrowsData, kinkIndex, kinkInjected }
 }
 
 // Parse APY from bigint (27 decimals) to percentage number
@@ -298,7 +300,7 @@ const fetchIRMData = async (kinkFraction: number | null) => {
   try {
     const client = rpcClient.value!
 
-    const { cashData, borrowsData, kinkIndex } = generateChartDataPoints(kinkFraction)
+    const { cashData, borrowsData, kinkIndex, kinkInjected } = generateChartDataPoints(kinkFraction)
 
     // Fetch general interest rate model info
     const irmData = await client.readContract({
@@ -312,6 +314,7 @@ const fetchIRMData = async (kinkFraction: number | null) => {
     return {
       irmData,
       kinkIndex,
+      kinkInjected,
     }
   }
   catch (error) {
@@ -357,7 +360,7 @@ const renderChart = async () => {
       return
     }
 
-    const { irmData, kinkIndex } = data
+    const { irmData, kinkIndex, kinkInjected } = data
 
     if (adaptiveAPYsPromise) {
       const [minAPY, maxAPY] = await adaptiveAPYsPromise
@@ -378,11 +381,11 @@ const renderChart = async () => {
     const supplyAPYValues: number[] = []
 
     irmData.interestRateInfo.forEach((rate: { borrowAPY: bigint, supplyAPY: bigint }, i: number) => {
-      if (kinkIndex !== null && i === kinkIndex && kinkUtilization !== null) {
+      if (kinkInjected && i === kinkIndex && kinkUtilization !== null) {
         labels.push(kinkUtilization.toFixed(2))
       }
       else {
-        const originalIndex = kinkIndex !== null && i > kinkIndex ? i - 1 : i
+        const originalIndex = kinkInjected && i > kinkIndex! ? i - 1 : i
         labels.push(originalIndex.toFixed(0))
       }
       borrowAPYValues.push(parseAPY(rate.borrowAPY))
