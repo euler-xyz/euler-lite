@@ -88,7 +88,7 @@ describe('loader-serde', () => {
     const snap = mockSnapshot()
     const wire = serialiseSnapshot(snap)
     expect(() => JSON.stringify(wire)).not.toThrow()
-    expect(JSON.stringify(wire)).toContain('__bi:')
+    expect(JSON.stringify(wire)).toContain('"__bi"')
   })
 
   it('restored bigint values survive JSON string round-trip', () => {
@@ -98,5 +98,22 @@ describe('loader-serde', () => {
     expect(restored.evkVaults[0].supply).toBe(snap.evkVaults[0].supply)
     expect(restored.evkVaults[0].supplyCap).toBe(snap.evkVaults[0].supplyCap)
     expect(restored.evkVaults[0].interestRateInfo.borrowAPY).toBe(snap.evkVaults[0].interestRateInfo.borrowAPY)
+  })
+
+  // Regression: vault name() / symbol() are adversary-controlled on-chain.
+  // A naive prefix-on-string encoding would let a malicious vault with
+  // `name = "__bi:0"` silently deserialise to the bigint 0n, corrupting
+  // downstream string operations. The object-wrapper encoding prevents this.
+  it('treats adversarial strings that look like the bigint tag as plain strings', () => {
+    const snap = mockSnapshot()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(snap.evkVaults[0] as any).name = '__bi:0'
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(snap.evkVaults[0] as any).symbol = '__bi:deadbeef'
+    const restored = deserialiseSnapshot(JSON.parse(JSON.stringify(serialiseSnapshot(snap))))
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((restored.evkVaults[0] as any).name).toBe('__bi:0')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((restored.evkVaults[0] as any).symbol).toBe('__bi:deadbeef')
   })
 })

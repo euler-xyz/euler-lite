@@ -6,11 +6,14 @@
  * a self-HTTP round-trip. The POST endpoint is a thin wrapper around
  * getVaultFactories() below.
  */
+import { isAddress } from 'viem'
 import { createTtlCache } from './cache'
+import { logWarn } from './log'
 import { getSubgraphUris } from '~/utils/chain-env'
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
 const SUBGRAPH_TIMEOUT_MS = 10_000
+const MAX_ADDRESSES_PER_CALL = 1000
 
 /** Factory address per `${chainId}:${lowercaseVaultAddress}`. */
 export const vaultFactoryCache = createTtlCache<string>({
@@ -72,11 +75,15 @@ const fetchFromSubgraph = async (
 }
 
 /**
- * Resolve factory addresses for a batch of (already-validated) vault addresses.
- * Caller must pre-validate with viem isAddress() when the input is untrusted —
- * this function does NOT re-validate and injects lowercase addresses into a
- * GraphQL query, so untrusted input would be an injection vector. See the
- * POST handler for the sanitisation it applies.
+ * Resolve factory addresses for a batch of vault addresses.
+ *
+ * Validates every input with viem isAddress() internally — callers (HTTP
+ * handler and server-internal composables) don't need to pre-validate.
+ * Invalid addresses are dropped and logged; the returned map only contains
+ * well-formed addresses. Enforces a hard cap of MAX_ADDRESSES_PER_CALL;
+ * excess input is truncated. Both guards exist because the uncached subset
+ * is interpolated into a raw GraphQL query string via `"${addr}"` — any
+ * unchecked input would be an injection vector.
  *
  * Returns a map of lowercase-address → lowercase-factory. Missing vaults
  * (not indexed yet, not matching the query) are absent from the result.
@@ -91,11 +98,22 @@ export const getVaultFactories = async (
 ): Promise<Record<string, string>> => {
   if (addresses.length === 0) return {}
 
-  const normalized = addresses.map(a => a.toLowerCase())
+  const valid: string[] = []
+  let rejected = 0
+  for (const addr of addresses) {
+    if (typeof addr === 'string' && isAddress(addr)) valid.push(addr.toLowerCase())
+    else rejected++
+    if (valid.length >= MAX_ADDRESSES_PER_CALL) break
+  }
+  if (rejected > 0) {
+    logWarn('vault-factories-store', `Dropped ${rejected} invalid address(es) from getVaultFactories call`)
+  }
+  if (valid.length === 0) return {}
+
   const factories: Record<string, string> = {}
   const uncached: string[] = []
 
-  for (const addr of normalized) {
+  for (const addr of valid) {
     const cached = vaultFactoryCache.get(`${chainId}:${addr}`)
     if (cached) factories[addr] = cached
     else uncached.push(addr)

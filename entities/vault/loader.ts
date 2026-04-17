@@ -78,13 +78,31 @@ export const loadChainSnapshot = async (input: LoadSnapshotInput): Promise<Chain
     ? fetchEscrowAddresses(ctx.rpcUrl, peripheryAddresses.escrowedCollateralPerspective, ctx.chainId)
     : Promise.resolve<string[]>([])
 
-  // Phase 2: all four in parallel.
-  const [evkVaults, earnVaults, securitizeSettled, escrowAddresses] = await Promise.all([
-    collectVaults(fetchVaults(ctx, evkAddresses)),
-    collectEarnVaults(fetchEarnVaults(ctx, explorableEarn)),
+  // Phase 2: all four in parallel. Each arm is `allSettled` so one RPC
+  // hiccup on e.g. the escrow-addresses read doesn't kill the whole
+  // snapshot — a partial snapshot serves the client better than none.
+  const [evkSettled, earnSettled, securitizeSettled, escrowAddressesSettled] = await Promise.all([
+    collectVaults(fetchVaults(ctx, evkAddresses)).then(
+      v => ({ ok: true as const, value: v }),
+      err => ({ ok: false as const, err }),
+    ),
+    collectEarnVaults(fetchEarnVaults(ctx, explorableEarn)).then(
+      v => ({ ok: true as const, value: v }),
+      err => ({ ok: false as const, err }),
+    ),
     Promise.allSettled(securitizeAddresses.map(a => fetchSecuritizeVault(a, ctx))),
-    escrowAddressesPromise,
+    escrowAddressesPromise.then(
+      v => ({ ok: true as const, value: v }),
+      err => ({ ok: false as const, err }),
+    ),
   ])
+
+  const evkVaults: Vault[] = evkSettled.ok ? evkSettled.value : []
+  if (!evkSettled.ok) logWarn('loader/evk', evkSettled.err)
+  const earnVaults: EarnVault[] = earnSettled.ok ? earnSettled.value : []
+  if (!earnSettled.ok) logWarn('loader/earn', earnSettled.err)
+  const escrowAddresses: string[] = escrowAddressesSettled.ok ? escrowAddressesSettled.value : []
+  if (!escrowAddressesSettled.ok) logWarn('loader/escrowAddresses', escrowAddressesSettled.err)
 
   const securitizeVaults: SecuritizeVault[] = []
   securitizeSettled.forEach((r, i) => {

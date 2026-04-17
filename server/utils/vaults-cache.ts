@@ -14,13 +14,11 @@
 import { createTtlCache } from './cache'
 import { logWarn } from './log'
 import { getVaultFactories } from './vault-factories-store'
+import { INTERNAL_FETCH_HEADERS } from './internal-headers'
 import { loadChainSnapshot, serialiseSnapshot } from '~/entities/vault'
 import type { FetchVaultContext, SerialisedSnapshot } from '~/entities/vault'
 
 const TTL_MS = 10 * 60_000
-// Synthetic CF header so rate-limit fail-closed in prd doesn't 403 every internal fetch.
-// Same fixed sentinel pattern as warm-cache.
-const WARM_HEADERS = { 'cf-connecting-ip': '127.0.0.1' } as const
 
 export const vaultsCache = createTtlCache<SerialisedSnapshot>({
   ttlMs: TTL_MS,
@@ -59,7 +57,7 @@ interface EarnVaultEntry {
 }
 
 const getChainConfig = async (chainId: number): Promise<EulerChainEntry | undefined> => {
-  const chains = await $fetch<EulerChainEntry[]>('/api/euler-chains', { headers: WARM_HEADERS })
+  const chains = await $fetch<EulerChainEntry[]>('/api/euler-chains', { headers: INTERNAL_FETCH_HEADERS })
   return chains.find(c => c.chainId === chainId)
 }
 
@@ -76,11 +74,11 @@ const getLabels = async (chainId: number) => {
   const [products, earn] = await Promise.all([
     $fetch<Record<string, EulerLabelProduct>>('/api/labels/products.json', {
       query: { chainId },
-      headers: WARM_HEADERS,
+      headers: INTERNAL_FETCH_HEADERS,
     }).catch(() => ({} as Record<string, EulerLabelProduct>)),
     $fetch<Array<string | EarnVaultEntry>>('/api/labels/earn-vaults.json', {
       query: { chainId },
-      headers: WARM_HEADERS,
+      headers: INTERNAL_FETCH_HEADERS,
     }).catch(() => [] as Array<string | EarnVaultEntry>),
   ])
 

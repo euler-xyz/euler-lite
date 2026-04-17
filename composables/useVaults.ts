@@ -3,6 +3,7 @@ import { useVaultRegistry } from './useVaultRegistry'
 import { logWarn } from '~/utils/errorHandling'
 import {
   type AnyBorrowVaultPair,
+  type ChainVaultsSnapshot,
   type EarnVault,
   type SecuritizeVault,
   type SerialisedSnapshot,
@@ -316,6 +317,26 @@ const updateSecuritizeVaults = async (securitizeAddresses: string[], generation:
  * have valid data to render; updating flags (isEVKUpdating) stay true so the
  * subsequent RPC refresh can still signal "refresh in progress" to the UI.
  */
+/** Upper bound on snapshot age the client will hydrate from. Covers normal
+ * warm-cache intervals (4 min) plus a couple of missed cycles. Older
+ * snapshots are discarded and the RPC pipeline populates from scratch. */
+const MAX_HYDRATION_AGE_MS = 15 * 60_000
+
+/** Narrow the opaque wire object to the ChainVaultsSnapshot shape before we
+ * start trusting it for registry writes. A malformed server response would
+ * otherwise crash at the first `.map()` call. */
+const isChainVaultsSnapshot = (v: unknown): v is ChainVaultsSnapshot => {
+  if (v === null || typeof v !== 'object') return false
+  const s = v as Record<string, unknown>
+  return typeof s.chainId === 'number'
+    && typeof s.fetchedAt === 'number'
+    && Array.isArray(s.evkVaults)
+    && Array.isArray(s.earnVaults)
+    && Array.isArray(s.securitizeVaults)
+    && Array.isArray(s.escrowAddresses)
+    && Array.isArray(s.escrowVaults)
+}
+
 const hydrateFromServer = async (targetChainId: number, generation: number): Promise<boolean> => {
   const { setMany: registrySetMany, setEscrowAddresses } = useVaultRegistry()
   try {
@@ -325,13 +346,30 @@ const hydrateFromServer = async (targetChainId: number, generation: number): Pro
     if (loadGeneration.value !== generation) return false
 
     const snap = deserialiseSnapshot(wire)
+    if (!isChainVaultsSnapshot(snap)) {
+      logWarn('useVaults/hydrateFromServer', 'server returned a malformed snapshot; falling back to RPC')
+      return false
+    }
     if (snap.chainId !== targetChainId) return false
+    if (Date.now() - snap.fetchedAt > MAX_HYDRATION_AGE_MS) {
+      // Snapshot is older than MAX_HYDRATION_AGE_MS — indicates prolonged
+      // warm-cache failure. Reject rather than render stale prices/caps.
+      logWarn('useVaults/hydrateFromServer', `snapshot too stale (${Math.round((Date.now() - snap.fetchedAt) / 1000)}s old); falling back to RPC`)
+      return false
+    }
 
     // Registry writes: match the type tags useVaults normally uses so that
     // getType/getVault/isEscrowVault all work identically after hydration.
-    // Escrow vaults already carry vaultCategory='escrow' from the loader.
+    // Re-stamp vaultCategory='escrow' defensively on escrow vaults — the
+    // loader already sets it via fetchEscrowVault, but the registry write
+    // is our last chance to guarantee it for downstream `vaultCategory`
+    // consumers (VaultItem etc.).
     registrySetMany(snap.evkVaults.map(vault => ({ address: vault.address, vault, type: 'evk' as const })))
-    registrySetMany(snap.escrowVaults.map(vault => ({ address: vault.address, vault, type: 'evk' as const })))
+    registrySetMany(snap.escrowVaults.map(vault => ({
+      address: vault.address,
+      vault: { ...vault, vaultCategory: 'escrow' as const },
+      type: 'evk' as const,
+    })))
     registrySetMany(snap.earnVaults.map(vault => ({ address: vault.address, vault, type: 'earn' as const })))
     registrySetMany(snap.securitizeVaults.map(vault => ({ address: vault.address, vault, type: 'securitize' as const })))
     setEscrowAddresses(snap.escrowAddresses)
