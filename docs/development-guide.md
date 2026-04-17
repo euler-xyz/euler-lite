@@ -85,6 +85,7 @@ External metadata (contract addresses, labels, oracle checks) is fetched through
 | `GET /api/oracle-adapter?chainId=X&address=0x...` | Per-adapter JSON from oracle-checks | 5 min | `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` |
 | `GET /api/token-list?chainId=X` | Euler API + Uniswap + DefiLlama token lists | 5 min | `EULER_API_URL`, `NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL`, `NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL` |
 | `POST /api/vault-factories` | Subgraph vault-factory lookup (body: `{ chainId, addresses }`) | 24 h | `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` |
+| `GET /api/intrinsic-apy?chainId=X` | Every intrinsic-APY source for chain as `{ [addr]: info }` | 5 min (per upstream) | Provider-specific upstreams (DefiLlama, Pendle, Securitize, etc.) |
 | `GET /api/pyth/updates?ids[]=...` | Pyth Hermes (`/v2/updates/price/latest`) | No cache | `PYTH_HERMES_URL` (server-only) |
 
 All endpoints use rate limiting and return stale cached data when upstream is unavailable (except `/api/pyth/updates` which requires real-time data and returns no-store cache headers). The shared caching utility is in `server/utils/cache.ts`.

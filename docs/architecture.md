@@ -203,7 +203,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 |----------|-----|-------|
 | `/api/labels/*` | 5 min | 404 → empty shape; stale-fallback on upstream error |
 | `/api/token-list` | 5 min | Three sources merged via `Promise.allSettled`; per-source cache with stale fallback |
-| `/api/intrinsic-apy/*` | 5 min | Per-provider; every source in `intrinsicApySources` is pre-warmed, including pendle markets and securitize symbols |
+| `/api/intrinsic-apy` | 5 min | One endpoint, returns `{ [address]: { apy, provider, source? } }` for a chain; server orchestrates every upstream |
 | `/api/vault-factories` | 24 h | Factory is immutable per vault; batched subgraph query |
 | `/api/oracle-adapter` | 5 min | Lazy per-address fetch |
 | `/api/euler-chains` | 5 min | Static chain-agnostic config from `euler-interfaces` repo |

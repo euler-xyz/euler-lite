@@ -9,8 +9,6 @@
  * latency for the specific endpoints they hit, same as today. The
  * periodic 4-min re-warm keeps every entry ahead of its 5-min TTL.
  */
-import { intrinsicApySources } from '~/entities/custom'
-import { toIntrinsicApyRequest } from '~/entities/intrinsic-apy'
 import { LABEL_FILES } from '../api/labels/[file].get'
 import { getEnabledChainIds } from '~/utils/chain-env'
 import { logWarn } from '../utils/log'
@@ -29,28 +27,13 @@ export default defineNitroPlugin(() => {
   const chainIds = getEnabledChainIds()
   if (chainIds.length === 0) return
 
-  // Dedupe intrinsic-apy requests on their full (path, query) signature so
-  // repeated sources collapse to one $fetch per unique request.
-  const intrinsicApyRequests = [...new Map(
-    intrinsicApySources
-      .map(toIntrinsicApyRequest)
-      .map(req => [JSON.stringify(req), req] as const),
-  ).values()]
-
   const warmChain = async (chainId: number) => {
     const tasks: Promise<unknown>[] = LABEL_FILES.map(file =>
       $fetch(`/api/labels/${file}`, { query: { chainId }, headers: WARM_HEADERS }).catch(() => undefined),
     )
     tasks.push($fetch('/api/token-list', { query: { chainId }, headers: WARM_HEADERS }).catch(() => undefined))
+    tasks.push($fetch('/api/intrinsic-apy', { query: { chainId }, headers: WARM_HEADERS }).catch(() => undefined))
     await Promise.allSettled(tasks)
-  }
-
-  const warmIntrinsicApy = async () => {
-    await Promise.allSettled(
-      intrinsicApyRequests.map(req =>
-        $fetch(req.path, { ...(req.query ? { query: req.query } : {}), headers: WARM_HEADERS }).catch(() => undefined),
-      ),
-    )
   }
 
   const warmEulerChains = () =>
@@ -60,7 +43,6 @@ export default defineNitroPlugin(() => {
     try {
       await Promise.allSettled([
         ...chainIds.map(warmChain),
-        warmIntrinsicApy(),
         warmEulerChains(),
       ])
     }
