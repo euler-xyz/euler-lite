@@ -116,10 +116,13 @@ export const useREULLocks = () => {
     }
   }, { immediate: true })
 
-  // Reload when the effective address changes (e.g. spy address resolves to owner)
+  // Reload when the effective address changes (e.g. wallet switch, spy address resolves to owner)
   watch(effectiveAddress, (addr, oldAddr) => {
     if (oldAddr && addr && addr !== oldAddr) {
+      locks.value = []
+      isLoaded.value = false
       loadREULLocksInfo(addr)
+      isLoaded.value = true
     }
     else if (oldAddr && !addr) {
       locks.value = []
