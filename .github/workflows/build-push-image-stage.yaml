@@ -45,7 +45,28 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@f2e9fc6c2b355c1890b65e6f6f0e2ac3e6e22f78
 
-      - name: Build, tag, and push docker image to Amazon ECR
+      - name: Build docker image
+        run: docker build --platform linux/amd64 -t euler-lite .
+
+      - name: Extract static assets from image
+        run: |
+          docker create --name temp-euler euler-lite
+          docker cp temp-euler:/usr/src/app/.output/public ./static-output
+          docker rm temp-euler
+
+      - name: Configure AWS credentials for S3
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload static assets to S3
+        run: |
+          aws s3 sync ./static-output/_nuxt \
+            s3://${{ secrets.S3_STATIC_ASSETS_BUCKET }}/_nuxt \
+            --cache-control "public,max-age=31536000,immutable"
+
+      - name: Tag and push docker image to Amazon ECR
         id: build
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
@@ -53,7 +74,6 @@ jobs:
           ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
         run: |
           FULL_IMAGE="$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-          docker build --platform linux/amd64 -t euler-lite .
           docker tag euler-lite "$FULL_IMAGE"
           docker push "$FULL_IMAGE"
 
