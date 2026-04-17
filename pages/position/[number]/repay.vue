@@ -377,6 +377,7 @@ watch(formTab, () => {
                   :asset="position.borrow.asset"
                   :vault="position.borrow"
                   :balance="walletBalance"
+                  :max-handler="wallet.onSourceMax"
                   maxable
                 />
 
@@ -410,6 +411,7 @@ watch(formTab, () => {
                   label="Pay from wallet"
                   :asset="walletSwap.selectedAsset.value"
                   :balance="walletSwap.selectedAssetBalance.value"
+                  :max-handler="walletSwap.onSourceMax"
                   maxable
                   @update:model-value="walletSwap.onAmountInput"
                 />
@@ -562,7 +564,7 @@ watch(formTab, () => {
                 />
               </SummaryRow>
               <SwapDetailsSummary
-                v-if="walletSwap.needsSwap.value && walletSwap.swapEstimatedOutput.value"
+                v-if="walletSwap.needsSwap.value && (walletSwap.swapEstimatedOutput.value || walletSwap.quotes.quoteError.value)"
                 :input-display="walletSwap.swapInputDisplay.value"
                 :output-display="walletSwap.swapOutputDisplay.value"
                 :price-impact="walletSwap.swapPriceImpact.value"
@@ -609,6 +611,7 @@ watch(formTab, () => {
                 :vault="collateral.sourceVault.value"
                 :collateral-options="collateral.repayCollateralOptions.value"
                 :balance="collateral.sourceBalance.value"
+                :max-handler="collateral.onSourceMax"
                 maxable
                 @input="collateral.onAmountInput"
                 @change-collateral="collateral.onSourceVaultChange"
@@ -779,6 +782,7 @@ watch(formTab, () => {
                 :vault="savings.sourceVault.value"
                 :collateral-options="savings.savingsOptions.value"
                 :balance="savings.sourceBalance.value"
+                :max-handler="savings.onSourceMax"
                 maxable
                 @input="savings.onAmountInput"
                 @change-collateral="savings.onSourceVaultChange"

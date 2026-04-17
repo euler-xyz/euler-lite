@@ -88,6 +88,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const otherAmountField: SwapQuoteAmountField = displayAmountField === 'amountIn' ? 'amountOut' : 'amountIn'
 
   const router = useRouter()
+  const route = useRoute()
   const { isConnected } = useAccount()
   const { executeTxPlan } = useEulerOperations()
   const modal = useModal()
@@ -155,10 +156,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
       return
     }
     const formatted = formatUnits(amount, Number(toVault.value.decimals))
-    const numericValue = Number(formatted)
-    toAmount.value = numericValue < 0.01
-      ? formatSignificant(formatted, 3)
-      : formatSignificant(formatted)
+    toAmount.value = formatSmartAmount(formatted).replace(/,/g, '')
   }, { immediate: true })
 
   // ── Quote state helpers ────────────────────────────────────────────────
@@ -493,7 +491,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
       await executeTxPlan(txPlan)
       modal.close()
       setTimeout(() => {
-        router.replace(redirectPath)
+        router.replace({ path: redirectPath, query: { network: route.query.network } })
       }, 400)
     }
     catch (e) {

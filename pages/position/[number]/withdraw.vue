@@ -241,7 +241,7 @@ watch(selectedOutputAsset, () => {
               />
 
               <VaultFormInfoBlock
-                v-if="form.swapEstimatedOutput.value"
+                v-if="form.swapEstimatedOutput.value || form.swapQuoteError.value"
                 :loading="form.isSwapQuoteLoading.value"
                 variant="card"
               >
