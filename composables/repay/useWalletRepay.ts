@@ -335,6 +335,17 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     amount.value = trimTrailingZeros(formatUnits(amountNano, Number(borrowVault.value.asset.decimals)))
   }
 
+  // Max on source input: clamp to current debt so clicking Max on wallet
+  // balance > debt behaves like Max on debt (no over-repay). The watcher on
+  // `amount` syncs walletRepayPercent and triggers estimates.
+  const onSourceMax = () => {
+    clearSimulationError()
+    if (!borrowVault.value || !position.value) return
+    const currentDebt = position.value.borrowed || 0n
+    const cap = walletBalance.value < currentDebt ? walletBalance.value : currentDebt
+    amount.value = trimTrailingZeros(formatUnits(cap, Number(borrowVault.value.asset.decimals)))
+  }
+
   // Watch amount changes: sync percent slider + trigger estimates
   watch(amount, () => {
     clearSimulationError()
@@ -395,6 +406,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     submit,
     send,
     onWalletRepayPercentInput,
+    onSourceMax,
     initEstimates,
     resetOnTabSwitch,
   }
