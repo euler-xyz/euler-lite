@@ -14,10 +14,10 @@ function sanitizeQuery(raw: string): string {
 export function useVaultSearch<T>(
   getSearchableFields: (item: T) => (string | undefined)[],
 ): {
-    searchQuery: Ref<string>
-    matchesSearch: (item: T) => boolean
-    clearSearch: () => void
-  } {
+  searchQuery: Ref<string>
+  matchesSearch: (item: T) => boolean
+  clearSearch: () => void
+} {
   const searchQuery = ref('')
 
   const matchesSearch = (item: T): boolean => {

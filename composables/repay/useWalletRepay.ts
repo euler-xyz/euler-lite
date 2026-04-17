@@ -141,20 +141,20 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       try {
         plan.value = shouldFullRepay
           ? await buildFullRepayPlan(
-            borrowVault.value.address,
-            borrowVault.value.asset.address,
-            amountNano,
-            position.value.subAccount,
-            position.value.collaterals ?? [collateralVault.value.address],
-            { includePermit2Call: false },
-          )
+              borrowVault.value.address,
+              borrowVault.value.asset.address,
+              amountNano,
+              position.value.subAccount,
+              position.value.collaterals ?? [collateralVault.value.address],
+              { includePermit2Call: false },
+            )
           : await buildRepayPlan(
-            borrowVault.value.address,
-            borrowVault.value.asset.address,
-            amountNano,
-            position.value.subAccount,
-            { includePermit2Call: false },
-          )
+              borrowVault.value.address,
+              borrowVault.value.asset.address,
+              amountNano,
+              position.value.subAccount,
+              { includePermit2Call: false },
+            )
       }
       catch (e) {
         logWarn('walletRepay/buildPlan', e)
@@ -196,20 +196,20 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       const isFullRepay = amountNano >= currentDebt || walletRepayPercent.value >= 100
       const txPlan = isFullRepay
         ? await buildFullRepayPlan(
-          borrowVault.value.address,
-          borrowVault.value.asset.address,
-          amountNano,
-          position.value.subAccount,
-          position.value.collaterals ?? [collateralVault.value.address],
-          { includePermit2Call: true },
-        )
+            borrowVault.value.address,
+            borrowVault.value.asset.address,
+            amountNano,
+            position.value.subAccount,
+            position.value.collaterals ?? [collateralVault.value.address],
+            { includePermit2Call: true },
+          )
         : await buildRepayPlan(
-          borrowVault.value.address,
-          borrowVault.value.asset.address,
-          amountNano,
-          position.value.subAccount,
-          { includePermit2Call: true },
-        )
+            borrowVault.value.address,
+            borrowVault.value.asset.address,
+            amountNano,
+            position.value.subAccount,
+            { includePermit2Call: true },
+          )
       await executeTxPlan(txPlan)
 
       modal.close()
