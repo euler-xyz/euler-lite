@@ -24,6 +24,14 @@ const images = computed(() => {
       return { label: labels[index], src: effectiveSrc, state: { isReady: true } }
     }
 
+    // Skip useImage for empty src — it would otherwise create an Image() with
+    // src="" and the browser would attempt to load the current document URL,
+    // emitting an uncaught error event. The template falls through to the
+    // label fallback below when isReady stays false.
+    if (!effectiveSrc) {
+      return { label: labels[index], src: effectiveSrc, state: { isReady: false } }
+    }
+
     const state = reactive(useImage({ src: effectiveSrc, referrerPolicy: 'no-referrer' }))
     watch(() => state.isReady, (ready) => {
       if (ready && effectiveSrc) loadedImages.add(effectiveSrc)

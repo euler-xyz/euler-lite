@@ -263,7 +263,7 @@ const load = async () => {
     // Check if securitize vault first
     const isSecuritize = await isSecuritizeVault(vaultAddress)
     if (isSecuritize) {
-      vault.value = await fetchSecuritizeVault(vaultAddress)
+      vault.value = await fetchSecuritizeVault(vaultAddress, buildFetchContext())
       estimateSupplyAPY.value = 0n // Securitize vaults don't have interest rate
     }
     else {

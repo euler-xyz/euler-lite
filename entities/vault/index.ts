@@ -38,8 +38,16 @@ export { clearPriceCaches } from './pricing'
 export {
   fetchEscrowVault,
   fetchEscrowAddresses,
-  fetchEscrowVaults,
 } from './escrow-fetcher'
+
+// Shared context for pure fetchers
+export type { FetchVaultContext } from './fetcher'
+
+// Universal chain snapshot loader (used by /api/vaults handler and client hydration).
+export { loadChainSnapshot } from './loader'
+export type { ChainVaultsSnapshot, LoadSnapshotInput } from './loader'
+export { serialiseSnapshot, deserialiseSnapshot } from './loader-serde'
+export type { SerialisedSnapshot } from './loader-serde'
 
 // LTV ramp calculations
 export {
