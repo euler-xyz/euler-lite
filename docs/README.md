@@ -81,6 +81,12 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Country group aliases (EU, EEA, EFTA)
 - UI enforcement across browse, detail, action, and modal pages
 
+### 🌐 [Public API](./public-api.md)
+
+- Publicly reachable endpoints under `/api/public/` (CORS `*`)
+- `GET /api/public/is-known` — verified-vault lookup by address
+- Request/response shape, caching, rate limits, and examples
+
 ## 🎯 Project Overview
 
 **Euler Lite** is a lightweight multi-chain DeFi application that provides lending and borrowing services through the Euler Finance protocol. It supports multiple EVM chains and connects via standard EVM wallets. The application allows users to:

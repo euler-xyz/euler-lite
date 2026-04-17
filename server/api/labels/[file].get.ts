@@ -7,17 +7,17 @@ import { logWarn } from '~/server/utils/log'
 const TIMEOUT_MS = 10_000
 const CACHE_TTL_MS = 300_000
 
-const ALLOWED_FILES = new Set([
-  'products.json',
-  'entities.json',
-  'earn-vaults.json',
-  'points.json',
-])
+// Shape to use when a file is legitimately absent (404 or upstream failure for
+// optional files). Products and entities are required — upstream failures for
+// those propagate as 502 so clients can show a proper error state.
+const EMPTY_SHAPES: Record<string, unknown> = {
+  'products.json': {},
+  'entities.json': {},
+  'earn-vaults.json': [],
+  'points.json': [],
+}
 
-const OPTIONAL_FILES = new Set([
-  'earn-vaults.json',
-  'points.json',
-])
+const OPTIONAL_FILES = new Set(['earn-vaults.json', 'points.json'])
 
 const rateLimiter = createRateLimiter({
   max: 1000,
@@ -88,7 +88,7 @@ export default defineEventHandler(async (event) => {
   rateLimiter.consume(event)
 
   const file = getRouterParam(event, 'file')
-  if (!file || !ALLOWED_FILES.has(file)) {
+  if (!file || !Object.hasOwn(EMPTY_SHAPES, file)) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid file' })
   }
 
@@ -103,15 +103,24 @@ export default defineEventHandler(async (event) => {
   const cached = cache.get(key)
   if (cached) return cached
 
+  const fallback = () => {
+    const stale = cache.getStale(key)
+    if (stale) return stale
+    const empty = EMPTY_SHAPES[file]
+    cache.set(key, empty)
+    return empty
+  }
+
   try {
     const resp = await fetchWithTimeout(getUpstreamUrl(chainId, file), TIMEOUT_MS)
     if (!resp.ok) {
-      if (resp.status === 404 && OPTIONAL_FILES.has(file)) {
-        const stale = cache.getStale(key)
-        if (stale) return stale
-        const empty: unknown[] = []
-        cache.set(key, empty)
-        return empty
+      // 404 (and 403 from S3/CDN-style stores) signal "file not published on this chain".
+      const absent = resp.status === 404 || resp.status === 403
+      if (absent || OPTIONAL_FILES.has(file)) {
+        if (!absent) {
+          logWarn('labels', `${file} upstream returned ${resp.status} for chain ${chainId}; treating as absent`)
+        }
+        return fallback()
       }
       throw new Error(`Upstream returned ${resp.status}`)
     }
@@ -123,6 +132,8 @@ export default defineEventHandler(async (event) => {
   }
   catch (err) {
     logWarn('labels', `Failed to fetch ${file} for chain ${chainId}:`, err instanceof Error ? err.message : err)
+
+    if (OPTIONAL_FILES.has(file)) return fallback()
 
     const stale = cache.getStale(key)
     if (stale) return stale
