@@ -46,6 +46,27 @@ export default defineNitroPlugin(() => {
     tasks.push($fetch('/api/token-list', { query: { chainId }, headers: WARM_HEADERS }).catch(() => undefined))
     tasks.push($fetch('/api/intrinsic-apy', { query: { chainId }, headers: WARM_HEADERS }).catch(() => undefined))
     await Promise.allSettled(tasks)
+
+    // Phase 2: warm vault-factories using earn-vault addresses (labels are cached from above)
+    try {
+      const earnData = await $fetch<Array<string | { address: string }>>('/api/labels/earn-vaults.json', {
+        query: { chainId },
+        headers: WARM_HEADERS,
+      })
+      const addresses = (earnData ?? [])
+        .map(e => typeof e === 'string' ? e : e?.address)
+        .filter((a): a is string => !!a)
+      if (addresses.length > 0) {
+        await $fetch('/api/vault-factories', {
+          method: 'POST',
+          body: { chainId, addresses },
+          headers: WARM_HEADERS,
+        })
+      }
+    }
+    catch {
+      // earn-vaults or vault-factories fetch failed; non-critical
+    }
   }
 
   const warmEulerChains = () =>

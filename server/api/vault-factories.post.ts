@@ -5,6 +5,7 @@ import { createTtlCache } from '~/server/utils/cache'
 import { getEnabledChainIds, getSubgraphUris } from '~/utils/chain-env'
 import { logWarn } from '~/server/utils/log'
 
+const TIMEOUT_MS = 10_000
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
 const MAX_ADDRESSES_PER_REQUEST = 1000
 
@@ -19,8 +20,10 @@ const rateLimiter = createRateLimiter({
 // vaults total — larger than any realistic deployment.
 const cache = createTtlCache<string>({ ttlMs: CACHE_TTL_MS, maxEntries: 10_000 })
 
-// Deduplicate concurrent subgraph fetches for the same (chainId, address-set).
-const inflight = new Map<string, Promise<Record<string, string>>>()
+// Per-address inflight dedup keyed by `${chainId}:${address}`.
+// Concurrent requests with overlapping addresses share the same subgraph
+// round-trip, and keys are always small fixed-size strings.
+const inflight = new Map<string, Promise<string | undefined>>()
 
 interface SubgraphVault {
   id: string
@@ -32,32 +35,40 @@ async function fetchFromSubgraph(
   addresses: string[],
 ): Promise<Record<string, string>> {
   const addressList = addresses.map(addr => `"${addr}"`).join(', ')
-  const resp = await fetch(subgraphUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      query: `query VaultFactories {
-        vaults(first: 1000, where: { id_in: [${addressList}] }) {
-          id
-          factory
-        }
-      }`,
-    }),
-  })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS)
+  try {
+    const resp = await fetch(subgraphUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        query: `query VaultFactories {
+          vaults(first: 1000, where: { id_in: [${addressList}] }) {
+            id
+            factory
+          }
+        }`,
+      }),
+    })
 
-  if (!resp.ok) {
-    throw new Error(`Subgraph returned ${resp.status}`)
-  }
-
-  const body = await resp.json() as { data?: { vaults?: SubgraphVault[] } }
-  const vaults = body?.data?.vaults ?? []
-  const result: Record<string, string> = {}
-  for (const vault of vaults) {
-    if (vault.id && vault.factory) {
-      result[vault.id.toLowerCase()] = vault.factory.toLowerCase()
+    if (!resp.ok) {
+      throw new Error(`Subgraph returned ${resp.status}`)
     }
+
+    const body = await resp.json() as { data?: { vaults?: SubgraphVault[] } }
+    const vaults = body?.data?.vaults ?? []
+    const result: Record<string, string> = {}
+    for (const vault of vaults) {
+      if (vault.id && vault.factory) {
+        result[vault.id.toLowerCase()] = vault.factory.toLowerCase()
+      }
+    }
+    return result
   }
-  return result
+  finally {
+    clearTimeout(timeout)
+  }
 }
 
 export default defineEventHandler(async (event) => {
@@ -108,34 +119,44 @@ export default defineEventHandler(async (event) => {
     return { factories }
   }
 
-  const sortedUncached = [...uncached].sort()
-  const inflightKey = `${chainId}:${sortedUncached.join(',')}`
-  const existing = inflight.get(inflightKey)
+  // Split uncached addresses into those already inflight vs needing a fresh fetch.
+  const promises: Array<[string, Promise<string | undefined>]> = []
+  const toFetch: string[] = []
 
-  const fetchPromise = existing ?? (async () => {
-    try {
-      const fetched = await fetchFromSubgraph(subgraphUrl, sortedUncached)
-      for (const [addr, factory] of Object.entries(fetched)) {
-        cache.set(`${chainId}:${addr}`, factory)
-      }
-      return fetched
+  for (const addr of uncached) {
+    const key = `${chainId}:${addr}`
+    const existing = inflight.get(key)
+    if (existing) {
+      promises.push([addr, existing])
     }
-    finally {
-      inflight.delete(inflightKey)
+    else {
+      toFetch.push(addr)
     }
-  })()
-
-  if (!existing) {
-    inflight.set(inflightKey, fetchPromise)
   }
 
-  try {
-    const fetched = await fetchPromise
-    Object.assign(factories, fetched)
-    return { factories }
+  if (toFetch.length > 0) {
+    const batchPromise = fetchFromSubgraph(subgraphUrl, toFetch).catch((err) => {
+      logWarn('vault-factories', `Subgraph query failed for chain ${chainId}:`, err instanceof Error ? err.message : err)
+      return {} as Record<string, string>
+    })
+
+    for (const addr of toFetch) {
+      const addrPromise = batchPromise
+        .then((result) => {
+          const factory = result[addr]
+          if (factory) cache.set(`${chainId}:${addr}`, factory)
+          return factory
+        })
+        .finally(() => { inflight.delete(`${chainId}:${addr}`) })
+      inflight.set(`${chainId}:${addr}`, addrPromise)
+      promises.push([addr, addrPromise])
+    }
   }
-  catch (err) {
-    logWarn('vault-factories', `Subgraph query failed for chain ${chainId}:`, err instanceof Error ? err.message : err)
-    return { factories }
-  }
+
+  await Promise.all(promises.map(async ([addr, promise]) => {
+    const factory = await promise
+    if (factory) factories[addr] = factory
+  }))
+
+  return { factories }
 })

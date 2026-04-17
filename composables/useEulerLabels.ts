@@ -106,20 +106,30 @@ export const useEulerLabels = () => {
       earnVaults.value = []
       verifiedVaultAddresses.value = []
 
-      const [productRes, entitiesRes, earnRes, pointsRes] = await Promise.all([
+      const [productRes, entitiesRes, earnRes, pointsRes] = await Promise.allSettled([
         axios.get('/api/labels/products.json', { params: { chainId } }),
         axios.get('/api/labels/entities.json', { params: { chainId } }),
         axios.get('/api/labels/earn-vaults.json', { params: { chainId } }),
         axios.get('/api/labels/points.json', { params: { chainId } }),
       ])
 
-      const normalizedProducts = normalizeProducts(productRes.data)
-      safeAssign(products, normalizedProducts.products)
-      verifiedVaultAddresses.value = normalizedProducts.vaultAddresses
+      if (productRes.status === 'fulfilled') {
+        const normalizedProducts = normalizeProducts(productRes.value.data)
+        safeAssign(products, normalizedProducts.products)
+        verifiedVaultAddresses.value = normalizedProducts.vaultAddresses
+      }
+      else {
+        logWarn('labels/load', 'Failed to load products:', productRes.reason)
+      }
 
-      safeAssign(entities, normalizeEntities(entitiesRes.data))
+      if (entitiesRes.status === 'fulfilled') {
+        safeAssign(entities, normalizeEntities(entitiesRes.value.data))
+      }
+      else {
+        logWarn('labels/load', 'Failed to load entities:', entitiesRes.reason)
+      }
 
-      const earnEntries = (earnRes.data ?? []) as Array<string | EulerLabelEarnVaultEntry>
+      const earnEntries = (earnRes.status === 'fulfilled' ? earnRes.value.data ?? [] : []) as Array<string | EulerLabelEarnVaultEntry>
       earnVaults.value = earnEntries.map((entry) => {
         if (typeof entry === 'string') return normalizeAddress(entry)
         const addr = normalizeAddress(entry.address)
@@ -147,7 +157,14 @@ export const useEulerLabels = () => {
         return addr
       })
 
-      const pointsData = (pointsRes.data ?? []) as EulerLabelPoint[]
+      if (earnRes.status === 'rejected') {
+        logWarn('labels/load', 'Failed to load earn-vaults:', earnRes.reason)
+      }
+
+      const pointsData = (pointsRes.status === 'fulfilled' ? pointsRes.value.data ?? [] : []) as EulerLabelPoint[]
+      if (pointsRes.status === 'rejected') {
+        logWarn('labels/load', 'Failed to load points:', pointsRes.reason)
+      }
       pointsData.forEach((point) => {
         if (!point.collateralVaults) {
           return

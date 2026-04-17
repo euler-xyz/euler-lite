@@ -361,6 +361,11 @@ async function extractSimple<S extends IntrinsicApySourceConfig, T>(
   }])
 }
 
+// Providers with dedicated extractors in the switch below.
+type ExplicitProvider = 'defillama' | 'pendle' | 'securitize' | 'stablewatch' | 'renzo' | 'midas' | 'yo' | 'infinifi'
+// Every remaining provider must have an entry in SIMPLE_SPECS — enforced at the type level.
+type SimpleProvider = Exclude<IntrinsicApySourceConfig['provider'], ExplicitProvider>
+
 const SIMPLE_SPECS = {
   etherfi: {
     key: 'etherfi',
@@ -408,7 +413,7 @@ const SIMPLE_SPECS = {
     sourceUrl: 'https://avantprotocol.com',
     extract: (d: { savusdApy?: number }) => Number(d.savusdApy ?? 0),
   },
-} satisfies Record<string, SimpleProviderSpec<unknown>>
+} satisfies Record<SimpleProvider, SimpleProviderSpec<unknown>>
 
 async function extractForProvider(
   provider: IntrinsicApySourceConfig['provider'],
@@ -423,8 +428,15 @@ async function extractForProvider(
     case 'midas': return extractMidas(sources as MidasSource[])
     case 'yo': return extractYo(sources as YoSource[])
     case 'infinifi': return extractInfinifi(sources as InfinifiSource[])
-    default:
-      return extractSimple(sources, SIMPLE_SPECS[provider] as SimpleProviderSpec<unknown>)
+    default: {
+      const simpleProvider: SimpleProvider = provider
+      const spec = SIMPLE_SPECS[simpleProvider]
+      if (!spec) {
+        logWarn('intrinsic-apy', `No extractor for provider "${provider}"`)
+        return []
+      }
+      return extractSimple(sources, spec as SimpleProviderSpec<unknown>)
+    }
   }
 }
 
