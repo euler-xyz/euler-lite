@@ -1,5 +1,6 @@
 import type { IntrinsicApySourceConfig } from '~/entities/custom'
 import type { IntrinsicApyProvider, IntrinsicApyResult } from '~/entities/intrinsic-apy'
+import { toIntrinsicApyRequest } from '~/entities/intrinsic-apy'
 import { logWarn } from '~/utils/errorHandling'
 
 type SecuritizeSource = Extract<IntrinsicApySourceConfig, { provider: 'securitize' }>
@@ -20,12 +21,10 @@ const buildSourceUrl = (symbol: string) =>
   `https://public-feed.securitize.io/asset-stats?symbol=${symbol}`
 
 const fetchBySymbol = async (
-  symbol: string,
   sources: SecuritizeSource[],
 ): Promise<IntrinsicApyResult[]> => {
-  const res = await $fetch<SecuritizeResponse>('/api/intrinsic-apy/securitize', {
-    query: { symbol },
-  })
+  const req = toIntrinsicApyRequest(sources[0])
+  const res = await $fetch<SecuritizeResponse>(req.path, { query: req.query })
 
   const entries = Array.isArray(res?.data) ? res.data : []
   const results: IntrinsicApyResult[] = []
@@ -71,9 +70,7 @@ export const createSecuritizeProvider = (sources: readonly IntrinsicApySourceCon
       }
 
       const settled = await Promise.allSettled(
-        [...bySymbol.entries()].map(([symbol, sources]) =>
-          fetchBySymbol(symbol, sources),
-        ),
+        [...bySymbol.values()].map(fetchBySymbol),
       )
 
       const results: IntrinsicApyResult[] = []

@@ -1,5 +1,6 @@
 import type { IntrinsicApySourceConfig } from '~/entities/custom'
 import type { IntrinsicApyProvider, IntrinsicApyResult } from '~/entities/intrinsic-apy'
+import { toIntrinsicApyRequest } from '~/entities/intrinsic-apy'
 import { STABLEWATCH_SOURCE_URL } from '~/entities/constants'
 import { logWarn } from '~/utils/errorHandling'
 
@@ -61,7 +62,8 @@ export const createStablewatchProvider = (sources: readonly IntrinsicApySourceCo
       if (!chainName) return []
 
       try {
-        const resp = await $fetch<StablewatchResponse>('/api/intrinsic-apy/stablewatch')
+        const req = toIntrinsicApyRequest(chainSources[0])
+        const resp = await $fetch<StablewatchResponse>(req.path, req.query ? { query: req.query } : {})
         const pools = Array.isArray(resp?.data) ? resp.data : []
 
         const lookup = new Map<string, number>()

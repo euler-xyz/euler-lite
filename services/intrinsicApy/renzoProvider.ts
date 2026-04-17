@@ -1,5 +1,6 @@
 import type { IntrinsicApySourceConfig } from '~/entities/custom'
 import type { IntrinsicApyProvider, IntrinsicApyResult } from '~/entities/intrinsic-apy'
+import { toIntrinsicApyRequest } from '~/entities/intrinsic-apy'
 
 type RenzoSource = Extract<IntrinsicApySourceConfig, { provider: 'renzo' }>
 
@@ -26,7 +27,8 @@ export const createRenzoProvider = (sources: readonly IntrinsicApySourceConfig[]
       const chainSources = renzoSources.filter(s => s.chainId === chainId)
       if (!chainSources.length) return []
 
-      const data = await $fetch<RenzoStatsResponse>('/api/intrinsic-apy/renzo')
+      const req = toIntrinsicApyRequest(chainSources[0])
+      const data = await $fetch<RenzoStatsResponse>(req.path, req.query ? { query: req.query } : {})
       const apr = data?.data?.apr
 
       return chainSources.map(source => ({

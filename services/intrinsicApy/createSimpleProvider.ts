@@ -1,5 +1,6 @@
 import type { IntrinsicApySourceConfig } from '~/entities/custom'
 import type { IntrinsicApyProvider, IntrinsicApyResult } from '~/entities/intrinsic-apy'
+import { toIntrinsicApyRequest } from '~/entities/intrinsic-apy'
 
 interface SimpleProviderConfig {
   readonly providerName: string
@@ -23,7 +24,8 @@ export const createSimpleProvider = (
       const chainSources = filtered.filter(s => s.chainId === chainId)
       if (!chainSources.length) return []
 
-      const data = await $fetch(`/api/intrinsic-apy/${config.providerKey}`)
+      const req = toIntrinsicApyRequest(chainSources[0])
+      const data = await $fetch(req.path, req.query ? { query: req.query } : {})
       const apy = config.extractApy(data)
 
       if (!Number.isFinite(apy) || apy <= 0) return []

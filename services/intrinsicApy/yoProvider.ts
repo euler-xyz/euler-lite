@@ -1,5 +1,6 @@
 import type { IntrinsicApySourceConfig } from '~/entities/custom'
 import type { IntrinsicApyProvider, IntrinsicApyResult } from '~/entities/intrinsic-apy'
+import { toIntrinsicApyRequest } from '~/entities/intrinsic-apy'
 
 type YoSource = Extract<IntrinsicApySourceConfig, { provider: 'yo' }>
 
@@ -24,7 +25,8 @@ export const createYoProvider = (sources: readonly IntrinsicApySourceConfig[]): 
       const chainSources = yoSources.filter(s => s.chainId === chainId)
       if (!chainSources.length) return []
 
-      const resp = await $fetch<YoVaultStats>('/api/intrinsic-apy/yo')
+      const req = toIntrinsicApyRequest(chainSources[0])
+      const resp = await $fetch<YoVaultStats>(req.path, req.query ? { query: req.query } : {})
       const vaults = resp?.data ?? []
 
       const apyByAddress = new Map<string, number>()

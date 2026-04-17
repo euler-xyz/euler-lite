@@ -1,5 +1,6 @@
 import type { IntrinsicApySourceConfig } from '~/entities/custom'
 import type { IntrinsicApyProvider, IntrinsicApyResult } from '~/entities/intrinsic-apy'
+import { toIntrinsicApyRequest } from '~/entities/intrinsic-apy'
 
 const CONCURRENCY = 10
 const MATURITY_STALE_THRESHOLD_MS = 2 * 60 * 60 * 1000
@@ -22,12 +23,9 @@ const isMatured = (timestamp?: string): boolean => {
 const fetchMarketData = async (
   source: PendleSource,
 ): Promise<IntrinsicApyResult | undefined> => {
-  const apiChainId = source.crossChainSourceChainId ?? source.chainId
-
+  const req = toIntrinsicApyRequest(source)
   try {
-    const data = await $fetch<PendleMarketData>('/api/intrinsic-apy/pendle', {
-      query: { chainId: apiChainId, market: source.pendleMarket },
-    })
+    const data = await $fetch<PendleMarketData>(req.path, { query: req.query })
 
     if (!data || isMatured(data.timestamp)) {
       return {

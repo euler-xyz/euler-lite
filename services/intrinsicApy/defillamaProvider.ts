@@ -1,5 +1,6 @@
 import type { IntrinsicApySourceConfig } from '~/entities/custom'
 import type { IntrinsicApyProvider, IntrinsicApyResult } from '~/entities/intrinsic-apy'
+import { toIntrinsicApyRequest } from '~/entities/intrinsic-apy'
 
 type DefiLlamaPool = {
   pool?: string
@@ -30,7 +31,8 @@ export const createDefiLlamaProvider = (sources: readonly IntrinsicApySourceConf
       const chainSources = defillamaSources.filter(s => s.chainId === chainId)
       if (chainSources.length === 0) return []
 
-      const res = await $fetch<{ data?: DefiLlamaPool[] }>('/api/intrinsic-apy/defillama')
+      const req = toIntrinsicApyRequest(chainSources[0])
+      const res = await $fetch<{ data?: DefiLlamaPool[] }>(req.path, req.query ? { query: req.query } : {})
       const rawPools = (res?.data || []) as DefiLlamaPool[]
 
       const poolsById = new Map<string, DefiLlamaPool>()

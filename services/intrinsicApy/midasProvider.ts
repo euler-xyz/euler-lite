@@ -1,5 +1,6 @@
 import type { IntrinsicApySourceConfig } from '~/entities/custom'
 import type { IntrinsicApyProvider, IntrinsicApyResult } from '~/entities/intrinsic-apy'
+import { toIntrinsicApyRequest } from '~/entities/intrinsic-apy'
 
 type MidasSource = Extract<IntrinsicApySourceConfig, { provider: 'midas' }>
 
@@ -17,7 +18,8 @@ export const createMidasProvider = (sources: readonly IntrinsicApySourceConfig[]
       const chainSources = midasSources.filter(s => s.chainId === chainId)
       if (!chainSources.length) return []
 
-      const data = await $fetch<Record<string, number>>('/api/intrinsic-apy/midas')
+      const req = toIntrinsicApyRequest(chainSources[0])
+      const data = await $fetch<Record<string, number>>(req.path, req.query ? { query: req.query } : {})
 
       return chainSources
         .filter(source => data[source.midasKey] !== undefined)
