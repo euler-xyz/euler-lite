@@ -33,7 +33,7 @@ const _route = useRoute()
 const router = useRouter()
 const modal = useModal()
 const { error } = useToast()
-const { isConnected } = useAccount()
+const { isConnected, address } = useAccount()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = useEulerAccount()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
@@ -689,7 +689,7 @@ const openPairInfoModal = () => {
     },
   })
 }
-watch([isConnected, isSpyMode], () => {
+watch([isConnected, isSpyMode, address], () => {
   load()
 }, { immediate: true })
 </script>

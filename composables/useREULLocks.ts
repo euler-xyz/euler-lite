@@ -112,6 +112,15 @@ export const useREULLocks = () => {
     }
   }, { immediate: true })
 
+  watch(wagmiAddress, (newAddress, oldAddress) => {
+    if (oldAddress && newAddress && newAddress !== oldAddress) {
+      isLoaded.value = false
+      locks.value = []
+      loadREULLocksInfo(newAddress)
+      isLoaded.value = true
+    }
+  })
+
   onUnmounted(() => {
     if (interval) {
       clearInterval(interval)
