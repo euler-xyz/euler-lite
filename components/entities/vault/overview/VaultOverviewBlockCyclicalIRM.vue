@@ -78,11 +78,6 @@ const isInFixedRate = computed(() => {
   return elapsedInCycle.value < cyclicalInfo.value.primaryDuration
 })
 
-const cycleLengthDays = computed(() => {
-  if (cycleLength.value === 0n) return 0
-  return Number(cycleLength.value) / 86400
-})
-
 const primaryDurationDays = computed(() => {
   if (!cyclicalInfo.value) return 0
   return Number(cyclicalInfo.value.primaryDuration) / 86400
@@ -93,29 +88,49 @@ const secondaryDurationDays = computed(() => {
   return Number(cyclicalInfo.value.secondaryDuration) / 86400
 })
 
-const percentComplete = computed(() => {
-  if (cycleLength.value === 0n) return 0
-  return (Number(elapsedInCycle.value) / Number(cycleLength.value)) * 100
+const currentPhaseDurationSec = computed(() => {
+  if (!cyclicalInfo.value) return 0n
+  return isInFixedRate.value
+    ? cyclicalInfo.value.primaryDuration
+    : cyclicalInfo.value.secondaryDuration
 })
 
-const dayInCycle = computed(() => {
-  return Number(elapsedInCycle.value) / 86400
+const currentPhaseDurationDays = computed(() => {
+  return Number(currentPhaseDurationSec.value) / 86400
 })
 
+const elapsedInPhase = computed(() => {
+  if (!cyclicalInfo.value) return 0n
+  if (isInFixedRate.value) return elapsedInCycle.value
+  const elapsed = elapsedInCycle.value - cyclicalInfo.value.primaryDuration
+  return elapsed < 0n ? 0n : elapsed
+})
+
+const dayInPhase = computed(() => {
+  return Number(elapsedInPhase.value) / 86400
+})
+
+// Bar represents the full cycle proportionally. The 100% tick sits at the
+// phase boundary, so fixedRatePercent is the position (in % of bar width)
+// of both the boundary and the end-of-fixed-rate tick.
 const fixedRatePercent = computed(() => {
   if (!cyclicalInfo.value || cycleLength.value === 0n) return 0
   return (Number(cyclicalInfo.value.primaryDuration) / Number(cycleLength.value)) * 100
 })
 
-const clampedPercent = computed(() => Math.min(Math.max(percentComplete.value, 0), 100))
-
-const fixedFillPercent = computed(() => {
-  return Math.min(clampedPercent.value, fixedRatePercent.value)
+const cyclePositionPercent = computed(() => {
+  if (cycleLength.value === 0n) return 0
+  const pct = (Number(elapsedInCycle.value) / Number(cycleLength.value)) * 100
+  return Math.min(Math.max(pct, 0), 100)
 })
+
+const fixedFillPercent = computed(() =>
+  Math.min(cyclePositionPercent.value, fixedRatePercent.value),
+)
 
 const repaymentFillPercent = computed(() => {
   if (isInFixedRate.value) return 0
-  return clampedPercent.value - fixedRatePercent.value
+  return cyclePositionPercent.value - fixedRatePercent.value
 })
 
 // SPY (27 decimal, per-second) to APY percentage
@@ -158,24 +173,6 @@ const getDaySuffix = (day: number): string => {
   }
 }
 
-// Omit year from end date when it matches the start date
-const formatCyclicalDateShort = (startTimestamp: bigint, endTimestamp: bigint): string => {
-  const startYear = new Date(Number(startTimestamp) * 1000).getFullYear()
-  const endDate = new Date(Number(endTimestamp) * 1000)
-  const day = endDate.getDate()
-  const suffix = getDaySuffix(day)
-  const month = endDate.toLocaleString('en-US', { month: 'short' })
-  const hour = endDate.getHours()
-  const ampm = hour >= 12 ? 'pm' : 'am'
-  const hour12 = hour % 12 || 12
-  const min = endDate.getMinutes()
-  const timeStr = min === 0 ? `${hour12}${ampm}` : `${hour12}:${String(min).padStart(2, '0')}${ampm}`
-  if (endDate.getFullYear() === startYear) {
-    return `${month} ${day}${suffix} ${timeStr}`
-  }
-  return `${month} ${day}${suffix}, ${endDate.getFullYear()} ${timeStr}`
-}
-
 const formatPercent = (value: number): string => {
   return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
@@ -189,14 +186,15 @@ const formatDuration = (days: number): string => {
   return `${hours} hour${hours !== 1 ? 's' : ''}`
 }
 
-// Progress bar tick marks at 0%, 33%, 66%, 100%
+// Tick marks at 0%, 50%, 100% of the fixed rate period. The 100% mark sits
+// at the phase boundary on the bar, and the repayment portion continues past.
 const progressTicks = computed(() => {
-  const totalDays = cycleLengthDays.value
+  const totalDays = primaryDurationDays.value
+  const fixedEnd = fixedRatePercent.value
   return [
-    { label: `Day 0`, pct: '0%', position: '0%' },
-    { label: `Day ${Math.round(totalDays / 3)}`, pct: '33%', position: '33.33%' },
-    { label: `Day ${Math.round((totalDays * 2) / 3)}`, pct: '66%', position: '66.66%' },
-    { label: `Day ${Math.round(totalDays)}`, pct: '100%', position: '100%' },
+    { label: 'Day 0', pct: '0%', position: '0%' },
+    { label: `Day ${Math.round(totalDays / 2)}`, pct: '50%', position: `${fixedEnd / 2}%` },
+    { label: `Day ${Math.round(totalDays)}`, pct: '100%', position: `${fixedEnd}%` },
   ]
 })
 
@@ -234,22 +232,22 @@ const phaseLabel = computed(() => {
       class="flex flex-col gap-12"
     >
       <p class="text-p3 text-content-tertiary font-medium uppercase tracking-wide text-[11px]">
-        Current cycle
+        Cycle
       </p>
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-16">
-        <VaultOverviewLabelValue label="Fixed rate start">
+        <VaultOverviewLabelValue label="Fixed rate cycle">
           <span class="text-p3 text-content-primary">
-            {{ formatCyclicalDate(fixedRateStart) }}
-          </span>
-        </VaultOverviewLabelValue>
-        <VaultOverviewLabelValue label="Fixed rate end">
-          <span class="text-p3 text-content-primary">
-            {{ formatCyclicalDate(fixedRateEnd) }}
+            {{ formatCyclicalDate(fixedRateStart) }}<br>{{ formatCyclicalDate(fixedRateEnd) }}
           </span>
         </VaultOverviewLabelValue>
         <VaultOverviewLabelValue label="Repayment window">
           <span class="text-p3 text-content-primary">
-            {{ formatCyclicalDate(repaymentWindowStart) }}<br>– {{ formatCyclicalDateShort(repaymentWindowStart, repaymentWindowEnd) }}
+            {{ formatCyclicalDate(repaymentWindowStart) }}<br>{{ formatCyclicalDate(repaymentWindowEnd) }}
+          </span>
+        </VaultOverviewLabelValue>
+        <VaultOverviewLabelValue label="Cycle length">
+          <span class="text-p3 text-content-primary">
+            {{ formatDuration(primaryDurationDays) }} / {{ formatDuration(secondaryDurationDays) }}
           </span>
         </VaultOverviewLabelValue>
       </div>
@@ -261,11 +259,6 @@ const phaseLabel = computed(() => {
         Parameters
       </p>
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-16">
-        <VaultOverviewLabelValue label="Cycle length">
-          <span class="text-p3 text-content-primary">
-            {{ formatDuration(primaryDurationDays) }} / {{ formatDuration(secondaryDurationDays) }}
-          </span>
-        </VaultOverviewLabelValue>
         <VaultOverviewLabelValue label="Fixed APY">
           <span class="text-p3 text-content-primary">
             {{ formatPercent(fixedBorrowAPY) }}%
@@ -305,7 +298,7 @@ const phaseLabel = computed(() => {
           v-for="tick in progressTicks"
           :key="tick.pct"
           class="absolute -translate-x-1/2 select-none"
-          :class="{ '!translate-x-0': tick.position === '0%', '!-translate-x-full': tick.position === '100%' }"
+          :class="{ '!translate-x-0': tick.pct === '0%' }"
           :style="{ left: tick.position }"
         >
           {{ tick.label }} ({{ tick.pct }})
@@ -331,19 +324,13 @@ const phaseLabel = computed(() => {
         </div>
         <div
           class="cyclical-progress__cursor"
-          :style="{ left: `${clampedPercent}%` }"
+          :style="{ left: `${cyclePositionPercent}%` }"
         />
       </div>
 
       <!-- Status text -->
-      <div class="flex justify-between text-[12px]">
-        <span class="text-content-secondary">
-          <span :class="isInFixedRate ? 'text-accent-700' : 'cyclical-repayment-text'">{{ phaseLabel }}</span>
-          day {{ Math.floor(dayInCycle) }} of {{ Math.round(cycleLengthDays) }}
-        </span>
-        <span class="text-content-tertiary">
-          {{ formatPercent(percentComplete) }}% complete
-        </span>
+      <div class="text-[12px] text-content-secondary">
+        {{ phaseLabel }} day {{ Math.floor(dayInPhase) }} of {{ Math.round(currentPhaseDurationDays) }}
       </div>
     </div>
   </div>
