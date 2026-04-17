@@ -120,6 +120,12 @@ export interface Opportunity {
       evkAddress?: string
       targetToken?: string
       collateralAddress?: string
+      markets?: {
+        campaignParameters: {
+          evkAddress?: string
+          targetToken: string
+        }
+      }[]
     }
     createdAt: string
   }[]
