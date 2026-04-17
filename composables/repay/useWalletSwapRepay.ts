@@ -195,15 +195,21 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const sourceValueUsdGuard = createRaceGuard()
   const sourceValueUsd = ref<number | null>(null)
   watchEffect(async () => {
+    const gen = sourceValueUsdGuard.next()
     if (!selectedAsset.value || selectedAssetBalance.value <= 0n) {
       sourceValueUsd.value = null
       return
     }
-    const gen = sourceValueUsdGuard.next()
+    // Native tokens (zero address) aren't indexed by the backend price feed;
+    // resolve to the wrapped native address for pricing.
+    const rawAddress = selectedAsset.value.address
+    const priceAddress = isNativeCurrencyAddress(rawAddress) && chainId.value
+      ? (resolveWrappedNativeAddress(chainId.value) ?? rawAddress)
+      : rawAddress
     const result = (await getTokenUsdValue(
       selectedAssetBalance.value,
       Number(selectedAsset.value.decimals),
-      selectedAsset.value.address,
+      priceAddress,
       null,
     )) ?? null
     if (sourceValueUsdGuard.isStale(gen)) return
@@ -213,11 +219,11 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const borrowValueUsdGuard = createRaceGuard()
   const borrowValueUsd = ref<number | null>(null)
   watchEffect(async () => {
+    const gen = borrowValueUsdGuard.next()
     if (!borrowVault.value || !position.value) {
       borrowValueUsd.value = null
       return
     }
-    const gen = borrowValueUsdGuard.next()
     const result = (await getAssetUsdValue(position.value.borrowed, borrowVault.value, 'off-chain')) ?? null
     if (borrowValueUsdGuard.isStale(gen)) return
     borrowValueUsd.value = result
@@ -589,7 +595,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     // Swap: compare USD values
     const srcUsd = sourceValueUsd.value
     const debtUsd = borrowValueUsd.value
-    if (srcUsd !== null && debtUsd !== null && srcUsd > debtUsd) {
+    if (srcUsd !== null && debtUsd !== null && srcUsd >= debtUsd) {
       debtAmount.value = trimTrailingZeros(formatUnits(currentDebt, borrowDecimals))
       onDebtInput()
       return
