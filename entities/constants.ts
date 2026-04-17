@@ -86,6 +86,7 @@ export const INTEREST_RATE_MODEL_TYPE = {
   KINK: 1,
   ADAPTIVE_CURVE: 2,
   KINKY: 3,
+  FIXED_CYCLICAL_BINARY: 4,
 } as const
 
 export const KINK_IRM_COMPONENTS = [
@@ -110,6 +111,14 @@ export const KINKY_IRM_COMPONENTS = [
   { name: 'shape', type: 'uint256' },
   { name: 'kink', type: 'uint256' },
   { name: 'cutoff', type: 'uint256' },
+] as const
+
+export const FIXED_CYCLICAL_BINARY_IRM_COMPONENTS = [
+  { name: 'primaryRate', type: 'uint256' },
+  { name: 'secondaryRate', type: 'uint256' },
+  { name: 'primaryDuration', type: 'uint256' },
+  { name: 'secondaryDuration', type: 'uint256' },
+  { name: 'startTimestamp', type: 'uint256' },
 ] as const
 
 export const ORACLE_DETAILED_INFO_COMPONENTS = [

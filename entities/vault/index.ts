@@ -9,6 +9,7 @@ export type {
   KinkIRMParams,
   AdaptiveCurveIRMParams,
   KinkyIRMParams,
+  CyclicalNoteInfo,
   Erc4626Vault,
   SecuritizeVault,
   Vault,

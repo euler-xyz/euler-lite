@@ -10,12 +10,14 @@ Not all vaults on-chain are equal. Some are curated by the Euler UI listing proc
 
 Labels originate from the [euler-labels](https://github.com/euler-xyz/euler-labels) GitHub repository by default. The client never fetches label JSON files directly from GitHub/CDN — all label data is served through **server-side proxy endpoints** that add in-memory caching and stale-fallback. Entity logos are still resolved directly from the labels base URL via `<img>` tags (benefiting from browser HTTP caching). Each supported chain has a directory containing JSON files:
 
-| File | Required | Server endpoint |
-|------|----------|-----------------|
-| `products.json` | Yes | `GET /api/labels/products.json?chainId=X` |
-| `entities.json` | Yes | `GET /api/labels/entities.json?chainId=X` |
-| `points.json` | No | `GET /api/labels/points.json?chainId=X` |
-| `earn-vaults.json` | No | `GET /api/labels/earn-vaults.json?chainId=X` |
+| File | Server endpoint | Empty shape |
+|------|-----------------|-------------|
+| `products.json` | `GET /api/labels/products.json?chainId=X` | `{}` |
+| `entities.json` | `GET /api/labels/entities.json?chainId=X` | `{}` |
+| `points.json` | `GET /api/labels/points.json?chainId=X` | `[]` |
+| `earn-vaults.json` | `GET /api/labels/earn-vaults.json?chainId=X` | `[]` |
+
+Any chain may legitimately ship without a given file. When upstream reports the file absent (HTTP 404 or 403), the proxy returns the type-appropriate empty payload (`{}` for object-shaped files, `[]` for array-shaped files) with HTTP 200 and caches it for 5 minutes. `earn-vaults.json` and `points.json` are fully optional — any upstream error degrades to the empty payload. `products.json` and `entities.json` are required — non-absent upstream failures (5xx, timeouts) serve stale data when available or return HTTP 502 so clients can show a proper error state.
 
 Oracle adapter metadata is fetched from a separate repository ([oracle-checks](https://github.com/euler-xyz/oracle-checks)) by default, loaded lazily per adapter via `GET /api/oracle-adapter?chainId=X&address=0x...`.
 
@@ -356,3 +358,7 @@ These labels appear in address fields across all vault overview types (EVK, Earn
 | `composables/useEulerLabels.ts` | Label fetching, caching, and reactive composables |
 | `composables/useVaultRegistry.ts` | Vault registry with type detection and unknown resolution |
 | `composables/useGeoBlock.ts` | Geo-blocking logic using label block/restricted fields |
+
+## Programmatic verification lookup
+
+External consumers that only need a yes/no answer for a vault address can call the public [`GET /api/public/is-known`](./public-api.md#get-apipublicis-known) endpoint instead of loading the full label set. The endpoint merges `products.json`, `earn-vaults.json`, and the on-chain `escrowedCollateralPerspective` into a single per-chain verified set, excludes deprecated entries, and answers batches of up to 100 addresses per request.

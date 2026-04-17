@@ -270,6 +270,7 @@ const linkPath = computed(() => ({
               Featured
             </span>
             <KeyringBadge v-if="isKeyring" />
+            <GovernanceLimitedBadge v-if="isAnyGovernanceLimited" />
             <span
               v-if="isGeoBlocked"
               class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"

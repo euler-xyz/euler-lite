@@ -54,7 +54,7 @@ export default defineEventHandler(async (event) => {
       response = await fetch(buildIngestUrl(sentryDsn), {
         method: 'POST',
         headers: { 'Content-Type': contentType },
-        body,
+        body: body as unknown as BodyInit,
         signal: controller.signal,
       })
     }

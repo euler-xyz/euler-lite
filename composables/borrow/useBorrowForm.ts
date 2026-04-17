@@ -674,28 +674,28 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       try {
         plan.value = isSavingCollateral.value
           ? await buildBorrowBySavingPlan(
-            collateralVault.value.address,
-            collateralAmountForPlan,
-            borrowVault.value.address,
-            borrowAmountNano,
-            undefined,
-            undefined,
-            savingCollateral.value?.subAccount,
-          )
+              collateralVault.value.address,
+              collateralAmountForPlan,
+              borrowVault.value.address,
+              borrowAmountNano,
+              undefined,
+              undefined,
+              savingCollateral.value?.subAccount,
+            )
           : await buildBorrowPlan(
-            collateralVault.value.address,
-            collateralVault.value.asset.address,
-            collateralAmountForPlan,
-            borrowVault.value.address,
-            borrowAmountNano,
-            undefined,
-            {
-              includePermit2Call: false,
-              wrappedNativeInfo: isBorrowNativeWrap.value
-                ? { wrappedTokenAddress: resolveWrappedNativeAddress(chainId.value!)!, nativeAmount: collateralAmountForPlan }
-                : undefined,
-            },
-          )
+              collateralVault.value.address,
+              collateralVault.value.asset.address,
+              collateralAmountForPlan,
+              borrowVault.value.address,
+              borrowAmountNano,
+              undefined,
+              {
+                includePermit2Call: false,
+                wrappedNativeInfo: isBorrowNativeWrap.value
+                  ? { wrappedTokenAddress: resolveWrappedNativeAddress(chainId.value!)!, nativeAmount: collateralAmountForPlan }
+                  : undefined,
+              },
+            )
       }
       catch (e) {
         logWarn('borrow/buildPlan', e)
@@ -761,28 +761,28 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         const borrowAmountNano = borrowAmountFixed.value.toFormat({ decimals: Number(borrowVault.value.decimals) }).value
         txPlan = isSavingCollateral.value
           ? await buildBorrowBySavingPlan(
-            collateralVault.value.address,
-            collateralAmountForPlan,
-            borrowVault.value.address,
-            borrowAmountNano,
-            undefined,
-            undefined,
-            savingCollateral.value?.subAccount,
-          )
+              collateralVault.value.address,
+              collateralAmountForPlan,
+              borrowVault.value.address,
+              borrowAmountNano,
+              undefined,
+              undefined,
+              savingCollateral.value?.subAccount,
+            )
           : await buildBorrowPlan(
-            collateralVault.value.address,
-            collateralVault.value.asset.address,
-            collateralAmountForPlan,
-            borrowVault.value.address,
-            borrowAmountNano,
-            undefined,
-            {
-              includePermit2Call: true,
-              wrappedNativeInfo: isBorrowNativeWrap.value
-                ? { wrappedTokenAddress: resolveWrappedNativeAddress(chainId.value!)!, nativeAmount: collateralAmountForPlan }
-                : undefined,
-            },
-          )
+              collateralVault.value.address,
+              collateralVault.value.asset.address,
+              collateralAmountForPlan,
+              borrowVault.value.address,
+              borrowAmountNano,
+              undefined,
+              {
+                includePermit2Call: true,
+                wrappedNativeInfo: isBorrowNativeWrap.value
+                  ? { wrappedTokenAddress: resolveWrappedNativeAddress(chainId.value!)!, nativeAmount: collateralAmountForPlan }
+                  : undefined,
+              },
+            )
       }
       await executeTxPlan(txPlan)
 
