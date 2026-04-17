@@ -151,7 +151,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
       return
     }
     const formatted = formatUnits(amount, Number(toVault.value.decimals))
-    toAmount.value = formatSmartAmount(formatted)
+    toAmount.value = formatSmartAmount(formatted).replace(/,/g, '')
   }, { immediate: true })
 
   // ── Quote state helpers ────────────────────────────────────────────────
