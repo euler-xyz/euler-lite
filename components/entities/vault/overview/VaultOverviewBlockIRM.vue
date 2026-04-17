@@ -180,7 +180,6 @@ const irmParamsDisplay = computed<Array<{ label: string, value: string }>>(() =>
       { label: 'Min rate at kink', value: fmtRate(adaptiveMinRateAPY.value) },
       { label: 'Max rate at kink', value: fmtRate(adaptiveMaxRateAPY.value) },
       { label: 'Kink', value: formatWadPercent(decoded.targetUtilization) },
-      { label: 'Curve steepness', value: `${Number(formatUnits(decoded.curveSteepness, 18)).toFixed(2)}x` },
       { label: 'Adjustment speed', value: `${(Number(formatUnits(decoded.adjustmentSpeed, 18)) * SECONDS_PER_YEAR).toFixed(1)}x/yr` },
     ]
   }
@@ -679,7 +678,7 @@ watch(isDark, async () => {
 
     <div
       v-if="irmParamsDisplay.length"
-      class="grid grid-cols-2 sm:grid-cols-3 gap-16"
+      class="flex flex-wrap justify-between gap-16 [&>*:last-child]:text-right"
     >
       <VaultOverviewLabelValue
         v-for="param in irmParamsDisplay"
