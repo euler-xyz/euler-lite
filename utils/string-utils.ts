@@ -94,6 +94,32 @@ export const formatCompactUsdValue = (value: string | number = 0, maximumFractio
 }
 
 /**
+ * Format a bigint token amount with full decimal precision for exact-value tooltips.
+ * Trims trailing zeros and adds thousand separators.
+ * e.g. 1234567890000000000n with 18 decimals → "1.23456789"
+ */
+export const formatExactAmount = (amount: bigint, decimals: number | bigint, symbol?: string): string => {
+  if (amount === 0n) return symbol ? `0 ${symbol}` : '0'
+
+  const d = Number(decimals)
+  const divisor = 10n ** BigInt(d)
+  const integerPart = amount / divisor
+  const fractionalPart = amount % divisor
+
+  const formattedInt = integerPart.toLocaleString('en-US')
+
+  if (fractionalPart === 0n) {
+    return symbol ? `${formattedInt} ${symbol}` : formattedInt
+  }
+
+  // Pad fractional part to full decimal width, then trim trailing zeros
+  const fracStr = fractionalPart.toString().padStart(d, '0').replace(/0+$/, '')
+
+  const result = `${formattedInt}.${fracStr}`
+  return symbol ? `${result} ${symbol}` : result
+}
+
+/**
  * Trim trailing zeros from a decimal string while keeping it parseable.
  * Intended for input fields where values are set programmatically.
  * "0.363002000000000000" → "0.363002"

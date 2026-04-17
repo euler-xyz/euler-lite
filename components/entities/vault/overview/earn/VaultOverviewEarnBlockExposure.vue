@@ -5,7 +5,7 @@ import { logWarn } from '~/utils/errorHandling'
 import type { EarnVault, EarnVaultStrategyInfo, Vault } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
+import { formatNumber, compactNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
@@ -253,7 +253,9 @@ load()
               <span class="text-content-secondary">({{ compactNumber(getAllocationPercentage(row.exposure), 2) }}%)</span>
             </template>
             <template v-else>
-              {{ getExposureAssetAmount(row.exposure) }}
+              <UiExactAmount :exact="formatExactAmount(row.exposure.allocatedAssets, row.exposure.info.assetDecimals, row.exposure.info.assetSymbol)">
+                {{ getExposureAssetAmount(row.exposure) }}
+              </UiExactAmount>
               <span class="text-content-secondary">({{ compactNumber(getAllocationPercentage(row.exposure), 2) }}%)</span>
             </template>
           </VaultOverviewLabelValue>
@@ -291,7 +293,9 @@ load()
                 {{ formatCompactUsdValue(exposureCapUsdPrices.get(row.exposure.strategy) || 0) }}
               </template>
               <template v-else>
-                {{ roundAndCompactTokens(row.exposure.currentAllocationCap, row.exposure.info.assetDecimals) }} {{ row.exposure.info.assetSymbol }}
+                <UiExactAmount :exact="formatExactAmount(row.exposure.currentAllocationCap, row.exposure.info.assetDecimals, row.exposure.info.assetSymbol)">
+                  {{ roundAndCompactTokens(row.exposure.currentAllocationCap, row.exposure.info.assetDecimals) }} {{ row.exposure.info.assetSymbol }}
+                </UiExactAmount>
               </template>
             </span>
           </VaultOverviewLabelValue>
