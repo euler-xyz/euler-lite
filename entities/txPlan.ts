@@ -1,10 +1,10 @@
 import type { Address, Abi } from 'viem'
 
-export type TxStepType =
-  | 'approve'
-  | 'permit2-approve'
-  | 'evc-batch'
-  | 'other'
+export type TxStepType
+  = | 'approve'
+    | 'permit2-approve'
+    | 'evc-batch'
+    | 'other'
 
 export interface TxStep {
   type: TxStepType

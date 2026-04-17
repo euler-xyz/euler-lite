@@ -17,6 +17,10 @@ export const useREULLocks = () => {
   const { writeContractAsync } = useWriteContract()
   const { eulerTokenAddresses } = useEulerAddresses()
   const { client: rpcClient } = useRpcClient()
+  const { spyAddress } = useSpyMode()
+
+  const effectiveAddress = computed(() => spyAddress.value || wagmiAddress.value || '')
+  const isActive = computed(() => isConnected.value || Boolean(spyAddress.value))
 
   const reulTokenContractAddress = computed(() => eulerTokenAddresses.value?.rEUL ?? '')
   const eulTokenContractAddress = computed(() => eulerTokenAddresses.value?.EUL ?? '')
@@ -84,25 +88,25 @@ export const useREULLocks = () => {
     }
   }
 
-  watch([isConnected, chainId], ([connected, currentChainId], [_oldConnected, oldChainId]) => {
+  watch([isActive, chainId], ([active, currentChainId], [_oldActive, oldChainId]) => {
     if (oldChainId && currentChainId !== oldChainId) {
       isLoaded.value = false
       locks.value = []
     }
 
-    if (!isLoaded.value && wagmiAddress.value) {
-      loadREULLocksInfo(wagmiAddress.value)
+    if (!isLoaded.value && effectiveAddress.value) {
+      loadREULLocksInfo(effectiveAddress.value)
       isLoaded.value = true
     }
 
-    if (connected && !interval) {
+    if (active && !interval) {
       interval = setInterval(() => {
-        if (wagmiAddress.value) {
-          loadREULLocksInfo(wagmiAddress.value, false)
+        if (effectiveAddress.value) {
+          loadREULLocksInfo(effectiveAddress.value, false)
         }
       }, POLL_INTERVAL_60S_MS)
     }
-    else if (!connected) {
+    else if (!active) {
       locks.value = []
       isLocksLoading.value = false
       if (interval) {
@@ -112,12 +116,16 @@ export const useREULLocks = () => {
     }
   }, { immediate: true })
 
-  watch(wagmiAddress, (newAddress, oldAddress) => {
-    if (oldAddress && newAddress && newAddress !== oldAddress) {
-      isLoaded.value = false
+  // Reload when the effective address changes (e.g. wallet switch, spy address resolves to owner)
+  watch(effectiveAddress, (addr, oldAddr) => {
+    if (oldAddr && addr && addr !== oldAddr) {
       locks.value = []
-      loadREULLocksInfo(newAddress)
+      isLoaded.value = false
+      loadREULLocksInfo(addr)
       isLoaded.value = true
+    }
+    else if (oldAddr && !addr) {
+      locks.value = []
     }
   })
 

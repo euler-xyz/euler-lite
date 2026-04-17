@@ -168,6 +168,7 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
               Featured
             </span>
             <KeyringBadge v-if="isKeyring" />
+            <GovernanceLimitedBadge v-if="isGovernanceLimited" />
           </div>
           <div class="text-h5 text-content-primary">
             {{ market.name }}

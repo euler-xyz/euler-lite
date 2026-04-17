@@ -22,7 +22,7 @@ const isVerified = computed(() => {
     return isEarnVaultOwnerVerified(vault as EarnVault)
   }
 
-  // governed, governanceLimited, ungoverned, securitize
+  // governed, ungoverned, securitize
   return isVaultGovernorVerified(vault as Vault)
 })
 
@@ -34,7 +34,6 @@ const icon = computed(() => {
   }
   switch (type) {
     case 'governed':
-    case 'governanceLimited':
     case 'managed':
       return 'bank'
     case 'escrow':
@@ -54,8 +53,6 @@ const label = computed(() => {
   switch (type) {
     case 'governed':
       return 'Governed'
-    case 'governanceLimited':
-      return 'Governed - limited'
     case 'managed':
       return 'Managed'
     case 'escrow':

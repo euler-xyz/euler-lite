@@ -604,7 +604,7 @@ const send = async (collateralAddress: string) => {
 
     modal.close()
     setTimeout(() => {
-      router.replace('/portfolio')
+      router.replace({ path: '/portfolio', query: { network: _route.query.network } })
     }, 400)
   }
   catch (e) {

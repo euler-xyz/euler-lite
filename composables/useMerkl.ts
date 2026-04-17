@@ -298,6 +298,10 @@ export const useMerkl = () => {
   const { writeContractAsync } = useWriteContract()
   const { chainId } = useEulerAddresses()
   const { enableMerkl } = useDeployConfig()
+  const { spyAddress } = useSpyMode()
+
+  const effectiveAddress = computed(() => spyAddress.value || wagmiAddress.value || '')
+  const isActive = computed(() => isConnected.value || Boolean(spyAddress.value))
 
   const ensureWalletOnCurrentChain = async () => {
     const targetChainId = chainId.value
@@ -366,14 +370,9 @@ export const useMerkl = () => {
     }
   }
 
-  watch(wagmiAddress, (val, oldVal) => {
-    if (val) {
-      address.value = val
-    }
-    else {
-      address.value = ''
-    }
-    // Force-refresh rewards when the connected wallet changes (skip initial mount)
+  watch(effectiveAddress, (val, oldVal) => {
+    address.value = val || ''
+    // Force-refresh rewards when the effective address changes (skip initial mount)
     if (enableMerkl && oldVal && val && val !== oldVal && chainId.value) {
       loadRewards(chainId.value, true, true)
     }
@@ -394,9 +393,8 @@ export const useMerkl = () => {
     }
   }, { immediate: true })
 
-  watch([isConnected, chainId], (val, oldVal) => {
-    const [connected, currentChainId] = val
-    const [oldConnected, oldChainId] = oldVal ?? [undefined, undefined]
+  watch([isActive, chainId], ([active, currentChainId], oldVal) => {
+    const [oldActive, oldChainId] = oldVal ?? [undefined, undefined]
 
     if (oldChainId && currentChainId !== oldChainId) {
       isLoaded.value = false
@@ -407,8 +405,8 @@ export const useMerkl = () => {
       cacheState.rewards = { chainId: 0, address: '', timestamp: 0 }
     }
 
-    // Clear user-specific data on disconnect
-    if (oldConnected && !connected) {
+    // Clear user-specific data on deactivation (disconnect + no spy)
+    if (oldActive && !active) {
       rewards.value = []
       isRewardsLoading.value = false
       cacheState.rewards = { chainId: 0, address: '', timestamp: 0 }
@@ -425,14 +423,14 @@ export const useMerkl = () => {
       isLoaded.value = true
     }
 
-    if (enableMerkl && connected && !interval) {
+    if (enableMerkl && active && !interval) {
       interval = setInterval(() => {
         loadRewards(chainId.value, false)
         loadOpportunities(chainId.value, false)
         loadTokens(chainId.value, false)
       }, POLL_INTERVAL_30S_MS)
     }
-    else if (!connected && interval) {
+    else if (!active && interval) {
       clearInterval(interval)
       interval = null
     }
