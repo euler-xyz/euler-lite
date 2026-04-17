@@ -17,6 +17,14 @@ import { logWarn } from '../utils/log'
 
 const REWARM_INTERVAL_MS = 4 * 60_000
 
+// Synthetic client-IP header for every internal $fetch the warm-cache issues.
+// The rate-limit middleware fails-closed when `cf-connecting-ip` is absent in
+// production (see server/utils/rate-limit.ts) — without this header every warm
+// request would get a silent 403 and the caches would never populate.
+// A fixed sentinel IP is fine: warm-cache runs at most ~240 requests/cycle
+// against a 1000/min label budget, so sharing one bucket is well-bounded.
+const WARM_HEADERS = { 'cf-connecting-ip': '127.0.0.1' } as const
+
 export default defineNitroPlugin(() => {
   const chainIds = getEnabledChainIds()
   if (chainIds.length === 0) return
@@ -31,22 +39,22 @@ export default defineNitroPlugin(() => {
 
   const warmChain = async (chainId: number) => {
     const tasks: Promise<unknown>[] = LABEL_FILES.map(file =>
-      $fetch(`/api/labels/${file}`, { query: { chainId } }).catch(() => undefined),
+      $fetch(`/api/labels/${file}`, { query: { chainId }, headers: WARM_HEADERS }).catch(() => undefined),
     )
-    tasks.push($fetch('/api/token-list', { query: { chainId } }).catch(() => undefined))
+    tasks.push($fetch('/api/token-list', { query: { chainId }, headers: WARM_HEADERS }).catch(() => undefined))
     await Promise.allSettled(tasks)
   }
 
   const warmIntrinsicApy = async () => {
     await Promise.allSettled(
       intrinsicApyRequests.map(req =>
-        $fetch(req.path, req.query ? { query: req.query } : {}).catch(() => undefined),
+        $fetch(req.path, { ...(req.query ? { query: req.query } : {}), headers: WARM_HEADERS }).catch(() => undefined),
       ),
     )
   }
 
   const warmEulerChains = () =>
-    $fetch('/api/euler-chains').catch(() => undefined)
+    $fetch('/api/euler-chains', { headers: WARM_HEADERS }).catch(() => undefined)
 
   const warmAll = async () => {
     try {

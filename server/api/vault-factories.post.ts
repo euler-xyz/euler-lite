@@ -2,7 +2,7 @@ import { createError, readBody } from 'h3'
 import { isAddress } from 'viem'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
-import { getSubgraphUris } from '~/server/utils/enabled-chains'
+import { getEnabledChainIds, getSubgraphUris } from '~/server/utils/enabled-chains'
 import { logWarn } from '~/server/utils/log'
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
@@ -67,6 +67,9 @@ export default defineEventHandler(async (event) => {
   const chainId = Number(body?.chainId)
   if (!Number.isInteger(chainId) || chainId <= 0) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid chainId' })
+  }
+  if (!getEnabledChainIds().includes(chainId)) {
+    throw createError({ statusCode: 400, statusMessage: 'Unsupported chainId' })
   }
 
   if (!Array.isArray(body?.addresses) || body.addresses.length === 0) {

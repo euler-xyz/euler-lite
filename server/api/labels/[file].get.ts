@@ -116,11 +116,19 @@ export default defineEventHandler(async (event) => {
   const existing = inFlight.get(key)
   if (existing) return existing
 
-  const fallback = () => {
+  /**
+   * `persist=true` writes the empty shape into the cache so subsequent
+   * requests skip upstream entirely. Reserve this for the 404 case, where
+   * the file is legitimately absent for this chain. For other failures
+   * (transient 5xx, network errors, JSON parse, validation) return empty
+   * but DON'T persist — otherwise a single upstream blip pins the empty
+   * allowlist for 5 minutes, making every verified vault appear unverified.
+   */
+  const fallback = (persist: boolean) => {
     const stale = cache.getStale(key)
     if (stale) return stale
     const empty = EMPTY_SHAPES[file as LabelFile]
-    cache.set(key, empty)
+    if (persist) cache.set(key, empty)
     return empty
   }
 
@@ -130,11 +138,13 @@ export default defineEventHandler(async (event) => {
       if (!resp.ok) {
         // 404 is the expected signal for "file not published on this chain".
         // Other non-2xx statuses (403/5xx from CDNs, etc.) are logged once so
-        // genuine upstream outages stay visible, then degraded the same way.
+        // genuine upstream outages stay visible, then returned empty without
+        // poisoning the cache.
         if (resp.status !== 404) {
           logWarn('labels', `${file} upstream returned ${resp.status} for chain ${chainId}; treating as absent`)
+          return fallback(false)
         }
-        return fallback()
+        return fallback(true)
       }
 
       const data: unknown = await resp.json()
@@ -144,7 +154,7 @@ export default defineEventHandler(async (event) => {
     }
     catch (err) {
       logWarn('labels', `Failed to fetch ${file} for chain ${chainId}:`, err instanceof Error ? err.message : err)
-      return fallback()
+      return fallback(false)
     }
   })().finally(() => { inFlight.delete(key) })
 
