@@ -1,5 +1,6 @@
 import { decodeFunctionResult, encodeFunctionData, getAddress } from 'viem'
 import { createTtlCache } from './cache'
+import { fetchWithTimeout } from './fetchWithTimeout'
 import { logWarn } from './log'
 import { resolveRpcUrl } from './rpc'
 
@@ -71,20 +72,11 @@ async function fetchEscrowAddresses(chainId: number): Promise<string[]> {
     params: [{ to: perspective, data: callData }, 'latest'],
   })
 
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 10_000)
-  let response: Response
-  try {
-    response = await fetch(rpcUrl, {
-      method: 'POST',
-      body: payload,
-      headers: { 'content-type': 'application/json' },
-      signal: controller.signal,
-    })
-  }
-  finally {
-    clearTimeout(timeout)
-  }
+  const response = await fetchWithTimeout(rpcUrl, 10_000, {
+    method: 'POST',
+    body: payload,
+    headers: { 'content-type': 'application/json' },
+  })
 
   if (!response.ok) throw new Error(`Upstream RPC returned ${response.status}`)
 

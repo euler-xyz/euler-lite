@@ -17,7 +17,7 @@ Labels originate from the [euler-labels](https://github.com/euler-xyz/euler-labe
 | `points.json` | `GET /api/labels/points.json?chainId=X` | `[]` |
 | `earn-vaults.json` | `GET /api/labels/earn-vaults.json?chainId=X` | `[]` |
 
-All label files are optional — any chain may legitimately ship without a given file. When upstream reports the file missing (or is unreachable), the proxy returns the type-appropriate empty payload (`{}` for object-shaped files, `[]` for array-shaped files) with HTTP 200 and caches it for 5 minutes. Non-404 upstream statuses are logged once per refresh so genuine outages stay visible.
+Any chain may legitimately ship without a given file. When upstream reports the file absent (HTTP 404 or 403), the proxy returns the type-appropriate empty payload (`{}` for object-shaped files, `[]` for array-shaped files) with HTTP 200 and caches it for 5 minutes. `earn-vaults.json` and `points.json` are fully optional — any upstream error degrades to the empty payload. `products.json` and `entities.json` are required — non-absent upstream failures (5xx, timeouts) serve stale data when available or return HTTP 502 so clients can show a proper error state.
 
 Oracle adapter metadata is fetched from a separate repository ([oracle-checks](https://github.com/euler-xyz/oracle-checks)) by default, loaded lazily per adapter via `GET /api/oracle-adapter?chainId=X&address=0x...`.
 
