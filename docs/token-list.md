@@ -7,13 +7,13 @@ The token list provides token metadata (name, symbol, decimals, logo URL) used a
 ```text
 Client (composables/useTokenList.ts)
   |
-  |  GET /api/token-list?chainId=X  (on chain switch + 15s retry)
+  |  GET /api/token-list?chainId=X  (once per chain switch)
   v
 Server (server/api/token-list.get.ts)
   |
-  +-- Euler API      [primary, always awaited]
-  +-- DefiLlama      [supplemental, best-effort]
-  +-- Uniswap        [supplemental, best-effort]
+  +-- Euler API      ┐
+  +-- DefiLlama      │  Promise.allSettled — all three concurrent,
+  +-- Uniswap        ┘  bounded by 10s timeout each
   |
   v
 Merge with deduplicateTokens()
@@ -28,11 +28,13 @@ Three data sources, each with its own 5-minute TTL cache and in-flight request d
 
 | Source | Scope | Role |
 |--------|-------|------|
-| Euler API | Per-chain | Primary. Always awaited. Has reliable logo URLs. |
-| DefiLlama | Per-chain | Supplemental. Served from cache or stale; fetched in background if missing. |
-| Uniswap | All chains | Supplemental. Same as DefiLlama. |
+| Euler API | Per-chain | Primary. Reliable logo URLs. |
+| DefiLlama | Per-chain | Supplemental. |
+| Uniswap | All chains | Supplemental. |
 
-The Euler API is the blocking call. Uniswap and DefiLlama are non-blocking: if their cache is warm they're included immediately, otherwise a background fetch is fired and the response is returned without waiting.
+All three sources run concurrently via `Promise.allSettled`. Each fetcher has its own 5-minute TTL cache, in-flight dedup, and a 10-second timeout that falls back to the stale cached value. On a warm cache the request returns immediately; on a cold cache the response is bounded by the slowest source and contains whatever resolved in time.
+
+**Startup warming**: `server/plugins/warm-cache.ts` hits this endpoint for every enabled chain during Nitro startup (awaited, so the instance doesn't go ready until caches are hot) and re-warms every 4 minutes thereafter. Every user — including the first one after a rolling deploy — finds a warm cache with all three sources populated.
 
 **Deduplication**: tokens are merged with Euler taking priority. If the same `chainId:address` appears in multiple sources, the higher-priority entry wins. This ensures Euler's metadata (name, symbol, decimals, logo URL) takes precedence over supplemental sources.
 
@@ -67,12 +69,7 @@ Singleton state with a `shallowRef` token map, keyed by normalized address.
 
 ## Loading Strategy
 
-The token list is loaded:
-
-1. **On chain switch** via `watch(chainId)` in `app.vue` — gets Euler tokens immediately
-2. **One-shot retry after 15 seconds** — picks up supplemental Uniswap/DefiLlama data that the server fetched in the background after the first request, then refreshes balances to include newly discovered tokens
-
-The 15s retry timer is cancelled on chain switch so it never fires for a stale chain.
+The token list is loaded once per chain switch via `watch(chainId)` in `app.vue`. Because the server now awaits all three sources concurrently, a single client call returns the merged set — no second retry is needed. When the fetch completes, the `isTokenListLoaded` watcher refreshes wallet balances so any newly-discovered tokens are included.
 
 ## CSP
 
