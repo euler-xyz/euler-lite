@@ -425,18 +425,32 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       targetDebt = debtAmountNano >= currentDebt ? 0n : currentDebt - debtAmountNano
     }
 
-    const isFullRepay = targetDebt === 0n && swapMode === SwapperMode.TARGET_DEBT
+    const isTargetDebt = swapMode === SwapperMode.TARGET_DEBT
+    const isFullRepay = isTargetDebt && targetDebt === 0n
+
+    // Target-debt mode always uses a BUY order: buyAmount is the exact debt
+    // reduction, sellAmount is the collateral cap. The close wrapper returns
+    // any unused collateral to the subaccount, so the user lands exactly at
+    // targetDebt. Exact-in mode stays a SELL.
+    const orderKind: 'buy' | 'sell' = isTargetDebt ? 'buy' : 'sell'
 
     // Quote amountIn is in underlying tokens, but CoW sellToken = collateralVault (shares).
-    // Convert underlying → shares using the vault's exchange rate.
-    const underlyingSellAmount = BigInt(core.quotes.selectedQuote.value.amountIn)
+    // Convert underlying → shares using the vault's exchange rate. For BUY orders
+    // use amountInMax so the wrapper has enough collateral to cover slippage.
+    const underlyingSellAmount = isTargetDebt
+      ? BigInt(core.quotes.selectedQuote.value.amountInMax || core.quotes.selectedQuote.value.amountIn)
+      : BigInt(core.quotes.selectedQuote.value.amountIn)
     const srcTA = sourceVault.value.totalAssets
     const srcTS = sourceVault.value.totalShares
     const sellAmount = srcTA > 0n ? underlyingSellAmount * srcTS / srcTA : underlyingSellAmount
 
-    // buyToken = borrowVault.asset() (underlying) — no conversion needed
-    const buyAmount = isFullRepay
-      ? currentDebt + (currentDebt / 1000n) // +0.1% buffer for interest
+    // buyToken = borrowVault.asset() (underlying) — no conversion needed.
+    // Target-debt BUY: full repay adds a 0.1% interest buffer, partial repay
+    // buys exactly (currentDebt - targetDebt).
+    const buyAmount = isTargetDebt
+      ? (isFullRepay
+          ? currentDebt + (currentDebt / 1000n)
+          : currentDebt - targetDebt)
       : BigInt(core.quotes.selectedQuote.value.amountOutMin || core.quotes.selectedQuote.value.amountOut || '1')
 
     const cowParams: CowSwapClosePositionExecuteParams = {
@@ -446,7 +460,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       sellAmount,
       buyAmount,
       validTo,
-      orderKind: isFullRepay ? 'buy' : 'sell',
+      orderKind,
       wrapper: {
         owner: (address.value || zeroAddress) as Address,
         account: position.value.subAccount as Address,
@@ -474,8 +488,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
     const walletWarningsDescription
       = 'The CoW order operates on vault shares. The amounts shown above are in underlying assets. '
-      + 'The CoW order receiver is a temporary Inbox contract — your wallet will flag this as an unfamiliar address. '
-      + 'The Inbox holds funds only during settlement and returns them to your position.'
+        + 'The CoW order receiver is a temporary Inbox contract — your wallet will flag this as an unfamiliar address. '
+        + 'The Inbox holds funds only during settlement and returns them to your position.'
 
     openCowSwapReviewModal(cowModal, {
       signSteps,
