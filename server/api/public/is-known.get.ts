@@ -26,7 +26,10 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Unsupported chainId' })
   }
 
-  const raw = typeof query.addresses === 'string' ? query.addresses : ''
+  const rawInput = query.addresses
+  const raw = Array.isArray(rawInput)
+    ? rawInput.filter((v): v is string => typeof v === 'string').join(',')
+    : typeof rawInput === 'string' ? rawInput : ''
   const parts = raw.split(',').map(s => s.trim()).filter(Boolean)
   if (parts.length === 0) {
     throw createError({ statusCode: 400, statusMessage: 'Missing addresses' })

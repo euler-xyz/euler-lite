@@ -27,7 +27,7 @@ See [vault-labels-and-verification.md](./vault-labels-and-verification.md) for h
 | Param       | Type     | Required | Description                                                                 |
 |-------------|----------|----------|-----------------------------------------------------------------------------|
 | `chainId`   | integer  | yes      | EVM chain ID (e.g. `1` for mainnet).                                        |
-| `addresses` | string   | yes      | Comma-separated list of vault addresses. Max 100. Any case accepted.        |
+| `addresses` | string   | yes      | Comma-separated list of vault addresses. Max 100. Lowercase, uppercase, or valid EIP-55 checksum accepted; mixed-case inputs must have a correct checksum. |
 
 ### Response
 
@@ -40,7 +40,7 @@ Status `200`, JSON object mapping each input address (in EIP-55 checksum form) t
 }
 ```
 
-Addresses are normalized via EIP-55 checksum before comparison, so callers may submit lowercase, uppercase, or mixed-case and get the same answer. Keys in the response always use the checksum form.
+Addresses are validated via viem's `isAddress` (strict EIP-55 checks) and normalized to checksum form before comparison. Lowercase and uppercase hex inputs are accepted; mixed-case inputs must already carry a valid EIP-55 checksum or the request is rejected with `400`. Keys in the response always use the checksum form.
 
 ### Errors
 
