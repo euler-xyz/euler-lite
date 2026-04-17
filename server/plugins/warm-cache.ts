@@ -12,6 +12,7 @@
 import { LABEL_FILES } from '../api/labels/[file].get'
 import { getEnabledChainIds } from '~/utils/chain-env'
 import { logWarn } from '../utils/log'
+import { refreshChainVaults } from '../utils/vaults-cache'
 
 const REWARM_INTERVAL_MS = 4 * 60_000
 
@@ -45,6 +46,13 @@ export default defineNitroPlugin(() => {
     )
     tasks.push($fetch('/api/token-list', { query: { chainId }, headers: WARM_HEADERS }).catch(() => undefined))
     tasks.push($fetch('/api/intrinsic-apy', { query: { chainId }, headers: WARM_HEADERS }).catch(() => undefined))
+    // Vaults snapshot — direct call so we skip $fetch's HTTP dispatch and
+    // get typed errors. refreshChainVaults internally $fetches labels +
+    // euler-chains + vault-factories; the other tasks in this batch populate
+    // those caches in parallel (in-flight dedup collapses the contention).
+    tasks.push(refreshChainVaults(chainId).catch((err) => {
+      logWarn('warm-cache', `vaults chain=${chainId} failed:`, err instanceof Error ? err.message : err)
+    }))
     await Promise.allSettled(tasks)
 
     // Phase 2: warm vault-factories using earn-vault addresses (labels are cached from above)

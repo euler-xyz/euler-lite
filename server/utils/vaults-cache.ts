@@ -1,0 +1,183 @@
+/**
+ * Server-side cache for the /api/vaults snapshot endpoint.
+ *
+ * - The cache itself is a plain TTL store. The 10 min TTL is a safety floor:
+ *   the warm-cache plugin rewrites every entry every 4 min under normal
+ *   operation, so in steady state the cache is always "fresh" from the
+ *   handler's point of view. If warm-cache stalls for two cycles, stale
+ *   entries are still servable (via .getStale) until the handler falls back
+ *   to a synchronous cold-path refresh.
+ * - refreshChainVaults() is the only write path. In-flight dedup collapses
+ *   concurrent calls (warm-cache + a cold client request arriving together)
+ *   onto a single upstream pass.
+ */
+import { createTtlCache } from './cache'
+import { logWarn } from './log'
+import { getVaultFactories } from './vault-factories-store'
+import { loadChainSnapshot, serialiseSnapshot } from '~/entities/vault'
+import type { FetchVaultContext, SerialisedSnapshot } from '~/entities/vault'
+
+const TTL_MS = 10 * 60_000
+// Synthetic CF header so rate-limit fail-closed in prd doesn't 403 every internal fetch.
+// Same fixed sentinel pattern as warm-cache.
+const WARM_HEADERS = { 'cf-connecting-ip': '127.0.0.1' } as const
+
+export const vaultsCache = createTtlCache<SerialisedSnapshot>({
+  ttlMs: TTL_MS,
+  maxEntries: 100,
+})
+
+const inFlight = new Map<number, Promise<SerialisedSnapshot>>()
+
+interface EulerChainEntry {
+  chainId: number
+  addresses: {
+    lensAddrs: {
+      vaultLens: string
+      eulerEarnVaultLens: string
+      utilsLens: string
+    }
+    coreAddrs: { evc: string }
+    peripheryAddrs: {
+      escrowedCollateralPerspective?: string
+      securitizeFactory?: string
+    }
+  }
+}
+
+interface EulerLabelProduct {
+  vaults?: string[]
+  deprecatedVaults?: string[]
+  /** If true, every vault in the product is excluded from the snapshot — mirrors isVaultNotExplorable on the client. */
+  notExplorable?: boolean
+}
+
+interface EarnVaultEntry {
+  address: string
+  /** If true, the entry is excluded from the snapshot — mirrors isEarnVaultNotExplorable on the client. */
+  notExplorable?: boolean
+}
+
+const getChainConfig = async (chainId: number): Promise<EulerChainEntry | undefined> => {
+  const chains = await $fetch<EulerChainEntry[]>('/api/euler-chains', { headers: WARM_HEADERS })
+  return chains.find(c => c.chainId === chainId)
+}
+
+/**
+ * Distil the label payloads needed by the loader. Mirrors the subset of
+ * useEulerLabels that feeds into the vault-loading pipeline:
+ *   - verifiedVaultAddresses: union of every `vaults[chainId]` array across all products
+ *   - earnVaults: the earn-vaults.json list (array of addresses)
+ *
+ * Does NOT extract entities/points/descriptions — those are UI-only and the
+ * loader doesn't care about them.
+ */
+const getLabels = async (chainId: number) => {
+  const [products, earn] = await Promise.all([
+    $fetch<Record<string, EulerLabelProduct>>('/api/labels/products.json', {
+      query: { chainId },
+      headers: WARM_HEADERS,
+    }).catch(() => ({} as Record<string, EulerLabelProduct>)),
+    $fetch<Array<string | EarnVaultEntry>>('/api/labels/earn-vaults.json', {
+      query: { chainId },
+      headers: WARM_HEADERS,
+    }).catch(() => [] as Array<string | EarnVaultEntry>),
+  ])
+
+  // products.json shape: { [productKey]: { vaults: ["0x…"], deprecatedVaults: [...], notExplorable? } }
+  // Verified set = union of vaults + deprecatedVaults across all products, EXCEPT products
+  // flagged notExplorable (mirrors the client's explorableVaultAddresses filter in loadVaults).
+  // Skipping them matters because the lens calls `getVaultInfoFull` against every address
+  // in the list — notExplorable entries include decommissioned vaults whose lens calls revert.
+  const verifiedSet = new Set<string>()
+  for (const product of Object.values(products)) {
+    if (product.notExplorable === true) continue
+    product.vaults?.forEach(addr => verifiedSet.add(addr))
+    product.deprecatedVaults?.forEach(addr => verifiedSet.add(addr))
+  }
+
+  // earn-vaults.json: array of { address, ... } entries, or (legacy) bare strings.
+  // Skip entries marked notExplorable (deprecated earn vaults whose lens calls would revert).
+  const earnVaults: string[] = earn.flatMap((entry) => {
+    if (typeof entry === 'string') return [entry]
+    if (entry.notExplorable === true) return []
+    return [entry.address]
+  })
+
+  return {
+    verifiedVaultAddresses: [...verifiedSet],
+    earnVaults,
+  }
+}
+
+const getFactories = async (chainId: number, addresses: string[]): Promise<Map<string, string>> => {
+  if (addresses.length === 0) return new Map()
+  const factories = await getVaultFactories(chainId, addresses)
+  return new Map(Object.entries(factories))
+}
+
+/**
+ * The single refresh path. Called by the warm-cache plugin on a 4-min
+ * schedule, and also by the /api/vaults handler as a cold-path fallback.
+ */
+export const refreshChainVaults = async (chainId: number): Promise<SerialisedSnapshot> => {
+  const existing = inFlight.get(chainId)
+  if (existing) return existing
+
+  const promise = (async () => {
+    const rpcUrl = process.env[`RPC_URL_HTTP_${chainId}`]
+    if (!rpcUrl) throw new Error(`No RPC URL configured for chain ${chainId}`)
+
+    const cfg = await getChainConfig(chainId)
+    if (!cfg) throw new Error(`No euler-chains entry for chain ${chainId}`)
+
+    const labels = await getLabels(chainId)
+    const factories = await getFactories(chainId, labels.verifiedVaultAddresses)
+
+    const ctx: FetchVaultContext = {
+      chainId,
+      rpcUrl,
+      lensAddresses: {
+        vaultLens: cfg.addresses.lensAddrs.vaultLens,
+        eulerEarnVaultLens: cfg.addresses.lensAddrs.eulerEarnVaultLens,
+        utilsLens: cfg.addresses.lensAddrs.utilsLens,
+      },
+      coreAddresses: { evc: cfg.addresses.coreAddrs.evc },
+      peripheryAddresses: {
+        escrowedCollateralPerspective: cfg.addresses.peripheryAddrs.escrowedCollateralPerspective,
+      },
+      // Server skips Pyth simulation in v1: the client's post-hydration
+      // RPC refresh handles Pyth-fresh prices. See plan "Pyth on server: skip in v1".
+      pythHermesUrl: undefined,
+      verifiedVaultAddresses: labels.verifiedVaultAddresses,
+      earnVaultAddresses: labels.earnVaults,
+    }
+
+    const snap = await loadChainSnapshot({
+      chainId,
+      ctx,
+      peripheryAddresses: {
+        escrowedCollateralPerspective: cfg.addresses.peripheryAddrs.escrowedCollateralPerspective,
+        securitizeFactory: cfg.addresses.peripheryAddrs.securitizeFactory,
+      },
+      factories,
+      // Server doesn't honour nonExplorable filters — UI-only concerns.
+      // The snapshot contains all verified vaults; the client applies UI
+      // filters at render time.
+    })
+
+    const serialised = serialiseSnapshot(snap)
+    vaultsCache.set(String(chainId), serialised)
+    return serialised
+  })().finally(() => { inFlight.delete(chainId) })
+
+  inFlight.set(chainId, promise)
+
+  try {
+    return await promise
+  }
+  catch (err) {
+    logWarn('vaults-cache', `refreshChainVaults chain=${chainId} failed:`, err instanceof Error ? err.message : err)
+    throw err
+  }
+}
