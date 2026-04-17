@@ -23,7 +23,19 @@ const REWARM_INTERVAL_MS = 4 * 60_000
 // against a 1000/min label budget, so sharing one bucket is well-bounded.
 const WARM_HEADERS = { 'cf-connecting-ip': '127.0.0.1' } as const
 
+// Nitro dev mode re-imports server plugins across its double-init (Vite
+// client build + Nitro server build), which would fire two warm cycles
+// back-to-back and schedule two interval timers. Latch on globalThis so
+// the second init sees the first's flag and no-ops. No effect in prod
+// (plugins run exactly once there).
+const WARM_LATCH_KEY = '__eulerLiteWarmCacheStarted'
+type WarmLatchedGlobal = typeof globalThis & { [WARM_LATCH_KEY]?: true }
+
 export default defineNitroPlugin(() => {
+  const g = globalThis as WarmLatchedGlobal
+  if (g[WARM_LATCH_KEY]) return
+  g[WARM_LATCH_KEY] = true
+
   const chainIds = getEnabledChainIds()
   if (chainIds.length === 0) return
 

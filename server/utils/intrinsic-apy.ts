@@ -12,6 +12,7 @@
  */
 import type { IntrinsicApySourceConfig } from '~/entities/custom'
 import { intrinsicApySources } from '~/entities/custom'
+import { STABLEWATCH_SOURCE_URL } from '~/entities/constants'
 import type { IntrinsicApyInfo } from '~/entities/intrinsic-apy'
 import { createTtlCache } from '~/server/utils/cache'
 import { logWarn } from '~/server/utils/log'
@@ -56,9 +57,22 @@ async function fetchJson(url: string): Promise<unknown> {
 }
 
 /**
- * Cached upstream fetch with in-flight dedup. Concurrent callers for the
- * same `key` (warm-cache + real traffic, multiple chains hitting a shared
- * upstream like defillama) collapse onto one network round-trip.
+ * Cached upstream fetch with in-flight dedup and stale-fallback.
+ *
+ * Order of operations:
+ *  1. Fresh cache hit → return immediately.
+ *  2. In-flight request for the same key → share that promise.
+ *  3. Issue upstream fetch:
+ *     a. On success → cache and return.
+ *     b. On failure → if a stale entry exists, return it (keeps the
+ *        provider's addresses in the response during transient upstream
+ *        blips); otherwise rethrow. Without the stale fallback, any
+ *        hiccup after TTL expiry would drop an entire provider's APY
+ *        entries from the merged map until the next 5-min window.
+ *
+ * Concurrent callers for the same `key` (warm-cache + real traffic, multiple
+ * chains hitting a shared upstream like defillama) collapse onto one
+ * network round-trip.
  */
 function fetchUpstream<T = unknown>(key: string, url: string): Promise<T> {
   const fresh = cache.get(key)
@@ -72,11 +86,40 @@ function fetchUpstream<T = unknown>(key: string, url: string): Promise<T> {
       cache.set(key, data)
       return data
     })
+    .catch((err) => {
+      const stale = cache.getStale(key)
+      if (stale !== undefined) {
+        logWarn('intrinsic-apy', `upstream ${key} failed; serving stale:`, err instanceof Error ? err.message : err)
+        return stale
+      }
+      throw err
+    })
     .finally(() => { inFlight.delete(key) })
 
   inFlight.set(key, promise)
   return promise as Promise<T>
 }
+
+/**
+ * Bounded-concurrency map. Used by extractors that fan out per-source
+ * (pendle, securitize) to avoid hammering an upstream with hundreds of
+ * parallel requests when the source list grows.
+ */
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = []
+  for (let i = 0; i < items.length; i += concurrency) {
+    const batch = items.slice(i, i + concurrency)
+    const settled = await Promise.allSettled(batch.map(fn))
+    results.push(...settled)
+  }
+  return results
+}
+
+const PENDLE_CONCURRENCY = 10
 
 const normalize = (v?: string) => v?.toLowerCase() || ''
 
@@ -116,13 +159,13 @@ const isPendleMatured = (timestamp?: string): boolean => {
 }
 
 async function extractPendle(sources: PendleSource[]): Promise<Array<[string, IntrinsicApyInfo]>> {
-  const settled = await Promise.allSettled(sources.map(async (s) => {
+  const settled = await mapWithConcurrency(sources, PENDLE_CONCURRENCY, async (s) => {
     const apiChainId = s.crossChainSourceChainId ?? s.chainId
     const key = `pendle:${apiChainId}:${s.pendleMarket.toLowerCase()}`
     const url = `${PENDLE_API_BASE}/${apiChainId}/markets/${s.pendleMarket}/data`
     const data = await fetchUpstream<PendleMarketData>(key, url)
     return { source: s, data }
-  }))
+  })
 
   const out: Array<[string, IntrinsicApyInfo]> = []
   for (const r of settled) {
@@ -218,7 +261,7 @@ async function extractStablewatch(sources: StablewatchSource[]): Promise<Array<[
     if (!chainName) continue
     const apy = lookup.get(`${chainName}:${s.address.toLowerCase()}`)
     if (apy === undefined) continue
-    out.push([normalize(s.address), { apy, provider: 'Stablewatch', source: 'https://stablewatch.io' }])
+    out.push([normalize(s.address), { apy, provider: 'Stablewatch', source: STABLEWATCH_SOURCE_URL }])
   }
   return out
 }
@@ -403,13 +446,21 @@ export async function getIntrinsicApyForChain(chainId: number): Promise<Record<s
     [...byProvider.entries()].map(([provider, sources]) => extractForProvider(provider, sources)),
   )
 
-  const merged: Record<string, IntrinsicApyInfo> = {}
+  // `merged` uses a null-prototype bag so nothing we write — even the
+  // unlikely `token_address: "__proto__"` from a compromised upstream —
+  // can mutate Object.prototype.
+  const merged: Record<string, IntrinsicApyInfo> = Object.create(null) as Record<string, IntrinsicApyInfo>
   for (const r of settled) {
-    if (r.status === 'fulfilled') {
-      for (const [addr, info] of r.value) merged[addr] = info
-    }
-    else {
+    if (r.status !== 'fulfilled') {
       logWarn('intrinsic-apy', 'provider failed:', r.reason instanceof Error ? r.reason.message : r.reason)
+      continue
+    }
+    for (const [addr, info] of r.value) {
+      const existing = merged[addr]
+      if (existing) {
+        logWarn('intrinsic-apy/merge', `Duplicate APY for ${addr}: "${existing.provider}" (${existing.apy}%) overwritten by "${info.provider}" (${info.apy}%)`)
+      }
+      merged[addr] = info
     }
   }
   return merged
