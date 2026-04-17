@@ -11,15 +11,19 @@ import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_30S_MS } from '~/entities/tuning-const
 import { logWarn } from '~/utils/errorHandling'
 import { earnVaults } from '~/utils/eulerLabelsState'
 
-const {
-  MERKL_API_BASE_URL,
-} = useEulerConfig()
-
-const endpoints = {
-  tokens: `${MERKL_API_BASE_URL}/tokens/reward`,
-  opportunities: `${MERKL_API_BASE_URL}/opportunities/campaigns`,
-  rewards: (addr: string) => `${MERKL_API_BASE_URL}/users/${addr}/rewards`,
-  campaignById: (id: string) => `${MERKL_API_BASE_URL}/campaigns/${id}`,
+// Endpoints are resolved lazily. `useEulerConfig()` must be called inside a
+// Vue setup or Nuxt context; evaluating it at module-load time fails when the
+// module is pulled in early (e.g. via an import from app.vue). All callers
+// below already run inside setup / async actions kicked off from setup, so a
+// function lookup is safe.
+const endpoints = () => {
+  const { MERKL_API_BASE_URL } = useEulerConfig()
+  return {
+    tokens: `${MERKL_API_BASE_URL}/tokens/reward`,
+    opportunities: `${MERKL_API_BASE_URL}/opportunities/campaigns`,
+    rewards: (addr: string) => `${MERKL_API_BASE_URL}/users/${addr}/rewards`,
+    campaignById: (id: string) => `${MERKL_API_BASE_URL}/campaigns/${id}`,
+  }
 }
 
 const address = ref('')
@@ -59,7 +63,7 @@ const loadTokens = async (chainId: number, isInitialLoading = true, forceRefresh
     if (isInitialLoading) {
       isTokensLoading.value = true
     }
-    const res = await axios.get(endpoints.tokens)
+    const res = await axios.get(endpoints().tokens)
     const data: RewardToken[] = res.data[chainId]
     rewardTokens.value = data || []
     cacheState.tokens = { chainId, timestamp: Date.now() }
@@ -186,6 +190,7 @@ const loadOpportunities = async (chainId: number, isInitialLoading = true, force
     // Always fetch EULER campaigns. Only fetch ERC20LOGPROCESSOR when Earn vault
     // labels are available for client-side filtering (the earnVaults watcher will
     // trigger a force-refresh once labels load).
+    const { MERKL_API_BASE_URL } = useEulerConfig()
     const eulerUrl = `${MERKL_API_BASE_URL}/opportunities/?chainId=${chainId}&type=EULER&campaigns=true`
     const earnAddrs = earnVaults.value
     const knownEarnVaults = earnAddrs.length > 0
@@ -258,7 +263,7 @@ const loadRewards = async (chainId: number, isInitialLoading = true, forceRefres
     if (isInitialLoading) {
       isRewardsLoading.value = true
     }
-    const res = await axios.get(endpoints.rewards(address.value), {
+    const res = await axios.get(endpoints().rewards(address.value), {
       params: {
         chainId,
       },

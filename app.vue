@@ -17,6 +17,13 @@ const { loadCountry } = useGeoBlock()
 const { updateBalances, resetBalances } = useWallets()
 const { isConnected, address } = useWagmi()
 
+// Eagerly instantiate useEulerAccount at app root so its internal watchers
+// trigger updatePositions() as soon as balances + lens addresses are ready.
+// Without this, positions only load when the user navigates to a page that
+// imports the composable, making first detail-page visit wait on the full
+// subgraph + accountLens round-trip.
+useEulerAccount()
+
 // Initialize price backend (configures endpoint when chainId changes)
 usePriceBackend()
 
