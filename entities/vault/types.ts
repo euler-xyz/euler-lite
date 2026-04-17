@@ -58,6 +58,30 @@ export interface VaultIRMInfo {
     interestRateModelParams?: string
   }
 }
+
+export interface KinkIRMParams {
+  baseRate: bigint
+  slope1: bigint
+  slope2: bigint
+  kink: bigint
+}
+
+export interface AdaptiveCurveIRMParams {
+  targetUtilization: bigint
+  initialRateAtTarget: bigint
+  minRateAtTarget: bigint
+  maxRateAtTarget: bigint
+  curveSteepness: bigint
+  adjustmentSpeed: bigint
+}
+
+export interface KinkyIRMParams {
+  baseRate: bigint
+  slope: bigint
+  shape: bigint
+  kink: bigint
+  cutoff: bigint
+}
 export interface Erc4626Vault {
   address: string
   name: string
