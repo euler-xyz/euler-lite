@@ -149,21 +149,11 @@ const processMultiLendBorrowOpportunities = (
   const campaignMap = new Map<string, RewardCampaign[]>()
   const now = Math.floor(Date.now() / 1000)
 
-  // TEMP debug: remove before merge
-  logWarn('merkl/MLB', `processing ${opportunities.length} opportunities`)
-
   for (const opportunity of opportunities) {
     // NOTE: LIVE guard temporarily disabled so the PAST test campaigns render
     // for local verification. Restore before merging (uncomment the line below).
     // if (opportunity.status !== 'LIVE') continue
-    if (!opportunity.campaigns?.length) {
-      logWarn('merkl/MLB', `skip ${opportunity.identifier}: no campaigns`)
-      continue
-    }
-    if (!opportunity.aprRecord?.breakdowns) {
-      logWarn('merkl/MLB', `skip ${opportunity.identifier}: no aprRecord.breakdowns`)
-      continue
-    }
+    if (!opportunity.campaigns?.length) continue
 
     const side: RewardCampaignType | null
       = opportunity.action === 'LEND'
@@ -171,49 +161,30 @@ const processMultiLendBorrowOpportunities = (
         : opportunity.action === 'BORROW'
           ? 'euler_borrow'
           : null
-    if (!side) {
-      logWarn('merkl/MLB', `skip ${opportunity.identifier}: action=${opportunity.action} not LEND/BORROW`)
-      continue
-    }
+    if (!side) continue
 
     const aprs = new Map<string, number>()
-    for (const breakdown of opportunity.aprRecord.breakdowns) {
+    for (const breakdown of opportunity.aprRecord?.breakdowns ?? []) {
       aprs.set(breakdown.identifier, breakdown.value)
     }
 
     for (const campaign of opportunity.campaigns) {
       const markets = campaign.params?.markets
-      if (!markets?.length) {
-        logWarn('merkl/MLB', `skip campaign ${campaign.campaignId}: no markets[] (params keys=${Object.keys(campaign.params || {}).join(',')})`)
-        continue
-      }
-      if (!campaign.rewardToken) {
-        logWarn('merkl/MLB', `skip campaign ${campaign.campaignId}: no rewardToken`)
-        continue
-      }
+      if (!markets?.length || !campaign.rewardToken) continue
 
-      // Merkl's aprRecord.breakdowns gives a single campaign-level APR (keyed by
-      // campaignId) rather than per-market breakdowns, so each vault in the
-      // campaign shares the same APR under the MAX_APR distribution.
-      const apr = aprs.get(campaign.campaignId) || 0
-      if (campaign.endTimestamp > now && !apr) {
-        logWarn('merkl/MLB', `skip campaign ${campaign.campaignId}: active but apr=0`)
-        continue
-      }
-
-      logWarn('merkl/MLB', `campaign ${campaign.campaignId} side=${side} apr=${apr} markets=${markets.length}`)
+      // Merkl provides a single campaign-level APR (keyed by campaignId in
+      // aprRecord.breakdowns), shared across all markets under MAX_APR. For
+      // MULTILENDBORROW that breakdown can be absent/zero while the top-level
+      // campaign.apr is populated, so fall back to it.
+      const apr = aprs.get(campaign.campaignId) || campaign.apr || 0
+      if (campaign.endTimestamp > now && !apr) continue
 
       for (const market of markets) {
         const vaultAddress = (
           market.campaignParameters.evkAddress
           || market.campaignParameters.targetToken
         )?.toLowerCase()
-        if (!vaultAddress) {
-          logWarn('merkl/MLB', `skip market: no vault address (params=${JSON.stringify(market.campaignParameters)})`)
-          continue
-        }
-
-        logWarn('merkl/MLB', `→ map vault=${vaultAddress} side=${side} apr=${apr}`)
+        if (!vaultAddress) continue
 
         const rewardCampaign: RewardCampaign = {
           vault: vaultAddress,
@@ -231,8 +202,6 @@ const processMultiLendBorrowOpportunities = (
       }
     }
   }
-
-  logWarn('merkl/MLB', `produced ${campaignMap.size} vault entries: [${[...campaignMap.keys()].join(', ')}]`)
 
   return campaignMap
 }
@@ -316,10 +285,7 @@ const loadOpportunities = async (chainId: number, isInitialLoading = true, force
 
     mergeInto(processOpportunitiesToCampaigns(eulerResult.data, 'EULER'))
     mergeInto(processOpportunitiesToCampaigns(erc20Result.data, 'ERC20LOGPROCESSOR', knownEarnVaults))
-    // TEMP debug: remove before merge
-    logWarn('merkl/MLB', `fetched raw ${multiResult.data.length} MULTILENDBORROW opps for chainId=${chainId}`)
     mergeInto(processMultiLendBorrowOpportunities(multiResult.data))
-    logWarn('merkl/MLB', `merged map size=${merged.size}; sample keys=${[...merged.keys()].slice(0, 5).join(', ')}`)
 
     merklCampaigns.value = merged
     // Only cache when all pages were fetched successfully — partial results
