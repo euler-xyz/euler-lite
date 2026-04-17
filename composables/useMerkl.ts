@@ -150,7 +150,9 @@ const processMultiLendBorrowOpportunities = (
   const now = Math.floor(Date.now() / 1000)
 
   for (const opportunity of opportunities) {
-    if (opportunity.status !== 'LIVE') continue
+    // NOTE: LIVE guard temporarily disabled so the PAST test campaigns render
+    // for local verification. Restore before merging (uncomment the line below).
+    // if (opportunity.status !== 'LIVE') continue
     if (!opportunity.campaigns?.length) continue
     if (!opportunity.aprRecord?.breakdowns) continue
 
