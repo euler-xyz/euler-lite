@@ -292,7 +292,7 @@ const send = async () => {
     modal.close()
     updateBalance()
     setTimeout(() => {
-      router.replace('/portfolio')
+      router.replace({ path: '/portfolio', query: { network: _route.query.network } })
     }, 400)
   }
   catch (e) {

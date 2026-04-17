@@ -664,7 +664,7 @@ const sendMultiply = async () => {
     modal.close()
     refreshAllPositions(eulerLensAddresses.value, address.value || '')
     setTimeout(() => {
-      router.replace('/portfolio')
+      router.replace({ path: '/portfolio', query: { network: route.query.network } })
     }, 400)
   }
   catch (e) {
