@@ -1,49 +1,52 @@
 import axios from 'axios'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 
-// Cache for vault factory lookups
+// Client-side in-memory cache keyed by `${chainId}:${lowercaseAddress}`.
+// Factories are immutable per vault, so entries never need to expire within a session.
 const vaultFactoryCache = new Map<string, string>()
 
-// Fetch vault factory from subgraph
-export const fetchVaultFactory = async (
-  vaultAddress: string,
-  subgraphUrl?: string,
-): Promise<string | null> => {
-  const normalizedAddress = vaultAddress.toLowerCase()
-
-  // Check cache first
-  if (vaultFactoryCache.has(normalizedAddress)) {
-    return vaultFactoryCache.get(normalizedAddress)!
-  }
-
+const getChainId = (): number | null => {
   try {
-    const url = subgraphUrl || useEulerConfig().SUBGRAPH_URL
-    if (!url) {
-      console.warn('[fetchVaultFactory] No subgraph URL available')
-      return null
-    }
-
-    const { data } = await axios.post(url, {
-      query: `query VaultFactory {
-        vaults(where: { id: "${normalizedAddress}" }) {
-          id
-          factory
-          }
-          }`,
-    })
-
-    const vault = data?.data?.vaults?.[0]
-    if (vault?.factory) {
-      vaultFactoryCache.set(normalizedAddress, vault.factory.toLowerCase())
-      return vault.factory.toLowerCase()
-    }
-
+    const { chainId } = useEulerAddresses()
+    return chainId.value ?? null
+  }
+  catch {
     return null
+  }
+}
+
+const cacheKey = (chainId: number, address: string) => `${chainId}:${address.toLowerCase()}`
+
+const postFactories = async (
+  chainId: number,
+  addresses: string[],
+): Promise<Record<string, string>> => {
+  try {
+    const { data } = await axios.post('/api/vault-factories', { chainId, addresses })
+    return (data?.factories ?? {}) as Record<string, string>
   }
   catch (e) {
-    console.warn('[fetchVaultFactory] Failed to fetch vault factory:', e)
-    return null
+    console.warn('[fetchVaultFactories] Proxy request failed:', e)
+    return {}
   }
+}
+
+// Fetch vault factory for a single vault
+export const fetchVaultFactory = async (vaultAddress: string): Promise<string | null> => {
+  const chainId = getChainId()
+  if (!chainId) return null
+
+  const key = cacheKey(chainId, vaultAddress)
+  const cached = vaultFactoryCache.get(key)
+  if (cached) return cached
+
+  const factories = await postFactories(chainId, [vaultAddress])
+  const factory = factories[vaultAddress.toLowerCase()]
+  if (factory) {
+    vaultFactoryCache.set(key, factory)
+    return factory
+  }
+  return null
 }
 
 // Check if vault is a securitize vault - first checks registry, then falls back to subgraph
@@ -86,15 +89,17 @@ export const isSecuritizeVaultSync = (address: string): boolean => {
     return false
   }
 
-  const normalizedAddress = address.toLowerCase()
-  const factory = vaultFactoryCache.get(normalizedAddress)
+  const chainId = getChainId()
+  if (!chainId) return false
+
+  const factory = vaultFactoryCache.get(cacheKey(chainId, address))
   if (!factory) {
     return false
   }
   return factory.toLowerCase() === securitizeFactory.toLowerCase()
 }
 
-// Batch fetch vault factories from subgraph
+// Batch fetch vault factories via the server proxy
 export const fetchVaultFactories = async (
   vaultAddresses: string[],
 ): Promise<Map<string, string>> => {
@@ -104,16 +109,18 @@ export const fetchVaultFactories = async (
     return result
   }
 
-  // Filter out already cached addresses
-  const uncachedAddresses = vaultAddresses.filter(
-    addr => !vaultFactoryCache.has(addr.toLowerCase()),
-  )
+  const chainId = getChainId()
+  if (!chainId) return result
 
-  // Add cached results to output
+  const uncachedAddresses: string[] = []
   vaultAddresses.forEach((addr) => {
-    const cached = vaultFactoryCache.get(addr.toLowerCase())
+    const lower = addr.toLowerCase()
+    const cached = vaultFactoryCache.get(cacheKey(chainId, lower))
     if (cached) {
-      result.set(addr.toLowerCase(), cached)
+      result.set(lower, cached)
+    }
+    else {
+      uncachedAddresses.push(lower)
     }
   })
 
@@ -121,41 +128,13 @@ export const fetchVaultFactories = async (
     return result
   }
 
-  try {
-    const { SUBGRAPH_URL } = useEulerConfig()
-    if (!SUBGRAPH_URL) {
-      return result
-    }
-
-    const normalizedAddresses = uncachedAddresses.map(addr => addr.toLowerCase())
-
-    // Use id_in for batch query with exact matches
-    // Add first: 1000 to override The Graph's default limit of 100
-    const addressList = normalizedAddresses.map(addr => `"${addr}"`).join(', ')
-    const { data } = await axios.post(SUBGRAPH_URL, {
-      query: `query VaultFactories {
-        vaults(first: 1000, where: { id_in: [${addressList}] }) {
-          id
-          factory
-        }
-      }`,
-    })
-
-    const vaults = data?.data?.vaults || []
-    vaults.forEach((vault: { id: string, factory: string }) => {
-      if (vault.factory) {
-        const factoryLower = vault.factory.toLowerCase()
-        vaultFactoryCache.set(vault.id, factoryLower)
-        result.set(vault.id, factoryLower)
-      }
-    })
-
-    return result
+  const factories = await postFactories(chainId, uncachedAddresses)
+  for (const [addr, factory] of Object.entries(factories)) {
+    vaultFactoryCache.set(cacheKey(chainId, addr), factory)
+    result.set(addr, factory)
   }
-  catch (e) {
-    console.warn('[fetchVaultFactories] Failed to fetch vault factories:', e)
-    return result
-  }
+
+  return result
 }
 
 // Get all securitize vault addresses from a list of addresses
