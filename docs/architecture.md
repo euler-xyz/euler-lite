@@ -195,7 +195,22 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Server-Side Proxy Layer**: External data sources (token lists, Pyth Hermes, labels, oracle checks, RPC) are proxied through Nuxt server endpoints rather than called directly from the browser. This provides caching, rate limiting, CORS avoidance, and keeps credentials server-side. See [Development Guide - Server-Side Data Proxies](./development-guide.md#server-side-data-proxies) for the full endpoint reference.
+**Server-Side Proxy Layer**: External data sources (token lists, Pyth Hermes, labels, oracle checks, RPC, subgraph vault factories) are proxied through Nuxt server endpoints rather than called directly from the browser. This provides caching, rate limiting, CORS avoidance, and keeps credentials server-side. See [Development Guide - Server-Side Data Proxies](./development-guide.md#server-side-data-proxies) for the full endpoint reference.
+
+**Proxy cache strategy**:
+
+| Endpoint | TTL | Notes |
+|----------|-----|-------|
+| `/api/labels/*` | 5 min | 404 → empty shape; stale-fallback on upstream error |
+| `/api/token-list` | 5 min | Three sources merged via `Promise.allSettled`; per-source cache with stale fallback |
+| `/api/intrinsic-apy/*` | 5 min | Per-provider; every source in `intrinsicApySources` is pre-warmed, including pendle markets and securitize symbols |
+| `/api/vault-factories` | 24 h | Factory is immutable per vault; batched subgraph query |
+| `/api/oracle-adapter` | 5 min | Lazy per-address fetch |
+| `/api/euler-chains` | 5 min | Static chain-agnostic config from `euler-interfaces` repo |
+
+Every cacheable proxy above uses the same pattern: TTL cache for fresh hits, stale-cache fallback on upstream failure, and in-flight request deduplication so concurrent cache-miss callers (e.g. warm-cache racing real traffic) collapse onto a single upstream fetch per cache key.
+
+`server/plugins/warm-cache.ts` pre-populates labels + token-list for every enabled chain, every intrinsic-APY source (derived from `intrinsicApySources` — includes pendle markets and securitize symbols), and `/api/euler-chains` once globally. A 4-min interval re-warms every entry ahead of its 5-min TTL. Warming runs fire-and-forget so Nitro's listener is never delayed; caches are typically hot within ~5 s of boot, and users arriving before that just pay the usual cold-upstream latency for whichever endpoints they hit.
 
 ## 🔍 Explore Page & Market Discovery
 

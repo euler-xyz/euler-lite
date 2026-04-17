@@ -17,13 +17,13 @@ Labels originate from the [euler-labels](https://github.com/euler-xyz/euler-labe
 | `points.json` | `GET /api/labels/points.json?chainId=X` | `[]` |
 | `earn-vaults.json` | `GET /api/labels/earn-vaults.json?chainId=X` | `[]` |
 
-Any chain may legitimately ship without a given file. When upstream reports the file absent (HTTP 404 or 403), the proxy returns the type-appropriate empty payload (`{}` for object-shaped files, `[]` for array-shaped files) with HTTP 200 and caches it for 5 minutes. `earn-vaults.json` and `points.json` are fully optional — any upstream error degrades to the empty payload. `products.json` and `entities.json` are required — non-absent upstream failures (5xx, timeouts) serve stale data when available or return HTTP 502 so clients can show a proper error state.
+All label files are optional — any chain may legitimately ship without a given file. When upstream reports the file missing (or is unreachable), the proxy returns the type-appropriate empty payload (`{}` for object-shaped files, `[]` for array-shaped files) with HTTP 200 and caches it for 5 minutes. Non-404 upstream statuses are logged once per refresh so genuine outages stay visible.
 
 Oracle adapter metadata is fetched from a separate repository ([oracle-checks](https://github.com/euler-xyz/oracle-checks)) by default, loaded lazily per adapter via `GET /api/oracle-adapter?chainId=X&address=0x...`.
 
 **Custom sources**: The server resolves upstream URLs from environment variables. `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` overrides the GitHub URL for labels (when set, `NUXT_PUBLIC_CONFIG_LABELS_REPO` and `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` are ignored). `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` overrides the GitHub URL for oracle checks. The expected URL pattern is `{baseUrl}/{chainId}/{file}` for labels and `{baseUrl}/{chainId}/adapters/{address}.json` for oracle adapters.
 
-**Caching**: The server caches each response for 5 minutes. On upstream failure, stale cached data is served. The client also maintains a 5-minute TTL to avoid unnecessary requests on chain switches.
+**Caching**: The server caches each label response for 5 minutes with in-flight request deduplication, so concurrent cache-miss callers collapse onto a single upstream fetch per `chainId:file`. On upstream failure, stale cached data is served. The client also maintains a 5-minute TTL to avoid unnecessary requests on chain switches. `server/plugins/warm-cache.ts` pre-populates the server caches at Nitro startup (fire-and-forget) and re-warms every 4 minutes.
 
 **Address normalization**: All addresses from labels are checksummed via `getAddress()` before storage, ensuring consistent lookups regardless of input casing.
 
@@ -283,6 +283,10 @@ The vault type determines how the vault is fetched and displayed:
 | `'securitize'` | Securitize vault (ERC-4626 without borrowing) |
 
 Type is detected in `useVaultRegistry` based on the vault's factory address queried from the subgraph.
+
+### Vault Factory Proxy
+
+Factory lookups (`entities/vault/factory.ts`) go through `POST /api/vault-factories`, which batches the subgraph query server-side and caches results for 24 hours. Factory addresses are immutable per vault, so cache hits are permanent within a process lifetime. The request body is `{ chainId: number, addresses: string[] }` (up to 1000 addresses per call); the response is `{ factories: Record<address, factory> }` keyed by lowercase address. Missing or failing subgraph URLs degrade to `{ factories: {} }` rather than 5xx, letting callers fall through to lens-based detection.
 
 ## Discovery Page Filtering
 

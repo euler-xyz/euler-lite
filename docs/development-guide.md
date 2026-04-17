@@ -84,9 +84,12 @@ External metadata (contract addresses, labels, oracle checks) is fetched through
 | `GET /api/labels/:file?chainId=X` | `{chainId}/{file}` from euler-labels | 5 min | `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` |
 | `GET /api/oracle-adapter?chainId=X&address=0x...` | Per-adapter JSON from oracle-checks | 5 min | `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` |
 | `GET /api/token-list?chainId=X` | Euler API + Uniswap + DefiLlama token lists | 5 min | `EULER_API_URL`, `NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL`, `NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL` |
+| `POST /api/vault-factories` | Subgraph vault-factory lookup (body: `{ chainId, addresses }`) | 24 h | `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` |
 | `GET /api/pyth/updates?ids[]=...` | Pyth Hermes (`/v2/updates/price/latest`) | No cache | `PYTH_HERMES_URL` (server-only) |
 
 All endpoints use rate limiting and return stale cached data when upstream is unavailable (except `/api/pyth/updates` which requires real-time data and returns no-store cache headers). The shared caching utility is in `server/utils/cache.ts`.
+
+**Startup cache warming**: `server/plugins/warm-cache.ts` runs at Nitro startup and pre-populates `/api/labels/*`, `/api/token-list` for every enabled chain, `/api/intrinsic-apy/*` for every entry in the static `intrinsicApySources` config (including each pendle market and securitize symbol), and `/api/euler-chains` once globally. A 4-min interval re-warms thereafter. Runs in the background — Nitro's node-server preset doesn't await plugins before starting the HTTP listener, so users arriving in the first ~5 s of a freshly-booted instance's lifetime pay the usual cold-upstream latency for whichever endpoints they hit; everyone after that sees cached responses.
 
 ### Token List Endpoint Details
 
