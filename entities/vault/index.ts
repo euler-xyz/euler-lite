@@ -6,6 +6,7 @@ export type {
   VaultAsset,
   VaultInterestRateInfo,
   VaultIRMInfo,
+  CyclicalNoteInfo,
   Erc4626Vault,
   SecuritizeVault,
   Vault,

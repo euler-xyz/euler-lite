@@ -45,9 +45,17 @@ export interface VaultInterestRateInfo {
   cash: bigint
   supplyAPY: bigint
 }
+export interface CyclicalNoteInfo {
+  primaryRate: bigint
+  secondaryRate: bigint
+  primaryDuration: bigint
+  secondaryDuration: bigint
+  startTimestamp: bigint
+}
 export interface VaultIRMInfo {
   interestRateModelInfo?: {
     interestRateModelType?: number
+    interestRateModelParams?: string
   }
 }
 export interface Erc4626Vault {
