@@ -210,7 +210,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 
 Every cacheable proxy above uses the same pattern: TTL cache for fresh hits, stale-cache fallback on upstream failure, and in-flight request deduplication so concurrent cache-miss callers (e.g. warm-cache racing real traffic) collapse onto a single upstream fetch per cache key.
 
-`server/plugins/warm-cache.ts` pre-populates labels + token-list for every enabled chain, every intrinsic-APY source (derived from `intrinsicApySources` — includes pendle markets and securitize symbols), and `/api/euler-chains` once globally. A 4-min interval re-warms every entry ahead of its 5-min TTL. Warming runs fire-and-forget so Nitro's listener is never delayed; caches are typically hot within ~5 s of boot, and users arriving before that just pay the usual cold-upstream latency for whichever endpoints they hit.
+`server/plugins/warm-cache.ts` pre-populates labels, token-list, `/api/intrinsic-apy`, and vault-factories for every enabled chain, plus `/api/euler-chains` once globally. A 4-min interval re-warms every entry ahead of its 5-min TTL. Warming runs fire-and-forget so Nitro's listener is never delayed; caches are typically hot within ~5 s of boot, and users arriving before that just pay the usual cold-upstream latency for whichever endpoints they hit.
 
 ## 🔍 Explore Page & Market Discovery
 

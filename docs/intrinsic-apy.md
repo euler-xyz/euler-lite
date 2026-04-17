@@ -8,7 +8,7 @@ Euler Lite adds this intrinsic yield on top of the vault's lending/borrowing APY
 
 All provider fetching, filtering, and APY extraction happens **server-side**. The client issues one parameter-less request per chain and receives a flat `{ [lowercaseAddress]: { apy, provider, source? } }` map. No giant upstream payloads hit the wire, and the client carries no provider-specific code.
 
-```
+```text
 ┌──────────────────────────────┐
 │    useIntrinsicApy()         │  Client composable
 │  - TTL cache (5 min)         │  Single GET /api/intrinsic-apy?chainId=X
