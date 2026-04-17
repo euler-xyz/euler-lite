@@ -1,14 +1,39 @@
 <script setup lang="ts">
-defineProps<{
+const props = defineProps<{
   exact: string
 }>()
+
+const copied = ref(false)
+let timer: ReturnType<typeof setTimeout>
+
+function onCopy() {
+  const numericPart = props.exact.replace(/\s+\S+$/, '').replaceAll(',', '')
+  navigator.clipboard.writeText(numericPart)
+  copied.value = true
+  clearTimeout(timer)
+  timer = setTimeout(() => (copied.value = false), 2000)
+}
 </script>
 
 <template>
   <span class="ui-exact-amount">
     <slot />
-    <span class="ui-exact-amount__tip">
+    <span
+      class="ui-exact-amount__tip"
+      @click.stop.prevent
+      @mousedown.stop.prevent
+      @pointerdown.stop.prevent
+    >
       {{ exact }}
+      <button
+        class="ui-exact-amount__copy"
+        @click="onCopy"
+      >
+        <SvgIcon
+          :name="copied ? 'check' : 'copy'"
+          class="!w-14 !h-14"
+        />
+      </button>
     </span>
   </span>
 </template>
@@ -24,7 +49,9 @@ defineProps<{
 
 @media (hover: hover) and (pointer: fine) {
   .ui-exact-amount:hover .ui-exact-amount__tip {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 6px;
     position: absolute;
     bottom: calc(100% + 6px);
     left: 50%;
@@ -41,9 +68,37 @@ defineProps<{
     font-weight: 400;
     font-variant-numeric: tabular-nums;
     color: var(--text-primary);
-    pointer-events: none;
     word-break: break-all;
     white-space: nowrap;
+    user-select: all;
+    cursor: text;
+
+    // invisible bridge to cover the gap between trigger and tooltip
+    &::after {
+      content: '';
+      position: absolute;
+      top: 100%;
+      left: 0;
+      width: 100%;
+      height: 6px;
+    }
+  }
+
+  .ui-exact-amount__copy {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.15s;
+
+    &:hover {
+      color: var(--text-primary);
+    }
   }
 }
 </style>
