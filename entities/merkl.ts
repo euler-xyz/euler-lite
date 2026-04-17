@@ -1,5 +1,6 @@
 export interface Opportunity {
   chainId: number
+  chain?: { name: string }
   type: string
   identifier: string
   name: string

@@ -193,7 +193,7 @@ const processMultiLendBorrowOpportunities = (
           provider: 'merkl',
           endTimestamp: campaign.endTimestamp,
           rewardToken: { symbol: campaign.rewardToken.symbol, icon: campaign.rewardToken.icon },
-          sourceUrl: `https://app.merkl.xyz/opportunities/${opportunity.chainId}/MULTILENDBORROW/${opportunity.identifier}`,
+          sourceUrl: `https://app.merkl.xyz/opportunities/${(opportunity.chain?.name || String(opportunity.chainId)).toLowerCase()}/MULTILENDBORROW/${opportunity.identifier}`,
         }
 
         const existing = campaignMap.get(vaultAddress)
