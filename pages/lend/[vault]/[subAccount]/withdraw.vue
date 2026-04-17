@@ -594,7 +594,7 @@ watch(swapSelectedQuote, () => {
               />
 
               <VaultFormInfoBlock
-                v-if="swapEstimatedOutput"
+                v-if="swapEstimatedOutput || swapQuoteError"
                 :loading="isSwapQuoteLoading"
                 variant="card"
               >

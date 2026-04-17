@@ -871,7 +871,7 @@ watch(address, () => {
               />
 
               <VaultFormInfoBlock
-                v-if="swapEstimatedOutput"
+                v-if="swapEstimatedOutput || swapQuoteError"
                 :loading="isSwapQuoteLoading"
                 variant="card"
               >
