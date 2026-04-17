@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
+import { logWarn } from '~/utils/errorHandling'
 
 // Client-side in-memory cache keyed by `${chainId}:${lowercaseAddress}`.
 // Factories are immutable per vault, so entries never need to expire within a session.
@@ -26,7 +27,7 @@ const postFactories = async (
     return (data?.factories ?? {}) as Record<string, string>
   }
   catch (e) {
-    console.warn('[fetchVaultFactories] Proxy request failed:', e)
+    logWarn('fetchVaultFactories', 'Proxy request failed:', e)
     return {}
   }
 }

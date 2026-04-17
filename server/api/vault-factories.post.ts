@@ -2,7 +2,7 @@ import { createError, readBody } from 'h3'
 import { isAddress } from 'viem'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
-import { getEnabledChainIds, getSubgraphUris } from '~/server/utils/enabled-chains'
+import { getEnabledChainIds, getSubgraphUris } from '~/utils/chain-env'
 import { logWarn } from '~/server/utils/log'
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000

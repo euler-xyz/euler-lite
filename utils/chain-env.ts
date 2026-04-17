@@ -1,8 +1,14 @@
 /**
- * Shared scanner for `RPC_URL_HTTP_<chainId>` env vars.
- * Used by chain-config plugin (to inject into HTML) and warm-cache plugin
- * (to iterate chains on startup).
+ * Scans `process.env` for chain-related environment variables.
+ *
+ * Lives in `utils/` (not `server/utils/`) so both server-side code
+ * (plugins, API handlers) and client-side code executed during SSR
+ * (e.g. `useChainConfig` on the server branch) import from a single
+ * source of truth. The convention is:
+ *   - `RPC_URL_HTTP_<chainId>` — enables a chain (presence, not value, matters)
+ *   - `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` — subgraph URL for that chain
  */
+
 export function getEnabledChainIds(env: NodeJS.ProcessEnv = process.env): number[] {
   const ids: number[] = []
   for (const [key, value] of Object.entries(env)) {

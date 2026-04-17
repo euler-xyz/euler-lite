@@ -12,7 +12,7 @@
 import { intrinsicApySources } from '~/entities/custom'
 import { toIntrinsicApyRequest } from '~/entities/intrinsic-apy'
 import { LABEL_FILES } from '../api/labels/[file].get'
-import { getEnabledChainIds } from '../utils/enabled-chains'
+import { getEnabledChainIds } from '~/utils/chain-env'
 import { logWarn } from '../utils/log'
 
 const REWARM_INTERVAL_MS = 4 * 60_000

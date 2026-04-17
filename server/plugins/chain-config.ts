@@ -7,7 +7,7 @@
  * accessible to the client synchronously via window.__CHAIN_CONFIG__.
  */
 import { parseDeprecatedChains } from '../../utils/parseDeprecatedChains'
-import { getEnabledChainIds, getSubgraphUris } from '../utils/enabled-chains'
+import { getEnabledChainIds, getSubgraphUris } from '~/utils/chain-env'
 
 export default defineNitroPlugin((nitroApp) => {
   const enabledChainIds = getEnabledChainIds()
