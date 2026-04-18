@@ -12,7 +12,7 @@ import {
 import { getSubAccountAddress } from '~/entities/account'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import type { TxPlan } from '~/entities/txPlan'
-import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
+import { formatNumber, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 
@@ -309,7 +309,10 @@ watch(amount, () => {
                 v-if="asset"
                 class="text-p2 flex items-center gap-4"
               >
-                {{ formatSmartAmount(nanoToValue(assetsBalance, asset.decimals)) }} <span class="text-p3 text-content-tertiary">{{ asset.symbol }}</span>
+                <UiExactAmount :exact="formatExactAmount(assetsBalance, asset.decimals, asset.symbol)">
+                  {{ formatSmartAmount(nanoToValue(assetsBalance, asset.decimals)) }}
+                  <span class="text-p3 text-content-tertiary">{{ asset.symbol }}</span>
+                </UiExactAmount>
                 <span class="text-p3 text-content-tertiary">&asymp; ${{ formatNumber(assetsBalanceUsd) }}</span>
               </p>
             </SummaryRow>

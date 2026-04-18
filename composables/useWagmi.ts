@@ -1,4 +1,4 @@
-import { useAccount, useAccountEffect, useDisconnect, useBalance, useSwitchChain, useEnsName } from '@wagmi/vue'
+import { useAccount, useDisconnect, useBalance, useSwitchChain, useEnsName } from '@wagmi/vue'
 import { formatUnits, getAddress, isAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { truncate } from '~/utils/string-utils'
@@ -45,14 +45,6 @@ function initializeWagmi() {
     }
     open()
   }
-
-  useAccountEffect({
-    onConnect: ({ address }) => {
-      if (address) {
-        screenConnectedAddress(address)
-      }
-    },
-  })
 
   watch(wagmiAddress, (address, oldAddress) => {
     if (address && address !== oldAddress) {

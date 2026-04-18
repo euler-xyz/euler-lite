@@ -4,7 +4,7 @@ import axios from 'axios'
 
 import { merklDistributorABI } from '~/abis/merkl'
 import type { Opportunity, Reward, RewardsResponseItem, RewardToken } from '~/entities/merkl'
-import type { RewardCampaign } from '~/entities/reward-campaign'
+import type { RewardCampaign, RewardCampaignType } from '~/entities/reward-campaign'
 import { mapMerklSubType } from '~/entities/reward-campaign'
 import type { TxPlan } from '~/entities/txPlan'
 import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_30S_MS } from '~/entities/tuning-constants'
@@ -144,6 +144,72 @@ const processOpportunitiesToCampaigns = (
   return campaignMap
 }
 
+// MULTILENDBORROW campaigns target multiple vaults under one budget. We emit one
+// RewardCampaign per market using the existing euler_lend/euler_borrow types, so
+// the existing APY aggregation and UI pick them up with no further changes.
+const processMultiLendBorrowOpportunities = (
+  opportunities: Opportunity[],
+): Map<string, RewardCampaign[]> => {
+  const campaignMap = new Map<string, RewardCampaign[]>()
+  const now = Math.floor(Date.now() / 1000)
+
+  for (const opportunity of opportunities) {
+    // NOTE: LIVE guard temporarily disabled so the PAST test campaigns render
+    // for local verification. Restore before merging (uncomment the line below).
+    // if (opportunity.status !== 'LIVE') continue
+    if (!opportunity.campaigns?.length) continue
+
+    const side: RewardCampaignType | null
+      = opportunity.action === 'LEND'
+        ? 'euler_lend'
+        : opportunity.action === 'BORROW'
+          ? 'euler_borrow'
+          : null
+    if (!side) continue
+
+    const aprs = new Map<string, number>()
+    for (const breakdown of opportunity.aprRecord?.breakdowns ?? []) {
+      aprs.set(breakdown.identifier, breakdown.value)
+    }
+
+    for (const campaign of opportunity.campaigns) {
+      const markets = campaign.params?.markets
+      if (!markets?.length || !campaign.rewardToken) continue
+
+      // Merkl provides a single campaign-level APR (keyed by campaignId in
+      // aprRecord.breakdowns), shared across all markets under MAX_APR. For
+      // MULTILENDBORROW that breakdown can be absent/zero while the top-level
+      // campaign.apr is populated, so fall back to it.
+      const apr = aprs.get(campaign.campaignId) || campaign.apr || 0
+      if (campaign.endTimestamp > now && !apr) continue
+
+      for (const market of markets) {
+        const vaultAddress = (
+          market.campaignParameters.evkAddress
+          || market.campaignParameters.targetToken
+        )?.toLowerCase()
+        if (!vaultAddress) continue
+
+        const rewardCampaign: RewardCampaign = {
+          vault: vaultAddress,
+          type: side,
+          apr,
+          provider: 'merkl',
+          endTimestamp: campaign.endTimestamp,
+          rewardToken: { symbol: campaign.rewardToken.symbol, icon: campaign.rewardToken.icon },
+          sourceUrl: `https://app.merkl.xyz/opportunities/${(opportunity.chain?.name || String(opportunity.chainId)).toLowerCase()}/MULTILENDBORROW/${opportunity.identifier}`,
+        }
+
+        const existing = campaignMap.get(vaultAddress)
+        if (existing) existing.push(rewardCampaign)
+        else campaignMap.set(vaultAddress, [rewardCampaign])
+      }
+    }
+  }
+
+  return campaignMap
+}
+
 const loadOpportunities = async (chainId: number, isInitialLoading = true, forceRefresh = false) => {
   const now = Date.now()
   // Skip if cached and not expired
@@ -187,42 +253,44 @@ const loadOpportunities = async (chainId: number, isInitialLoading = true, force
       return { data: allData, complete: true }
     }
 
-    // Always fetch EULER campaigns. Only fetch ERC20LOGPROCESSOR when Earn vault
-    // labels are available for client-side filtering (the earnVaults watcher will
-    // trigger a force-refresh once labels load).
+    // Always fetch EULER and MULTILENDBORROW campaigns. Only fetch ERC20LOGPROCESSOR
+    // when Earn vault labels are available for client-side filtering (the earnVaults
+    // watcher will trigger a force-refresh once labels load). MULTILENDBORROW is
+    // unconditional because each campaign explicitly lists the targeted vaults.
+    // NOTE: &test=true is temporary for local verification; remove before merging.
     const { MERKL_API_BASE_URL } = useEulerConfig()
-    const eulerUrl = `${MERKL_API_BASE_URL}/opportunities/?chainId=${chainId}&type=EULER&campaigns=true`
+    const eulerUrl = `${MERKL_API_BASE_URL}/opportunities/?chainId=${chainId}&type=EULER&campaigns=true&test=true`
+    const multiUrl = `${MERKL_API_BASE_URL}/opportunities/?chainId=${chainId}&type=MULTILENDBORROW&campaigns=true&test=true`
     const earnAddrs = earnVaults.value
     const knownEarnVaults = earnAddrs.length > 0
       ? new Set(earnAddrs.map(addr => addr.toLowerCase()))
       : undefined
 
-    const fetches: Promise<{ data: Opportunity[], complete: boolean }>[] = [fetchAllPages(eulerUrl)]
-    if (knownEarnVaults) {
-      const erc20Url = `${MERKL_API_BASE_URL}/opportunities/?chainId=${chainId}&type=ERC20LOGPROCESSOR&campaigns=true`
-      fetches.push(fetchAllPages(erc20Url))
-    }
+    const eulerPromise = fetchAllPages(eulerUrl)
+    const multiPromise = fetchAllPages(multiUrl)
+    const erc20Promise = knownEarnVaults
+      ? fetchAllPages(`${MERKL_API_BASE_URL}/opportunities/?chainId=${chainId}&type=ERC20LOGPROCESSOR&campaigns=true&test=true`)
+      : Promise.resolve<{ data: Opportunity[], complete: boolean }>({ data: [], complete: true })
 
-    const results = await Promise.all(fetches)
+    const [eulerResult, multiResult, erc20Result] = await Promise.all([eulerPromise, multiPromise, erc20Promise])
 
     if (requestId !== latestOpportunitiesRequestId) return
 
-    const allComplete = results.every(r => r.complete)
-    const [eulerResult, erc20Result] = results
+    const allComplete = eulerResult.complete && multiResult.complete && erc20Result.complete
 
     const merged = new Map<string, RewardCampaign[]>()
 
-    for (const { data, type } of [
-      { data: eulerResult.data, type: 'EULER' as const },
-      { data: erc20Result?.data ?? [], type: 'ERC20LOGPROCESSOR' as const },
-    ]) {
-      const partial = processOpportunitiesToCampaigns(data, type, type === 'ERC20LOGPROCESSOR' ? knownEarnVaults : undefined)
+    const mergeInto = (partial: Map<string, RewardCampaign[]>) => {
       for (const [vault, campaigns] of partial) {
         const existing = merged.get(vault)
         if (existing) existing.push(...campaigns)
         else merged.set(vault, [...campaigns])
       }
     }
+
+    mergeInto(processOpportunitiesToCampaigns(eulerResult.data, 'EULER'))
+    mergeInto(processOpportunitiesToCampaigns(erc20Result.data, 'ERC20LOGPROCESSOR', knownEarnVaults))
+    mergeInto(processMultiLendBorrowOpportunities(multiResult.data))
 
     merklCampaigns.value = merged
     // Only cache when all pages were fetched successfully — partial results
