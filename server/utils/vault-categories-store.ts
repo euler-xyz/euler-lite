@@ -72,7 +72,32 @@ interface ChainFactoryAddresses {
 
 const emptyCategories = (): VaultCategories => ({ evk: [], earn: [], securitize: [], escrow: [] })
 
-const categoriesCache = createTtlCache<VaultCategories>({ ttlMs: CACHE_TTL_MS, maxEntries: 50 })
+/**
+ * Internal wrapper that carries both the wire-shape arrays and a set index
+ * for O(1) membership probes. getVaultCategory for large chains (thousands
+ * of vaults) would otherwise run four linear scans per per-address lookup.
+ */
+interface IndexedCategories {
+  data: VaultCategories
+  index: {
+    evk: Set<string>
+    earn: Set<string>
+    securitize: Set<string>
+    escrow: Set<string>
+  }
+}
+
+const buildIndex = (data: VaultCategories): IndexedCategories => ({
+  data,
+  index: {
+    evk: new Set(data.evk),
+    earn: new Set(data.earn),
+    securitize: new Set(data.securitize),
+    escrow: new Set(data.escrow),
+  },
+})
+
+const categoriesCache = createTtlCache<IndexedCategories>({ ttlMs: CACHE_TTL_MS, maxEntries: 50 })
 const inFlight = new Map<number, Promise<VaultCategories>>()
 
 // Per-address inflight dedup for the single-address fallback path.
@@ -223,7 +248,7 @@ export const refreshVaultCategories = async (chainId: number): Promise<VaultCate
 
   const promise = withWallClock(() => buildCategories(chainId), PER_REQUEST_TIMEOUT_MS, `vault-categories chain=${chainId}`)
     .then((cats) => {
-      categoriesCache.set(chainId.toString(), cats)
+      categoriesCache.set(chainId.toString(), buildIndex(cats))
       return cats
     })
     .finally(() => { inFlight.delete(chainId) })
@@ -237,13 +262,19 @@ export interface CategoriesRead {
   isStale: boolean
 }
 
-export const readVaultCategories = (chainId: number): CategoriesRead | undefined => {
+const readIndexed = (chainId: number): { entry: IndexedCategories, isStale: boolean } | undefined => {
   const key = chainId.toString()
   const fresh = categoriesCache.get(key)
-  if (fresh) return { data: fresh, isStale: false }
+  if (fresh) return { entry: fresh, isStale: false }
   const stale = categoriesCache.getStale(key)
-  if (stale) return { data: stale, isStale: true }
+  if (stale) return { entry: stale, isStale: true }
   return undefined
+}
+
+export const readVaultCategories = (chainId: number): CategoriesRead | undefined => {
+  const got = readIndexed(chainId)
+  if (!got) return undefined
+  return { data: got.entry.data, isStale: got.isStale }
 }
 
 /**
@@ -307,21 +338,24 @@ export const getVaultCategory = async (
   const cachedOne = perAddressCache.get(key) ?? perAddressCache.getStale(key)
   if (cachedOne) return cachedOne
 
-  const fullCats = readVaultCategories(chainId)
-  if (fullCats) {
-    if (fullCats.data.escrow.includes(normalized)) {
+  const indexed = readIndexed(chainId)
+  if (indexed) {
+    const { index } = indexed.entry
+    // O(1) membership probes via the pre-built Set index. Order matters:
+    // 'escrow' is a subset of 'evk', so check escrow first.
+    if (index.escrow.has(normalized)) {
       perAddressCache.set(key, 'escrow')
       return 'escrow'
     }
-    if (fullCats.data.evk.includes(normalized)) {
+    if (index.evk.has(normalized)) {
       perAddressCache.set(key, 'evk')
       return 'evk'
     }
-    if (fullCats.data.earn.includes(normalized)) {
+    if (index.earn.has(normalized)) {
       perAddressCache.set(key, 'earn')
       return 'earn'
     }
-    if (fullCats.data.securitize.includes(normalized)) {
+    if (index.securitize.has(normalized)) {
       perAddressCache.set(key, 'securitize')
       return 'securitize'
     }

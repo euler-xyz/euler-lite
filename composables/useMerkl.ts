@@ -38,6 +38,11 @@ const isRewardsLoading = ref(true)
 // token list rather than a dedicated Merkl fetch here.
 let publicInterval: NodeJS.Timeout | null = null
 let userInterval: NodeJS.Timeout | null = null
+// Module-singleton refcount: multiple components / composables (useRewardsApy,
+// PortfolioRewardItem, vault list rows, etc.) call useMerkl simultaneously.
+// Clearing intervals on the first unmount would starve everyone else still
+// subscribed. Mirrors the pattern already used in useFuul.
+let subscriberCount = 0
 
 const cacheState = {
   opportunities: { chainId: 0, timestamp: 0 },
@@ -445,14 +450,19 @@ export const useMerkl = () => {
     }
   }, { immediate: true })
 
+  subscriberCount++
+
   onUnmounted(() => {
-    if (publicInterval) {
-      clearInterval(publicInterval)
-      publicInterval = null
-    }
-    if (userInterval) {
-      clearInterval(userInterval)
-      userInterval = null
+    subscriberCount--
+    if (subscriberCount === 0) {
+      if (publicInterval) {
+        clearInterval(publicInterval)
+        publicInterval = null
+      }
+      if (userInterval) {
+        clearInterval(userInterval)
+        userInterval = null
+      }
     }
   })
 

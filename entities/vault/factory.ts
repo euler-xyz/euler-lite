@@ -116,12 +116,9 @@ export const fetchVaultCategory = async (address: string): Promise<VaultCategory
   const cached = perAddressCache.get(key)
   if (cached) return cached
 
-  // If the full chain categorization is in cache and didn't contain this
-  // address, skip the per-address fallback — we'd ask the subgraph for an
-  // address it already knows isn't a registered vault.
-  const fullCached = chainCategoriesCache.get(chainId)
-  if (fullCached) return null
-
+  // Full categorization doesn't include this address — could be a brand-new
+  // deployment the subgraph indexed after our last catalog refresh. Fall
+  // through to the server's single-address endpoint which runs a live query.
   const existing = perAddressInFlight.get(key)
   if (existing) return existing
 

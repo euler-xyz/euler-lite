@@ -86,6 +86,10 @@ const isRewardsLoading = ref(true)
 // claimable amounts refresh responsively after attestation ticks.
 let publicInterval: NodeJS.Timeout | null = null
 let userInterval: NodeJS.Timeout | null = null
+// Refcount: useBrevis is consumed by useRewardsApy + portfolio components
+// simultaneously. Clearing intervals on the first unmount would starve other
+// subscribers; tear down only when the last one goes away.
+let subscriberCount = 0
 
 const cacheState = {
   campaigns: { timestamp: 0 },
@@ -394,14 +398,19 @@ export const useBrevis = () => {
     }
   }, { immediate: true })
 
+  subscriberCount++
+
   onUnmounted(() => {
-    if (publicInterval) {
-      clearInterval(publicInterval)
-      publicInterval = null
-    }
-    if (userInterval) {
-      clearInterval(userInterval)
-      userInterval = null
+    subscriberCount--
+    if (subscriberCount === 0) {
+      if (publicInterval) {
+        clearInterval(publicInterval)
+        publicInterval = null
+      }
+      if (userInterval) {
+        clearInterval(userInterval)
+        userInterval = null
+      }
     }
   })
 

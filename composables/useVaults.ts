@@ -12,13 +12,12 @@ import {
   fetchVault,
   fetchEarnVault,
   fetchEscrowVault,
-  fetchEscrowAddresses,
   fetchSecuritizeVault,
   fetchVaults,
   clearPriceCaches,
   type Vault,
 } from '~/entities/vault'
-import { fetchChainVaultCategories, isSecuritizeVault } from '~/entities/vault/factory'
+import { fetchChainVaultCategories, isSecuritizeVault, resetVaultCategoryCache } from '~/entities/vault/factory'
 import { getProductByVault, isVaultNotExplorable, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import { getEulerRouterGovernor } from '~/entities/oracle'
 
@@ -121,6 +120,7 @@ const resetVaultsState = () => {
   loadedChainId.value = null
   clear()
   clearPriceCaches()
+  resetVaultCategoryCache()
 }
 
 const updateEVKVaults = async (vaultAddresses: string[], generation?: number, silent = false) => {
@@ -405,7 +405,7 @@ const hydrateFromServer = async (targetChainId: number, generation: number): Pro
 }
 
 const loadVaults = async () => {
-  const { chainId, eulerPeripheryAddresses } = useEulerAddresses()
+  const { chainId } = useEulerAddresses()
   const { verifiedVaultAddresses, earnVaults: earnVaultAddresses } = useEulerLabels()
   const { setEscrowAddresses } = useVaultRegistry()
 
@@ -462,29 +462,22 @@ const loadVaults = async () => {
       }
     })
 
-    // Seed the registry's escrow set from the categorization now rather
-    // than waiting for the Phase-2 RPC — keeps UI routing (isKnownEscrowAddress)
-    // responsive even before the escrow perspective read completes.
-    if (categories.escrow.length > 0) {
-      setEscrowAddresses(categories.escrow)
-    }
+    // Seed the registry's escrow set from the categorization. The catalog
+    // endpoint already reads EscrowedCollateralPerspective.verifiedArray()
+    // server-side, so no redundant client-side RPC call is needed.
+    setEscrowAddresses(categories.escrow)
 
-    // Phase 2: Fetch all vault types + escrow addresses in parallel
-    // Escrow vault info fetch starts when EVK, Earn, AND escrow addresses are all ready
-    // (need EVK collateralLTVs + Earn strategies to know which escrow vaults are needed)
+    // Phase 2: fetch EVK, Earn, Securitize in parallel; follow with escrow
+    // vault info once EVK collateralLTVs + Earn strategies are known (the
+    // escrow subset referenced by them is what we need to fetch details for).
 
-    // Signals for coordination
     let evkResolve: () => void = () => {}
     let earnResolve: () => void = () => {}
-    let escrowAddrsResolve: (addrs: string[]) => void = () => {}
     const evkLoaded = new Promise<void>((resolve) => {
       evkResolve = resolve
     })
     const earnLoaded = new Promise<void>((resolve) => {
       earnResolve = resolve
-    })
-    const escrowAddrsLoaded = new Promise<string[]>((resolve) => {
-      escrowAddrsResolve = resolve
     })
 
     await Promise.all([
@@ -497,20 +490,7 @@ const loadVaults = async () => {
         evkResolve()
       })(),
       updateSecuritizeVaults(securitizeAddresses, generation, silent),
-      // Escrow addresses - fetch in parallel, populate set when ready
-      (async () => {
-        const perspective = eulerPeripheryAddresses.value?.escrowedCollateralPerspective
-        const ctx = contextForGeneration(generation)
-        const addrs = perspective ? await fetchEscrowAddresses(ctx.rpcUrl, perspective, ctx.chainId) : []
-        if (loadGeneration.value !== generation) {
-          escrowAddrsResolve([]) // Unblock downstream even if stale
-          return
-        }
-        setEscrowAddresses(addrs)
-        escrowAddrsResolve(addrs)
-      })(),
-      // Escrow vault info - waits for EVK, Earn, AND escrow addresses
-      Promise.all([evkLoaded, earnLoaded, escrowAddrsLoaded]).then(async () => {
+      Promise.all([evkLoaded, earnLoaded]).then(async () => {
         const neededEscrowAddresses = extractNeededEscrowAddresses()
         await fetchNeededEscrowVaults(neededEscrowAddresses, generation)
       }),
