@@ -347,6 +347,15 @@ interface SimpleProviderSpec<T> {
   extract: (data: T) => number
 }
 
+/**
+ * Structural shape used only for the `satisfies` constraint on SIMPLE_SPECS
+ * below. Each spec entry has its own concrete `T`; the record can't fix a
+ * single `T` without breaking variance, so the shape check ignores it.
+ * extractSimple re-applies the per-call `T` via its own generic.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- heterogeneous record constraint
+type SimpleProviderSpecShape = SimpleProviderSpec<any>
+
 async function extractSimple<S extends IntrinsicApySourceConfig, T>(
   sources: S[],
   spec: SimpleProviderSpec<T>,
@@ -413,7 +422,7 @@ const SIMPLE_SPECS = {
     sourceUrl: 'https://avantprotocol.com',
     extract: (d: { savusdApy?: number }) => Number(d.savusdApy ?? 0),
   },
-} satisfies Record<SimpleProvider, SimpleProviderSpec<unknown>>
+} satisfies Record<SimpleProvider, SimpleProviderSpecShape>
 
 async function extractForProvider(
   provider: IntrinsicApySourceConfig['provider'],
@@ -435,7 +444,7 @@ async function extractForProvider(
         logWarn('intrinsic-apy', `No extractor for provider "${provider}"`)
         return []
       }
-      return extractSimple(sources, spec as SimpleProviderSpec<unknown>)
+      return extractSimple(sources, spec as SimpleProviderSpecShape)
     }
   }
 }
