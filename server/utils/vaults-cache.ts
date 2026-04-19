@@ -13,7 +13,7 @@
  */
 import { createTtlCache } from './cache'
 import { logWarn } from './log'
-import { getVaultFactories } from './vault-factories-store'
+import { getVaultCategories } from './vault-categories-store'
 import { INTERNAL_FETCH_HEADERS } from './internal-headers'
 import { loadChainSnapshot, serialiseSnapshot } from '~/entities/vault'
 import type { FetchVaultContext, SerialisedSnapshot } from '~/entities/vault'
@@ -108,10 +108,25 @@ const getLabels = async (chainId: number) => {
   }
 }
 
-const getFactories = async (chainId: number, addresses: string[]): Promise<Map<string, string>> => {
-  if (addresses.length === 0) return new Map()
-  const factories = await getVaultFactories(chainId, addresses)
-  return new Map(Object.entries(factories))
+/**
+ * Split verified addresses into EVK vs Securitize using the chain-wide
+ * vault categorization. Labels tell us WHICH vaults to include in the
+ * snapshot; categorization tells us WHICH LENS to use for each. Addresses
+ * missing from the categorization (e.g. brand-new deployments the subgraph
+ * hasn't picked up yet) default to EVK since the VaultLens handles any
+ * ERC-4626 + EVK-compatible deployment.
+ */
+const splitVerifiedByCategory = (
+  verifiedAddresses: string[],
+  securitizeSet: Set<string>,
+): { evkVaultAddresses: string[], securitizeVaultAddresses: string[] } => {
+  const evkVaultAddresses: string[] = []
+  const securitizeVaultAddresses: string[] = []
+  for (const addr of verifiedAddresses) {
+    if (securitizeSet.has(addr.toLowerCase())) securitizeVaultAddresses.push(addr)
+    else evkVaultAddresses.push(addr)
+  }
+  return { evkVaultAddresses, securitizeVaultAddresses }
 }
 
 /**
@@ -129,8 +144,15 @@ export const refreshChainVaults = async (chainId: number): Promise<SerialisedSna
     const cfg = await getChainConfig(chainId)
     if (!cfg) throw new Error(`No euler-chains entry for chain ${chainId}`)
 
-    const labels = await getLabels(chainId)
-    const factories = await getFactories(chainId, labels.verifiedVaultAddresses)
+    // Labels (what to include) + categories (how to categorize) run in parallel.
+    const [labels, categories] = await Promise.all([
+      getLabels(chainId),
+      getVaultCategories(chainId),
+    ])
+
+    const securitizeSet = new Set(categories.securitize.map(a => a.toLowerCase()))
+    const { evkVaultAddresses, securitizeVaultAddresses }
+      = splitVerifiedByCategory(labels.verifiedVaultAddresses, securitizeSet)
 
     const ctx: FetchVaultContext = {
       chainId,
@@ -154,11 +176,9 @@ export const refreshChainVaults = async (chainId: number): Promise<SerialisedSna
     const snap = await loadChainSnapshot({
       chainId,
       ctx,
-      peripheryAddresses: {
-        escrowedCollateralPerspective: cfg.addresses.peripheryAddrs.escrowedCollateralPerspective,
-        securitizeFactory: cfg.addresses.peripheryAddrs.securitizeFactory,
-      },
-      factories,
+      evkVaultAddresses,
+      securitizeVaultAddresses,
+      escrowAddresses: categories.escrow,
       // Server doesn't honour nonExplorable filters — UI-only concerns.
       // The snapshot contains all verified vaults; the client applies UI
       // filters at render time.

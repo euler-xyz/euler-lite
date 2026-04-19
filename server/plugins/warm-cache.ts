@@ -1,6 +1,7 @@
 /**
  * Pre-populates the in-memory TTL caches for every proxy that serves
- * static/low-churn data (labels, token-list, intrinsic APY, euler-chains).
+ * static/low-churn data (labels, token-list, intrinsic APY, euler-chains,
+ * vaults snapshot, public reward campaigns).
  *
  * Nitro's node-server preset calls `server.listen()` synchronously right
  * after firing plugins and does NOT await plugin promises, so warming
@@ -8,14 +9,41 @@
  * ~5 s of boot; users arriving before that pay the usual cold-upstream
  * latency for the specific endpoints they hit, same as today. The
  * periodic 4-min re-warm keeps every entry ahead of its 5-min TTL.
+ *
+ * Warm-up structure (per cycle): all tasks run in parallel.
+ *
+ *   • Global:    /api/euler-chains
+ *   • Per-chain: labels, token-list, intrinsic-apy, vault-categories,
+ *                Merkl opportunities × 3, Brevis campaigns, Fuul × 2,
+ *                refreshChainVaults(chainId)
+ *
+ * `refreshChainVaults` internally $fetches /api/euler-chains and
+ * /api/labels/*, and calls `getVaultCategories(chainId)` — those all
+ * collapse onto the parallel warms via in-flight dedup at the cache layer,
+ * so no duplicate upstream traffic.
+ *
+ * Merkl's /tokens/reward payload is fetched transitively by /api/token-list
+ * (one of its sources). Merkl's ERC20LOGPROCESSOR refresh also calls
+ * `getVaultCategories(chainId)` to filter by the chain earn set.
  */
 import { LABEL_FILES } from '../api/labels/[file].get'
 import { getEnabledChainIds } from '~/utils/chain-env'
 import { logWarn } from '../utils/log'
 import { INTERNAL_FETCH_HEADERS } from '../utils/internal-headers'
 import { refreshChainVaults } from '../utils/vaults-cache'
+import { refreshVaultCategories } from '../utils/vault-categories-store'
+import {
+  type FuulProtocol,
+  type MerklOpportunityType,
+  refreshBrevisCampaigns,
+  refreshFuulProtocol,
+  refreshMerklType,
+} from '../utils/rewards-cache'
 
 const REWARM_INTERVAL_MS = 4 * 60_000
+
+const MERKL_TYPES: MerklOpportunityType[] = ['EULER', 'MULTILENDBORROW', 'ERC20LOGPROCESSOR']
+const FUUL_PROTOCOLS: FuulProtocol[] = ['euler', 'euler-looping']
 
 // Nitro dev mode re-imports server plugins across its double-init (Vite
 // client build + Nitro server build), which would fire two warm cycles
@@ -25,6 +53,63 @@ const REWARM_INTERVAL_MS = 4 * 60_000
 const WARM_LATCH_KEY = '__eulerLiteWarmCacheStarted'
 type WarmLatchedGlobal = typeof globalThis & { [WARM_LATCH_KEY]?: true }
 
+const logFail = (context: string) => (err: unknown) => {
+  logWarn('warm-cache', `${context} failed:`, err instanceof Error ? err.message : err)
+}
+
+// --- Global warms (no dependencies, run once per cycle) ---
+
+const warmEulerChains = () =>
+  $fetch('/api/euler-chains', { headers: INTERNAL_FETCH_HEADERS })
+    .catch(logFail('euler-chains'))
+
+// --- Per-chain warms (parallel across chains and within a chain) ---
+
+const warmLabels = (chainId: number): Promise<unknown>[] =>
+  LABEL_FILES.map(file =>
+    $fetch(`/api/labels/${file}`, { query: { chainId }, headers: INTERNAL_FETCH_HEADERS })
+      .catch(logFail(`labels/${file} chain=${chainId}`)),
+  )
+
+const warmTokenList = (chainId: number) =>
+  $fetch('/api/token-list', { query: { chainId }, headers: INTERNAL_FETCH_HEADERS })
+    .catch(logFail(`token-list chain=${chainId}`))
+
+const warmIntrinsicApy = (chainId: number) =>
+  $fetch('/api/intrinsic-apy', { query: { chainId }, headers: INTERNAL_FETCH_HEADERS })
+    .catch(logFail(`intrinsic-apy chain=${chainId}`))
+
+const warmRewardCampaigns = (chainId: number): Promise<unknown>[] => [
+  ...MERKL_TYPES.map(type =>
+    refreshMerklType(chainId, type).catch(logFail(`merkl/${type} chain=${chainId}`)),
+  ),
+  refreshBrevisCampaigns(chainId).catch(logFail(`brevis chain=${chainId}`)),
+  ...FUUL_PROTOCOLS.map(protocol =>
+    refreshFuulProtocol(chainId, protocol).catch(logFail(`fuul/${protocol} chain=${chainId}`)),
+  ),
+]
+
+const warmVaultCategories = (chainId: number) =>
+  refreshVaultCategories(chainId).catch(logFail(`vault-categories chain=${chainId}`))
+
+// Direct call (no $fetch HTTP round-trip) so we get typed errors. Its internal
+// $fetches to /api/euler-chains + /api/labels/* collapse onto Stage A's
+// parallel warms via in-flight dedup at the cache layer, and its call to
+// getVaultCategories() joins the warmVaultCategories task above.
+const warmChainVaults = (chainId: number) =>
+  refreshChainVaults(chainId).catch(logFail(`vaults chain=${chainId}`))
+
+const warmChainTasks = (chainId: number): Promise<unknown>[] => [
+  ...warmLabels(chainId),
+  warmTokenList(chainId),
+  warmIntrinsicApy(chainId),
+  warmVaultCategories(chainId),
+  ...warmRewardCampaigns(chainId),
+  warmChainVaults(chainId),
+]
+
+// --- Orchestration ---
+
 export default defineNitroPlugin(() => {
   const g = globalThis as WarmLatchedGlobal
   if (g[WARM_LATCH_KEY]) return
@@ -33,51 +118,11 @@ export default defineNitroPlugin(() => {
   const chainIds = getEnabledChainIds()
   if (chainIds.length === 0) return
 
-  const warmChain = async (chainId: number) => {
-    const tasks: Promise<unknown>[] = LABEL_FILES.map(file =>
-      $fetch(`/api/labels/${file}`, { query: { chainId }, headers: INTERNAL_FETCH_HEADERS }).catch(() => undefined),
-    )
-    tasks.push($fetch('/api/token-list', { query: { chainId }, headers: INTERNAL_FETCH_HEADERS }).catch(() => undefined))
-    tasks.push($fetch('/api/intrinsic-apy', { query: { chainId }, headers: INTERNAL_FETCH_HEADERS }).catch(() => undefined))
-    // Vaults snapshot — direct call so we skip $fetch's HTTP dispatch and
-    // get typed errors. refreshChainVaults internally $fetches labels +
-    // euler-chains + vault-factories; the other tasks in this batch populate
-    // those caches in parallel (in-flight dedup collapses the contention).
-    tasks.push(refreshChainVaults(chainId).catch((err) => {
-      logWarn('warm-cache', `vaults chain=${chainId} failed:`, err instanceof Error ? err.message : err)
-    }))
-    await Promise.allSettled(tasks)
-
-    // Phase 2: warm vault-factories using earn-vault addresses (labels are cached from above)
-    try {
-      const earnData = await $fetch<Array<string | { address: string }>>('/api/labels/earn-vaults.json', {
-        query: { chainId },
-        headers: INTERNAL_FETCH_HEADERS,
-      })
-      const addresses = (earnData ?? [])
-        .map(e => typeof e === 'string' ? e : e?.address)
-        .filter((a): a is string => !!a)
-      if (addresses.length > 0) {
-        await $fetch('/api/vault-factories', {
-          method: 'POST',
-          body: { chainId, addresses },
-          headers: INTERNAL_FETCH_HEADERS,
-        })
-      }
-    }
-    catch {
-      // earn-vaults or vault-factories fetch failed; non-critical
-    }
-  }
-
-  const warmEulerChains = () =>
-    $fetch('/api/euler-chains', { headers: INTERNAL_FETCH_HEADERS }).catch(() => undefined)
-
   const warmAll = async () => {
     try {
       await Promise.allSettled([
-        ...chainIds.map(warmChain),
         warmEulerChains(),
+        ...chainIds.flatMap(warmChainTasks),
       ])
     }
     catch (err) {

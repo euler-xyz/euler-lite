@@ -1,10 +1,40 @@
-import axios from 'axios'
-import { useVaultRegistry } from '~/composables/useVaultRegistry'
+/**
+ * Client-side helpers for vault categorization.
+ *
+ * Reads the chain-wide categorization from /api/vault-categories (cached
+ * server-side with a 5-min TTL + warm-cache). The client caches the full
+ * per-chain categorization and individual-address lookups in memory for
+ * the session — the upstream TTL is authoritative, in-session cache just
+ * avoids re-fetching on re-entry to the same page.
+ *
+ * Replaces the old factory-based API (fetchVaultFactory / fetchVaultFactories)
+ * which hit /api/vault-factories with a per-address subgraph lookup.
+ */
+import { getAddress } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 
-// Client-side in-memory cache keyed by `${chainId}:${lowercaseAddress}`.
-// Factories are immutable per vault, so entries never need to expire within a session.
-const vaultFactoryCache = new Map<string, string>()
+export type VaultCategory = 'evk' | 'earn' | 'securitize' | 'escrow'
+
+/**
+ * Shape returned by GET /api/vault-categories?chainId=X.
+ *
+ * Invariant: every address in `escrow` also appears in `evk`. Consumers that
+ * want "all EVK-compatible vaults" iterate `evk`; consumers that want to
+ * distinguish escrow check `escrow` (or the per-address lookup).
+ */
+export interface VaultCategories {
+  evk: string[]
+  earn: string[]
+  securitize: string[]
+  escrow: string[]
+}
+
+const chainCategoriesCache = new Map<number, VaultCategories>()
+const chainCategoriesInFlight = new Map<number, Promise<VaultCategories | null>>()
+const perAddressCache = new Map<string, VaultCategory>()
+const perAddressInFlight = new Map<string, Promise<VaultCategory | null>>()
+
+const emptyCategories = (): VaultCategories => ({ evk: [], earn: [], securitize: [], escrow: [] })
 
 const getChainId = (): number | null => {
   try {
@@ -18,142 +48,143 @@ const getChainId = (): number | null => {
 
 const cacheKey = (chainId: number, address: string) => `${chainId}:${address.toLowerCase()}`
 
-const postFactories = async (
-  chainId: number,
-  addresses: string[],
-): Promise<Record<string, string>> => {
-  try {
-    const { data } = await axios.post('/api/vault-factories', { chainId, addresses })
-    return (data?.factories ?? {}) as Record<string, string>
+const populatePerAddressFromCategories = (chainId: number, categories: VaultCategories) => {
+  // Index the full categorization into the per-address cache so subsequent
+  // single-address lookups don't need to roundtrip.
+  for (const addr of categories.escrow) perAddressCache.set(cacheKey(chainId, addr), 'escrow')
+  for (const addr of categories.evk) {
+    const key = cacheKey(chainId, addr)
+    // Don't overwrite 'escrow' with 'evk' — escrow is the more specific label.
+    if (!perAddressCache.has(key)) perAddressCache.set(key, 'evk')
   }
-  catch (e) {
-    logWarn('fetchVaultFactories', 'Proxy request failed:', e)
-    return {}
-  }
+  for (const addr of categories.earn) perAddressCache.set(cacheKey(chainId, addr), 'earn')
+  for (const addr of categories.securitize) perAddressCache.set(cacheKey(chainId, addr), 'securitize')
 }
 
-// Fetch vault factory for a single vault
-export const fetchVaultFactory = async (vaultAddress: string): Promise<string | null> => {
+/**
+ * Fetch (or reuse cached) the full chain categorization. Deduplicates
+ * concurrent callers for the same chain onto one HTTP round-trip.
+ */
+export const fetchChainVaultCategories = async (): Promise<VaultCategories> => {
+  const chainId = getChainId()
+  if (!chainId) return emptyCategories()
+
+  const cached = chainCategoriesCache.get(chainId)
+  if (cached) return cached
+
+  const existing = chainCategoriesInFlight.get(chainId)
+  if (existing) return (await existing) ?? emptyCategories()
+
+  const promise = $fetch<VaultCategories>('/api/vault-categories', { query: { chainId } })
+    .then((data) => {
+      const categories = {
+        evk: data?.evk ?? [],
+        earn: data?.earn ?? [],
+        securitize: data?.securitize ?? [],
+        escrow: data?.escrow ?? [],
+      }
+      chainCategoriesCache.set(chainId, categories)
+      populatePerAddressFromCategories(chainId, categories)
+      return categories
+    })
+    .catch((err) => {
+      logWarn('fetchChainVaultCategories', err)
+      return null
+    })
+    .finally(() => { chainCategoriesInFlight.delete(chainId) })
+
+  chainCategoriesInFlight.set(chainId, promise)
+  return (await promise) ?? emptyCategories()
+}
+
+/**
+ * Resolve the category of a single vault address. Falls back to a server-side
+ * single-address subgraph query if the full chain categorization hasn't been
+ * loaded yet (or if the address is too new to be in it).
+ *
+ * Note: the single-address fallback does NOT distinguish escrow from evk —
+ * escrow membership requires an on-chain perspective check that only runs
+ * during the full categorization refresh. If escrow detection matters, load
+ * the full categorization first (via fetchChainVaultCategories) or fall back
+ * to an explicit escrow check downstream.
+ */
+export const fetchVaultCategory = async (address: string): Promise<VaultCategory | null> => {
   const chainId = getChainId()
   if (!chainId) return null
 
-  const key = cacheKey(chainId, vaultAddress)
-  const cached = vaultFactoryCache.get(key)
+  const key = cacheKey(chainId, address)
+  const cached = perAddressCache.get(key)
   if (cached) return cached
 
-  const factories = await postFactories(chainId, [vaultAddress])
-  const factory = factories[vaultAddress.toLowerCase()]
-  if (factory) {
-    vaultFactoryCache.set(key, factory)
-    return factory
-  }
-  return null
+  // If the full chain categorization is in cache and didn't contain this
+  // address, skip the per-address fallback — we'd ask the subgraph for an
+  // address it already knows isn't a registered vault.
+  const fullCached = chainCategoriesCache.get(chainId)
+  if (fullCached) return null
+
+  const existing = perAddressInFlight.get(key)
+  if (existing) return existing
+
+  const promise = $fetch<{ category: VaultCategory | null }>('/api/vault-categories', {
+    query: { chainId, address },
+  })
+    .then((data) => {
+      const category = data?.category ?? null
+      if (category) perAddressCache.set(key, category)
+      return category
+    })
+    .catch((err) => {
+      logWarn('fetchVaultCategory', err)
+      return null
+    })
+    .finally(() => { perAddressInFlight.delete(key) })
+
+  perAddressInFlight.set(key, promise)
+  return promise
 }
 
-// Check if vault is a securitize vault - first checks registry, then falls back to subgraph
+/**
+ * Check if an address is a securitize vault. Registry type wins; otherwise
+ * falls back to the categorization endpoint.
+ */
 export const isSecuritizeVault = async (address: string): Promise<boolean> => {
   try {
-    // First check the vault registry (if populated)
+    const { useVaultRegistry } = await import('~/composables/useVaultRegistry')
     const { getType } = useVaultRegistry()
     const registryType = getType(address)
-    if (registryType) {
-      return registryType === 'securitize'
-    }
-
-    // Fall back to subgraph query — wait for addresses to load
-    const { eulerPeripheryAddresses, isReady, loadEulerConfig } = useEulerAddresses()
-    if (!isReady.value) {
-      loadEulerConfig()
-      await until(computed(() => isReady.value)).toBeTruthy()
-    }
-    const securitizeFactory = eulerPeripheryAddresses.value?.securitizeFactory
-    if (!securitizeFactory) {
-      return false
-    }
-
-    const factory = await fetchVaultFactory(address)
-    if (!factory) {
-      return false
-    }
-    return factory.toLowerCase() === securitizeFactory.toLowerCase()
+    if (registryType) return registryType === 'securitize'
   }
   catch {
-    return false
+    // registry unavailable (e.g. called outside setup) — fall through
   }
+
+  const category = await fetchVaultCategory(address)
+  return category === 'securitize'
 }
 
-// Synchronous check using cached factory data
-export const isSecuritizeVaultSync = (address: string): boolean => {
-  const { eulerPeripheryAddresses } = useEulerAddresses()
-  const securitizeFactory = eulerPeripheryAddresses.value?.securitizeFactory
-  if (!securitizeFactory) {
-    return false
-  }
+/** Clear in-memory per-session caches on chain switch or other invalidation. */
+export const resetVaultCategoryCache = (): void => {
+  chainCategoriesCache.clear()
+  chainCategoriesInFlight.clear()
+  perAddressCache.clear()
+  perAddressInFlight.clear()
+}
 
+/**
+ * Synchronous check: is the given address known to be a securitize vault?
+ * Returns false when the categorization hasn't been fetched yet.
+ */
+export const isSecuritizeVaultSync = (address: string): boolean => {
   const chainId = getChainId()
   if (!chainId) return false
-
-  const factory = vaultFactoryCache.get(cacheKey(chainId, address))
-  if (!factory) {
-    return false
-  }
-  return factory.toLowerCase() === securitizeFactory.toLowerCase()
+  return perAddressCache.get(cacheKey(chainId, normalizeAddress(address))) === 'securitize'
 }
 
-// Batch fetch vault factories via the server proxy
-export const fetchVaultFactories = async (
-  vaultAddresses: string[],
-): Promise<Map<string, string>> => {
-  const result = new Map<string, string>()
-
-  if (!vaultAddresses.length) {
-    return result
+const normalizeAddress = (address: string): string => {
+  try {
+    return getAddress(address)
   }
-
-  const chainId = getChainId()
-  if (!chainId) return result
-
-  const uncachedAddresses: string[] = []
-  vaultAddresses.forEach((addr) => {
-    const lower = addr.toLowerCase()
-    const cached = vaultFactoryCache.get(cacheKey(chainId, lower))
-    if (cached) {
-      result.set(lower, cached)
-    }
-    else {
-      uncachedAddresses.push(lower)
-    }
-  })
-
-  if (!uncachedAddresses.length) {
-    return result
+  catch {
+    return address
   }
-
-  const factories = await postFactories(chainId, uncachedAddresses)
-  for (const [addr, factory] of Object.entries(factories)) {
-    vaultFactoryCache.set(cacheKey(chainId, addr), factory)
-    result.set(addr, factory)
-  }
-
-  return result
-}
-
-// Get all securitize vault addresses from a list of addresses
-export const filterSecuritizeVaults = async (vaultAddresses: string[]): Promise<string[]> => {
-  const { eulerPeripheryAddresses } = useEulerAddresses()
-  const securitizeFactory = eulerPeripheryAddresses.value?.securitizeFactory
-  if (!securitizeFactory) {
-    return []
-  }
-
-  const factories = await fetchVaultFactories(vaultAddresses)
-  const securitizeAddresses: string[] = []
-
-  factories.forEach((factory, address) => {
-    if (factory.toLowerCase() === securitizeFactory.toLowerCase()) {
-      securitizeAddresses.push(address)
-    }
-  })
-
-  return securitizeAddresses
 }

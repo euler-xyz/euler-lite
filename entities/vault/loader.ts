@@ -1,7 +1,7 @@
 import { getAddress } from 'viem'
 import type { Vault, EarnVault, SecuritizeVault } from './types'
 import { type FetchVaultContext, fetchVaults, fetchEarnVaults, fetchSecuritizeVault } from './fetcher'
-import { fetchEscrowAddresses, fetchEscrowVault } from './escrow-fetcher'
+import { fetchEscrowVault } from './escrow-fetcher'
 import { logWarn } from '~/utils/errorHandling'
 
 /**
@@ -9,6 +9,10 @@ import { logWarn } from '~/utils/errorHandling'
  * wallet-independent — only depends on chainId × vault addresses. Per-user
  * data (balances, debts, collateral flags) is NOT included; the client
  * fetches it separately after wallet connect.
+ *
+ * Note: escrow categorization used to live here (`escrowAddresses: string[]`)
+ * but has moved to `/api/vault-categories`. The snapshot no longer carries
+ * that field; clients get the escrow set from the categorization endpoint.
  */
 export interface ChainVaultsSnapshot {
   chainId: number
@@ -17,8 +21,6 @@ export interface ChainVaultsSnapshot {
   evkVaults: Vault[]
   earnVaults: EarnVault[]
   securitizeVaults: SecuritizeVault[]
-  /** All escrow vault addresses known to the chain (from escrowedCollateralPerspective). */
-  escrowAddresses: string[]
   /** Info for the subset of escrow vaults referenced as collateral / strategy by evkVaults or earnVaults. */
   escrowVaults: Vault[]
 }
@@ -26,16 +28,20 @@ export interface ChainVaultsSnapshot {
 export interface LoadSnapshotInput {
   chainId: number
   ctx: FetchVaultContext
-  peripheryAddresses: {
-    escrowedCollateralPerspective?: string
-    securitizeFactory?: string
-  }
   /**
-   * Lowercase vault address → factory address, for splitting verified vault
-   * addresses into EVK vs Securitize. Client: from /api/vault-factories proxy.
-   * Server: from direct subgraph query.
+   * Verified vault addresses to include in the snapshot, pre-split into EVK
+   * and Securitize based on the chain's vault categorization. The caller
+   * performs this split using /api/vault-categories and intersects with the
+   * labels-derived verified set.
    */
-  factories: Map<string, string>
+  evkVaultAddresses: string[]
+  securitizeVaultAddresses: string[]
+  /**
+   * Lowercase escrow addresses for the chain (from the EscrowedCollateralPerspective).
+   * Used to derive the subset of escrow vaults referenced by EVK collateralLTVs
+   * or Earn strategies so we fetch info for them in Phase 3.
+   */
+  escrowAddresses: string[]
   /** Optional UI-only filters (honoured by the client path, bypassed by server for completeness). */
   nonExplorableVault?: (addr: string) => boolean
   nonExplorableEarn?: (addr: string) => boolean
@@ -43,8 +49,8 @@ export interface LoadSnapshotInput {
 
 /**
  * Runs the same 3-phase load the client uses in useVaults.loadVaults():
- *   1. split EVK vs Securitize by factory
- *   2. fetch EVK + Earn + Securitize + escrow-address-list in parallel
+ *   1. caller has already split verified addresses into EVK vs Securitize
+ *   2. fetch EVK + Earn + Securitize in parallel
  *   3. fetch info for the escrow subset referenced by (1)
  *
  * Generators are collected into arrays so the caller gets one snapshot.
@@ -52,37 +58,23 @@ export interface LoadSnapshotInput {
  * (client-side); server callers pass no isAborted and run the full fetch.
  */
 export const loadChainSnapshot = async (input: LoadSnapshotInput): Promise<ChainVaultsSnapshot> => {
-  const { chainId, ctx, peripheryAddresses, factories } = input
+  const { chainId, ctx, escrowAddresses } = input
 
-  const explorableVault = ctx.verifiedVaultAddresses.filter(
+  const explorableEvk = input.evkVaultAddresses.filter(
+    addr => !input.nonExplorableVault?.(addr),
+  )
+  const explorableSecuritize = input.securitizeVaultAddresses.filter(
     addr => !input.nonExplorableVault?.(addr),
   )
   const explorableEarn = ctx.earnVaultAddresses.filter(
     addr => !input.nonExplorableEarn?.(addr),
   )
 
-  const securitizeFactory = peripheryAddresses.securitizeFactory?.toLowerCase()
-  const evkAddresses: string[] = []
-  const securitizeAddresses: string[] = []
-  for (const addr of explorableVault) {
-    const factory = factories.get(addr.toLowerCase())
-    if (securitizeFactory && factory?.toLowerCase() === securitizeFactory) {
-      securitizeAddresses.push(addr)
-    }
-    else {
-      evkAddresses.push(addr)
-    }
-  }
-
-  const escrowAddressesPromise = peripheryAddresses.escrowedCollateralPerspective
-    ? fetchEscrowAddresses(ctx.rpcUrl, peripheryAddresses.escrowedCollateralPerspective, ctx.chainId)
-    : Promise.resolve<string[]>([])
-
-  // Phase 2: all four in parallel. Each arm is `allSettled` so one RPC
-  // hiccup on e.g. the escrow-addresses read doesn't kill the whole
-  // snapshot — a partial snapshot serves the client better than none.
-  const [evkSettled, earnSettled, securitizeSettled, escrowAddressesSettled] = await Promise.all([
-    collectVaults(fetchVaults(ctx, evkAddresses)).then(
+  // Phase 2: three arms in parallel. Each is isolated so one RPC hiccup
+  // doesn't kill the whole snapshot — a partial snapshot serves the client
+  // better than none.
+  const [evkSettled, earnSettled, securitizeSettled] = await Promise.all([
+    collectVaults(fetchVaults(ctx, explorableEvk)).then(
       v => ({ ok: true as const, value: v }),
       err => ({ ok: false as const, err }),
     ),
@@ -90,24 +82,18 @@ export const loadChainSnapshot = async (input: LoadSnapshotInput): Promise<Chain
       v => ({ ok: true as const, value: v }),
       err => ({ ok: false as const, err }),
     ),
-    Promise.allSettled(securitizeAddresses.map(a => fetchSecuritizeVault(a, ctx))),
-    escrowAddressesPromise.then(
-      v => ({ ok: true as const, value: v }),
-      err => ({ ok: false as const, err }),
-    ),
+    Promise.allSettled(explorableSecuritize.map(a => fetchSecuritizeVault(a, ctx))),
   ])
 
   const evkVaults: Vault[] = evkSettled.ok ? evkSettled.value : []
   if (!evkSettled.ok) logWarn('loader/evk', evkSettled.err)
   const earnVaults: EarnVault[] = earnSettled.ok ? earnSettled.value : []
   if (!earnSettled.ok) logWarn('loader/earn', earnSettled.err)
-  const escrowAddresses: string[] = escrowAddressesSettled.ok ? escrowAddressesSettled.value : []
-  if (!escrowAddressesSettled.ok) logWarn('loader/escrowAddresses', escrowAddressesSettled.err)
 
   const securitizeVaults: SecuritizeVault[] = []
   securitizeSettled.forEach((r, i) => {
     if (r.status === 'fulfilled') securitizeVaults.push(r.value)
-    else logWarn(`loader/securitize/${securitizeAddresses[i]}`, r.reason)
+    else logWarn(`loader/securitize/${explorableSecuritize[i]}`, r.reason)
   })
 
   // Phase 3: derive the escrow subset referenced by EVK collateral LTVs and
@@ -144,7 +130,6 @@ export const loadChainSnapshot = async (input: LoadSnapshotInput): Promise<Chain
     evkVaults,
     earnVaults,
     securitizeVaults,
-    escrowAddresses,
     escrowVaults,
   }
 }
