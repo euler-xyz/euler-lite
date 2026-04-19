@@ -8,6 +8,12 @@ export const POLL_INTERVAL_5S_MS = 5_000
 export const POLL_INTERVAL_10S_MS = 10_000
 export const POLL_INTERVAL_30S_MS = 30_000
 export const POLL_INTERVAL_60S_MS = 60_000
+/** Reward campaign poll cadence. Matches `server/plugins/warm-cache.ts`'s
+ * 4-min refresh interval: polling more often just re-reads the same
+ * browser/CDN cache entry and churns renders for no new data. Users who
+ * connect/disconnect, switch chain, or reload see fresh data immediately
+ * regardless of this cadence. */
+export const POLL_INTERVAL_REWARDS_MS = 4 * 60_000
 
 // ── RPC Batch Sizes ───────────────────────────────────────
 export const BATCH_SIZE_RPC_CALLS = 5

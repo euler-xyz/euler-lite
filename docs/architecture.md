@@ -204,14 +204,15 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 | `/api/labels/*` | 5 min | 404 → empty shape; stale-fallback on upstream error |
 | `/api/token-list` | 5 min | Three sources merged via `Promise.allSettled`; per-source cache with stale fallback |
 | `/api/intrinsic-apy` | 5 min | One endpoint, returns `{ [address]: { apy, provider, source? } }` for a chain; server orchestrates every upstream |
-| `/api/vault-factories` | 24 h | Factory is immutable per vault; batched subgraph query |
+| `/api/vault-categories` | 5 min | Full chain vault categorization (evk/earn/securitize/escrow) from subgraph + escrow-perspective RPC; `evk` is a superset that includes escrow. Per-address lookup mode via `&address=0x…` for direct-nav fallback |
 | `/api/oracle-adapter` | 5 min | Lazy per-address fetch |
 | `/api/euler-chains` | 5 min | Static chain-agnostic config from `euler-interfaces` repo |
 | `/api/vaults` | 10 min (safety floor) | Pre-computed chain vault snapshot; warm-cache rewrites every 4 min so in steady state the snapshot is ≤4 min old. Handler is read-only — no request-triggered refresh |
+| `/api/rewards/{merkl,brevis,fuul}` | 5 min | Public reward campaigns per provider; see Reward campaigns pipeline below |
 
 Every cacheable proxy above uses the same pattern: TTL cache for fresh hits, stale-cache fallback on upstream failure, and in-flight request deduplication so concurrent cache-miss callers (e.g. warm-cache racing real traffic) collapse onto a single upstream fetch per cache key.
 
-`server/plugins/warm-cache.ts` pre-populates labels, token-list, `/api/intrinsic-apy`, vault-factories, and the vaults snapshot for every enabled chain, plus `/api/euler-chains` once globally. A 4-min interval re-warms every entry ahead of its 5-min TTL. Warming runs fire-and-forget so Nitro's listener is never delayed; caches are typically hot within ~5 s of boot, and users arriving before that just pay the usual cold-upstream latency for whichever endpoints they hit.
+`server/plugins/warm-cache.ts` pre-populates labels, token-list, `/api/intrinsic-apy`, vault-categories, reward campaigns, and the vaults snapshot for every enabled chain, plus `/api/euler-chains` once globally. A 4-min interval re-warms every entry ahead of its 5-min TTL. Warming runs fire-and-forget so Nitro's listener is never delayed; caches are typically hot within ~5 s of boot, and users arriving before that just pay the usual cold-upstream latency for whichever endpoints they hit.
 
 ### Vault snapshot pipeline
 
@@ -223,6 +224,23 @@ The client composable `useVaults.loadVaults()` runs in two phases:
 2. **Fresh RPC pass** (`~3-6 s`): the existing batched lens pipeline (`fetchVaults`/`fetchEarnVaults`/`fetchSecuritizeVault`/`fetchEscrowVault`) runs against the client's RPC with Pyth simulation, overwriting registry entries with live prices and rates.
 
 The public interface of `useVaults()` is unchanged — the 15 exports (`isReady`, `borrowList`, `getVault`, etc.) keep their names, types, and semantics. All RPC-level fetchers are extracted to pure functions in `entities/vault/{fetcher,apy,pricing,escrow-fetcher}.ts` that accept a `FetchVaultContext`; both the client composable and the server-side `loadChainSnapshot` (`entities/vault/loader.ts`) share the same code path. bigint fields in the wire payload are tagged (`__bi:<decimal>`) by `entities/vault/loader-serde.ts` so the JSON transport doesn't lose precision.
+
+### Reward campaigns pipeline
+
+`/api/rewards/{merkl,brevis,fuul}?chainId=X` proxies the three reward providers' **public** campaign surface (chain-scoped, identical for every user). The composables `useMerkl`, `useBrevis`, `useFuul` each do one `$fetch('/api/rewards/<provider>')` per poll instead of the previous 4-6 direct upstream requests per user per poll.
+
+- **Merkl**: the handler consolidates the three opportunity types (EULER, MULTILENDBORROW, ERC20LOGPROCESSOR — paginated internally up to 10×100 items per type) plus the global `/tokens/reward` payload into one response. Each type caches separately under `merkl:{type}:{chainId}` so one flaky upstream doesn't blank out the others.
+- **Brevis**: the upstream POST body is hardcoded server-side (`{ action: [LEND, BORROW], status: [3] }`), so the cache key reduces to `brevis:{chainId}` and the handler exposes a cacheable GET.
+- **Fuul**: the two `protocol=euler` and `protocol=euler-looping` queries fan out server-side and return as `{ euler, looping }`.
+
+Semantics:
+
+- **Raw pass-through**: the server never interprets `Opportunity[]` / `Campaign[]` / `FuulIncentive[]`. All transforms (Merkl subType mapping, MULTILENDBORROW expansion, Brevis snake_case/camelCase normalisation) stay in the composables so provider feature work doesn't need a backend redeploy.
+- **SWR + warm-cache**: the three handlers serve `fresh → stale-with-background-revalidate → cold-await-upstream` against a 5-min TTL. The warm-cache plugin (`server/plugins/warm-cache.ts`) refreshes all six per-chain keys plus the global `merkl:tokens` every 4 min, so steady-state requests always hit fresh entries.
+- **Pagination partial-response gate**: if a Merkl paginated fetch fails mid-flight or exceeds the 10-page cap, the partial response is **not** cached — the next call re-runs the pagination rather than serving a truncated dataset for 5 minutes.
+- **Rate limiting + CDN**: each handler has its own rate-limit label (`rewards-merkl-proxy`, etc.) so a noisy client against one endpoint can't starve the others. Handlers set `Cache-Control: public, max-age=30, stale-while-revalidate=300` so Cloudflare short-circuits repeat hits between warm cycles.
+- **Poll cadence** (see `entities/tuning-constants.ts`): public campaigns poll every 4 min (matching the server warm cycle), user-specific claimable rewards poll every 60 s — split into two `setInterval`s per composable so campaign data doesn't thrash the UI while claimable amounts stay responsive post-claim.
+- **User-specific traffic stays direct**: Merkl `/users/{addr}/rewards`, Brevis `getMerkleProofsBatch`, Fuul `/claimable-rewards` are **not** proxied — they remain direct axios calls from the browser. Only the chain-scoped public surface flows through the shared cache.
 
 ## 🔍 Explore Page & Market Discovery
 

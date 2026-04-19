@@ -7,8 +7,29 @@ import type { Campaign, CampaignsRequest, MerkleProofRequest, RewardInfo } from 
 import type { RewardCampaign } from '~/entities/reward-campaign'
 import type { TxPlan } from '~/entities/txPlan'
 import { CampaignAction } from '~/entities/brevis'
-import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_30S_MS } from '~/entities/tuning-constants'
+import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_60S_MS, POLL_INTERVAL_REWARDS_MS } from '~/entities/tuning-constants'
 import { logWarn } from '~/utils/errorHandling'
+
+// Server proxy response shape for public campaigns (raw pass-through of the
+// Brevis POST response body).
+interface BrevisCampaignsProxyResponse {
+  campaigns?: Record<string, unknown>[]
+  err?: unknown
+}
+
+// Per-chain in-flight dedup so concurrent callers (chain-switch watcher
+// + isActive watcher + 30s poll firing in quick succession) share a
+// single HTTP round-trip instead of issuing duplicate proxy requests.
+const inFlightBrevis = new Map<number, Promise<BrevisCampaignsProxyResponse>>()
+
+const fetchBrevisCampaignsProxy = (chainId: number): Promise<BrevisCampaignsProxyResponse> => {
+  const existing = inFlightBrevis.get(chainId)
+  if (existing) return existing
+  const p = $fetch<BrevisCampaignsProxyResponse>('/api/rewards/brevis', { query: { chainId } })
+    .finally(() => { inFlightBrevis.delete(chainId) }) as Promise<BrevisCampaignsProxyResponse>
+  inFlightBrevis.set(chainId, p)
+  return p
+}
 
 const ACTION_MAP: Record<string, CampaignAction> = {
   EULER_BORROW: CampaignAction.BORROW,
@@ -60,7 +81,11 @@ const userRewards: Ref<Campaign[]> = ref([])
 const isCampaignsLoading = ref(true)
 const isRewardsLoading = ref(true)
 
-let interval: NodeJS.Timeout | null = null
+// Public campaigns poll matches the server's 4-min warm cycle; user-specific
+// rewards (Brevis POST with user_address — NOT proxied) stays at 60s so
+// claimable amounts refresh responsively after attestation ticks.
+let publicInterval: NodeJS.Timeout | null = null
+let userInterval: NodeJS.Timeout | null = null
 
 const cacheState = {
   campaigns: { timestamp: 0 },
@@ -119,22 +144,20 @@ export const useBrevis = () => {
         isCampaignsLoading.value = true
       }
 
-      const request: CampaignsRequest = {
-        chain_id: [currentChainId],
-        action: [CampaignAction.LEND, CampaignAction.BORROW],
-        status: [3],
-      }
-
-      const res = await axios.post(BREVIS_API_URL, request)
+      // Public campaigns flow through the proxy; the server always sends the
+      // same hardcoded { action: [LEND, BORROW], status: [3] } request body,
+      // so the proxy cache key reduces to `brevis:{chainId}`. The per-user
+      // /getMerkleProofsBatch POST stays direct (claimReward).
+      const data = await fetchBrevisCampaignsProxy(currentChainId)
 
       if (requestId !== latestCampaignsRequestId) return
 
-      if (res.data.err) {
-        logWarn('brevis/campaigns', res.data.err)
+      if (data.err) {
+        logWarn('brevis/campaigns', data.err)
         return
       }
 
-      const campaigns: Campaign[] = (res.data.campaigns || []).map(normalizeCampaign)
+      const campaigns: Campaign[] = (data.campaigns || []).map(normalizeCampaign)
       const campaignMap = new Map<string, RewardCampaign[]>()
 
       for (const campaign of campaigns) {
@@ -344,11 +367,15 @@ export const useBrevis = () => {
         isLoaded.value = true
       }
 
-      if (!interval) {
-        interval = setInterval(() => {
-          loadRewards(false)
+      if (!publicInterval) {
+        publicInterval = setInterval(() => {
           loadCampaigns(false)
-        }, POLL_INTERVAL_30S_MS)
+        }, POLL_INTERVAL_REWARDS_MS)
+      }
+      if (!userInterval) {
+        userInterval = setInterval(() => {
+          loadRewards(false)
+        }, POLL_INTERVAL_60S_MS)
       }
     }
     else if (!active) {
@@ -356,17 +383,25 @@ export const useBrevis = () => {
       isCampaignsLoading.value = false
       isRewardsLoading.value = false
       cacheState.rewards = { timestamp: 0, address: '' }
-      if (interval) {
-        clearInterval(interval)
-        interval = null
+      if (publicInterval) {
+        clearInterval(publicInterval)
+        publicInterval = null
+      }
+      if (userInterval) {
+        clearInterval(userInterval)
+        userInterval = null
       }
     }
   }, { immediate: true })
 
   onUnmounted(() => {
-    if (interval) {
-      clearInterval(interval)
-      interval = null
+    if (publicInterval) {
+      clearInterval(publicInterval)
+      publicInterval = null
+    }
+    if (userInterval) {
+      clearInterval(userInterval)
+      userInterval = null
     }
   })
 

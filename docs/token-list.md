@@ -17,22 +17,23 @@ Server (server/api/token-list.get.ts)
   |
   v
 Merge with deduplicateTokens()
-Priority: Euler API > DefiLlama > Uniswap
+Priority: Euler API > DefiLlama > Uniswap > Merkl reward-tokens
 ```
 
 ## Server Endpoint
 
 **`/api/token-list?chainId=<number>`**
 
-Three data sources, each with its own 5-minute TTL cache and in-flight request deduplication:
+Four data sources, each with its own 5-minute TTL cache and in-flight request deduplication:
 
 | Source | Scope | Role |
 |--------|-------|------|
 | Euler API | Per-chain | Primary. Reliable logo URLs. |
 | DefiLlama | Per-chain | Supplemental. |
 | Uniswap | All chains | Supplemental. |
+| Merkl reward-tokens | Per-chain | Fallback. Fills in rEUL and other reward-specific tokens that rarely appear in general-purpose lists. Shares the rewards-cache state used by warm-cache, so in steady state this is a synchronous cache hit. |
 
-All three sources run concurrently via `Promise.allSettled`. Each fetcher has its own 5-minute TTL cache, in-flight dedup, and a 10-second timeout that falls back to the stale cached value. On a warm cache the request returns immediately; on a cold cache the response is bounded by the slowest source and contains whatever resolved in time.
+All four sources run concurrently via `Promise.allSettled`. Each fetcher has its own 5-minute TTL cache, in-flight dedup, and a 10-second timeout that falls back to the stale cached value. On a warm cache the request returns immediately; on a cold cache the response is bounded by the slowest source and contains whatever resolved in time.
 
 **Startup warming**: `server/plugins/warm-cache.ts` hits this endpoint for every enabled chain at Nitro startup and re-warms every 4 minutes thereafter. Warming runs fire-and-forget (Nitro's node-server preset doesn't await plugin promises), so caches are typically hot within ~5 s of boot; users arriving before that pay the usual cold-upstream latency.
 

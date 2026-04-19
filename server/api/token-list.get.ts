@@ -3,6 +3,7 @@ import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { logWarn } from '~/server/utils/log'
+import { getMerklRewardTokensForChain } from '~/server/utils/rewards-cache'
 
 const TIMEOUT_MS = 10_000
 const CACHE_TTL_MS = 300_000
@@ -174,22 +175,32 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'chainId is required and must be a positive integer' })
   }
 
-  // Fetch all three sources concurrently. Each fetcher already reads its own
+  // Fetch all four sources concurrently. Each fetcher already reads its own
   // cache first, dedups in-flight requests, and resolves to stale/empty on
   // error — allSettled never rejects. The response is bounded by the slowest
   // cold-fetch (10s timeout); on a warm cache this returns immediately.
-  const [eulerResult, uniswapResult, defillamaResult] = await Promise.allSettled([
+  // Merkl reward tokens share the rewards-cache state used by warm-cache,
+  // so this is usually a synchronous read from a hot cache.
+  const [eulerResult, uniswapResult, defillamaResult, merklResult] = await Promise.allSettled([
     fetchEulerApi(chainId),
     fetchUniswap(),
     fetchDefillama(chainId),
+    getMerklRewardTokensForChain(chainId),
   ])
 
   const euler = eulerResult.status === 'fulfilled' ? eulerResult.value : []
   const uniswap = uniswapResult.status === 'fulfilled' ? uniswapResult.value : []
   const defillama = defillamaResult.status === 'fulfilled' ? defillamaResult.value : []
+  const merkl = merklResult.status === 'fulfilled' ? merklResult.value : []
 
-  // Priority: Euler API > DefiLlama > Uniswap
-  const tokens = deduplicateTokens(euler, deduplicateTokens(defillama, uniswap))
+  // Priority: Euler API > DefiLlama > Uniswap > Merkl rewards. Merkl sits
+  // last so it only fills in tokens the general sources don't know about,
+  // without overriding authoritative metadata for tokens (like EUL) that
+  // are in multiple lists.
+  const tokens = deduplicateTokens(
+    euler,
+    deduplicateTokens(defillama, deduplicateTokens(uniswap, merkl)),
+  )
 
   if (tokens.length === 0) {
     throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
