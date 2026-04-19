@@ -2,7 +2,7 @@ import { createError, getQuery } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
-import { logWarn } from '~/server/utils/log'
+import { reportStatus } from '~/server/utils/log'
 import { getMerklRewardTokensForChain } from '~/server/utils/rewards-cache'
 
 const TIMEOUT_MS = 10_000
@@ -66,10 +66,13 @@ function fetchEulerApi(chainId: number): Promise<TokenEntry[]> {
         logoURI: t.logoURI || undefined,
       }))
       eulerApiCache.set(key, tokens)
+      reportStatus('token-list', `euler-api:${chainId}`, 'ok')
       return tokens
     })
     .catch((err: unknown) => {
-      logWarn('token-list', 'Euler API fetch failed:', err instanceof Error ? err.message : err, 'for chain', chainId)
+      const msg = err instanceof Error ? err.message : String(err)
+      reportStatus('token-list', `euler-api:${chainId}`, `failed:${msg}`,
+        `Euler API fetch failed for chain ${chainId}: ${msg}`)
       return eulerApiCache.getStale(key) || []
     })
     .finally(() => { eulerInFlight.delete(key) })
@@ -93,10 +96,13 @@ function fetchUniswap(): Promise<TokenEntry[]> {
       const data = await resp.json()
       const tokens: TokenEntry[] = data.tokens || []
       uniswapCache.set('all', tokens)
+      reportStatus('token-list', 'uniswap:all', 'ok')
       return tokens
     })
     .catch((err: unknown) => {
-      logWarn('token-list', 'Uniswap fetch failed:', err instanceof Error ? err.message : err)
+      const msg = err instanceof Error ? err.message : String(err)
+      reportStatus('token-list', 'uniswap:all', `failed:${msg}`,
+        `Uniswap fetch failed: ${msg}`)
       return uniswapCache.getStale('all') || []
     })
     .finally(() => { uniswapInFlight.delete('all') })
@@ -130,10 +136,13 @@ function fetchDefillama(chainId: number): Promise<TokenEntry[]> {
         logoURI: (entry.logoURI || entry.logoURI2) as string | undefined,
       }))
       defillamaCache.set(key, tokens)
+      reportStatus('token-list', `defillama:${chainId}`, 'ok')
       return tokens
     })
     .catch((err: unknown) => {
-      logWarn('token-list', 'DefiLlama fetch failed:', err instanceof Error ? err.message : err, 'for chain', chainId)
+      const msg = err instanceof Error ? err.message : String(err)
+      reportStatus('token-list', `defillama:${chainId}`, `failed:${msg}`,
+        `DefiLlama fetch failed for chain ${chainId}: ${msg}`)
       return defillamaCache.getStale(key) || []
     })
     .finally(() => { defillamaInFlight.delete(key) })

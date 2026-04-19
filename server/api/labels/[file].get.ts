@@ -2,7 +2,7 @@ import { createError, getQuery, getRouterParam } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
-import { logWarn } from '~/server/utils/log'
+import { reportStatus } from '~/server/utils/log'
 
 const TIMEOUT_MS = 10_000
 const CACHE_TTL_MS = 300_000
@@ -133,27 +133,32 @@ export default defineEventHandler(async (event) => {
   }
 
   const promise = (async () => {
+    const statusKey = `${file}:${chainId}`
     try {
       const resp = await fetchWithTimeout(getUpstreamUrl(chainId, file), TIMEOUT_MS)
       if (!resp.ok) {
-        // 404 is the expected signal for "file not published on this chain".
-        // Other non-2xx statuses (403/5xx from CDNs, etc.) are logged once so
-        // genuine upstream outages stay visible, then returned empty without
-        // poisoning the cache.
+        // 404 is the expected signal for "file not published on this chain"
+        // — treat it as a steady-state "absent" and don't spam the logs
+        // each warm cycle. Other non-2xx statuses (403/5xx) are reported
+        // as transitions so the first occurrence surfaces but repeats do not.
         if (resp.status !== 404) {
-          logWarn('labels', `${file} upstream returned ${resp.status} for chain ${chainId}; treating as absent`)
+          reportStatus('labels', statusKey, `http-${resp.status}`,
+            `${file} upstream returned ${resp.status} for chain ${chainId}; treating as absent`)
           return fallback(false)
         }
+        reportStatus('labels', statusKey, 'absent-404')
         return fallback(true)
       }
 
       const data: unknown = await resp.json()
       validateNode(data, file)
       cache.set(key, data)
+      reportStatus('labels', statusKey, 'ok')
       return data
     }
     catch (err) {
-      logWarn('labels', `Failed to fetch ${file} for chain ${chainId}:`, err instanceof Error ? err.message : err)
+      reportStatus('labels', statusKey, 'fetch-error',
+        `Failed to fetch ${file} for chain ${chainId}: ${err instanceof Error ? err.message : err}`)
       return fallback(false)
     }
   })().finally(() => { inFlight.delete(key) })
