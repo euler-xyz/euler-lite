@@ -42,7 +42,7 @@ export const COLLATERAL_SWAP_PARAMS_COMPONENTS = [
   { name: 'fromVault', type: 'address' },
   { name: 'toVault', type: 'address' },
   { name: 'fromAmount', type: 'uint256' },
-  { name: 'toAmount', type: 'uint256' },
+  { name: 'disableSourceCollateral', type: 'bool' },
 ] as const
 
 export const COLLATERAL_SWAP_WRAPPER_ABI = [
