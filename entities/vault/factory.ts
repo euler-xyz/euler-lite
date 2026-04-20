@@ -10,7 +10,6 @@
  * Replaces the old factory-based API (fetchVaultFactory / fetchVaultFactories)
  * which hit /api/vault-factories with a per-address subgraph lookup.
  */
-import { getAddress } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 
 export type VaultCategory = 'evk' | 'earn' | 'securitize' | 'escrow'
@@ -165,23 +164,4 @@ export const resetVaultCategoryCache = (): void => {
   chainCategoriesInFlight.clear()
   perAddressCache.clear()
   perAddressInFlight.clear()
-}
-
-/**
- * Synchronous check: is the given address known to be a securitize vault?
- * Returns false when the categorization hasn't been fetched yet.
- */
-export const isSecuritizeVaultSync = (address: string): boolean => {
-  const chainId = getChainId()
-  if (!chainId) return false
-  return perAddressCache.get(cacheKey(chainId, normalizeAddress(address))) === 'securitize'
-}
-
-const normalizeAddress = (address: string): string => {
-  try {
-    return getAddress(address)
-  }
-  catch {
-    return address
-  }
 }

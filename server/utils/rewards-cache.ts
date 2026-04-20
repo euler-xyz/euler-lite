@@ -15,8 +15,8 @@
  * means we only ship a new frontend bundle.
  *
  * Refresh cadence + TTL: the TTL is a safety floor if warm-cache stalls.
- * The 4-min warm cycle (plugin-side) keeps entries well inside the
- * 5-min TTL under normal operation.
+ * The 5-min warm cycle force-refreshes each entry before it expires,
+ * so user requests always read from a fresh cache under normal operation.
  */
 import { createTtlCache } from './cache'
 import { fetchWithTimeout, withWallClock } from './fetchWithTimeout'

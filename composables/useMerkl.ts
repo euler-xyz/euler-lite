@@ -9,6 +9,7 @@ import { mapMerklSubType } from '~/entities/reward-campaign'
 import type { TxPlan } from '~/entities/txPlan'
 import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 import { logWarn } from '~/utils/errorHandling'
+import { createInFlightDedup } from '~/utils/in-flight'
 
 // The per-user /users/{addr}/rewards endpoint stays direct (it carries the
 // wallet address, which we deliberately keep off the shared server cache).
@@ -68,20 +69,15 @@ interface MerklProxyResponse {
 // Per-chain in-flight dedup so concurrent callers fired from the same
 // watcher tick share a single HTTP round-trip. Keyed by chainId because
 // chain-switch invalidates the relevant in-flight promise naturally.
-const inFlightMerkl = new Map<number, Promise<MerklProxyResponse | null>>()
+const inFlightMerkl = createInFlightDedup<number, MerklProxyResponse | null>()
 
-const fetchMerklProxy = (chainId: number): Promise<MerklProxyResponse | null> => {
-  const existing = inFlightMerkl.get(chainId)
-  if (existing) return existing
-  const p = $fetch<MerklProxyResponse>('/api/rewards/merkl', { query: { chainId } })
-    .catch((e) => {
-      logWarn('merkl/proxy', e)
-      return null
-    })
-    .finally(() => { inFlightMerkl.delete(chainId) }) as Promise<MerklProxyResponse | null>
-  inFlightMerkl.set(chainId, p)
-  return p
-}
+const fetchMerklProxy = (chainId: number): Promise<MerklProxyResponse | null> =>
+  inFlightMerkl.run(chainId, () =>
+    $fetch<MerklProxyResponse>('/api/rewards/merkl', { query: { chainId } })
+      .catch((e) => {
+        logWarn('merkl/proxy', e)
+        return null
+      }))
 
 const processOpportunitiesToCampaigns = (
   opportunities: Opportunity[],

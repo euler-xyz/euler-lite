@@ -1,11 +1,12 @@
 /**
  * Server-side cache for the /api/vaults snapshot endpoint.
  *
- * - The cache itself is a plain TTL store. The 10 min TTL is a safety floor:
- *   the warm-cache plugin rewrites every entry every 4 min under normal
- *   operation, so in steady state the cache is always "fresh" from the
- *   handler's point of view. If warm-cache stalls for two cycles, stale
- *   entries are still servable (via .getStale) until the handler falls back
+ * - The cache itself is a plain TTL store. The 5 min TTL is a safety floor:
+ *   the warm-cache plugin rewrites every entry every 5 min via a direct
+ *   `refreshChainVaults()` call (force-refresh), so in steady state the
+ *   cache is always "fresh" from the handler's point of view. If warm-cache
+ *   stalls for multiple cycles, stale entries are still servable (via
+ *   .getStale up to the staleness ceiling) until the handler falls back
  *   to a synchronous cold-path refresh.
  * - refreshChainVaults() is the only write path. In-flight dedup collapses
  *   concurrent calls (warm-cache + a cold client request arriving together)
@@ -131,7 +132,7 @@ const splitVerifiedByCategory = (
 }
 
 /**
- * The single refresh path. Called by the warm-cache plugin on a 4-min
+ * The single refresh path. Called by the warm-cache plugin on a 5-min
  * schedule, and also by the /api/vaults handler as a cold-path fallback.
  */
 export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot> =>

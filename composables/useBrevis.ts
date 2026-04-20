@@ -9,6 +9,7 @@ import type { TxPlan } from '~/entities/txPlan'
 import { CampaignAction } from '~/entities/brevis'
 import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 import { logWarn } from '~/utils/errorHandling'
+import { createInFlightDedup } from '~/utils/in-flight'
 
 // Server proxy response shape for public campaigns (raw pass-through of the
 // Brevis POST response body).
@@ -18,18 +19,13 @@ interface BrevisCampaignsProxyResponse {
 }
 
 // Per-chain in-flight dedup so concurrent callers (chain-switch watcher
-// + isActive watcher + 30s poll firing in quick succession) share a
+// + isActive watcher + 60 s poll firing in quick succession) share a
 // single HTTP round-trip instead of issuing duplicate proxy requests.
-const inFlightBrevis = new Map<number, Promise<BrevisCampaignsProxyResponse>>()
+const inFlightBrevis = createInFlightDedup<number, BrevisCampaignsProxyResponse>()
 
-const fetchBrevisCampaignsProxy = (chainId: number): Promise<BrevisCampaignsProxyResponse> => {
-  const existing = inFlightBrevis.get(chainId)
-  if (existing) return existing
-  const p = $fetch<BrevisCampaignsProxyResponse>('/api/rewards/brevis', { query: { chainId } })
-    .finally(() => { inFlightBrevis.delete(chainId) }) as Promise<BrevisCampaignsProxyResponse>
-  inFlightBrevis.set(chainId, p)
-  return p
-}
+const fetchBrevisCampaignsProxy = (chainId: number): Promise<BrevisCampaignsProxyResponse> =>
+  inFlightBrevis.run(chainId, () =>
+    $fetch<BrevisCampaignsProxyResponse>('/api/rewards/brevis', { query: { chainId } }))
 
 const ACTION_MAP: Record<string, CampaignAction> = {
   EULER_BORROW: CampaignAction.BORROW,

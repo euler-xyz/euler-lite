@@ -20,11 +20,10 @@
  * Each Merkl opportunity type caches separately so one upstream flake
  * (e.g. ERC20LOGPROCESSOR) does not poison the entire provider slot.
  */
-import { createError, getQuery, setResponseHeader } from 'h3'
-import type { H3Event } from 'h3'
+import { createError, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { logWarn } from '~/server/utils/log'
-import { getEnabledChainIds } from '~/utils/chain-env'
+import { resolveChainId } from '~/server/utils/resolve-chain-id'
 import {
   type CachedEntry,
   type MerklOpportunityType,
@@ -40,18 +39,6 @@ const rateLimiter = createRateLimiter({
 })
 
 const MERKL_TYPES: MerklOpportunityType[] = ['EULER', 'MULTILENDBORROW', 'ERC20LOGPROCESSOR']
-
-const resolveChainId = (event: H3Event): number => {
-  const raw = getQuery(event).chainId
-  const chainId = Number(raw)
-  if (!Number.isInteger(chainId) || chainId <= 0) {
-    throw createError({ statusCode: 400, statusMessage: 'Invalid chainId' })
-  }
-  if (!getEnabledChainIds().includes(chainId)) {
-    throw createError({ statusCode: 400, statusMessage: 'Unsupported chainId' })
-  }
-  return chainId
-}
 
 const resolveOpportunity = async (
   chainId: number,

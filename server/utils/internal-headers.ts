@@ -9,7 +9,7 @@
  *
  * 127.0.0.1 is a fixed sentinel — all server-internal traffic shares one
  * rate-limit bucket, which is fine: warm-cache issues at most ~240
- * requests per 4-min cycle against a >=600/min-per-endpoint budget.
+ * requests per 5-min cycle against a >=600/min-per-endpoint budget.
  *
  * SECURITY: this sentinel relies on origin ingress NOT being directly
  * reachable — Cloudflare is the only public entrypoint. If that

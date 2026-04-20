@@ -8,7 +8,7 @@
  * provider knowledge, no giant upstream payloads on the wire.
  *
  * Caching: each upstream URL is cached for 5 min with in-flight dedup.
- * A warm-cache refetch every 4 min keeps every entry hot.
+ * A warm-cache refetch every 5 min force-refreshes every entry.
  */
 import type { IntrinsicApySourceConfig } from '~/entities/custom'
 import { intrinsicApySources } from '~/entities/custom'

@@ -8,6 +8,7 @@ import type { RewardCampaign } from '~/entities/reward-campaign'
 import type { TxPlan } from '~/entities/txPlan'
 import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 import { logWarn } from '~/utils/errorHandling'
+import { createInFlightDedup } from '~/utils/in-flight'
 
 const address = ref('')
 
@@ -40,17 +41,12 @@ interface FuulProxyResponse {
 }
 
 // Per-chain in-flight dedup so concurrent callers (chain-switch watcher +
-// 30s poll firing close together) share a single HTTP round-trip.
-const inFlightFuul = new Map<number, Promise<FuulProxyResponse>>()
+// 60 s poll firing close together) share a single HTTP round-trip.
+const inFlightFuul = createInFlightDedup<number, FuulProxyResponse>()
 
-const fetchFuulProxy = (chainId: number): Promise<FuulProxyResponse> => {
-  const existing = inFlightFuul.get(chainId)
-  if (existing) return existing
-  const p = $fetch<FuulProxyResponse>('/api/rewards/fuul', { query: { chainId } })
-    .finally(() => { inFlightFuul.delete(chainId) }) as Promise<FuulProxyResponse>
-  inFlightFuul.set(chainId, p)
-  return p
-}
+const fetchFuulProxy = (chainId: number): Promise<FuulProxyResponse> =>
+  inFlightFuul.run(chainId, () =>
+    $fetch<FuulProxyResponse>('/api/rewards/fuul', { query: { chainId } }))
 
 export const useFuul = () => {
   const { address: wagmiAddress, chain: wagmiChain } = useAccount()

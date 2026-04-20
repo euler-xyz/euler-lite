@@ -25,7 +25,7 @@
 import { createError, getQuery, setResponseHeader } from 'h3'
 import { isAddress } from 'viem'
 import { createRateLimiter } from '~/server/utils/rate-limit'
-import { getEnabledChainIds } from '~/utils/chain-env'
+import { resolveChainId } from '~/server/utils/resolve-chain-id'
 import { logWarn } from '~/server/utils/log'
 import {
   getVaultCategories,
@@ -41,16 +41,8 @@ const rateLimiter = createRateLimiter({
 export default defineEventHandler(async (event) => {
   rateLimiter.consume(event)
 
-  const query = getQuery(event)
-  const chainId = Number(query.chainId)
-  if (!Number.isInteger(chainId) || chainId <= 0) {
-    throw createError({ statusCode: 400, statusMessage: 'Invalid chainId' })
-  }
-  if (!getEnabledChainIds().includes(chainId)) {
-    throw createError({ statusCode: 400, statusMessage: 'Unsupported chainId' })
-  }
-
-  const rawAddress = typeof query.address === 'string' ? query.address : undefined
+  const chainId = resolveChainId(event)
+  const rawAddress = typeof getQuery(event).address === 'string' ? getQuery(event).address as string : undefined
 
   try {
     if (rawAddress) {
