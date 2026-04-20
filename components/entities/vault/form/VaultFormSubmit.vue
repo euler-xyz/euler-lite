@@ -72,7 +72,9 @@ const tooltipVariantClass = computed(() => {
 const showTooltip = () => {
   if (_disabled.value && !props.loading) {
     isTooltipVisible.value = true
-    update()
+    // Defer update until after v-if mounts the floating element,
+    // otherwise the first paint lands at the wrapper's origin.
+    nextTick(update)
   }
 }
 const hideTooltip = () => {

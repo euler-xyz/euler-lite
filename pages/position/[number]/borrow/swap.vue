@@ -261,6 +261,7 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (errorText.value) return { message: errorText.value, variant: 'error' }
   if (sameVaultError.value) return { message: sameVaultError.value, variant: 'error' }
   if (healthError.value) return { message: healthError.value, variant: 'error' }
+  if (quoteError.value) return { message: quoteError.value, variant: 'warning' }
   if (simulationError.value) return { message: simulationError.value, variant: 'error' }
   return undefined
 })
