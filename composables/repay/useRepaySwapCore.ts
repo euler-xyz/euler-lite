@@ -278,6 +278,11 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     requestQuote()
   }
 
+  const onProviderSelect = (provider: string) => {
+    clearSimulationError()
+    quotes.selectProvider(provider)
+  }
+
   // --- Quote request ---
   const requestQuote = useDebounceFn(async () => {
     if (!position.value || !sourceVault.value || !borrowVault.value) {
@@ -449,6 +454,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     onSourceVaultChange,
     onRefreshQuotes,
     onSourceMax,
+    onProviderSelect,
     requestQuote,
     resetCore,
   }

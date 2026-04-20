@@ -109,6 +109,16 @@ export const CLOSE_POSITION_WRAPPER_ABI = [
       { name: 'owner', type: 'address' },
       { name: 'subaccount', type: 'address' },
     ],
+    name: 'getInbox',
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { name: 'owner', type: 'address' },
+      { name: 'subaccount', type: 'address' },
+    ],
     name: 'getInboxAddressAndDomainSeparator',
     outputs: [
       { name: '', type: 'address' },

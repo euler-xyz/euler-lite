@@ -6,6 +6,7 @@ import type { DisplayStep } from '~/utils/stepDecoding'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
+import { CLOSE_POSITION_WRAPPER_ABI } from '~/abis/cowswap-wrapper'
 import { getCashLimitedWithdrawAmount, isEVKVault, type Vault } from '~/entities/vault'
 import { COWSWAP_PROVIDER_NAME, COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapClosePositionExecuteParams, getCowSwapChainConfig } from '~/entities/cowswap'
 import { useCowSwapClosePositionExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
@@ -141,6 +142,27 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const isCowSwapProvider = computed(() =>
     core.quotes.selectedProvider.value?.toLowerCase() === COWSWAP_PROVIDER_NAME,
   )
+
+  const closePositionInboxExists = async (params: CowSwapClosePositionExecuteParams): Promise<boolean> => {
+    const client = rpcClient.value
+    const wrapperAddress = getCowSwapChainConfig(params.chainId)?.closePositionWrapper
+    if (!client || !wrapperAddress) return false
+
+    try {
+      const [inboxAddress] = await client.readContract({
+        address: wrapperAddress,
+        abi: CLOSE_POSITION_WRAPPER_ABI,
+        functionName: 'getInboxAddressAndDomainSeparator',
+        args: [params.wrapper.owner, params.wrapper.account],
+      }) as [Address, `0x${string}`]
+      const inboxCode = await client.getCode({ address: inboxAddress })
+      return !!inboxCode && inboxCode !== '0x'
+    }
+    catch (err) {
+      logWarn('collateralSwapRepay/cowswap/inboxExists', err)
+      return false
+    }
+  }
 
   // --- Swap details ---
   const details = useRepaySwapDetails({
@@ -423,7 +445,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     })
   }
 
-  const submitCowSwapClosePosition = () => {
+  const submitCowSwapClosePosition = async () => {
     if (!position.value || !borrowVault.value || !sourceVault.value || !core.quotes.selectedQuote.value) return
     if (isHealthInsufficient.value) return
     if (core.isRepayExceedsDebt.value) return
@@ -495,6 +517,10 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
     const signSteps: DisplayStep[] = []
     let idx = 1
+    const hasExistingInbox = await closePositionInboxExists(cowParams)
+    if (!hasExistingInbox) {
+      signSteps.push({ index: idx++, label: 'Prepare order receiver', isSeparateTx: true })
+    }
     signSteps.push({ index: idx++, label: 'Sign EVC permit', isSeparateTx: false })
     signSteps.push({ index: idx++, label: 'Sign CoW order', isSeparateTx: false })
 
@@ -543,7 +569,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
     // CowSwap path: skip plan building and simulation
     if (isCowSwapProvider.value) {
-      submitCowSwapClosePosition()
+      await submitCowSwapClosePosition()
       return
     }
 
@@ -674,6 +700,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     onSourceVaultChange,
     onRefreshQuotes: core.onRefreshQuotes,
     onSourceMax: core.onSourceMax,
+    onProviderSelect: core.onProviderSelect,
     submit,
     send,
     updateSourceBalance,

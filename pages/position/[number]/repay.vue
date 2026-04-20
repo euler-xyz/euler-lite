@@ -703,7 +703,7 @@ watch(formTab, () => {
                 :status-label="collateral.quotes.statusLabel.value"
                 :is-loading="collateral.quotes.isLoading.value"
                 :empty-message="collateral.routeEmptyMessage.value"
-                @select="collateral.quotes.selectProvider"
+                @select="collateral.onProviderSelect"
                 @refresh="collateral.onRefreshQuotes"
               />
 
@@ -878,7 +878,7 @@ watch(formTab, () => {
                 :status-label="savings.quotes.statusLabel.value"
                 :is-loading="savings.quotes.isLoading.value"
                 :empty-message="savings.routeEmptyMessage.value"
-                @select="savings.quotes.selectProvider"
+                @select="savings.onProviderSelect"
                 @refresh="savings.onRefreshQuotes"
               />
 
