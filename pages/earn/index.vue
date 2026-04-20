@@ -122,15 +122,20 @@ const assetOptions = computed(() => {
 })
 
 const curatorOptions = computed(() => {
-  return list.value.reduce((result, vault) => {
-    const vaultEntities = getEntitiesByEarnVault(vault)
-    for (const entity of vaultEntities) {
-      if (!result.find(option => option.value === entity.name)) {
-        return [...result, { label: entity.name, value: entity.name, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined }]
+  const tvlByEntity = new Map<string, number>()
+  const options: { label: string, value: string, icon?: string, iconFallback?: string }[] = []
+
+  for (const vault of list.value) {
+    const tvl = vaultTotalSupplyUsd.value.get(vault.address) ?? 0
+    for (const entity of getEntitiesByEarnVault(vault)) {
+      tvlByEntity.set(entity.name, (tvlByEntity.get(entity.name) ?? 0) + tvl)
+      if (!options.find(option => option.value === entity.name)) {
+        options.push({ label: entity.name, value: entity.name, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined })
       }
     }
-    return result
-  }, [] as { label: string, value: string, icon?: string, iconFallback?: string }[])
+  }
+
+  return options.sort((a, b) => (tvlByEntity.get(b.value) ?? 0) - (tvlByEntity.get(a.value) ?? 0))
 })
 
 const filteredList = computed(() => {

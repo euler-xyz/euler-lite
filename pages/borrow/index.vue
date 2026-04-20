@@ -225,24 +225,35 @@ const debtAssetOptions = computed(() => {
 })
 
 const marketOptions = computed(() => {
-  return activeBorrowList.value.reduce((result, pair) => {
+  const tvlByMarket = new Map<string, number>()
+  const options: { label: string, value: string, icon?: string, iconFallback?: string }[] = []
+
+  for (const pair of activeBorrowList.value) {
     const market = getProductByVault(pair.collateral.address)
-    const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
-    const entityObj = entityName ? entities[entityName] : null
+    if (!market.name) continue
+    const key = getPairKey(pair)
+    const tvl = (pairLiquidityUsd.value.get(key) ?? 0) + (pairBorrowedUsd.value.get(key) ?? 0)
+    tvlByMarket.set(market.name, (tvlByMarket.get(market.name) ?? 0) + tvl)
 
-    if (market.name && !result.find(option => option.label === market.name)) {
-      return [...result, { label: market.name, value: market.name, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
+    if (!options.find(option => option.label === market.name)) {
+      const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
+      const entityObj = entityName ? entities[entityName] : null
+      options.push({ label: market.name, value: market.name, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined })
     }
+  }
 
-    return result
-  }, [] as { label: string, value: string, icon?: string, iconFallback?: string }[])
+  return options.sort((a, b) => (tvlByMarket.get(b.value) ?? 0) - (tvlByMarket.get(a.value) ?? 0))
 })
 
 const riskManagerOptions = computed(() => {
+  const tvlByEntity = new Map<string, number>()
   const seen = new Set<string>()
   const result: { label: string, value: string, icon?: string, iconFallback?: string }[] = []
   for (const pair of activeBorrowList.value) {
+    const key = getPairKey(pair)
+    const tvl = (pairLiquidityUsd.value.get(key) ?? 0) + (pairBorrowedUsd.value.get(key) ?? 0)
     for (const entity of getEntitiesByVault(pair.borrow)) {
+      tvlByEntity.set(entity.name, (tvlByEntity.get(entity.name) ?? 0) + tvl)
       if (!seen.has(entity.name)) {
         seen.add(entity.name)
         result.push({
@@ -254,7 +265,7 @@ const riskManagerOptions = computed(() => {
       }
     }
   }
-  return result
+  return result.sort((a, b) => (tvlByEntity.get(b.value) ?? 0) - (tvlByEntity.get(a.value) ?? 0))
 })
 
 const filteredBorrowList = computed(() => {

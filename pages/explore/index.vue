@@ -90,20 +90,31 @@ watch(chainId, (newChainId, oldChainId) => {
 })
 
 const marketOptions = computed(() => {
-  return marketGroups.value.reduce((result, group) => {
+  const tvlByMarket = new Map<string, number>()
+  const options: { label: string, value: string, icon?: string, iconFallback?: string }[] = []
+
+  for (const group of marketGroups.value) {
+    const seenMarketsInGroup = new Set<string>()
     for (const vault of group.vaults) {
       const addr = getVaultAddress(vault)
       if (!addr) continue
       const market = getProductByVault(addr)
-      const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
-      const entityObj = entityName ? entities[entityName] : null
+      if (!market.name) continue
 
-      if (market.name && !result.find(option => option.label === market.name)) {
-        return [...result, { label: market.name, value: market.name, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
+      if (!seenMarketsInGroup.has(market.name)) {
+        seenMarketsInGroup.add(market.name)
+        tvlByMarket.set(market.name, (tvlByMarket.get(market.name) ?? 0) + group.metrics.totalTVL)
+      }
+
+      if (!options.find(option => option.label === market.name)) {
+        const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
+        const entityObj = entityName ? entities[entityName] : null
+        options.push({ label: market.name, value: market.name, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined })
       }
     }
-    return result
-  }, [] as { label: string, value: string, icon?: string, iconFallback?: string }[])
+  }
+
+  return options.sort((a, b) => (tvlByMarket.get(b.value) ?? 0) - (tvlByMarket.get(a.value) ?? 0))
 })
 
 const assetOptions = computed(() => {
@@ -126,12 +137,18 @@ const assetOptions = computed(() => {
 })
 
 const riskManagerOptions = computed(() => {
+  const tvlByEntity = new Map<string, number>()
   const seen = new Set<string>()
   const result: { label: string, value: string, icon?: string, iconFallback?: string }[] = []
   for (const group of marketGroups.value) {
+    const seenEntitiesInGroup = new Set<string>()
     for (const vault of group.vaults) {
       if (!isVaultType(vault)) continue
       for (const entity of getEntitiesByVault(vault)) {
+        if (!seenEntitiesInGroup.has(entity.name)) {
+          seenEntitiesInGroup.add(entity.name)
+          tvlByEntity.set(entity.name, (tvlByEntity.get(entity.name) ?? 0) + group.metrics.totalTVL)
+        }
         if (!seen.has(entity.name)) {
           seen.add(entity.name)
           result.push({
@@ -144,7 +161,7 @@ const riskManagerOptions = computed(() => {
       }
     }
   }
-  return result
+  return result.sort((a, b) => (tvlByEntity.get(b.value) ?? 0) - (tvlByEntity.get(a.value) ?? 0))
 })
 
 const matchesMarketFilter = (group: MarketGroup): boolean => {
