@@ -5,6 +5,10 @@ WORKDIR /usr/src/app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
+
+# Sentry source-map upload (build-time only; token never reaches production stage)
+ARG SENTRY_AUTH_TOKEN
+
 RUN npm run build
 
 # Download Doppler CLI (binary only, no package manager install)
