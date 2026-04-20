@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - development
-      - feat/enable_stage_env_for_dev
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
