@@ -49,6 +49,7 @@ export type CowSwapExecutionStatus
     | 'signing_permit'
     | 'signing_order'
     | 'submitting'
+    | 'cancelling'
     | 'submitted'
 
 export type CowSwapOpenPositionParams = {
