@@ -21,7 +21,6 @@
 import { createTtlCache } from './cache'
 import { fetchWithTimeout, withWallClock } from './fetchWithTimeout'
 import { createInFlightDedup, scheduleBackgroundRefresh } from './in-flight'
-import { logWarn } from './log'
 import { getVaultCategories } from './vault-categories-store'
 import {
   BREVIS_API_URL,
@@ -64,14 +63,8 @@ const merklTypeKey = (chainId: number, type: MerklOpportunityType): string =>
  * dropping them. Filtering on the server keeps the client payload small.
  */
 const getEarnVaultSet = async (chainId: number): Promise<Set<string>> => {
-  try {
-    const categories = await getVaultCategories(chainId)
-    return new Set(categories.earn.map(a => a.toLowerCase()))
-  }
-  catch (err) {
-    logWarn('rewards-cache', `earn vault categorization failed chain=${chainId}:`, err instanceof Error ? err.message : err)
-    return new Set()
-  }
+  const categories = await getVaultCategories(chainId)
+  return new Set(categories.earn.map(a => a.toLowerCase()))
 }
 
 const filterErc20LogProcessor = (

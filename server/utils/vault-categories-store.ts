@@ -164,7 +164,8 @@ const paginatedSubgraphFetch = async (subgraphUrl: string): Promise<SubgraphVaul
       }),
     })
     if (!resp.ok) throw new Error(`Subgraph returned ${resp.status}`)
-    const body = await resp.json() as { data?: { vaults?: SubgraphVault[] } }
+    const body = await resp.json() as { data?: { vaults?: SubgraphVault[] }, errors?: unknown[] }
+    if (body.errors?.length) throw new Error(`Subgraph returned errors: ${JSON.stringify(body.errors).slice(0, 200)}`)
     const batch = body?.data?.vaults ?? []
     collected.push(...batch)
     if (batch.length < SUBGRAPH_PAGE_SIZE) return collected

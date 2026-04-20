@@ -229,7 +229,7 @@ The public interface of `useVaults()` is unchanged — the 15 exports (`isReady`
 
 `/api/rewards/{merkl,brevis,fuul}?chainId=X` proxies the three reward providers' **public** campaign surface (chain-scoped, identical for every user). The composables `useMerkl`, `useBrevis`, `useFuul` each do one `$fetch('/api/rewards/<provider>')` per poll instead of the previous 4-6 direct upstream requests per user per poll.
 
-- **Merkl**: the handler consolidates the three opportunity types (EULER, MULTILENDBORROW, ERC20LOGPROCESSOR — paginated internally up to 10×100 items per type) plus the global `/tokens/reward` payload into one response. Each type caches separately under `merkl:{type}:{chainId}` so one flaky upstream doesn't blank out the others.
+- **Merkl**: the handler consolidates the three opportunity types (EULER, MULTILENDBORROW, ERC20LOGPROCESSOR — paginated internally up to 10×100 items per type) into one response. The global `/tokens/reward` payload is **not** included here — it flows through `/api/token-list` instead (see `fetchMerkl` there). Each type caches separately under `merkl:{type}:{chainId}` so one flaky upstream doesn't blank out the others.
 - **Brevis**: the upstream POST body is hardcoded server-side (`{ action: [LEND, BORROW], status: [3] }`), so the cache key reduces to `brevis:{chainId}` and the handler exposes a cacheable GET.
 - **Fuul**: the two `protocol=euler` and `protocol=euler-looping` queries fan out server-side and return as `{ euler, looping }`.
 

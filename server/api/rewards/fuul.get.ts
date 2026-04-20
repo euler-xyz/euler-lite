@@ -40,22 +40,27 @@ export default defineEventHandler(async (event) => {
 
   const chainId = resolveChainId(event)
 
-  try {
-    const [euler, looping] = await Promise.all([
-      resolveProtocol(chainId, 'euler'),
-      resolveProtocol(chainId, 'euler-looping'),
-    ])
+  const [eulerResult, loopingResult] = await Promise.allSettled([
+    resolveProtocol(chainId, 'euler'),
+    resolveProtocol(chainId, 'euler-looping'),
+  ])
 
-    setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
-    return { euler, looping }
+  const euler = eulerResult.status === 'fulfilled' ? eulerResult.value : []
+  const looping = loopingResult.status === 'fulfilled' ? loopingResult.value : []
+
+  if (eulerResult.status === 'rejected') {
+    logWarn('rewards-fuul', `euler cold fetch failed chain=${chainId}:`, eulerResult.reason instanceof Error ? eulerResult.reason.message : eulerResult.reason)
   }
-  catch (err) {
-    if (err && typeof err === 'object' && 'statusCode' in err) {
-      throw err
-    }
-    logWarn('rewards-fuul', `cold fetch failed chain=${chainId}:`, err instanceof Error ? err.message : err)
+  if (loopingResult.status === 'rejected') {
+    logWarn('rewards-fuul', `euler-looping cold fetch failed chain=${chainId}:`, loopingResult.reason instanceof Error ? loopingResult.reason.message : loopingResult.reason)
+  }
+
+  if (eulerResult.status === 'rejected' && loopingResult.status === 'rejected') {
     throw createError({ statusCode: 502, statusMessage: 'Fuul upstream error' })
   }
+
+  setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
+  return { euler, looping }
 })
 
 export { FUUL_PROTOCOLS }
