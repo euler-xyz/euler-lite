@@ -7,17 +7,15 @@ import { getAddressPrefix } from '~/utils/subgraph'
 import {
   type CowSwapExecutionStatus,
   type CowSwapOrderUid,
-  getCowSwapChainConfig,
   buildEvcPermitTypedData,
   computeNonceNamespace,
   submitCowSwapOrder,
-  cancelCowSwapOrder,
   type CowSwapOrderPayload,
 } from '~/entities/cowswap'
 
 export const useCowSwapExecutionCore = () => {
   const { address } = useWagmi()
-  const { eulerCoreAddresses, chainId } = useEulerAddresses()
+  const { eulerCoreAddresses } = useEulerAddresses()
   const { client: rpcClient } = useRpcClient()
   const { writeContractAsync } = useWriteContract()
   const { signTypedDataAsync } = useSignTypedData()
@@ -28,6 +26,12 @@ export const useCowSwapExecutionCore = () => {
   const submissionChainId = ref<number | undefined>()
   const error = ref<Error | null>(null)
   const locallyCancelled = ref(false)
+  const permitCancellation = ref<{
+    evcAddress: Address
+    addressPrefix: Hex
+    nonceNamespace: bigint
+    nonce: bigint
+  } | undefined>()
 
   const isPending = computed(() => status.value !== 'idle' && status.value !== 'submitted')
   const explorerUrl = computed(() => {
@@ -122,6 +126,8 @@ export const useCowSwapExecutionCore = () => {
       args: [wrapperParams],
     }) as Hex
 
+    permitCancellation.value = { evcAddress, addressPrefix, nonceNamespace, nonce }
+
     return { nonce, nonceNamespace, permitCalldata, evcAddress, chainId: flowChainId }
   }
 
@@ -187,33 +193,38 @@ export const useCowSwapExecutionCore = () => {
   const cancelOrder = async (): Promise<void> => {
     const uid = orderUid.value
     if (!uid) throw new Error('No order to cancel')
-
-    const cancelChainId = submissionChainId.value ?? chainId.value ?? 0
-    const config = getCowSwapChainConfig(cancelChainId)
-    if (!config) throw new Error('Chain not supported')
+    const permit = permitCancellation.value
+    if (!permit) throw new Error('Permit cancellation data not available')
 
     error.value = null
+    const previousStatus = status.value
+    status.value = 'cancelling'
 
     try {
-      await cancelCowSwapOrder({
-        orderUid: uid,
-        orderbookUrl: config.orderbookUrl,
-        settlementContract: config.settlementContract,
-        chainId: cancelChainId,
-        signTypedData: async (params) => {
-          return await signTypedDataAsync({
-            domain: params.domain as Record<string, unknown>,
-            types: params.types as Record<string, unknown>,
-            primaryType: params.primaryType,
-            message: params.message as Record<string, unknown>,
-          }) as Hex
-        },
-      })
+      const client = requireRpc()
+      const currentNonce = await client.readContract({
+        address: permit.evcAddress,
+        abi: EVC_ABI,
+        functionName: 'getNonce',
+        args: [permit.addressPrefix, permit.nonceNamespace],
+      }) as bigint
+
+      if (currentNonce <= permit.nonce) {
+        await writeContractAndWait({
+          address: permit.evcAddress,
+          abi: EVC_ABI,
+          functionName: 'setNonce',
+          args: [permit.addressPrefix, permit.nonceNamespace, permit.nonce + 1n],
+        })
+      }
+
       locallyCancelled.value = true
+      status.value = 'submitted'
     }
     catch (err) {
       const wrapped = err instanceof Error ? err : new Error(String(err))
       error.value = wrapped
+      status.value = previousStatus
       logWarn('cowswap/cancelOrder', wrapped)
       throw wrapped
     }
@@ -225,6 +236,7 @@ export const useCowSwapExecutionCore = () => {
     submissionChainId.value = undefined
     error.value = null
     locallyCancelled.value = false
+    permitCancellation.value = undefined
   }
 
   return {

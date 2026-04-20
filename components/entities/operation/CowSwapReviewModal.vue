@@ -24,8 +24,9 @@ const isExecuting = computed(() => {
   return s !== 'idle' && s !== 'submitted'
 })
 
-const isSubmitted = computed(() => props.executionStatus === 'submitted')
 const isCancelling = ref(false)
+const isCancelPending = computed(() => props.executionStatus === 'cancelling' || isCancelling.value)
+const isSubmitted = computed(() => props.executionStatus === 'submitted' || isCancelPending.value)
 
 const executionLabel = computed(() => {
   switch (props.executionStatus) {
@@ -34,11 +35,13 @@ const executionLabel = computed(() => {
     case 'signing_permit': return 'Sign EVC permit in wallet...'
     case 'signing_order': return 'Sign CoW order in wallet...'
     case 'submitting': return 'Submitting order to CoW Protocol...'
+    case 'cancelling': return 'Cancelling order...'
     default: return null
   }
 })
 
 const orderStatusLabel = computed(() => {
+  if (isCancelPending.value) return 'Cancelling order'
   if (props.locallyCancelled) return 'Order cancelled'
   if (!props.orderStatus) return 'Waiting for solver...'
   switch (props.orderStatus.type) {
@@ -52,6 +55,16 @@ const orderStatusLabel = computed(() => {
     case 'expired': return 'Order expired'
     default: return 'Waiting for solver...'
   }
+})
+
+const orderStatusDescription = computed(() => {
+  if (isCancelPending.value) {
+    return 'We are invalidating the swap order in Euler.'
+  }
+  if (props.locallyCancelled) {
+    return 'The signed EVC permit has been invalidated. The order may remain visible on CoW Protocol, but it can no longer execute through Euler.'
+  }
+  return undefined
 })
 
 const internalSubmitting = ref(false)
@@ -109,7 +122,7 @@ const handleCancel = async () => {
 
       <!-- Execution progress -->
       <UiToast
-        v-if="executionLabel"
+        v-if="executionLabel && !isSubmitted"
         :title="executionLabel"
         variant="info"
         size="compact"
@@ -120,6 +133,7 @@ const handleCancel = async () => {
       <template v-if="isSubmitted">
         <UiToast
           :title="orderStatusLabel"
+          :description="orderStatusDescription"
           variant="info"
           size="compact"
           persistent
@@ -140,11 +154,11 @@ const handleCancel = async () => {
           variant="secondary"
           size="xlarge"
           rounded
-          :disabled="isCancelling"
-          :loading="isCancelling"
+          :disabled="isCancelPending"
+          :loading="isCancelPending"
           @click="handleCancel"
         >
-          {{ isCancelling ? 'Cancelling...' : 'Cancel Order' }}
+          {{ isCancelPending ? 'Cancelling...' : 'Cancel Order' }}
         </UiButton>
       </template>
 
