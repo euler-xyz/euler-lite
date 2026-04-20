@@ -51,10 +51,8 @@ const _disabled = computed(() => {
   return props.disabled && !needToSwitchChain.value
 })
 
-const GENERIC_DISABLED_REASON = 'This operation is currently disabled. Check the messages above for details.'
+const GENERIC_DISABLED_REASON = 'Complete the form fields above to continue.'
 
-// Tooltip is only shown while `_disabled && !loading`, so the generic fallback
-// guarantees `effectiveDisabledReason` is truthy in that window.
 const effectiveDisabledReason = computed(() => {
   if (props.disabledReason) return props.disabledReason
   if (operationBlockReason.value) return operationBlockReason.value

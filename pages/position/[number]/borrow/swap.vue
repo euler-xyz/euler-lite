@@ -255,6 +255,15 @@ const {
   normalizeAddress, clearSimulationError, requestQuote,
 } = swap
 
+const disabledReason = computed(() => {
+  if (isGeoBlocked.value) return 'This operation is not available in your region'
+  if (errorText.value) return errorText.value
+  if (sameVaultError.value) return sameVaultError.value
+  if (healthError.value) return healthError.value
+  if (simulationError.value) return simulationError.value
+  return undefined
+})
+
 // Must be after `swap` destructuring so `quote` is in scope
 watchEffect(async () => {
   if (!quote.value || !toVault.value) {
@@ -448,6 +457,7 @@ const onToVaultChange = (selectedIndex: number) => {
               <VaultFormSubmit
                 :disabled="reviewSwapDisabled"
                 :loading="isSubmitting || isPreparing"
+                :disabled-reason="disabledReason"
               >
                 {{ reviewSwapLabel }}
               </VaultFormSubmit>

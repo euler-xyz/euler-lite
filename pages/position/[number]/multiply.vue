@@ -707,6 +707,14 @@ const isMultiplyRestricted = computed(() => {
 })
 const reviewMultiplyDisabled = computed(() => isGeoBlocked.value || isMultiplyRestricted.value || isMultiplySubmitDisabled.value)
 
+const disabledReason = computed(() => {
+  if (isGeoBlocked.value) return 'This operation is not available in your region'
+  if (isMultiplyRestricted.value) return 'Multiply is not available for this pair in your region'
+  if (multiplyErrorText.value) return multiplyErrorText.value
+  if (multiplySimulationError.value) return multiplySimulationError.value
+  return undefined
+})
+
 const loadPosition = async () => {
   if (!isConnected.value && !isSpyMode.value) {
     position.value = null
@@ -875,6 +883,7 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
             <VaultFormSubmit
               :disabled="reviewMultiplyDisabled"
               :loading="isSubmitting || isPreparing"
+              :disabled-reason="disabledReason"
             >
               Review Multiply
             </VaultFormSubmit>

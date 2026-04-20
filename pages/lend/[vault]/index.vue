@@ -291,6 +291,14 @@ const isSubmitDisabled = computed(() => {
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vaultAddress))
 const isSwapRestricted = computed(() => needsSwap.value && isVaultRestrictedByCountry(vaultAddress))
 const reviewSupplyDisabled = computed(() => isGeoBlocked.value || isSwapRestricted.value || isSubmitDisabled.value)
+const disabledReason = computed(() => {
+  if (isGeoBlocked.value) return 'This operation is not available in your region'
+  if (isSwapRestricted.value) return 'Swap deposits are not available in your region'
+  if (evkVault.value && isOpDisabled(evkVault.value, OP_DEPOSIT)) return 'Deposits are currently disabled for this vault'
+  if (isSupplyCapReached.value) return 'Supply cap has been reached'
+  if (errorText.value) return errorText.value
+  return undefined
+})
 const totalRewardsAPY = computed(() => getSupplyRewardApy(vaultAddress))
 const hasRewards = computed(() => hasSupplyRewards(vaultAddress))
 const intrinsicApy = computed(() => getIntrinsicApy(asset.value?.address))
@@ -970,6 +978,7 @@ watch(address, () => {
               />
               <VaultFormSubmit
                 :disabled="reviewSupplyDisabled"
+                :disabled-reason="disabledReason"
                 :loading="isSubmitting || isPreparing"
               >
                 {{ reviewSupplyLabel }}

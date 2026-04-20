@@ -163,6 +163,23 @@ const { guardWithPriceImpact: guardWithBorrowSwapPriceImpact } = usePriceImpactG
 const reviewBorrowDisabled = computed(() => isGeoBlocked.value || isBorrowRestricted.value || borrow.isBorrowSwapRestricted.value || borrow.isSubmitDisabled.value)
 const reviewMultiplyDisabled = computed(() => isGeoBlocked.value || isMultiplyRestricted.value || multiply.isMultiplySubmitDisabled.value)
 
+const borrowDisabledReason = computed(() => {
+  if (isGeoBlocked.value) return 'This operation is not available in your region'
+  if (isBorrowRestricted.value) return 'Borrowing this asset is not available in your region'
+  if (borrow.isBorrowSwapRestricted.value) return 'Swapping into this collateral vault is not available in your region'
+  if (borrow.errorText.value) return borrow.errorText.value
+  if (borrow.borrowSimulationError.value) return borrow.borrowSimulationError.value
+  return undefined
+})
+
+const multiplyDisabledReason = computed(() => {
+  if (isGeoBlocked.value) return 'This operation is not available in your region'
+  if (isMultiplyRestricted.value) return 'Multiply is not available for this pair in your region'
+  if (multiply.multiplyErrorText.value) return multiply.multiplyErrorText.value
+  if (multiply.multiplySimulationError.value) return multiply.multiplySimulationError.value
+  return undefined
+})
+
 // --- Tabs ---
 const formTabs = computed(() => [
   { label: 'Borrow', value: 'borrow' },
@@ -847,6 +864,7 @@ watch(formTab, () => {
               <VaultFormSubmit
                 v-if="formTab === 'borrow'"
                 :disabled="reviewBorrowDisabled"
+                :disabled-reason="borrowDisabledReason"
                 :loading="borrow.isSubmitting.value || borrow.isPreparing.value"
               >
                 {{ reviewBorrowLabel }}
@@ -854,6 +872,7 @@ watch(formTab, () => {
               <VaultFormSubmit
                 v-else-if="formTab === 'multiply'"
                 :disabled="reviewMultiplyDisabled"
+                :disabled-reason="multiplyDisabledReason"
                 :loading="multiply.isMultiplySubmitting.value || multiply.isMultiplyPreparing.value"
               >
                 {{ reviewMultiplyLabel }}

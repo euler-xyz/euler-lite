@@ -158,6 +158,14 @@ const form = useCollateralForm({
 })
 useOperationGuard(computed(() => [form.collateralVault.value?.address].filter(Boolean)))
 
+const disabledReason = computed(() => {
+  if (form.isGeoBlocked.value) return 'This operation is not available in your region'
+  if (form.isSwapRestricted.value) return 'Swapping into this vault is not available in your region'
+  if (form.estimatesError.value) return form.estimatesError.value
+  if (form.simulationError.value) return form.simulationError.value
+  return undefined
+})
+
 const balanceFixed = computed(() => FixedPoint.fromValue(balance.value, form.collateralVault.value?.decimals || 18))
 const assets = computed(() => [form.asset.value].filter((v): v is VaultAsset => !!v))
 const pairAssetsLabel = usePositionPairLabel(form.position)
@@ -419,6 +427,7 @@ watch(selectedAsset, async () => {
             <VaultFormSubmit
               :disabled="form.submitDisabled.value"
               :loading="form.isSubmitting.value || form.isPreparing.value"
+              :disabled-reason="disabledReason"
             >
               {{ form.submitLabel }}
             </VaultFormSubmit>

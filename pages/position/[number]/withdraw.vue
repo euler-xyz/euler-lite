@@ -132,6 +132,14 @@ const form = useCollateralForm({
   },
 })
 useOperationGuard(computed(() => [form.collateralVault.value?.address, form.borrowVault.value?.address].filter(Boolean)))
+
+const disabledReason = computed(() => {
+  if (form.isGeoBlocked.value) return 'This operation is not available in your region'
+  if (form.isSwapRestricted.value) return 'Swapping from this vault is not available in your region'
+  if (form.estimatesError.value) return form.estimatesError.value
+  if (form.simulationError.value) return form.simulationError.value
+  return undefined
+})
 const pairAssetsLabel = usePositionPairLabel(form.position)
 
 // Withdraw-specific computeds
@@ -364,6 +372,7 @@ watch(selectedOutputAsset, () => {
             <VaultFormSubmit
               :disabled="form.submitDisabled.value"
               :loading="form.isSubmitting.value || form.isPreparing.value"
+              :disabled-reason="disabledReason"
             >
               {{ form.submitLabel }}
             </VaultFormSubmit>

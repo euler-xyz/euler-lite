@@ -141,6 +141,14 @@ const {
   selectProvider, onFromInput, onToVaultChange, onRefreshQuotes, submit, openSlippageSettings,
 } = swap
 
+const disabledReason = computed(() => {
+  if (isGeoBlocked.value) return 'This operation is not available in your region'
+  if (sameVaultError.value) return sameVaultError.value
+  if (errorText.value) return errorText.value
+  if (quoteError.value) return quoteError.value
+  return undefined
+})
+
 // ── Vault loading ────────────────────────────────────────────────────────
 const loadVaults = async () => {
   isLoading.value = true
@@ -327,6 +335,7 @@ watch([() => route.params.vault, () => route.query.to], () => {
           <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
             <VaultFormSubmit
               :disabled="reviewSwapDisabled"
+              :disabled-reason="disabledReason"
               :loading="isSubmitting || isPreparing"
             >
               {{ reviewSwapLabel }}

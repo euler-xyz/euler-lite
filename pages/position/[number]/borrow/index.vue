@@ -102,6 +102,14 @@ const isGeoBlocked = computed(() => {
 const isBorrowRestricted = computed(() =>
   pair.value?.borrow ? isVaultRestrictedByCountry(pair.value.borrow.address) : false)
 const reviewBorrowDisabled = computed(() => isGeoBlocked.value || isBorrowRestricted.value || isSubmitDisabled.value)
+
+const disabledReason = computed(() => {
+  if (isGeoBlocked.value) return 'This operation is not available in your region'
+  if (isBorrowRestricted.value) return 'Borrowing this asset is not available in your region'
+  if (errorText.value) return errorText.value
+  if (simulationError.value) return simulationError.value
+  return undefined
+})
 const borrowVault = computed(() => pair.value?.borrow)
 const collateralVault = computed(() => pair.value?.collateral)
 useOperationGuard(computed(() => [borrowVault.value?.address, collateralVault.value?.address].filter(Boolean)))
@@ -564,6 +572,7 @@ watch([collateralAmount, borrowAmount], async () => {
             <VaultFormSubmit
               :disabled="reviewBorrowDisabled"
               :loading="isSubmitting || isPreparing"
+              :disabled-reason="disabledReason"
             >
               Review Borrow
             </VaultFormSubmit>

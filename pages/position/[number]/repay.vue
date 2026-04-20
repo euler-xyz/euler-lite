@@ -218,6 +218,29 @@ const reviewRepayDisabled = computed(() => {
   return collateral.isSubmitDisabled.value
 })
 
+const disabledReason = computed(() => {
+  if (formTab.value === 'wallet') {
+    if (walletSwap.needsSwap.value) {
+      if (isWalletSwapRestricted.value) return 'Swapping into this vault is not available in your region'
+      if (walletSwap.disabledReason.value) return walletSwap.disabledReason.value
+      if (walletSwap.estimatesError.value) return walletSwap.estimatesError.value
+    }
+    else {
+      if (wallet.estimatesError.value) return wallet.estimatesError.value
+    }
+    if (simulationError.value) return simulationError.value
+    return undefined
+  }
+  if (formTab.value === 'savings') {
+    if (savings.disabledReason.value) return savings.disabledReason.value
+    if (simulationError.value) return simulationError.value
+    return undefined
+  }
+  if (collateral.disabledReason.value) return collateral.disabledReason.value
+  if (simulationError.value) return simulationError.value
+  return undefined
+})
+
 const activeHookWarning = computed(() => {
   if (formTab.value === 'wallet') {
     return walletSwap.needsSwap.value
@@ -584,6 +607,7 @@ watch(formTab, () => {
               <VaultFormSubmit
                 :disabled="reviewRepayDisabled"
                 :loading="isSubmitting || isPreparing"
+                :disabled-reason="disabledReason"
               >
                 {{ reviewRepayLabel }}
               </VaultFormSubmit>
@@ -763,6 +787,7 @@ watch(formTab, () => {
               <VaultFormSubmit
                 :disabled="reviewRepayDisabled"
                 :loading="isSubmitting || isPreparing"
+                :disabled-reason="disabledReason"
               >
                 {{ reviewRepayLabel }}
               </VaultFormSubmit>
@@ -934,6 +959,7 @@ watch(formTab, () => {
               <VaultFormSubmit
                 :disabled="reviewRepayDisabled"
                 :loading="isSubmitting || isPreparing"
+                :disabled-reason="disabledReason"
               >
                 {{ reviewRepayLabel }}
               </VaultFormSubmit>

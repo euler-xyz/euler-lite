@@ -188,6 +188,14 @@ const {
   normalizeAddress, clearSimulationError, resetQuoteState,
 } = swap
 
+const disabledReason = computed(() => {
+  if (isGeoBlocked.value) return 'This operation is not available in your region'
+  if (errorText.value) return errorText.value
+  if (sameVaultError.value) return sameVaultError.value
+  if (simulationError.value) return simulationError.value
+  return undefined
+})
+
 // ── Position loading ─────────────────────────────────────────────────────
 const getSelectedCollateralAddress = () =>
   (typeof route.query.collateral === 'string' ? route.query.collateral : '')
@@ -570,6 +578,7 @@ const nextLiquidationPrice = computed(() => {
               <VaultFormSubmit
                 :disabled="reviewSwapDisabled"
                 :loading="isSubmitting || isPreparing"
+                :disabled-reason="disabledReason"
               >
                 {{ reviewSwapLabel }}
               </VaultFormSubmit>
