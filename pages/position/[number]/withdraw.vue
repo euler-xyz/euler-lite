@@ -16,6 +16,7 @@ import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/stri
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useCollateralForm } from '~/composables/position/useCollateralForm'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const positionIndex = usePositionIndex()
 const { address } = useAccount()
@@ -133,11 +134,11 @@ const form = useCollateralForm({
 })
 useOperationGuard(computed(() => [form.collateralVault.value?.address, form.borrowVault.value?.address].filter(Boolean)))
 
-const disabledReasonInfo = computed(() => {
-  if (form.isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' as const }
-  if (form.isSwapRestricted.value) return { message: 'Swapping from this vault is not available in your region', variant: 'warning' as const }
-  if (form.estimatesError.value) return { message: form.estimatesError.value, variant: 'error' as const }
-  if (form.simulationError.value) return { message: form.simulationError.value, variant: 'error' as const }
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (form.isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (form.isSwapRestricted.value) return { message: 'Swapping from this vault is not available in your region', variant: 'warning' }
+  if (form.estimatesError.value) return { message: form.estimatesError.value, variant: 'error' }
+  if (form.simulationError.value) return { message: form.simulationError.value, variant: 'error' }
   return undefined
 })
 const pairAssetsLabel = usePositionPairLabel(form.position)

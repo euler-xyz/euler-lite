@@ -25,6 +25,7 @@ import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/stri
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const route = useRoute()
 const { isConnected, address } = useAccount()
@@ -188,11 +189,11 @@ const {
   normalizeAddress, clearSimulationError, resetQuoteState,
 } = swap
 
-const disabledReasonInfo = computed(() => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' as const }
-  if (errorText.value) return { message: errorText.value, variant: 'error' as const }
-  if (sameVaultError.value) return { message: sameVaultError.value, variant: 'error' as const }
-  if (simulationError.value) return { message: simulationError.value, variant: 'error' as const }
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (errorText.value) return { message: errorText.value, variant: 'error' }
+  if (sameVaultError.value) return { message: sameVaultError.value, variant: 'error' }
+  if (simulationError.value) return { message: simulationError.value, variant: 'error' }
   return undefined
 })
 

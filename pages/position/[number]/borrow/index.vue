@@ -18,6 +18,7 @@ import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { createRaceGuard } from '~/utils/race-guard'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const router = useRouter()
 const _route = useRoute()
@@ -103,11 +104,11 @@ const isBorrowRestricted = computed(() =>
   pair.value?.borrow ? isVaultRestrictedByCountry(pair.value.borrow.address) : false)
 const reviewBorrowDisabled = computed(() => isGeoBlocked.value || isBorrowRestricted.value || isSubmitDisabled.value)
 
-const disabledReasonInfo = computed(() => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' as const }
-  if (isBorrowRestricted.value) return { message: 'Borrowing this asset is not available in your region', variant: 'warning' as const }
-  if (errorText.value) return { message: errorText.value, variant: 'error' as const }
-  if (simulationError.value) return { message: simulationError.value, variant: 'error' as const }
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isBorrowRestricted.value) return { message: 'Borrowing this asset is not available in your region', variant: 'warning' }
+  if (errorText.value) return { message: errorText.value, variant: 'error' }
+  if (simulationError.value) return { message: simulationError.value, variant: 'error' }
   return undefined
 })
 const borrowVault = computed(() => pair.value?.borrow)

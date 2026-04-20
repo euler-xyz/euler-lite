@@ -18,6 +18,7 @@ import { useWalletSwapRepay } from '~/composables/repay/useWalletSwapRepay'
 import { useCollateralSwapRepay } from '~/composables/repay/useCollateralSwapRepay'
 import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const _route = useRoute()
 const _router = useRouter()
@@ -218,26 +219,26 @@ const reviewRepayDisabled = computed(() => {
   return collateral.isSubmitDisabled.value
 })
 
-const disabledReasonInfo = computed(() => {
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (formTab.value === 'wallet') {
     if (walletSwap.needsSwap.value) {
-      if (isWalletSwapRestricted.value) return { message: 'Swapping into this vault is not available in your region', variant: 'warning' as const }
-      if (walletSwap.disabledReason.value) return { message: walletSwap.disabledReason.value, variant: 'error' as const }
-      if (walletSwap.estimatesError.value) return { message: walletSwap.estimatesError.value, variant: 'error' as const }
+      if (isWalletSwapRestricted.value) return { message: 'Swapping into this vault is not available in your region', variant: 'warning' }
+      if (walletSwap.disabledReason.value) return { message: walletSwap.disabledReason.value, variant: 'error' }
+      if (walletSwap.estimatesError.value) return { message: walletSwap.estimatesError.value, variant: 'error' }
     }
     else {
-      if (wallet.estimatesError.value) return { message: wallet.estimatesError.value, variant: 'error' as const }
+      if (wallet.estimatesError.value) return { message: wallet.estimatesError.value, variant: 'error' }
     }
-    if (simulationError.value) return { message: simulationError.value, variant: 'error' as const }
+    if (simulationError.value) return { message: simulationError.value, variant: 'error' }
     return undefined
   }
   if (formTab.value === 'savings') {
-    if (savings.disabledReason.value) return { message: savings.disabledReason.value, variant: 'error' as const }
-    if (simulationError.value) return { message: simulationError.value, variant: 'error' as const }
+    if (savings.disabledReason.value) return { message: savings.disabledReason.value, variant: 'error' }
+    if (simulationError.value) return { message: simulationError.value, variant: 'error' }
     return undefined
   }
-  if (collateral.disabledReason.value) return { message: collateral.disabledReason.value, variant: 'error' as const }
-  if (simulationError.value) return { message: simulationError.value, variant: 'error' as const }
+  if (collateral.disabledReason.value) return { message: collateral.disabledReason.value, variant: 'error' }
+  if (simulationError.value) return { message: simulationError.value, variant: 'error' }
   return undefined
 })
 

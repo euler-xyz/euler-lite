@@ -13,6 +13,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { isVaultDeprecated } from '~/utils/eulerLabelsUtils'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const route = useRoute()
 const { getVault } = useVaults()
@@ -141,12 +142,12 @@ const {
   selectProvider, onFromInput, onToVaultChange, onRefreshQuotes, submit, openSlippageSettings,
 } = swap
 
-const disabledReasonInfo = computed(() => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' as const }
-  if (sameVaultError.value) return { message: sameVaultError.value, variant: 'error' as const }
-  if (errorText.value) return { message: errorText.value, variant: 'error' as const }
-  if (quoteError.value) return { message: quoteError.value, variant: 'warning' as const }
-  if (simulationError.value) return { message: simulationError.value, variant: 'error' as const }
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (sameVaultError.value) return { message: sameVaultError.value, variant: 'error' }
+  if (errorText.value) return { message: errorText.value, variant: 'error' }
+  if (quoteError.value) return { message: quoteError.value, variant: 'warning' }
+  if (simulationError.value) return { message: simulationError.value, variant: 'error' }
   return undefined
 })
 

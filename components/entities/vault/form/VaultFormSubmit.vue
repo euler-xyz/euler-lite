@@ -4,6 +4,7 @@ import { useAccount } from '@wagmi/vue'
 import { flip, offset, shift, useFloating } from '@floating-ui/vue'
 
 import { isOperationBlocked, operationBlockReason } from '~/utils/operationGuardRegistry'
+import type { DisabledReasonVariant } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { AcknowledgeTermsModal, VaultUnverifiedDisclaimerModal } from '#components'
 import type { KeyringFlowState, CredentialData } from '~/composables/useKeyring'
@@ -20,7 +21,7 @@ interface KeyringGuardState {
   cancelVerification: () => void
 }
 
-const props = defineProps<{ disabled?: boolean, loading?: boolean, disabledReason?: string, disabledReasonVariant?: 'warning' | 'error' }>()
+const props = defineProps<{ disabled?: boolean, loading?: boolean, disabledReason?: string, disabledReasonVariant?: DisabledReasonVariant }>()
 const { isConnected } = useAccount()
 const { chainId: _chainId } = useEulerAddresses()
 const { chainId, switchChain, connect } = useWagmi()
@@ -61,8 +62,11 @@ const effectiveDisabledReason = computed(() => {
 })
 
 const tooltipVariantClass = computed(() => {
-  if (!props.disabledReason || !props.disabledReasonVariant) return ''
-  return `vault-form-submit__tooltip--${props.disabledReasonVariant}`
+  if (props.disabledReason && props.disabledReasonVariant) {
+    return `vault-form-submit__tooltip--${props.disabledReasonVariant}`
+  }
+  if (operationBlockReason.value) return 'vault-form-submit__tooltip--warning'
+  return ''
 })
 
 const showTooltip = () => {

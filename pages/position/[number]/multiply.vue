@@ -22,6 +22,7 @@ import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe, computeNextHe
 import { nanoToValue } from '~/utils/crypto-utils'
 import { computeMaxMultiplier } from '~/utils/multiply-math'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -707,11 +708,11 @@ const isMultiplyRestricted = computed(() => {
 })
 const reviewMultiplyDisabled = computed(() => isGeoBlocked.value || isMultiplyRestricted.value || isMultiplySubmitDisabled.value)
 
-const disabledReasonInfo = computed(() => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' as const }
-  if (isMultiplyRestricted.value) return { message: 'Multiply is not available for this pair in your region', variant: 'warning' as const }
-  if (multiplyErrorText.value) return { message: multiplyErrorText.value, variant: 'error' as const }
-  if (multiplySimulationError.value) return { message: multiplySimulationError.value, variant: 'error' as const }
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isMultiplyRestricted.value) return { message: 'Multiply is not available for this pair in your region', variant: 'warning' }
+  if (multiplyErrorText.value) return { message: multiplyErrorText.value, variant: 'error' }
+  if (multiplySimulationError.value) return { message: multiplySimulationError.value, variant: 'error' }
   return undefined
 })
 
