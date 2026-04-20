@@ -94,6 +94,7 @@ watch(chainId, (newChainId, oldChainId) => {
 const marketOptions = computed(() => {
   const entries: FilterOptionEntry[] = []
   for (const group of marketGroups.value) {
+    if (group.source !== 'product') continue
     const seenInGroup = new Set<string>()
     for (const vault of group.vaults) {
       const addr = getVaultAddress(vault)
@@ -131,6 +132,7 @@ const assetOptions = computed(() => {
 const riskManagerOptions = computed(() => {
   const entries: FilterOptionEntry[] = []
   for (const group of marketGroups.value) {
+    if (group.source !== 'product') continue
     const seenInGroup = new Set<string>()
     for (const vault of group.vaults) {
       if (!isVaultType(vault)) continue
