@@ -1,9 +1,9 @@
-name: Build, Push & Deploy
+name: Build, Push & Deploy (stage)
 on:
+  workflow_dispatch:
   push:
     branches:
-      - master
-
+      - development
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -22,7 +22,7 @@ jobs:
       image_tag: ${{ steps.generate-tag.outputs.image_tag }}
     steps:
       - name: Check out repository code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.ref }}
 
@@ -36,16 +36,47 @@ jobs:
           echo "Generated image tag: ${IMAGE_TAG}"
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN_PUSH_IMAGE }}
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@f2e9fc6c2b355c1890b65e6f6f0e2ac3e6e22f78
+        uses: aws-actions/amazon-ecr-login@f2e9fc6c2b355c1890b65e6f6f0e2ac3e6e22f78 # v2.1.2
 
-      - name: Build, tag, and push docker image to Amazon ECR
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Build docker image
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: euler-lite
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract static assets from image
+        run: |
+          docker create --name temp-euler euler-lite
+          docker cp temp-euler:/usr/src/app/.output/public ./static-output
+          docker rm temp-euler
+
+      - name: Configure AWS credentials for S3
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload static assets to S3
+        run: |
+          aws s3 sync ./static-output/_nuxt \
+            s3://${{ secrets.S3_STATIC_ASSETS_BUCKET_STAGE }}/_nuxt \
+            --cache-control "public,max-age=31536000,immutable"
+
+      - name: Tag and push docker image to Amazon ECR
         id: build
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
@@ -53,11 +84,8 @@ jobs:
           ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
         run: |
           FULL_IMAGE="$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-          docker build --platform linux/amd64 --build-arg SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }} -t euler-lite .
           docker tag euler-lite "$FULL_IMAGE"
-          docker tag euler-lite "$REGISTRY/$ECR_REPOSITORY:latest"
           docker push "$FULL_IMAGE"
-          docker push "$REGISTRY/$ECR_REPOSITORY:latest"
 
   deploy:
     name: Deploy to ECS
@@ -67,7 +95,7 @@ jobs:
       id-token: write
     steps:
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
@@ -75,31 +103,31 @@ jobs:
       - name: Download current task definition
         run: |
           aws ecs describe-task-definition \
-            --task-definition ${{ secrets.ECS_TASK_DEFINITION }} \
+            --task-definition ${{ secrets.ECS_TASK_DEFINITION_STAGE }} \
             --query taskDefinition \
             | jq 'del(.taskDefinitionArn, .revision, .status, .registeredAt, .registeredBy, .requiresAttributes, .compatibilities)' \
             > task-definition.json
 
       - name: Update image in task definition
         id: render-task-def
-        uses: aws-actions/amazon-ecs-render-task-definition@77954e213ba1f9f9cb016b86a1d4f6fcdea0d57e
+        uses: aws-actions/amazon-ecs-render-task-definition@77954e213ba1f9f9cb016b86a1d4f6fcdea0d57e # v1.8.4
         with:
           task-definition: task-definition.json
-          container-name: ${{ secrets.ECS_CONTAINER_NAME }}
+          container-name: ${{ secrets.ECS_CONTAINER_NAME_STAGE }}
           image: ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${{ needs.build-push.outputs.image_tag }}
 
       - name: Deploy new task definition to ECS
-        uses: aws-actions/amazon-ecs-deploy-task-definition@fc8fc60f3a60ffd500fcb13b209c59d221ac8c8c
+        uses: aws-actions/amazon-ecs-deploy-task-definition@fc8fc60f3a60ffd500fcb13b209c59d221ac8c8c # v2.6.1
         with:
           task-definition: ${{ steps.render-task-def.outputs.task-definition }}
-          service: ${{ secrets.ECS_SERVICE }}
-          cluster: ${{ secrets.ECS_CLUSTER }}
+          service: ${{ secrets.ECS_SERVICE_STAGE }}
+          cluster: ${{ secrets.ECS_CLUSTER_STAGE }}
           wait-for-service-stability: false
 
       - name: Wait for ECS service stability and stream events
         env:
-          ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
-          ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
+          ECS_CLUSTER: ${{ secrets.ECS_CLUSTER_STAGE }}
+          ECS_SERVICE: ${{ secrets.ECS_SERVICE_STAGE }}
         run: |
           set -euo pipefail
 
@@ -115,7 +143,7 @@ jobs:
               --cluster "$ECS_CLUSTER" \
               --services "$ECS_SERVICE" \
               --query "services[0].events" \
-              --output table || true
+              --output table || echo "WARNING: failed to fetch ECS service events"
 
             primary_rollout_state=$(aws ecs describe-services \
               --cluster "$ECS_CLUSTER" \
