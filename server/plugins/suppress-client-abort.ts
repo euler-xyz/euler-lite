@@ -24,9 +24,6 @@ function isClientAbort(error: unknown): boolean {
   if (error.message === 'aborted') return true
   // Defensive: also match if statusMessage was set (future h3 versions)
   if (error.statusMessage === 'aborted') return true
-  // Check cause for Node.js request abort errors
-  const cause = (error as { cause?: { message?: string, code?: string } }).cause
-  if (cause?.message === 'aborted' || cause?.code === 'ECONNRESET') return true
   return false
 }
 
