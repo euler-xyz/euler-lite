@@ -6,32 +6,32 @@ export type CowSwapOrderSigningScheme = 'eip712' | 'eip1271' | 'ethsign' | 'pres
 
 export type CowSwapTokenBalance = 'erc20' | 'internal' | 'external'
 
-export type CowSwapCompetitionOrderStatusType =
-  | 'open'
-  | 'scheduled'
-  | 'active'
-  | 'solved'
-  | 'executing'
-  | 'traded'
-  | 'cancelled'
+export type CowSwapCompetitionOrderStatusType
+  = | 'open'
+    | 'scheduled'
+    | 'active'
+    | 'solved'
+    | 'executing'
+    | 'traded'
+    | 'cancelled'
 
-export type CowSwapLifecycleOrderStatusType =
-  | 'presignaturePending'
-  | 'open'
-  | 'fulfilled'
-  | 'cancelled'
-  | 'expired'
+export type CowSwapLifecycleOrderStatusType
+  = | 'presignaturePending'
+    | 'open'
+    | 'fulfilled'
+    | 'cancelled'
+    | 'expired'
 
-export type CowSwapOrderStatusType =
-  | CowSwapCompetitionOrderStatusType
-  | CowSwapLifecycleOrderStatusType
-  | 'unknown'
+export type CowSwapOrderStatusType
+  = | CowSwapCompetitionOrderStatusType
+    | CowSwapLifecycleOrderStatusType
+    | 'unknown'
 
-export type CowSwapTerminalOrderStatus =
-  | 'traded'
-  | 'fulfilled'
-  | 'cancelled'
-  | 'expired'
+export type CowSwapTerminalOrderStatus
+  = | 'traded'
+    | 'fulfilled'
+    | 'cancelled'
+    | 'expired'
 
 export type CowSwapOrderStatus = {
   type: CowSwapOrderStatusType
@@ -42,14 +42,14 @@ export type CowSwapOrderStatus = {
 
 export type CowSwapOrderUid = string
 
-export type CowSwapExecutionStatus =
-  | 'idle'
-  | 'approving_collateral'
-  | 'fetching_inbox'
-  | 'signing_permit'
-  | 'signing_order'
-  | 'submitting'
-  | 'submitted'
+export type CowSwapExecutionStatus
+  = | 'idle'
+    | 'approving_collateral'
+    | 'fetching_inbox'
+    | 'signing_permit'
+    | 'signing_order'
+    | 'submitting'
+    | 'submitted'
 
 export type CowSwapOpenPositionParams = {
   owner: Address
@@ -81,7 +81,7 @@ export type CowSwapCollateralSwapParams = {
   fromVault: Address
   toVault: Address
   fromAmount: bigint
-  toAmount: bigint
+  disableSourceCollateral: boolean
 }
 
 export type CowSwapCollateralSwapExecuteParams = {

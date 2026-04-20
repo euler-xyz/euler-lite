@@ -40,7 +40,7 @@ export const useCowSwapCollateralSwapExecution = () => {
         fromVault: params.wrapper.fromVault,
         toVault: params.wrapper.toVault,
         fromAmount: params.wrapper.fromAmount,
-        toAmount: params.wrapper.toAmount,
+        disableSourceCollateral: params.wrapper.disableSourceCollateral,
       }
 
       const { nonce, nonceNamespace, permitCalldata, evcAddress } = await core.fetchNonceAndPermitData(
