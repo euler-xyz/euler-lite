@@ -3,7 +3,7 @@ import { useAccount } from '@wagmi/vue'
 import { erc20Abi, formatUnits, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import type { DisplayStep } from '~/utils/stepDecoding'
-import type { Vault, VaultAsset } from '~/entities/vault'
+import type { Vault } from '~/entities/vault'
 import type { SwapApiQuote } from '~/entities/swap'
 import {
   COWSWAP_PROVIDER_NAME,
@@ -209,9 +209,9 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
 
     const walletWarningsDescription
       = `The CoW order is signed with buy amounts in ${supplyVault.symbol} shares. `
-      + `The amounts shown above are in ${collateralAsset.symbol} (underlying). `
-      + 'The CoW order receiver is your sub-account, not your main wallet — your wallet may flag this as a mismatch. '
-      + 'You can verify the first 19 bytes (38 hex chars after "0x") of the receiver match your wallet address.'
+        + `The amounts shown above are in ${collateralAsset.symbol} (underlying). `
+        + 'The CoW order receiver is your sub-account, not your main wallet — your wallet may flag this as a mismatch. '
+        + 'You can verify the first 19 bytes (38 hex chars after "0x") of the receiver match your wallet address.'
 
     openCowSwapReviewModal(modal, {
       signSteps,
