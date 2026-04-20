@@ -15,6 +15,7 @@ concurrency:
 jobs:
   build-push:
     name: Build & Push Image
+    if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:
       contents: read
