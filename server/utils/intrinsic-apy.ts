@@ -23,7 +23,7 @@ const PENDLE_MATURITY_STALE_THRESHOLD_MS = 2 * 60 * 60 * 1000
 
 const UPSTREAM_URLS = {
   defillama: 'https://yields.llama.fi/pools',
-  etherfi: 'https://app.ether.fi/api/protocol/protocol-detail',
+  etherfi: 'https://ether.fi/api/dapp/protocol/protocol-detail',
   puffer: 'https://api-v2.puffer.fi/backend-for-frontend/tvl/all',
   treehouse: 'https://api.treehouse.finance/apy',
   spark: 'https://info-sky.blockanalitica.com/api/v1/overall/?format=json',
