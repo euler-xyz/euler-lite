@@ -6,7 +6,7 @@ import { fuulManagerABI, fuulFactoryABI } from '~/abis/fuul'
 import type { FuulClaimableEntry, FuulClaimableReward, FuulIncentive } from '~/entities/fuul'
 import type { RewardCampaign } from '~/entities/reward-campaign'
 import type { TxPlan } from '~/entities/txPlan'
-import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_60S_MS, POLL_INTERVAL_REWARDS_MS } from '~/entities/tuning-constants'
+import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 import { logWarn } from '~/utils/errorHandling'
 
 const address = ref('')
@@ -17,9 +17,9 @@ const isCampaignsLoading = ref(true)
 const fuulClaimableEntries: Ref<FuulClaimableEntry[]> = shallowRef([])
 const isClaimableLoading = ref(true)
 
-// Public incentives poll matches the server's 4-min warm cycle; user-specific
-// claimable rewards (direct Fuul call, NOT proxied) stays at 60s for responsive
-// post-claim updates.
+// Both public incentives and user-specific claimable rewards poll at 60s.
+// Public hits the CDN-cached proxy; claimable rewards (direct Fuul call,
+// NOT proxied) go to upstream.
 let publicInterval: NodeJS.Timeout | null = null
 let userInterval: NodeJS.Timeout | null = null
 let subscriberCount = 0
@@ -309,7 +309,7 @@ export const useFuul = () => {
       if (!publicInterval) {
         publicInterval = setInterval(() => {
           loadIncentives(false)
-        }, POLL_INTERVAL_REWARDS_MS)
+        }, POLL_INTERVAL_60S_MS)
       }
       if (!userInterval) {
         userInterval = setInterval(() => {

@@ -8,7 +8,9 @@
  * necessarily runs in the background. Caches are typically hot within
  * ~5 s of boot; users arriving before that pay the usual cold-upstream
  * latency for the specific endpoints they hit, same as today. The
- * periodic 4-min re-warm keeps every entry ahead of its 5-min TTL.
+ * periodic 5-min re-warm cycles with the TTL so reads against a healthy
+ * warm pipeline always find a cached entry (refresh completes just as the
+ * previous entry would otherwise expire).
  *
  * Warm-up structure (per cycle): all tasks run in parallel.
  *
@@ -40,7 +42,7 @@ import {
   refreshMerklType,
 } from '../utils/rewards-cache'
 
-const REWARM_INTERVAL_MS = 4 * 60_000
+const REWARM_INTERVAL_MS = 5 * 60_000
 
 const MERKL_TYPES: MerklOpportunityType[] = ['EULER', 'MULTILENDBORROW', 'ERC20LOGPROCESSOR']
 const FUUL_PROTOCOLS: FuulProtocol[] = ['euler', 'euler-looping']

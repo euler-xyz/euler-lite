@@ -61,7 +61,7 @@ Every upstream URL is cached under its own key in a shared TTL cache (5 min). Sh
 
 ### Warm-cache
 
-`server/plugins/warm-cache.ts` hits `/api/intrinsic-apy?chainId=X` for every enabled chain at boot and re-warms every 4 minutes. After the first warm, every client request per chain is a fast cache hit.
+`server/plugins/warm-cache.ts` hits `/api/intrinsic-apy?chainId=X` for every enabled chain at boot and re-warms every 5 minutes. After the first warm, every client request per chain is a fast cache hit.
 
 ## Client types (`entities/intrinsic-apy.ts`)
 

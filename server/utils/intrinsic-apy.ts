@@ -15,7 +15,7 @@ import { intrinsicApySources } from '~/entities/custom'
 import { STABLEWATCH_SOURCE_URL } from '~/entities/constants'
 import type { IntrinsicApyInfo } from '~/entities/intrinsic-apy'
 import { createTtlCache } from '~/server/utils/cache'
-import { UPSTREAM_FETCH_TIMEOUT_MS } from '~/server/utils/fetchWithTimeout'
+import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { logWarn } from '~/server/utils/log'
 
 const CACHE_TTL_MS = 5 * 60 * 1000
@@ -44,16 +44,9 @@ const cache = createTtlCache<unknown>({ ttlMs: CACHE_TTL_MS, maxEntries: 200 })
 const inFlight = new Map<string, Promise<unknown>>()
 
 async function fetchJson(url: string): Promise<unknown> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), UPSTREAM_FETCH_TIMEOUT_MS)
-  try {
-    const resp = await fetch(url, { signal: controller.signal })
-    if (!resp.ok) throw new Error(`Upstream returned ${resp.status}`)
-    return await resp.json()
-  }
-  finally {
-    clearTimeout(timeout)
-  }
+  const resp = await fetchWithTimeout(url)
+  if (!resp.ok) throw new Error(`Upstream returned ${resp.status}`)
+  return resp.json()
 }
 
 /**

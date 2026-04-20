@@ -7,7 +7,7 @@ import type { Campaign, CampaignsRequest, MerkleProofRequest, RewardInfo } from 
 import type { RewardCampaign } from '~/entities/reward-campaign'
 import type { TxPlan } from '~/entities/txPlan'
 import { CampaignAction } from '~/entities/brevis'
-import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_60S_MS, POLL_INTERVAL_REWARDS_MS } from '~/entities/tuning-constants'
+import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 import { logWarn } from '~/utils/errorHandling'
 
 // Server proxy response shape for public campaigns (raw pass-through of the
@@ -81,9 +81,9 @@ const userRewards: Ref<Campaign[]> = ref([])
 const isCampaignsLoading = ref(true)
 const isRewardsLoading = ref(true)
 
-// Public campaigns poll matches the server's 4-min warm cycle; user-specific
-// rewards (Brevis POST with user_address — NOT proxied) stays at 60s so
-// claimable amounts refresh responsively after attestation ticks.
+// Both public campaigns and user-specific rewards poll at 60s. Public polls
+// mostly hit CDN (60s total window). User-specific rewards (Brevis POST with
+// user_address — NOT proxied) hit the upstream directly.
 let publicInterval: NodeJS.Timeout | null = null
 let userInterval: NodeJS.Timeout | null = null
 // Refcount: useBrevis is consumed by useRewardsApy + portfolio components
@@ -374,7 +374,7 @@ export const useBrevis = () => {
       if (!publicInterval) {
         publicInterval = setInterval(() => {
           loadCampaigns(false)
-        }, POLL_INTERVAL_REWARDS_MS)
+        }, POLL_INTERVAL_60S_MS)
       }
       if (!userInterval) {
         userInterval = setInterval(() => {

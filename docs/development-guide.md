@@ -92,7 +92,7 @@ External metadata (contract addresses, labels, oracle checks) is fetched through
 
 All endpoints use rate limiting and return stale cached data when upstream is unavailable (except `/api/pyth/updates` which requires real-time data and returns no-store cache headers). The shared caching utility is in `server/utils/cache.ts`.
 
-**Startup cache warming**: `server/plugins/warm-cache.ts` runs at Nitro startup and pre-populates `/api/labels/*`, `/api/token-list`, `/api/intrinsic-apy`, `/api/vault-categories`, `/api/rewards/*`, and the vaults snapshot for every enabled chain, plus `/api/euler-chains` once globally. A 4-min interval re-warms thereafter. Runs in the background — Nitro's node-server preset doesn't await plugins before starting the HTTP listener, so users arriving in the first ~5 s of a freshly-booted instance's lifetime pay the usual cold-upstream latency for whichever endpoints they hit; everyone after that sees cached responses.
+**Startup cache warming**: `server/plugins/warm-cache.ts` runs at Nitro startup and pre-populates `/api/labels/*`, `/api/token-list`, `/api/intrinsic-apy`, `/api/vault-categories`, `/api/rewards/*`, and the vaults snapshot for every enabled chain, plus `/api/euler-chains` once globally. A 5-min interval re-warms thereafter. Runs in the background — Nitro's node-server preset doesn't await plugins before starting the HTTP listener, so users arriving in the first ~5 s of a freshly-booted instance's lifetime pay the usual cold-upstream latency for whichever endpoints they hit; everyone after that sees cached responses.
 
 ### Token List Endpoint Details
 

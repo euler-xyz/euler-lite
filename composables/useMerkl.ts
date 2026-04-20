@@ -7,7 +7,7 @@ import type { Opportunity, Reward, RewardsResponseItem } from '~/entities/merkl'
 import type { RewardCampaign, RewardCampaignType } from '~/entities/reward-campaign'
 import { mapMerklSubType } from '~/entities/reward-campaign'
 import type { TxPlan } from '~/entities/txPlan'
-import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_60S_MS, POLL_INTERVAL_REWARDS_MS } from '~/entities/tuning-constants'
+import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 import { logWarn } from '~/utils/errorHandling'
 
 // The per-user /users/{addr}/rewards endpoint stays direct (it carries the
@@ -28,10 +28,10 @@ const rewards: Ref<Reward[]> = ref([])
 const isOpportunitiesLoading = ref(true)
 const isRewardsLoading = ref(true)
 
-// Public campaigns poll matches the server's 4-min warm cycle — faster ticks
-// just re-read the same cache. User-specific `/users/{addr}/rewards` is not
-// proxied (per-wallet data) so it polls at 60s for responsive claimable-amount
-// updates after on-chain claims.
+// Both public campaigns and user-specific rewards poll at 60s. Public polls
+// mostly hit CDN (60s total window = max-age 30s + stale-while-revalidate 30s)
+// so the cost is near-zero while keeping the UI fresh. User-specific
+// `/users/{addr}/rewards` is not proxied (per-wallet data).
 //
 // Note: Merkl's /tokens/reward payload is merged into /api/token-list on the
 // server, so reward-token metadata (icons, decimals) comes from the unified
@@ -430,7 +430,7 @@ export const useMerkl = () => {
       if (!publicInterval) {
         publicInterval = setInterval(() => {
           loadOpportunities(chainId.value, false)
-        }, POLL_INTERVAL_REWARDS_MS)
+        }, POLL_INTERVAL_60S_MS)
       }
       if (!userInterval) {
         userInterval = setInterval(() => {

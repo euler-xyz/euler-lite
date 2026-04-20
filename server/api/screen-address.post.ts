@@ -1,9 +1,8 @@
 import { createError, readBody } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
+import { UPSTREAM_FETCH_TIMEOUT_MS } from '~/server/utils/fetchWithTimeout'
 import { logWarn } from '~/server/utils/log'
 import { isAbortError } from '~/utils/errorHandling'
-
-const SCREENING_TIMEOUT_MS = 5000
 
 const rateLimiter = createRateLimiter({
   max: 10,
@@ -35,7 +34,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), SCREENING_TIMEOUT_MS)
+  const timeout = setTimeout(() => controller.abort(), UPSTREAM_FETCH_TIMEOUT_MS)
 
   try {
     const resp = await fetch(screeningUri, {
