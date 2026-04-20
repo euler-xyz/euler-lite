@@ -19,7 +19,7 @@ import { getHookDisabledWarning, getUtilisationWarning } from '~/composables/use
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import type { TxPlan } from '~/entities/txPlan'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
-import { SwapperMode } from '~/entities/swap'
+import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatNumber, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
@@ -103,7 +103,11 @@ const {
   reset: resetSwapQuoteState,
   requestQuotes: requestSwapQuotes,
   selectProvider: selectSwapQuote,
-} = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+} = useSwapQuotesParallel({
+  amountField: 'amountOut',
+  compare: 'max',
+  buildTxPlanForQuote: quote => buildSwapWithdrawPlanFromQuote(quote),
+})
 
 const rewardApy = computed(() => getSupplyRewardApy(vault.value?.address || ''))
 const amountFixed = computed(() => {
@@ -203,6 +207,23 @@ const swapRouteItems = computed(() => {
     formatAmount: formatSmartAmount,
   })
 })
+
+async function buildSwapWithdrawPlanFromQuote(quote: SwapApiQuote): Promise<TxPlan> {
+  const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
+  return isMax
+    ? buildRedeemAndSwapPlan({
+        vaultAddress: vaultAddress as Address,
+        sharesAmount: sharesBalance.value,
+        quote,
+        subAccount: subAccount.value,
+      })
+    : buildWithdrawAndSwapPlan({
+        vaultAddress: vaultAddress as Address,
+        assetsAmount: amountFixed.value.value,
+        quote,
+        subAccount: subAccount.value,
+      })
+}
 
 const requestSwapQuote = useDebounceFn(async () => {
   swapQuoteError.value = null

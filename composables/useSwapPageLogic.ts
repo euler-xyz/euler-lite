@@ -42,7 +42,7 @@ export interface UseSwapPageLogicOptions {
    */
   buildQuoteRequest: (amount: bigint) => { params: SwapApiRequestInput } | null
   /** Build the TxPlan for the current swap (same-asset or quote-based). Must throw on failure. */
-  buildPlan: () => Promise<TxPlan>
+  buildPlan: (quote?: SwapApiQuote) => Promise<TxPlan>
   /** Page-specific balance validation error. Receives the parsed nano amount. */
   getBalanceError: (amountNano: bigint) => string | null
   /** Vault addresses to check for geo-blocking */
@@ -121,7 +121,13 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     reset: resetQuoteStateInternal,
     requestQuotes,
     selectProvider,
-  } = useSwapQuotesParallel({ amountField, compare, includeCowSwap: options.includeCowSwap, transformQuote: options.transformQuote })
+  } = useSwapQuotesParallel({
+    amountField,
+    compare,
+    includeCowSwap: options.includeCowSwap,
+    transformQuote: options.transformQuote,
+    buildTxPlanForQuote: quote => buildPlan(quote),
+  })
 
   // ── Vault products & price invert ──────────────────────────────────────
   const fromProduct = useEulerProductOfVault(computed(() => fromVault.value?.address || ''))

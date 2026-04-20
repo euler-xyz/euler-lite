@@ -7,6 +7,7 @@ type SwapRouteItem = {
   provider: string
   amount: string
   symbol: string
+  gasCostLabel?: string
   routeLabel?: string
   badge?: {
     label: string
@@ -112,14 +113,14 @@ const onSelect = (provider: string) => {
               </p>
               <span class="flex items-center gap-8">
                 <span
-                  v-if="isCowItem(item)"
+                  v-if="isCowItem(item) || item.gasCostLabel"
                   class="flex items-center gap-2 text-p3 text-success-600"
                 >
                   <SvgIcon
                     name="gas"
                     class="!w-12 !h-12"
                   />
-                  Gasless
+                  {{ isCowItem(item) ? 'Gasless' : item.gasCostLabel }}
                 </span>
                 <span class="truncate">{{ item.routeLabel || '-' }}</span>
               </span>

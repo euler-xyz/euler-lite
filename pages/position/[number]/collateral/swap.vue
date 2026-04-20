@@ -146,7 +146,7 @@ const swap = useSwapPageLogic({
     }
   },
 
-  async buildPlan(): Promise<TxPlan> {
+  async buildPlan(quote?: SwapApiQuote): Promise<TxPlan> {
     if (!fromVault.value || !toVault.value || !position.value) throw new Error('Vaults or position not loaded')
     if (isSameAsset.value) {
       const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
@@ -162,9 +162,10 @@ const swap = useSwapPageLogic({
         enabledCollaterals: position.value.collaterals,
       })
     }
-    if (!selectedQuote.value) throw new Error('No quote selected')
+    const swapQuote = quote || selectedQuote.value
+    if (!swapQuote) throw new Error('No quote selected')
     return buildSwapPlan({
-      quote: selectedQuote.value,
+      quote: swapQuote,
       swapperMode: SwapperMode.EXACT_IN,
       isRepay: false,
       targetDebt: 0n,

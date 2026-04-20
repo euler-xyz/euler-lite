@@ -141,6 +141,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         amountOutMin: convert(quote.amountOutMin),
       }
     },
+    buildTxPlanForQuote: quote => buildMultiplyTxPlanForQuote(quote, false),
   })
 
   // --- Form state ---
@@ -818,6 +819,41 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   })
   const { isCowSwapProvider, cowSwapExecution, cowSwapOrderStatus, cowSwapStatusLabel, submitCowSwapMultiply } = cowSwap
   const multiplySimulationError = computed(() => isCowSwapProvider.value ? null : baseSimulationError.value)
+
+  const buildMultiplyTxPlanForQuote = async (quote: SwapApiQuote, includePermit2Call: boolean): Promise<TxPlan> => {
+    if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
+      throw new Error('Vaults not loaded')
+    }
+    const supplyAmountNano = valueToNano(multiplyInputAmount.value || '0', multiplySupplyVault.value.asset.decimals)
+    let supplySharesAmount: bigint | undefined
+    if (isMultiplySavingCollateral.value) {
+      if (!multiplySavingPosition.value) {
+        throw new Error('No savings balance for selected collateral')
+      }
+      supplySharesAmount = multiplySavingPosition.value.assets === supplyAmountNano
+        ? multiplySavingBalance.value
+        : await convertAssetsToShares(multiplySupplyVault.value.address, supplyAmountNano)
+      if (!supplySharesAmount || supplySharesAmount <= 0n) {
+        throw new Error('Unable to resolve savings amount')
+      }
+    }
+    const subAccount = await resolvePendingSubAccount()
+    return buildMultiplyPlan({
+      supplyVaultAddress: multiplySupplyVault.value.address,
+      supplyAssetAddress: multiplySupplyVault.value.asset.address,
+      supplyAmount: supplyAmountNano,
+      supplySharesAmount,
+      supplyIsSavings: isMultiplySavingCollateral.value,
+      longVaultAddress: multiplyLongVault.value.address,
+      longAssetAddress: multiplyLongVault.value.asset.address,
+      borrowVaultAddress: multiplyShortVault.value.address,
+      debtAmount: multiplyDebtAmountNano.value,
+      quote,
+      swapperMode: SwapperMode.EXACT_IN,
+      subAccount,
+      includePermit2Call,
+    })
+  }
 
   // --- Actions: submit & send ---
   const submitMultiply = async () => {
