@@ -157,6 +157,7 @@ watchEffect(async () => {
 
 const marketOptions = computed(() => {
   const tvlByMarket = new Map<string, number>()
+  const seen = new Set<string>()
   const options: { label: string, value: string, icon?: string, iconFallback?: string }[] = []
 
   for (const vault of borrowableVaults.value) {
@@ -165,7 +166,8 @@ const marketOptions = computed(() => {
     const tvl = vaultUsdValues.value.get(vault.address) ?? 0
     tvlByMarket.set(market.name, (tvlByMarket.get(market.name) ?? 0) + tvl)
 
-    if (!options.find(option => option.label === market.name)) {
+    if (!seen.has(market.name)) {
+      seen.add(market.name)
       const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
       const entityObj = entityName ? entities[entityName] : null
       options.push({ label: market.name, value: market.name, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined })

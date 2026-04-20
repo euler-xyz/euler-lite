@@ -125,11 +125,13 @@ const curatorOptions = computed(() => {
   const tvlByEntity = new Map<string, number>()
   const options: { label: string, value: string, icon?: string, iconFallback?: string }[] = []
 
+  const seen = new Set<string>()
   for (const vault of list.value) {
     const tvl = vaultTotalSupplyUsd.value.get(vault.address) ?? 0
     for (const entity of getEntitiesByEarnVault(vault)) {
       tvlByEntity.set(entity.name, (tvlByEntity.get(entity.name) ?? 0) + tvl)
-      if (!options.find(option => option.value === entity.name)) {
+      if (!seen.has(entity.name)) {
+        seen.add(entity.name)
         options.push({ label: entity.name, value: entity.name, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined })
       }
     }
