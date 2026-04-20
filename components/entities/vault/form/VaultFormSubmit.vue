@@ -186,7 +186,7 @@ const openTermsModal = () => {
       </UiButton>
       <Transition name="tooltip">
         <div
-          v-show="isTooltipVisible && _disabled && !loading"
+          v-if="isTooltipVisible && _disabled && !loading"
           ref="floating"
           :style="floatingStyles"
           class="vault-form-submit__tooltip"
