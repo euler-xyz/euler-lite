@@ -1,7 +1,10 @@
+import { encodeFunctionData, type Address, type StateOverride } from 'viem'
 import type { SwapApiQuote } from '~/entities/swap'
 import type { SwapApiRequestInput } from '~/composables/useSwapApi'
+import type { TxPlan } from '~/entities/txPlan'
 import {
   getQuoteAmount,
+  getQuoteCardScore,
   getQuoteDiffPct,
   pickBestQuote,
   sortQuoteCards,
@@ -11,12 +14,17 @@ import {
 } from '~/utils/swapQuotes'
 import { createRaceGuard } from '~/utils/race-guard'
 import { isAbortError } from '~/utils/errorHandling'
+import { COWSWAP_PROVIDER_NAME } from '~/entities/cowswap'
+import { getTokenUsdValue } from '~/services/pricing/priceProvider'
+import { resolveWrappedNativeAddress } from '~/utils/native-currency'
+import { applyOperationGuards } from '~/utils/operationGuardRegistry'
 
 type SwapQuotesParallelOptions = {
   amountField: SwapQuoteAmountField
   compare: SwapQuoteCompare
   transformQuote?: (quote: SwapApiQuote, provider: string) => SwapApiQuote
   includeCowSwap?: boolean
+  buildTxPlanForQuote?: (quote: SwapApiQuote, provider: string) => Promise<TxPlan>
 }
 
 type SwapQuotesRequestOptions = {
@@ -26,6 +34,10 @@ type SwapQuotesRequestOptions = {
 
 export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   const { getSwapQuotes, getSwapProviders } = useSwapApi()
+  const { client: rpcClient } = useRpcClient()
+  const { address, chain } = useWagmi()
+  const { chainId } = useEulerAddresses()
+  const { buildSimulationStateOverride } = useEulerOperations()
 
   const quoteCards = ref<SwapQuoteCard[]>([])
   const selectedProvider = ref<string | null>(null)
@@ -78,9 +90,120 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   })
 
   const getQuoteDiffPctFor = (quote: SwapApiQuote) => {
-    const best = bestAmount.value
+    const card = quoteCards.value.find(item => item.quote === quote)
+    const best = sortedQuoteCards.value[0]
+    if (!best) return null
+
+    const bestScore = getQuoteCardScore(best, options.compare)
+    const score = card ? getQuoteCardScore(card, options.compare) : null
+    if (bestScore !== null && score !== null) {
+      return getQuoteDiffPct(score, bestScore, options.compare)
+    }
+    return getQuoteDiffPct(
+      Number(getQuoteAmount(quote, options.amountField)),
+      Number(getQuoteAmount(best.quote, options.amountField)),
+      options.compare,
+    )
+  }
+
+  const isCowQuote = (provider: string, quote: SwapApiQuote) => {
+    const normalizedProvider = provider.toLowerCase()
+    return normalizedProvider.includes(COWSWAP_PROVIDER_NAME)
+      || quote.route?.some(route => route.providerName.toLowerCase().includes(COWSWAP_PROVIDER_NAME))
+  }
+
+  const getQuotePricingToken = (quote: SwapApiQuote) =>
+    options.amountField === 'amountIn' ? quote.tokenIn : quote.tokenOut
+
+  const getAmountUsd = async (quote: SwapApiQuote): Promise<number | undefined> => {
+    const token = getQuotePricingToken(quote)
+    if (!token.address) return undefined
     const amount = getQuoteAmount(quote, options.amountField)
-    return getQuoteDiffPct(amount, best, options.compare)
+    if (amount <= 0n) return undefined
+    return getTokenUsdValue(amount, token.decimals, token.address, null)
+  }
+
+  const getGasCostUsd = async (gasCostNative: bigint): Promise<number | undefined> => {
+    if (gasCostNative <= 0n) return undefined
+    const wrappedNativeAddress = chainId.value ? resolveWrappedNativeAddress(chainId.value) : null
+    if (!wrappedNativeAddress) return undefined
+    const nativeDecimals = chain.value?.nativeCurrency.decimals ?? 18
+    return getTokenUsdValue(gasCostNative, nativeDecimals, wrappedNativeAddress, null)
+  }
+
+  const enrichQuoteCard = async (
+    provider: string,
+    quote: SwapApiQuote,
+    params: SwapApiRequestInput,
+    gasPricePromise: Promise<bigint | undefined>,
+  ): Promise<SwapQuoteCard | null> => {
+    const amountUsdPromise = getAmountUsd(quote).catch(() => undefined)
+
+    if (isCowQuote(provider, quote)) {
+      return {
+        provider,
+        quote,
+        amountUsd: await amountUsdPromise,
+        gasCostNative: 0n,
+        gasCostUsd: 0,
+      }
+    }
+
+    const client = rpcClient.value
+    if (!client) {
+      return { provider, quote, amountUsd: await amountUsdPromise }
+    }
+
+    let gas: bigint
+    try {
+      if (!options.buildTxPlanForQuote) {
+        return { provider, quote, amountUsd: await amountUsdPromise }
+      }
+
+      const account = (params.origin || address.value || quote.accountIn) as Address
+      const plan = applyOperationGuards(await options.buildTxPlanForQuote(quote, provider))
+      const stateOverride = await buildSimulationStateOverride(plan, account)
+      const stepsToEstimate = plan.steps.filter(step => step.type !== 'approve' && step.type !== 'permit2-approve')
+      gas = 0n
+      for (const step of stepsToEstimate) {
+        /* eslint-disable @typescript-eslint/no-explicit-any -- TxPlan steps are runtime ABI/data pairs */
+        const data = encodeFunctionData({
+          abi: step.abi as any,
+          functionName: step.functionName as any,
+          args: step.args as any,
+        })
+        gas += await client.estimateGas({
+          account,
+          to: step.to,
+          data,
+          value: step.value ?? 0n,
+          stateOverride: stateOverride.length ? stateOverride as StateOverride : undefined,
+        })
+        /* eslint-enable @typescript-eslint/no-explicit-any */
+      }
+    }
+    catch {
+      console.warn(`estimateGas for quote ${provider} failed`)
+      return null
+    }
+
+    const gasPrice = await gasPricePromise
+    if (!gasPrice) {
+      return { provider, quote, amountUsd: await amountUsdPromise }
+    }
+
+    const gasCostNative = gas * gasPrice
+    const [amountUsd, gasCostUsd] = await Promise.all([
+      amountUsdPromise,
+      getGasCostUsd(gasCostNative).catch(() => undefined),
+    ])
+    return {
+      provider,
+      quote,
+      amountUsd,
+      gasCostNative,
+      gasCostUsd,
+    }
   }
 
   const reset = () => {
@@ -98,9 +221,10 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     isLoading.value = false
   }
 
-  const upsertQuote = (provider: string, quote: SwapApiQuote) => {
+  const upsertQuote = (card: SwapQuoteCard) => {
+    const { provider } = card
     const next = quoteCards.value.filter(card => card.provider !== provider)
-    next.push({ provider, quote })
+    next.push(card)
     quoteCards.value = sortQuoteCards(next, options.amountField, options.compare)
     if (isLoading.value && next.length > 0) {
       isLoading.value = false
@@ -143,6 +267,9 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
       }
 
       let rateLimitedCount = 0
+      const gasPricePromise = rpcClient.value
+        ? rpcClient.value.getGasPrice().catch(() => undefined)
+        : Promise.resolve(undefined)
 
       const fetchProviderQuote = async (provider: string) => {
         try {
@@ -158,7 +285,11 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
           const best = pickBestQuote(data, options.amountField, options.compare)
           if (best) {
             const transformed = options.transformQuote ? options.transformQuote(best, provider) : best
-            upsertQuote(provider, transformed)
+            const card = await enrichQuoteCard(provider, transformed, params, gasPricePromise)
+            if (guard.isStale(gen) || !card) {
+              return
+            }
+            upsertQuote(card)
           }
         }
         catch (err) {

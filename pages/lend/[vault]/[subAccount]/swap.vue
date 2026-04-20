@@ -5,7 +5,7 @@ import { getCashLimitedWithdrawAmount, type Vault, type SecuritizeVault, fetchSe
 import { isSecuritizeVault } from '~/entities/vault/factory'
 import { getSubAccountAddress } from '~/entities/account'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
-import { SwapperMode } from '~/entities/swap'
+import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import type { TxPlan } from '~/entities/txPlan'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
@@ -110,7 +110,7 @@ const swap = useSwapPageLogic({
     }
   },
 
-  async buildPlan(): Promise<TxPlan> {
+  async buildPlan(quote?: SwapApiQuote): Promise<TxPlan> {
     if (isSameAsset.value) {
       if (!fromVault.value || !toVault.value) throw new Error('Vaults not loaded')
       const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
@@ -123,9 +123,10 @@ const swap = useSwapPageLogic({
         maxShares: isMax ? savingPosition.value?.shares : undefined,
       })
     }
-    if (!selectedQuote.value) throw new Error('No quote selected')
+    const swapQuote = quote || selectedQuote.value
+    if (!swapQuote) throw new Error('No quote selected')
     return buildSwapPlan({
-      quote: selectedQuote.value,
+      quote: swapQuote,
       swapperMode: SwapperMode.EXACT_IN,
       isRepay: false,
       requestedSlippage: slippage.value,

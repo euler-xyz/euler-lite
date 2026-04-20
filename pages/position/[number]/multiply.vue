@@ -97,11 +97,41 @@ const {
   reset: resetMultiplyQuoteStateInternal,
   requestQuotes: requestMultiplyQuotes,
   selectProvider: selectMultiplyQuote,
-} = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+} = useSwapQuotesParallel({
+  amountField: 'amountOut',
+  compare: 'max',
+  buildTxPlanForQuote: quote => buildMultiplyTxPlanForQuote(quote, false),
+})
 const multiplyLongVault = computed(() => position.value?.collateral)
 const multiplyShortVault = computed(() => position.value?.borrow)
 const multiplySubAccount = computed(() => position.value?.subAccount || null)
 useOperationGuard(computed(() => [multiplySupplyVault.value?.address, multiplyLongVault.value?.address, multiplyShortVault.value?.address].filter(Boolean)))
+
+async function buildMultiplyTxPlanForQuote(quote: SwapApiQuote, includePermit2Call: boolean): Promise<TxPlan> {
+  if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
+    throw new Error('Vaults not loaded')
+  }
+  const subAccount = multiplySubAccount.value
+  if (!subAccount) {
+    throw new Error('Unable to resolve position')
+  }
+  return buildMultiplyPlan({
+    supplyVaultAddress: multiplySupplyVault.value.address,
+    supplyAssetAddress: multiplySupplyVault.value.asset.address,
+    supplyAmount: 0n,
+    longVaultAddress: multiplyLongVault.value.address,
+    longAssetAddress: multiplyLongVault.value.asset.address,
+    borrowVaultAddress: multiplyShortVault.value.address,
+    debtAmount: multiplyDebtAmountNano.value,
+    quote,
+    requestedSlippage: multiplySlippage.value,
+    swapperMode: SwapperMode.EXACT_IN,
+    subAccount,
+    includePermit2Call,
+    enabledCollaterals: position.value?.collaterals,
+    enabledController: position.value?.borrow.address,
+  })
+}
 
 const pairAssets = computed(() => {
   if (!multiplyLongVault.value || !multiplyShortVault.value) {

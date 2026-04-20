@@ -128,7 +128,11 @@ const {
   reset: resetSwapQuoteState,
   requestQuotes: requestSwapQuotes,
   selectProvider: selectSwapQuote,
-} = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+} = useSwapQuotesParallel({
+  amountField: 'amountOut',
+  compare: 'max',
+  buildTxPlanForQuote: quote => buildSwapSupplyPlanFromQuote(quote, { includePermit2Call: false }),
+})
 // Vault data - only one will be populated based on type
 const evkVault: Ref<Vault | undefined> = ref(undefined)
 const securitizeVault: Ref<SecuritizeVault | undefined> = ref(undefined)

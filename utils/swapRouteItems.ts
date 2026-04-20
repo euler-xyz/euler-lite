@@ -1,11 +1,13 @@
 import { formatUnits } from 'viem'
 import type { SwapApiQuote } from '~/entities/swap'
-import { getQuoteAmount, type SwapQuoteAmountField } from '~/utils/swapQuotes'
+import { getQuoteCardAmount, type SwapQuoteAmountField, type SwapQuoteCard } from '~/utils/swapQuotes'
+import { formatUsdValue } from '~/utils/string-utils'
 
 export type SwapRouteItem = {
   provider: string
   amount: string
   symbol: string
+  gasCostLabel?: string
   routeLabel?: string
   badge?: {
     label: string
@@ -13,19 +15,16 @@ export type SwapRouteItem = {
   }
 }
 
-interface QuoteCard {
-  provider: string
-  quote: SwapApiQuote
-}
-
 export function buildSwapRouteItems(params: {
-  quoteCards: QuoteCard[]
+  quoteCards: SwapQuoteCard[]
   getQuoteDiffPct: (quote: SwapApiQuote) => number | null
   decimals: number
   symbol: string
   formatAmount: (raw: string) => string
   amountField?: SwapQuoteAmountField
   diffPrefix?: string
+  nativeSymbol?: string
+  nativeDecimals?: number
 }): SwapRouteItem[] {
   const {
     quoteCards,
@@ -35,12 +34,23 @@ export function buildSwapRouteItems(params: {
     formatAmount,
     amountField = 'amountOut',
     diffPrefix = '-',
+    nativeSymbol,
+    nativeDecimals = 18,
   } = params
 
   const bestProvider = quoteCards[0]?.provider
+  const formatGasCostLabel = (card: SwapQuoteCard) => {
+    if (card.gasCostUsd && card.gasCostUsd > 0) {
+      return `Gas ${formatUsdValue(card.gasCostUsd)}`
+    }
+    if (card.gasCostNative && card.gasCostNative > 0n && nativeSymbol) {
+      return `Gas ${formatAmount(formatUnits(card.gasCostNative, nativeDecimals))} ${nativeSymbol}`
+    }
+    return undefined
+  }
 
   return quoteCards.map((card) => {
-    const amount = getQuoteAmount(card.quote, amountField)
+    const amount = getQuoteCardAmount(card, amountField)
     const formatted = formatAmount(formatUnits(amount, decimals))
     const diffPct = getQuoteDiffPct(card.quote)
     const badge = card.provider === bestProvider
@@ -53,6 +63,7 @@ export function buildSwapRouteItems(params: {
       provider: card.provider,
       amount: formatted,
       symbol,
+      gasCostLabel: formatGasCostLabel(card),
       routeLabel: card.quote.route?.length
         ? `via ${card.quote.route.map(r => r.providerName).join(', ')}`
         : '-',

@@ -160,7 +160,11 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     reset: resetSwapQuoteState,
     requestQuotes: requestSwapQuotes,
     selectProvider: selectSwapQuote,
-  } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+  } = useSwapQuotesParallel({
+    amountField: 'amountOut',
+    compare: 'max',
+    buildTxPlanForQuote: quote => buildSwapTxPlanForQuote(quote, false),
+  })
   // --- Position/vault computeds ---
   const position = computed(() => getPositionBySubAccountIndex(+positionIndex))
   const isPositionLoaded = computed(() => !!position.value)
@@ -603,6 +607,19 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     }
   }
 
+  async function buildSwapTxPlanForQuote(quote: SwapApiQuote, includePermit2Call: boolean): Promise<TxPlan> {
+    if (!collateralVault.value?.address || !asset.value?.address) {
+      throw new Error('Missing collateral vault or asset')
+    }
+    return options.buildSwapPlan(quote, {
+      vaultAddress: collateralVault.value.address,
+      amountNano: valueToNano(amount.value || '0', asset.value.decimals),
+      slippage: swapSlippage.value,
+      subAccount: position.value?.subAccount,
+      includePermit2Call,
+    })
+  }
+
   // --- Submit ---
   const submit = async () => {
     if (isOperationBlocked.value) return
@@ -619,13 +636,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
         try {
           if (options.needsSwap.value && swapEffectiveQuote.value) {
-            plan.value = await options.buildSwapPlan(swapEffectiveQuote.value, {
-              vaultAddress: collateralVault.value.address,
-              amountNano: valueToNano(amount.value || '0', asset.value.decimals),
-              slippage: swapSlippage.value,
-              subAccount: position.value?.subAccount,
-              includePermit2Call: false,
-            })
+            plan.value = await buildSwapTxPlanForQuote(swapEffectiveQuote.value, false)
           }
           else {
             plan.value = await options.buildDirectPlan({

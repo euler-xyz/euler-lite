@@ -1,5 +1,4 @@
 import type { SwapApiQuote } from '~/entities/swap'
-import { BPS_BASE } from '~/entities/tuning-constants'
 
 export type SwapQuoteAmountField = 'amountIn' | 'amountOut'
 export type SwapQuoteCompare = 'max' | 'min'
@@ -7,6 +6,9 @@ export type SwapQuoteCompare = 'max' | 'min'
 export type SwapQuoteCard = {
   provider: string
   quote: SwapApiQuote
+  amountUsd?: number
+  gasCostNative?: bigint
+  gasCostUsd?: number
 }
 
 const parseBigInt = (value?: string | number | bigint | null) => {
@@ -28,20 +30,39 @@ export const getQuoteAmount = (
   return parseBigInt(quote[field])
 }
 
+export const getQuoteCardAmount = (
+  card: SwapQuoteCard,
+  field: SwapQuoteAmountField,
+) => getQuoteAmount(card.quote, field)
+
+export const getQuoteCardScore = (
+  card: SwapQuoteCard,
+  compare: SwapQuoteCompare,
+): number | null => {
+  if (card.amountUsd === undefined) return null
+  const gas = card.gasCostUsd ?? 0
+  return compare === 'max' ? card.amountUsd - gas : card.amountUsd + gas
+}
+
 export const sortQuoteCards = (
   cards: SwapQuoteCard[],
   field: SwapQuoteAmountField,
   compare: SwapQuoteCompare,
 ) => {
   return [...cards].sort((first, second) => {
+    const scoreA = getQuoteCardScore(first, compare)
+    const scoreB = getQuoteCardScore(second, compare)
+    if (scoreA !== null && scoreB !== null) {
+      if (scoreA === scoreB) return 0
+      if (compare === 'max') return scoreB > scoreA ? 1 : -1
+      return scoreB > scoreA ? -1 : 1
+    }
+    if (scoreA !== null) return -1
+    if (scoreB !== null) return 1
     const amountA = getQuoteAmount(first.quote, field)
     const amountB = getQuoteAmount(second.quote, field)
-    if (amountA === amountB) {
-      return 0
-    }
-    if (compare === 'max') {
-      return amountB > amountA ? 1 : -1
-    }
+    if (amountA === amountB) return 0
+    if (compare === 'max') return amountB > amountA ? 1 : -1
     return amountB > amountA ? -1 : 1
   })
 }
@@ -65,19 +86,18 @@ export const pickBestQuote = (
 }
 
 export const getQuoteDiffPct = (
-  quoteAmount: bigint,
-  bestAmount: bigint,
+  quoteAmount: number,
+  bestAmount: number,
   compare: SwapQuoteCompare,
 ) => {
-  if (bestAmount <= 0n || quoteAmount <= 0n || quoteAmount === bestAmount) {
+  if (bestAmount <= 0 || quoteAmount <= 0 || quoteAmount === bestAmount) {
     return null
   }
   const diff = compare === 'max'
     ? bestAmount - quoteAmount
     : quoteAmount - bestAmount
-  if (diff <= 0n) {
+  if (diff <= 0) {
     return null
   }
-  const diffBps = (diff * BPS_BASE) / bestAmount
-  return Number(diffBps) / 100
+  return (diff / bestAmount) * 100
 }

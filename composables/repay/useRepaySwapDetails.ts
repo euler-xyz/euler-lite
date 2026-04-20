@@ -17,6 +17,7 @@ interface UseRepaySwapDetailsOptions {
 
 export const useRepaySwapDetails = (options: UseRepaySwapDetailsOptions) => {
   const { quotes, sourceVault, borrowVault, direction } = options
+  const { chain } = useWagmi()
 
   const currentPrice = computed(() => {
     if (!quotes.quote.value || !sourceVault.value || !borrowVault.value) return null
@@ -85,6 +86,8 @@ export const useRepaySwapDetails = (options: UseRepaySwapDetailsOptions) => {
       symbol: asset.symbol,
       formatAmount: formatSmartAmount,
       amountField: isExactIn ? 'amountOut' : 'amountIn',
+      nativeSymbol: chain.value?.nativeCurrency.symbol,
+      nativeDecimals: chain.value?.nativeCurrency.decimals,
     })
   })
 

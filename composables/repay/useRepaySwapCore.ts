@@ -30,6 +30,7 @@ export interface UseRepaySwapCoreOptions {
   onQuoteReceived?: (amountOut: bigint, direction: SwapperMode) => boolean
   includeCowSwap?: boolean
   transformQuote?: (quote: SwapApiQuote, provider: string) => SwapApiQuote
+  buildTxPlanForQuote?: (quote: SwapApiQuote, provider: string) => Promise<import('~/entities/txPlan').TxPlan>
 }
 
 export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
@@ -58,6 +59,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     direction,
     includeCowSwap: options.includeCowSwap,
     transformQuote: options.transformQuote,
+    buildTxPlanForQuote: options.buildTxPlanForQuote,
   })
 
   // --- Derived ---
