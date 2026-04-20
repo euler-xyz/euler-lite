@@ -15,6 +15,7 @@ import type { TxPlan } from '~/entities/txPlan'
 import { formatNumber, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const router = useRouter()
 const route = useRoute()
@@ -70,6 +71,11 @@ const isSubmitDisabled = computed(() => {
     || !!(estimatesError.value)
 })
 const reviewWithdrawDisabled = isSubmitDisabled
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (estimatesError.value) return { message: estimatesError.value, variant: 'error' }
+  if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return { message: 'Insufficient balance', variant: 'error' }
+  return undefined
+})
 const supplyAPYDisplay = computed(() => {
   if (!vault.value) return '0.00'
   return formatNumber(nanoToValue(vault.value.interestRateInfo.supplyAPY, 25) + rewardApy.value)
@@ -322,6 +328,8 @@ watch(amount, () => {
             <VaultFormSubmit
               :loading="isSubmitting || isPreparing"
               :disabled="reviewWithdrawDisabled"
+              :disabled-reason="disabledReasonInfo?.message"
+              :disabled-reason-variant="disabledReasonInfo?.variant"
             >
               Review Withdraw
             </VaultFormSubmit>
