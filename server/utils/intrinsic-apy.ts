@@ -16,7 +16,7 @@ import { STABLEWATCH_SOURCE_URL } from '~/entities/constants'
 import type { IntrinsicApyInfo } from '~/entities/intrinsic-apy'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
-import { logWarn } from '~/server/utils/log'
+import { logWarn, reportStatus } from '~/server/utils/log'
 
 const CACHE_TTL_MS = 5 * 60 * 1000
 const PENDLE_MATURITY_STALE_THRESHOLD_MS = 2 * 60 * 60 * 1000
@@ -45,7 +45,7 @@ const inFlight = new Map<string, Promise<unknown>>()
 
 async function fetchJson(url: string): Promise<unknown> {
   const resp = await fetchWithTimeout(url)
-  if (!resp.ok) throw new Error(`Upstream returned ${resp.status}`)
+  if (!resp.ok) throw new Error(`${url} returned ${resp.status}`)
   return resp.json()
 }
 
@@ -77,14 +77,19 @@ function fetchUpstream<T = unknown>(key: string, url: string): Promise<T> {
   const promise = fetchJson(url)
     .then((data) => {
       cache.set(key, data)
+      reportStatus('intrinsic-apy', `upstream:${key}`, 'ok')
       return data
     })
     .catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err)
       const stale = cache.getStale(key)
       if (stale !== undefined) {
-        logWarn('intrinsic-apy', `upstream ${key} failed; serving stale:`, err instanceof Error ? err.message : err)
+        reportStatus('intrinsic-apy', `upstream:${key}`, `failed-stale:${msg}`,
+          `upstream ${key} failed (${msg}); serving stale`)
         return stale
       }
+      reportStatus('intrinsic-apy', `upstream:${key}`, `failed:${msg}`,
+        `upstream ${key} failed (${msg}); no stale entry`)
       throw err
     })
     .finally(() => { inFlight.delete(key) })
@@ -162,10 +167,10 @@ async function extractPendle(sources: PendleSource[]): Promise<Array<[string, In
 
   const out: Array<[string, IntrinsicApyInfo]> = []
   for (const r of settled) {
-    if (r.status !== 'fulfilled') {
-      logWarn('intrinsic-apy/pendle', 'market fetch failed:', r.reason instanceof Error ? r.reason.message : r.reason)
-      continue
-    }
+    // Per-market failures are already reported by fetchUpstream's
+    // reportStatus (keyed by `upstream:pendle:{chainId}:{market}`) — no
+    // need to double-log them here.
+    if (r.status !== 'fulfilled') continue
     const { source, data } = r.value
     if (!data || isPendleMatured(data.timestamp)) {
       out.push([normalize(source.address), { apy: 0, provider: 'Pendle' }])
@@ -193,8 +198,9 @@ async function extractSecuritize(sources: SecuritizeSource[]): Promise<Array<[st
 
   const entries: SecuritizeAsset[] = []
   for (const r of settled) {
+    // Per-symbol failures are reported by fetchUpstream's reportStatus
+    // (keyed by `upstream:securitize:{symbol}`) — no need to double-log.
     if (r.status === 'fulfilled' && Array.isArray(r.value?.data)) entries.push(...r.value.data)
-    else if (r.status === 'rejected') logWarn('intrinsic-apy/securitize', r.reason instanceof Error ? r.reason.message : r.reason)
   }
 
   const out: Array<[string, IntrinsicApyInfo]> = []
@@ -473,19 +479,24 @@ export async function getIntrinsicApyForChain(chainId: number): Promise<Record<s
       byProvider.set(s.provider, [...existing, s])
     }
 
+    const providerEntries = [...byProvider.entries()]
     const settled = await Promise.allSettled(
-      [...byProvider.entries()].map(([provider, sources]) => extractForProvider(provider, sources)),
+      providerEntries.map(([provider, sources]) => extractForProvider(provider, sources)),
     )
 
     // `merged` uses a null-prototype bag so nothing we write — even the
     // unlikely `token_address: "__proto__"` from a compromised upstream —
     // can mutate Object.prototype.
     const merged: Record<string, IntrinsicApyInfo> = Object.create(null) as Record<string, IntrinsicApyInfo>
-    for (const r of settled) {
+    settled.forEach((r, i) => {
+      const [provider] = providerEntries[i]
       if (r.status !== 'fulfilled') {
-        logWarn('intrinsic-apy', 'provider failed:', r.reason instanceof Error ? r.reason.message : r.reason)
-        continue
+        const msg = r.reason instanceof Error ? r.reason.message : String(r.reason)
+        reportStatus('intrinsic-apy', `provider:${provider}:chain=${chainId}`, `failed:${msg}`,
+          `provider "${provider}" failed for chain ${chainId}: ${msg}`)
+        return
       }
+      reportStatus('intrinsic-apy', `provider:${provider}:chain=${chainId}`, 'ok')
       for (const [addr, info] of r.value) {
         const existing = merged[addr]
         if (existing) {
@@ -493,7 +504,7 @@ export async function getIntrinsicApyForChain(chainId: number): Promise<Record<s
         }
         merged[addr] = info
       }
-    }
+    })
     merkedCache.set(String(chainId), merged)
     return merged
   })().finally(() => { mergedInFlight.delete(chainId) })
