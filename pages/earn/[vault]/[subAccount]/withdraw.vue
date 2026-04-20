@@ -70,14 +70,9 @@ const isSubmitDisabled = computed(() => {
     || !!(estimatesError.value)
 })
 const reviewWithdrawDisabled = isSubmitDisabled
-const disabledReason = computed(() => {
-  if (estimatesError.value) return estimatesError.value
-  if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return 'Insufficient balance'
-  return undefined
-})
-const disabledReasonVariant = computed(() => {
-  if (estimatesError.value) return 'error' as const
-  if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return 'error' as const
+const disabledReasonInfo = computed(() => {
+  if (estimatesError.value) return { message: estimatesError.value, variant: 'error' as const }
+  if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return { message: 'Insufficient balance', variant: 'error' as const }
   return undefined
 })
 const supplyAPYDisplay = computed(() => {
@@ -332,8 +327,8 @@ watch(amount, () => {
             <VaultFormSubmit
               :loading="isSubmitting || isPreparing"
               :disabled="reviewWithdrawDisabled"
-              :disabled-reason="disabledReason"
-              :disabled-reason-variant="disabledReasonVariant"
+              :disabled-reason="disabledReasonInfo?.message"
+              :disabled-reason-variant="disabledReasonInfo?.variant"
             >
               Review Withdraw
             </VaultFormSubmit>

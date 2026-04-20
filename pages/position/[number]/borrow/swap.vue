@@ -255,20 +255,12 @@ const {
   normalizeAddress, clearSimulationError, requestQuote,
 } = swap
 
-const disabledReason = computed(() => {
-  if (isGeoBlocked.value) return 'This operation is not available in your region'
-  if (errorText.value) return errorText.value
-  if (sameVaultError.value) return sameVaultError.value
-  if (healthError.value) return healthError.value
-  if (simulationError.value) return simulationError.value
-  return undefined
-})
-const disabledReasonVariant = computed(() => {
-  if (isGeoBlocked.value) return 'warning' as const
-  if (errorText.value) return 'error' as const
-  if (sameVaultError.value) return 'error' as const
-  if (healthError.value) return 'error' as const
-  if (simulationError.value) return 'error' as const
+const disabledReasonInfo = computed(() => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' as const }
+  if (errorText.value) return { message: errorText.value, variant: 'error' as const }
+  if (sameVaultError.value) return { message: sameVaultError.value, variant: 'error' as const }
+  if (healthError.value) return { message: healthError.value, variant: 'error' as const }
+  if (simulationError.value) return { message: simulationError.value, variant: 'error' as const }
   return undefined
 })
 
@@ -465,8 +457,8 @@ const onToVaultChange = (selectedIndex: number) => {
               <VaultFormSubmit
                 :disabled="reviewSwapDisabled"
                 :loading="isSubmitting || isPreparing"
-                :disabled-reason="disabledReason"
-                :disabled-reason-variant="disabledReasonVariant"
+                :disabled-reason="disabledReasonInfo?.message"
+                :disabled-reason-variant="disabledReasonInfo?.variant"
               >
                 {{ reviewSwapLabel }}
               </VaultFormSubmit>

@@ -103,18 +103,11 @@ const isBorrowRestricted = computed(() =>
   pair.value?.borrow ? isVaultRestrictedByCountry(pair.value.borrow.address) : false)
 const reviewBorrowDisabled = computed(() => isGeoBlocked.value || isBorrowRestricted.value || isSubmitDisabled.value)
 
-const disabledReason = computed(() => {
-  if (isGeoBlocked.value) return 'This operation is not available in your region'
-  if (isBorrowRestricted.value) return 'Borrowing this asset is not available in your region'
-  if (errorText.value) return errorText.value
-  if (simulationError.value) return simulationError.value
-  return undefined
-})
-const disabledReasonVariant = computed(() => {
-  if (isGeoBlocked.value) return 'warning' as const
-  if (isBorrowRestricted.value) return 'warning' as const
-  if (errorText.value) return 'error' as const
-  if (simulationError.value) return 'error' as const
+const disabledReasonInfo = computed(() => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' as const }
+  if (isBorrowRestricted.value) return { message: 'Borrowing this asset is not available in your region', variant: 'warning' as const }
+  if (errorText.value) return { message: errorText.value, variant: 'error' as const }
+  if (simulationError.value) return { message: simulationError.value, variant: 'error' as const }
   return undefined
 })
 const borrowVault = computed(() => pair.value?.borrow)
@@ -579,8 +572,8 @@ watch([collateralAmount, borrowAmount], async () => {
             <VaultFormSubmit
               :disabled="reviewBorrowDisabled"
               :loading="isSubmitting || isPreparing"
-              :disabled-reason="disabledReason"
-              :disabled-reason-variant="disabledReasonVariant"
+              :disabled-reason="disabledReasonInfo?.message"
+              :disabled-reason-variant="disabledReasonInfo?.variant"
             >
               Review Borrow
             </VaultFormSubmit>

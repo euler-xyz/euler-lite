@@ -291,20 +291,12 @@ const isSubmitDisabled = computed(() => {
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vaultAddress))
 const isSwapRestricted = computed(() => needsSwap.value && isVaultRestrictedByCountry(vaultAddress))
 const reviewSupplyDisabled = computed(() => isGeoBlocked.value || isSwapRestricted.value || isSubmitDisabled.value)
-const disabledReason = computed(() => {
-  if (isGeoBlocked.value) return 'This operation is not available in your region'
-  if (isSwapRestricted.value) return 'Swap deposits are not available in your region'
-  if (evkVault.value && isOpDisabled(evkVault.value, OP_DEPOSIT)) return 'Deposits are currently disabled for this vault'
-  if (isSupplyCapReached.value) return 'Supply cap has been reached'
-  if (errorText.value) return errorText.value
-  return undefined
-})
-const disabledReasonVariant = computed(() => {
-  if (isGeoBlocked.value) return 'warning' as const
-  if (isSwapRestricted.value) return 'warning' as const
-  if (evkVault.value && isOpDisabled(evkVault.value, OP_DEPOSIT)) return 'warning' as const
-  if (isSupplyCapReached.value) return 'warning' as const
-  if (errorText.value) return 'error' as const
+const disabledReasonInfo = computed(() => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' as const }
+  if (isSwapRestricted.value) return { message: 'Swap deposits are not available in your region', variant: 'warning' as const }
+  if (evkVault.value && isOpDisabled(evkVault.value, OP_DEPOSIT)) return { message: 'Deposits are currently disabled for this vault', variant: 'warning' as const }
+  if (isSupplyCapReached.value) return { message: 'Supply cap has been reached', variant: 'warning' as const }
+  if (errorText.value) return { message: errorText.value, variant: 'error' as const }
   return undefined
 })
 const totalRewardsAPY = computed(() => getSupplyRewardApy(vaultAddress))
@@ -986,8 +978,8 @@ watch(address, () => {
               />
               <VaultFormSubmit
                 :disabled="reviewSupplyDisabled"
-                :disabled-reason="disabledReason"
-                :disabled-reason-variant="disabledReasonVariant"
+                :disabled-reason="disabledReasonInfo?.message"
+                :disabled-reason-variant="disabledReasonInfo?.variant"
                 :loading="isSubmitting || isPreparing"
               >
                 {{ reviewSupplyLabel }}

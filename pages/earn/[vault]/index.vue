@@ -88,14 +88,9 @@ const isSubmitDisabled = computed(() => {
 })
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vaultAddress))
 const reviewSupplyDisabled = computed(() => isGeoBlocked.value || isSubmitDisabled.value)
-const disabledReason = computed(() => {
-  if (isGeoBlocked.value) return 'This operation is not available in your region'
-  if (errorText.value) return errorText.value
-  return undefined
-})
-const disabledReasonVariant = computed(() => {
-  if (isGeoBlocked.value) return 'warning' as const
-  if (errorText.value) return 'error' as const
+const disabledReasonInfo = computed(() => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' as const }
+  if (errorText.value) return { message: errorText.value, variant: 'error' as const }
   return undefined
 })
 const totalRewardsAPY = computed(() => getSupplyRewardApy(vaultAddress))
@@ -365,8 +360,8 @@ watch(address, () => {
               />
               <VaultFormSubmit
                 :disabled="reviewSupplyDisabled"
-                :disabled-reason="disabledReason"
-                :disabled-reason-variant="disabledReasonVariant"
+                :disabled-reason="disabledReasonInfo?.message"
+                :disabled-reason-variant="disabledReasonInfo?.variant"
                 :loading="isSubmitting || isPreparing"
               >
                 Review Supply

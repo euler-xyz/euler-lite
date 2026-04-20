@@ -133,18 +133,11 @@ const form = useCollateralForm({
 })
 useOperationGuard(computed(() => [form.collateralVault.value?.address, form.borrowVault.value?.address].filter(Boolean)))
 
-const disabledReason = computed(() => {
-  if (form.isGeoBlocked.value) return 'This operation is not available in your region'
-  if (form.isSwapRestricted.value) return 'Swapping from this vault is not available in your region'
-  if (form.estimatesError.value) return form.estimatesError.value
-  if (form.simulationError.value) return form.simulationError.value
-  return undefined
-})
-const disabledReasonVariant = computed(() => {
-  if (form.isGeoBlocked.value) return 'warning' as const
-  if (form.isSwapRestricted.value) return 'warning' as const
-  if (form.estimatesError.value) return 'error' as const
-  if (form.simulationError.value) return 'error' as const
+const disabledReasonInfo = computed(() => {
+  if (form.isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' as const }
+  if (form.isSwapRestricted.value) return { message: 'Swapping from this vault is not available in your region', variant: 'warning' as const }
+  if (form.estimatesError.value) return { message: form.estimatesError.value, variant: 'error' as const }
+  if (form.simulationError.value) return { message: form.simulationError.value, variant: 'error' as const }
   return undefined
 })
 const pairAssetsLabel = usePositionPairLabel(form.position)
@@ -379,8 +372,8 @@ watch(selectedOutputAsset, () => {
             <VaultFormSubmit
               :disabled="form.submitDisabled.value"
               :loading="form.isSubmitting.value || form.isPreparing.value"
-              :disabled-reason="disabledReason"
-              :disabled-reason-variant="disabledReasonVariant"
+              :disabled-reason="disabledReasonInfo?.message"
+              :disabled-reason-variant="disabledReasonInfo?.variant"
             >
               {{ form.submitLabel }}
             </VaultFormSubmit>

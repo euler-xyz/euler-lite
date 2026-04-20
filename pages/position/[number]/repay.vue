@@ -218,49 +218,26 @@ const reviewRepayDisabled = computed(() => {
   return collateral.isSubmitDisabled.value
 })
 
-const disabledReason = computed(() => {
+const disabledReasonInfo = computed(() => {
   if (formTab.value === 'wallet') {
     if (walletSwap.needsSwap.value) {
-      if (isWalletSwapRestricted.value) return 'Swapping into this vault is not available in your region'
-      if (walletSwap.disabledReason.value) return walletSwap.disabledReason.value
-      if (walletSwap.estimatesError.value) return walletSwap.estimatesError.value
+      if (isWalletSwapRestricted.value) return { message: 'Swapping into this vault is not available in your region', variant: 'warning' as const }
+      if (walletSwap.disabledReason.value) return { message: walletSwap.disabledReason.value, variant: 'error' as const }
+      if (walletSwap.estimatesError.value) return { message: walletSwap.estimatesError.value, variant: 'error' as const }
     }
     else {
-      if (wallet.estimatesError.value) return wallet.estimatesError.value
+      if (wallet.estimatesError.value) return { message: wallet.estimatesError.value, variant: 'error' as const }
     }
-    if (simulationError.value) return simulationError.value
+    if (simulationError.value) return { message: simulationError.value, variant: 'error' as const }
     return undefined
   }
   if (formTab.value === 'savings') {
-    if (savings.disabledReason.value) return savings.disabledReason.value
-    if (simulationError.value) return simulationError.value
+    if (savings.disabledReason.value) return { message: savings.disabledReason.value, variant: 'error' as const }
+    if (simulationError.value) return { message: simulationError.value, variant: 'error' as const }
     return undefined
   }
-  if (collateral.disabledReason.value) return collateral.disabledReason.value
-  if (simulationError.value) return simulationError.value
-  return undefined
-})
-
-const disabledReasonVariant = computed(() => {
-  if (formTab.value === 'wallet') {
-    if (walletSwap.needsSwap.value) {
-      if (isWalletSwapRestricted.value) return 'warning' as const
-      if (walletSwap.disabledReason.value) return 'error' as const
-      if (walletSwap.estimatesError.value) return 'error' as const
-    }
-    else {
-      if (wallet.estimatesError.value) return 'error' as const
-    }
-    if (simulationError.value) return 'error' as const
-    return undefined
-  }
-  if (formTab.value === 'savings') {
-    if (savings.disabledReason.value) return 'error' as const
-    if (simulationError.value) return 'error' as const
-    return undefined
-  }
-  if (collateral.disabledReason.value) return 'error' as const
-  if (simulationError.value) return 'error' as const
+  if (collateral.disabledReason.value) return { message: collateral.disabledReason.value, variant: 'error' as const }
+  if (simulationError.value) return { message: simulationError.value, variant: 'error' as const }
   return undefined
 })
 
@@ -630,8 +607,8 @@ watch(formTab, () => {
               <VaultFormSubmit
                 :disabled="reviewRepayDisabled"
                 :loading="isSubmitting || isPreparing"
-                :disabled-reason="disabledReason"
-                :disabled-reason-variant="disabledReasonVariant"
+                :disabled-reason="disabledReasonInfo?.message"
+                :disabled-reason-variant="disabledReasonInfo?.variant"
               >
                 {{ reviewRepayLabel }}
               </VaultFormSubmit>
@@ -811,8 +788,8 @@ watch(formTab, () => {
               <VaultFormSubmit
                 :disabled="reviewRepayDisabled"
                 :loading="isSubmitting || isPreparing"
-                :disabled-reason="disabledReason"
-                :disabled-reason-variant="disabledReasonVariant"
+                :disabled-reason="disabledReasonInfo?.message"
+                :disabled-reason-variant="disabledReasonInfo?.variant"
               >
                 {{ reviewRepayLabel }}
               </VaultFormSubmit>
@@ -984,8 +961,8 @@ watch(formTab, () => {
               <VaultFormSubmit
                 :disabled="reviewRepayDisabled"
                 :loading="isSubmitting || isPreparing"
-                :disabled-reason="disabledReason"
-                :disabled-reason-variant="disabledReasonVariant"
+                :disabled-reason="disabledReasonInfo?.message"
+                :disabled-reason-variant="disabledReasonInfo?.variant"
               >
                 {{ reviewRepayLabel }}
               </VaultFormSubmit>

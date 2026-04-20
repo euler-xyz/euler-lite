@@ -123,16 +123,10 @@ const isSubmitDisabled = computed(() => {
   return false
 })
 const reviewWithdrawDisabled = isSubmitDisabled
-const disabledReason = computed(() => {
-  if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return 'Withdrawals are currently disabled for this vault'
-  if (estimatesError.value) return estimatesError.value
-  if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return 'Insufficient balance'
-  return undefined
-})
-const disabledReasonVariant = computed(() => {
-  if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return 'warning' as const
-  if (estimatesError.value) return 'error' as const
-  if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return 'error' as const
+const disabledReasonInfo = computed(() => {
+  if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return { message: 'Withdrawals are currently disabled for this vault', variant: 'warning' as const }
+  if (estimatesError.value) return { message: estimatesError.value, variant: 'error' as const }
+  if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return { message: 'Insufficient balance', variant: 'error' as const }
   return undefined
 })
 const supplyAPYDisplay = computed(() => {
@@ -697,8 +691,8 @@ watch(swapSelectedQuote, () => {
             <VaultFormSubmit
               :loading="isSubmitting || isPreparing"
               :disabled="reviewWithdrawDisabled"
-              :disabled-reason="disabledReason"
-              :disabled-reason-variant="disabledReasonVariant"
+              :disabled-reason="disabledReasonInfo?.message"
+              :disabled-reason-variant="disabledReasonInfo?.variant"
             >
               Review Withdraw
             </VaultFormSubmit>

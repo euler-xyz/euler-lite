@@ -163,37 +163,20 @@ const { guardWithPriceImpact: guardWithBorrowSwapPriceImpact } = usePriceImpactG
 const reviewBorrowDisabled = computed(() => isGeoBlocked.value || isBorrowRestricted.value || borrow.isBorrowSwapRestricted.value || borrow.isSubmitDisabled.value)
 const reviewMultiplyDisabled = computed(() => isGeoBlocked.value || isMultiplyRestricted.value || multiply.isMultiplySubmitDisabled.value)
 
-const borrowDisabledReason = computed(() => {
-  if (isGeoBlocked.value) return 'This operation is not available in your region'
-  if (isBorrowRestricted.value) return 'Borrowing this asset is not available in your region'
-  if (borrow.isBorrowSwapRestricted.value) return 'Swapping into this collateral vault is not available in your region'
-  if (borrow.errorText.value) return borrow.errorText.value
-  if (borrow.borrowSimulationError.value) return borrow.borrowSimulationError.value
+const borrowDisabledReasonInfo = computed(() => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' as const }
+  if (isBorrowRestricted.value) return { message: 'Borrowing this asset is not available in your region', variant: 'warning' as const }
+  if (borrow.isBorrowSwapRestricted.value) return { message: 'Swapping into this collateral vault is not available in your region', variant: 'warning' as const }
+  if (borrow.errorText.value) return { message: borrow.errorText.value, variant: 'error' as const }
+  if (borrow.borrowSimulationError.value) return { message: borrow.borrowSimulationError.value, variant: 'error' as const }
   return undefined
 })
 
-const multiplyDisabledReason = computed(() => {
-  if (isGeoBlocked.value) return 'This operation is not available in your region'
-  if (isMultiplyRestricted.value) return 'Multiply is not available for this pair in your region'
-  if (multiply.multiplyErrorText.value) return multiply.multiplyErrorText.value
-  if (multiply.multiplySimulationError.value) return multiply.multiplySimulationError.value
-  return undefined
-})
-
-const borrowDisabledReasonVariant = computed(() => {
-  if (isGeoBlocked.value) return 'warning' as const
-  if (isBorrowRestricted.value) return 'warning' as const
-  if (borrow.isBorrowSwapRestricted.value) return 'warning' as const
-  if (borrow.errorText.value) return 'error' as const
-  if (borrow.borrowSimulationError.value) return 'error' as const
-  return undefined
-})
-
-const multiplyDisabledReasonVariant = computed(() => {
-  if (isGeoBlocked.value) return 'warning' as const
-  if (isMultiplyRestricted.value) return 'warning' as const
-  if (multiply.multiplyErrorText.value) return 'error' as const
-  if (multiply.multiplySimulationError.value) return 'error' as const
+const multiplyDisabledReasonInfo = computed(() => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' as const }
+  if (isMultiplyRestricted.value) return { message: 'Multiply is not available for this pair in your region', variant: 'warning' as const }
+  if (multiply.multiplyErrorText.value) return { message: multiply.multiplyErrorText.value, variant: 'error' as const }
+  if (multiply.multiplySimulationError.value) return { message: multiply.multiplySimulationError.value, variant: 'error' as const }
   return undefined
 })
 
@@ -881,8 +864,8 @@ watch(formTab, () => {
               <VaultFormSubmit
                 v-if="formTab === 'borrow'"
                 :disabled="reviewBorrowDisabled"
-                :disabled-reason="borrowDisabledReason"
-                :disabled-reason-variant="borrowDisabledReasonVariant"
+                :disabled-reason="borrowDisabledReasonInfo?.message"
+                :disabled-reason-variant="borrowDisabledReasonInfo?.variant"
                 :loading="borrow.isSubmitting.value || borrow.isPreparing.value"
               >
                 {{ reviewBorrowLabel }}
@@ -890,8 +873,8 @@ watch(formTab, () => {
               <VaultFormSubmit
                 v-else-if="formTab === 'multiply'"
                 :disabled="reviewMultiplyDisabled"
-                :disabled-reason="multiplyDisabledReason"
-                :disabled-reason-variant="multiplyDisabledReasonVariant"
+                :disabled-reason="multiplyDisabledReasonInfo?.message"
+                :disabled-reason-variant="multiplyDisabledReasonInfo?.variant"
                 :loading="multiply.isMultiplySubmitting.value || multiply.isMultiplyPreparing.value"
               >
                 {{ reviewMultiplyLabel }}

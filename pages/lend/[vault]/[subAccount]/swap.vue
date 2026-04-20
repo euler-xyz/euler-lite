@@ -141,18 +141,11 @@ const {
   selectProvider, onFromInput, onToVaultChange, onRefreshQuotes, submit, openSlippageSettings,
 } = swap
 
-const disabledReason = computed(() => {
-  if (isGeoBlocked.value) return 'This operation is not available in your region'
-  if (sameVaultError.value) return sameVaultError.value
-  if (errorText.value) return errorText.value
-  if (quoteError.value) return quoteError.value
-  return undefined
-})
-const disabledReasonVariant = computed(() => {
-  if (isGeoBlocked.value) return 'warning' as const
-  if (sameVaultError.value) return 'error' as const
-  if (errorText.value) return 'error' as const
-  if (quoteError.value) return 'error' as const
+const disabledReasonInfo = computed(() => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' as const }
+  if (sameVaultError.value) return { message: sameVaultError.value, variant: 'error' as const }
+  if (errorText.value) return { message: errorText.value, variant: 'error' as const }
+  if (quoteError.value) return { message: quoteError.value, variant: 'error' as const }
   return undefined
 })
 
@@ -342,8 +335,8 @@ watch([() => route.params.vault, () => route.query.to], () => {
           <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
             <VaultFormSubmit
               :disabled="reviewSwapDisabled"
-              :disabled-reason="disabledReason"
-              :disabled-reason-variant="disabledReasonVariant"
+              :disabled-reason="disabledReasonInfo?.message"
+              :disabled-reason-variant="disabledReasonInfo?.variant"
               :loading="isSubmitting || isPreparing"
             >
               {{ reviewSwapLabel }}

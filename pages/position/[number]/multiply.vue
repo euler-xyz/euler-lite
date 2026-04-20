@@ -707,18 +707,11 @@ const isMultiplyRestricted = computed(() => {
 })
 const reviewMultiplyDisabled = computed(() => isGeoBlocked.value || isMultiplyRestricted.value || isMultiplySubmitDisabled.value)
 
-const disabledReason = computed(() => {
-  if (isGeoBlocked.value) return 'This operation is not available in your region'
-  if (isMultiplyRestricted.value) return 'Multiply is not available for this pair in your region'
-  if (multiplyErrorText.value) return multiplyErrorText.value
-  if (multiplySimulationError.value) return multiplySimulationError.value
-  return undefined
-})
-const disabledReasonVariant = computed(() => {
-  if (isGeoBlocked.value) return 'warning' as const
-  if (isMultiplyRestricted.value) return 'warning' as const
-  if (multiplyErrorText.value) return 'error' as const
-  if (multiplySimulationError.value) return 'error' as const
+const disabledReasonInfo = computed(() => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' as const }
+  if (isMultiplyRestricted.value) return { message: 'Multiply is not available for this pair in your region', variant: 'warning' as const }
+  if (multiplyErrorText.value) return { message: multiplyErrorText.value, variant: 'error' as const }
+  if (multiplySimulationError.value) return { message: multiplySimulationError.value, variant: 'error' as const }
   return undefined
 })
 
@@ -890,8 +883,8 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
             <VaultFormSubmit
               :disabled="reviewMultiplyDisabled"
               :loading="isSubmitting || isPreparing"
-              :disabled-reason="disabledReason"
-              :disabled-reason-variant="disabledReasonVariant"
+              :disabled-reason="disabledReasonInfo?.message"
+              :disabled-reason-variant="disabledReasonInfo?.variant"
             >
               Review Multiply
             </VaultFormSubmit>
