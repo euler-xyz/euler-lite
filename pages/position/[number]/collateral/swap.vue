@@ -15,7 +15,6 @@ import {
   conservativePriceRatioNumber,
   getCollateralUsdValueOrZero,
 } from '~/services/pricing/priceProvider'
-import { logWarn } from '~/utils/errorHandling'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
 import { SwapperMode } from '~/entities/swap'
 import type { SwapApiQuote } from '~/entities/swap'
