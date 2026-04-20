@@ -444,6 +444,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     onSourceVaultChange,
     onRefreshQuotes: core.onRefreshQuotes,
     onSourceMax: core.onSourceMax,
+    onProviderSelect: core.onProviderSelect,
     submit,
     send,
     updateSourceBalance,
