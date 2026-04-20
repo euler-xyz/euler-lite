@@ -63,8 +63,6 @@ const fetchDeduped = <T>(key: string, task: () => Promise<T>): Promise<T> => {
 const merklTypeKey = (chainId: number, type: MerklOpportunityType): string =>
   `merkl:${type.toLowerCase()}:${chainId}`
 
-const merklTokensKey = 'merkl:tokens'
-
 /**
  * Loads the earn-vault address set from the chain's vault categorization.
  * Reads the factories-subgraph-derived set (not labels), so unlabeled earn
@@ -131,19 +129,6 @@ export const refreshMerklType = async (chainId: number, type: MerklOpportunityTy
   return fetchDeduped(key, async () => {
     const data = await withWallClock(() => fetchMerklType(chainId, type), PER_REQUEST_TIMEOUT_MS, `merkl/${type} chain=${chainId}`)
     rewardsCache.set(key, data)
-    return data
-  })
-}
-
-export const refreshMerklTokens = async (): Promise<unknown> => {
-  return fetchDeduped(merklTokensKey, async () => {
-    const url = `${MERKL_API_BASE_URL}/tokens/reward`
-    const resp = await fetchWithTimeout(url, PER_PAGE_TIMEOUT_MS)
-    if (!resp.ok) {
-      throw new Error(`Merkl tokens returned ${resp.status}`)
-    }
-    const data = await resp.json() as unknown
-    rewardsCache.set(merklTokensKey, data)
     return data
   })
 }
@@ -215,9 +200,6 @@ const readEntry = <T>(key: string): CachedEntry<T> | undefined => {
 export const readMerklType = (chainId: number, type: MerklOpportunityType): CachedEntry<unknown[]> | undefined =>
   readEntry<unknown[]>(merklTypeKey(chainId, type))
 
-export const readMerklTokens = (): CachedEntry<unknown> | undefined =>
-  readEntry<unknown>(merklTokensKey)
-
 export const readBrevis = (chainId: number): CachedEntry<unknown> | undefined =>
   readEntry<unknown>(brevisKey(chainId))
 
@@ -235,64 +217,4 @@ export const scheduleRevalidation = (context: string, refresh: () => Promise<unk
   void refresh().catch((err) => {
     logWarn('rewards-cache', `${context} background revalidate failed:`, err instanceof Error ? err.message : err)
   })
-}
-
-// --- Merkl reward tokens → /api/token-list adapter ---------------------------
-
-/** Minimal shape consumed by the token-list handler. Matches its internal
- * TokenEntry contract so the tokens merge is a straight push. */
-export interface MerklRewardTokenEntry {
-  chainId: number
-  address: string
-  name: string
-  symbol: string
-  decimals: number
-  logoURI?: string
-}
-
-/**
- * Returns Merkl reward tokens for a specific chain, formatted as token-list
- * entries. Reads from the same cache the warm-cache populates via
- * `refreshMerklTokens`. SWR-style on cache state:
- *   fresh → synchronous return
- *   stale → return stale, kick background revalidate
- *   cold  → await refresh
- *
- * Consumed by /api/token-list as one of several sources. Merkl sits last
- * in the priority chain — Euler protocol-native tokens (EUL, rEUL, eUSD,
- * seUSD) come from chain config instead, and general ERC-20 lists come
- * from Euler API / DefiLlama / Uniswap. Merkl's role here is covering
- * campaign-specific reward tokens that aren't in the general lists.
- */
-export const getMerklRewardTokensForChain = async (chainId: number): Promise<MerklRewardTokenEntry[]> => {
-  const cached = readMerklTokens()
-  let payload: unknown
-  if (cached && !cached.isStale) {
-    payload = cached.data
-  }
-  else if (cached && cached.isStale) {
-    scheduleRevalidation('merkl/tokens', refreshMerklTokens)
-    payload = cached.data
-  }
-  else {
-    payload = await refreshMerklTokens()
-  }
-
-  const indexed = (payload as Record<string, unknown> | null | undefined) ?? {}
-  const raw = indexed[String(chainId)]
-  if (!Array.isArray(raw)) return []
-
-  const out: MerklRewardTokenEntry[] = []
-  for (const entry of raw) {
-    if (!entry || typeof entry !== 'object') continue
-    const t = entry as Record<string, unknown>
-    const address = typeof t.address === 'string' ? t.address : ''
-    if (!address) continue
-    const symbol = typeof t.symbol === 'string' ? t.symbol : ''
-    const name = typeof t.name === 'string' ? t.name : symbol
-    const decimals = typeof t.decimals === 'number' ? t.decimals : Number(t.decimals ?? 18)
-    const icon = typeof t.icon === 'string' ? t.icon : undefined
-    out.push({ chainId, address, name, symbol, decimals, logoURI: icon })
-  }
-  return out
 }

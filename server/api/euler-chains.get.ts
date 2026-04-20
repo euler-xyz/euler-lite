@@ -1,4 +1,4 @@
-import { createError } from 'h3'
+import { createError, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
@@ -25,6 +25,8 @@ function getUpstreamUrl(): string {
 
 export default defineEventHandler(async (event) => {
   rateLimiter.consume(event)
+
+  setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
 
   const cached = cache.get(CACHE_KEY)
   if (cached) return cached

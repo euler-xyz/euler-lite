@@ -13,11 +13,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   readBrevis,
   readFuul,
-  readMerklTokens,
   readMerklType,
   refreshBrevisCampaigns,
   refreshFuulProtocol,
-  refreshMerklTokens,
   refreshMerklType,
 } from '~/server/utils/rewards-cache'
 
@@ -111,26 +109,6 @@ describe('refreshMerklType', () => {
     expect(readMerklType(6, 'EULER')?.data).toEqual([{ id: 'chain6' }])
     // Distinct type key — not polluted by the EULER cache.
     expect(readMerklType(5, 'MULTILENDBORROW')).toBeUndefined()
-  })
-})
-
-describe('refreshMerklTokens', () => {
-  it('caches the global tokens payload and dedupes concurrent callers', async () => {
-    const fetchMock = installFetch(async () => {
-      await new Promise(r => setTimeout(r, 15))
-      return jsonResponse({ 1: [{ symbol: 'TKN' }] })
-    })
-
-    const [a, b] = await Promise.all([refreshMerklTokens(), refreshMerklTokens()])
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(a).toEqual({ 1: [{ symbol: 'TKN' }] })
-    expect(b).toEqual(a)
-    expect(readMerklTokens()?.isStale).toBe(false)
-  })
-
-  it('surfaces upstream errors (no cache write)', async () => {
-    installFetch(async () => jsonResponse(null, 503))
-    await expect(refreshMerklTokens()).rejects.toThrow(/503/)
   })
 })
 

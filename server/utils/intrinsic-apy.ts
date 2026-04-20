@@ -450,39 +450,72 @@ async function extractForProvider(
 }
 
 /**
+ * Handler-level cache of the merged per-chain result. Without this, every
+ * /api/intrinsic-apy request re-dispatches to every provider extractor,
+ * iterates Pendle markets + DefiLlama pools + Securitize symbols, and
+ * re-merges. Upstream fetches are cached, but the orchestration itself is
+ * O(sources) per request — noticeable on chains with many Pendle markets.
+ */
+const merkedCache = createTtlCache<Record<string, IntrinsicApyInfo>>({ ttlMs: CACHE_TTL_MS, maxEntries: 50 })
+const mergedInFlight = new Map<number, Promise<Record<string, IntrinsicApyInfo>>>()
+
+/**
  * Public entry point. Resolves every intrinsic-APY source configured for
  * the given chain and returns a flat map of lowercase-address → APY info.
  */
 export async function getIntrinsicApyForChain(chainId: number): Promise<Record<string, IntrinsicApyInfo>> {
-  const chainSources = intrinsicApySources.filter(s => s.chainId === chainId)
-  if (chainSources.length === 0) return {}
+  const fresh = merkedCache.get(String(chainId))
+  if (fresh) return fresh
 
-  const byProvider = new Map<IntrinsicApySourceConfig['provider'], IntrinsicApySourceConfig[]>()
-  for (const s of chainSources) {
-    const existing = byProvider.get(s.provider) ?? []
-    byProvider.set(s.provider, [...existing, s])
-  }
+  const existing = mergedInFlight.get(chainId)
+  if (existing) return existing
 
-  const settled = await Promise.allSettled(
-    [...byProvider.entries()].map(([provider, sources]) => extractForProvider(provider, sources)),
-  )
+  const promise = (async () => {
+    const chainSources = intrinsicApySources.filter(s => s.chainId === chainId)
+    if (chainSources.length === 0) return {}
 
-  // `merged` uses a null-prototype bag so nothing we write — even the
-  // unlikely `token_address: "__proto__"` from a compromised upstream —
-  // can mutate Object.prototype.
-  const merged: Record<string, IntrinsicApyInfo> = Object.create(null) as Record<string, IntrinsicApyInfo>
-  for (const r of settled) {
-    if (r.status !== 'fulfilled') {
-      logWarn('intrinsic-apy', 'provider failed:', r.reason instanceof Error ? r.reason.message : r.reason)
-      continue
+    const byProvider = new Map<IntrinsicApySourceConfig['provider'], IntrinsicApySourceConfig[]>()
+    for (const s of chainSources) {
+      const existing = byProvider.get(s.provider) ?? []
+      byProvider.set(s.provider, [...existing, s])
     }
-    for (const [addr, info] of r.value) {
-      const existing = merged[addr]
-      if (existing) {
-        logWarn('intrinsic-apy/merge', `Duplicate APY for ${addr}: "${existing.provider}" (${existing.apy}%) overwritten by "${info.provider}" (${info.apy}%)`)
+
+    const settled = await Promise.allSettled(
+      [...byProvider.entries()].map(([provider, sources]) => extractForProvider(provider, sources)),
+    )
+
+    // `merged` uses a null-prototype bag so nothing we write — even the
+    // unlikely `token_address: "__proto__"` from a compromised upstream —
+    // can mutate Object.prototype.
+    const merged: Record<string, IntrinsicApyInfo> = Object.create(null) as Record<string, IntrinsicApyInfo>
+    for (const r of settled) {
+      if (r.status !== 'fulfilled') {
+        logWarn('intrinsic-apy', 'provider failed:', r.reason instanceof Error ? r.reason.message : r.reason)
+        continue
       }
-      merged[addr] = info
+      for (const [addr, info] of r.value) {
+        const existing = merged[addr]
+        if (existing) {
+          logWarn('intrinsic-apy/merge', `Duplicate APY for ${addr}: "${existing.provider}" (${existing.apy}%) overwritten by "${info.provider}" (${info.apy}%)`)
+        }
+        merged[addr] = info
+      }
     }
+    merkedCache.set(String(chainId), merged)
+    return merged
+  })().finally(() => { mergedInFlight.delete(chainId) })
+
+  mergedInFlight.set(chainId, promise)
+
+  try {
+    return await promise
   }
-  return merged
+  catch (err) {
+    const stale = merkedCache.getStale(String(chainId))
+    if (stale) {
+      logWarn('intrinsic-apy', `chain ${chainId} merge failed; serving stale:`, err instanceof Error ? err.message : err)
+      return stale
+    }
+    throw err
+  }
 }

@@ -1,4 +1,4 @@
-import { createError, getQuery } from 'h3'
+import { createError, getQuery, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { logWarn } from '~/server/utils/log'
 import { vaultsCache, refreshChainVaults } from '~/server/utils/vaults-cache'
@@ -34,10 +34,15 @@ export default defineEventHandler(async (event) => {
 
   const cacheKey = String(chainId)
   const cached = vaultsCache.get(cacheKey) ?? vaultsCache.getStale(cacheKey)
-  if (cached) return cached
+  if (cached) {
+    setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
+    return cached
+  }
 
   try {
-    return await refreshChainVaults(chainId)
+    const result = await refreshChainVaults(chainId)
+    setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
+    return result
   }
   catch (err) {
     logWarn('vaults', `Cold fetch failed for chain ${chainId}:`, err instanceof Error ? err.message : err)

@@ -67,7 +67,7 @@ export default defineEventHandler(async (event) => {
     }
 
     const categories = await getVaultCategories(chainId)
-    setResponseHeader(event, 'Cache-Control', 'public, max-age=60, stale-while-revalidate=600')
+    setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
     return categories
   }
   catch (err) {

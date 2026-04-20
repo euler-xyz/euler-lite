@@ -7,11 +7,10 @@
  * instead of 3+ on every tick.
  *
  * Merkl's global `/tokens/reward` payload is NOT returned here. It's
- * merged into `/api/token-list` as a fallback source for reward-specific
- * tokens (e.g. rEUL, project-specific tokens) that may not appear in the
- * general-purpose lists. The client looks up reward-token metadata from
- * the unified token list like any other token.
- * See server/utils/rewards-cache.ts:getMerklRewardTokensForChain.
+ * a 4th source inside `/api/token-list` (see fetchMerkl there), covering
+ * reward-specific tokens (rEUL, project-specific tokens) that may not
+ * appear in the general token lists. The client looks up reward-token
+ * metadata from the unified token list like any other token.
  *
  * SWR semantics per sub-key:
  *   fresh → return synchronously
@@ -81,7 +80,7 @@ export default defineEventHandler(async (event) => {
 
     // Clients poll in lockstep — letting Cloudflare short-circuit the repeat
     // polls between warm cycles skips Nitro entirely for most hits.
-    setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=300')
+    setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
 
     return {
       opportunities: {

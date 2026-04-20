@@ -1,4 +1,4 @@
-import { createError, getQuery, getRouterParam } from 'h3'
+import { createError, getQuery, getRouterParam, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
@@ -109,6 +109,10 @@ export default defineEventHandler(async (event) => {
   }
 
   const key = `${chainId}:${file}`
+
+  // Labels are curated external metadata — CDN can short-circuit polls
+  // between warm cycles.
+  setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
 
   const cached = cache.get(key)
   if (cached) return cached

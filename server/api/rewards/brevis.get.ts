@@ -54,7 +54,7 @@ export default defineEventHandler(async (event) => {
       data = await refreshBrevisCampaigns(chainId)
     }
 
-    setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=300')
+    setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
     return data
   }
   catch (err) {

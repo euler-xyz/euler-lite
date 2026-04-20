@@ -42,6 +42,10 @@ export default defineEventHandler(async (event) => {
 
   const key = `${chainId}:${address.toLowerCase()}`
 
+  // No Cache-Control on this lazy (non-warm-cached) endpoint: origin data
+  // age can already reach the full TTL between client probes, so any CDN
+  // window would extend staleness past the per-cache invariant.
+
   const cached = cache.get(key)
   if (cached !== undefined) return cached
 

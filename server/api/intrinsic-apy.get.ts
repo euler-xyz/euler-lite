@@ -1,4 +1,4 @@
-import { createError, getQuery } from 'h3'
+import { createError, getQuery, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { getIntrinsicApyForChain } from '~/server/utils/intrinsic-apy'
 import { getEnabledChainIds } from '~/utils/chain-env'
@@ -31,7 +31,10 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    return await getIntrinsicApyForChain(chainId)
+    const result = await getIntrinsicApyForChain(chainId)
+    // Cloudflare can short-circuit repeat hits between warm cycles.
+    setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
+    return result
   }
   catch (err) {
     logWarn('intrinsic-apy', `Failed to resolve chain ${chainId}:`, err instanceof Error ? err.message : err)
