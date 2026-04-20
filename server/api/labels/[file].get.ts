@@ -2,6 +2,7 @@ import { createError, getQuery, getRouterParam, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
+import { createInFlightDedup } from '~/server/utils/in-flight'
 import { reportStatus } from '~/server/utils/log'
 
 const CACHE_TTL_MS = 300_000
@@ -29,12 +30,7 @@ const rateLimiter = createRateLimiter({
 })
 
 const cache = createTtlCache<unknown>({ ttlMs: CACHE_TTL_MS })
-/**
- * Collapses concurrent cache-miss callers (e.g. warm-cache firing at the
- * same moment as real client requests) onto a single upstream fetch per
- * `chainId:file` key.
- */
-const inFlight = new Map<string, Promise<unknown>>()
+const inFlight = createInFlightDedup<string, unknown>()
 
 /** Fields whose values are rendered as HTML via autoLink() — check for markdown link injection. */
 const LINK_TEXT_KEYS = new Set(['description', 'deprecationReason', 'deprecateReason', 'portfolioNotice'])
@@ -93,49 +89,32 @@ function getUpstreamUrl(chainId: number, file: string): string {
   return `https://raw.githubusercontent.com/${repo}/refs/heads/${branch}/${chainId}/${file}`
 }
 
-export default defineEventHandler(async (event) => {
-  rateLimiter.consume(event)
-
-  const file = getRouterParam(event, 'file')
-  if (!file || !Object.hasOwn(EMPTY_SHAPES, file)) {
-    throw createError({ statusCode: 400, statusMessage: 'Invalid file' })
-  }
-
-  const query = getQuery(event)
-  const chainId = Number(query.chainId)
-  if (!Number.isInteger(chainId) || chainId <= 0) {
-    throw createError({ statusCode: 400, statusMessage: 'Invalid chainId' })
-  }
-
+/**
+ * Forces an upstream fetch, bypassing the fresh-cache check. Used by the
+ * warm-cache plugin so every cycle actually refreshes the entry instead
+ * of cache-hitting a still-fresh value and letting it expire before the
+ * next cycle. Collapses concurrent refresh calls per `chainId:file` via
+ * the in-flight map.
+ *
+ * `persist=true` writes the empty shape into the cache so subsequent
+ * requests skip upstream entirely. Reserved for the 404 case, where the
+ * file is legitimately absent for this chain. For other failures
+ * (transient 5xx, network errors, JSON parse, validation) return empty
+ * but DON'T persist — otherwise a single upstream blip pins the empty
+ * allowlist for 5 minutes, making every verified vault appear unverified.
+ */
+export function refreshLabelFile(chainId: number, file: LabelFile): Promise<unknown> {
   const key = `${chainId}:${file}`
 
-  // Labels are curated external metadata — CDN can short-circuit polls
-  // between warm cycles.
-  setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
-
-  const cached = cache.get(key)
-  if (cached) return cached
-
-  const existing = inFlight.get(key)
-  if (existing) return existing
-
-  /**
-   * `persist=true` writes the empty shape into the cache so subsequent
-   * requests skip upstream entirely. Reserve this for the 404 case, where
-   * the file is legitimately absent for this chain. For other failures
-   * (transient 5xx, network errors, JSON parse, validation) return empty
-   * but DON'T persist — otherwise a single upstream blip pins the empty
-   * allowlist for 5 minutes, making every verified vault appear unverified.
-   */
-  const fallback = (persist: boolean) => {
+  const fallback = (persist: boolean): unknown => {
     const stale = cache.getStale(key)
     if (stale) return stale
-    const empty = EMPTY_SHAPES[file as LabelFile]
+    const empty = EMPTY_SHAPES[file]
     if (persist) cache.set(key, empty)
     return empty
   }
 
-  const promise = (async () => {
+  return inFlight.run(key, async (): Promise<unknown> => {
     const statusKey = `${file}:${chainId}`
     try {
       const resp = await fetchWithTimeout(getUpstreamUrl(chainId, file))
@@ -164,8 +143,31 @@ export default defineEventHandler(async (event) => {
         `Failed to fetch ${file} for chain ${chainId}: ${err instanceof Error ? err.message : err}`)
       return fallback(false)
     }
-  })().finally(() => { inFlight.delete(key) })
+  })
+}
 
-  inFlight.set(key, promise)
-  return promise
+export default defineEventHandler(async (event) => {
+  rateLimiter.consume(event)
+
+  const file = getRouterParam(event, 'file')
+  if (!file || !Object.hasOwn(EMPTY_SHAPES, file)) {
+    throw createError({ statusCode: 400, statusMessage: 'Invalid file' })
+  }
+
+  const query = getQuery(event)
+  const chainId = Number(query.chainId)
+  if (!Number.isInteger(chainId) || chainId <= 0) {
+    throw createError({ statusCode: 400, statusMessage: 'Invalid chainId' })
+  }
+
+  const key = `${chainId}:${file}`
+
+  // Labels are curated external metadata — CDN can short-circuit polls
+  // between warm cycles.
+  setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
+
+  const cached = cache.get(key)
+  if (cached) return cached
+
+  return refreshLabelFile(chainId, file as LabelFile)
 })

@@ -16,6 +16,7 @@ import { STABLEWATCH_SOURCE_URL } from '~/entities/constants'
 import type { IntrinsicApyInfo } from '~/entities/intrinsic-apy'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
+import { createInFlightDedup, scheduleBackgroundRefresh } from '~/server/utils/in-flight'
 import { logWarn, reportStatus } from '~/server/utils/log'
 
 const CACHE_TTL_MS = 5 * 60 * 1000
@@ -41,7 +42,7 @@ const UPSTREAM_URLS = {
 const PENDLE_API_BASE = 'https://api-v2.pendle.finance/core/v2'
 
 const cache = createTtlCache<unknown>({ ttlMs: CACHE_TTL_MS, maxEntries: 200 })
-const inFlight = new Map<string, Promise<unknown>>()
+const upstreamInFlight = createInFlightDedup<string, unknown>()
 
 async function fetchJson(url: string): Promise<unknown> {
   const resp = await fetchWithTimeout(url)
@@ -71,10 +72,7 @@ function fetchUpstream<T = unknown>(key: string, url: string): Promise<T> {
   const fresh = cache.get(key)
   if (fresh !== undefined) return Promise.resolve(fresh as T)
 
-  const existing = inFlight.get(key)
-  if (existing) return existing as Promise<T>
-
-  const promise = fetchJson(url)
+  return upstreamInFlight.run(key, () => fetchJson(url)
     .then((data) => {
       cache.set(key, data)
       reportStatus('intrinsic-apy', `upstream:${key}`, 'ok')
@@ -91,11 +89,7 @@ function fetchUpstream<T = unknown>(key: string, url: string): Promise<T> {
       reportStatus('intrinsic-apy', `upstream:${key}`, `failed:${msg}`,
         `upstream ${key} failed (${msg}); no stale entry`)
       throw err
-    })
-    .finally(() => { inFlight.delete(key) })
-
-  inFlight.set(key, promise)
-  return promise as Promise<T>
+    })) as Promise<T>
 }
 
 /**
@@ -455,21 +449,11 @@ async function extractForProvider(
  * re-merges. Upstream fetches are cached, but the orchestration itself is
  * O(sources) per request — noticeable on chains with many Pendle markets.
  */
-const merkedCache = createTtlCache<Record<string, IntrinsicApyInfo>>({ ttlMs: CACHE_TTL_MS, maxEntries: 50 })
-const mergedInFlight = new Map<number, Promise<Record<string, IntrinsicApyInfo>>>()
+const mergedCache = createTtlCache<Record<string, IntrinsicApyInfo>>({ ttlMs: CACHE_TTL_MS, maxEntries: 50 })
+const mergedInFlight = createInFlightDedup<number, Record<string, IntrinsicApyInfo>>()
 
-/**
- * Public entry point. Resolves every intrinsic-APY source configured for
- * the given chain and returns a flat map of lowercase-address → APY info.
- */
-export async function getIntrinsicApyForChain(chainId: number): Promise<Record<string, IntrinsicApyInfo>> {
-  const fresh = merkedCache.get(String(chainId))
-  if (fresh) return fresh
-
-  const existing = mergedInFlight.get(chainId)
-  if (existing) return existing
-
-  const promise = (async () => {
+const orchestrate = (chainId: number): Promise<Record<string, IntrinsicApyInfo>> =>
+  mergedInFlight.run(chainId, async () => {
     const chainSources = intrinsicApySources.filter(s => s.chainId === chainId)
     if (chainSources.length === 0) return {}
 
@@ -505,20 +489,52 @@ export async function getIntrinsicApyForChain(chainId: number): Promise<Record<s
         merged[addr] = info
       }
     })
-    merkedCache.set(String(chainId), merged)
+    mergedCache.set(String(chainId), merged)
     return merged
-  })().finally(() => { mergedInFlight.delete(chainId) })
+  })
 
-  mergedInFlight.set(chainId, promise)
+/**
+ * Forces a merge orchestration, bypassing the fresh cache. Used by the
+ * warm-cache plugin so every cycle actually refreshes the entry instead
+ * of cache-hitting a still-fresh value and letting it expire before the
+ * next cycle. Reuses any in-flight refresh so concurrent warm cycles
+ * don't fan out.
+ */
+export async function refreshIntrinsicApyForChain(chainId: number): Promise<Record<string, IntrinsicApyInfo>> {
+  return mergedInFlight.peek(chainId) ?? orchestrate(chainId)
+}
+
+/**
+ * Public entry point. Resolves every intrinsic-APY source configured for
+ * the given chain and returns a flat map of lowercase-address → APY info.
+ *
+ * SWR semantics: a fresh entry is returned immediately. A stale entry is
+ * served immediately AND kicks off a background refresh — no user ever
+ * waits for the ~1s orchestration cost so long as the warm-cache plugin
+ * has populated the entry at least once within the staleness ceiling.
+ * Only a genuinely-cold chain (never warmed or expired past the ceiling)
+ * awaits orchestration.
+ */
+export async function getIntrinsicApyForChain(chainId: number): Promise<Record<string, IntrinsicApyInfo>> {
+  const key = String(chainId)
+  const fresh = mergedCache.get(key)
+  if (fresh) return fresh
+
+  const stale = mergedCache.getStale(key)
+  if (stale) {
+    scheduleBackgroundRefresh(`intrinsic-apy chain=${chainId}`,
+      () => refreshIntrinsicApyForChain(chainId))
+    return stale
+  }
 
   try {
-    return await promise
+    return await refreshIntrinsicApyForChain(chainId)
   }
   catch (err) {
-    const stale = merkedCache.getStale(String(chainId))
-    if (stale) {
+    const lastStale = mergedCache.getStale(key)
+    if (lastStale) {
       logWarn('intrinsic-apy', `chain ${chainId} merge failed; serving stale:`, err instanceof Error ? err.message : err)
-      return stale
+      return lastStale
     }
     throw err
   }

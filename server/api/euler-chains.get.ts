@@ -2,6 +2,7 @@ import { createError, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
+import { createInFlightDedup } from '~/server/utils/in-flight'
 import { logWarn } from '~/server/utils/log'
 
 const CACHE_TTL_MS = 300_000
@@ -15,11 +16,32 @@ const rateLimiter = createRateLimiter({
 
 const cache = createTtlCache<unknown[]>({ ttlMs: CACHE_TTL_MS })
 const CACHE_KEY = 'euler-chains'
-/** Collapses concurrent cache-miss callers (warm-cache racing client requests) onto one upstream fetch. */
-let inFlight: Promise<unknown[]> | null = null
+const inFlight = createInFlightDedup<string, unknown[]>()
 
 function getUpstreamUrl(): string {
   return (process.env.NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL || '').trim() || DEFAULT_URL
+}
+
+/**
+ * Forces an upstream fetch, bypassing the fresh-cache check. Used by the
+ * warm-cache plugin so every cycle actually refreshes the entry instead
+ * of cache-hitting a still-fresh value and letting it expire before the
+ * next cycle. Collapses concurrent refresh calls onto one in-flight promise.
+ */
+export function refreshEulerChains(): Promise<unknown[]> {
+  return inFlight.run(CACHE_KEY, async () => {
+    const resp = await fetchWithTimeout(getUpstreamUrl())
+    if (!resp.ok) {
+      throw new Error(`Upstream returned ${resp.status}`)
+    }
+
+    const data: unknown = await resp.json()
+    if (!Array.isArray(data)) {
+      throw new Error('Upstream returned a non-array payload')
+    }
+    cache.set(CACHE_KEY, data)
+    return data
+  })
 }
 
 export default defineEventHandler(async (event) => {
@@ -30,31 +52,15 @@ export default defineEventHandler(async (event) => {
   const cached = cache.get(CACHE_KEY)
   if (cached) return cached
 
-  if (inFlight) return inFlight
+  try {
+    return await refreshEulerChains()
+  }
+  catch (err) {
+    logWarn('euler-chains', 'Upstream fetch failed:', err instanceof Error ? err.message : err)
 
-  inFlight = (async () => {
-    try {
-      const resp = await fetchWithTimeout(getUpstreamUrl())
-      if (!resp.ok) {
-        throw new Error(`Upstream returned ${resp.status}`)
-      }
+    const stale = cache.getStale(CACHE_KEY)
+    if (stale) return stale
 
-      const data: unknown = await resp.json()
-      if (!Array.isArray(data)) {
-        throw new Error('Upstream returned a non-array payload')
-      }
-      cache.set(CACHE_KEY, data)
-      return data
-    }
-    catch (err) {
-      logWarn('euler-chains', 'Upstream fetch failed:', err instanceof Error ? err.message : err)
-
-      const stale = cache.getStale(CACHE_KEY)
-      if (stale) return stale
-
-      throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
-    }
-  })().finally(() => { inFlight = null })
-
-  return inFlight
+    throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
+  }
 })

@@ -28,12 +28,14 @@
  * (one of its sources). Merkl's ERC20LOGPROCESSOR refresh also calls
  * `getVaultCategories(chainId)` to filter by the chain earn set.
  */
-import { LABEL_FILES } from '../api/labels/[file].get'
+import { LABEL_FILES, refreshLabelFile } from '../api/labels/[file].get'
+import { refreshEulerChains } from '../api/euler-chains.get'
+import { refreshTokenList } from '../api/token-list.get'
 import { getEnabledChainIds } from '~/utils/chain-env'
 import { logWarn } from '../utils/log'
-import { INTERNAL_FETCH_HEADERS } from '../utils/internal-headers'
 import { refreshChainVaults } from '../utils/vaults-cache'
 import { refreshVaultCategories } from '../utils/vault-categories-store'
+import { refreshIntrinsicApyForChain } from '../utils/intrinsic-apy'
 import {
   type FuulProtocol,
   type MerklOpportunityType,
@@ -61,25 +63,31 @@ const logFail = (context: string) => (err: unknown) => {
 
 // --- Global warms (no dependencies, run once per cycle) ---
 
+// All warms are direct function calls that bypass the handler's
+// fresh-cache short-circuit. Without this, warm hits at the 5-min mark
+// cache-hit the entry that was set ~1 s into the previous cycle
+// (age ≈ 298 s, still fresh), no refresh happens, and the entry then
+// expires until the NEXT cycle — leaving ~5 min per cycle where users
+// pay the cold-upstream cost. User requests arriving *during* a
+// force-refresh continue to see the previous fresh entry via the
+// handler's own `cache.get()` short-circuit, so there is no user-facing
+// downtime.
+
 const warmEulerChains = () =>
-  $fetch('/api/euler-chains', { headers: INTERNAL_FETCH_HEADERS })
-    .catch(logFail('euler-chains'))
+  refreshEulerChains().catch(logFail('euler-chains'))
 
 // --- Per-chain warms (parallel across chains and within a chain) ---
 
 const warmLabels = (chainId: number): Promise<unknown>[] =>
   LABEL_FILES.map(file =>
-    $fetch(`/api/labels/${file}`, { query: { chainId }, headers: INTERNAL_FETCH_HEADERS })
-      .catch(logFail(`labels/${file} chain=${chainId}`)),
+    refreshLabelFile(chainId, file).catch(logFail(`labels/${file} chain=${chainId}`)),
   )
 
 const warmTokenList = (chainId: number) =>
-  $fetch('/api/token-list', { query: { chainId }, headers: INTERNAL_FETCH_HEADERS })
-    .catch(logFail(`token-list chain=${chainId}`))
+  refreshTokenList(chainId).catch(logFail(`token-list chain=${chainId}`))
 
 const warmIntrinsicApy = (chainId: number) =>
-  $fetch('/api/intrinsic-apy', { query: { chainId }, headers: INTERNAL_FETCH_HEADERS })
-    .catch(logFail(`intrinsic-apy chain=${chainId}`))
+  refreshIntrinsicApyForChain(chainId).catch(logFail(`intrinsic-apy chain=${chainId}`))
 
 const warmRewardCampaigns = (chainId: number): Promise<unknown>[] => [
   ...MERKL_TYPES.map(type =>

@@ -32,6 +32,7 @@ import type { Address } from 'viem'
 import { createPublicClient, getAddress, http, isAddress } from 'viem'
 import { createTtlCache } from './cache'
 import { fetchWithTimeout, withWallClock } from './fetchWithTimeout'
+import { createInFlightDedup } from './in-flight'
 import { INTERNAL_FETCH_HEADERS } from './internal-headers'
 import { logWarn } from './log'
 import { getSubgraphUris } from '~/utils/chain-env'
@@ -98,10 +99,10 @@ const buildIndex = (data: VaultCategories): IndexedCategories => ({
 })
 
 const categoriesCache = createTtlCache<IndexedCategories>({ ttlMs: CACHE_TTL_MS, maxEntries: 50 })
-const inFlight = new Map<number, Promise<VaultCategories>>()
+const inFlight = createInFlightDedup<number, VaultCategories>()
 
 // Per-address inflight dedup for the single-address fallback path.
-const perAddressInFlight = new Map<string, Promise<VaultCategory | undefined>>()
+const perAddressInFlight = createInFlightDedup<string, VaultCategory | undefined>()
 const perAddressCache = createTtlCache<VaultCategory>({ ttlMs: CACHE_TTL_MS, maxEntries: 2_000 })
 
 interface EulerChainsResponse {
@@ -242,20 +243,14 @@ const buildCategories = async (chainId: number): Promise<VaultCategories> => {
  * callers share one upstream round-trip. On failure, does NOT write the cache
  * so readers continue to see the stale entry via SWR.
  */
-export const refreshVaultCategories = async (chainId: number): Promise<VaultCategories> => {
-  const existing = inFlight.get(chainId)
-  if (existing) return existing
-
-  const promise = withWallClock(() => buildCategories(chainId), CATALOG_BUILD_BUDGET_MS, `vault-categories chain=${chainId}`)
-    .then((cats) => {
-      categoriesCache.set(chainId.toString(), buildIndex(cats))
-      return cats
-    })
-    .finally(() => { inFlight.delete(chainId) })
-
-  inFlight.set(chainId, promise)
-  return promise
-}
+export const refreshVaultCategories = (chainId: number): Promise<VaultCategories> =>
+  inFlight.run(chainId, () =>
+    withWallClock(() => buildCategories(chainId), CATALOG_BUILD_BUDGET_MS, `vault-categories chain=${chainId}`)
+      .then((cats) => {
+        categoriesCache.set(chainId.toString(), buildIndex(cats))
+        return cats
+      }),
+  )
 
 export interface CategoriesRead {
   data: VaultCategories
@@ -361,16 +356,10 @@ export const getVaultCategory = async (
     }
   }
 
-  const existing = perAddressInFlight.get(key)
-  if (existing) return existing
-
-  const promise = (async () => {
+  return perAddressInFlight.run(key, async () => {
     const chainFactories = await getChainFactoryAddresses(chainId)
     const category = await fetchSingleFromSubgraph(chainId, normalized, chainFactories)
     if (category) perAddressCache.set(key, category)
     return category
-  })().finally(() => { perAddressInFlight.delete(key) })
-
-  perAddressInFlight.set(key, promise)
-  return promise
+  })
 }

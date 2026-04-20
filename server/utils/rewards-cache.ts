@@ -20,6 +20,7 @@
  */
 import { createTtlCache } from './cache'
 import { fetchWithTimeout, withWallClock } from './fetchWithTimeout'
+import { createInFlightDedup, scheduleBackgroundRefresh } from './in-flight'
 import { logWarn } from './log'
 import { getVaultCategories } from './vault-categories-store'
 import {
@@ -44,19 +45,11 @@ export type FuulProtocol = 'euler' | 'euler-looping'
 // Upstream response is unknown — server never interprets shape.
 const rewardsCache = createTtlCache<unknown>({ ttlMs: CACHE_TTL_MS, maxEntries: 500 })
 
-// Key → in-flight refresh promise. Concurrent callers share the same
-// promise; the .finally() below drops the key once the promise settles.
-const inFlight = new Map<string, Promise<unknown>>()
+// Concurrent callers for the same key share one upstream round-trip.
+const inFlight = createInFlightDedup<string, unknown>()
 
-const fetchDeduped = <T>(key: string, task: () => Promise<T>): Promise<T> => {
-  const existing = inFlight.get(key) as Promise<T> | undefined
-  if (existing) return existing
-  const p = task().finally(() => {
-    inFlight.delete(key)
-  })
-  inFlight.set(key, p)
-  return p
-}
+const fetchDeduped = <T>(key: string, task: () => Promise<T>): Promise<T> =>
+  inFlight.run(key, task as () => Promise<unknown>) as Promise<T>
 
 // --- Merkl -----------------------------------------------------------------
 
@@ -209,12 +202,9 @@ export const readFuul = (chainId: number, protocol: FuulProtocol): CachedEntry<u
 // --- Background revalidation helper ---------------------------------------
 
 /**
- * Fire-and-forget background revalidation. Used by handlers when serving
- * stale: kick the refresh, swallow the error (logWarn for observability),
- * return the stale payload synchronously.
+ * Fire-and-forget background revalidation. Thin wrapper preserving the
+ * rewards-scoped log prefix. New code should use
+ * `scheduleBackgroundRefresh` from `./in-flight` directly.
  */
-export const scheduleRevalidation = (context: string, refresh: () => Promise<unknown>): void => {
-  void refresh().catch((err) => {
-    logWarn('rewards-cache', `${context} background revalidate failed:`, err instanceof Error ? err.message : err)
-  })
-}
+export const scheduleRevalidation = (context: string, refresh: () => Promise<unknown>): void =>
+  scheduleBackgroundRefresh(`rewards-cache/${context}`, refresh)

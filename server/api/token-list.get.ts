@@ -2,6 +2,7 @@ import { createError, getQuery, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
+import { createInFlightDedup } from '~/server/utils/in-flight'
 import { reportStatus } from '~/server/utils/log'
 import { MERKL_API_BASE_URL } from '~/entities/constants'
 
@@ -38,10 +39,10 @@ const uniswapCache = createTtlCache<TokenEntry[]>({ ttlMs: CACHE_TTL_MS })
 const defillamaCache = createTtlCache<TokenEntry[]>({ ttlMs: CACHE_TTL_MS })
 const merklCache = createTtlCache<TokenEntry[]>({ ttlMs: CACHE_TTL_MS })
 
-const eulerInFlight = new Map<string, Promise<TokenEntry[]>>()
-const uniswapInFlight = new Map<string, Promise<TokenEntry[]>>()
-const defillamaInFlight = new Map<string, Promise<TokenEntry[]>>()
-const merklInFlight = new Map<string, Promise<TokenEntry[]>>()
+const eulerInFlight = createInFlightDedup<string, TokenEntry[]>()
+const uniswapInFlight = createInFlightDedup<string, TokenEntry[]>()
+const defillamaInFlight = createInFlightDedup<string, TokenEntry[]>()
+const merklInFlight = createInFlightDedup<string, TokenEntry[]>()
 
 /**
  * Handler-level cache for the merged per-chain token list. Without it every
@@ -50,20 +51,14 @@ const merklInFlight = new Map<string, Promise<TokenEntry[]>>()
  * are a single Map lookup after the first merge.
  */
 const mergedCache = createTtlCache<TokenEntry[]>({ ttlMs: CACHE_TTL_MS, maxEntries: 50 })
-const mergedInFlight = new Map<string, Promise<TokenEntry[]>>()
+const mergedInFlight = createInFlightDedup<string, TokenEntry[]>()
 
-function fetchEulerApi(chainId: number): Promise<TokenEntry[]> {
+function refreshEulerApi(chainId: number): Promise<TokenEntry[]> {
   const key = String(chainId)
-  const cached = eulerApiCache.get(key)
-  if (cached) return Promise.resolve(cached)
-
-  const existing = eulerInFlight.get(key)
-  if (existing) return existing
-
   const url = process.env.EULER_API_URL || process.env.NUXT_PUBLIC_EULER_API_URL
   if (!url) return Promise.resolve([])
 
-  const promise = fetchWithTimeout(`${url}/v1/tokens?chainId=${chainId}`)
+  return eulerInFlight.run(key, () => fetchWithTimeout(`${url}/v1/tokens?chainId=${chainId}`)
     .then(async (resp) => {
       if (!resp.ok) throw new Error(`Euler API returned ${resp.status}`)
       const data = (await resp.json()) as EulerApiToken[]
@@ -84,23 +79,19 @@ function fetchEulerApi(chainId: number): Promise<TokenEntry[]> {
       reportStatus('token-list', `euler-api:${chainId}`, `failed:${msg}`,
         `Euler API fetch failed for chain ${chainId}: ${msg}`)
       return eulerApiCache.getStale(key) || []
-    })
-    .finally(() => { eulerInFlight.delete(key) })
-
-  eulerInFlight.set(key, promise)
-  return promise
+    }))
 }
 
-function fetchUniswap(): Promise<TokenEntry[]> {
+function fetchEulerApi(chainId: number): Promise<TokenEntry[]> {
+  const cached = eulerApiCache.get(String(chainId))
+  if (cached) return Promise.resolve(cached)
+  return refreshEulerApi(chainId)
+}
+
+function refreshUniswap(): Promise<TokenEntry[]> {
   const url = process.env.NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL || 'https://tokens.uniswap.org'
 
-  const cached = uniswapCache.get('all')
-  if (cached) return Promise.resolve(cached)
-
-  const existing = uniswapInFlight.get('all')
-  if (existing) return existing
-
-  const promise = fetchWithTimeout(url)
+  return uniswapInFlight.run('all', () => fetchWithTimeout(url)
     .then(async (resp) => {
       if (!resp.ok) throw new Error(`Uniswap upstream returned ${resp.status}`)
       const data = await resp.json()
@@ -114,25 +105,21 @@ function fetchUniswap(): Promise<TokenEntry[]> {
       reportStatus('token-list', 'uniswap:all', `failed:${msg}`,
         `Uniswap fetch failed: ${msg}`)
       return uniswapCache.getStale('all') || []
-    })
-    .finally(() => { uniswapInFlight.delete('all') })
-
-  uniswapInFlight.set('all', promise)
-  return promise
+    }))
 }
 
-function fetchDefillama(chainId: number): Promise<TokenEntry[]> {
-  const key = String(chainId)
-  const cached = defillamaCache.get(key)
+function fetchUniswap(): Promise<TokenEntry[]> {
+  const cached = uniswapCache.get('all')
   if (cached) return Promise.resolve(cached)
+  return refreshUniswap()
+}
 
-  const existing = defillamaInFlight.get(key)
-  if (existing) return existing
-
+function refreshDefillama(chainId: number): Promise<TokenEntry[]> {
+  const key = String(chainId)
   const baseUrl = process.env.NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL || DEFILLAMA_DEFAULT_URL
   const url = `${baseUrl}/tokenlists-${chainId}.json`
 
-  const promise = fetchWithTimeout(url)
+  return defillamaInFlight.run(key, () => fetchWithTimeout(url)
     .then(async (resp) => {
       if (!resp.ok) throw new Error(`DefiLlama upstream returned ${resp.status}`)
       const data = await resp.json()
@@ -154,10 +141,13 @@ function fetchDefillama(chainId: number): Promise<TokenEntry[]> {
       reportStatus('token-list', `defillama:${chainId}`, `failed:${msg}`,
         `DefiLlama fetch failed for chain ${chainId}: ${msg}`)
       return defillamaCache.getStale(key) || []
-    })
-    .finally(() => { defillamaInFlight.delete(key) })
-  defillamaInFlight.set(key, promise)
-  return promise
+    }))
+}
+
+function fetchDefillama(chainId: number): Promise<TokenEntry[]> {
+  const cached = defillamaCache.get(String(chainId))
+  if (cached) return Promise.resolve(cached)
+  return refreshDefillama(chainId)
 }
 
 // Merkl publishes a single global payload `{ [chainId]: RewardToken[] }`.
@@ -177,15 +167,10 @@ function fetchMerklGlobal(): Promise<Record<string, unknown[]>> {
   return merklGlobalInFlight
 }
 
-function fetchMerkl(chainId: number): Promise<TokenEntry[]> {
+function refreshMerkl(chainId: number): Promise<TokenEntry[]> {
   const key = String(chainId)
-  const cached = merklCache.get(key)
-  if (cached) return Promise.resolve(cached)
 
-  const existing = merklInFlight.get(key)
-  if (existing) return existing
-
-  const promise = fetchMerklGlobal()
+  return merklInFlight.run(key, () => fetchMerklGlobal()
     .then((data) => {
       const raw = data[key]
       if (!Array.isArray(raw)) return []
@@ -209,11 +194,13 @@ function fetchMerkl(chainId: number): Promise<TokenEntry[]> {
       reportStatus('token-list', `merkl:${chainId}`, `failed:${msg}`,
         `Merkl fetch failed for chain ${chainId}: ${msg}`)
       return merklCache.getStale(key) || []
-    })
-    .finally(() => { merklInFlight.delete(key) })
+    }))
+}
 
-  merklInFlight.set(key, promise)
-  return promise
+function fetchMerkl(chainId: number): Promise<TokenEntry[]> {
+  const cached = merklCache.get(String(chainId))
+  if (cached) return Promise.resolve(cached)
+  return refreshMerkl(chainId)
 }
 
 /** Merge two token arrays, deduplicating by chain+address. Primary entries take precedence. */
@@ -240,18 +227,12 @@ function deduplicateTokens(primary: TokenEntry[], secondary: TokenEntry[]): Toke
   return result
 }
 
-const buildMergedTokens = async (chainId: number): Promise<TokenEntry[]> => {
-  // Fetch all four sources concurrently. Each fetcher has its own cache,
-  // in-flight dedup, and stale-fallback (via allSettled so one failure
-  // doesn't kill the merge). Bounded by the slowest cold-fetch (10s
-  // timeout); warm-cache path is a Map lookup.
-  const [eulerResult, uniswapResult, defillamaResult, merklResult] = await Promise.allSettled([
-    fetchEulerApi(chainId),
-    fetchUniswap(),
-    fetchDefillama(chainId),
-    fetchMerkl(chainId),
-  ])
-
+const mergeSources = (
+  eulerResult: PromiseSettledResult<TokenEntry[]>,
+  uniswapResult: PromiseSettledResult<TokenEntry[]>,
+  defillamaResult: PromiseSettledResult<TokenEntry[]>,
+  merklResult: PromiseSettledResult<TokenEntry[]>,
+): TokenEntry[] => {
   const euler = eulerResult.status === 'fulfilled' ? eulerResult.value : []
   const uniswap = uniswapResult.status === 'fulfilled' ? uniswapResult.value : []
   const defillama = defillamaResult.status === 'fulfilled' ? defillamaResult.value : []
@@ -267,6 +248,45 @@ const buildMergedTokens = async (chainId: number): Promise<TokenEntry[]> => {
   )
 }
 
+const buildMergedTokens = async (chainId: number): Promise<TokenEntry[]> => {
+  // Fetch all four sources concurrently. Each fetcher has its own cache,
+  // in-flight dedup, and stale-fallback (via allSettled so one failure
+  // doesn't kill the merge). Bounded by the slowest cold-fetch (10s
+  // timeout); warm-cache path is a Map lookup.
+  const [eulerResult, uniswapResult, defillamaResult, merklResult] = await Promise.allSettled([
+    fetchEulerApi(chainId),
+    fetchUniswap(),
+    fetchDefillama(chainId),
+    fetchMerkl(chainId),
+  ])
+  return mergeSources(eulerResult, uniswapResult, defillamaResult, merklResult)
+}
+
+/**
+ * Forces an upstream fetch of every source AND a merged-cache rebuild,
+ * bypassing the fresh-cache short-circuits at every layer. Used by the
+ * warm-cache plugin so every cycle actually refreshes the entries
+ * instead of cache-hitting still-fresh values and letting them expire
+ * before the next cycle.
+ *
+ * During the refresh window, user requests continue to see the previous
+ * fresh entry via the handler's `mergedCache.get()` short-circuit.
+ */
+export function refreshTokenList(chainId: number): Promise<TokenEntry[]> {
+  const key = String(chainId)
+  return mergedInFlight.run(key, async () => {
+    const results = await Promise.allSettled([
+      refreshEulerApi(chainId),
+      refreshUniswap(),
+      refreshDefillama(chainId),
+      refreshMerkl(chainId),
+    ])
+    const merged = mergeSources(results[0], results[1], results[2], results[3])
+    if (merged.length > 0) mergedCache.set(key, merged)
+    return merged
+  })
+}
+
 export default defineEventHandler(async (event) => {
   rateLimiter.consume(event)
 
@@ -278,26 +298,11 @@ export default defineEventHandler(async (event) => {
 
   const key = String(chainId)
   const fresh = mergedCache.get(key)
-  let tokens: TokenEntry[]
-  if (fresh) {
-    tokens = fresh
-  }
-  else {
-    const existing = mergedInFlight.get(key)
-    if (existing) {
-      tokens = await existing
-    }
-    else {
-      const promise = buildMergedTokens(chainId)
-        .then((result) => {
-          if (result.length > 0) mergedCache.set(key, result)
-          return result
-        })
-        .finally(() => { mergedInFlight.delete(key) })
-      mergedInFlight.set(key, promise)
-      tokens = await promise
-    }
-  }
+  const tokens = fresh ?? await mergedInFlight.run(key, async () => {
+    const result = await buildMergedTokens(chainId)
+    if (result.length > 0) mergedCache.set(key, result)
+    return result
+  })
 
   if (tokens.length === 0) {
     const stale = mergedCache.getStale(key)

@@ -12,6 +12,7 @@
  *   onto a single upstream pass.
  */
 import { createTtlCache } from './cache'
+import { createInFlightDedup } from './in-flight'
 import { logWarn } from './log'
 import { getVaultCategories } from './vault-categories-store'
 import { INTERNAL_FETCH_HEADERS } from './internal-headers'
@@ -25,7 +26,7 @@ export const vaultsCache = createTtlCache<SerialisedSnapshot>({
   maxEntries: 100,
 })
 
-const inFlight = new Map<number, Promise<SerialisedSnapshot>>()
+const inFlight = createInFlightDedup<number, SerialisedSnapshot>()
 
 interface EulerChainEntry {
   chainId: number
@@ -133,69 +134,61 @@ const splitVerifiedByCategory = (
  * The single refresh path. Called by the warm-cache plugin on a 4-min
  * schedule, and also by the /api/vaults handler as a cold-path fallback.
  */
-export const refreshChainVaults = async (chainId: number): Promise<SerialisedSnapshot> => {
-  const existing = inFlight.get(chainId)
-  if (existing) return existing
+export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot> =>
+  inFlight.run(chainId, async () => {
+    try {
+      const rpcUrl = process.env[`RPC_URL_HTTP_${chainId}`]
+      if (!rpcUrl) throw new Error(`No RPC URL configured for chain ${chainId}`)
 
-  const promise = (async () => {
-    const rpcUrl = process.env[`RPC_URL_HTTP_${chainId}`]
-    if (!rpcUrl) throw new Error(`No RPC URL configured for chain ${chainId}`)
+      const cfg = await getChainConfig(chainId)
+      if (!cfg) throw new Error(`No euler-chains entry for chain ${chainId}`)
 
-    const cfg = await getChainConfig(chainId)
-    if (!cfg) throw new Error(`No euler-chains entry for chain ${chainId}`)
+      // Labels (what to include) + categories (how to categorize) run in parallel.
+      const [labels, categories] = await Promise.all([
+        getLabels(chainId),
+        getVaultCategories(chainId),
+      ])
 
-    // Labels (what to include) + categories (how to categorize) run in parallel.
-    const [labels, categories] = await Promise.all([
-      getLabels(chainId),
-      getVaultCategories(chainId),
-    ])
+      const securitizeSet = new Set(categories.securitize.map(a => a.toLowerCase()))
+      const { evkVaultAddresses, securitizeVaultAddresses }
+        = splitVerifiedByCategory(labels.verifiedVaultAddresses, securitizeSet)
 
-    const securitizeSet = new Set(categories.securitize.map(a => a.toLowerCase()))
-    const { evkVaultAddresses, securitizeVaultAddresses }
-      = splitVerifiedByCategory(labels.verifiedVaultAddresses, securitizeSet)
+      const ctx: FetchVaultContext = {
+        chainId,
+        rpcUrl,
+        lensAddresses: {
+          vaultLens: cfg.addresses.lensAddrs.vaultLens,
+          eulerEarnVaultLens: cfg.addresses.lensAddrs.eulerEarnVaultLens,
+          utilsLens: cfg.addresses.lensAddrs.utilsLens,
+        },
+        coreAddresses: { evc: cfg.addresses.coreAddrs.evc },
+        peripheryAddresses: {
+          escrowedCollateralPerspective: cfg.addresses.peripheryAddrs.escrowedCollateralPerspective,
+        },
+        // Server skips Pyth simulation in v1: the client's post-hydration
+        // RPC refresh handles Pyth-fresh prices. See plan "Pyth on server: skip in v1".
+        pythHermesUrl: undefined,
+        verifiedVaultAddresses: labels.verifiedVaultAddresses,
+        earnVaultAddresses: labels.earnVaults,
+      }
 
-    const ctx: FetchVaultContext = {
-      chainId,
-      rpcUrl,
-      lensAddresses: {
-        vaultLens: cfg.addresses.lensAddrs.vaultLens,
-        eulerEarnVaultLens: cfg.addresses.lensAddrs.eulerEarnVaultLens,
-        utilsLens: cfg.addresses.lensAddrs.utilsLens,
-      },
-      coreAddresses: { evc: cfg.addresses.coreAddrs.evc },
-      peripheryAddresses: {
-        escrowedCollateralPerspective: cfg.addresses.peripheryAddrs.escrowedCollateralPerspective,
-      },
-      // Server skips Pyth simulation in v1: the client's post-hydration
-      // RPC refresh handles Pyth-fresh prices. See plan "Pyth on server: skip in v1".
-      pythHermesUrl: undefined,
-      verifiedVaultAddresses: labels.verifiedVaultAddresses,
-      earnVaultAddresses: labels.earnVaults,
+      const snap = await loadChainSnapshot({
+        chainId,
+        ctx,
+        evkVaultAddresses,
+        securitizeVaultAddresses,
+        escrowAddresses: categories.escrow,
+        // Server doesn't honour nonExplorable filters — UI-only concerns.
+        // The snapshot contains all verified vaults; the client applies UI
+        // filters at render time.
+      })
+
+      const serialised = serialiseSnapshot(snap)
+      vaultsCache.set(String(chainId), serialised)
+      return serialised
     }
-
-    const snap = await loadChainSnapshot({
-      chainId,
-      ctx,
-      evkVaultAddresses,
-      securitizeVaultAddresses,
-      escrowAddresses: categories.escrow,
-      // Server doesn't honour nonExplorable filters — UI-only concerns.
-      // The snapshot contains all verified vaults; the client applies UI
-      // filters at render time.
-    })
-
-    const serialised = serialiseSnapshot(snap)
-    vaultsCache.set(String(chainId), serialised)
-    return serialised
-  })().finally(() => { inFlight.delete(chainId) })
-
-  inFlight.set(chainId, promise)
-
-  try {
-    return await promise
-  }
-  catch (err) {
-    logWarn('vaults-cache', `refreshChainVaults chain=${chainId} failed:`, err instanceof Error ? err.message : err)
-    throw err
-  }
-}
+    catch (err) {
+      logWarn('vaults-cache', `refreshChainVaults chain=${chainId} failed:`, err instanceof Error ? err.message : err)
+      throw err
+    }
+  })
