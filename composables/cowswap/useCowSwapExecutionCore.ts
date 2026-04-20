@@ -77,7 +77,23 @@ export const useCowSwapExecutionCore = () => {
     }
   }
 
-  /** Fetch EVC nonce and call wrapper.encodePermitData(). */
+  const writeContractAndWait = async (params: {
+    address: Address
+    abi: readonly unknown[]
+    functionName: string
+    args?: unknown[]
+  }): Promise<Hex> => {
+    const client = requireRpc()
+    const tx = await writeContractAsync({
+      address: params.address,
+      abi: params.abi,
+      functionName: params.functionName,
+      args: params.args ?? [],
+    })
+    await client.waitForTransactionReceipt({ hash: tx })
+    return tx
+  }
+
   /** Fetch EVC nonce and call wrapper.encodePermitData(). */
   const fetchNonceAndPermitData = async (
     wrapperAddress: Address,
@@ -229,6 +245,7 @@ export const useCowSwapExecutionCore = () => {
     requireEvc,
     requireRpc,
     safeApprove,
+    writeContractAndWait,
     fetchNonceAndPermitData,
     signEvcPermit,
     signOrderTypedData,

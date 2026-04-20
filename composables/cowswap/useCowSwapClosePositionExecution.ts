@@ -46,6 +46,16 @@ export const useCowSwapClosePositionExecution = () => {
       // Verify the domain separator matches our expectation
       verifyInboxDomainSeparator(inboxAddress, params.chainId, inboxDomainSep)
 
+      const inboxCode = await client.getCode({ address: inboxAddress })
+      if (!inboxCode || inboxCode === '0x') {
+        await core.writeContractAndWait({
+          address: wrapperAddress,
+          abi: CLOSE_POSITION_WRAPPER_ABI,
+          functionName: 'getInbox',
+          args: [params.wrapper.owner, params.wrapper.account],
+        })
+      }
+
       // Step 2: No user-side approvals needed (Inbox handles internally)
       // Fetch EVC nonce + permit data, sign EVC permit
       core.status.value = 'signing_permit'
