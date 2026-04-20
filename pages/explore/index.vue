@@ -10,6 +10,8 @@ import { useVaultSearch } from '~/composables/useVaultSearch'
 import type { MarketGroup } from '~/entities/lend-discovery'
 import type { Vault } from '~/entities/vault'
 import { isVaultType, getVaultAddress, getVaultAssetSymbol, getVaultAssetAddress } from '~/utils/discoveryCalculations'
+import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
+import type { FilterOptionEntry } from '~/utils/buildTvlSortedOptions'
 
 defineOptions({
   name: 'ExplorePage',
@@ -90,33 +92,21 @@ watch(chainId, (newChainId, oldChainId) => {
 })
 
 const marketOptions = computed(() => {
-  const tvlByMarket = new Map<string, number>()
-  const seen = new Set<string>()
-  const options: { label: string, value: string, icon?: string, iconFallback?: string }[] = []
-
+  const entries: FilterOptionEntry[] = []
   for (const group of marketGroups.value) {
-    const seenMarketsInGroup = new Set<string>()
+    const seenInGroup = new Set<string>()
     for (const vault of group.vaults) {
       const addr = getVaultAddress(vault)
       if (!addr) continue
       const market = getProductByVault(addr)
-      if (!market.name) continue
-
-      if (!seenMarketsInGroup.has(market.name)) {
-        seenMarketsInGroup.add(market.name)
-        tvlByMarket.set(market.name, (tvlByMarket.get(market.name) ?? 0) + group.metrics.totalTVL)
-      }
-
-      if (!seen.has(market.name)) {
-        seen.add(market.name)
-        const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
-        const entityObj = entityName ? entities[entityName] : null
-        options.push({ label: market.name, value: market.name, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined })
-      }
+      if (!market.name || seenInGroup.has(market.name)) continue
+      seenInGroup.add(market.name)
+      const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
+      const entityObj = entityName ? entities[entityName] : null
+      entries.push({ key: market.name, label: market.name, tvl: group.metrics.totalTVL, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined })
     }
   }
-
-  return options.sort((a, b) => (tvlByMarket.get(b.value) ?? 0) - (tvlByMarket.get(a.value) ?? 0))
+  return buildTvlSortedOptions(entries)
 })
 
 const assetOptions = computed(() => {
@@ -139,31 +129,19 @@ const assetOptions = computed(() => {
 })
 
 const riskManagerOptions = computed(() => {
-  const tvlByEntity = new Map<string, number>()
-  const seen = new Set<string>()
-  const result: { label: string, value: string, icon?: string, iconFallback?: string }[] = []
+  const entries: FilterOptionEntry[] = []
   for (const group of marketGroups.value) {
-    const seenEntitiesInGroup = new Set<string>()
+    const seenInGroup = new Set<string>()
     for (const vault of group.vaults) {
       if (!isVaultType(vault)) continue
       for (const entity of getEntitiesByVault(vault)) {
-        if (!seenEntitiesInGroup.has(entity.name)) {
-          seenEntitiesInGroup.add(entity.name)
-          tvlByEntity.set(entity.name, (tvlByEntity.get(entity.name) ?? 0) + group.metrics.totalTVL)
-        }
-        if (!seen.has(entity.name)) {
-          seen.add(entity.name)
-          result.push({
-            label: entity.name,
-            value: entity.name,
-            icon: entity.logo ? `/entities/${entity.logo}` : undefined,
-            iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined,
-          })
-        }
+        if (seenInGroup.has(entity.name)) continue
+        seenInGroup.add(entity.name)
+        entries.push({ key: entity.name, label: entity.name, tvl: group.metrics.totalTVL, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined })
       }
     }
   }
-  return result.sort((a, b) => (tvlByEntity.get(b.value) ?? 0) - (tvlByEntity.get(a.value) ?? 0))
+  return buildTvlSortedOptions(entries)
 })
 
 const matchesMarketFilter = (group: MarketGroup): boolean => {

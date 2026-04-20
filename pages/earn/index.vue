@@ -9,6 +9,7 @@ import { getProductByVault, applyVaultOverrides, getEntitiesByEarnVault, isVault
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
+import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 
 defineOptions({
   name: 'EarnPage',
@@ -122,22 +123,12 @@ const assetOptions = computed(() => {
 })
 
 const curatorOptions = computed(() => {
-  const tvlByEntity = new Map<string, number>()
-  const options: { label: string, value: string, icon?: string, iconFallback?: string }[] = []
-
-  const seen = new Set<string>()
-  for (const vault of list.value) {
+  return buildTvlSortedOptions(list.value.flatMap((vault) => {
     const tvl = vaultTotalSupplyUsd.value.get(vault.address) ?? 0
-    for (const entity of getEntitiesByEarnVault(vault)) {
-      tvlByEntity.set(entity.name, (tvlByEntity.get(entity.name) ?? 0) + tvl)
-      if (!seen.has(entity.name)) {
-        seen.add(entity.name)
-        options.push({ label: entity.name, value: entity.name, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined })
-      }
-    }
-  }
-
-  return options.sort((a, b) => (tvlByEntity.get(b.value) ?? 0) - (tvlByEntity.get(a.value) ?? 0))
+    return getEntitiesByEarnVault(vault).map(entity => ({
+      key: entity.name, label: entity.name, tvl, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined,
+    }))
+  }))
 })
 
 const filteredList = computed(() => {
