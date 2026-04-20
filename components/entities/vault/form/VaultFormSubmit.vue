@@ -55,17 +55,17 @@ const _disabled = computed(() => {
 const GENERIC_DISABLED_REASON = 'Complete the form fields above to continue.'
 
 const effectiveDisabledReason = computed(() => {
-  if (props.disabledReason) return props.disabledReason
   if (operationBlockReason.value) return operationBlockReason.value
+  if (props.disabledReason) return props.disabledReason
   if (_disabled.value && !props.loading) return GENERIC_DISABLED_REASON
   return undefined
 })
 
 const tooltipVariantClass = computed(() => {
+  if (operationBlockReason.value) return 'vault-form-submit__tooltip--warning'
   if (props.disabledReason && props.disabledReasonVariant) {
     return `vault-form-submit__tooltip--${props.disabledReasonVariant}`
   }
-  if (operationBlockReason.value) return 'vault-form-submit__tooltip--warning'
   return ''
 })
 

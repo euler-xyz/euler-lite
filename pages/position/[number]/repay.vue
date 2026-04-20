@@ -233,11 +233,11 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
     return undefined
   }
   if (formTab.value === 'savings') {
-    if (savings.disabledReason.value) return { message: savings.disabledReason.value, variant: 'error' }
+    if (savings.disabledReason.value) return { message: savings.disabledReason.value, variant: savings.isRepayExceedsDebt.value ? 'error' : 'warning' }
     if (simulationError.value) return { message: simulationError.value, variant: 'error' }
     return undefined
   }
-  if (collateral.disabledReason.value) return { message: collateral.disabledReason.value, variant: 'error' }
+  if (collateral.disabledReason.value) return { message: collateral.disabledReason.value, variant: collateral.isRepayExceedsDebt.value ? 'error' : 'warning' }
   if (simulationError.value) return { message: simulationError.value, variant: 'error' }
   return undefined
 })
