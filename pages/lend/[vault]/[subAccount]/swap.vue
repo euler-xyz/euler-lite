@@ -148,6 +148,13 @@ const disabledReason = computed(() => {
   if (quoteError.value) return quoteError.value
   return undefined
 })
+const disabledReasonVariant = computed(() => {
+  if (isGeoBlocked.value) return 'warning' as const
+  if (sameVaultError.value) return 'error' as const
+  if (errorText.value) return 'error' as const
+  if (quoteError.value) return 'error' as const
+  return undefined
+})
 
 // ── Vault loading ────────────────────────────────────────────────────────
 const loadVaults = async () => {
@@ -336,6 +343,7 @@ watch([() => route.params.vault, () => route.query.to], () => {
             <VaultFormSubmit
               :disabled="reviewSwapDisabled"
               :disabled-reason="disabledReason"
+              :disabled-reason-variant="disabledReasonVariant"
               :loading="isSubmitting || isPreparing"
             >
               {{ reviewSwapLabel }}

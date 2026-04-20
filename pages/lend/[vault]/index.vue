@@ -299,6 +299,14 @@ const disabledReason = computed(() => {
   if (errorText.value) return errorText.value
   return undefined
 })
+const disabledReasonVariant = computed(() => {
+  if (isGeoBlocked.value) return 'warning' as const
+  if (isSwapRestricted.value) return 'warning' as const
+  if (evkVault.value && isOpDisabled(evkVault.value, OP_DEPOSIT)) return 'warning' as const
+  if (isSupplyCapReached.value) return 'warning' as const
+  if (errorText.value) return 'error' as const
+  return undefined
+})
 const totalRewardsAPY = computed(() => getSupplyRewardApy(vaultAddress))
 const hasRewards = computed(() => hasSupplyRewards(vaultAddress))
 const intrinsicApy = computed(() => getIntrinsicApy(asset.value?.address))
@@ -979,6 +987,7 @@ watch(address, () => {
               <VaultFormSubmit
                 :disabled="reviewSupplyDisabled"
                 :disabled-reason="disabledReason"
+                :disabled-reason-variant="disabledReasonVariant"
                 :loading="isSubmitting || isPreparing"
               >
                 {{ reviewSupplyLabel }}

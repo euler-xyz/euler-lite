@@ -110,6 +110,13 @@ const disabledReason = computed(() => {
   if (simulationError.value) return simulationError.value
   return undefined
 })
+const disabledReasonVariant = computed(() => {
+  if (isGeoBlocked.value) return 'warning' as const
+  if (isBorrowRestricted.value) return 'warning' as const
+  if (errorText.value) return 'error' as const
+  if (simulationError.value) return 'error' as const
+  return undefined
+})
 const borrowVault = computed(() => pair.value?.borrow)
 const collateralVault = computed(() => pair.value?.collateral)
 useOperationGuard(computed(() => [borrowVault.value?.address, collateralVault.value?.address].filter(Boolean)))
@@ -573,6 +580,7 @@ watch([collateralAmount, borrowAmount], async () => {
               :disabled="reviewBorrowDisabled"
               :loading="isSubmitting || isPreparing"
               :disabled-reason="disabledReason"
+              :disabled-reason-variant="disabledReasonVariant"
             >
               Review Borrow
             </VaultFormSubmit>

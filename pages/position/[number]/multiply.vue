@@ -714,6 +714,13 @@ const disabledReason = computed(() => {
   if (multiplySimulationError.value) return multiplySimulationError.value
   return undefined
 })
+const disabledReasonVariant = computed(() => {
+  if (isGeoBlocked.value) return 'warning' as const
+  if (isMultiplyRestricted.value) return 'warning' as const
+  if (multiplyErrorText.value) return 'error' as const
+  if (multiplySimulationError.value) return 'error' as const
+  return undefined
+})
 
 const loadPosition = async () => {
   if (!isConnected.value && !isSpyMode.value) {
@@ -884,6 +891,7 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
               :disabled="reviewMultiplyDisabled"
               :loading="isSubmitting || isPreparing"
               :disabled-reason="disabledReason"
+              :disabled-reason-variant="disabledReasonVariant"
             >
               Review Multiply
             </VaultFormSubmit>

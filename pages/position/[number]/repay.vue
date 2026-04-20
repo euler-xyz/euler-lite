@@ -241,6 +241,29 @@ const disabledReason = computed(() => {
   return undefined
 })
 
+const disabledReasonVariant = computed(() => {
+  if (formTab.value === 'wallet') {
+    if (walletSwap.needsSwap.value) {
+      if (isWalletSwapRestricted.value) return 'warning' as const
+      if (walletSwap.disabledReason.value) return 'error' as const
+      if (walletSwap.estimatesError.value) return 'error' as const
+    }
+    else {
+      if (wallet.estimatesError.value) return 'error' as const
+    }
+    if (simulationError.value) return 'error' as const
+    return undefined
+  }
+  if (formTab.value === 'savings') {
+    if (savings.disabledReason.value) return 'error' as const
+    if (simulationError.value) return 'error' as const
+    return undefined
+  }
+  if (collateral.disabledReason.value) return 'error' as const
+  if (simulationError.value) return 'error' as const
+  return undefined
+})
+
 const activeHookWarning = computed(() => {
   if (formTab.value === 'wallet') {
     return walletSwap.needsSwap.value
@@ -608,6 +631,7 @@ watch(formTab, () => {
                 :disabled="reviewRepayDisabled"
                 :loading="isSubmitting || isPreparing"
                 :disabled-reason="disabledReason"
+                :disabled-reason-variant="disabledReasonVariant"
               >
                 {{ reviewRepayLabel }}
               </VaultFormSubmit>
@@ -788,6 +812,7 @@ watch(formTab, () => {
                 :disabled="reviewRepayDisabled"
                 :loading="isSubmitting || isPreparing"
                 :disabled-reason="disabledReason"
+                :disabled-reason-variant="disabledReasonVariant"
               >
                 {{ reviewRepayLabel }}
               </VaultFormSubmit>
@@ -960,6 +985,7 @@ watch(formTab, () => {
                 :disabled="reviewRepayDisabled"
                 :loading="isSubmitting || isPreparing"
                 :disabled-reason="disabledReason"
+                :disabled-reason-variant="disabledReasonVariant"
               >
                 {{ reviewRepayLabel }}
               </VaultFormSubmit>

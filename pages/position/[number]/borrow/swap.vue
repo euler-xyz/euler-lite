@@ -263,6 +263,14 @@ const disabledReason = computed(() => {
   if (simulationError.value) return simulationError.value
   return undefined
 })
+const disabledReasonVariant = computed(() => {
+  if (isGeoBlocked.value) return 'warning' as const
+  if (errorText.value) return 'error' as const
+  if (sameVaultError.value) return 'error' as const
+  if (healthError.value) return 'error' as const
+  if (simulationError.value) return 'error' as const
+  return undefined
+})
 
 // Must be after `swap` destructuring so `quote` is in scope
 watchEffect(async () => {
@@ -458,6 +466,7 @@ const onToVaultChange = (selectedIndex: number) => {
                 :disabled="reviewSwapDisabled"
                 :loading="isSubmitting || isPreparing"
                 :disabled-reason="disabledReason"
+                :disabled-reason-variant="disabledReasonVariant"
               >
                 {{ reviewSwapLabel }}
               </VaultFormSubmit>

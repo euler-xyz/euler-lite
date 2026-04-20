@@ -129,6 +129,12 @@ const disabledReason = computed(() => {
   if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return 'Insufficient balance'
   return undefined
 })
+const disabledReasonVariant = computed(() => {
+  if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return 'warning' as const
+  if (estimatesError.value) return 'error' as const
+  if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return 'error' as const
+  return undefined
+})
 const supplyAPYDisplay = computed(() => {
   if (!vault.value) return '0.00'
   const base = withIntrinsicSupplyApy(nanoToValue(vault.value.interestRateInfo.supplyAPY, 25), vault.value.asset.address)
@@ -692,6 +698,7 @@ watch(swapSelectedQuote, () => {
               :loading="isSubmitting || isPreparing"
               :disabled="reviewWithdrawDisabled"
               :disabled-reason="disabledReason"
+              :disabled-reason-variant="disabledReasonVariant"
             >
               Review Withdraw
             </VaultFormSubmit>

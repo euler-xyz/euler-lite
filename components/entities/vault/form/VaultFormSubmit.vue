@@ -20,7 +20,7 @@ interface KeyringGuardState {
   cancelVerification: () => void
 }
 
-const props = defineProps<{ disabled?: boolean, loading?: boolean, disabledReason?: string }>()
+const props = defineProps<{ disabled?: boolean, loading?: boolean, disabledReason?: string, disabledReasonVariant?: 'warning' | 'error' }>()
 const { isConnected } = useAccount()
 const { chainId: _chainId } = useEulerAddresses()
 const { chainId, switchChain, connect } = useWagmi()
@@ -58,6 +58,11 @@ const effectiveDisabledReason = computed(() => {
   if (operationBlockReason.value) return operationBlockReason.value
   if (_disabled.value && !props.loading) return GENERIC_DISABLED_REASON
   return undefined
+})
+
+const tooltipVariantClass = computed(() => {
+  if (!props.disabledReason || !props.disabledReasonVariant) return ''
+  return `vault-form-submit__tooltip--${props.disabledReasonVariant}`
 })
 
 const showTooltip = () => {
@@ -182,16 +187,14 @@ const openTermsModal = () => {
           Connect wallet
         </template>
       </UiButton>
-      <Transition name="tooltip">
-        <div
-          v-if="isTooltipVisible && _disabled && !loading"
-          ref="floating"
-          :style="floatingStyles"
-          class="vault-form-submit__tooltip"
-        >
-          {{ effectiveDisabledReason }}
-        </div>
-      </Transition>
+      <div
+        v-if="isTooltipVisible && _disabled && !loading"
+        ref="floating"
+        :style="floatingStyles"
+        :class="['vault-form-submit__tooltip', tooltipVariantClass]"
+      >
+        {{ effectiveDisabledReason }}
+      </div>
     </template>
   </div>
 </template>
@@ -211,6 +214,7 @@ const openTermsModal = () => {
     max-width: 300px;
     padding: 8px 12px;
     border-radius: 8px;
+    border: 1px solid transparent;
     background-color: var(--ui-footnote-floating-background-color);
     box-shadow: 0 8px 32px var(--ui-footnote-floating-box-shadow-color);
     font-size: 13px;
@@ -218,16 +222,22 @@ const openTermsModal = () => {
     font-weight: 400;
     text-align: center;
     pointer-events: none;
+
+    &--warning {
+      background-color: var(--ui-footnote-floating-background-color);
+      background-image: linear-gradient(var(--ui-toast-warning-background-color), var(--ui-toast-warning-background-color));
+      border-color: var(--ui-toast-warning-border-color);
+      color: var(--ui-toast-warning-text-color);
+      box-shadow: none;
+    }
+
+    &--error {
+      background-color: var(--ui-footnote-floating-background-color);
+      background-image: linear-gradient(var(--ui-toast-error-background-color), var(--ui-toast-error-background-color));
+      border-color: var(--ui-toast-error-border-color);
+      color: var(--ui-toast-error-text-color);
+      box-shadow: none;
+    }
   }
-}
-
-.tooltip-enter-active,
-.tooltip-leave-active {
-  transition: opacity 0.15s ease;
-}
-
-.tooltip-enter-from,
-.tooltip-leave-to {
-  opacity: 0;
 }
 </style>

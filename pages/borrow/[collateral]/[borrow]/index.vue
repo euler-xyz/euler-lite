@@ -180,6 +180,23 @@ const multiplyDisabledReason = computed(() => {
   return undefined
 })
 
+const borrowDisabledReasonVariant = computed(() => {
+  if (isGeoBlocked.value) return 'warning' as const
+  if (isBorrowRestricted.value) return 'warning' as const
+  if (borrow.isBorrowSwapRestricted.value) return 'warning' as const
+  if (borrow.errorText.value) return 'error' as const
+  if (borrow.borrowSimulationError.value) return 'error' as const
+  return undefined
+})
+
+const multiplyDisabledReasonVariant = computed(() => {
+  if (isGeoBlocked.value) return 'warning' as const
+  if (isMultiplyRestricted.value) return 'warning' as const
+  if (multiply.multiplyErrorText.value) return 'error' as const
+  if (multiply.multiplySimulationError.value) return 'error' as const
+  return undefined
+})
+
 // --- Tabs ---
 const formTabs = computed(() => [
   { label: 'Borrow', value: 'borrow' },
@@ -865,6 +882,7 @@ watch(formTab, () => {
                 v-if="formTab === 'borrow'"
                 :disabled="reviewBorrowDisabled"
                 :disabled-reason="borrowDisabledReason"
+                :disabled-reason-variant="borrowDisabledReasonVariant"
                 :loading="borrow.isSubmitting.value || borrow.isPreparing.value"
               >
                 {{ reviewBorrowLabel }}
@@ -873,6 +891,7 @@ watch(formTab, () => {
                 v-else-if="formTab === 'multiply'"
                 :disabled="reviewMultiplyDisabled"
                 :disabled-reason="multiplyDisabledReason"
+                :disabled-reason-variant="multiplyDisabledReasonVariant"
                 :loading="multiply.isMultiplySubmitting.value || multiply.isMultiplyPreparing.value"
               >
                 {{ reviewMultiplyLabel }}

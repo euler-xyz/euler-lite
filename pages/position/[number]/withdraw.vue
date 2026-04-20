@@ -140,6 +140,13 @@ const disabledReason = computed(() => {
   if (form.simulationError.value) return form.simulationError.value
   return undefined
 })
+const disabledReasonVariant = computed(() => {
+  if (form.isGeoBlocked.value) return 'warning' as const
+  if (form.isSwapRestricted.value) return 'warning' as const
+  if (form.estimatesError.value) return 'error' as const
+  if (form.simulationError.value) return 'error' as const
+  return undefined
+})
 const pairAssetsLabel = usePositionPairLabel(form.position)
 
 // Withdraw-specific computeds
@@ -373,6 +380,7 @@ watch(selectedOutputAsset, () => {
               :disabled="form.submitDisabled.value"
               :loading="form.isSubmitting.value || form.isPreparing.value"
               :disabled-reason="disabledReason"
+              :disabled-reason-variant="disabledReasonVariant"
             >
               {{ form.submitLabel }}
             </VaultFormSubmit>
