@@ -15,9 +15,9 @@ import { intrinsicApySources } from '~/entities/custom'
 import { STABLEWATCH_SOURCE_URL } from '~/entities/constants'
 import type { IntrinsicApyInfo } from '~/entities/intrinsic-apy'
 import { createTtlCache } from '~/server/utils/cache'
+import { UPSTREAM_FETCH_TIMEOUT_MS } from '~/server/utils/fetchWithTimeout'
 import { logWarn } from '~/server/utils/log'
 
-const TIMEOUT_MS = 10_000
 const CACHE_TTL_MS = 5 * 60 * 1000
 const PENDLE_MATURITY_STALE_THRESHOLD_MS = 2 * 60 * 60 * 1000
 
@@ -45,7 +45,7 @@ const inFlight = new Map<string, Promise<unknown>>()
 
 async function fetchJson(url: string): Promise<unknown> {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS)
+  const timeout = setTimeout(() => controller.abort(), UPSTREAM_FETCH_TIMEOUT_MS)
   try {
     const resp = await fetch(url, { signal: controller.signal })
     if (!resp.ok) throw new Error(`Upstream returned ${resp.status}`)

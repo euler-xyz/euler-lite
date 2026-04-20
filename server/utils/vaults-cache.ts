@@ -18,7 +18,7 @@ import { INTERNAL_FETCH_HEADERS } from './internal-headers'
 import { loadChainSnapshot, serialiseSnapshot } from '~/entities/vault'
 import type { FetchVaultContext, SerialisedSnapshot } from '~/entities/vault'
 
-const TTL_MS = 10 * 60_000
+const TTL_MS = 5 * 60_000
 
 export const vaultsCache = createTtlCache<SerialisedSnapshot>({
   ttlMs: TTL_MS,

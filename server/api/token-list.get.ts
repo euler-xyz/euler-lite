@@ -5,7 +5,6 @@ import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { reportStatus } from '~/server/utils/log'
 import { MERKL_API_BASE_URL } from '~/entities/constants'
 
-const TIMEOUT_MS = 10_000
 const CACHE_TTL_MS = 300_000
 const DEFILLAMA_DEFAULT_URL = 'https://d3g10bzo9rdluh.cloudfront.net'
 
@@ -64,7 +63,7 @@ function fetchEulerApi(chainId: number): Promise<TokenEntry[]> {
   const url = process.env.EULER_API_URL || process.env.NUXT_PUBLIC_EULER_API_URL
   if (!url) return Promise.resolve([])
 
-  const promise = fetchWithTimeout(`${url}/v1/tokens?chainId=${chainId}`, TIMEOUT_MS)
+  const promise = fetchWithTimeout(`${url}/v1/tokens?chainId=${chainId}`)
     .then(async (resp) => {
       if (!resp.ok) throw new Error(`Euler API returned ${resp.status}`)
       const data = (await resp.json()) as EulerApiToken[]
@@ -101,7 +100,7 @@ function fetchUniswap(): Promise<TokenEntry[]> {
   const existing = uniswapInFlight.get('all')
   if (existing) return existing
 
-  const promise = fetchWithTimeout(url, TIMEOUT_MS)
+  const promise = fetchWithTimeout(url)
     .then(async (resp) => {
       if (!resp.ok) throw new Error(`Uniswap upstream returned ${resp.status}`)
       const data = await resp.json()
@@ -133,7 +132,7 @@ function fetchDefillama(chainId: number): Promise<TokenEntry[]> {
   const baseUrl = process.env.NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL || DEFILLAMA_DEFAULT_URL
   const url = `${baseUrl}/tokenlists-${chainId}.json`
 
-  const promise = fetchWithTimeout(url, TIMEOUT_MS)
+  const promise = fetchWithTimeout(url)
     .then(async (resp) => {
       if (!resp.ok) throw new Error(`DefiLlama upstream returned ${resp.status}`)
       const data = await resp.json()
@@ -169,7 +168,7 @@ let merklGlobalInFlight: Promise<Record<string, unknown[]>> | null = null
 
 function fetchMerklGlobal(): Promise<Record<string, unknown[]>> {
   if (merklGlobalInFlight) return merklGlobalInFlight
-  merklGlobalInFlight = fetchWithTimeout(`${MERKL_API_BASE_URL}/tokens/reward`, TIMEOUT_MS)
+  merklGlobalInFlight = fetchWithTimeout(`${MERKL_API_BASE_URL}/tokens/reward`)
     .then(async (resp) => {
       if (!resp.ok) throw new Error(`Merkl tokens upstream returned ${resp.status}`)
       return await resp.json() as Record<string, unknown[]>

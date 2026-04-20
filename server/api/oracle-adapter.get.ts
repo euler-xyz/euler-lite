@@ -4,7 +4,6 @@ import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { logWarn } from '~/server/utils/log'
 
-const TIMEOUT_MS = 10_000
 const CACHE_TTL_MS = 300_000
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
@@ -50,7 +49,7 @@ export default defineEventHandler(async (event) => {
   if (cached !== undefined) return cached
 
   try {
-    const resp = await fetchWithTimeout(getUpstreamUrl(chainId, address), TIMEOUT_MS)
+    const resp = await fetchWithTimeout(getUpstreamUrl(chainId, address))
     if (!resp.ok) {
       if (resp.status === 404) {
         cache.set(key, null)

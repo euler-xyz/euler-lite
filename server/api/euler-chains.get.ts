@@ -4,7 +4,6 @@ import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { logWarn } from '~/server/utils/log'
 
-const TIMEOUT_MS = 10_000
 const CACHE_TTL_MS = 300_000
 const DEFAULT_URL = 'https://raw.githubusercontent.com/euler-xyz/euler-interfaces/refs/heads/master/EulerChains.json'
 
@@ -35,7 +34,7 @@ export default defineEventHandler(async (event) => {
 
   inFlight = (async () => {
     try {
-      const resp = await fetchWithTimeout(getUpstreamUrl(), TIMEOUT_MS)
+      const resp = await fetchWithTimeout(getUpstreamUrl())
       if (!resp.ok) {
         throw new Error(`Upstream returned ${resp.status}`)
       }

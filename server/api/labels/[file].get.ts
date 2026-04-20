@@ -4,7 +4,6 @@ import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { reportStatus } from '~/server/utils/log'
 
-const TIMEOUT_MS = 10_000
 const CACHE_TTL_MS = 300_000
 
 /** The set of label files this proxy serves. Also consumed by warm-cache. */
@@ -139,7 +138,7 @@ export default defineEventHandler(async (event) => {
   const promise = (async () => {
     const statusKey = `${file}:${chainId}`
     try {
-      const resp = await fetchWithTimeout(getUpstreamUrl(chainId, file), TIMEOUT_MS)
+      const resp = await fetchWithTimeout(getUpstreamUrl(chainId, file))
       if (!resp.ok) {
         // 404 is the expected signal for "file not published on this chain"
         // — treat it as a steady-state "absent" and don't spam the logs

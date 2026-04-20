@@ -4,8 +4,14 @@
  * `fetchWithTimeout` caps a single HTTP request. `withWallClock` caps an
  * arbitrary async task — useful for paginated loops where the per-page
  * timeout must cooperate with an overall budget.
+ *
+ * `UPSTREAM_FETCH_TIMEOUT_MS` is the shared default for single HTTP calls
+ * to external services — consistent across the server layer so retries
+ * and budgets have a predictable floor.
  */
-export async function fetchWithTimeout(url: string, timeoutMs: number, init?: RequestInit): Promise<Response> {
+export const UPSTREAM_FETCH_TIMEOUT_MS = 10_000
+
+export async function fetchWithTimeout(url: string, timeoutMs: number = UPSTREAM_FETCH_TIMEOUT_MS, init?: RequestInit): Promise<Response> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
   try {

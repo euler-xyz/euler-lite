@@ -38,8 +38,8 @@ import { getSubgraphUris } from '~/utils/chain-env'
 import { eulerPerspectiveABI } from '~/entities/euler/abis'
 
 const CACHE_TTL_MS = 5 * 60_000
-const SUBGRAPH_TIMEOUT_MS = 10_000
-const PER_REQUEST_TIMEOUT_MS = 30_000
+/** Wall-clock budget for the full catalog build (all subgraph pages + escrow RPC). */
+const CATALOG_BUILD_BUDGET_MS = 30_000
 const SUBGRAPH_PAGE_SIZE = 1000
 // Cap at 10k vaults per chain — well above current chain sizes with room for
 // growth. Exceeding this aborts the refresh without caching so we don't
@@ -149,7 +149,7 @@ const paginatedSubgraphFetch = async (subgraphUrl: string): Promise<SubgraphVaul
     // Keyset pagination by id (lexical) — more efficient than offset-based
     // pagination for subgraphs and avoids rows being skipped or doubled if
     // the underlying data shifts mid-fetch.
-    const resp = await fetchWithTimeout(subgraphUrl, SUBGRAPH_TIMEOUT_MS, {
+    const resp = await fetchWithTimeout(subgraphUrl, undefined, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -246,7 +246,7 @@ export const refreshVaultCategories = async (chainId: number): Promise<VaultCate
   const existing = inFlight.get(chainId)
   if (existing) return existing
 
-  const promise = withWallClock(() => buildCategories(chainId), PER_REQUEST_TIMEOUT_MS, `vault-categories chain=${chainId}`)
+  const promise = withWallClock(() => buildCategories(chainId), CATALOG_BUILD_BUDGET_MS, `vault-categories chain=${chainId}`)
     .then((cats) => {
       categoriesCache.set(chainId.toString(), buildIndex(cats))
       return cats
@@ -300,7 +300,7 @@ const fetchSingleFromSubgraph = async (
 ): Promise<FactoryCategory | undefined> => {
   const subgraphUrl = getSubgraphUris()[String(chainId)]
   if (!subgraphUrl) return undefined
-  const resp = await fetchWithTimeout(subgraphUrl, SUBGRAPH_TIMEOUT_MS, {
+  const resp = await fetchWithTimeout(subgraphUrl, undefined, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({

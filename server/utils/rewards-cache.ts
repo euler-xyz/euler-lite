@@ -29,8 +29,8 @@ import {
 } from '~/entities/constants'
 
 const CACHE_TTL_MS = 5 * 60_000
-const PER_REQUEST_TIMEOUT_MS = 15_000
-const PER_PAGE_TIMEOUT_MS = 10_000
+/** Wall-clock budget for a full paginated Merkl request (all pages combined). */
+const MERKL_PAGINATION_BUDGET_MS = 15_000
 const MERKL_PAGE_SIZE = 100
 // Today each chain has well under 100 opportunities per type; 10 pages gives
 // roughly 10x headroom before the cap starts truncating. A partial response
@@ -100,7 +100,7 @@ const fetchMerklType = async (chainId: number, type: MerklOpportunityType): Prom
 
   for (let page = 0; page < MAX_MERKL_PAGES; page++) {
     const url = `${baseUrl}&items=${MERKL_PAGE_SIZE}&page=${page}`
-    const resp = await fetchWithTimeout(url, PER_PAGE_TIMEOUT_MS)
+    const resp = await fetchWithTimeout(url)
     if (!resp.ok) {
       throw new Error(`Merkl ${type} returned ${resp.status}`)
     }
@@ -127,7 +127,7 @@ const fetchMerklType = async (chainId: number, type: MerklOpportunityType): Prom
 export const refreshMerklType = async (chainId: number, type: MerklOpportunityType): Promise<unknown[]> => {
   const key = merklTypeKey(chainId, type)
   return fetchDeduped(key, async () => {
-    const data = await withWallClock(() => fetchMerklType(chainId, type), PER_REQUEST_TIMEOUT_MS, `merkl/${type} chain=${chainId}`)
+    const data = await withWallClock(() => fetchMerklType(chainId, type), MERKL_PAGINATION_BUDGET_MS, `merkl/${type} chain=${chainId}`)
     rewardsCache.set(key, data)
     return data
   })
@@ -149,7 +149,7 @@ export const refreshBrevisCampaigns = async (chainId: number): Promise<unknown> 
       action: [2001, 2002],
       status: [3],
     }
-    const resp = await fetchWithTimeout(BREVIS_API_URL, PER_REQUEST_TIMEOUT_MS, {
+    const resp = await fetchWithTimeout(BREVIS_API_URL, undefined, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
@@ -172,7 +172,7 @@ export const refreshFuulProtocol = async (chainId: number, protocol: FuulProtoco
   const key = fuulKey(chainId, protocol)
   return fetchDeduped(key, async () => {
     const url = `${FUUL_API_BASE_URL}/incentives?protocol=${protocol}&chain_id=${chainId}`
-    const resp = await fetchWithTimeout(url, PER_PAGE_TIMEOUT_MS)
+    const resp = await fetchWithTimeout(url)
     if (!resp.ok) {
       throw new Error(`Fuul ${protocol} returned ${resp.status}`)
     }

@@ -4,9 +4,6 @@ export const CACHE_TTL_1MIN_MS = 60_000
 export const CACHE_TTL_5MIN_MS = 300_000
 
 // ── Polling Intervals ─────────────────────────────────────
-export const POLL_INTERVAL_5S_MS = 5_000
-export const POLL_INTERVAL_10S_MS = 10_000
-export const POLL_INTERVAL_30S_MS = 30_000
 export const POLL_INTERVAL_60S_MS = 60_000
 /** Reward campaign poll cadence. Matches `server/plugins/warm-cache.ts`'s
  * 4-min refresh interval: polling more often just re-reads the same
@@ -24,7 +21,9 @@ export const BATCH_SIZE_PARALLEL_ROUNDS = 5
 export const BATCH_DELAY_COLLECT_MS = 50
 
 // ── Request Timeouts ────────────────────────────────────
-export const TIMEOUT_SUBGRAPH_MS = 30_000
+/** Subgraph query timeout (client-side). Longer than server-side subgraph
+ * calls because client traffic tolerates higher variance. */
+export const SUBGRAPH_TIMEOUT_MS = 30_000
 
 // ── Debounce ──────────────────────────────────────────────
 /** Price-fetch watchEffects on list pages. Collapses bursts of registry
