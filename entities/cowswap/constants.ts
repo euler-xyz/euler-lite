@@ -17,12 +17,12 @@ export type CowSwapChainConfig = {
 
 export const COWSWAP_CHAIN_CONFIG: Record<number, CowSwapChainConfig> = {
   1: {
-    orderbookUrl: 'https://barn.api.cow.fi/mainnet',
-    settlementContract: '0xf553d092b50bdcbddeD1A99aF2cA29FBE5E2CB13',
-    vaultRelayer: '0xC7242d167563352E2BCA4d71C043fbe542DB8FB2',
-    openPositionWrapper: '0x891cf92cf082CD159aCAF6A62Ab010495B5Ab4aE',
-    closePositionWrapper: '0x212EbC94997746285924b4e516e9936664B96275',
-    collateralSwapWrapper: '0x4f501061d2288f52dF5693f9A1a25e04c77B4163',
+    orderbookUrl: 'https://api.cow.fi/mainnet',
+    settlementContract: '0x9008D19f58AAbD9eD0D60971565AA8510560ab41',
+    vaultRelayer: '0xC92E8bdf79f0507f65a392b0ab4667716BFE0110',
+    openPositionWrapper: '0x59684A689D4a1CAc0f0632F54ec8cDd42612D728',
+    closePositionWrapper: '0xa18c87849eF90190117FF1E1e8b4acE6Dac7A54b',
+    collateralSwapWrapper: '0x175FBD01874e92C9b081F493371fEFE009760a42',
   },
 }
 

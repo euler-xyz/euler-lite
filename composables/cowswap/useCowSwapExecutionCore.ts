@@ -32,11 +32,7 @@ export const useCowSwapExecutionCore = () => {
   const isPending = computed(() => status.value !== 'idle' && status.value !== 'submitted')
   const explorerUrl = computed(() => {
     if (!orderUid.value || !submissionChainId.value) return undefined
-    const config = getCowSwapChainConfig(submissionChainId.value)
-    const base = config?.orderbookUrl?.includes('barn')
-      ? 'https://barn.explorer.cow.fi'
-      : 'https://explorer.cow.fi'
-    return `${base}/orders/${orderUid.value}`
+    return `https://explorer.cow.fi/orders/${orderUid.value}`
   })
 
   const requireWallet = () => {

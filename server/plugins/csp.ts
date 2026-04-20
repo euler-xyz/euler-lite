@@ -143,7 +143,6 @@ const CONNECT_SRC_BASE = [
   // External data APIs
   'https://api.fuul.xyz',
   // CoW Protocol orderbook
-  'https://barn.api.cow.fi',
   'https://api.cow.fi',
   // Reown AppKit SDK version check
   'https://registry.npmjs.org',
