@@ -13,6 +13,7 @@ import { useVaultSearch } from '~/composables/useVaultSearch'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOpDisabled, OP_DEPOSIT } from '~/utils/vault-hooks'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
+import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
 
 defineOptions({
   name: 'LendPage',
@@ -116,11 +117,12 @@ const borrowableVaults = computed(() => {
   )
 })
 
-// Fetch USD values for all borrowable vaults
-// Reading rewardsVersion.value establishes a reactive dependency so this
-// re-runs when reward data loads asynchronously (fixes custom filter staleness).
-watchEffect(async () => {
-  const _rv = rewardsVersion.value
+// Fetch USD values for all borrowable vaults. Debounced to collapse the
+// bursts of registry updates streamed during loadVaults's RPC refresh
+// (each batch causes borrowableVaults to re-derive) into a single
+// price-fetch cycle. Reading rewardsVersion.value establishes a reactive
+// dependency so this also re-runs when reward data loads asynchronously.
+const fetchLendPrices = useDebounceFn(async () => {
   const vaults = borrowableVaults.value
   if (!vaults.length) {
     isPricesReady.value = true
@@ -154,6 +156,27 @@ watchEffect(async () => {
   finally {
     isPricesReady.value = true
   }
+}, DEBOUNCE_LIST_PRICE_FETCH_MS)
+
+// Pause price fetches while the page is in keep-alive but not visible.
+// See the borrow-page equivalent for the full rationale — avoiding a
+// bulk refetch while a hidden page's data changes.
+const isActive = ref(true)
+onActivated(() => {
+  isActive.value = true
+})
+onDeactivated(() => {
+  isActive.value = false
+})
+
+watchEffect(() => {
+  // Touch deps so watchEffect re-registers on change, then delegate to the
+  // debounced fetcher. Values are re-read inside fetchLendPrices at execution
+  // time to avoid closing over stale references.
+  void rewardsVersion.value
+  void borrowableVaults.value
+  if (!isActive.value) return
+  fetchLendPrices()
 })
 
 const marketOptions = computed(() => {

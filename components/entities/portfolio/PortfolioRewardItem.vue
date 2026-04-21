@@ -10,7 +10,8 @@ import { nanoToValue } from '~/utils/crypto-utils'
 
 const { reward } = defineProps<{ reward: Reward }>()
 
-const { isTokensLoading, rewardTokens, claimReward, loadRewards, buildClaimRewardPlan } = useMerkl()
+const { claimReward, loadRewards, buildClaimRewardPlan } = useMerkl()
+const { getTokenByAddress } = useTokenList()
 const { isSpyMode } = useSpyMode()
 const modal = useModal()
 const { error } = useToast()
@@ -28,9 +29,8 @@ const amountToClaim = computed(() => amount.value - claimed.value)
 const amountInUsd = computed(() => amountToClaim.value * reward.token.price)
 const isEulFamily = computed(() => ['rEUL', 'EUL'].includes(reward.token.symbol))
 const externalIconUrl = computed(() => {
-  if (isTokensLoading.value || isEulFamily.value) return undefined
-  return rewardTokens.value.find(token => token.address === reward.token.address)?.icon
-    || undefined
+  if (isEulFamily.value) return undefined
+  return getTokenByAddress(reward.token.address)?.logoURI || undefined
 })
 const hasIcon = computed(() => isEulFamily.value || !!externalIconUrl.value)
 const avatarAsset = computed(() => isEulFamily.value

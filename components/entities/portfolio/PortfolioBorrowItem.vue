@@ -558,9 +558,9 @@ onMounted(() => {
             <UiExactAmount
               v-if="collateralValue.hasPrice"
               class="text-content-tertiary text-p3"
-              :exact="formatExactAmount(collateralItems[0].assets, position.collateral.decimals, position.collateral.asset.symbol)"
+              :exact="formatExactAmount(collateralItems[0]?.assets ?? 0n, position.collateral.decimals, position.collateral.asset.symbol)"
             >
-              ~ {{ roundAndCompactTokens(collateralItems[0].assets, position.collateral.decimals) }}
+              ~ {{ roundAndCompactTokens(collateralItems[0]?.assets ?? 0n, position.collateral.decimals) }}
               {{ position.collateral.asset.symbol }} {{ collateralItems.length > 1 ? '& others' : '' }}
             </UiExactAmount>
           </div>

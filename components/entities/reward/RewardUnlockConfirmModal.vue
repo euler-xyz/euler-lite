@@ -3,7 +3,8 @@ import type { REULLock } from '~/entities/reul'
 import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 
-const { rewardTokens } = useMerkl()
+const { getTokenByAddress } = useTokenList()
+const { reulTokenContractAddress } = useREULLocks()
 
 const { item } = defineProps<{
   item: REULLock
@@ -11,9 +12,8 @@ const { item } = defineProps<{
 }>()
 defineEmits(['close'])
 
-const reulToken = computed(() => {
-  return rewardTokens.value.find(token => token.symbol === 'rEUL')
-})
+// rEUL address from contract config; metadata from the unified token list.
+const reulToken = computed(() => getTokenByAddress(reulTokenContractAddress.value))
 
 const unlockableAmount = computed(() => {
   return nanoToValue(item.unlockableAmount, reulToken.value?.decimals)
