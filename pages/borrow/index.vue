@@ -226,11 +226,14 @@ const debtAssetOptions = computed(() => {
 })
 
 const marketOptions = computed(() => {
+  const counted = new Set<string>()
   return buildTvlSortedOptions(activeBorrowList.value.flatMap((pair) => {
     const market = getProductByVault(pair.collateral.address)
     if (!market.name) return []
-    const key = getPairKey(pair)
-    const tvl = (pairLiquidityUsd.value.get(key) ?? 0) + (pairBorrowedUsd.value.get(key) ?? 0)
+    const dedupKey = `${market.name}:${pair.borrow.address}`
+    const pairKey = getPairKey(pair)
+    const tvl = counted.has(dedupKey) ? 0 : (pairLiquidityUsd.value.get(pairKey) ?? 0) + (pairBorrowedUsd.value.get(pairKey) ?? 0)
+    counted.add(dedupKey)
     const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
     const entityObj = entityName ? entities[entityName] : null
     return [{ key: market.name, label: market.name, tvl, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
@@ -238,12 +241,16 @@ const marketOptions = computed(() => {
 })
 
 const riskManagerOptions = computed(() => {
+  const counted = new Set<string>()
   return buildTvlSortedOptions(activeBorrowList.value.flatMap((pair) => {
-    const key = getPairKey(pair)
-    const tvl = (pairLiquidityUsd.value.get(key) ?? 0) + (pairBorrowedUsd.value.get(key) ?? 0)
-    return getEntitiesByVault(pair.borrow).map(entity => ({
-      key: entity.name, label: entity.name, tvl, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined,
-    }))
+    const pairKey = getPairKey(pair)
+    const pairTvl = (pairLiquidityUsd.value.get(pairKey) ?? 0) + (pairBorrowedUsd.value.get(pairKey) ?? 0)
+    return getEntitiesByVault(pair.borrow).map((entity) => {
+      const dedupKey = `${entity.name}:${pair.borrow.address}`
+      const tvl = counted.has(dedupKey) ? 0 : pairTvl
+      counted.add(dedupKey)
+      return { key: entity.name, label: entity.name, tvl, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined }
+    })
   }))
 })
 
