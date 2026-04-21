@@ -27,11 +27,14 @@ import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { isOpDisabled, OP_REDEEM, OP_WITHDRAW } from '~/utils/vault-hooks'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const router = useRouter()
 const route = useRoute()
 const modal = useModal()
 const { error } = useToast()
+// Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
+useFullBalances()
 const { buildWithdrawPlan, buildRedeemPlan, buildWithdrawAndSwapPlan, buildRedeemAndSwapPlan, executeTxPlan } = useEulerOperations()
 const { getVault, getSecuritizeVault: _getSecuritizeVault, getEscrowVault: _getEscrowVault } = useVaults()
 const { isConnected, address } = useAccount()
@@ -123,6 +126,12 @@ const isSubmitDisabled = computed(() => {
   return false
 })
 const reviewWithdrawDisabled = isSubmitDisabled
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return { message: 'Withdrawals are currently disabled for this vault', variant: 'warning' }
+  if (estimatesError.value) return { message: estimatesError.value, variant: 'error' }
+  if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return { message: 'Insufficient balance', variant: 'error' }
+  return undefined
+})
 const supplyAPYDisplay = computed(() => {
   if (!vault.value) return '0.00'
   const base = withIntrinsicSupplyApy(nanoToValue(vault.value.interestRateInfo.supplyAPY, 25), vault.value.asset.address)
@@ -263,7 +272,7 @@ const load = async () => {
     // Check if securitize vault first
     const isSecuritize = await isSecuritizeVault(vaultAddress)
     if (isSecuritize) {
-      vault.value = await fetchSecuritizeVault(vaultAddress)
+      vault.value = await fetchSecuritizeVault(vaultAddress, buildFetchContext())
       estimateSupplyAPY.value = 0n // Securitize vaults don't have interest rate
     }
     else {
@@ -685,6 +694,8 @@ watch(swapSelectedQuote, () => {
             <VaultFormSubmit
               :loading="isSubmitting || isPreparing"
               :disabled="reviewWithdrawDisabled"
+              :disabled-reason="disabledReasonInfo?.message"
+              :disabled-reason-variant="disabledReasonInfo?.variant"
             >
               Review Withdraw
             </VaultFormSubmit>

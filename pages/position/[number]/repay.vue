@@ -18,12 +18,15 @@ import { useWalletSwapRepay } from '~/composables/repay/useWalletSwapRepay'
 import { useCollateralSwapRepay } from '~/composables/repay/useCollateralSwapRepay'
 import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const _route = useRoute()
 const _router = useRouter()
 const modal = useModal()
 const { isConnected, address } = useAccount()
 const { isSpyMode } = useSpyMode()
+// Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
+useFullBalances()
 const positionIndex = usePositionIndex()
 const { isPositionsLoading, isPositionsLoaded, isDepositsLoaded, refreshAllPositions: _refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
@@ -216,6 +219,29 @@ const reviewRepayDisabled = computed(() => {
   }
   if (formTab.value === 'savings') return savings.isSubmitDisabled.value
   return collateral.isSubmitDisabled.value
+})
+
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (formTab.value === 'wallet') {
+    if (walletSwap.needsSwap.value) {
+      if (isWalletSwapRestricted.value) return { message: 'Swapping into this vault is not available in your region', variant: 'warning' }
+      if (walletSwap.disabledReason.value) return { message: walletSwap.disabledReason.value, variant: 'error' }
+      if (walletSwap.estimatesError.value) return { message: walletSwap.estimatesError.value, variant: 'error' }
+    }
+    else {
+      if (wallet.estimatesError.value) return { message: wallet.estimatesError.value, variant: 'error' }
+    }
+    if (simulationError.value) return { message: simulationError.value, variant: 'error' }
+    return undefined
+  }
+  if (formTab.value === 'savings') {
+    if (savings.disabledReason.value) return { message: savings.disabledReason.value, variant: savings.isRepayExceedsDebt.value ? 'error' : 'warning' }
+    if (simulationError.value) return { message: simulationError.value, variant: 'error' }
+    return undefined
+  }
+  if (collateral.disabledReason.value) return { message: collateral.disabledReason.value, variant: collateral.isRepayExceedsDebt.value ? 'error' : 'warning' }
+  if (simulationError.value) return { message: simulationError.value, variant: 'error' }
+  return undefined
 })
 
 const activeHookWarning = computed(() => {
@@ -584,6 +610,8 @@ watch(formTab, () => {
               <VaultFormSubmit
                 :disabled="reviewRepayDisabled"
                 :loading="isSubmitting || isPreparing"
+                :disabled-reason="disabledReasonInfo?.message"
+                :disabled-reason-variant="disabledReasonInfo?.variant"
               >
                 {{ reviewRepayLabel }}
               </VaultFormSubmit>
@@ -763,6 +791,8 @@ watch(formTab, () => {
               <VaultFormSubmit
                 :disabled="reviewRepayDisabled"
                 :loading="isSubmitting || isPreparing"
+                :disabled-reason="disabledReasonInfo?.message"
+                :disabled-reason-variant="disabledReasonInfo?.variant"
               >
                 {{ reviewRepayLabel }}
               </VaultFormSubmit>
@@ -934,6 +964,8 @@ watch(formTab, () => {
               <VaultFormSubmit
                 :disabled="reviewRepayDisabled"
                 :loading="isSubmitting || isPreparing"
+                :disabled-reason="disabledReasonInfo?.message"
+                :disabled-reason-variant="disabledReasonInfo?.variant"
               >
                 {{ reviewRepayLabel }}
               </VaultFormSubmit>

@@ -15,6 +15,9 @@ const rateLimiter = createRateLimiter({
 })
 
 const cache = createTtlCache<unknown[]>({ ttlMs: CACHE_TTL_MS })
+const CACHE_KEY = 'euler-chains'
+/** Collapses concurrent cache-miss callers (warm-cache racing client requests) onto one upstream fetch. */
+let inFlight: Promise<unknown[]> | null = null
 
 function getUpstreamUrl(): string {
   return (process.env.NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL || '').trim() || DEFAULT_URL
@@ -23,28 +26,34 @@ function getUpstreamUrl(): string {
 export default defineEventHandler(async (event) => {
   rateLimiter.consume(event)
 
-  const cached = cache.get('euler-chains')
+  const cached = cache.get(CACHE_KEY)
   if (cached) return cached
 
-  try {
-    const resp = await fetchWithTimeout(getUpstreamUrl(), TIMEOUT_MS)
-    if (!resp.ok) {
-      throw new Error(`Upstream returned ${resp.status}`)
+  if (inFlight) return inFlight
+
+  inFlight = (async () => {
+    try {
+      const resp = await fetchWithTimeout(getUpstreamUrl(), TIMEOUT_MS)
+      if (!resp.ok) {
+        throw new Error(`Upstream returned ${resp.status}`)
+      }
+
+      const data: unknown = await resp.json()
+      if (!Array.isArray(data)) {
+        throw new Error('Upstream returned a non-array payload')
+      }
+      cache.set(CACHE_KEY, data)
+      return data
     }
+    catch (err) {
+      logWarn('euler-chains', 'Upstream fetch failed:', err instanceof Error ? err.message : err)
 
-    const data: unknown = await resp.json()
-    if (!Array.isArray(data)) {
-      throw new Error('Upstream returned a non-array payload')
+      const stale = cache.getStale(CACHE_KEY)
+      if (stale) return stale
+
+      throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
     }
-    cache.set('euler-chains', data)
-    return data
-  }
-  catch (err) {
-    logWarn('euler-chains', 'Upstream fetch failed:', err instanceof Error ? err.message : err)
+  })().finally(() => { inFlight = null })
 
-    const stale = cache.getStale('euler-chains')
-    if (stale) return stale
-
-    throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
-  }
+  return inFlight
 })

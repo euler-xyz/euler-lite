@@ -184,14 +184,15 @@ const detectVaultType = (factoryAddress: string): VaultType => {
  * They are fetched using fetchVault and identified by vaultCategory.
  */
 const fetchVaultByType = async (address: string, type: VaultType): Promise<AnyVault> => {
+  const ctx = buildFetchContext()
   switch (type) {
     case 'earn':
-      return await fetchEarnVault(address)
+      return await fetchEarnVault(address, ctx)
     case 'securitize':
-      return await fetchSecuritizeVault(address)
+      return await fetchSecuritizeVault(address, ctx)
     case 'evk':
     default:
-      return await fetchVault(address)
+      return await fetchVault(address, ctx)
   }
 }
 
@@ -248,7 +249,7 @@ const resolveUnknown = async (address: string): Promise<VaultEntry> => {
 
     // Try securitize first (has distinct structure), then fall back to EVK
     try {
-      const vault = await fetchSecuritizeVault(normalized)
+      const vault = await fetchSecuritizeVault(normalized, buildFetchContext())
       set(normalized, vault, 'securitize')
       return { vault, type: 'securitize' }
     }
@@ -262,7 +263,7 @@ const resolveUnknown = async (address: string): Promise<VaultEntry> => {
   if (type === 'evk') {
     const isEscrow = await isInEscrowPerspective(normalized)
     if (isEscrow) {
-      const vault = await fetchEscrowVault(normalized)
+      const vault = await fetchEscrowVault(normalized, buildFetchContext())
       set(normalized, vault, 'evk')
       return { vault, type: 'evk' }
     }

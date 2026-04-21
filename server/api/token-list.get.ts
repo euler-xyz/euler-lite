@@ -174,23 +174,19 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'chainId is required and must be a positive integer' })
   }
 
-  // --- Primary source: Euler API (always awaited) ---
-  const euler = await fetchEulerApi(chainId)
+  // Fetch all three sources concurrently. Each fetcher already reads its own
+  // cache first, dedups in-flight requests, and resolves to stale/empty on
+  // error — allSettled never rejects. The response is bounded by the slowest
+  // cold-fetch (10s timeout); on a warm cache this returns immediately.
+  const [eulerResult, uniswapResult, defillamaResult] = await Promise.allSettled([
+    fetchEulerApi(chainId),
+    fetchUniswap(),
+    fetchDefillama(chainId),
+  ])
 
-  // --- Supplemental: Uniswap (best-effort, non-blocking) ---
-  let uniswap = uniswapCache.get('all')
-  if (uniswap === undefined) {
-    void fetchUniswap()
-    uniswap = uniswapCache.getStale('all') ?? []
-  }
-
-  // --- Supplemental: DefiLlama (best-effort, non-blocking) ---
-  const key = String(chainId)
-  let defillama = defillamaCache.get(key)
-  if (defillama === undefined) {
-    void fetchDefillama(chainId)
-    defillama = defillamaCache.getStale(key) ?? []
-  }
+  const euler = eulerResult.status === 'fulfilled' ? eulerResult.value : []
+  const uniswap = uniswapResult.status === 'fulfilled' ? uniswapResult.value : []
+  const defillama = defillamaResult.status === 'fulfilled' ? defillamaResult.value : []
 
   // Priority: Euler API > DefiLlama > Uniswap
   const tokens = deduplicateTokens(euler, deduplicateTokens(defillama, uniswap))

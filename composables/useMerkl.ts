@@ -11,15 +11,19 @@ import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_30S_MS } from '~/entities/tuning-const
 import { logWarn } from '~/utils/errorHandling'
 import { earnVaults } from '~/utils/eulerLabelsState'
 
-const {
-  MERKL_API_BASE_URL,
-} = useEulerConfig()
-
-const endpoints = {
-  tokens: `${MERKL_API_BASE_URL}/tokens/reward`,
-  opportunities: `${MERKL_API_BASE_URL}/opportunities/campaigns`,
-  rewards: (addr: string) => `${MERKL_API_BASE_URL}/users/${addr}/rewards`,
-  campaignById: (id: string) => `${MERKL_API_BASE_URL}/campaigns/${id}`,
+// Endpoints are resolved lazily. `useEulerConfig()` must be called inside a
+// Vue setup or Nuxt context; evaluating it at module-load time fails when the
+// module is pulled in early (e.g. via an import from app.vue). All callers
+// below already run inside setup / async actions kicked off from setup, so a
+// function lookup is safe.
+const endpoints = () => {
+  const { MERKL_API_BASE_URL } = useEulerConfig()
+  return {
+    tokens: `${MERKL_API_BASE_URL}/tokens/reward`,
+    opportunities: `${MERKL_API_BASE_URL}/opportunities/campaigns`,
+    rewards: (addr: string) => `${MERKL_API_BASE_URL}/users/${addr}/rewards`,
+    campaignById: (id: string) => `${MERKL_API_BASE_URL}/campaigns/${id}`,
+  }
 }
 
 const address = ref('')
@@ -59,7 +63,7 @@ const loadTokens = async (chainId: number, isInitialLoading = true, forceRefresh
     if (isInitialLoading) {
       isTokensLoading.value = true
     }
-    const res = await axios.get(endpoints.tokens)
+    const res = await axios.get(endpoints().tokens)
     const data: RewardToken[] = res.data[chainId]
     rewardTokens.value = data || []
     cacheState.tokens = { chainId, timestamp: Date.now() }
@@ -150,9 +154,7 @@ const processMultiLendBorrowOpportunities = (
   const now = Math.floor(Date.now() / 1000)
 
   for (const opportunity of opportunities) {
-    // NOTE: LIVE guard temporarily disabled so the PAST test campaigns render
-    // for local verification. Restore before merging (uncomment the line below).
-    // if (opportunity.status !== 'LIVE') continue
+    if (opportunity.status !== 'LIVE') continue
     if (!opportunity.campaigns?.length) continue
 
     const side: RewardCampaignType | null
@@ -253,9 +255,9 @@ const loadOpportunities = async (chainId: number, isInitialLoading = true, force
     // when Earn vault labels are available for client-side filtering (the earnVaults
     // watcher will trigger a force-refresh once labels load). MULTILENDBORROW is
     // unconditional because each campaign explicitly lists the targeted vaults.
-    // NOTE: &test=true is temporary for local verification; remove before merging.
-    const eulerUrl = `${MERKL_API_BASE_URL}/opportunities/?chainId=${chainId}&type=EULER&campaigns=true&test=true`
-    const multiUrl = `${MERKL_API_BASE_URL}/opportunities/?chainId=${chainId}&type=MULTILENDBORROW&campaigns=true&test=true`
+    const { MERKL_API_BASE_URL } = useEulerConfig()
+    const eulerUrl = `${MERKL_API_BASE_URL}/opportunities/?chainId=${chainId}&type=EULER&campaigns=true`
+    const multiUrl = `${MERKL_API_BASE_URL}/opportunities/?chainId=${chainId}&type=MULTILENDBORROW&campaigns=true`
     const earnAddrs = earnVaults.value
     const knownEarnVaults = earnAddrs.length > 0
       ? new Set(earnAddrs.map(addr => addr.toLowerCase()))
@@ -264,7 +266,7 @@ const loadOpportunities = async (chainId: number, isInitialLoading = true, force
     const eulerPromise = fetchAllPages(eulerUrl)
     const multiPromise = fetchAllPages(multiUrl)
     const erc20Promise = knownEarnVaults
-      ? fetchAllPages(`${MERKL_API_BASE_URL}/opportunities/?chainId=${chainId}&type=ERC20LOGPROCESSOR&campaigns=true&test=true`)
+      ? fetchAllPages(`${MERKL_API_BASE_URL}/opportunities/?chainId=${chainId}&type=ERC20LOGPROCESSOR&campaigns=true`)
       : Promise.resolve<{ data: Opportunity[], complete: boolean }>({ data: [], complete: true })
 
     const [eulerResult, multiResult, erc20Result] = await Promise.all([eulerPromise, multiPromise, erc20Promise])
@@ -326,7 +328,7 @@ const loadRewards = async (chainId: number, isInitialLoading = true, forceRefres
     if (isInitialLoading) {
       isRewardsLoading.value = true
     }
-    const res = await axios.get(endpoints.rewards(address.value), {
+    const res = await axios.get(endpoints().rewards(address.value), {
       params: {
         chainId,
       },

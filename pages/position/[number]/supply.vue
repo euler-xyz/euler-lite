@@ -14,6 +14,7 @@ import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/stri
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useCollateralForm } from '~/composables/position/useCollateralForm'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const positionIndex = usePositionIndex()
 const { isConnected, address } = useAccount()
@@ -21,6 +22,8 @@ const { isSpyMode } = useSpyMode()
 const { fetchSingleBalance } = useWallets()
 const { buildSupplyPlan, buildSwapAndSupplyPlan } = useEulerOperations()
 const { chainId } = useEulerAddresses()
+// Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
+useFullBalances()
 
 // Supply-specific state
 const balance = ref(0n)
@@ -157,6 +160,14 @@ const form = useCollateralForm({
   onAfterLoad: () => updateBalance(),
 })
 useOperationGuard(computed(() => [form.collateralVault.value?.address].filter(Boolean)))
+
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (form.isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (form.isSwapRestricted.value) return { message: 'Swapping into this vault is not available in your region', variant: 'warning' }
+  if (form.estimatesError.value) return { message: form.estimatesError.value, variant: 'error' }
+  if (form.simulationError.value) return { message: form.simulationError.value, variant: 'error' }
+  return undefined
+})
 
 const balanceFixed = computed(() => FixedPoint.fromValue(balance.value, form.collateralVault.value?.decimals || 18))
 const assets = computed(() => [form.asset.value].filter((v): v is VaultAsset => !!v))
@@ -419,6 +430,8 @@ watch(selectedAsset, async () => {
             <VaultFormSubmit
               :disabled="form.submitDisabled.value"
               :loading="form.isSubmitting.value || form.isPreparing.value"
+              :disabled-reason="disabledReasonInfo?.message"
+              :disabled-reason-variant="disabledReasonInfo?.variant"
             >
               {{ form.submitLabel }}
             </VaultFormSubmit>

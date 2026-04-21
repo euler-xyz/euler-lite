@@ -9,6 +9,7 @@ import { getProductByVault, applyVaultOverrides, getEntitiesByEarnVault, isVault
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
+import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
 
 defineOptions({
   name: 'EarnPage',
@@ -53,8 +54,9 @@ useUrlQuerySync([
 const vaultTotalSupplyUsd = ref<Map<string, number>>(new Map())
 const vaultLiquidityUsd = ref<Map<string, number>>(new Map())
 
-// Fetch USD values for all earn vaults
-watchEffect(async () => {
+// Fetch USD values for all earn vaults. Debounced to collapse the bursts
+// of registry updates streamed during loadVaults's RPC refresh.
+const fetchEarnPrices = useDebounceFn(async () => {
   const vaults = list.value
   if (!vaults.length) {
     isPricesReady.value = true
@@ -80,6 +82,22 @@ watchEffect(async () => {
   finally {
     isPricesReady.value = true
   }
+}, DEBOUNCE_LIST_PRICE_FETCH_MS)
+
+// Pause price fetches while the page is in keep-alive but not visible. See the
+// borrow-page equivalent for the full rationale.
+const isActive = ref(true)
+onActivated(() => {
+  isActive.value = true
+})
+onDeactivated(() => {
+  isActive.value = false
+})
+
+watchEffect(() => {
+  void list.value
+  if (!isActive.value) return
+  fetchEarnPrices()
 })
 
 const {
