@@ -181,7 +181,7 @@ watchEffect(() => {
 const collateralValueDisplay = computed(() => {
   return collateralValue.value.hasPrice
     ? formatCompactUsdValue(collateralValue.value.usd)
-    : `${roundAndCompactTokens(collateralItems.value[0]?.assets ?? 0n, BigInt(position.collateral.decimals))} ${position.collateral.asset.symbol}`
+    : `${roundAndCompactTokens(collateralItems.value[0]?.assets ?? position.supplied, BigInt(position.collateral.decimals))} ${position.collateral.asset.symbol}`
 })
 
 const borrowedValueInfo = ref<{ display: string, hasPrice: boolean }>({ display: '-', hasPrice: false })
