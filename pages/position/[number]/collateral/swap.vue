@@ -372,7 +372,7 @@ watch(() => cowSwapOrderStatus.orderStatus.value, (status) => {
     }, 400)
   }
   else {
-    cowSwapExecution.reset()
+    // Don't reset — leave terminal status visible in modal until user dismisses
   }
 })
 
@@ -756,7 +756,7 @@ const nextLiquidationPrice = computed(() => {
               class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2"
             >
               <VaultFormSubmit
-                :disabled="reviewSwapDisabled"
+                :disabled="reviewSwapDisabled || !!cowSwapErrorText"
                 :loading="isSubmitting || isPreparing"
                 :disabled-reason="disabledReasonInfo?.message"
                 :disabled-reason-variant="disabledReasonInfo?.variant"

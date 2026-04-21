@@ -580,15 +580,16 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         return 'Not enough liquidity to borrow'
       }
 
-      // LTV check
-      if (multiplyNextLtv.value !== null && multiplyBorrowLtv.value > 0) {
-        if (multiplyNextLtv.value > multiplyBorrowLtv.value) {
-          return 'Position would exceed maximum LTV'
-        }
+      // LTV / health: block if unavailable (replaces simulation)
+      if (multiplyNextLtv.value === null || multiplyNextHealth.value === null) {
+        return 'Unable to validate position health — try again shortly'
       }
 
-      // Health score
-      if (multiplyNextHealth.value !== null && multiplyNextHealth.value < 1) {
+      if (multiplyBorrowLtv.value > 0 && multiplyNextLtv.value > multiplyBorrowLtv.value) {
+        return 'Position would exceed maximum LTV'
+      }
+
+      if (multiplyNextHealth.value < 1) {
         return 'Position would be immediately liquidatable'
       }
     }

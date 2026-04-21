@@ -559,7 +559,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       }, 400)
     }
     else {
-      cowSwapExecution.reset()
+      // Don't reset — leave terminal status visible in modal until user dismisses
     }
   })
 

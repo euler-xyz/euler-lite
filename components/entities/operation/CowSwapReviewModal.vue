@@ -81,6 +81,7 @@ const handleConfirm = async () => {
 }
 
 const handleCancel = async () => {
+  if (isCancelling.value) return
   isCancelling.value = true
   try {
     await props.onCancel()
@@ -94,7 +95,7 @@ const handleCancel = async () => {
 <template>
   <BaseModalWrapper
     title="Transaction review"
-    @close="emit('close')"
+    @close="!internalSubmitting && emit('close')"
   >
     <div class="flex flex-col gap-24">
       <!-- Review steps (hidden after submission) -->
@@ -165,7 +166,8 @@ const handleCancel = async () => {
       <!-- Error -->
       <UiToast
         v-if="executionError"
-        :title="executionError.message"
+        title="Something went wrong"
+        :description="executionError.message"
         variant="error"
         size="compact"
         persistent
