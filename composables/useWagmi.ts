@@ -43,7 +43,7 @@ function initializeWagmi() {
       console.warn('[useWagmi] $openWalletModal not available — wallet plugin may not have loaded')
       return
     }
-    open()
+    open().catch(err => logWarn('useWagmi/modal', err))
   }
 
   watch(wagmiAddress, (address, oldAddress) => {
