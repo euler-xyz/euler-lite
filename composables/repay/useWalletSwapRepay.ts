@@ -266,7 +266,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
   const disabledReason = computed(() => {
     if (isRepayExceedsDebt.value) {
-      return 'You repaying more than required'
+      return 'Repay amount exceeds outstanding debt'
     }
     return undefined
   })

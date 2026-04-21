@@ -313,7 +313,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
   const disabledReason = computed(() => {
     if (core.isRepayExceedsDebt.value) {
-      return 'You repaying more than required'
+      return 'Repay amount exceeds outstanding debt'
     }
     if (isInsufficientSource.value) {
       return 'Insufficient collateral balance to cover the required swap amount.'
@@ -427,7 +427,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   }
 
   const submitCowSwapClosePosition = async () => {
-    if (!position.value || !borrowVault.value || !sourceVault.value || !core.quotes.selectedQuote.value) return
+    if (!position.value || !borrowVault.value || !sourceVault.value || !core.quotes.selectedQuote.value || !address.value) return
     if (isHealthInsufficient.value) return
     if (core.isRepayExceedsDebt.value) return
 

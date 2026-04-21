@@ -247,7 +247,7 @@ const cowSwapErrorText = computed(() => {
 })
 
 const submitCowSwapCollateralSwap = async () => {
-  if (!position.value || !fromVault.value || !toVault.value || !selectedQuote.value) return
+  if (!position.value || !fromVault.value || !toVault.value || !selectedQuote.value || !address.value) return
   if (cowSwapErrorText.value) return
 
   cowSwapExecution.reset()
@@ -419,7 +419,7 @@ const loadSelectedCollateral = async () => {
     selectedCollateralAssets.value = res.assets ?? 0n
   }
   catch (e) {
-    console.warn('[Collateral swap] failed to load collateral', e)
+    logWarn('collateralSwap/loadCollateral', e)
     if (!selectedCollateral.value) {
       selectedCollateral.value = position.value.collateral
     }
