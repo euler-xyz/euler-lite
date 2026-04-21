@@ -472,7 +472,8 @@ export const useMarketGroups = () => {
     try {
       return await resolveGroupTVL(augmented)
     }
-    catch {
+    catch (e) {
+      logWarn(`useMarketGroups/fetchMarketGroupOnDemand/resolveGroupTVL [${productKey}]`, e)
       return augmented
     }
   }
