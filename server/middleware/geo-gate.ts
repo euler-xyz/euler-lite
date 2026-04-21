@@ -1,10 +1,21 @@
 import { createError, getRequestURL } from 'h3'
 import { SANCTIONED_COUNTRIES } from '~/entities/country-constants'
+import { isInternalRequest } from '~/server/utils/internal-headers'
 
 export default defineEventHandler((event) => {
   // Only gate API routes
   const url = getRequestURL(event)
   if (!url.pathname.startsWith('/api/')) {
+    return
+  }
+
+  // Internal server-to-server $fetch calls (warm-cache, vaults-cache) skip
+  // geo-gating — they never traversed Cloudflare and have no cf-ipcountry,
+  // which would otherwise fail-closed and 451 every internal fetch. The
+  // loopback cf-connecting-ip sentinel is the same signal the rate-limiter
+  // uses to identify internal traffic; both rely on origin being locked
+  // behind CF (see internal-headers.ts).
+  if (isInternalRequest(event)) {
     return
   }
 
