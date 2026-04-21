@@ -61,7 +61,7 @@ Every upstream URL is cached under its own key in a shared TTL cache (5 min). Sh
 
 ### Warm-cache
 
-`server/plugins/warm-cache.ts` hits `/api/intrinsic-apy?chainId=X` for every enabled chain at boot and re-warms every 4 minutes. After the first warm, every client request per chain is a fast cache hit.
+`server/plugins/warm-cache.ts` calls `refreshIntrinsicApyForChain(chainId)` directly every 5 minutes for each enabled chain — not via HTTP. The direct call bypasses the handler's fresh-cache short-circuit and always forces a re-merge, so the cache entry is overwritten while the previous one is still within its TTL window. User requests arriving during a refresh continue to read the still-fresh old entry from `mergedCache`. If a request lands in the narrow gap where the old entry has just expired but the new one hasn't landed yet, the handler's SWR path (`getStale()` + `scheduleBackgroundRefresh`) serves the stale entry immediately rather than awaiting the in-flight orchestration.
 
 ## Client types (`entities/intrinsic-apy.ts`)
 

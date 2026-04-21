@@ -23,7 +23,7 @@ Oracle adapter metadata is fetched from a separate repository ([oracle-checks](h
 
 **Custom sources**: The server resolves upstream URLs from environment variables. `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` overrides the GitHub URL for labels (when set, `NUXT_PUBLIC_CONFIG_LABELS_REPO` and `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` are ignored). `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` overrides the GitHub URL for oracle checks. The expected URL pattern is `{baseUrl}/{chainId}/{file}` for labels and `{baseUrl}/{chainId}/adapters/{address}.json` for oracle adapters.
 
-**Caching**: The server caches each label response for 5 minutes with in-flight request deduplication, so concurrent cache-miss callers collapse onto a single upstream fetch per `chainId:file`. On upstream failure, stale cached data is served. The client also maintains a 5-minute TTL to avoid unnecessary requests on chain switches. `server/plugins/warm-cache.ts` pre-populates the server caches at Nitro startup (fire-and-forget) and re-warms every 4 minutes.
+**Caching**: The server caches each label response for 5 minutes with in-flight request deduplication, so concurrent cache-miss callers collapse onto a single upstream fetch per `chainId:file`. On upstream failure, stale cached data is served. The client also maintains a 5-minute TTL to avoid unnecessary requests on chain switches. `server/plugins/warm-cache.ts` pre-populates the server caches at Nitro startup (fire-and-forget) and re-warms every 5 minutes.
 
 **Address normalization**: All addresses from labels are checksummed via `getAddress()` before storage, ensuring consistent lookups regardless of input casing.
 
@@ -282,11 +282,26 @@ The vault type determines how the vault is fetched and displayed:
 | `'earn'` | EulerEarn aggregator vault (yield optimization) |
 | `'securitize'` | Securitize vault (ERC-4626 without borrowing) |
 
-Type is detected in `useVaultRegistry` based on the vault's factory address queried from the subgraph.
+Type is detected via `/api/vault-categories`, which categorizes every vault on the chain using the subgraph's factory field plus an on-chain check against `EscrowedCollateralPerspective`.
 
-### Vault Factory Proxy
+### Vault Categorization Endpoint
 
-Factory lookups (`entities/vault/factory.ts`) go through `POST /api/vault-factories`, which batches the subgraph query server-side and caches results for 24 hours. Factory addresses are immutable per vault, so cache hits are permanent within a process lifetime. The request body is `{ chainId: number, addresses: string[] }` (up to 1000 addresses per call); the response is `{ factories: Record<address, factory> }` keyed by lowercase address. Missing or failing subgraph URLs degrade to `{ factories: {} }` rather than 5xx, letting callers fall through to lens-based detection.
+Type detection (`entities/vault/factory.ts`) goes through `GET /api/vault-categories?chainId=X`, which returns the full chain's vault set grouped by category:
+
+```ts
+{
+  evk: string[]        // EVK-family vaults; INCLUDES every escrow address
+  earn: string[]       // EulerEarn aggregator vaults
+  securitize: string[] // Securitize vaults
+  escrow: string[]     // subset of evk that is in EscrowedCollateralPerspective
+}
+```
+
+The server pages through the subgraph's `vaults` query (up to 10k addresses per chain) and merges in the escrow perspective via a single RPC call to `verifiedArray()`. Categorization is cached for 5 min; warm-cache keeps it fresh ahead of the TTL so fresh-deployed vaults are picked up within one cycle.
+
+For per-address lookups during direct navigation to a not-yet-indexed vault, the endpoint also accepts `&address=0x…` and returns `{ category: 'evk' | 'earn' | 'securitize' | 'escrow' | null }`. The per-address fallback runs a single-address subgraph query; it does NOT include the escrow perspective check (that requires the full refresh), so callers that need escrow precision should rely on the full categorization or a local `isInEscrowPerspective` probe as a safety net.
+
+**Important: labels remain authoritative for which vaults are _shown_.** The categorization endpoint says "what category each vault is"; `products.json` / `earn-vaults.json` still say "which vaults to include in lists". The two are composed in `useVaults.loadVaults`: labels select the set, categorization picks the right lens per address.
 
 ## Discovery Page Filtering
 

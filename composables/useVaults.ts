@@ -12,13 +12,12 @@ import {
   fetchVault,
   fetchEarnVault,
   fetchEscrowVault,
-  fetchEscrowAddresses,
   fetchSecuritizeVault,
   fetchVaults,
   clearPriceCaches,
   type Vault,
 } from '~/entities/vault'
-import { fetchVaultFactories, isSecuritizeVault } from '~/entities/vault/factory'
+import { fetchChainVaultCategories, isSecuritizeVault, resetVaultCategoryCache } from '~/entities/vault/factory'
 import { getProductByVault, isVaultNotExplorable, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import { getEulerRouterGovernor } from '~/entities/oracle'
 
@@ -121,6 +120,7 @@ const resetVaultsState = () => {
   loadedChainId.value = null
   clear()
   clearPriceCaches()
+  resetVaultCategoryCache()
 }
 
 const updateEVKVaults = async (vaultAddresses: string[], generation?: number, silent = false) => {
@@ -333,16 +333,19 @@ const isChainVaultsSnapshot = (v: unknown): v is ChainVaultsSnapshot => {
     && Array.isArray(s.evkVaults)
     && Array.isArray(s.earnVaults)
     && Array.isArray(s.securitizeVaults)
-    && Array.isArray(s.escrowAddresses)
     && Array.isArray(s.escrowVaults)
 }
 
 const hydrateFromServer = async (targetChainId: number, generation: number): Promise<boolean> => {
   const { setMany: registrySetMany, setEscrowAddresses } = useVaultRegistry()
   try {
-    const wire = await $fetch<SerialisedSnapshot>('/api/vaults', {
-      query: { chainId: targetChainId },
-    })
+    // Snapshot + categorization fetched in parallel. Both are warm-cached
+    // server-side so this is usually two fast hits. Categorization provides
+    // the escrow address set previously baked into the snapshot payload.
+    const [wire, categories] = await Promise.all([
+      $fetch<SerialisedSnapshot>('/api/vaults', { query: { chainId: targetChainId } }),
+      fetchChainVaultCategories(),
+    ])
     if (loadGeneration.value !== generation) return false
 
     const snap = deserialiseSnapshot(wire)
@@ -372,7 +375,9 @@ const hydrateFromServer = async (targetChainId: number, generation: number): Pro
     })))
     registrySetMany(snap.earnVaults.map(vault => ({ address: vault.address, vault, type: 'earn' as const })))
     registrySetMany(snap.securitizeVaults.map(vault => ({ address: vault.address, vault, type: 'securitize' as const })))
-    setEscrowAddresses(snap.escrowAddresses)
+    // Seed escrow set from the categorization. UI routing (isKnownEscrowAddress)
+    // depends on this being populated at hydration time.
+    setEscrowAddresses(categories.escrow)
 
     // Clear both loading AND updating flags: the registry is fully populated
     // from the snapshot, and the subsequent RPC refresh runs in silent mode
@@ -400,7 +405,7 @@ const hydrateFromServer = async (targetChainId: number, generation: number): Pro
 }
 
 const loadVaults = async () => {
-  const { chainId, eulerPeripheryAddresses } = useEulerAddresses()
+  const { chainId } = useEulerAddresses()
   const { verifiedVaultAddresses, earnVaults: earnVaultAddresses } = useEulerLabels()
   const { setEscrowAddresses } = useVaultRegistry()
 
@@ -435,20 +440,21 @@ const loadVaults = async () => {
       isEscrowLoading.value = true
     }
 
-    // Phase 1: Fetch vault factories (escrow addresses fetched in Phase 2)
-    const factories = await fetchVaultFactories(explorableVaultAddresses)
+    // Phase 1: Fetch chain-wide vault categorization. The endpoint is
+    // CDN-cacheable and warm-cached server-side, so this is usually a
+    // ~50ms fetch. Addresses missing from the categorization (new
+    // deployments the subgraph hasn't indexed yet) default to EVK —
+    // the VaultLens handles any ERC-4626 + EVK-compatible vault.
+    const categories = await fetchChainVaultCategories()
 
     if (loadGeneration.value !== generation) return
 
-    // Separate EVK vaults from Securitize vaults based on factory
+    const securitizeSet = new Set(categories.securitize.map(a => a.toLowerCase()))
     const evkAddresses: string[] = []
     const securitizeAddresses: string[] = []
 
     explorableVaultAddresses.forEach((addr) => {
-      const normalizedAddr = addr.toLowerCase()
-      const factory = factories.get(normalizedAddr)
-
-      if (eulerPeripheryAddresses.value?.securitizeFactory && factory?.toLowerCase() === eulerPeripheryAddresses.value.securitizeFactory.toLowerCase()) {
+      if (securitizeSet.has(addr.toLowerCase())) {
         securitizeAddresses.push(addr)
       }
       else {
@@ -456,22 +462,22 @@ const loadVaults = async () => {
       }
     })
 
-    // Phase 2: Fetch all vault types + escrow addresses in parallel
-    // Escrow vault info fetch starts when EVK, Earn, AND escrow addresses are all ready
-    // (need EVK collateralLTVs + Earn strategies to know which escrow vaults are needed)
+    // Seed the registry's escrow set from the categorization. The catalog
+    // endpoint already reads EscrowedCollateralPerspective.verifiedArray()
+    // server-side, so no redundant client-side RPC call is needed.
+    setEscrowAddresses(categories.escrow)
 
-    // Signals for coordination
+    // Phase 2: fetch EVK, Earn, Securitize in parallel; follow with escrow
+    // vault info once EVK collateralLTVs + Earn strategies are known (the
+    // escrow subset referenced by them is what we need to fetch details for).
+
     let evkResolve: () => void = () => {}
     let earnResolve: () => void = () => {}
-    let escrowAddrsResolve: (addrs: string[]) => void = () => {}
     const evkLoaded = new Promise<void>((resolve) => {
       evkResolve = resolve
     })
     const earnLoaded = new Promise<void>((resolve) => {
       earnResolve = resolve
-    })
-    const escrowAddrsLoaded = new Promise<string[]>((resolve) => {
-      escrowAddrsResolve = resolve
     })
 
     await Promise.all([
@@ -484,20 +490,7 @@ const loadVaults = async () => {
         evkResolve()
       })(),
       updateSecuritizeVaults(securitizeAddresses, generation, silent),
-      // Escrow addresses - fetch in parallel, populate set when ready
-      (async () => {
-        const perspective = eulerPeripheryAddresses.value?.escrowedCollateralPerspective
-        const ctx = contextForGeneration(generation)
-        const addrs = perspective ? await fetchEscrowAddresses(ctx.rpcUrl, perspective, ctx.chainId) : []
-        if (loadGeneration.value !== generation) {
-          escrowAddrsResolve([]) // Unblock downstream even if stale
-          return
-        }
-        setEscrowAddresses(addrs)
-        escrowAddrsResolve(addrs)
-      })(),
-      // Escrow vault info - waits for EVK, Earn, AND escrow addresses
-      Promise.all([evkLoaded, earnLoaded, escrowAddrsLoaded]).then(async () => {
+      Promise.all([evkLoaded, earnLoaded]).then(async () => {
         const neededEscrowAddresses = extractNeededEscrowAddresses()
         await fetchNeededEscrowVaults(neededEscrowAddresses, generation)
       }),
@@ -540,7 +533,12 @@ const loadVaults = async () => {
 }
 const getVault = async (address: string): Promise<Vault> => {
   const { verifiedVaultAddresses } = useEulerLabels()
-  const { getType, getVault: registryGetVault, has: registryHas, set: registrySet } = useVaultRegistry()
+  const {
+    getType,
+    getVault: registryGetVault,
+    has: registryHas,
+    getOrFetch: registryGetOrFetch,
+  } = useVaultRegistry()
   const normalizedAddress = getAddress(address)
 
   // Check if this is a securitize vault - if so, throw to trigger fallback
@@ -570,13 +568,21 @@ const getVault = async (address: string): Promise<Vault> => {
 
   if (verifiedVaultAddresses.value.includes(normalizedAddress) && !isVaultNotExplorable(normalizedAddress)) {
     await until(computed(() => registryGetVault(normalizedAddress))).toBeTruthy()
-  }
-  else {
-    const vault = await fetchVault(normalizedAddress, contextForGeneration(loadGeneration.value))
-    registrySet(normalizedAddress, vault, 'evk')
-    return vault
+    return registryGetVault(normalizedAddress) as Vault
   }
 
+  // Unlabeled address — route through the registry's resolveUnknown path so
+  // we correctly detect escrow / securitize via subgraph factory lookup +
+  // escrow perspective check, instead of blindly calling the EVK lens.
+  // getOrFetch caches the result in the registry with the correct type tag.
+  await registryGetOrFetch(normalizedAddress)
+  const resolvedType = getType(normalizedAddress)
+  if (resolvedType === 'securitize') {
+    throw new Error('[getVault] Address is a securitize vault, use getSecuritizeVault instead')
+  }
+  if (resolvedType === 'earn') {
+    throw new Error('[getVault] Address is an earn vault, use getEarnVault instead')
+  }
   return registryGetVault(normalizedAddress) as Vault
 }
 const getEarnVault = async (address: string): Promise<EarnVault> => {

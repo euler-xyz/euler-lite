@@ -3,7 +3,6 @@ import { createRateLimiter } from '~/server/utils/rate-limit'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { logWarn } from '~/server/utils/log'
 
-const TIMEOUT_MS = 10_000
 const FEED_ID_RE = /^0x[0-9a-fA-F]{64}$/
 
 const rateLimiter = createRateLimiter({
@@ -56,7 +55,7 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    const resp = await fetchWithTimeout(url.toString(), TIMEOUT_MS)
+    const resp = await fetchWithTimeout(url.toString())
     if (!resp.ok) {
       throw createError({ statusCode: resp.status, statusMessage: `Hermes returned ${resp.status}` })
     }

@@ -73,7 +73,6 @@ describe('loader-serde', () => {
     ] as any,
     earnVaults: [],
     securitizeVaults: [],
-    escrowAddresses: ['0xescrow1'],
     escrowVaults: [],
   })
 

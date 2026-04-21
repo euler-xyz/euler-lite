@@ -1,10 +1,10 @@
-import { createError, getQuery, getRouterParam } from 'h3'
+import { createError, getQuery, getRouterParam, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
-import { logWarn } from '~/server/utils/log'
+import { createInFlightDedup } from '~/server/utils/in-flight'
+import { reportStatus } from '~/server/utils/log'
 
-const TIMEOUT_MS = 10_000
 const CACHE_TTL_MS = 300_000
 
 /** The set of label files this proxy serves. Also consumed by warm-cache. */
@@ -30,12 +30,7 @@ const rateLimiter = createRateLimiter({
 })
 
 const cache = createTtlCache<unknown>({ ttlMs: CACHE_TTL_MS })
-/**
- * Collapses concurrent cache-miss callers (e.g. warm-cache firing at the
- * same moment as real client requests) onto a single upstream fetch per
- * `chainId:file` key.
- */
-const inFlight = new Map<string, Promise<unknown>>()
+const inFlight = createInFlightDedup<string, unknown>()
 
 /** Fields whose values are rendered as HTML via autoLink() — check for markdown link injection. */
 const LINK_TEXT_KEYS = new Set(['description', 'deprecationReason', 'deprecateReason', 'portfolioNotice'])
@@ -94,6 +89,63 @@ function getUpstreamUrl(chainId: number, file: string): string {
   return `https://raw.githubusercontent.com/${repo}/refs/heads/${branch}/${chainId}/${file}`
 }
 
+/**
+ * Forces an upstream fetch, bypassing the fresh-cache check. Used by the
+ * warm-cache plugin so every cycle actually refreshes the entry instead
+ * of cache-hitting a still-fresh value and letting it expire before the
+ * next cycle. Collapses concurrent refresh calls per `chainId:file` via
+ * the in-flight map.
+ *
+ * `persist=true` writes the empty shape into the cache so subsequent
+ * requests skip upstream entirely. Reserved for the 404 case, where the
+ * file is legitimately absent for this chain. For other failures
+ * (transient 5xx, network errors, JSON parse, validation) return empty
+ * but DON'T persist — otherwise a single upstream blip pins the empty
+ * allowlist for 5 minutes, making every verified vault appear unverified.
+ */
+export function refreshLabelFile(chainId: number, file: LabelFile): Promise<unknown> {
+  const key = `${chainId}:${file}`
+
+  const fallback = (persist: boolean): unknown => {
+    const stale = cache.getStale(key)
+    if (stale) return stale
+    const empty = EMPTY_SHAPES[file]
+    if (persist) cache.set(key, empty)
+    return empty
+  }
+
+  return inFlight.run(key, async (): Promise<unknown> => {
+    const statusKey = `${file}:${chainId}`
+    try {
+      const resp = await fetchWithTimeout(getUpstreamUrl(chainId, file))
+      if (!resp.ok) {
+        // 404 is the expected signal for "file not published on this chain"
+        // — treat it as a steady-state "absent" and don't spam the logs
+        // each warm cycle. Other non-2xx statuses (403/5xx) are reported
+        // as transitions so the first occurrence surfaces but repeats do not.
+        if (resp.status !== 404) {
+          reportStatus('labels', statusKey, `http-${resp.status}`,
+            `${file} upstream returned ${resp.status} for chain ${chainId}; treating as absent`)
+          return fallback(false)
+        }
+        reportStatus('labels', statusKey, 'absent-404')
+        return fallback(true)
+      }
+
+      const data: unknown = await resp.json()
+      validateNode(data, file)
+      cache.set(key, data)
+      reportStatus('labels', statusKey, 'ok')
+      return data
+    }
+    catch (err) {
+      reportStatus('labels', statusKey, 'fetch-error',
+        `Failed to fetch ${file} for chain ${chainId}: ${err instanceof Error ? err.message : err}`)
+      return fallback(false)
+    }
+  })
+}
+
 export default defineEventHandler(async (event) => {
   rateLimiter.consume(event)
 
@@ -110,54 +162,12 @@ export default defineEventHandler(async (event) => {
 
   const key = `${chainId}:${file}`
 
+  // Labels are curated external metadata — CDN can short-circuit polls
+  // between warm cycles.
+  setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
+
   const cached = cache.get(key)
   if (cached) return cached
 
-  const existing = inFlight.get(key)
-  if (existing) return existing
-
-  /**
-   * `persist=true` writes the empty shape into the cache so subsequent
-   * requests skip upstream entirely. Reserve this for the 404 case, where
-   * the file is legitimately absent for this chain. For other failures
-   * (transient 5xx, network errors, JSON parse, validation) return empty
-   * but DON'T persist — otherwise a single upstream blip pins the empty
-   * allowlist for 5 minutes, making every verified vault appear unverified.
-   */
-  const fallback = (persist: boolean) => {
-    const stale = cache.getStale(key)
-    if (stale) return stale
-    const empty = EMPTY_SHAPES[file as LabelFile]
-    if (persist) cache.set(key, empty)
-    return empty
-  }
-
-  const promise = (async () => {
-    try {
-      const resp = await fetchWithTimeout(getUpstreamUrl(chainId, file), TIMEOUT_MS)
-      if (!resp.ok) {
-        // 404 is the expected signal for "file not published on this chain".
-        // Other non-2xx statuses (403/5xx from CDNs, etc.) are logged once so
-        // genuine upstream outages stay visible, then returned empty without
-        // poisoning the cache.
-        if (resp.status !== 404) {
-          logWarn('labels', `${file} upstream returned ${resp.status} for chain ${chainId}; treating as absent`)
-          return fallback(false)
-        }
-        return fallback(true)
-      }
-
-      const data: unknown = await resp.json()
-      validateNode(data, file)
-      cache.set(key, data)
-      return data
-    }
-    catch (err) {
-      logWarn('labels', `Failed to fetch ${file} for chain ${chainId}:`, err instanceof Error ? err.message : err)
-      return fallback(false)
-    }
-  })().finally(() => { inFlight.delete(key) })
-
-  inFlight.set(key, promise)
-  return promise
+  return refreshLabelFile(chainId, file as LabelFile)
 })

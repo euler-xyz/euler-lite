@@ -1,7 +1,7 @@
-import { createError, getQuery } from 'h3'
+import { setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { getIntrinsicApyForChain } from '~/server/utils/intrinsic-apy'
-import { getEnabledChainIds } from '~/utils/chain-env'
+import { resolveChainId } from '~/server/utils/resolve-chain-id'
 import { logWarn } from '~/server/utils/log'
 
 /**
@@ -21,17 +21,13 @@ const rateLimiter = createRateLimiter({
 export default defineEventHandler(async (event) => {
   rateLimiter.consume(event)
 
-  const query = getQuery(event)
-  const chainId = Number(query.chainId)
-  if (!Number.isInteger(chainId) || chainId <= 0) {
-    throw createError({ statusCode: 400, statusMessage: 'Invalid chainId' })
-  }
-  if (!getEnabledChainIds().includes(chainId)) {
-    throw createError({ statusCode: 400, statusMessage: 'Unsupported chainId' })
-  }
+  const chainId = resolveChainId(event)
 
   try {
-    return await getIntrinsicApyForChain(chainId)
+    const result = await getIntrinsicApyForChain(chainId)
+    // Cloudflare can short-circuit repeat hits between warm cycles.
+    setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
+    return result
   }
   catch (err) {
     logWarn('intrinsic-apy', `Failed to resolve chain ${chainId}:`, err instanceof Error ? err.message : err)
