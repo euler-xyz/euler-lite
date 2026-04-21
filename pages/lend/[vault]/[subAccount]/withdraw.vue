@@ -329,12 +329,12 @@ const submit = async () => {
       const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
 
       try {
-        if (needsSwap.value && swapEffectiveQuote.value) {
+        if (needsSwap.value && swapSelectedQuote.value) {
           if (isMax) {
             plan.value = await buildRedeemAndSwapPlan({
               vaultAddress: vaultAddress as Address,
               sharesAmount: sharesBalance.value,
-              quote: swapEffectiveQuote.value,
+              quote: swapSelectedQuote.value,
               subAccount: subAccount.value,
             })
           }
@@ -342,7 +342,7 @@ const submit = async () => {
             plan.value = await buildWithdrawAndSwapPlan({
               vaultAddress: vaultAddress as Address,
               assetsAmount: amountFixed.value.value,
-              quote: swapEffectiveQuote.value,
+              quote: swapSelectedQuote.value,
               subAccount: subAccount.value,
             })
           }
@@ -396,8 +396,8 @@ const send = async () => {
     const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
     let txPlan: TxPlan
 
-    if (needsSwap.value && (swapSelectedQuote.value || swapEffectiveQuote.value)) {
-      const quote = swapSelectedQuote.value || swapEffectiveQuote.value!
+    if (needsSwap.value && swapSelectedQuote.value) {
+      const quote = swapSelectedQuote.value
       if (isMax) {
         txPlan = await buildRedeemAndSwapPlan({
           vaultAddress: vaultAddress as Address,
