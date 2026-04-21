@@ -272,6 +272,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   })
 
   const borrowSwapRoutedVia = computed(() => {
+    if (!borrowSwapSelectedProvider.value) return 'Not selected'
     if (!borrowSwapEffectiveQuote.value?.route?.length) return null
     return borrowSwapEffectiveQuote.value.route.map((r: { providerName: string }) => r.providerName).join(', ')
   })

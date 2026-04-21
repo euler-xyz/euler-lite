@@ -315,6 +315,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   })
 
   const swapRoutedVia = computed(() => {
+    if (!swapSelectedProvider.value) return 'Not selected'
     if (!swapEffectiveQuote.value?.route?.length) return null
     return swapEffectiveQuote.value.route.map((r: { providerName: string }) => r.providerName).join(', ')
   })

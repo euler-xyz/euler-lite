@@ -64,6 +64,7 @@ export const useRepaySwapDetails = (options: UseRepaySwapDetailsOptions) => {
   const leveragedPriceImpact = computed(() => priceImpact.value)
 
   const routedVia = computed(() => {
+    if (!quotes.selectedProvider.value) return 'Not selected'
     if (!quotes.quote.value?.route?.length) return null
     return quotes.quote.value.route.map(route => route.providerName).join(', ')
   })
