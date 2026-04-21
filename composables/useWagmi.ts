@@ -38,7 +38,7 @@ function initializeWagmi() {
   // only on first connect for signed-out visitors.
   const modal = () => {
     const nuxtApp = useNuxtApp()
-    const open = nuxtApp.$openWalletModal as (() => void) | undefined
+    const open = nuxtApp.$openWalletModal as (() => Promise<void>) | undefined
     if (!open) {
       console.warn('[useWagmi] $openWalletModal not available — wallet plugin may not have loaded')
       return

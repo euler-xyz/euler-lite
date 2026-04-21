@@ -122,8 +122,9 @@ export default defineNuxtPlugin((nuxtApp) => {
     return appKitInstance
   }
 
-  const openWalletModal = () => {
+  const openWalletModal = async () => {
     const kit = ensureAppKit()
+    await kit.ready()
     kit.open()
   }
 
