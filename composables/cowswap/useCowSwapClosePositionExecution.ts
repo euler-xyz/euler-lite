@@ -20,6 +20,19 @@ import { useCowSwapExecutionCore } from './useCowSwapExecutionCore'
 export const useCowSwapClosePositionExecution = () => {
   const core = useCowSwapExecutionCore()
 
+  const waitForNextBlock = async (client: ReturnType<typeof core.requireRpc>, timeoutMs = 30_000) => {
+    const startBlock = await client.getBlockNumber()
+    const deadline = Date.now() + timeoutMs
+
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 1_000))
+      const currentBlock = await client.getBlockNumber()
+      if (currentBlock > startBlock) {
+        return
+      }
+    }
+  }
+
   const executeAsync = async (params: CowSwapClosePositionExecuteParams): Promise<CowSwapOrderUid> => {
     core.requireWallet()
     const client = core.requireRpc()
@@ -54,6 +67,11 @@ export const useCowSwapClosePositionExecution = () => {
           functionName: 'getInbox',
           args: [params.wrapper.owner, params.wrapper.account],
         })
+
+        // The orderbook validates EIP-1271 signatures against its own RPCs.
+        // Waiting one more block after the deployment receipt reduces races
+        // where our node has the Inbox code but the orderbook's backend does not yet.
+        await waitForNextBlock(client)
       }
 
       // Step 2: No user-side approvals needed (Inbox handles internally)

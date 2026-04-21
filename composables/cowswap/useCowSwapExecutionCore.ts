@@ -8,6 +8,7 @@ import {
   type CowSwapExecutionStatus,
   type CowSwapOrderUid,
   buildEvcPermitTypedData,
+  normalizeCowSignature,
   computeNonceNamespace,
   submitCowSwapOrder,
   type CowSwapOrderPayload,
@@ -169,12 +170,14 @@ export const useCowSwapExecutionCore = () => {
     primaryType: string
     message: Record<string, unknown>
   }): Promise<string> => {
-    return await signTypedDataAsync({
+    const signature = await signTypedDataAsync({
       domain: typedData.domain,
       types: typedData.types,
       primaryType: typedData.primaryType,
       message: typedData.message,
     }) as string
+
+    return normalizeCowSignature(signature as Hex)
   }
 
   /** Submit the order payload to the CoW API. */
