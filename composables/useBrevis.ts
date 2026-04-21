@@ -356,6 +356,16 @@ export const useBrevis = () => {
       cacheState.campaigns.timestamp = 0
       cacheState.rewards.timestamp = 0
       cacheState.rewards.address = ''
+
+      // Trigger immediate reload so users don't wait up to 60s for the
+      // poll interval to repopulate data after a chain switch.
+      // Only mark isLoaded when active, so the isActive watcher still
+      // fires the initial fetch on reconnect.
+      if (enableIncentra && isActive.value && val) {
+        loadCampaigns()
+        loadRewards()
+        isLoaded.value = true
+      }
     }
   })
 
