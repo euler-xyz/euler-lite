@@ -58,31 +58,38 @@ export default defineEventHandler(async (event) => {
 
   const chainId = resolveChainId(event)
 
-  try {
-    const [euler, multi, erc20] = await Promise.all([
-      resolveOpportunity(chainId, 'EULER'),
-      resolveOpportunity(chainId, 'MULTILENDBORROW'),
-      resolveOpportunity(chainId, 'ERC20LOGPROCESSOR'),
-    ])
+  const results = await Promise.allSettled([
+    resolveOpportunity(chainId, 'EULER'),
+    resolveOpportunity(chainId, 'MULTILENDBORROW'),
+    resolveOpportunity(chainId, 'ERC20LOGPROCESSOR'),
+  ])
 
-    // Clients poll in lockstep — letting Cloudflare short-circuit the repeat
-    // polls between warm cycles skips Nitro entirely for most hits.
-    setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
+  const euler = results[0].status === 'fulfilled' ? results[0].value : []
+  const multi = results[1].status === 'fulfilled' ? results[1].value : []
+  const erc20 = results[2].status === 'fulfilled' ? results[2].value : []
 
-    return {
-      opportunities: {
-        euler,
-        multilendborrow: multi,
-        erc20logprocessor: erc20,
-      },
+  // Log individual failures but don't fail the whole response
+  for (const [i, type] of MERKL_TYPES.entries()) {
+    if (results[i].status === 'rejected') {
+      logWarn('rewards-merkl', `${type} failed chain=${chainId}:`, results[i].reason instanceof Error ? results[i].reason.message : results[i].reason)
     }
   }
-  catch (err) {
-    if (err && typeof err === 'object' && 'statusCode' in err) {
-      throw err
-    }
-    logWarn('rewards-merkl', `cold fetch failed chain=${chainId}:`, err instanceof Error ? err.message : err)
+
+  // Only fail if all three subtypes failed — partial data is better than none
+  if (results.every(r => r.status === 'rejected')) {
     throw createError({ statusCode: 502, statusMessage: 'Merkl upstream error' })
+  }
+
+  // Clients poll in lockstep — letting Cloudflare short-circuit the repeat
+  // polls between warm cycles skips Nitro entirely for most hits.
+  setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
+
+  return {
+    opportunities: {
+      euler,
+      multilendborrow: multi,
+      erc20logprocessor: erc20,
+    },
   }
 })
 

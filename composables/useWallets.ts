@@ -49,9 +49,12 @@ export const useWallets = () => {
       return
     }
 
-    // Capture chainId up-front so we can (a) filter out stale cross-chain
-    // token-list entries and (b) discard results if the chain changes mid-fetch.
+    // Capture chainId and full-balance mode up-front so we can (a) filter out
+    // stale cross-chain token-list entries, (b) discard results if the chain
+    // changes mid-fetch, and (c) only stamp lastFullFetchKey when the fetch
+    // actually included the full token list (not when the mode flipped mid-flight).
     const currentChainId = chainId.value
+    const wasFullMode = fullBalancesRequesters.value > 0
 
     // Guard: the vault registry must hold vaults for THIS chain. Checking
     // `isReady` alone is not enough — on chain switch, `eulerLensAddresses`
@@ -190,7 +193,7 @@ export const useWallets = () => {
         lastFetchChainId.value = currentChainId
         lastFetchAddress.value = targetAddress
         isLoaded.value = true
-        if (fullBalancesRequesters.value > 0) {
+        if (wasFullMode) {
           lastFullFetchKey = `${currentChainId}:${targetAddress.toLowerCase()}`
           lastFullFetchAt = Date.now()
         }

@@ -26,6 +26,8 @@ let userInterval: NodeJS.Timeout | null = null
 let subscriberCount = 0
 let latestClaimableRequestId = 0
 
+let latestIncentivesRequestId = 0
+
 const cacheState = {
   campaigns: { chainId: 0, timestamp: 0 },
   claimable: { timestamp: 0, address: '', chainId: 0 },
@@ -84,6 +86,8 @@ export const useFuul = () => {
       return
     }
 
+    const requestId = ++latestIncentivesRequestId
+
     try {
       if (isInitialLoading) {
         isCampaignsLoading.value = true
@@ -93,6 +97,8 @@ export const useFuul = () => {
       // protocol queries (euler + euler-looping) and returns a combined shape.
       // /claimable-rewards stays direct below since it's wallet-specific.
       const proxyData = await fetchFuulProxy(currentChainId)
+
+      if (requestId !== latestIncentivesRequestId) return
 
       const campaignMap = new Map<string, RewardCampaign[]>()
 
