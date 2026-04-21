@@ -10,6 +10,8 @@ import { useVaultSearch } from '~/composables/useVaultSearch'
 import type { MarketGroup } from '~/entities/lend-discovery'
 import type { Vault } from '~/entities/vault'
 import { isVaultType, getVaultAddress, getVaultAssetSymbol, getVaultAssetAddress } from '~/utils/discoveryCalculations'
+import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
+import type { FilterOptionEntry } from '~/utils/buildTvlSortedOptions'
 
 defineOptions({
   name: 'ExplorePage',
@@ -90,20 +92,22 @@ watch(chainId, (newChainId, oldChainId) => {
 })
 
 const marketOptions = computed(() => {
-  return marketGroups.value.reduce((result, group) => {
+  const entries: FilterOptionEntry[] = []
+  for (const group of marketGroups.value) {
+    if (group.source !== 'product') continue
+    const seenInGroup = new Set<string>()
     for (const vault of group.vaults) {
       const addr = getVaultAddress(vault)
       if (!addr) continue
       const market = getProductByVault(addr)
+      if (!market.name || seenInGroup.has(market.name)) continue
+      seenInGroup.add(market.name)
       const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
       const entityObj = entityName ? entities[entityName] : null
-
-      if (market.name && !result.find(option => option.label === market.name)) {
-        return [...result, { label: market.name, value: market.name, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
-      }
+      entries.push({ key: market.name, label: market.name, tvl: group.metrics.totalTVL, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined })
     }
-    return result
-  }, [] as { label: string, value: string, icon?: string, iconFallback?: string }[])
+  }
+  return buildTvlSortedOptions(entries)
 })
 
 const assetOptions = computed(() => {
@@ -126,25 +130,20 @@ const assetOptions = computed(() => {
 })
 
 const riskManagerOptions = computed(() => {
-  const seen = new Set<string>()
-  const result: { label: string, value: string, icon?: string, iconFallback?: string }[] = []
+  const entries: FilterOptionEntry[] = []
   for (const group of marketGroups.value) {
+    if (group.source !== 'product') continue
+    const seenInGroup = new Set<string>()
     for (const vault of group.vaults) {
       if (!isVaultType(vault)) continue
       for (const entity of getEntitiesByVault(vault)) {
-        if (!seen.has(entity.name)) {
-          seen.add(entity.name)
-          result.push({
-            label: entity.name,
-            value: entity.name,
-            icon: entity.logo ? `/entities/${entity.logo}` : undefined,
-            iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined,
-          })
-        }
+        if (seenInGroup.has(entity.name)) continue
+        seenInGroup.add(entity.name)
+        entries.push({ key: entity.name, label: entity.name, tvl: group.metrics.totalTVL, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined })
       }
     }
   }
-  return result
+  return buildTvlSortedOptions(entries)
 })
 
 const matchesMarketFilter = (group: MarketGroup): boolean => {
