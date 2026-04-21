@@ -239,7 +239,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
 
   const disabledReason = computed(() => {
     if (core.isRepayExceedsDebt.value) {
-      return 'You repaying more than required'
+      return 'Repay amount exceeds outstanding debt'
     }
     if (isInsufficientSource.value) {
       return 'Insufficient savings balance to cover the required swap amount.'
