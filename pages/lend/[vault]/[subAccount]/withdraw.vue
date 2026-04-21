@@ -120,7 +120,7 @@ const isSubmitDisabled = computed(() => {
   if (assetsBalance.value < amountFixed.value.value) return true
   if (isLoading.value || amountFixed.value.isZero() || amountFixed.value.isNegative()) return true
   if (estimatesError.value) return true
-  if (needsSwap.value && !swapEffectiveQuote.value && !isSwapQuoteLoading.value) return true
+  if (needsSwap.value && !swapSelectedQuote.value && !isSwapQuoteLoading.value) return true
   return false
 })
 const reviewWithdrawDisabled = isSubmitDisabled
