@@ -109,6 +109,9 @@ export const buildCowSwapAppData = (
     appCode,
     version: COWSWAP_APPDATA_VERSION,
     metadata: {
+      orderClass: {
+        orderClass: 'market',
+      },
       wrappers: [
         {
           address: wrapperAddress,
