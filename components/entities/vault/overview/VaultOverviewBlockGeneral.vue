@@ -9,6 +9,7 @@ import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { autoLink } from '~/utils/autoLink'
 
 const { vault } = defineProps<{ vault: Vault }>()
+const route = useRoute()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
 const { borrowList, isVaultGovernorVerified } = useVaults()
@@ -99,7 +100,7 @@ watchEffect(async () => {
         <VaultOverviewLabelValue label="Market">
           <NuxtLink
             v-if="marketProductKey"
-            :to="{ name: 'explore-market', params: { market: marketProductKey } }"
+            :to="{ name: 'explore-market', params: { market: marketProductKey }, query: { network: route.query.network } }"
             class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
           >
             {{ product.name }}

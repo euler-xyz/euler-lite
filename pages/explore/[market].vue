@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useMarketGroups } from '~/composables/useMarketGroups'
+import type { MarketGroup } from '~/entities/lend-discovery'
 
 defineOptions({
   name: 'ExploreMarketPage',
@@ -8,17 +9,58 @@ defineOptions({
 const route = useRoute()
 const marketKey = computed(() => route.params.market as string)
 
-const { marketGroups, isResolvingTVL } = useMarketGroups()
+const { marketGroups, isResolvingTVL, fetchMarketGroupOnDemand } = useMarketGroups()
 const { isEVKUpdating, isEarnUpdating, isSecuritizeUpdating, isEscrowUpdating } = useVaults()
 
-const isLoading = computed(() =>
+const isVaultsLoading = computed(() =>
   isEVKUpdating.value || isEarnUpdating.value || isSecuritizeUpdating.value || isEscrowUpdating.value
   || isResolvingTVL.value,
 )
 
-const market = computed(() =>
+// Regular market from pre-loaded groups
+const indexedMarket = computed(() =>
   marketGroups.value.find(g => g.id === marketKey.value),
 )
+
+// On-demand market for non-explorable products accessed via direct URL
+const onDemandMarket = ref<MarketGroup | null>(null)
+const isLoadingOnDemand = ref(false)
+let onDemandRunId = 0
+
+watch(
+  [indexedMarket, isVaultsLoading, marketKey],
+  async ([found, loading, key]) => {
+    // If the market appeared in regular groups, clear on-demand data
+    if (found) {
+      onDemandMarket.value = null
+      return
+    }
+
+    // Skip while vaults are still loading, or no key — keep stale data visible
+    if (loading || !key) return
+
+    // Skip if already loaded for this key
+    if (onDemandMarket.value?.id === key) return
+
+    const runId = ++onDemandRunId
+    isLoadingOnDemand.value = true
+    try {
+      const result = await fetchMarketGroupOnDemand(key)
+      if (runId === onDemandRunId) {
+        onDemandMarket.value = result
+      }
+    }
+    finally {
+      if (runId === onDemandRunId) {
+        isLoadingOnDemand.value = false
+      }
+    }
+  },
+  { immediate: true },
+)
+
+const market = computed(() => indexedMarket.value || onDemandMarket.value)
+const isLoading = computed(() => isVaultsLoading.value || isLoadingOnDemand.value)
 </script>
 
 <template>
