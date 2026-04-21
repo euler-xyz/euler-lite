@@ -59,10 +59,10 @@ const orderStatusLabel = computed(() => {
 
 const orderStatusDescription = computed(() => {
   if (isCancelPending.value) {
-    return 'We are invalidating the swap order in Euler.'
+    return 'We are cancelling the swap order.'
   }
   if (props.locallyCancelled) {
-    return 'The signed EVC permit has been invalidated. The order may remain visible on CoW Protocol, but it can no longer execute through Euler.'
+    return 'The cancellation request was submitted. CoW order status may take a moment to update.'
   }
   return undefined
 })

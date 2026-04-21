@@ -18,6 +18,11 @@ export const useCowSwapCollateralSwapExecution = () => {
     const userAddress = core.requireWallet()
     const chainConfig = getCowSwapChainConfig(params.chainId)
     if (!chainConfig) throw new Error(`CowSwap not supported on chain ${params.chainId}`)
+    core.configureCowApiCancellation({
+      orderbookUrl: chainConfig.orderbookUrl,
+      settlementContract: chainConfig.settlementContract,
+      chainId: params.chainId,
+    })
 
     if (params.sellAmount <= 0n) throw new Error('Sell amount must be greater than zero')
     if (params.buyAmount <= 0n) throw new Error('Buy amount must be greater than zero')
