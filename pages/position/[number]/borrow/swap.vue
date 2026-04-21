@@ -263,6 +263,8 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (healthError.value) return { message: healthError.value, variant: 'error' }
   if (quoteError.value) return { message: quoteError.value, variant: 'warning' }
   if (simulationError.value) return { message: simulationError.value, variant: 'error' }
+  if (!isSameAsset.value && isQuoteLoading.value && fromAmount.value) return { message: 'Fetching swap quotes...', variant: 'warning' }
+  if (!isSameAsset.value && !selectedQuote.value && fromAmount.value) return { message: 'Select a swap quote to continue', variant: 'warning' }
   return undefined
 })
 
