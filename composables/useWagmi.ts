@@ -17,17 +17,6 @@ const routeNetworkId: Ref<number | null> = ref(null)
 let cachedWagmiData: ReturnType<typeof initializeWagmi> | null = null
 let watchersInitialized = false
 
-function isAppKitInitializing(): boolean {
-  try {
-    const nuxtApp = useNuxtApp()
-    const check = nuxtApp.$isAppKitInitializing as (() => boolean) | undefined
-    return check ? check() : false
-  }
-  catch {
-    return false
-  }
-}
-
 function initializeWagmi() {
   const { address: wagmiAddress, isConnected: wagmiIsConnected, connector, chain: wagmiChain, status } = useAccount()
   const { disconnect: wagmiDisconnect } = useDisconnect()
@@ -239,8 +228,6 @@ export const useWagmi = () => {
     watchersInitialized = true
 
     watch([isConnected, connector], ([connected, conn]) => {
-      if (isAppKitInitializing()) return
-
       if (connected && conn) {
         walletName.value = conn.name || 'Wallet'
       }
@@ -291,13 +278,6 @@ export const useWagmi = () => {
 
     watch(wagmiChain, async (val, oldVal) => {
       if (!val?.id || isChangingChain) {
-        return
-      }
-
-      // Suppress state changes from AppKit's deferred initialization
-      // (connector discovery, adapter sync) to prevent route/chain cascades
-      // that would make the page appear to refresh on first connect click.
-      if (isAppKitInitializing()) {
         return
       }
 
