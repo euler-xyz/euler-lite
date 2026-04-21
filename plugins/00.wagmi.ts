@@ -5,44 +5,6 @@ import type { AppKitNetwork } from '@reown/appkit/networks'
 import { WagmiAdapter } from '@reown/appkit-adapter-wagmi'
 import { getNetworksByChainIds } from '~/entities/chainRegistry'
 
-/**
- * Detects whether the user has previously connected a wallet on this origin.
- *
- * AppKit / Wagmi eagerly probe injected providers and attempt silent reconnect
- * at startup. For users in "default EVM wallet" modes (notably Phantom), that
- * probe can surface an unsolicited connection prompt on every page visit — even
- * when the visitor has never connected. To avoid that we only eagerly initialize
- * AppKit when we know the user previously connected. Otherwise we defer AppKit
- * creation until the user explicitly clicks "Connect Wallet".
- */
-const hasPersistedWalletSession = (): boolean => {
-  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
-    return false
-  }
-
-  try {
-    if (window.localStorage.getItem('wagmi.recentConnectorId')) {
-      return true
-    }
-
-    const storeRaw = window.localStorage.getItem('wagmi.store')
-    if (storeRaw) {
-      try {
-        const parsed = JSON.parse(storeRaw)
-        if (parsed?.state?.current) return true
-      }
-      catch {
-        // Malformed store — treat as no session.
-      }
-    }
-  }
-  catch {
-    // localStorage may be blocked (Safari private mode, etc.) — treat as no session.
-  }
-
-  return false
-}
-
 export default defineNuxtPlugin((nuxtApp) => {
   const envConfig = useEnvConfig()
   const projectId = envConfig.appKitProjectId
@@ -128,12 +90,10 @@ export default defineNuxtPlugin((nuxtApp) => {
     kit.open()
   }
 
-  // Returning users who previously connected get the full modal up front so
-  // silent reconnect works as before. First-time / signed-out visitors don't
-  // pay that cost until they actually ask to connect.
-  if (hasPersistedWalletSession()) {
-    ensureAppKit()
-  }
+  // Always eagerly initialize AppKit so chunk loads and initialization
+  // side-effects (connector discovery, remote feature fetches) complete
+  // during page load rather than on first "Connect Wallet" click.
+  ensureAppKit()
 
   return {
     provide: {
