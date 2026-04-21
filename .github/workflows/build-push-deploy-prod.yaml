@@ -1,8 +1,14 @@
-name: Build, Push & Deploy
+name: Build, Push & Deploy (prod)
 on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'ECR image tag to deploy (defaults to "latest")'
+        required: false
+        default: 'latest'
   push:
-    branches:
-      - master
+    tags:
+      - 'v*'
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -12,21 +18,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-push:
-    name: Build & Push Image
+  build-push-deploy:
+    name: Build, Push & Deploy
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
-    outputs:
-      image_tag: ${{ steps.generate-tag.outputs.image_tag }}
     steps:
+      # ── Build & Push (tag push only) ──
       - name: Check out repository code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        if: github.event_name == 'push'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Verify tag is on master
+        if: github.event_name == 'push'
+        run: |
+          if ! git merge-base --is-ancestor "${{ github.sha }}" origin/master; then
+            echo "::error::Tag does not point to a commit on master. Aborting."
+            exit 1
+          fi
 
       - name: Generate image tag
+        if: github.event_name == 'push'
         id: generate-tag
         run: |
           TIMESTAMP=$(date -u +'%H%M_%d%m%Y')
@@ -35,39 +51,49 @@ jobs:
           echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
           echo "Generated image tag: ${IMAGE_TAG}"
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37
+      - name: Configure AWS credentials (ECR push)
+        if: github.event_name == 'push'
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN_PUSH_IMAGE }}
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Login to Amazon ECR
+        if: github.event_name == 'push'
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@f2e9fc6c2b355c1890b65e6f6f0e2ac3e6e22f78
+        uses: aws-actions/amazon-ecr-login@f2e9fc6c2b355c1890b65e6f6f0e2ac3e6e22f78 # v2.1.2
+
+      - name: Set up Docker Buildx
+        if: github.event_name == 'push'
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
       - name: Build, tag, and push docker image to Amazon ECR
-        id: build
-        env:
-          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ steps.generate-tag.outputs.image_tag }}
-          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
-        run: |
-          FULL_IMAGE="$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-          docker build --platform linux/amd64 -t euler-lite .
-          docker tag euler-lite "$FULL_IMAGE"
-          docker tag euler-lite "$REGISTRY/$ECR_REPOSITORY:latest"
-          docker push "$FULL_IMAGE"
-          docker push "$REGISTRY/$ECR_REPOSITORY:latest"
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ steps.generate-tag.outputs.image_tag }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:latest
+          build-args: |
+            SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-  deploy:
-    name: Deploy to ECS
-    needs: build-push
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37
+      # ── Deploy ──
+      - name: Resolve image tag
+        id: resolve-tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "image_tag=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "image_tag=${{ steps.generate-tag.outputs.image_tag }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Configure AWS credentials (ECS deploy)
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
@@ -82,14 +108,14 @@ jobs:
 
       - name: Update image in task definition
         id: render-task-def
-        uses: aws-actions/amazon-ecs-render-task-definition@77954e213ba1f9f9cb016b86a1d4f6fcdea0d57e
+        uses: aws-actions/amazon-ecs-render-task-definition@77954e213ba1f9f9cb016b86a1d4f6fcdea0d57e # v1.8.4
         with:
           task-definition: task-definition.json
           container-name: ${{ secrets.ECS_CONTAINER_NAME }}
-          image: ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${{ needs.build-push.outputs.image_tag }}
+          image: ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${{ steps.resolve-tag.outputs.image_tag }}
 
       - name: Deploy new task definition to ECS
-        uses: aws-actions/amazon-ecs-deploy-task-definition@fc8fc60f3a60ffd500fcb13b209c59d221ac8c8c
+        uses: aws-actions/amazon-ecs-deploy-task-definition@fc8fc60f3a60ffd500fcb13b209c59d221ac8c8c # v2.6.1
         with:
           task-definition: ${{ steps.render-task-def.outputs.task-definition }}
           service: ${{ secrets.ECS_SERVICE }}
@@ -115,7 +141,7 @@ jobs:
               --cluster "$ECS_CLUSTER" \
               --services "$ECS_SERVICE" \
               --query "services[0].events" \
-              --output table || true
+              --output table || echo "WARNING: failed to fetch ECS service events"
 
             primary_rollout_state=$(aws ecs describe-services \
               --cluster "$ECS_CLUSTER" \

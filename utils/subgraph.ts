@@ -1,7 +1,7 @@
 import { getAddress } from 'viem'
 import axios from 'axios'
 import { logWarn } from '~/utils/errorHandling'
-import { TIMEOUT_SUBGRAPH_MS } from '~/entities/tuning-constants'
+import { SUBGRAPH_TIMEOUT_MS } from '~/entities/tuning-constants'
 
 export interface SubgraphPositionEntry {
   subAccount: string
@@ -34,7 +34,7 @@ export async function fetchAccountPositions(subgraphUrl: string, walletAddress: 
         }
       }`,
       operationName: 'AccountPositions',
-    }, { timeout: TIMEOUT_SUBGRAPH_MS })
+    }, { timeout: SUBGRAPH_TIMEOUT_MS })
 
     const account = data.data?.trackingActiveAccount
 

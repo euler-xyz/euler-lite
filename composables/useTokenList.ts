@@ -135,6 +135,16 @@ const hasToken = (address: string): boolean => {
   }
 }
 
+const getTokenByAddress = (address: string): TokenListEntry | undefined => {
+  if (!address) return undefined
+  try {
+    return tokenMap.value.get(getAddress(address).toLowerCase())
+  }
+  catch {
+    return undefined
+  }
+}
+
 const getAllTokens = (): TokenListEntry[] => {
   return [...tokenMap.value.values()]
 }
@@ -166,6 +176,7 @@ export const useTokenList = () => {
     loadTokenList,
     hasToken,
     getAllTokens,
+    getTokenByAddress,
     toVaultAsset,
     isLoading,
     isLoaded,

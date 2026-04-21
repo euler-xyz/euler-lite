@@ -11,7 +11,7 @@ import {
   fetchEscrowVault,
   fetchSecuritizeVault,
 } from '~/entities/vault'
-import { fetchVaultFactory } from '~/entities/vault/factory'
+import { fetchVaultCategory } from '~/entities/vault/factory'
 
 // Vault type enum - 3 types (escrow is a category of evk, not a separate type)
 export type VaultType = 'evk' | 'earn' | 'securitize'
@@ -148,50 +148,20 @@ const isEvkVault = (address: string): boolean => getType(address) === 'evk'
 const size = computed(() => registry.value.size)
 
 /**
- * Detect vault type from factory address.
- *
- * Note: This is only called for vaults NOT already in the registry.
- * During loadVaults(), escrow vaults are loaded from escrowedCollateralPerspective
- * and registered as 'escrow'. Therefore, any unknown vault from the EVK factory
- * can be assumed to be 'evk' (not escrow) — if it were escrow, it would already
- * be in the registry.
- */
-const detectVaultType = (factoryAddress: string): VaultType => {
-  const { eulerCoreAddresses, eulerPeripheryAddresses } = useEulerAddresses()
-
-  const normalizedFactory = factoryAddress.toLowerCase()
-
-  // Check Securitize factory (distinct factory)
-  if (eulerPeripheryAddresses.value?.securitizeFactory?.toLowerCase() === normalizedFactory) {
-    return 'securitize'
-  }
-
-  // Check Euler Earn factory (distinct factory)
-  if (eulerCoreAddresses.value?.eulerEarnFactory?.toLowerCase() === normalizedFactory) {
-    return 'earn'
-  }
-
-  // EVK factory or unknown factory → 'evk'
-  // Note: Escrow vaults use the same EVK factory but are loaded from
-  // escrowedCollateralPerspective during loadVaults(). Any unknown vault
-  // from EVK factory is therefore a regular EVK vault, not escrow.
-  return 'evk'
-}
-
-/**
  * Fetch vault using the appropriate fetch function based on type.
  * Note: Escrow vaults are a category of evk, not a separate type.
  * They are fetched using fetchVault and identified by vaultCategory.
  */
 const fetchVaultByType = async (address: string, type: VaultType): Promise<AnyVault> => {
+  const ctx = buildFetchContext()
   switch (type) {
     case 'earn':
-      return await fetchEarnVault(address)
+      return await fetchEarnVault(address, ctx)
     case 'securitize':
-      return await fetchSecuritizeVault(address)
+      return await fetchSecuritizeVault(address, ctx)
     case 'evk':
     default:
-      return await fetchVault(address)
+      return await fetchVault(address, ctx)
   }
 }
 
@@ -227,53 +197,57 @@ const isInEscrowPerspective = async (address: string): Promise<boolean> => {
 }
 
 /**
- * Resolve an unknown vault by querying subgraph for its factory,
- * detecting the type, fetching with appropriate lens, and caching in registry.
+ * Resolve an unknown vault using /api/vault-categories, fetch with the
+ * appropriate lens, and cache in the registry. The category endpoint returns
+ * 'escrow' directly when the full chain categorization is warm; per-address
+ * fallback returns factory-based category only (no escrow check) so we still
+ * run a local isInEscrowPerspective probe for the 'evk' case.
  */
 const resolveUnknown = async (address: string): Promise<VaultEntry> => {
   const normalized = normalizeAddress(address)
-
-  // Query subgraph for factory
-  const factory = await fetchVaultFactory(normalized)
+  const category = await fetchVaultCategory(normalized)
 
   let type: VaultType
-  if (factory) {
-    // Detect type from factory
-    type = detectVaultType(factory)
+  if (category === 'earn') {
+    type = 'earn'
+  }
+  else if (category === 'securitize') {
+    type = 'securitize'
+  }
+  else if (category === 'escrow' || category === 'evk') {
+    type = 'evk'
   }
   else {
-    // Factory not found - try to determine type by attempting fetches
-    // This can happen if vault is not yet indexed in subgraph
-    logWarn('resolveUnknown', `Factory not found for ${address}, trying fetch methods`)
-
-    // Try securitize first (has distinct structure), then fall back to EVK
+    // Category endpoint returned null — vault not indexed in the subgraph.
+    // This can happen for brand-new deployments. Try securitize first (has
+    // distinct structure), fall back to EVK.
+    logWarn('resolveUnknown', `Category not found for ${address}, trying fetch methods`)
     try {
-      const vault = await fetchSecuritizeVault(normalized)
+      const vault = await fetchSecuritizeVault(normalized, buildFetchContext())
       set(normalized, vault, 'securitize')
       return { vault, type: 'securitize' }
     }
     catch {
-      // Not a securitize vault, default to EVK
       type = 'evk'
     }
   }
 
-  // For EVK vaults, check if it's actually an escrow vault
+  // For EVK vaults the category endpoint may have returned 'escrow' (full
+  // categorization hit) — in that case we already know. Otherwise probe the
+  // escrow perspective locally to cover brand-new escrow deployments picked
+  // up before the full categorization refresh.
   if (type === 'evk') {
-    const isEscrow = await isInEscrowPerspective(normalized)
+    const alreadyEscrow = category === 'escrow'
+    const isEscrow = alreadyEscrow || await isInEscrowPerspective(normalized)
     if (isEscrow) {
-      const vault = await fetchEscrowVault(normalized)
+      const vault = await fetchEscrowVault(normalized, buildFetchContext())
       set(normalized, vault, 'evk')
       return { vault, type: 'evk' }
     }
   }
 
-  // Fetch vault with appropriate lens
   const vault = await fetchVaultByType(normalized, type)
-
-  // Cache in registry
   set(normalized, vault, type)
-
   return { vault, type }
 }
 
@@ -352,7 +326,6 @@ export const useVaultRegistry = () => {
     isEvkVault,
 
     // Type detection & fetching
-    detectVaultType,
     fetchVaultByType,
 
     // Resolution (primary method for vault resolution)

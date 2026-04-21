@@ -27,6 +27,7 @@ import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { createRaceGuard } from '~/utils/race-guard'
 import { isOpDisabled, OP_DEPOSIT } from '~/utils/vault-hooks'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 // Type definitions for vault display
 type VaultType = 'evk' | 'securitize'
@@ -64,6 +65,8 @@ const route = useRoute()
 const modal = useModal()
 const { error } = useToast()
 const reviewSupplyLabel = 'Review Supply'
+// Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
+useFullBalances()
 const { buildSupplyPlan, buildSwapAndSupplyPlan, executeTxPlan } = useEulerOperations()
 const { getVault, getSecuritizeVault, getEscrowVault, updateVault, isEscrowLoadedOnce } = useVaults()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
@@ -291,6 +294,14 @@ const isSubmitDisabled = computed(() => {
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vaultAddress))
 const isSwapRestricted = computed(() => needsSwap.value && isVaultRestrictedByCountry(vaultAddress))
 const reviewSupplyDisabled = computed(() => isGeoBlocked.value || isSwapRestricted.value || isSubmitDisabled.value)
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isSwapRestricted.value) return { message: 'Swap deposits are not available in your region', variant: 'warning' }
+  if (evkVault.value && isOpDisabled(evkVault.value, OP_DEPOSIT)) return { message: 'Deposits are currently disabled for this vault', variant: 'warning' }
+  if (isSupplyCapReached.value) return { message: 'Supply cap has been reached', variant: 'warning' }
+  if (errorText.value) return { message: errorText.value, variant: 'error' }
+  return undefined
+})
 const totalRewardsAPY = computed(() => getSupplyRewardApy(vaultAddress))
 const hasRewards = computed(() => hasSupplyRewards(vaultAddress))
 const intrinsicApy = computed(() => getIntrinsicApy(asset.value?.address))
@@ -970,6 +981,8 @@ watch(address, () => {
               />
               <VaultFormSubmit
                 :disabled="reviewSupplyDisabled"
+                :disabled-reason="disabledReasonInfo?.message"
+                :disabled-reason-variant="disabledReasonInfo?.variant"
                 :loading="isSubmitting || isPreparing"
               >
                 {{ reviewSupplyLabel }}

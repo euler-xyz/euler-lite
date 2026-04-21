@@ -15,7 +15,6 @@ import {
   conservativePriceRatioNumber,
   getCollateralUsdValueOrZero,
 } from '~/services/pricing/priceProvider'
-import { logWarn } from '~/utils/errorHandling'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
 import { SwapperMode } from '~/entities/swap'
 import type { SwapApiQuote } from '~/entities/swap'
@@ -30,6 +29,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import { COWSWAP_PROVIDER_NAME, COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapCollateralSwapExecuteParams, getCowSwapChainConfig } from '~/entities/cowswap'
 import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const route = useRoute()
 const { isConnected, address } = useAccount()
@@ -320,8 +320,8 @@ const submitCowSwapCollateralSwap = async () => {
 
   const walletWarningsDescription
     = 'The CoW order operates on vault shares. The amounts shown above are in underlying assets. '
-    + 'The CoW order receiver is your sub-account, not your main wallet — your wallet may flag this as a mismatch. '
-    + 'You can verify the first 19 bytes (38 hex chars after "0x") of the receiver match your wallet address.'
+      + 'The CoW order receiver is your sub-account, not your main wallet — your wallet may flag this as a mismatch. '
+      + 'You can verify the first 19 bytes (38 hex chars after "0x") of the receiver match your wallet address.'
 
   openCowSwapReviewModal(cowModal, {
     signSteps,
@@ -360,6 +360,16 @@ watch(() => cowSwapOrderStatus.orderStatus.value, (status) => {
   else {
     cowSwapExecution.reset()
   }
+})
+
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (cowSwapErrorText.value) return { message: cowSwapErrorText.value, variant: 'error' }
+  if (errorText.value) return { message: errorText.value, variant: 'error' }
+  if (sameVaultError.value) return { message: sameVaultError.value, variant: 'error' }
+  if (quoteError.value) return { message: quoteError.value, variant: 'warning' }
+  if (simulationError.value) return { message: simulationError.value, variant: 'error' }
+  return undefined
 })
 
 // ── Position loading ─────────────────────────────────────────────────────
@@ -744,6 +754,8 @@ const nextLiquidationPrice = computed(() => {
               <VaultFormSubmit
                 :disabled="reviewSwapDisabled"
                 :loading="isSubmitting || isPreparing"
+                :disabled-reason="disabledReasonInfo?.message"
+                :disabled-reason-variant="disabledReasonInfo?.variant"
               >
                 {{ reviewSwapLabel }}
               </VaultFormSubmit>
