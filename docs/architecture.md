@@ -207,10 +207,22 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 | `/api/vault-factories` | 24 h | Factory is immutable per vault; batched subgraph query |
 | `/api/oracle-adapter` | 5 min | Lazy per-address fetch |
 | `/api/euler-chains` | 5 min | Static chain-agnostic config from `euler-interfaces` repo |
+| `/api/vaults` | 10 min (safety floor) | Pre-computed chain vault snapshot; warm-cache rewrites every 4 min so in steady state the snapshot is ≤4 min old. Handler is read-only — no request-triggered refresh |
 
 Every cacheable proxy above uses the same pattern: TTL cache for fresh hits, stale-cache fallback on upstream failure, and in-flight request deduplication so concurrent cache-miss callers (e.g. warm-cache racing real traffic) collapse onto a single upstream fetch per cache key.
 
-`server/plugins/warm-cache.ts` pre-populates labels, token-list, `/api/intrinsic-apy`, and vault-factories for every enabled chain, plus `/api/euler-chains` once globally. A 4-min interval re-warms every entry ahead of its 5-min TTL. Warming runs fire-and-forget so Nitro's listener is never delayed; caches are typically hot within ~5 s of boot, and users arriving before that just pay the usual cold-upstream latency for whichever endpoints they hit.
+`server/plugins/warm-cache.ts` pre-populates labels, token-list, `/api/intrinsic-apy`, vault-factories, and the vaults snapshot for every enabled chain, plus `/api/euler-chains` once globally. A 4-min interval re-warms every entry ahead of its 5-min TTL. Warming runs fire-and-forget so Nitro's listener is never delayed; caches are typically hot within ~5 s of boot, and users arriving before that just pay the usual cold-upstream latency for whichever endpoints they hit.
+
+### Vault snapshot pipeline
+
+`/api/vaults?chainId=X` serves a pre-computed snapshot of the public vault set for a chain: every EVK vault, Earn vault, Securitize vault, and referenced escrow vault, with all on-chain state (caps, rates, LTV matrices, oracle prices) already resolved. Per-user data (balances, positions, collateral flags) is **not** in this snapshot — the client fetches it separately after wallet connect via `useAccountPositions` / `useEulerAccount`.
+
+The client composable `useVaults.loadVaults()` runs in two phases:
+
+1. **Hydrate** (`~100 ms`): `$fetch('/api/vaults?chainId=X')`, deserialise, populate the vault registry, flip `isReady=true`. UI renders a fully populated `borrowList` immediately.
+2. **Fresh RPC pass** (`~3-6 s`): the existing batched lens pipeline (`fetchVaults`/`fetchEarnVaults`/`fetchSecuritizeVault`/`fetchEscrowVault`) runs against the client's RPC with Pyth simulation, overwriting registry entries with live prices and rates.
+
+The public interface of `useVaults()` is unchanged — the 15 exports (`isReady`, `borrowList`, `getVault`, etc.) keep their names, types, and semantics. All RPC-level fetchers are extracted to pure functions in `entities/vault/{fetcher,apy,pricing,escrow-fetcher}.ts` that accept a `FetchVaultContext`; both the client composable and the server-side `loadChainSnapshot` (`entities/vault/loader.ts`) share the same code path. bigint fields in the wire payload are tagged (`__bi:<decimal>`) by `entities/vault/loader-serde.ts` so the JSON transport doesn't lose precision.
 
 ## 🔍 Explore Page & Market Discovery
 

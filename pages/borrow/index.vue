@@ -9,6 +9,7 @@ import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
 import { isOpDisabled, OP_BORROW, OP_DEPOSIT, OP_TRANSFER } from '~/utils/vault-hooks'
+import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
 
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy } = useRewardsApy()
@@ -108,8 +109,12 @@ const pairBorrowedUsd = ref<Map<string, number>>(new Map())
 // Helper to create a unique key for a borrow pair
 const getPairKey = (pair: AnyBorrowVaultPair) => `${pair.collateral.address}-${pair.borrow.address}`
 
-// Fetch USD values for all borrow pairs
-watchEffect(async () => {
+// Fetch USD values for all borrow pairs. Debounced to collapse the
+// bursts of registry updates streamed during loadVaults's RPC refresh
+// (each batch causes borrowList to re-derive) into a single pass —
+// this is the most expensive price-fetch watcher in the app because
+// pair count is combinatorial in collaterals × borrow vaults.
+const fetchBorrowPrices = useDebounceFn(async () => {
   const pairs = borrowList.value
   if (!pairs.length) {
     isPricesReady.value = true
@@ -136,6 +141,26 @@ watchEffect(async () => {
   finally {
     isPricesReady.value = true
   }
+}, DEBOUNCE_LIST_PRICE_FETCH_MS)
+
+// Pause price fetches while the page is in keep-alive but not visible. The
+// borrow page is included in app.vue's keepalive list, so it keeps running
+// watchEffects when the user navigates away. Deferring the refetch until
+// the user returns removes a major source of main-thread contention
+// during chain switches, which otherwise fan out to every keep-alive
+// page's price watchEffect at once.
+const isActive = ref(true)
+onActivated(() => {
+  isActive.value = true
+})
+onDeactivated(() => {
+  isActive.value = false
+})
+
+watchEffect(() => {
+  void borrowList.value
+  if (!isActive.value) return
+  fetchBorrowPrices()
 })
 
 const getPairBorrowApy = (pair: AnyBorrowVaultPair): number => {

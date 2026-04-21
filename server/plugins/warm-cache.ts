@@ -12,16 +12,10 @@
 import { LABEL_FILES } from '../api/labels/[file].get'
 import { getEnabledChainIds } from '~/utils/chain-env'
 import { logWarn } from '../utils/log'
+import { INTERNAL_FETCH_HEADERS } from '../utils/internal-headers'
+import { refreshChainVaults } from '../utils/vaults-cache'
 
 const REWARM_INTERVAL_MS = 4 * 60_000
-
-// Synthetic client-IP header for every internal $fetch the warm-cache issues.
-// The rate-limit middleware fails-closed when `cf-connecting-ip` is absent in
-// production (see server/utils/rate-limit.ts) — without this header every warm
-// request would get a silent 403 and the caches would never populate.
-// A fixed sentinel IP is fine: warm-cache runs at most ~240 requests/cycle
-// against a 1000/min label budget, so sharing one bucket is well-bounded.
-const WARM_HEADERS = { 'cf-connecting-ip': '127.0.0.1' } as const
 
 // Nitro dev mode re-imports server plugins across its double-init (Vite
 // client build + Nitro server build), which would fire two warm cycles
@@ -41,17 +35,24 @@ export default defineNitroPlugin(() => {
 
   const warmChain = async (chainId: number) => {
     const tasks: Promise<unknown>[] = LABEL_FILES.map(file =>
-      $fetch(`/api/labels/${file}`, { query: { chainId }, headers: WARM_HEADERS }).catch(() => undefined),
+      $fetch(`/api/labels/${file}`, { query: { chainId }, headers: INTERNAL_FETCH_HEADERS }).catch(() => undefined),
     )
-    tasks.push($fetch('/api/token-list', { query: { chainId }, headers: WARM_HEADERS }).catch(() => undefined))
-    tasks.push($fetch('/api/intrinsic-apy', { query: { chainId }, headers: WARM_HEADERS }).catch(() => undefined))
+    tasks.push($fetch('/api/token-list', { query: { chainId }, headers: INTERNAL_FETCH_HEADERS }).catch(() => undefined))
+    tasks.push($fetch('/api/intrinsic-apy', { query: { chainId }, headers: INTERNAL_FETCH_HEADERS }).catch(() => undefined))
+    // Vaults snapshot — direct call so we skip $fetch's HTTP dispatch and
+    // get typed errors. refreshChainVaults internally $fetches labels +
+    // euler-chains + vault-factories; the other tasks in this batch populate
+    // those caches in parallel (in-flight dedup collapses the contention).
+    tasks.push(refreshChainVaults(chainId).catch((err) => {
+      logWarn('warm-cache', `vaults chain=${chainId} failed:`, err instanceof Error ? err.message : err)
+    }))
     await Promise.allSettled(tasks)
 
     // Phase 2: warm vault-factories using earn-vault addresses (labels are cached from above)
     try {
       const earnData = await $fetch<Array<string | { address: string }>>('/api/labels/earn-vaults.json', {
         query: { chainId },
-        headers: WARM_HEADERS,
+        headers: INTERNAL_FETCH_HEADERS,
       })
       const addresses = (earnData ?? [])
         .map(e => typeof e === 'string' ? e : e?.address)
@@ -60,7 +61,7 @@ export default defineNitroPlugin(() => {
         await $fetch('/api/vault-factories', {
           method: 'POST',
           body: { chainId, addresses },
-          headers: WARM_HEADERS,
+          headers: INTERNAL_FETCH_HEADERS,
         })
       }
     }
@@ -70,7 +71,7 @@ export default defineNitroPlugin(() => {
   }
 
   const warmEulerChains = () =>
-    $fetch('/api/euler-chains', { headers: WARM_HEADERS }).catch(() => undefined)
+    $fetch('/api/euler-chains', { headers: INTERNAL_FETCH_HEADERS }).catch(() => undefined)
 
   const warmAll = async () => {
     try {

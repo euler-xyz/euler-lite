@@ -22,6 +22,8 @@ const { isSpyMode } = useSpyMode()
 const { fetchSingleBalance } = useWallets()
 const { buildSupplyPlan, buildSwapAndSupplyPlan } = useEulerOperations()
 const { chainId } = useEulerAddresses()
+// Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
+useFullBalances()
 
 // Supply-specific state
 const balance = ref(0n)

@@ -20,6 +20,24 @@ export const BATCH_DELAY_COLLECT_MS = 50
 // ── Request Timeouts ────────────────────────────────────
 export const TIMEOUT_SUBGRAPH_MS = 30_000
 
+// ── Debounce ──────────────────────────────────────────────
+/** Price-fetch watchEffects on list pages. Collapses bursts of registry
+ * updates streamed during loadVaults's RPC refresh into a single pass. */
+export const DEBOUNCE_LIST_PRICE_FETCH_MS = 300
+
+// ── Progressive list rendering ────────────────────────────
+/** Rows rendered on the initial paint of a long list. Remainder is inserted
+ * one frame later so the first paint is fast on large (400+ row) sets. */
+export const LIST_INITIAL_BATCH_ROWS = 40
+/** Estimated per-row height for the scroll-restoration spacer reservation. */
+export const LIST_ROW_HEIGHT_PX = 88
+
+// ── Wallet balances ───────────────────────────────────────
+/** TTL for a "full" wallet balance fetch (the one that includes the whole
+ * token list for the pay-with selector). Navigating between swap pages
+ * within this window reuses the cached Map rather than re-fetching. */
+export const FULL_BALANCES_TTL_MS = 60_000
+
 // ── Basis Points ──────────────────────────────────────────
 export const BPS_BASE = 10_000n
 /** BPS_BASE + 1: pads amounts by 0.01% to cover interest accrual */
