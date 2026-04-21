@@ -9,6 +9,7 @@ import type { TxPlan } from '~/entities/txPlan'
 import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 import { logWarn } from '~/utils/errorHandling'
 import { createInFlightDedup } from '~/utils/in-flight'
+import { createRaceGuard } from '~/utils/race-guard'
 
 const address = ref('')
 
@@ -24,9 +25,8 @@ const isClaimableLoading = ref(true)
 let publicInterval: NodeJS.Timeout | null = null
 let userInterval: NodeJS.Timeout | null = null
 let subscriberCount = 0
-let latestClaimableRequestId = 0
-
-let latestIncentivesRequestId = 0
+const incentivesGuard = createRaceGuard()
+const claimableGuard = createRaceGuard()
 
 const cacheState = {
   campaigns: { chainId: 0, timestamp: 0 },
@@ -86,7 +86,7 @@ export const useFuul = () => {
       return
     }
 
-    const requestId = ++latestIncentivesRequestId
+    const generation = incentivesGuard.next()
 
     try {
       if (isInitialLoading) {
@@ -98,7 +98,7 @@ export const useFuul = () => {
       // /claimable-rewards stays direct below since it's wallet-specific.
       const proxyData = await fetchFuulProxy(currentChainId)
 
-      if (requestId !== latestIncentivesRequestId) return
+      if (incentivesGuard.isStale(generation)) return
 
       const campaignMap = new Map<string, RewardCampaign[]>()
 
@@ -171,7 +171,7 @@ export const useFuul = () => {
       return
     }
 
-    const requestId = ++latestClaimableRequestId
+    const generation = claimableGuard.next()
     const capturedAddress = address.value
 
     try {
@@ -188,7 +188,7 @@ export const useFuul = () => {
         }),
       ])
 
-      if (requestId !== latestClaimableRequestId) return
+      if (claimableGuard.isStale(generation)) return
 
       fuulClaimableEntries.value = [
         ...(Array.isArray(eulerRes.data) ? eulerRes.data : []),
@@ -200,7 +200,7 @@ export const useFuul = () => {
       logWarn('fuul/claimable-rewards', e)
     }
     finally {
-      if (requestId === latestClaimableRequestId) {
+      if (!claimableGuard.isStale(generation)) {
         isClaimableLoading.value = false
       }
     }
@@ -286,7 +286,7 @@ export const useFuul = () => {
     }
     else {
       address.value = ''
-      latestClaimableRequestId++
+      claimableGuard.next()
       fuulClaimableEntries.value = []
       isClaimableLoading.value = false
       cacheState.claimable = { timestamp: 0, address: '', chainId: 0 }

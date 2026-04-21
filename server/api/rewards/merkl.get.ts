@@ -70,8 +70,9 @@ export default defineEventHandler(async (event) => {
 
   // Log individual failures but don't fail the whole response
   for (const [i, type] of MERKL_TYPES.entries()) {
-    if (results[i].status === 'rejected') {
-      logWarn('rewards-merkl', `${type} failed chain=${chainId}:`, results[i].reason instanceof Error ? results[i].reason.message : results[i].reason)
+    const result = results[i]
+    if (result.status === 'rejected') {
+      logWarn('rewards-merkl', `${type} failed chain=${chainId}:`, result.reason instanceof Error ? result.reason.message : result.reason)
     }
   }
 
