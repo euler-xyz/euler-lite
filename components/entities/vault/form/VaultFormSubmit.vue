@@ -4,6 +4,7 @@ import { useAccount } from '@wagmi/vue'
 import { flip, offset, shift, useFloating } from '@floating-ui/vue'
 
 import { isOperationBlocked, operationBlockReason } from '~/utils/operationGuardRegistry'
+import type { DisabledReasonVariant } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { AcknowledgeTermsModal, VaultUnverifiedDisclaimerModal } from '#components'
 import type { KeyringFlowState, CredentialData } from '~/composables/useKeyring'
@@ -20,7 +21,7 @@ interface KeyringGuardState {
   cancelVerification: () => void
 }
 
-const props = defineProps<{ disabled?: boolean, loading?: boolean, disabledReason?: string }>()
+const props = defineProps<{ disabled?: boolean, loading?: boolean, disabledReason?: string, disabledReasonVariant?: DisabledReasonVariant }>()
 const { isConnected } = useAccount()
 const { chainId: _chainId } = useEulerAddresses()
 const { chainId, switchChain, connect } = useWagmi()
@@ -51,21 +52,29 @@ const _disabled = computed(() => {
   return props.disabled && !needToSwitchChain.value
 })
 
-const GENERIC_DISABLED_REASON = 'This operation is currently disabled. Check the messages above for details.'
+const GENERIC_DISABLED_REASON = 'Complete the form fields above to continue.'
 
-// Tooltip is only shown while `_disabled && !loading`, so the generic fallback
-// guarantees `effectiveDisabledReason` is truthy in that window.
 const effectiveDisabledReason = computed(() => {
-  if (props.disabledReason) return props.disabledReason
   if (operationBlockReason.value) return operationBlockReason.value
+  if (props.disabledReason) return props.disabledReason
   if (_disabled.value && !props.loading) return GENERIC_DISABLED_REASON
   return undefined
+})
+
+const tooltipVariantClass = computed(() => {
+  if (operationBlockReason.value) return 'vault-form-submit__tooltip--warning'
+  if (props.disabledReason && props.disabledReasonVariant) {
+    return `vault-form-submit__tooltip--${props.disabledReasonVariant}`
+  }
+  return ''
 })
 
 const showTooltip = () => {
   if (_disabled.value && !props.loading) {
     isTooltipVisible.value = true
-    update()
+    // Defer update until after v-if mounts the floating element,
+    // otherwise the first paint lands at the wrapper's origin.
+    nextTick(update)
   }
 }
 const hideTooltip = () => {
@@ -184,16 +193,14 @@ const openTermsModal = () => {
           Connect wallet
         </template>
       </UiButton>
-      <Transition name="tooltip">
-        <div
-          v-show="isTooltipVisible && _disabled && !loading"
-          ref="floating"
-          :style="floatingStyles"
-          class="vault-form-submit__tooltip"
-        >
-          {{ effectiveDisabledReason }}
-        </div>
-      </Transition>
+      <div
+        v-if="isTooltipVisible && _disabled && !loading"
+        ref="floating"
+        :style="floatingStyles"
+        :class="['vault-form-submit__tooltip', tooltipVariantClass]"
+      >
+        {{ effectiveDisabledReason }}
+      </div>
     </template>
   </div>
 </template>
@@ -213,6 +220,7 @@ const openTermsModal = () => {
     max-width: 300px;
     padding: 8px 12px;
     border-radius: 8px;
+    border: 1px solid transparent;
     background-color: var(--ui-footnote-floating-background-color);
     box-shadow: 0 8px 32px var(--ui-footnote-floating-box-shadow-color);
     font-size: 13px;
@@ -220,16 +228,22 @@ const openTermsModal = () => {
     font-weight: 400;
     text-align: center;
     pointer-events: none;
+
+    &--warning {
+      background-color: var(--ui-footnote-floating-background-color);
+      background-image: linear-gradient(var(--ui-toast-warning-background-color), var(--ui-toast-warning-background-color));
+      border-color: var(--ui-toast-warning-border-color);
+      color: var(--ui-toast-warning-text-color);
+      box-shadow: none;
+    }
+
+    &--error {
+      background-color: var(--ui-footnote-floating-background-color);
+      background-image: linear-gradient(var(--ui-toast-error-background-color), var(--ui-toast-error-background-color));
+      border-color: var(--ui-toast-error-border-color);
+      color: var(--ui-toast-error-text-color);
+      box-shadow: none;
+    }
   }
-}
-
-.tooltip-enter-active,
-.tooltip-leave-active {
-  transition: opacity 0.15s ease;
-}
-
-.tooltip-enter-from,
-.tooltip-leave-to {
-  opacity: 0;
 }
 </style>

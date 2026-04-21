@@ -13,6 +13,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { isVaultDeprecated } from '~/utils/eulerLabelsUtils'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const route = useRoute()
 const { getVault } = useVaults()
@@ -140,6 +141,15 @@ const {
   swapRouteItems, swapRouteEmptyMessage,
   selectProvider, onFromInput, onToVaultChange, onRefreshQuotes, submit, openSlippageSettings,
 } = swap
+
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (sameVaultError.value) return { message: sameVaultError.value, variant: 'error' }
+  if (errorText.value) return { message: errorText.value, variant: 'error' }
+  if (quoteError.value) return { message: quoteError.value, variant: 'warning' }
+  if (simulationError.value) return { message: simulationError.value, variant: 'error' }
+  return undefined
+})
 
 // ── Vault loading ────────────────────────────────────────────────────────
 const loadVaults = async () => {
@@ -327,6 +337,8 @@ watch([() => route.params.vault, () => route.query.to], () => {
           <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
             <VaultFormSubmit
               :disabled="reviewSwapDisabled"
+              :disabled-reason="disabledReasonInfo?.message"
+              :disabled-reason-variant="disabledReasonInfo?.variant"
               :loading="isSubmitting || isPreparing"
             >
               {{ reviewSwapLabel }}
