@@ -7,7 +7,7 @@ import { type AccountDepositPosition, getSubAccountIndex } from '~/entities/acco
 import type { EarnVault } from '~/entities/vault'
 import { VaultOverviewModal, VaultSupplyApyModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
-import { formatNumber, formatCompactUsdValue, compactNumber } from '~/utils/string-utils'
+import { formatNumber, formatCompactUsdValue, compactNumber, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 
 const { position } = defineProps<{ position: AccountDepositPosition }>()
@@ -183,12 +183,13 @@ const onClick = () => {
             <div class="text-content-primary text-p3">
               {{ supplyValueDisplay }}
             </div>
-            <div
+            <UiExactAmount
               v-if="hasPrice"
               class="text-content-tertiary text-p3"
+              :exact="formatExactAmount(position.assets, vault.asset.decimals, vault.asset.symbol)"
             >
               ~ {{ roundAndCompactTokens(position.assets, vault.asset.decimals) }} {{ vault.asset.symbol }}
-            </div>
+            </UiExactAmount>
           </div>
         </div>
         <div

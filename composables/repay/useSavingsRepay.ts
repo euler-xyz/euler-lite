@@ -15,6 +15,7 @@ import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { useRepaySwapCore } from '~/composables/repay/useRepaySwapCore'
 import { useRepaySwapDetails } from '~/composables/repay/useRepaySwapDetails'
 import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics'
+import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
 import { createRaceGuard } from '~/utils/race-guard'
 import { findBlockingDisabledOp, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
@@ -187,6 +188,16 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
 
   const hookWarning = computed(() => getPlanHookDisabledWarning(savingsRepayPlannedOps.value))
 
+  // Uses amountInMax (slippage-padded) when available so the user sees an
+  // insufficient-balance error before hitting an on-chain revert.
+  const requiredInput = computed(() => {
+    if (core.isSameAsset.value) return core.spent.value ?? 0n
+    const q = core.quotes.selectedQuote.value
+    if (!q) return 0n
+    return getSwapInputAmount(q, core.direction.value)
+  })
+  const isInsufficientSource = computed(() => requiredInput.value > 0n && requiredInput.value > sourceBalance.value)
+
   // --- Submit disabled ---
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
@@ -194,7 +205,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     if (!sourceVault.value || !borrowVault.value) return true
     if (!core.debtAmount.value && !core.amount.value) return true
     if (core.isRepayExceedsDebt.value) return true
-    if (core.spent.value !== null && core.spent.value > sourceBalance.value) return true
+    if (isInsufficientSource.value) return true
     if (core.isSameAsset.value) return false
     if (core.quotes.quoteError.value) return true
     if (!core.quotes.selectedQuote.value) return true
@@ -205,7 +216,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     if (core.isRepayExceedsDebt.value) {
       return 'You repaying more than required'
     }
-    if (core.spent.value !== null && core.spent.value > sourceBalance.value) {
+    if (isInsufficientSource.value) {
       return 'Insufficient savings balance to cover the required swap amount.'
     }
     return undefined
@@ -432,6 +443,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     onPercentInput: core.onPercentInput,
     onSourceVaultChange,
     onRefreshQuotes: core.onRefreshQuotes,
+    onSourceMax: core.onSourceMax,
     submit,
     send,
     updateSourceBalance,

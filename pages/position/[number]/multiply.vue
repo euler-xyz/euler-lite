@@ -22,6 +22,7 @@ import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe, computeNextHe
 import { nanoToValue } from '~/utils/crypto-utils'
 import { computeMaxMultiplier } from '~/utils/multiply-math'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -664,7 +665,7 @@ const sendMultiply = async () => {
     modal.close()
     refreshAllPositions(eulerLensAddresses.value, address.value || '')
     setTimeout(() => {
-      router.replace('/portfolio')
+      router.replace({ path: '/portfolio', query: { network: route.query.network } })
     }, 400)
   }
   catch (e) {
@@ -706,6 +707,14 @@ const isMultiplyRestricted = computed(() => {
     || (short && isVaultRestrictedByCountry(short.address))
 })
 const reviewMultiplyDisabled = computed(() => isGeoBlocked.value || isMultiplyRestricted.value || isMultiplySubmitDisabled.value)
+
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isMultiplyRestricted.value) return { message: 'Multiply is not available for this pair in your region', variant: 'warning' }
+  if (multiplyErrorText.value) return { message: multiplyErrorText.value, variant: 'error' }
+  if (multiplySimulationError.value) return { message: multiplySimulationError.value, variant: 'error' }
+  return undefined
+})
 
 const loadPosition = async () => {
   if (!isConnected.value && !isSpyMode.value) {
@@ -875,6 +884,8 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
             <VaultFormSubmit
               :disabled="reviewMultiplyDisabled"
               :loading="isSubmitting || isPreparing"
+              :disabled-reason="disabledReasonInfo?.message"
+              :disabled-reason-variant="disabledReasonInfo?.variant"
             >
               Review Multiply
             </VaultFormSubmit>

@@ -2,7 +2,7 @@
 import { useAccount } from '@wagmi/vue'
 import { getAddress, type Address, type Abi } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
-import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
+import { formatNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import type { AccountBorrowPosition } from '~/entities/account'
 import { getSubAccountIndex } from '~/entities/account'
@@ -529,13 +529,14 @@ onMounted(() => {
             <div class="text-content-primary text-p3">
               {{ borrowedValueDisplay }}
             </div>
-            <div
+            <UiExactAmount
               v-if="borrowedValueInfo.hasPrice"
               class="text-content-tertiary text-p3"
+              :exact="formatExactAmount(position.borrowed, position.borrow.decimals, position.borrow.asset.symbol)"
             >
               ~ {{ roundAndCompactTokens(position.borrowed, position.borrow.decimals) }}
               {{ position.borrow.asset.symbol }}
-            </div>
+            </UiExactAmount>
           </div>
         </div>
         <div class="flex justify-between">
@@ -544,15 +545,24 @@ onMounted(() => {
           </div>
           <div class="flex justify-between gap-8 text-right">
             <div class="text-content-primary text-p3">
-              {{ collateralValueDisplay }}
+              <template v-if="collateralValue.hasPrice">
+                {{ collateralValueDisplay }}
+              </template>
+              <UiExactAmount
+                v-else
+                :exact="formatExactAmount(collateralItems[0]?.assets ?? 0n, position.collateral.decimals, position.collateral.asset.symbol)"
+              >
+                {{ collateralValueDisplay }}
+              </UiExactAmount>
             </div>
-            <div
+            <UiExactAmount
               v-if="collateralValue.hasPrice"
               class="text-content-tertiary text-p3"
+              :exact="formatExactAmount(collateralItems[0].assets, position.collateral.decimals, position.collateral.asset.symbol)"
             >
               ~ {{ roundAndCompactTokens(collateralItems[0].assets, position.collateral.decimals) }}
               {{ position.collateral.asset.symbol }} {{ collateralItems.length > 1 ? '& others' : '' }}
-            </div>
+            </UiExactAmount>
           </div>
         </div>
         <div class="flex justify-between">

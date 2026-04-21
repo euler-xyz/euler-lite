@@ -226,7 +226,7 @@ The listing pages (Lend, Borrow, Earn, Explore) support user-defined metric filt
 
 ## 🚀 Performance Architecture
 
-### Page Keepalive Strategy
+### Page KeepAlive Strategy
 
 The app uses Vue's `<KeepAlive>` to preserve component state across navigation for listing pages:
 
@@ -246,7 +246,7 @@ This prevents re-fetching and re-rendering when users navigate between listing p
 4. **RPC Deduplication**: Concurrent RPC calls for the same data are deduplicated so only one request is made
 5. **Batch Operations**: Batch API calls to reduce network overhead
 6. **Debouncing**: User input and position refresh debouncing to prevent excessive API calls
-7. **Keepalive**: Listing pages cached in memory to avoid redundant data loads
+7. **KeepAlive**: Listing pages cached in memory to avoid redundant data loads
 8. **Lazy Chart Loading**: Chart.js is lazy-loaded only when chart components are mounted. Chart colors are read from CSS custom properties via the `useThemeColors` composable (reads `document.body` computed styles, reactive to `useTheme()`), so charts automatically follow the theme
 9. **Interval Cleanup**: All `setInterval` timers are properly cleaned up to prevent memory leaks
 10. **shallowRef**: Collection data (arrays, maps) uses `shallowRef` instead of `ref` to avoid deep reactivity overhead

@@ -82,6 +82,10 @@ export const useBrevis = () => {
   const { chainId } = useEulerAddresses()
   const { client: rpcClient } = useRpcClient()
   const { enableIncentra } = useDeployConfig()
+  const { spyAddress } = useSpyMode()
+
+  const effectiveAddress = computed(() => spyAddress.value || wagmiAddress.value || '')
+  const isActive = computed(() => isConnected.value || Boolean(spyAddress.value))
 
   const ensureWalletOnCurrentChain = async () => {
     const targetChainId = chainId.value
@@ -313,14 +317,9 @@ export const useBrevis = () => {
     }
   }
 
-  watch(wagmiAddress, (val, oldVal) => {
-    if (val) {
-      address.value = val
-    }
-    else {
-      address.value = ''
-    }
-    // Force-refresh rewards when the connected wallet changes (skip initial mount)
+  watch(effectiveAddress, (val, oldVal) => {
+    address.value = val || ''
+    // Force-refresh rewards when the effective address changes (skip initial mount)
     if (enableIncentra && oldVal && val && val !== oldVal) {
       loadRewards(true, true)
     }
@@ -337,8 +336,8 @@ export const useBrevis = () => {
     }
   })
 
-  watch(isConnected, (connected) => {
-    if (connected && enableIncentra) {
+  watch(isActive, (active) => {
+    if (active && enableIncentra) {
       if (!isLoaded.value) {
         loadCampaigns()
         loadRewards()
@@ -352,7 +351,7 @@ export const useBrevis = () => {
         }, POLL_INTERVAL_30S_MS)
       }
     }
-    else {
+    else if (!active) {
       userRewards.value = []
       isCampaignsLoading.value = false
       isRewardsLoading.value = false

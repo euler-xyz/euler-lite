@@ -1,27 +1,10 @@
-import { type Address, formatUnits } from 'viem'
 import type { Ref } from 'vue'
 import type { SwapApiQuote } from '~/entities/swap'
 import type { Vault, SecuritizeVault, EarnVault } from '~/entities/vault'
-import { getAssetUsdValue } from '~/services/pricing/priceProvider'
-import { fetchBackendPrice } from '~/services/pricing/backendClient'
+import { getTokenUsdValue } from '~/services/pricing/priceProvider'
 import { createRaceGuard } from '~/utils/race-guard'
 
 type AnyVault = Vault | SecuritizeVault | EarnVault
-
-const getTokenUsdValue = async (
-  amount: bigint,
-  decimals: number,
-  tokenAddress: string,
-  vault: AnyVault | null | undefined,
-): Promise<number | undefined> => {
-  if (vault) {
-    return getAssetUsdValue(amount, vault, 'off-chain')
-  }
-  const priceData = await fetchBackendPrice(tokenAddress as Address)
-  if (!priceData?.price) return undefined
-  const tokenAmount = Number(formatUnits(amount, decimals))
-  return tokenAmount * priceData.price
-}
 
 export const useSwapPriceImpact = (options: {
   quote: Ref<SwapApiQuote | null>

@@ -228,7 +228,9 @@ export default defineNuxtConfig({
             org: 'euler',
             project: 'euler-lite',
             authToken: process.env.SENTRY_AUTH_TOKEN,
-            filesToDeleteAfterUpload: ['**/*.map'],
+            sourcemaps: {
+              filesToDeleteAfterUpload: ['**/*.map'],
+            },
           },
         },
       }

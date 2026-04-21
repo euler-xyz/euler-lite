@@ -18,6 +18,7 @@ import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { createRaceGuard } from '~/utils/race-guard'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const router = useRouter()
 const _route = useRoute()
@@ -102,6 +103,14 @@ const isGeoBlocked = computed(() => {
 const isBorrowRestricted = computed(() =>
   pair.value?.borrow ? isVaultRestrictedByCountry(pair.value.borrow.address) : false)
 const reviewBorrowDisabled = computed(() => isGeoBlocked.value || isBorrowRestricted.value || isSubmitDisabled.value)
+
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isBorrowRestricted.value) return { message: 'Borrowing this asset is not available in your region', variant: 'warning' }
+  if (errorText.value) return { message: errorText.value, variant: 'error' }
+  if (simulationError.value) return { message: simulationError.value, variant: 'error' }
+  return undefined
+})
 const borrowVault = computed(() => pair.value?.borrow)
 const collateralVault = computed(() => pair.value?.collateral)
 useOperationGuard(computed(() => [borrowVault.value?.address, collateralVault.value?.address].filter(Boolean)))
@@ -292,7 +301,7 @@ const send = async () => {
     modal.close()
     updateBalance()
     setTimeout(() => {
-      router.replace('/portfolio')
+      router.replace({ path: '/portfolio', query: { network: _route.query.network } })
     }, 400)
   }
   catch (e) {
@@ -564,6 +573,8 @@ watch([collateralAmount, borrowAmount], async () => {
             <VaultFormSubmit
               :disabled="reviewBorrowDisabled"
               :loading="isSubmitting || isPreparing"
+              :disabled-reason="disabledReasonInfo?.message"
+              :disabled-reason-variant="disabledReasonInfo?.variant"
             >
               Review Borrow
             </VaultFormSubmit>

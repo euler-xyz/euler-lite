@@ -16,6 +16,7 @@ import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { useRepaySwapCore } from '~/composables/repay/useRepaySwapCore'
 import { useRepaySwapDetails } from '~/composables/repay/useRepaySwapDetails'
 import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics'
+import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createRaceGuard } from '~/utils/race-guard'
@@ -243,12 +244,23 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
   const hookWarning = computed(() => getPlanHookDisabledWarning(collateralSwapRepayPlannedOps.value))
 
+  // Uses amountInMax (slippage-padded) when available so the user sees an
+  // insufficient-balance error before hitting an on-chain revert.
+  const requiredInput = computed(() => {
+    if (core.isSameAsset.value) return core.spent.value ?? 0n
+    const q = core.quotes.selectedQuote.value
+    if (!q) return 0n
+    return getSwapInputAmount(q, core.direction.value)
+  })
+  const isInsufficientSource = computed(() => requiredInput.value > 0n && requiredInput.value > sourceBalance.value)
+
   // --- Submit disabled ---
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
     if (findBlockingDisabledOp(collateralSwapRepayPlannedOps.value)) return true
     if (!sourceVault.value || !borrowVault.value) return true
     if (!core.debtAmount.value && !core.amount.value) return true
+    if (isInsufficientSource.value) return true
     if (core.isSameAsset.value) {
       if (isHealthInsufficient.value) return true
       return false
@@ -263,6 +275,9 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const disabledReason = computed(() => {
     if (core.isRepayExceedsDebt.value) {
       return 'You repaying more than required'
+    }
+    if (isInsufficientSource.value) {
+      return 'Insufficient collateral balance to cover the required swap amount.'
     }
     if (isHealthInsufficient.value) {
       return 'This swap will not restore account health. Repay the full debt from your wallet instead.'
@@ -498,6 +513,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     onPercentInput: core.onPercentInput,
     onSourceVaultChange,
     onRefreshQuotes: core.onRefreshQuotes,
+    onSourceMax: core.onSourceMax,
     submit,
     send,
     updateSourceBalance,

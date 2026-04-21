@@ -3,7 +3,7 @@ import { formatUnits } from 'viem'
 import type { Vault, SecuritizeVault, VaultAsset, CollateralOption, EarnVault } from '~/entities/vault'
 import { getAssetUsdPrice } from '~/services/pricing/priceProvider'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { compactNumber, formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
+import { compactNumber, formatSmartAmount, trimTrailingZeros, formatExactAmount } from '~/utils/string-utils'
 import { ChooseCollateralModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 
@@ -22,6 +22,7 @@ const props = defineProps<{
   priceOverride?: number // USD unit price for assets without a vault (e.g., swap-to-deposit)
   swappable?: boolean // When true, asset pill shows dropdown arrow and emits click-asset
   selectedSource?: 'wallet' | 'saving' // Source indicator chip when multiple collateral options exist
+  maxHandler?: () => void // When provided, replaces the default "Max" button behavior
 }>()
 const emits = defineEmits(['input', 'change-collateral', 'click-asset'])
 const model = defineModel<string>({ default: '' })
@@ -99,6 +100,10 @@ const price = computed(() => {
 
 const hasPrice = computed(() => price.value !== null)
 const setMax = () => {
+  if (props.maxHandler) {
+    props.maxHandler()
+    return
+  }
   model.value = trimTrailingZeros(formatUnits(props.balance ?? 0n, Number(props.asset.decimals)))
   emitInputNow()
   if (inputEl.value) {
@@ -250,7 +255,12 @@ const openChooseCollateralModal = () => {
         :loading="balanceLoading ?? false"
       >
         <p @click="setMax">
-          <span class="text-content-tertiary">{{ formatSmartAmount(friendlyBalance) }} {{ asset.symbol }}</span> <span
+          <UiExactAmount
+            class="text-content-tertiary"
+            :exact="formatExactAmount(balance ?? 0n, asset?.decimals ?? 18n, asset.symbol)"
+          >
+            {{ formatSmartAmount(friendlyBalance) }} {{ asset.symbol }}
+          </UiExactAmount> <span
             class="text-accent-500 font-semibold px-4 cursor-pointer select-none text-[12px] leading-[16px]"
           >Max</span> <!-- TODO: button -->
         </p>

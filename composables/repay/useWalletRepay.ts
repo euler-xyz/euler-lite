@@ -141,20 +141,20 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       try {
         plan.value = shouldFullRepay
           ? await buildFullRepayPlan(
-            borrowVault.value.address,
-            borrowVault.value.asset.address,
-            amountNano,
-            position.value.subAccount,
-            position.value.collaterals ?? [collateralVault.value.address],
-            { includePermit2Call: false },
-          )
+              borrowVault.value.address,
+              borrowVault.value.asset.address,
+              amountNano,
+              position.value.subAccount,
+              position.value.collaterals ?? [collateralVault.value.address],
+              { includePermit2Call: false },
+            )
           : await buildRepayPlan(
-            borrowVault.value.address,
-            borrowVault.value.asset.address,
-            amountNano,
-            position.value.subAccount,
-            { includePermit2Call: false },
-          )
+              borrowVault.value.address,
+              borrowVault.value.asset.address,
+              amountNano,
+              position.value.subAccount,
+              { includePermit2Call: false },
+            )
       }
       catch (e) {
         logWarn('walletRepay/buildPlan', e)
@@ -196,20 +196,20 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       const isFullRepay = amountNano >= currentDebt || walletRepayPercent.value >= 100
       const txPlan = isFullRepay
         ? await buildFullRepayPlan(
-          borrowVault.value.address,
-          borrowVault.value.asset.address,
-          amountNano,
-          position.value.subAccount,
-          position.value.collaterals ?? [collateralVault.value.address],
-          { includePermit2Call: true },
-        )
+            borrowVault.value.address,
+            borrowVault.value.asset.address,
+            amountNano,
+            position.value.subAccount,
+            position.value.collaterals ?? [collateralVault.value.address],
+            { includePermit2Call: true },
+          )
         : await buildRepayPlan(
-          borrowVault.value.address,
-          borrowVault.value.asset.address,
-          amountNano,
-          position.value.subAccount,
-          { includePermit2Call: true },
-        )
+            borrowVault.value.address,
+            borrowVault.value.asset.address,
+            amountNano,
+            position.value.subAccount,
+            { includePermit2Call: true },
+          )
       await executeTxPlan(txPlan)
 
       modal.close()
@@ -335,6 +335,17 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     amount.value = trimTrailingZeros(formatUnits(amountNano, Number(borrowVault.value.asset.decimals)))
   }
 
+  // Max on source input: clamp to current debt so clicking Max on wallet
+  // balance > debt behaves like Max on debt (no over-repay). The watcher on
+  // `amount` syncs walletRepayPercent and triggers estimates.
+  const onSourceMax = () => {
+    clearSimulationError()
+    if (!borrowVault.value || !position.value) return
+    const currentDebt = position.value.borrowed || 0n
+    const cap = walletBalance.value < currentDebt ? walletBalance.value : currentDebt
+    amount.value = trimTrailingZeros(formatUnits(cap, Number(borrowVault.value.asset.decimals)))
+  }
+
   // Watch amount changes: sync percent slider + trigger estimates
   watch(amount, () => {
     clearSimulationError()
@@ -395,6 +406,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     submit,
     send,
     onWalletRepayPercentInput,
+    onSourceMax,
     initEstimates,
     resetOnTabSwitch,
   }

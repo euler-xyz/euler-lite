@@ -144,10 +144,6 @@ watchEffect(async () => {
                 class="text-p2 text-content-primary"
               >{{ entity.name }}</span>
             </div>
-            <span
-              v-if="isGovernanceLimited"
-              class="text-p3 text-content-tertiary"
-            >Limited risk management</span>
           </div>
           <div v-else>
             -

@@ -253,10 +253,10 @@ export const fetchSecuritizeVault = async (vaultAddress: string): Promise<Securi
 
   const assetPriceInfo = eulerLensAddresses.value?.utilsLens
     ? await resolveAssetPriceInfo(
-      rpcUrl.value,
-      eulerLensAddresses.value.utilsLens,
-      data.asset as string,
-    )
+        rpcUrl.value,
+        eulerLensAddresses.value.utilsLens,
+        data.asset as string,
+      )
     : undefined
 
   return {
@@ -384,10 +384,10 @@ export const fetchEarnVault = async (vaultAddress: string): Promise<EarnVault> =
 export const fetchVaults = async function* (
   vaultAddresses?: string[],
 ): AsyncGenerator<
-    VaultIteratorResult<Vault>,
-    void,
-    unknown
-  > {
+  VaultIteratorResult<Vault>,
+  void,
+  unknown
+> {
   const { PYTH_HERMES_URL } = useEulerConfig()
   const { client: rpcClient, rpcUrl } = useRpcClient()
   const { eulerLensAddresses, eulerCoreAddresses, chainId } = useEulerAddresses()
