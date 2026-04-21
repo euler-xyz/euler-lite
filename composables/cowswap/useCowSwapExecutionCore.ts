@@ -11,6 +11,7 @@ import {
   normalizeCowSignature,
   computeNonceNamespace,
   submitCowSwapOrder,
+  cancelCowSwapOrder,
   type CowSwapOrderPayload,
 } from '~/entities/cowswap'
 
@@ -32,6 +33,12 @@ export const useCowSwapExecutionCore = () => {
     addressPrefix: Hex
     nonceNamespace: bigint
     nonce: bigint
+  } | undefined>()
+  const cancelMode = ref<'cow-api' | 'evc-permit' | undefined>()
+  const cowApiCancellation = ref<{
+    orderbookUrl: string
+    settlementContract: Address
+    chainId: number
   } | undefined>()
 
   const isPending = computed(() => status.value !== 'idle' && status.value !== 'submitted')
@@ -193,32 +200,68 @@ export const useCowSwapExecutionCore = () => {
     return uid
   }
 
+  const configureCowApiCancellation = (params: {
+    orderbookUrl: string
+    settlementContract: Address
+    chainId: number
+  }) => {
+    cancelMode.value = 'cow-api'
+    cowApiCancellation.value = params
+  }
+
+  const configurePermitCancellation = () => {
+    cancelMode.value = 'evc-permit'
+    cowApiCancellation.value = undefined
+  }
+
   const cancelOrder = async (): Promise<void> => {
     const uid = orderUid.value
     if (!uid) throw new Error('No order to cancel')
-    const permit = permitCancellation.value
-    if (!permit) throw new Error('Permit cancellation data not available')
 
     error.value = null
     const previousStatus = status.value
     status.value = 'cancelling'
 
     try {
-      const client = requireRpc()
-      const currentNonce = await client.readContract({
-        address: permit.evcAddress,
-        abi: EVC_ABI,
-        functionName: 'getNonce',
-        args: [permit.addressPrefix, permit.nonceNamespace],
-      }) as bigint
+      if (cancelMode.value === 'cow-api') {
+        const config = cowApiCancellation.value
+        if (!config) throw new Error('CoW API cancellation data not available')
 
-      if (currentNonce <= permit.nonce) {
-        await writeContractAndWait({
+        await cancelCowSwapOrder({
+          orderUid: uid,
+          orderbookUrl: config.orderbookUrl,
+          settlementContract: config.settlementContract,
+          chainId: config.chainId,
+          signTypedData: async (params) => {
+            return await signTypedDataAsync({
+              domain: params.domain as Record<string, unknown>,
+              types: params.types as Record<string, unknown>,
+              primaryType: params.primaryType,
+              message: params.message as Record<string, unknown>,
+            }) as Hex
+          },
+        })
+      }
+      else {
+        const permit = permitCancellation.value
+        if (!permit) throw new Error('Permit cancellation data not available')
+
+        const client = requireRpc()
+        const currentNonce = await client.readContract({
           address: permit.evcAddress,
           abi: EVC_ABI,
-          functionName: 'setNonce',
-          args: [permit.addressPrefix, permit.nonceNamespace, permit.nonce + 1n],
-        })
+          functionName: 'getNonce',
+          args: [permit.addressPrefix, permit.nonceNamespace],
+        }) as bigint
+
+        if (currentNonce <= permit.nonce) {
+          await writeContractAndWait({
+            address: permit.evcAddress,
+            abi: EVC_ABI,
+            functionName: 'setNonce',
+            args: [permit.addressPrefix, permit.nonceNamespace, permit.nonce + 1n],
+          })
+        }
       }
 
       locallyCancelled.value = true
@@ -240,6 +283,8 @@ export const useCowSwapExecutionCore = () => {
     error.value = null
     locallyCancelled.value = false
     permitCancellation.value = undefined
+    cancelMode.value = undefined
+    cowApiCancellation.value = undefined
   }
 
   return {
@@ -265,5 +310,7 @@ export const useCowSwapExecutionCore = () => {
     signEvcPermit,
     signOrderTypedData,
     submitAndFinalize,
+    configureCowApiCancellation,
+    configurePermitCancellation,
   }
 }
