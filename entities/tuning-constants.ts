@@ -3,9 +3,6 @@ export const CACHE_TTL_15S_MS = 15_000
 export const CACHE_TTL_1MIN_MS = 60_000
 export const CACHE_TTL_5MIN_MS = 300_000
 
-// ── Retry Delays ─────────────────────────────────────────
-export const TOKEN_LIST_RETRY_DELAY_MS = 15_000
-
 // ── Polling Intervals ─────────────────────────────────────
 export const POLL_INTERVAL_5S_MS = 5_000
 export const POLL_INTERVAL_10S_MS = 10_000

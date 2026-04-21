@@ -70,8 +70,8 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 ### 🪙 [Token List](./token-list.md)
 
 - Three-source token list (Euler API, DefiLlama, Uniswap)
-- Euler-first blocking strategy with lazy supplemental sources
-- One-shot 15s retry for supplemental data pickup
+- Parallel fetch via `Promise.allSettled` with per-source stale fallback
+- Pre-populated at server startup by `warm-cache.ts`
 - CSP considerations for logo URLs
 
 ### 🌍 [Geo-Blocking](./geo-blocking.md)

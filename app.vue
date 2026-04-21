@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { POLL_INTERVAL_60S_MS, TOKEN_LIST_RETRY_DELAY_MS } from '~/entities/tuning-constants'
+import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 import { useModal } from '~/components/ui/composables/useModal'
 import { MigrationAnnouncementModal } from '#components'
 
@@ -56,7 +56,6 @@ useHead({
 const isMenuVisible = ref(true)
 const isHeaderVisible = ref(true)
 let interval: NodeJS.Timeout | null = null
-let tokenListRetryTimeout: NodeJS.Timeout | null = null
 
 const checkOnboarding = () => {
   const isOnboardingCompleted = useLocalStorage('is-onboarding-completed', false)
@@ -113,22 +112,10 @@ onMounted(checkMigrationAnnouncement)
 watch(chainId, () => {
   resetVaultsState()
   resetBalances()
-  if (tokenListRetryTimeout) {
-    clearTimeout(tokenListRetryTimeout)
-    tokenListRetryTimeout = null
-  }
   const targetChainId = chainId.value
   const labelsPromise = loadLabels()
   void loadTokenList()
   void loadCountry()
-  // One-shot retry after 15s to pick up supplemental token sources
-  // (Uniswap/DefiLlama background fetches complete on the server by then)
-  tokenListRetryTimeout = setTimeout(async () => {
-    tokenListRetryTimeout = null
-    if (chainId.value !== targetChainId) return
-    await loadTokenList(true)
-    updateBalances()
-  }, TOKEN_LIST_RETRY_DELAY_MS)
   void labelsPromise.then(() => {
     if (chainId.value !== targetChainId) return
     void loadVaults()
@@ -173,9 +160,6 @@ watch(portfolioRefreshCounter, () => {
 onUnmounted(() => {
   if (interval) {
     clearInterval(interval)
-  }
-  if (tokenListRetryTimeout) {
-    clearTimeout(tokenListRetryTimeout)
   }
 })
 </script>

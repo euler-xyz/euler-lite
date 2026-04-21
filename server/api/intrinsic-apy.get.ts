@@ -1,0 +1,40 @@
+import { createError, getQuery } from 'h3'
+import { createRateLimiter } from '~/server/utils/rate-limit'
+import { getIntrinsicApyForChain } from '~/server/utils/intrinsic-apy'
+import { getEnabledChainIds } from '~/utils/chain-env'
+import { logWarn } from '~/server/utils/log'
+
+/**
+ * Consolidated intrinsic-APY proxy. Client issues one request per chain
+ * and receives a flat `{ [lowercaseAddress]: { apy, provider, source? } }`
+ * map with every APY we can resolve from `intrinsicApySources`. All
+ * provider-specific upstream fetching, filtering, and extraction happens
+ * server-side — no giant payloads and no provider-awareness on the client.
+ */
+
+const rateLimiter = createRateLimiter({
+  max: 1000,
+  windowMs: 60_000,
+  label: 'intrinsic-apy',
+})
+
+export default defineEventHandler(async (event) => {
+  rateLimiter.consume(event)
+
+  const query = getQuery(event)
+  const chainId = Number(query.chainId)
+  if (!Number.isInteger(chainId) || chainId <= 0) {
+    throw createError({ statusCode: 400, statusMessage: 'Invalid chainId' })
+  }
+  if (!getEnabledChainIds().includes(chainId)) {
+    throw createError({ statusCode: 400, statusMessage: 'Unsupported chainId' })
+  }
+
+  try {
+    return await getIntrinsicApyForChain(chainId)
+  }
+  catch (err) {
+    logWarn('intrinsic-apy', `Failed to resolve chain ${chainId}:`, err instanceof Error ? err.message : err)
+    return {}
+  }
+})
