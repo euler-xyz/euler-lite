@@ -86,7 +86,7 @@ External metadata (contract addresses, labels, oracle checks) is fetched through
 | `GET /api/token-list?chainId=X` | Euler API + Uniswap + DefiLlama + Merkl reward-tokens | 5 min | `EULER_API_URL`, `NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL`, `NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL` |
 | `GET /api/vault-categories?chainId=X[&address=0x…]` | Subgraph vaults query (paginated, capped at 10k per chain) + escrow perspective RPC | 5 min | `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` |
 | `GET /api/intrinsic-apy?chainId=X` | Every intrinsic-APY source for chain as `{ [addr]: info }` | 5 min (per upstream) | Provider-specific upstreams (DefiLlama, Pendle, Securitize, etc.) |
-| `GET /api/rewards/{merkl,brevis,fuul}?chainId=X` | Merkl / Brevis / Fuul public campaigns | 5 min | Hardcoded provider URLs |
+| `GET /api/rewards/{merkl,brevis,fuul}?chainId=X` | Merkl / Incentra / Fuul public campaigns | 5 min | Hardcoded provider URLs |
 | `GET /api/vaults?chainId=X` | Pre-computed chain vault snapshot | 10 min (safety floor) | — |
 | `GET /api/pyth/updates?ids[]=...` | Pyth Hermes (`/v2/updates/price/latest`) | No cache | `PYTH_HERMES_URL` (server-only) |
 
