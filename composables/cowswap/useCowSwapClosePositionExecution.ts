@@ -38,6 +38,7 @@ export const useCowSwapClosePositionExecution = () => {
     const client = core.requireRpc()
     const chainConfig = getCowSwapChainConfig(params.chainId)
     if (!chainConfig) throw new Error(`CowSwap not supported on chain ${params.chainId}`)
+    core.configurePermitCancellation()
 
     if (params.sellAmount <= 0n) throw new Error('Sell amount must be greater than zero')
     if (params.buyAmount <= 0n) throw new Error('Buy amount must be greater than zero')
