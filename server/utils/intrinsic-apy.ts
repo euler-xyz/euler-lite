@@ -533,7 +533,9 @@ export async function getIntrinsicApyForChain(chainId: number): Promise<Record<s
   catch (err) {
     const lastStale = mergedCache.getStale(key)
     if (lastStale) {
-      logWarn('intrinsic-apy', `chain ${chainId} merge failed; serving stale:`, err instanceof Error ? err.message : err)
+      const msg = err instanceof Error ? err.message : String(err)
+      reportStatus('intrinsic-apy', `merge-stale-fallback:${chainId}`, `failed:${msg}`,
+        `chain ${chainId} merge failed; serving stale: ${msg}`)
       return lastStale
     }
     throw err

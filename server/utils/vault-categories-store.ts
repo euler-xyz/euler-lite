@@ -34,7 +34,7 @@ import { createTtlCache } from './cache'
 import { fetchWithTimeout, withWallClock } from './fetchWithTimeout'
 import { createInFlightDedup } from './in-flight'
 import { INTERNAL_FETCH_HEADERS } from './internal-headers'
-import { logWarn } from './log'
+import { reportStatus } from './log'
 import { getSubgraphUris } from '~/utils/chain-env'
 import { eulerPerspectiveABI } from '~/entities/euler/abis'
 
@@ -119,6 +119,7 @@ const getChainFactoryAddresses = async (chainId: number): Promise<ChainFactoryAd
     const entry = chains.find(c => c.chainId === chainId)
     const core = entry?.addresses?.coreAddrs
     const periphery = entry?.addresses?.peripheryAddrs
+    reportStatus('vault-categories', `chain-config:${chainId}`, 'ok')
     return {
       evk: core?.eVaultFactory?.toLowerCase(),
       earn: core?.eulerEarnFactory?.toLowerCase(),
@@ -127,7 +128,9 @@ const getChainFactoryAddresses = async (chainId: number): Promise<ChainFactoryAd
     }
   }
   catch (err) {
-    logWarn('vault-categories', `chain config fetch failed chain=${chainId}:`, err instanceof Error ? err.message : err)
+    const msg = err instanceof Error ? err.message : String(err)
+    reportStatus('vault-categories', `chain-config:${chainId}`, `failed:${msg}`,
+      `chain config fetch failed chain=${chainId}: ${msg}`)
     return {}
   }
 }
@@ -182,7 +185,8 @@ const fetchEscrowVerifiedArray = async (
   if (!perspectiveAddress) return new Set()
   const rpcUrl = process.env[`RPC_URL_HTTP_${chainId}`]
   if (!rpcUrl) {
-    logWarn('vault-categories', `no RPC URL for chain=${chainId}, skipping escrow categorization`)
+    reportStatus('vault-categories', `no-rpc:${chainId}`, 'missing-rpc-url',
+      `no RPC URL for chain=${chainId}, skipping escrow categorization`)
     return new Set()
   }
   try {
@@ -192,10 +196,13 @@ const fetchEscrowVerifiedArray = async (
       abi: eulerPerspectiveABI,
       functionName: 'verifiedArray',
     }) as Address[]
+    reportStatus('vault-categories', `escrow-rpc:${chainId}`, 'ok')
     return new Set(addresses.map(a => a.toLowerCase()))
   }
   catch (err) {
-    logWarn('vault-categories', `escrow verifiedArray failed chain=${chainId}:`, err instanceof Error ? err.message : err)
+    const msg = err instanceof Error ? err.message : String(err)
+    reportStatus('vault-categories', `escrow-rpc:${chainId}`, `failed:${msg}`,
+      `escrow verifiedArray failed chain=${chainId}: ${msg}`)
     return new Set()
   }
 }
@@ -282,7 +289,9 @@ export const getVaultCategories = async (chainId: number): Promise<VaultCategori
   if (cached && !cached.isStale) return cached.data
   if (cached && cached.isStale) {
     void refreshVaultCategories(chainId).catch((err) => {
-      logWarn('vault-categories', `bg revalidate chain=${chainId}:`, err instanceof Error ? err.message : err)
+      const msg = err instanceof Error ? err.message : String(err)
+      reportStatus('vault-categories', `bg-revalidate:${chainId}`, `failed:${msg}`,
+        `bg revalidate chain=${chainId}: ${msg}`)
     })
     return cached.data
   }
