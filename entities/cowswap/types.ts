@@ -68,6 +68,7 @@ export type CowSwapOpenPositionExecuteParams = {
   buyToken: Address
   sellAmount: bigint
   buyAmount: bigint
+  slippageBips: number
   validTo: number
   collateralToken: Address
   wrapper: CowSwapOpenPositionParams
@@ -91,6 +92,7 @@ export type CowSwapCollateralSwapExecuteParams = {
   buyToken: Address
   sellAmount: bigint
   buyAmount: bigint
+  slippageBips: number
   validTo: number
   wrapper: CowSwapCollateralSwapParams
 }
@@ -112,6 +114,7 @@ export type CowSwapClosePositionExecuteParams = {
   buyToken: Address
   sellAmount: bigint
   buyAmount: bigint
+  slippageBips: number
   validTo: number
   orderKind: 'buy' | 'sell'
   wrapper: CowSwapClosePositionParams

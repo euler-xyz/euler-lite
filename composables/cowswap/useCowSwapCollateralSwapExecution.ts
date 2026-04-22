@@ -72,6 +72,7 @@ export const useCowSwapCollateralSwapExecution = () => {
       const { appDataString, appDataHash } = buildCowSwapAppData(
         wrapperData,
         wrapperAddress,
+        params.slippageBips,
         'euler_position_collateral_swap',
       )
 

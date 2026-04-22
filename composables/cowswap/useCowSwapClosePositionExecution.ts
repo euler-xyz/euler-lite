@@ -112,6 +112,7 @@ export const useCowSwapClosePositionExecution = () => {
       const { appDataString, appDataHash } = buildCowSwapAppData(
         wrapperData,
         wrapperAddress,
+        params.slippageBips,
         'euler_position_close',
       )
 

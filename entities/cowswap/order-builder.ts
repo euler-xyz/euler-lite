@@ -103,6 +103,7 @@ export const buildClosePositionWrapperData = (
 export const buildCowSwapAppData = (
   wrapperData: Hex,
   wrapperAddress: Address,
+  slippageBips: number,
   appCode = 'euler_position_open',
 ): { appDataString: string, appDataHash: Hex } => {
   const appData = {
@@ -111,6 +112,10 @@ export const buildCowSwapAppData = (
     metadata: {
       orderClass: {
         orderClass: 'market',
+      },
+      quote: {
+        slippageBips,
+        smartSlippage: false,
       },
       wrappers: [
         {

@@ -281,6 +281,7 @@ const submitCowSwapCollateralSwap = async () => {
     buyToken: toVault.value.address as Address,
     sellAmount,
     buyAmount,
+    slippageBips: Math.round(slippage.value * 100),
     validTo,
     wrapper: {
       owner: (address.value || zeroAddress) as Address,
