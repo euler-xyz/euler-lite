@@ -3,9 +3,8 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'ECR image tag to deploy (defaults to "latest")'
-        required: false
-        default: 'latest'
+        description: 'ECR image tag to deploy'
+        required: true
   push:
     tags:
       - 'v*-rc*'
