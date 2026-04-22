@@ -506,9 +506,9 @@ export const getTokenUsdValue = async (
     return getAssetUsdValue(amount, vault, 'off-chain')
   }
   const priceData = await fetchBackendPrice(tokenAddress as `0x${string}`)
-  if (!priceData?.price) return undefined
+  if (!priceData?.priceUsd) return undefined
   const tokenAmount = nanoToValue(amount, decimals)
-  return tokenAmount * priceData.price
+  return tokenAmount * priceData.priceUsd
 }
 
 /**
