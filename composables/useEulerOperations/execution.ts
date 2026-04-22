@@ -8,11 +8,26 @@ import { applyOperationGuards } from '~/utils/operationGuardRegistry'
 
 const OKX_POST_APPROVE_DELAY_MS = 3000
 
-const isOkxWallet = (connector?: { id?: string, name?: string }) => {
+const isOkxWallet = async (connector?: { id?: string, name?: string, getProvider?: () => Promise<unknown> }) => {
   if (!connector) return false
   const id = connector.id?.toLowerCase() ?? ''
   const name = connector.name?.toLowerCase() ?? ''
-  return id === 'okx' || name.includes('okx')
+  if (id === 'okx' || name.includes('okx')) return true
+
+  // When OKX connects via WalletConnect, the connector itself is generic.
+  // The actual wallet name is in the WC session peer metadata.
+  if (id === 'walletconnect' && connector.getProvider) {
+    try {
+      const provider = await connector.getProvider() as { session?: { peer?: { metadata?: { name?: string } } } }
+      const peerName = provider?.session?.peer?.metadata?.name?.toLowerCase() ?? ''
+      return peerName.includes('okx')
+    }
+    catch {
+      return false
+    }
+  }
+
+  return false
 }
 
 export const createExecutionHelpers = (ctx: OperationsContext, allowanceHelpers: AllowanceHelpers) => {
@@ -59,7 +74,7 @@ export const createExecutionHelpers = (ctx: OperationsContext, allowanceHelpers:
       // OKX wallet's simulation backend lags behind on-chain state after approvals.
       // Without a delay, the next step's preview shows "unable to decode asset changes".
       const isApproveStep = step.type === 'approve' || step.type === 'permit2-approve'
-      if (isApproveStep && isOkxWallet(getAccount(ctx.config).connector)) {
+      if (isApproveStep && await isOkxWallet(getAccount(ctx.config).connector)) {
         await new Promise(resolve => setTimeout(resolve, OKX_POST_APPROVE_DELAY_MS))
       }
     }
