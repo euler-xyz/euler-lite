@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { POLL_INTERVAL_60S_MS, TOKEN_LIST_RETRY_DELAY_MS } from '~/entities/tuning-constants'
+import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 import { useModal } from '~/components/ui/composables/useModal'
 import { MigrationAnnouncementModal } from '#components'
 
 const route = useRoute()
 const router = useRouter()
-const { migrationAnnouncementUrl } = useDeployConfig()
+const { migrationAnnouncementUrl, migrationLegacyAppUrl } = useDeployConfig()
 const migrationAnnouncementSeen = useLocalStorage('migration-announcement-seen', false)
 const modal = useModal()
 
@@ -16,6 +16,13 @@ const { loadLabels } = useEulerLabels()
 const { loadCountry } = useGeoBlock()
 const { updateBalances, resetBalances } = useWallets()
 const { isConnected, address } = useWagmi()
+
+// Eagerly instantiate useEulerAccount at app root so its internal watchers
+// trigger updatePositions() as soon as balances + lens addresses are ready.
+// Without this, positions only load when the user navigates to a page that
+// imports the composable, making first detail-page visit wait on the full
+// subgraph + accountLens round-trip.
+useEulerAccount()
 
 // Initialize price backend (configures endpoint when chainId changes)
 usePriceBackend()
@@ -41,13 +48,21 @@ useHead({
     { property: 'og:description', content: envConfig.appDescription },
     { name: 'twitter:title', content: envConfig.appTitle },
     { name: 'twitter:description', content: envConfig.appDescription },
+    // Crawlers (X, Slack, Discord) read these from the server-rendered HTML,
+    // which is patched by server/plugins/app-config.ts. These entries keep
+    // the SPA in sync after hydration when the env var changes at runtime.
+    ...(envConfig.socialImageUrl
+      ? [
+          { property: 'og:image', content: envConfig.socialImageUrl },
+          { name: 'twitter:image', content: envConfig.socialImageUrl },
+        ]
+      : []),
   ],
 })
 
 const isMenuVisible = ref(true)
 const isHeaderVisible = ref(true)
 let interval: NodeJS.Timeout | null = null
-let tokenListRetryTimeout: NodeJS.Timeout | null = null
 
 const checkOnboarding = () => {
   const isOnboardingCompleted = useLocalStorage('is-onboarding-completed', false)
@@ -91,6 +106,7 @@ const checkMigrationAnnouncement = () => {
     onClose: () => { migrationAnnouncementSeen.value = true },
     props: {
       announcementUrl: migrationAnnouncementUrl,
+      legacyAppUrl: migrationLegacyAppUrl,
     },
   })
 }
@@ -103,22 +119,10 @@ onMounted(checkMigrationAnnouncement)
 watch(chainId, () => {
   resetVaultsState()
   resetBalances()
-  if (tokenListRetryTimeout) {
-    clearTimeout(tokenListRetryTimeout)
-    tokenListRetryTimeout = null
-  }
   const targetChainId = chainId.value
   const labelsPromise = loadLabels()
   void loadTokenList()
   void loadCountry()
-  // One-shot retry after 15s to pick up supplemental token sources
-  // (Uniswap/DefiLlama background fetches complete on the server by then)
-  tokenListRetryTimeout = setTimeout(async () => {
-    tokenListRetryTimeout = null
-    if (chainId.value !== targetChainId) return
-    await loadTokenList(true)
-    updateBalances()
-  }, TOKEN_LIST_RETRY_DELAY_MS)
   void labelsPromise.then(() => {
     if (chainId.value !== targetChainId) return
     void loadVaults()
@@ -163,9 +167,6 @@ watch(portfolioRefreshCounter, () => {
 onUnmounted(() => {
   if (interval) {
     clearInterval(interval)
-  }
-  if (tokenListRetryTimeout) {
-    clearTimeout(tokenListRetryTimeout)
   }
 })
 </script>

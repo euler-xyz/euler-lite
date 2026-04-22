@@ -6,12 +6,12 @@ Euler Lite provides all the core functionality of Euler Finance in a customizabl
 
 - **Lending & Borrowing**: Users can deposit assets to earn yield or borrow against collateral
 - **Portfolio Management**: Track positions and performance
-- **Rewards**: Participate in Merkl/Brevis reward programs
+- **Rewards**: Participate in Merkl, Incentra, and Fuul reward programs
 - **Multi-chain Support**: Connect to multiple EVM-compatible networks
 
 ## Prerequisites
 
-- **Node.js** 18+ (recommended: 20.12.2)
+- **Node.js** 24+ (recommended: 24.14.1)
 - **npm** package manager
 - **Git**
 - A **Reown Project ID** (formerly WalletConnect) - get one at [reown.com](https://reown.com/)
@@ -62,22 +62,32 @@ These use Nuxt's `runtimeConfig` and are set via `NUXT_PUBLIC_CONFIG_*` env vars
 | `NUXT_PUBLIC_CONFIG_APP_TITLE`              | `Euler Lite`                               | App title (SEO, meta tags)                            |
 | `NUXT_PUBLIC_CONFIG_APP_DESCRIPTION`        | `Lightweight interface for Euler Finance.` | App description                                       |
 | `NUXT_PUBLIC_CONFIG_LOGO_URL`               | —                                          | Custom logo URL (falls back to built-in Euler logo)   |
+| `NUXT_PUBLIC_CONFIG_SOCIAL_IMAGE_URL`       | —                                          | Absolute URL to social share image (og:image / twitter:image), 1200×630+ |
 | `NUXT_PUBLIC_CONFIG_LABELS_REPO`            | `euler-xyz/euler-labels`                   | GitHub labels repo                                    |
 | `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH`     | `master`                                   | Branch to fetch labels from                           |
 | `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL`        | —                                          | S3/CDN base URL for labels (overrides repo/branch)    |
+| `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_REPO`     | `euler-xyz/oracle-checks`                  | GitHub repo for oracle check results                  |
 | `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` | —                                          | S3/CDN base URL for oracle checks (overrides repo)    |
+| `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL`       | —                                          | URL for EulerChains.json (overrides default upstream) |
 | `NUXT_PUBLIC_CONFIG_DOCS_URL`               | —                                          | Documentation link                                    |
 | `NUXT_PUBLIC_CONFIG_TOS_URL`                | —                                          | Terms of Service link                                 |
 | `NUXT_PUBLIC_CONFIG_TOS_MD_URL`             | —                                          | TOS markdown URL (enables TOS signing when set)       |
+| `NUXT_PUBLIC_CONFIG_PRIVACY_POLICY_URL`     | `https://www.euler.finance/privacy-policy` | Privacy policy link                                   |
+| `NUXT_PUBLIC_CONFIG_RISK_DISCLOSURES_URL`   | `https://www.euler.finance/risk-disclosures` | Risk disclosures link                               |
+| `NUXT_PUBLIC_CONFIG_MICA_WHITEPAPER_URL`    | `https://www.euler.finance/MICA-Whitepaper.pdf` | MiCA whitepaper link                           |
 | `NUXT_PUBLIC_CONFIG_X_URL`                  | —                                          | X (Twitter) link                                      |
 | `NUXT_PUBLIC_CONFIG_DISCORD_URL`            | —                                          | Discord link                                          |
 | `NUXT_PUBLIC_CONFIG_TELEGRAM_URL`           | —                                          | Telegram link                                         |
 | `NUXT_PUBLIC_CONFIG_GITHUB_URL`             | —                                          | GitHub link                                           |
 | `NUXT_PUBLIC_CONFIG_ENABLE_EARN_PAGE`       | `true`                                     | Show Earn page                                        |
 | `NUXT_PUBLIC_CONFIG_ENABLE_LEND_PAGE`       | `true`                                     | Show Lend page                                        |
+| `NUXT_PUBLIC_CONFIG_ENABLE_EXPLORE_PAGE`    | `true`                                     | Show Explore page                                     |
 | `NUXT_PUBLIC_CONFIG_ENABLE_ENTITY_BRANDING` | `true`                                     | Show entity branding                                  |
 | `NUXT_PUBLIC_CONFIG_ENABLE_VAULT_TYPE`      | `true`                                     | Show vault type labels                                |
 | `NUXT_PUBLIC_CONFIG_ENABLE_APP_TITLE`       | `true`                                     | Show app title in the navbar                          |
+| `NUXT_PUBLIC_CONFIG_ENABLE_MERKL`           | `true`                                     | Enable Merkl rewards integration                      |
+| `NUXT_PUBLIC_CONFIG_ENABLE_INCENTRA`        | `true`                                     | Enable Incentra rewards integration                   |
+| `NUXT_PUBLIC_CONFIG_ENABLE_FUUL`            | `true`                                     | Enable Fuul rewards integration                       |
 | `NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL` | `https://tokens.uniswap.org`               | Uniswap token list for swap selector                  |
 | `NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL` | `https://d3g10bzo9rdluh.cloudfront.net`  | DefiLlama token list for swap selector                |
 
@@ -285,6 +295,11 @@ server/
 | `npm run build`       | Build for production              |
 | `npm run preview`     | Preview production build locally  |
 | `npm run generate`    | Generate static site              |
+| `npm run lint`        | Run ESLint                        |
+| `npm run lint:fix`    | Run ESLint with auto-fix          |
+| `npm run test`        | Run unit tests (watch mode)       |
+| `npm run test:run`    | Run unit tests (single pass)      |
+| `npm run typecheck`   | Type-check the project            |
 | `npm run postinstall` | Prepare Nuxt (runs automatically) |
 
 ## Configuration Checklist
@@ -295,7 +310,7 @@ Before deploying:
 - [ ] Set `APPKIT_PROJECT_ID` and `NUXT_PUBLIC_APP_URL`
 - [ ] Set `EULER_API_URL`, `SWAP_API_URL`
 - [ ] Added at least one `RPC_URL_HTTP_<chainId>` with matching `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`
-- [ ] Configured branding via `NUXT_PUBLIC_CONFIG_*` env vars (title, description, logo, social links)
+- [ ] Configured branding via `NUXT_PUBLIC_CONFIG_*` env vars (title, description, logo, social links, social share image)
 - [ ] Customized theme colors in `assets/styles/variables.scss` (THEME CONFIGURATION section)
 - [ ] Replaced favicon files in `public/favicons/`
 - [ ] Added token icon overrides in `assets/tokens/` (if needed)
@@ -309,7 +324,7 @@ Before deploying:
 
 ### Build Errors
 
-- Ensure Node.js version is 18+ (20.12.2 recommended)
+- Ensure Node.js version is 24+ (24.14.1 recommended)
 - Clear and reinstall: `rm -rf node_modules && npm install`
 
 ### Wallet Connection Issues

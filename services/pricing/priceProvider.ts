@@ -486,6 +486,32 @@ export const getAssetUsdValueOrZero = async (
 }
 
 /**
+ * Calculate USD value of a token amount, preferring vault pricing when
+ * available and falling back to the backend price feed for tokens without
+ * an associated vault (e.g. arbitrary swap tokens from the wallet).
+ *
+ * @param amount - Token amount in native decimals
+ * @param decimals - Token decimals
+ * @param tokenAddress - Token address, required for backend fallback
+ * @param vault - Optional vault for on-vault pricing
+ * @returns USD value as number, or undefined if no price available
+ */
+export const getTokenUsdValue = async (
+  amount: bigint,
+  decimals: number,
+  tokenAddress: string,
+  vault: AnyVault | null | undefined,
+): Promise<number | undefined> => {
+  if (vault) {
+    return getAssetUsdValue(amount, vault, 'off-chain')
+  }
+  const priceData = await fetchBackendPrice(tokenAddress as `0x${string}`)
+  if (!priceData?.price) return undefined
+  const tokenAmount = nanoToValue(amount, decimals)
+  return tokenAmount * priceData.price
+}
+
+/**
  * Convenience wrapper: same as getCollateralUsdValue but returns 0 instead of undefined.
  */
 export const getCollateralUsdValueOrZero = async (

@@ -5,7 +5,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
-import type { Vault } from '~/entities/vault'
+import { isEVKVault, type Vault, type SecuritizeVault } from '~/entities/vault'
 import { getAssetUsdValue } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
@@ -15,8 +15,11 @@ import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { useRepaySwapCore } from '~/composables/repay/useRepaySwapCore'
 import { useRepaySwapDetails } from '~/composables/repay/useRepaySwapDetails'
 import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics'
+import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
 import { createRaceGuard } from '~/utils/race-guard'
+import { findBlockingDisabledOp, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
+import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 
 interface UseSavingsRepayOptions {
   position: Ref<AccountBorrowPosition | undefined>
@@ -60,6 +63,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   const { buildSwapPlan, buildSavingsRepayPlan, buildSavingsFullRepayPlan, buildSwapFullRepayPlan, executeTxPlan } = useEulerOperations()
   const { refreshAllPositions } = useEulerAccount()
   const { eulerLensAddresses } = useEulerAddresses()
+  const { getVault: registryGetVault } = useVaultRegistry()
 
   // --- Savings options ---
   const { savingsPositions, savingsVaults, savingsOptions, getSavingsPosition } = useRepaySavingsOptions()
@@ -146,13 +150,62 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     nextBorrowValueUsd: core.nextBorrowValueUsd,
   })
 
+  // Savings repay: savings.WITHDRAW + liability.SKIM + liability.REPAY_WITH_SHARES.
+  // Full repay additionally sweeps collateral + savings shares back via
+  // transferFromMax (OP_TRANSFER on collateral and savings vaults).
+  // Heuristic: for cross-asset paths, core.debtRepaid uses the quote's
+  // amountOut (pre-slippage). At the exact debt boundary, the on-chain
+  // execution may land on either side. Over-estimating triggers the
+  // OP_TRANSFER check for a partial repay (harmless — the warning is
+  // accurate since a full close would also need OP_TRANSFER). Under-
+  // estimating omits the check for a true full repay — extremely narrow.
+  const isEffectivelyFullRepay = computed(() => {
+    if (!position.value || (position.value.borrowed ?? 0n) <= 0n) return false
+    const repaid = core.debtRepaid.value
+    return repaid !== null && repaid >= (position.value.borrowed ?? 0n)
+  })
+
+  const savingsRepayPlannedOps = computed<PlannedOp[]>(() => {
+    const steps: PlannedOp[] = []
+    if (sourceVault.value) steps.push({ vault: sourceVault.value as Vault, op: OP_WITHDRAW })
+    if (borrowVault.value) {
+      steps.push({ vault: borrowVault.value as Vault, op: OP_SKIM })
+      steps.push({ vault: borrowVault.value as Vault, op: OP_REPAY_WITH_SHARES })
+    }
+    if (isEffectivelyFullRepay.value) {
+      // Full repay sweeps all enabled collaterals via transferFromMax.
+      const collateralAddresses = position.value?.collaterals ?? []
+      for (const addr of collateralAddresses) {
+        const vault = registryGetVault(addr) as Vault | SecuritizeVault | undefined
+        if (vault && isEVKVault(vault)) {
+          steps.push({ vault, op: OP_TRANSFER })
+        }
+      }
+      if (sourceVault.value) steps.push({ vault: sourceVault.value as Vault, op: OP_TRANSFER })
+    }
+    return steps
+  })
+
+  const hookWarning = computed(() => getPlanHookDisabledWarning(savingsRepayPlannedOps.value))
+
+  // Uses amountInMax (slippage-padded) when available so the user sees an
+  // insufficient-balance error before hitting an on-chain revert.
+  const requiredInput = computed(() => {
+    if (core.isSameAsset.value) return core.spent.value ?? 0n
+    const q = core.quotes.selectedQuote.value
+    if (!q) return 0n
+    return getSwapInputAmount(q, core.direction.value)
+  })
+  const isInsufficientSource = computed(() => requiredInput.value > 0n && requiredInput.value > sourceBalance.value)
+
   // --- Submit disabled ---
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
+    if (findBlockingDisabledOp(savingsRepayPlannedOps.value)) return true
     if (!sourceVault.value || !borrowVault.value) return true
     if (!core.debtAmount.value && !core.amount.value) return true
     if (core.isRepayExceedsDebt.value) return true
-    if (core.spent.value !== null && core.spent.value > sourceBalance.value) return true
+    if (isInsufficientSource.value) return true
     if (core.isSameAsset.value) return false
     if (core.quotes.quoteError.value) return true
     if (!core.quotes.selectedQuote.value) return true
@@ -163,7 +216,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     if (core.isRepayExceedsDebt.value) {
       return 'You repaying more than required'
     }
-    if (core.spent.value !== null && core.spent.value > sourceBalance.value) {
+    if (isInsufficientSource.value) {
       return 'Insufficient savings balance to cover the required swap amount.'
     }
     return undefined
@@ -382,6 +435,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     // Submit
     isSubmitDisabled,
     disabledReason,
+    hookWarning,
     isRepayExceedsDebt: core.isRepayExceedsDebt,
     // Handlers
     onAmountInput: core.onAmountInput,
@@ -389,6 +443,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     onPercentInput: core.onPercentInput,
     onSourceVaultChange,
     onRefreshQuotes: core.onRefreshQuotes,
+    onSourceMax: core.onSourceMax,
     submit,
     send,
     updateSourceBalance,

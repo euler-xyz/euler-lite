@@ -5,10 +5,11 @@ import { logWarn } from '~/utils/errorHandling'
 import type { EarnVault, EarnVaultStrategyInfo, Vault } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
+import { formatNumber, compactNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
+import { getStrategyHookWarning } from '~/composables/useVaultWarnings'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
@@ -104,10 +105,14 @@ const getExposureVaultByAddress = (address: string) => {
 }
 
 const exposureRows = computed(() => {
-  return exposureList.value.map(exposure => ({
-    exposure,
-    vault: getExposureVaultByAddress(exposure.info.vault),
-  }))
+  return exposureList.value.map((exposure) => {
+    const strategyVault = getExposureVaultByAddress(exposure.info.vault)
+    return {
+      exposure,
+      vault: strategyVault,
+      hookWarning: strategyVault ? getStrategyHookWarning(strategyVault) : null,
+    }
+  })
 })
 
 const getAllocationPercentage = (exposure: EarnVaultStrategyInfo) => {
@@ -190,7 +195,14 @@ load()
                 name: row.exposure.info.assetName,
                 symbol: row.exposure.info.assetSymbol,
               }]"
-            />
+            >
+              <span
+                v-if="row.hookWarning"
+                @click.stop.prevent
+              >
+                <VaultWarningIcon :warning="row.hookWarning" />
+              </span>
+            </VaultLabelsAndAssets>
           </template>
           <template v-else>
             <div class="flex items-center gap-12">
@@ -241,7 +253,9 @@ load()
               <span class="text-content-secondary">({{ compactNumber(getAllocationPercentage(row.exposure), 2) }}%)</span>
             </template>
             <template v-else>
-              {{ getExposureAssetAmount(row.exposure) }}
+              <UiExactAmount :exact="formatExactAmount(row.exposure.allocatedAssets, row.exposure.info.assetDecimals, row.exposure.info.assetSymbol)">
+                {{ getExposureAssetAmount(row.exposure) }}
+              </UiExactAmount>
               <span class="text-content-secondary">({{ compactNumber(getAllocationPercentage(row.exposure), 2) }}%)</span>
             </template>
           </VaultOverviewLabelValue>
@@ -279,7 +293,9 @@ load()
                 {{ formatCompactUsdValue(exposureCapUsdPrices.get(row.exposure.strategy) || 0) }}
               </template>
               <template v-else>
-                {{ roundAndCompactTokens(row.exposure.currentAllocationCap, row.exposure.info.assetDecimals) }} {{ row.exposure.info.assetSymbol }}
+                <UiExactAmount :exact="formatExactAmount(row.exposure.currentAllocationCap, row.exposure.info.assetDecimals, row.exposure.info.assetSymbol)">
+                  {{ roundAndCompactTokens(row.exposure.currentAllocationCap, row.exposure.info.assetDecimals) }} {{ row.exposure.info.assetSymbol }}
+                </UiExactAmount>
               </template>
             </span>
           </VaultOverviewLabelValue>

@@ -228,6 +228,50 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     requestQuote()
   }
 
+  // Max on source input: if source is worth at least as much as the debt,
+  // behave like Max on debt (TARGET_DEBT with full debt). Otherwise default
+  // to EXACT_IN with full source balance. Prevents accidental over-repay.
+  const onSourceMax = () => {
+    clearSimulationError()
+    if (!sourceVault.value || !borrowVault.value) return
+    const currentDebt = getCurrentDebt()
+    if (currentDebt <= 0n) return
+
+    const sourceDecimals = Number(sourceVault.value.asset.decimals)
+    const borrowDecimals = Number(borrowVault.value.asset.decimals)
+
+    if (isSameAsset.value) {
+      if (sourceBalance.value >= currentDebt) {
+        direction.value = SwapperMode.TARGET_DEBT
+        debtAmount.value = trimTrailingZeros(formatUnits(currentDebt, borrowDecimals))
+        amount.value = ''
+        debtPercent.value = 100
+        requestQuote()
+        return
+      }
+      direction.value = SwapperMode.EXACT_IN
+      amount.value = trimTrailingZeros(formatUnits(sourceBalance.value, sourceDecimals))
+      debtAmount.value = ''
+      requestQuote()
+      return
+    }
+
+    const srcUsd = sourceValueUsd.value
+    const debtUsd = borrowValueUsd.value
+    if (srcUsd !== null && debtUsd !== null && srcUsd > debtUsd) {
+      direction.value = SwapperMode.TARGET_DEBT
+      debtAmount.value = trimTrailingZeros(formatUnits(currentDebt, borrowDecimals))
+      amount.value = ''
+      debtPercent.value = 100
+      requestQuote()
+      return
+    }
+    direction.value = SwapperMode.EXACT_IN
+    amount.value = trimTrailingZeros(formatUnits(sourceBalance.value, sourceDecimals))
+    debtAmount.value = ''
+    requestQuote()
+  }
+
   // --- Quote request ---
   const requestQuote = useDebounceFn(async () => {
     if (!position.value || !sourceVault.value || !borrowVault.value) {
@@ -376,6 +420,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
   const resetCore = () => {
     amount.value = ''
     debtAmount.value = ''
+    debtPercent.value = 0
     quotes.reset()
   }
 
@@ -397,6 +442,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     onPercentInput,
     onSourceVaultChange,
     onRefreshQuotes,
+    onSourceMax,
     requestQuote,
     resetCore,
   }

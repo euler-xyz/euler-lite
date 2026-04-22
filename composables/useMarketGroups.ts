@@ -365,7 +365,11 @@ export const useMarketGroups = () => {
         return
       }
 
-      isResolvingTVL.value = true
+      // Only show loading state on initial load — during refreshes, keep showing stale data
+      const isInitialLoad = marketGroups.value.length === 0
+      if (isInitialLoad) {
+        isResolvingTVL.value = true
+      }
       try {
         const resolved = await Promise.all(groups.map(resolveGroupTVL))
         if (runId === resolveRunId) {

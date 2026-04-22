@@ -12,6 +12,7 @@ import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/stri
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const route = useRoute()
 const { isConnected, address } = useAccount()
@@ -255,6 +256,16 @@ const {
   normalizeAddress, clearSimulationError, requestQuote,
 } = swap
 
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (errorText.value) return { message: errorText.value, variant: 'error' }
+  if (sameVaultError.value) return { message: sameVaultError.value, variant: 'error' }
+  if (healthError.value) return { message: healthError.value, variant: 'error' }
+  if (quoteError.value) return { message: quoteError.value, variant: 'warning' }
+  if (simulationError.value) return { message: simulationError.value, variant: 'error' }
+  return undefined
+})
+
 // Must be after `swap` destructuring so `quote` is in scope
 watchEffect(async () => {
   if (!quote.value || !toVault.value) {
@@ -312,8 +323,14 @@ const onToVaultChange = (selectedIndex: number) => {
 </script>
 
 <template>
-  <div class="flex gap-32">
+  <div class="relative flex gap-32">
+    <BackButton
+      class="hidden tablet:inline-flex tablet:absolute tablet:top-20 tablet:right-full tablet:mr-4"
+      :fallback="`/position/${positionIndex}`"
+    />
     <VaultForm
+      back
+      :back-fallback="`/position/${positionIndex}`"
       title="Refinance debt"
       description="Move your debt to a different vault, potentially for a better rate."
       class="flex flex-col gap-16 w-full"
@@ -442,6 +459,8 @@ const onToVaultChange = (selectedIndex: number) => {
               <VaultFormSubmit
                 :disabled="reviewSwapDisabled"
                 :loading="isSubmitting || isPreparing"
+                :disabled-reason="disabledReasonInfo?.message"
+                :disabled-reason-variant="disabledReasonInfo?.variant"
               >
                 {{ reviewSwapLabel }}
               </VaultFormSubmit>

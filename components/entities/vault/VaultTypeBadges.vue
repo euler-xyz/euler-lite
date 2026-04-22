@@ -46,7 +46,7 @@ const governanceType = computed(() => {
   if (!v.governorAdmin) return 'unknown'
   if (v.governorAdmin === zeroAddress) return 'ungoverned'
   if (entities.value.length) {
-    return isGovernanceLimited.value ? 'governanceLimited' : 'governed'
+    return 'governed'
   }
   return 'unknown'
 })
@@ -75,6 +75,10 @@ const isKeyring = computed(() => isVaultKeyring(vaultAddress))
     />
     <KeyringBadge
       v-if="isKeyring && isVerified"
+      size="large"
+    />
+    <GovernanceLimitedBadge
+      v-if="isGovernanceLimited"
       size="large"
     />
   </div>

@@ -15,22 +15,26 @@ import {
 } from '~/entities/vault'
 import { isSecuritizeVault } from '~/entities/vault/factory'
 import { getSubAccountAddress } from '~/entities/account'
-import { getUtilisationWarning } from '~/composables/useVaultWarnings'
+import { getHookDisabledWarning, getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import type { TxPlan } from '~/entities/txPlan'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { SwapperMode } from '~/entities/swap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
-import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
+import { formatNumber, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import { isOpDisabled, OP_REDEEM, OP_WITHDRAW } from '~/utils/vault-hooks'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const router = useRouter()
 const route = useRoute()
 const modal = useModal()
 const { error } = useToast()
+// Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
+useFullBalances()
 const { buildWithdrawPlan, buildRedeemPlan, buildWithdrawAndSwapPlan, buildRedeemAndSwapPlan, executeTxPlan } = useEulerOperations()
 const { getVault, getSecuritizeVault: _getSecuritizeVault, getEscrowVault: _getEscrowVault } = useVaults()
 const { isConnected, address } = useAccount()
@@ -63,7 +67,10 @@ const isSecuritizeVaultType = computed(() => vault.value && 'type' in vault.valu
 
 const withdrawWarnings = computed(() => {
   if (!vault.value || isSecuritizeVaultType.value) return []
-  return [getUtilisationWarning(vault.value as Vault, 'lend')]
+  return [
+    getHookDisabledWarning(vault.value as Vault, effectiveWithdrawOp.value),
+    getUtilisationWarning(vault.value as Vault, 'lend'),
+  ]
 })
 const assetsBalance = ref(0n)
 const sharesBalance = ref(0n)
@@ -105,8 +112,13 @@ const amountFixed = computed(() => {
     Number(asset.value?.decimals || 0),
   )
 })
+const effectiveWithdrawOp = computed(() => {
+  const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
+  return isMax ? OP_REDEEM : OP_WITHDRAW
+})
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value) return false
+  if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return true
   if (assetsBalance.value < amountFixed.value.value) return true
   if (isLoading.value || amountFixed.value.isZero() || amountFixed.value.isNegative()) return true
   if (estimatesError.value) return true
@@ -114,6 +126,12 @@ const isSubmitDisabled = computed(() => {
   return false
 })
 const reviewWithdrawDisabled = isSubmitDisabled
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return { message: 'Withdrawals are currently disabled for this vault', variant: 'warning' }
+  if (estimatesError.value) return { message: estimatesError.value, variant: 'error' }
+  if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return { message: 'Insufficient balance', variant: 'error' }
+  return undefined
+})
 const supplyAPYDisplay = computed(() => {
   if (!vault.value) return '0.00'
   const base = withIntrinsicSupplyApy(nanoToValue(vault.value.interestRateInfo.supplyAPY, 25), vault.value.asset.address)
@@ -254,7 +272,7 @@ const load = async () => {
     // Check if securitize vault first
     const isSecuritize = await isSecuritizeVault(vaultAddress)
     if (isSecuritize) {
-      vault.value = await fetchSecuritizeVault(vaultAddress)
+      vault.value = await fetchSecuritizeVault(vaultAddress, buildFetchContext())
       estimateSupplyAPY.value = 0n // Securitize vaults don't have interest rate
     }
     else {
@@ -405,7 +423,7 @@ const send = async () => {
 
     modal.close()
     setTimeout(() => {
-      router.replace('/portfolio/saving')
+      router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
     }, 400)
   }
   catch (e) {
@@ -519,158 +537,171 @@ watch(swapSelectedQuote, () => {
 </script>
 
 <template>
-  <VaultForm
-    title="Withdraw savings"
-    description="Withdraw your supplied assets back to your wallet."
-    class="flex flex-col gap-16"
-    :loading="isLoading"
-    @submit.prevent="submit"
-  >
-    <template v-if="vault && asset">
-      <VaultLabelsAndAssets
-        :vault="vault"
-        :assets="[asset]"
-        size="large"
-      />
+  <div class="relative">
+    <BackButton
+      class="hidden tablet:inline-flex tablet:absolute tablet:top-20 tablet:right-full tablet:mr-4"
+      :fallback="`/lend/${vaultAddress}`"
+    />
+    <VaultForm
+      back
+      :back-fallback="`/lend/${vaultAddress}`"
+      title="Withdraw savings"
+      description="Withdraw your supplied assets back to your wallet."
+      class="flex flex-col gap-16"
+      :loading="isLoading"
+      @submit.prevent="submit"
+    >
+      <template v-if="vault && asset">
+        <VaultLabelsAndAssets
+          :vault="vault"
+          :assets="[asset]"
+          size="large"
+        />
 
-      <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
-        <div class="flex flex-col gap-16 w-full">
-          <AssetInput
-            v-if="asset"
-            v-model="amount"
-            label="Withdraw amount"
-            :asset="asset"
-            :vault="(vault as Vault)"
-            :balance="assetsBalance"
-            maxable
-          />
-
-          <!-- Receive as token selector -->
-          <div class="flex items-center gap-8">
-            <span class="text-p3 text-content-tertiary">Receive as</span>
-            <button
-              type="button"
-              class="flex items-center gap-6 bg-card text-p3 font-semibold px-12 h-36 rounded-[40px] whitespace-nowrap"
-              @click="openSwapTokenSelector"
-            >
-              <AssetAvatar
-                :asset="{ address: selectedOutputAsset?.address || asset.address, symbol: selectedOutputAsset?.symbol || asset.symbol }"
-                size="20"
-              />
-              {{ selectedOutputAsset?.symbol || asset.symbol }}
-              <SvgIcon
-                class="text-content-tertiary !w-16 !h-16"
-                name="arrow-down"
-              />
-            </button>
-          </div>
-
-          <!-- Swap info block -->
-          <template v-if="needsSwap && selectedOutputAsset">
-            <SwapRouteSelector
-              :items="swapRouteItems"
-              :selected-provider="swapSelectedProvider"
-              :status-label="swapQuotesStatusLabel"
-              :is-loading="isSwapQuoteLoading"
-              empty-message="Enter amount to fetch quotes"
-              @select="selectSwapQuote"
-              @refresh="onRefreshSwapQuotes"
+        <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
+          <div class="flex flex-col gap-16 w-full">
+            <AssetInput
+              v-if="asset"
+              v-model="amount"
+              label="Withdraw amount"
+              :asset="asset"
+              :vault="(vault as Vault)"
+              :balance="assetsBalance"
+              maxable
             />
 
-            <VaultFormInfoBlock
-              v-if="swapEstimatedOutput"
-              :loading="isSwapQuoteLoading"
-              variant="card"
-            >
-              <SwapDetailsSummary
-                :input-display="swapInputDisplay"
-                :output-display="swapOutputDisplay"
-                :price-impact="swapPriceImpact"
-                :slippage="swapSlippage"
-                :routed-via="swapRoutedVia"
-                @open-slippage-settings="openSlippageSettings"
+            <!-- Receive as token selector -->
+            <div class="flex items-center gap-8">
+              <span class="text-p3 text-content-tertiary">Receive as</span>
+              <button
+                type="button"
+                class="flex items-center gap-6 bg-card text-p3 font-semibold px-12 h-36 rounded-[40px] whitespace-nowrap"
+                @click="openSwapTokenSelector"
+              >
+                <AssetAvatar
+                  :asset="{ address: selectedOutputAsset?.address || asset.address, symbol: selectedOutputAsset?.symbol || asset.symbol }"
+                  size="20"
+                />
+                {{ selectedOutputAsset?.symbol || asset.symbol }}
+                <SvgIcon
+                  class="text-content-tertiary !w-16 !h-16"
+                  name="arrow-down"
+                />
+              </button>
+            </div>
+
+            <!-- Swap info block -->
+            <template v-if="needsSwap && selectedOutputAsset">
+              <SwapRouteSelector
+                :items="swapRouteItems"
+                :selected-provider="swapSelectedProvider"
+                :status-label="swapQuotesStatusLabel"
+                :is-loading="isSwapQuoteLoading"
+                empty-message="Enter amount to fetch quotes"
+                @select="selectSwapQuote"
+                @refresh="onRefreshSwapQuotes"
               />
-            </VaultFormInfoBlock>
+
+              <VaultFormInfoBlock
+                v-if="swapEstimatedOutput || swapQuoteError"
+                :loading="isSwapQuoteLoading"
+                variant="card"
+              >
+                <SwapDetailsSummary
+                  :input-display="swapInputDisplay"
+                  :output-display="swapOutputDisplay"
+                  :price-impact="swapPriceImpact"
+                  :slippage="swapSlippage"
+                  :routed-via="swapRoutedVia"
+                  @open-slippage-settings="openSlippageSettings"
+                />
+              </VaultFormInfoBlock>
+
+              <UiToast
+                v-if="swapQuoteError"
+                title="Swap quote"
+                variant="warning"
+                :description="swapQuoteError"
+                size="compact"
+              />
+            </template>
 
             <UiToast
-              v-if="swapQuoteError"
-              title="Swap quote"
+              v-if="isUnknownSwapToken && needsSwap"
+              title="Unknown token"
+              description="This token is not on any recognized token list. It could be fraudulent or malicious. Verify the contract address before proceeding."
               variant="warning"
-              :description="swapQuoteError"
               size="compact"
             />
-          </template>
 
-          <UiToast
-            v-if="isUnknownSwapToken && needsSwap"
-            title="Unknown token"
-            description="This token is not on any recognized token list. It could be fraudulent or malicious. Verify the contract address before proceeding."
-            variant="warning"
-            size="compact"
-          />
-
-          <UiToast
-            v-show="estimatesError"
-            title="Error"
-            variant="error"
-            :description="estimatesError"
-            size="compact"
-          />
-          <UiToast
-            v-if="simulationError"
-            title="Error"
-            variant="error"
-            :description="simulationError"
-            size="compact"
-          />
-
-          <VaultWarningBanner :warnings="withdrawWarnings" />
-        </div>
-
-        <VaultFormInfoBlock
-          :loading="isEstimatesLoading"
-          variant="card"
-          class="w-full laptop:max-w-[360px]"
-        >
-          <SummaryRow label="Supply APY">
-            <SummaryValue
-              :before="supplyAPYDisplay"
-              :after="estimateSupplyAPYDisplay"
-              suffix="%"
+            <UiToast
+              v-show="estimatesError"
+              title="Error"
+              variant="error"
+              :description="estimatesError"
+              size="compact"
             />
-          </SummaryRow>
-          <SummaryRow
-            v-if="!isSecuritizeVaultType"
-            label="Supplied"
+            <UiToast
+              v-if="simulationError"
+              title="Error"
+              variant="error"
+              :description="simulationError"
+              size="compact"
+            />
+
+            <VaultWarningBanner :warnings="withdrawWarnings" />
+          </div>
+
+          <VaultFormInfoBlock
+            :loading="isEstimatesLoading"
+            variant="card"
+            class="w-full laptop:max-w-[360px]"
           >
-            <SummaryValue
-              :before="`$${formatNumber(assetsBalanceUsd)}`"
-              :after="amount && delta !== assetsBalance && delta >= 0n ? `$${formatNumber(deltaUsd)}` : undefined"
-            />
-          </SummaryRow>
-          <SummaryRow label="Available for withdraw">
-            <p
-              v-if="asset"
-              class="text-p2 flex items-center gap-4"
+            <SummaryRow label="Supply APY">
+              <SummaryValue
+                :before="supplyAPYDisplay"
+                :after="estimateSupplyAPYDisplay"
+                suffix="%"
+              />
+            </SummaryRow>
+            <SummaryRow
+              v-if="!isSecuritizeVaultType"
+              label="Supplied"
             >
-              {{ formatSmartAmount(nanoToValue(assetsBalance, asset.decimals)) }} <span class="text-p3 text-content-tertiary">{{ asset.symbol }}</span>
-              <span
-                v-if="!isSecuritizeVaultType"
-                class="text-p3 text-content-tertiary"
-              >≈ ${{ formatNumber(assetsBalanceUsd) }}</span>
-            </p>
-          </SummaryRow>
-        </VaultFormInfoBlock>
+              <SummaryValue
+                :before="`$${formatNumber(assetsBalanceUsd)}`"
+                :after="amount && delta !== assetsBalance && delta >= 0n ? `$${formatNumber(deltaUsd)}` : undefined"
+              />
+            </SummaryRow>
+            <SummaryRow label="Available for withdraw">
+              <p
+                v-if="asset"
+                class="text-p2 flex items-center gap-4"
+              >
+                <UiExactAmount :exact="formatExactAmount(assetsBalance, asset.decimals, asset.symbol)">
+                  {{ formatSmartAmount(nanoToValue(assetsBalance, asset.decimals)) }}
+                  <span class="text-p3 text-content-tertiary">{{ asset.symbol }}</span>
+                </UiExactAmount>
+                <span
+                  v-if="!isSecuritizeVaultType"
+                  class="text-p3 text-content-tertiary"
+                >≈ ${{ formatNumber(assetsBalanceUsd) }}</span>
+              </p>
+            </SummaryRow>
+          </VaultFormInfoBlock>
 
-        <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
-          <VaultFormSubmit
-            :loading="isSubmitting || isPreparing"
-            :disabled="reviewWithdrawDisabled"
-          >
-            Review Withdraw
-          </VaultFormSubmit>
+          <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
+            <VaultFormSubmit
+              :loading="isSubmitting || isPreparing"
+              :disabled="reviewWithdrawDisabled"
+              :disabled-reason="disabledReasonInfo?.message"
+              :disabled-reason-variant="disabledReasonInfo?.variant"
+            >
+              Review Withdraw
+            </VaultFormSubmit>
+          </div>
         </div>
-      </div>
-    </template>
-  </VaultForm>
+      </template>
+    </VaultForm>
+  </div>
 </template>

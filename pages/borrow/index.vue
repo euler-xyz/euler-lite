@@ -2,13 +2,14 @@
 import { useVaults } from '~/composables/useVaults'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
-import { getVaultUtilization } from '~/entities/vault'
-import type { AnyBorrowVaultPair, BorrowVaultPair } from '~/entities/vault'
+import { getVaultUtilization, isSecuritizeBorrowPair, type AnyBorrowVaultPair, type BorrowVaultPair } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import { getProductByVault, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
+import { isOpDisabled, OP_BORROW, OP_DEPOSIT, OP_TRANSFER } from '~/utils/vault-hooks'
+import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
 
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy } = useRewardsApy()
@@ -51,23 +52,32 @@ const { enableEntityBranding } = useDeployConfig()
 const { entities } = useEulerLabels()
 
 const activeBorrowList = computed(() =>
-  borrowList.value.filter(pair =>
-    !isVaultNotExplorableBorrow(pair.borrow.address)
-    && !isVaultNotExplorableBorrow(pair.collateral.address),
-  ),
+  borrowList.value.filter((pair) => {
+    if (isVaultNotExplorableBorrow(pair.borrow.address)) return false
+    if (isVaultNotExplorableBorrow(pair.collateral.address)) return false
+    if (isOpDisabled(pair.borrow, OP_BORROW)) return false
+    // Securitize collateral has no hookedOps — only check EVK collateral.
+    // Fresh-deposit needs OP_DEPOSIT, savings-sourced needs OP_TRANSFER.
+    // Hide only when BOTH paths are blocked; the form guards the active path.
+    if (!isSecuritizeBorrowPair(pair) && isOpDisabled(pair.collateral, OP_DEPOSIT) && isOpDisabled(pair.collateral, OP_TRANSFER)) return false
+    return true
+  }),
 )
 
-const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<AnyBorrowVaultPair>(pair => [
-  pair.collateral.asset.symbol,
-  pair.collateral.asset.name,
-  pair.collateral.name,
-  pair.borrow.asset.symbol,
-  pair.borrow.asset.name,
-  pair.borrow.name,
-  getProductByVault(pair.collateral.address).name,
-  getProductByVault(pair.collateral.address).description,
-  ...getEntitiesByVault(pair.borrow).map(e => e.name),
-])
+const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<AnyBorrowVaultPair>((pair) => {
+  const product = applyVaultOverrides(getProductByVault(pair.collateral.address), pair.collateral.address)
+  return [
+    pair.collateral.asset.symbol,
+    pair.collateral.asset.name,
+    pair.collateral.name,
+    pair.borrow.asset.symbol,
+    pair.borrow.asset.name,
+    pair.borrow.name,
+    product.name,
+    product.description,
+    ...getEntitiesByVault(pair.borrow).map(e => e.name),
+  ]
+})
 
 const selectedCollateral = ref<string[]>([])
 const selectedDebt = ref<string[]>([])
@@ -99,8 +109,12 @@ const pairBorrowedUsd = ref<Map<string, number>>(new Map())
 // Helper to create a unique key for a borrow pair
 const getPairKey = (pair: AnyBorrowVaultPair) => `${pair.collateral.address}-${pair.borrow.address}`
 
-// Fetch USD values for all borrow pairs
-watchEffect(async () => {
+// Fetch USD values for all borrow pairs. Debounced to collapse the
+// bursts of registry updates streamed during loadVaults's RPC refresh
+// (each batch causes borrowList to re-derive) into a single pass —
+// this is the most expensive price-fetch watcher in the app because
+// pair count is combinatorial in collaterals × borrow vaults.
+const fetchBorrowPrices = useDebounceFn(async () => {
   const pairs = borrowList.value
   if (!pairs.length) {
     isPricesReady.value = true
@@ -127,6 +141,26 @@ watchEffect(async () => {
   finally {
     isPricesReady.value = true
   }
+}, DEBOUNCE_LIST_PRICE_FETCH_MS)
+
+// Pause price fetches while the page is in keep-alive but not visible. The
+// borrow page is included in app.vue's keepalive list, so it keeps running
+// watchEffects when the user navigates away. Deferring the refetch until
+// the user returns removes a major source of main-thread contention
+// during chain switches, which otherwise fan out to every keep-alive
+// page's price watchEffect at once.
+const isActive = ref(true)
+onActivated(() => {
+  isActive.value = true
+})
+onDeactivated(() => {
+  isActive.value = false
+})
+
+watchEffect(() => {
+  void borrowList.value
+  if (!isActive.value) return
+  fetchBorrowPrices()
 })
 
 const getPairBorrowApy = (pair: AnyBorrowVaultPair): number => {
@@ -360,7 +394,7 @@ const sortedBorrowList = computed(() => {
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
     <BasePageHeader
       title="Borrow"
-      description="Discover vaults, borrow against your collateral."
+      description="Borrow against your assets in isolated lending markets."
       class="mb-16"
     />
 

@@ -12,6 +12,7 @@ import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBl
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
 import { formatNumber, compactNumber } from '~/utils/string-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const router = useRouter()
 const route = useRoute()
@@ -88,6 +89,11 @@ const isSubmitDisabled = computed(() => {
 })
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vaultAddress))
 const reviewSupplyDisabled = computed(() => isGeoBlocked.value || isSubmitDisabled.value)
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (errorText.value) return { message: errorText.value, variant: 'error' }
+  return undefined
+})
 const totalRewardsAPY = computed(() => getSupplyRewardApy(vaultAddress))
 const hasRewards = computed(() => hasSupplyRewards(vaultAddress))
 const intrinsicApy = computed(() => getIntrinsicApy(vault.value?.asset.address))
@@ -157,7 +163,7 @@ const send = async () => {
     modal.close()
     await updateEstimates()
     setTimeout(() => {
-      router.replace('/portfolio/saving')
+      router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
     }, 400)
   }
   catch (e) {
@@ -220,7 +226,7 @@ watch(address, () => {
 </script>
 
 <template>
-  <div>
+  <div class="relative">
     <div
       v-if="!vault"
       class="flex justify-center items-center min-h-[50dvh]"
@@ -228,10 +234,14 @@ watch(address, () => {
       <UiLoader />
     </div>
     <template v-else>
-      <BaseBackButton class="laptop:!hidden mb-16" />
-
+      <BackButton
+        class="hidden tablet:inline-flex tablet:absolute tablet:top-8 tablet:right-full tablet:mr-12"
+        fallback="/earn"
+      />
       <VaultLabelsAndAssets
         v-if="asset"
+        back
+        back-fallback="/earn"
         class="mb-24"
         :vault="vault"
         :assets="assets"
@@ -351,6 +361,8 @@ watch(address, () => {
               />
               <VaultFormSubmit
                 :disabled="reviewSupplyDisabled"
+                :disabled-reason="disabledReasonInfo?.message"
+                :disabled-reason-variant="disabledReasonInfo?.variant"
                 :loading="isSubmitting || isPreparing"
               >
                 Review Supply

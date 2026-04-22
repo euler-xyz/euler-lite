@@ -15,6 +15,7 @@ export const useAddressScreen = () => {
   const defaultPageRoute = getDefaultPageRoute(enableEarnPage, enableLendPage, enableExplorePage)
   const blockedAddress = ref<string | null>(null)
   const isScreening = ref(false)
+  let screeningGeneration = 0
 
   const showBlockedModal = (address: string) => {
     blockedAddress.value = address
@@ -35,10 +36,14 @@ export const useAddressScreen = () => {
       return false
     }
 
+    const gen = ++screeningGeneration
     isScreening.value = true
     try {
       const vpnIsUsed = await detectVpn()
+      if (gen !== screeningGeneration) return false
+
       const isRestricted = await screenAddress(address, vpnIsUsed)
+      if (gen !== screeningGeneration) return false
 
       if (isRestricted) {
         await disconnect()
@@ -48,7 +53,9 @@ export const useAddressScreen = () => {
       return false
     }
     finally {
-      isScreening.value = false
+      if (gen === screeningGeneration) {
+        isScreening.value = false
+      }
     }
   }
 

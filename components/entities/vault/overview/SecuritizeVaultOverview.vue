@@ -245,13 +245,10 @@ const supplyCapPercentageDisplay = computed(() => {
               <a
                 :href="entity.url"
                 target="_blank"
+                rel="noopener noreferrer"
                 class="text-p2 text-content-primary underline"
               >{{ entity.name }}</a>
             </div>
-            <span
-              v-if="isGovernanceLimited"
-              class="text-p3 text-content-tertiary"
-            >Limited risk management</span>
           </div>
           <VaultTypeChip
             v-else-if="!isGovernorVerified"

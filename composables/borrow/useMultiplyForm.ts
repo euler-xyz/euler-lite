@@ -30,11 +30,12 @@ import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
 import { calculateRoe, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
 import { computeMaxMultiplier, computeMinMultiplier, computeWeightedSupplyApy, computeLeverageDebt } from '~/utils/multiply-math'
 import type { TxPlan } from '~/entities/txPlan'
-import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
+import { getPlanHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { useMultiplyCollateralOptions } from '~/composables/useMultiplyCollateralOptions'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
+import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 
 type MultiplyPlanParams = {
   supplyVaultAddress: string
@@ -546,8 +547,35 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const isSupplyCapReached = computed(() => multiplySupplyVault.value ? getIsSupplyCapReached(multiplySupplyVault.value) : false)
   const isBorrowCapReached = computed(() => multiplyShortVault.value ? getIsBorrowCapReached(multiplyShortVault.value) : false)
 
+  // Multiply supply side: savings-sourced transfers existing shares (OP_TRANSFER);
+  // fresh-supply deposits new assets (OP_DEPOSIT). The short vault is always
+  // borrowed from, and any swap path touches OP_SKIM on the long vault via the
+  // SkimMin verifier (skipped on same-asset multiply).
+  const multiplyPlannedOps = computed<PlannedOp[]>(() => {
+    const steps: PlannedOp[] = []
+    if (multiplySupplyVault.value) {
+      steps.push({
+        vault: multiplySupplyVault.value,
+        op: isMultiplySavingCollateral.value ? OP_TRANSFER : OP_DEPOSIT,
+      })
+    }
+    if (multiplyShortVault.value) steps.push({ vault: multiplyShortVault.value, op: OP_BORROW })
+    if (multiplyLongVault.value) {
+      if (multiplySelectedQuote.value) {
+        // Cross-asset: verifyAmountMinAndSkim calls skim() on the long vault
+        steps.push({ vault: multiplyLongVault.value, op: OP_SKIM })
+      }
+      else if (multiplyDebtAmountNano.value > 0n) {
+        // Same-asset without swap: borrowed assets deposited directly
+        steps.push({ vault: multiplyLongVault.value, op: OP_DEPOSIT })
+      }
+    }
+    return steps
+  })
+
   const isMultiplySubmitDisabled = computed(() => {
     if (!isConnected.value) return false
+    if (findBlockingDisabledOp(multiplyPlannedOps.value)) return true
     if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) return true
     if (!multiplyInputAmount.value || multiplyDebtAmountNano.value <= 0n) return true
     if (multiplyErrorText.value) return true
@@ -562,6 +590,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const multiplyFormWarnings = computed(() => {
     if (!multiplyShortVault.value) return []
     return [
+      getPlanHookDisabledWarning(multiplyPlannedOps.value),
       getUtilisationWarning(multiplyShortVault.value, 'borrow'),
       getBorrowCapWarning(multiplyShortVault.value),
     ]

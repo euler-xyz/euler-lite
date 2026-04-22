@@ -18,13 +18,6 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Data flow patterns
 - Technology decisions
 
-### 📁 [Project Structure](./project-structure.md)
-
-- Folder organization
-- File naming conventions
-- Key directories explanation
-- Component organization
-
 ### 🚀 [Development Guide](./development-guide.md)
 
 - Development workflow
@@ -77,8 +70,8 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 ### 🪙 [Token List](./token-list.md)
 
 - Three-source token list (Euler API, DefiLlama, Uniswap)
-- Euler-first blocking strategy with lazy supplemental sources
-- One-shot 15s retry for supplemental data pickup
+- Parallel fetch via `Promise.allSettled` with per-source stale fallback
+- Pre-populated at server startup by `warm-cache.ts`
 - CSP considerations for logo URLs
 
 ### 🌍 [Geo-Blocking](./geo-blocking.md)
@@ -87,6 +80,12 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Product-level and per-vault blocking overrides
 - Country group aliases (EU, EEA, EFTA)
 - UI enforcement across browse, detail, action, and modal pages
+
+### 🌐 [Public API](./public-api.md)
+
+- Publicly reachable endpoints under `/api/public/` (CORS `*`)
+- `GET /api/public/is-known` — verified-vault lookup by address
+- Request/response shape, caching, rate limits, and examples
 
 ## 🎯 Project Overview
 

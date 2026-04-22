@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { getProductByVault } from '~/utils/eulerLabelsUtils'
+import { getVaultProductName } from '~/utils/eulerLabelsUtils'
 import type { CollateralOption } from '~/entities/vault'
 import { formatNumber } from '~/utils/string-utils'
 
@@ -22,8 +22,8 @@ const getOptionLabel = (option: CollateralOption) => {
   if (option.vaultAddress && isEscrowVault(option.vaultAddress)) return 'Escrowed collateral'
   if (option.label) return option.label
   if (option.vaultAddress) {
-    const product = getProductByVault(option.vaultAddress)
-    if (product?.name) return product.name
+    const name = getVaultProductName(option.vaultAddress)
+    if (name) return name
   }
   return productName
 }
@@ -64,7 +64,7 @@ const handleClose = () => {
         clearable
       />
     </div>
-    <div class="flex-1 overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div class="flex-1 min-h-0 overflow-auto styled-scrollbar">
       <div
         v-for="{ option, idx } in filteredOptions"
         :key="`options-${idx}`"

@@ -13,6 +13,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { isVaultDeprecated } from '~/utils/eulerLabelsUtils'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const route = useRoute()
 const { getVault } = useVaults()
@@ -45,6 +46,7 @@ const toCollateralOptions = computed(() => {
 })
 
 const getVaultAddress = () => route.params.vault as string
+const vaultAddress = computed(() => route.params.vault as string)
 
 // ── Position ─────────────────────────────────────────────────────────────
 const savingPosition = computed(() => {
@@ -140,6 +142,15 @@ const {
   selectProvider, onFromInput, onToVaultChange, onRefreshQuotes, submit, openSlippageSettings,
 } = swap
 
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (sameVaultError.value) return { message: sameVaultError.value, variant: 'error' }
+  if (errorText.value) return { message: errorText.value, variant: 'error' }
+  if (quoteError.value) return { message: quoteError.value, variant: 'warning' }
+  if (simulationError.value) return { message: simulationError.value, variant: 'error' }
+  return undefined
+})
+
 // ── Vault loading ────────────────────────────────────────────────────────
 const loadVaults = async () => {
   isLoading.value = true
@@ -149,7 +160,7 @@ const loadVaults = async () => {
 
     const isFromSecuritize = await isSecuritizeVault(baseAddress)
     if (isFromSecuritize) {
-      fromVault.value = await fetchSecuritizeVault(baseAddress)
+      fromVault.value = await fetchSecuritizeVault(baseAddress, buildFetchContext())
     }
     else {
       fromVault.value = await getVault(baseAddress)
@@ -179,8 +190,14 @@ watch([() => route.params.vault, () => route.query.to], () => {
 </script>
 
 <template>
-  <div class="flex gap-32">
+  <div class="relative flex gap-32">
+    <BackButton
+      class="hidden tablet:inline-flex tablet:absolute tablet:top-20 tablet:right-full tablet:mr-4"
+      :fallback="`/lend/${vaultAddress}`"
+    />
     <VaultForm
+      back
+      :back-fallback="`/lend/${vaultAddress}`"
       title="Rebalance savings"
       description="Move your supplied assets from one vault to another."
       class="flex flex-col gap-16 w-full"
@@ -320,6 +337,8 @@ watch([() => route.params.vault, () => route.query.to], () => {
           <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
             <VaultFormSubmit
               :disabled="reviewSwapDisabled"
+              :disabled-reason="disabledReasonInfo?.message"
+              :disabled-reason-variant="disabledReasonInfo?.variant"
               :loading="isSubmitting || isPreparing"
             >
               {{ reviewSwapLabel }}

@@ -5,10 +5,11 @@ import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import type { EarnVault } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import { getProductByVault, getEntitiesByEarnVault, isVaultFeatured, isVaultDeprecated, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getEntitiesByEarnVault, isVaultFeatured, isVaultDeprecated, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
+import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
 
 defineOptions({
   name: 'EarnPage',
@@ -24,14 +25,17 @@ const list = computed(() => getEarnVaults().filter(v => v.verified && !isEarnVau
 
 const { enableEntityBranding } = useDeployConfig()
 
-const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<EarnVault>(vault => [
-  vault.asset.symbol,
-  vault.asset.name,
-  vault.name,
-  getProductByVault(vault.address).name,
-  getProductByVault(vault.address).description,
-  ...getEntitiesByEarnVault(vault).map(e => e.name),
-])
+const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<EarnVault>((vault) => {
+  const product = applyVaultOverrides(getProductByVault(vault.address), vault.address)
+  return [
+    vault.asset.symbol,
+    vault.asset.name,
+    vault.name,
+    product.name,
+    product.description,
+    ...getEntitiesByEarnVault(vault).map(e => e.name),
+  ]
+})
 
 const selectedCollateral = ref<string[]>([])
 const selectedCurators = ref<string[]>([])
@@ -50,8 +54,9 @@ useUrlQuerySync([
 const vaultTotalSupplyUsd = ref<Map<string, number>>(new Map())
 const vaultLiquidityUsd = ref<Map<string, number>>(new Map())
 
-// Fetch USD values for all earn vaults
-watchEffect(async () => {
+// Fetch USD values for all earn vaults. Debounced to collapse the bursts
+// of registry updates streamed during loadVaults's RPC refresh.
+const fetchEarnPrices = useDebounceFn(async () => {
   const vaults = list.value
   if (!vaults.length) {
     isPricesReady.value = true
@@ -77,6 +82,22 @@ watchEffect(async () => {
   finally {
     isPricesReady.value = true
   }
+}, DEBOUNCE_LIST_PRICE_FETCH_MS)
+
+// Pause price fetches while the page is in keep-alive but not visible. See the
+// borrow-page equivalent for the full rationale.
+const isActive = ref(true)
+onActivated(() => {
+  isActive.value = true
+})
+onDeactivated(() => {
+  isActive.value = false
+})
+
+watchEffect(() => {
+  void list.value
+  if (!isActive.value) return
+  fetchEarnPrices()
 })
 
 const {
@@ -188,7 +209,7 @@ const sortedList = computed(() => {
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
     <BasePageHeader
       title="Earn"
-      description="Discover vaults, deposit once, earn passive yield across multiple professionally curated strategies."
+      description="One deposit, diversified yield. Curators allocate your capital across multiple lending strategies."
       class="mb-16"
       arrow-right
     />

@@ -105,6 +105,7 @@ module.exports = {
       screens: {
         mobile: { max: '900px' },
         laptop: { min: '901px' },
+        tablet: { min: '1300px' },
       },
 
       borderRadius: {

@@ -3,7 +3,11 @@ import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import type { Vault, SecuritizeVault } from '~/entities/vault'
 import type { LTVRampConfig } from '~/entities/vault/ltv'
-import { getCurrentLiquidationLTV, isLiquidationLTVRamping } from '~/entities/vault'
+import {
+  getCollateralExposurePairs,
+  getCurrentLiquidationLTV,
+  isLiquidationLTVRamping,
+} from '~/entities/vault'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { VaultRampDownModal } from '#components'
@@ -26,41 +30,12 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: LTVRampConfig) => {
   })
 }
 
-// Build collateral pairs from collateralLTVs where currentLiquidationLTV > 0
-// Excludes fully ramped-down collaterals (borrowLTV == 0) with no remaining supply
-const allCollateralPairs = computed(() => {
-  const pairs: Array<{
-    collateral: Vault | SecuritizeVault
-    borrowLTV: bigint
-    liquidationLTV: bigint
-    initialLiquidationLTV: bigint
-    targetTimestamp: bigint
-    rampDuration: bigint
-  }> = []
-
-  vault.collateralLTVs.forEach((ltv) => {
-    if (getCurrentLiquidationLTV(ltv) <= 0n) return
-
-    // Try to find the collateral vault from registry
-    const collateralEntry = registryGet(ltv.collateral)
-    if (collateralEntry) {
-      const collateral = collateralEntry.vault as Vault | SecuritizeVault
-      if (ltv.borrowLTV <= 0n && collateral.totalAssets <= 0n) return
-
-      pairs.push({
-        collateral,
-        borrowLTV: ltv.borrowLTV,
-        liquidationLTV: ltv.liquidationLTV,
-        initialLiquidationLTV: ltv.initialLiquidationLTV,
-        targetTimestamp: ltv.targetTimestamp,
-        rampDuration: ltv.rampDuration,
-      })
-    }
-  })
-
-  // Sort by borrow LTV descending (highest first)
-  return pairs.sort((a, b) => (b.borrowLTV > a.borrowLTV ? 1 : b.borrowLTV < a.borrowLTV ? -1 : 0))
-})
+const allCollateralPairs = computed(() =>
+  getCollateralExposurePairs(
+    vault,
+    addr => registryGet(addr)?.vault as Vault | SecuritizeVault | undefined,
+  ),
+)
 </script>
 
 <template>

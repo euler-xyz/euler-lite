@@ -45,10 +45,42 @@ export interface VaultInterestRateInfo {
   cash: bigint
   supplyAPY: bigint
 }
+export interface CyclicalNoteInfo {
+  primaryRate: bigint
+  secondaryRate: bigint
+  primaryDuration: bigint
+  secondaryDuration: bigint
+  startTimestamp: bigint
+}
 export interface VaultIRMInfo {
   interestRateModelInfo?: {
     interestRateModelType?: number
+    interestRateModelParams?: string
   }
+}
+
+export interface KinkIRMParams {
+  baseRate: bigint
+  slope1: bigint
+  slope2: bigint
+  kink: bigint
+}
+
+export interface AdaptiveCurveIRMParams {
+  targetUtilization: bigint
+  initialRateAtTarget: bigint
+  minRateAtTarget: bigint
+  maxRateAtTarget: bigint
+  curveSteepness: bigint
+  adjustmentSpeed: bigint
+}
+
+export interface KinkyIRMParams {
+  baseRate: bigint
+  slope: bigint
+  shape: bigint
+  kink: bigint
+  cutoff: bigint
 }
 export interface Erc4626Vault {
   address: string
@@ -112,6 +144,7 @@ export interface Vault {
   unitOfAccountDecimals?: bigint
   interestRateModelAddress: string
   hookTarget: string
+  hookedOps: bigint
   irmInfo?: VaultIRMInfo
   // Vault category: 'escrow' for escrow vaults, undefined/'standard' for regular EVK vaults
   vaultCategory?: 'standard' | 'escrow'
@@ -142,6 +175,11 @@ export type AnyBorrowVaultPair = BorrowVaultPair | SecuritizeBorrowVaultPair
 // Type guard to check if a pair is a securitize pair
 export const isSecuritizeBorrowPair = (pair: AnyBorrowVaultPair): pair is SecuritizeBorrowVaultPair => {
   return 'type' in pair.collateral && pair.collateral.type === 'securitize'
+}
+
+// Type guard to narrow a vault union to an EVK Vault (has hookedOps, hookTarget)
+export const isEVKVault = (vault: Vault | SecuritizeVault): vault is Vault => {
+  return !('type' in vault && vault.type === 'securitize')
 }
 
 export interface VaultIteratorResult<T> {

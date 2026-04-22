@@ -4,12 +4,14 @@ import type { EarnVault, SecuritizeVault, Vault, VaultAsset } from '~/entities/v
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 
-const { vault, assets, size, assetsLabel, pairVault } = defineProps<{
+const { vault, assets, size, assetsLabel, pairVault, back, backFallback } = defineProps<{
   vault?: Vault | EarnVault | SecuritizeVault
   assets: VaultAsset[]
   size?: 'large'
   assetsLabel?: string
   pairVault?: Vault
+  back?: boolean
+  backFallback?: string
 }>()
 const normalizeAddress = (address?: string) => {
   if (!address) return ''
@@ -90,6 +92,11 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
     :class="[size === 'large' ? 'gap-16' : 'gap-12']"
     class="flex items-center"
   >
+    <BackButton
+      v-if="back"
+      class="tablet:hidden"
+      :fallback="backFallback"
+    />
     <AssetAvatar
       :asset="assets"
       :size="size === 'large' ? '46' : '38'"
@@ -124,6 +131,7 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
           />
           Restricted
         </span>
+        <slot />
       </div>
 
       <p class="text-p2 font-semibold text-content-primary">

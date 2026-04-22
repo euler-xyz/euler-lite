@@ -8,35 +8,23 @@
  * This avoids runtimeConfig (which is frozen in production) and works
  * with runtime-injected env vars (e.g. Doppler on Railway).
  */
+import { getEnabledChainIds, getSubgraphUris } from '~/utils/chain-env'
 
 interface ChainConfig {
   enabledChainIds: number[]
+  deprecatedChainIds: number[]
   subgraphUris: Record<string, string>
 }
 
 let cached: ChainConfig | null = null
 
 function scanEnv(): ChainConfig {
-  const enabledChainIds: number[] = []
+  const enabledChainIds = getEnabledChainIds()
+  const subgraphUris = getSubgraphUris()
+  const enabledSet = new Set(enabledChainIds)
+  const deprecatedChainIds = parseDeprecatedChains(process.env.DEPRECATED_CHAINS, enabledSet)
 
-  for (const [key, value] of Object.entries(process.env)) {
-    const rpcMatch = key.match(/^RPC_URL_HTTP_(\d+)$/)
-    if (rpcMatch && value) {
-      enabledChainIds.push(Number(rpcMatch[1]))
-    }
-  }
-
-  const subgraphUris: Record<string, string> = {}
-  for (const [key, value] of Object.entries(process.env)) {
-    const match = key.match(/^NUXT_PUBLIC_SUBGRAPH_URI_(\d+)$/)
-    if (match && value) {
-      subgraphUris[match[1]] = value
-    }
-  }
-
-  enabledChainIds.sort((a, b) => a - b)
-
-  return { enabledChainIds, subgraphUris }
+  return { enabledChainIds, deprecatedChainIds, subgraphUris }
 }
 
 export const useChainConfig = (): ChainConfig => {
@@ -51,7 +39,7 @@ export const useChainConfig = (): ChainConfig => {
   /* eslint-enable @typescript-eslint/no-explicit-any */
   }
   else {
-    cached = { enabledChainIds: [], subgraphUris: {} }
+    cached = { enabledChainIds: [], deprecatedChainIds: [], subgraphUris: {} }
   }
 
   return cached!

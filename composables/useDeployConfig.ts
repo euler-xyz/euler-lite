@@ -25,19 +25,12 @@ export const useDeployConfig = () => {
     appTitle: envConfig.appTitle,
     appDescription: envConfig.appDescription,
     logoUrl: envConfig.logoUrl,
+    socialImageUrl: envConfig.socialImageUrl,
 
     // Repos (labelsRepo/branch/baseUrl still needed for logo URL construction)
     labelsRepo: rc.configLabelsRepo || 'euler-xyz/euler-labels',
     labelsRepoBranch: rc.configLabelsRepoBranch || 'master',
     labelsBaseUrl,
-    isCustomLabelsRepo: computed(() => {
-      if (labelsBaseUrl) {
-        return !labelsBaseUrl.includes('master')
-      }
-      const repo = rc.configLabelsRepo || 'euler-xyz/euler-labels'
-      const branch = rc.configLabelsRepoBranch || 'master'
-      return repo !== 'euler-xyz/euler-labels' || branch !== 'master'
-    }),
 
     // Feature flags: all enabled by default, set env var to 'false' to disable
     enableTosSignature: !!rc.configTosMdUrl,
@@ -54,6 +47,8 @@ export const useDeployConfig = () => {
 
     // Migration announcement (opt-in: non-empty URL enables the modal)
     migrationAnnouncementUrl: rc.configMigrationAnnouncementUrl || '',
+    // Migration: link to legacy app shown in the header dropdown
+    migrationLegacyAppUrl: rc.configMigrationLegacyAppUrl || '',
 
     // External token lists (defaults in server/api/token-list.get.ts)
     uniswapTokenListUrl: rc.configUniswapTokenListUrl || '',

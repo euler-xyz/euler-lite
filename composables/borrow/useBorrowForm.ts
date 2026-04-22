@@ -31,10 +31,11 @@ import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { TxPlan } from '~/entities/txPlan'
-import { getUtilisationWarning, getBorrowCapWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
+import { getPlanHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { getVaultTags, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { getNetAPY, getProjectedRates } from '~/entities/vault'
+import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 
 export interface UseBorrowFormOptions {
   pair: Ref<AnyBorrowVaultPair | undefined>
@@ -343,8 +344,30 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const isSupplyCapReached = computed(() => collateralVault.value ? getIsSupplyCapReached(collateralVault.value) : false)
   const isBorrowCapReached = computed(() => borrowVault.value ? getIsBorrowCapReached(borrowVault.value) : false)
 
+  // Which builder runs at submit determines which collateral op the plan touches:
+  // swap-and-borrow → buildSwapAndBorrowPlan: only liability OP_BORROW + collateral
+  //                   OP_SKIM (via verifier). No deposit/transfer on collateral.
+  // savings-sourced → buildBorrowBySavingPlan: collateral OP_TRANSFER + liability OP_BORROW.
+  // fresh-deposit   → buildBorrowPlan: collateral OP_DEPOSIT + liability OP_BORROW.
+  const borrowPlannedOps = computed<PlannedOp[]>(() => {
+    const steps: PlannedOp[] = []
+    if (borrowNeedsSwap.value) {
+      // Swap-and-borrow: swapper deposits via verifyAmountMinAndSkim (OP_SKIM on collateral)
+      if (collateralVault.value) steps.push({ vault: collateralVault.value, op: OP_SKIM })
+    }
+    else if (collateralVault.value) {
+      steps.push({
+        vault: collateralVault.value,
+        op: isSavingCollateral.value ? OP_TRANSFER : OP_DEPOSIT,
+      })
+    }
+    if (borrowVault.value) steps.push({ vault: borrowVault.value, op: OP_BORROW })
+    return steps
+  })
+
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
+    if (findBlockingDisabledOp(borrowPlannedOps.value)) return true
     if (borrowActiveBalance.value < valueToNano(collateralAmount.value, borrowActiveAssetDecimals.value)) return true
     if (!(+collateralAmount.value)) return true
     if ((borrowVault.value?.supply || 0n) < valueToNano(borrowAmount.value, borrowVault.value?.decimals)) return true
@@ -358,6 +381,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const borrowFormWarnings = computed(() => {
     if (!borrowVault.value) return []
     return [
+      getPlanHookDisabledWarning(borrowPlannedOps.value),
       getUtilisationWarning(borrowVault.value, 'borrow'),
       getBorrowCapWarning(borrowVault.value),
       collateralVault.value && !('type' in collateralVault.value) ? getSupplyCapWarning(collateralVault.value) : null,
@@ -650,28 +674,28 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       try {
         plan.value = isSavingCollateral.value
           ? await buildBorrowBySavingPlan(
-            collateralVault.value.address,
-            collateralAmountForPlan,
-            borrowVault.value.address,
-            borrowAmountNano,
-            undefined,
-            undefined,
-            savingCollateral.value?.subAccount,
-          )
+              collateralVault.value.address,
+              collateralAmountForPlan,
+              borrowVault.value.address,
+              borrowAmountNano,
+              undefined,
+              undefined,
+              savingCollateral.value?.subAccount,
+            )
           : await buildBorrowPlan(
-            collateralVault.value.address,
-            collateralVault.value.asset.address,
-            collateralAmountForPlan,
-            borrowVault.value.address,
-            borrowAmountNano,
-            undefined,
-            {
-              includePermit2Call: false,
-              wrappedNativeInfo: isBorrowNativeWrap.value
-                ? { wrappedTokenAddress: resolveWrappedNativeAddress(chainId.value!)!, nativeAmount: collateralAmountForPlan }
-                : undefined,
-            },
-          )
+              collateralVault.value.address,
+              collateralVault.value.asset.address,
+              collateralAmountForPlan,
+              borrowVault.value.address,
+              borrowAmountNano,
+              undefined,
+              {
+                includePermit2Call: false,
+                wrappedNativeInfo: isBorrowNativeWrap.value
+                  ? { wrappedTokenAddress: resolveWrappedNativeAddress(chainId.value!)!, nativeAmount: collateralAmountForPlan }
+                  : undefined,
+              },
+            )
       }
       catch (e) {
         logWarn('borrow/buildPlan', e)
@@ -737,28 +761,28 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         const borrowAmountNano = borrowAmountFixed.value.toFormat({ decimals: Number(borrowVault.value.decimals) }).value
         txPlan = isSavingCollateral.value
           ? await buildBorrowBySavingPlan(
-            collateralVault.value.address,
-            collateralAmountForPlan,
-            borrowVault.value.address,
-            borrowAmountNano,
-            undefined,
-            undefined,
-            savingCollateral.value?.subAccount,
-          )
+              collateralVault.value.address,
+              collateralAmountForPlan,
+              borrowVault.value.address,
+              borrowAmountNano,
+              undefined,
+              undefined,
+              savingCollateral.value?.subAccount,
+            )
           : await buildBorrowPlan(
-            collateralVault.value.address,
-            collateralVault.value.asset.address,
-            collateralAmountForPlan,
-            borrowVault.value.address,
-            borrowAmountNano,
-            undefined,
-            {
-              includePermit2Call: true,
-              wrappedNativeInfo: isBorrowNativeWrap.value
-                ? { wrappedTokenAddress: resolveWrappedNativeAddress(chainId.value!)!, nativeAmount: collateralAmountForPlan }
-                : undefined,
-            },
-          )
+              collateralVault.value.address,
+              collateralVault.value.asset.address,
+              collateralAmountForPlan,
+              borrowVault.value.address,
+              borrowAmountNano,
+              undefined,
+              {
+                includePermit2Call: true,
+                wrappedNativeInfo: isBorrowNativeWrap.value
+                  ? { wrappedTokenAddress: resolveWrappedNativeAddress(chainId.value!)!, nativeAmount: collateralAmountForPlan }
+                  : undefined,
+              },
+            )
       }
       await executeTxPlan(txPlan)
 

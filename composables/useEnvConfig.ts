@@ -14,6 +14,7 @@ interface EnvConfig {
   appTitle: string
   appDescription: string
   logoUrl: string
+  socialImageUrl: string
   pythHermesUrl: string
   appKitProjectId: string
   appUrl: string
@@ -25,6 +26,7 @@ const DEFAULTS: EnvConfig = {
   appTitle: 'Euler Lite',
   appDescription: 'Lightweight interface for Euler Finance lending and borrowing.',
   logoUrl: '',
+  socialImageUrl: '',
   pythHermesUrl: '',
   appKitProjectId: '',
   appUrl: '',
@@ -46,6 +48,7 @@ function scanEnv(): EnvConfig {
     appTitle: env('APP_TITLE', 'NUXT_PUBLIC_CONFIG_APP_TITLE') || DEFAULTS.appTitle,
     appDescription: env('APP_DESCRIPTION', 'NUXT_PUBLIC_CONFIG_APP_DESCRIPTION') || DEFAULTS.appDescription,
     logoUrl: env('LOGO_URL', 'NUXT_PUBLIC_CONFIG_LOGO_URL') || DEFAULTS.logoUrl,
+    socialImageUrl: env('SOCIAL_IMAGE_URL', 'NUXT_PUBLIC_CONFIG_SOCIAL_IMAGE_URL') || DEFAULTS.socialImageUrl,
     pythHermesUrl: env('PYTH_HERMES_URL', 'NUXT_PUBLIC_PYTH_HERMES_URL') || '',
     appKitProjectId: env('APPKIT_PROJECT_ID', 'NUXT_PUBLIC_APP_KIT_PROJECT_ID') || DEFAULTS.appKitProjectId,
     appUrl: env('NUXT_PUBLIC_APP_URL') || DEFAULTS.appUrl,
@@ -62,6 +65,7 @@ function fromRuntimeConfig(): EnvConfig {
     appTitle: str(rc.configAppTitle) || DEFAULTS.appTitle,
     appDescription: str(rc.configAppDescription) || DEFAULTS.appDescription,
     logoUrl: str(rc.configLogoUrl) || DEFAULTS.logoUrl,
+    socialImageUrl: str(rc.configSocialImageUrl) || DEFAULTS.socialImageUrl,
     pythHermesUrl: str(rc.pythHermesUrl) ? 'proxy' : '',
     appKitProjectId: str(rc.appKitProjectId) || DEFAULTS.appKitProjectId,
     appUrl: str(rc.appUrl) || DEFAULTS.appUrl,

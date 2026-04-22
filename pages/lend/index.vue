@@ -6,11 +6,13 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { getVaultUtilization } from '~/entities/vault'
 import type { Vault } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import { getProductByVault, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
 import { nanoToValue } from '~/utils/crypto-utils'
+import { isOpDisabled, OP_DEPOSIT } from '~/utils/vault-hooks'
+import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
 
 defineOptions({
   name: 'LendPage',
@@ -31,14 +33,17 @@ const { getBalance } = useWallets()
 
 const { enableEntityBranding } = useDeployConfig()
 
-const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<Vault>(vault => [
-  vault.asset.symbol,
-  vault.asset.name,
-  vault.name,
-  getProductByVault(vault.address).name,
-  getProductByVault(vault.address).description,
-  ...getEntitiesByVault(vault).map(e => e.name),
-])
+const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<Vault>((vault) => {
+  const product = applyVaultOverrides(getProductByVault(vault.address), vault.address)
+  return [
+    vault.asset.symbol,
+    vault.asset.name,
+    vault.name,
+    product.name,
+    product.description,
+    ...getEntitiesByVault(vault).map(e => e.name),
+  ]
+})
 
 const selectedCollateral = ref<string[]>([])
 const selectedMarkets = ref<string[]>([])
@@ -101,18 +106,22 @@ watch(chainId, (newChainId, oldChainId) => {
   }
 })
 
+// Lend listing only checks OP_DEPOSIT: it shows a vault as long as depositing is possible,
+// regardless of OP_TRANSFER state. Contrast with borrow/index.vue which checks both.
 const borrowableVaults = computed(() => {
   return list.value.filter(vault =>
     !isVaultNotExplorableLend(vault.address)
-    && borrowList.value.some(pair => pair.borrow.address === vault.address),
+    && borrowList.value.some(pair => pair.borrow.address === vault.address)
+    && !isOpDisabled(vault, OP_DEPOSIT),
   )
 })
 
-// Fetch USD values for all borrowable vaults
-// Reading rewardsVersion.value establishes a reactive dependency so this
-// re-runs when reward data loads asynchronously (fixes custom filter staleness).
-watchEffect(async () => {
-  const _rv = rewardsVersion.value
+// Fetch USD values for all borrowable vaults. Debounced to collapse the
+// bursts of registry updates streamed during loadVaults's RPC refresh
+// (each batch causes borrowableVaults to re-derive) into a single
+// price-fetch cycle. Reading rewardsVersion.value establishes a reactive
+// dependency so this also re-runs when reward data loads asynchronously.
+const fetchLendPrices = useDebounceFn(async () => {
   const vaults = borrowableVaults.value
   if (!vaults.length) {
     isPricesReady.value = true
@@ -146,6 +155,27 @@ watchEffect(async () => {
   finally {
     isPricesReady.value = true
   }
+}, DEBOUNCE_LIST_PRICE_FETCH_MS)
+
+// Pause price fetches while the page is in keep-alive but not visible.
+// See the borrow-page equivalent for the full rationale — avoiding a
+// bulk refetch while a hidden page's data changes.
+const isActive = ref(true)
+onActivated(() => {
+  isActive.value = true
+})
+onDeactivated(() => {
+  isActive.value = false
+})
+
+watchEffect(() => {
+  // Touch deps so watchEffect re-registers on change, then delegate to the
+  // debounced fetcher. Values are re-read inside fetchLendPrices at execution
+  // time to avoid closing over stale references.
+  void rewardsVersion.value
+  void borrowableVaults.value
+  if (!isActive.value) return
+  fetchLendPrices()
 })
 
 const marketOptions = computed(() => {
@@ -252,7 +282,7 @@ const sortedList = computed(() => {
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
     <BasePageHeader
       title="Lend"
-      description="Discover vaults, earn yield on assets by lending them out."
+      description="Supply assets to isolated lending markets. Earn yield from borrower demand."
       class="mb-16"
       arrow-down
     />
