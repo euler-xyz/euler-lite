@@ -109,6 +109,11 @@ export const getTxErrorCode = (error: unknown) => {
   return extractErrorCode(error)
 }
 
+export const shouldDiscardQuoteOnEstimateGasError = (error: unknown) => {
+  const code = extractErrorCode(error)
+  return code === 'Swapper_SwapError' || code?.startsWith('SwapVerifier_') === true
+}
+
 export const isNonBlockingSimulationError = (error: unknown) => {
   const code = extractErrorCode(error)
   return code ? NON_BLOCKING_SIMULATION_ERRORS.has(code) : false

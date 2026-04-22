@@ -1,4 +1,4 @@
-import { encodeFunctionData, type Address, type StateOverride } from 'viem'
+import type { Address, StateOverride } from 'viem'
 import type { SwapApiQuote } from '~/entities/swap'
 import type { SwapApiRequestInput } from '~/composables/useSwapApi'
 import type { TxPlan } from '~/entities/txPlan'
@@ -18,6 +18,7 @@ import { COWSWAP_PROVIDER_NAME } from '~/entities/cowswap'
 import { getTokenUsdValue } from '~/services/pricing/priceProvider'
 import { resolveWrappedNativeAddress } from '~/utils/native-currency'
 import { applyOperationGuards } from '~/utils/operationGuardRegistry'
+import { getTxErrorMessage, shouldDiscardQuoteOnEstimateGasError } from '~/utils/tx-errors'
 
 type SwapQuotesParallelOptions = {
   amountField: SwapQuoteAmountField
@@ -143,36 +144,48 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     }
 
     let gas: bigint
+    let plan: TxPlan | null = null
+    let account: Address | undefined
+    let stateOverride: StateOverride = []
     try {
       if (!options.buildTxPlanForQuote) {
         return { provider, quote, amountUsd: await amountUsdPromise }
       }
 
-      const account = (params.origin || address.value || quote.accountIn) as Address
-      const plan = applyOperationGuards(await options.buildTxPlanForQuote(quote, provider))
-      const stateOverride = await buildSimulationStateOverride(plan, account)
+      account = (params.origin || address.value || quote.accountIn) as Address
+      plan = applyOperationGuards(await options.buildTxPlanForQuote(quote, provider))
+      stateOverride = await buildSimulationStateOverride(plan, account)
       const stepsToEstimate = plan.steps.filter(step => step.type !== 'approve' && step.type !== 'permit2-approve')
       gas = 0n
       for (const step of stepsToEstimate) {
         /* eslint-disable @typescript-eslint/no-explicit-any -- TxPlan steps are runtime ABI/data pairs */
-        const data = encodeFunctionData({
+        gas += await client.estimateContractGas({
+          account,
+          address: step.to,
           abi: step.abi as any,
           functionName: step.functionName as any,
           args: step.args as any,
-        })
-        gas += await client.estimateGas({
-          account,
-          to: step.to,
-          data,
           value: step.value ?? 0n,
           stateOverride: stateOverride.length ? stateOverride as StateOverride : undefined,
         })
         /* eslint-enable @typescript-eslint/no-explicit-any */
       }
     }
-    catch {
-      console.warn(`estimateGas for quote ${provider} failed`)
-      return null
+    catch (err) {
+      if (shouldDiscardQuoteOnEstimateGasError(err)) {
+        console.warn(`quote simulation error ${provider}`)
+        return null
+      }
+      else {
+        console.warn(getTxErrorMessage(err))
+      }
+      return {
+        provider,
+        quote,
+        amountUsd: await amountUsdPromise,
+        gasCostNative: 0n,
+        gasCostUsd: 0,
+      }
     }
 
     const gasPrice = await gasPricePromise
