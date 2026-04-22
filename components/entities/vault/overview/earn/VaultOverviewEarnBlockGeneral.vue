@@ -47,7 +47,7 @@ const feeDisplay = computed(() => {
     </p>
     <div class="flex flex-col gap-20">
       <div
-        v-if="isDeprecated && deprecationReason"
+        v-if="isDeprecated"
         class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
       >
         <div class="flex items-center gap-8">
@@ -57,10 +57,17 @@ const feeDisplay = computed(() => {
           />
           <!-- eslint-disable vue/no-v-html -- trusted label content -->
           <p
+            v-if="deprecationReason"
             class="text-p3 text-warning-500 auto-link"
             v-html="autoLink(deprecationReason)"
           />
           <!-- eslint-enable vue/no-v-html -->
+          <p
+            v-else
+            class="text-p3 text-warning-500"
+          >
+            This vault has been deprecated.
+          </p>
         </div>
       </div>
       <div
