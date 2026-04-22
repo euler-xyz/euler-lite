@@ -35,6 +35,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   const quoteError = ref<string | null>(null)
 
   let quoteAbort: AbortController | null = null
+  let userSelectedProvider: string | null = null
   const guard = createRaceGuard()
 
   const sortedQuoteCards = computed(() =>
@@ -71,6 +72,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   const reset = () => {
     quoteCards.value = []
     selectedProvider.value = null
+    userSelectedProvider = null
     providersCount.value = 0
     providersFetchedCount.value = 0
     quoteError.value = null
@@ -106,7 +108,11 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
 
     isLoading.value = true
     quoteCards.value = []
+    // Preserve user's manual selection — it will be validated against
+    // new results by the watch(quoteCards) handler below.
+    const preservedProvider = userSelectedProvider
     selectedProvider.value = null
+    userSelectedProvider = preservedProvider
     providersFetchedCount.value = 0
     providersCount.value = 0
 
@@ -190,11 +196,17 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
 
   const selectProvider = (provider: string) => {
     selectedProvider.value = provider
+    userSelectedProvider = provider
   }
 
   watch(quoteCards, (next) => {
     if (!next.length) {
       selectedProvider.value = null
+      return
+    }
+    // Restore user's manual selection if the provider reappears after a re-fetch
+    if (!selectedProvider.value && userSelectedProvider && next.some(card => card.provider === userSelectedProvider)) {
+      selectedProvider.value = userSelectedProvider
       return
     }
     if (
