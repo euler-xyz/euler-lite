@@ -1,10 +1,19 @@
 import type { Address, Hash, Hex, StateOverride } from 'viem'
-import { simulateContract } from '@wagmi/vue/actions'
+import { getAccount, simulateContract } from '@wagmi/vue/actions'
 import type { OperationsContext, AllowanceHelpers } from './types'
 import type { TxPlan } from '~/entities/txPlan'
 import { catchToFallback } from '~/utils/errorHandling'
 import { isNonBlockingSimulationError } from '~/utils/tx-errors'
 import { applyOperationGuards } from '~/utils/operationGuardRegistry'
+
+const OKX_POST_APPROVE_DELAY_MS = 3000
+
+const isOkxWallet = (connector?: { id?: string, name?: string }) => {
+  if (!connector) return false
+  const id = connector.id?.toLowerCase() ?? ''
+  const name = connector.name?.toLowerCase() ?? ''
+  return id === 'okx' || name.includes('okx')
+}
 
 export const createExecutionHelpers = (ctx: OperationsContext, allowanceHelpers: AllowanceHelpers) => {
   const { triggerPortfolioRefresh } = usePortfolioRefresh()
@@ -46,6 +55,13 @@ export const createExecutionHelpers = (ctx: OperationsContext, allowanceHelpers:
 
       lastHash = txHash
       await waitForTxReceipt(txHash)
+
+      // OKX wallet's simulation backend lags behind on-chain state after approvals.
+      // Without a delay, the next step's preview shows "unable to decode asset changes".
+      const isApproveStep = step.type === 'approve' || step.type === 'permit2-approve'
+      if (isApproveStep && isOkxWallet(getAccount(ctx.config).connector)) {
+        await new Promise(resolve => setTimeout(resolve, OKX_POST_APPROVE_DELAY_MS))
+      }
     }
 
     triggerPortfolioRefresh()
