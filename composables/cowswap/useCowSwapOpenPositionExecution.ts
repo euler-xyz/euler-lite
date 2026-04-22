@@ -102,6 +102,7 @@ export const useCowSwapOpenPositionExecution = () => {
         userAddress,
         appDataString,
         appDataHash,
+        { quoteId: params.quoteId },
       )
 
       return await core.submitAndFinalize(payload, chainConfig.orderbookUrl, params.chainId)

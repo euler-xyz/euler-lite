@@ -253,7 +253,8 @@ const submitCowSwapCollateralSwap = async () => {
   cowSwapExecution.reset()
 
   const chainId = currentChainId.value ?? 0
-  if (!getCowSwapChainConfig(chainId)) return
+  const chainConfig = getCowSwapChainConfig(chainId)
+  if (!chainConfig) return
 
   const validTo = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
 
@@ -277,6 +278,7 @@ const submitCowSwapCollateralSwap = async () => {
     buyToken: toVault.value.address as Address,
     sellAmount,
     buyAmount,
+    quoteId: selectedQuote.value.providerData?.quoteId,
     slippageBips: Math.round(slippage.value * 100),
     validTo,
     wrapper: {

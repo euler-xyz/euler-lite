@@ -68,6 +68,7 @@ export type CowSwapOpenPositionExecuteParams = {
   buyToken: Address
   sellAmount: bigint
   buyAmount: bigint
+  quoteId?: number
   slippageBips: number
   validTo: number
   collateralToken: Address
@@ -92,6 +93,7 @@ export type CowSwapCollateralSwapExecuteParams = {
   buyToken: Address
   sellAmount: bigint
   buyAmount: bigint
+  quoteId?: number
   slippageBips: number
   validTo: number
   wrapper: CowSwapCollateralSwapParams
@@ -114,6 +116,7 @@ export type CowSwapClosePositionExecuteParams = {
   buyToken: Address
   sellAmount: bigint
   buyAmount: bigint
+  quoteId?: number
   slippageBips: number
   validTo: number
   orderKind: 'buy' | 'sell'
@@ -140,4 +143,5 @@ export type CowSwapOrderPayload = {
   onchainOrder: boolean
   appData: string
   appDataHash: Hex
+  quoteId?: number
 }
