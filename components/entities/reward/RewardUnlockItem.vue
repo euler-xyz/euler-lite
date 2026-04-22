@@ -12,7 +12,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 const modal = useModal()
 const { error } = useToast()
 const { isSpyMode } = useSpyMode()
-const { rewardTokens, isTokensLoading } = useMerkl()
+const { getTokenByAddress } = useTokenList()
 const { unlockREUL, buildUnlockREULPlan, reulTokenContractAddress, loadREULLocksInfo } = useREULLocks()
 const { chainId: siteChainId } = useEulerAddresses()
 const { chainId: walletChainId, switchChain, address: wagmiAddress } = useWagmi()
@@ -23,12 +23,11 @@ const isUnlocking = ref(false)
 const isPreparing = ref(false)
 const plan = ref<TxPlan | null>(null)
 
-const reulToken = computed(() => {
-  if (isTokensLoading.value && rewardTokens.value.length === 0) {
-    return
-  }
-  return rewardTokens.value.find(token => token.symbol === 'rEUL')
-})
+// rEUL address is read from chain contract config (reulTokenContractAddress) —
+// the authoritative source. Its metadata (symbol, decimals, logo) is looked
+// up in the unified token list like any other token; Merkl's reward-token
+// feed is one of the token-list sources and typically covers rEUL.
+const reulToken = computed(() => getTokenByAddress(reulTokenContractAddress.value))
 
 const unlockableAmount = computed(() => {
   return nanoToValue(item.unlockableAmount, reulToken.value?.decimals)

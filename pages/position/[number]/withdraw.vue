@@ -23,6 +23,8 @@ const { address } = useAccount()
 const { buildWithdrawPlan, buildWithdrawAndSwapPlan } = useEulerOperations()
 const { refreshAllPositions } = useEulerAccount()
 const { eulerLensAddresses } = useEulerAddresses()
+// Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
+useFullBalances()
 
 // Withdraw-specific state
 const selectedOutputAsset = ref<VaultAsset | undefined>()

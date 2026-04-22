@@ -162,7 +162,7 @@ const loadVaults = async () => {
 
     const isFromSecuritize = await isSecuritizeVault(baseAddress)
     if (isFromSecuritize) {
-      fromVault.value = await fetchSecuritizeVault(baseAddress)
+      fromVault.value = await fetchSecuritizeVault(baseAddress, buildFetchContext())
     }
     else {
       fromVault.value = await getVault(baseAddress)

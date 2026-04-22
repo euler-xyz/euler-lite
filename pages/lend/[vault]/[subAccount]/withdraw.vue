@@ -33,6 +33,8 @@ const router = useRouter()
 const route = useRoute()
 const modal = useModal()
 const { error } = useToast()
+// Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
+useFullBalances()
 const { buildWithdrawPlan, buildRedeemPlan, buildWithdrawAndSwapPlan, buildRedeemAndSwapPlan, executeTxPlan } = useEulerOperations()
 const { getVault, getSecuritizeVault: _getSecuritizeVault, getEscrowVault: _getEscrowVault } = useVaults()
 const { isConnected, address } = useAccount()
@@ -273,7 +275,7 @@ const load = async () => {
     // Check if securitize vault first
     const isSecuritize = await isSecuritizeVault(vaultAddress)
     if (isSecuritize) {
-      vault.value = await fetchSecuritizeVault(vaultAddress)
+      vault.value = await fetchSecuritizeVault(vaultAddress, buildFetchContext())
       estimateSupplyAPY.value = 0n // Securitize vaults don't have interest rate
     }
     else {
