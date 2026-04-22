@@ -83,6 +83,14 @@ jobs:
           cache-to: type=gha,mode=max
 
       # ── Deploy ──
+      - name: Verify dispatch is from master
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/master" ]; then
+            echo "::error::workflow_dispatch must be run from the master branch."
+            exit 1
+          fi
+
       - name: Resolve image tag
         id: resolve-tag
         env:

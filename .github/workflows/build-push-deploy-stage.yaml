@@ -113,6 +113,14 @@ jobs:
     permissions:
       id-token: write
     steps:
+      - name: Verify dispatch is from development
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/development" ]; then
+            echo "::error::workflow_dispatch must be run from the development branch."
+            exit 1
+          fi
+
       - name: Resolve image tag
         id: resolve-tag
         env:
