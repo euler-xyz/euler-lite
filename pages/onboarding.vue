@@ -247,8 +247,9 @@ $mono-stack: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberati
 
   &__title {
     margin: 36px 0 0;
+    font-family: 'Plus Jakarta Sans', sans-serif;
     font-size: clamp(48px, 5vw, 68px);
-    font-weight: 600;
+    font-weight: 300;
     letter-spacing: -0.035em;
     line-height: 1.02;
     color: var(--text-primary);
@@ -257,7 +258,9 @@ $mono-stack: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberati
   &__description {
     margin: 20px 0 0;
     max-width: 520px;
+    font-family: 'Plus Jakarta Sans', sans-serif;
     font-size: 17px;
+    font-weight: 300;
     line-height: 1.5;
     color: var(--text-tertiary);
   }
