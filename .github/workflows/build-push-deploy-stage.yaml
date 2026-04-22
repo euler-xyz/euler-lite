@@ -128,10 +128,15 @@ jobs:
           BUILD_TAG: ${{ needs.build-push.outputs.image_tag }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "image_tag=$INPUT_TAG" >> $GITHUB_OUTPUT
+            TAG="$INPUT_TAG"
           else
-            echo "image_tag=$BUILD_TAG" >> $GITHUB_OUTPUT
+            TAG="$BUILD_TAG"
           fi
+          if ! echo "$TAG" | grep -qE '^[a-zA-Z0-9_.-]+$'; then
+            echo "::error::Invalid image tag: must match [a-zA-Z0-9_.-]+"
+            exit 1
+          fi
+          echo "image_tag=$TAG" >> $GITHUB_OUTPUT
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
