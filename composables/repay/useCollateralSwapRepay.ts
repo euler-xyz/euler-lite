@@ -500,6 +500,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       buyToken: borrowVault.value.asset.address as Address,
       sellAmount,
       buyAmount,
+      quoteId: core.quotes.selectedQuote.value.providerData?.quoteId,
       slippageBips: Math.round(slippage.value * 100),
       validTo,
       orderKind,

@@ -49,6 +49,10 @@ export interface SwapApiRouteItem {
   providerName: string
 }
 
+export interface SwapApiProviderData {
+  quoteId?: number
+}
+
 export interface SwapApiQuote {
   amountIn: string
   amountInMax: string
@@ -64,6 +68,7 @@ export interface SwapApiQuote {
   swap: SwapApiSwapBundle
   verify: SwapApiVerify
   route: SwapApiRouteItem[]
+  providerData?: SwapApiProviderData
 }
 
 export interface SwapApiResponse {

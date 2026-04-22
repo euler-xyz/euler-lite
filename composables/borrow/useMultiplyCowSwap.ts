@@ -136,6 +136,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
       buyToken: longVault.address as Address,
       sellAmount: debtAmount,
       buyAmount,
+      quoteId: quote.providerData?.quoteId,
       slippageBips: Math.round(options.multiplySlippage.value * 100),
       validTo,
       collateralToken: supplyVault.asset.address as Address,

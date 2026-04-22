@@ -186,7 +186,7 @@ export const buildCowSwapOrderPayload = (
   from: Address,
   appDataString: string,
   appDataHash: Hex,
-  options?: { signingScheme?: CowSwapOrderSigningScheme },
+  options?: { signingScheme?: CowSwapOrderSigningScheme, quoteId?: number },
 ): CowSwapOrderPayload => {
   const { message } = typedData
 
@@ -208,5 +208,6 @@ export const buildCowSwapOrderPayload = (
     onchainOrder: false,
     appData: appDataString,
     appDataHash,
+    quoteId: options?.quoteId,
   }
 }

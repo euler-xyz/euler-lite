@@ -163,7 +163,7 @@ export const useCowSwapClosePositionExecution = () => {
         inboxAddress,
         appDataString,
         appDataHash,
-        { signingScheme: 'eip1271' },
+        { signingScheme: 'eip1271', quoteId: params.quoteId },
       )
 
       return await core.submitAndFinalize(payload, chainConfig.orderbookUrl, params.chainId)

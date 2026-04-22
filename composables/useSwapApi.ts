@@ -87,6 +87,32 @@ const parseSwapProvidersResponse = (payload: { success?: boolean, data?: string[
   return []
 }
 
+const normalizeQuoteId = (quoteId: unknown): number | undefined => {
+  if (typeof quoteId === 'number' && Number.isSafeInteger(quoteId)) {
+    return quoteId
+  }
+  if (typeof quoteId === 'string' && /^-?\d+$/.test(quoteId)) {
+    const parsed = Number(quoteId)
+    if (Number.isSafeInteger(parsed)) {
+      return parsed
+    }
+  }
+  return undefined
+}
+
+const normalizeSwapQuote = (quote: SwapApiQuote): SwapApiQuote => {
+  const normalizedQuoteId = normalizeQuoteId(quote.providerData?.quoteId)
+  if (!quote.providerData) return quote
+
+  return {
+    ...quote,
+    providerData: {
+      ...quote.providerData,
+      quoteId: normalizedQuoteId,
+    },
+  }
+}
+
 export const useSwapApi = () => {
   const { SWAP_API_URL } = useEulerConfig()
   const { chainId } = useEulerAddresses()
@@ -114,7 +140,7 @@ export const useSwapApi = () => {
       },
     )
 
-    return parseSwapApiResponse(response.data)
+    return parseSwapApiResponse(response.data).map(normalizeSwapQuote)
   }
 
   const getSwapProviders = async (options?: { includeCowSwap?: boolean }): Promise<string[]> => {
