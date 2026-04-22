@@ -1,4 +1,4 @@
-import type { Vault } from '~/entities/vault'
+import { fetchVaults, type Vault } from '~/entities/vault'
 import { logWarn } from '~/utils/errorHandling'
 import type { EulerLabelEntity, EulerLabelProduct } from '~/entities/euler/labels'
 import type { MarketGroup, MarketGroupMetrics, CuratorGroup } from '~/entities/lend-discovery'
@@ -428,6 +428,56 @@ export const useMarketGroups = () => {
     )
   }
 
+  /** Fetch a market group on demand for non-explorable products accessed via direct URL */
+  const fetchMarketGroupOnDemand = async (productKey: string): Promise<MarketGroup | null> => {
+    const product = products[productKey]
+    if (!product) return null
+
+    const allAddresses = [...product.vaults, ...(product.deprecatedVaults || [])]
+    if (allAddresses.length === 0) return null
+
+    const memberVaults: Vault[] = []
+
+    try {
+      for await (const result of fetchVaults(allAddresses)) {
+        memberVaults.push(...result.vaults)
+        if (result.isFinished) break
+      }
+    }
+    catch (e) {
+      logWarn('useMarketGroups/fetchMarketGroupOnDemand', e)
+    }
+
+    if (memberVaults.length === 0) return null
+
+    const entityKeys = Array.isArray(product.entity) ? product.entity : [product.entity]
+    const curatorKey = entityKeys[0] || undefined
+    const curator = curatorKey ? entities[curatorKey] : undefined
+
+    const group: MarketGroup = {
+      id: productKey,
+      name: product.name,
+      source: 'product',
+      curator,
+      curatorKey,
+      vaults: memberVaults,
+      externalCollateral: [],
+      metrics: computeMetricsSync(memberVaults),
+    }
+
+    // Augment with collateral graph using registry vaults + fetched vaults
+    const registryVaults = getAll().map(entry => entry.vault)
+    const [augmented] = augmentWithCollateralGraph([group], [...registryVaults, ...memberVaults])
+
+    try {
+      return await resolveGroupTVL(augmented)
+    }
+    catch (e) {
+      logWarn(`useMarketGroups/fetchMarketGroupOnDemand/resolveGroupTVL [${productKey}]`, e)
+      return augmented
+    }
+  }
+
   return {
     allVaults,
     marketGroups,
@@ -435,5 +485,6 @@ export const useMarketGroups = () => {
     curatorGroups,
     isResolvingTVL,
     getGroupForVault,
+    fetchMarketGroupOnDemand,
   }
 }
