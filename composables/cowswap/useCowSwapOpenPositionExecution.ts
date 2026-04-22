@@ -73,7 +73,11 @@ export const useCowSwapOpenPositionExecution = () => {
       core.status.value = 'signing_order'
 
       const wrapperData = buildOpenPositionWrapperData(params.wrapper, permitSignature)
-      const { appDataString, appDataHash } = buildCowSwapAppData(wrapperData, wrapperAddress)
+      const { appDataString, appDataHash } = buildCowSwapAppData(
+        wrapperData,
+        wrapperAddress,
+        params.slippageBips,
+      )
 
       const orderTypedData = buildCowSwapOrderTypedData({
         chainId: params.chainId,

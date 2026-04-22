@@ -22,6 +22,7 @@ interface UseMultiplyCowSwapOptions {
   multiplySelectedProvider: ComputedRef<string | null>
   multiplyEffectiveQuote: ComputedRef<SwapApiQuote | null>
   multiplySelectedQuote: ComputedRef<SwapApiQuote | null>
+  multiplySlippage: Readonly<Ref<number>>
   multiplySupplyVault: ComputedRef<Vault | undefined>
   multiplyLongVault: ComputedRef<Vault | undefined>
   multiplyShortVault: ComputedRef<Vault | undefined>
@@ -135,6 +136,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
       buyToken: longVault.address as Address,
       sellAmount: debtAmount,
       buyAmount,
+      slippageBips: Math.round(options.multiplySlippage.value * 100),
       validTo,
       collateralToken: supplyVault.asset.address as Address,
       wrapper: {
