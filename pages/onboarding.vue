@@ -6,6 +6,8 @@ const { isConnected } = useAccount()
 
 const { connect } = useWagmi()
 const {
+  appTitle,
+  appDescription,
   enableEarnPage,
   enableLendPage,
   enableExplorePage,
@@ -86,14 +88,14 @@ const socialLinks = computed(() =>
         class="onboarding__title onboarding__rise"
         style="--delay: 80ms"
       >
-        Welcome to <span class="text-accent-500">Euler</span>
+        Welcome to <span class="text-accent-500">{{ appTitle }}</span>
       </h1>
 
       <p
         class="onboarding__description onboarding__rise"
         style="--delay: 160ms"
       >
-        Connect a wallet to get started, or take a look around first.
+        {{ appDescription || 'Connect a wallet to get started, or take a look around first.' }}
       </p>
 
       <div
@@ -145,6 +147,7 @@ const socialLinks = computed(() =>
         v-for="item in socialLinks"
         :key="item.name"
         :href="item.url"
+        :aria-label="item.name"
         target="_blank"
         rel="noopener noreferrer"
         class="onboarding__social-link"
