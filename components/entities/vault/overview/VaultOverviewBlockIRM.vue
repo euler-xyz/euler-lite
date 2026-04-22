@@ -127,7 +127,7 @@ const decodedIRMParams = computed<DecodedIRMParams | null>(() => {
         [{ type: 'tuple', components: [...KINK_IRM_COMPONENTS] }],
         params as Hex,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- viem decode returns dynamic shape
-      ) as any[]
+      ) as unknown as any[]
       return { type: 'kink', baseRate: decoded.baseRate, slope1: decoded.slope1, slope2: decoded.slope2, kink: decoded.kink }
     }
     if (type === INTEREST_RATE_MODEL_TYPE.ADAPTIVE_CURVE) {
@@ -135,7 +135,7 @@ const decodedIRMParams = computed<DecodedIRMParams | null>(() => {
         [{ type: 'tuple', components: [...ADAPTIVE_CURVE_IRM_COMPONENTS] }],
         params as Hex,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- viem decode returns dynamic shape
-      ) as any[]
+      ) as unknown as any[]
       return {
         type: 'adaptive',
         targetUtilization: decoded.targetUtilization,
@@ -151,7 +151,7 @@ const decodedIRMParams = computed<DecodedIRMParams | null>(() => {
         [{ type: 'tuple', components: [...KINKY_IRM_COMPONENTS] }],
         params as Hex,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- viem decode returns dynamic shape
-      ) as any[]
+      ) as unknown as any[]
       return { type: 'kinky', baseRate: decoded.baseRate, slope: decoded.slope, shape: decoded.shape, kink: decoded.kink, cutoff: decoded.cutoff }
     }
   }

@@ -3,6 +3,8 @@ import { logWarn } from '~/utils/errorHandling'
 import { SECONDS_IN_YEAR, TARGET_TIME_AGO } from '~/entities/constants'
 import { eulerUtilsLensABI, eulerVaultLensABI } from '~/entities/euler/abis'
 import { vaultConvertToAssetsAbi } from '~/abis/vault'
+import { getPublicClient } from '~/utils/public-client'
+import { logConciseFetchError } from './log-fetch-error'
 
 export interface ProjectedRates {
   supplyAPY: bigint // 27 decimals
@@ -110,10 +112,9 @@ interface BlockDataCache {
 }
 
 // Pre-fetch block data once for all APY calculations
-export const fetchBlockDataForAPY = async (): Promise<BlockDataCache | null> => {
+export const fetchBlockDataForAPY = async (rpcUrl: string, chainId: number): Promise<BlockDataCache | null> => {
   try {
-    const { client: rpcClient } = useRpcClient()
-    const client = rpcClient.value!
+    const client = getPublicClient(rpcUrl)
     const currentBlockBigInt = await client.getBlockNumber()
     const currentBlock = Number(currentBlockBigInt)
     const sampleDistance = 100
@@ -166,7 +167,7 @@ export const fetchBlockDataForAPY = async (): Promise<BlockDataCache | null> => 
     }
   }
   catch (e) {
-    logWarn('apy/fetchBlockData', e, { severity: 'error' })
+    logConciseFetchError('apy/fetchBlockData', chainId, 'block data', e)
     return null
   }
 }
@@ -176,10 +177,10 @@ export const calculateEarnVaultAPYWithCache = async (
   vaultAddress: string,
   decimals: bigint,
   blockCache: BlockDataCache,
+  rpcUrl: string,
 ): Promise<number> => {
   try {
-    const { client: rpcClient } = useRpcClient()
-    const client = rpcClient.value!
+    const client = getPublicClient(rpcUrl)
 
     const oneShare = parseUnits('1', Number(decimals))
 
@@ -224,10 +225,12 @@ export const calculateEarnVaultAPYWithCache = async (
 export const calculateEarnVaultAPYFromExchangeRate = async (
   vaultAddress: string,
   decimals: bigint,
+  rpcUrl: string,
+  chainId: number,
 ): Promise<number> => {
-  const blockCache = await fetchBlockDataForAPY()
+  const blockCache = await fetchBlockDataForAPY(rpcUrl, chainId)
   if (!blockCache) {
     return 0
   }
-  return calculateEarnVaultAPYWithCache(vaultAddress, decimals, blockCache)
+  return calculateEarnVaultAPYWithCache(vaultAddress, decimals, blockCache, rpcUrl)
 }

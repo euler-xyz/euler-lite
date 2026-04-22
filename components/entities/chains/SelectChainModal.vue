@@ -27,7 +27,7 @@ const onClick = (chainId: number) => {
   emits('close')
   setTimeout(() => {
     changeChain(chainId)
-  }, 1000)
+  }, 400)
 }
 </script>
 

@@ -6,8 +6,10 @@ import { fuulManagerABI, fuulFactoryABI } from '~/abis/fuul'
 import type { FuulClaimableEntry, FuulClaimableReward, FuulIncentive } from '~/entities/fuul'
 import type { RewardCampaign } from '~/entities/reward-campaign'
 import type { TxPlan } from '~/entities/txPlan'
-import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_30S_MS } from '~/entities/tuning-constants'
+import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 import { logWarn } from '~/utils/errorHandling'
+import { createInFlightDedup } from '~/utils/in-flight'
+import { createRaceGuard } from '~/utils/race-guard'
 
 const address = ref('')
 
@@ -17,9 +19,14 @@ const isCampaignsLoading = ref(true)
 const fuulClaimableEntries: Ref<FuulClaimableEntry[]> = shallowRef([])
 const isClaimableLoading = ref(true)
 
-let interval: NodeJS.Timeout | null = null
+// Both public incentives and user-specific claimable rewards poll at 60s.
+// Public hits the CDN-cached proxy; claimable rewards (direct Fuul call,
+// NOT proxied) go to upstream.
+let publicInterval: NodeJS.Timeout | null = null
+let userInterval: NodeJS.Timeout | null = null
 let subscriberCount = 0
-let latestClaimableRequestId = 0
+const incentivesGuard = createRaceGuard()
+const claimableGuard = createRaceGuard()
 
 const cacheState = {
   campaigns: { chainId: 0, timestamp: 0 },
@@ -29,6 +36,19 @@ const cacheState = {
 const getFuulCampaignsForVault = (vaultAddress: string): RewardCampaign[] => {
   return fuulCampaigns.value.get(vaultAddress.toLowerCase()) || []
 }
+
+interface FuulProxyResponse {
+  euler: unknown
+  looping: unknown
+}
+
+// Per-chain in-flight dedup so concurrent callers (chain-switch watcher +
+// 60 s poll firing close together) share a single HTTP round-trip.
+const inFlightFuul = createInFlightDedup<number, FuulProxyResponse>()
+
+const fetchFuulProxy = (chainId: number): Promise<FuulProxyResponse> =>
+  inFlightFuul.run(chainId, () =>
+    $fetch<FuulProxyResponse>('/api/rewards/fuul', { query: { chainId } }))
 
 export const useFuul = () => {
   const { address: wagmiAddress, chain: wagmiChain } = useAccount()
@@ -66,19 +86,19 @@ export const useFuul = () => {
       return
     }
 
+    const generation = incentivesGuard.next()
+
     try {
       if (isInitialLoading) {
         isCampaignsLoading.value = true
       }
 
-      const [eulerRes, loopingRes] = await Promise.all([
-        axios.get(`${FUUL_API_BASE_URL}/incentives`, {
-          params: { protocol: 'euler', chain_id: currentChainId },
-        }),
-        axios.get(`${FUUL_API_BASE_URL}/incentives`, {
-          params: { protocol: 'euler-looping', chain_id: currentChainId },
-        }),
-      ])
+      // Public incentives flow through the proxy; server fans out the two
+      // protocol queries (euler + euler-looping) and returns a combined shape.
+      // /claimable-rewards stays direct below since it's wallet-specific.
+      const proxyData = await fetchFuulProxy(currentChainId)
+
+      if (incentivesGuard.isStale(generation)) return
 
       const campaignMap = new Map<string, RewardCampaign[]>()
 
@@ -88,7 +108,7 @@ export const useFuul = () => {
         else campaignMap.set(vaultKey, [campaign])
       }
 
-      const eulerData: FuulIncentive[] = Array.isArray(eulerRes.data) ? eulerRes.data : []
+      const eulerData: FuulIncentive[] = Array.isArray(proxyData.euler) ? proxyData.euler : []
       for (const item of eulerData) {
         const vaultKey = item.trigger.context.token_address?.toLowerCase()
         if (!vaultKey) continue
@@ -104,7 +124,7 @@ export const useFuul = () => {
         })
       }
 
-      const loopingData: FuulIncentive[] = Array.isArray(loopingRes.data) ? loopingRes.data : []
+      const loopingData: FuulIncentive[] = Array.isArray(proxyData.looping) ? proxyData.looping : []
       for (const item of loopingData) {
         const borrowVault = item.trigger.context.borrowVault?.toLowerCase()
         const depositVault = item.trigger.context.depositVault?.toLowerCase()
@@ -151,7 +171,7 @@ export const useFuul = () => {
       return
     }
 
-    const requestId = ++latestClaimableRequestId
+    const generation = claimableGuard.next()
     const capturedAddress = address.value
 
     try {
@@ -168,7 +188,7 @@ export const useFuul = () => {
         }),
       ])
 
-      if (requestId !== latestClaimableRequestId) return
+      if (claimableGuard.isStale(generation)) return
 
       fuulClaimableEntries.value = [
         ...(Array.isArray(eulerRes.data) ? eulerRes.data : []),
@@ -180,7 +200,7 @@ export const useFuul = () => {
       logWarn('fuul/claimable-rewards', e)
     }
     finally {
-      if (requestId === latestClaimableRequestId) {
+      if (!claimableGuard.isStale(generation)) {
         isClaimableLoading.value = false
       }
     }
@@ -266,7 +286,7 @@ export const useFuul = () => {
     }
     else {
       address.value = ''
-      latestClaimableRequestId++
+      claimableGuard.next()
       fuulClaimableEntries.value = []
       isClaimableLoading.value = false
       cacheState.claimable = { timestamp: 0, address: '', chainId: 0 }
@@ -287,11 +307,17 @@ export const useFuul = () => {
       isLoaded.value = true
     }
 
-    if (enableFuul && !interval) {
-      interval = setInterval(() => {
-        loadIncentives(false)
-        loadClaimableRewards(false)
-      }, POLL_INTERVAL_30S_MS)
+    if (enableFuul) {
+      if (!publicInterval) {
+        publicInterval = setInterval(() => {
+          loadIncentives(false)
+        }, POLL_INTERVAL_60S_MS)
+      }
+      if (!userInterval) {
+        userInterval = setInterval(() => {
+          loadClaimableRewards(false)
+        }, POLL_INTERVAL_60S_MS)
+      }
     }
   }, { immediate: true })
 
@@ -299,9 +325,15 @@ export const useFuul = () => {
 
   onUnmounted(() => {
     subscriberCount--
-    if (subscriberCount === 0 && interval) {
-      clearInterval(interval)
-      interval = null
+    if (subscriberCount === 0) {
+      if (publicInterval) {
+        clearInterval(publicInterval)
+        publicInterval = null
+      }
+      if (userInterval) {
+        clearInterval(userInterval)
+        userInterval = null
+      }
     }
   })
 
