@@ -115,11 +115,14 @@ jobs:
     steps:
       - name: Resolve image tag
         id: resolve-tag
+        env:
+          INPUT_TAG: ${{ inputs.image_tag }}
+          BUILD_TAG: ${{ needs.build-push.outputs.image_tag }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "image_tag=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
+            echo "image_tag=$INPUT_TAG" >> $GITHUB_OUTPUT
           else
-            echo "image_tag=${{ needs.build-push.outputs.image_tag }}" >> $GITHUB_OUTPUT
+            echo "image_tag=$BUILD_TAG" >> $GITHUB_OUTPUT
           fi
 
       - name: Configure AWS credentials
