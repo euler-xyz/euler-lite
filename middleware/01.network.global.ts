@@ -10,6 +10,7 @@ const rawNetworkParam = (value: unknown): string | null => {
 const LEGACY_PATH_REWRITES: ReadonlyArray<{ from: RegExp, to: string }> = [
   { from: /^\/vault(\/.*)?$/, to: '/lend' },
   { from: /^\/positions(\/.*)?$/, to: '/borrow' },
+  { from: /^\/account(\/.*)?$/, to: '/position' },
 ]
 
 const rewriteLegacyPath = (path: string): string | null => {
@@ -27,12 +28,14 @@ export default defineNuxtRouteMiddleware((to) => {
 
   const { chainId, changeCurrentChainId } = useEulerAddresses()
 
-  const queryChainId = parseChainId(to.query.network)
+  const rawChainParam = to.query.network ?? to.query.chainId
+  const queryChainId = parseChainId(rawChainParam)
   const savedChainId = parseChainId(localStorage.getItem('chainId'))
   const fallbackChainId = queryChainId ?? savedChainId ?? (chainId.value || 1)
 
-  const rawNetwork = rawNetworkParam(to.query.network)
+  const rawNetwork = rawNetworkParam(rawChainParam)
   const needsNormalization = queryChainId != null && rawNetwork !== String(queryChainId)
+  const hasLegacyChainIdParam = to.query.chainId != null
   const rewrittenPath = rewriteLegacyPath(to.path)
 
   // Sync state chainId to the URL's chainId before downstream middleware
@@ -48,11 +51,12 @@ export default defineNuxtRouteMiddleware((to) => {
     localStorage.setItem('chainId', String(fallbackChainId))
   }
 
-  if (rewrittenPath || !queryChainId || queryChainId !== fallbackChainId || needsNormalization) {
+  if (rewrittenPath || !queryChainId || queryChainId !== fallbackChainId || needsNormalization || hasLegacyChainIdParam) {
+    const { chainId: _legacyChainId, ...restQuery } = to.query
     return navigateTo({
       path: rewrittenPath ?? to.path,
       query: {
-        ...to.query,
+        ...restQuery,
         network: fallbackChainId,
       },
       hash: to.hash,

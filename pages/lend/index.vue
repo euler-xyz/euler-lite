@@ -12,6 +12,7 @@ import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOpDisabled, OP_DEPOSIT } from '~/utils/vault-hooks'
+import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
 
 defineOptions({
@@ -179,17 +180,13 @@ watchEffect(() => {
 })
 
 const marketOptions = computed(() => {
-  return borrowableVaults.value.reduce((result, vault) => {
+  return buildTvlSortedOptions(borrowableVaults.value.flatMap((vault) => {
     const market = getProductByVault(vault.address)
+    if (!market.name) return []
     const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
     const entityObj = entityName ? entities[entityName] : null
-
-    if (market.name && !result.find(option => option.label === market.name)) {
-      return [...result, { label: market.name, value: market.name, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
-    }
-
-    return result
-  }, [] as { label: string, value: string, icon?: string, iconFallback?: string }[])
+    return [{ key: market.name, label: market.name, tvl: vaultUsdValues.value.get(vault.address) ?? 0, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
+  }))
 })
 
 const assetOptions = computed(() => {
@@ -205,22 +202,12 @@ const assetOptions = computed(() => {
 })
 
 const riskManagerOptions = computed(() => {
-  const seen = new Set<string>()
-  const result: { label: string, value: string, icon?: string, iconFallback?: string }[] = []
-  for (const vault of borrowableVaults.value) {
-    for (const entity of getEntitiesByVault(vault)) {
-      if (!seen.has(entity.name)) {
-        seen.add(entity.name)
-        result.push({
-          label: entity.name,
-          value: entity.name,
-          icon: entity.logo ? `/entities/${entity.logo}` : undefined,
-          iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined,
-        })
-      }
-    }
-  }
-  return result
+  return buildTvlSortedOptions(borrowableVaults.value.flatMap((vault) => {
+    const tvl = vaultUsdValues.value.get(vault.address) ?? 0
+    return getEntitiesByVault(vault).map(entity => ({
+      key: entity.name, label: entity.name, tvl, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined,
+    }))
+  }))
 })
 
 const filteredList = computed(() => {

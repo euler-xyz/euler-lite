@@ -17,6 +17,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
 
 const { vault } = defineProps<{ vault: SecuritizeVault, desktopOverview?: boolean }>()
+const route = useRoute()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
 const { client: rpcClient } = useRpcClient()
@@ -215,7 +216,7 @@ const supplyCapPercentageDisplay = computed(() => {
         <VaultOverviewLabelValue label="Market">
           <NuxtLink
             v-if="marketProductKey"
-            :to="{ name: 'explore-market', params: { market: marketProductKey } }"
+            :to="{ name: 'explore-market', params: { market: marketProductKey }, query: { network: route.query.network } }"
             class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
           >
             {{ product.name }}
