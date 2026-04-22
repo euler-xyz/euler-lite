@@ -4,7 +4,6 @@ import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { logWarn } from '~/server/utils/log'
 
-const TIMEOUT_MS = 10_000
 const CACHE_TTL_MS = 300_000
 
 const rateLimiter = createRateLimiter({
@@ -31,7 +30,7 @@ export default defineEventHandler(async (event) => {
   if (cached) return cached
 
   try {
-    const resp = await fetchWithTimeout(upstreamUrl, TIMEOUT_MS)
+    const resp = await fetchWithTimeout(upstreamUrl)
     if (!resp.ok) {
       throw new Error(`Upstream returned ${resp.status}`)
     }
