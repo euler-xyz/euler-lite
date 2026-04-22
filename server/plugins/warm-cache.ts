@@ -19,6 +19,10 @@
  *                Merkl opportunities × 3, Brevis campaigns, Fuul × 2,
  *                refreshChainVaults(chainId)
  *
+ * Per-chain warms skip chains listed in `DEPRECATED_CHAINS`. Their data
+ * is still served — the first visitor to a deprecated chain pays a
+ * cold-upstream fetch, cached from then on under normal TTL behavior.
+ *
  * `refreshChainVaults` internally $fetches /api/euler-chains and
  * /api/labels/*, and calls `getVaultCategories(chainId)` — those all
  * collapse onto the parallel warms via in-flight dedup at the cache layer,
@@ -32,6 +36,7 @@ import { LABEL_FILES, refreshLabelFile } from '../api/labels/[file].get'
 import { refreshEulerChains } from '../api/euler-chains.get'
 import { refreshTokenList } from '../api/token-list.get'
 import { getEnabledChainIds } from '~/utils/chain-env'
+import { parseDeprecatedChains } from '~/utils/parseDeprecatedChains'
 import { logWarn } from '../utils/log'
 import { refreshChainVaults } from '../utils/vaults-cache'
 import { refreshVaultCategories } from '../utils/vault-categories-store'
@@ -125,7 +130,11 @@ export default defineNitroPlugin(() => {
   if (g[WARM_LATCH_KEY]) return
   g[WARM_LATCH_KEY] = true
 
-  const chainIds = getEnabledChainIds()
+  const enabledChainIds = getEnabledChainIds()
+  const deprecatedChainIds = new Set(
+    parseDeprecatedChains(process.env.DEPRECATED_CHAINS, new Set(enabledChainIds)),
+  )
+  const chainIds = enabledChainIds.filter(id => !deprecatedChainIds.has(id))
   if (chainIds.length === 0) return
 
   const warmAll = async () => {
