@@ -1,9 +1,16 @@
 name: Build, Push & Deploy (stage)
 on:
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'ECR image tag to deploy (defaults to "latest")'
+        required: false
+        default: 'latest'
   push:
-    branches:
-      - development
+    tags:
+      - 'rc*'
+      - 'beta*'
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -14,6 +21,7 @@ concurrency:
 jobs:
   build-push:
     name: Build & Push Image
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -25,6 +33,14 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Verify tag is on development
+        run: |
+          if ! git merge-base --is-ancestor "${{ github.sha }}" origin/development; then
+            echo "::error::Tag does not point to a commit on development. Aborting."
+            exit 1
+          fi
 
       - name: Generate image tag
         id: generate-tag
@@ -91,11 +107,21 @@ jobs:
 
   deploy:
     name: Deploy to ECS
+    if: always() && (needs.build-push.result == 'success' || (github.event_name == 'workflow_dispatch' && needs.build-push.result == 'skipped'))
     needs: build-push
     runs-on: ubuntu-latest
     permissions:
       id-token: write
     steps:
+      - name: Resolve image tag
+        id: resolve-tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "image_tag=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "image_tag=${{ needs.build-push.outputs.image_tag }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
         with:
@@ -116,7 +142,7 @@ jobs:
         with:
           task-definition: task-definition.json
           container-name: ${{ secrets.ECS_CONTAINER_NAME_STAGE }}
-          image: ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${{ needs.build-push.outputs.image_tag }}
+          image: ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${{ steps.resolve-tag.outputs.image_tag }}
 
       - name: Deploy new task definition to ECS
         uses: aws-actions/amazon-ecs-deploy-task-definition@fc8fc60f3a60ffd500fcb13b209c59d221ac8c8c # v2.6.1
