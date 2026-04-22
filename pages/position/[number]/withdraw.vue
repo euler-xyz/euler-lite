@@ -16,12 +16,15 @@ import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/stri
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useCollateralForm } from '~/composables/position/useCollateralForm'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const positionIndex = usePositionIndex()
 const { address } = useAccount()
 const { buildWithdrawPlan, buildWithdrawAndSwapPlan } = useEulerOperations()
 const { refreshAllPositions } = useEulerAccount()
 const { eulerLensAddresses } = useEulerAddresses()
+// Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
+useFullBalances()
 
 // Withdraw-specific state
 const selectedOutputAsset = ref<VaultAsset | undefined>()
@@ -41,6 +44,7 @@ const form = useCollateralForm({
   mode: 'withdraw',
   needsSwap,
   effectiveBalance: computed(() => form.collateralAssets.value),
+  effectiveAsset: computed(() => form.asset.value),
 
   computePriceFixed: (_pos, borrowVault, collateralVault) => {
     const collateralPrice = borrowVault && collateralVault
@@ -131,12 +135,23 @@ const form = useCollateralForm({
   },
 })
 useOperationGuard(computed(() => [form.collateralVault.value?.address, form.borrowVault.value?.address].filter(Boolean)))
+
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (form.isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (form.isSwapRestricted.value) return { message: 'Swapping from this vault is not available in your region', variant: 'warning' }
+  if (form.estimatesError.value) return { message: form.estimatesError.value, variant: 'error' }
+  if (form.simulationError.value) return { message: form.simulationError.value, variant: 'error' }
+  return undefined
+})
 const pairAssetsLabel = usePositionPairLabel(form.position)
 
 // Withdraw-specific computeds
 const withdrawWarnings = computed(() => {
   if (!form.borrowVault.value) return []
-  return [getUtilisationWarning(form.borrowVault.value, 'borrow')]
+  return [
+    form.hookWarning.value,
+    getUtilisationWarning(form.borrowVault.value, 'borrow'),
+  ]
 })
 
 const onSelectOutputAsset = (newAsset: VaultAsset, meta?: SwapTokenSelectMeta) => {
@@ -237,7 +252,7 @@ watch(selectedOutputAsset, () => {
               />
 
               <VaultFormInfoBlock
-                v-if="form.swapEstimatedOutput.value"
+                v-if="form.swapEstimatedOutput.value || form.swapQuoteError.value"
                 :loading="form.isSwapQuoteLoading.value"
                 variant="card"
               >
@@ -360,6 +375,8 @@ watch(selectedOutputAsset, () => {
             <VaultFormSubmit
               :disabled="form.submitDisabled.value"
               :loading="form.isSubmitting.value || form.isPreparing.value"
+              :disabled-reason="disabledReasonInfo?.message"
+              :disabled-reason-variant="disabledReasonInfo?.variant"
             >
               {{ form.submitLabel }}
             </VaultFormSubmit>

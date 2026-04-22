@@ -5,7 +5,8 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
 import { type BorrowVaultPair, getNetAPY, getProjectedRates, type VaultAsset } from '~/entities/vault'
-import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
+import { getHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
+import { isOpDisabled, OP_BORROW } from '~/utils/vault-hooks'
 import { getAssetUsdValueOrZero, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatio } from '~/services/pricing/priceProvider'
 import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
@@ -17,6 +18,7 @@ import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { createRaceGuard } from '~/utils/race-guard'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const router = useRouter()
 const _route = useRoute()
@@ -80,6 +82,7 @@ const errorText = computed(() => {
 })
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value) return false
+  if (pair.value?.borrow && isOpDisabled(pair.value.borrow, OP_BORROW)) return true
 
   const currentSupplied = position.value?.supplied || 0n
   const newCollateralAmount = valueToNano(collateralAmount.value, collateralVault.value?.asset?.decimals)
@@ -100,12 +103,21 @@ const isGeoBlocked = computed(() => {
 const isBorrowRestricted = computed(() =>
   pair.value?.borrow ? isVaultRestrictedByCountry(pair.value.borrow.address) : false)
 const reviewBorrowDisabled = computed(() => isGeoBlocked.value || isBorrowRestricted.value || isSubmitDisabled.value)
+
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isBorrowRestricted.value) return { message: 'Borrowing this asset is not available in your region', variant: 'warning' }
+  if (errorText.value) return { message: errorText.value, variant: 'error' }
+  if (simulationError.value) return { message: simulationError.value, variant: 'error' }
+  return undefined
+})
 const borrowVault = computed(() => pair.value?.borrow)
 const collateralVault = computed(() => pair.value?.collateral)
 useOperationGuard(computed(() => [borrowVault.value?.address, collateralVault.value?.address].filter(Boolean)))
 const borrowWarnings = computed(() => {
   if (!borrowVault.value) return []
   return [
+    getHookDisabledWarning(borrowVault.value, OP_BORROW),
     getUtilisationWarning(borrowVault.value, 'borrow'),
     getBorrowCapWarning(borrowVault.value),
   ]
@@ -289,7 +301,7 @@ const send = async () => {
     modal.close()
     updateBalance()
     setTimeout(() => {
-      router.replace('/portfolio')
+      router.replace({ path: '/portfolio', query: { network: _route.query.network } })
     }, 400)
   }
   catch (e) {
@@ -561,6 +573,8 @@ watch([collateralAmount, borrowAmount], async () => {
             <VaultFormSubmit
               :disabled="reviewBorrowDisabled"
               :loading="isSubmitting || isPreparing"
+              :disabled-reason="disabledReasonInfo?.message"
+              :disabled-reason-variant="disabledReasonInfo?.variant"
             >
               Review Borrow
             </VaultFormSubmit>

@@ -11,6 +11,36 @@ interface TenderlySimulateParams {
 
 interface TenderlySimulateResponse {
   url: string
+  errorMessage?: string
+}
+
+interface TenderlyFetchError {
+  message?: string
+  statusMessage?: string
+  data?: {
+    statusMessage?: string
+    message?: string
+  }
+}
+
+function getTenderlyErrorMessage(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const fetchError = error as TenderlyFetchError
+    const candidates = [
+      fetchError.data?.statusMessage,
+      fetchError.statusMessage,
+      fetchError.data?.message,
+      fetchError.message,
+    ]
+
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim()
+      }
+    }
+  }
+
+  return 'Tenderly simulation failed'
 }
 
 export const useTenderlySimulation = () => {
@@ -34,12 +64,11 @@ export const useTenderlySimulation = () => {
       })
 
       simulationUrl.value = response.url
+      simulationError.value = response.errorMessage?.trim() || ''
       return response.url
     }
     catch (error: unknown) {
-      simulationError.value = error instanceof Error
-        ? error.message
-        : 'Tenderly simulation failed'
+      simulationError.value = getTenderlyErrorMessage(error)
       return null
     }
     finally {

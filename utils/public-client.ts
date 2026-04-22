@@ -10,6 +10,9 @@ export const getPublicClient = (rpcUrl: string): PublicClient => {
 
   const client = createPublicClient({
     transport: http(rpcUrl, {
+      // Disable viem's default 3× retry on 429/5xx. The proxy is reliable and
+      // retries here amplify Cloudflare rate-limit bursts (1 failure → 4 requests).
+      retryCount: 0,
       batch: {
         batchSize: 100,
         wait: 100,

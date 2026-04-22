@@ -5,7 +5,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
-import type { Vault } from '~/entities/vault'
+import { isEVKVault, type Vault } from '~/entities/vault'
 import { getAssetUsdValue, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
@@ -16,9 +16,12 @@ import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { useRepaySwapCore } from '~/composables/repay/useRepaySwapCore'
 import { useRepaySwapDetails } from '~/composables/repay/useRepaySwapDetails'
 import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics'
+import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createRaceGuard } from '~/utils/race-guard'
+import { findBlockingDisabledOp, OP_REPAY, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
+import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 
 interface UseCollateralSwapRepayOptions {
   position: Ref<AccountBorrowPosition | undefined>
@@ -204,11 +207,60 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     return health.nextHealth.value < 1
   })
 
+  // Collateral-swap repay. Same-asset path: source.WITHDRAW + liability.SKIM
+  // + liability.REPAY_WITH_SHARES. Cross-asset path: source.WITHDRAW + swap +
+  // liability.REPAY (done by swapper). Full repay: + collateral.TRANSFER.
+  // Heuristic: for cross-asset paths, core.debtRepaid uses the quote's
+  // amountOut (pre-slippage). See useSavingsRepay for the precision note.
+  const isEffectivelyFullRepay = computed(() => {
+    if (!position.value || (position.value.borrowed ?? 0n) <= 0n) return false
+    const repaid = core.debtRepaid.value
+    return repaid !== null && repaid >= (position.value.borrowed ?? 0n)
+  })
+
+  const collateralSwapRepayPlannedOps = computed<PlannedOp[]>(() => {
+    const steps: PlannedOp[] = []
+    if (sourceVault.value) steps.push({ vault: sourceVault.value as Vault, op: OP_WITHDRAW })
+    if (borrowVault.value) {
+      if (core.isSameAsset.value) {
+        // Same-asset: withdraw → skim → repayWithShares
+        steps.push({ vault: borrowVault.value as Vault, op: OP_SKIM })
+        steps.push({ vault: borrowVault.value as Vault, op: OP_REPAY_WITH_SHARES })
+      }
+      else {
+        // Cross-asset: swapper internally calls repay
+        steps.push({ vault: borrowVault.value as Vault, op: OP_REPAY })
+      }
+    }
+    if (isEffectivelyFullRepay.value) {
+      for (const vault of repayCollateralVaults.value) {
+        if (isEVKVault(vault)) {
+          steps.push({ vault, op: OP_TRANSFER })
+        }
+      }
+    }
+    return steps
+  })
+
+  const hookWarning = computed(() => getPlanHookDisabledWarning(collateralSwapRepayPlannedOps.value))
+
+  // Uses amountInMax (slippage-padded) when available so the user sees an
+  // insufficient-balance error before hitting an on-chain revert.
+  const requiredInput = computed(() => {
+    if (core.isSameAsset.value) return core.spent.value ?? 0n
+    const q = core.quotes.selectedQuote.value
+    if (!q) return 0n
+    return getSwapInputAmount(q, core.direction.value)
+  })
+  const isInsufficientSource = computed(() => requiredInput.value > 0n && requiredInput.value > sourceBalance.value)
+
   // --- Submit disabled ---
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
+    if (findBlockingDisabledOp(collateralSwapRepayPlannedOps.value)) return true
     if (!sourceVault.value || !borrowVault.value) return true
     if (!core.debtAmount.value && !core.amount.value) return true
+    if (isInsufficientSource.value) return true
     if (core.isSameAsset.value) {
       if (isHealthInsufficient.value) return true
       return false
@@ -223,6 +275,9 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const disabledReason = computed(() => {
     if (core.isRepayExceedsDebt.value) {
       return 'You repaying more than required'
+    }
+    if (isInsufficientSource.value) {
+      return 'Insufficient collateral balance to cover the required swap amount.'
     }
     if (isHealthInsufficient.value) {
       return 'This swap will not restore account health. Repay the full debt from your wallet instead.'
@@ -450,6 +505,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     // Submit
     isSubmitDisabled,
     disabledReason,
+    hookWarning,
     isRepayExceedsDebt: core.isRepayExceedsDebt,
     // Handlers
     onAmountInput: core.onAmountInput,
@@ -457,6 +513,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     onPercentInput: core.onPercentInput,
     onSourceVaultChange,
     onRefreshQuotes: core.onRefreshQuotes,
+    onSourceMax: core.onSourceMax,
     submit,
     send,
     updateSourceBalance,

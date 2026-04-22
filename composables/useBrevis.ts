@@ -7,8 +7,25 @@ import type { Campaign, CampaignsRequest, MerkleProofRequest, RewardInfo } from 
 import type { RewardCampaign } from '~/entities/reward-campaign'
 import type { TxPlan } from '~/entities/txPlan'
 import { CampaignAction } from '~/entities/brevis'
-import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_30S_MS } from '~/entities/tuning-constants'
+import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 import { logWarn } from '~/utils/errorHandling'
+import { createInFlightDedup } from '~/utils/in-flight'
+
+// Server proxy response shape for public campaigns (raw pass-through of the
+// Brevis POST response body).
+interface BrevisCampaignsProxyResponse {
+  campaigns?: Record<string, unknown>[]
+  err?: unknown
+}
+
+// Per-chain in-flight dedup so concurrent callers (chain-switch watcher
+// + isActive watcher + 60 s poll firing in quick succession) share a
+// single HTTP round-trip instead of issuing duplicate proxy requests.
+const inFlightBrevis = createInFlightDedup<number, BrevisCampaignsProxyResponse>()
+
+const fetchBrevisCampaignsProxy = (chainId: number): Promise<BrevisCampaignsProxyResponse> =>
+  inFlightBrevis.run(chainId, () =>
+    $fetch<BrevisCampaignsProxyResponse>('/api/rewards/brevis', { query: { chainId } }))
 
 const ACTION_MAP: Record<string, CampaignAction> = {
   EULER_BORROW: CampaignAction.BORROW,
@@ -60,7 +77,15 @@ const userRewards: Ref<Campaign[]> = ref([])
 const isCampaignsLoading = ref(true)
 const isRewardsLoading = ref(true)
 
-let interval: NodeJS.Timeout | null = null
+// Both public campaigns and user-specific rewards poll at 60s. Public polls
+// mostly hit CDN (60s total window). User-specific rewards (Brevis POST with
+// user_address — NOT proxied) hit the upstream directly.
+let publicInterval: NodeJS.Timeout | null = null
+let userInterval: NodeJS.Timeout | null = null
+// Refcount: useBrevis is consumed by useRewardsApy + portfolio components
+// simultaneously. Clearing intervals on the first unmount would starve other
+// subscribers; tear down only when the last one goes away.
+let subscriberCount = 0
 
 const cacheState = {
   campaigns: { timestamp: 0 },
@@ -82,6 +107,10 @@ export const useBrevis = () => {
   const { chainId } = useEulerAddresses()
   const { client: rpcClient } = useRpcClient()
   const { enableIncentra } = useDeployConfig()
+  const { spyAddress } = useSpyMode()
+
+  const effectiveAddress = computed(() => spyAddress.value || wagmiAddress.value || '')
+  const isActive = computed(() => isConnected.value || Boolean(spyAddress.value))
 
   const ensureWalletOnCurrentChain = async () => {
     const targetChainId = chainId.value
@@ -115,22 +144,20 @@ export const useBrevis = () => {
         isCampaignsLoading.value = true
       }
 
-      const request: CampaignsRequest = {
-        chain_id: [currentChainId],
-        action: [CampaignAction.LEND, CampaignAction.BORROW],
-        status: [3],
-      }
-
-      const res = await axios.post(BREVIS_API_URL, request)
+      // Public campaigns flow through the proxy; the server always sends the
+      // same hardcoded { action: [LEND, BORROW], status: [3] } request body,
+      // so the proxy cache key reduces to `brevis:{chainId}`. The per-user
+      // /getMerkleProofsBatch POST stays direct (claimReward).
+      const data = await fetchBrevisCampaignsProxy(currentChainId)
 
       if (requestId !== latestCampaignsRequestId) return
 
-      if (res.data.err) {
-        logWarn('brevis/campaigns', res.data.err)
+      if (data.err) {
+        logWarn('brevis/campaigns', data.err)
         return
       }
 
-      const campaigns: Campaign[] = (res.data.campaigns || []).map(normalizeCampaign)
+      const campaigns: Campaign[] = (data.campaigns || []).map(normalizeCampaign)
       const campaignMap = new Map<string, RewardCampaign[]>()
 
       for (const campaign of campaigns) {
@@ -313,14 +340,9 @@ export const useBrevis = () => {
     }
   }
 
-  watch(wagmiAddress, (val, oldVal) => {
-    if (val) {
-      address.value = val
-    }
-    else {
-      address.value = ''
-    }
-    // Force-refresh rewards when the connected wallet changes (skip initial mount)
+  watch(effectiveAddress, (val, oldVal) => {
+    address.value = val || ''
+    // Force-refresh rewards when the effective address changes (skip initial mount)
     if (enableIncentra && oldVal && val && val !== oldVal) {
       loadRewards(true, true)
     }
@@ -334,40 +356,67 @@ export const useBrevis = () => {
       cacheState.campaigns.timestamp = 0
       cacheState.rewards.timestamp = 0
       cacheState.rewards.address = ''
+
+      // Trigger immediate reload so users don't wait up to 60s for the
+      // poll interval to repopulate data after a chain switch.
+      // Only mark isLoaded when active, so the isActive watcher still
+      // fires the initial fetch on reconnect.
+      if (enableIncentra && isActive.value && val) {
+        loadCampaigns()
+        loadRewards()
+        isLoaded.value = true
+      }
     }
   })
 
-  watch(isConnected, (connected) => {
-    if (connected && enableIncentra) {
+  watch(isActive, (active) => {
+    if (active && enableIncentra) {
       if (!isLoaded.value) {
         loadCampaigns()
         loadRewards()
         isLoaded.value = true
       }
 
-      if (!interval) {
-        interval = setInterval(() => {
-          loadRewards(false)
+      if (!publicInterval) {
+        publicInterval = setInterval(() => {
           loadCampaigns(false)
-        }, POLL_INTERVAL_30S_MS)
+        }, POLL_INTERVAL_60S_MS)
+      }
+      if (!userInterval) {
+        userInterval = setInterval(() => {
+          loadRewards(false)
+        }, POLL_INTERVAL_60S_MS)
       }
     }
-    else {
+    else if (!active) {
       userRewards.value = []
       isCampaignsLoading.value = false
       isRewardsLoading.value = false
       cacheState.rewards = { timestamp: 0, address: '' }
-      if (interval) {
-        clearInterval(interval)
-        interval = null
+      if (publicInterval) {
+        clearInterval(publicInterval)
+        publicInterval = null
+      }
+      if (userInterval) {
+        clearInterval(userInterval)
+        userInterval = null
       }
     }
   }, { immediate: true })
 
+  subscriberCount++
+
   onUnmounted(() => {
-    if (interval) {
-      clearInterval(interval)
-      interval = null
+    subscriberCount--
+    if (subscriberCount === 0) {
+      if (publicInterval) {
+        clearInterval(publicInterval)
+        publicInterval = null
+      }
+      if (userInterval) {
+        clearInterval(userInterval)
+        userInterval = null
+      }
     }
   })
 

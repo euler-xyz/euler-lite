@@ -1,5 +1,5 @@
 import { getAddress } from 'viem'
-import { getProductByVault } from '~/utils/eulerLabelsUtils'
+import { getVaultProductName } from '~/utils/eulerLabelsUtils'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import type { AccountDepositPosition } from '~/entities/account'
@@ -41,7 +41,6 @@ export const useRepaySavingsOptions = () => {
     async (position) => {
       const vault = position.vault
       const amount = nanoToValue(position.assets, vault.asset.decimals)
-      const product = getProductByVault(vault.address)
       const baseApy = nanoToValue(vault.interestRateInfo.supplyAPY || 0n, 25)
       const apy = withIntrinsicSupplyApy(baseApy, vault.asset.address) + getSupplyRewardApy(vault.address)
       return {
@@ -51,7 +50,7 @@ export const useRepaySavingsOptions = () => {
         apy,
         symbol: vault.asset.symbol,
         assetAddress: vault.asset.address,
-        label: product.name || vault.name,
+        label: getVaultProductName(vault.address) || vault.name,
         vaultAddress: vault.address,
       }
     },

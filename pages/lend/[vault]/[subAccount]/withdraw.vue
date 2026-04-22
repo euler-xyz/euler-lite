@@ -15,22 +15,26 @@ import {
 } from '~/entities/vault'
 import { isSecuritizeVault } from '~/entities/vault/factory'
 import { getSubAccountAddress } from '~/entities/account'
-import { getUtilisationWarning } from '~/composables/useVaultWarnings'
+import { getHookDisabledWarning, getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import type { TxPlan } from '~/entities/txPlan'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { SwapperMode } from '~/entities/swap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
-import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
+import { formatNumber, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import { isOpDisabled, OP_REDEEM, OP_WITHDRAW } from '~/utils/vault-hooks'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const router = useRouter()
 const route = useRoute()
 const modal = useModal()
 const { error } = useToast()
+// Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
+useFullBalances()
 const { buildWithdrawPlan, buildRedeemPlan, buildWithdrawAndSwapPlan, buildRedeemAndSwapPlan, executeTxPlan } = useEulerOperations()
 const { getVault, getSecuritizeVault: _getSecuritizeVault, getEscrowVault: _getEscrowVault } = useVaults()
 const { isConnected, address } = useAccount()
@@ -63,7 +67,10 @@ const isSecuritizeVaultType = computed(() => vault.value && 'type' in vault.valu
 
 const withdrawWarnings = computed(() => {
   if (!vault.value || isSecuritizeVaultType.value) return []
-  return [getUtilisationWarning(vault.value as Vault, 'lend')]
+  return [
+    getHookDisabledWarning(vault.value as Vault, effectiveWithdrawOp.value),
+    getUtilisationWarning(vault.value as Vault, 'lend'),
+  ]
 })
 const assetsBalance = ref(0n)
 const sharesBalance = ref(0n)
@@ -105,8 +112,13 @@ const amountFixed = computed(() => {
     Number(asset.value?.decimals || 0),
   )
 })
+const effectiveWithdrawOp = computed(() => {
+  const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
+  return isMax ? OP_REDEEM : OP_WITHDRAW
+})
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value) return false
+  if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return true
   if (assetsBalance.value < amountFixed.value.value) return true
   if (isLoading.value || amountFixed.value.isZero() || amountFixed.value.isNegative()) return true
   if (estimatesError.value) return true
@@ -114,6 +126,12 @@ const isSubmitDisabled = computed(() => {
   return false
 })
 const reviewWithdrawDisabled = isSubmitDisabled
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return { message: 'Withdrawals are currently disabled for this vault', variant: 'warning' }
+  if (estimatesError.value) return { message: estimatesError.value, variant: 'error' }
+  if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return { message: 'Insufficient balance', variant: 'error' }
+  return undefined
+})
 const supplyAPYDisplay = computed(() => {
   if (!vault.value) return '0.00'
   const base = withIntrinsicSupplyApy(nanoToValue(vault.value.interestRateInfo.supplyAPY, 25), vault.value.asset.address)
@@ -254,7 +272,7 @@ const load = async () => {
     // Check if securitize vault first
     const isSecuritize = await isSecuritizeVault(vaultAddress)
     if (isSecuritize) {
-      vault.value = await fetchSecuritizeVault(vaultAddress)
+      vault.value = await fetchSecuritizeVault(vaultAddress, buildFetchContext())
       estimateSupplyAPY.value = 0n // Securitize vaults don't have interest rate
     }
     else {
@@ -405,7 +423,7 @@ const send = async () => {
 
     modal.close()
     setTimeout(() => {
-      router.replace('/portfolio/saving')
+      router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
     }, 400)
   }
   catch (e) {
@@ -585,7 +603,7 @@ watch(swapSelectedQuote, () => {
               />
 
               <VaultFormInfoBlock
-                v-if="swapEstimatedOutput"
+                v-if="swapEstimatedOutput || swapQuoteError"
                 :loading="isSwapQuoteLoading"
                 variant="card"
               >
@@ -660,7 +678,10 @@ watch(swapSelectedQuote, () => {
                 v-if="asset"
                 class="text-p2 flex items-center gap-4"
               >
-                {{ formatSmartAmount(nanoToValue(assetsBalance, asset.decimals)) }} <span class="text-p3 text-content-tertiary">{{ asset.symbol }}</span>
+                <UiExactAmount :exact="formatExactAmount(assetsBalance, asset.decimals, asset.symbol)">
+                  {{ formatSmartAmount(nanoToValue(assetsBalance, asset.decimals)) }}
+                  <span class="text-p3 text-content-tertiary">{{ asset.symbol }}</span>
+                </UiExactAmount>
                 <span
                   v-if="!isSecuritizeVaultType"
                   class="text-p3 text-content-tertiary"
@@ -673,6 +694,8 @@ watch(swapSelectedQuote, () => {
             <VaultFormSubmit
               :loading="isSubmitting || isPreparing"
               :disabled="reviewWithdrawDisabled"
+              :disabled-reason="disabledReasonInfo?.message"
+              :disabled-reason-variant="disabledReasonInfo?.variant"
             >
               Review Withdraw
             </VaultFormSubmit>

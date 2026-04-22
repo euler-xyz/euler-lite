@@ -45,6 +45,7 @@ export const extractVaultOverrides = (raw: Record<string, unknown>): Record<stri
     if (!key.startsWith('0x') || typeof value !== 'object' || value === null) continue
     const entry = value as Record<string, unknown>
     const override: EulerLabelVaultOverride = {}
+    if (typeof entry.name === 'string') override.name = entry.name
     if (typeof entry.description === 'string') override.description = entry.description
     if (typeof entry.portfolioNotice === 'string') override.portfolioNotice = entry.portfolioNotice
     const reason = entry.deprecationReason ?? entry.deprecateReason
@@ -307,8 +308,14 @@ export const applyVaultOverrides = (product: EulerLabelProduct, vaultAddress: st
   if (!override) return product
   return {
     ...product,
+    ...(override.name !== undefined && { name: override.name }),
     ...(override.description !== undefined && { description: override.description }),
     ...(override.portfolioNotice !== undefined && { portfolioNotice: override.portfolioNotice }),
     ...(override.deprecationReason !== undefined && { deprecationReason: override.deprecationReason }),
   }
+}
+
+export const getVaultProductName = (vaultAddress: string): string => {
+  const product = getProductByVault(vaultAddress)
+  return applyVaultOverrides(product, vaultAddress).name
 }

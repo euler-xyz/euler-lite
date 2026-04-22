@@ -13,6 +13,7 @@ export type EulerLabelEntity = {
   }
 }
 export type EulerLabelVaultOverride = {
+  name?: string
   description?: string
   portfolioNotice?: string
   deprecationReason?: string

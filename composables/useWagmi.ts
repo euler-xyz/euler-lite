@@ -1,8 +1,9 @@
-import { useAccount, useAccountEffect, useDisconnect, useBalance, useSwitchChain, useEnsName } from '@wagmi/vue'
+import { useAccount, useDisconnect, useBalance, useSwitchChain, useEnsName } from '@wagmi/vue'
 import { formatUnits, getAddress, isAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { truncate } from '~/utils/string-utils'
 import { useAddressScreen } from '~/composables/useAddressScreen'
+import { parseChainId } from '~/entities/chainRegistry'
 
 let isChangingChain = false
 let chainChangeCooldownUntil = 0
@@ -15,17 +16,6 @@ const routeNetworkId: Ref<number | null> = ref(null)
 
 let cachedWagmiData: ReturnType<typeof initializeWagmi> | null = null
 let watchersInitialized = false
-
-const parseChainId = (value: unknown): number | null => {
-  const normalized = Array.isArray(value) ? value[0] : value
-  const parsed = typeof normalized === 'string'
-    ? Number.parseInt(normalized, 10)
-    : typeof normalized === 'number'
-      ? normalized
-      : NaN
-
-  return Number.isFinite(parsed) ? parsed : null
-}
 
 function initializeWagmi() {
   const { address: wagmiAddress, isConnected: wagmiIsConnected, connector, chain: wagmiChain, status } = useAccount()
@@ -48,21 +38,13 @@ function initializeWagmi() {
   // only on first connect for signed-out visitors.
   const modal = () => {
     const nuxtApp = useNuxtApp()
-    const open = nuxtApp.$openWalletModal as (() => void) | undefined
+    const open = nuxtApp.$openWalletModal as (() => Promise<void>) | undefined
     if (!open) {
       console.warn('[useWagmi] $openWalletModal not available — wallet plugin may not have loaded')
       return
     }
-    open()
+    open().catch(err => logWarn('useWagmi/modal', err))
   }
-
-  useAccountEffect({
-    onConnect: ({ address }) => {
-      if (address) {
-        screenConnectedAddress(address)
-      }
-    },
-  })
 
   watch(wagmiAddress, (address, oldAddress) => {
     if (address && address !== oldAddress) {

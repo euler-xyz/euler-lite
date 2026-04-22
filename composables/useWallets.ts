@@ -4,6 +4,7 @@ import { eulerUtilsLensABI } from '~/entities/euler/abis'
 import { erc20BalanceOfAbi } from '~/abis/erc20'
 import { logWarn } from '~/utils/errorHandling'
 import { getPublicClient } from '~/utils/public-client'
+import { FULL_BALANCES_TTL_MS } from '~/entities/tuning-constants'
 
 // Singleton state
 const balances = shallowRef(new Map<string, bigint>())
@@ -13,8 +14,24 @@ const lastFetchChainId = ref<number | null>(null)
 const lastFetchAddress = ref<string | null>(null)
 let fetchPromise: Promise<void> | null = null
 
+// Reference-counted flag: when >0, updateBalances includes the full token list
+// (all Uniswap/DefiLlama entries — thousands of tokens on mainnet) so pages
+// with the "pay with" token selector can show non-zero balances first.
+// When 0 (the default), updateBalances fetches only vault-asset balances
+// (a few dozen tokens at most) — enough for Max buttons, balance chips, and
+// wallet-sourced-repay dropdowns on the main navigation pages.
+const fullBalancesRequesters = ref(0)
+
+// Remembers the most recent (chain, address) that completed a full-mode fetch
+// and when. Lets useFullBalances skip a redundant refetch when the user
+// navigates between two swap pages within the TTL window.
+// resetBalances() clears this alongside the Map, so chain / wallet changes
+// correctly force a refetch.
+let lastFullFetchKey: string | null = null
+let lastFullFetchAt = 0
+
 export const useWallets = () => {
-  const { isReady } = useVaults()
+  const { loadedChainId } = useVaults()
   const { getByType } = useVaultRegistry()
   const { address, isConnected } = useWagmi()
   const { eulerLensAddresses } = useEulerAddresses()
@@ -32,8 +49,24 @@ export const useWallets = () => {
       return
     }
 
-    // Guard: vaults must be ready
-    if (!isReady.value) {
+    // Capture chainId and full-balance mode up-front so we can (a) filter out
+    // stale cross-chain token-list entries, (b) discard results if the chain
+    // changes mid-fetch, and (c) only stamp lastFullFetchKey when the fetch
+    // actually included the full token list (not when the mode flipped mid-flight).
+    const currentChainId = chainId.value
+    const wasFullMode = fullBalancesRequesters.value > 0
+
+    // Guard: the vault registry must hold vaults for THIS chain. Checking
+    // `isReady` alone is not enough — on chain switch, `eulerLensAddresses`
+    // recomputes to the new chain's lens synchronously, which can trigger
+    // our watcher *before* app.vue's chainId watcher has run
+    // resetVaultsState(). In that window `isReady` is still true (from the
+    // previous chain) and the registry still holds the previous chain's
+    // vaults, which would be sent cross-chain to the new chain's lens.
+    // `loadedChainId` is only set to the actual loaded chain after a
+    // successful loadVaults() and cleared to null on reset, so comparing
+    // it to the current chainId is the reliable gate.
+    if (loadedChainId.value !== currentChainId) {
       return
     }
 
@@ -62,13 +95,28 @@ export const useWallets = () => {
     })
 
     // Include token list addresses (for swap selector zero-balance filtering)
-    const { getAllTokens } = useTokenList()
-    for (const token of getAllTokens()) {
-      try {
-        addresses.add(getAddress(token.address))
-      }
-      catch {
-        // Skip invalid addresses
+    // ONLY when a page with the "pay with" selector is mounted. On mainnet
+    // the token list is thousands of tokens, so including it in every
+    // routine balance refresh stretches the fetch into many RPC chunks.
+    // The main navigation pages (lend/borrow/earn) don't need this data,
+    // so we default to vault-assets-only — typically a single RPC chunk.
+    //
+    // Pages that render SwapTokenSelector opt in via `useFullBalances()`; when
+    // the counter flips from 0 we re-fire updateBalances to populate the rest.
+    //
+    // Defensive filter: only accept entries matching the active chain, so that
+    // a stale useTokenList singleton from a previous chain can never contaminate
+    // the RPC batch with foreign-chain addresses.
+    if (fullBalancesRequesters.value > 0) {
+      const { getAllTokens } = useTokenList()
+      for (const token of getAllTokens()) {
+        if (token.chainId !== currentChainId) continue
+        try {
+          addresses.add(getAddress(token.address))
+        }
+        catch {
+          // Skip invalid addresses
+        }
       }
     }
 
@@ -83,7 +131,6 @@ export const useWallets = () => {
       return
     }
 
-    const currentChainId = chainId.value
     isFetching.value = true
 
     try {
@@ -99,7 +146,7 @@ export const useWallets = () => {
       }
 
       const chunkResults = await Promise.all(
-        chunks.map(async (batch) => {
+        chunks.map(async (batch, chunkIndex) => {
           try {
             return await client.readContract({
               address: utilsLensAddress,
@@ -108,8 +155,24 @@ export const useWallets = () => {
               args: [targetAddress, batch],
             }) as bigint[]
           }
-          catch {
-            logWarn('wallets/batchFetch', `Lens tokenBalances failed for chunk of ${batch.length}, using zero fallback`)
+          catch (e) {
+            logWarn(
+              'wallets/batchFetch',
+              `Lens tokenBalances failed, using zero fallback`,
+              {
+                data: {
+                  chainId: currentChainId,
+                  lens: utilsLensAddress,
+                  target: targetAddress,
+                  totalTokens: tokenAddresses.length,
+                  chunkIndex,
+                  chunkCount: chunks.length,
+                  chunkSize: batch.length,
+                  sampleTokens: batch.slice(0, 3),
+                  error: e,
+                },
+              },
+            )
             return batch.map(() => 0n)
           }
         }),
@@ -118,14 +181,22 @@ export const useWallets = () => {
 
       // Only update if still on same chain
       if (chainId.value === currentChainId) {
-        const newBalances = new Map<string, bigint>()
+        // Merge rather than replace: a vault-only-mode fetch shouldn't drop
+        // full-mode balances we fetched earlier (e.g. from a swap page).
+        // resetBalances() is called on chain switch and wallet-address
+        // change, which is the right boundary to fully clear.
+        const merged = new Map(balances.value)
         result.forEach((balance: bigint, index: number) => {
-          newBalances.set(tokenAddresses[index], balance)
+          merged.set(tokenAddresses[index], balance)
         })
-        balances.value = newBalances
+        balances.value = merged
         lastFetchChainId.value = currentChainId
         lastFetchAddress.value = targetAddress
         isLoaded.value = true
+        if (wasFullMode) {
+          lastFullFetchKey = `${currentChainId}:${targetAddress.toLowerCase()}`
+          lastFullFetchAt = Date.now()
+        }
       }
     }
     catch (e) {
@@ -149,7 +220,7 @@ export const useWallets = () => {
   // Check if we need to fetch on each call
   const needsFetch = () => {
     return (isConnected.value || isSpyMode.value)
-      && isReady.value
+      && loadedChainId.value === chainId.value
       && !!balanceAddress.value
       && !!eulerLensAddresses.value?.utilsLens
       && (lastFetchChainId.value !== chainId.value || !isLoaded.value || lastFetchAddress.value !== balanceAddress.value)
@@ -161,8 +232,10 @@ export const useWallets = () => {
     fetchPromise = updateBalances()
   }
 
-  // Retry when dependencies become ready (e.g. vaults load after cold start)
-  watch([isReady, () => balanceAddress.value, () => eulerLensAddresses.value?.utilsLens], () => {
+  // Retry when dependencies become ready (e.g. vaults load after cold start).
+  // Watching loadedChainId (instead of the less-specific isReady) ensures we
+  // only fire once the registry is confirmed to hold vaults for the active chain.
+  watch([loadedChainId, () => balanceAddress.value, () => eulerLensAddresses.value?.utilsLens], () => {
     if (needsFetch() && !fetchPromise) {
       fetchPromise = updateBalances()
     }
@@ -170,6 +243,8 @@ export const useWallets = () => {
 
   const resetBalances = () => {
     balances.value = new Map()
+    lastFullFetchKey = null
+    lastFullFetchAt = 0
     isLoaded.value = false
     isFetching.value = false
     lastFetchChainId.value = null
@@ -238,8 +313,16 @@ export const useWallets = () => {
     }
   }
 
-  // isLoading only true on initial load, not on background refreshes
-  const isLoading = computed(() => !isLoaded.value && isFetching.value)
+  // isLoading is true during initial load (and during the "waiting for the
+  // active chain's vaults to finish loading" window that precedes it), but
+  // stays false during background refreshes. Including the loadedChainId
+  // check prevents the UI from flashing "0" balances between resetBalances()
+  // and the actual fetch firing on chain switch — because updateBalances is
+  // gated on loadedChainId === chainId, there's a real window where neither
+  // isLoaded nor isFetching is true yet, and the balances Map is empty.
+  const isLoading = computed(() =>
+    !isLoaded.value && (isFetching.value || loadedChainId.value !== chainId.value),
+  )
 
   return {
     balances,
@@ -251,4 +334,43 @@ export const useWallets = () => {
     fetchSingleBalance,
     fetchVaultShareBalance,
   }
+}
+
+/**
+ * Opt the current component into "full balance" mode. While any component
+ * using this is mounted, updateBalances includes the whole token list (so
+ * the pay-with selector sees non-zero balances on wallet tokens); when the
+ * counter returns to zero, subsequent updates go back to the vault-assets-
+ * only fast path.
+ *
+ * Refcounted so multiple concurrent pages (unlikely, but safe) compose.
+ * A TTL guard skips the re-fetch when navigating between two swap pages
+ * within a 60s window on the same chain+address — the balances Map already
+ * has them from the previous page's fetch, and the merge semantics in
+ * updateBalances mean they weren't wiped by intervening vault-only fetches.
+ *
+ * Call once at `<script setup>` top-level — lifecycle hooks do the rest.
+ */
+export const useFullBalances = (): void => {
+  const { updateBalances } = useWallets()
+  const { chainId } = useEulerAddresses()
+  const { address } = useWagmi()
+  const { spyAddress, isSpyMode } = useSpyMode()
+
+  onMounted(() => {
+    fullBalancesRequesters.value++
+    if (fullBalancesRequesters.value !== 1) return // not the first requester, data already in-flight / present
+
+    const activeAddress = (isSpyMode.value ? spyAddress.value : address.value) ?? ''
+    const expectedKey = `${chainId.value}:${activeAddress.toLowerCase()}`
+    const isFresh = lastFullFetchKey === expectedKey && (Date.now() - lastFullFetchAt) < FULL_BALANCES_TTL_MS
+
+    if (!isFresh) {
+      void updateBalances()
+    }
+  })
+
+  onBeforeUnmount(() => {
+    fullBalancesRequesters.value = Math.max(0, fullBalancesRequesters.value - 1)
+  })
 }

@@ -18,12 +18,15 @@ import { useWalletSwapRepay } from '~/composables/repay/useWalletSwapRepay'
 import { useCollateralSwapRepay } from '~/composables/repay/useCollateralSwapRepay'
 import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const _route = useRoute()
 const _router = useRouter()
 const modal = useModal()
 const { isConnected, address } = useAccount()
 const { isSpyMode } = useSpyMode()
+// Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
+useFullBalances()
 const positionIndex = usePositionIndex()
 const { isPositionsLoading, isPositionsLoaded, isDepositsLoaded, refreshAllPositions: _refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
@@ -218,6 +221,39 @@ const reviewRepayDisabled = computed(() => {
   return collateral.isSubmitDisabled.value
 })
 
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (formTab.value === 'wallet') {
+    if (walletSwap.needsSwap.value) {
+      if (isWalletSwapRestricted.value) return { message: 'Swapping into this vault is not available in your region', variant: 'warning' }
+      if (walletSwap.disabledReason.value) return { message: walletSwap.disabledReason.value, variant: 'error' }
+      if (walletSwap.estimatesError.value) return { message: walletSwap.estimatesError.value, variant: 'error' }
+    }
+    else {
+      if (wallet.estimatesError.value) return { message: wallet.estimatesError.value, variant: 'error' }
+    }
+    if (simulationError.value) return { message: simulationError.value, variant: 'error' }
+    return undefined
+  }
+  if (formTab.value === 'savings') {
+    if (savings.disabledReason.value) return { message: savings.disabledReason.value, variant: savings.isRepayExceedsDebt.value ? 'error' : 'warning' }
+    if (simulationError.value) return { message: simulationError.value, variant: 'error' }
+    return undefined
+  }
+  if (collateral.disabledReason.value) return { message: collateral.disabledReason.value, variant: collateral.isRepayExceedsDebt.value ? 'error' : 'warning' }
+  if (simulationError.value) return { message: simulationError.value, variant: 'error' }
+  return undefined
+})
+
+const activeHookWarning = computed(() => {
+  if (formTab.value === 'wallet') {
+    return walletSwap.needsSwap.value
+      ? walletSwap.hookWarning.value
+      : wallet.hookWarning.value
+  }
+  if (formTab.value === 'savings') return savings.hookWarning.value
+  return collateral.hookWarning.value
+})
+
 const onSubmitForm = async () => {
   if (isOperationBlocked.value) return
   if (formTab.value === 'wallet') {
@@ -345,6 +381,15 @@ watch(formTab, () => {
           :list="formTabs"
         />
 
+        <UiToast
+          v-if="activeHookWarning"
+          :title="activeHookWarning.title"
+          :description="activeHookWarning.message"
+          variant="error"
+          size="compact"
+          class="mb-16"
+        />
+
         <template v-if="formTab === 'wallet'">
           <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
             <div class="flex flex-col gap-16 w-full">
@@ -358,6 +403,7 @@ watch(formTab, () => {
                   :asset="position.borrow.asset"
                   :vault="position.borrow"
                   :balance="walletBalance"
+                  :max-handler="wallet.onSourceMax"
                   maxable
                 />
 
@@ -391,6 +437,7 @@ watch(formTab, () => {
                   label="Pay from wallet"
                   :asset="walletSwap.selectedAsset.value"
                   :balance="walletSwap.selectedAssetBalance.value"
+                  :max-handler="walletSwap.onSourceMax"
                   maxable
                   @update:model-value="walletSwap.onAmountInput"
                 />
@@ -543,7 +590,7 @@ watch(formTab, () => {
                 />
               </SummaryRow>
               <SwapDetailsSummary
-                v-if="walletSwap.needsSwap.value && walletSwap.swapEstimatedOutput.value"
+                v-if="walletSwap.needsSwap.value && (walletSwap.swapEstimatedOutput.value || walletSwap.quotes.quoteError.value)"
                 :input-display="walletSwap.swapInputDisplay.value"
                 :output-display="walletSwap.swapOutputDisplay.value"
                 :price-impact="walletSwap.swapPriceImpact.value"
@@ -563,6 +610,8 @@ watch(formTab, () => {
               <VaultFormSubmit
                 :disabled="reviewRepayDisabled"
                 :loading="isSubmitting || isPreparing"
+                :disabled-reason="disabledReasonInfo?.message"
+                :disabled-reason-variant="disabledReasonInfo?.variant"
               >
                 {{ reviewRepayLabel }}
               </VaultFormSubmit>
@@ -590,6 +639,7 @@ watch(formTab, () => {
                 :vault="collateral.sourceVault.value"
                 :collateral-options="collateral.repayCollateralOptions.value"
                 :balance="collateral.sourceBalance.value"
+                :max-handler="collateral.onSourceMax"
                 maxable
                 @input="collateral.onAmountInput"
                 @change-collateral="collateral.onSourceVaultChange"
@@ -741,6 +791,8 @@ watch(formTab, () => {
               <VaultFormSubmit
                 :disabled="reviewRepayDisabled"
                 :loading="isSubmitting || isPreparing"
+                :disabled-reason="disabledReasonInfo?.message"
+                :disabled-reason-variant="disabledReasonInfo?.variant"
               >
                 {{ reviewRepayLabel }}
               </VaultFormSubmit>
@@ -760,6 +812,7 @@ watch(formTab, () => {
                 :vault="savings.sourceVault.value"
                 :collateral-options="savings.savingsOptions.value"
                 :balance="savings.sourceBalance.value"
+                :max-handler="savings.onSourceMax"
                 maxable
                 @input="savings.onAmountInput"
                 @change-collateral="savings.onSourceVaultChange"
@@ -911,6 +964,8 @@ watch(formTab, () => {
               <VaultFormSubmit
                 :disabled="reviewRepayDisabled"
                 :loading="isSubmitting || isPreparing"
+                :disabled-reason="disabledReasonInfo?.message"
+                :disabled-reason-variant="disabledReasonInfo?.variant"
               >
                 {{ reviewRepayLabel }}
               </VaultFormSubmit>

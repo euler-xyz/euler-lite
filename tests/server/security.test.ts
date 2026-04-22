@@ -18,7 +18,7 @@ import { applySecurityHeaders } from '~/server/middleware/security-headers'
 import { ANTI_CLICKJACK_SCRIPT } from '~/server/plugins/00-anti-clickjack'
 
 describe('buildCsp', () => {
-  const csp = buildCsp('test-nonce', [], { connect: [] })
+  const csp = buildCsp('test-nonce', [], { connect: [] }, [])
 
   it('forbids all frame ancestors', () => {
     expect(csp).toContain('frame-ancestors \'none\'')

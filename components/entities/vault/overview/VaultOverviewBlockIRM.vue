@@ -14,14 +14,25 @@ import {
   type ChartData,
 } from 'chart.js'
 import annotationPlugin from 'chartjs-plugin-annotation'
-import { formatUnits, zeroAddress, type Address, type Abi } from 'viem'
+import { formatUnits, zeroAddress, decodeAbiParameters, type Address, type Abi, type Hex } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
-import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
-import { BPS_BASE } from '~/entities/tuning-constants'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
-import { getVaultUtilization, hasCollateralExposure } from '~/entities/vault'
+import {
+  INTEREST_RATE_MODEL_TYPE,
+  KINK_IRM_COMPONENTS,
+  ADAPTIVE_CURVE_IRM_COMPONENTS,
+  KINKY_IRM_COMPONENTS,
+} from '~/entities/constants'
+import {
+  type Vault,
+  type SecuritizeVault,
+  type KinkIRMParams,
+  type AdaptiveCurveIRMParams,
+  type KinkyIRMParams,
+  getVaultUtilization,
+  hasCollateralExposure,
+} from '~/entities/vault'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { eulerVaultLensABI } from '~/entities/euler/abis'
+import { eulerUtilsLensABI, eulerVaultLensABI } from '~/entities/euler/abis'
 
 // Register Chart.js components
 ChartJS.register(
@@ -65,31 +76,187 @@ const hasValidIRM = computed(() => {
     && vault.interestRateModelAddress !== zeroAddress
 })
 
+const SECONDS_PER_YEAR = 31_557_600 // 365.25 days
+const MAX_UINT32 = 4_294_967_295
+
+// Key borrow APY values derived from the chart data (populated in renderChart)
+const chartRateAtZero = ref<number | null>(null)
+const chartRateAtKink = ref<number | null>(null)
+const chartRateAtMax = ref<number | null>(null)
+// Adaptive-only: APY bounds on rate-at-target, computed via UtilsLens.computeAPYs
+// so values match exactly what the vault will accrue (APR × year is the wrong
+// conversion — see AdaptiveCurveIRMParams, baseline uses daily compounding).
+const adaptiveMinRateAPY = ref<number | null>(null)
+const adaptiveMaxRateAPY = ref<number | null>(null)
+
+const formatKinkPercent = (kink: bigint): string => {
+  const percent = Number(kink) / MAX_UINT32 * 100
+  return `${percent.toFixed(2)}%`
+}
+
+const formatWadPercent = (wad: bigint): string => {
+  const percent = Number(formatUnits(wad, 18)) * 100
+  return `${percent.toFixed(2)}%`
+}
+
+const irmModelType = computed(() => Number(vault.irmInfo?.interestRateModelInfo?.interestRateModelType))
+
 const irmTypeLabel = computed(() => {
-  const modelType = Number(vault.irmInfo?.interestRateModelInfo?.interestRateModelType)
-  if (modelType === INTEREST_RATE_MODEL_TYPE.KINK) {
-    return 'Kink'
-  }
-  else if (modelType === INTEREST_RATE_MODEL_TYPE.ADAPTIVE_CURVE) {
-    return 'Adaptive'
-  }
+  const type = irmModelType.value
+  if (type === INTEREST_RATE_MODEL_TYPE.KINK) return 'Kink'
+  if (type === INTEREST_RATE_MODEL_TYPE.ADAPTIVE_CURVE) return 'Adaptive'
+  if (type === INTEREST_RATE_MODEL_TYPE.KINKY) return 'Kinky'
+  if (type === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY) return 'Cyclical note'
   return 'Interest Rate Model'
 })
 
-// Generate cash and borrows data points for chart (0-100% utilization)
-const generateChartDataPoints = () => {
+type DecodedIRMParams
+  = ({ type: 'kink' } & KinkIRMParams)
+    | ({ type: 'adaptive' } & AdaptiveCurveIRMParams)
+    | ({ type: 'kinky' } & KinkyIRMParams)
+
+const decodedIRMParams = computed<DecodedIRMParams | null>(() => {
+  const params = vault.irmInfo?.interestRateModelInfo?.interestRateModelParams
+  if (!params || params === '0x') return null
+
+  const type = irmModelType.value
+
+  try {
+    if (type === INTEREST_RATE_MODEL_TYPE.KINK) {
+      const [decoded] = decodeAbiParameters(
+        [{ type: 'tuple', components: [...KINK_IRM_COMPONENTS] }],
+        params as Hex,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- viem decode returns dynamic shape
+      ) as unknown as any[]
+      return { type: 'kink', baseRate: decoded.baseRate, slope1: decoded.slope1, slope2: decoded.slope2, kink: decoded.kink }
+    }
+    if (type === INTEREST_RATE_MODEL_TYPE.ADAPTIVE_CURVE) {
+      const [decoded] = decodeAbiParameters(
+        [{ type: 'tuple', components: [...ADAPTIVE_CURVE_IRM_COMPONENTS] }],
+        params as Hex,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- viem decode returns dynamic shape
+      ) as unknown as any[]
+      return {
+        type: 'adaptive',
+        targetUtilization: decoded.targetUtilization,
+        initialRateAtTarget: decoded.initialRateAtTarget,
+        minRateAtTarget: decoded.minRateAtTarget,
+        maxRateAtTarget: decoded.maxRateAtTarget,
+        curveSteepness: decoded.curveSteepness,
+        adjustmentSpeed: decoded.adjustmentSpeed,
+      }
+    }
+    if (type === INTEREST_RATE_MODEL_TYPE.KINKY) {
+      const [decoded] = decodeAbiParameters(
+        [{ type: 'tuple', components: [...KINKY_IRM_COMPONENTS] }],
+        params as Hex,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- viem decode returns dynamic shape
+      ) as unknown as any[]
+      return { type: 'kinky', baseRate: decoded.baseRate, slope: decoded.slope, shape: decoded.shape, kink: decoded.kink, cutoff: decoded.cutoff }
+    }
+  }
+  catch (e) {
+    logWarn('VaultOverviewBlockIRM/decodeParams', e)
+  }
+  return null
+})
+
+const irmParamsDisplay = computed<Array<{ label: string, value: string }>>(() => {
+  const decoded = decodedIRMParams.value
+  if (!decoded) return []
+
+  const fmtRate = (rate: number | null) => rate !== null ? `${rate.toFixed(2)}%` : '-'
+
+  if (decoded.type === 'kink') {
+    return [
+      { label: 'Base rate', value: fmtRate(chartRateAtZero.value) },
+      { label: 'Rate at kink', value: fmtRate(chartRateAtKink.value) },
+      { label: 'Max rate', value: fmtRate(chartRateAtMax.value) },
+      { label: 'Kink', value: formatKinkPercent(decoded.kink) },
+    ]
+  }
+  if (decoded.type === 'adaptive') {
+    return [
+      { label: 'Min rate at kink', value: fmtRate(adaptiveMinRateAPY.value) },
+      { label: 'Max rate at kink', value: fmtRate(adaptiveMaxRateAPY.value) },
+      { label: 'Kink', value: formatWadPercent(decoded.targetUtilization) },
+      { label: 'Adjustment speed', value: `${(Number(formatUnits(decoded.adjustmentSpeed, 18)) * SECONDS_PER_YEAR).toFixed(1)}x/yr` },
+    ]
+  }
+  if (decoded.type === 'kinky') {
+    return [
+      { label: 'Base rate', value: fmtRate(chartRateAtZero.value) },
+      { label: 'Rate at kink', value: fmtRate(chartRateAtKink.value) },
+      { label: 'Max rate', value: fmtRate(chartRateAtMax.value) },
+      { label: 'Kink', value: formatKinkPercent(decoded.kink) },
+    ]
+  }
+  return []
+})
+
+const irmTooltip = computed<{ title: string, text: string } | null>(() => {
+  const type = irmModelType.value
+  if (type === INTEREST_RATE_MODEL_TYPE.KINK) {
+    return {
+      title: 'Kink IRM',
+      text: 'A two-slope interest rate model. Rates increase gradually below the kink utilization point, then steeply above it to discourage over-borrowing.',
+    }
+  }
+  if (type === INTEREST_RATE_MODEL_TYPE.ADAPTIVE_CURVE) {
+    return {
+      title: 'Adaptive Curve IRM',
+      text: 'A dynamic interest rate model that automatically adjusts rates toward a target utilization. When utilization exceeds the target, rates increase. When below, they decrease.',
+    }
+  }
+  if (type === INTEREST_RATE_MODEL_TYPE.KINKY) {
+    return {
+      title: 'Kinky IRM',
+      text: 'A non-linear interest rate model with a kink point and curved rate progression. Unlike the standard Kink model, rates follow a smooth curve controlled by a shape parameter and are capped at a maximum rate.',
+    }
+  }
+  return null
+})
+
+// Generate cash and borrows data points for chart (0-100% utilization).
+// When `kinkFraction` is provided (in 0..1), injects an extra sample at the
+// exact kink so the rendered curve bends there and the annotation + kink-rate
+// readout land on a real data point instead of the nearest integer-percent
+// neighbour. Returns the index of the kink sample, or null when none was added.
+const generateChartDataPoints = (kinkFraction: number | null) => {
   const amountPoints = 100
-  const borrowsData: bigint[] = [BigInt(0)]
+  const TOTAL = 2 ** 32
+  const TOTAL_BIG = BigInt(TOTAL)
+  const borrowsData: bigint[] = [0n]
 
   for (let i = 1; i <= amountPoints; i += 1) {
-    const borrow: bigint = BigInt(Math.floor((i / amountPoints) * 2 ** 32))
-    borrowsData.push(borrow)
+    borrowsData.push(BigInt(Math.floor((i / amountPoints) * TOTAL)))
   }
 
   const cashData = [...borrowsData]
   cashData.reverse()
 
-  return { cashData, borrowsData }
+  let kinkIndex: number | null = null
+  let kinkInjected = false
+  if (kinkFraction !== null && kinkFraction > 0 && kinkFraction < 1) {
+    const kinkBorrows = BigInt(Math.floor(kinkFraction * TOTAL))
+    const kinkCash = TOTAL_BIG - kinkBorrows
+
+    // Keep the arrays sorted by borrows so the plotted line stays monotonic.
+    let idx = borrowsData.findIndex(b => b >= kinkBorrows)
+    if (idx < 0) idx = borrowsData.length
+
+    if (idx < borrowsData.length && borrowsData[idx] === kinkBorrows) {
+      kinkIndex = idx
+    }
+    else {
+      borrowsData.splice(idx, 0, kinkBorrows)
+      cashData.splice(idx, 0, kinkCash)
+      kinkIndex = idx
+      kinkInjected = true
+    }
+  }
+
+  return { cashData, borrowsData, kinkIndex, kinkInjected }
 }
 
 // Parse APY from bigint (27 decimals) to percentage number
@@ -97,8 +264,35 @@ const parseAPY = (apy: bigint): number => {
   return Number(formatUnits(apy, 27)) * 100
 }
 
+// Convert a wad-scaled per-second rate into a properly-compounded APY % by
+// round-tripping through UtilsLens.computeAPYs — same math the vault itself
+// uses, so Min/Max rate cells match on-chain accrual for large rates instead
+// of silently collapsing to APR.
+const fetchAdaptiveBorrowAPY = async (wadPerSec: bigint): Promise<number | null> => {
+  const utilsLens = eulerLensAddresses.value?.utilsLens
+  if (!utilsLens || wadPerSec === 0n) {
+    return wadPerSec === 0n ? 0 : null
+  }
+  try {
+    const client = rpcClient.value!
+    const result = await client.readContract({
+      address: utilsLens as Address,
+      abi: eulerUtilsLensABI as Abi,
+      functionName: 'computeAPYs',
+      // cash/borrows don't influence borrowAPY; interestFee only affects supplyAPY.
+      args: [wadPerSec, 1n, 0n, 0n],
+    }) as readonly [bigint, bigint]
+    const [borrowAPY] = result
+    return Number(formatUnits(borrowAPY, 27)) * 100
+  }
+  catch (e) {
+    logWarn('VaultOverviewBlockIRM/fetchAdaptiveBorrowAPY', e)
+    return null
+  }
+}
+
 // Fetch interest rate model data
-const fetchIRMData = async () => {
+const fetchIRMData = async (kinkFraction: number | null) => {
   if (!eulerLensAddresses.value?.vaultLens) {
     return null
   }
@@ -106,7 +300,7 @@ const fetchIRMData = async () => {
   try {
     const client = rpcClient.value!
 
-    const { cashData, borrowsData } = generateChartDataPoints()
+    const { cashData, borrowsData, kinkIndex, kinkInjected } = generateChartDataPoints(kinkFraction)
 
     // Fetch general interest rate model info
     const irmData = await client.readContract({
@@ -117,29 +311,10 @@ const fetchIRMData = async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic lens contract return
     }) as Record<string, any>
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic lens contract return
-    let kinkData: Record<string, any> | null = null
-    const modelType = Number(irmData.interestRateModelInfo?.interestRateModelType)
-
-    // Fetch kink-specific data if applicable
-    if (modelType === INTEREST_RATE_MODEL_TYPE.KINK) {
-      try {
-        kinkData = await client.readContract({
-          address: eulerLensAddresses.value.vaultLens as Address,
-          abi: eulerVaultLensABI as Abi,
-          functionName: 'getVaultKinkInterestRateModelInfo',
-          args: [vault.address],
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic lens contract return
-        }) as Record<string, any>
-      }
-      catch (e) {
-        logWarn('VaultOverviewBlockIRM/fetchKinkIRM', e)
-      }
-    }
-
     return {
       irmData,
-      kinkData,
+      kinkIndex,
+      kinkInjected,
     }
   }
   catch (error) {
@@ -156,7 +331,28 @@ const renderChart = async () => {
   hasError.value = false
 
   try {
-    const data = await fetchIRMData()
+    // Derive kink utilization (0..1) from decoded params for KINK and KINKY types.
+    // This drives BOTH the annotation line position and the extra sample injected
+    // into the sweep so the curve bends at the exact kink.
+    const decoded = decodedIRMParams.value
+    const kinkFraction = (decoded && (decoded.type === 'kink' || decoded.type === 'kinky'))
+      ? Number(decoded.kink) / MAX_UINT32
+      : null
+    const kinkUtilization = kinkFraction !== null ? kinkFraction * 100 : null
+
+    // Kick off the adaptive-only APY-bound reads in parallel with the curve
+    // fetch so they don't add sequential latency. Reset first so a failed
+    // lookup doesn't leave stale values on the display.
+    adaptiveMinRateAPY.value = null
+    adaptiveMaxRateAPY.value = null
+    const adaptiveAPYsPromise = decoded?.type === 'adaptive'
+      ? Promise.all([
+          fetchAdaptiveBorrowAPY(decoded.minRateAtTarget),
+          fetchAdaptiveBorrowAPY(decoded.maxRateAtTarget),
+        ])
+      : null
+
+    const data = await fetchIRMData(kinkFraction)
 
     if (!data || !data.irmData?.interestRateInfo) {
       hasError.value = true
@@ -164,36 +360,47 @@ const renderChart = async () => {
       return
     }
 
-    const { irmData, kinkData } = data
+    const { irmData, kinkIndex, kinkInjected } = data
+
+    if (adaptiveAPYsPromise) {
+      const [minAPY, maxAPY] = await adaptiveAPYsPromise
+      adaptiveMinRateAPY.value = minAPY
+      adaptiveMaxRateAPY.value = maxAPY
+    }
 
     // Read chart colors from CSS variables (theme-aware)
     const colors = getChartColors()
 
-    // Prepare chart data
+    // Prepare chart data. With a kink sample injected, index → utilization is no
+    // longer i/(N-1). Regular samples keep integer-percent labels (so the every-
+    // 10% tick rule still fires). The injected sample gets a two-decimal label
+    // reflecting the exact kink utilization, which deliberately doesn't match
+    // the integer-tick rule — no stray tick at a non-round utilization.
     const labels: string[] = []
     const borrowAPYValues: number[] = []
     const supplyAPYValues: number[] = []
 
     irmData.interestRateInfo.forEach((rate: { borrowAPY: bigint, supplyAPY: bigint }, i: number) => {
-      const utilization = ((i / (irmData.interestRateInfo.length - 1)) * 100).toFixed(0)
-      labels.push(utilization)
+      if (kinkInjected && i === kinkIndex && kinkUtilization !== null) {
+        labels.push(kinkUtilization.toFixed(2))
+      }
+      else {
+        const originalIndex = kinkInjected && i > kinkIndex! ? i - 1 : i
+        labels.push(originalIndex.toFixed(0))
+      }
       borrowAPYValues.push(parseAPY(rate.borrowAPY))
       supplyAPYValues.push(parseAPY(rate.supplyAPY))
     })
 
+    // Store key borrow APY values for the params display.
+    chartRateAtZero.value = borrowAPYValues[0] ?? null
+    chartRateAtMax.value = borrowAPYValues[borrowAPYValues.length - 1] ?? null
+    chartRateAtKink.value = kinkIndex !== null
+      ? borrowAPYValues[kinkIndex] ?? null
+      : null
+
     // Current utilization
     const currentUtilization = getVaultUtilization(vault)
-
-    // Kink utilization if available
-    let kinkUtilization: number | null = null
-    if (kinkData?.interestRateInfo && kinkData.interestRateInfo.length > 1) {
-      const kinkInfo = kinkData.interestRateInfo[1]
-      const kinkCash = kinkData.interestRateInfo[0]?.cash || 0n
-      const kinkBorrows = kinkInfo?.borrows || 0n
-      if (kinkCash > 0n) {
-        kinkUtilization = Number((kinkBorrows * BPS_BASE) / kinkCash) / 100
-      }
-    }
 
     // Set chart data
     chartData.value = {
@@ -250,7 +457,7 @@ const renderChart = async () => {
       },
     }
 
-    if (kinkUtilization !== null) {
+    if (kinkUtilization !== null && kinkIndex !== null) {
       const labelsAreClose = Math.abs(currentUtilization - kinkUtilization) < 20
       const currentIsLower = currentUtilization <= kinkUtilization
       const yOffset = labelsAreClose ? 24 : 0
@@ -259,10 +466,15 @@ const renderChart = async () => {
         annotations.currentLine.label.yAdjust = yOffset
       }
 
+      // Anchor to the injected sample's label so the line lands exactly on the
+      // kink data point. Using the raw kink percent here would miss the sample
+      // because the category axis positions by label match, not numeric value.
+      const kinkLabel = labels[kinkIndex]
+
       annotations.kinkLine = {
         type: 'line',
-        xMin: kinkUtilization.toFixed(0),
-        xMax: kinkUtilization.toFixed(0),
+        xMin: kinkLabel,
+        xMax: kinkLabel,
         borderColor: colors.lineA,
         borderWidth: 1,
         borderDash: [5, 5],
@@ -428,9 +640,15 @@ watch(isDark, async () => {
         <p class="text-h3 text-content-primary">
           Interest rate model
         </p>
-        <div class="inline-flex items-center py-0 px-4 rounded-4 bg-accent-300/30 text-accent-700 text-[12px] font-medium capitalize">
+        <div class="irm-type-chip inline-flex items-center py-2 px-8 rounded-8 text-[13px] font-medium">
           {{ irmTypeLabel }}
         </div>
+        <UiFootnote
+          v-if="irmTooltip"
+          :title="irmTooltip.title"
+          :text="irmTooltip.text"
+          class="[--ui-footnote-icon-color:var(--text-muted)] hover:[--ui-footnote-icon-color:var(--text-secondary)]"
+        />
       </div>
     </div>
 
@@ -457,5 +675,29 @@ watch(isDark, async () => {
         />
       </div>
     </div>
+
+    <div
+      v-if="irmParamsDisplay.length"
+      class="flex flex-wrap justify-between gap-16 [&>*:last-child]:text-right"
+    >
+      <VaultOverviewLabelValue
+        v-for="param in irmParamsDisplay"
+        :key="param.label"
+        :label="param.label"
+        :value="param.value"
+      />
+    </div>
   </div>
 </template>
+
+<style scoped lang="scss">
+.irm-type-chip {
+  background-color: rgba(var(--accent-rgb), 0.15);
+  color: var(--accent-600);
+
+  [data-theme="dark"] & {
+    background-color: rgba(var(--accent-rgb), 0.2);
+    color: var(--accent-500);
+  }
+}
+</style>

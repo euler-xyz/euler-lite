@@ -14,6 +14,7 @@ import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useBorrowForm } from '~/composables/borrow/useBorrowForm'
 import { useMultiplyForm } from '~/composables/borrow/useMultiplyForm'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const router = useRouter()
 const route = useRoute()
@@ -22,6 +23,8 @@ const reviewBorrowLabel = 'Review Borrow'
 const reviewMultiplyLabel = 'Review Multiply'
 const { getBorrowVaultPair, updateVault } = useVaults()
 const { address, isConnected } = useAccount()
+// Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
+useFullBalances()
 const { refreshAllPositions: _refreshAllPositions, depositPositions } = useEulerAccount()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
@@ -162,6 +165,23 @@ const { guardWithPriceImpact: guardWithBorrowSwapPriceImpact } = usePriceImpactG
 // --- Submit disabled ---
 const reviewBorrowDisabled = computed(() => isGeoBlocked.value || isBorrowRestricted.value || borrow.isBorrowSwapRestricted.value || borrow.isSubmitDisabled.value)
 const reviewMultiplyDisabled = computed(() => isGeoBlocked.value || isMultiplyRestricted.value || multiply.isMultiplySubmitDisabled.value)
+
+const borrowDisabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isBorrowRestricted.value) return { message: 'Borrowing this asset is not available in your region', variant: 'warning' }
+  if (borrow.isBorrowSwapRestricted.value) return { message: 'Swapping into this collateral vault is not available in your region', variant: 'warning' }
+  if (borrow.errorText.value) return { message: borrow.errorText.value, variant: 'error' }
+  if (borrow.borrowSimulationError.value) return { message: borrow.borrowSimulationError.value, variant: 'error' }
+  return undefined
+})
+
+const multiplyDisabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isMultiplyRestricted.value) return { message: 'Multiply is not available for this pair in your region', variant: 'warning' }
+  if (multiply.multiplyErrorText.value) return { message: multiply.multiplyErrorText.value, variant: 'error' }
+  if (multiply.multiplySimulationError.value) return { message: multiply.multiplySimulationError.value, variant: 'error' }
+  return undefined
+})
 
 // --- Tabs ---
 const formTabs = computed(() => [
@@ -515,7 +535,7 @@ watch(formTab, () => {
                   />
 
                   <VaultFormInfoBlock
-                    v-if="borrow.borrowSwapEstimatedCollateral.value"
+                    v-if="borrow.borrowSwapEstimatedCollateral.value || borrow.borrowSwapQuoteError.value"
                     :loading="borrow.isBorrowSwapQuoteLoading.value"
                     variant="card"
                   >
@@ -847,6 +867,8 @@ watch(formTab, () => {
               <VaultFormSubmit
                 v-if="formTab === 'borrow'"
                 :disabled="reviewBorrowDisabled"
+                :disabled-reason="borrowDisabledReasonInfo?.message"
+                :disabled-reason-variant="borrowDisabledReasonInfo?.variant"
                 :loading="borrow.isSubmitting.value || borrow.isPreparing.value"
               >
                 {{ reviewBorrowLabel }}
@@ -854,6 +876,8 @@ watch(formTab, () => {
               <VaultFormSubmit
                 v-else-if="formTab === 'multiply'"
                 :disabled="reviewMultiplyDisabled"
+                :disabled-reason="multiplyDisabledReasonInfo?.message"
+                :disabled-reason-variant="multiplyDisabledReasonInfo?.variant"
                 :loading="multiply.isMultiplySubmitting.value || multiply.isMultiplyPreparing.value"
               >
                 {{ reviewMultiplyLabel }}

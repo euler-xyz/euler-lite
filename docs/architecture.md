@@ -195,7 +195,52 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Server-Side Proxy Layer**: External data sources (token lists, Pyth Hermes, labels, oracle checks, RPC) are proxied through Nuxt server endpoints rather than called directly from the browser. This provides caching, rate limiting, CORS avoidance, and keeps credentials server-side. See [Development Guide - Server-Side Data Proxies](./development-guide.md#server-side-data-proxies) for the full endpoint reference.
+**Server-Side Proxy Layer**: External data sources (token lists, Pyth Hermes, labels, oracle checks, RPC, subgraph vault factories) are proxied through Nuxt server endpoints rather than called directly from the browser. This provides caching, rate limiting, CORS avoidance, and keeps credentials server-side. See [Development Guide - Server-Side Data Proxies](./development-guide.md#server-side-data-proxies) for the full endpoint reference.
+
+**Proxy cache strategy**:
+
+| Endpoint | TTL | Notes |
+|----------|-----|-------|
+| `/api/labels/*` | 5 min | 404 → empty shape; stale-fallback on upstream error |
+| `/api/token-list` | 5 min | Three sources merged via `Promise.allSettled`; per-source cache with stale fallback |
+| `/api/intrinsic-apy` | 5 min | One endpoint, returns `{ [address]: { apy, provider, source? } }` for a chain; server orchestrates every upstream |
+| `/api/vault-categories` | 5 min | Full chain vault categorization (evk/earn/securitize/escrow) from subgraph + escrow-perspective RPC; `evk` is a superset that includes escrow. Per-address lookup mode via `&address=0x…` for direct-nav fallback |
+| `/api/oracle-adapter` | 5 min | Lazy per-address fetch |
+| `/api/euler-chains` | 5 min | Static chain-agnostic config from `euler-interfaces` repo |
+| `/api/vaults` | 5 min | Pre-computed chain vault snapshot; warm-cache rewrites every 5 min. Handler is read-only — no request-triggered refresh |
+| `/api/rewards/{merkl,brevis,fuul}` | 5 min | Public reward campaigns per provider; see Reward campaigns pipeline below |
+
+Every cacheable proxy above uses the same pattern: TTL cache for fresh hits, stale-cache fallback on upstream failure, and in-flight request deduplication so concurrent cache-miss callers (e.g. warm-cache racing real traffic) collapse onto a single upstream fetch per cache key. The in-flight dedup pattern itself is a shared util — `createInFlightDedup` / `scheduleBackgroundRefresh` in `server/utils/in-flight.ts`.
+
+`server/plugins/warm-cache.ts` pre-populates labels, token-list, `/api/intrinsic-apy`, vault-categories, reward campaigns, and the vaults snapshot for every enabled chain, plus `/api/euler-chains` once globally. Every warm task is a **direct function call** to a `refreshX()` that bypasses the handler's fresh-cache short-circuit and writes straight to the cache. This matters: if warm cycled via HTTP, the handler would short-circuit on the still-fresh entry from the previous cycle (age ≈ 298 s at the 5-min mark) and the entry would then expire with no refresh until the next cycle — leaving a ~5 min stale window per cycle. With direct refresh calls, the cache is always rewritten while the previous entry is still serving live traffic, so user requests arriving during a refresh continue to read the fresh old entry (no blocking on the in-flight refresh). Warming runs fire-and-forget so Nitro's listener is never delayed; caches are typically hot within ~5 s of boot, and users arriving before that just pay the usual cold-upstream latency for whichever endpoints they hit.
+
+### Vault snapshot pipeline
+
+`/api/vaults?chainId=X` serves a pre-computed snapshot of the public vault set for a chain: every EVK vault, Earn vault, Securitize vault, and referenced escrow vault, with all on-chain state (caps, rates, LTV matrices, oracle prices) already resolved. Per-user data (balances, positions, collateral flags) is **not** in this snapshot — the client fetches it separately after wallet connect via `useAccountPositions` / `useEulerAccount`.
+
+The client composable `useVaults.loadVaults()` runs in two phases:
+
+1. **Hydrate** (`~100 ms`): `$fetch('/api/vaults?chainId=X')`, deserialise, populate the vault registry, flip `isReady=true`. UI renders a fully populated `borrowList` immediately.
+2. **Fresh RPC pass** (`~3-6 s`): the existing batched lens pipeline (`fetchVaults`/`fetchEarnVaults`/`fetchSecuritizeVault`/`fetchEscrowVault`) runs against the client's RPC with Pyth simulation, overwriting registry entries with live prices and rates.
+
+The public interface of `useVaults()` is unchanged — the 15 exports (`isReady`, `borrowList`, `getVault`, etc.) keep their names, types, and semantics. All RPC-level fetchers are extracted to pure functions in `entities/vault/{fetcher,apy,pricing,escrow-fetcher}.ts` that accept a `FetchVaultContext`; both the client composable and the server-side `loadChainSnapshot` (`entities/vault/loader.ts`) share the same code path. bigint fields in the wire payload are tagged (`__bi:<decimal>`) by `entities/vault/loader-serde.ts` so the JSON transport doesn't lose precision.
+
+### Reward campaigns pipeline
+
+`/api/rewards/{merkl,brevis,fuul}?chainId=X` proxies the three reward providers' **public** campaign surface (chain-scoped, identical for every user). The composables `useMerkl`, `useBrevis`, `useFuul` each do one `$fetch('/api/rewards/<provider>')` per poll instead of the previous 4-6 direct upstream requests per user per poll.
+
+- **Merkl**: the handler consolidates the three opportunity types (EULER, MULTILENDBORROW, ERC20LOGPROCESSOR — paginated internally up to 10×100 items per type) into one response. The global `/tokens/reward` payload is **not** included here — it flows through `/api/token-list` instead (see `fetchMerkl` there). Each type caches separately under `merkl:{type}:{chainId}` so one flaky upstream doesn't blank out the others.
+- **Brevis**: the upstream POST body is hardcoded server-side (`{ action: [LEND, BORROW], status: [3] }`), so the cache key reduces to `brevis:{chainId}` and the handler exposes a cacheable GET.
+- **Fuul**: the two `protocol=euler` and `protocol=euler-looping` queries fan out server-side and return as `{ euler, looping }`.
+
+Semantics:
+
+- **Raw pass-through**: the server never interprets `Opportunity[]` / `Campaign[]` / `FuulIncentive[]`. All transforms (Merkl subType mapping, MULTILENDBORROW expansion, Brevis snake_case/camelCase normalisation) stay in the composables so provider feature work doesn't need a backend redeploy.
+- **SWR + warm-cache**: the three handlers serve `fresh → stale-with-background-revalidate → cold-await-upstream` against a 5-min TTL. The warm-cache plugin (`server/plugins/warm-cache.ts`) refreshes all six per-chain keys plus the global `merkl:tokens` every 5 min, so steady-state requests always hit fresh entries.
+- **Pagination partial-response gate**: if a Merkl paginated fetch fails mid-flight or exceeds the 10-page cap, the partial response is **not** cached — the next call re-runs the pagination rather than serving a truncated dataset for 5 minutes.
+- **Rate limiting + CDN**: each handler has its own rate-limit label (`rewards-merkl-proxy`, etc.) so a noisy client against one endpoint can't starve the others. Handlers set `Cache-Control: public, max-age=30, stale-while-revalidate=30` so Cloudflare short-circuits repeat hits between warm cycles.
+- **Poll cadence** (see `entities/tuning-constants.ts`): both public campaigns and user-specific claimable rewards poll every 60 s. Public polls mostly hit the CDN (30s `max-age` + 30s `stale-while-revalidate` = 60s total window) so they're near-free; user-specific polls go to upstream directly.
+- **User-specific traffic stays direct**: Merkl `/users/{addr}/rewards`, Brevis `getMerkleProofsBatch`, Fuul `/claimable-rewards` are **not** proxied — they remain direct axios calls from the browser. Only the chain-scoped public surface flows through the shared cache.
 
 ## 🔍 Explore Page & Market Discovery
 
@@ -226,7 +271,7 @@ The listing pages (Lend, Borrow, Earn, Explore) support user-defined metric filt
 
 ## 🚀 Performance Architecture
 
-### Page Keepalive Strategy
+### Page KeepAlive Strategy
 
 The app uses Vue's `<KeepAlive>` to preserve component state across navigation for listing pages:
 
@@ -246,7 +291,7 @@ This prevents re-fetching and re-rendering when users navigate between listing p
 4. **RPC Deduplication**: Concurrent RPC calls for the same data are deduplicated so only one request is made
 5. **Batch Operations**: Batch API calls to reduce network overhead
 6. **Debouncing**: User input and position refresh debouncing to prevent excessive API calls
-7. **Keepalive**: Listing pages cached in memory to avoid redundant data loads
+7. **KeepAlive**: Listing pages cached in memory to avoid redundant data loads
 8. **Lazy Chart Loading**: Chart.js is lazy-loaded only when chart components are mounted. Chart colors are read from CSS custom properties via the `useThemeColors` composable (reads `document.body` computed styles, reactive to `useTheme()`), so charts automatically follow the theme
 9. **Interval Cleanup**: All `setInterval` timers are properly cleaned up to prevent memory leaks
 10. **shallowRef**: Collection data (arrays, maps) uses `shallowRef` instead of `ref` to avoid deep reactivity overhead

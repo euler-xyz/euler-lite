@@ -2,7 +2,7 @@
 import { useMarketGroups } from '~/composables/useMarketGroups'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
-import { getProductByVault, getEntitiesByVault, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useBestMaxROE } from '~/composables/useBestMaxROE'
@@ -29,7 +29,7 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<MarketGroup>(
   ...group.vaults.flatMap((vault) => {
     const addr = isVaultType(vault) ? vault.address : ''
     if (!addr) return []
-    const product = getProductByVault(addr)
+    const product = applyVaultOverrides(getProductByVault(addr), addr)
     return [
       product.name,
       product.description,
@@ -264,8 +264,7 @@ const sortedMarkets = computed(() => {
 
 const isLoading = computed(() =>
   isEVKUpdating.value || isEarnUpdating.value || isSecuritizeUpdating.value || isEscrowUpdating.value
-  || (isResolvingTVL.value && marketGroups.value.length === 0)
-  || marketGroups.value.length === 0,
+  || isResolvingTVL.value,
 )
 const { isSlow } = useSlowLoading(isLoading)
 </script>
@@ -274,7 +273,7 @@ const { isSlow } = useSlowLoading(isLoading)
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
     <BasePageHeader
       title="Explore"
-      description="Discover markets structure and collateral relationships."
+      description="Discover lending markets across Euler. Filter by asset, risk manager, or market type."
       class="mb-16"
       icon="nodes"
     />

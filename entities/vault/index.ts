@@ -6,6 +6,10 @@ export type {
   VaultAsset,
   VaultInterestRateInfo,
   VaultIRMInfo,
+  KinkIRMParams,
+  AdaptiveCurveIRMParams,
+  KinkyIRMParams,
+  CyclicalNoteInfo,
   Erc4626Vault,
   SecuritizeVault,
   Vault,
@@ -17,7 +21,7 @@ export type {
   EarnVault,
   CollateralOption,
 } from './types'
-export { isSecuritizeBorrowPair } from './types'
+export { isSecuritizeBorrowPair, isEVKVault } from './types'
 
 // Factory detection — imported directly from ~/entities/vault/factory to avoid circular dependency
 // (factory.ts → useVaultRegistry → index.ts → factory.ts)
@@ -38,8 +42,16 @@ export { clearPriceCaches } from './pricing'
 export {
   fetchEscrowVault,
   fetchEscrowAddresses,
-  fetchEscrowVaults,
 } from './escrow-fetcher'
+
+// Shared context for pure fetchers
+export type { FetchVaultContext } from './fetcher'
+
+// Universal chain snapshot loader (used by /api/vaults handler and client hydration).
+export { loadChainSnapshot } from './loader'
+export type { ChainVaultsSnapshot, LoadSnapshotInput } from './loader'
+export { serialiseSnapshot, deserialiseSnapshot } from './loader-serde'
+export type { SerialisedSnapshot } from './loader-serde'
 
 // LTV ramp calculations
 export {

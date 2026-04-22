@@ -12,9 +12,10 @@ import {
 import { getSubAccountAddress } from '~/entities/account'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import type { TxPlan } from '~/entities/txPlan'
-import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
+import { formatNumber, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const router = useRouter()
 const route = useRoute()
@@ -70,6 +71,11 @@ const isSubmitDisabled = computed(() => {
     || !!(estimatesError.value)
 })
 const reviewWithdrawDisabled = isSubmitDisabled
+const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (estimatesError.value) return { message: estimatesError.value, variant: 'error' }
+  if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return { message: 'Insufficient balance', variant: 'error' }
+  return undefined
+})
 const supplyAPYDisplay = computed(() => {
   if (!vault.value) return '0.00'
   return formatNumber(nanoToValue(vault.value.interestRateInfo.supplyAPY, 25) + rewardApy.value)
@@ -181,7 +187,7 @@ const send = async () => {
 
     modal.close()
     setTimeout(() => {
-      router.replace('/portfolio/saving')
+      router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
     }, 400)
   }
   catch (e) {
@@ -309,7 +315,10 @@ watch(amount, () => {
                 v-if="asset"
                 class="text-p2 flex items-center gap-4"
               >
-                {{ formatSmartAmount(nanoToValue(assetsBalance, asset.decimals)) }} <span class="text-p3 text-content-tertiary">{{ asset.symbol }}</span>
+                <UiExactAmount :exact="formatExactAmount(assetsBalance, asset.decimals, asset.symbol)">
+                  {{ formatSmartAmount(nanoToValue(assetsBalance, asset.decimals)) }}
+                  <span class="text-p3 text-content-tertiary">{{ asset.symbol }}</span>
+                </UiExactAmount>
                 <span class="text-p3 text-content-tertiary">&asymp; ${{ formatNumber(assetsBalanceUsd) }}</span>
               </p>
             </SummaryRow>
@@ -319,6 +328,8 @@ watch(amount, () => {
             <VaultFormSubmit
               :loading="isSubmitting || isPreparing"
               :disabled="reviewWithdrawDisabled"
+              :disabled-reason="disabledReasonInfo?.message"
+              :disabled-reason-variant="disabledReasonInfo?.variant"
             >
               Review Withdraw
             </VaultFormSubmit>
