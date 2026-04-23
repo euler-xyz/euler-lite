@@ -138,8 +138,7 @@ useOperationGuard(computed(() => [form.collateralVault.value?.address, form.borr
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (form.isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
-  if (form.isOutputAssetBlocked.value) return { message: 'Receiving this asset is not available in your region', variant: 'warning' }
-  if (form.isOutputAssetRestricted.value) return { message: 'Receiving this asset is not available in your region', variant: 'warning' }
+  if (form.isOutputAssetBlocked.value || form.isOutputAssetRestricted.value) return { message: 'Receiving this asset is not available in your region', variant: 'warning' }
   if (form.isSwapRestricted.value) return { message: 'Swapping from this vault is not available in your region', variant: 'warning' }
   if (form.estimatesError.value) return { message: form.estimatesError.value, variant: 'error' }
   if (form.simulationError.value) return { message: form.simulationError.value, variant: 'error' }

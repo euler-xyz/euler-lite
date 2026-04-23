@@ -42,11 +42,15 @@ const expandBlockList = (codes: readonly string[]): string[] => {
   return codes.flatMap(code => COUNTRY_GROUPS[code] ?? [code])
 }
 
+// Module-scoped accessor: useVaultRegistry() returns module-level state,
+// but instantiating the wrapper per call allocates a new object on every
+// vault render in browse tables. Resolve it once at module load.
+const { getVault: registryGetVault } = useVaultRegistry()
+
 // Resolve the underlying asset address for a vault via the registry.
 // Used by vault-level helpers to OR-in asset-level rules from assets.json.
 const getVaultUnderlyingAsset = (vaultAddress: string): string | undefined => {
-  const vault = useVaultRegistry().getVault(vaultAddress)
-  return vault?.asset?.address
+  return registryGetVault(vaultAddress)?.asset?.address
 }
 
 export const isAssetBlockedByCountry = (assetAddress: string | undefined): boolean => {

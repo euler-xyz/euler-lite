@@ -150,6 +150,23 @@ const filteredOptions = computed(() => {
   return base
 })
 
+// Compute geo state once per visible row rather than 3x per render
+// (class binding + bg-card-hover + click guard).
+const geoByAddress = computed(() => {
+  const map = new Map<string, { disabled: boolean, showChip: boolean }>()
+  for (const opt of filteredOptions.value) {
+    map.set(opt.asset.address.toLowerCase(), getAssetGeoState(opt.asset.address, mode))
+  }
+  return map
+})
+
+const rowGeo = (address: string) =>
+  geoByAddress.value.get(address.toLowerCase()) ?? { disabled: false, showChip: false }
+
+const customTokenGeo = computed(() =>
+  customToken.value ? getAssetGeoState(customToken.value.address, mode) : { disabled: false, showChip: false },
+)
+
 watch(searchQuery, (q) => {
   const trimmed = q.trim()
   if (isAddress(trimmed) && !knownAddresses.value.has(trimmed.toLowerCase())) {
@@ -175,8 +192,14 @@ const handleSelect = (opt: TokenOption) => {
   emits('close')
 }
 
+const onRowClick = (opt: TokenOption) => {
+  if (rowGeo(opt.asset.address).disabled) return
+  handleSelect(opt)
+}
+
 const handleSelectCustomToken = () => {
   if (!customToken.value) return
+  if (customTokenGeo.value.disabled) return
   onSelect(customToken.value, { isUnknownToken: true })
   emits('close')
 }
@@ -203,12 +226,10 @@ const handleSelectCustomToken = () => {
           :key="opt.asset.address"
           class="flex items-center py-12 px-16 rounded-16"
           :class="[
-            getAssetGeoState(opt.asset.address, mode).disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
-            isSelected(opt.asset.address) && !getAssetGeoState(opt.asset.address, mode).disabled ? 'bg-card-hover' : '',
+            rowGeo(opt.asset.address).disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+            isSelected(opt.asset.address) && !rowGeo(opt.asset.address).disabled ? 'bg-card-hover' : '',
           ]"
-          @click="
-            if (!getAssetGeoState(opt.asset.address, mode).disabled) handleSelect(opt)
-          "
+          @click="onRowClick(opt)"
         >
           <AssetAvatar
             :asset="opt.asset"
@@ -222,7 +243,7 @@ const handleSelectCustomToken = () => {
             <div class="text-h5 flex items-center">
               {{ opt.asset.symbol }}
               <span
-                v-if="getAssetGeoState(opt.asset.address, mode).showChip"
+                v-if="rowGeo(opt.asset.address).showChip"
                 class="ml-6 inline-flex items-center rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
               >
                 Restricted
@@ -251,10 +272,8 @@ const handleSelectCustomToken = () => {
         <div
           v-else-if="isUnknownAddress && customToken"
           class="flex items-center py-12 px-16 rounded-16 hover:bg-surface-secondary"
-          :class="getAssetGeoState(customToken.address, mode).disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'"
-          @click="
-            if (!getAssetGeoState(customToken.address, mode).disabled) handleSelectCustomToken()
-          "
+          :class="customTokenGeo.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'"
+          @click="handleSelectCustomToken"
         >
           <AssetAvatar
             :asset="customToken"
@@ -268,7 +287,7 @@ const handleSelectCustomToken = () => {
                 Import
               </span>
               <span
-                v-if="getAssetGeoState(customToken.address, mode).showChip"
+                v-if="customTokenGeo.showChip"
                 class="inline-flex items-center rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
               >
                 Restricted

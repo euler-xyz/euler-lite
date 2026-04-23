@@ -32,7 +32,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { TxPlan } from '~/entities/txPlan'
 import { getPlanHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
-import { getVaultTags, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
+import { getVaultTags, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { getNetAPY, getProjectedRates } from '~/entities/vault'
 import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
@@ -328,6 +328,13 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     borrowNeedsSwap.value && isVaultRestrictedByCountry(collateralAddress),
   )
 
+  // Pay-with asset can be any ERC-20 not tied to any vault, so the
+  // vault-level check above can't see it. Hard-block the asset directly.
+  // Soft-restrict does not apply: pay-with reduces exposure to that asset.
+  const isBorrowPayWithBlocked = computed(() =>
+    borrowNeedsSwap.value && isAssetBlockedByCountry(borrowSelectedAsset.value?.address),
+  )
+
   const errorText = computed(() => {
     if (borrowActiveBalance.value < valueToNano(collateralAmount.value, borrowActiveAssetDecimals.value)) {
       return 'Not enough balance'
@@ -607,7 +614,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   const submit = async () => {
     if (isOperationBlocked.value) return
-    if (isPreparing.value || isGeoBlocked.value || isBorrowRestricted.value || isBorrowSwapRestricted.value) return
+    if (isPreparing.value || isGeoBlocked.value || isBorrowRestricted.value || isBorrowSwapRestricted.value || isBorrowPayWithBlocked.value) return
     isPreparing.value = true
     try {
       if (!isConnected.value) {
@@ -938,6 +945,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     errorText,
     isSubmitDisabled,
     isBorrowSwapRestricted,
+    isBorrowPayWithBlocked,
 
     // Computed: warnings
     borrowFormWarnings,
