@@ -65,8 +65,6 @@ export interface UseSwapPageLogicOptions {
   reviewSwapEstimatedSide?: 'input' | 'output'
   /** Include CowSwap provider in swap quotes (Ethereum mainnet only) */
   includeCowSwap?: boolean
-  /** Transform individual quotes (e.g. vault shares → underlying conversion) */
-  transformQuote?: (quote: SwapApiQuote, provider: string) => SwapApiQuote
 }
 
 export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
@@ -91,7 +89,6 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     swapperMode,
     reviewSwapEstimatedSide,
     includeCowSwap,
-    transformQuote,
   } = options
 
   const otherAmountField: SwapQuoteAmountField = displayAmountField === 'amountIn' ? 'amountOut' : 'amountIn'
@@ -134,7 +131,6 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     amountField,
     compare,
     includeCowSwap,
-    transformQuote,
     buildTxPlanForQuote: quote => buildPlan(quote),
   })
   // ── Vault products & price invert ──────────────────────────────────────
