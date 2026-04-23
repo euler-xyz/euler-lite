@@ -444,12 +444,8 @@ const { guardWithPriceImpact } = usePriceImpactGate({
   multipliedPriceImpact,
 })
 const multiplyRoutedVia = computed(() => {
-  if (isMultiplyQuoteLoading.value) {
-    return null
-  }
-  if (!multiplyEffectiveQuote.value?.route?.length) {
-    return null
-  }
+  if (!multiplySelectedProvider.value) return isMultiplyQuoteLoading.value ? null : 'Not selected'
+  if (!multiplyEffectiveQuote.value?.route?.length) return null
   return multiplyEffectiveQuote.value.route.map(route => route.providerName).join(', ')
 })
 const multiplyErrorText = computed(() => {
@@ -713,6 +709,8 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (isMultiplyRestricted.value) return { message: 'Multiply is not available for this pair in your region', variant: 'warning' }
   if (multiplyErrorText.value) return { message: multiplyErrorText.value, variant: 'error' }
   if (multiplySimulationError.value) return { message: multiplySimulationError.value, variant: 'error' }
+  if (!multiplyIsSameAsset.value && isMultiplyQuoteLoading.value && multiplyDebtAmountNano.value > 0n) return { message: 'Fetching swap quotes...', variant: 'warning' }
+  if (!multiplyIsSameAsset.value && !multiplySelectedQuote.value && multiplyDebtAmountNano.value > 0n) return { message: 'Select a swap quote to continue', variant: 'warning' }
   return undefined
 })
 

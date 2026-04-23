@@ -511,7 +511,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   )
 
   const multiplyRoutedVia = computed(() => {
-    if (isMultiplyQuoteLoading.value) return null
+    if (!multiplySelectedProvider.value) return isMultiplyQuoteLoading.value ? null : 'Not selected'
     if (!multiplyEffectiveQuote.value?.route?.length) return null
     return multiplyEffectiveQuote.value.route.map(route => route.providerName).join(', ')
   })

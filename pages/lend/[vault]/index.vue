@@ -300,6 +300,8 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (evkVault.value && isOpDisabled(evkVault.value, OP_DEPOSIT)) return { message: 'Deposits are currently disabled for this vault', variant: 'warning' }
   if (isSupplyCapReached.value) return { message: 'Supply cap has been reached', variant: 'warning' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
+  if (needsSwap.value && isSwapQuoteLoading.value && +amount.value > 0) return { message: 'Fetching swap quotes...', variant: 'warning' }
+  if (needsSwap.value && !swapSelectedQuote.value && +amount.value > 0) return { message: 'Select a swap quote to continue', variant: 'warning' }
   return undefined
 })
 const totalRewardsAPY = computed(() => getSupplyRewardApy(vaultAddress))
@@ -593,6 +595,7 @@ const swapOutputDisplay = computed(() => {
 })
 
 const swapRoutedVia = computed(() => {
+  if (!swapSelectedProvider.value) return 'Not selected'
   if (!swapEffectiveQuote.value?.route?.length) return null
   return swapEffectiveQuote.value.route.map((r: { providerName: string }) => r.providerName).join(', ')
 })

@@ -148,6 +148,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   })
 
   const swapRoutedVia = computed(() => {
+    if (!quotes.selectedProvider.value) return 'Not selected'
     if (!quotes.effectiveQuote.value?.route?.length) return null
     return quotes.effectiveQuote.value.route.map((r: { providerName: string }) => r.providerName).join(', ')
   })

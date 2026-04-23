@@ -172,6 +172,8 @@ const borrowDisabledReasonInfo = computed((): DisabledReasonInfo | undefined => 
   if (borrow.isBorrowSwapRestricted.value) return { message: 'Swapping into this collateral vault is not available in your region', variant: 'warning' }
   if (borrow.errorText.value) return { message: borrow.errorText.value, variant: 'error' }
   if (borrow.borrowSimulationError.value) return { message: borrow.borrowSimulationError.value, variant: 'error' }
+  if (borrow.borrowNeedsSwap.value && borrow.isBorrowSwapQuoteLoading.value && +borrow.collateralAmount.value > 0) return { message: 'Fetching swap quotes...', variant: 'warning' }
+  if (borrow.borrowNeedsSwap.value && !borrow.borrowSwapSelectedProvider.value && +borrow.collateralAmount.value > 0) return { message: 'Select a swap quote to continue', variant: 'warning' }
   return undefined
 })
 
@@ -180,6 +182,8 @@ const multiplyDisabledReasonInfo = computed((): DisabledReasonInfo | undefined =
   if (isMultiplyRestricted.value) return { message: 'Multiply is not available for this pair in your region', variant: 'warning' }
   if (multiply.multiplyErrorText.value) return { message: multiply.multiplyErrorText.value, variant: 'error' }
   if (multiply.multiplySimulationError.value) return { message: multiply.multiplySimulationError.value, variant: 'error' }
+  if (!multiply.multiplyIsSameAsset.value && multiply.isMultiplyQuoteLoading.value) return { message: 'Fetching swap quotes...', variant: 'warning' }
+  if (!multiply.multiplyIsSameAsset.value && !multiply.multiplySelectedProvider.value) return { message: 'Select a swap quote to continue', variant: 'warning' }
   return undefined
 })
 
