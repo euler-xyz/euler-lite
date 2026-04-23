@@ -22,7 +22,7 @@ import {
   getCollateralUsdValueOrZero,
 } from '~/services/pricing/priceProvider'
 import type { TxPlan } from '~/entities/txPlan'
-import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
+import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
@@ -409,6 +409,20 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     options.needsSwap.value && isVaultRestrictedByCountry(collateralVault.value?.address || ''),
   )
 
+  // Asset-level geo checks for swap flows. The user-selected swap input (pay-with)
+  // and/or output (receive-as) can be arbitrary ERC-20 tokens not tied to any
+  // vault, so vault-level checks above won't see them. Hard-block always applies;
+  // soft-restrict applies only to the "acquire" side (output).
+  const isInputAssetBlocked = computed(() =>
+    options.needsSwap.value && isAssetBlockedByCountry(options.effectiveAsset.value?.address),
+  )
+  const isOutputAssetBlocked = computed(() =>
+    options.needsSwap.value && isAssetBlockedByCountry(options.getSwapOutputAsset()?.address),
+  )
+  const isOutputAssetRestricted = computed(() =>
+    options.needsSwap.value && isAssetRestrictedByCountry(options.getSwapOutputAsset()?.address),
+  )
+
   const collateralOp = computed(() => options.mode === 'supply' ? OP_DEPOSIT : OP_WITHDRAW)
 
   const hookWarning = computed(() => {
@@ -427,7 +441,13 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   })
 
   const submitDisabled = computed(() =>
-    isGeoBlocked.value || isSwapRestricted.value || isLoading.value || isSubmitDisabled.value,
+    isGeoBlocked.value
+    || isSwapRestricted.value
+    || isInputAssetBlocked.value
+    || isOutputAssetBlocked.value
+    || isOutputAssetRestricted.value
+    || isLoading.value
+    || isSubmitDisabled.value,
   )
 
   // --- Estimates ---
@@ -573,7 +593,12 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   // --- Submit ---
   const submit = async () => {
     if (isOperationBlocked.value) return
-    if (isPreparing.value || isGeoBlocked.value || isSwapRestricted.value) return
+    if (isPreparing.value
+      || isGeoBlocked.value
+      || isSwapRestricted.value
+      || isInputAssetBlocked.value
+      || isOutputAssetBlocked.value
+      || isOutputAssetRestricted.value) return
     isPreparing.value = true
     try {
       await guardWithPriceImpact(async () => {
@@ -779,6 +804,9 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     // Validation
     isGeoBlocked,
     isSwapRestricted,
+    isInputAssetBlocked,
+    isOutputAssetBlocked,
+    isOutputAssetRestricted,
     isSubmitDisabled,
     submitDisabled,
     submitLabel,

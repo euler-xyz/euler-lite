@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-dynamic-delete */
 import axios from 'axios'
 import { getAddress } from 'viem'
-import type { EulerLabelPoint, EulerLabelEarnVaultEntry } from '~/entities/euler/labels'
+import type { EulerLabelPoint, EulerLabelEarnVaultEntry, EulerLabelAssetEntry } from '~/entities/euler/labels'
 import type { EarnVault, Vault } from '~/entities/vault'
 import { safeAssign } from '~/utils/safe-assign'
 import { logWarn } from '~/utils/errorHandling'
@@ -24,6 +24,8 @@ import {
   verifiedVaultAddresses,
   oracleAdapters,
   loadingAdapters,
+  assetBlocks,
+  assetRestrictions,
 } from '~/utils/eulerLabelsState'
 import {
   normalizeProducts,
@@ -101,16 +103,19 @@ export const useEulerLabels = () => {
       Object.keys(deprecatedEarnVaults).forEach(key => delete deprecatedEarnVaults[key])
       Object.keys(earnVaultDescriptions).forEach(key => delete earnVaultDescriptions[key])
       Object.keys(earnVaultNotices).forEach(key => delete earnVaultNotices[key])
+      Object.keys(assetBlocks).forEach(key => delete assetBlocks[key])
+      Object.keys(assetRestrictions).forEach(key => delete assetRestrictions[key])
       featuredEarnVaults.clear()
       notExplorableEarnVaults.clear()
       earnVaults.value = []
       verifiedVaultAddresses.value = []
 
-      const [productRes, entitiesRes, earnRes, pointsRes] = await Promise.allSettled([
+      const [productRes, entitiesRes, earnRes, pointsRes, assetsRes] = await Promise.allSettled([
         axios.get('/api/labels/products.json', { params: { chainId } }),
         axios.get('/api/labels/entities.json', { params: { chainId } }),
         axios.get('/api/labels/earn-vaults.json', { params: { chainId } }),
         axios.get('/api/labels/points.json', { params: { chainId } }),
+        axios.get('/api/labels/assets.json', { params: { chainId } }),
       ])
 
       if (productRes.status === 'fulfilled') {
@@ -180,6 +185,21 @@ export const useEulerLabels = () => {
             logo: point.logo,
           })
         })
+      })
+
+      const assetEntries = (assetsRes.status === 'fulfilled' ? assetsRes.value.data ?? [] : []) as Array<EulerLabelAssetEntry>
+      if (assetsRes.status === 'rejected') {
+        logWarn('labels/load', 'Failed to load assets:', assetsRes.reason)
+      }
+      assetEntries.forEach((entry) => {
+        if (!entry || typeof entry.address !== 'string') return
+        const key = normalizeAddress(entry.address).toLowerCase()
+        if (entry.block?.length) {
+          assetBlocks[key] = entry.block
+        }
+        if (entry.restricted?.length) {
+          assetRestrictions[key] = entry.restricted
+        }
       })
 
       loadState.chainId = chainId

@@ -52,6 +52,12 @@ export type EulerLabelEarnVaultEntry = {
   portfolioNotice?: string
   notExplorable?: boolean
 }
+
+export type EulerLabelAssetEntry = {
+  address: string
+  block?: string[]
+  restricted?: string[]
+}
 export type EulerLabelPoint = {
   name: string
   logo: string

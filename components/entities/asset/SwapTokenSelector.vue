@@ -3,6 +3,7 @@ import { getAddress, isAddress, zeroAddress, type Address } from 'viem'
 import type { VaultAsset } from '~/entities/vault'
 import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
+import { isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
 
 export interface SwapTokenSelectMeta {
   isUnknownToken?: boolean
@@ -39,6 +40,20 @@ interface TokenOption {
   balance: bigint
   balanceFormatted: number
   source: 'vault' | 'tokenList'
+}
+
+// Picker-geo semantics:
+// - 'input' (pay-with): user gives up this asset. Hard-block disables, soft-restrict
+//   does not (reducing exposure).
+// - 'output' (receive-as): user acquires this asset. Both hard-block and
+//   soft-restrict disable.
+const getAssetGeoState = (address: string, pickerMode: 'input' | 'output'): { disabled: boolean, showChip: boolean } => {
+  const blocked = isAssetBlockedByCountry(address)
+  if (blocked) return { disabled: true, showChip: true }
+  if (pickerMode === 'output' && isAssetRestrictedByCountry(address)) {
+    return { disabled: true, showChip: true }
+  }
+  return { disabled: false, showChip: false }
 }
 
 const tokenOptions = computed((): TokenOption[] => {
@@ -186,9 +201,14 @@ const handleSelectCustomToken = () => {
         <div
           v-for="opt in filteredOptions"
           :key="opt.asset.address"
-          class="flex items-center py-12 px-16 rounded-16 cursor-pointer"
-          :class="isSelected(opt.asset.address) ? 'bg-card-hover' : ''"
-          @click="handleSelect(opt)"
+          class="flex items-center py-12 px-16 rounded-16"
+          :class="[
+            getAssetGeoState(opt.asset.address, mode).disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+            isSelected(opt.asset.address) && !getAssetGeoState(opt.asset.address, mode).disabled ? 'bg-card-hover' : '',
+          ]"
+          @click="
+            if (!getAssetGeoState(opt.asset.address, mode).disabled) handleSelect(opt)
+          "
         >
           <AssetAvatar
             :asset="opt.asset"
@@ -199,8 +219,14 @@ const handleSelectCustomToken = () => {
             <div class="text-content-primary mb-2">
               {{ opt.asset.name }}
             </div>
-            <div class="text-h5">
+            <div class="text-h5 flex items-center">
               {{ opt.asset.symbol }}
+              <span
+                v-if="getAssetGeoState(opt.asset.address, mode).showChip"
+                class="ml-6 inline-flex items-center rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
+              >
+                Restricted
+              </span>
             </div>
           </div>
           <div class="text-right">
@@ -224,8 +250,11 @@ const handleSelectCustomToken = () => {
         <!-- Custom token: resolved -->
         <div
           v-else-if="isUnknownAddress && customToken"
-          class="flex items-center py-12 px-16 rounded-16 cursor-pointer hover:bg-surface-secondary"
-          @click="handleSelectCustomToken"
+          class="flex items-center py-12 px-16 rounded-16 hover:bg-surface-secondary"
+          :class="getAssetGeoState(customToken.address, mode).disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'"
+          @click="
+            if (!getAssetGeoState(customToken.address, mode).disabled) handleSelectCustomToken()
+          "
         >
           <AssetAvatar
             :asset="customToken"
@@ -237,6 +266,12 @@ const handleSelectCustomToken = () => {
               <span class="text-content-primary">{{ customToken.name }}</span>
               <span class="inline-flex items-center rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5">
                 Import
+              </span>
+              <span
+                v-if="getAssetGeoState(customToken.address, mode).showChip"
+                class="inline-flex items-center rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
+              >
+                Restricted
               </span>
             </div>
             <div class="text-h5">

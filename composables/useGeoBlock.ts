@@ -1,5 +1,14 @@
 import { detectCountry } from '~/services/country'
-import { getVaultBlock, getEarnVaultBlock, getVaultRestricted, getEarnVaultRestricted, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
+import {
+  getVaultBlock,
+  getEarnVaultBlock,
+  getVaultRestricted,
+  getEarnVaultRestricted,
+  getAssetBlock,
+  getAssetRestricted,
+  isVaultDeprecated,
+} from '~/utils/eulerLabelsUtils'
+import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { SANCTIONED_COUNTRIES, COUNTRY_GROUPS } from '~/entities/constants'
 
 // undefined = not yet loaded, null = loaded but country unknown, string = loaded with country
@@ -33,6 +42,38 @@ const expandBlockList = (codes: readonly string[]): string[] => {
   return codes.flatMap(code => COUNTRY_GROUPS[code] ?? [code])
 }
 
+// Resolve the underlying asset address for a vault via the registry.
+// Used by vault-level helpers to OR-in asset-level rules from assets.json.
+const getVaultUnderlyingAsset = (vaultAddress: string): string | undefined => {
+  const vault = useVaultRegistry().getVault(vaultAddress)
+  return vault?.asset?.address
+}
+
+export const isAssetBlockedByCountry = (assetAddress: string | undefined): boolean => {
+  if (!assetAddress) return false
+  if (country.value === undefined) return false // still loading
+  if (country.value === null) return true // loaded, country unknown
+
+  // Sanctioned countries are always blocked
+  if (isCountryInList(SANCTIONED_COUNTRIES)) return true
+
+  const assetBlock = getAssetBlock(assetAddress)
+  if (assetBlock?.length && isCountryInList(expandBlockList(assetBlock))) return true
+
+  return false
+}
+
+export const isAssetRestrictedByCountry = (assetAddress: string | undefined): boolean => {
+  if (!assetAddress) return false
+  if (country.value === undefined) return false // still loading
+  if (country.value === null) return true // loaded, country unknown
+
+  const assetRestricted = getAssetRestricted(assetAddress)
+  if (assetRestricted?.length && isCountryInList(expandBlockList(assetRestricted))) return true
+
+  return false
+}
+
 export const isVaultBlockedByCountry = (vaultAddress: string): boolean => {
   if (country.value === undefined) return false // still loading
   if (country.value === null) return true // loaded, country unknown
@@ -45,6 +86,9 @@ export const isVaultBlockedByCountry = (vaultAddress: string): boolean => {
 
   const earnBlock = getEarnVaultBlock(vaultAddress)
   if (earnBlock?.length && isCountryInList(expandBlockList(earnBlock))) return true
+
+  // Asset-level block: a vault is blocked whenever its underlying asset is blocked.
+  if (isAssetBlockedByCountry(getVaultUnderlyingAsset(vaultAddress))) return true
 
   return false
 }
@@ -62,6 +106,9 @@ export const isVaultRestrictedByCountry = (vaultAddress: string): boolean => {
 
   const earnRestricted = getEarnVaultRestricted(vaultAddress)
   if (earnRestricted?.length && isCountryInList(expandBlockList(earnRestricted))) return true
+
+  // Asset-level restriction: a vault is restricted whenever its underlying asset is restricted.
+  if (isAssetRestrictedByCountry(getVaultUnderlyingAsset(vaultAddress))) return true
 
   return false
 }

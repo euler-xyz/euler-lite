@@ -8,7 +8,7 @@ import { reportStatus } from '~/server/utils/log'
 const CACHE_TTL_MS = 300_000
 
 /** The set of label files this proxy serves. Also consumed by warm-cache. */
-export const LABEL_FILES = ['products.json', 'entities.json', 'earn-vaults.json', 'points.json'] as const
+export const LABEL_FILES = ['products.json', 'entities.json', 'earn-vaults.json', 'points.json', 'assets.json'] as const
 
 export type LabelFile = typeof LABEL_FILES[number]
 
@@ -21,6 +21,7 @@ const EMPTY_SHAPES: Record<LabelFile, unknown> = {
   'entities.json': {},
   'earn-vaults.json': [],
   'points.json': [],
+  'assets.json': [],
 }
 
 const rateLimiter = createRateLimiter({
