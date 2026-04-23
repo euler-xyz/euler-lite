@@ -44,6 +44,21 @@ const URL_KEYS = new Set(['url'])
 const REGEX_KEYS = new Set(['symbolRegex', 'nameRegex'])
 /** Cap regex length as a basic ReDoS sanity guard — labels are curated, not user-submitted. */
 const MAX_REGEX_LEN = 512
+/**
+ * Fields whose values are concatenated into image URLs (`${CDN}/${logo}`
+ * and `/entities/${logo}`). Must be a bare filename — no slashes, no `..`,
+ * no scheme — so a curator slip can't point the browser off-origin or
+ * traverse outside the intended asset directory.
+ */
+const LOGO_FILENAME_KEYS = new Set(['logo'])
+const SAFE_LOGO_FILENAME_RE = /^[a-zA-Z0-9_-]+\.(svg|png|jpg|jpeg|webp|gif)$/i
+/**
+ * Defensive size caps. Labels are trusted but version-controlled; these
+ * are there to prevent a mistake (or a compromise of the labels repo)
+ * from ballooning a single proxy response into a client-side DoS.
+ */
+const MAX_STRING_LEN = 16_384
+const MAX_ARRAY_LEN = 10_000
 
 /**
  * Detects the markdown-link href-injection pattern: [text](https://..."....)
@@ -66,14 +81,23 @@ function isSafeHttpUrl(value: string): boolean {
 
 function validateNode(node: unknown, path: string): void {
   if (Array.isArray(node)) {
+    if (node.length > MAX_ARRAY_LEN) {
+      throw new Error(`Array too large at ${path}: ${node.length} exceeds ${MAX_ARRAY_LEN}`)
+    }
     node.forEach((item, i) => validateNode(item, `${path}[${i}]`))
     return
   }
   if (node !== null && typeof node === 'object') {
     for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
       if (typeof value === 'string') {
+        if (value.length > MAX_STRING_LEN) {
+          throw new Error(`String too long at ${path}.${key}: ${value.length} exceeds ${MAX_STRING_LEN}`)
+        }
         if (URL_KEYS.has(key) && !isSafeHttpUrl(value)) {
           throw new Error(`Unsafe URL in ${path}.${key}: protocol must be http or https`)
+        }
+        if (LOGO_FILENAME_KEYS.has(key) && value !== '' && !SAFE_LOGO_FILENAME_RE.test(value)) {
+          throw new Error(`Unsafe logo filename in ${path}.${key}: ${value}`)
         }
         if (LINK_TEXT_KEYS.has(key) && MARKDOWN_LINK_INJECTION_RE.test(value)) {
           throw new Error(`Injection pattern detected in ${path}.${key}`)

@@ -65,13 +65,45 @@ const toAssetFields = (asset: AssetLike): { address?: string, symbol?: string, n
   }
 }
 
+// Cap inputs passed to regex .test() to protect against catastrophic
+// backtracking if a curator ships a poorly-formed pattern and an on-chain
+// token returns an attacker-chosen long symbol/name. Real ERC-20 symbols are
+// typically <=12 chars and names <=64; 128 is well above any legitimate value.
+const MAX_REGEX_INPUT_LEN = 128
+
+// Per-country cache for asset-level block / restricted resolution. Browse
+// pages call these helpers per-row for potentially hundreds of rows on each
+// render; the pattern-rule scan is O(rules) which adds up. Cache key
+// composes country + address + symbol + name so a country change (rare) or
+// a new unique asset produces a fresh entry without ever serving stale data.
+// Pattern-rule content lives in module-scoped `assetPatternRules`; the
+// labels loader calls `clearAssetGeoCache()` after repopulating that list
+// so we never serve a decision computed against removed rules.
+const MAX_ASSET_CACHE_SIZE = 1000
+const assetBlockCache = new Map<string, boolean>()
+const assetRestrictedCache = new Map<string, boolean>()
+
+const makeAssetCacheKey = (fields: { address?: string, symbol?: string, name?: string }): string =>
+  `${country.value ?? ''}|${fields.address?.toLowerCase() ?? ''}|${fields.symbol?.toLowerCase() ?? ''}|${fields.name?.toLowerCase() ?? ''}`
+
+const cacheSet = (cache: Map<string, boolean>, key: string, value: boolean): boolean => {
+  if (cache.size >= MAX_ASSET_CACHE_SIZE) cache.clear()
+  cache.set(key, value)
+  return value
+}
+
+export const clearAssetGeoCache = (): void => {
+  assetBlockCache.clear()
+  assetRestrictedCache.clear()
+}
+
 // Test whether a pattern rule matches the given symbol/name (lowercase inputs).
 // OR across populated fields — any match wins.
 const patternRuleMatches = (rule: CompiledPatternRule, symbolLower: string | undefined, nameLower: string | undefined): boolean => {
   if (rule.symbolsLower && symbolLower && rule.symbolsLower.has(symbolLower)) return true
-  if (rule.symbolRegex && symbolLower && rule.symbolRegex.test(symbolLower)) return true
+  if (rule.symbolRegex && symbolLower && symbolLower.length <= MAX_REGEX_INPUT_LEN && rule.symbolRegex.test(symbolLower)) return true
   if (rule.namesLower && nameLower && rule.namesLower.has(nameLower)) return true
-  if (rule.nameRegex && nameLower && rule.nameRegex.test(nameLower)) return true
+  if (rule.nameRegex && nameLower && nameLower.length <= MAX_REGEX_INPUT_LEN && rule.nameRegex.test(nameLower)) return true
   return false
 }
 
@@ -95,12 +127,18 @@ export const isAssetBlockedByCountry = (asset: AssetLike): boolean => {
   if (country.value === undefined) return false // still loading
   if (country.value === null) return true // loaded, country unknown
 
+  const cacheKey = makeAssetCacheKey(fields)
+  const cached = assetBlockCache.get(cacheKey)
+  if (cached !== undefined) return cached
+
   // Sanctioned countries are always blocked
-  if (isCountryInList(SANCTIONED_COUNTRIES)) return true
+  if (isCountryInList(SANCTIONED_COUNTRIES)) return cacheSet(assetBlockCache, cacheKey, true)
 
   if (fields.address) {
     const assetBlock = getAssetBlock(fields.address)
-    if (assetBlock?.length && isCountryInList(expandBlockList(assetBlock))) return true
+    if (assetBlock?.length && isCountryInList(expandBlockList(assetBlock))) {
+      return cacheSet(assetBlockCache, cacheKey, true)
+    }
   }
 
   // Pattern rules: only consulted when symbol or name is available. Callers
@@ -112,11 +150,13 @@ export const isAssetBlockedByCountry = (asset: AssetLike): boolean => {
     for (const rule of assetPatternRules) {
       if (!rule.block?.length) continue
       if (!patternRuleMatches(rule, symbolLower, nameLower)) continue
-      if (isCountryInList(expandBlockList(rule.block))) return true
+      if (isCountryInList(expandBlockList(rule.block))) {
+        return cacheSet(assetBlockCache, cacheKey, true)
+      }
     }
   }
 
-  return false
+  return cacheSet(assetBlockCache, cacheKey, false)
 }
 
 export const isAssetRestrictedByCountry = (asset: AssetLike): boolean => {
@@ -125,9 +165,15 @@ export const isAssetRestrictedByCountry = (asset: AssetLike): boolean => {
   if (country.value === undefined) return false // still loading
   if (country.value === null) return true // loaded, country unknown
 
+  const cacheKey = makeAssetCacheKey(fields)
+  const cached = assetRestrictedCache.get(cacheKey)
+  if (cached !== undefined) return cached
+
   if (fields.address) {
     const assetRestricted = getAssetRestricted(fields.address)
-    if (assetRestricted?.length && isCountryInList(expandBlockList(assetRestricted))) return true
+    if (assetRestricted?.length && isCountryInList(expandBlockList(assetRestricted))) {
+      return cacheSet(assetRestrictedCache, cacheKey, true)
+    }
   }
 
   const symbolLower = fields.symbol?.toLowerCase()
@@ -136,11 +182,13 @@ export const isAssetRestrictedByCountry = (asset: AssetLike): boolean => {
     for (const rule of assetPatternRules) {
       if (!rule.restricted?.length) continue
       if (!patternRuleMatches(rule, symbolLower, nameLower)) continue
-      if (isCountryInList(expandBlockList(rule.restricted))) return true
+      if (isCountryInList(expandBlockList(rule.restricted))) {
+        return cacheSet(assetRestrictedCache, cacheKey, true)
+      }
     }
   }
 
-  return false
+  return cacheSet(assetRestrictedCache, cacheKey, false)
 }
 
 export const isVaultBlockedByCountry = (vaultAddress: string): boolean => {

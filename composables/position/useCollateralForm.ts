@@ -414,8 +414,16 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   // vault, so vault-level checks above won't see them. Hard-block always applies;
   // soft-restrict applies only to the "acquire" side (output). Pass the full
   // asset object so symbol/name pattern rules are also consulted.
+  //
+  // Input-side check is scoped to supply mode: in withdraw, `effectiveAsset`
+  // is the collateral vault's own underlying, which `isGeoBlocked` above
+  // already covers via the vault-level OR. Re-checking there would disable
+  // submit with no corresponding toast (withdraw.vue's disabledReasonInfo
+  // doesn't consult this flag).
   const isInputAssetBlocked = computed(() =>
-    options.needsSwap.value && isAssetBlockedByCountry(options.effectiveAsset.value),
+    options.mode === 'supply'
+    && options.needsSwap.value
+    && isAssetBlockedByCountry(options.effectiveAsset.value),
   )
   const isOutputAssetBlocked = computed(() =>
     options.needsSwap.value && isAssetBlockedByCountry(options.getSwapOutputAsset()),

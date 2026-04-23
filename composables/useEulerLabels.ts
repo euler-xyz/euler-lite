@@ -7,6 +7,7 @@ import { safeAssign } from '~/utils/safe-assign'
 import { logWarn } from '~/utils/errorHandling'
 import { CACHE_TTL_5MIN_MS } from '~/entities/tuning-constants'
 import { normalizeAddress } from '~/utils/normalizeAddress'
+import { clearAssetGeoCache } from '~/composables/useGeoBlock'
 import {
   isLoading,
   loadState,
@@ -108,6 +109,10 @@ export const useEulerLabels = () => {
       Object.keys(assetBlocks).forEach(key => delete assetBlocks[key])
       Object.keys(assetRestrictions).forEach(key => delete assetRestrictions[key])
       assetPatternRules.splice(0, assetPatternRules.length)
+      // Resolution cache in useGeoBlock may hold decisions computed against
+      // the now-cleared pattern rules and address maps; drop it so the next
+      // lookup recomputes against the freshly-loaded labels.
+      clearAssetGeoCache()
       featuredEarnVaults.clear()
       notExplorableEarnVaults.clear()
       earnVaults.value = []
@@ -197,9 +202,24 @@ export const useEulerLabels = () => {
       assetEntries.forEach((entry, index) => {
         if (!entry) return
 
+        const hasAddress = typeof entry.address === 'string'
+        const hasSymbols = Array.isArray(entry.symbols) && entry.symbols.length > 0
+        const hasSymbolRegex = typeof entry.symbolRegex === 'string' && entry.symbolRegex.length > 0
+        const hasNames = Array.isArray(entry.names) && entry.names.length > 0
+        const hasNameRegex = typeof entry.nameRegex === 'string' && entry.nameRegex.length > 0
+        const hasPattern = hasSymbols || hasSymbolRegex || hasNames || hasNameRegex
+
+        // Mixing address and pattern fields in one entry is confusing: the
+        // shared `block` / `restricted` arrays apply to both sides, so there's
+        // no way to scope different country lists to each match surface.
+        // Split into two entries instead.
+        if (hasAddress && hasPattern) {
+          logWarn('labels/load', `assets.json entry #${index} mixes 'address' with pattern fields; both will apply the same block/restricted rules — split into separate entries for clarity`)
+        }
+
         // Address-based rule: populate the fast O(1) lookup map.
-        if (typeof entry.address === 'string') {
-          const key = normalizeAddress(entry.address).toLowerCase()
+        if (hasAddress) {
+          const key = normalizeAddress(entry.address!).toLowerCase()
           if (entry.block?.length) {
             assetBlocks[key] = entry.block
           }
@@ -208,16 +228,10 @@ export const useEulerLabels = () => {
           }
         }
 
-        // Pattern rule: compile once at load time, append to the iterated list.
-        const hasSymbols = Array.isArray(entry.symbols) && entry.symbols.length > 0
-        const hasSymbolRegex = typeof entry.symbolRegex === 'string' && entry.symbolRegex.length > 0
-        const hasNames = Array.isArray(entry.names) && entry.names.length > 0
-        const hasNameRegex = typeof entry.nameRegex === 'string' && entry.nameRegex.length > 0
-
-        if (!hasSymbols && !hasSymbolRegex && !hasNames && !hasNameRegex) {
+        if (!hasPattern) {
           // No pattern fields; either an address-only rule (already handled)
           // or an entry with no match fields at all (skip).
-          if (typeof entry.address !== 'string') {
+          if (!hasAddress) {
             logWarn('labels/load', `assets.json entry #${index} has no match fields; skipping`)
           }
           return
