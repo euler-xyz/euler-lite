@@ -18,6 +18,8 @@ import { useCowSwapOpenPositionExecution, useCowSwapOrderStatus, openCowSwapRevi
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { trimTrailingZeros } from '~/utils/string-utils'
+import { getFreeSubAccountWithoutController, isBorrowControllerCompatible } from '~/entities/account'
+import { evcGetControllersAbi } from '~/abis/evc'
 
 interface UseMultiplyCowSwapOptions {
   multiplySelectedProvider: ComputedRef<string | null>
@@ -45,7 +47,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const { client: rpcClient } = useRpcClient()
-  const { chainId: currentChainId } = useEulerAddresses()
+  const { chainId: currentChainId, eulerCoreAddresses } = useEulerAddresses()
 
   const cowSwapExecution = useCowSwapOpenPositionExecution()
   const cowSwapOrderbookUrl = computed(() => getCowSwapChainConfig(currentChainId.value ?? 0)?.orderbookUrl)
@@ -104,9 +106,24 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     const chainId = currentChainId.value ?? 0
     if (!isCowSwapSupportedChain(chainId)) return
 
+    if (!address.value) return
     let subAccount: string
     try {
-      subAccount = await options.resolvePendingSubAccount()
+      const candidate = await options.resolvePendingSubAccount()
+      const evcAddress = eulerCoreAddresses.value?.evc as Address | undefined
+      const client = rpcClient.value
+      let candidateControllers: readonly string[] = []
+      if (client && evcAddress) {
+        candidateControllers = await client.readContract({
+          address: evcAddress,
+          abi: evcGetControllersAbi,
+          functionName: 'getControllers',
+          args: [candidate as Address],
+        }) as readonly string[]
+      }
+      subAccount = isBorrowControllerCompatible(candidateControllers, shortVault.address)
+        ? candidate
+        : await getFreeSubAccountWithoutController(address.value, shortVault.address)
     }
     catch (e) {
       logWarn('multiply/cowswap/resolveSubaccount', e)
