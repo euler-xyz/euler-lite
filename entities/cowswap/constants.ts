@@ -1,6 +1,19 @@
 import type { Address } from 'viem'
+import type { SwapApiQuote } from '~/entities/swap'
 
 export const COWSWAP_PROVIDER_NAME = 'cow'
+
+export const isCowProvider = (provider: string | null | undefined): boolean =>
+  !!provider && provider.toLowerCase() === COWSWAP_PROVIDER_NAME
+
+export const isCowQuote = (quote: SwapApiQuote | null | undefined): boolean =>
+  !!quote?.route?.some(r => r.providerName?.toLowerCase() === COWSWAP_PROVIDER_NAME)
+
+export const isCowProviderOrQuote = (
+  provider: string | null | undefined,
+  quote: SwapApiQuote | null | undefined,
+): boolean => isCowProvider(provider) || isCowQuote(quote)
+
 export const COWSWAP_APPDATA_VERSION = '0.9.0'
 export const COWSWAP_ORDER_DEADLINE_SECONDS = 900 // 15 minutes
 export const COWSWAP_ORDER_POLL_INTERVAL_MS = 3000

@@ -69,7 +69,6 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const { buildSwapAndRepayPlan, executeTxPlan } = useEulerOperations()
   const { chainId } = useEulerAddresses()
   const { isConnected, address } = useAccount()
-  const { chain } = useWagmi()
   const { fetchSingleBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { getVault: registryGetVault } = useVaultRegistry()
@@ -174,8 +173,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       symbol: routeAsset.symbol,
       formatAmount: formatSmartAmount,
       amountField: isExactIn ? 'amountOut' : 'amountIn',
-      nativeSymbol: chain.value?.nativeCurrency.symbol,
-      nativeDecimals: chain.value?.nativeCurrency.decimals,
+      compare: isExactIn ? 'max' : 'min',
     })
   })
 

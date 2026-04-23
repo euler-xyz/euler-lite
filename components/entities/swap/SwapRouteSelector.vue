@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { COWSWAP_PROVIDER_NAME } from '~/entities/cowswap'
-
 type SwapRouteBadgeTone = 'best' | 'worse'
 
 type SwapRouteItem = {
@@ -8,7 +6,9 @@ type SwapRouteItem = {
   amount: string
   symbol: string
   gasCostLabel?: string
+  netUsdLabel?: string
   routeLabel?: string
+  isGasless?: boolean
   badge?: {
     label: string
     tone: SwapRouteBadgeTone
@@ -17,9 +17,7 @@ type SwapRouteItem = {
 
 const VISIBLE_COUNT = 3
 
-const isCowItem = (item: SwapRouteItem) =>
-  item.provider.toLowerCase().includes(COWSWAP_PROVIDER_NAME)
-  || item.routeLabel?.toLowerCase().includes(COWSWAP_PROVIDER_NAME)
+const isGaslessItem = (item: SwapRouteItem) => !!item.isGasless
 
 const props = withDefaults(defineProps<{
   title?: string
@@ -48,9 +46,9 @@ const visibleItems = computed(() => {
   if (expanded.value) return props.items
 
   const top = props.items.slice(0, VISIBLE_COUNT)
-  if (top.some(isCowItem)) return top
+  if (top.some(isGaslessItem)) return top
 
-  const cow = props.items.find(isCowItem)
+  const cow = props.items.find(isGaslessItem)
   if (!cow) return top
 
   return top.length >= VISIBLE_COUNT
@@ -102,14 +100,28 @@ const onSelect = (provider: string) => {
             type="button"
             class="w-full text-left rounded-12 border p-12 transition-colors"
             :class="selectedProvider === item.provider
-              ? 'border-accent-500 bg-neutral-200'
-              : 'border-line-default bg-surface hover:bg-surface-secondary'"
+              ? 'border-accent-500 bg-surface-elevated shadow-sm'
+              : 'border-line-default bg-surface hover:border-accent-500/60 hover:bg-surface-elevated'"
             @click="onSelect(item.provider)"
           >
-            <div class="flex items-center justify-between gap-8">
-              <p class="text-p2 text-content-primary">
-                {{ item.amount }} {{ item.symbol }}
-              </p>
+            <div
+              class="flex justify-between gap-8"
+              :class="item.netUsdLabel ? 'items-start' : 'items-center'"
+            >
+              <div class="flex flex-col gap-2 min-w-0">
+                <p class="text-p2 text-content-primary">
+                  {{ item.amount }} {{ item.symbol }}
+                </p>
+                <p class="text-p3 text-content-secondary truncate">
+                  {{ item.routeLabel || '-' }}
+                </p>
+                <p
+                  v-if="item.netUsdLabel"
+                  class="text-p3 text-content-secondary"
+                >
+                  {{ item.netUsdLabel }}
+                </p>
+              </div>
               <div class="flex flex-col items-end gap-2 text-p3 text-content-secondary">
                 <p
                   v-if="item.badge"
@@ -117,18 +129,15 @@ const onSelect = (provider: string) => {
                 >
                   {{ item.badge.label }}
                 </p>
-                <span class="flex items-center gap-8">
-                  <span
-                    v-if="isCowItem(item) || item.gasCostLabel"
-                    class="flex items-center gap-2 text-success-600"
-                  >
-                    <SvgIcon
-                      name="gas"
-                      class="!w-12 !h-12"
-                    />
-                    {{ isCowItem(item) ? 'Gasless' : item.gasCostLabel }}
-                  </span>
-                  <span class="truncate">{{ item.routeLabel || '-' }}</span>
+                <span
+                  v-if="isGaslessItem(item) || item.gasCostLabel"
+                  class="flex items-center gap-2 text-success-600"
+                >
+                  <SvgIcon
+                    name="gas"
+                    class="!w-12 !h-12"
+                  />
+                  {{ isGaslessItem(item) ? 'Gasless' : item.gasCostLabel }}
                 </span>
               </div>
             </div>

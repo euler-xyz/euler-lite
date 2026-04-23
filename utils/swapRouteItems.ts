@@ -1,6 +1,13 @@
 import { formatUnits } from 'viem'
 import type { SwapApiQuote } from '~/entities/swap'
-import { getQuoteCardAmount, type SwapQuoteAmountField, type SwapQuoteCard } from '~/utils/swapQuotes'
+import {
+  getQuoteCardAmount,
+  getQuoteCardScore,
+  hasKnownGas,
+  type SwapQuoteAmountField,
+  type SwapQuoteCard,
+  type SwapQuoteCompare,
+} from '~/utils/swapQuotes'
 import { formatUsdValue } from '~/utils/string-utils'
 
 export type SwapRouteItem = {
@@ -8,7 +15,9 @@ export type SwapRouteItem = {
   amount: string
   symbol: string
   gasCostLabel?: string
+  netUsdLabel?: string
   routeLabel?: string
+  isGasless?: boolean
   badge?: {
     label: string
     tone: 'best' | 'worse'
@@ -22,9 +31,8 @@ export function buildSwapRouteItems(params: {
   symbol: string
   formatAmount: (raw: string) => string
   amountField?: SwapQuoteAmountField
+  compare?: SwapQuoteCompare
   diffPrefix?: string
-  nativeSymbol?: string
-  nativeDecimals?: number
 }): SwapRouteItem[] {
   const {
     quoteCards,
@@ -33,20 +41,26 @@ export function buildSwapRouteItems(params: {
     symbol,
     formatAmount,
     amountField = 'amountOut',
+    compare = 'max',
     diffPrefix = '-',
-    nativeSymbol,
-    nativeDecimals = 18,
   } = params
 
   const bestProvider = quoteCards[0]?.provider
+
   const formatGasCostLabel = (card: SwapQuoteCard) => {
     if (card.gasCostUsd && card.gasCostUsd > 0) {
-      return `Gas ${formatUsdValue(card.gasCostUsd)}`
-    }
-    if (card.gasCostNative && card.gasCostNative > 0n && nativeSymbol) {
-      return `Gas ${formatAmount(formatUnits(card.gasCostNative, nativeDecimals))} ${nativeSymbol}`
+      return formatUsdValue(card.gasCostUsd)
     }
     return undefined
+  }
+
+  // Max mode = "net output after gas" (subtracts). Min mode = "total spend
+  // including gas" (adds). Same score, different framing.
+  const netSuffix = compare === 'max' ? 'after gas' : 'including gas'
+  const formatNetUsdLabel = (card: SwapQuoteCard) => {
+    const score = getQuoteCardScore(card, compare)
+    if (score === null || !hasKnownGas(card)) return undefined
+    return `≈ ${formatUsdValue(score)} ${netSuffix}`
   }
 
   return quoteCards.map((card) => {
@@ -64,9 +78,11 @@ export function buildSwapRouteItems(params: {
       amount: formatted,
       symbol,
       gasCostLabel: formatGasCostLabel(card),
+      netUsdLabel: formatNetUsdLabel(card),
       routeLabel: card.quote.route?.length
         ? `via ${card.quote.route.map(r => r.providerName).join(', ')}`
         : '-',
+      isGasless: card.isGasless,
       badge,
     }
   })

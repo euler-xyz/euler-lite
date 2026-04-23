@@ -100,14 +100,14 @@ const {
 } = useSwapQuotesParallel({
   amountField: 'amountOut',
   compare: 'max',
-  buildTxPlanForQuote: quote => buildMultiplyTxPlanForQuote(quote, false),
+  buildTxPlanForQuote: quote => buildIncreasePositionTxPlanForQuote(quote, false),
 })
 const multiplyLongVault = computed(() => position.value?.collateral)
 const multiplyShortVault = computed(() => position.value?.borrow)
 const multiplySubAccount = computed(() => position.value?.subAccount || null)
 useOperationGuard(computed(() => [multiplySupplyVault.value?.address, multiplyLongVault.value?.address, multiplyShortVault.value?.address].filter(Boolean)))
 
-async function buildMultiplyTxPlanForQuote(quote: SwapApiQuote, includePermit2Call: boolean): Promise<TxPlan> {
+async function buildIncreasePositionTxPlanForQuote(quote: SwapApiQuote, includePermit2Call: boolean): Promise<TxPlan> {
   if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
     throw new Error('Vaults not loaded')
   }

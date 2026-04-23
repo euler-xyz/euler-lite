@@ -436,6 +436,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
       symbol: toVault.value.asset.symbol,
       formatAmount: formatSmartAmount,
       amountField: displayAmountField,
+      compare,
       diffPrefix: quoteDiffPrefix,
     })
   })

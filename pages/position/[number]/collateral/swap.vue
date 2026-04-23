@@ -28,7 +28,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { COWSWAP_PROVIDER_NAME, COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapCollateralSwapExecuteParams, getCowSwapChainConfig } from '~/entities/cowswap'
+import { COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapCollateralSwapExecuteParams, getCowSwapChainConfig, isCowProvider } from '~/entities/cowswap'
 import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
 
 const route = useRoute()
@@ -222,7 +222,7 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 
 // ── CowSwap collateral swap ─────────────────────────────────────────────
 const isCowSwapProvider = computed(() =>
-  selectedProvider.value?.toLowerCase() === COWSWAP_PROVIDER_NAME,
+  isCowProvider(selectedProvider.value),
 )
 
 // Pre-flight checks for CoW orders (replaces simulation which isn't possible)

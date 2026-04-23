@@ -6,11 +6,12 @@ import type { DisplayStep } from '~/utils/stepDecoding'
 import type { Vault } from '~/entities/vault'
 import type { SwapApiQuote } from '~/entities/swap'
 import {
-  COWSWAP_PROVIDER_NAME,
   COWSWAP_ORDER_DEADLINE_SECONDS,
   type CowSwapOpenPositionExecuteParams,
   deriveCowSwapBuyAmountFromQuote,
   getCowSwapChainConfig,
+  isCowProvider,
+  isCowQuote,
   isCowSwapSupportedChain,
 } from '~/entities/cowswap'
 import { useCowSwapOpenPositionExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
@@ -51,8 +52,8 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
   const cowSwapOrderStatus = useCowSwapOrderStatus(cowSwapExecution.orderUid, cowSwapOrderbookUrl)
 
   const isCowSwapProvider = computed(() =>
-    options.multiplySelectedProvider.value?.toLowerCase() === COWSWAP_PROVIDER_NAME
-    || (!options.multiplySelectedProvider.value && options.multiplyEffectiveQuote.value?.route?.some(r => r.providerName?.toLowerCase() === COWSWAP_PROVIDER_NAME)),
+    isCowProvider(options.multiplySelectedProvider.value)
+    || (!options.multiplySelectedProvider.value && isCowQuote(options.multiplyEffectiveQuote.value)),
   )
 
   const cowSwapStatusLabel = computed(() => {
