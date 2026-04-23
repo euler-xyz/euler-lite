@@ -10,7 +10,9 @@ import {
   getGraphConnectedAddresses,
   isNodeRampingDown,
   isExternalCollateral,
+  findVault,
 } from '~/utils/discoveryCalculations'
+import { isCyclicalNoteVault } from '~/entities/vault'
 
 const props = defineProps<{
   market: MarketGroup
@@ -38,6 +40,10 @@ const isGraphEdgeHighlighted = (fromAddr: string, toAddr: string): boolean => {
     fromAddr === props.selectedNodeAddress
     || toAddr === props.selectedNodeAddress
   )
+}
+
+const isNodeCyclicalNote = (address: string): boolean => {
+  return isCyclicalNoteVault(findVault(props.market, address))
 }
 </script>
 
@@ -255,6 +261,23 @@ const isGraphEdgeHighlighted = (fromAddr: string, toAddr: string): boolean => {
               :d="`M${node.x + 9} ${node.y - 12.5} l-2.5 1 v2.2 c0 1.5 1 2.5 2.5 3 c1.5 -0.5 2.5 -1.5 2.5 -3 v-2.2 z`"
               fill="white"
             />
+          </g>
+          <!-- Cyclical note badge -->
+          <g v-else-if="isNodeCyclicalNote(node.address)">
+            <circle
+              :cx="node.x + 9"
+              :cy="node.y - 9"
+              r="6"
+              style="fill: var(--accent-500)"
+            />
+            <text
+              :x="node.x + 9"
+              :y="node.y - 5.8"
+              text-anchor="middle"
+              fill="white"
+              font-size="9"
+              font-weight="700"
+            >↻</text>
           </g>
           <!-- Asset label -->
           <text
