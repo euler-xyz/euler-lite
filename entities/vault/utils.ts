@@ -8,10 +8,12 @@ import {
 } from '~/abis/vault'
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
 
-export const isCyclicalNoteVault = (vault: unknown): boolean => {
-  const type = (vault as { irmInfo?: { interestRateModelInfo?: { interestRateModelType?: number } } } | null | undefined)
-    ?.irmInfo?.interestRateModelInfo?.interestRateModelType
-  return Number(type) === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY
+export const isCyclicalNoteVault = (
+  vault: Vault | SecuritizeVault | null | undefined,
+): boolean => {
+  if (!vault || !('irmInfo' in vault)) return false
+  const type = vault.irmInfo?.interestRateModelInfo?.interestRateModelType
+  return typeof type === 'number' && type === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY
 }
 
 export const getBorrowVaultsByMap = (vaultsMap: Map<string, Vault>) => {

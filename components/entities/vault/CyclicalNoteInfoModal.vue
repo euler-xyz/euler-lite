@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineEmits(['close'])
+defineEmits<{ close: [] }>()
 
 const LEARN_MORE_URL = 'https://hackmd.io/@46qaiep5S3W5Kif6afqAFg/ByDllQt5xl'
 </script>
