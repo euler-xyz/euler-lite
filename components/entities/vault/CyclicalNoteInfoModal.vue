@@ -1,7 +1,5 @@
 <script setup lang="ts">
 defineEmits<{ close: [] }>()
-
-const LEARN_MORE_URL = 'https://hackmd.io/@46qaiep5S3W5Kif6afqAFg/ByDllQt5xl'
 </script>
 
 <template>
@@ -66,19 +64,6 @@ const LEARN_MORE_URL = 'https://hackmd.io/@46qaiep5S3W5Kif6afqAFg/ByDllQt5xl'
           </p>
         </div>
       </div>
-
-      <a
-        :href="LEARN_MORE_URL"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="flex items-center justify-center gap-4 text-p3 text-accent-600 hover:underline"
-      >
-        Learn more
-        <SvgIcon
-          name="arrow-top-right"
-          class="!w-14 !h-14"
-        />
-      </a>
 
       <UiButton
         variant="primary"
