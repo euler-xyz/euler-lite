@@ -469,8 +469,11 @@ export const isNodeRampingDown = (market: MarketGroup, address: string): boolean
   const normalized = address.toLowerCase()
   for (const v of market.vaults) {
     if (!isVaultType(v)) continue
+    if (!hasBorrowableLTV(v)) continue
     for (const ltv of v.collateralLTVs) {
-      if (ltv.collateral.toLowerCase() === normalized && isLiquidationLTVRamping(ltv)) return true
+      if (ltv.collateral.toLowerCase() === normalized && isLiquidationLTVRamping(ltv)) {
+        return true
+      }
     }
   }
   return false
