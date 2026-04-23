@@ -107,7 +107,6 @@ export const useCowSwapExecutionCore = () => {
   }
 
   /** Fetch EVC nonce and call wrapper.encodePermitData(). */
-  /** Fetch EVC nonce and call wrapper.encodePermitData(). */
   const fetchNonceAndPermitData = async (
     wrapperAddress: Address,
     wrapperAbi: readonly unknown[],

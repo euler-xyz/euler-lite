@@ -1,4 +1,4 @@
-import type { Address, StateOverride } from 'viem'
+import type { Address, PublicClient } from 'viem'
 import type { SwapApiQuote } from '~/entities/swap'
 import type { SwapApiRequestInput } from '~/composables/useSwapApi'
 import type { TxPlan } from '~/entities/txPlan'
@@ -6,6 +6,7 @@ import {
   getQuoteAmount,
   getQuoteCardScore,
   getQuoteDiffPct,
+  hasKnownGas,
   pickBestQuote,
   sortQuoteCards,
   type SwapQuoteAmountField,
@@ -13,12 +14,11 @@ import {
   type SwapQuoteCompare,
 } from '~/utils/swapQuotes'
 import { createRaceGuard } from '~/utils/race-guard'
-import { isAbortError } from '~/utils/errorHandling'
-import { COWSWAP_PROVIDER_NAME } from '~/entities/cowswap'
+import { isAbortError, logWarn } from '~/utils/errorHandling'
+import { isCowProviderOrQuote } from '~/entities/cowswap'
 import { getTokenUsdValue } from '~/services/pricing/priceProvider'
 import { resolveWrappedNativeAddress } from '~/utils/native-currency'
-import { applyOperationGuards } from '~/utils/operationGuardRegistry'
-import { getTxErrorMessage, shouldDiscardQuoteOnEstimateGasError } from '~/utils/tx-errors'
+import { shouldDiscardQuoteOnEstimateGasError } from '~/utils/tx-errors'
 
 type SwapQuotesParallelOptions = {
   amountField: SwapQuoteAmountField
@@ -38,7 +38,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   const { client: rpcClient } = useRpcClient()
   const { address, chain } = useWagmi()
   const { chainId } = useEulerAddresses()
-  const { buildSimulationStateOverride } = useEulerOperations()
+  const { estimateTxPlanGas } = useEulerOperations()
 
   const quoteCards = ref<SwapQuoteCard[]>([])
   const selectedProvider = ref<string | null>(null)
@@ -78,27 +78,42 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
       : 'Quotes fetched'
   })
 
+  // Locate the card corresponding to a quote. Uses referential identity first
+  // (fast path for untransformed quotes) and falls back to matching amount /
+  // token fields so transformed quotes (e.g. CoW share→underlying) still hit.
+  const findCardForQuote = (quote: SwapApiQuote): SwapQuoteCard | undefined => {
+    const byRef = quoteCards.value.find(c => c.quote === quote)
+    if (byRef) return byRef
+    return quoteCards.value.find(c =>
+      c.quote.amountIn === quote.amountIn
+      && c.quote.amountOut === quote.amountOut
+      && c.quote.tokenIn?.address === quote.tokenIn?.address
+      && c.quote.tokenOut?.address === quote.tokenOut?.address,
+    )
+  }
+
   const getQuoteDiffPctFor = (quote: SwapApiQuote) => {
-    const card = quoteCards.value.find(item => item.quote === quote)
     const best = sortedQuoteCards.value[0]
     if (!best) return null
 
-    const bestScore = getQuoteCardScore(best, options.compare)
-    const score = card ? getQuoteCardScore(card, options.compare) : null
-    if (bestScore !== null && score !== null) {
-      return getQuoteDiffPct(score, bestScore, options.compare)
+    // USD-score diff is only meaningful when BOTH quotes have trustworthy gas
+    // (gasless route OR sim succeeded with a positive estimate). Mixing a
+    // known-gas score against a sim-failed zero-gas score is apples-to-oranges.
+    // Fall through to raw-amount diff for degenerate cases.
+    const card = findCardForQuote(quote)
+    if (card && hasKnownGas(best) && hasKnownGas(card)) {
+      const bestScore = getQuoteCardScore(best, options.compare)
+      const score = getQuoteCardScore(card, options.compare)
+      if (bestScore !== null && score !== null) {
+        const usdDiff = getQuoteDiffPct(score, bestScore, options.compare)
+        if (usdDiff !== null) return usdDiff
+      }
     }
     return getQuoteDiffPct(
       Number(getQuoteAmount(quote, options.amountField)),
       Number(getQuoteAmount(best.quote, options.amountField)),
       options.compare,
     )
-  }
-
-  const isCowQuote = (provider: string, quote: SwapApiQuote) => {
-    const normalizedProvider = provider.toLowerCase()
-    return normalizedProvider.includes(COWSWAP_PROVIDER_NAME)
-      || quote.route?.some(route => route.providerName.toLowerCase().includes(COWSWAP_PROVIDER_NAME))
   }
 
   const getQuotePricingToken = (quote: SwapApiQuote) =>
@@ -124,61 +139,38 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     provider: string,
     quote: SwapApiQuote,
     params: SwapApiRequestInput,
+    client: PublicClient | null,
     gasPricePromise: Promise<bigint | undefined>,
   ): Promise<SwapQuoteCard | null> => {
     const amountUsdPromise = getAmountUsd(quote).catch(() => undefined)
 
-    if (isCowQuote(provider, quote)) {
+    if (isCowProviderOrQuote(provider, quote)) {
       return {
         provider,
         quote,
         amountUsd: await amountUsdPromise,
         gasCostNative: 0n,
         gasCostUsd: 0,
+        isGasless: true,
       }
     }
 
-    const client = rpcClient.value
-    if (!client) {
+    if (!client || !options.buildTxPlanForQuote) {
       return { provider, quote, amountUsd: await amountUsdPromise }
     }
 
     let gas: bigint
-    let plan: TxPlan | null = null
-    let account: Address | undefined
-    let stateOverride: StateOverride = []
     try {
-      if (!options.buildTxPlanForQuote) {
-        return { provider, quote, amountUsd: await amountUsdPromise }
-      }
-
-      account = (params.origin || address.value || quote.accountIn) as Address
-      plan = applyOperationGuards(await options.buildTxPlanForQuote(quote, provider))
-      stateOverride = await buildSimulationStateOverride(plan, account)
-      const stepsToEstimate = plan.steps.filter(step => step.type !== 'approve' && step.type !== 'permit2-approve')
-      gas = 0n
-      for (const step of stepsToEstimate) {
-        /* eslint-disable @typescript-eslint/no-explicit-any -- TxPlan steps are runtime ABI/data pairs */
-        gas += await client.estimateContractGas({
-          account,
-          address: step.to,
-          abi: step.abi as any,
-          functionName: step.functionName as any,
-          args: step.args as any,
-          value: step.value ?? 0n,
-          stateOverride: stateOverride.length ? stateOverride as StateOverride : undefined,
-        })
-        /* eslint-enable @typescript-eslint/no-explicit-any */
-      }
+      const account = (params.origin || address.value || quote.accountIn) as Address
+      const plan = await options.buildTxPlanForQuote(quote, provider)
+      gas = await estimateTxPlanGas(plan, account)
     }
     catch (err) {
       if (shouldDiscardQuoteOnEstimateGasError(err)) {
-        console.warn(`quote simulation error ${provider}`)
+        logWarn('useSwapQuotesParallel/estimateGas', new Error(`quote simulation discarded for ${provider}`))
         return null
       }
-      else {
-        console.warn(getTxErrorMessage(err))
-      }
+      logWarn('useSwapQuotesParallel/estimateGas', err)
       return {
         provider,
         quote,
@@ -223,7 +215,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
 
   const upsertQuote = (card: SwapQuoteCard) => {
     const { provider } = card
-    const next = quoteCards.value.filter(card => card.provider !== provider)
+    const next = quoteCards.value.filter(existing => existing.provider !== provider)
     next.push(card)
     quoteCards.value = sortQuoteCards(next, options.amountField, options.compare)
     if (isLoading.value && next.length > 0) {
@@ -263,9 +255,22 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
       }
 
       let rateLimitedCount = 0
-      const gasPricePromise = rpcClient.value
-        ? rpcClient.value.getGasPrice().catch(() => undefined)
-        : Promise.resolve(undefined)
+      const client = rpcClient.value
+      // Prefer EIP-1559 fee estimation (baseFee * 2 + tip) — matches wallet
+      // "market" tier. Falls back to legacy eth_gasPrice for non-1559 chains.
+      const fetchGasPrice = async (): Promise<bigint | undefined> => {
+        if (!client) return undefined
+        try {
+          const fees = await client.estimateFeesPerGas()
+          return 'maxFeePerGas' in fees
+            ? fees.maxFeePerGas
+            : (fees as { gasPrice: bigint }).gasPrice
+        }
+        catch {
+          return client.getGasPrice().catch(() => undefined)
+        }
+      }
+      const gasPricePromise = fetchGasPrice()
 
       const fetchProviderQuote = async (provider: string) => {
         try {
@@ -281,7 +286,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
           const best = pickBestQuote(data, options.amountField, options.compare)
           if (best) {
             const transformed = options.transformQuote ? options.transformQuote(best, provider) : best
-            const card = await enrichQuoteCard(provider, transformed, params, gasPricePromise)
+            const card = await enrichQuoteCard(provider, transformed, params, client, gasPricePromise)
             if (guard.isStale(gen) || !card) {
               return
             }

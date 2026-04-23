@@ -44,7 +44,7 @@ const openSlippageSettings = () => {
   modal.open(SlippageSettingsModal)
 }
 
-async function buildMultiplyTxPlanForQuote(quote: SwapApiQuote, includePermit2Call: boolean): Promise<TxPlan> {
+async function buildIncreasePositionTxPlanForQuote(quote: SwapApiQuote, includePermit2Call: boolean): Promise<TxPlan> {
   if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
     throw new Error('Vaults not loaded')
   }
@@ -123,7 +123,7 @@ const {
 } = useSwapQuotesParallel({
   amountField: 'amountOut',
   compare: 'max',
-  buildTxPlanForQuote: quote => buildMultiplyTxPlanForQuote(quote, false),
+  buildTxPlanForQuote: quote => buildIncreasePositionTxPlanForQuote(quote, false),
 })
 
 const multiplyLongVault = computed(() => position.value?.collateral)

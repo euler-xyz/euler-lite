@@ -68,7 +68,6 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const { refreshAllPositions } = useEulerAccount()
   const { eulerLensAddresses, chainId } = useEulerAddresses()
   const { isConnected, address } = useAccount()
-  const { chain } = useWagmi()
   const { fetchSingleBalance } = useWallets()
   const { slippage } = useSlippage()
   const { getVault: registryGetVault } = useVaultRegistry()
@@ -173,8 +172,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       symbol: routeAsset.symbol,
       formatAmount: formatSmartAmount,
       amountField: isExactIn ? 'amountOut' : 'amountIn',
-      nativeSymbol: chain.value?.nativeCurrency.symbol,
-      nativeDecimals: chain.value?.nativeCurrency.decimals,
+      compare: isExactIn ? 'max' : 'min',
     })
   })
 

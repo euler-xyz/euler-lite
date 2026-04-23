@@ -8,7 +8,7 @@ import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
 import { CLOSE_POSITION_WRAPPER_ABI } from '~/abis/cowswap-wrapper'
 import { isEVKVault, type Vault } from '~/entities/vault'
-import { COWSWAP_PROVIDER_NAME, COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapClosePositionExecuteParams, getCowSwapChainConfig } from '~/entities/cowswap'
+import { COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapClosePositionExecuteParams, getCowSwapChainConfig, isCowProvider } from '~/entities/cowswap'
 import { useCowSwapClosePositionExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
 import { getAssetUsdValue, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
@@ -137,7 +137,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     cowSwapOrderbookUrl,
   )
   const isCowSwapProvider = computed(() =>
-    core.quotes.selectedProvider.value?.toLowerCase() === COWSWAP_PROVIDER_NAME,
+    isCowProvider(core.quotes.selectedProvider.value),
   )
 
   const closePositionInboxExists = async (params: CowSwapClosePositionExecuteParams): Promise<boolean> => {

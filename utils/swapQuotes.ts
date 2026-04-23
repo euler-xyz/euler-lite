@@ -9,7 +9,16 @@ export type SwapQuoteCard = {
   amountUsd?: number
   gasCostNative?: bigint
   gasCostUsd?: number
+  /** Route is genuinely gas-free (e.g. CoW intents). Distinguishes
+   *  "gas is known to be 0" from "gas estimate unavailable". */
+  isGasless?: boolean
 }
+
+/** Whether the gas cost on a card is trustworthy (known-zero for gasless
+ *  routes, or a positive estimate). Cards whose sim failed or whose gas
+ *  price was unavailable return false. */
+export const hasKnownGas = (card: SwapQuoteCard): boolean =>
+  !!card.isGasless || (card.gasCostUsd !== undefined && card.gasCostUsd > 0)
 
 const parseBigInt = (value?: string | number | bigint | null) => {
   try {
@@ -35,6 +44,13 @@ export const getQuoteCardAmount = (
   field: SwapQuoteAmountField,
 ) => getQuoteAmount(card.quote, field)
 
+/**
+ * Compare-aware score for ranking AND display.
+ * - max mode (swap output, multiply, borrow): `amountUsd − gas`. Net value
+ *   you receive; gas eats your proceeds. Can go negative if gas > output.
+ * - min mode (target-debt repay): `amountUsd + gas`. Total you spend; gas
+ *   adds to the cost of repayment.
+ */
 export const getQuoteCardScore = (
   card: SwapQuoteCard,
   compare: SwapQuoteCompare,
