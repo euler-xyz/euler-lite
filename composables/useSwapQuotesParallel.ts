@@ -23,7 +23,6 @@ import { shouldDiscardQuoteOnEstimateGasError } from '~/utils/tx-errors'
 type SwapQuotesParallelOptions = {
   amountField: SwapQuoteAmountField
   compare: SwapQuoteCompare
-  transformQuote?: (quote: SwapApiQuote, provider: string) => SwapApiQuote
   includeCowSwap?: boolean
   buildTxPlanForQuote?: (quote: SwapApiQuote, provider: string) => Promise<TxPlan>
 }
@@ -291,8 +290,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
 
           const best = pickBestQuote(data, options.amountField, options.compare)
           if (best) {
-            const transformed = options.transformQuote ? options.transformQuote(best, provider) : best
-            const card = await enrichQuoteCard(provider, transformed, params, client, gasPricePromise)
+            const card = await enrichQuoteCard(provider, best, params, client, gasPricePromise)
             if (guard.isStale(gen) || !card) {
               return
             }

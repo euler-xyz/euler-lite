@@ -60,8 +60,6 @@ export interface UseSwapPageLogicOptions {
   sameAssetModalType?: 'transfer' | 'swap'
   /** Include CowSwap provider in swap quotes (Ethereum mainnet only) */
   includeCowSwap?: boolean
-  /** Transform individual quotes (e.g. vault shares → underlying conversion) */
-  transformQuote?: (quote: SwapApiQuote, provider: string) => SwapApiQuote
 }
 
 export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
@@ -125,7 +123,6 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     amountField,
     compare,
     includeCowSwap: options.includeCowSwap,
-    transformQuote: options.transformQuote,
     buildTxPlanForQuote: quote => buildPlan(quote),
   })
 

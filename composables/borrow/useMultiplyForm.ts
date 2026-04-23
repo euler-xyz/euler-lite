@@ -22,7 +22,6 @@ import {
   getCollateralShareOraclePrice,
   conservativePriceRatioNumber,
 } from '~/services/pricing/priceProvider'
-import { isCowProvider } from '~/entities/cowswap'
 import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { useMultiplyCowSwap } from '~/composables/borrow/useMultiplyCowSwap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
@@ -123,24 +122,6 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     amountField: 'amountOut',
     compare: 'max',
     includeCowSwap: true,
-    // CoW quotes return amountOut in vault shares (buyToken = vault address).
-    // Convert to underlying using the vault's exchange rate from lens data.
-    transformQuote: (quote, provider) => {
-      if (!isCowProvider(provider)) return quote
-      const vault = multiplyLongVault.value
-      if (!vault || vault.totalShares <= 0n) return quote
-      const convert = (value: string) => {
-        const shares = BigInt(value || '0')
-        if (shares <= 0n) return value
-        return (shares * vault.totalAssets / vault.totalShares).toString()
-      }
-
-      return {
-        ...quote,
-        amountOut: convert(quote.amountOut),
-        amountOutMin: convert(quote.amountOutMin),
-      }
-    },
     buildTxPlanForQuote: quote => buildMultiplyTxPlanForQuote(quote, false),
   })
 
