@@ -95,12 +95,12 @@ export const getFreeSubAccounts = (
   occupiedSubAccounts: readonly string[],
 ): string[] => {
   const address = getAddress(ownerAddress)
-  const occupied = new Set(occupiedSubAccounts.map(subAccount => getAddress(subAccount)))
+  const occupied = new Set(occupiedSubAccounts.map(subAccount => getAddress(subAccount) as string))
   const freeSubAccounts: string[] = []
 
   for (let index = 1; index <= 256; index++) {
     const subAccountAddress = getSubAccountAddress(address, index)
-    if (!occupied.has(subAccountAddress)) {
+    if (!occupied.has(subAccountAddress as string)) {
       freeSubAccounts.push(subAccountAddress)
     }
   }
@@ -119,7 +119,7 @@ export const isBorrowControllerCompatible = (
 }
 
 export const selectBorrowCompatibleSubAccount = (
-  candidates: readonly Array<{ subAccount: string, enabledControllers: readonly string[] }>,
+  candidates: ReadonlyArray<{ subAccount: string, enabledControllers: readonly string[] }>,
   borrowVaultAddress: string,
 ): string | null => {
   for (const candidate of candidates) {
@@ -131,37 +131,39 @@ export const selectBorrowCompatibleSubAccount = (
   return null
 }
 
-export const getNewSubAccount = async (ownerAddress: string) => {
-  const { SUBGRAPH_URL } = useEulerConfig()
-
-  const { borrows } = await fetchAccountPositions(SUBGRAPH_URL, ownerAddress)
-  const freeSubAccounts = getFreeSubAccounts(ownerAddress, borrows.map(b => b.subAccount))
-
-  if (freeSubAccounts.length > 0) return freeSubAccounts[0]
-
-  throw new Error('Free subaccount not found')
-}
-
-export const getFreeSubAccountWithoutController = async (
+/**
+ * Find a free sub-account for a new position.
+ *
+ * When `borrowVaultAddress` is provided, the returned sub-account is guaranteed
+ * to have no controller or only the target borrow vault as controller. This
+ * avoids picking a sub-account whose existing controller would conflict with
+ * the new borrow.
+ */
+export const getNewSubAccount = async (
   ownerAddress: string,
-  borrowVaultAddress: string,
+  borrowVaultAddress?: string,
 ) => {
   const { SUBGRAPH_URL } = useEulerConfig()
-  const { eulerCoreAddresses, eulerLensAddresses } = useEulerAddresses()
-  const { rpcUrl } = useRpcClient()
 
   const { borrows, deposits } = await fetchAccountPositions(SUBGRAPH_URL, ownerAddress)
-  const freeSubAccounts = getFreeSubAccounts(
-    ownerAddress,
-    [...borrows, ...deposits].map(position => position.subAccount),
-  )
+  const occupiedSubAccounts = borrowVaultAddress
+    ? [...borrows, ...deposits].map(p => p.subAccount)
+    : borrows.map(b => b.subAccount)
+  const freeSubAccounts = getFreeSubAccounts(ownerAddress, occupiedSubAccounts)
 
   if (!freeSubAccounts.length) {
     throw new Error('Free subaccount not found')
   }
 
+  if (!borrowVaultAddress) {
+    return freeSubAccounts[0]
+  }
+
+  const { eulerCoreAddresses, eulerLensAddresses } = useEulerAddresses()
+  const { rpcUrl } = useRpcClient()
   const evcAddress = eulerCoreAddresses.value?.evc
   const accountLensAddress = eulerLensAddresses.value?.accountLens
+
   if (!evcAddress || !accountLensAddress) {
     return freeSubAccounts[0]
   }
@@ -183,7 +185,7 @@ export const getFreeSubAccountWithoutController = async (
     )
 
     if (results.some(result => result.transportError)) {
-      logWarn('account/getFreeSubAccountWithoutController', 'Account lens unavailable, falling back to first free sub-account')
+      logWarn('account/getNewSubAccount', 'Account lens unavailable, falling back to first free sub-account')
       return freeSubAccounts[0]
     }
 
