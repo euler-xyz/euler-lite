@@ -79,7 +79,7 @@ function isSafeHttpUrl(value: string): boolean {
   }
 }
 
-function validateNode(node: unknown, path: string): void {
+export function validateNode(node: unknown, path: string): void {
   if (Array.isArray(node)) {
     if (node.length > MAX_ARRAY_LEN) {
       throw new Error(`Array too large at ${path}: ${node.length} exceeds ${MAX_ARRAY_LEN}`)
