@@ -331,8 +331,9 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   // Pay-with asset can be any ERC-20 not tied to any vault, so the
   // vault-level check above can't see it. Hard-block the asset directly.
   // Soft-restrict does not apply: pay-with reduces exposure to that asset.
+  // Pass the asset object so symbol/name pattern rules also apply.
   const isBorrowPayWithBlocked = computed(() =>
-    borrowNeedsSwap.value && isAssetBlockedByCountry(borrowSelectedAsset.value?.address),
+    borrowNeedsSwap.value && isAssetBlockedByCountry(borrowSelectedAsset.value),
   )
 
   const errorText = computed(() => {

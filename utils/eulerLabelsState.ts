@@ -14,6 +14,21 @@ export const earnVaultBlocks = shallowReactive<Record<string, string[]>>({}) // 
 export const earnVaultRestrictions = shallowReactive<Record<string, string[]>>({}) // address (lowercase) -> restricted country codes
 export const assetBlocks = shallowReactive<Record<string, string[]>>({}) // asset address (lowercase) -> blocked country codes
 export const assetRestrictions = shallowReactive<Record<string, string[]>>({}) // asset address (lowercase) -> restricted country codes
+
+/**
+ * Compiled pattern rule derived from `EulerLabelAssetEntry` pattern fields.
+ * `symbolsLower` / `namesLower` are pre-lowercased sets; regex fields are
+ * pre-compiled with the `i` flag. Match is OR across populated fields.
+ */
+export type CompiledPatternRule = {
+  symbolsLower?: Set<string>
+  symbolRegex?: RegExp
+  namesLower?: Set<string>
+  nameRegex?: RegExp
+  block?: string[]
+  restricted?: string[]
+}
+export const assetPatternRules = shallowReactive<CompiledPatternRule[]>([])
 export const featuredEarnVaults: Set<string> = shallowReactive(new Set())
 export const deprecatedEarnVaults = shallowReactive<Record<string, string>>({}) // address (lowercase) -> deprecation reason
 export const earnVaultDescriptions = shallowReactive<Record<string, string>>({}) // address (lowercase) -> description

@@ -161,8 +161,9 @@ const isWalletSwapRestricted = computed(() =>
 // Pay-with asset can be an arbitrary ERC-20 not tied to any vault, so the
 // vault-level geo-check above can't see it. Hard-block the asset directly.
 // Soft-restrict does not apply: pay-with reduces exposure to that asset.
+// Pass the asset object (not just address) so symbol/name pattern rules apply.
 const isPayWithAssetBlocked = computed(() =>
-  walletSwap.needsSwap.value && isAssetBlockedByCountry(walletSwap.selectedAsset.value?.address),
+  walletSwap.needsSwap.value && isAssetBlockedByCountry(walletSwap.selectedAsset.value),
 )
 
 const collateral = useCollateralSwapRepay({

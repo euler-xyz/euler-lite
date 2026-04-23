@@ -47,10 +47,12 @@ interface TokenOption {
 //   does not (reducing exposure).
 // - 'output' (receive-as): user acquires this asset. Both hard-block and
 //   soft-restrict disable.
-const getAssetGeoState = (address: string, pickerMode: 'input' | 'output'): { disabled: boolean, showChip: boolean } => {
-  const blocked = isAssetBlockedByCountry(address)
+// Accepts the full asset so symbol/name pattern rules (assets.json + all/assets.json)
+// are consulted, not just the address map.
+const getAssetGeoState = (asset: VaultAsset, pickerMode: 'input' | 'output'): { disabled: boolean, showChip: boolean } => {
+  const blocked = isAssetBlockedByCountry(asset)
   if (blocked) return { disabled: true, showChip: true }
-  if (pickerMode === 'output' && isAssetRestrictedByCountry(address)) {
+  if (pickerMode === 'output' && isAssetRestrictedByCountry(asset)) {
     return { disabled: true, showChip: true }
   }
   return { disabled: false, showChip: false }
@@ -155,7 +157,7 @@ const filteredOptions = computed(() => {
 const geoByAddress = computed(() => {
   const map = new Map<string, { disabled: boolean, showChip: boolean }>()
   for (const opt of filteredOptions.value) {
-    map.set(opt.asset.address.toLowerCase(), getAssetGeoState(opt.asset.address, mode))
+    map.set(opt.asset.address.toLowerCase(), getAssetGeoState(opt.asset, mode))
   }
   return map
 })
@@ -164,7 +166,7 @@ const rowGeo = (address: string) =>
   geoByAddress.value.get(address.toLowerCase()) ?? { disabled: false, showChip: false }
 
 const customTokenGeo = computed(() =>
-  customToken.value ? getAssetGeoState(customToken.value.address, mode) : { disabled: false, showChip: false },
+  customToken.value ? getAssetGeoState(customToken.value, mode) : { disabled: false, showChip: false },
 )
 
 watch(searchQuery, (q) => {

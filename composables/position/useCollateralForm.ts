@@ -412,15 +412,16 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   // Asset-level geo checks for swap flows. The user-selected swap input (pay-with)
   // and/or output (receive-as) can be arbitrary ERC-20 tokens not tied to any
   // vault, so vault-level checks above won't see them. Hard-block always applies;
-  // soft-restrict applies only to the "acquire" side (output).
+  // soft-restrict applies only to the "acquire" side (output). Pass the full
+  // asset object so symbol/name pattern rules are also consulted.
   const isInputAssetBlocked = computed(() =>
-    options.needsSwap.value && isAssetBlockedByCountry(options.effectiveAsset.value?.address),
+    options.needsSwap.value && isAssetBlockedByCountry(options.effectiveAsset.value),
   )
   const isOutputAssetBlocked = computed(() =>
-    options.needsSwap.value && isAssetBlockedByCountry(options.getSwapOutputAsset()?.address),
+    options.needsSwap.value && isAssetBlockedByCountry(options.getSwapOutputAsset()),
   )
   const isOutputAssetRestricted = computed(() =>
-    options.needsSwap.value && isAssetRestrictedByCountry(options.getSwapOutputAsset()?.address),
+    options.needsSwap.value && isAssetRestrictedByCountry(options.getSwapOutputAsset()),
   )
 
   const collateralOp = computed(() => options.mode === 'supply' ? OP_DEPOSIT : OP_WITHDRAW)

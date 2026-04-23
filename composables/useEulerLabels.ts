@@ -26,6 +26,8 @@ import {
   loadingAdapters,
   assetBlocks,
   assetRestrictions,
+  assetPatternRules,
+  type CompiledPatternRule,
 } from '~/utils/eulerLabelsState'
 import {
   normalizeProducts,
@@ -105,6 +107,7 @@ export const useEulerLabels = () => {
       Object.keys(earnVaultNotices).forEach(key => delete earnVaultNotices[key])
       Object.keys(assetBlocks).forEach(key => delete assetBlocks[key])
       Object.keys(assetRestrictions).forEach(key => delete assetRestrictions[key])
+      assetPatternRules.splice(0, assetPatternRules.length)
       featuredEarnVaults.clear()
       notExplorableEarnVaults.clear()
       earnVaults.value = []
@@ -191,15 +194,74 @@ export const useEulerLabels = () => {
       if (assetsRes.status === 'rejected') {
         logWarn('labels/load', 'Failed to load assets:', assetsRes.reason)
       }
-      assetEntries.forEach((entry) => {
-        if (!entry || typeof entry.address !== 'string') return
-        const key = normalizeAddress(entry.address).toLowerCase()
-        if (entry.block?.length) {
-          assetBlocks[key] = entry.block
+      assetEntries.forEach((entry, index) => {
+        if (!entry) return
+
+        // Address-based rule: populate the fast O(1) lookup map.
+        if (typeof entry.address === 'string') {
+          const key = normalizeAddress(entry.address).toLowerCase()
+          if (entry.block?.length) {
+            assetBlocks[key] = entry.block
+          }
+          if (entry.restricted?.length) {
+            assetRestrictions[key] = entry.restricted
+          }
         }
-        if (entry.restricted?.length) {
-          assetRestrictions[key] = entry.restricted
+
+        // Pattern rule: compile once at load time, append to the iterated list.
+        const hasSymbols = Array.isArray(entry.symbols) && entry.symbols.length > 0
+        const hasSymbolRegex = typeof entry.symbolRegex === 'string' && entry.symbolRegex.length > 0
+        const hasNames = Array.isArray(entry.names) && entry.names.length > 0
+        const hasNameRegex = typeof entry.nameRegex === 'string' && entry.nameRegex.length > 0
+
+        if (!hasSymbols && !hasSymbolRegex && !hasNames && !hasNameRegex) {
+          // No pattern fields; either an address-only rule (already handled)
+          // or an entry with no match fields at all (skip).
+          if (typeof entry.address !== 'string') {
+            logWarn('labels/load', `assets.json entry #${index} has no match fields; skipping`)
+          }
+          return
         }
+
+        const rule: CompiledPatternRule = {
+          block: entry.block?.length ? entry.block : undefined,
+          restricted: entry.restricted?.length ? entry.restricted : undefined,
+        }
+        if (!rule.block && !rule.restricted) {
+          // Pattern rule with no block/restricted is a no-op; drop it.
+          return
+        }
+
+        if (hasSymbols) {
+          rule.symbolsLower = new Set(entry.symbols!.map(s => s.toLowerCase()))
+        }
+        if (hasSymbolRegex) {
+          try {
+            rule.symbolRegex = new RegExp(entry.symbolRegex!, 'i')
+          }
+          catch (e) {
+            logWarn('labels/load', `assets.json entry #${index} has invalid symbolRegex; skipping regex`, { data: e })
+          }
+        }
+        if (hasNames) {
+          rule.namesLower = new Set(entry.names!.map(s => s.toLowerCase()))
+        }
+        if (hasNameRegex) {
+          try {
+            rule.nameRegex = new RegExp(entry.nameRegex!, 'i')
+          }
+          catch (e) {
+            logWarn('labels/load', `assets.json entry #${index} has invalid nameRegex; skipping regex`, { data: e })
+          }
+        }
+
+        // If every pattern field failed to populate (e.g. all regexes invalid),
+        // drop the entry entirely — no match surface.
+        if (!rule.symbolsLower && !rule.symbolRegex && !rule.namesLower && !rule.nameRegex) {
+          return
+        }
+
+        assetPatternRules.push(rule)
       })
 
       loadState.chainId = chainId

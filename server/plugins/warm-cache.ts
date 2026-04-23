@@ -76,6 +76,13 @@ const logFail = (context: string) => (err: unknown) => {
 const warmEulerChains = () =>
   refreshEulerChains().catch(logFail('euler-chains'))
 
+// Cross-chain pattern rules for asset geo-blocking live at `all/assets.json`
+// upstream. The /api/labels/assets.json handler unions this with the
+// per-chain file; warm it once so the first chain-scoped request doesn't
+// pay the cold-upstream cost.
+const warmGlobalAssets = () =>
+  refreshLabelFile('all', 'assets.json').catch(logFail('labels/assets.json scope=all'))
+
 // --- Per-chain warms (parallel across chains and within a chain) ---
 
 const warmLabels = (chainId: number): Promise<unknown>[] =>
@@ -132,6 +139,7 @@ export default defineNitroPlugin(() => {
     try {
       await Promise.allSettled([
         warmEulerChains(),
+        warmGlobalAssets(),
         ...chainIds.flatMap(warmChainTasks),
       ])
     }

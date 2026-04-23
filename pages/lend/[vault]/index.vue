@@ -295,7 +295,8 @@ const isGeoBlocked = computed(() => isVaultBlockedByCountry(vaultAddress))
 const isSwapRestricted = computed(() => needsSwap.value && isVaultRestrictedByCountry(vaultAddress))
 // Swap-deposit source: user is giving up the selected asset (reducing exposure),
 // so only hard-block applies. Soft-restrict intentionally does not apply here.
-const isSourceAssetBlocked = computed(() => needsSwap.value && isAssetBlockedByCountry(selectedAsset.value?.address))
+// Pass the asset object so symbol/name pattern rules also apply.
+const isSourceAssetBlocked = computed(() => needsSwap.value && isAssetBlockedByCountry(selectedAsset.value))
 const reviewSupplyDisabled = computed(() => isGeoBlocked.value || isSwapRestricted.value || isSourceAssetBlocked.value || isSubmitDisabled.value)
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
