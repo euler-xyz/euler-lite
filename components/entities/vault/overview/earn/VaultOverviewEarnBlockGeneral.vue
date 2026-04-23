@@ -46,23 +46,10 @@ const feeDisplay = computed(() => {
       Overview
     </p>
     <div class="flex flex-col gap-20">
-      <div
-        v-if="isDeprecated && deprecationReason"
-        class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
-      >
-        <div class="flex items-center gap-8">
-          <SvgIcon
-            name="warning"
-            class="!w-20 !h-20 flex-shrink-0"
-          />
-          <!-- eslint-disable vue/no-v-html -- trusted label content -->
-          <p
-            class="text-p3 text-warning-500 auto-link"
-            v-html="autoLink(deprecationReason)"
-          />
-          <!-- eslint-enable vue/no-v-html -->
-        </div>
-      </div>
+      <VaultDeprecationBanner
+        v-if="isDeprecated"
+        :reason="deprecationReason"
+      />
       <div
         v-if="isRestricted"
         class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
