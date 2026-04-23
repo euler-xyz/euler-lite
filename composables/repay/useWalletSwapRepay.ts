@@ -15,7 +15,7 @@ import type { TxPlan } from '~/entities/txPlan'
 import { valueToNano } from '~/utils/crypto-utils'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { amountToPercent, percentToAmountNano } from '~/utils/repayUtils'
-import { SwapperMode } from '~/entities/swap'
+import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { createRaceGuard } from '~/utils/race-guard'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
@@ -82,7 +82,10 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const debtPercent = ref(0)
 
   // --- Swap quotes (dual-direction) ---
-  const quotes = useSwapRepayQuotes({ direction })
+  const quotes = useSwapRepayQuotes({
+    direction,
+    buildTxPlanForQuote: quote => buildRepayPlan(false, quote),
+  })
 
   // --- Derived ---
   const needsSwap = computed(() => {
@@ -159,12 +162,17 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
   const swapRouteItems = computed(() => {
     if (!borrowVault.value) return []
+    const isExactIn = direction.value === SwapperMode.EXACT_IN
+    const routeAsset = isExactIn ? borrowVault.value.asset : selectedAsset.value
+    if (!routeAsset) return []
     return buildSwapRouteItems({
       quoteCards: quotes.sortedQuoteCards.value,
       getQuoteDiffPct: quotes.getQuoteDiffPct,
-      decimals: Number(borrowVault.value.asset.decimals),
-      symbol: borrowVault.value.asset.symbol,
+      decimals: Number(routeAsset.decimals),
+      symbol: routeAsset.symbol,
       formatAmount: formatSmartAmount,
+      amountField: isExactIn ? 'amountOut' : 'amountIn',
+      compare: isExactIn ? 'max' : 'min',
     })
   })
 
@@ -645,8 +653,9 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   })
 
   // --- Build plan ---
-  const buildRepayPlan = async (includePermit2Call: boolean): Promise<TxPlan> => {
-    if (!position.value || !borrowVault.value || !collateralVault.value || !quotes.selectedQuote.value || !selectedAsset.value) {
+  async function buildRepayPlan(includePermit2Call: boolean, quote?: SwapApiQuote): Promise<TxPlan> {
+    const swapQuote = quote || quotes.selectedQuote.value
+    if (!position.value || !borrowVault.value || !collateralVault.value || !swapQuote || !selectedAsset.value) {
       throw new Error('Missing data for swap repay plan')
     }
 
@@ -659,7 +668,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       targetDebt = debtAmountNano >= currentDebt ? 0n : currentDebt - debtAmountNano
     }
 
-    const inputAmount = getSwapInputAmount(quotes.selectedQuote.value, swapMode)
+    const inputAmount = getSwapInputAmount(swapQuote, swapMode)
 
     const isNative = isNativeCurrencyAddress(selectedAsset.value.address)
     const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
@@ -670,7 +679,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     return buildSwapAndRepayPlan({
       inputTokenAddress: (wrappedAddress || selectedAsset.value.address) as Address,
       inputAmount,
-      quote: quotes.selectedQuote.value,
+      quote: swapQuote,
       borrowVaultAddress: borrowVault.value.address as Address,
       subAccount: (position.value.subAccount || address.value || zeroAddress) as Address,
       enabledCollaterals: position.value.collaterals ?? [collateralVault.value.address],

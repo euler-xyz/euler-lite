@@ -124,7 +124,11 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     reset: resetBorrowSwapQuoteState,
     requestQuotes: requestBorrowSwapQuotes,
     selectProvider: selectBorrowSwapQuote,
-  } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+  } = useSwapQuotesParallel({
+    amountField: 'amountOut',
+    compare: 'max',
+    buildTxPlanForQuote: quote => buildSwapBorrowPlanFromQuote(quote, { includePermit2Call: false }),
+  })
 
   // --- Form state ---
   const ltv = ref(0)

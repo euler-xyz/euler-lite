@@ -44,6 +44,31 @@ const openSlippageSettings = () => {
   modal.open(SlippageSettingsModal)
 }
 
+async function buildIncreasePositionTxPlanForQuote(quote: SwapApiQuote, includePermit2Call: boolean): Promise<TxPlan> {
+  if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
+    throw new Error('Vaults not loaded')
+  }
+  const subAccount = multiplySubAccount.value
+  if (!subAccount) {
+    throw new Error('Unable to resolve position')
+  }
+  return buildMultiplyPlan({
+    supplyVaultAddress: multiplySupplyVault.value.address,
+    supplyAssetAddress: multiplySupplyVault.value.asset.address,
+    supplyAmount: 0n,
+    longVaultAddress: multiplyLongVault.value.address,
+    longAssetAddress: multiplyLongVault.value.asset.address,
+    borrowVaultAddress: multiplyShortVault.value.address,
+    debtAmount: multiplyDebtAmountNano.value,
+    quote,
+    swapperMode: SwapperMode.EXACT_IN,
+    subAccount,
+    includePermit2Call,
+    enabledCollaterals: position.value?.collaterals,
+    enabledController: position.value?.borrow.address,
+  })
+}
+
 type MultiplyPlanParams = {
   supplyVaultAddress: string
   supplyAssetAddress: string
@@ -95,7 +120,11 @@ const {
   reset: resetMultiplyQuoteStateInternal,
   requestQuotes: requestMultiplyQuotes,
   selectProvider: selectMultiplyQuote,
-} = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+} = useSwapQuotesParallel({
+  amountField: 'amountOut',
+  compare: 'max',
+  buildTxPlanForQuote: quote => buildIncreasePositionTxPlanForQuote(quote, false),
+})
 
 const multiplyLongVault = computed(() => position.value?.collateral)
 const multiplyShortVault = computed(() => position.value?.borrow)

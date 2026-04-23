@@ -8,7 +8,7 @@ import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
 import { CLOSE_POSITION_WRAPPER_ABI } from '~/abis/cowswap-wrapper'
 import { isEVKVault, type Vault } from '~/entities/vault'
-import { COWSWAP_PROVIDER_NAME, COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapClosePositionExecuteParams, getCowSwapChainConfig } from '~/entities/cowswap'
+import { COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapClosePositionExecuteParams, getCowSwapChainConfig, isCowProvider } from '~/entities/cowswap'
 import { useCowSwapClosePositionExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
 import { getAssetUsdValue, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
@@ -120,6 +120,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     clearSimulationError,
     getCurrentDebt,
     includeCowSwap: true,
+    buildTxPlanForQuote: quote => buildRepayPlan(quote),
     getQuoteAccounts: () => {
       const subAccount = (position.value?.subAccount || address.value || zeroAddress) as Address
       return { accountIn: subAccount, accountOut: subAccount }
@@ -136,7 +137,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     cowSwapOrderbookUrl,
   )
   const isCowSwapProvider = computed(() =>
-    core.quotes.selectedProvider.value?.toLowerCase() === COWSWAP_PROVIDER_NAME,
+    isCowProvider(core.quotes.selectedProvider.value),
   )
 
   const closePositionInboxExists = async (params: CowSwapClosePositionExecuteParams): Promise<boolean> => {
@@ -360,7 +361,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   }, { immediate: true })
 
   // --- Build / Submit / Send ---
-  const buildRepayPlan = async (): Promise<TxPlan> => {
+  async function buildRepayPlan(quote?: import('~/entities/swap').SwapApiQuote): Promise<TxPlan> {
     if (!position.value || !borrowVault.value || !sourceVault.value) {
       throw new Error('Position or vaults not loaded')
     }
@@ -390,7 +391,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       })
     }
 
-    if (!core.quotes.selectedQuote.value) {
+    const swapQuote = quote || core.quotes.selectedQuote.value
+    if (!swapQuote) {
       throw new Error('No quote selected')
     }
 
@@ -405,7 +407,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     const isFullRepay = targetDebt === 0n && swapMode === SwapperMode.TARGET_DEBT
     if (isFullRepay) {
       return buildSwapFullRepayPlan({
-        quote: core.quotes.selectedQuote.value,
+        quote: swapQuote,
         swapperMode: swapMode,
         targetDebt,
         currentDebt,
@@ -416,7 +418,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     }
 
     return buildSwapPlan({
-      quote: core.quotes.selectedQuote.value,
+      quote: swapQuote,
       swapperMode: swapMode,
       isRepay: true,
       targetDebt,

@@ -11,11 +11,12 @@ export const useSwapRepayQuotes = (options: {
   direction: Ref<SwapperMode>
   includeCowSwap?: boolean
   transformQuote?: (quote: SwapApiQuote, provider: string) => SwapApiQuote
+  buildTxPlanForQuote?: (quote: SwapApiQuote, provider: string) => Promise<import('~/entities/txPlan').TxPlan>
 }) => {
-  const { direction, includeCowSwap, transformQuote } = options
+  const { direction, includeCowSwap, transformQuote, buildTxPlanForQuote } = options
 
-  const exactInQuotes = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max', includeCowSwap, transformQuote })
-  const targetDebtQuotes = useSwapQuotesParallel({ amountField: 'amountIn', compare: 'min', includeCowSwap, transformQuote })
+  const exactInQuotes = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max', includeCowSwap, transformQuote, buildTxPlanForQuote })
+  const targetDebtQuotes = useSwapQuotesParallel({ amountField: 'amountIn', compare: 'min', includeCowSwap, transformQuote, buildTxPlanForQuote })
 
   const isExactIn = computed(() => direction.value === SwapperMode.EXACT_IN)
 

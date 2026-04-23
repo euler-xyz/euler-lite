@@ -84,6 +84,7 @@ export const useRepaySwapDetails = (options: UseRepaySwapDetailsOptions) => {
       symbol: asset.symbol,
       formatAmount: formatSmartAmount,
       amountField: isExactIn ? 'amountOut' : 'amountIn',
+      compare: isExactIn ? 'max' : 'min',
     })
   })
 
