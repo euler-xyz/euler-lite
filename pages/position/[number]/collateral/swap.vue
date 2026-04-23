@@ -49,6 +49,7 @@ const positionIndex = usePositionIndex()
 const position: Ref<AccountBorrowPosition | null> = ref(null)
 const pairAssetsLabel = usePositionPairLabel(position)
 const selectedCollateral = ref<Vault | SecuritizeVault | null>(null)
+const selectedCollateralShares = ref(0n)
 const selectedCollateralAssets = ref(0n)
 const lastCollateralAddress = ref('')
 
@@ -266,7 +267,10 @@ const submitCowSwapCollateralSwap = async () => {
 
   const fromTA = fromVault.value.totalAssets
   const fromTS = fromVault.value.totalShares
-  const sellAmount = fromTA > 0n ? underlyingSellAmount * fromTS / fromTA : underlyingSellAmount
+  const quotedSellAmount = fromTA > 0n ? underlyingSellAmount * fromTS / fromTA : underlyingSellAmount
+  const sellAmount = isMaxSwap.value && selectedCollateralShares.value > 0n
+    ? selectedCollateralShares.value
+    : quotedSellAmount
 
   const toTA = toVault.value.totalAssets
   const toTS = toVault.value.totalShares
@@ -382,6 +386,7 @@ const getSelectedCollateralAddress = () =>
 const loadSelectedCollateral = async () => {
   if (!position.value) {
     selectedCollateral.value = null
+    selectedCollateralShares.value = 0n
     selectedCollateralAssets.value = 0n
     return
   }
@@ -395,6 +400,7 @@ const loadSelectedCollateral = async () => {
     resetQuoteState()
   }
 
+  selectedCollateralShares.value = 0n
   selectedCollateralAssets.value = targetAddress === primaryAddress ? position.value.supplied : 0n
 
   try {
@@ -418,7 +424,8 @@ const loadSelectedCollateral = async () => {
       abi: eulerAccountLensABI as Abi,
       functionName: 'getVaultAccountInfo',
       args: [position.value.subAccount, targetAddress],
-    }) as { assets?: bigint }
+    }) as { shares?: bigint, assets?: bigint }
+    selectedCollateralShares.value = res.shares ?? 0n
     selectedCollateralAssets.value = res.assets ?? 0n
   }
   catch (e) {
