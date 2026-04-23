@@ -107,15 +107,21 @@ const patternRuleMatches = (rule: CompiledPatternRule, symbolLower: string | und
   return false
 }
 
-// Module-scoped accessor: useVaultRegistry() returns module-level state,
-// but instantiating the wrapper per call allocates a new object on every
-// vault render in browse tables. Resolve it once at module load.
-const { getVault: registryGetVault } = useVaultRegistry()
-
 // Resolve the underlying asset for a vault via the registry.
 // Used by vault-level helpers to OR-in asset-level rules from assets.json,
 // including pattern rules against the asset's symbol and name.
+//
+// The registry accessor is resolved lazily on first use instead of at
+// module-load time. Module-load destructuring against `useVaultRegistry()`
+// triggered a TDZ error in some import orderings (auto-imports create
+// cycles that we can't see at call sites). Lazy-once keeps the per-call
+// allocation cost at zero after the first invocation without coupling
+// to module-eval order.
+let registryGetVault: ((addr: string) => ReturnType<ReturnType<typeof useVaultRegistry>['getVault']>) | null = null
 const getVaultUnderlyingAsset = (vaultAddress: string): { address: string, symbol: string, name: string } | undefined => {
+  if (!registryGetVault) {
+    registryGetVault = useVaultRegistry().getVault
+  }
   const asset = registryGetVault(vaultAddress)?.asset
   if (!asset) return undefined
   return { address: asset.address, symbol: asset.symbol, name: asset.name }
