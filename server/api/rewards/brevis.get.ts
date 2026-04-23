@@ -8,7 +8,7 @@
  */
 import { createError, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
-import { logWarn } from '~/server/utils/log'
+import { reportStatus } from '~/server/utils/log'
 import { resolveChainId } from '~/server/utils/resolve-chain-id'
 import {
   readBrevis,
@@ -41,6 +41,7 @@ export default defineEventHandler(async (event) => {
       data = await refreshBrevisCampaigns(chainId)
     }
 
+    reportStatus('rewards-brevis', `cold-path:${chainId}`, 'ok')
     setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
     return data
   }
@@ -48,7 +49,9 @@ export default defineEventHandler(async (event) => {
     if (err && typeof err === 'object' && 'statusCode' in err) {
       throw err
     }
-    logWarn('rewards-brevis', `cold fetch failed chain=${chainId}:`, err instanceof Error ? err.message : err)
+    const msg = err instanceof Error ? err.message : String(err)
+    reportStatus('rewards-brevis', `cold-path:${chainId}`, `failed:${msg}`,
+      `cold fetch failed chain=${chainId}: ${msg}`)
     throw createError({ statusCode: 502, statusMessage: 'Brevis upstream error' })
   }
 })
