@@ -17,6 +17,14 @@
 }
 
 @font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url('/fonts/plus-jakarta-sans/PlusJakartaSans-Variable.woff2?v=1.0') format('woff2');
+}
+
+@font-face {
   font-family: Besley;
   font-style: normal;
   font-weight: 400 900;
