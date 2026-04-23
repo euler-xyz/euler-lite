@@ -288,11 +288,14 @@ export const getVaultCategories = async (chainId: number): Promise<VaultCategori
   const cached = readVaultCategories(chainId)
   if (cached && !cached.isStale) return cached.data
   if (cached && cached.isStale) {
-    void refreshVaultCategories(chainId).catch((err) => {
-      const msg = err instanceof Error ? err.message : String(err)
-      reportStatus('vault-categories', `bg-revalidate:${chainId}`, `failed:${msg}`,
-        `bg revalidate chain=${chainId}: ${msg}`)
-    })
+    void refreshVaultCategories(chainId).then(
+      () => { reportStatus('vault-categories', `bg-revalidate:${chainId}`, 'ok') },
+      (err) => {
+        const msg = err instanceof Error ? err.message : String(err)
+        reportStatus('vault-categories', `bg-revalidate:${chainId}`, `failed:${msg}`,
+          `bg revalidate chain=${chainId}: ${msg}`)
+      },
+    )
     return cached.data
   }
   return refreshVaultCategories(chainId)

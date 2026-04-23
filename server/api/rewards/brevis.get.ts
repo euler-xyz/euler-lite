@@ -41,6 +41,7 @@ export default defineEventHandler(async (event) => {
       data = await refreshBrevisCampaigns(chainId)
     }
 
+    reportStatus('rewards-brevis', `handler:${chainId}`, 'ok')
     setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
     return data
   }

@@ -46,7 +46,11 @@ const upstreamInFlight = createInFlightDedup<string, unknown>()
 
 async function fetchJson(url: string): Promise<unknown> {
   const resp = await fetchWithTimeout(url)
-  if (!resp.ok) throw new Error(`${url} returned ${resp.status}`)
+  if (!resp.ok) {
+    // Strip query params to avoid leaking API keys (e.g. Stablewatch) into logs
+    const safeUrl = url.split('?')[0]
+    throw new Error(`${safeUrl} returned ${resp.status}`)
+  }
   return resp.json()
 }
 
