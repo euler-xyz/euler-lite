@@ -90,7 +90,10 @@ const needsSwap = computed(() => {
     return false
   }
 })
-const { slippage: swapSlippage } = useSlippage()
+const { slippage: swapSlippage } = useSlippage({
+  fromSymbol: () => asset.value?.symbol,
+  toSymbol: () => selectedOutputAsset.value?.symbol,
+})
 const {
   sortedQuoteCards: swapQuoteCardsSorted,
   selectedProvider: swapSelectedProvider,

@@ -70,7 +70,10 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const { eulerLensAddresses, chainId } = useEulerAddresses()
   const { isConnected, address } = useAccount()
   const { fetchSingleBalance } = useWallets()
-  const { slippage } = useSlippage()
+  const { slippage } = useSlippage({
+    fromSymbol: () => selectedAsset.value?.symbol,
+    toSymbol: () => borrowVault.value?.asset.symbol,
+  })
   const { getVault: registryGetVault } = useVaultRegistry()
 
   // --- State ---
