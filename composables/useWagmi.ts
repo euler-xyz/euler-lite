@@ -22,6 +22,8 @@ function initializeWagmi() {
   const { disconnect: wagmiDisconnect } = useDisconnect()
   const { switchChain } = useSwitchChain()
   const { screenConnectedAddress, resetScreeningCache } = useAddressScreen()
+  const { spyAddress } = useSpyMode()
+  const { chainId: appChainId } = useEulerAddresses()
 
   const chainId = computed(() => wagmiChain.value?.id)
 
@@ -29,8 +31,22 @@ function initializeWagmi() {
     address: wagmiAddress,
     chainId: chainId.value,
   })
+
+  // Balance follows spy mode when active: queries the spy-target's balance on
+  // the app's current chain (not the wallet's), so the header always matches
+  // the portfolio being viewed. Falls back to the connected wallet otherwise.
+  const balanceAddress = computed<Address | undefined>(() => {
+    if (spyAddress.value) return spyAddress.value as Address
+    return wagmiAddress.value
+  })
+  const balanceChainId = computed(() => {
+    if (spyAddress.value) return appChainId.value || undefined
+    return undefined
+  })
+
   const { data: balanceData, isLoading: isLoadingBalance, refetch: refetchBalance } = useBalance({
-    address: wagmiAddress,
+    address: balanceAddress,
+    chainId: balanceChainId,
   })
 
   // AppKit may be deferred-initialized (see plugins/00.wagmi.ts). Route
