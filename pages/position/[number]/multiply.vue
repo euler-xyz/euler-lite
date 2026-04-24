@@ -827,7 +827,7 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
             <AssetInput
               v-model="multiplyLongAmount"
               :desc="multiplyLongProduct.name"
-              label="Long"
+              label="Additional collateral"
               :asset="multiplyLongVault.asset"
               :vault="(multiplyLongVault as Vault)"
               :readonly="true"
@@ -836,7 +836,7 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
             <AssetInput
               v-model="multiplyShortAmount"
               :desc="multiplyShortProduct.name"
-              label="Short"
+              label="Debt"
               :asset="multiplyShortVault.asset"
               :vault="multiplyShortVault"
               :readonly="true"

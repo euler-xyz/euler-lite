@@ -728,7 +728,7 @@ watch(formTab, () => {
                     <AssetInput
                       v-model="multiply.multiplyLongAmount.value"
                       :desc="multiply.multiplyLongProduct.name"
-                      label="Long"
+                      label="Additional collateral"
                       :asset="multiply.multiplyLongVault.value.asset"
                       :vault="(multiply.multiplyLongVault.value as Vault)"
                       :readonly="true"
@@ -737,7 +737,7 @@ watch(formTab, () => {
                     <AssetInput
                       v-model="multiply.multiplyShortAmount.value"
                       :desc="multiply.multiplyShortProduct.name"
-                      label="Short"
+                      label="Debt"
                       :asset="multiply.multiplyShortVault.value.asset"
                       :vault="multiply.multiplyShortVault.value"
                       :readonly="true"
