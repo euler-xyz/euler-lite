@@ -57,11 +57,11 @@ const utilisationMessages: Record<WarningContext, Record<'high' | 'critical', { 
   repay: {
     high: {
       title: 'High utilisation',
-      message: 'Utilisation is high on this collateral market. Available cash is limited, so repaying with collateral may be constrained.',
+      message: 'Utilisation is high on this collateral market. Available liquidity is limited, so repaying with collateral may be constrained.',
     },
     critical: {
       title: 'Critical utilisation',
-      message: 'Utilisation is critically high on this collateral market. Available cash is near zero, so repaying with collateral may fail.',
+      message: 'Utilisation is critically high on this collateral market. Available liquidity is near zero, so repaying with collateral may fail.',
     },
   },
   general: {
