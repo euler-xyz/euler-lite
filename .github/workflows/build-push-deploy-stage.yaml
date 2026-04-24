@@ -36,8 +36,8 @@ jobs:
 
       - name: Verify tag is on development
         run: |
-          if ! git merge-base --is-ancestor "${{ github.sha }}" origin/development; then
-            echo "::error::Tag does not point to a commit on development. Aborting."
+          if ! git log --first-parent --format=%H origin/development | grep -q "^${{ github.sha }}$"; then
+            echo "::error::Tag does not point to a commit on development's first-parent history. Aborting."
             exit 1
           fi
 
