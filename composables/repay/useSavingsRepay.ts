@@ -198,6 +198,15 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   })
   const isInsufficientSource = computed(() => requiredInput.value > 0n && requiredInput.value > sourceBalance.value)
 
+  const effectiveSlippage = computed(() => {
+    const quote = core.quotes.effectiveQuote.value
+    if (!quote) return null
+    const out = BigInt(quote.amountOut || 0)
+    const min = BigInt(quote.amountOutMin || 0)
+    if (out <= 0n || min <= 0n || min >= out) return null
+    return Number((out - min) * 10000n / out) / 100
+  })
+
   // --- Submit disabled ---
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
@@ -432,6 +441,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     routedVia: details.routedVia,
     routeEmptyMessage: details.routeEmptyMessage,
     routeItems: details.routeItems,
+    effectiveSlippage,
     // Submit
     isSubmitDisabled,
     disabledReason,

@@ -2,14 +2,20 @@
 import { isPriceImpactWarning, isSlippageWarning } from '~/utils/priceImpact'
 import { formatNumber } from '~/utils/string-utils'
 
-defineProps<{
+const props = defineProps<{
   inputDisplay: string | null
   outputDisplay: string | null
   priceImpact: number | null
   slippage: number
   routedVia: string | null
   multipliedPriceImpact?: number | null
+  effectiveSlippage?: number | null
 }>()
+
+const slippageDiffers = computed(() => {
+  if (props.effectiveSlippage == null) return false
+  return Math.abs(props.effectiveSlippage - props.slippage) > 0.05
+})
 
 const emit = defineEmits<{
   (e: 'openSlippageSettings'): void
@@ -56,17 +62,25 @@ const emit = defineEmits<{
     </p>
   </SummaryRow>
   <SummaryRow label="Slippage tolerance">
-    <button
-      type="button"
-      class="flex items-center gap-6 text-p2"
-      @click="emit('openSlippageSettings')"
-    >
-      <span :class="{ 'text-error-500': isSlippageWarning(slippage) }">{{ formatNumber(slippage, 2, 0) }}%</span>
-      <SvgIcon
-        name="edit"
-        class="!w-16 !h-16 text-accent-600"
-      />
-    </button>
+    <div class="flex flex-col items-end gap-2">
+      <button
+        type="button"
+        class="flex items-center gap-6 text-p2"
+        @click="emit('openSlippageSettings')"
+      >
+        <span :class="{ 'text-error-500': isSlippageWarning(slippage) }">{{ formatNumber(slippage, 2, 0) }}%</span>
+        <SvgIcon
+          name="edit"
+          class="!w-16 !h-16 text-accent-600"
+        />
+      </button>
+      <span
+        v-if="slippageDiffers"
+        class="text-p4 text-warning-500"
+      >
+        Quote applies {{ formatNumber(effectiveSlippage!, 2, 2) }}%
+      </span>
+    </div>
   </SummaryRow>
   <SummaryRow
     v-if="routedVia"

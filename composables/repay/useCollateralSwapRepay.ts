@@ -1,6 +1,6 @@
 import type { Ref, ComputedRef } from 'vue'
 import { useAccount } from '@wagmi/vue'
-import { zeroAddress, type Address, type Abi } from 'viem'
+import { formatUnits, zeroAddress, type Address, type Abi } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
@@ -18,6 +18,7 @@ import { useRepaySwapDetails } from '~/composables/repay/useRepaySwapDetails'
 import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics'
 import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
+import { trimTrailingZeros } from '~/utils/string-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createRaceGuard } from '~/utils/race-guard'
 import { findBlockingDisabledOp, OP_REPAY, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
@@ -254,6 +255,29 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   })
   const isInsufficientSource = computed(() => requiredInput.value > 0n && requiredInput.value > sourceBalance.value)
 
+  // Minimum guaranteed swap output (amountOutMin) for the review modal.
+  // The debt field shows amountOut (expected), but the on-chain verifier
+  // enforces amountOutMin. Show users the guaranteed minimum at confirmation.
+  const minSwapOutput = computed(() => {
+    if (core.isSameAsset.value || !borrowVault.value) return undefined
+    const quote = core.quotes.effectiveQuote.value
+    if (!quote) return undefined
+    const min = BigInt(quote.amountOutMin || 0)
+    if (min <= 0n) return undefined
+    return trimTrailingZeros(formatUnits(min, Number(borrowVault.value.asset.decimals)))
+  })
+
+  // Effective slippage derived from the quote's amountOut vs amountOutMin.
+  // Used to warn users when the backend applies different slippage than configured.
+  const effectiveSlippage = computed(() => {
+    const quote = core.quotes.effectiveQuote.value
+    if (!quote) return null
+    const out = BigInt(quote.amountOut || 0)
+    const min = BigInt(quote.amountOutMin || 0)
+    if (out <= 0n || min <= 0n || min >= out) return null
+    return Number((out - min) * 10000n / out) / 100
+  })
+
   // --- Submit disabled ---
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
@@ -413,7 +437,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
           amount: core.amount.value,
           plan: plan.value || undefined,
           swapToAsset: !core.isSameAsset.value ? borrowVault.value.asset : undefined,
-          swapToAmount: !core.isSameAsset.value ? core.debtAmount.value : undefined,
+          swapToAmount: minSwapOutput.value,
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
           onConfirm: async () => {
@@ -502,6 +526,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     routedVia: details.routedVia,
     routeEmptyMessage: details.routeEmptyMessage,
     routeItems: details.routeItems,
+    effectiveSlippage,
     // Submit
     isSubmitDisabled,
     disabledReason,

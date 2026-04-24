@@ -114,6 +114,17 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     return BigInt(quotes.effectiveQuote.value.amountOutMin || 0)
   })
 
+  // Effective slippage derived from the quote's amountOut vs amountOutMin.
+  // Used to warn users when the backend applies different slippage than configured.
+  const effectiveSlippage = computed(() => {
+    const quote = quotes.effectiveQuote.value
+    if (!quote) return null
+    const out = BigInt(quote.amountOut || 0)
+    const min = BigInt(quote.amountOutMin || 0)
+    if (out <= 0n || min <= 0n || min >= out) return null
+    return Number((out - min) * 10000n / out) / 100
+  })
+
   const computedTargetDebt = computed(() => {
     if (direction.value !== SwapperMode.TARGET_DEBT || !borrowVault.value || !debtAmount.value) return 0n
     try {
@@ -798,6 +809,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     swapRoutedVia,
     swapPriceImpact,
     swapRouteItems,
+    effectiveSlippage,
     isFullRepay,
 
     // Health estimates
