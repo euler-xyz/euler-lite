@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { HIGH_SLIPPAGE_THRESHOLD } from '~/entities/constants'
+import { DEFAULT_SLIPPAGE, HIGH_SLIPPAGE_THRESHOLD } from '~/entities/constants'
 import { formatNumber } from '~/utils/string-utils'
 
 const _props = withDefaults(defineProps<{
@@ -12,8 +12,8 @@ const { slippage, setSlippage, minSlippage, maxSlippage, defaultSlippage, isOver
 
 const slippagePresets = [
   { label: '0.1%', value: 0.1 },
+  { label: '0.3%', value: 0.3 },
   { label: '0.5%', value: 0.5 },
-  { label: '1%', value: 1 },
 ]
 
 const presetValues = slippagePresets.map(option => option.value)
@@ -130,10 +130,10 @@ defineExpose({ savePending })
         Slippage settings
       </div>
       <div class="text-p3 text-content-muted">
-        <template v-if="isOverrideActive && slippage > 0.5">
+        <template v-if="isOverrideActive && slippage > defaultSlippage">
           Custom slippage (resets to {{ defaultSlippage }}% default after 24h)
         </template>
-        <template v-else-if="defaultSlippage !== 0.5">
+        <template v-else-if="defaultSlippage !== DEFAULT_SLIPPAGE">
           Default: {{ defaultSlippage }}% for stablecoin swaps
         </template>
         <template v-else>
