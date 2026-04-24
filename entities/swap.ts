@@ -109,4 +109,5 @@ export interface SwapApiRequest {
   dustAccount?: Address
   routingOverride?: RoutingConfig
   provider?: string
+  providerExtraData?: string
 }

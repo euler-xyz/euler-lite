@@ -4,6 +4,7 @@ import type { Vault, SecuritizeVault } from '~/entities/vault'
 import { getAssetUsdValue } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
+import { COWSWAP_PROVIDER_EXTRA_DATA } from '~/entities/cowswap'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
 import { valueToNano } from '~/utils/crypto-utils'
 import { trimTrailingZeros } from '~/utils/string-utils'
@@ -376,6 +377,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
       isRepay: true,
       targetDebt,
       currentDebt,
+      providerExtraData: COWSWAP_PROVIDER_EXTRA_DATA.closePosition,
     })
   }, 500)
 

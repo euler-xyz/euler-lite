@@ -28,7 +28,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapCollateralSwapExecuteParams, getCowSwapChainConfig, isCowProvider } from '~/entities/cowswap'
+import { COWSWAP_ORDER_DEADLINE_SECONDS, COWSWAP_PROVIDER_EXTRA_DATA, type CowSwapCollateralSwapExecuteParams, getCowSwapChainConfig, isCowProvider } from '~/entities/cowswap'
 import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
 
 const route = useRoute()
@@ -143,6 +143,7 @@ const swap = useSwapPageLogic({
         isRepay: false,
         targetDebt: 0n,
         currentDebt: 0n,
+        providerExtraData: COWSWAP_PROVIDER_EXTRA_DATA.collateralSwap,
       },
     }
   },
