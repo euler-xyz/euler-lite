@@ -46,7 +46,7 @@ const { floatingStyles, update } = useFloating(reference, floating, {
 })
 
 const needToSwitchChain = computed(() => {
-  return isConnected.value && chainId.value !== _chainId.value
+  return !isSpyMode.value && isConnected.value && chainId.value !== _chainId.value
 })
 const hasActiveSession = computed(() => isConnected.value || isSpyMode.value)
 const _disabled = computed(() => {
