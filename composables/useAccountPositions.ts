@@ -1,5 +1,6 @@
 import { getAddress, type Address, type Abi } from 'viem'
 import { computed, ref, shallowRef, type Ref } from 'vue'
+import * as Sentry from '@sentry/nuxt'
 import { useVaultRegistry } from './useVaultRegistry'
 import { logWarn } from '~/utils/errorHandling'
 import { FixedPoint } from '~/utils/fixed-point'
@@ -16,6 +17,7 @@ import type {
   SecuritizeVault,
 } from '~/entities/vault'
 import { processRawVaultData } from '~/entities/vault/fetcher'
+import { fetchVaultCategory } from '~/entities/vault/factory'
 import { getCollateralUsdPrice } from '~/services/pricing/priceProvider'
 import { collectPythFeedIds } from '~/entities/oracle'
 import { executeBatchLensWithPythSimulation } from '~/utils/pyth'
@@ -31,6 +33,23 @@ import {
 // Internal storage — always contains ALL positions (verified + unverified)
 const _allDepositPositions: Ref<AccountDepositPosition[]> = ref([])
 const _allBorrowPositions: Ref<AccountBorrowPosition[]> = ref([])
+
+// Unresolved positions — subgraph reported them but the vault lens fetch failed
+// (RPC revert, network timeout, decode error). Surfaced on the portfolio page
+// so users know their position exists even when we can't render details.
+export type UnresolvedPositionKind = 'deposit' | 'borrow'
+export type UnresolvedPositionVaultType = 'evk' | 'earn' | 'securitize' | 'unknown'
+export type UnresolvedPositionReason = 'fetch-failed' | 'collateral-unresolved'
+
+export interface UnresolvedPosition {
+  subAccount: string
+  vault: string
+  kind: UnresolvedPositionKind
+  vaultType: UnresolvedPositionVaultType
+  reason: UnresolvedPositionReason
+}
+
+const _unresolvedPositions: Ref<UnresolvedPosition[]> = shallowRef([])
 
 // Track which (subAccount, vaultAddress) pairs are used as collateral
 // Format: "subAccount:vaultAddress" (both checksummed)
@@ -61,6 +80,108 @@ const hiddenDepositCount = computed(() =>
 // Generation counter to invalidate stale in-flight position fetches after chain switch.
 // Incremented on chain change; async operations capturing an older generation discard results.
 const positionGuard = createRaceGuard()
+
+const clearUnresolvedPositions = () => {
+  _unresolvedPositions.value = []
+}
+
+// Register a position the subgraph reported but we couldn't resolve.
+// Synchronous capture with best-effort type lookup; the async category fetch
+// patches the entry in place so the banner grouping updates once known.
+const registerUnresolved = (
+  subAccount: string,
+  vault: string,
+  kind: UnresolvedPositionKind,
+  reason: UnresolvedPositionReason,
+): void => {
+  let normalizedVault: string
+  let normalizedSubAccount: string
+  try {
+    normalizedVault = getAddress(vault)
+    normalizedSubAccount = getAddress(subAccount)
+  }
+  catch {
+    return
+  }
+
+  const alreadyCaptured = _unresolvedPositions.value.some(p =>
+    p.kind === kind && p.subAccount === normalizedSubAccount && p.vault === normalizedVault,
+  )
+  if (alreadyCaptured) return
+
+  const { getType } = useVaultRegistry()
+  const cachedType = getType(normalizedVault)
+  const initialType: UnresolvedPositionVaultType
+    = cachedType === 'earn'
+      ? 'earn'
+      : cachedType === 'securitize'
+        ? 'securitize'
+        : cachedType === 'evk'
+          ? 'evk'
+          : 'unknown'
+
+  const entry: UnresolvedPosition = {
+    subAccount: normalizedSubAccount,
+    vault: normalizedVault,
+    kind,
+    vaultType: initialType,
+    reason,
+  }
+  _unresolvedPositions.value = [..._unresolvedPositions.value, entry]
+
+  if (initialType === 'unknown') {
+    fetchVaultCategory(normalizedVault)
+      .then((category) => {
+        const resolved: UnresolvedPositionVaultType | null
+          = category === 'earn'
+            ? 'earn'
+            : category === 'securitize'
+              ? 'securitize'
+              : (category === 'evk' || category === 'escrow')
+                  ? 'evk'
+                  : null
+        if (!resolved) return
+
+        const current = _unresolvedPositions.value
+        const idx = current.findIndex(p =>
+          p.kind === kind && p.subAccount === normalizedSubAccount && p.vault === normalizedVault,
+        )
+        if (idx < 0 || current[idx].vaultType !== 'unknown') return
+
+        const next = current.slice()
+        next[idx] = { ...next[idx], vaultType: resolved }
+        _unresolvedPositions.value = next
+      })
+      .catch(e => logWarn('useAccountPositions/registerUnresolved/type', e))
+  }
+
+  try {
+    const { chainId } = useEulerAddresses()
+    const runtimeConfig = useRuntimeConfig()
+    if (runtimeConfig.public.sentryDsn) {
+      Sentry.captureMessage('Unresolved position', {
+        level: 'warning',
+        tags: {
+          chainId: chainId.value ?? 'unknown',
+          vaultType: initialType,
+          kind,
+          reason,
+        },
+        contexts: {
+          unresolved: {
+            subAccount: normalizedSubAccount,
+            vault: normalizedVault,
+            kind,
+            reason,
+          },
+        },
+      })
+    }
+  }
+  catch (e) {
+    logWarn('useAccountPositions/registerUnresolved/sentry', e)
+  }
+}
 
 const updateBorrowPositions = async (
   eulerLensAddresses: EulerLensAddresses,
@@ -260,7 +381,10 @@ const updateBorrowPositions = async (
     let borrow = prefetchedVault && prefetchedVault.address.toLowerCase() === borrowAddress.toLowerCase()
       ? prefetchedVault
       : await getOrFetch(borrowAddress) as Vault | undefined
-    if (!borrow) continue
+    if (!borrow) {
+      registerUnresolved(entry.subAccount, borrowAddress, 'borrow', 'fetch-failed')
+      continue
+    }
 
     // Use batch-refreshed vault data if available (Pyth vaults with fresh prices)
     const refreshed = pythVaultRefreshMap.get(getAddress(borrow.address))
@@ -280,7 +404,10 @@ const updateBorrowPositions = async (
     if (!collateralAddress) continue
 
     const collateral = await getOrFetch(collateralAddress) as Vault | SecuritizeVault | undefined
-    if (!collateral) continue
+    if (!collateral) {
+      registerUnresolved(entry.subAccount, collateralAddress, 'borrow', 'collateral-unresolved')
+      continue
+    }
 
     processed.push({
       entry,
@@ -497,7 +624,10 @@ const updateSavingsPositions = async (
     if (collateralUsageSet.value.has(collateralKey)) continue
 
     const vault = await getOrFetch(entry.vault)
-    if (!vault) continue
+    if (!vault) {
+      registerUnresolved(entry.subAccount, entry.vault, 'deposit', 'fetch-failed')
+      continue
+    }
 
     validEntries.push({ entry, vault })
   }
@@ -554,7 +684,10 @@ const clearPositions = () => {
   _allBorrowPositions.value = []
   _allDepositPositions.value = []
   collateralUsageSet.value = new Set()
+  _unresolvedPositions.value = []
 }
+
+const unresolvedPositions = computed(() => _unresolvedPositions.value)
 
 export const useAccountPositions = () => ({
   depositPositions,
@@ -568,7 +701,9 @@ export const useAccountPositions = () => ({
   hiddenBorrowCount,
   hiddenDepositCount,
   positionGuard,
+  unresolvedPositions,
   updateBorrowPositions,
   updateSavingsPositions,
   clearPositions,
+  clearUnresolvedPositions,
 })

@@ -22,9 +22,11 @@ const {
   hiddenBorrowCount,
   hiddenDepositCount,
   positionGuard,
+  unresolvedPositions,
   updateBorrowPositions,
   updateSavingsPositions,
   clearPositions,
+  clearUnresolvedPositions,
 } = useAccountPositions()
 
 let fetchInProgress = false
@@ -47,6 +49,7 @@ export const useEulerAccount = () => {
     if (fetchInProgress) return
     fetchInProgress = true
     try {
+      clearUnresolvedPositions()
       const gen = positionGuard.current()
       const targetAddress = portfolioAddress.value
       const { SUBGRAPH_URL } = useEulerConfig()
@@ -162,6 +165,7 @@ export const useEulerAccount = () => {
     if (fetchInProgress) return
     fetchInProgress = true
     try {
+      clearUnresolvedPositions()
       const gen = positionGuard.current()
       const { SUBGRAPH_URL } = useEulerConfig()
       const { borrows: borrowEntries, deposits: depositEntries } = walletAddress
@@ -188,6 +192,7 @@ export const useEulerAccount = () => {
   return {
     borrowPositions,
     depositPositions,
+    unresolvedPositions,
     isPositionsLoading,
     isPositionsLoaded,
     isDepositsLoading,
