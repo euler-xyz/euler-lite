@@ -17,6 +17,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
 
 const { vault } = defineProps<{ vault: SecuritizeVault, desktopOverview?: boolean }>()
+const route = useRoute()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
 const { client: rpcClient } = useRpcClient()
@@ -39,7 +40,7 @@ const marketProductKey = computed(() => getProductKeyByVault(vault.address))
 const isDeprecated = computed(() => {
   return product.deprecatedVaults?.includes(vaultAddress.value) ?? false
 })
-const deprecationReason = computed(() => isDeprecated.value ? product.deprecationReason : '')
+const deprecationReason = computed(() => isDeprecated.value ? product.deprecationReason || '' : '')
 const isRestricted = computed(() => isVaultBlockedByCountry(vault.address))
 
 const shortenAddress = (address: string) => {
@@ -166,23 +167,10 @@ const supplyCapPercentageDisplay = computed(() => {
         Overview
       </p>
       <div class="flex flex-col items-start gap-24">
-        <div
-          v-if="isDeprecated && deprecationReason"
-          class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
-        >
-          <div class="flex items-center gap-8">
-            <SvgIcon
-              name="warning"
-              class="!w-20 !h-20 flex-shrink-0"
-            />
-            <!-- eslint-disable vue/no-v-html -- trusted label content -->
-            <p
-              class="text-p3 text-warning-500 auto-link"
-              v-html="autoLink(deprecationReason)"
-            />
-            <!-- eslint-enable vue/no-v-html -->
-          </div>
-        </div>
+        <VaultDeprecationBanner
+          v-if="isDeprecated"
+          :reason="deprecationReason"
+        />
         <div
           v-if="isRestricted"
           class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
@@ -215,7 +203,7 @@ const supplyCapPercentageDisplay = computed(() => {
         <VaultOverviewLabelValue label="Market">
           <NuxtLink
             v-if="marketProductKey"
-            :to="{ name: 'explore-market', params: { market: marketProductKey } }"
+            :to="{ name: 'explore-market', params: { market: marketProductKey }, query: { network: route.query.network } }"
             class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
           >
             {{ product.name }}

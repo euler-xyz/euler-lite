@@ -89,4 +89,5 @@ export {
   getMaxWithdraw,
   getUtilization,
   getVaultUtilization,
+  isCyclicalNoteVault,
 } from './utils'

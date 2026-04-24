@@ -272,6 +272,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   })
 
   const borrowSwapRoutedVia = computed(() => {
+    if (!borrowSwapSelectedProvider.value) return 'Not selected'
     if (!borrowSwapEffectiveQuote.value?.route?.length) return null
     return borrowSwapEffectiveQuote.value.route.map((r: { providerName: string }) => r.providerName).join(', ')
   })
@@ -335,7 +336,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     else if ((borrowVault.value?.supply || 0n) < valueToNano(borrowAmount.value, borrowVault.value?.decimals)) {
       return 'Not enough liquidity in the vault'
     }
-    if (borrowNeedsSwap.value && !borrowSwapSelectedQuote.value && +collateralAmount.value > 0) {
+    if (borrowNeedsSwap.value && !borrowSwapQuoteCards.value.length && +collateralAmount.value > 0) {
       return isBorrowSwapQuoteLoading.value ? null : 'No swap quote available'
     }
     return null

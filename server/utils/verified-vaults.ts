@@ -1,6 +1,7 @@
 import { decodeFunctionResult, encodeFunctionData, getAddress } from 'viem'
 import { createTtlCache } from './cache'
 import { fetchWithTimeout } from './fetchWithTimeout'
+import { INTERNAL_FETCH_HEADERS } from './internal-headers'
 import { logWarn } from './log'
 import { resolveRpcUrl } from './rpc'
 
@@ -47,11 +48,11 @@ function addChecksum(set: Set<string>, value: unknown): void {
 }
 
 async function fetchLabels<T>(chainId: number, file: 'products.json' | 'earn-vaults.json'): Promise<T> {
-  return await $fetch<T>(`/api/labels/${file}`, { query: { chainId } })
+  return await $fetch<T>(`/api/labels/${file}`, { query: { chainId }, headers: INTERNAL_FETCH_HEADERS })
 }
 
 async function fetchEulerChains(): Promise<EulerChainConfig[]> {
-  const data = await $fetch<unknown>('/api/euler-chains')
+  const data = await $fetch<unknown>('/api/euler-chains', { headers: INTERNAL_FETCH_HEADERS })
   return Array.isArray(data) ? data as EulerChainConfig[] : []
 }
 

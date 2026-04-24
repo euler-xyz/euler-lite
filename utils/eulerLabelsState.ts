@@ -2,6 +2,7 @@ import type { EulerLabelEntity, EulerLabelProduct, EulerLabelPointReward } from 
 import type { OracleAdapterMeta } from '~/entities/oracle'
 
 export const isLoading = ref(false)
+export const isReady = ref(false)
 
 // Use a simple object to track loaded state (survives HMR better than ref)
 export const loadState = { chainId: null as number | null, timestamp: 0 }

@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import type { SelectOption } from './select.types'
+
 const props = defineProps<{
   selected: string[]
-  options: { label: string, value: string, icon?: string, iconFallback?: string }[]
+  options: SelectOption[]
   title?: string
   inputPlaceholder?: string
   onSave?: (selected: string[]) => void

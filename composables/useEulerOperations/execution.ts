@@ -1,10 +1,34 @@
 import type { Address, Hash, Hex, StateOverride } from 'viem'
-import { simulateContract } from '@wagmi/vue/actions'
+import { getAccount, simulateContract } from '@wagmi/vue/actions'
 import type { OperationsContext, AllowanceHelpers } from './types'
 import type { TxPlan } from '~/entities/txPlan'
 import { catchToFallback } from '~/utils/errorHandling'
 import { isNonBlockingSimulationError } from '~/utils/tx-errors'
 import { applyOperationGuards } from '~/utils/operationGuardRegistry'
+
+const OKX_POST_APPROVE_DELAY_MS = 3000
+
+const isOkxWallet = async (connector?: { id?: string, name?: string, getProvider?: () => Promise<unknown> }) => {
+  if (!connector) return false
+  const id = connector.id?.toLowerCase() ?? ''
+  const name = connector.name?.toLowerCase() ?? ''
+  if (id === 'okx' || name.includes('okx')) return true
+
+  // When OKX connects via WalletConnect, the connector itself is generic.
+  // The actual wallet name is in the WC session peer metadata.
+  if (id === 'walletconnect' && connector.getProvider) {
+    try {
+      const provider = await connector.getProvider() as { session?: { peer?: { metadata?: { name?: string } } } }
+      const peerName = provider?.session?.peer?.metadata?.name?.toLowerCase() ?? ''
+      return peerName.includes('okx')
+    }
+    catch {
+      return false
+    }
+  }
+
+  return false
+}
 
 export const createExecutionHelpers = (ctx: OperationsContext, allowanceHelpers: AllowanceHelpers) => {
   const { triggerPortfolioRefresh } = usePortfolioRefresh()
@@ -46,6 +70,13 @@ export const createExecutionHelpers = (ctx: OperationsContext, allowanceHelpers:
 
       lastHash = txHash
       await waitForTxReceipt(txHash)
+
+      // OKX wallet's simulation backend lags behind on-chain state after approvals.
+      // Without a delay, the next step's preview shows "unable to decode asset changes".
+      const isApproveStep = step.type === 'approve' || step.type === 'permit2-approve'
+      if (isApproveStep && await isOkxWallet(getAccount(ctx.config).connector)) {
+        await new Promise(resolve => setTimeout(resolve, OKX_POST_APPROVE_DELAY_MS))
+      }
     }
 
     triggerPortfolioRefresh()

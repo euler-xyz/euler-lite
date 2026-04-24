@@ -1,6 +1,6 @@
 import { createError, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
-import { logWarn } from '~/server/utils/log'
+import { reportStatus } from '~/server/utils/log'
 import { resolveChainId } from '~/server/utils/resolve-chain-id'
 import { vaultsCache, refreshChainVaults } from '~/server/utils/vaults-cache'
 
@@ -36,11 +36,14 @@ export default defineEventHandler(async (event) => {
 
   try {
     const result = await refreshChainVaults(chainId)
+    reportStatus('vaults', `cold-path:${chainId}`, 'ok')
     setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
     return result
   }
   catch (err) {
-    logWarn('vaults', `Cold fetch failed for chain ${chainId}:`, err instanceof Error ? err.message : err)
+    const msg = err instanceof Error ? err.message : String(err)
+    reportStatus('vaults', `cold-path:${chainId}`, `failed:${msg}`,
+      `cold fetch failed for chain ${chainId}: ${msg}`)
     throw createError({ statusCode: 502, statusMessage: 'Upstream vault load failed' })
   }
 })

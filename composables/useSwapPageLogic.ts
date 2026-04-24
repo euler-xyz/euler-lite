@@ -403,6 +403,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
 
   // ── Routed via ─────────────────────────────────────────────────────────
   const routedVia = computed(() => {
+    if (!selectedProvider.value) return isSameAsset.value ? null : 'Not selected'
     if (!quote.value?.route?.length) return null
     return quote.value.route.map(r => r.providerName).join(', ')
   })

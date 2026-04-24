@@ -9,6 +9,8 @@ on:
   push:
     tags:
       - 'v*'
+      - '!v*-rc*'
+      - '!v*-beta*'
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -36,8 +38,8 @@ jobs:
       - name: Verify tag is on master
         if: github.event_name == 'push'
         run: |
-          if ! git merge-base --is-ancestor "${{ github.sha }}" origin/master; then
-            echo "::error::Tag does not point to a commit on master. Aborting."
+          if ! git log --first-parent --format=%H origin/master | grep -q "^${{ github.sha }}$"; then
+            echo "::error::Tag does not point to a commit on master's first-parent history. Aborting."
             exit 1
           fi
 
@@ -83,14 +85,30 @@ jobs:
           cache-to: type=gha,mode=max
 
       # ── Deploy ──
+      - name: Verify dispatch is from master
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/master" ]; then
+            echo "::error::workflow_dispatch must be run from the master branch."
+            exit 1
+          fi
+
       - name: Resolve image tag
         id: resolve-tag
+        env:
+          INPUT_TAG: ${{ inputs.image_tag }}
+          BUILD_TAG: ${{ steps.generate-tag.outputs.image_tag }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "image_tag=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
+            TAG="$INPUT_TAG"
           else
-            echo "image_tag=${{ steps.generate-tag.outputs.image_tag }}" >> $GITHUB_OUTPUT
+            TAG="$BUILD_TAG"
           fi
+          if ! echo "$TAG" | grep -qE '^[a-zA-Z0-9_.-]+$'; then
+            echo "::error::Invalid image tag: must match [a-zA-Z0-9_.-]+"
+            exit 1
+          fi
+          echo "image_tag=$TAG" >> $GITHUB_OUTPUT
 
       - name: Configure AWS credentials (ECS deploy)
         uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0

@@ -69,7 +69,10 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const { eulerLensAddresses, chainId } = useEulerAddresses()
   const { isConnected, address } = useAccount()
   const { fetchSingleBalance } = useWallets()
-  const { slippage } = useSlippage()
+  const { slippage } = useSlippage({
+    fromSymbol: () => selectedAsset.value?.symbol,
+    toSymbol: () => borrowVault.value?.asset.symbol,
+  })
   const { getVault: registryGetVault } = useVaultRegistry()
 
   // --- State ---
@@ -148,6 +151,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   })
 
   const swapRoutedVia = computed(() => {
+    if (!quotes.selectedProvider.value) return 'Not selected'
     if (!quotes.effectiveQuote.value?.route?.length) return null
     return quotes.effectiveQuote.value.route.map((r: { providerName: string }) => r.providerName).join(', ')
   })

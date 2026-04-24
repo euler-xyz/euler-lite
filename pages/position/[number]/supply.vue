@@ -166,6 +166,8 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (form.isSwapRestricted.value) return { message: 'Swapping into this vault is not available in your region', variant: 'warning' }
   if (form.estimatesError.value) return { message: form.estimatesError.value, variant: 'error' }
   if (form.simulationError.value) return { message: form.simulationError.value, variant: 'error' }
+  if (needsSwap.value && form.isSwapQuoteLoading.value && +form.amount.value > 0) return { message: 'Fetching swap quotes...', variant: 'warning' }
+  if (needsSwap.value && !form.swapSelectedQuote.value && +form.amount.value > 0) return { message: 'Select a swap quote to continue', variant: 'warning' }
   return undefined
 })
 
