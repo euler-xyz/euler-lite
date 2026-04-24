@@ -1,6 +1,6 @@
 import type { Ref, ComputedRef } from 'vue'
 import { useAccount } from '@wagmi/vue'
-import { formatUnits, zeroAddress, type Address, type Abi } from 'viem'
+import { zeroAddress, type Address, type Abi } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
@@ -18,7 +18,6 @@ import { useRepaySwapDetails } from '~/composables/repay/useRepaySwapDetails'
 import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics'
 import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
-import { trimTrailingZeros } from '~/utils/string-utils'
 import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createRaceGuard } from '~/utils/race-guard'
@@ -256,18 +255,6 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   })
   const isInsufficientSource = computed(() => requiredInput.value > 0n && requiredInput.value > sourceBalance.value)
 
-  // Minimum guaranteed swap output (amountOutMin) for the review modal.
-  // The debt field shows amountOut (expected), but the on-chain verifier
-  // enforces amountOutMin. Show users the guaranteed minimum at confirmation.
-  const minSwapOutput = computed(() => {
-    if (core.isSameAsset.value || !borrowVault.value) return undefined
-    const quote = core.quotes.effectiveQuote.value
-    if (!quote) return undefined
-    const min = BigInt(quote.amountOutMin || 0)
-    if (min <= 0n) return undefined
-    return trimTrailingZeros(formatUnits(min, Number(borrowVault.value.asset.decimals)))
-  })
-
   const quoteSlippage = computed(() => computeQuoteSlippage(core.quotes.effectiveQuote.value))
 
   // --- Submit disabled ---
@@ -429,7 +416,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
           amount: core.amount.value,
           plan: plan.value || undefined,
           swapToAsset: !core.isSameAsset.value ? borrowVault.value.asset : undefined,
-          swapToAmount: minSwapOutput.value,
+          swapToAmount: !core.isSameAsset.value ? core.debtAmount.value : undefined,
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
           onConfirm: async () => {

@@ -1,6 +1,6 @@
 import type { Ref, ComputedRef } from 'vue'
 import { useAccount } from '@wagmi/vue'
-import { formatUnits, zeroAddress, type Address } from 'viem'
+import { zeroAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
@@ -17,7 +17,6 @@ import { useRepaySwapDetails } from '~/composables/repay/useRepaySwapDetails'
 import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics'
 import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
-import { trimTrailingZeros } from '~/utils/string-utils'
 import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { createRaceGuard } from '~/utils/race-guard'
 import { findBlockingDisabledOp, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
@@ -202,15 +201,6 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
 
   const quoteSlippage = computed(() => computeQuoteSlippage(core.quotes.effectiveQuote.value))
 
-  const minSwapOutput = computed(() => {
-    if (core.isSameAsset.value || !borrowVault.value) return undefined
-    const quote = core.quotes.effectiveQuote.value
-    if (!quote) return undefined
-    const min = BigInt(quote.amountOutMin || 0)
-    if (min <= 0n) return undefined
-    return trimTrailingZeros(formatUnits(min, Number(borrowVault.value.asset.decimals)))
-  })
-
   // --- Submit disabled ---
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
@@ -353,7 +343,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
           asset: sourceVault.value.asset,
           amount: core.amount.value,
           swapToAsset: !core.isSameAsset.value ? borrowVault.value.asset : undefined,
-          swapToAmount: minSwapOutput.value,
+          swapToAmount: !core.isSameAsset.value ? core.debtAmount.value : undefined,
           plan: plan.value || undefined,
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
