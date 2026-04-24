@@ -128,18 +128,27 @@ export const getBorrowableVaults = (market: MarketGroup): Vault[] =>
 export const getNonBorrowableMemberVaults = (market: MarketGroup): Vault[] =>
   market.vaults.filter(isVaultType).filter(v => !hasBorrowableLTV(v))
 
+const hasLiveDiscoveryColumn = (vault: Vault): boolean =>
+  vault.collateralLTVs.some(ltv => getCurrentLiquidationLTV(ltv) > 0n)
+
+const getDiscoveryColumnVaults = (market: MarketGroup): Vault[] =>
+  market.vaults.filter(isVaultType).filter(hasLiveDiscoveryColumn)
+
+const getDiscoveryRowOnlyVaults = (market: MarketGroup): Vault[] =>
+  market.vaults.filter(isVaultType).filter(v => !hasLiveDiscoveryColumn(v))
+
 export const isExternalCollateral = (market: MarketGroup, address: string): boolean => {
   const normalized = address.toLowerCase()
   return market.externalCollateral.some(v => getVaultAddress(v).toLowerCase() === normalized)
 }
 
 export const getActiveExternalCollateral = (market: MarketGroup): AnyVault[] => {
-  const borrowableVaults = getBorrowableVaults(market)
+  const columnVaults = getDiscoveryColumnVaults(market)
   return market.externalCollateral.filter((ext) => {
     const extAddr = getVaultAddress(ext).toLowerCase()
-    return borrowableVaults.some(v =>
+    return columnVaults.some(v =>
       v.collateralLTVs.some(ltv =>
-        ltv.collateral.toLowerCase() === extAddr && ltv.liquidationLTV > 0n,
+        ltv.collateral.toLowerCase() === extAddr && getCurrentLiquidationLTV(ltv) > 0n,
       ),
     )
   })
@@ -250,8 +259,8 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
 // ============================================================
 
 export const getCollateralMatrix = (market: MarketGroup): CollateralMatrixData | null => {
-  const borrowable = getBorrowableVaults(market)
-  const nonBorrowable = getNonBorrowableMemberVaults(market)
+  const borrowable = getDiscoveryColumnVaults(market)
+  const nonBorrowable = getDiscoveryRowOnlyVaults(market)
   const external = getActiveExternalCollateral(market)
 
   const knownAddresses = new Set<string>()
@@ -467,16 +476,11 @@ export const getGraphConnectedAddresses = (diagram: MiniDiagramData, address: st
 
 export const isNodeRampingDown = (market: MarketGroup, address: string): boolean => {
   const normalized = address.toLowerCase()
-  for (const v of market.vaults) {
-    if (!isVaultType(v)) continue
-    if (!hasBorrowableLTV(v)) continue
-    for (const ltv of v.collateralLTVs) {
-      if (ltv.collateral.toLowerCase() === normalized && isLiquidationLTVRamping(ltv)) {
-        return true
-      }
-    }
-  }
-  return false
+  const vault = market.vaults
+    .filter(isVaultType)
+    .find(v => v.address.toLowerCase() === normalized)
+
+  return vault?.collateralLTVs.some(ltv => isLiquidationLTVRamping(ltv)) ?? false
 }
 
 // ============================================================
