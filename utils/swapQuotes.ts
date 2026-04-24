@@ -64,17 +64,6 @@ export const pickBestQuote = (
   }, null)
 }
 
-export const computeQuoteSlippage = (
-  quote: SwapApiQuote | null | undefined,
-): number | null => {
-  if (!quote) return null
-  const out = parseBigInt(quote.amountOut)
-  const min = parseBigInt(quote.amountOutMin)
-  if (out <= 0n || min <= 0n || min > out) return null
-  if (min === out) return 0
-  return Number((out - min) * 10000n / out) / 100
-}
-
 export const getQuoteDiffPct = (
   quoteAmount: bigint,
   bestAmount: bigint,

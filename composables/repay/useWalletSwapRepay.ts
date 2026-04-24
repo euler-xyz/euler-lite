@@ -14,7 +14,6 @@ import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
 import { valueToNano } from '~/utils/crypto-utils'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
-import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { amountToPercent, percentToAmountNano } from '~/utils/repayUtils'
 import { SwapperMode } from '~/entities/swap'
 import { createRaceGuard } from '~/utils/race-guard'
@@ -117,8 +116,6 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     if (!quotes.effectiveQuote.value) return 0n
     return BigInt(quotes.effectiveQuote.value.amountOutMin || 0)
   })
-
-  const quoteSlippage = computed(() => computeQuoteSlippage(quotes.effectiveQuote.value))
 
   const computedTargetDebt = computed(() => {
     if (direction.value !== SwapperMode.TARGET_DEBT || !borrowVault.value || !debtAmount.value) return 0n
@@ -804,7 +801,6 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     swapRoutedVia,
     swapPriceImpact,
     swapRouteItems,
-    quoteSlippage,
     isFullRepay,
 
     // Health estimates

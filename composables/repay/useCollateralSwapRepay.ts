@@ -18,7 +18,6 @@ import { useRepaySwapDetails } from '~/composables/repay/useRepaySwapDetails'
 import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics'
 import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
-import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createRaceGuard } from '~/utils/race-guard'
 import { findBlockingDisabledOp, OP_REPAY, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
@@ -254,8 +253,6 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     return getSwapInputAmount(q, core.direction.value)
   })
   const isInsufficientSource = computed(() => requiredInput.value > 0n && requiredInput.value > sourceBalance.value)
-
-  const quoteSlippage = computed(() => computeQuoteSlippage(core.quotes.effectiveQuote.value))
 
   // --- Submit disabled ---
   const isSubmitDisabled = computed(() => {
@@ -505,7 +502,6 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     routedVia: details.routedVia,
     routeEmptyMessage: details.routeEmptyMessage,
     routeItems: details.routeItems,
-    quoteSlippage,
     // Submit
     isSubmitDisabled,
     disabledReason,

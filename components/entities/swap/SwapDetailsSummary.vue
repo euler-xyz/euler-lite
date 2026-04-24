@@ -2,20 +2,14 @@
 import { isPriceImpactWarning, isSlippageWarning } from '~/utils/priceImpact'
 import { formatNumber } from '~/utils/string-utils'
 
-const props = defineProps<{
+defineProps<{
   inputDisplay: string | null
   outputDisplay: string | null
   priceImpact: number | null
   slippage: number
   routedVia: string | null
   multipliedPriceImpact?: number | null
-  quoteSlippage?: number | null
 }>()
-
-const slippageDiffers = computed(() => {
-  if (props.quoteSlippage == null) return false
-  return Math.abs(props.quoteSlippage - props.slippage) > 0.05
-})
 
 const emit = defineEmits<{
   (e: 'openSlippageSettings'): void
@@ -74,12 +68,6 @@ const emit = defineEmits<{
           class="!w-16 !h-16 text-accent-600"
         />
       </button>
-      <span
-        v-if="slippageDiffers"
-        class="text-p4 text-warning-500"
-      >
-        Quote applies {{ formatNumber(quoteSlippage ?? 0, 2, 2) }}%
-      </span>
     </div>
   </SummaryRow>
   <SummaryRow
