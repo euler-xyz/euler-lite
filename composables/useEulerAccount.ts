@@ -22,11 +22,13 @@ const {
   hiddenBorrowCount,
   hiddenDepositCount,
   positionGuard,
-  unresolvedPositions,
+  unresolvedBorrowCount,
+  unresolvedDepositCount,
   updateBorrowPositions,
   updateSavingsPositions,
   clearPositions,
-  clearUnresolvedPositions,
+  beginRefreshCycle,
+  finalizeRefreshCycle,
 } = useAccountPositions()
 
 let fetchInProgress = false
@@ -49,7 +51,7 @@ export const useEulerAccount = () => {
     if (fetchInProgress) return
     fetchInProgress = true
     try {
-      clearUnresolvedPositions()
+      beginRefreshCycle()
       const gen = positionGuard.current()
       const targetAddress = portfolioAddress.value
       const { SUBGRAPH_URL } = useEulerConfig()
@@ -75,6 +77,7 @@ export const useEulerAccount = () => {
         false,
         gen,
       )
+      if (!positionGuard.isStale(gen)) finalizeRefreshCycle()
     }
     catch (error) {
       logWarn('useEulerAccount/updatePositions', error)
@@ -165,7 +168,7 @@ export const useEulerAccount = () => {
     if (fetchInProgress) return
     fetchInProgress = true
     try {
-      clearUnresolvedPositions()
+      beginRefreshCycle()
       const gen = positionGuard.current()
       const { SUBGRAPH_URL } = useEulerConfig()
       const { borrows: borrowEntries, deposits: depositEntries } = walletAddress
@@ -176,6 +179,7 @@ export const useEulerAccount = () => {
 
       await updateBorrowPositions(lensAddresses, walletAddress, borrowEntries)
       await updateSavingsPositions(lensAddresses, walletAddress, depositEntries, false, gen)
+      if (!positionGuard.isStale(gen)) finalizeRefreshCycle()
     }
     catch (error) {
       logWarn('useEulerAccount/refreshAllPositions', error)
@@ -192,7 +196,8 @@ export const useEulerAccount = () => {
   return {
     borrowPositions,
     depositPositions,
-    unresolvedPositions,
+    unresolvedBorrowCount,
+    unresolvedDepositCount,
     isPositionsLoading,
     isPositionsLoaded,
     isDepositsLoading,
