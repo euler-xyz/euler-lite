@@ -538,8 +538,6 @@ watch(formTab, () => {
                 :description="simulationError"
                 size="compact"
               />
-
-              <VaultWarningBanner :warnings="[collateral.liquidityWarning.value]" />
             </div>
 
             <VaultFormInfoBlock
@@ -713,6 +711,8 @@ watch(formTab, () => {
                 :description="simulationError"
                 size="compact"
               />
+
+              <VaultWarningBanner :warnings="[collateral.liquidityWarning.value]" />
             </div>
 
             <VaultFormInfoBlock
