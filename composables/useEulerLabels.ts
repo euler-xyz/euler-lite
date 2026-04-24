@@ -9,6 +9,7 @@ import { CACHE_TTL_5MIN_MS } from '~/entities/tuning-constants'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import {
   isLoading,
+  isReady,
   loadState,
   products,
   entities,
@@ -87,9 +88,11 @@ export const useEulerLabels = () => {
         && loadState.chainId === chainId
         && Object.keys(products).length > 0
         && (now - loadState.timestamp) < CACHE_TTL_5MIN_MS) {
+        isReady.value = true
         return
       }
 
+      isReady.value = false
       isLoading.value = true
 
       Object.keys(products).forEach(key => delete products[key])
@@ -190,11 +193,13 @@ export const useEulerLabels = () => {
     }
     finally {
       isLoading.value = false
+      isReady.value = true
     }
   }
 
   return {
     isLoading,
+    isReady,
     verifiedVaultAddresses,
     products,
     entities,

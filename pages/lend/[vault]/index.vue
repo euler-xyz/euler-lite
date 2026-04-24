@@ -69,6 +69,7 @@ const reviewSupplyLabel = 'Review Supply'
 useFullBalances()
 const { buildSupplyPlan, buildSwapAndSupplyPlan, executeTxPlan } = useEulerOperations()
 const { getVault, getSecuritizeVault, getEscrowVault, updateVault, isEscrowLoadedOnce } = useVaults()
+const { isReady: isLabelsReady } = useEulerLabels()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
 const { isConnected, address } = useAccount()
 const { chainId } = useEulerAddresses()
@@ -161,6 +162,12 @@ const needsRefresh = (v: Vault | undefined): boolean => {
   const isSecuritize = await isSecuritizeVault(vaultAddress)
 
   if (isSecuritize) {
+    // Wait for labels so `verified` is set correctly on direct navigation.
+    // Otherwise getSecuritizeVault falls through to a direct fetch with
+    // empty verifiedVaultAddresses and returns verified: false.
+    if (!isLabelsReady.value) {
+      await until(isLabelsReady).toBe(true)
+    }
     securitizeVault.value = await getSecuritizeVault(vaultAddress)
   }
   else {
@@ -172,9 +179,13 @@ const needsRefresh = (v: Vault | undefined): boolean => {
       if (registryEntry?.type === 'evk') {
         evkVault.value = registryEntry.vault as Vault
       }
-      // Escrow vaults haven't loaded yet - wait for them
-      else if (!isEscrowLoadedOnce.value) {
-        await until(isEscrowLoadedOnce).toBe(true)
+      else {
+        // Wait for labels (so `verified` is set correctly) AND for the escrow
+        // address set (so isKnownEscrowAddress can dispatch) before resolving.
+        await Promise.all([
+          isLabelsReady.value ? null : until(isLabelsReady).toBe(true),
+          isEscrowLoadedOnce.value ? null : until(isEscrowLoadedOnce).toBe(true),
+        ])
         const entryAfterLoad = registryGet(normalizedAddress)
         if (entryAfterLoad?.type === 'evk') {
           evkVault.value = entryAfterLoad.vault as Vault
@@ -185,14 +196,6 @@ const needsRefresh = (v: Vault | undefined): boolean => {
         else {
           evkVault.value = await getVault(vaultAddress)
         }
-      }
-      // Escrow vaults loaded - check if known escrow address
-      else if (isKnownEscrowAddress(normalizedAddress)) {
-        evkVault.value = await getEscrowVault(vaultAddress) as Vault
-      }
-      // Regular vault
-      else {
-        evkVault.value = await getVault(vaultAddress)
       }
 
       // Load any collateral vaults that aren't already in registry
