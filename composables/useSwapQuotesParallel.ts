@@ -15,7 +15,7 @@ import {
 } from '~/utils/swapQuotes'
 import { createRaceGuard } from '~/utils/race-guard'
 import { isAbortError, logWarn } from '~/utils/errorHandling'
-import { isCowProviderOrQuote } from '~/entities/cowswap'
+import { isCowProvider, isCowProviderOrQuote } from '~/entities/cowswap'
 import { getTokenUsdValue } from '~/services/pricing/priceProvider'
 import { resolveWrappedNativeAddress } from '~/utils/native-currency'
 import { shouldDiscardQuoteOnEstimateGasError } from '~/utils/tx-errors'
@@ -30,6 +30,7 @@ type SwapQuotesParallelOptions = {
 type SwapQuotesRequestOptions = {
   providers?: string[]
   errorMessage?: string
+  providerExtraData?: Partial<Record<string, string>>
 }
 
 export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
@@ -235,6 +236,17 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     }
   }
 
+  const getProviderExtraData = (
+    provider: string,
+    params: SwapApiRequestInput,
+    requestOptions: SwapQuotesRequestOptions,
+  ) => {
+    const normalizedProvider = provider.toLowerCase()
+    return requestOptions.providerExtraData?.[provider]
+      ?? requestOptions.providerExtraData?.[normalizedProvider]
+      ?? (isCowProvider(provider) ? params.providerExtraData : undefined)
+  }
+
   const requestQuotes = async (
     params: SwapApiRequestInput,
     requestOptions: SwapQuotesRequestOptions = {},
@@ -293,6 +305,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
           const data = await getSwapQuotes({
             ...params,
             provider,
+            providerExtraData: getProviderExtraData(provider, params, requestOptions),
           }, { signal: controller.signal })
 
           if (guard.isStale(gen)) {

@@ -31,6 +31,7 @@ export interface SwapApiRequestInput {
   transferOutputToReceiver?: boolean
   routingOverride?: RoutingConfig
   provider?: string
+  providerExtraData?: string
 }
 
 const buildRequestParams = (
@@ -60,6 +61,7 @@ const buildRequestParams = (
     transferOutputToReceiver: params.transferOutputToReceiver != null ? String(params.transferOutputToReceiver) : undefined,
     routingOverride: params.routingOverride ? JSON.stringify(params.routingOverride) : undefined,
     provider: params.provider,
+    providerExtraData: params.providerExtraData,
   }
 
   return Object.fromEntries(

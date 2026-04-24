@@ -24,6 +24,7 @@ import {
 } from '~/services/pricing/priceProvider'
 import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { useMultiplyCowSwap } from '~/composables/borrow/useMultiplyCowSwap'
+import { COWSWAP_PROVIDER_EXTRA_DATA } from '~/entities/cowswap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
@@ -695,6 +696,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       isRepay: false,
       targetDebt: 0n,
       currentDebt: 0n,
+      providerExtraData: COWSWAP_PROVIDER_EXTRA_DATA.openPosition,
     }
     await requestMultiplyQuotes(requestParams, {
       errorMessage: 'Unable to fetch swap quote. Multiply feature is not available for this asset.',

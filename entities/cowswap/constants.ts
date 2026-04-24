@@ -3,6 +3,14 @@ import type { SwapApiQuote } from '~/entities/swap'
 
 export const COWSWAP_PROVIDER_NAME = 'cow'
 
+export const COWSWAP_PROVIDER_EXTRA_DATA = {
+  openPosition: 'openPosition',
+  closePosition: 'closePosition',
+  collateralSwap: 'collateralSwap',
+} as const
+
+export type CowSwapProviderExtraData = typeof COWSWAP_PROVIDER_EXTRA_DATA[keyof typeof COWSWAP_PROVIDER_EXTRA_DATA]
+
 export const isCowProvider = (provider: string | null | undefined): boolean =>
   !!provider && provider.toLowerCase() === COWSWAP_PROVIDER_NAME
 
