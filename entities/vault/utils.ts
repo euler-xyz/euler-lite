@@ -6,6 +6,15 @@ import {
   vaultMaxWithdrawAbi,
   vaultPreviewWithdrawAbi,
 } from '~/abis/vault'
+import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
+
+export const isCyclicalNoteVault = (
+  vault: Vault | SecuritizeVault | null | undefined,
+): boolean => {
+  if (!vault || !('irmInfo' in vault)) return false
+  const type = vault.irmInfo?.interestRateModelInfo?.interestRateModelType
+  return typeof type === 'number' && type === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY
+}
 
 export const getBorrowVaultsByMap = (vaultsMap: Map<string, Vault>) => {
   const arr: BorrowVaultPair[] = []

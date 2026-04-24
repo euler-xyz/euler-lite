@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { zeroAddress } from 'viem'
 import type { Vault, EarnVault } from '~/entities/vault'
+import { isCyclicalNoteVault } from '~/entities/vault'
 import { isVaultKeyring, getEntitiesByVault, getEntitiesByEarnVault } from '~/utils/eulerLabelsUtils'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 
@@ -57,6 +58,11 @@ const extraType = computed(() => {
 })
 
 const isKeyring = computed(() => isVaultKeyring(vaultAddress))
+
+const isCyclicalNote = computed(() => {
+  if (!vault.value || isEarn.value) return false
+  return isCyclicalNoteVault(vault.value as Vault)
+})
 </script>
 
 <template>
@@ -79,6 +85,10 @@ const isKeyring = computed(() => isVaultKeyring(vaultAddress))
     />
     <GovernanceLimitedBadge
       v-if="isGovernanceLimited"
+      size="large"
+    />
+    <CyclicalNoteBadge
+      v-if="isCyclicalNote"
       size="large"
     />
   </div>
