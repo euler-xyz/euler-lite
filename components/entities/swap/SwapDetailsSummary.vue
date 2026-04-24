@@ -9,12 +9,12 @@ const props = defineProps<{
   slippage: number
   routedVia: string | null
   multipliedPriceImpact?: number | null
-  effectiveSlippage?: number | null
+  quoteSlippage?: number | null
 }>()
 
 const slippageDiffers = computed(() => {
-  if (props.effectiveSlippage == null) return false
-  return Math.abs(props.effectiveSlippage - props.slippage) > 0.05
+  if (props.quoteSlippage == null) return false
+  return Math.abs(props.quoteSlippage - props.slippage) > 0.05
 })
 
 const emit = defineEmits<{
@@ -78,7 +78,7 @@ const emit = defineEmits<{
         v-if="slippageDiffers"
         class="text-p4 text-warning-500"
       >
-        Quote applies {{ formatNumber(effectiveSlippage!, 2, 2) }}%
+        Quote applies {{ formatNumber(quoteSlippage ?? 0, 2, 2) }}%
       </span>
     </div>
   </SummaryRow>

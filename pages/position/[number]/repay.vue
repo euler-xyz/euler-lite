@@ -35,7 +35,11 @@ const { eulerLensAddresses: _eulerLensAddresses } = useEulerAddresses()
 const { fetchSingleBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
 const { slippage } = useSlippage({
-  fromSymbol: () => collateralVault.value?.asset.symbol,
+  fromSymbol: () => {
+    if (formTab.value === 'wallet') return walletSwap.selectedAsset.value?.symbol
+    if (formTab.value === 'savings') return savings.sourceVault.value?.asset.symbol
+    return collateralVault.value?.asset.symbol
+  },
   toSymbol: () => borrowVault.value?.asset.symbol,
 })
 // --- Shared state ---
@@ -604,7 +608,7 @@ watch(formTab, () => {
                 :output-display="walletSwap.swapOutputDisplay.value"
                 :price-impact="walletSwap.swapPriceImpact.value"
                 :slippage="slippage"
-                :effective-slippage="walletSwap.effectiveSlippage.value"
+                :quote-slippage="walletSwap.quoteSlippage.value"
                 :routed-via="walletSwap.swapRoutedVia.value"
                 @open-slippage-settings="openSlippageSettings"
               />
@@ -786,7 +790,7 @@ watch(formTab, () => {
                 :output-display="collateral.summary.value?.to ?? null"
                 :price-impact="collateral.priceImpact.value"
                 :slippage="slippage"
-                :effective-slippage="collateral.effectiveSlippage.value"
+                :quote-slippage="collateral.quoteSlippage.value"
                 :routed-via="collateral.routedVia.value"
                 @open-slippage-settings="openSlippageSettings"
               />
@@ -960,7 +964,7 @@ watch(formTab, () => {
                 :output-display="savings.summary.value?.to ?? null"
                 :price-impact="savings.priceImpact.value"
                 :slippage="slippage"
-                :effective-slippage="savings.effectiveSlippage.value"
+                :quote-slippage="savings.quoteSlippage.value"
                 :routed-via="savings.routedVia.value"
                 @open-slippage-settings="openSlippageSettings"
               />

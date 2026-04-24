@@ -19,6 +19,7 @@ import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics
 import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
 import { trimTrailingZeros } from '~/utils/string-utils'
+import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createRaceGuard } from '~/utils/race-guard'
 import { findBlockingDisabledOp, OP_REPAY, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
@@ -267,16 +268,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     return trimTrailingZeros(formatUnits(min, Number(borrowVault.value.asset.decimals)))
   })
 
-  // Effective slippage derived from the quote's amountOut vs amountOutMin.
-  // Used to warn users when the backend applies different slippage than configured.
-  const effectiveSlippage = computed(() => {
-    const quote = core.quotes.effectiveQuote.value
-    if (!quote) return null
-    const out = BigInt(quote.amountOut || 0)
-    const min = BigInt(quote.amountOutMin || 0)
-    if (out <= 0n || min <= 0n || min >= out) return null
-    return Number((out - min) * 10000n / out) / 100
-  })
+  const quoteSlippage = computed(() => computeQuoteSlippage(core.quotes.effectiveQuote.value))
 
   // --- Submit disabled ---
   const isSubmitDisabled = computed(() => {
@@ -526,7 +518,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     routedVia: details.routedVia,
     routeEmptyMessage: details.routeEmptyMessage,
     routeItems: details.routeItems,
-    effectiveSlippage,
+    quoteSlippage,
     // Submit
     isSubmitDisabled,
     disabledReason,

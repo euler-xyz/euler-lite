@@ -14,6 +14,7 @@ import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
 import { valueToNano } from '~/utils/crypto-utils'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
+import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { amountToPercent, percentToAmountNano } from '~/utils/repayUtils'
 import { SwapperMode } from '~/entities/swap'
 import { createRaceGuard } from '~/utils/race-guard'
@@ -114,16 +115,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     return BigInt(quotes.effectiveQuote.value.amountOutMin || 0)
   })
 
-  // Effective slippage derived from the quote's amountOut vs amountOutMin.
-  // Used to warn users when the backend applies different slippage than configured.
-  const effectiveSlippage = computed(() => {
-    const quote = quotes.effectiveQuote.value
-    if (!quote) return null
-    const out = BigInt(quote.amountOut || 0)
-    const min = BigInt(quote.amountOutMin || 0)
-    if (out <= 0n || min <= 0n || min >= out) return null
-    return Number((out - min) * 10000n / out) / 100
-  })
+  const quoteSlippage = computed(() => computeQuoteSlippage(quotes.effectiveQuote.value))
 
   const computedTargetDebt = computed(() => {
     if (direction.value !== SwapperMode.TARGET_DEBT || !borrowVault.value || !debtAmount.value) return 0n
@@ -809,7 +801,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     swapRoutedVia,
     swapPriceImpact,
     swapRouteItems,
-    effectiveSlippage,
+    quoteSlippage,
     isFullRepay,
 
     // Health estimates
