@@ -302,8 +302,8 @@ This prevents re-fetching and re-rendering when users navigate between listing p
 
 The `useSlippage` composable (`composables/useSlippage.ts`) manages swap slippage tolerance with two safety features:
 
-- **24-hour expiry**: Custom slippage values above 0.5% automatically expire after 24 hours, reverting to the default. This prevents users from forgetting high slippage settings across sessions. Values at or below 0.5% never expire.
-- **Stablecoin defaults**: Swaps between two stablecoins (detected by "USD" in the token symbol) default to 0.1% slippage instead of the general 0.5% default, reducing unnecessary losses on stable-to-stable pairs.
+- **24-hour expiry**: Custom slippage values above 0.3% automatically expire after 24 hours, reverting to the default. This prevents users from forgetting high slippage settings across sessions. Values at or below 0.3% never expire.
+- **Stablecoin defaults**: Swaps between two stablecoins (detected by "USD" in the token symbol) default to 0.05% slippage instead of the general 0.3% default, reducing unnecessary losses on stable-to-stable pairs.
 
 The composable accepts optional `fromSymbol`/`toSymbol` getters to detect stablecoin pairs reactively. Slippage state is persisted to `localStorage` with a timestamp for expiry tracking.
 

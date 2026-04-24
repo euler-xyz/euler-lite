@@ -56,17 +56,19 @@ const emit = defineEmits<{
     </p>
   </SummaryRow>
   <SummaryRow label="Slippage tolerance">
-    <button
-      type="button"
-      class="flex items-center gap-6 text-p2"
-      @click="emit('openSlippageSettings')"
-    >
-      <span :class="{ 'text-error-500': isSlippageWarning(slippage) }">{{ formatNumber(slippage, 2, 0) }}%</span>
-      <SvgIcon
-        name="edit"
-        class="!w-16 !h-16 text-accent-600"
-      />
-    </button>
+    <div class="flex flex-col items-end gap-2">
+      <button
+        type="button"
+        class="flex items-center gap-6 text-p2"
+        @click="emit('openSlippageSettings')"
+      >
+        <span :class="{ 'text-error-500': isSlippageWarning(slippage) }">{{ formatNumber(slippage, 2, 0) }}%</span>
+        <SvgIcon
+          name="edit"
+          class="!w-16 !h-16 text-accent-600"
+        />
+      </button>
+    </div>
   </SummaryRow>
   <SummaryRow
     v-if="routedVia"

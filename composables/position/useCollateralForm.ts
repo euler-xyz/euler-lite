@@ -142,7 +142,10 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const lastCollateralAddress = ref('')
 
   // --- Swap infrastructure ---
-  const { slippage: swapSlippage } = useSlippage()
+  const { slippage: swapSlippage } = useSlippage({
+    fromSymbol: () => collateralVault.value?.asset.symbol,
+    toSymbol: () => borrowVault.value?.asset.symbol,
+  })
   const {
     sortedQuoteCards: swapQuoteCardsSorted,
     selectedProvider: swapSelectedProvider,

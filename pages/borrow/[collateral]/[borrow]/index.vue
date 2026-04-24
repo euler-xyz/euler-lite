@@ -182,8 +182,8 @@ const multiplyDisabledReasonInfo = computed((): DisabledReasonInfo | undefined =
   if (isMultiplyRestricted.value) return { message: 'Multiply is not available for this pair in your region', variant: 'warning' }
   if (multiply.multiplyErrorText.value) return { message: multiply.multiplyErrorText.value, variant: 'error' }
   if (multiply.multiplySimulationError.value) return { message: multiply.multiplySimulationError.value, variant: 'error' }
-  if (!multiply.multiplyIsSameAsset.value && multiply.isMultiplyQuoteLoading.value) return { message: 'Fetching swap quotes...', variant: 'warning' }
-  if (!multiply.multiplyIsSameAsset.value && !multiply.multiplySelectedProvider.value) return { message: 'Select a swap quote to continue', variant: 'warning' }
+  if (!multiply.multiplyIsSameAsset.value && multiply.isMultiplyQuoteLoading.value && multiply.multiplyDebtAmountNano.value > 0n) return { message: 'Fetching swap quotes...', variant: 'warning' }
+  if (!multiply.multiplyIsSameAsset.value && !multiply.multiplySelectedProvider.value && multiply.multiplyDebtAmountNano.value > 0n) return { message: 'Select a swap quote to continue', variant: 'warning' }
   return undefined
 })
 
