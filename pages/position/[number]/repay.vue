@@ -886,6 +886,8 @@ watch(formTab, () => {
                 :description="simulationError"
                 size="compact"
               />
+
+              <VaultWarningBanner :warnings="[savings.liquidityWarning.value]" />
             </div>
 
             <VaultFormInfoBlock
