@@ -38,7 +38,7 @@ const { slippage } = useSlippage({
   fromSymbol: () => {
     if (formTab.value === 'wallet') return walletSwap.selectedAsset.value?.symbol
     if (formTab.value === 'savings') return savings.sourceVault.value?.asset.symbol
-    return collateralVault.value?.asset.symbol
+    return collateral.sourceVault.value?.asset.symbol
   },
   toSymbol: () => borrowVault.value?.asset.symbol,
 })
@@ -147,6 +147,7 @@ const walletSwap = useWalletSwapRepay({
   plan,
   isSubmitting,
   isPreparing,
+  slippage,
   clearSimulationError,
   runSimulation,
   netAPY,

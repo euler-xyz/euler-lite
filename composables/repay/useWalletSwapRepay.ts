@@ -32,6 +32,7 @@ interface UseWalletSwapRepayOptions {
   plan: Ref<TxPlan | null>
   isSubmitting: Ref<boolean>
   isPreparing: Ref<boolean>
+  slippage: Readonly<Ref<number>>
   clearSimulationError: () => void
   runSimulation: (plan: TxPlan) => Promise<boolean>
   netAPY: Ref<number>
@@ -51,6 +52,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     plan,
     isSubmitting,
     isPreparing,
+    slippage,
     clearSimulationError,
     runSimulation,
     netAPY,
@@ -69,10 +71,6 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const { eulerLensAddresses, chainId } = useEulerAddresses()
   const { isConnected, address } = useAccount()
   const { fetchSingleBalance } = useWallets()
-  const { slippage } = useSlippage({
-    fromSymbol: () => selectedAsset.value?.symbol,
-    toSymbol: () => borrowVault.value?.asset.symbol,
-  })
   const { getVault: registryGetVault } = useVaultRegistry()
 
   // --- State ---
