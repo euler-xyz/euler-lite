@@ -31,6 +31,8 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: LTVRampConfig) => {
   })
 }
 
+// Module-scope dedupe so we warn at most once per missing collateral address
+// across recomputes (and across SFC instances on the client).
 const warnedUnresolved = new Set<string>()
 
 const allCollateralPairs = computed(() =>

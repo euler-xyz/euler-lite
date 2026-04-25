@@ -54,6 +54,11 @@ export const isLiquidationLTVRamping = (ltv: LTVRampConfig, nowSeconds?: bigint)
  * / loaded / counted?". An LTV ramp-down sets borrowLTV to 0 immediately while
  * liquidation LTV ramps over time, so a `borrowLTV > 0` check alone drops live
  * mid-ramp edges (escrows, etc.) from discovery.
+ *
+ * This is the **edge-level** predicate (no collateral vault object available).
+ * For the borrow-side overview block, see `isLiveExposure` in
+ * `./collateral-exposure` — it additionally checks the collateral vault's
+ * `totalAssets`, so the two predicates are deliberately not equivalent.
  */
 export const isLiveCollateralEdge = (ltv: CollateralEdgeConfig, nowSeconds?: bigint): boolean =>
   ltv.borrowLTV > 0n || getCurrentLiquidationLTV(ltv, nowSeconds) > 0n

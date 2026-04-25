@@ -186,6 +186,10 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
       const colAddr = ltv.collateral.toLowerCase()
       if (!vaultByAddr.has(colAddr)) continue
       const liabAddr = vault.address.toLowerCase()
+      // directedEdges drives the borrowable-pair count rendered next to the
+      // graph — only currently borrowable edges count. displayEdges drives
+      // graph rendering and includes mid-ramp edges so a winding-down
+      // collateral remains visually connected.
       if (ltv.borrowLTV > 0n) {
         directedEdges.add(`${colAddr}:${liabAddr}`)
       }
