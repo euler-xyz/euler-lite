@@ -609,6 +609,13 @@ export const fetchEarnVaults = async function* (
   // incident), let the first transport failure log normally and silently drop the
   // rest in this batch. A genuine on-chain revert from one specific vault still
   // logs because it isn't classified as transport.
+  //
+  // Race safety: the check-then-set on `transportFailureLogged` looks like a
+  // TOCTOU but is safe today because every line in the catch handler runs
+  // synchronously — JavaScript microtasks run to completion without preemption,
+  // so the first rejected promise's catch sets the flag before any sibling's
+  // catch starts. DO NOT introduce an `await` between the check and the set
+  // without redesigning this as a post-batch dedup over `Promise.allSettled`.
   let transportFailureLogged = false
 
   const fetchVaultData = async (vaultAddress: string): Promise<PartialEarnVault | undefined> => {

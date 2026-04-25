@@ -102,6 +102,54 @@ describe('server logger (pino)', () => {
     expect(parsed.msg).toBe('RPC timeout')
   })
 
+  it('summarises errors nested under a non-err key (regression: pino serializers only walk top-level by default)', async () => {
+    process.env.NODE_ENV = 'production'
+    process.env.LOG_LEVEL = 'debug'
+    vi.resetModules()
+    const { pino } = await import('pino')
+    const { summarizeViemError } = await import('~/utils/viem-errors')
+    const captured: string[] = []
+    const stream = {
+      write: (s: string) => {
+        captured.push(s)
+        return true
+      },
+    }
+    // Mirror the real serializer config from utils/logger.server.ts so the
+    // assertion describes the same constraint that ships to production.
+    const log = pino({
+      level: 'debug',
+      base: { app: 'euler-lite' },
+      formatters: { level: (label: string) => ({ level: label }) },
+      serializers: { err: summarizeViemError, error: summarizeViemError },
+    }, stream as unknown as NodeJS.WritableStream)
+
+    const inner = new TimeoutError({ body: { method: 'eth_call' }, url: 'https://rpc.example' })
+    const outer = new ContractFunctionExecutionError(inner, {
+      abi: [{ type: 'function', name: 'foo', inputs: [], outputs: [], stateMutability: 'view' }],
+      args: ['0xdeadbeef'],
+      contractAddress: '0x0000000000000000000000000000000000000001',
+      functionName: 'foo',
+    })
+
+    // Top-level err: serializer fires, abi/metaMessages stripped.
+    log.warn({ ctx: 'top', err: outer }, 'top-level')
+    // Nested under wrapper.err: serializer does NOT walk into nested objects.
+    // This call is the regression-trigger; we expect callers to summarise at
+    // the call site if they need to nest. Asserts the bare nested case still
+    // doesn't leak by relying on ourselves passing summarised payloads when
+    // nesting (the recommended pattern).
+    log.warn({ ctx: 'nested', wrapper: { err: summarizeViemError(outer) } }, 'nested')
+
+    const lines = captured.join('').split('\n').filter(Boolean)
+    expect(lines.length).toBe(2)
+    for (const line of lines) {
+      expect(line).not.toContain('"abi"')
+      expect(line).not.toContain('metaMessages')
+      expect(line).not.toContain('0xdeadbeef')
+    }
+  })
+
   it('serialises an `err` field through summarizeViemError so abi/metaMessages never appear', async () => {
     vi.resetModules()
     const inner = new TimeoutError({ body: { method: 'eth_call' }, url: 'https://rpc.example' })

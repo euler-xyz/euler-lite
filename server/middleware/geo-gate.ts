@@ -1,6 +1,7 @@
 import { createError, getRequestURL } from 'h3'
 import { SANCTIONED_COUNTRIES } from '~/entities/country-constants'
 import { isInternalRequest } from '~/server/utils/internal-headers'
+import { logger } from '~/utils/logger'
 
 export default defineEventHandler((event) => {
   // Only gate API routes
@@ -40,10 +41,10 @@ export default defineEventHandler((event) => {
   // This prevents bypassing geo-blocks by omitting or spoofing headers.
   // In dev (DOPPLER_ENVIRONMENT=dev) without DEV_GEO_COUNTRY set, allow through.
   if (!country && process.env.DOPPLER_ENVIRONMENT !== 'dev') {
-    console.warn('[geo-gate] Blocked: country undetermined', {
-      cfCountry: cfCountry || 'absent',
-      path: url.pathname,
-    })
+    logger.warn(
+      { ctx: 'geo-gate', cfCountry: cfCountry || 'absent', path: url.pathname },
+      'blocked: country undetermined',
+    )
     throw createError({
       statusCode: 451,
       statusMessage: 'Unavailable For Legal Reasons',
@@ -55,20 +56,18 @@ export default defineEventHandler((event) => {
 
   // Log VPN/proxy usage for monitoring (do not block -- too many false positives)
   if (isVpn === 'true' || isProxyOrVpn === 'true') {
-    console.warn('[geo-gate] VPN/proxy detected', {
-      country,
-      isVpn,
-      isProxyOrVpn,
-      path: url.pathname,
-    })
+    logger.warn(
+      { ctx: 'geo-gate', country, isVpn, isProxyOrVpn, path: url.pathname },
+      'VPN/proxy detected',
+    )
   }
 
   // Block sanctioned countries
   if (country && SANCTIONED_COUNTRIES.includes(country)) {
-    console.warn('[geo-gate] Blocked sanctioned country', {
-      country,
-      path: url.pathname,
-    })
+    logger.warn(
+      { ctx: 'geo-gate', country, path: url.pathname },
+      'blocked sanctioned country',
+    )
     throw createError({
       statusCode: 451,
       statusMessage: 'Unavailable For Legal Reasons',

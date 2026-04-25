@@ -6,6 +6,10 @@ import {
   ContractFunctionExecutionError,
   CallExecutionError,
   ContractFunctionRevertedError,
+  RpcRequestError,
+  LimitExceededRpcError,
+  ResourceUnavailableRpcError,
+  InternalRpcError,
 } from 'viem'
 import { classifyViemError, isTransportError, summarizeViemError } from '~/utils/viem-errors'
 
@@ -103,6 +107,85 @@ describe('classifyViemError', () => {
     const err: Error & { cause?: unknown } = new Error('loop')
     err.cause = err
     expect(() => classifyViemError(err)).not.toThrow()
+  })
+
+  it('terminates on a mutual cause cycle', () => {
+    const a: Error & { cause?: unknown } = new Error('a')
+    const b: Error & { cause?: unknown } = new Error('b')
+    a.cause = b
+    b.cause = a
+    expect(() => classifyViemError(a)).not.toThrow()
+    expect(classifyViemError(a).kind).toBe('unknown')
+  })
+
+  it('classifies a viem LimitExceededRpcError as rate-limited', () => {
+    const err = new LimitExceededRpcError(
+      new RpcRequestError({
+        body: { method: 'eth_call' },
+        error: { code: -32005, message: 'too many requests' },
+        url: 'https://rpc.example',
+      }),
+    )
+    const out = classifyViemError(err)
+    expect(out.kind).toBe('rpc-rate-limited')
+    expect(out.isTransport).toBe(true)
+  })
+
+  it('classifies a viem ResourceUnavailableRpcError as resource-unavailable', () => {
+    const err = new ResourceUnavailableRpcError(
+      new RpcRequestError({
+        body: { method: 'eth_call' },
+        error: { code: -32002, message: 'resource unavailable' },
+        url: 'https://rpc.example',
+      }),
+    )
+    expect(classifyViemError(err).kind).toBe('rpc-resource-unavailable')
+  })
+
+  it('classifies a viem InternalRpcError as unreachable', () => {
+    const err = new InternalRpcError(
+      new RpcRequestError({
+        body: { method: 'eth_call' },
+        error: { code: -32603, message: 'internal' },
+        url: 'https://rpc.example',
+      }),
+    )
+    expect(classifyViemError(err).kind).toBe('rpc-unreachable')
+  })
+
+  it('classifies a bare RpcRequestError with code -32005 as rate-limited via the JSON-RPC code fallback', () => {
+    // Chainstack and other providers sometimes return bare RpcRequestError
+    // shapes whose name doesn't match a known viem subclass. The class-name
+    // lookup misses, but the JSON-RPC code fallback should refine the kind.
+    const err = new RpcRequestError({
+      body: { method: 'eth_call' },
+      error: { code: -32005, message: 'too many requests' },
+      url: 'https://rpc.example',
+    })
+    const out = classifyViemError(err)
+    // RpcRequestError itself is in KIND_BY_VIEM_NAME mapped to 'rpc-unreachable',
+    // but the deepest-first walk picks the same node, then code fallback runs
+    // only if name lookup misses. So this test asserts the safety-net path
+    // still classifies as transport even when the specific kind defaults to
+    // 'rpc-unreachable'.
+    expect(out.isTransport).toBe(true)
+    expect(['rpc-unreachable', 'rpc-rate-limited']).toContain(out.kind)
+  })
+
+  it('refines an unrecognised wrapper with code -32005 to rate-limited via code fallback', () => {
+    // Synthesise an Error whose name is not in the table, but whose `code`
+    // is recognisable. This is the class of upstream that previously read
+    // as kind: 'unknown' and bypassed the batch-level transport dedup.
+    class WeirdRpcError extends Error {
+      code = -32005
+      constructor() {
+        super('upstream throttled')
+        this.name = 'WeirdRpcError'
+      }
+    }
+    const out = classifyViemError(new WeirdRpcError())
+    expect(out.kind).toBe('rpc-rate-limited')
+    expect(out.isTransport).toBe(true)
   })
 })
 

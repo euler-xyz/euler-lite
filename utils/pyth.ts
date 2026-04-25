@@ -297,7 +297,7 @@ export const buildPythUpdateCallsFromFeeds = async (
       }) as bigint
     }
     catch (err) {
-      console.warn('[buildPythUpdateCalls] getUpdateFee failed', err)
+      logger.warn({ ctx: 'pyth/buildPythUpdateCalls', err }, 'getUpdateFee failed')
       continue
     }
 
@@ -434,7 +434,7 @@ export const buildPythBatchItems = async (
       }) as bigint
     }
     catch (err) {
-      console.warn('[buildPythBatchItems] getUpdateFee failed', err)
+      logger.warn({ ctx: 'pyth/buildPythBatchItems', err }, 'getUpdateFee failed')
       continue
     }
 
@@ -499,7 +499,7 @@ export const buildPythBatchItemsFromFeeds = async (
       }) as bigint
     }
     catch (err) {
-      console.warn('[buildPythBatchItemsFromFeeds] getUpdateFee failed', err)
+      logger.warn({ ctx: 'pyth/buildPythBatchItemsFromFeeds', err }, 'getUpdateFee failed')
       continue
     }
 
