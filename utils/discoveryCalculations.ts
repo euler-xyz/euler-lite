@@ -619,12 +619,9 @@ const isEscrow = (v: Vault | SecuritizeVault): boolean =>
 const compareSymbolAsc = (a: Vault | SecuritizeVault, b: Vault | SecuritizeVault): number =>
   a.asset.symbol.localeCompare(b.asset.symbol, undefined, { sensitivity: 'base' })
 
-export const getAttributeMatrixColumns = (
-  market: MarketGroup,
-  options: { includeExternal?: boolean } = {},
-): AttributeMatrixColumn[] => {
-  const includeExternal = options.includeExternal ?? true
-
+// Both Configuration and Stats matrices show only the curated product — external
+// collateral belongs to other governance and adds noise either way.
+export const getAttributeMatrixColumns = (market: MarketGroup): AttributeMatrixColumn[] => {
   const memberEvk: Vault[] = []
   const memberSecuritize: SecuritizeVault[] = []
   for (const v of market.vaults) {
@@ -642,30 +639,7 @@ export const getAttributeMatrixColumns = (
     vault,
   })
 
-  if (!includeExternal) {
-    return [...memberEvk.map(toCol), ...memberSecuritize.map(toCol)]
-  }
-
-  const externalEvk: Vault[] = []
-  const externalSecuritize: SecuritizeVault[] = []
-  const seenExternal = new Set<string>()
-  for (const v of market.externalCollateral) {
-    const addr = getVaultAddress(v).toLowerCase()
-    if (!addr || seenExternal.has(addr)) continue
-    seenExternal.add(addr)
-    if (isVaultType(v)) externalEvk.push(v)
-    else if (isSecuritizeVault(v)) externalSecuritize.push(v)
-  }
-
-  externalEvk.sort(compareSymbolAsc)
-  externalSecuritize.sort(compareSymbolAsc)
-
-  return [
-    ...memberEvk.map(toCol),
-    ...memberSecuritize.map(toCol),
-    ...externalEvk.map(toCol),
-    ...externalSecuritize.map(toCol),
-  ]
+  return [...memberEvk.map(toCol), ...memberSecuritize.map(toCol)]
 }
 
 const NA_CELL: AttributeCell = { display: '—', kind: 'text' }
@@ -918,10 +892,7 @@ export const getAttributeMatrix = (
   mode: AttributeMatrixMode,
 ): AttributeMatrixData => ({
   rows: mode === 'config' ? CONFIG_ROWS : STATS_ROWS,
-  // Config view focuses on the curated product — externals belong to other
-  // governance and add noise. Stats view keeps externals so risk managers can
-  // compare TVL/APY against linked collateral pools.
-  columns: getAttributeMatrixColumns(market, { includeExternal: mode !== 'config' }),
+  columns: getAttributeMatrixColumns(market),
 })
 
 export const buildAttributeRowCells = (
