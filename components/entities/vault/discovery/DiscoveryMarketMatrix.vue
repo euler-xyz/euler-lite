@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { CSSProperties } from 'vue'
+import type { Address } from 'viem'
 import type { MarketGroup } from '~/entities/lend-discovery'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
@@ -9,11 +11,22 @@ import {
   isLiquidationLTVRamping,
   getCurrentLiquidationLTV,
   getVaultUtilization,
+  isVaultType,
   type CollateralMatrixData,
   type MatrixCell,
   type DotMetric,
   type EnhancedCellApys,
 } from '~/utils/discoveryCalculations'
+import {
+  collectOracleAdapters,
+  getChecksStatus,
+  OracleAdapterCheckSeverity,
+  type OracleAdapterEntry,
+  type OracleAdapterCheck,
+} from '~/entities/oracle'
+import { getOracleProviderLogo } from '~/entities/oracle-providers'
+import { getExplorerLink } from '~/utils/block-explorer'
+import { truncate } from '~/utils/string-utils'
 
 const props = defineProps<{
   market: MarketGroup
@@ -36,6 +49,8 @@ const {
   hasSupplyRewards,
   hasBorrowRewards,
 } = useRewardsApy()
+const { oracleAdapters, loadOracleAdapter } = useEulerLabels()
+const { chainId } = useEulerAddresses()
 
 const hoveredCell = ref<{
   collateralAddr: string
@@ -123,6 +138,7 @@ const shouldShowSparkles = (
 }
 
 const metricRange = computed((): { min: number, max: number } => {
+  if (props.dotMetric === 'oracle') return { min: 0, max: 0 }
   let min = Infinity
   let max = -Infinity
   for (const [rowAddr, cols] of props.matrix.cells) {
@@ -136,6 +152,124 @@ const metricRange = computed((): { min: number, max: number } => {
   }
   return Number.isFinite(min) ? { min, max } : { min: 0, max: 0 }
 })
+
+// ── Oracle metric: per-cell adapter list + tooltip ────────────────────────────
+
+const cellOracleAdapters = computed((): Map<string, OracleAdapterEntry[]> => {
+  const result = new Map<string, OracleAdapterEntry[]>()
+  if (props.dotMetric !== 'oracle') return result
+  for (const [colAddr, rowCells] of props.matrix.cells) {
+    for (const [liabAddr] of rowCells) {
+      const collateral = findVault(props.market, colAddr)
+      const liability = findVault(props.market, liabAddr)
+      if (!collateral || !liability) continue
+      if (!isVaultType(liability) || !liability.oracleDetailedInfo) continue
+      const adapters = collectOracleAdapters(liability.oracleDetailedInfo, 3, {
+        base: collateral.asset.address as Address,
+        quote: liability.unitOfAccount as Address,
+        leafOnly: true,
+      })
+      if (adapters.length) result.set(`${colAddr}:${liabAddr}`, adapters)
+    }
+  }
+  return result
+})
+
+watch(
+  cellOracleAdapters,
+  async (map) => {
+    if (!chainId.value || map.size === 0) return
+    const seen = new Set<string>()
+    const toLoad: OracleAdapterEntry[] = []
+    for (const adapters of map.values()) {
+      for (const a of adapters) {
+        if (a.name === 'ERC4626Vault') continue
+        const key = a.oracle.toLowerCase()
+        if (seen.has(key)) continue
+        seen.add(key)
+        toLoad.push(a)
+      }
+    }
+    await Promise.all(toLoad.map(a => loadOracleAdapter(chainId.value, a.oracle)))
+  },
+  { immediate: true },
+)
+
+interface AdapterView {
+  oracle: string
+  name: string
+  provider: string
+  methodology?: string
+  logo?: string
+  label?: { primary: string, suffix?: string }
+  checks?: OracleAdapterCheck[]
+  checksStatus: 'positive' | 'warning' | 'negative' | null
+  failedChecks: OracleAdapterCheck[]
+}
+
+const enrichAdapter = (adapter: OracleAdapterEntry): AdapterView => {
+  const meta = oracleAdapters[adapter.oracle.toLowerCase()]
+  const isERC4626 = adapter.name === 'ERC4626Vault'
+  const provider = meta?.provider || adapter.name
+  const name = meta?.name || adapter.name
+  const checks = meta?.checks
+  return {
+    oracle: adapter.oracle,
+    name,
+    provider,
+    methodology: meta?.methodology || (isERC4626 ? 'Exchange Rate' : undefined),
+    logo: getOracleProviderLogo(provider, name),
+    label: meta?.label
+      ? {
+          primary: meta.label.split('(')[0].trimEnd(),
+          suffix: meta.label.includes('(') ? meta.label.slice(meta.label.indexOf('(')).trim() : undefined,
+        }
+      : undefined,
+    checks,
+    checksStatus: getChecksStatus(checks),
+    failedChecks: checks?.filter(c => !c.pass) ?? [],
+  }
+}
+
+const getCellAdapterViews = (collateralAddr: string, liabilityAddr: string): AdapterView[] => {
+  const list = cellOracleAdapters.value.get(`${collateralAddr}:${liabilityAddr}`)
+  if (!list) return []
+  return list.map(enrichAdapter)
+}
+
+const TOOLTIP_WIDTH = 360
+const tooltipAdapter = ref<AdapterView | null>(null)
+const tooltipStyle = ref<CSSProperties>({})
+
+const closeTooltip = () => {
+  tooltipAdapter.value = null
+}
+
+const onAdapterClick = (adapter: AdapterView, event: MouseEvent) => {
+  if (tooltipAdapter.value?.oracle === adapter.oracle) {
+    closeTooltip()
+    return
+  }
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  const left = Math.min(rect.left, window.innerWidth - TOOLTIP_WIDTH - 16)
+  const spaceBelow = window.innerHeight - rect.bottom - 16
+  const spaceAbove = rect.top - 16
+  const flipUp = spaceAbove > spaceBelow
+  tooltipStyle.value = flipUp
+    ? { top: `${rect.top - 8}px`, left: `${left}px`, transform: 'translateY(-100%)', maxHeight: `${spaceAbove}px` }
+    : { top: `${rect.bottom + 8}px`, left: `${left}px`, transform: 'none', maxHeight: `${spaceBelow}px` }
+  tooltipAdapter.value = adapter
+}
+
+const onDocumentClick = () => closeTooltip()
+onMounted(() => {
+  document.addEventListener('click', onDocumentClick)
+})
+onUnmounted(() => {
+  document.removeEventListener('click', onDocumentClick)
+})
+
+const explorerLink = (address: string) => getExplorerLink(address, chainId.value, true)
 </script>
 
 <template>
@@ -257,7 +391,42 @@ const metricRange = computed((): { min: number, max: number } => {
               "
             >
               <template v-if="matrix.cells.get(row.address)?.get(col.address)">
-                <div class="inline-flex items-center justify-center gap-2">
+                <!-- Oracle metric: render adapter logos -->
+                <template v-if="dotMetric === 'oracle'">
+                  <div class="inline-flex items-center justify-center gap-4 flex-wrap">
+                    <button
+                      v-for="adapter in getCellAdapterViews(row.address, col.address)"
+                      :key="adapter.oracle"
+                      type="button"
+                      class="relative inline-flex items-center justify-center cursor-pointer"
+                      :title="adapter.provider"
+                      @click.stop="onAdapterClick(adapter, $event)"
+                    >
+                      <BaseAvatar
+                        v-if="adapter.logo"
+                        :src="adapter.logo"
+                        :label="adapter.name"
+                        class="icon--16"
+                      />
+                      <SvgIcon
+                        v-else
+                        name="question-circle"
+                        class="!w-16 !h-16 text-content-tertiary"
+                      />
+                      <span
+                        v-if="adapter.checksStatus === 'warning' || adapter.checksStatus === 'negative'"
+                        class="absolute -top-1 -right-1 w-6 h-6 rounded-full"
+                        :class="adapter.checksStatus === 'negative' ? 'bg-error-500' : 'bg-warning-500'"
+                      />
+                    </button>
+                  </div>
+                </template>
+
+                <!-- Numeric metrics: original rendering -->
+                <div
+                  v-else
+                  class="inline-flex items-center justify-center gap-2"
+                >
                   <SvgIcon
                     v-if="
                       dotMetric === 'lltv'
@@ -312,4 +481,109 @@ const metricRange = computed((): { min: number, max: number } => {
   >
     Tap a cell, row, or column header to see lending/borrowing options below.
   </p>
+
+  <!-- Oracle adapter tooltip -->
+  <Teleport to="body">
+    <div
+      v-if="tooltipAdapter"
+      class="fixed z-[9999] bg-surface-secondary border border-line-subtle rounded-xl p-12 shadow-card overflow-y-auto"
+      :style="[tooltipStyle, { width: `${TOOLTIP_WIDTH}px` }]"
+      @click.stop
+    >
+      <div class="flex items-center justify-between gap-8 mb-8">
+        <div class="flex items-center gap-8">
+          <BaseAvatar
+            v-if="tooltipAdapter.logo"
+            :src="tooltipAdapter.logo"
+            :label="tooltipAdapter.name"
+            class="icon--20"
+          />
+          <SvgIcon
+            v-else
+            name="question-circle"
+            class="!w-20 !h-20 text-content-tertiary"
+          />
+          <span class="text-p2 text-content-primary font-medium">{{ tooltipAdapter.provider || 'Unknown' }}</span>
+        </div>
+        <button
+          type="button"
+          class="text-content-muted hover:text-content-secondary cursor-pointer"
+          aria-label="Close"
+          @click.stop="closeTooltip"
+        >
+          <SvgIcon
+            name="close"
+            class="!w-14 !h-14"
+          />
+        </button>
+      </div>
+      <div class="flex flex-col gap-8 text-p3">
+        <div class="flex flex-col gap-2">
+          <span class="text-content-tertiary">Oracle</span>
+          <NuxtLink
+            :to="explorerLink(tooltipAdapter.oracle)"
+            target="_blank"
+            class="text-accent-600 underline hover:text-accent-500"
+            @click.stop
+          >
+            {{ tooltipAdapter.label?.primary ?? truncate(tooltipAdapter.oracle, 6) }}
+            <span
+              v-if="tooltipAdapter.label?.suffix"
+              class="text-content-tertiary ml-2"
+            >{{ tooltipAdapter.label.suffix }}</span>
+          </NuxtLink>
+        </div>
+        <div
+          v-if="tooltipAdapter.methodology"
+          class="flex flex-col gap-2"
+        >
+          <span class="text-content-tertiary">Methodology</span>
+          <span class="text-content-primary">{{ tooltipAdapter.methodology }}</span>
+        </div>
+        <div
+          v-if="tooltipAdapter.checks?.length"
+          class="flex flex-col gap-2"
+        >
+          <span class="text-content-tertiary">Checks</span>
+          <span class="flex items-center gap-6">
+            <span
+              class="inline-block w-8 h-8 rounded-full flex-shrink-0"
+              :class="{
+                'bg-success-500': tooltipAdapter.checksStatus === 'positive',
+                'bg-warning-500': tooltipAdapter.checksStatus === 'warning',
+                'bg-error-500': tooltipAdapter.checksStatus === 'negative',
+              }"
+            />
+            <span class="text-content-primary">
+              <template v-if="tooltipAdapter.checksStatus === 'positive'">{{ tooltipAdapter.checks.length }} passed</template>
+              <template v-else>{{ tooltipAdapter.failedChecks.length }} failed</template>
+            </span>
+          </span>
+        </div>
+        <div
+          v-if="tooltipAdapter.failedChecks.length"
+          class="flex flex-col gap-6 border-t border-line-subtle pt-8"
+        >
+          <div
+            v-for="(check, i) in tooltipAdapter.failedChecks"
+            :key="`${check.id}-${i}`"
+            class="flex items-start gap-6"
+          >
+            <SvgIcon
+              name="warning"
+              class="!w-14 !h-14 mt-1 flex-shrink-0"
+              :class="{
+                'text-error-500': check.severity === OracleAdapterCheckSeverity.High,
+                'text-warning-500': check.severity !== OracleAdapterCheckSeverity.High,
+              }"
+            />
+            <div>
+              <span class="text-content-primary font-medium">{{ check.id }}: </span>
+              <span class="text-content-secondary">{{ check.message }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
