@@ -19,7 +19,7 @@ import {
 } from '~/utils/vault-hooks'
 
 export type WarningLevel = 'info' | 'high' | 'critical'
-export type WarningContext = 'lend' | 'borrow' | 'general'
+export type WarningContext = 'lend' | 'borrow' | 'repay' | 'general'
 
 export interface VaultWarning {
   level: WarningLevel
@@ -52,6 +52,16 @@ const utilisationMessages: Record<WarningContext, Record<'high' | 'critical', { 
     critical: {
       title: 'Critical utilisation',
       message: 'Utilisation is critically high. Interest rates are very elevated. Available liquidity is near zero.',
+    },
+  },
+  repay: {
+    high: {
+      title: 'High utilisation',
+      message: 'Utilisation is high on this collateral market. Available liquidity is limited, so repaying with collateral may be constrained.',
+    },
+    critical: {
+      title: 'Critical utilisation',
+      message: 'Utilisation is critically high on this collateral market. Available liquidity is near zero, so repaying with collateral may fail.',
     },
   },
   general: {
