@@ -31,8 +31,10 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: LTVRampConfig) => {
   })
 }
 
-// Module-scope dedupe so we warn at most once per missing collateral address
-// across recomputes (and across SFC instances on the client).
+// Module-scope dedupe so we warn at most once per (vault, missing-collateral)
+// pair across recomputes and SFC instances. Mirrors the dedupe in
+// composables/useMarketGroups.ts so a curator can spot the same gap reported
+// by either site without one suppressing the other.
 const warnedUnresolved = new Set<string>()
 
 const allCollateralPairs = computed(() =>
@@ -41,7 +43,7 @@ const allCollateralPairs = computed(() =>
     (addr) => {
       const entry = registryGet(addr)
       if (!entry?.vault) {
-        const key = addr.toLowerCase()
+        const key = `${vault.address.toLowerCase()}:${addr.toLowerCase()}`
         if (!warnedUnresolved.has(key)) {
           warnedUnresolved.add(key)
           logWarn(
