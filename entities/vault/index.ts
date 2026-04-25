@@ -61,6 +61,10 @@ export {
   getRampTimeRemaining,
 } from './ltv'
 
+// Collateral discovery (find addresses referenced as live collateral but
+// not yet resolved into the registry).
+export { extractUnresolvedCollateralAddresses } from './collateral-discovery'
+
 // Collateral exposure (borrow-side pair derivation)
 export {
   getCollateralExposurePairs,

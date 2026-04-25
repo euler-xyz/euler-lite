@@ -15,6 +15,7 @@ import {
   fetchSecuritizeVault,
   fetchVaults,
   clearPriceCaches,
+  extractUnresolvedCollateralAddresses,
   isLiveCollateralEdge,
   type Vault,
 } from '~/entities/vault'
@@ -266,6 +267,28 @@ const fetchNeededEscrowVaults = async (addresses: string[], generation: number):
   registrySetMany(entries)
 }
 
+const UNRESOLVED_COLLATERAL_CONCURRENCY = 8
+
+/**
+ * Lazy-resolve collateral addresses that aren't covered by the bulk loaders.
+ * Uses {@link useVaultRegistry.getOrFetch} (which routes through
+ * `/api/vault-categories` + escrow-perspective probe + EVK/Securitize lens
+ * fallback) so the call site doesn't need to know the vault type.
+ *
+ * Bounded concurrency keeps this from fanning out into hundreds of parallel
+ * lens reads on markets that reference many off-label collaterals.
+ */
+const fetchUnresolvedCollaterals = async (addresses: string[], generation: number): Promise<void> => {
+  const { getOrFetch } = useVaultRegistry()
+  if (!addresses.length || loadGeneration.value !== generation) return
+
+  for (let i = 0; i < addresses.length; i += UNRESOLVED_COLLATERAL_CONCURRENCY) {
+    if (loadGeneration.value !== generation) return
+    const batch = addresses.slice(i, i + UNRESOLVED_COLLATERAL_CONCURRENCY)
+    await Promise.allSettled(batch.map(addr => getOrFetch(addr)))
+  }
+}
+
 const updateSecuritizeVaults = async (securitizeAddresses: string[], generation: number, silent = false) => {
   const { setMany: registrySetMany } = useVaultRegistry()
 
@@ -498,6 +521,21 @@ const loadVaults = async () => {
         await fetchNeededEscrowVaults(neededEscrowAddresses, generation)
       }),
     ])
+
+    if (loadGeneration.value !== generation) return
+
+    // After bulk loaders + escrow lazy-fetch settle, sweep up any collateral
+    // address referenced by a member vault that isn't yet in the registry.
+    // These are typically EVK vaults that exist on chain but aren't part of
+    // any product label — without this, discovery views silently drop the
+    // relationship. The registry's getOrFetch routes through the standard
+    // category resolver, so escrow / securitize / EVK are all handled.
+    const { getEvkVaults: getEvkForUnresolved, has: registryHasForUnresolved } = useVaultRegistry()
+    const unresolvedCollateralAddresses = extractUnresolvedCollateralAddresses(
+      getEvkForUnresolved(),
+      registryHasForUnresolved,
+    )
+    await fetchUnresolvedCollaterals(unresolvedCollateralAddresses, generation)
 
     if (loadGeneration.value !== generation) return
 
