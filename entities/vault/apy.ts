@@ -1,5 +1,6 @@
 import { parseUnits, type Address } from 'viem'
-import { logWarn } from '~/utils/errorHandling'
+import { logger } from '~/utils/logger'
+import { chainTag } from '~/utils/chain-tag'
 import { SECONDS_IN_YEAR, TARGET_TIME_AGO } from '~/entities/constants'
 import { eulerUtilsLensABI, eulerVaultLensABI } from '~/entities/euler/abis'
 import { vaultConvertToAssetsAbi } from '~/abis/vault'
@@ -178,6 +179,7 @@ export const calculateEarnVaultAPYWithCache = async (
   decimals: bigint,
   blockCache: BlockDataCache,
   rpcUrl: string,
+  chainId: number,
 ): Promise<number> => {
   try {
     const client = getPublicClient(rpcUrl)
@@ -216,7 +218,7 @@ export const calculateEarnVaultAPYWithCache = async (
     return Number.isFinite(apy) ? apy : 0
   }
   catch (e) {
-    logWarn('apy/calculate', e, { severity: 'error' })
+    logger.error({ ctx: 'apy/calculate', ...chainTag(chainId), vault: vaultAddress, err: e }, 'failed to calculate APY')
     return 0
   }
 }
@@ -232,5 +234,5 @@ export const calculateEarnVaultAPYFromExchangeRate = async (
   if (!blockCache) {
     return 0
   }
-  return calculateEarnVaultAPYWithCache(vaultAddress, decimals, blockCache, rpcUrl)
+  return calculateEarnVaultAPYWithCache(vaultAddress, decimals, blockCache, rpcUrl, chainId)
 }

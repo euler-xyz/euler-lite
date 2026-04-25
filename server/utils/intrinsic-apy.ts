@@ -17,7 +17,9 @@ import type { IntrinsicApyInfo } from '~/entities/intrinsic-apy'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { createInFlightDedup, scheduleBackgroundRefresh } from '~/server/utils/in-flight'
-import { logWarn, reportStatus } from '~/server/utils/log'
+import { reportStatus } from '~/server/utils/log'
+import { logger } from '~/utils/logger'
+import { chainTag } from '~/utils/chain-tag'
 
 const CACHE_TTL_MS = 5 * 60 * 1000
 const PENDLE_MATURITY_STALE_THRESHOLD_MS = 2 * 60 * 60 * 1000
@@ -438,7 +440,7 @@ async function extractForProvider(
       const simpleProvider: SimpleProvider = provider
       const spec = SIMPLE_SPECS[simpleProvider]
       if (!spec) {
-        logWarn('intrinsic-apy', `No extractor for provider "${provider}"`)
+        logger.warn({ ctx: 'intrinsic-apy', provider }, 'no extractor for provider')
         return []
       }
       return extractSimple(sources, spec as SimpleProviderSpecShape)
@@ -488,7 +490,18 @@ const orchestrate = (chainId: number): Promise<Record<string, IntrinsicApyInfo>>
       for (const [addr, info] of r.value) {
         const existing = merged[addr]
         if (existing) {
-          logWarn('intrinsic-apy/merge', `Duplicate APY for ${addr}: "${existing.provider}" (${existing.apy}%) overwritten by "${info.provider}" (${info.apy}%)`)
+          logger.warn(
+            {
+              ctx: 'intrinsic-apy/merge',
+              ...chainTag(chainId),
+              address: addr,
+              previousProvider: existing.provider,
+              previousApy: existing.apy,
+              newProvider: info.provider,
+              newApy: info.apy,
+            },
+            'duplicate APY entry overwritten',
+          )
         }
         merged[addr] = info
       }

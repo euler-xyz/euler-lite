@@ -2,7 +2,8 @@ import { decodeFunctionResult, encodeFunctionData, getAddress } from 'viem'
 import { createTtlCache } from './cache'
 import { fetchWithTimeout } from './fetchWithTimeout'
 import { INTERNAL_FETCH_HEADERS } from './internal-headers'
-import { logWarn } from './log'
+import { logger } from '~/utils/logger'
+import { chainTag } from '~/utils/chain-tag'
 import { resolveRpcUrl } from './rpc'
 
 const CACHE_TTL_MS = 300_000
@@ -136,14 +137,20 @@ async function buildVerifiedSet(chainId: number): Promise<Set<string>> {
     collectEarnAddresses(earn.value, set)
   }
   else if (earn.status === 'rejected') {
-    logWarn('verified-vaults', `earn-vaults fetch failed for chain ${chainId}:`, earn.reason)
+    logger.warn(
+      { ctx: 'verified-vaults', ...chainTag(chainId), err: earn.reason },
+      'earn-vaults fetch failed',
+    )
   }
 
   if (escrow.status === 'fulfilled') {
     for (const a of escrow.value) addChecksum(set, a)
   }
   else {
-    logWarn('verified-vaults', `escrow fetch failed for chain ${chainId}:`, escrow.reason)
+    logger.warn(
+      { ctx: 'verified-vaults', ...chainTag(chainId), err: escrow.reason },
+      'escrow fetch failed',
+    )
   }
 
   return set
@@ -164,7 +171,7 @@ export async function getVerifiedAddressSet(chainId: number): Promise<Set<string
       return set
     }
     catch (err) {
-      logWarn('verified-vaults', `Rebuild failed for chain ${chainId}:`, err instanceof Error ? err.message : err)
+      logger.warn({ ctx: 'verified-vaults', ...chainTag(chainId), err }, 'rebuild failed')
       const stale = cache.getStale(key)
       if (stale) return stale
       throw err

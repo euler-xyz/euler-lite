@@ -1,3 +1,5 @@
+import { logger } from '~/utils/logger'
+
 type LogSeverity = 'warn' | 'error' | 'silent'
 
 /**
@@ -13,12 +15,14 @@ export function isAbortError(error: unknown): boolean {
 }
 
 /**
- * Structured warning with [context] tag.
+ * Legacy structured-warning shim. New call sites should call `logger.warn` /
+ * `logger.error` directly with a fields object — that way `chainId`, `kind`,
+ * etc. are first-class JSON fields in BetterStack. This wrapper exists so
+ * the long tail of pre-existing call sites still benefit from the pino
+ * pipeline (one JSON line per event, viem error summarisation) without a
+ * mass rewrite.
  *
- * @param context - Tag for the log message, e.g. 'merkl/loadTokens'
- * @param error - The error or message to log
- * @param options.severity - 'warn' (default) | 'error' | 'silent'
- * @param options.data - Additional data to log after the error
+ * @deprecated Prefer `logger.warn({ ctx, ...chainTag(chainId), ... }, 'msg')`.
  */
 export function logWarn(
   context: string,
@@ -28,13 +32,18 @@ export function logWarn(
   const severity = options?.severity ?? 'warn'
   if (severity === 'silent') return
 
-  const log = severity === 'error' ? console.error : console.warn
-  if (options?.data !== undefined) {
-    log(`[${context}]`, error, options.data)
+  const fields: Record<string, unknown> = { ctx: context }
+  if (options?.data !== undefined) fields.data = options.data
+  if (error instanceof Error) {
+    fields.err = error
+    const log = severity === 'error' ? logger.error : logger.warn
+    log(fields, error.message)
+    return
   }
-  else {
-    log(`[${context}]`, error)
-  }
+  const msg = typeof error === 'string' ? error : ''
+  const log = severity === 'error' ? logger.error : logger.warn
+  if (msg) log(fields, msg)
+  else log({ ...fields, value: error }, '')
 }
 
 /**

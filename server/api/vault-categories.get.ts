@@ -26,7 +26,8 @@ import { createError, getQuery, setResponseHeader } from 'h3'
 import { isAddress } from 'viem'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { resolveChainId } from '~/server/utils/resolve-chain-id'
-import { logWarn } from '~/server/utils/log'
+import { logger } from '~/utils/logger'
+import { chainTag } from '~/utils/chain-tag'
 import {
   getVaultCategories,
   getVaultCategory,
@@ -64,7 +65,7 @@ export default defineEventHandler(async (event) => {
   }
   catch (err) {
     if (err && typeof err === 'object' && 'statusCode' in err) throw err
-    logWarn('vault-categories', `failed chain=${chainId}:`, err instanceof Error ? err.message : err)
+    logger.warn({ ctx: 'vault-categories', ...chainTag(chainId), err }, 'vault categories upstream error')
     throw createError({ statusCode: 502, statusMessage: 'Vault categories upstream error' })
   }
 })

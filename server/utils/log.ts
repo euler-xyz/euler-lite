@@ -1,9 +1,27 @@
+import { logger } from '~/utils/logger'
+
 /**
- * Server-side structured logging utility.
- * Mirrors the client-side logWarn pattern from utils/errorHandling.ts.
+ * Server-side structured-warning shim.
+ *
+ * @deprecated Prefer `logger.warn({ ctx, ... }, 'msg')`. This shim exists so
+ * the long tail of pre-existing call sites still emit one structured JSON
+ * line per event via the pino pipeline.
  */
 export function logWarn(context: string, ...args: unknown[]): void {
-  console.warn(`[${context}]`, ...args)
+  if (args.length === 0) {
+    logger.warn({ ctx: context }, '')
+    return
+  }
+  const [first, ...rest] = args
+  if (first instanceof Error) {
+    logger.warn({ ctx: context, err: first, ...(rest.length ? { extra: rest } : {}) }, first.message)
+    return
+  }
+  if (typeof first === 'string') {
+    logger.warn({ ctx: context, ...(rest.length ? { extra: rest } : {}) }, first)
+    return
+  }
+  logger.warn({ ctx: context, value: first, ...(rest.length ? { extra: rest } : {}) }, '')
 }
 
 /**
@@ -42,11 +60,13 @@ export function reportStatus(
 
   if (status === 'ok') {
     if (prev && prev !== 'ok') {
-      console.info(`[${context}]`, `${key} recovered (was: ${prev})`)
+      logger.info({ ctx: context, key, status, prevStatus: prev }, `${key} recovered`)
     }
     return
   }
 
-  const suffix = prev && prev !== 'ok' ? ` (was: ${prev})` : ''
-  console.warn(`[${context}]`, (message ?? `${key} status=${status}`) + suffix)
+  logger.warn(
+    { ctx: context, key, status, ...(prev && prev !== 'ok' ? { prevStatus: prev } : {}) },
+    message ?? `${key} status=${status}`,
+  )
 }

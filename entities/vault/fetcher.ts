@@ -8,7 +8,9 @@ import type {
 } from './types'
 import { resolveAssetPriceInfo, resolveUnitOfAccountPriceInfo } from './pricing'
 import { calculateEarnVaultAPYFromExchangeRate, calculateEarnVaultAPYWithCache, fetchBlockDataForAPY } from './apy'
-import { logWarn } from '~/utils/errorHandling'
+import { logger } from '~/utils/logger'
+import { chainTag } from '~/utils/chain-tag'
+import { summarizeViemError } from '~/utils/viem-errors'
 import { BATCH_SIZE_VAULT_FETCH, BATCH_SIZE_PARALLEL_ROUNDS } from '~/entities/tuning-constants'
 import type { PythFeed } from '~/entities/oracle'
 import { collectPythFeedIds } from '~/entities/oracle'
@@ -396,7 +398,7 @@ export const fetchVaults = async function* (
       return processRawVaultData(raw, vaultAddress, ctx.verifiedVaultAddresses)
     }
     catch (e) {
-      logWarn('vault/processResult', e, { severity: 'error' })
+      logger.error({ ctx: 'vault/processResult', ...chainTag(ctx.chainId), err: e }, 'failed to decode vault result')
       return undefined
     }
   }
@@ -460,9 +462,15 @@ export const fetchVaults = async function* (
         }
       }
 
-      // Only retry individually for on-chain reverts, not transport errors (403, network failures)
+      // Only retry individually for on-chain reverts, not transport errors (403, network failures).
+      // When a transport error is detected we emit ONE batch-level roll-up and skip the per-item
+      // retries entirely — this prevents a single upstream RPC outage from producing one log line
+      // per vault in the batch (was the root cause of the 568-line BetterStack incident).
       if (failedAddresses.length > 0 && !hasTransportError) {
-        logWarn('vault/fetchBatch', `Retrying ${failedAddresses.length} failed vaults individually`)
+        logger.warn(
+          { ctx: 'vault/fetchBatch', ...chainTag(ctx.chainId), failedCount: failedAddresses.length },
+          `retrying ${failedAddresses.length} failed vaults individually`,
+        )
         const retryResults = await Promise.all(
           failedAddresses.map(addr => fetchVaultIndividually(addr)),
         )
@@ -473,7 +481,17 @@ export const fetchVaults = async function* (
         }
       }
       else if (hasTransportError) {
-        logWarn('vault/fetchBatch', `Skipping individual retries — RPC transport error`)
+        const transportFailedCount = results.filter(r => r.transportError).length
+        logger.warn(
+          {
+            ctx: 'vault/fetchBatch',
+            ...chainTag(ctx.chainId),
+            kind: 'rpc-transport',
+            failedCount: transportFailedCount,
+            batchSize: batchAddresses.length,
+          },
+          'batch transport failure — skipping individual retries',
+        )
       }
 
       return vaults
@@ -537,7 +555,7 @@ export const fetchVaults = async function* (
             return processRawVaultData(raw, vault.address, ctx.verifiedVaultAddresses)
           }
           catch (e) {
-            logWarn('vault/pythRefresh', e, { severity: 'error' })
+            logger.error({ ctx: 'vault/pythRefresh', ...chainTag(ctx.chainId), err: e }, 'failed to apply Pyth refresh')
             return vault
           }
         })
@@ -584,6 +602,14 @@ export const fetchEarnVaults = async function* (
 
   // Helper to fetch a single vault (lens + price only, APY calculated after)
   type PartialEarnVault = Omit<EarnVault, 'interestRateInfo'> & { decimals: bigint }
+
+  // Earn vaults are fetched in parallel below. If the RPC endpoint dies mid-batch
+  // every parallel fetch will fail at roughly the same instant — instead of logging
+  // N near-identical "RPC timeout" lines (the root cause of the 568-row BetterStack
+  // incident), let the first transport failure log normally and silently drop the
+  // rest in this batch. A genuine on-chain revert from one specific vault still
+  // logs because it isn't classified as transport.
+  let transportFailureLogged = false
 
   const fetchVaultData = async (vaultAddress: string): Promise<PartialEarnVault | undefined> => {
     try {
@@ -649,6 +675,11 @@ export const fetchEarnVaults = async function* (
       } as PartialEarnVault
     }
     catch (e) {
+      const summary = summarizeViemError(e)
+      if (summary.isTransport) {
+        if (transportFailureLogged) return undefined
+        transportFailureLogged = true
+      }
       logConciseFetchError('vault/fetchEarnVault', ctx.chainId, vaultAddress, e)
       return undefined
     }
@@ -671,7 +702,7 @@ export const fetchEarnVaults = async function* (
       .filter((v): v is PartialEarnVault => v !== undefined)
       .map(async (vaultData) => {
         const supplyAPYNumber = blockCache
-          ? await calculateEarnVaultAPYWithCache(vaultData.address, vaultData.decimals, blockCache, ctx.rpcUrl)
+          ? await calculateEarnVaultAPYWithCache(vaultData.address, vaultData.decimals, blockCache, ctx.rpcUrl, ctx.chainId)
           : 0
         return {
           ...vaultData,

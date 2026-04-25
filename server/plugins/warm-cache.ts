@@ -37,7 +37,8 @@ import { refreshEulerChains } from '../api/euler-chains.get'
 import { refreshTokenList } from '../api/token-list.get'
 import { getEnabledChainIds } from '~/utils/chain-env'
 import { parseDeprecatedChains } from '~/utils/parseDeprecatedChains'
-import { logWarn, reportStatus } from '../utils/log'
+import { reportStatus } from '../utils/log'
+import { logger } from '~/utils/logger'
 import { refreshChainVaults } from '../utils/vaults-cache'
 import { refreshVaultCategories } from '../utils/vault-categories-store'
 import { refreshIntrinsicApyForChain } from '../utils/intrinsic-apy'
@@ -158,7 +159,7 @@ export default defineNitroPlugin(() => {
       ])
     }
     catch (err) {
-      logWarn('warm-cache', 'warm-up iteration failed:', err instanceof Error ? err.message : err)
+      logger.warn({ ctx: 'warm-cache', err }, 'warm-up iteration failed')
     }
   }
 

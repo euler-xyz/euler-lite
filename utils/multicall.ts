@@ -1,6 +1,8 @@
 import { encodeFunctionData, decodeFunctionResult, zeroAddress, type Address, type Hex, type Abi, BaseError } from 'viem'
 import { EVC_ABI, type BatchItem, type BatchItemResult } from '~/abis/evc'
 import { getPublicClient } from '~/utils/public-client'
+import { isTransportError as isViemTransportError } from '~/utils/viem-errors'
+import { logger } from '~/utils/logger'
 
 export type MulticallResult<T = unknown> = {
   success: boolean
@@ -16,28 +18,18 @@ export type BatchLensResult<T = unknown> = {
 }
 
 /**
- * Check if an error is a transport/provider-level failure (HTTP error, network down,
- * timeout, RPC rate limit) vs an on-chain revert that could be retried individually.
+ * Conservative "should we suppress per-item retries?" check for batch callers.
+ * For viem errors, classification is delegated to `utils/viem-errors.ts` so the
+ * set of recognised transport classes (TimeoutError, HttpRequestError,
+ * WebSocketRequestError, LimitExceededRpcError, ResourceUnavailableRpcError,
+ * SocketClosedError) lives in one place. Non-viem throwables — TypeErrors from
+ * a misconfigured client, plain Errors from upstream fetches — are treated as
+ * transport errors here too: it's safer to skip retries against an
+ * already-broken endpoint than to amplify load by hammering it per-address.
  */
-const TRANSPORT_ERROR_NAMES = new Set([
-  'HttpRequestError',
-  'TimeoutError',
-  'WebSocketRequestError',
-  'LimitExceededRpcError', // JSON-RPC -32005 (provider rate limit)
-  'ResourceUnavailableRpcError', // JSON-RPC -32002 (provider temporarily unavailable)
-])
-
 const isTransportError = (err: unknown): boolean => {
-  // Non-viem errors (e.g. TypeError from a misconfigured client) are treated as transport errors.
-  // This is intentionally conservative: suppressing retries against an already-broken endpoint is
-  // safer than amplifying load by retrying every address individually.
   if (!(err instanceof BaseError)) return true
-  // Walk to the deepest BaseError in the chain. If walk() returns a non-BaseError (e.g. a
-  // TypeError: Failed to fetch buried as the root cause), that is by definition a network-level
-  // failure — treat it as a transport error.
-  const root = err.walk()
-  if (!(root instanceof BaseError)) return true
-  return TRANSPORT_ERROR_NAMES.has(root.name)
+  return isViemTransportError(err)
 }
 
 /**
@@ -155,7 +147,10 @@ const executeLensChunk = async <T>(
       return { success: true, result: decoded as T }
     }
     catch (err) {
-      console.warn(`[batchLensCalls] Failed to decode result for ${calls[index].functionName}:`, err)
+      logger.warn(
+        { ctx: 'batchLensCalls', fn: calls[index].functionName, err },
+        'failed to decode batch result',
+      )
       return { success: false, result: null }
     }
   })

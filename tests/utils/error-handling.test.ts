@@ -37,18 +37,21 @@ describe('isAbortError', () => {
   })
 })
 
-describe('logWarn', () => {
-  it('calls console.warn by default', () => {
+describe('logWarn (legacy shim — delegates to structured logger)', () => {
+  it('routes the default severity through console.warn with the [ctx] prefix', () => {
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     logWarn('test', 'message')
-    expect(spy).toHaveBeenCalledWith('[test]', 'message')
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy.mock.calls[0][0]).toBe('[test]')
+    expect(spy.mock.calls[0][1]).toBe('message')
     spy.mockRestore()
   })
 
-  it('calls console.error when severity is error', () => {
+  it('routes severity:error through console.error', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     logWarn('test', 'message', { severity: 'error' })
-    expect(spy).toHaveBeenCalledWith('[test]', 'message')
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy.mock.calls[0][0]).toBe('[test]')
     spy.mockRestore()
   })
 
@@ -62,10 +65,23 @@ describe('logWarn', () => {
     errorSpy.mockRestore()
   })
 
-  it('includes additional data when provided', () => {
+  it('attaches additional data as a structured field', () => {
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     logWarn('ctx', 'err', { data: { extra: true } })
-    expect(spy).toHaveBeenCalledWith('[ctx]', 'err', { extra: true })
+    expect(spy).toHaveBeenCalledTimes(1)
+    const fields = spy.mock.calls[0][2] as Record<string, unknown>
+    expect(fields).toMatchObject({ ctx: 'ctx', data: { extra: true } })
+    spy.mockRestore()
+  })
+
+  it('passes Error objects through summarisation (no abi/metaMessages)', async () => {
+    const { TimeoutError } = await import('viem')
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const err = new TimeoutError({ body: { method: 'eth_call' }, url: 'https://rpc.example' })
+    logWarn('vault/x', err)
+    const fields = spy.mock.calls[0][2] as Record<string, unknown>
+    expect(JSON.stringify(fields)).toContain('rpc-timeout')
+    expect(JSON.stringify(fields)).not.toContain('"abi"')
     spy.mockRestore()
   })
 })
