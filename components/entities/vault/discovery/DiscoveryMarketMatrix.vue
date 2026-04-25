@@ -595,7 +595,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                     <SvgIcon
                       v-if="isAdapterPriceFailed(adapter)"
                       name="warning"
-                      class="absolute -bottom-1 -right-1 !w-10 !h-10 text-error-500"
+                      class="absolute -bottom-1 -right-1 !w-10 !h-10 text-warning-500"
                       title="getQuote reverted"
                     />
                   </button>
@@ -633,7 +633,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                       <SvgIcon
                         v-if="isAdapterPriceFailed(adapter)"
                         name="warning"
-                        class="absolute -bottom-1 -right-1 !w-10 !h-10 text-error-500"
+                        class="absolute -bottom-1 -right-1 !w-10 !h-10 text-warning-500"
                         title="getQuote reverted"
                       />
                     </button>
