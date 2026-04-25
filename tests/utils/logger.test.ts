@@ -74,8 +74,6 @@ describe('client logger shim', () => {
 
 describe('server logger (pino)', () => {
   it('emits one JSON line per event with chain context', async () => {
-    process.env.NODE_ENV = 'production'
-    process.env.LOG_LEVEL = 'debug'
     vi.resetModules()
     const { pino } = await import('pino')
     const captured: string[] = []
@@ -102,8 +100,6 @@ describe('server logger (pino)', () => {
   })
 
   it('summarises errors nested under a non-err key (regression: pino serializers only walk top-level by default)', async () => {
-    process.env.NODE_ENV = 'production'
-    process.env.LOG_LEVEL = 'debug'
     vi.resetModules()
     const { pino } = await import('pino')
     const { summarizeViemError } = await import('~/utils/viem-errors')

@@ -33,7 +33,6 @@ const errSerializer = (err: unknown): unknown => {
 }
 
 export const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
   base: { app: 'euler-lite' },
   formatters: {
     // Emit level as a string ('warn', 'error', …) — easier to filter in

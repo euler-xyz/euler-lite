@@ -61,7 +61,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 4. **Reactive State**: Vue 3 reactivity system for state management
 5. **Modular Design**: Well-defined boundaries between different system parts
 6. **Directory-based Modules**: Large composables and entity files are split into focused modules within directories (e.g., `useEulerOperations/`, `entities/vault/`, `composables/repay/`). Each directory has an `index.ts` re-exporting the public API
-7. **Centralized Error Handling**: `logWarn()` and `logError()` from `utils/errorHandling.ts` replace raw `console.warn`/`console.error` calls, enabling structured logging
+7. **Structured Logging**: a single `logger` API from `~/utils/logger` (console-backed shim, used by shared code) and `~/server/utils/logger` (pino, JSON to stdout for BetterStack on Fargate). Errors passed in `err` are summarised by `~/utils/viem-errors` so viem's `abi` / `metaMessages` / hex request bodies never leak. `~/utils/errorHandling` exposes a small `logWarn` helper for the long tail of client-side call sites; it routes through the same shared logger
 
 ## 🔄 Data Flow Architecture
 
