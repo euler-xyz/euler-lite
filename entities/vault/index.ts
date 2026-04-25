@@ -57,6 +57,7 @@ export type { SerialisedSnapshot } from './loader-serde'
 export {
   getCurrentLiquidationLTV,
   isLiquidationLTVRamping,
+  isLiveCollateralEdge,
   getRampTimeRemaining,
 } from './ltv'
 
