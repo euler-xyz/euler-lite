@@ -10,6 +10,7 @@ import {
 } from '~/entities/vault'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
+import { logWarn } from '~/utils/errorHandling'
 import { VaultRampDownModal } from '#components'
 
 const modal = useModal()
@@ -30,10 +31,25 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: LTVRampConfig) => {
   })
 }
 
+const warnedUnresolved = new Set<string>()
+
 const allCollateralPairs = computed(() =>
   getCollateralExposurePairs(
     vault,
-    addr => registryGet(addr)?.vault as Vault | SecuritizeVault | undefined,
+    (addr) => {
+      const entry = registryGet(addr)
+      if (!entry?.vault) {
+        const key = addr.toLowerCase()
+        if (!warnedUnresolved.has(key)) {
+          warnedUnresolved.add(key)
+          logWarn(
+            'vault-overview/missing-collateral',
+            `Vault ${vault.address} references unresolved collateral ${addr}`,
+          )
+        }
+      }
+      return entry?.vault as Vault | SecuritizeVault | undefined
+    },
   ),
 )
 </script>

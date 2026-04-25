@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { getCollateralMatrix, isNodeRampingDown } from '~/utils/discoveryCalculations'
+import { getActiveExternalCollateral, getCollateralMatrix, isNodeRampingDown } from '~/utils/discoveryCalculations'
 import type { MarketGroup } from '~/entities/lend-discovery'
 import type { Vault, VaultCollateralLTV } from '~/entities/vault/types'
 
@@ -31,10 +31,10 @@ const makeVault = (address: string, collateralLTVs: VaultCollateralLTV[]): Vault
     asset: { address, symbol: 'TST' },
   }) as unknown as Vault
 
-const makeMarket = (vaults: Vault[]): MarketGroup =>
+const makeMarket = (vaults: Vault[], externalCollateral: Vault[] = []): MarketGroup =>
   ({
     vaults,
-    externalCollateral: [],
+    externalCollateral,
   }) as unknown as MarketGroup
 
 describe('isNodeRampingDown', () => {
@@ -97,5 +97,34 @@ describe('getCollateralMatrix', () => {
     const market = makeMarket([phasedOutVault, collateralVault])
 
     expect(getCollateralMatrix(market)).toBeNull()
+  })
+})
+
+describe('getActiveExternalCollateral', () => {
+  it('keeps an external collateral vault visible while the borrow vault is ramping it out', () => {
+    const borrowVault = makeVault('0xBorrow', [
+      makeLtv({ collateral: '0xExternal', borrowLTV: 0n }),
+    ])
+    const externalVault = makeVault('0xExternal', [])
+    const market = makeMarket([borrowVault], [externalVault])
+
+    const active = getActiveExternalCollateral(market)
+    expect(active.map(v => (v as Vault).address)).toContain('0xExternal')
+  })
+
+  it('drops an external collateral once the relationship is fully ramped out', () => {
+    const borrowVault = makeVault('0xBorrow', [
+      makeLtv({
+        collateral: '0xExternal',
+        borrowLTV: 0n,
+        liquidationLTV: 0n,
+        initialLiquidationLTV: 8500n,
+        targetTimestamp: nowSeconds - 1n,
+      }),
+    ])
+    const externalVault = makeVault('0xExternal', [])
+    const market = makeMarket([borrowVault], [externalVault])
+
+    expect(getActiveExternalCollateral(market)).toEqual([])
   })
 })

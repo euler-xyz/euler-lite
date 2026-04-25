@@ -2,7 +2,7 @@ import type { MarketGroup, MiniDiagramData, MiniNode, MiniEdge } from '~/entitie
 import type { Vault, SecuritizeVault, VaultCollateralLTV } from '~/entities/vault'
 import type { AnyVault } from '~/composables/useVaultRegistry'
 import type { EulerLabelEntity } from '~/entities/euler/labels'
-import { getCurrentLiquidationLTV, isLiquidationLTVRamping } from '~/entities/vault'
+import { isLiquidationLTVRamping, isLiveCollateralEdge } from '~/entities/vault'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { getEntitiesByVault, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
@@ -129,7 +129,7 @@ export const getNonBorrowableMemberVaults = (market: MarketGroup): Vault[] =>
   market.vaults.filter(isVaultType).filter(v => !hasBorrowableLTV(v))
 
 const hasLiveDiscoveryColumn = (vault: Vault): boolean =>
-  vault.collateralLTVs.some(ltv => getCurrentLiquidationLTV(ltv) > 0n)
+  vault.collateralLTVs.some(ltv => isLiveCollateralEdge(ltv))
 
 const getDiscoveryColumnVaults = (market: MarketGroup): Vault[] =>
   market.vaults.filter(isVaultType).filter(hasLiveDiscoveryColumn)
@@ -148,7 +148,7 @@ export const getActiveExternalCollateral = (market: MarketGroup): AnyVault[] => 
     const extAddr = getVaultAddress(ext).toLowerCase()
     return columnVaults.some(v =>
       v.collateralLTVs.some(ltv =>
-        ltv.collateral.toLowerCase() === extAddr && getCurrentLiquidationLTV(ltv) > 0n,
+        ltv.collateral.toLowerCase() === extAddr && isLiveCollateralEdge(ltv),
       ),
     )
   })
@@ -189,7 +189,7 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
       if (ltv.borrowLTV > 0n) {
         directedEdges.add(`${colAddr}:${liabAddr}`)
       }
-      if (getCurrentLiquidationLTV(ltv) > 0n) {
+      if (isLiveCollateralEdge(ltv)) {
         displayEdges.add(`${colAddr}:${liabAddr}`)
         connectedAddresses.add(colAddr)
         connectedAddresses.add(liabAddr)
@@ -276,7 +276,7 @@ export const getCollateralMatrix = (market: MarketGroup): CollateralMatrixData |
 
   for (const vault of borrowable) {
     for (const ltv of vault.collateralLTVs) {
-      if (getCurrentLiquidationLTV(ltv) <= 0n) continue
+      if (!isLiveCollateralEdge(ltv)) continue
       const colAddr = ltv.collateral.toLowerCase()
       if (!knownAddresses.has(colAddr)) continue
 

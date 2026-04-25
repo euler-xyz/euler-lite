@@ -15,6 +15,7 @@ import {
   fetchSecuritizeVault,
   fetchVaults,
   clearPriceCaches,
+  isLiveCollateralEdge,
   type Vault,
 } from '~/entities/vault'
 import { fetchChainVaultCategories, isSecuritizeVault, resetVaultCategoryCache } from '~/entities/vault/factory'
@@ -212,10 +213,12 @@ const extractNeededEscrowAddresses = (): string[] => {
   const { getEvkVaults, getEarnVaults, isKnownEscrowAddress } = useVaultRegistry()
   const needed = new Set<string>()
 
-  // 1. Escrow vaults used as collateral in EVK vaults
+  // 1. Escrow vaults used as collateral in EVK vaults — include any live edge,
+  //    not just borrowable ones, so escrows mid-liquidation-LTV-ramp (where
+  //    borrowLTV is already 0) still get fetched and shown in discovery.
   getEvkVaults().forEach((vault) => {
     vault.collateralLTVs.forEach((ltv) => {
-      if (ltv.borrowLTV > 0n && isKnownEscrowAddress(ltv.collateral)) {
+      if (isLiveCollateralEdge(ltv) && isKnownEscrowAddress(ltv.collateral)) {
         needed.add(getAddress(ltv.collateral))
       }
     })
