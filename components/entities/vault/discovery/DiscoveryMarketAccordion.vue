@@ -480,21 +480,21 @@ onMounted(() => {
                 </button>
                 <button
                   class="flex items-center gap-4 min-h-36 py-6 px-12 cursor-pointer transition-all text-p3 border-l border-line-default"
-                  :class="matrixVariant === 'config'
-                    ? 'bg-accent-300/20 text-accent-700 font-medium'
-                    : 'bg-surface text-content-secondary hover:bg-surface-secondary'"
-                  @click.stop="setMatrixVariant('config')"
-                >
-                  Config
-                </button>
-                <button
-                  class="flex items-center gap-4 min-h-36 py-6 px-12 cursor-pointer transition-all text-p3 border-l border-line-default"
                   :class="matrixVariant === 'stats'
                     ? 'bg-accent-300/20 text-accent-700 font-medium'
                     : 'bg-surface text-content-secondary hover:bg-surface-secondary'"
                   @click.stop="setMatrixVariant('stats')"
                 >
                   Stats
+                </button>
+                <button
+                  class="flex items-center gap-4 min-h-36 py-6 px-12 cursor-pointer transition-all text-p3 border-l border-line-default"
+                  :class="matrixVariant === 'config'
+                    ? 'bg-accent-300/20 text-accent-700 font-medium'
+                    : 'bg-surface text-content-secondary hover:bg-surface-secondary'"
+                  @click.stop="setMatrixVariant('config')"
+                >
+                  Configuration
                 </button>
               </div>
 

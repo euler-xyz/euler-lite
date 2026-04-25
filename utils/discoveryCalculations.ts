@@ -586,19 +586,11 @@ export interface AttributeMatrixData {
   columns: AttributeMatrixColumn[]
 }
 
-const getTotalAssets = (vault: Vault | SecuritizeVault): bigint =>
-  (vault.totalAssets ?? 0n) as bigint
-
 const isEscrow = (v: Vault | SecuritizeVault): boolean =>
   isVaultType(v) && v.vaultCategory === 'escrow'
 
-const compareTotalAssetsDesc = (a: Vault | SecuritizeVault, b: Vault | SecuritizeVault): number => {
-  const ta = getTotalAssets(a)
-  const tb = getTotalAssets(b)
-  if (tb > ta) return 1
-  if (tb < ta) return -1
-  return 0
-}
+const compareSymbolAsc = (a: Vault | SecuritizeVault, b: Vault | SecuritizeVault): number =>
+  a.asset.symbol.localeCompare(b.asset.symbol, undefined, { sensitivity: 'base' })
 
 export const getAttributeMatrixColumns = (
   market: MarketGroup,
@@ -613,8 +605,8 @@ export const getAttributeMatrixColumns = (
     else if (isSecuritizeVault(v)) memberSecuritize.push(v)
   }
 
-  memberEvk.sort(compareTotalAssetsDesc)
-  memberSecuritize.sort(compareTotalAssetsDesc)
+  memberEvk.sort(compareSymbolAsc)
+  memberSecuritize.sort(compareSymbolAsc)
 
   const toCol = (vault: Vault | SecuritizeVault): AttributeMatrixColumn => ({
     address: getVaultAddress(vault).toLowerCase(),
@@ -638,8 +630,8 @@ export const getAttributeMatrixColumns = (
     else if (isSecuritizeVault(v)) externalSecuritize.push(v)
   }
 
-  externalEvk.sort(compareTotalAssetsDesc)
-  externalSecuritize.sort(compareTotalAssetsDesc)
+  externalEvk.sort(compareSymbolAsc)
+  externalSecuritize.sort(compareSymbolAsc)
 
   return [
     ...memberEvk.map(toCol),
@@ -689,15 +681,8 @@ export const CONFIG_ROWS: AttributeRow[] = [
     direction: 'neutral',
     getValue: (vault, usd) => {
       const rawCap = vault.supplyCap
-      const uncapped = rawCap >= maxUint256
       const { display } = formatCapDisplay(rawCap, usd ? { capStr: usd.supplyCap, capUsd: usd.supplyCapUsd } : undefined)
-      const pct = uncapped ? 0 : getSupplyCapPercentage(vault as Vault)
-      return {
-        display,
-        kind: 'capProgress',
-        capPercent: pct,
-        capUncapped: uncapped,
-      }
+      return { display, kind: 'text' }
     },
   },
   {
@@ -708,45 +693,8 @@ export const CONFIG_ROWS: AttributeRow[] = [
       if (!isVaultType(vault)) return NA_CELL
       if (isEscrow(vault)) return NA_CELL
       const rawCap = vault.borrowCap
-      const uncapped = rawCap >= maxUint256
       const { display } = formatCapDisplay(rawCap, usd ? { capStr: usd.borrowCap, capUsd: usd.borrowCapUsd } : undefined)
-      const pct = getBorrowCapPercentage(vault)
-      return {
-        display,
-        kind: 'capProgress',
-        capPercent: pct,
-        capUncapped: uncapped,
-      }
-    },
-  },
-  {
-    id: 'maxLiqDiscount',
-    label: 'Max liquidation discount',
-    direction: 'neutral',
-    getValue: (vault) => {
-      if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
-      const pct = Number(vault.maxLiquidationDiscount / 100n)
-      return { display: `${pct}%`, kind: 'text', numeric: pct }
-    },
-  },
-  {
-    id: 'interestFee',
-    label: 'Interest fee',
-    direction: 'neutral',
-    getValue: (vault) => {
-      if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
-      const pct = Number(nanoToValue(vault.interestFee, 2))
-      return { display: `${formatNumber(pct)}%`, kind: 'text', numeric: pct }
-    },
-  },
-  {
-    id: 'badDebtSocialised',
-    label: 'Bad debt socialised',
-    direction: 'lower-better',
-    getValue: (vault) => {
-      if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
-      const yes = vault.configFlags === 0n
-      return { display: yes ? 'Yes' : 'No', kind: 'text', numeric: yes ? 0 : 1 }
+      return { display, kind: 'text' }
     },
   },
   {
@@ -761,14 +709,45 @@ export const CONFIG_ROWS: AttributeRow[] = [
     },
   },
   {
+    id: 'interestFee',
+    label: 'Interest fee',
+    direction: 'neutral',
+    getValue: (vault) => {
+      if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
+      const pct = Number(nanoToValue(vault.interestFee, 2))
+      return { display: `${formatNumber(pct)}%`, kind: 'text' }
+    },
+  },
+  {
+    id: 'maxLiqDiscount',
+    label: 'Max liquidation discount',
+    direction: 'neutral',
+    getValue: (vault) => {
+      if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
+      const pct = Number(vault.maxLiquidationDiscount / 100n)
+      return { display: `${pct}%`, kind: 'text' }
+    },
+  },
+  {
+    id: 'badDebtSocialised',
+    label: 'Bad debt socialization',
+    direction: 'neutral',
+    getValue: (vault) => {
+      if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
+      const yes = vault.configFlags === 0n
+      return { display: yes ? 'Yes' : 'No', kind: 'text' }
+    },
+  },
+  {
     id: 'hooks',
-    label: 'Hooks',
+    label: 'Hooked operations',
     direction: 'neutral',
     getValue: (vault) => {
       if (!isVaultType(vault)) return NA_CELL
-      const paused = isVaultEffectivelyPaused(vault)
-      const display = paused
-        ? 'Paused'
+      // 'All' when every user-facing op is hooked (full disable). Specific
+      // op summary otherwise. 'None' when no ops are hooked.
+      const display = isVaultEffectivelyPaused(vault)
+        ? 'All'
         : vault.hookedOps === 0n
           ? 'None'
           : formatHookedOpsSummary(decodeHookedOps(vault.hookedOps))

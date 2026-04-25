@@ -166,7 +166,10 @@ const cellOracleAdapters = computed((): Map<string, OracleAdapterEntry[]> => {
   for (const row of props.matrix.rows) skipERC4626Bases.add(row.address.toLowerCase())
 
   for (const [colAddr, rowCells] of props.matrix.cells) {
-    for (const [liabAddr] of rowCells) {
+    for (const [liabAddr, cell] of rowCells) {
+      // Belt-and-braces — getCollateralMatrix already filters LLTV>0 cells,
+      // but enforce again here so the invariant is explicit at the consumer.
+      if (getCurrentLiquidationLTV(cell.ltv) <= 0n) continue
       const collateral = findVault(props.market, colAddr)
       const liability = findVault(props.market, liabAddr)
       if (!collateral || !liability) continue
@@ -183,6 +186,25 @@ const cellOracleAdapters = computed((): Map<string, OracleAdapterEntry[]> => {
       })
       if (adapters.length) result.set(`${colAddr}:${liabAddr}`, adapters)
     }
+  }
+  return result
+})
+
+// Per-borrow-vault asset oracle: resolves the borrow vault's own asset against
+// its unit of account. Same set repeated across every cell in a column, so we
+// surface it once as a header row instead.
+const columnAssetOracleAdapters = computed((): Map<string, OracleAdapterEntry[]> => {
+  const result = new Map<string, OracleAdapterEntry[]>()
+  if (props.dotMetric !== 'oracle') return result
+  for (const col of props.matrix.columns) {
+    const liability = findVault(props.market, col.address)
+    if (!liability || !isVaultType(liability) || !liability.oracleDetailedInfo) continue
+    const adapters = collectOracleAdapters(liability.oracleDetailedInfo, 3, {
+      base: liability.asset.address as Address,
+      quote: liability.unitOfAccount as Address,
+      leafOnly: true,
+    })
+    if (adapters.length) result.set(col.address, adapters)
   }
   return result
 })
@@ -237,6 +259,12 @@ const enrichAdapter = (adapter: OracleAdapterEntry): AdapterView => {
 
 const getCellAdapterViews = (collateralAddr: string, liabilityAddr: string): AdapterView[] => {
   const list = cellOracleAdapters.value.get(`${collateralAddr}:${liabilityAddr}`)
+  if (!list) return []
+  return list.map(enrichAdapter)
+}
+
+const getColumnAssetAdapterViews = (liabilityAddr: string): AdapterView[] => {
+  const list = columnAssetOracleAdapters.value.get(liabilityAddr)
   if (!list) return []
   return list.map(enrichAdapter)
 }
@@ -315,6 +343,54 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
           </tr>
         </thead>
         <tbody>
+          <!-- Oracle metric: per-column asset oracle row (vault asset -> UoA).
+               Lifted out of cells because it's identical for every row in a
+               given column. -->
+          <tr
+            v-if="dotMetric === 'oracle'"
+          >
+            <td
+              class="text-p5 italic text-content-tertiary py-6 pr-10 pl-6 whitespace-nowrap sticky left-0 z-10 bg-surface border-b-2 border-r border-line-subtle"
+            >
+              Asset
+            </td>
+            <td
+              v-for="col in matrix.columns"
+              :key="`asset-${col.address}`"
+              class="text-center py-6 px-8 min-w-[56px] border-b-2 border-r border-line-subtle bg-white/[0.02]"
+            >
+              <div
+                v-if="getColumnAssetAdapterViews(col.address).length"
+                class="inline-flex items-center justify-center gap-4 flex-wrap"
+              >
+                <button
+                  v-for="adapter in getColumnAssetAdapterViews(col.address)"
+                  :key="adapter.oracle"
+                  type="button"
+                  class="relative inline-flex items-center justify-center cursor-pointer"
+                  :title="adapter.provider"
+                  @click.stop="onAdapterClick(adapter, $event)"
+                >
+                  <BaseAvatar
+                    v-if="adapter.logo"
+                    :src="adapter.logo"
+                    :label="adapter.name"
+                    class="icon--16"
+                  />
+                  <SvgIcon
+                    v-else
+                    name="question-circle"
+                    class="!w-16 !h-16 text-content-tertiary"
+                  />
+                  <span
+                    v-if="adapter.checksStatus === 'warning' || adapter.checksStatus === 'negative'"
+                    class="absolute -top-1 -right-1 w-6 h-6 rounded-full"
+                    :class="adapter.checksStatus === 'negative' ? 'bg-error-500' : 'bg-warning-500'"
+                  />
+                </button>
+              </div>
+            </td>
+          </tr>
           <tr
             v-for="row in matrix.rows"
             :key="row.address"
@@ -486,70 +562,84 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
     Tap a cell, row, or column header to see lending/borrowing options below.
   </p>
 
-  <!-- Oracle adapter tooltip -->
+  <!-- Oracle adapter tooltip — mirrors VaultOverviewBlockOracleAdapters card layout -->
   <Teleport to="body">
     <div
       v-if="tooltipAdapter"
-      class="fixed z-[9999] bg-surface-secondary border border-line-subtle rounded-xl p-12 shadow-card overflow-y-auto"
+      class="fixed z-[9999] bg-surface-secondary border border-line-subtle rounded-xl p-16 shadow-card overflow-y-auto flex flex-col gap-12"
       :style="[tooltipStyle, { width: `${TOOLTIP_WIDTH}px` }]"
       @click.stop
     >
-      <div class="flex items-center justify-between gap-8 mb-8">
-        <div class="flex items-center gap-8">
-          <BaseAvatar
-            v-if="tooltipAdapter.logo"
-            :src="tooltipAdapter.logo"
-            :label="tooltipAdapter.name"
-            class="icon--20"
-          />
-          <SvgIcon
-            v-else
-            name="question-circle"
-            class="!w-20 !h-20 text-content-tertiary"
-          />
-          <span class="text-p2 text-content-primary font-medium">{{ tooltipAdapter.provider || 'Unknown' }}</span>
+      <!-- Header: oracle label / pair + address & close -->
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-8">
+        <div class="text-p2 text-content-primary font-medium">
+          <template v-if="tooltipAdapter.label">
+            {{ tooltipAdapter.label.primary }}
+            <span
+              v-if="tooltipAdapter.label.suffix"
+              class="text-content-tertiary ml-2"
+            >{{ tooltipAdapter.label.suffix }}</span>
+          </template>
+          <template v-else>
+            Oracle
+          </template>
         </div>
-        <button
-          type="button"
-          class="text-content-muted hover:text-content-secondary cursor-pointer"
-          aria-label="Close"
-          @click.stop="closeTooltip"
-        >
-          <SvgIcon
-            name="close"
-            class="!w-14 !h-14"
-          />
-        </button>
-      </div>
-      <div class="flex flex-col gap-8 text-p3">
-        <div class="flex flex-col gap-2">
-          <span class="text-content-tertiary">Oracle</span>
+        <div class="flex items-center gap-8 flex-shrink-0">
           <NuxtLink
             :to="explorerLink(tooltipAdapter.oracle)"
             target="_blank"
-            class="text-accent-600 underline hover:text-accent-500"
+            class="text-accent-600 underline cursor-pointer hover:text-accent-500 text-p3"
             @click.stop
           >
-            {{ tooltipAdapter.label?.primary ?? truncate(tooltipAdapter.oracle, 6) }}
-            <span
-              v-if="tooltipAdapter.label?.suffix"
-              class="text-content-tertiary ml-2"
-            >{{ tooltipAdapter.label.suffix }}</span>
+            {{ truncate(tooltipAdapter.oracle, 6) }}
           </NuxtLink>
+          <button
+            type="button"
+            class="text-content-muted hover:text-content-secondary cursor-pointer"
+            aria-label="Close"
+            @click.stop="closeTooltip"
+          >
+            <SvgIcon
+              name="close"
+              class="!w-14 !h-14"
+            />
+          </button>
         </div>
-        <div
-          v-if="tooltipAdapter.methodology"
-          class="flex flex-col gap-2"
-        >
+      </div>
+
+      <!-- Provider / Methodology / Checks grid -->
+      <div class="grid grid-cols-2 gap-12 text-p3">
+        <div class="flex flex-col gap-4">
+          <span class="text-content-tertiary">Provider</span>
+          <div class="flex items-center gap-8">
+            <BaseAvatar
+              v-if="tooltipAdapter.logo"
+              :src="tooltipAdapter.logo"
+              :label="tooltipAdapter.name"
+              class="icon--20"
+            />
+            <SvgIcon
+              v-else
+              name="question-circle"
+              class="!w-20 !h-20 text-content-tertiary"
+            />
+            <span class="text-content-primary">{{ tooltipAdapter.provider || 'Unknown' }}</span>
+          </div>
+        </div>
+        <div class="flex flex-col gap-4">
           <span class="text-content-tertiary">Methodology</span>
-          <span class="text-content-primary">{{ tooltipAdapter.methodology }}</span>
+          <span class="text-content-primary">{{ tooltipAdapter.methodology || 'Unknown' }}</span>
         </div>
-        <div
-          v-if="tooltipAdapter.checks?.length"
-          class="flex flex-col gap-2"
-        >
+        <div class="flex flex-col gap-4 col-span-2">
           <span class="text-content-tertiary">Checks</span>
-          <span class="flex items-center gap-6">
+          <span
+            v-if="!tooltipAdapter.checks?.length"
+            class="text-content-secondary"
+          >N/A</span>
+          <span
+            v-else
+            class="flex items-center gap-6"
+          >
             <span
               class="inline-block w-8 h-8 rounded-full flex-shrink-0"
               :class="{
@@ -564,27 +654,29 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
             </span>
           </span>
         </div>
+      </div>
+
+      <!-- Failed checks detail -->
+      <div
+        v-if="tooltipAdapter.failedChecks.length"
+        class="flex flex-col gap-6 border-t border-line-subtle pt-12 text-p3"
+      >
         <div
-          v-if="tooltipAdapter.failedChecks.length"
-          class="flex flex-col gap-6 border-t border-line-subtle pt-8"
+          v-for="(check, i) in tooltipAdapter.failedChecks"
+          :key="`${check.id}-${i}`"
+          class="flex items-start gap-8"
         >
-          <div
-            v-for="(check, i) in tooltipAdapter.failedChecks"
-            :key="`${check.id}-${i}`"
-            class="flex items-start gap-6"
-          >
-            <SvgIcon
-              name="warning"
-              class="!w-14 !h-14 mt-1 flex-shrink-0"
-              :class="{
-                'text-error-500': check.severity === OracleAdapterCheckSeverity.High,
-                'text-warning-500': check.severity !== OracleAdapterCheckSeverity.High,
-              }"
-            />
-            <div>
-              <span class="text-content-primary font-medium">{{ check.id }}: </span>
-              <span class="text-content-secondary">{{ check.message }}</span>
-            </div>
+          <SvgIcon
+            name="warning"
+            class="!w-16 !h-16 mt-1 flex-shrink-0"
+            :class="{
+              'text-error-500': check.severity === OracleAdapterCheckSeverity.High,
+              'text-warning-500': check.severity !== OracleAdapterCheckSeverity.High,
+            }"
+          />
+          <div>
+            <span class="text-content-primary font-medium">{{ check.id }}: </span>
+            <span class="text-content-secondary">{{ check.message }}</span>
           </div>
         </div>
       </div>
