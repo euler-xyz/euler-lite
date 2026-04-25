@@ -60,6 +60,17 @@ const hoveredCell = ref<{
   liabilityAddr: string
 } | null>(null)
 
+// Row/column highlighting helpers — make it easy to scan a cell back to its
+// row label and column header. A row is "highlighted" when it owns either
+// the hovered cell or the currently selected cell; same for columns.
+const isRowHighlighted = (rowAddr: string): boolean =>
+  hoveredCell.value?.collateralAddr === rowAddr
+  || props.selectedCell?.collateralAddr === rowAddr
+
+const isColumnHighlighted = (colAddr: string): boolean =>
+  hoveredCell.value?.liabilityAddr === colAddr
+  || props.selectedCell?.liabilityAddr === colAddr
+
 const computeEnhancedApys = (
   cell: MatrixCell,
   collateralAddr: string,
@@ -419,7 +430,9 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                 selectedHeader?.address === col.address
                   && selectedHeader?.axis === 'column'
                   ? 'text-accent-500 !bg-accent-500/10'
-                  : 'text-content-primary hover:bg-white/[0.04]'
+                  : isColumnHighlighted(col.address)
+                    ? 'text-content-primary !bg-white/[0.06]'
+                    : 'text-content-primary hover:bg-white/[0.04]'
               "
               @click.stop="$emit('selectHeader', col.address, 'column')"
             >
@@ -444,9 +457,11 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                 selectedHeader?.address === row.address
                   && selectedHeader?.axis === 'row'
                   ? 'text-accent-500 !bg-accent-500/10'
-                  : row.category === 'external'
-                    ? 'text-content-tertiary hover:bg-white/[0.04]'
-                    : 'text-content-primary hover:bg-white/[0.04]'
+                  : isRowHighlighted(row.address)
+                    ? (row.category === 'external' ? 'text-content-tertiary !bg-white/[0.06]' : 'text-content-primary !bg-white/[0.06]')
+                    : (row.category === 'external'
+                      ? 'text-content-tertiary hover:bg-white/[0.04]'
+                      : 'text-content-primary hover:bg-white/[0.04]')
               "
               @click.stop="$emit('selectHeader', row.address, 'row')"
             >
@@ -500,13 +515,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                   };
                 })()
               "
-              @mouseenter="
-                matrix.cells.get(row.address)?.get(col.address)
-                  && (hoveredCell = {
-                    collateralAddr: row.address,
-                    liabilityAddr: col.address,
-                  })
-              "
+              @mouseenter="hoveredCell = { collateralAddr: row.address, liabilityAddr: col.address }"
               @mouseleave="hoveredCell = null"
               @click.stop="
                 matrix.cells.get(row.address)?.get(col.address)

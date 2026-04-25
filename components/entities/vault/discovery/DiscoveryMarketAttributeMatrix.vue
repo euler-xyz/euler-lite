@@ -62,9 +62,18 @@ const onHooksClick = (vault: AttributeMatrixColumn) => {
   modal.open(VaultHooksInfoModal, { props: { vault: vault.vault } })
 }
 
-// Governor entities resolve via the vault's governorAdmin address, which exists
-// on both Vault and SecuritizeVault — the helper only reads that one field.
 const entitiesFor = (vault: AttributeMatrixColumn) => getEntitiesByVault(vault.vault)
+
+// Hover state — used to highlight the matching vault row label and attribute
+// column header so users can scan from a cell back to its labels.
+const hoveredCell = ref<{ vaultAddr: string, attributeId: string } | null>(null)
+
+const isVaultRowHighlighted = (vaultAddr: string): boolean =>
+  hoveredCell.value?.vaultAddr === vaultAddr
+  || (props.selectedHeader?.axis === 'row' && props.selectedHeader.address === vaultAddr)
+
+const isAttributeColumnHighlighted = (attributeId: string): boolean =>
+  hoveredCell.value?.attributeId === attributeId
 </script>
 
 <template>
@@ -86,7 +95,8 @@ const entitiesFor = (vault: AttributeMatrixColumn) => getEntitiesByVault(vault.v
             <th
               v-for="col in attributeColumns"
               :key="col.attribute.id"
-              class="text-center text-p4 text-content-secondary font-medium py-6 px-8 whitespace-nowrap border-b border-r border-white/[0.04]"
+              class="text-center text-p4 text-content-secondary font-medium py-6 px-8 whitespace-nowrap border-b border-r border-white/[0.04] transition-colors"
+              :class="isAttributeColumnHighlighted(col.attribute.id) ? '!bg-white/[0.06] text-content-primary' : ''"
             >
               <span :title="col.attribute.tooltip">{{ col.attribute.label }}</span>
             </th>
@@ -103,7 +113,9 @@ const entitiesFor = (vault: AttributeMatrixColumn) => getEntitiesByVault(vault.v
                 selectedHeader?.address === vault.address
                   && selectedHeader?.axis === 'row'
                   ? 'text-accent-500 !bg-accent-500/10'
-                  : 'text-content-primary hover:bg-white/[0.04]'
+                  : isVaultRowHighlighted(vault.address)
+                    ? 'text-content-primary !bg-white/[0.06]'
+                    : 'text-content-primary hover:bg-white/[0.04]'
               "
               @click.stop="$emit('selectHeader', vault.address, 'row')"
             >
@@ -121,6 +133,8 @@ const entitiesFor = (vault: AttributeMatrixColumn) => getEntitiesByVault(vault.v
               :key="col.attribute.id"
               class="text-center py-6 px-8 min-w-[80px] transition-colors border-b border-r border-white/[0.04]"
               :style="{ backgroundColor: cellBgColor(col, col.cells[vaultIdx]) }"
+              @mouseenter="hoveredCell = { vaultAddr: vault.address, attributeId: col.attribute.id }"
+              @mouseleave="hoveredCell = null"
             >
               <!-- capProgress: number + radial -->
               <template v-if="col.cells[vaultIdx].kind === 'capProgress'">

@@ -691,8 +691,13 @@ const getIrmTypeLabel = (t: number | undefined): string => {
   return '—'
 }
 
-const formatCapPercentDisplay = (pct: number, uncapped: boolean): string => {
+const formatCapPercentDisplay = (pct: number, uncapped: boolean, exceeded: boolean): string => {
   if (uncapped) return '—'
+  // Both the supply > supplyCap case and the supplyCap === 0n / supply > 0n
+  // edge case (where getSupplyCapPercentage clamps to 100) collapse to one
+  // visual signal: '>100%'. Without this, an exceeded cap was displayed as
+  // exactly 100%, which read as 'at cap' rather than 'over'.
+  if (exceeded || pct > 100) return '>100%'
   return `${compactNumber(pct, 2)}%`
 }
 
@@ -856,8 +861,11 @@ export const STATS_ROWS: AttributeRow[] = [
       if (!isVaultType(vault)) return NA_CELL
       const uncapped = vault.supplyCap >= maxUint256
       const pct = getSupplyCapPercentage(vault)
+      // Edge case: supplyCap === 0 with supply > 0 — the percentage helper
+      // clamps to 100, but conceptually any deposit against a 0 cap is over.
+      const exceeded = vault.supplyCap === 0n && vault.supply > 0n
       return {
-        display: formatCapPercentDisplay(pct, uncapped),
+        display: formatCapPercentDisplay(pct, uncapped, exceeded),
         kind: 'capProgress',
         capPercent: pct,
         capUncapped: uncapped,
@@ -872,8 +880,9 @@ export const STATS_ROWS: AttributeRow[] = [
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       const uncapped = vault.borrowCap >= maxUint256
       const pct = getBorrowCapPercentage(vault)
+      const exceeded = vault.borrowCap === 0n && vault.borrow > 0n
       return {
-        display: formatCapPercentDisplay(pct, uncapped),
+        display: formatCapPercentDisplay(pct, uncapped, exceeded),
         kind: 'capProgress',
         capPercent: pct,
         capUncapped: uncapped,
