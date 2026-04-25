@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { Vault } from '~/entities/vault'
 import {
   type AttributeMatrixData,
   type AttributeCell,
@@ -65,7 +64,7 @@ const onHooksClick = (vault: AttributeMatrixColumn) => {
 
 // Governor entities resolve via the vault's governorAdmin address, which exists
 // on both Vault and SecuritizeVault — the helper only reads that one field.
-const entitiesFor = (vault: AttributeMatrixColumn) => getEntitiesByVault(vault.vault as Vault)
+const entitiesFor = (vault: AttributeMatrixColumn) => getEntitiesByVault(vault.vault)
 </script>
 
 <template>

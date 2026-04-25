@@ -3,14 +3,19 @@ import type { MarketGroup, MiniDiagramData, MiniNode, MiniEdge } from '~/entitie
 import type { Vault, SecuritizeVault, VaultCollateralLTV } from '~/entities/vault'
 import type { AnyVault } from '~/composables/useVaultRegistry'
 import type { EulerLabelEntity } from '~/entities/euler/labels'
-import { getCurrentLiquidationLTV, isLiquidationLTVRamping, getVaultUtilization } from '~/entities/vault'
+import {
+  getCurrentLiquidationLTV,
+  isLiquidationLTVRamping,
+  getVaultUtilization,
+  getSupplyCapPercentage,
+  getBorrowCapPercentage,
+} from '~/entities/vault'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { getEntitiesByVault, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { formatNumber, compactNumber } from '~/utils/string-utils'
 import { decodeHookedOps, formatHookedOpsSummary, isVaultEffectivelyPaused } from '~/utils/vault-hooks'
-import { getSupplyCapPercentage, getBorrowCapPercentage } from '~/composables/useVaultWarnings'
-import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
+import { INTEREST_RATE_MODEL_TYPE, CFG_DONT_SOCIALIZE_DEBT } from '~/entities/constants'
 
 // ============================================================
 // Types & Constants
@@ -68,6 +73,28 @@ export type ExpandedViewMode = 'graph' | 'matrix'
 
 export type MatrixVariant = 'pairs' | 'config' | 'stats'
 export type AttributeMatrixMode = 'config' | 'stats'
+
+// Unified matrix-view selector. Wraps both attribute matrices (stats / config)
+// and pair-matrix metric variants (oracle + numeric metrics). Order is the
+// order shown in the dropdown.
+export type MatrixViewId = AttributeMatrixMode | DotMetric
+export interface MatrixViewOption {
+  id: MatrixViewId
+  label: string
+}
+export const MATRIX_VIEW_OPTIONS: MatrixViewOption[] = [
+  { id: 'stats', label: 'Stats' },
+  { id: 'config', label: 'Configuration' },
+  { id: 'oracle', label: 'Oracles' },
+  { id: 'net-apy', label: 'Net APY' },
+  { id: 'roe', label: 'Max ROE' },
+  { id: 'multiplier', label: 'Multiplier' },
+  { id: 'bltv', label: 'Borrow LTV' },
+  { id: 'lltv', label: 'Liquidation LTV' },
+]
+
+export const isAttributeMatrixView = (id: MatrixViewId): id is AttributeMatrixMode =>
+  id === 'stats' || id === 'config'
 
 // ============================================================
 // Vault Type Guards & Accessors
@@ -643,14 +670,17 @@ export const getAttributeMatrixColumns = (
 
 const NA_CELL: AttributeCell = { display: '—', kind: 'text' }
 
-const formatCapDisplay = (
+// Shared cap renderer used by both the attribute matrix (CONFIG_ROWS) and the
+// USD cache loader in DiscoveryMarketAccordion. `formatted` is the pre-built
+// USD or asset-amount string when available; the boundary cases (uncapped /
+// zero cap) win regardless of whether the formatted string is supplied.
+export const formatCapDisplay = (
   rawCap: bigint,
-  usdEntry: { capStr: string, capUsd: number | undefined } | undefined,
+  formatted: string | null | undefined,
 ): { display: string, hint?: string } => {
   if (rawCap >= maxUint256) return { display: '∞' }
   if (rawCap === 0n) return { display: '$0' }
-  if (!usdEntry) return { display: '…' }
-  return { display: usdEntry.capStr }
+  return { display: formatted ?? '…' }
 }
 
 const getIrmTypeLabel = (t: number | undefined): string => {
@@ -681,7 +711,7 @@ export const CONFIG_ROWS: AttributeRow[] = [
     direction: 'neutral',
     getValue: (vault, usd) => {
       const rawCap = vault.supplyCap
-      const { display } = formatCapDisplay(rawCap, usd ? { capStr: usd.supplyCap, capUsd: usd.supplyCapUsd } : undefined)
+      const { display } = formatCapDisplay(rawCap, usd?.supplyCap)
       return { display, kind: 'text' }
     },
   },
@@ -693,7 +723,7 @@ export const CONFIG_ROWS: AttributeRow[] = [
       if (!isVaultType(vault)) return NA_CELL
       if (isEscrow(vault)) return NA_CELL
       const rawCap = vault.borrowCap
-      const { display } = formatCapDisplay(rawCap, usd ? { capStr: usd.borrowCap, capUsd: usd.borrowCapUsd } : undefined)
+      const { display } = formatCapDisplay(rawCap, usd?.borrowCap)
       return { display, kind: 'text' }
     },
   },
@@ -734,7 +764,11 @@ export const CONFIG_ROWS: AttributeRow[] = [
     direction: 'neutral',
     getValue: (vault) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
-      const yes = vault.configFlags === 0n
+      // Bitmask check — bad-debt socialisation is on when the
+      // CFG_DONT_SOCIALIZE_DEBT bit is *not* set. configFlags may carry
+      // other bits in the future, so testing strict equality against 0n
+      // would silently flip to "No" when an unrelated flag is enabled.
+      const yes = (vault.configFlags & CFG_DONT_SOCIALIZE_DEBT) === 0n
       return { display: yes ? 'Yes' : 'No', kind: 'text' }
     },
   },
@@ -851,6 +885,8 @@ export const STATS_ROWS: AttributeRow[] = [
     label: 'Supply APY',
     direction: 'neutral',
     getValue: (vault) => {
+      // Securitize vaults' interestRateInfo is documented as zero-valued,
+      // so we'd render "0.00%" — avoid that misleading display.
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       const pct = supplyApyPercent(vault)
       return { display: `${formatNumber(pct, 2)}%`, kind: 'text' }

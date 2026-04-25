@@ -13,6 +13,7 @@ import {
   getCurrentLiquidationLTV,
   getVaultUtilization,
   isVaultType,
+  isMatrixCompatibleVault,
   type CollateralMatrixData,
   type MatrixCell,
   type DotMetric,
@@ -168,20 +169,17 @@ const cellOracleAdapters = computed((): Map<string, OracleAdapterEntry[]> => {
   for (const row of props.matrix.rows) skipERC4626Bases.add(row.address.toLowerCase())
 
   for (const [colAddr, rowCells] of props.matrix.cells) {
-    for (const [liabAddr, cell] of rowCells) {
-      // Belt-and-braces — getCollateralMatrix already filters LLTV>0 cells,
-      // but enforce again here so the invariant is explicit at the consumer.
-      if (getCurrentLiquidationLTV(cell.ltv) <= 0n) continue
+    for (const [liabAddr] of rowCells) {
       const collateral = findVault(props.market, colAddr)
       const liability = findVault(props.market, liabAddr)
       if (!collateral || !liability) continue
+      if (!isMatrixCompatibleVault(collateral)) continue
       if (!isVaultType(liability) || !liability.oracleDetailedInfo) continue
       // The borrow vault's oracle resolves the collateral *vault* (eToken)
       // address against its unit of account — not the collateral's underlying
       // asset. Mirrors VaultOverviewBlockOracleAdapters' collateralVaults path.
-      const collateralAddr = (isVaultType(collateral) ? collateral.address : (collateral as { address: string }).address)
       const adapters = collectOracleAdapters(liability.oracleDetailedInfo, 3, {
-        base: collateralAddr as Address,
+        base: collateral.address as Address,
         quote: liability.unitOfAccount as Address,
         leafOnly: true,
         skipERC4626Bases,
@@ -211,9 +209,11 @@ const columnAssetOracleAdapters = computed((): Map<string, OracleAdapterEntry[]>
   return result
 })
 
-// Bulk-load adapter metadata for the chain whenever the oracle metric is the
-// active view. Heavy call; deferred to first oracle-mode render and cached
-// per-chain by useEulerLabels.
+// Bulk-load adapter metadata for the chain. Heavy call (1+ MB JSON); the
+// `metric !== 'oracle'` guard short-circuits the immediate run on mount and
+// every re-evaluation while a non-oracle metric is selected — so the network
+// request only fires the first time the user picks the Oracles view.
+// loadAllOracleAdapters is per-chain idempotent (cached by useEulerLabels).
 watch(
   [() => props.dotMetric, chainId],
   ([metric, currentChainId]) => {
@@ -224,10 +224,10 @@ watch(
 )
 
 interface AdapterView {
-  oracle: string
+  oracle: Address
   name: string
-  base: string
-  quote: string
+  base: Address
+  quote: Address
   provider: string
   methodology?: string
   logo?: string
@@ -294,10 +294,10 @@ const tooltipAdapters = computed<OracleAdapterEntry[]>(() => {
   const ctx = tooltipContext.value
   if (!ctx) return []
   return [{
-    oracle: ctx.view.oracle as Address,
+    oracle: ctx.view.oracle,
     name: ctx.view.name,
-    base: ctx.view.base as Address,
-    quote: ctx.view.quote as Address,
+    base: ctx.view.base,
+    quote: ctx.view.quote,
   }]
 })
 const tooltipSourceVaults = computed<Vault[]>(() => {
@@ -379,6 +379,11 @@ const onAssetAdapterClick = (
   }
 }
 
+// Document-level bubble-phase listener — `@click.stop` on every logo button
+// and on the tooltip itself prevents this from firing for in-tooltip clicks
+// or for clicks on other adapter triggers. That keeps "click same logo to
+// close" working (vueuse's onClickOutside attaches in capture phase, which
+// would short-circuit the toggle behaviour).
 const onDocumentClick = () => closeTooltip()
 onMounted(() => {
   document.addEventListener('click', onDocumentClick)
@@ -682,7 +687,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
         </div>
       </div>
 
-      <!-- Provider / Methodology / Checks / Price grid (mirrors borrow page) -->
+      <!-- Provider / Methodology / Price / Checks grid (mirrors borrow page) -->
       <div class="grid grid-cols-2 gap-12 text-p3">
         <div class="flex flex-col gap-4">
           <span class="text-content-tertiary">Provider</span>
@@ -704,6 +709,27 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
         <div class="flex flex-col gap-4">
           <span class="text-content-tertiary">Methodology</span>
           <span class="text-content-primary">{{ tooltipAdapter.methodology || 'Unknown' }}</span>
+        </div>
+        <div class="flex flex-col gap-4">
+          <span class="text-content-tertiary">Price</span>
+          <span
+            v-if="tooltipPriceLoading"
+            class="text-content-secondary animate-pulse"
+          >...</span>
+          <span
+            v-else-if="tooltipPriceText === null"
+            class="flex items-center text-warning-500"
+          >
+            <SvgIcon
+              name="warning"
+              class="mr-2 !w-16 !h-16"
+            />
+            Unknown
+          </span>
+          <span
+            v-else
+            class="text-content-primary"
+          >{{ tooltipPriceText }}</span>
         </div>
         <div class="flex flex-col gap-4">
           <span class="text-content-tertiary">Checks</span>
@@ -728,27 +754,6 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
               <template v-else>{{ tooltipAdapter.failedChecks.length }} failed</template>
             </span>
           </span>
-        </div>
-        <div class="flex flex-col gap-4">
-          <span class="text-content-tertiary">Price</span>
-          <span
-            v-if="tooltipPriceLoading"
-            class="text-content-secondary animate-pulse"
-          >...</span>
-          <span
-            v-else-if="tooltipPriceText === null"
-            class="flex items-center text-warning-500"
-          >
-            <SvgIcon
-              name="warning"
-              class="mr-2 !w-16 !h-16"
-            />
-            Unknown
-          </span>
-          <span
-            v-else
-            class="text-content-primary"
-          >{{ tooltipPriceText }}</span>
         </div>
       </div>
 

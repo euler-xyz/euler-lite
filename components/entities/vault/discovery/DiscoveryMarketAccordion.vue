@@ -10,15 +10,16 @@ import {
   getMiniDiagram,
   getCollateralMatrix,
   findVault,
-  DOT_METRIC_OPTIONS,
   getAttributeMatrix,
   isMatrixCompatibleVault,
+  formatCapDisplay,
+  isAttributeMatrixView,
+  MATRIX_VIEW_OPTIONS,
   type CollateralMatrixData,
   type DotMetric,
   type ExpandedViewMode,
-  type MatrixVariant,
   type AttributeMatrixData,
-  type AttributeMatrixMode,
+  type MatrixViewId,
   type VaultUsdCacheEntry,
 } from '~/utils/discoveryCalculations'
 
@@ -112,9 +113,6 @@ const loadVaultUsdValues = async (market: MarketGroup) => {
         borrowCapHasPrice ? formatAssetValue(borrowCapRaw, vault, 'off-chain') : null,
       ])
 
-      const capDisplay = (rawCap: bigint, price: typeof supplyPrice | null) =>
-        rawCap >= maxUint256 ? '∞' : rawCap === 0n ? '$0' : price ? formatUsdOrDisplay(price) : '—'
-
       newEntries.set(addr, {
         supply: formatUsdOrDisplay(supplyPrice),
         supplyUsd: supplyPrice.hasPrice ? supplyPrice.usdValue : 0,
@@ -122,9 +120,9 @@ const loadVaultUsdValues = async (market: MarketGroup) => {
         borrowUsd: borrowPrice.hasPrice ? borrowPrice.usdValue : 0,
         liquidity: formatUsdOrDisplay(liquidityPrice),
         liquidityUsd: liquidityPrice.hasPrice ? liquidityPrice.usdValue : 0,
-        supplyCap: capDisplay(supplyCapRaw, supplyCapPrice),
+        supplyCap: formatCapDisplay(supplyCapRaw, supplyCapPrice ? formatUsdOrDisplay(supplyCapPrice) : null).display,
         supplyCapUsd: supplyCapPrice?.hasPrice ? supplyCapPrice.usdValue : undefined,
-        borrowCap: capDisplay(borrowCapRaw, borrowCapPrice),
+        borrowCap: formatCapDisplay(borrowCapRaw, borrowCapPrice ? formatUsdOrDisplay(borrowCapPrice) : null).display,
         borrowCapUsd: borrowCapPrice?.hasPrice ? borrowCapPrice.usdValue : undefined,
       })
     }),
@@ -139,21 +137,33 @@ const onToggle = (market: MarketGroup) => {
   if (!wasExpanded) loadVaultUsdValues(market)
 }
 
-// -- Metric selector --
+// -- Matrix view selector (single dropdown spans Stats, Configuration,
+// Oracles, and the four numeric pair metrics) --
 
-const dotMetric = ref<DotMetric>('net-apy')
-const metricDropdownOpen = ref(false)
+const matrixView = ref<MatrixViewId>('stats')
+const matrixDropdownOpen = ref(false)
 
-// -- Matrix variant (LTV pairs / Config / Stats) --
+const matrixVariant = computed(() => isAttributeMatrixView(matrixView.value) ? matrixView.value : 'pairs')
+const dotMetric = computed<DotMetric>(() => {
+  if (isAttributeMatrixView(matrixView.value)) return 'net-apy' // unused for attribute matrices
+  return matrixView.value
+})
 
-const matrixVariant = ref<MatrixVariant>('pairs')
-
-const setMatrixVariant = (variant: MatrixVariant) => {
-  if (matrixVariant.value === variant) return
-  matrixVariant.value = variant
-  // Clear selections that don't apply to the new variant.
-  selectedCell.value = null
-  selectedMatrixHeader.value = null
+const setMatrixView = (view: MatrixViewId) => {
+  if (matrixView.value === view) {
+    matrixDropdownOpen.value = false
+    return
+  }
+  const wasAttribute = isAttributeMatrixView(matrixView.value)
+  const isAttribute = isAttributeMatrixView(view)
+  matrixView.value = view
+  matrixDropdownOpen.value = false
+  // Clear selections when crossing the attribute / pair boundary — pair
+  // selections (cell) don't map to attribute matrices and vice versa.
+  if (wasAttribute !== isAttribute) {
+    selectedCell.value = null
+    selectedMatrixHeader.value = null
+  }
 }
 
 // -- Precomputed matrix map --
@@ -168,10 +178,9 @@ const matrixMap = computed((): Map<string, CollateralMatrixData | null> => {
 
 const attributeMatrixMap = computed((): Map<string, AttributeMatrixData> => {
   const result = new Map<string, AttributeMatrixData>()
-  if (matrixVariant.value === 'pairs') return result
-  const mode = matrixVariant.value as AttributeMatrixMode
+  if (!isAttributeMatrixView(matrixView.value)) return result
   for (const market of props.markets) {
-    result.set(market.id, getAttributeMatrix(market, mode))
+    result.set(market.id, getAttributeMatrix(market, matrixView.value))
   }
   return result
 })
@@ -365,7 +374,7 @@ const hasSelection = (market: MarketGroup): boolean => {
 
 onMounted(() => {
   const onClick = () => {
-    metricDropdownOpen.value = false
+    matrixDropdownOpen.value = false
   }
   window.addEventListener('click', onClick)
   onUnmounted(() => {
@@ -464,72 +473,42 @@ onMounted(() => {
                 </button>
               </div>
 
-              <!-- Matrix sub-mode toggle (matrix view only) -->
+              <!-- Unified matrix view dropdown (matrix view only).
+                   Stats / Configuration sit at the top, then Oracles, then
+                   the existing pair metrics. Selecting Stats/Configuration
+                   swaps in the attribute matrix; everything else uses the
+                   pair matrix with the corresponding dotMetric. -->
               <div
                 v-if="getExpandedView(market.id) === 'matrix'"
-                class="flex rounded-[100px] border border-line-default overflow-hidden"
-              >
-                <button
-                  class="flex items-center gap-4 min-h-36 py-6 px-12 cursor-pointer transition-all text-p3"
-                  :class="matrixVariant === 'pairs'
-                    ? 'bg-accent-300/20 text-accent-700 font-medium'
-                    : 'bg-surface text-content-secondary hover:bg-surface-secondary'"
-                  @click.stop="setMatrixVariant('pairs')"
-                >
-                  LTV pairs
-                </button>
-                <button
-                  class="flex items-center gap-4 min-h-36 py-6 px-12 cursor-pointer transition-all text-p3 border-l border-line-default"
-                  :class="matrixVariant === 'stats'
-                    ? 'bg-accent-300/20 text-accent-700 font-medium'
-                    : 'bg-surface text-content-secondary hover:bg-surface-secondary'"
-                  @click.stop="setMatrixVariant('stats')"
-                >
-                  Stats
-                </button>
-                <button
-                  class="flex items-center gap-4 min-h-36 py-6 px-12 cursor-pointer transition-all text-p3 border-l border-line-default"
-                  :class="matrixVariant === 'config'
-                    ? 'bg-accent-300/20 text-accent-700 font-medium'
-                    : 'bg-surface text-content-secondary hover:bg-surface-secondary'"
-                  @click.stop="setMatrixVariant('config')"
-                >
-                  Configuration
-                </button>
-              </div>
-
-              <!-- Metric dropdown (LTV pairs only) -->
-              <div
-                v-if="getExpandedView(market.id) === 'matrix' && matrixVariant === 'pairs'"
                 class="relative"
               >
                 <div
                   class="ui-select__field"
-                  @click.stop="metricDropdownOpen = !metricDropdownOpen"
+                  @click.stop="matrixDropdownOpen = !matrixDropdownOpen"
                 >
                   <UiIcon
                     name="filter"
                     class="ui-select__icon"
                   />
-                  <span class="ui-select__text">{{ DOT_METRIC_OPTIONS.find(o => o.id === dotMetric)?.label }}</span>
+                  <span class="ui-select__text">{{ MATRIX_VIEW_OPTIONS.find(o => o.id === matrixView)?.label }}</span>
                   <UiIcon
                     name="arrow-down"
                     class="ui-select__arrow"
-                    :style="metricDropdownOpen ? 'transform: rotate(180deg)' : ''"
+                    :style="matrixDropdownOpen ? 'transform: rotate(180deg)' : ''"
                   />
                 </div>
                 <div
-                  v-if="metricDropdownOpen"
-                  class="absolute left-0 top-full mt-4 z-30 bg-surface border border-line-default rounded-12 shadow-card py-4 min-w-[160px]"
+                  v-if="matrixDropdownOpen"
+                  class="absolute left-0 top-full mt-4 z-30 bg-surface border border-line-default rounded-12 shadow-card py-4 min-w-[180px]"
                 >
                   <button
-                    v-for="option in DOT_METRIC_OPTIONS"
+                    v-for="option in MATRIX_VIEW_OPTIONS"
                     :key="option.id"
                     class="w-full text-left px-14 py-6 text-p3 cursor-pointer transition-colors"
-                    :class="dotMetric === option.id
+                    :class="matrixView === option.id
                       ? 'text-accent-700 bg-accent-300/20 font-medium'
                       : 'text-content-secondary hover:bg-surface-secondary'"
-                    @click.stop="dotMetric = option.id; metricDropdownOpen = false"
+                    @click.stop="setMatrixView(option.id)"
                   >
                     {{ option.label }}
                   </button>

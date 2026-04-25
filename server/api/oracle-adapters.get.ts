@@ -41,10 +41,11 @@ export default defineEventHandler(async (event) => {
   try {
     const resp = await fetchWithTimeout(getUpstreamUrl(chainId))
     if (!resp.ok) {
-      if (resp.status === 404) {
-        cache.set(key, [])
-        return []
-      }
+      // Don't cache the empty fallback for 404 (or any non-OK status). A
+      // missing/transient upstream response would otherwise pin every client
+      // to the empty array for the full TTL window — better to let the next
+      // request retry quickly.
+      if (resp.status === 404) return []
       throw new Error(`Upstream returned ${resp.status}`)
     }
 
@@ -58,6 +59,8 @@ export default defineEventHandler(async (event) => {
     const stale = cache.getStale(key)
     if (stale !== undefined) return stale
 
+    // Same reasoning as the 404 branch: don't pollute the cache with an empty
+    // array on transient failures.
     return []
   }
 })
