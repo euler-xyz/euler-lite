@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { MarketGroup } from '~/entities/lend-discovery'
 import type { Vault } from '~/entities/vault'
 import {
   type AttributeMatrixData,
@@ -9,6 +8,7 @@ import {
   type VaultUsdCacheEntry,
   buildAttributeRowCells,
   getAttributeRowColor,
+  isVaultType,
 } from '~/utils/discoveryCalculations'
 import { getEntitiesByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
@@ -16,7 +16,6 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { VaultHooksInfoModal } from '#components'
 
 const props = defineProps<{
-  market: MarketGroup
   data: AttributeMatrixData
   usdCache: Map<string, VaultUsdCacheEntry>
   selectedHeader: { address: string, axis: 'row' | 'column' } | null
@@ -27,7 +26,6 @@ defineEmits<{
 }>()
 
 const modal = useModal()
-const { isVaultGovernorVerified } = useVaults()
 
 interface RowComputed {
   row: AttributeRow
@@ -60,11 +58,13 @@ const cellBgColor = (
 ): string => getAttributeRowColor(cell.numeric, rowComputed.min, rowComputed.max, rowComputed.row.direction)
 
 const onHooksClick = (col: AttributeMatrixColumn) => {
-  modal.open(VaultHooksInfoModal, { props: { vault: col.vault as Vault } })
+  if (!isVaultType(col.vault)) return
+  modal.open(VaultHooksInfoModal, { props: { vault: col.vault } })
 }
 
+// Governor entities resolve via the vault's governorAdmin address, which exists
+// on both Vault and SecuritizeVault — the helper only reads that one field.
 const entitiesFor = (col: AttributeMatrixColumn) => getEntitiesByVault(col.vault as Vault)
-const isGovernorKnown = (col: AttributeMatrixColumn) => isVaultGovernorVerified(col.vault as Vault)
 </script>
 
 <template>
@@ -136,7 +136,7 @@ const isGovernorKnown = (col: AttributeMatrixColumn) => isVaultGovernorVerified(
 
               <!-- governor: entity logos + names, or unknown chip -->
               <template v-else-if="cell.kind === 'governor'">
-                <template v-if="isGovernorKnown(data.columns[colIdx]) && entitiesFor(data.columns[colIdx]).length">
+                <template v-if="entitiesFor(data.columns[colIdx]).length">
                   <div class="inline-flex items-center justify-center gap-6 flex-wrap">
                     <div
                       v-for="(entity, idx) in entitiesFor(data.columns[colIdx])"

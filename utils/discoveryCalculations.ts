@@ -592,6 +592,14 @@ const getTotalAssets = (vault: Vault | SecuritizeVault): bigint =>
 const isEscrow = (v: Vault | SecuritizeVault): boolean =>
   isVaultType(v) && v.vaultCategory === 'escrow'
 
+const compareTotalAssetsDesc = (a: Vault | SecuritizeVault, b: Vault | SecuritizeVault): number => {
+  const ta = getTotalAssets(a)
+  const tb = getTotalAssets(b)
+  if (tb > ta) return 1
+  if (tb < ta) return -1
+  return 0
+}
+
 export const getAttributeMatrixColumns = (market: MarketGroup): AttributeMatrixColumn[] => {
   const memberEvk: Vault[] = []
   const memberSecuritize: SecuritizeVault[] = []
@@ -599,19 +607,21 @@ export const getAttributeMatrixColumns = (market: MarketGroup): AttributeMatrixC
     if (isVaultType(v)) memberEvk.push(v)
     else if (isSecuritizeVault(v)) memberSecuritize.push(v)
   }
+  const externalEvk: Vault[] = []
   const externalSecuritize: SecuritizeVault[] = []
   const seenExternal = new Set<string>()
   for (const v of market.externalCollateral) {
-    if (!isSecuritizeVault(v)) continue
     const addr = getVaultAddress(v).toLowerCase()
-    if (seenExternal.has(addr)) continue
+    if (!addr || seenExternal.has(addr)) continue
     seenExternal.add(addr)
-    externalSecuritize.push(v)
+    if (isVaultType(v)) externalEvk.push(v)
+    else if (isSecuritizeVault(v)) externalSecuritize.push(v)
   }
 
-  memberEvk.sort((a, b) => (getTotalAssets(b) > getTotalAssets(a) ? 1 : -1))
-  memberSecuritize.sort((a, b) => (getTotalAssets(b) > getTotalAssets(a) ? 1 : -1))
-  externalSecuritize.sort((a, b) => (getTotalAssets(b) > getTotalAssets(a) ? 1 : -1))
+  memberEvk.sort(compareTotalAssetsDesc)
+  memberSecuritize.sort(compareTotalAssetsDesc)
+  externalEvk.sort(compareTotalAssetsDesc)
+  externalSecuritize.sort(compareTotalAssetsDesc)
 
   const toCol = (vault: Vault | SecuritizeVault): AttributeMatrixColumn => ({
     address: getVaultAddress(vault).toLowerCase(),
@@ -623,6 +633,7 @@ export const getAttributeMatrixColumns = (market: MarketGroup): AttributeMatrixC
   return [
     ...memberEvk.map(toCol),
     ...memberSecuritize.map(toCol),
+    ...externalEvk.map(toCol),
     ...externalSecuritize.map(toCol),
   ]
 }
@@ -643,7 +654,7 @@ const getIrmTypeLabel = (t: number | undefined): string => {
   if (t === INTEREST_RATE_MODEL_TYPE.KINK) return 'Kink'
   if (t === INTEREST_RATE_MODEL_TYPE.ADAPTIVE_CURVE) return 'Adaptive'
   if (t === INTEREST_RATE_MODEL_TYPE.KINKY) return 'Kinky'
-  if (t === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY) return 'Cyclical'
+  if (t === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY) return 'Cyclical note'
   return '—'
 }
 

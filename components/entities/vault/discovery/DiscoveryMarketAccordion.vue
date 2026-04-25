@@ -83,13 +83,16 @@ const setExpandedView = (marketId: string, mode: ExpandedViewMode) => {
 
 const vaultUsdCache = ref<Map<string, VaultUsdCacheEntry>>(new Map())
 
+const formatUsdOrDisplay = (p: { hasPrice: boolean, usdValue: number, display: string }) =>
+  p.hasPrice ? formatCompactUsdValue(p.usdValue) : p.display
+
 const loadVaultUsdValues = async (market: MarketGroup) => {
   const newEntries = new Map(vaultUsdCache.value)
   const allVaults = [...market.vaults, ...market.externalCollateral.filter(isMatrixCompatibleVault)]
 
   await Promise.all(
     allVaults.map(async (vault) => {
-      const addr = getVaultAddress(vault)
+      const addr = getVaultAddress(vault).toLowerCase()
       if (!addr || newEntries.has(addr)) return
       const totalAssets = 'totalAssets' in vault ? vault.totalAssets as bigint : 0n
       const supply = 'supply' in vault ? vault.supply as bigint : totalAssets
@@ -98,34 +101,19 @@ const loadVaultUsdValues = async (market: MarketGroup) => {
       const borrowCapRaw = 'borrowCap' in vault ? vault.borrowCap as bigint : maxUint256
 
       const liquidity = supply >= borrow ? supply - borrow : 0n
-      const supplyCapAmount = supplyCapRaw >= maxUint256 ? 0n : supplyCapRaw
-      const borrowCapAmount = borrowCapRaw >= maxUint256 ? 0n : borrowCapRaw
+      const supplyCapHasPrice = supplyCapRaw > 0n && supplyCapRaw < maxUint256
+      const borrowCapHasPrice = borrowCapRaw > 0n && borrowCapRaw < maxUint256
 
       const [supplyPrice, borrowPrice, liquidityPrice, supplyCapPrice, borrowCapPrice] = await Promise.all([
         formatAssetValue(totalAssets, vault, 'off-chain'),
         formatAssetValue(borrow, vault, 'off-chain'),
         formatAssetValue(liquidity, vault, 'off-chain'),
-        supplyCapAmount > 0n
-          ? formatAssetValue(supplyCapAmount, vault, 'off-chain')
-          : Promise.resolve({ hasPrice: false, usdValue: 0, display: '$0' }),
-        borrowCapAmount > 0n
-          ? formatAssetValue(borrowCapAmount, vault, 'off-chain')
-          : Promise.resolve({ hasPrice: false, usdValue: 0, display: '$0' }),
+        supplyCapHasPrice ? formatAssetValue(supplyCapRaw, vault, 'off-chain') : null,
+        borrowCapHasPrice ? formatAssetValue(borrowCapRaw, vault, 'off-chain') : null,
       ])
 
-      const formatUsdOrDisplay = (p: { hasPrice: boolean, usdValue: number, display: string }) =>
-        p.hasPrice ? formatCompactUsdValue(p.usdValue) : p.display
-
-      const supplyCapStr = supplyCapRaw >= maxUint256
-        ? '∞'
-        : supplyCapRaw === 0n
-          ? '$0'
-          : formatUsdOrDisplay(supplyCapPrice)
-      const borrowCapStr = borrowCapRaw >= maxUint256
-        ? '∞'
-        : borrowCapRaw === 0n
-          ? '$0'
-          : formatUsdOrDisplay(borrowCapPrice)
+      const capDisplay = (rawCap: bigint, price: typeof supplyPrice | null) =>
+        rawCap >= maxUint256 ? '∞' : rawCap === 0n ? '$0' : price ? formatUsdOrDisplay(price) : '—'
 
       newEntries.set(addr, {
         supply: formatUsdOrDisplay(supplyPrice),
@@ -134,10 +122,10 @@ const loadVaultUsdValues = async (market: MarketGroup) => {
         borrowUsd: borrowPrice.hasPrice ? borrowPrice.usdValue : 0,
         liquidity: formatUsdOrDisplay(liquidityPrice),
         liquidityUsd: liquidityPrice.hasPrice ? liquidityPrice.usdValue : 0,
-        supplyCap: supplyCapStr,
-        supplyCapUsd: supplyCapRaw >= maxUint256 || !supplyCapPrice.hasPrice ? undefined : supplyCapPrice.usdValue,
-        borrowCap: borrowCapStr,
-        borrowCapUsd: borrowCapRaw >= maxUint256 || !borrowCapPrice.hasPrice ? undefined : borrowCapPrice.usdValue,
+        supplyCap: capDisplay(supplyCapRaw, supplyCapPrice),
+        supplyCapUsd: supplyCapPrice?.hasPrice ? supplyCapPrice.usdValue : undefined,
+        borrowCap: capDisplay(borrowCapRaw, borrowCapPrice),
+        borrowCapUsd: borrowCapPrice?.hasPrice ? borrowCapPrice.usdValue : undefined,
       })
     }),
   )
@@ -573,7 +561,6 @@ onMounted(() => {
             <!-- Matrix View: Config / Stats attribute matrix -->
             <DiscoveryMarketAttributeMatrix
               v-else-if="attributeMatrixMap.get(market.id)"
-              :market="market"
               :data="attributeMatrixMap.get(market.id)!"
               :usd-cache="vaultUsdCache"
               :selected-header="selectedMatrixHeader?.marketId === market.id ? { address: selectedMatrixHeader.address, axis: selectedMatrixHeader.axis } : null"

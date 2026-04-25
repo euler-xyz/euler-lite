@@ -176,9 +176,9 @@ const cellOracleAdapters = computed((): Map<string, OracleAdapterEntry[]> => {
 })
 
 watch(
-  cellOracleAdapters,
-  async (map) => {
-    if (!chainId.value || map.size === 0) return
+  [cellOracleAdapters, chainId],
+  async ([map, currentChainId]) => {
+    if (!currentChainId || map.size === 0) return
     const seen = new Set<string>()
     const toLoad: OracleAdapterEntry[] = []
     for (const adapters of map.values()) {
@@ -190,7 +190,7 @@ watch(
         toLoad.push(a)
       }
     }
-    await Promise.all(toLoad.map(a => loadOracleAdapter(chainId.value, a.oracle)))
+    await Promise.all(toLoad.map(a => loadOracleAdapter(currentChainId, a.oracle)))
   },
   { immediate: true },
 )
@@ -251,9 +251,9 @@ const onAdapterClick = (adapter: AdapterView, event: MouseEvent) => {
     return
   }
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  const left = Math.min(rect.left, window.innerWidth - TOOLTIP_WIDTH - 16)
-  const spaceBelow = window.innerHeight - rect.bottom - 16
-  const spaceAbove = rect.top - 16
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - TOOLTIP_WIDTH - 16))
+  const spaceBelow = Math.max(160, window.innerHeight - rect.bottom - 16)
+  const spaceAbove = Math.max(160, rect.top - 16)
   const flipUp = spaceAbove > spaceBelow
   tooltipStyle.value = flipUp
     ? { top: `${rect.top - 8}px`, left: `${left}px`, transform: 'translateY(-100%)', maxHeight: `${spaceAbove}px` }
