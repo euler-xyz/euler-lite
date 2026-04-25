@@ -268,6 +268,14 @@ const fetchNeededEscrowVaults = async (addresses: string[], generation: number):
 }
 
 const UNRESOLVED_COLLATERAL_CONCURRENCY = 8
+// Total addresses resolved per loadVaults call. Defends against pathological
+// product labels that reference hundreds of off-label collaterals — a
+// well-formed product should resolve in well under this cap.
+const UNRESOLVED_COLLATERAL_MAX_TOTAL = 64
+// Hop limit for the fixed-point sweep. A newly-resolved off-label vault may
+// itself reference further off-label collaterals; we re-extract until no new
+// addresses appear, but cap the depth to keep loadVaults bounded.
+const UNRESOLVED_COLLATERAL_MAX_HOPS = 3
 
 /**
  * Lazy-resolve collateral addresses that aren't covered by the bulk loaders.
@@ -286,6 +294,46 @@ const fetchUnresolvedCollaterals = async (addresses: string[], generation: numbe
     if (loadGeneration.value !== generation) return
     const batch = addresses.slice(i, i + UNRESOLVED_COLLATERAL_CONCURRENCY)
     await Promise.allSettled(batch.map(addr => getOrFetch(addr)))
+  }
+}
+
+/**
+ * Run the lazy-resolve sweep to a fixed point: each newly-resolved EVK vault
+ * may bring its own collateral edges, which can reference further off-label
+ * vaults. Repeat the (extract → fetch) pair until extract returns empty or
+ * the hop / total caps trip.
+ */
+const resolveUnknownCollateralsToFixedPoint = async (generation: number): Promise<void> => {
+  const { getEvkVaults, has: registryHas } = useVaultRegistry()
+  let resolvedSoFar = 0
+
+  for (let hop = 0; hop < UNRESOLVED_COLLATERAL_MAX_HOPS; hop++) {
+    if (loadGeneration.value !== generation) return
+
+    const next = extractUnresolvedCollateralAddresses(getEvkVaults(), registryHas)
+      .filter(addr => !isVaultNotExplorable(addr))
+    if (!next.length) return
+
+    const remaining = UNRESOLVED_COLLATERAL_MAX_TOTAL - resolvedSoFar
+    if (remaining <= 0) {
+      logWarn(
+        'useVaults/resolveUnknownCollaterals',
+        `total cap (${UNRESOLVED_COLLATERAL_MAX_TOTAL}) reached at hop ${hop} with ${next.length} addresses still unresolved`,
+      )
+      return
+    }
+
+    const batch = next.length > remaining ? next.slice(0, remaining) : next
+    await fetchUnresolvedCollaterals(batch, generation)
+    resolvedSoFar += batch.length
+
+    if (next.length > batch.length) {
+      logWarn(
+        'useVaults/resolveUnknownCollaterals',
+        `truncated lazy-resolve at hop ${hop}: ${next.length - batch.length} addresses skipped after total cap`,
+      )
+      return
+    }
   }
 }
 
@@ -530,12 +578,9 @@ const loadVaults = async () => {
     // any product label — without this, discovery views silently drop the
     // relationship. The registry's getOrFetch routes through the standard
     // category resolver, so escrow / securitize / EVK are all handled.
-    const { getEvkVaults: getEvkForUnresolved, has: registryHasForUnresolved } = useVaultRegistry()
-    const unresolvedCollateralAddresses = extractUnresolvedCollateralAddresses(
-      getEvkForUnresolved(),
-      registryHasForUnresolved,
-    )
-    await fetchUnresolvedCollaterals(unresolvedCollateralAddresses, generation)
+    // Iterates to a fixed point: a newly-resolved off-label vault may itself
+    // reference further off-label collaterals.
+    await resolveUnknownCollateralsToFixedPoint(generation)
 
     if (loadGeneration.value !== generation) return
 

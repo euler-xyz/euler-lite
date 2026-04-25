@@ -22,14 +22,20 @@ export const extractUnresolvedCollateralAddresses = (
   isInRegistry: (address: string) => boolean,
   nowSeconds?: bigint,
 ): string[] => {
+  // Snapshot the clock once so all edges see the same "now" — without this,
+  // two edges in the same vault could be evaluated with millisecond-different
+  // values across a ramp boundary. Defaulting here keeps the documented
+  // contract ("we don't fetch fully ramped-out edges") tight.
+  const now = nowSeconds ?? BigInt(Math.floor(Date.now() / 1000))
   const unresolved = new Set<string>()
   evkVaults.forEach((vault) => {
     vault.collateralLTVs.forEach((ltv) => {
-      if (!isLiveCollateralEdge(ltv, nowSeconds)) return
+      if (!isLiveCollateralEdge(ltv, now)) return
       const addr = ltv.collateral
       if (addr === zeroAddress) return
-      if (isInRegistry(addr)) return
-      unresolved.add(getAddress(addr))
+      const normalised = getAddress(addr)
+      if (isInRegistry(normalised)) return
+      unresolved.add(normalised)
     })
   })
   return [...unresolved]

@@ -90,21 +90,49 @@ describe('extractUnresolvedCollateralAddresses', () => {
   })
 
   it('deduplicates collaterals shared across multiple vaults', () => {
+    const upperA = `0x${ADDR_A.slice(2).toUpperCase()}`
     const a = makeVault([makeLtv({ collateral: ADDR_A })])
-    const b = makeVault([makeLtv({ collateral: ADDR_A.toUpperCase().replace('0X', '0x') })])
+    const b = makeVault([makeLtv({ collateral: upperA })])
     const result = extractUnresolvedCollateralAddresses([a, b], () => false, NOW)
     expect(lower(result)).toEqual([ADDR_A.toLowerCase()])
   })
 
   it('treats registry membership case-insensitively', () => {
-    const vault = makeVault([
-      makeLtv({ collateral: ADDR_A.toUpperCase().replace('0X', '0x') }),
-    ])
+    const upperA = `0x${ADDR_A.slice(2).toUpperCase()}`
+    const vault = makeVault([makeLtv({ collateral: upperA })])
     const result = extractUnresolvedCollateralAddresses(
       [vault],
       inRegistry(ADDR_A),
       NOW,
     )
     expect(result).toEqual([])
+  })
+
+  it('snapshots time once so mid-evaluation Date.now() jitter cannot move ramp boundaries', () => {
+    // Edge with a borderline ramp: targetTimestamp exactly NOW means the ramp
+    // is complete, edge is dead. If the helper called Date.now() per-edge
+    // and the wall-clock advanced mid-loop the second edge could see now+ε
+    // and still be dead — but we want a single snapshot.
+    const vault = makeVault([
+      makeLtv({
+        collateral: ADDR_A,
+        borrowLTV: 0n,
+        liquidationLTV: 0n,
+        initialLiquidationLTV: 9000n,
+        targetTimestamp: NOW,
+        rampDuration: 1000n,
+      }),
+      makeLtv({
+        collateral: ADDR_B,
+        borrowLTV: 0n,
+        liquidationLTV: 0n,
+        initialLiquidationLTV: 9000n,
+        targetTimestamp: NOW + 100n,
+        rampDuration: 1000n,
+      }),
+    ])
+    const result = extractUnresolvedCollateralAddresses([vault], () => false, NOW)
+    // First edge dead at NOW; second still mid-ramp.
+    expect(lower(result)).toEqual([ADDR_B.toLowerCase()])
   })
 })
