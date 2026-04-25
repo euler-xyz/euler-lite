@@ -267,77 +267,64 @@ const fetchNeededEscrowVaults = async (addresses: string[], generation: number):
   registrySetMany(entries)
 }
 
-const UNRESOLVED_COLLATERAL_CONCURRENCY = 8
-
 /**
  * Lazy-resolve collateral addresses that aren't covered by the bulk loaders.
  *
  * `fetchChainVaultCategories` already ran earlier in this `loadVaults` call
  * and populated the per-address category cache, so `fetchVaultCategory` is a
- * cache hit for every address indexed by the subgraph. We dispatch each
- * address directly to its dedicated lens — no escrow-perspective probe and
- * no securitize-then-EVK guessing — and only fall back to the registry's
- * `resolveUnknown` for the rare brand-new deployment whose category endpoint
- * returns `null`.
+ * cache hit for every address indexed by the subgraph. We group addresses
+ * by category and hand each group to the existing bulk loader for that type
+ * (`updateEVKVaults` / `updateEarnVaults` / `updateSecuritizeVaults` /
+ * `fetchNeededEscrowVaults`) — same multicall batching, same registry-write
+ * path, no parallel implementation. `silent=true` keeps loading flags
+ * untouched since this runs after the initial reveal.
  *
- * Bounded concurrency keeps this from fanning out into hundreds of parallel
- * lens reads on markets that reference many off-label collaterals.
+ * Brand-new deployments not yet indexed by the subgraph (category === null)
+ * fall back to the registry's `getOrFetch` / `resolveUnknown`, which is the
+ * only path that needs the legacy probe-and-guess.
  */
 const fetchUnresolvedCollaterals = async (addresses: string[], generation: number): Promise<void> => {
-  const { setMany: registrySetMany, getOrFetch } = useVaultRegistry()
+  const { getOrFetch } = useVaultRegistry()
   if (!addresses.length || loadGeneration.value !== generation) return
 
-  const ctx = contextForGeneration(generation)
+  const evkAddrs: string[] = []
+  const earnAddrs: string[] = []
+  const securitizeAddrs: string[] = []
+  const escrowAddrs: string[] = []
+  const unknownAddrs: string[] = []
 
-  for (let i = 0; i < addresses.length; i += UNRESOLVED_COLLATERAL_CONCURRENCY) {
-    if (loadGeneration.value !== generation) return
-    const batch = addresses.slice(i, i + UNRESOLVED_COLLATERAL_CONCURRENCY)
+  await Promise.allSettled(addresses.map(async (addr) => {
+    const category = await fetchVaultCategory(addr)
+    switch (category) {
+      case 'escrow':
+        escrowAddrs.push(addr)
+        break
+      case 'evk':
+        evkAddrs.push(addr)
+        break
+      case 'earn':
+        earnAddrs.push(addr)
+        break
+      case 'securitize':
+        securitizeAddrs.push(addr)
+        break
+      default:
+        unknownAddrs.push(addr)
+        break
+    }
+  }))
 
-    const settled = await Promise.allSettled(batch.map(async (addr) => {
-      const category = await fetchVaultCategory(addr)
-      if (loadGeneration.value !== generation) return null
+  if (loadGeneration.value !== generation) return
 
-      switch (category) {
-        case 'escrow': {
-          const vault = await fetchEscrowVault(addr, ctx)
-          return { address: vault.address, vault, type: 'evk' as const }
-        }
-        case 'evk': {
-          const vault = await fetchVault(addr, ctx)
-          return { address: vault.address, vault, type: 'evk' as const }
-        }
-        case 'earn': {
-          const vault = await fetchEarnVault(addr, ctx)
-          return { address: vault.address, vault, type: 'earn' as const }
-        }
-        case 'securitize': {
-          const vault = await fetchSecuritizeVault(addr, ctx)
-          return { address: vault.address, vault, type: 'securitize' as const }
-        }
-        default: {
-          // Subgraph hasn't indexed this address yet (brand-new deployment).
-          // Fall back to the registry's resolveUnknown — it caches the
-          // entry itself, so we just await and skip the manual setMany.
-          await getOrFetch(addr)
-          return null
-        }
-      }
-    }))
-
-    if (loadGeneration.value !== generation) return
-
-    const entries = settled
-      .map((r) => {
-        if (r.status === 'rejected') {
-          logWarn('useVaults/fetchUnresolvedCollaterals', r.reason)
-          return null
-        }
-        return r.value
-      })
-      .filter((entry): entry is { address: string, vault: Vault | EarnVault | SecuritizeVault, type: 'evk' | 'earn' | 'securitize' } => entry !== null)
-
-    if (entries.length) registrySetMany(entries)
-  }
+  await Promise.all([
+    evkAddrs.length ? updateEVKVaults(evkAddrs, generation, true) : null,
+    earnAddrs.length ? updateEarnVaults(earnAddrs, generation, true) : null,
+    securitizeAddrs.length ? updateSecuritizeVaults(securitizeAddrs, generation, true) : null,
+    escrowAddrs.length ? fetchNeededEscrowVaults(escrowAddrs, generation) : null,
+    unknownAddrs.length
+      ? Promise.allSettled(unknownAddrs.map(addr => getOrFetch(addr)))
+      : null,
+  ])
 }
 
 const updateSecuritizeVaults = async (securitizeAddresses: string[], generation: number, silent = false) => {
