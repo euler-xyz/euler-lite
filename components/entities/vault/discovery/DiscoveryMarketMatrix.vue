@@ -298,42 +298,77 @@ const tooltipContext = ref<TooltipContext | null>(null)
 const tooltipAdapter = computed(() => tooltipContext.value?.view ?? null)
 const tooltipStyle = ref<CSSProperties>({})
 
-// Lazy price fetch — only the currently-open tooltip's adapter is in the
-// list, so the borrow page's batch query runs once per tooltip open and
-// nothing else.
-const tooltipAdapters = computed<OracleAdapterEntry[]>(() => {
-  const ctx = tooltipContext.value
-  if (!ctx) return []
-  return [{
-    oracle: ctx.view.oracle,
-    name: ctx.view.name,
-    base: ctx.view.base,
-    quote: ctx.view.quote,
-  }]
-})
-const tooltipSourceVaults = computed<Vault[]>(() => {
-  const ctx = tooltipContext.value
-  return ctx ? [ctx.sourceVault] : []
-})
-const tooltipCollateralVaults = computed<(Vault | SecuritizeVault)[]>(() => {
-  const ctx = tooltipContext.value
-  return ctx?.collateralVault ? [ctx.collateralVault] : []
+// Single matrix-wide price fetch — when oracle mode is active we
+// dedup-collect every adapter currently shown (per-pair + per-column-asset)
+// and run them through one batchSimulation. The tooltip then reads its
+// price from the same map, and every logo can show a warning marker if
+// its getQuote reverted.
+const adapterKeyOf = (a: OracleAdapterEntry) =>
+  `${a.oracle.toLowerCase()}:${a.base.toLowerCase()}:${a.quote.toLowerCase()}`
+
+const allOracleAdapters = computed<OracleAdapterEntry[]>(() => {
+  if (props.dotMetric !== 'oracle') return []
+  const seen = new Map<string, OracleAdapterEntry>()
+  const ingest = (lists: Iterable<OracleAdapterEntry[]>) => {
+    for (const list of lists) {
+      for (const a of list) {
+        const key = adapterKeyOf(a)
+        if (!seen.has(key)) seen.set(key, a)
+      }
+    }
+  }
+  ingest(cellOracleAdapters.value.values())
+  ingest(columnAssetOracleAdapters.value.values())
+  return [...seen.values()]
 })
 
-const { prices: tooltipPrices, isLoading: tooltipPriceLoading } = useOracleAdapterPrices(
-  tooltipAdapters,
-  tooltipSourceVaults,
-  tooltipCollateralVaults,
+const oraclePriceSourceVaults = computed<Vault[]>(() => {
+  if (props.dotMetric !== 'oracle') return []
+  const seen = new Map<string, Vault>()
+  for (const col of props.matrix.columns) {
+    const liability = findVault(props.market, col.address)
+    if (liability && isVaultType(liability)) {
+      seen.set(liability.address.toLowerCase(), liability)
+    }
+  }
+  return [...seen.values()]
+})
+
+const oraclePriceCollateralVaults = computed<(Vault | SecuritizeVault)[]>(() => {
+  if (props.dotMetric !== 'oracle') return []
+  const seen = new Map<string, Vault | SecuritizeVault>()
+  for (const row of props.matrix.rows) {
+    const v = findVault(props.market, row.address)
+    if (v && isMatrixCompatibleVault(v)) {
+      seen.set(row.address.toLowerCase(), v)
+    }
+  }
+  return [...seen.values()]
+})
+
+const { prices: oraclePrices, isLoading: oraclePricesLoading } = useOracleAdapterPrices(
+  allOracleAdapters,
+  oraclePriceSourceVaults,
+  oraclePriceCollateralVaults,
 )
 
+const isAdapterPriceFailed = (adapter: { oracle: string, base: string, quote: string }): boolean => {
+  if (oraclePricesLoading.value) return false
+  const key = `${adapter.oracle.toLowerCase()}:${adapter.base.toLowerCase()}:${adapter.quote.toLowerCase()}`
+  const info = oraclePrices.value.get(key)
+  return info ? !info.success : false
+}
+
 const tooltipPriceText = computed((): string | null => {
-  const adapters = tooltipAdapters.value
-  if (!adapters.length) return null
-  const key = `${adapters[0].oracle.toLowerCase()}:${adapters[0].base.toLowerCase()}:${adapters[0].quote.toLowerCase()}`
-  const info = tooltipPrices.value.get(key)
+  const ctx = tooltipContext.value
+  if (!ctx) return null
+  const key = `${ctx.view.oracle.toLowerCase()}:${ctx.view.base.toLowerCase()}:${ctx.view.quote.toLowerCase()}`
+  const info = oraclePrices.value.get(key)
   if (!info?.success) return null
   return formatNumber(info.rate, 4)
 })
+
+const tooltipPriceLoading = computed(() => oraclePricesLoading.value && !oraclePrices.value.size)
 
 const closeTooltip = () => {
   tooltipContext.value = null
@@ -482,11 +517,13 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                 selectedCell?.collateralAddr === row.address
                   && selectedCell?.liabilityAddr === col.address
                   ? '!bg-accent-500/20'
-                  : row.address === col.address
-                    ? 'bg-white/[0.03]'
-                    : '',
+                  : (isRowHighlighted(row.address) || isColumnHighlighted(col.address))
+                    ? '!bg-white/[0.06]'
+                    : row.address === col.address
+                      ? 'bg-white/[0.03]'
+                      : '',
                 matrix.cells.get(row.address)?.get(col.address)
-                  ? 'cursor-pointer hover:bg-white/[0.06]'
+                  ? 'cursor-pointer'
                   : '',
               ]"
               :style="
@@ -555,6 +592,12 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                       class="absolute -top-1 -right-1 w-6 h-6 rounded-full"
                       :class="adapter.checksStatus === 'negative' ? 'bg-error-500' : 'bg-warning-500'"
                     />
+                    <SvgIcon
+                      v-if="isAdapterPriceFailed(adapter)"
+                      name="warning"
+                      class="absolute -bottom-1 -right-1 !w-10 !h-10 text-error-500"
+                      title="getQuote reverted"
+                    />
                   </button>
                 </div>
               </template>
@@ -586,6 +629,12 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                         v-if="adapter.checksStatus === 'warning' || adapter.checksStatus === 'negative'"
                         class="absolute -top-1 -right-1 w-6 h-6 rounded-full"
                         :class="adapter.checksStatus === 'negative' ? 'bg-error-500' : 'bg-warning-500'"
+                      />
+                      <SvgIcon
+                        v-if="isAdapterPriceFailed(adapter)"
+                        name="warning"
+                        class="absolute -bottom-1 -right-1 !w-10 !h-10 text-error-500"
+                        title="getQuote reverted"
                       />
                     </button>
                   </div>

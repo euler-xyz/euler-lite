@@ -132,6 +132,7 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
               v-for="col in attributeColumns"
               :key="col.attribute.id"
               class="text-center py-6 px-8 min-w-[80px] transition-colors border-b border-r border-white/[0.04]"
+              :class="(isVaultRowHighlighted(vault.address) || isAttributeColumnHighlighted(col.attribute.id)) ? '!bg-white/[0.06]' : ''"
               :style="{ backgroundColor: cellBgColor(col, col.cells[vaultIdx]) }"
               @mouseenter="hoveredCell = { vaultAddr: vault.address, attributeId: col.attribute.id }"
               @mouseleave="hoveredCell = null"
