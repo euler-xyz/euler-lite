@@ -600,13 +600,33 @@ const compareTotalAssetsDesc = (a: Vault | SecuritizeVault, b: Vault | Securitiz
   return 0
 }
 
-export const getAttributeMatrixColumns = (market: MarketGroup): AttributeMatrixColumn[] => {
+export const getAttributeMatrixColumns = (
+  market: MarketGroup,
+  options: { includeExternal?: boolean } = {},
+): AttributeMatrixColumn[] => {
+  const includeExternal = options.includeExternal ?? true
+
   const memberEvk: Vault[] = []
   const memberSecuritize: SecuritizeVault[] = []
   for (const v of market.vaults) {
     if (isVaultType(v)) memberEvk.push(v)
     else if (isSecuritizeVault(v)) memberSecuritize.push(v)
   }
+
+  memberEvk.sort(compareTotalAssetsDesc)
+  memberSecuritize.sort(compareTotalAssetsDesc)
+
+  const toCol = (vault: Vault | SecuritizeVault): AttributeMatrixColumn => ({
+    address: getVaultAddress(vault).toLowerCase(),
+    symbol: vault.asset.symbol,
+    assetAddress: vault.asset.address,
+    vault,
+  })
+
+  if (!includeExternal) {
+    return [...memberEvk.map(toCol), ...memberSecuritize.map(toCol)]
+  }
+
   const externalEvk: Vault[] = []
   const externalSecuritize: SecuritizeVault[] = []
   const seenExternal = new Set<string>()
@@ -618,17 +638,8 @@ export const getAttributeMatrixColumns = (market: MarketGroup): AttributeMatrixC
     else if (isSecuritizeVault(v)) externalSecuritize.push(v)
   }
 
-  memberEvk.sort(compareTotalAssetsDesc)
-  memberSecuritize.sort(compareTotalAssetsDesc)
   externalEvk.sort(compareTotalAssetsDesc)
   externalSecuritize.sort(compareTotalAssetsDesc)
-
-  const toCol = (vault: Vault | SecuritizeVault): AttributeMatrixColumn => ({
-    address: getVaultAddress(vault).toLowerCase(),
-    symbol: vault.asset.symbol,
-    assetAddress: vault.asset.address,
-    vault,
-  })
 
   return [
     ...memberEvk.map(toCol),
@@ -663,17 +674,19 @@ const formatCapPercentDisplay = (pct: number, uncapped: boolean): string => {
   return `${compactNumber(pct, 2)}%`
 }
 
+// nanoToValue(supplyAPY, 25) already returns a percentage value (e.g. 5.2 for
+// 5.2%) — matches VaultOverviewBlockStats. No further scaling needed.
 const supplyApyPercent = (vault: Vault | SecuritizeVault): number =>
-  Number(nanoToValue(vault.interestRateInfo.supplyAPY, 25)) * 100
+  Number(nanoToValue(vault.interestRateInfo.supplyAPY, 25))
 
 const borrowApyPercent = (vault: Vault | SecuritizeVault): number =>
-  Number(nanoToValue(vault.interestRateInfo.borrowAPY, 25)) * 100
+  Number(nanoToValue(vault.interestRateInfo.borrowAPY, 25))
 
 export const CONFIG_ROWS: AttributeRow[] = [
   {
     id: 'supplyCap',
     label: 'Supply cap',
-    direction: 'lower-better',
+    direction: 'neutral',
     getValue: (vault, usd) => {
       const rawCap = vault.supplyCap
       const uncapped = rawCap >= maxUint256
@@ -684,14 +697,13 @@ export const CONFIG_ROWS: AttributeRow[] = [
         kind: 'capProgress',
         capPercent: pct,
         capUncapped: uncapped,
-        numeric: uncapped ? undefined : pct,
       }
     },
   },
   {
     id: 'borrowCap',
     label: 'Borrow cap',
-    direction: 'lower-better',
+    direction: 'neutral',
     getValue: (vault, usd) => {
       if (!isVaultType(vault)) return NA_CELL
       if (isEscrow(vault)) return NA_CELL
@@ -704,7 +716,6 @@ export const CONFIG_ROWS: AttributeRow[] = [
         kind: 'capProgress',
         capPercent: pct,
         capUncapped: uncapped,
-        numeric: uncapped ? undefined : pct,
       }
     },
   },
@@ -750,16 +761,6 @@ export const CONFIG_ROWS: AttributeRow[] = [
     },
   },
   {
-    id: 'governor',
-    label: 'Governor',
-    direction: 'neutral',
-    getValue: vault => ({
-      display: vault.governorAdmin,
-      kind: 'governor',
-      hint: vault.governorAdmin,
-    }),
-  },
-  {
     id: 'hooks',
     label: 'Hooks',
     direction: 'neutral',
@@ -778,17 +779,26 @@ export const CONFIG_ROWS: AttributeRow[] = [
       }
     },
   },
+  {
+    id: 'governor',
+    label: 'Governor',
+    direction: 'neutral',
+    getValue: vault => ({
+      display: vault.governorAdmin,
+      kind: 'governor',
+      hint: vault.governorAdmin,
+    }),
+  },
 ]
 
 export const STATS_ROWS: AttributeRow[] = [
   {
     id: 'totalSupply',
     label: 'Total supply',
-    direction: 'higher-better',
+    direction: 'neutral',
     getValue: (_vault, usd) => ({
       display: usd ? usd.supply : '…',
       kind: 'text',
-      numeric: usd?.supplyUsd,
     }),
   },
   {
@@ -800,37 +810,35 @@ export const STATS_ROWS: AttributeRow[] = [
       return {
         display: usd ? usd.borrow : '…',
         kind: 'text',
-        numeric: usd?.borrowUsd,
       }
     },
   },
   {
     id: 'liquidity',
     label: 'Available liquidity',
-    direction: 'higher-better',
+    direction: 'neutral',
     getValue: (vault, usd) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       return {
         display: usd ? usd.liquidity : '…',
         kind: 'text',
-        numeric: usd?.liquidityUsd,
       }
     },
   },
   {
     id: 'utilization',
     label: 'Utilization',
-    direction: 'lower-better',
+    direction: 'neutral',
     getValue: (vault) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       const pct = getVaultUtilization(vault)
-      return { display: `${formatNumber(pct, 2)}%`, kind: 'text', numeric: pct }
+      return { display: `${formatNumber(pct, 2)}%`, kind: 'text' }
     },
   },
   {
     id: 'supplyCapUsage',
     label: 'Supply cap usage',
-    direction: 'lower-better',
+    direction: 'neutral',
     getValue: (vault) => {
       if (!isVaultType(vault)) return NA_CELL
       const uncapped = vault.supplyCap >= maxUint256
@@ -840,14 +848,13 @@ export const STATS_ROWS: AttributeRow[] = [
         kind: 'capProgress',
         capPercent: pct,
         capUncapped: uncapped,
-        numeric: uncapped ? undefined : pct,
       }
     },
   },
   {
     id: 'borrowCapUsage',
     label: 'Borrow cap usage',
-    direction: 'lower-better',
+    direction: 'neutral',
     getValue: (vault) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       const uncapped = vault.borrowCap >= maxUint256
@@ -857,18 +864,17 @@ export const STATS_ROWS: AttributeRow[] = [
         kind: 'capProgress',
         capPercent: pct,
         capUncapped: uncapped,
-        numeric: uncapped ? undefined : pct,
       }
     },
   },
   {
     id: 'supplyApy',
     label: 'Supply APY',
-    direction: 'higher-better',
+    direction: 'neutral',
     getValue: (vault) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       const pct = supplyApyPercent(vault)
-      return { display: `${formatNumber(pct, 2)}%`, kind: 'text', numeric: pct }
+      return { display: `${formatNumber(pct, 2)}%`, kind: 'text' }
     },
   },
   {
@@ -878,7 +884,7 @@ export const STATS_ROWS: AttributeRow[] = [
     getValue: (vault) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       const pct = borrowApyPercent(vault)
-      return { display: `${formatNumber(pct, 2)}%`, kind: 'text', numeric: pct }
+      return { display: `${formatNumber(pct, 2)}%`, kind: 'text' }
     },
   },
 ]
@@ -888,7 +894,10 @@ export const getAttributeMatrix = (
   mode: AttributeMatrixMode,
 ): AttributeMatrixData => ({
   rows: mode === 'config' ? CONFIG_ROWS : STATS_ROWS,
-  columns: getAttributeMatrixColumns(market),
+  // Config view focuses on the curated product — externals belong to other
+  // governance and add noise. Stats view keeps externals so risk managers can
+  // compare TVL/APY against linked collateral pools.
+  columns: getAttributeMatrixColumns(market, { includeExternal: mode !== 'config' }),
 })
 
 export const buildAttributeRowCells = (

@@ -158,16 +158,28 @@ const metricRange = computed((): { min: number, max: number } => {
 const cellOracleAdapters = computed((): Map<string, OracleAdapterEntry[]> => {
   const result = new Map<string, OracleAdapterEntry[]>()
   if (props.dotMetric !== 'oracle') return result
+
+  // Skip the ERC4626 wrapper adapter for any address that already appears
+  // as a collateral row — the matrix already names the collateral, so the
+  // wrapper-to-underlying hop is noise in the cell.
+  const skipERC4626Bases = new Set<string>()
+  for (const row of props.matrix.rows) skipERC4626Bases.add(row.address.toLowerCase())
+
   for (const [colAddr, rowCells] of props.matrix.cells) {
     for (const [liabAddr] of rowCells) {
       const collateral = findVault(props.market, colAddr)
       const liability = findVault(props.market, liabAddr)
       if (!collateral || !liability) continue
       if (!isVaultType(liability) || !liability.oracleDetailedInfo) continue
+      // The borrow vault's oracle resolves the collateral *vault* (eToken)
+      // address against its unit of account — not the collateral's underlying
+      // asset. Mirrors VaultOverviewBlockOracleAdapters' collateralVaults path.
+      const collateralAddr = (isVaultType(collateral) ? collateral.address : (collateral as { address: string }).address)
       const adapters = collectOracleAdapters(liability.oracleDetailedInfo, 3, {
-        base: collateral.asset.address as Address,
+        base: collateralAddr as Address,
         quote: liability.unitOfAccount as Address,
         leafOnly: true,
+        skipERC4626Bases,
       })
       if (adapters.length) result.set(`${colAddr}:${liabAddr}`, adapters)
     }

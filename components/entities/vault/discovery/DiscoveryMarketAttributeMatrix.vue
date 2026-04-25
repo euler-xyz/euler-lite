@@ -79,7 +79,10 @@ const entitiesFor = (vault: AttributeMatrixColumn) => getEntitiesByVault(vault.v
             <th
               class="text-left text-p5 text-content-muted font-normal py-6 pr-10 pl-6 sticky left-0 bg-surface z-30 border-b border-r border-white/[0.04]"
             >
-              <span>Vault</span>
+              <div class="flex flex-col leading-tight">
+                <span>Attribute &#8594;</span>
+                <span>Vault &#8595;</span>
+              </div>
             </th>
             <th
               v-for="col in attributeColumns"
