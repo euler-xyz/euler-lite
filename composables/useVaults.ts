@@ -279,19 +279,19 @@ const fetchNeededEscrowVaults = async (addresses: string[], generation: number):
  * path, no parallel implementation. `silent=true` keeps loading flags
  * untouched since this runs after the initial reveal.
  *
- * Brand-new deployments not yet indexed by the subgraph (category === null)
- * fall back to the registry's `getOrFetch` / `resolveUnknown`, which is the
- * only path that needs the legacy probe-and-guess.
+ * Addresses the subgraph has not indexed (category === null) are skipped —
+ * a probe-and-guess fallback would misidentify brand-new escrows as plain
+ * EVK, and the next `loadVaults` cycle picks them up once the subgraph
+ * catches up. The diagnostic warns in `useMarketGroups` and
+ * `VaultOverviewBlockBorrow` surface the gap in the meantime.
  */
 const fetchUnresolvedCollaterals = async (addresses: string[], generation: number): Promise<void> => {
-  const { getOrFetch } = useVaultRegistry()
   if (!addresses.length || loadGeneration.value !== generation) return
 
   const evkAddrs: string[] = []
   const earnAddrs: string[] = []
   const securitizeAddrs: string[] = []
   const escrowAddrs: string[] = []
-  const unknownAddrs: string[] = []
 
   await Promise.allSettled(addresses.map(async (addr) => {
     const category = await fetchVaultCategory(addr)
@@ -309,7 +309,8 @@ const fetchUnresolvedCollaterals = async (addresses: string[], generation: numbe
         securitizeAddrs.push(addr)
         break
       default:
-        unknownAddrs.push(addr)
+        // Subgraph hasn't indexed this address — skip and let the next
+        // loadVaults cycle pick it up once the category endpoint warms.
         break
     }
   }))
@@ -321,9 +322,6 @@ const fetchUnresolvedCollaterals = async (addresses: string[], generation: numbe
     earnAddrs.length ? updateEarnVaults(earnAddrs, generation, true) : null,
     securitizeAddrs.length ? updateSecuritizeVaults(securitizeAddrs, generation, true) : null,
     escrowAddrs.length ? fetchNeededEscrowVaults(escrowAddrs, generation) : null,
-    unknownAddrs.length
-      ? Promise.allSettled(unknownAddrs.map(addr => getOrFetch(addr)))
-      : null,
   ])
 }
 
