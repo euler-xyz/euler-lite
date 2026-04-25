@@ -317,11 +317,12 @@ const fetchUnresolvedCollaterals = async (addresses: string[], generation: numbe
 
   if (loadGeneration.value !== generation) return
 
+  // Bulk loaders short-circuit on empty input, so call unconditionally.
   await Promise.all([
-    evkAddrs.length ? updateEVKVaults(evkAddrs, generation, true) : null,
-    earnAddrs.length ? updateEarnVaults(earnAddrs, generation, true) : null,
-    securitizeAddrs.length ? updateSecuritizeVaults(securitizeAddrs, generation, true) : null,
-    escrowAddrs.length ? fetchNeededEscrowVaults(escrowAddrs, generation) : null,
+    updateEVKVaults(evkAddrs, generation, true),
+    updateEarnVaults(earnAddrs, generation, true),
+    updateSecuritizeVaults(securitizeAddrs, generation, true),
+    fetchNeededEscrowVaults(escrowAddrs, generation),
   ])
 }
 
@@ -568,10 +569,10 @@ const loadVaults = async () => {
     // member vaults, so a resolved off-label vault is a leaf in those views;
     // any second-hop unknowns will surface as diagnostic warns and resolve
     // on the next loadVaults cycle.
-    const { getEvkVaults: getEvkForUnresolved, has: registryHasForUnresolved } = useVaultRegistry()
+    const { getEvkVaults, has: registryHas } = useVaultRegistry()
     const unresolvedAddresses = extractUnresolvedCollateralAddresses(
-      getEvkForUnresolved(),
-      registryHasForUnresolved,
+      getEvkVaults(),
+      registryHas,
     ).filter(addr => !isVaultNotExplorable(addr))
     await fetchUnresolvedCollaterals(unresolvedAddresses, generation)
 
