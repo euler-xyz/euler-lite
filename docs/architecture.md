@@ -100,7 +100,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 ├─────────────────────────────────────────────────────────────────┤
 │                    TypeScript + SCSS                            │
 ├─────────────────────────────────────────────────────────────────┤
-│              ESLint (flat config) + Playwright (E2E)            │
+│         ESLint (flat config) + Vitest (unit/integration)        │
 ├─────────────────────────────────────────────────────────────────┤
 │          simple-git-hooks + lint-staged (pre-commit)            │
 └─────────────────────────────────────────────────────────────────┘
