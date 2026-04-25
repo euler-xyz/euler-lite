@@ -3,7 +3,7 @@ import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { createInFlightDedup } from '~/server/utils/in-flight'
-import { logger } from '~/utils/logger.server'
+import { logger } from '~/server/utils/logger'
 
 const CACHE_TTL_MS = 300_000
 const DEFAULT_URL = 'https://raw.githubusercontent.com/euler-xyz/euler-interfaces/refs/heads/master/EulerChains.json'

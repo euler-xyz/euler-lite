@@ -16,7 +16,7 @@ describe('client logger shim', () => {
   })
 
   it('emits a `[ctx]` prefix and a fields object', async () => {
-    const { logger } = await import('~/utils/logger.client')
+    const { logger } = await import('~/utils/logger')
     logger.warn({ ctx: 'vault/test' }, 'hello')
     const call = consoleSpies.warn.mock.calls.at(-1)!
     expect(call[0]).toBe('[vault/test]')
@@ -25,14 +25,14 @@ describe('client logger shim', () => {
   })
 
   it('formats chain context as `(Name:id)` in the prefix', async () => {
-    const { logger } = await import('~/utils/logger.client')
+    const { logger } = await import('~/utils/logger')
     logger.warn({ ctx: 'apy/fetch', chain: 'Base', chainId: 8453 }, 'failed')
     const call = consoleSpies.warn.mock.calls.at(-1)!
     expect(call[0]).toBe('[apy/fetch] (Base:8453)')
   })
 
   it('summarises Error fields named `err` so abi/metaMessages do not leak', async () => {
-    const { logger } = await import('~/utils/logger.client')
+    const { logger } = await import('~/utils/logger')
     const inner = new TimeoutError({ body: { method: 'eth_call' }, url: 'https://rpc.example' })
     const middle = new CallExecutionError(inner, { account: undefined, data: '0xdead', to: '0x0000000000000000000000000000000000000000' })
     const outer = new ContractFunctionExecutionError(middle, {
@@ -51,7 +51,7 @@ describe('client logger shim', () => {
   })
 
   it('child() merges bindings into every emitted record', async () => {
-    const { logger } = await import('~/utils/logger.client')
+    const { logger } = await import('~/utils/logger')
     const child = logger.child({ ctx: 'warm-cache', chainId: 1, chain: 'Ethereum' })
     child.info({ batch: 'evk' }, 'ok')
     const call = consoleSpies.info.mock.calls.at(-1)!
@@ -60,13 +60,13 @@ describe('client logger shim', () => {
   })
 
   it('accepts a bare-string call (logger.warn(\'msg\'))', async () => {
-    const { logger } = await import('~/utils/logger.client')
+    const { logger } = await import('~/utils/logger')
     logger.warn('hello')
     expect(consoleSpies.warn).toHaveBeenCalled()
   })
 
   it('routes error level to console.error', async () => {
-    const { logger } = await import('~/utils/logger.client')
+    const { logger } = await import('~/utils/logger')
     logger.error({ ctx: 'x' }, 'boom')
     expect(consoleSpies.error).toHaveBeenCalled()
   })
@@ -115,7 +115,7 @@ describe('server logger (pino)', () => {
         return true
       },
     }
-    // Mirror the real serializer config from utils/logger.server.ts so the
+    // Mirror the real serializer config from server/utils/logger.ts so the
     // assertion describes the same constraint that ships to production.
     const log = pino({
       level: 'debug',
@@ -160,7 +160,7 @@ describe('server logger (pino)', () => {
       functionName: 'foo',
     })
     // Run the actual server logger module (loads its err serializer)
-    const { logger } = await import('~/utils/logger.server')
+    const { logger } = await import('~/server/utils/logger')
     const captured: string[] = []
     const origWrite = process.stdout.write.bind(process.stdout)
     process.stdout.write = ((chunk: unknown) => {

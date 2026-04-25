@@ -1,5 +1,5 @@
 import { createError, getRequestURL, setResponseHeader, sendNoContent } from 'h3'
-import { logger } from '~/utils/logger.server'
+import { logger } from '~/server/utils/logger'
 
 function parseAllowedOrigins(): Set<string> {
   // CORS_ALLOWED_ORIGINS is the dedicated CORS var (comma-separated).

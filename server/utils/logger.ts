@@ -1,5 +1,17 @@
 import { pino } from 'pino'
-import { summarizeViemError } from './viem-errors'
+import { summarizeViemError } from '~/utils/viem-errors'
+
+/**
+ * Server-side pino instance. Lives in `server/utils/` so Nitro auto-imports
+ * it on the server only and Nuxt's app-side `utils/` scanner never sees it
+ * (which would otherwise clash with the shared shim in `~/utils/logger.ts`
+ * and emit a duplicate-imports warning every dev cycle).
+ *
+ * Server-only modules (`server/api/**`, `server/middleware/**`,
+ * `server/plugins/**`, `server/utils/**`) import this for JSON output, level
+ * filtering, and `pino-pretty` in dev. Code that runs in both contexts uses
+ * the console-backed shim from `~/utils/logger` instead.
+ */
 
 const isProd = process.env.NODE_ENV === 'production'
 const level = process.env.LOG_LEVEL ?? (isProd ? 'info' : 'debug')

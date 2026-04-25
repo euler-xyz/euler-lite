@@ -1,4 +1,4 @@
-import { logger } from '~/utils/logger.server'
+import { logger } from '~/server/utils/logger'
 
 /**
  * Server-side structured-warning shim.

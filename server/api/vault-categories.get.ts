@@ -26,7 +26,7 @@ import { createError, getQuery, setResponseHeader } from 'h3'
 import { isAddress } from 'viem'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { resolveChainId } from '~/server/utils/resolve-chain-id'
-import { logger } from '~/utils/logger.server'
+import { logger } from '~/server/utils/logger'
 import { chainTag } from '~/utils/chain-tag'
 import {
   getVaultCategories,

@@ -1,7 +1,7 @@
 import { createError, readBody } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { UPSTREAM_FETCH_TIMEOUT_MS } from '~/server/utils/fetchWithTimeout'
-import { logger } from '~/utils/logger.server'
+import { logger } from '~/server/utils/logger'
 import { isAbortError } from '~/utils/errorHandling'
 
 const rateLimiter = createRateLimiter({
