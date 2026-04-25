@@ -9,7 +9,6 @@ import type {
 import { resolveAssetPriceInfo, resolveUnitOfAccountPriceInfo } from './pricing'
 import { calculateEarnVaultAPYFromExchangeRate, calculateEarnVaultAPYWithCache, fetchBlockDataForAPY } from './apy'
 import { logger } from '~/utils/logger'
-import { chainTag } from '~/utils/chain-tag'
 import { summarizeViemError } from '~/utils/viem-errors'
 import { BATCH_SIZE_VAULT_FETCH, BATCH_SIZE_PARALLEL_ROUNDS } from '~/entities/tuning-constants'
 import type { PythFeed } from '~/entities/oracle'
@@ -398,7 +397,7 @@ export const fetchVaults = async function* (
       return processRawVaultData(raw, vaultAddress, ctx.verifiedVaultAddresses)
     }
     catch (e) {
-      logger.error({ ctx: 'vault/processResult', ...chainTag(ctx.chainId), err: e }, 'failed to decode vault result')
+      logger.error({ ctx: 'vault/processResult', chainId: ctx.chainId, err: e }, 'failed to decode vault result')
       return undefined
     }
   }
@@ -468,7 +467,7 @@ export const fetchVaults = async function* (
       // per vault in the batch (was the root cause of the 568-line BetterStack incident).
       if (failedAddresses.length > 0 && !hasTransportError) {
         logger.warn(
-          { ctx: 'vault/fetchBatch', ...chainTag(ctx.chainId), failedCount: failedAddresses.length },
+          { ctx: 'vault/fetchBatch', chainId: ctx.chainId, failedCount: failedAddresses.length },
           `retrying ${failedAddresses.length} failed vaults individually`,
         )
         const retryResults = await Promise.all(
@@ -485,7 +484,7 @@ export const fetchVaults = async function* (
         logger.warn(
           {
             ctx: 'vault/fetchBatch',
-            ...chainTag(ctx.chainId),
+            chainId: ctx.chainId,
             kind: 'rpc-transport',
             failedCount: transportFailedCount,
             batchSize: batchAddresses.length,
@@ -555,7 +554,7 @@ export const fetchVaults = async function* (
             return processRawVaultData(raw, vault.address, ctx.verifiedVaultAddresses)
           }
           catch (e) {
-            logger.error({ ctx: 'vault/pythRefresh', ...chainTag(ctx.chainId), err: e }, 'failed to apply Pyth refresh')
+            logger.error({ ctx: 'vault/pythRefresh', chainId: ctx.chainId, err: e }, 'failed to apply Pyth refresh')
             return vault
           }
         })

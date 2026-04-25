@@ -4,7 +4,6 @@ import { createRateLimiter } from '~/server/utils/rate-limit'
 import { resolveRpcUrl } from '~/server/utils/rpc'
 import { getVerifiedAddressSet } from '~/server/utils/verified-vaults'
 import { logger } from '~/server/utils/logger'
-import { chainTag } from '~/utils/chain-tag'
 
 const MAX_ADDRESSES = 100
 
@@ -52,7 +51,7 @@ export default defineEventHandler(async (event) => {
     verifiedSet = await getVerifiedAddressSet(chainId)
   }
   catch (err) {
-    logger.warn({ ctx: 'public-is-known', ...chainTag(chainId), err }, 'verified-address lookup failed')
+    logger.warn({ ctx: 'public-is-known', chainId, err }, 'verified-address lookup failed')
     throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
   }
 

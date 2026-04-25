@@ -1,30 +1,6 @@
 import { logger } from '~/server/utils/logger'
 
 /**
- * Server-side structured-warning shim.
- *
- * @deprecated Prefer `logger.warn({ ctx, ... }, 'msg')`. This shim exists so
- * the long tail of pre-existing call sites still emit one structured JSON
- * line per event via the pino pipeline.
- */
-export function logWarn(context: string, ...args: unknown[]): void {
-  if (args.length === 0) {
-    logger.warn({ ctx: context }, '')
-    return
-  }
-  const [first, ...rest] = args
-  if (first instanceof Error) {
-    logger.warn({ ctx: context, err: first, ...(rest.length ? { extra: rest } : {}) }, first.message)
-    return
-  }
-  if (typeof first === 'string') {
-    logger.warn({ ctx: context, ...(rest.length ? { extra: rest } : {}) }, first)
-    return
-  }
-  logger.warn({ ctx: context, value: first, ...(rest.length ? { extra: rest } : {}) }, '')
-}
-
-/**
  * Transition-based status logger for warm-cache upstream probes.
  *
  * Warm cycles hit the same upstreams every few minutes. If one is persistently

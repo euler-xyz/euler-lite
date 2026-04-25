@@ -51,10 +51,9 @@ const projectFields = (fields: Fields): Fields => {
 
 const formatPrefix = (fields: Fields): string => {
   const ctx = typeof fields.ctx === 'string' ? fields.ctx : undefined
-  const chain = typeof fields.chain === 'string' ? fields.chain : undefined
   const chainId = typeof fields.chainId === 'number' ? fields.chainId : undefined
-  const chainTag = chain != null ? ` (${chain}${chainId != null ? `:${chainId}` : ''})` : ''
-  return ctx ? `[${ctx}]${chainTag}` : `[log]${chainTag}`
+  const tag = chainId != null ? ` (chainId=${chainId})` : ''
+  return ctx ? `[${ctx}]${tag}` : `[log]${tag}`
 }
 
 type ConsoleMethod = 'debug' | 'info' | 'warn' | 'error'

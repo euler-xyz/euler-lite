@@ -3,7 +3,6 @@ import type { Vault } from './types'
 import { resolveFullAssetPriceInfo } from './pricing'
 import { fetchVault, type FetchVaultContext } from './fetcher'
 import { logger } from '~/utils/logger'
-import { chainTag } from '~/utils/chain-tag'
 import { USD_ADDRESS } from '~/entities/constants'
 import { eulerPerspectiveABI } from '~/entities/euler/abis'
 import { getPublicClient } from '~/utils/public-client'
@@ -43,7 +42,7 @@ export const fetchEscrowVault = async (
     }
   }
   catch (e) {
-    logger.warn({ ctx: 'escrow/fetchAssetPrice', ...chainTag(ctx.chainId), vault: vaultAddress, err: e }, 'failed to resolve escrow asset price')
+    logger.warn({ ctx: 'escrow/fetchAssetPrice', chainId: ctx.chainId, vault: vaultAddress, err: e }, 'failed to resolve escrow asset price')
   }
 
   return {

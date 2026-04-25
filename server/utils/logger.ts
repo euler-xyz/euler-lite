@@ -3,18 +3,13 @@ import { summarizeViemError } from '~/utils/viem-errors'
 
 /**
  * Server-side pino instance. Lives in `server/utils/` so Nitro auto-imports
- * it on the server only and Nuxt's app-side `utils/` scanner never sees it
- * (which would otherwise clash with the shared shim in `~/utils/logger.ts`
- * and emit a duplicate-imports warning every dev cycle).
+ * it on the server only and Nuxt's app-side `utils/` scanner never sees it.
  *
- * Server-only modules (`server/api/**`, `server/middleware/**`,
- * `server/plugins/**`, `server/utils/**`) import this for JSON output, level
- * filtering, and `pino-pretty` in dev. Code that runs in both contexts uses
- * the console-backed shim from `~/utils/logger` instead.
+ * Always emits JSON to stdout. If a developer wants pretty output locally,
+ * pipe through `pino-pretty` from the CLI (`npm run dev | pino-pretty`).
+ * Keeping the runtime configuration single-mode avoids the worker-thread
+ * complexity that comes with pino's transport machinery.
  */
-
-const isProd = process.env.NODE_ENV === 'production'
-const level = process.env.LOG_LEVEL ?? (isProd ? 'info' : 'debug')
 
 const errSerializer = (err: unknown): unknown => {
   if (err == null) return err
@@ -37,8 +32,8 @@ const errSerializer = (err: unknown): unknown => {
   }
 }
 
-const baseOptions: Parameters<typeof pino>[0] = {
-  level,
+export const logger = pino({
+  level: process.env.LOG_LEVEL ?? 'info',
   base: { app: 'euler-lite' },
   formatters: {
     // Emit level as a string ('warn', 'error', …) — easier to filter in
@@ -49,32 +44,6 @@ const baseOptions: Parameters<typeof pino>[0] = {
     err: errSerializer,
     error: errSerializer,
   },
-}
+})
 
-const buildLogger = () => {
-  if (isProd) return pino(baseOptions)
-  // In dev, route through pino-pretty so terminal output is readable. Wrapped
-  // in a try/catch in case pino-pretty isn't installed (e.g. in CI tests
-  // running with NODE_ENV unset) — fall back to plain JSON in that case.
-  try {
-    return pino({
-      ...baseOptions,
-      transport: {
-        target: 'pino-pretty',
-        options: {
-          colorize: true,
-          translateTime: 'SYS:HH:MM:ss.l',
-          ignore: 'pid,hostname,app',
-          singleLine: false,
-        },
-      },
-    })
-  }
-  catch {
-    return pino(baseOptions)
-  }
-}
-
-export const logger = buildLogger()
-
-export type Logger = ReturnType<typeof buildLogger>
+export type Logger = typeof logger

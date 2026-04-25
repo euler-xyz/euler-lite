@@ -3,7 +3,6 @@ import { createTtlCache } from './cache'
 import { fetchWithTimeout } from './fetchWithTimeout'
 import { INTERNAL_FETCH_HEADERS } from './internal-headers'
 import { logger } from '~/server/utils/logger'
-import { chainTag } from '~/utils/chain-tag'
 import { resolveRpcUrl } from './rpc'
 
 const CACHE_TTL_MS = 300_000
@@ -138,7 +137,7 @@ async function buildVerifiedSet(chainId: number): Promise<Set<string>> {
   }
   else if (earn.status === 'rejected') {
     logger.warn(
-      { ctx: 'verified-vaults', ...chainTag(chainId), err: earn.reason },
+      { ctx: 'verified-vaults', chainId, err: earn.reason },
       'earn-vaults fetch failed',
     )
   }
@@ -148,7 +147,7 @@ async function buildVerifiedSet(chainId: number): Promise<Set<string>> {
   }
   else {
     logger.warn(
-      { ctx: 'verified-vaults', ...chainTag(chainId), err: escrow.reason },
+      { ctx: 'verified-vaults', chainId, err: escrow.reason },
       'escrow fetch failed',
     )
   }
@@ -171,7 +170,7 @@ export async function getVerifiedAddressSet(chainId: number): Promise<Set<string
       return set
     }
     catch (err) {
-      logger.warn({ ctx: 'verified-vaults', ...chainTag(chainId), err }, 'rebuild failed')
+      logger.warn({ ctx: 'verified-vaults', chainId, err }, 'rebuild failed')
       const stale = cache.getStale(key)
       if (stale) return stale
       throw err

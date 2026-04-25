@@ -11,7 +11,6 @@
  * which hit /api/vault-factories with a per-address subgraph lookup.
  */
 import { logger } from '~/utils/logger'
-import { chainTag } from '~/utils/chain-tag'
 
 export type VaultCategory = 'evk' | 'earn' | 'securitize' | 'escrow'
 
@@ -88,7 +87,7 @@ export const fetchChainVaultCategories = async (): Promise<VaultCategories> => {
       return categories
     })
     .catch((err) => {
-      logger.warn({ ctx: 'fetchChainVaultCategories', ...chainTag(chainId), err }, 'failed to fetch chain vault categories')
+      logger.warn({ ctx: 'fetchChainVaultCategories', chainId, err }, 'failed to fetch chain vault categories')
       return null
     })
     .finally(() => { chainCategoriesInFlight.delete(chainId) })
@@ -131,7 +130,7 @@ export const fetchVaultCategory = async (address: string): Promise<VaultCategory
       return category
     })
     .catch((err) => {
-      logger.warn({ ctx: 'fetchVaultCategory', ...chainTag(chainId), address, err }, 'failed to fetch vault category')
+      logger.warn({ ctx: 'fetchVaultCategory', chainId, address, err }, 'failed to fetch vault category')
       return null
     })
     .finally(() => { perAddressInFlight.delete(key) })

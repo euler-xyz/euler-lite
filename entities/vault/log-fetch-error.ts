@@ -1,5 +1,4 @@
 import { logger } from '~/utils/logger'
-import { chainTag } from '~/utils/chain-tag'
 import { summarizeViemError } from '~/utils/viem-errors'
 
 /**
@@ -20,12 +19,11 @@ export const logConciseFetchError = (
   subject: string,
   err: unknown,
 ): void => {
-  const tag = chainTag(chainId)
   const summary = summarizeViemError(err)
 
   if (summary.kind === 'contract-revert') {
     logger.warn(
-      { ctx, ...tag, subject, kind: summary.kind },
+      { ctx, chainId, subject, kind: summary.kind },
       `${subject} reverted (likely not deployed on this chain)`,
     )
     return
@@ -33,11 +31,11 @@ export const logConciseFetchError = (
 
   if (summary.isTransport) {
     logger.warn(
-      { ctx, ...tag, subject, kind: summary.kind, ...(summary.url != null ? { url: summary.url } : {}) },
+      { ctx, chainId, subject, kind: summary.kind, ...(summary.url != null ? { url: summary.url } : {}) },
       `RPC ${summary.kind.replace('rpc-', '')} for ${subject}`,
     )
     return
   }
 
-  logger.error({ ctx, ...tag, subject, err }, `unexpected fetch error for ${subject}`)
+  logger.error({ ctx, chainId, subject, err }, `unexpected fetch error for ${subject}`)
 }

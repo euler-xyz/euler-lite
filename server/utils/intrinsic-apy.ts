@@ -19,7 +19,6 @@ import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { createInFlightDedup, scheduleBackgroundRefresh } from '~/server/utils/in-flight'
 import { reportStatus } from '~/server/utils/log'
 import { logger } from '~/server/utils/logger'
-import { chainTag } from '~/utils/chain-tag'
 
 const CACHE_TTL_MS = 5 * 60 * 1000
 const PENDLE_MATURITY_STALE_THRESHOLD_MS = 2 * 60 * 60 * 1000
@@ -493,7 +492,7 @@ const orchestrate = (chainId: number): Promise<Record<string, IntrinsicApyInfo>>
           logger.warn(
             {
               ctx: 'intrinsic-apy/merge',
-              ...chainTag(chainId),
+              chainId,
               address: addr,
               previousProvider: existing.provider,
               previousApy: existing.apy,

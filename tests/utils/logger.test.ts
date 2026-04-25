@@ -24,11 +24,11 @@ describe('client logger shim', () => {
     expect(call[2]).toMatchObject({ ctx: 'vault/test' })
   })
 
-  it('formats chain context as `(Name:id)` in the prefix', async () => {
+  it('formats chainId in the prefix when present', async () => {
     const { logger } = await import('~/utils/logger')
-    logger.warn({ ctx: 'apy/fetch', chain: 'Base', chainId: 8453 }, 'failed')
+    logger.warn({ ctx: 'apy/fetch', chainId: 8453 }, 'failed')
     const call = consoleSpies.warn.mock.calls.at(-1)!
-    expect(call[0]).toBe('[apy/fetch] (Base:8453)')
+    expect(call[0]).toBe('[apy/fetch] (chainId=8453)')
   })
 
   it('summarises Error fields named `err` so abi/metaMessages do not leak', async () => {
@@ -52,11 +52,11 @@ describe('client logger shim', () => {
 
   it('child() merges bindings into every emitted record', async () => {
     const { logger } = await import('~/utils/logger')
-    const child = logger.child({ ctx: 'warm-cache', chainId: 1, chain: 'Ethereum' })
+    const child = logger.child({ ctx: 'warm-cache', chainId: 1 })
     child.info({ batch: 'evk' }, 'ok')
     const call = consoleSpies.info.mock.calls.at(-1)!
-    expect(call[0]).toBe('[warm-cache] (Ethereum:1)')
-    expect(call[2]).toMatchObject({ ctx: 'warm-cache', chainId: 1, chain: 'Ethereum', batch: 'evk' })
+    expect(call[0]).toBe('[warm-cache] (chainId=1)')
+    expect(call[2]).toMatchObject({ ctx: 'warm-cache', chainId: 1, batch: 'evk' })
   })
 
   it('accepts a bare-string call (logger.warn(\'msg\'))', async () => {
@@ -91,13 +91,12 @@ describe('server logger (pino)', () => {
       formatters: { level: (label: string) => ({ level: label }) },
     }, stream as unknown as NodeJS.WritableStream)
 
-    log.warn({ ctx: 'vault/fetchEarnVault', chainId: 8453, chain: 'Base', kind: 'rpc-timeout' }, 'RPC timeout')
+    log.warn({ ctx: 'vault/fetchEarnVault', chainId: 8453, kind: 'rpc-timeout' }, 'RPC timeout')
     expect(captured).toHaveLength(1)
     const parsed = JSON.parse(captured[0])
     expect(parsed.level).toBe('warn')
     expect(parsed.ctx).toBe('vault/fetchEarnVault')
     expect(parsed.chainId).toBe(8453)
-    expect(parsed.chain).toBe('Base')
     expect(parsed.kind).toBe('rpc-timeout')
     expect(parsed.msg).toBe('RPC timeout')
   })

@@ -3,7 +3,6 @@ import type { Vault, EarnVault, SecuritizeVault } from './types'
 import { type FetchVaultContext, fetchVaults, fetchEarnVaults, fetchSecuritizeVault } from './fetcher'
 import { fetchEscrowVault } from './escrow-fetcher'
 import { logger } from '~/utils/logger'
-import { chainTag } from '~/utils/chain-tag'
 import { summarizeViemError } from '~/utils/viem-errors'
 
 /**
@@ -87,14 +86,13 @@ export const loadChainSnapshot = async (input: LoadSnapshotInput): Promise<Chain
     Promise.allSettled(explorableSecuritize.map(a => fetchSecuritizeVault(a, ctx))),
   ])
 
-  const tag = chainTag(chainId)
   const evkVaults: Vault[] = evkSettled.ok ? evkSettled.value : []
   if (!evkSettled.ok) {
-    logger.warn({ ctx: 'loader/evk', ...tag, err: evkSettled.err }, 'EVK vault fetch failed')
+    logger.warn({ ctx: 'loader/evk', chainId, err: evkSettled.err }, 'EVK vault fetch failed')
   }
   const earnVaults: EarnVault[] = earnSettled.ok ? earnSettled.value : []
   if (!earnSettled.ok) {
-    logger.warn({ ctx: 'loader/earn', ...tag, err: earnSettled.err }, 'earn vault fetch failed')
+    logger.warn({ ctx: 'loader/earn', chainId, err: earnSettled.err }, 'earn vault fetch failed')
   }
 
   // Per-securitize-vault errors share the same dedup logic as the earn loop in
@@ -113,7 +111,7 @@ export const loadChainSnapshot = async (input: LoadSnapshotInput): Promise<Chain
     if (summary.isTransport && securitizeTransportLogged) return
     if (summary.isTransport) securitizeTransportLogged = true
     logger.warn(
-      { ctx: 'loader/securitize', ...tag, vault: explorableSecuritize[i], err: r.reason },
+      { ctx: 'loader/securitize', chainId, vault: explorableSecuritize[i], err: r.reason },
       `securitize vault fetch failed: ${explorableSecuritize[i]}`,
     )
   })
@@ -152,7 +150,7 @@ export const loadChainSnapshot = async (input: LoadSnapshotInput): Promise<Chain
     if (summary.isTransport && escrowTransportLogged) return
     if (summary.isTransport) escrowTransportLogged = true
     logger.warn(
-      { ctx: 'loader/escrow', ...tag, vault: neededAddresses[i], err: r.reason },
+      { ctx: 'loader/escrow', chainId, vault: neededAddresses[i], err: r.reason },
       `escrow vault fetch failed: ${neededAddresses[i]}`,
     )
   })

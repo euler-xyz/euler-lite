@@ -15,14 +15,13 @@ export function isAbortError(error: unknown): boolean {
 }
 
 /**
- * Legacy structured-warning shim. New call sites should call `logger.warn` /
- * `logger.error` directly with a fields object — that way `chainId`, `kind`,
- * etc. are first-class JSON fields in BetterStack. This wrapper exists so
- * the long tail of pre-existing call sites still benefit from the pino
- * pipeline (one JSON line per event, viem error summarisation) without a
- * mass rewrite.
+ * Compact `(context, error)` warning helper for client-side call sites.
  *
- * @deprecated Prefer `logger.warn({ ctx, ...chainTag(chainId), ... }, 'msg')`.
+ * Routes through the shared `logger` so the output goes through the same
+ * structured pipeline as direct `logger.warn` calls (one console line per
+ * event, errors summarised via `summarizeViemError` so `abi`/`metaMessages`
+ * payloads never leak). Server-side code should call `logger.warn({ ctx, ... }, 'msg')`
+ * directly.
  */
 export function logWarn(
   context: string,

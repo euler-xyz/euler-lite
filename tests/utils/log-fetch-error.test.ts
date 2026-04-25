@@ -57,13 +57,12 @@ describe('logConciseFetchError — regression for 568-row BetterStack incident',
     expect(errorSpy).not.toHaveBeenCalled()
   })
 
-  it('records chainId and chain name as JSON fields', () => {
+  it('records chainId as a JSON field', () => {
     logConciseFetchError('vault/fetchEarnVault', 8453, '0xabc', buildWrappedTimeout())
     const fields = warnSpy.mock.calls[0][2] as Record<string, unknown>
     expect(fields).toMatchObject({
       ctx: 'vault/fetchEarnVault',
       chainId: 8453,
-      chain: 'Base',
       kind: 'rpc-timeout',
       subject: '0xabc',
     })
@@ -95,7 +94,7 @@ describe('logConciseFetchError — regression for 568-row BetterStack incident',
     expect(errorSpy).not.toHaveBeenCalled()
     const fields = warnSpy.mock.calls[0][2] as Record<string, unknown>
     expect(fields.kind).toBe('rpc-http')
-    expect(fields.chain).toBe('Ethereum')
+    expect(fields.chainId).toBe(1)
   })
 
   it('classifies a contract revert as warn (lens called against non-vault)', () => {

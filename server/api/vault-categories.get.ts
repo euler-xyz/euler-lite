@@ -27,7 +27,6 @@ import { isAddress } from 'viem'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { resolveChainId } from '~/server/utils/resolve-chain-id'
 import { logger } from '~/server/utils/logger'
-import { chainTag } from '~/utils/chain-tag'
 import {
   getVaultCategories,
   getVaultCategory,
@@ -65,7 +64,7 @@ export default defineEventHandler(async (event) => {
   }
   catch (err) {
     if (err && typeof err === 'object' && 'statusCode' in err) throw err
-    logger.warn({ ctx: 'vault-categories', ...chainTag(chainId), err }, 'vault categories upstream error')
+    logger.warn({ ctx: 'vault-categories', chainId, err }, 'vault categories upstream error')
     throw createError({ statusCode: 502, statusMessage: 'Vault categories upstream error' })
   }
 })
