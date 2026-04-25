@@ -138,7 +138,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
   // --- Collateral options ---
   const { collateralOptions: multiplyCollateralOptions, collateralVaults: multiplyCollateralVaults } = useMultiplyCollateralOptions({
-    currentVault: multiplySupplyVault,
+    primaryCollateralVault: multiplyLongVault,
     liabilityVault: multiplyShortVault,
   })
 
