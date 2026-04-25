@@ -25,6 +25,8 @@ import {
   verifiedVaultAddresses,
   oracleAdapters,
   loadingAdapters,
+  bulkLoadedAdapterChains,
+  pendingBulkAdapterLoads,
 } from '~/utils/eulerLabelsState'
 import {
   normalizeProducts,
@@ -71,6 +73,36 @@ const loadOracleAdapters = async (chainId: number, addresses?: string[]) => {
   await Promise.all(addresses.map(addr => loadOracleAdapter(chainId, addr)))
 }
 
+// Bulk-load every adapter known for a chain via the all.json upstream.
+// Heavy call (KBs of JSON, hundreds of adapters) — caller decides when to invoke.
+// Concurrent callers share one in-flight request; subsequent calls within the
+// same session are no-ops once the chain is loaded.
+const loadAllOracleAdapters = async (chainId: number): Promise<void> => {
+  if (!Number.isInteger(chainId) || chainId <= 0) return
+  if (bulkLoadedAdapterChains.has(chainId)) return
+
+  const inflight = pendingBulkAdapterLoads.get(chainId)
+  if (inflight) return inflight
+
+  const promise = (async () => {
+    try {
+      const res = await axios.get('/api/oracle-adapters', { params: { chainId } })
+      const meta = normalizeOracleAdapters(res.data)
+      safeAssign(oracleAdapters, meta)
+      bulkLoadedAdapterChains.add(chainId)
+    }
+    catch (err) {
+      logWarn('useEulerLabels', `Failed to bulk-load oracle adapters for chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`)
+    }
+    finally {
+      pendingBulkAdapterLoads.delete(chainId)
+    }
+  })()
+
+  pendingBulkAdapterLoads.set(chainId, promise)
+  return promise
+}
+
 export const useEulerLabels = () => {
   const loadLabels = async (forceRefresh = false) => {
     try {
@@ -99,6 +131,7 @@ export const useEulerLabels = () => {
       Object.keys(entities).forEach(key => delete entities[key])
       Object.keys(points).forEach(key => delete points[key])
       Object.keys(oracleAdapters).forEach(key => delete oracleAdapters[key])
+      bulkLoadedAdapterChains.clear()
       Object.keys(earnVaultBlocks).forEach(key => delete earnVaultBlocks[key])
       Object.keys(earnVaultRestrictions).forEach(key => delete earnVaultRestrictions[key])
       Object.keys(deprecatedEarnVaults).forEach(key => delete deprecatedEarnVaults[key])
@@ -209,6 +242,7 @@ export const useEulerLabels = () => {
     loadLabels,
     loadOracleAdapter,
     loadOracleAdapters,
+    loadAllOracleAdapters,
   }
 }
 

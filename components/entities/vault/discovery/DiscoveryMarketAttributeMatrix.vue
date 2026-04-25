@@ -27,16 +27,19 @@ defineEmits<{
 
 const modal = useModal()
 
-interface RowComputed {
-  row: AttributeRow
-  cells: AttributeCell[]
+// Each AttributeRow renders as a *table column*; each vault renders as a *table row*.
+// We pre-compute one entry per attribute with the per-attribute cells (one per vault)
+// and the min/max range needed for the heatmap.
+interface AttributeColumn {
+  attribute: AttributeRow
+  cells: AttributeCell[] // index aligned to data.columns (vaults)
   min: number
   max: number
 }
 
-const rowsComputed = computed<RowComputed[]>(() =>
-  props.data.rows.map((row) => {
-    const cells = buildAttributeRowCells(row, props.data.columns, props.usdCache)
+const attributeColumns = computed<AttributeColumn[]>(() =>
+  props.data.rows.map((attribute) => {
+    const cells = buildAttributeRowCells(attribute, props.data.columns, props.usdCache)
     let min = Infinity
     let max = -Infinity
     for (const c of cells) {
@@ -48,23 +51,21 @@ const rowsComputed = computed<RowComputed[]>(() =>
       min = 0
       max = 0
     }
-    return { row, cells, min, max }
+    return { attribute, cells, min, max }
   }),
 )
 
-const cellBgColor = (
-  rowComputed: RowComputed,
-  cell: AttributeCell,
-): string => getAttributeRowColor(cell.numeric, rowComputed.min, rowComputed.max, rowComputed.row.direction)
+const cellBgColor = (column: AttributeColumn, cell: AttributeCell): string =>
+  getAttributeRowColor(cell.numeric, column.min, column.max, column.attribute.direction)
 
-const onHooksClick = (col: AttributeMatrixColumn) => {
-  if (!isVaultType(col.vault)) return
-  modal.open(VaultHooksInfoModal, { props: { vault: col.vault } })
+const onHooksClick = (vault: AttributeMatrixColumn) => {
+  if (!isVaultType(vault.vault)) return
+  modal.open(VaultHooksInfoModal, { props: { vault: vault.vault } })
 }
 
 // Governor entities resolve via the vault's governorAdmin address, which exists
 // on both Vault and SecuritizeVault — the helper only reads that one field.
-const entitiesFor = (col: AttributeMatrixColumn) => getEntitiesByVault(col.vault as Vault)
+const entitiesFor = (vault: AttributeMatrixColumn) => getEntitiesByVault(vault.vault as Vault)
 </script>
 
 <template>
@@ -78,56 +79,57 @@ const entitiesFor = (col: AttributeMatrixColumn) => getEntitiesByVault(col.vault
             <th
               class="text-left text-p5 text-content-muted font-normal py-6 pr-10 pl-6 sticky left-0 bg-surface z-30 border-b border-r border-white/[0.04]"
             >
-              <span>Attribute</span>
+              <span>Vault</span>
             </th>
             <th
-              v-for="col in data.columns"
-              :key="col.address"
-              class="text-center text-p4 font-medium py-6 px-8 whitespace-nowrap border-b border-r border-white/[0.04] cursor-pointer transition-colors"
-              :class="
-                selectedHeader?.address === col.address
-                  && selectedHeader?.axis === 'column'
-                  ? 'text-accent-500 !bg-accent-500/10'
-                  : 'text-content-primary hover:bg-white/[0.04]'
-              "
-              @click.stop="$emit('selectHeader', col.address, 'column')"
+              v-for="col in attributeColumns"
+              :key="col.attribute.id"
+              class="text-center text-p4 text-content-secondary font-medium py-6 px-8 whitespace-nowrap border-b border-r border-white/[0.04]"
             >
-              <div class="flex flex-col items-center gap-2">
-                <AssetAvatar
-                  :asset="{ address: col.assetAddress, symbol: col.symbol }"
-                  size="16"
-                />
-                {{ col.symbol }}
-              </div>
+              <span :title="col.attribute.tooltip">{{ col.attribute.label }}</span>
             </th>
           </tr>
         </thead>
         <tbody>
           <tr
-            v-for="rc in rowsComputed"
-            :key="rc.row.id"
+            v-for="(vault, vaultIdx) in data.columns"
+            :key="vault.address"
           >
             <td
-              class="text-p4 font-medium py-6 pr-10 pl-6 whitespace-nowrap sticky left-0 z-10 bg-surface border-b border-r border-white/[0.04] text-content-primary"
+              class="text-p4 font-medium py-6 pr-10 pl-6 whitespace-nowrap sticky left-0 z-10 bg-surface border-b border-r border-white/[0.04] cursor-pointer transition-colors"
+              :class="
+                selectedHeader?.address === vault.address
+                  && selectedHeader?.axis === 'row'
+                  ? 'text-accent-500 !bg-accent-500/10'
+                  : 'text-content-primary hover:bg-white/[0.04]'
+              "
+              @click.stop="$emit('selectHeader', vault.address, 'row')"
             >
-              <span :title="rc.row.tooltip">{{ rc.row.label }}</span>
+              <div class="flex items-center gap-4">
+                <AssetAvatar
+                  class="shrink-0"
+                  :asset="{ address: vault.assetAddress, symbol: vault.symbol }"
+                  size="16"
+                />
+                {{ vault.symbol }}
+              </div>
             </td>
             <td
-              v-for="(cell, colIdx) in rc.cells"
-              :key="data.columns[colIdx].address"
+              v-for="col in attributeColumns"
+              :key="col.attribute.id"
               class="text-center py-6 px-8 min-w-[80px] transition-colors border-b border-r border-white/[0.04]"
-              :style="{ backgroundColor: cellBgColor(rc, cell) }"
+              :style="{ backgroundColor: cellBgColor(col, col.cells[vaultIdx]) }"
             >
               <!-- capProgress: number + radial -->
-              <template v-if="cell.kind === 'capProgress'">
+              <template v-if="col.cells[vaultIdx].kind === 'capProgress'">
                 <div
                   class="inline-flex items-center justify-center gap-6 text-p5 text-content-secondary whitespace-nowrap"
-                  :title="cell.hint"
+                  :title="col.cells[vaultIdx].hint"
                 >
-                  <span>{{ cell.display }}</span>
+                  <span>{{ col.cells[vaultIdx].display }}</span>
                   <UiRadialProgress
-                    v-if="!cell.capUncapped && cell.capPercent !== undefined"
-                    :value="cell.capPercent"
+                    v-if="!col.cells[vaultIdx].capUncapped && col.cells[vaultIdx].capPercent !== undefined"
+                    :value="col.cells[vaultIdx].capPercent!"
                     :max="100"
                     class="shrink-0"
                   />
@@ -135,11 +137,11 @@ const entitiesFor = (col: AttributeMatrixColumn) => getEntitiesByVault(col.vault
               </template>
 
               <!-- governor: entity logos + names, or unknown chip -->
-              <template v-else-if="cell.kind === 'governor'">
-                <template v-if="entitiesFor(data.columns[colIdx]).length">
+              <template v-else-if="col.cells[vaultIdx].kind === 'governor'">
+                <template v-if="entitiesFor(vault).length">
                   <div class="inline-flex items-center justify-center gap-6 flex-wrap">
                     <div
-                      v-for="(entity, idx) in entitiesFor(data.columns[colIdx])"
+                      v-for="(entity, idx) in entitiesFor(vault)"
                       :key="idx"
                       class="inline-flex items-center gap-4"
                     >
@@ -154,7 +156,7 @@ const entitiesFor = (col: AttributeMatrixColumn) => getEntitiesByVault(col.vault
                 </template>
                 <template v-else>
                   <VaultTypeChip
-                    :vault="data.columns[colIdx].vault"
+                    :vault="vault.vault"
                     type="unknown"
                     class="inline-flex !py-2 !px-6 !text-p5"
                   />
@@ -162,14 +164,14 @@ const entitiesFor = (col: AttributeMatrixColumn) => getEntitiesByVault(col.vault
               </template>
 
               <!-- hooks: text + optional clickable info icon -->
-              <template v-else-if="cell.kind === 'hooks'">
+              <template v-else-if="col.cells[vaultIdx].kind === 'hooks'">
                 <button
-                  v-if="cell.hookable"
+                  v-if="col.cells[vaultIdx].hookable"
                   type="button"
                   class="inline-flex items-center justify-center gap-4 text-p5 text-content-primary hover:text-accent-500 cursor-pointer transition-colors"
-                  @click.stop="onHooksClick(data.columns[colIdx])"
+                  @click.stop="onHooksClick(vault)"
                 >
-                  <span>{{ cell.display }}</span>
+                  <span>{{ col.cells[vaultIdx].display }}</span>
                   <SvgIcon
                     name="info-circle"
                     class="!w-12 !h-12 shrink-0"
@@ -178,15 +180,15 @@ const entitiesFor = (col: AttributeMatrixColumn) => getEntitiesByVault(col.vault
                 <span
                   v-else
                   class="text-p5 text-content-secondary"
-                >{{ cell.display }}</span>
+                >{{ col.cells[vaultIdx].display }}</span>
               </template>
 
               <!-- text (default) -->
               <template v-else>
                 <span
                   class="text-p5 text-content-secondary whitespace-nowrap"
-                  :title="cell.hint"
-                >{{ cell.display }}</span>
+                  :title="col.cells[vaultIdx].hint"
+                >{{ col.cells[vaultIdx].display }}</span>
               </template>
             </td>
           </tr>
@@ -199,6 +201,6 @@ const entitiesFor = (col: AttributeMatrixColumn) => getEntitiesByVault(col.vault
     v-if="!selectedHeader"
     class="text-h6 text-content-primary text-center leading-relaxed px-16 pb-12"
   >
-    Tap a column header to see lending/borrowing options below.
+    Tap a vault row to see lending/borrowing options below.
   </p>
 </template>

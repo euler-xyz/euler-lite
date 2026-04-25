@@ -49,7 +49,7 @@ const {
   hasSupplyRewards,
   hasBorrowRewards,
 } = useRewardsApy()
-const { oracleAdapters, loadOracleAdapter } = useEulerLabels()
+const { oracleAdapters, loadAllOracleAdapters } = useEulerLabels()
 const { chainId } = useEulerAddresses()
 
 const hoveredCell = ref<{
@@ -175,22 +175,14 @@ const cellOracleAdapters = computed((): Map<string, OracleAdapterEntry[]> => {
   return result
 })
 
+// Bulk-load adapter metadata for the chain whenever the oracle metric is the
+// active view. Heavy call; deferred to first oracle-mode render and cached
+// per-chain by useEulerLabels.
 watch(
-  [cellOracleAdapters, chainId],
-  async ([map, currentChainId]) => {
-    if (!currentChainId || map.size === 0) return
-    const seen = new Set<string>()
-    const toLoad: OracleAdapterEntry[] = []
-    for (const adapters of map.values()) {
-      for (const a of adapters) {
-        if (a.name === 'ERC4626Vault') continue
-        const key = a.oracle.toLowerCase()
-        if (seen.has(key)) continue
-        seen.add(key)
-        toLoad.push(a)
-      }
-    }
-    await Promise.all(toLoad.map(a => loadOracleAdapter(currentChainId, a.oracle)))
+  [() => props.dotMetric, chainId],
+  ([metric, currentChainId]) => {
+    if (metric !== 'oracle' || !currentChainId) return
+    void loadAllOracleAdapters(currentChainId)
   },
   { immediate: true },
 )

@@ -23,3 +23,9 @@ export const verifiedVaultAddresses: Ref<string[]> = ref([])
 export const oracleAdapters = shallowReactive<Record<string, OracleAdapterMeta>>({})
 
 export const loadingAdapters = new Set<string>()
+
+// Per-chain bulk-load state for the oracle-adapters all.json fetch.
+// loadedChains tracks chains for which we already have the bulk payload;
+// pendingBulkLoads holds in-flight promises so concurrent callers share a request.
+export const bulkLoadedAdapterChains = new Set<number>()
+export const pendingBulkAdapterLoads = new Map<number, Promise<void>>()

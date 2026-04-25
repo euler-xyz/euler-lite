@@ -61,7 +61,7 @@ export const DOT_METRIC_OPTIONS: DotMetricOption[] = [
   { id: 'multiplier', label: 'Multiplier', higherIsBetter: false },
   { id: 'bltv', label: 'Borrow LTV', higherIsBetter: false },
   { id: 'lltv', label: 'Liquidation LTV', higherIsBetter: false },
-  { id: 'oracle', label: 'Oracle', higherIsBetter: false },
+  { id: 'oracle', label: 'Oracles', higherIsBetter: false },
 ]
 
 export type ExpandedViewMode = 'graph' | 'matrix'
