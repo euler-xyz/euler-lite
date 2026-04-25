@@ -2,7 +2,7 @@ import { createError, getQuery } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
-import { logger } from '~/utils/logger'
+import { logger } from '~/utils/logger.server'
 import { chainTag } from '~/utils/chain-tag'
 
 const CACHE_TTL_MS = 300_000

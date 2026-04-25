@@ -1,7 +1,7 @@
 import { createError, getRequestURL } from 'h3'
 import { SANCTIONED_COUNTRIES } from '~/entities/country-constants'
 import { isInternalRequest } from '~/server/utils/internal-headers'
-import { logger } from '~/utils/logger'
+import { logger } from '~/utils/logger.server'
 
 export default defineEventHandler((event) => {
   // Only gate API routes

@@ -2,7 +2,7 @@ import { decodeFunctionResult, encodeFunctionData, getAddress } from 'viem'
 import { createTtlCache } from './cache'
 import { fetchWithTimeout } from './fetchWithTimeout'
 import { INTERNAL_FETCH_HEADERS } from './internal-headers'
-import { logger } from '~/utils/logger'
+import { logger } from '~/utils/logger.server'
 import { chainTag } from '~/utils/chain-tag'
 import { resolveRpcUrl } from './rpc'
 

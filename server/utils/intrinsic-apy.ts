@@ -18,7 +18,7 @@ import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { createInFlightDedup, scheduleBackgroundRefresh } from '~/server/utils/in-flight'
 import { reportStatus } from '~/server/utils/log'
-import { logger } from '~/utils/logger'
+import { logger } from '~/utils/logger.server'
 import { chainTag } from '~/utils/chain-tag'
 
 const CACHE_TTL_MS = 5 * 60 * 1000

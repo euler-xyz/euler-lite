@@ -1,6 +1,6 @@
 import type { H3Event } from 'h3'
 import { createError } from 'h3'
-import { logger } from '~/utils/logger'
+import { logger } from '~/utils/logger.server'
 
 interface RateLimitEntry {
   consumed: number

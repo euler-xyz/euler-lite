@@ -3,7 +3,7 @@ import { getAddress, isAddress } from 'viem'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { resolveRpcUrl } from '~/server/utils/rpc'
 import { getVerifiedAddressSet } from '~/server/utils/verified-vaults'
-import { logger } from '~/utils/logger'
+import { logger } from '~/utils/logger.server'
 import { chainTag } from '~/utils/chain-tag'
 
 const MAX_ADDRESSES = 100

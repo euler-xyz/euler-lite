@@ -1,7 +1,7 @@
 import { createError, getQuery, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
-import { logger } from '~/utils/logger'
+import { logger } from '~/utils/logger.server'
 
 const FEED_ID_RE = /^0x[0-9a-fA-F]{64}$/
 

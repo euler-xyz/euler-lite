@@ -2,7 +2,7 @@ import { createError } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
-import { logger } from '~/utils/logger'
+import { logger } from '~/utils/logger.server'
 
 const CACHE_TTL_MS = 300_000
 
