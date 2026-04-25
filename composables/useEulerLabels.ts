@@ -4,6 +4,7 @@ import { getAddress } from 'viem'
 import type { EulerLabelPoint, EulerLabelEarnVaultEntry } from '~/entities/euler/labels'
 import type { EarnVault, Vault } from '~/entities/vault'
 import { safeAssign } from '~/utils/safe-assign'
+import { logger } from '~/utils/logger'
 import { logWarn } from '~/utils/errorHandling'
 import { CACHE_TTL_5MIN_MS } from '~/entities/tuning-constants'
 import { normalizeAddress } from '~/utils/normalizeAddress'
@@ -122,14 +123,14 @@ export const useEulerLabels = () => {
         verifiedVaultAddresses.value = normalizedProducts.vaultAddresses
       }
       else {
-        logWarn('labels/load', 'Failed to load products:', productRes.reason)
+        logger.warn({ ctx: 'labels/load', err: productRes.reason }, 'failed to load products')
       }
 
       if (entitiesRes.status === 'fulfilled') {
         safeAssign(entities, normalizeEntities(entitiesRes.value.data))
       }
       else {
-        logWarn('labels/load', 'Failed to load entities:', entitiesRes.reason)
+        logger.warn({ ctx: 'labels/load', err: entitiesRes.reason }, 'failed to load entities')
       }
 
       const earnEntries = (earnRes.status === 'fulfilled' ? earnRes.value.data ?? [] : []) as Array<string | EulerLabelEarnVaultEntry>
@@ -161,12 +162,12 @@ export const useEulerLabels = () => {
       })
 
       if (earnRes.status === 'rejected') {
-        logWarn('labels/load', 'Failed to load earn-vaults:', earnRes.reason)
+        logger.warn({ ctx: 'labels/load', err: earnRes.reason }, 'failed to load earn-vaults')
       }
 
       const pointsData = (pointsRes.status === 'fulfilled' ? pointsRes.value.data ?? [] : []) as EulerLabelPoint[]
       if (pointsRes.status === 'rejected') {
-        logWarn('labels/load', 'Failed to load points:', pointsRes.reason)
+        logger.warn({ ctx: 'labels/load', err: pointsRes.reason }, 'failed to load points')
       }
       pointsData.forEach((point) => {
         if (!point.collateralVaults) {

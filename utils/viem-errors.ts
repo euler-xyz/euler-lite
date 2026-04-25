@@ -26,7 +26,6 @@ export type ViemErrorClassification = {
   functionName?: string
   contractAddress?: string
   causeName?: string
-  causeMessage?: string
 }
 
 const TRANSPORT_KINDS: ReadonlySet<ViemErrorKind> = new Set([
@@ -97,6 +96,46 @@ const pickString = (err: unknown, key: string): string | undefined => {
   return typeof v === 'string' ? v : undefined
 }
 
+/**
+ * Walk the cause chain for the first node carrying a string at `key`. Viem
+ * stores diagnostic info (`url`, `functionName`, `contractAddress`) on the
+ * specific error class that originated it — the wrapper at the top of the
+ * chain doesn't carry them, so the outer-only pick returned undefined for
+ * any wrapped error.
+ */
+const pickStringFromChain = (chain: readonly unknown[], key: string): string | undefined => {
+  for (const node of chain) {
+    const v = pickString(node, key)
+    if (v != null) return v
+  }
+  return undefined
+}
+
+const pickNumberFromChain = (chain: readonly unknown[], key: string): number | undefined => {
+  for (const node of chain) {
+    const v = pickNumber(node, key)
+    if (v != null) return v
+  }
+  return undefined
+}
+
+/**
+ * RPC provider URLs (Chainstack, Alchemy, Infura, …) commonly carry the API
+ * key as a path segment or query parameter. Logging them verbatim would ship
+ * those keys to BetterStack as a queryable JSON field. Reduce to host only —
+ * we keep enough to know which provider was unreachable, nothing more.
+ */
+const redactUrl = (url: string | undefined): string | undefined => {
+  if (url == null) return undefined
+  try {
+    return new URL(url).host
+  }
+  catch {
+    // Not a parseable URL — drop entirely rather than risk leaking what's there.
+    return undefined
+  }
+}
+
 const pickNumber = (err: unknown, key: string): number | undefined => {
   if (!isPlainObject(err)) return undefined
   const v = err[key]
@@ -163,7 +202,6 @@ export const classifyViemError = (err: unknown): ViemErrorClassification => {
 
   let kind: ViemErrorKind = 'unknown'
   let causeName: string | undefined
-  let causeMessage: string | undefined
 
   // Build the chain of nodes once. For viem errors we also use `BaseError.walk()`
   // so the deepest viem cause is preferred (it carries the most specific name).
@@ -186,7 +224,6 @@ export const classifyViemError = (err: unknown): ViemErrorClassification => {
     if (matched) {
       kind = matched
       causeName ??= node.name
-      causeMessage ??= node.message
       break
     }
   }
@@ -197,10 +234,7 @@ export const classifyViemError = (err: unknown): ViemErrorClassification => {
       const matched = classifyByCode(pickNumber(node, 'code'))
       if (matched) {
         kind = matched
-        if (node instanceof Error) {
-          causeName ??= node.name
-          causeMessage ??= node.message
-        }
+        if (node instanceof Error) causeName ??= node.name
         break
       }
     }
@@ -213,10 +247,7 @@ export const classifyViemError = (err: unknown): ViemErrorClassification => {
       const matched = classifyByMessage(message)
       if (matched) {
         kind = matched
-        if (node instanceof Error) {
-          causeName ??= node.name
-          causeMessage ??= node.message
-        }
+        if (node instanceof Error) causeName ??= node.name
         break
       }
     }
@@ -233,13 +264,12 @@ export const classifyViemError = (err: unknown): ViemErrorClassification => {
     name,
     shortMessage,
     isTransport: TRANSPORT_KINDS.has(kind),
-    url: pickString(err, 'url'),
-    status: pickNumber(err, 'status'),
-    code: pickNumber(err, 'code'),
-    functionName: pickString(err, 'functionName'),
-    contractAddress: pickString(err, 'contractAddress'),
+    url: redactUrl(pickStringFromChain(chain, 'url')),
+    status: pickNumberFromChain(chain, 'status'),
+    code: pickNumberFromChain(chain, 'code'),
+    functionName: pickStringFromChain(chain, 'functionName'),
+    contractAddress: pickStringFromChain(chain, 'contractAddress'),
     causeName,
-    causeMessage,
   }
 }
 

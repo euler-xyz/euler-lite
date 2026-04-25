@@ -28,7 +28,6 @@ const errSerializer = (err: unknown): unknown => {
     ...(summary.functionName != null ? { functionName: summary.functionName } : {}),
     ...(summary.contractAddress != null ? { contractAddress: summary.contractAddress } : {}),
     ...(summary.causeName != null ? { causeName: summary.causeName } : {}),
-    ...(summary.causeMessage != null ? { causeMessage: summary.causeMessage } : {}),
   }
 }
 

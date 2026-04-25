@@ -49,6 +49,15 @@ const collectJsFiles = (dir: string): string[] => {
 
 describe('client bundle does not ship server-only logger code', () => {
   if (!existsSync(CLIENT_BUNDLE_DIR)) {
+    // CI must run `npm run build` before `npm run test:run` for this assertion
+    // to fire. Hard-fail when running under CI so a missing build doesn't
+    // silently turn the regression check into a no-op; locally we just skip.
+    if (process.env.CI) {
+      it('FAILS — .output/public/_nuxt/ missing under CI (build step likely missing)', () => {
+        expect(false).toBe(true)
+      })
+      return
+    }
     it.skip('skipped — .output/public/_nuxt/ missing (run `npm run build` first)', () => {})
     return
   }

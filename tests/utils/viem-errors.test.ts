@@ -22,8 +22,48 @@ describe('classifyViemError', () => {
     const out = classifyViemError(err)
     expect(out.kind).toBe('rpc-timeout')
     expect(out.isTransport).toBe(true)
-    expect(out.url).toBe('https://rpc.example/abc')
+    expect(out.url).toBe('rpc.example')
     expect(out.shortMessage).toMatch(/took too long/i)
+  })
+
+  it('redacts the RPC URL to host only — never logs the API-keyed path or query', () => {
+    // Chainstack-style API key as a path segment.
+    const chainstack = new TimeoutError({
+      body: { method: 'eth_call' },
+      url: 'https://base-mainnet.core.chainstack.com/9f15ebed5cbdb72826d7d0604db4e64c',
+    })
+    expect(classifyViemError(chainstack).url).toBe('base-mainnet.core.chainstack.com')
+
+    // Alchemy-style API key as a path segment after a v2 prefix.
+    const alchemy = new TimeoutError({
+      body: { method: 'eth_call' },
+      url: 'https://eth-mainnet.g.alchemy.com/v2/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    })
+    expect(classifyViemError(alchemy).url).toBe('eth-mainnet.g.alchemy.com')
+
+    // Query-string API key.
+    const queryKey = new TimeoutError({
+      body: { method: 'eth_call' },
+      url: 'https://rpc.example.com/?apikey=secret-token-deadbeef',
+    })
+    expect(classifyViemError(queryKey).url).toBe('rpc.example.com')
+
+    // userinfo (legacy basic auth) in the URL.
+    const userinfo = new TimeoutError({
+      body: { method: 'eth_call' },
+      url: 'https://user:password@rpc.example.com/path',
+    })
+    const out = classifyViemError(userinfo)
+    expect(out.url).toBe('rpc.example.com')
+    expect(out.url).not.toContain('user')
+    expect(out.url).not.toContain('password')
+
+    // A genuinely unparseable URL is dropped rather than leaked.
+    const broken = new TimeoutError({
+      body: { method: 'eth_call' },
+      url: 'not a url at all',
+    })
+    expect(classifyViemError(broken).url).toBeUndefined()
   })
 
   it('walks the cause chain to recognise a wrapped TimeoutError', () => {

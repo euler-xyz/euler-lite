@@ -1,7 +1,7 @@
-import { encodeFunctionData, decodeFunctionResult, zeroAddress, type Address, type Hex, type Abi, BaseError } from 'viem'
+import { encodeFunctionData, decodeFunctionResult, zeroAddress, type Address, type Hex, type Abi } from 'viem'
 import { EVC_ABI, type BatchItem, type BatchItemResult } from '~/abis/evc'
 import { getPublicClient } from '~/utils/public-client'
-import { isTransportError as isViemTransportError } from '~/utils/viem-errors'
+import { isTransportError } from '~/utils/viem-errors'
 import { logger } from '~/utils/logger'
 
 export type MulticallResult<T = unknown> = {
@@ -15,21 +15,6 @@ export type BatchLensResult<T = unknown> = {
   result: T | null
   /** True when the entire RPC request failed (e.g. 403, network error) vs individual call revert */
   transportError?: boolean
-}
-
-/**
- * Conservative "should we suppress per-item retries?" check for batch callers.
- * For viem errors, classification is delegated to `utils/viem-errors.ts` so the
- * set of recognised transport classes (TimeoutError, HttpRequestError,
- * WebSocketRequestError, LimitExceededRpcError, ResourceUnavailableRpcError,
- * SocketClosedError) lives in one place. Non-viem throwables — TypeErrors from
- * a misconfigured client, plain Errors from upstream fetches — are treated as
- * transport errors here too: it's safer to skip retries against an
- * already-broken endpoint than to amplify load by hammering it per-address.
- */
-const isTransportError = (err: unknown): boolean => {
-  if (!(err instanceof BaseError)) return true
-  return isViemTransportError(err)
 }
 
 /**

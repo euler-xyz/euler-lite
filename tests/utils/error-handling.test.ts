@@ -1,5 +1,21 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { isAbortError, logWarn, catchToFallback } from '~/utils/errorHandling'
+
+const captureStdout = () => {
+  const captured: string[] = []
+  const orig = process.stdout.write.bind(process.stdout)
+  process.stdout.write = ((chunk: unknown) => {
+    captured.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk as Uint8Array).toString())
+    return true
+  }) as typeof process.stdout.write
+  return {
+    captured,
+    restore: () => {
+      process.stdout.write = orig
+    },
+    lines: () => captured.join('').split('\n').filter(Boolean).map(l => JSON.parse(l) as Record<string, unknown>),
+  }
+}
 
 describe('isAbortError', () => {
   it('returns true for DOMException AbortError', () => {
@@ -37,52 +53,44 @@ describe('isAbortError', () => {
   })
 })
 
-describe('logWarn (legacy shim — delegates to structured logger)', () => {
-  it('routes the default severity through console.warn with the [ctx] prefix', () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    logWarn('test', 'message')
-    expect(spy).toHaveBeenCalledTimes(1)
-    expect(spy.mock.calls[0][0]).toBe('[test]')
-    expect(spy.mock.calls[0][1]).toBe('message')
-    spy.mockRestore()
+describe('logWarn — client-side helper that routes through the shared logger', () => {
+  let cap: ReturnType<typeof captureStdout>
+
+  beforeEach(() => {
+    cap = captureStdout()
   })
 
-  it('routes severity:error through console.error', () => {
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  afterEach(() => {
+    cap.restore()
+  })
+
+  it('emits at level=warn by default with the ctx field set', () => {
+    logWarn('test', 'message')
+    expect(cap.lines()[0]).toMatchObject({ level: 'warn', ctx: 'test', msg: 'message' })
+  })
+
+  it('emits at level=error when severity is error', () => {
     logWarn('test', 'message', { severity: 'error' })
-    expect(spy).toHaveBeenCalledTimes(1)
-    expect(spy.mock.calls[0][0]).toBe('[test]')
-    spy.mockRestore()
+    expect(cap.lines()[0]).toMatchObject({ level: 'error', ctx: 'test', msg: 'message' })
   })
 
   it('does nothing when severity is silent', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     logWarn('test', 'message', { severity: 'silent' })
-    expect(warnSpy).not.toHaveBeenCalled()
-    expect(errorSpy).not.toHaveBeenCalled()
-    warnSpy.mockRestore()
-    errorSpy.mockRestore()
+    expect(cap.captured).toHaveLength(0)
   })
 
   it('attaches additional data as a structured field', () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     logWarn('ctx', 'err', { data: { extra: true } })
-    expect(spy).toHaveBeenCalledTimes(1)
-    const fields = spy.mock.calls[0][2] as Record<string, unknown>
-    expect(fields).toMatchObject({ ctx: 'ctx', data: { extra: true } })
-    spy.mockRestore()
+    expect(cap.lines()[0]).toMatchObject({ ctx: 'ctx', data: { extra: true }, msg: 'err' })
   })
 
   it('passes Error objects through summarisation (no abi/metaMessages)', async () => {
     const { TimeoutError } = await import('viem')
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const err = new TimeoutError({ body: { method: 'eth_call' }, url: 'https://rpc.example' })
     logWarn('vault/x', err)
-    const fields = spy.mock.calls[0][2] as Record<string, unknown>
-    expect(JSON.stringify(fields)).toContain('rpc-timeout')
-    expect(JSON.stringify(fields)).not.toContain('"abi"')
-    spy.mockRestore()
+    const flat = cap.captured.join('')
+    expect(flat).toContain('rpc-timeout')
+    expect(flat).not.toContain('"abi"')
   })
 })
 
@@ -101,12 +109,16 @@ describe('catchToFallback', () => {
   })
 
   it('logs error when logContext provided', async () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const thrower = async () => {
-      throw new Error('fail')
+    const cap = captureStdout()
+    try {
+      const thrower = async () => {
+        throw new Error('fail')
+      }
+      await catchToFallback(thrower, 99, 'test/ctx')
     }
-    await catchToFallback(thrower, 99, 'test/ctx')
-    expect(spy).toHaveBeenCalled()
-    spy.mockRestore()
+    finally {
+      cap.restore()
+    }
+    expect(cap.captured.join('')).toContain('test/ctx')
   })
 })
