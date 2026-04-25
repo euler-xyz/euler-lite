@@ -145,14 +145,14 @@ defineExpose({ savePending })
           v-for="option in slippagePresets"
           :key="option.value"
           type="button"
-          :class="['ui-select__chip', { 'ui-select__chip--active': isPresetActive(option.value) }]"
+          :class="['slippage-settings__chip', { 'slippage-settings__chip--active': isPresetActive(option.value) }]"
           @click="onPresetSelect(option.value)"
         >
           {{ option.label }}
         </button>
         <button
           type="button"
-          :class="['ui-select__chip', { 'ui-select__chip--active': customChipActive }]"
+          :class="['slippage-settings__chip', { 'slippage-settings__chip--active': customChipActive }]"
           @click="onCustomChipClick"
         >
           <span v-if="isCustomSelected && !isCustomInputVisible">
@@ -212,3 +212,45 @@ defineExpose({ savePending })
     </div>
   </div>
 </template>
+
+<style scoped lang="scss">
+.slippage-settings__chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: 100px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  box-shadow: var(--ui-input-shadow);
+
+  &:hover {
+    color: var(--accent-600);
+    border-color: var(--border-emphasis);
+    background: var(--bg-surface-elevated);
+  }
+
+  &--active {
+    font-weight: 600;
+    color: var(--ui-select-chip-active-color);
+    background: var(--ui-select-chip-active-background-color);
+    border-color: transparent;
+    box-shadow: var(--accent-shadow-md);
+
+    &:hover {
+      color: var(--ui-select-chip-active-color);
+      background: var(--accent-600);
+      border-color: transparent;
+      box-shadow: var(--accent-shadow-lg);
+    }
+  }
+}
+</style>
