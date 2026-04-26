@@ -444,7 +444,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
 <template>
   <div class="px-16 pb-12 flex items-center justify-center">
     <div
-      class="relative max-h-[50vh] overflow-auto rounded-8 border border-line-subtle p-12"
+      class="relative max-h-[50vh] overflow-auto rounded-8 border border-line-subtle px-12 pb-12 pt-0"
     >
       <table class="border-collapse">
         <thead class="sticky top-0 z-20 bg-surface">
