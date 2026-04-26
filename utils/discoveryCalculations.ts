@@ -4,11 +4,11 @@ import type { Vault, SecuritizeVault, VaultCollateralLTV } from '~/entities/vaul
 import type { AnyVault } from '~/composables/useVaultRegistry'
 import type { EulerLabelEntity } from '~/entities/euler/labels'
 import {
-  getCurrentLiquidationLTV,
   isLiquidationLTVRamping,
   getVaultUtilization,
   getSupplyCapPercentage,
   getBorrowCapPercentage,
+  isLiveCollateralEdge,
 } from '~/entities/vault'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { getEntitiesByVault, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
@@ -163,18 +163,27 @@ export const getBorrowableVaults = (market: MarketGroup): Vault[] =>
 export const getNonBorrowableMemberVaults = (market: MarketGroup): Vault[] =>
   market.vaults.filter(isVaultType).filter(v => !hasBorrowableLTV(v))
 
+const hasLiveDiscoveryColumn = (vault: Vault): boolean =>
+  vault.collateralLTVs.some(ltv => isLiveCollateralEdge(ltv))
+
+const getDiscoveryColumnVaults = (market: MarketGroup): Vault[] =>
+  market.vaults.filter(isVaultType).filter(hasLiveDiscoveryColumn)
+
+const getDiscoveryRowOnlyVaults = (market: MarketGroup): Vault[] =>
+  market.vaults.filter(isVaultType).filter(v => !hasLiveDiscoveryColumn(v))
+
 export const isExternalCollateral = (market: MarketGroup, address: string): boolean => {
   const normalized = address.toLowerCase()
   return market.externalCollateral.some(v => getVaultAddress(v).toLowerCase() === normalized)
 }
 
 export const getActiveExternalCollateral = (market: MarketGroup): AnyVault[] => {
-  const borrowableVaults = getBorrowableVaults(market)
+  const columnVaults = getDiscoveryColumnVaults(market)
   return market.externalCollateral.filter((ext) => {
     const extAddr = getVaultAddress(ext).toLowerCase()
-    return borrowableVaults.some(v =>
+    return columnVaults.some(v =>
       v.collateralLTVs.some(ltv =>
-        ltv.collateral.toLowerCase() === extAddr && ltv.liquidationLTV > 0n,
+        ltv.collateral.toLowerCase() === extAddr && isLiveCollateralEdge(ltv),
       ),
     )
   })
@@ -212,10 +221,14 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
       const colAddr = ltv.collateral.toLowerCase()
       if (!vaultByAddr.has(colAddr)) continue
       const liabAddr = vault.address.toLowerCase()
+      // directedEdges drives the borrowable-pair count rendered next to the
+      // graph — only currently borrowable edges count. displayEdges drives
+      // graph rendering and includes mid-ramp edges so a winding-down
+      // collateral remains visually connected.
       if (ltv.borrowLTV > 0n) {
         directedEdges.add(`${colAddr}:${liabAddr}`)
       }
-      if (getCurrentLiquidationLTV(ltv) > 0n) {
+      if (isLiveCollateralEdge(ltv)) {
         displayEdges.add(`${colAddr}:${liabAddr}`)
         connectedAddresses.add(colAddr)
         connectedAddresses.add(liabAddr)
@@ -285,8 +298,8 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
 // ============================================================
 
 export const getCollateralMatrix = (market: MarketGroup): CollateralMatrixData | null => {
-  const borrowable = getBorrowableVaults(market)
-  const nonBorrowable = getNonBorrowableMemberVaults(market)
+  const borrowable = getDiscoveryColumnVaults(market)
+  const nonBorrowable = getDiscoveryRowOnlyVaults(market)
   const external = getActiveExternalCollateral(market)
 
   const knownAddresses = new Set<string>()
@@ -302,7 +315,7 @@ export const getCollateralMatrix = (market: MarketGroup): CollateralMatrixData |
 
   for (const vault of borrowable) {
     for (const ltv of vault.collateralLTVs) {
-      if (getCurrentLiquidationLTV(ltv) <= 0n) continue
+      if (!isLiveCollateralEdge(ltv)) continue
       const colAddr = ltv.collateral.toLowerCase()
       if (!knownAddresses.has(colAddr)) continue
 
@@ -504,13 +517,11 @@ export const getGraphConnectedAddresses = (diagram: MiniDiagramData, address: st
 
 export const isNodeRampingDown = (market: MarketGroup, address: string): boolean => {
   const normalized = address.toLowerCase()
-  for (const v of market.vaults) {
-    if (!isVaultType(v)) continue
-    for (const ltv of v.collateralLTVs) {
-      if (ltv.collateral.toLowerCase() === normalized && isLiquidationLTVRamping(ltv)) return true
-    }
-  }
-  return false
+  const vault = market.vaults
+    .filter(isVaultType)
+    .find(v => v.address.toLowerCase() === normalized)
+
+  return vault?.collateralLTVs.some(ltv => isLiquidationLTVRamping(ltv)) ?? false
 }
 
 // ============================================================
