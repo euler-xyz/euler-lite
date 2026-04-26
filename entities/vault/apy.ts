@@ -103,68 +103,44 @@ export const getRoe = (
   return netYield / equity
 }
 
-// Cached block data for APY calculations (shared across all vaults)
 interface BlockDataCache {
-  currentBlock: number
-  currentBlockData: { number: bigint, timestamp: bigint }
   oneHourAgoBlock: number
-  oneHourAgoBlockData: { number: bigint, timestamp: bigint }
+  timeElapsedSeconds: number
 }
 
-// Pre-fetch block data once for all APY calculations
+const SAMPLE_DISTANCE = 10_000
+
 export const fetchBlockDataForAPY = async (rpcUrl: string, chainId: number): Promise<BlockDataCache | null> => {
   try {
     const client = getPublicClient(rpcUrl)
-    const currentBlockBigInt = await client.getBlockNumber()
-    const currentBlock = Number(currentBlockBigInt)
-    const sampleDistance = 100
+    const currentBlock = Number(await client.getBlockNumber())
+    const sampleDistance = Math.min(SAMPLE_DISTANCE, currentBlock)
 
-    // Estimate oneHourAgoBlock upfront using typical block times
-    // This allows all 3 getBlock calls to run in parallel
-    // We'll refine the estimate after getting actual block data
-    const estimatedBlockTime = 12 // Conservative estimate (Ethereum mainnet)
-    const estimatedBlocksPerHour = Math.floor(TARGET_TIME_AGO / estimatedBlockTime)
-    const estimatedOneHourAgoBlock = Math.max(0, currentBlock - estimatedBlocksPerHour)
+    if (sampleDistance === 0) {
+      return null
+    }
 
-    // Fetch all 3 blocks in parallel
-    const [currentBlockData, sampleBlockData, estimatedOneHourAgoBlockData] = await Promise.all([
+    const [currentBlockData, sampleBlockData] = await Promise.all([
       client.getBlock({ blockNumber: BigInt(currentBlock) }),
       client.getBlock({ blockNumber: BigInt(currentBlock - sampleDistance) }),
-      client.getBlock({ blockNumber: BigInt(estimatedOneHourAgoBlock) }),
     ])
 
     if (!currentBlockData || !sampleBlockData) {
       return null
     }
 
-    // Calculate actual block time and refine if needed
     const timeDiff = Number(currentBlockData.timestamp - sampleBlockData.timestamp)
     const avgBlockTime = timeDiff / sampleDistance
 
-    if (avgBlockTime === 0) {
+    if (avgBlockTime <= 0) {
       return null
     }
 
-    const blocksPerHour = Math.floor(TARGET_TIME_AGO / avgBlockTime)
-    const actualOneHourAgoBlock = Math.max(0, currentBlock - blocksPerHour)
+    const blocksPerHour = Math.round(TARGET_TIME_AGO / avgBlockTime)
+    const oneHourAgoBlock = Math.max(0, currentBlock - blocksPerHour)
+    const timeElapsedSeconds = blocksPerHour * avgBlockTime
 
-    // If estimate was close enough, use the already-fetched block data
-    // Otherwise fetch the correct block (rare case)
-    let oneHourAgoBlockData = estimatedOneHourAgoBlockData
-    if (actualOneHourAgoBlock !== estimatedOneHourAgoBlock) {
-      oneHourAgoBlockData = await client.getBlock({ blockNumber: BigInt(actualOneHourAgoBlock) })
-    }
-
-    if (!oneHourAgoBlockData) {
-      return null
-    }
-
-    return {
-      currentBlock,
-      currentBlockData,
-      oneHourAgoBlock: actualOneHourAgoBlock,
-      oneHourAgoBlockData,
-    }
+    return { oneHourAgoBlock, timeElapsedSeconds }
   }
   catch (e) {
     logConciseFetchError('apy/fetchBlockData', chainId, 'block data', e)
@@ -172,7 +148,6 @@ export const fetchBlockDataForAPY = async (rpcUrl: string, chainId: number): Pro
   }
 }
 
-// Calculate APY using cached block data (only 2 RPC calls per vault instead of 6)
 export const calculateEarnVaultAPYWithCache = async (
   vaultAddress: string,
   decimals: bigint,
@@ -200,18 +175,12 @@ export const calculateEarnVaultAPYWithCache = async (
       }) as Promise<bigint>,
     ])
 
-    if (oneHourAgoRate === 0n) {
-      return 0
-    }
-
-    const timeElapsed = Number(blockCache.currentBlockData.timestamp - blockCache.oneHourAgoBlockData.timestamp)
-
-    if (timeElapsed === 0) {
+    if (oneHourAgoRate === 0n || blockCache.timeElapsedSeconds <= 0) {
       return 0
     }
 
     const rateChange = Number(currentRate - oneHourAgoRate) / Number(oneHourAgoRate)
-    const apy = ((rateChange * SECONDS_IN_YEAR) / timeElapsed) * 100
+    const apy = ((rateChange * SECONDS_IN_YEAR) / blockCache.timeElapsedSeconds) * 100
 
     return Number.isFinite(apy) ? apy : 0
   }
