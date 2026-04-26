@@ -1,11 +1,12 @@
 import type { Address, Hash } from 'viem'
 import { encodeFunctionData, getAddress } from 'viem'
+import { buildSwapVerifierData, getSwapInputAmount } from './swaps/verify'
 import type { OperationsContext, OperationHelpers, Permit2Helpers, AllowanceHelpers } from './types'
 import { erc20ApproveAbi, erc20TransferAbi } from '~/abis/erc20'
 import { evcEnableCollateralAbi, evcEnableControllerAbi } from '~/abis/evc'
 import { vaultBorrowAbi, vaultDepositAbi, vaultPreviewWithdrawAbi, vaultRedeemAbi, vaultWithdrawAbi } from '~/abis/vault'
 import { SaHooksBuilder } from '~/entities/saHooksSDK'
-import { swapperAbi, swapVerifierAbi } from '~/entities/euler/abis'
+import { swapperAbi } from '~/entities/euler/abis'
 import { convertSaHooksToEVCCalls, type EVCCall } from '~/utils/evc-converter'
 import { getNewSubAccount } from '~/entities/account'
 import { buildCollateralCleanupCalls } from '~/utils/collateral-cleanup'
@@ -405,6 +406,7 @@ export const createVaultBuilders = (
     borrowVaultAddress,
     debtAmount,
     quote,
+    requestedSlippage,
     swapperMode = SwapperMode.EXACT_IN,
     subAccount,
     includePermit2Call = true,
@@ -421,6 +423,7 @@ export const createVaultBuilders = (
     borrowVaultAddress: string
     debtAmount: bigint
     quote?: SwapApiQuote
+    requestedSlippage?: number
     swapperMode?: SwapperMode
     subAccount?: string
     includePermit2Call?: boolean
@@ -548,15 +551,11 @@ export const createVaultBuilders = (
       data: hooks.getDataForCall(evcAddress, 'enableCollateral', [subAccountAddr, supplyVaultAddr]) as Hash,
     }
 
-    const getSwapInputAmount = (q: SwapApiQuote, mode: SwapperMode) => {
-      const amountIn = BigInt(q.amountIn || 0)
-      const amountInMax = BigInt(q.amountInMax || 0)
-      if (mode === SwapperMode.EXACT_IN) return amountIn
-      return amountInMax > 0n ? amountInMax : amountIn
-    }
-
     if (hasSwap) {
       assertSwapperVerifierAllowed(quote!.verify.verifierAddress, ctx.eulerPeripheryAddresses.value!.swapVerifier)
+      if (requestedSlippage === undefined) {
+        throw new Error('Valid slippage between 0 and 50% must be provided for swap')
+      }
     }
 
     const borrowRecipient = hasSwap ? quote!.swap.swapperAddress : userAddr
@@ -588,49 +587,11 @@ export const createVaultBuilders = (
         throw new Error('Swap quote account mismatch')
       }
 
-      const buildSwapVerifierData = ({
-        q,
-        mode,
-        isRepay,
-        targetDebt = 0n,
-        currentDebt = 0n,
-      }: {
-        q: SwapApiQuote
-        mode: SwapperMode
-        isRepay: boolean
-        targetDebt?: bigint
-        currentDebt?: bigint
-      }) => {
-        let functionName: 'verifyAmountMinAndSkim' | 'verifyDebtMax'
-        let amount: bigint
-
-        if (isRepay) {
-          functionName = 'verifyDebtMax'
-          if (mode === SwapperMode.TARGET_DEBT) {
-            amount = targetDebt
-          }
-          else {
-            amount = currentDebt - BigInt(q.amountOutMin || 0)
-            if (amount < 0n) amount = 0n
-            amount = helpers.adjustForInterest(amount)
-          }
-        }
-        else {
-          functionName = 'verifyAmountMinAndSkim'
-          amount = BigInt(q.amountOutMin || 0)
-        }
-
-        return encodeFunctionData({
-          abi: swapVerifierAbi,
-          functionName,
-          args: [q.verify.vault, q.verify.account, amount, BigInt(q.verify.deadline || 0)],
-        })
-      }
-
       const verifierData = buildSwapVerifierData({
-        q: quote!,
-        mode: swapperMode,
+        quote: quote!,
+        swapperMode,
         isRepay: false,
+        requestedSlippage: requestedSlippage!,
       })
       if (verifierData.toLowerCase() !== quote!.verify.verifierData.toLowerCase()) {
         logWarn('multiply', 'SwapVerifier data mismatch')

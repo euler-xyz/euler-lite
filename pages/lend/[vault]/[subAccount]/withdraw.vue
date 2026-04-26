@@ -21,6 +21,7 @@ import type { TxPlan } from '~/entities/txPlan'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { SwapperMode } from '~/entities/swap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
+import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { formatNumber, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -107,6 +108,7 @@ const {
   requestQuotes: requestSwapQuotes,
   selectProvider: selectSwapQuote,
 } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+const swapQuoteSlippage = computed(() => computeQuoteSlippage(swapEffectiveQuote.value))
 
 const rewardApy = computed(() => getSupplyRewardApy(vault.value?.address || ''))
 const amountFixed = computed(() => {
@@ -340,6 +342,7 @@ const submit = async () => {
               vaultAddress: vaultAddress as Address,
               sharesAmount: sharesBalance.value,
               quote: swapSelectedQuote.value,
+              requestedSlippage: swapSlippage.value,
               subAccount: subAccount.value,
             })
           }
@@ -348,6 +351,7 @@ const submit = async () => {
               vaultAddress: vaultAddress as Address,
               assetsAmount: amountFixed.value.value,
               quote: swapSelectedQuote.value,
+              requestedSlippage: swapSlippage.value,
               subAccount: subAccount.value,
             })
           }
@@ -408,6 +412,7 @@ const send = async () => {
           vaultAddress: vaultAddress as Address,
           sharesAmount: sharesBalance.value,
           quote,
+          requestedSlippage: swapSlippage.value,
           subAccount: subAccount.value,
         })
       }
@@ -416,6 +421,7 @@ const send = async () => {
           vaultAddress: vaultAddress as Address,
           assetsAmount: amountFixed.value.value,
           quote,
+          requestedSlippage: swapSlippage.value,
           subAccount: subAccount.value,
         })
       }
@@ -618,6 +624,7 @@ watch(swapSelectedQuote, () => {
                   :output-display="swapOutputDisplay"
                   :price-impact="swapPriceImpact"
                   :slippage="swapSlippage"
+                  :quote-slippage="swapQuoteSlippage"
                   :routed-via="swapRoutedVia"
                   @open-slippage-settings="openSlippageSettings"
                 />

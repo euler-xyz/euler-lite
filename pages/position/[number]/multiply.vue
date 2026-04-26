@@ -9,6 +9,7 @@ import type { AccountBorrowPosition } from '~/entities/account'
 import type { Vault, VaultAsset } from '~/entities/vault'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
+import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
@@ -55,6 +56,7 @@ type MultiplyPlanParams = {
   borrowVaultAddress: string
   debtAmount: bigint
   quote?: SwapApiQuote
+  requestedSlippage?: number
   swapperMode: SwapperMode
   subAccount: string
 }
@@ -96,6 +98,7 @@ const {
   requestQuotes: requestMultiplyQuotes,
   selectProvider: selectMultiplyQuote,
 } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+const multiplyQuoteSlippage = computed(() => computeQuoteSlippage(multiplyEffectiveQuote.value))
 
 const multiplyLongVault = computed(() => position.value?.collateral)
 const multiplyShortVault = computed(() => position.value?.borrow)
@@ -597,6 +600,7 @@ const submitMultiply = async () => {
         borrowVaultAddress: multiplyShortVault.value.address,
         debtAmount,
         quote: quote || undefined,
+        requestedSlippage: multiplySlippage.value,
         swapperMode: SwapperMode.EXACT_IN,
         subAccount,
       }
@@ -622,14 +626,19 @@ const submitMultiply = async () => {
         }
       }
 
+      const reviewBorrowAmount = trimTrailingZeros(formatUnits(debtAmount, Number(multiplyShortVault.value.asset.decimals)))
+      const reviewSwapToAmount = quote
+        ? trimTrailingZeros(formatUnits(BigInt(quote.amountOut || 0), Number(multiplyLongVault.value.asset.decimals)))
+        : undefined
+
       modal.open(OperationReviewModal, {
         props: {
           type: 'borrow',
           asset: multiplyShortVault.value.asset,
-          amount: multiplyShortAmount.value || formatUnits(debtAmount, Number(multiplyShortVault.value.asset.decimals)),
+          amount: reviewBorrowAmount,
           plan: plan.value || undefined,
           swapToAsset: quote ? multiplyLongVault.value.asset : undefined,
-          swapToAmount: quote ? multiplyLongAmount.value : undefined,
+          swapToAmount: reviewSwapToAmount,
           subAccount,
           submittingLabel: 'Submitting...',
           onConfirm: async () => {
@@ -948,6 +957,7 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
               :output-display="multiplySwapSummary?.to ?? null"
               :price-impact="multiplyPriceImpact"
               :slippage="multiplySlippage"
+              :quote-slippage="multiplyQuoteSlippage"
               :routed-via="multiplyRoutedVia"
               :multiplied-price-impact="multipliedPriceImpact"
               @open-slippage-settings="openSlippageSettings"

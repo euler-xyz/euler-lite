@@ -88,12 +88,13 @@ const form = useCollateralForm({
     )
   },
 
-  buildSwapPlan: async (quote: SwapApiQuote, { vaultAddress, amountNano, subAccount }) => {
+  buildSwapPlan: async (quote: SwapApiQuote, { vaultAddress, amountNano, slippage, subAccount }) => {
     const hasBorrows = (form.position.value?.borrowed || 0n) > 0n
     return buildWithdrawAndSwapPlan({
       vaultAddress: vaultAddress as Address,
       assetsAmount: amountNano,
       quote,
+      requestedSlippage: slippage,
       subAccount,
       options: {
         includePythUpdate: hasBorrows,
@@ -263,6 +264,7 @@ watch(selectedOutputAsset, () => {
                   :output-display="form.swapOutputDisplay.value"
                   :price-impact="form.swapPriceImpact.value"
                   :slippage="form.swapSlippage.value"
+                  :quote-slippage="form.swapQuoteSlippage.value"
                   :routed-via="form.swapRoutedVia.value"
                   @open-slippage-settings="form.openSlippageSettings"
                 />

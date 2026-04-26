@@ -27,6 +27,7 @@ import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
+import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { calculateRoe, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
 import { computeMaxMultiplier, computeMinMultiplier, computeWeightedSupplyApy, computeLeverageDebt } from '~/utils/multiply-math'
 import type { TxPlan } from '~/entities/txPlan'
@@ -48,6 +49,7 @@ type MultiplyPlanParams = {
   borrowVaultAddress: string
   debtAmount: bigint
   quote?: SwapApiQuote
+  requestedSlippage?: number
   swapperMode: SwapperMode
   subAccount: string
 }
@@ -118,6 +120,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     requestQuotes: requestMultiplyQuotes,
     selectProvider: selectMultiplyQuote,
   } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+  const multiplyQuoteSlippage = computed(() => computeQuoteSlippage(multiplyEffectiveQuote.value))
 
   // --- Form state ---
   const multiplyInputAmount = ref('')
@@ -781,6 +784,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         borrowVaultAddress: multiplyShortVault.value.address,
         debtAmount,
         quote: quote || undefined,
+        requestedSlippage: multiplySlippage.value,
         swapperMode: SwapperMode.EXACT_IN,
         subAccount,
       }
@@ -979,6 +983,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     isMultiplyQuoteLoading,
     multiplyQuoteError,
     multiplyQuotesStatusLabel,
+    multiplyQuoteSlippage,
     selectMultiplyQuote,
 
     // USD values

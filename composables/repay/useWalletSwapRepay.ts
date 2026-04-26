@@ -18,6 +18,7 @@ import { amountToPercent, percentToAmountNano } from '~/utils/repayUtils'
 import { SwapperMode } from '~/entities/swap'
 import { createRaceGuard } from '~/utils/race-guard'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
+import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
 import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
@@ -86,6 +87,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
   // --- Swap quotes (dual-direction) ---
   const quotes = useSwapRepayQuotes({ direction })
+  const quoteSlippage = computed(() => computeQuoteSlippage(quotes.effectiveQuote.value, direction.value))
 
   // --- Derived ---
   const needsSwap = computed(() => {
@@ -619,6 +621,14 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     }
   })
 
+  watch(slippage, () => {
+    if (formTab.value !== 'wallet' || !needsSwap.value) return
+    clearSimulationError()
+    quotes.reset()
+    resetDerivedState()
+    requestQuote()
+  })
+
   // --- Watch quote changes → sync opposite field + estimates ---
   watch([quotes.effectiveQuote, direction], () => {
     if (formTab.value !== 'wallet' || !needsSwap.value) return
@@ -675,6 +685,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       inputTokenAddress: (wrappedAddress || selectedAsset.value.address) as Address,
       inputAmount,
       quote: quotes.selectedQuote.value,
+      requestedSlippage: slippage.value,
       borrowVaultAddress: borrowVault.value.address as Address,
       subAccount: (position.value.subAccount || address.value || zeroAddress) as Address,
       enabledCollaterals: position.value.collaterals ?? [collateralVault.value.address],
@@ -799,6 +810,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     swapInputDisplay,
     swapOutputDisplay,
     swapRoutedVia,
+    quoteSlippage,
     swapPriceImpact,
     swapRouteItems,
     isFullRepay,

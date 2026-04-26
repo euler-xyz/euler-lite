@@ -18,6 +18,7 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
+import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
 import SecuritizeVaultOverview from '~/components/entities/vault/overview/SecuritizeVaultOverview.vue'
@@ -129,6 +130,7 @@ const {
   requestQuotes: requestSwapQuotes,
   selectProvider: selectSwapQuote,
 } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+const swapQuoteSlippage = computed(() => computeQuoteSlippage(swapEffectiveQuote.value))
 
 // Vault data - only one will be populated based on type
 const evkVault: Ref<Vault | undefined> = ref(undefined)
@@ -392,6 +394,7 @@ const buildSwapSupplyPlanFromQuote = async (quote: SwapApiQuote, options: { incl
     inputTokenAddress: (wrappedAddress || selectedAsset.value.address) as Address,
     inputAmount,
     quote,
+    requestedSlippage: swapSlippage.value,
     includePermit2Call: options.includePermit2Call,
     wrappedNativeInfo: isNative && wrappedAddress
       ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
@@ -897,6 +900,7 @@ watch(address, () => {
                   :output-display="swapOutputDisplay"
                   :price-impact="swapPriceImpact"
                   :slippage="swapSlippage"
+                  :quote-slippage="swapQuoteSlippage"
                   :routed-via="swapRoutedVia"
                   @open-slippage-settings="openSlippageSettings"
                 />

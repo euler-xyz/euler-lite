@@ -18,6 +18,7 @@ import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics
 import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
 import { createRaceGuard } from '~/utils/race-guard'
+import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { findBlockingDisabledOp, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 
@@ -107,6 +108,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     borrowVault,
     direction: core.direction,
   })
+  const quoteSlippage = computed(() => computeQuoteSlippage(core.quotes.effectiveQuote.value, core.direction.value))
 
   // --- Savings-specific computeds ---
   const collateralAmountAfter = computed(() => {
@@ -290,6 +292,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
       return buildSwapFullRepayPlan({
         quote: core.quotes.selectedQuote.value,
         swapperMode: swapMode,
+        requestedSlippage: slippage.value,
         targetDebt,
         currentDebt,
         liabilityVault: borrowVault.value.address,
@@ -302,6 +305,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
       quote: core.quotes.selectedQuote.value,
       swapperMode: swapMode,
       isRepay: true,
+      requestedSlippage: slippage.value,
       targetDebt,
       currentDebt,
       liabilityVault: borrowVault.value.address,
@@ -427,6 +431,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     // Swap details
     currentPrice: details.currentPrice,
     summary: details.summary,
+    quoteSlippage,
     priceImpact: details.priceImpact,
     leveragedPriceImpact: details.leveragedPriceImpact,
     routedVia: details.routedVia,
