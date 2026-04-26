@@ -5,12 +5,12 @@ This guide covers the concrete steps and scripts needed to work on this reposito
 ## Prerequisites
 
 - Node.js 24+
-- npm (or yarn/pnpm if you prefer)
+- npm
 
 ## Install and run
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
