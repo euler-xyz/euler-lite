@@ -798,20 +798,22 @@ export const STATS_ROWS: AttributeRow[] = [
   {
     id: 'totalSupply',
     label: 'Total supply',
-    direction: 'neutral',
+    direction: 'higher-better',
     getValue: (_vault, usd) => ({
       display: usd ? usd.supply : '…',
+      numeric: usd?.supplyUsd,
       kind: 'text',
     }),
   },
   {
     id: 'totalBorrow',
     label: 'Total borrows',
-    direction: 'neutral',
+    direction: 'lower-better',
     getValue: (vault, usd) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       return {
         display: usd ? usd.borrow : '…',
+        numeric: usd?.borrowUsd,
         kind: 'text',
       }
     },
@@ -819,11 +821,12 @@ export const STATS_ROWS: AttributeRow[] = [
   {
     id: 'liquidity',
     label: 'Available liquidity',
-    direction: 'neutral',
+    direction: 'higher-better',
     getValue: (vault, usd) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       return {
         display: usd ? usd.liquidity : '…',
+        numeric: usd?.liquidityUsd,
         kind: 'text',
       }
     },
@@ -831,17 +834,17 @@ export const STATS_ROWS: AttributeRow[] = [
   {
     id: 'utilization',
     label: 'Utilization',
-    direction: 'neutral',
+    direction: 'lower-better',
     getValue: (vault) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       const pct = getVaultUtilization(vault)
-      return { display: `${formatNumber(pct, 2)}%`, kind: 'text' }
+      return { display: `${formatNumber(pct, 2)}%`, numeric: pct, kind: 'text' }
     },
   },
   {
     id: 'supplyCapUsage',
     label: 'Supply cap usage',
-    direction: 'neutral',
+    direction: 'lower-better',
     getValue: (vault) => {
       if (!isVaultType(vault)) return NA_CELL
       const uncapped = vault.supplyCap >= maxUint256
@@ -851,6 +854,7 @@ export const STATS_ROWS: AttributeRow[] = [
       const exceeded = vault.supplyCap === 0n && vault.supply > 0n
       return {
         display: formatCapPercentDisplay(pct, uncapped, exceeded),
+        numeric: uncapped ? undefined : pct,
         kind: 'capProgress',
         capPercent: pct,
         capUncapped: uncapped,
@@ -860,7 +864,7 @@ export const STATS_ROWS: AttributeRow[] = [
   {
     id: 'borrowCapUsage',
     label: 'Borrow cap usage',
-    direction: 'neutral',
+    direction: 'lower-better',
     getValue: (vault) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       const uncapped = vault.borrowCap >= maxUint256
@@ -868,6 +872,7 @@ export const STATS_ROWS: AttributeRow[] = [
       const exceeded = vault.borrowCap === 0n && vault.borrow > 0n
       return {
         display: formatCapPercentDisplay(pct, uncapped, exceeded),
+        numeric: uncapped ? undefined : pct,
         kind: 'capProgress',
         capPercent: pct,
         capUncapped: uncapped,
@@ -877,23 +882,23 @@ export const STATS_ROWS: AttributeRow[] = [
   {
     id: 'supplyApy',
     label: 'Supply APY',
-    direction: 'neutral',
+    direction: 'higher-better',
     getValue: (vault) => {
       // Securitize vaults' interestRateInfo is documented as zero-valued,
       // so we'd render "0.00%" — avoid that misleading display.
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       const pct = supplyApyPercent(vault)
-      return { display: `${formatNumber(pct, 2)}%`, kind: 'text' }
+      return { display: `${formatNumber(pct, 2)}%`, numeric: pct, kind: 'text' }
     },
   },
   {
     id: 'borrowApy',
     label: 'Borrow APY',
-    direction: 'neutral',
+    direction: 'lower-better',
     getValue: (vault) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       const pct = borrowApyPercent(vault)
-      return { display: `${formatNumber(pct, 2)}%`, kind: 'text' }
+      return { display: `${formatNumber(pct, 2)}%`, numeric: pct, kind: 'text' }
     },
   },
 ]

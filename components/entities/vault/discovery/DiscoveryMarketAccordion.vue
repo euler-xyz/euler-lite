@@ -154,16 +154,10 @@ const setMatrixView = (view: MatrixViewId) => {
     matrixDropdownOpen.value = false
     return
   }
-  const wasAttribute = isAttributeMatrixView(matrixView.value)
-  const isAttribute = isAttributeMatrixView(view)
   matrixView.value = view
   matrixDropdownOpen.value = false
-  // Clear selections when crossing the attribute / pair boundary — pair
-  // selections (cell) don't map to attribute matrices and vice versa.
-  if (wasAttribute !== isAttribute) {
-    selectedCell.value = null
-    selectedMatrixHeader.value = null
-  }
+  selectedCell.value = null
+  selectedMatrixHeader.value = null
 }
 
 // -- Precomputed matrix map --

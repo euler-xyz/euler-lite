@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
-import { getActiveExternalCollateral, getCollateralMatrix, isNodeRampingDown } from '~/utils/discoveryCalculations'
+import {
+  STATS_ROWS,
+  buildAttributeRowCells,
+  getActiveExternalCollateral,
+  getAttributeRowColor,
+  getCollateralMatrix,
+  isNodeRampingDown,
+  type VaultUsdCacheEntry,
+} from '~/utils/discoveryCalculations'
 import type { MarketGroup } from '~/entities/lend-discovery'
 import type { Vault, VaultCollateralLTV } from '~/entities/vault/types'
 
@@ -126,5 +134,63 @@ describe('getActiveExternalCollateral', () => {
     const market = makeMarket([borrowVault], [externalVault])
 
     expect(getActiveExternalCollateral(market)).toEqual([])
+  })
+})
+
+describe('attribute stats matrix', () => {
+  it('emits numeric values and directional rows for heatmap rendering', () => {
+    const vault = {
+      ...makeVault('0xStats', []),
+      supply: 400n,
+      borrow: 500n,
+      totalAssets: 1000n,
+      supplyCap: 1000n,
+      borrowCap: 1000n,
+      interestRateInfo: {
+        supplyAPY: 5n * 10n ** 25n,
+        borrowAPY: 12n * 10n ** 25n,
+      },
+    } as Vault
+    const usd: VaultUsdCacheEntry = {
+      supply: '$1K',
+      supplyUsd: 1000,
+      borrow: '$500',
+      borrowUsd: 500,
+      liquidity: '$500',
+      liquidityUsd: 500,
+      supplyCap: '$1K',
+      supplyCapUsd: 1000,
+      borrowCap: '$1K',
+      borrowCapUsd: 1000,
+    }
+
+    const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, vault }]
+    const usdCache = new Map([[vault.address.toLowerCase(), usd]])
+    const byRow = new Map(STATS_ROWS.map(row => [
+      row.id,
+      { row, cell: buildAttributeRowCells(row, columns, usdCache)[0] },
+    ]))
+
+    expect(byRow.get('totalSupply')!.row.direction).toBe('higher-better')
+    expect(byRow.get('totalSupply')!.cell.numeric).toBe(1000)
+    expect(byRow.get('totalBorrow')!.row.direction).toBe('lower-better')
+    expect(byRow.get('totalBorrow')!.cell.numeric).toBe(500)
+    expect(byRow.get('liquidity')!.row.direction).toBe('higher-better')
+    expect(byRow.get('liquidity')!.cell.numeric).toBe(500)
+    expect(byRow.get('utilization')!.row.direction).toBe('lower-better')
+    expect(byRow.get('utilization')!.cell.numeric).toBe(50)
+    expect(byRow.get('supplyCapUsage')!.row.direction).toBe('lower-better')
+    expect(byRow.get('supplyCapUsage')!.cell.numeric).toBe(40)
+    expect(byRow.get('borrowCapUsage')!.row.direction).toBe('lower-better')
+    expect(byRow.get('borrowCapUsage')!.cell.numeric).toBe(50)
+    expect(byRow.get('supplyApy')!.row.direction).toBe('higher-better')
+    expect(byRow.get('supplyApy')!.cell.numeric).toBe(5)
+    expect(byRow.get('borrowApy')!.row.direction).toBe('lower-better')
+    expect(byRow.get('borrowApy')!.cell.numeric).toBe(12)
+  })
+
+  it('colors higher-better rows green at the high end and lower-better rows red at the high end', () => {
+    expect(getAttributeRowColor(100, 0, 100, 'higher-better')).toContain('hsla(145')
+    expect(getAttributeRowColor(100, 0, 100, 'lower-better')).toContain('hsla(0')
   })
 })
