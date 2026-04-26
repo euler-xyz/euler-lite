@@ -99,6 +99,26 @@ describe('shared logger — Node branch (JSON to stdout)', () => {
     })
   })
 
+  it('projects non-plain objects to bounded scalar summaries for useful logs', async () => {
+    const { logger } = await import('~/utils/logger')
+    const response = new Response('nope', {
+      status: 503,
+      statusText: 'Service Unavailable',
+    })
+
+    logger.warn({ ctx: 'fetch/test', response }, 'upstream failed')
+
+    expect(cap.lines()[0]).toMatchObject({
+      ctx: 'fetch/test',
+      response: {
+        type: 'Response',
+        status: 503,
+        statusText: 'Service Unavailable',
+      },
+      msg: 'upstream failed',
+    })
+  })
+
   it('child() merges bindings into every emitted record', async () => {
     const { logger } = await import('~/utils/logger')
     const child = logger.child({ ctx: 'warm-cache', chainId: 1 })

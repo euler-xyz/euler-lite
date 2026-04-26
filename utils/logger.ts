@@ -39,11 +39,33 @@ export type Logger = {
 type Level = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal'
 
 type JsonSafeValue = null | string | number | boolean | JsonSafeValue[] | { [key: string]: JsonSafeValue }
+const CLASS_INSTANCE_SCALAR_KEYS = ['name', 'message', 'status', 'statusText', 'code', 'url'] as const
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> => {
   if (typeof value !== 'object' || value === null) return false
   const proto = Object.getPrototypeOf(value)
   return proto === Object.prototype || proto === null
+}
+
+const projectClassInstance = (value: object): { [key: string]: JsonSafeValue } => {
+  const record = value as Record<string, unknown>
+  const out: { [key: string]: JsonSafeValue } = {
+    type: value.constructor?.name || Object.prototype.toString.call(value),
+  }
+
+  for (const key of CLASS_INSTANCE_SCALAR_KEYS) {
+    const nested = record[key]
+    if (
+      typeof nested === 'string'
+      || typeof nested === 'number'
+      || typeof nested === 'boolean'
+      || typeof nested === 'bigint'
+    ) {
+      out[key] = typeof nested === 'bigint' ? nested.toString() : nested
+    }
+  }
+
+  return out
 }
 
 const projectValue = (value: unknown, seen: WeakSet<object>): JsonSafeValue | undefined => {
@@ -74,7 +96,7 @@ const projectValue = (value: unknown, seen: WeakSet<object>): JsonSafeValue | un
 
     if (!isPlainObject(value)) {
       seen.delete(value)
-      return Object.prototype.toString.call(value)
+      return projectClassInstance(value)
     }
 
     const out: { [key: string]: JsonSafeValue } = {}
