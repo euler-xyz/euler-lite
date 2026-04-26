@@ -203,13 +203,10 @@ describe('classifyViemError', () => {
       url: 'https://rpc.example',
     })
     const out = classifyViemError(err)
-    // RpcRequestError itself is in KIND_BY_VIEM_NAME mapped to 'rpc-unreachable',
-    // but the deepest-first walk picks the same node, then code fallback runs
-    // only if name lookup misses. So this test asserts the safety-net path
-    // still classifies as transport even when the specific kind defaults to
-    // 'rpc-unreachable'.
+    // Generic RpcRequestError is classified only after the JSON-RPC code has
+    // had a chance to refine the kind.
     expect(out.isTransport).toBe(true)
-    expect(['rpc-unreachable', 'rpc-rate-limited']).toContain(out.kind)
+    expect(out.kind).toBe('rpc-rate-limited')
   })
 
   it('refines an unrecognised wrapper with code -32005 to rate-limited via code fallback', () => {

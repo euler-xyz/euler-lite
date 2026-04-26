@@ -69,6 +69,36 @@ describe('shared logger — Node branch (JSON to stdout)', () => {
     expect(json).toContain('rpc-timeout')
   })
 
+  it('summarises nested Error fields so legacy logWarn data payloads stay safe', async () => {
+    const { logger } = await import('~/utils/logger')
+    const inner = new TimeoutError({ body: { method: 'eth_call' }, url: 'https://rpc.example' })
+    const outer = new ContractFunctionExecutionError(inner, {
+      abi: [{ type: 'function', name: 'foo', inputs: [], outputs: [], stateMutability: 'view' }],
+      args: ['0xdeadbeef'],
+      contractAddress: '0x0000000000000000000000000000000000000001',
+      functionName: 'foo',
+    })
+    logger.warn({ ctx: 'wallets/batchFetch', data: { error: outer } }, 'failed')
+    const line = cap.lines()[0]
+    const json = JSON.stringify(line)
+    expect(json).not.toContain('"abi"')
+    expect(json).not.toContain('metaMessages')
+    expect(json).not.toContain('0xdeadbeef')
+    expect(json).toContain('rpc-timeout')
+  })
+
+  it('does not throw when structured fields contain bigint values or cycles', async () => {
+    const { logger } = await import('~/utils/logger')
+    const cyclic: { amount: bigint, self?: unknown } = { amount: 123n }
+    cyclic.self = cyclic
+    expect(() => logger.warn({ ctx: 'safe-json', cyclic }, 'ok')).not.toThrow()
+    expect(cap.lines()[0]).toMatchObject({
+      ctx: 'safe-json',
+      cyclic: { amount: '123', self: '[Circular]' },
+      msg: 'ok',
+    })
+  })
+
   it('child() merges bindings into every emitted record', async () => {
     const { logger } = await import('~/utils/logger')
     const child = logger.child({ ctx: 'warm-cache', chainId: 1 })

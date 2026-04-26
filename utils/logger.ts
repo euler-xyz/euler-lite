@@ -38,18 +38,68 @@ export type Logger = {
 
 type Level = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal'
 
-const summariseValue = (value: unknown): unknown =>
-  value instanceof Error ? summarizeViemError(value) : value
+type JsonSafeValue = null | string | number | boolean | JsonSafeValue[] | { [key: string]: JsonSafeValue }
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+  if (typeof value !== 'object' || value === null) return false
+  const proto = Object.getPrototypeOf(value)
+  return proto === Object.prototype || proto === null
+}
+
+const projectValue = (value: unknown, seen: WeakSet<object>): JsonSafeValue | undefined => {
+  if (value instanceof Error) return summarizeViemError(value) as unknown as JsonSafeValue
+  if (value == null) return null
+
+  if (typeof value === 'string') return value
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') {
+    return Number.isNaN(value) ? 'NaN' : value
+  }
+  if (typeof value === 'bigint') return value.toString()
+  if (typeof value === 'symbol' || typeof value === 'function' || typeof value === 'undefined') return undefined
+
+  if (Array.isArray(value)) {
+    if (seen.has(value)) return '[Circular]'
+    seen.add(value)
+    const out = value.map(item => projectValue(item, seen) ?? null)
+    seen.delete(value)
+    return out
+  }
+
+  if (value instanceof Date) return value.toISOString()
+
+  if (typeof value === 'object' && value !== null) {
+    if (seen.has(value)) return '[Circular]'
+    seen.add(value)
+
+    if (!isPlainObject(value)) {
+      seen.delete(value)
+      return Object.prototype.toString.call(value)
+    }
+
+    const out: { [key: string]: JsonSafeValue } = {}
+    for (const [key, nested] of Object.entries(value)) {
+      const projected = projectValue(nested, seen)
+      if (projected !== undefined) out[key] = projected
+    }
+    seen.delete(value)
+    return out
+  }
+
+  return String(value)
+}
 
 /**
- * Walks ALL keys (not just `err` / `error`) and replaces any `Error` value
- * with its summary. Anchors the safety property — "viem internals never
- * reach the log sink" — to the value type, not to a key-name convention.
+ * Recursively projects log fields into JSON-safe values. Any nested `Error`
+ * is summarised, `bigint`s are stringified, and cycles are marked instead of
+ * letting logging throw from JSON.stringify.
  */
 const projectFields = (fields: Fields): Fields => {
   const out: Fields = {}
+  const seen = new WeakSet<object>()
   for (const [key, value] of Object.entries(fields)) {
-    out[key] = summariseValue(value)
+    const projected = projectValue(value, seen)
+    if (projected !== undefined) out[key] = projected
   }
   return out
 }

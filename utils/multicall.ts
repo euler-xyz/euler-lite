@@ -17,6 +17,15 @@ export type BatchLensResult<T = unknown> = {
   transportError?: boolean
 }
 
+const isBatchTransportError = (err: unknown): boolean => {
+  // The shared classifier is precise for viem/Error values. For strange
+  // non-Error throwables from a provider/client boundary, keep the old
+  // conservative multicall behaviour: suppress per-item retries rather than
+  // amplifying load against an endpoint that may already be unhealthy.
+  if (!(err instanceof Error)) return true
+  return isTransportError(err)
+}
+
 /**
  * Execute multiple contract calls in a single RPC request using EVC batchSimulation.
  * This is more reliable than Multicall3 as EVC is guaranteed to exist on all Euler chains.
@@ -111,7 +120,7 @@ const executeLensChunk = async <T>(
     batchResults = await evcBatchCall(evcAddress, items, rpcUrl)
   }
   catch (err) {
-    if (isTransportError(err)) {
+    if (isBatchTransportError(err)) {
       return calls.map(() => ({ success: false, result: null, transportError: true }))
     }
     // On-chain revert of the whole batch (e.g. out of gas) — let caller retry individually

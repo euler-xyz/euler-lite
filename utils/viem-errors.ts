@@ -40,11 +40,6 @@ const TRANSPORT_KINDS: ReadonlySet<ViemErrorKind> = new Set([
 const KIND_BY_VIEM_NAME: Readonly<Record<string, ViemErrorKind>> = {
   TimeoutError: 'rpc-timeout',
   HttpRequestError: 'rpc-http',
-  // Top-level RpcRequestError is the parent for any JSON-RPC error response;
-  // when its specific subclass isn't recognised below we treat it as a
-  // (probably transient) transport failure and let the JSON-RPC code fallback
-  // refine the kind.
-  RpcRequestError: 'rpc-unreachable',
   InternalRpcError: 'rpc-unreachable',
   LimitExceededRpcError: 'rpc-rate-limited',
   ResourceUnavailableRpcError: 'rpc-resource-unavailable',
@@ -55,6 +50,10 @@ const KIND_BY_VIEM_NAME: Readonly<Record<string, ViemErrorKind>> = {
   ProviderDisconnectedError: 'rpc-socket-closed',
   ContractFunctionRevertedError: 'contract-revert',
 }
+
+const GENERIC_RPC_ERROR_NAMES: ReadonlySet<string> = new Set([
+  'RpcRequestError',
+])
 
 // JSON-RPC standard error codes (https://www.jsonrpc.org/specification#error_object)
 // plus EIP-1474 / common provider extensions. A bare `RpcRequestError` whose
@@ -186,10 +185,12 @@ const classifyByMessage = (msg: string): ViemErrorKind | undefined => {
  *      `KIND_BY_VIEM_NAME` wins.
  *   2. Otherwise, JSON-RPC `code` on any node (handles `RpcRequestError`
  *      subclasses that ship a code but a non-canonical `name`).
- *   3. Otherwise, message-pattern scan against every cause-chain node
+ *   3. Otherwise, generic `RpcRequestError` nodes become `rpc-unreachable`
+ *      after code refinement has had a chance to produce a more specific kind.
+ *   4. Otherwise, message-pattern scan against every cause-chain node
  *      (timeout / revert / network keywords) — covers fetch's
  *      `TypeError: fetch failed` and similar non-Error throwables.
- *   4. Otherwise `kind: 'unknown'`.
+ *   5. Otherwise `kind: 'unknown'`.
  */
 export const classifyViemError = (err: unknown): ViemErrorClassification => {
   const isViem = err instanceof BaseError
@@ -240,7 +241,20 @@ export const classifyViemError = (err: unknown): ViemErrorClassification => {
     }
   }
 
-  // 3. Message-pattern scan, walking the chain not just the outer.
+  // 3. Generic JSON-RPC wrappers are still transport failures, but only after
+  //    the code fallback gets the first shot at classifying rate limits etc.
+  if (kind === 'unknown') {
+    for (const node of chain) {
+      if (!(node instanceof Error)) continue
+      if (GENERIC_RPC_ERROR_NAMES.has(node.name)) {
+        kind = 'rpc-unreachable'
+        causeName ??= node.name
+        break
+      }
+    }
+  }
+
+  // 4. Message-pattern scan, walking the chain not just the outer.
   if (kind === 'unknown') {
     for (const node of chain) {
       const message = node instanceof Error ? node.message : ''
