@@ -45,7 +45,7 @@ const openSlippageSettings = () => {
   modal.open(SlippageSettingsModal)
 }
 
-type MultiplyPlanParams = {
+type MultiplyPlanParamsCommon = {
   supplyVaultAddress: string
   supplyAssetAddress: string
   supplyAmount: bigint
@@ -55,11 +55,12 @@ type MultiplyPlanParams = {
   longAssetAddress: string
   borrowVaultAddress: string
   debtAmount: bigint
-  quote?: SwapApiQuote
-  requestedSlippage?: number
   swapperMode: SwapperMode
   subAccount: string
 }
+type MultiplyPlanParams
+  = | (MultiplyPlanParamsCommon & { quote: SwapApiQuote, requestedSlippage: number })
+    | (MultiplyPlanParamsCommon & { quote?: undefined, requestedSlippage?: never })
 
 const priceInvert = usePriceInvert(
   () => multiplyShortVault.value?.asset.symbol,
@@ -591,7 +592,7 @@ const submitMultiply = async () => {
         return
       }
 
-      const nextPlanParams: MultiplyPlanParams = {
+      const baseParams: MultiplyPlanParamsCommon = {
         supplyVaultAddress: multiplySupplyVault.value.address,
         supplyAssetAddress: multiplySupplyVault.value.asset.address,
         supplyAmount: 0n,
@@ -599,11 +600,12 @@ const submitMultiply = async () => {
         longAssetAddress: multiplyLongVault.value.asset.address,
         borrowVaultAddress: multiplyShortVault.value.address,
         debtAmount,
-        quote: quote || undefined,
-        requestedSlippage: multiplySlippage.value,
         swapperMode: SwapperMode.EXACT_IN,
         subAccount,
       }
+      const nextPlanParams: MultiplyPlanParams = quote
+        ? { ...baseParams, quote, requestedSlippage: multiplySlippage.value }
+        : baseParams
       planParams.value = nextPlanParams
 
       try {

@@ -38,7 +38,7 @@ import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 
-type MultiplyPlanParams = {
+type MultiplyPlanParamsCommon = {
   supplyVaultAddress: string
   supplyAssetAddress: string
   supplyAmount: bigint
@@ -48,11 +48,12 @@ type MultiplyPlanParams = {
   longAssetAddress: string
   borrowVaultAddress: string
   debtAmount: bigint
-  quote?: SwapApiQuote
-  requestedSlippage?: number
   swapperMode: SwapperMode
   subAccount: string
 }
+type MultiplyPlanParams
+  = | (MultiplyPlanParamsCommon & { quote: SwapApiQuote, requestedSlippage: number })
+    | (MultiplyPlanParamsCommon & { quote?: undefined, requestedSlippage?: never })
 
 export interface UseMultiplyFormOptions {
   pair: Ref<AnyBorrowVaultPair | undefined>
@@ -773,7 +774,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         return
       }
 
-      const planParams: MultiplyPlanParams = {
+      const baseParams: MultiplyPlanParamsCommon = {
         supplyVaultAddress: multiplySupplyVault.value.address,
         supplyAssetAddress: multiplySupplyVault.value.asset.address,
         supplyAmount: supplyAmountNano,
@@ -783,11 +784,12 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         longAssetAddress: multiplyLongVault.value.asset.address,
         borrowVaultAddress: multiplyShortVault.value.address,
         debtAmount,
-        quote: quote || undefined,
-        requestedSlippage: multiplySlippage.value,
         swapperMode: SwapperMode.EXACT_IN,
         subAccount,
       }
+      const planParams: MultiplyPlanParams = quote
+        ? { ...baseParams, quote, requestedSlippage: multiplySlippage.value }
+        : baseParams
       multiplyPlanParams.value = planParams
 
       try {

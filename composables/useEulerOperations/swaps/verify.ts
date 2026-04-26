@@ -1,11 +1,15 @@
 import { encodeFunctionData } from 'viem'
 import { adjustForInterest } from '../helpers'
 import { swapVerifierAbi } from '~/entities/euler/abis'
+import { MAX_SLIPPAGE } from '~/entities/constants'
 import { type SwapApiQuote, SwapperMode, SwapVerificationType } from '~/entities/swap'
+import { logWarn } from '~/utils/errorHandling'
 
-const MAX_SLIPPAGE = 50
-const SLIPPAGE_DIVERGENCE_NUMERATOR = 10_001n
-const SLIPPAGE_DIVERGENCE_DENOMINATOR = 10_000n
+// Absolute extra slippage (in percentage points) the validator forgives to absorb
+// BigInt rounding between the swap API and the SDK. Must stay strictly below
+// SLIPPAGE_DIFF_TOLERANCE in SwapDetailsSummary so the user-facing warning never
+// fires on a quote the validator has accepted.
+const VALIDATION_DIVERGENCE_TOLERANCE_PP = 0.001
 
 type SwapQuoteSlippageValidationContext = {
   actualSlippage: string
@@ -57,8 +61,8 @@ export function validateSwapQuoteSlippageData(
   }
 
   if (request.swapperMode === SwapperMode.TARGET_DEBT) {
-    const amountIn = BigInt(quote.amountIn)
-    const amountInMax = BigInt(quote.amountInMax)
+    const amountIn = BigInt(quote.amountIn || 0)
+    const amountInMax = BigInt(quote.amountInMax || 0)
     const expectedAmountInMax = applySlippageToInputWithDivergence(amountIn, slippage)
     const validationContext = {
       actualSlippage: calculateInputSlippagePercent(amountIn, amountInMax),
@@ -79,8 +83,8 @@ export function validateSwapQuoteSlippageData(
     return
   }
 
-  const amountOut = BigInt(quote.amountOut)
-  const amountOutMin = BigInt(quote.amountOutMin)
+  const amountOut = BigInt(quote.amountOut || 0)
+  const amountOutMin = BigInt(quote.amountOutMin || 0)
   const expectedAmountOutMin = applySlippageToOutputWithDivergence(amountOut, slippage)
   const validationContext = {
     actualSlippage: calculateOutputSlippagePercent(amountOut, amountOutMin),
@@ -111,19 +115,11 @@ export function applySlippageToInput(amount: bigint, slippage: number): bigint {
 }
 
 function applySlippageToOutputWithDivergence(amount: bigint, slippage: number): bigint {
-  const { slippageUnits, denominator } = parseSlippagePercent(slippage)
-  const adjustedDenominator = denominator * SLIPPAGE_DIVERGENCE_DENOMINATOR
-  const adjustedSlippageUnits = slippageUnits * SLIPPAGE_DIVERGENCE_NUMERATOR
-
-  return (amount * (adjustedDenominator - adjustedSlippageUnits)) / adjustedDenominator
+  return applySlippageToOutput(amount, slippage + VALIDATION_DIVERGENCE_TOLERANCE_PP)
 }
 
 function applySlippageToInputWithDivergence(amount: bigint, slippage: number): bigint {
-  const { slippageUnits, denominator } = parseSlippagePercent(slippage)
-  const adjustedDenominator = denominator * SLIPPAGE_DIVERGENCE_DENOMINATOR
-  const adjustedSlippageUnits = slippageUnits * SLIPPAGE_DIVERGENCE_NUMERATOR
-
-  return (amount * (adjustedDenominator + adjustedSlippageUnits) + adjustedDenominator - 1n) / adjustedDenominator
+  return applySlippageToInput(amount, slippage + VALIDATION_DIVERGENCE_TOLERANCE_PP)
 }
 
 function parseSlippagePercent(slippage: number): {
@@ -193,19 +189,13 @@ function logSwapQuoteSlippageValidation(
     status,
   }
 
+  if (status !== 'failed') return
+
   if (isDevRuntime() && shouldLogFullSwapQuote()) {
     payload.fullQuote = quote
   }
 
-  if (status === 'failed') {
-    console.warn('[swapQuoteSlippage] Swap quote exceeds requested slippage', payload)
-    return
-  }
-
-  if (!isDevRuntime()) return
-
-  // eslint-disable-next-line no-console
-  console.info('[swapQuoteSlippage] Swap quote slippage validation', payload)
+  logWarn('swapQuoteSlippage', 'Swap quote exceeds requested slippage', { data: payload })
 }
 
 function isDevRuntime() {

@@ -48,7 +48,8 @@ describe('swap quote slippage validation', () => {
     ).toThrow('amountOutMin exceeds requested slippage')
 
     expect(warnSpy).toHaveBeenCalledWith(
-      '[swapQuoteSlippage] Swap quote exceeds requested slippage',
+      '[swapQuoteSlippage]',
+      'Swap quote exceeds requested slippage',
       expect.objectContaining({
         actualSlippage: '0.6315%',
         checkedAmount: '944',
@@ -59,8 +60,8 @@ describe('swap quote slippage validation', () => {
         route: 'test-provider',
       }),
     )
-    expect(warnSpy.mock.calls[0]?.[1]).not.toHaveProperty('quote')
-    expect(warnSpy.mock.calls[0]?.[1]).not.toHaveProperty('fullQuote')
+    expect(warnSpy.mock.calls[0]?.[2]).not.toHaveProperty('quote')
+    expect(warnSpy.mock.calls[0]?.[2]).not.toHaveProperty('fullQuote')
   })
 
   it('rejects amountInMax above requested slippage for target debt', () => {
@@ -74,7 +75,8 @@ describe('swap quote slippage validation', () => {
     ).toThrow('amountInMax exceeds requested slippage')
 
     expect(warnSpy).toHaveBeenCalledWith(
-      '[swapQuoteSlippage] Swap quote exceeds requested slippage',
+      '[swapQuoteSlippage]',
+      'Swap quote exceeds requested slippage',
       expect.objectContaining({
         actualSlippage: '0.7000%',
         checkedAmount: '1007',
@@ -85,59 +87,73 @@ describe('swap quote slippage validation', () => {
         route: 'test-provider',
       }),
     )
-    expect(warnSpy.mock.calls[0]?.[1]).not.toHaveProperty('quote')
-    expect(warnSpy.mock.calls[0]?.[1]).not.toHaveProperty('fullQuote')
+    expect(warnSpy.mock.calls[0]?.[2]).not.toHaveProperty('quote')
+    expect(warnSpy.mock.calls[0]?.[2]).not.toHaveProperty('fullQuote')
   })
 
-  it('allows output slippage up to the monorepo divergence allowance', () => {
-    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
+  it('allows output slippage up to the validator divergence tolerance', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
+    // At slippage 0.5%, validator forgives up to +0.001pp absolute, so a quote
+    // with amountOutMin = floor(2_000_000 * (1 - 0.00501)) = 1989980 must pass.
     expect(() =>
       validateSwapQuoteSlippageData(
         { slippage: 0.5, swapperMode: SwapperMode.EXACT_IN },
-        makeQuote({ amountOut: '2000000', amountOutMin: '1989999' }),
+        makeQuote({ amountOut: '2000000', amountOutMin: '1989980' }),
       ),
     ).not.toThrow()
 
-    expect(infoSpy).toHaveBeenCalledWith(
-      '[swapQuoteSlippage] Swap quote slippage validation',
-      expect.objectContaining({
-        actualSlippage: '0.5000%',
-        checkedAmount: '1989999',
-        expectedAmount: '1989999',
-        field: 'amountOutMin',
-        requestedSlippage: '0.5%',
-        route: 'test-provider',
-        status: 'passed',
-      }),
-    )
-    expect(infoSpy.mock.calls[0]?.[1]).not.toHaveProperty('quote')
-    expect(infoSpy.mock.calls[0]?.[1]).not.toHaveProperty('fullQuote')
+    // One wei below the boundary must fail.
+    expect(() =>
+      validateSwapQuoteSlippageData(
+        { slippage: 0.5, swapperMode: SwapperMode.EXACT_IN },
+        makeQuote({ amountOut: '2000000', amountOutMin: '1989979' }),
+      ),
+    ).toThrow('amountOutMin exceeds requested slippage')
+
+    expect(warnSpy).toHaveBeenCalledTimes(1)
   })
 
-  it('allows input slippage up to the monorepo divergence allowance', () => {
-    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
+  it('allows input slippage up to the validator divergence tolerance', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
+    // At slippage 0.5%, validator forgives up to +0.001pp absolute, so a quote
+    // with amountInMax = floor(2_000_000 * (1 + 0.00501)) = 2010020 must pass.
     expect(() =>
       validateSwapQuoteSlippageData(
         { slippage: 0.5, swapperMode: SwapperMode.TARGET_DEBT },
-        makeQuote({ amountIn: '2000000', amountInMax: '2010001' }),
+        makeQuote({ amountIn: '2000000', amountInMax: '2010020' }),
       ),
     ).not.toThrow()
 
-    expect(infoSpy).toHaveBeenCalledWith(
-      '[swapQuoteSlippage] Swap quote slippage validation',
-      expect.objectContaining({
-        actualSlippage: '0.5000%',
-        checkedAmount: '2010001',
-        expectedAmount: '2010001',
-        field: 'amountInMax',
-        requestedSlippage: '0.5%',
-        route: 'test-provider',
-        status: 'passed',
-      }),
-    )
-    expect(infoSpy.mock.calls[0]?.[1]).not.toHaveProperty('quote')
-    expect(infoSpy.mock.calls[0]?.[1]).not.toHaveProperty('fullQuote')
+    // One wei above the boundary must fail.
+    expect(() =>
+      validateSwapQuoteSlippageData(
+        { slippage: 0.5, swapperMode: SwapperMode.TARGET_DEBT },
+        makeQuote({ amountIn: '2000000', amountInMax: '2010021' }),
+      ),
+    ).toThrow('amountInMax exceeds requested slippage')
+
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps validator tolerance below SwapDetailsSummary warning threshold at MAX_SLIPPAGE', () => {
+    // SLIPPAGE_DIFF_TOLERANCE in SwapDetailsSummary is 0.005pp. The validator
+    // must allow strictly less so a quote it accepts never trips the user-facing
+    // warning. At MAX_SLIPPAGE = 50%, the validator forgives 0.001pp → boundary
+    // amountOutMin = floor(2_000_000 * (1 - 0.50001)) = 999_980.
+    expect(() =>
+      validateSwapQuoteSlippageData(
+        { slippage: 50, swapperMode: SwapperMode.EXACT_IN },
+        makeQuote({ amountOut: '2000000', amountOutMin: '999980' }),
+      ),
+    ).not.toThrow()
+
+    expect(() =>
+      validateSwapQuoteSlippageData(
+        { slippage: 50, swapperMode: SwapperMode.EXACT_IN },
+        makeQuote({ amountOut: '2000000', amountOutMin: '999979' }),
+      ),
+    ).toThrow('amountOutMin exceeds requested slippage')
   })
 })
