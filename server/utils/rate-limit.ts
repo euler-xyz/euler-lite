@@ -1,5 +1,6 @@
 import type { H3Event } from 'h3'
 import { createError } from 'h3'
+import { logger } from '~/server/utils/logger'
 
 interface RateLimitEntry {
   consumed: number
@@ -88,7 +89,7 @@ export function createRateLimiter(config: RateLimiterConfig) {
       // stg and dev are exempt: they don't always run behind Cloudflare.
       const hasCfIp = typeof cfIp === 'string' && !!cfIp.trim()
       if (!hasCfIp && process.env.DOPPLER_ENVIRONMENT === 'prd') {
-        console.warn('[rate-limit] Blocked: CF-Connecting-IP absent, request bypassed Cloudflare')
+        logger.warn({ ctx: 'rate-limit' }, 'blocked: CF-Connecting-IP absent, request bypassed Cloudflare')
         throw createError({ statusCode: 403, statusMessage: 'Forbidden' })
       }
 
@@ -98,14 +99,14 @@ export function createRateLimiter(config: RateLimiterConfig) {
 
       if (entry && now < entry.resetAt) {
         if (entry.consumed + cost > config.max) {
-          console.warn(`[${config.label}] Rate limited:`, ip)
+          logger.warn({ ctx: config.label, ip }, 'rate limited')
           throw createError({ statusCode: 429, statusMessage: 'Too Many Requests' })
         }
         map.set(ip, { consumed: entry.consumed + cost, resetAt: entry.resetAt })
       }
       else {
         if (cost > config.max) {
-          console.warn(`[${config.label}] Rate limited:`, ip)
+          logger.warn({ ctx: config.label, ip }, 'rate limited')
           throw createError({ statusCode: 429, statusMessage: 'Too Many Requests' })
         }
         map.set(ip, { consumed: cost, resetAt: now + config.windowMs })

@@ -1,7 +1,7 @@
 import type { Address } from 'viem'
 import { USD_ADDRESS } from '~/entities/constants'
 import { eulerUtilsLensABI } from '~/entities/euler/abis'
-import { logWarn } from '~/utils/errorHandling'
+import { logger } from '~/utils/logger'
 import { getPublicClient } from '~/utils/public-client'
 
 export interface FullAssetPriceInfo {
@@ -82,7 +82,10 @@ const resolveAndCacheAssetPrice = (
       return result
     })
     .catch((e) => {
-      logWarn('pricing/resolveAssetPrice', `Error fetching price for asset ${assetAddress}:`, e)
+      logger.warn(
+        { ctx: 'pricing/resolveAssetPrice', asset: assetAddress, err: e },
+        `error fetching price for asset ${assetAddress}`,
+      )
       if (cacheGeneration === gen) {
         assetPriceCache.set(key, null)
       }
