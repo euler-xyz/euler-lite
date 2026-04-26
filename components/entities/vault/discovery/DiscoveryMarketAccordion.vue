@@ -493,7 +493,7 @@ onMounted(() => {
                 </div>
                 <div
                   v-if="matrixDropdownOpen"
-                  class="absolute left-0 top-full mt-4 z-30 bg-surface border border-line-default rounded-12 shadow-card py-4 min-w-[180px]"
+                  class="absolute left-0 top-full mt-4 z-50 bg-surface border border-line-default rounded-12 shadow-card py-4 min-w-[180px]"
                 >
                   <button
                     v-for="option in MATRIX_VIEW_OPTIONS"

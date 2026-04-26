@@ -81,11 +81,11 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
     <div
       class="relative max-h-[60vh] overflow-auto rounded-8 border border-line-subtle px-12 pb-12 pt-0"
     >
-      <table class="border-collapse">
-        <thead class="sticky top-0 z-20 bg-surface">
+      <table class="border-separate border-spacing-0">
+        <thead class="sticky top-0 z-30 bg-surface">
           <tr>
             <th
-              class="text-left text-p5 text-content-muted font-normal py-6 pr-10 pl-6 sticky left-0 bg-surface z-30 border-b border-r border-white/[0.04]"
+              class="text-left text-p5 text-content-muted font-normal py-6 pr-10 pl-6 sticky left-0 bg-surface z-40 border-b border-r border-white/[0.04]"
             >
               <div class="flex flex-col leading-tight">
                 <span>Attribute &#8594;</span>
@@ -95,7 +95,7 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
             <th
               v-for="col in attributeColumns"
               :key="col.attribute.id"
-              class="text-center text-p4 text-content-secondary font-medium py-6 px-8 whitespace-nowrap border-b border-r border-white/[0.04] transition-colors"
+              class="text-center text-p4 text-content-secondary font-medium py-6 px-8 whitespace-nowrap bg-surface border-b border-r border-white/[0.04] transition-colors"
               :class="isAttributeColumnHighlighted(col.attribute.id) ? '!bg-white/[0.06] text-content-primary' : ''"
             >
               <span :title="col.attribute.tooltip">{{ col.attribute.label }}</span>
