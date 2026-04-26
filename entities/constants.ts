@@ -89,6 +89,11 @@ export const INTEREST_RATE_MODEL_TYPE = {
   FIXED_CYCLICAL_BINARY: 4,
 } as const
 
+// EVK Vault.configFlags is a bitmask. CFG_DONT_SOCIALIZE_DEBT is the only
+// publicly-defined bit today (0x01) — when set, bad debt is left in the vault
+// rather than being shared across depositors via share-price reduction.
+export const CFG_DONT_SOCIALIZE_DEBT = 1n
+
 export const KINK_IRM_COMPONENTS = [
   { name: 'baseRate', type: 'uint256' },
   { name: 'slope1', type: 'uint256' },

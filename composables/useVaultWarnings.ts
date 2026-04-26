@@ -1,5 +1,4 @@
-import { maxUint256 } from 'viem'
-import { getVaultUtilization, type Vault } from '~/entities/vault'
+import { getVaultUtilization, getSupplyCapPercentage, getBorrowCapPercentage, type Vault } from '~/entities/vault'
 import {
   findBlockingDisabledOp,
   getOpMeta,
@@ -88,25 +87,9 @@ const getCapLevel = (percentage: number): WarningLevel | null => {
   return null
 }
 
-const bigintPercentage = (numerator: bigint, denominator: bigint): number => {
-  const scale = 10n ** 2n
-  const fraction = (numerator * scale * 100n) / denominator
-  const whole = fraction / scale
-  const remainder = fraction % scale
-  return parseFloat(`${whole}.${remainder.toString().padStart(2, '0')}`)
-}
-
-export const getSupplyCapPercentage = (vault: Vault): number => {
-  if (vault.supplyCap >= maxUint256) return 0
-  if (vault.supplyCap === 0n) return vault.supply > 0n ? 100 : 0
-  return bigintPercentage(vault.supply, vault.supplyCap)
-}
-
-export const getBorrowCapPercentage = (vault: Vault): number => {
-  if (vault.borrowCap >= maxUint256) return 0
-  if (vault.borrowCap === 0n) return vault.borrow > 0n ? 100 : 0
-  return bigintPercentage(vault.borrow, vault.borrowCap)
-}
+// Re-export cap helpers from entities/vault so existing call sites that
+// imported them from useVaultWarnings still work after the move.
+export { getSupplyCapPercentage, getBorrowCapPercentage } from '~/entities/vault'
 
 export const getUtilisationWarning = (
   vault: Vault,

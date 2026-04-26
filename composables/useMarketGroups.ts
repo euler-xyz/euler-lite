@@ -6,6 +6,7 @@ import type { AnyVault } from '~/composables/useVaultRegistry'
 import { getVaultUtilization } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import { isVaultNotExplorable, isVaultFeatured } from '~/utils/eulerLabelsUtils'
+import { buildFetchContext } from '~/composables/useFetchContext'
 
 // -- Helpers --
 
@@ -456,7 +457,8 @@ export const useMarketGroups = () => {
     const memberVaults: Vault[] = []
 
     try {
-      for await (const result of fetchVaults(allAddresses)) {
+      const ctx = buildFetchContext()
+      for await (const result of fetchVaults(ctx, allAddresses)) {
         memberVaults.push(...result.vaults)
         if (result.isFinished) break
       }
