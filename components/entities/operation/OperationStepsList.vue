@@ -5,6 +5,12 @@ import { formatNumber } from '~/utils/string-utils'
 defineProps<{
   steps: DisplayStep[]
 }>()
+
+const getFullAmountText = (assetInfo?: DisplayStep['assetInfo']) => {
+  const amount = assetInfo?.amount
+  if (!assetInfo || amount === undefined || amount === 'max' || amount === 'remaining') return undefined
+  return `${String(amount)} ${assetInfo.symbol}`
+}
 </script>
 
 <template>
@@ -28,11 +34,16 @@ defineProps<{
           class="text-p3"
         >
           <template v-if="step.assetInfo.amount === 'max' || step.assetInfo.amount === 'remaining'">
-            {{ step.assetInfo.amount }}&nbsp;
+            {{ step.assetInfo.amount }}&nbsp;{{ step.assetInfo.symbol }}
           </template>
-          <template v-else-if="step.assetInfo.amount !== undefined">
-            {{ formatNumber(step.assetInfo.amount, 8, 0) }}&nbsp;
-          </template>{{ step.assetInfo.symbol }}
+          <template v-else-if="getFullAmountText(step.assetInfo)">
+            <UiExactAmount :exact="getFullAmountText(step.assetInfo)!">
+              {{ formatNumber(step.assetInfo.amount, 8, 0) }}&nbsp;{{ step.assetInfo.symbol }}
+            </UiExactAmount>
+          </template>
+          <template v-else>
+            {{ step.assetInfo.symbol }}
+          </template>
         </p>
       </template>
       <p
@@ -56,9 +67,14 @@ defineProps<{
           v-if="!step.iconOnly"
           class="text-p3"
         >
-          <template v-if="step.toAssetInfo.amount !== undefined">
-            {{ formatNumber(step.toAssetInfo.amount, 8, 0) }}&nbsp;
-          </template>{{ step.toAssetInfo.symbol }}
+          <template v-if="getFullAmountText(step.toAssetInfo)">
+            <UiExactAmount :exact="getFullAmountText(step.toAssetInfo)!">
+              {{ formatNumber(step.toAssetInfo.amount, 8, 0) }}&nbsp;{{ step.toAssetInfo.symbol }}
+            </UiExactAmount>
+          </template>
+          <template v-else>
+            {{ step.toAssetInfo.symbol }}
+          </template>
         </p>
       </template>
     </div>
