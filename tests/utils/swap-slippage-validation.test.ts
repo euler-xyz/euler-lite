@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SwapperMode, type SwapApiQuote } from '~/entities/swap'
 import {
   applySlippageToInput,
@@ -15,8 +15,30 @@ const makeQuote = (overrides: Partial<SwapApiQuote>): SwapApiQuote => ({
   ...overrides,
 }) as SwapApiQuote
 
+const captureStdout = () => {
+  const captured: string[] = []
+  const orig = process.stdout.write.bind(process.stdout)
+  process.stdout.write = ((chunk: unknown) => {
+    captured.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk as Uint8Array).toString())
+    return true
+  }) as typeof process.stdout.write
+  return {
+    restore: () => {
+      process.stdout.write = orig
+    },
+    lines: () => captured.join('').split('\n').filter(Boolean).map(l => JSON.parse(l) as Record<string, unknown>),
+  }
+}
+
 describe('swap quote slippage validation', () => {
+  let cap: ReturnType<typeof captureStdout>
+
+  beforeEach(() => {
+    cap = captureStdout()
+  })
+
   afterEach(() => {
+    cap.restore()
     vi.restoreAllMocks()
   })
 
@@ -38,8 +60,6 @@ describe('swap quote slippage validation', () => {
   })
 
   it('rejects amountOutMin below requested slippage', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-
     expect(() =>
       validateSwapQuoteSlippageData(
         { slippage: 0.5, swapperMode: SwapperMode.EXACT_IN },
@@ -47,10 +67,14 @@ describe('swap quote slippage validation', () => {
       ),
     ).toThrow('amountOutMin exceeds requested slippage')
 
-    expect(warnSpy).toHaveBeenCalledWith(
-      '[swapQuoteSlippage]',
-      'Swap quote exceeds requested slippage',
-      expect.objectContaining({
+    const lines = cap.lines()
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatchObject({
+      level: 'warn',
+      app: 'euler-lite',
+      ctx: 'swapQuoteSlippage',
+      msg: 'Swap quote exceeds requested slippage',
+      data: expect.objectContaining({
         actualSlippage: '0.6315%',
         checkedAmount: '944',
         expectedAmount: '945',
@@ -59,14 +83,12 @@ describe('swap quote slippage validation', () => {
         requestedSlippage: '0.5%',
         route: 'test-provider',
       }),
-    )
-    expect(warnSpy.mock.calls[0]?.[2]).not.toHaveProperty('quote')
-    expect(warnSpy.mock.calls[0]?.[2]).not.toHaveProperty('fullQuote')
+    })
+    expect(lines[0].data).not.toHaveProperty('quote')
+    expect(lines[0].data).not.toHaveProperty('fullQuote')
   })
 
   it('rejects amountInMax above requested slippage for target debt', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-
     expect(() =>
       validateSwapQuoteSlippageData(
         { slippage: 0.5, swapperMode: SwapperMode.TARGET_DEBT },
@@ -74,10 +96,14 @@ describe('swap quote slippage validation', () => {
       ),
     ).toThrow('amountInMax exceeds requested slippage')
 
-    expect(warnSpy).toHaveBeenCalledWith(
-      '[swapQuoteSlippage]',
-      'Swap quote exceeds requested slippage',
-      expect.objectContaining({
+    const lines = cap.lines()
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatchObject({
+      level: 'warn',
+      app: 'euler-lite',
+      ctx: 'swapQuoteSlippage',
+      msg: 'Swap quote exceeds requested slippage',
+      data: expect.objectContaining({
         actualSlippage: '0.7000%',
         checkedAmount: '1007',
         expectedAmount: '1006',
@@ -86,14 +112,12 @@ describe('swap quote slippage validation', () => {
         requestedSlippage: '0.5%',
         route: 'test-provider',
       }),
-    )
-    expect(warnSpy.mock.calls[0]?.[2]).not.toHaveProperty('quote')
-    expect(warnSpy.mock.calls[0]?.[2]).not.toHaveProperty('fullQuote')
+    })
+    expect(lines[0].data).not.toHaveProperty('quote')
+    expect(lines[0].data).not.toHaveProperty('fullQuote')
   })
 
   it('allows output slippage up to the validator divergence tolerance', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-
     // At slippage 0.5%, validator forgives up to +0.001pp absolute, so a quote
     // with amountOutMin = floor(2_000_000 * (1 - 0.00501)) = 1989980 must pass.
     expect(() =>
@@ -111,12 +135,10 @@ describe('swap quote slippage validation', () => {
       ),
     ).toThrow('amountOutMin exceeds requested slippage')
 
-    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(cap.lines()).toHaveLength(1)
   })
 
   it('allows input slippage up to the validator divergence tolerance', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-
     // At slippage 0.5%, validator forgives up to +0.001pp absolute, so a quote
     // with amountInMax = floor(2_000_000 * (1 + 0.00501)) = 2010020 must pass.
     expect(() =>
@@ -134,7 +156,7 @@ describe('swap quote slippage validation', () => {
       ),
     ).toThrow('amountInMax exceeds requested slippage')
 
-    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(cap.lines()).toHaveLength(1)
   })
 
   it('keeps validator tolerance below SwapDetailsSummary warning threshold at MAX_SLIPPAGE', () => {
