@@ -356,6 +356,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
           type: 'repay',
           asset: sourceVault.value.asset,
           amount: core.amount.value,
+          quoteFetchedAt: !core.isSameAsset.value ? core.quotes.effectiveQuoteFetchedAt.value : null,
           swapToAsset: !core.isSameAsset.value ? borrowVault.value.asset : undefined,
           swapToAmount: !core.isSameAsset.value ? core.debtAmount.value : undefined,
           plan: plan.value || undefined,

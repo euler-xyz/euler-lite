@@ -100,6 +100,7 @@ const {
   selectedProvider: swapSelectedProvider,
   selectedQuote: swapSelectedQuote,
   effectiveQuote: swapEffectiveQuote,
+  effectiveQuoteFetchedAt: swapEffectiveQuoteFetchedAt,
   isLoading: isSwapQuoteLoading,
   quoteError: swapQuoteError,
   statusLabel: swapQuotesStatusLabel,
@@ -223,12 +224,14 @@ async function buildSwapWithdrawPlanFromQuote(quote: SwapApiQuote): Promise<TxPl
         vaultAddress: vaultAddress as Address,
         sharesAmount: sharesBalance.value,
         quote,
+        requestedSlippage: swapSlippage.value,
         subAccount: subAccount.value,
       })
     : buildWithdrawAndSwapPlan({
         vaultAddress: vaultAddress as Address,
         assetsAmount: amountFixed.value.value,
         quote,
+        requestedSlippage: swapSlippage.value,
         subAccount: subAccount.value,
       })
 }
@@ -402,6 +405,7 @@ const submit = async () => {
           asset: asset.value,
           amount: amount.value,
           plan: plan.value || undefined,
+          quoteFetchedAt: needsSwap.value ? swapEffectiveQuoteFetchedAt.value : null,
           swapToAsset: needsSwap.value ? selectedOutputAsset.value : undefined,
           swapToAmount: needsSwap.value ? swapEstimatedOutput.value : undefined,
           submittingLabel: 'Submitting...',

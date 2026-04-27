@@ -21,7 +21,7 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, amount, onConfirm, plan, swapToAsset, swapToAmount, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel } = defineProps<{
+const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, amount, onConfirm, plan, swapToAsset, swapToAmount, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel, quoteFetchedAt } = defineProps<{
   type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
@@ -40,6 +40,8 @@ const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, 
   transferAmounts?: Record<string, string>
   /** Label shown on the button while executing */
   submittingLabel?: string
+  /** Milliseconds since epoch when the active swap quote was fetched */
+  quoteFetchedAt?: number | null
 }>()
 
 const { address: walletAddress, chainId: currentChainId } = useWagmi()
@@ -58,9 +60,24 @@ const {
 
 const copied = ref(false)
 const tenderlyEnabled = ref(false)
+const nowMs = ref(Date.now())
+const staleQuoteThresholdMs = 3 * 60 * 1000
+let nowTimer: ReturnType<typeof setInterval> | undefined
 
 fetchTenderlyEnabled().then((enabled) => {
   tenderlyEnabled.value = enabled
+})
+
+onMounted(() => {
+  nowTimer = setInterval(() => {
+    nowMs.value = Date.now()
+  }, 1000)
+})
+
+onUnmounted(() => {
+  if (nowTimer) {
+    clearInterval(nowTimer)
+  }
 })
 
 const handleTenderlySimulate = async () => {
@@ -221,6 +238,11 @@ const hasTenderlyFailedSimulation = computed(() => {
   return !!(tenderlyUrl.value && tenderlyError.value)
 })
 
+const isSwapQuoteStale = computed(() => {
+  return typeof quoteFetchedAt === 'number'
+    && nowMs.value - quoteFetchedAt > staleQuoteThresholdMs
+})
+
 const permit2DisclaimerText = 'You are granting the permit2 contract unlimited access to your tokens. This is a safe, one-time setup — permit2 (by Uniswap) is a widely trusted and audited contract that replaces repeated approval transactions with gasless signatures. Each future transaction still requires your explicit signature, limited in both amount and duration.'
 </script>
 
@@ -307,6 +329,24 @@ const permit2DisclaimerText = 'You are granting the permit2 contract unlimited a
         :description="tenderlyError"
         size="compact"
       />
+
+      <div
+        v-if="isSwapQuoteStale"
+        class="flex items-start gap-8 rounded-12 bg-warning-100 p-12 text-warning-500"
+      >
+        <SvgIcon
+          name="warning-circle"
+          class="!w-16 !h-16 shrink-0 mt-1"
+        />
+        <p class="text-p4">
+          This swap quote is more than 3 minutes old. Consider refreshing quotes with the
+          <SvgIcon
+            name="refresh"
+            class="inline-block !w-14 !h-14 align-[-2px]"
+          />
+          icon before submitting to get the best execution price.
+        </p>
+      </div>
 
       <!-- Disclaimers -->
       <UiToast

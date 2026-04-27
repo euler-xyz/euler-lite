@@ -594,6 +594,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
           asset: sourceVault.value.asset,
           amount: core.amount.value,
           plan: plan.value || undefined,
+          quoteFetchedAt: !core.isSameAsset.value ? core.quotes.effectiveQuoteFetchedAt.value : null,
           swapToAsset: !core.isSameAsset.value ? borrowVault.value.asset : undefined,
           swapToAmount: !core.isSameAsset.value ? core.debtAmount.value : undefined,
           subAccount: position.value?.subAccount,

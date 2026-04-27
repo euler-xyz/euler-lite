@@ -112,6 +112,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     selectedProvider,
     selectedQuote,
     effectiveQuote,
+    effectiveQuoteFetchedAt,
     providersCount,
     isLoading: isQuoteLoading,
     quoteError,
@@ -478,6 +479,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
             swapToAsset: showSwapAmounts ? toVault.value?.asset : undefined,
             swapToAmount: showSwapAmounts ? toAmount.value : undefined,
             plan: plan.value || undefined,
+            quoteFetchedAt: !isSameAsset.value ? effectiveQuoteFetchedAt.value : null,
             onConfirm: async () => {
               await send()
             },
