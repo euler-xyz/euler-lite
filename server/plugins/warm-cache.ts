@@ -95,6 +95,13 @@ const reportWarm = <T>(context: string, task: Promise<T>): Promise<T | undefined
 const warmEulerChains = () =>
   reportWarm('euler-chains', refreshEulerChains())
 
+// Cross-chain pattern rules for asset geo-blocking live at `all/assets.json`
+// upstream. The /api/labels/assets.json handler unions this with the
+// per-chain file; warm it once so the first chain-scoped request doesn't
+// pay the cold-upstream cost.
+const warmGlobalAssets = () =>
+  reportWarm('labels/assets.json scope=all', refreshLabelFile('all', 'assets.json'))
+
 // --- Per-chain warms (parallel across chains and within a chain) ---
 
 const warmLabels = (chainId: number): Promise<unknown>[] =>
@@ -155,6 +162,7 @@ export default defineNitroPlugin(() => {
     try {
       await Promise.allSettled([
         warmEulerChains(),
+        warmGlobalAssets(),
         ...chainIds.flatMap(warmChainTasks),
       ])
     }

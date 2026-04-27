@@ -92,6 +92,8 @@ describe('swap quote slippage validation', () => {
       expect(lines).toHaveLength(1)
       const line = lines[0]
       expect(line).toMatchObject({
+        level: 'warn',
+        app: 'euler-lite',
         ctx: 'swapQuoteSlippage',
         msg: 'Swap quote exceeds requested slippage',
         data: expect.objectContaining({
@@ -121,6 +123,8 @@ describe('swap quote slippage validation', () => {
       expect(lines).toHaveLength(1)
       const line = lines[0]
       expect(line).toMatchObject({
+        level: 'warn',
+        app: 'euler-lite',
         ctx: 'swapQuoteSlippage',
         msg: 'Swap quote exceeds requested slippage',
         data: expect.objectContaining({
@@ -197,9 +201,11 @@ describe('swap quote slippage validation', () => {
       })
     }))
 
-  it('keeps validator divergence tolerance tiny at MAX_SLIPPAGE', () =>
+  it('keeps validator tolerance below SwapDetailsSummary warning threshold at MAX_SLIPPAGE', () =>
     withCapturedStdout((stdout) => {
-      // At MAX_SLIPPAGE = 50%, the validator forgives 0.001pp for rounding:
+      // SLIPPAGE_DIFF_TOLERANCE in SwapDetailsSummary is 0.005pp. The validator
+      // must allow strictly less so a quote it accepts never trips the user-facing
+      // warning. At MAX_SLIPPAGE = 50%, the validator forgives 0.001pp:
       // boundary amountOutMin = floor(2_000_000 * (1 - 0.50001)) = 999_980.
       expect(() =>
         validateSwapQuoteSlippageData(
