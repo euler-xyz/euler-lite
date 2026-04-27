@@ -156,7 +156,7 @@ export default defineNuxtConfig({
 
   sourcemap: {
     server: false,
-    client: process.env.SENTRY_AUTH_TOKEN ? 'hidden' : false,
+    client: false,
   },
 
   devServer: {
@@ -222,20 +222,11 @@ export default defineNuxtConfig({
   telemetry: false,
   eslint: { config: { stylistic: true } },
 
-  ...(process.env.SENTRY_AUTH_TOKEN
-    ? {
-        sentry: {
-          sourceMapsUploadOptions: {
-            org: 'euler',
-            project: 'euler-lite',
-            authToken: process.env.SENTRY_AUTH_TOKEN,
-            sourcemaps: {
-              filesToDeleteAfterUpload: ['**/*.map'],
-            },
-          },
-        },
-      }
-    : {}),
+  sentry: {
+    sourcemaps: {
+      disable: true,
+    },
+  },
 
   svgSprite: {
     elementClass: 'icon',

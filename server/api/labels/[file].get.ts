@@ -68,6 +68,125 @@ const MAX_ARRAY_LEN = 10_000
  */
 const MARKDOWN_LINK_INJECTION_RE = /\[[^\]]*\]\(https?:\/\/[^)]*"[^)]*\)/
 
+function getQuantifierLength(pattern: string, index: number): number {
+  const char = pattern[index]
+  if (char === '*' || char === '+' || char === '?') return 1
+  if (char !== '{') return 0
+
+  const match = /^\{\d+(?:,\d*)?\}/.exec(pattern.slice(index))
+  return match ? match[0].length : 0
+}
+
+function getGroupPrefixLength(pattern: string, index: number): number {
+  if (pattern[index] !== '?') return 0
+
+  const marker = pattern[index + 1]
+  if (marker === ':' || marker === '=' || marker === '!') return 2
+  if (marker === '<' && (pattern[index + 2] === '=' || pattern[index + 2] === '!')) return 3
+  if (marker === '<') {
+    const end = pattern.indexOf('>', index + 2)
+    return end === -1 ? 0 : end - index + 1
+  }
+  return 0
+}
+
+function findClassEnd(pattern: string, start: number): number {
+  for (let i = start + 1; i < pattern.length; i++) {
+    if (pattern[i] === '\\') {
+      i += 1
+      continue
+    }
+    if (pattern[i] === ']') return i
+  }
+  return pattern.length - 1
+}
+
+function hasPrefixOverlap(alternatives: string[]): boolean {
+  if (alternatives.length < 2) return false
+
+  const normalized = alternatives
+    .map(value => value.replace(/^\^/, '').replace(/\$$/, ''))
+    .filter(value => value.length > 0 && /^[a-zA-Z0-9 _-]+$/.test(value))
+
+  for (let i = 0; i < normalized.length; i++) {
+    for (let j = i + 1; j < normalized.length; j++) {
+      if (normalized[i].startsWith(normalized[j]) || normalized[j].startsWith(normalized[i])) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+function hasUnsafeRegexStructure(pattern: string): boolean {
+  const root = { hasQuantifier: false, alternatives: [''] }
+  const stack = [root]
+  const append = (value: string): void => {
+    const frame = stack[stack.length - 1]!
+    frame.alternatives[frame.alternatives.length - 1] += value
+  }
+
+  for (let i = 0; i < pattern.length; i++) {
+    const char = pattern[i]
+    const frame = stack[stack.length - 1]!
+
+    if (char === '\\') {
+      append(pattern.slice(i, i + 2))
+      i += 1
+      continue
+    }
+
+    if (char === '[') {
+      const end = findClassEnd(pattern, i)
+      append('[]')
+      i = end
+      continue
+    }
+
+    if (char === '(') {
+      stack.push({ hasQuantifier: false, alternatives: [''] })
+      i += getGroupPrefixLength(pattern, i + 1)
+      continue
+    }
+
+    if (char === ')' && stack.length > 1) {
+      const child = stack.pop()!
+      const parent = stack[stack.length - 1]!
+      const quantifierLength = getQuantifierLength(pattern, i + 1)
+      const isQuantified = quantifierLength > 0
+
+      if (isQuantified && (child.hasQuantifier || hasPrefixOverlap(child.alternatives))) {
+        return true
+      }
+
+      if (isQuantified) {
+        parent.hasQuantifier = true
+        i += quantifierLength
+        if (pattern[i + 1] === '?') i += 1
+      }
+      append('()')
+      continue
+    }
+
+    if (char === '|') {
+      frame.alternatives.push('')
+      continue
+    }
+
+    const quantifierLength = getQuantifierLength(pattern, i)
+    if (quantifierLength > 0) {
+      frame.hasQuantifier = true
+      i += quantifierLength - 1
+      if (pattern[i + 1] === '?') i += 1
+      continue
+    }
+
+    append(char)
+  }
+
+  return false
+}
+
 function isSafeHttpUrl(value: string): boolean {
   if (!value) return true
   try {
@@ -105,6 +224,9 @@ export function validateNode(node: unknown, path: string): void {
         if (REGEX_KEYS.has(key)) {
           if (value.length > MAX_REGEX_LEN) {
             throw new Error(`Invalid regex in ${path}.${key}: pattern exceeds ${MAX_REGEX_LEN} chars`)
+          }
+          if (hasUnsafeRegexStructure(value)) {
+            throw new Error(`Invalid regex in ${path}.${key}: pattern can cause excessive backtracking`)
           }
           try {
             new RegExp(value)

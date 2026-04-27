@@ -61,8 +61,10 @@
     "vue-tsc": "3.2.7"
   },
   "overrides": {
-    "serialize-javascript": "7.0.4",
-    "unhead": "2.1.12"
+    "axios": "1.15.1",
+    "postcss": "8.5.10",
+    "serialize-javascript": "7.0.5",
+    "unhead": "2.1.13"
   },
   "license": "MIT"
 }

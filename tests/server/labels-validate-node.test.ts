@@ -124,6 +124,7 @@ describe('validateNode — regex field caps + compilability', () => {
   it('accepts simple patterns in symbolRegex', () => {
     expect(() => validateNode({ symbolRegex: '^USD.*$' }, 'root')).not.toThrow()
     expect(() => validateNode({ nameRegex: '^Ondo\\s' }, 'root')).not.toThrow()
+    expect(() => validateNode({ symbolRegex: '^(USDY|OUSG|OMPL)$' }, 'root')).not.toThrow()
   })
 
   it('rejects patterns longer than 512 chars', () => {
@@ -138,6 +139,16 @@ describe('validateNode — regex field caps + compilability', () => {
 
   it('rejects patterns that do not compile', () => {
     expect(() => validateNode({ symbolRegex: '*invalid(' }, 'root')).toThrow(/Invalid regex/)
+  })
+
+  it('rejects nested quantifiers that can cause catastrophic backtracking', () => {
+    expect(() => validateNode({ symbolRegex: '^(a+)+$' }, 'root')).toThrow(/excessive backtracking/)
+    expect(() => validateNode({ nameRegex: '^(.*)+$' }, 'root')).toThrow(/excessive backtracking/)
+    expect(() => validateNode({ nameRegex: '^((ab)+)+$' }, 'root')).toThrow(/excessive backtracking/)
+  })
+
+  it('rejects quantified prefix-overlapping alternation', () => {
+    expect(() => validateNode({ symbolRegex: '^(a|aa)+$' }, 'root')).toThrow(/excessive backtracking/)
   })
 
   it('ignores the compile check for keys other than symbolRegex / nameRegex', () => {
