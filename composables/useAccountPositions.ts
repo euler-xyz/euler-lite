@@ -146,7 +146,10 @@ const registerUnresolved = (
   vault: string,
   kind: UnresolvedPositionKind,
   reason: UnresolvedPositionReason,
+  generation: number,
 ): void => {
+  if (positionGuard.isStale(generation)) return
+
   let normalizedVault: string
   let normalizedSubAccount: string
   try {
@@ -292,13 +295,13 @@ const updateBorrowPositions = async (
     for (let i = 0; i < results.length; i++) {
       if (results[i].transportError) {
         hasTransportError = true
-        registerUnresolved(nonPythEntries[i].entry.subAccount, nonPythEntries[i].entry.vault, 'borrow', 'lens-failed')
+        registerUnresolved(nonPythEntries[i].entry.subAccount, nonPythEntries[i].entry.vault, 'borrow', 'lens-failed', gen)
       }
       else if (results[i].success && results[i].result) {
         accountInfoMap.set(nonPythEntries[i].key, results[i].result!)
       }
       else {
-        registerUnresolved(nonPythEntries[i].entry.subAccount, nonPythEntries[i].entry.vault, 'borrow', 'lens-failed')
+        registerUnresolved(nonPythEntries[i].entry.subAccount, nonPythEntries[i].entry.vault, 'borrow', 'lens-failed', gen)
       }
     }
     if (hasTransportError) logWarn('useAccountPositions/accountInfo', 'RPC transport error — account info results may be incomplete')
@@ -334,7 +337,7 @@ const updateBorrowPositions = async (
     // has no entry for their key.
     for (const pe of pythEntries) {
       if (!pythResults.get(pe.key)) {
-        registerUnresolved(pe.entry.subAccount, pe.entry.vault, 'borrow', 'lens-failed')
+        registerUnresolved(pe.entry.subAccount, pe.entry.vault, 'borrow', 'lens-failed', gen)
       }
     }
   }
@@ -418,7 +421,7 @@ const updateBorrowPositions = async (
       ? prefetchedVault
       : await getOrFetch(borrowAddress) as Vault | undefined
     if (!borrow) {
-      registerUnresolved(entry.subAccount, borrowAddress, 'borrow', 'fetch-failed')
+      registerUnresolved(entry.subAccount, borrowAddress, 'borrow', 'fetch-failed', gen)
       continue
     }
 
@@ -441,7 +444,7 @@ const updateBorrowPositions = async (
 
     const collateral = await getOrFetch(collateralAddress) as Vault | SecuritizeVault | undefined
     if (!collateral) {
-      registerUnresolved(entry.subAccount, collateralAddress, 'borrow', 'collateral-unresolved')
+      registerUnresolved(entry.subAccount, collateralAddress, 'borrow', 'collateral-unresolved', gen)
       continue
     }
 
@@ -661,7 +664,7 @@ const updateSavingsPositions = async (
 
     const vault = await getOrFetch(entry.vault)
     if (!vault) {
-      registerUnresolved(entry.subAccount, entry.vault, 'deposit', 'fetch-failed')
+      registerUnresolved(entry.subAccount, entry.vault, 'deposit', 'fetch-failed', gen)
       continue
     }
 
@@ -692,11 +695,11 @@ const updateSavingsPositions = async (
       const r = results[i]
       if (r.transportError) {
         hasTransportError = true
-        registerUnresolved(validEntries[i].entry.subAccount, validEntries[i].entry.vault, 'deposit', 'lens-failed')
+        registerUnresolved(validEntries[i].entry.subAccount, validEntries[i].entry.vault, 'deposit', 'lens-failed', gen)
         continue
       }
       if (!r.success || !r.result) {
-        registerUnresolved(validEntries[i].entry.subAccount, validEntries[i].entry.vault, 'deposit', 'lens-failed')
+        registerUnresolved(validEntries[i].entry.subAccount, validEntries[i].entry.vault, 'deposit', 'lens-failed', gen)
         continue
       }
 
