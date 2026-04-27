@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import type { Address, Hex } from 'viem'
+import { erc20Abi, type Address, type Hex } from 'viem'
 import { useSignTypedData, useWriteContract } from '@wagmi/vue'
 import { EVC_ABI } from '~/abis/evc'
 import { logWarn } from '~/utils/errorHandling'
@@ -86,6 +86,17 @@ export const useCowSwapExecutionCore = () => {
         args: step.args as unknown[],
       })
       await client.waitForTransactionReceipt({ hash: tx })
+    }
+
+    const approvedAmount = await client.readContract({
+      address: token,
+      abi: erc20Abi,
+      functionName: 'allowance',
+      args: [userAddress, spender],
+    }) as bigint
+
+    if (approvedAmount < amount) {
+      throw new Error('Approved amount is lower than required for this order. Increase the approval and try again.')
     }
   }
 
