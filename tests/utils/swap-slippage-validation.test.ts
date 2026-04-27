@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { SwapperMode, type SwapApiQuote } from '~/entities/swap'
 import {
   applySlippageToInput,
@@ -15,11 +15,26 @@ const makeQuote = (overrides: Partial<SwapApiQuote>): SwapApiQuote => ({
   ...overrides,
 }) as SwapApiQuote
 
-describe('swap quote slippage validation', () => {
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
+const captureStdout = () => {
+  const captured: string[] = []
+  const originalWrite = process.stdout.write.bind(process.stdout)
+  process.stdout.write = ((chunk: unknown) => {
+    captured.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk as Uint8Array).toString())
+    return true
+  }) as typeof process.stdout.write
 
+  return {
+    restore: () => {
+      process.stdout.write = originalWrite
+    },
+    lines: () => captured.join('').split('\n').filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>),
+  }
+}
+
+const validationLogLines = (capture: ReturnType<typeof captureStdout>) =>
+  capture.lines().filter(line => line.ctx === 'swapQuoteSlippage')
+
+describe('swap quote slippage validation', () => {
   it('rounds output slippage down like the SDK', () => {
     expect(applySlippageToOutput(950n, 0.5)).toBe(945n)
   })
@@ -38,122 +53,149 @@ describe('swap quote slippage validation', () => {
   })
 
   it('rejects amountOutMin below requested slippage', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const stdout = captureStdout()
 
-    expect(() =>
-      validateSwapQuoteSlippageData(
-        { slippage: 0.5, swapperMode: SwapperMode.EXACT_IN },
-        makeQuote({ amountOutMin: '944' }),
-      ),
-    ).toThrow('amountOutMin exceeds requested slippage')
+    try {
+      expect(() =>
+        validateSwapQuoteSlippageData(
+          { slippage: 0.5, swapperMode: SwapperMode.EXACT_IN },
+          makeQuote({ amountOutMin: '944' }),
+        ),
+      ).toThrow('amountOutMin exceeds requested slippage')
 
-    expect(warnSpy).toHaveBeenCalledWith(
-      '[swapQuoteSlippage]',
-      'Swap quote exceeds requested slippage',
-      expect.objectContaining({
-        actualSlippage: '0.6315%',
-        checkedAmount: '944',
-        expectedAmount: '945',
-        field: 'amountOutMin',
-        mode: 'output',
-        requestedSlippage: '0.5%',
-        route: 'test-provider',
-      }),
-    )
-    expect(warnSpy.mock.calls[0]?.[2]).not.toHaveProperty('quote')
-    expect(warnSpy.mock.calls[0]?.[2]).not.toHaveProperty('fullQuote')
+      const line = validationLogLines(stdout)[0]
+      expect(line).toMatchObject({
+        ctx: 'swapQuoteSlippage',
+        msg: 'Swap quote exceeds requested slippage',
+        data: expect.objectContaining({
+          actualSlippage: '0.6315%',
+          checkedAmount: '944',
+          expectedAmount: '945',
+          field: 'amountOutMin',
+          mode: 'output',
+          requestedSlippage: '0.5%',
+          route: 'test-provider',
+        }),
+      })
+      expect(line.data).not.toHaveProperty('quote')
+      expect(line.data).not.toHaveProperty('fullQuote')
+    }
+    finally {
+      stdout.restore()
+    }
   })
 
   it('rejects amountInMax above requested slippage for target debt', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const stdout = captureStdout()
 
-    expect(() =>
-      validateSwapQuoteSlippageData(
-        { slippage: 0.5, swapperMode: SwapperMode.TARGET_DEBT },
-        makeQuote({ amountInMax: '1007' }),
-      ),
-    ).toThrow('amountInMax exceeds requested slippage')
+    try {
+      expect(() =>
+        validateSwapQuoteSlippageData(
+          { slippage: 0.5, swapperMode: SwapperMode.TARGET_DEBT },
+          makeQuote({ amountInMax: '1007' }),
+        ),
+      ).toThrow('amountInMax exceeds requested slippage')
 
-    expect(warnSpy).toHaveBeenCalledWith(
-      '[swapQuoteSlippage]',
-      'Swap quote exceeds requested slippage',
-      expect.objectContaining({
-        actualSlippage: '0.7000%',
-        checkedAmount: '1007',
-        expectedAmount: '1006',
-        field: 'amountInMax',
-        mode: 'input',
-        requestedSlippage: '0.5%',
-        route: 'test-provider',
-      }),
-    )
-    expect(warnSpy.mock.calls[0]?.[2]).not.toHaveProperty('quote')
-    expect(warnSpy.mock.calls[0]?.[2]).not.toHaveProperty('fullQuote')
+      const line = validationLogLines(stdout)[0]
+      expect(line).toMatchObject({
+        ctx: 'swapQuoteSlippage',
+        msg: 'Swap quote exceeds requested slippage',
+        data: expect.objectContaining({
+          actualSlippage: '0.7000%',
+          checkedAmount: '1007',
+          expectedAmount: '1006',
+          field: 'amountInMax',
+          mode: 'input',
+          requestedSlippage: '0.5%',
+          route: 'test-provider',
+        }),
+      })
+      expect(line.data).not.toHaveProperty('quote')
+      expect(line.data).not.toHaveProperty('fullQuote')
+    }
+    finally {
+      stdout.restore()
+    }
   })
 
   it('allows output slippage up to the validator divergence tolerance', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const stdout = captureStdout()
 
-    // At slippage 0.5%, validator forgives up to +0.001pp absolute, so a quote
-    // with amountOutMin = floor(2_000_000 * (1 - 0.00501)) = 1989980 must pass.
-    expect(() =>
-      validateSwapQuoteSlippageData(
-        { slippage: 0.5, swapperMode: SwapperMode.EXACT_IN },
-        makeQuote({ amountOut: '2000000', amountOutMin: '1989980' }),
-      ),
-    ).not.toThrow()
+    try {
+      // At slippage 0.5%, validator forgives up to +0.001pp absolute, so a quote
+      // with amountOutMin = floor(2_000_000 * (1 - 0.00501)) = 1989980 must pass.
+      expect(() =>
+        validateSwapQuoteSlippageData(
+          { slippage: 0.5, swapperMode: SwapperMode.EXACT_IN },
+          makeQuote({ amountOut: '2000000', amountOutMin: '1989980' }),
+        ),
+      ).not.toThrow()
 
-    // One wei below the boundary must fail.
-    expect(() =>
-      validateSwapQuoteSlippageData(
-        { slippage: 0.5, swapperMode: SwapperMode.EXACT_IN },
-        makeQuote({ amountOut: '2000000', amountOutMin: '1989979' }),
-      ),
-    ).toThrow('amountOutMin exceeds requested slippage')
+      // One wei below the boundary must fail.
+      expect(() =>
+        validateSwapQuoteSlippageData(
+          { slippage: 0.5, swapperMode: SwapperMode.EXACT_IN },
+          makeQuote({ amountOut: '2000000', amountOutMin: '1989979' }),
+        ),
+      ).toThrow('amountOutMin exceeds requested slippage')
 
-    expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(validationLogLines(stdout)).toHaveLength(1)
+    }
+    finally {
+      stdout.restore()
+    }
   })
 
   it('allows input slippage up to the validator divergence tolerance', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const stdout = captureStdout()
 
-    // At slippage 0.5%, validator forgives up to +0.001pp absolute, so a quote
-    // with amountInMax = floor(2_000_000 * (1 + 0.00501)) = 2010020 must pass.
-    expect(() =>
-      validateSwapQuoteSlippageData(
-        { slippage: 0.5, swapperMode: SwapperMode.TARGET_DEBT },
-        makeQuote({ amountIn: '2000000', amountInMax: '2010020' }),
-      ),
-    ).not.toThrow()
+    try {
+      // At slippage 0.5%, validator forgives up to +0.001pp absolute, so a quote
+      // with amountInMax = floor(2_000_000 * (1 + 0.00501)) = 2010020 must pass.
+      expect(() =>
+        validateSwapQuoteSlippageData(
+          { slippage: 0.5, swapperMode: SwapperMode.TARGET_DEBT },
+          makeQuote({ amountIn: '2000000', amountInMax: '2010020' }),
+        ),
+      ).not.toThrow()
 
-    // One wei above the boundary must fail.
-    expect(() =>
-      validateSwapQuoteSlippageData(
-        { slippage: 0.5, swapperMode: SwapperMode.TARGET_DEBT },
-        makeQuote({ amountIn: '2000000', amountInMax: '2010021' }),
-      ),
-    ).toThrow('amountInMax exceeds requested slippage')
+      // One wei above the boundary must fail.
+      expect(() =>
+        validateSwapQuoteSlippageData(
+          { slippage: 0.5, swapperMode: SwapperMode.TARGET_DEBT },
+          makeQuote({ amountIn: '2000000', amountInMax: '2010021' }),
+        ),
+      ).toThrow('amountInMax exceeds requested slippage')
 
-    expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(validationLogLines(stdout)).toHaveLength(1)
+    }
+    finally {
+      stdout.restore()
+    }
   })
 
-  it('keeps validator tolerance below SwapDetailsSummary warning threshold at MAX_SLIPPAGE', () => {
-    // SLIPPAGE_DIFF_TOLERANCE in SwapDetailsSummary is 0.005pp. The validator
-    // must allow strictly less so a quote it accepts never trips the user-facing
-    // warning. At MAX_SLIPPAGE = 50%, the validator forgives 0.001pp → boundary
-    // amountOutMin = floor(2_000_000 * (1 - 0.50001)) = 999_980.
-    expect(() =>
-      validateSwapQuoteSlippageData(
-        { slippage: 50, swapperMode: SwapperMode.EXACT_IN },
-        makeQuote({ amountOut: '2000000', amountOutMin: '999980' }),
-      ),
-    ).not.toThrow()
+  it('keeps validator divergence tolerance tiny at MAX_SLIPPAGE', () => {
+    const stdout = captureStdout()
 
-    expect(() =>
-      validateSwapQuoteSlippageData(
-        { slippage: 50, swapperMode: SwapperMode.EXACT_IN },
-        makeQuote({ amountOut: '2000000', amountOutMin: '999979' }),
-      ),
-    ).toThrow('amountOutMin exceeds requested slippage')
+    // At MAX_SLIPPAGE = 50%, the validator forgives 0.001pp for rounding:
+    // boundary amountOutMin = floor(2_000_000 * (1 - 0.50001)) = 999_980.
+    try {
+      expect(() =>
+        validateSwapQuoteSlippageData(
+          { slippage: 50, swapperMode: SwapperMode.EXACT_IN },
+          makeQuote({ amountOut: '2000000', amountOutMin: '999980' }),
+        ),
+      ).not.toThrow()
+
+      expect(() =>
+        validateSwapQuoteSlippageData(
+          { slippage: 50, swapperMode: SwapperMode.EXACT_IN },
+          makeQuote({ amountOut: '2000000', amountOutMin: '999979' }),
+        ),
+      ).toThrow('amountOutMin exceeds requested slippage')
+    }
+    finally {
+      stdout.restore()
+    }
   })
 })
