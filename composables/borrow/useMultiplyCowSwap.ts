@@ -14,7 +14,7 @@ import {
   isCowQuote,
   isCowSwapSupportedChain,
 } from '~/entities/cowswap'
-import { useCowSwapOpenPositionExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
+import { useCowSwapOpenPositionExecution, useCowSwapOrderStatus, openCowSwapReviewModal, buildApprovalSignSteps } from '~/composables/cowswap'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { trimTrailingZeros } from '~/utils/string-utils'
@@ -154,28 +154,26 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
       },
     }
 
-    let needsCollateralApproval = true
-    let needsSellTokenApproval = true
+    let collateralAllowance = 0n
+    let sellTokenAllowance = 0n
     try {
       const client = rpcClient.value
       if (client) {
         const chainConfig = getCowSwapChainConfig(chainId)
-        const collateralAllowance = await client.readContract({
+        collateralAllowance = await client.readContract({
           address: supplyVault.asset.address as Address,
           abi: erc20Abi,
           functionName: 'allowance',
           args: [address.value as Address, supplyVault.address as Address],
         }) as bigint
-        needsCollateralApproval = collateralAllowance < supplyAmountNano
 
         if (chainConfig) {
-          const sellTokenAllowance = await client.readContract({
+          sellTokenAllowance = await client.readContract({
             address: shortVault.asset.address as Address,
             abi: erc20Abi,
             functionName: 'allowance',
             args: [address.value as Address, chainConfig.vaultRelayer],
           }) as bigint
-          needsSellTokenApproval = sellTokenAllowance < debtAmount
         }
       }
     }
@@ -192,12 +190,28 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
 
     const signSteps: DisplayStep[] = []
     let idx = 1
-    if (needsCollateralApproval) {
-      signSteps.push({ index: idx++, label: 'Approve for deposit', isSeparateTx: true, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: options.multiplyInputAmount.value } })
-    }
-    if (needsSellTokenApproval) {
-      signSteps.push({ index: idx++, label: 'Approve for swap', isSeparateTx: true, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: borrowAmountStr } })
-    }
+    const collateralApproval = buildApprovalSignSteps({
+      tokenAddress: supplyVault.asset.address,
+      currentAllowance: collateralAllowance,
+      requiredAmount: supplyAmountNano,
+      label: 'Approve for deposit',
+      assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: options.multiplyInputAmount.value },
+      startIndex: idx,
+    })
+    signSteps.push(...collateralApproval.steps)
+    idx = collateralApproval.nextIndex
+
+    const sellTokenApproval = buildApprovalSignSteps({
+      tokenAddress: shortVault.asset.address,
+      currentAllowance: sellTokenAllowance,
+      requiredAmount: debtAmount,
+      label: 'Approve for swap',
+      assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: borrowAmountStr },
+      startIndex: idx,
+    })
+    signSteps.push(...sellTokenApproval.steps)
+    idx = sellTokenApproval.nextIndex
+
     signSteps.push({ index: idx++, label: 'Sign EVC permit', isSeparateTx: false })
     signSteps.push({ index: idx++, label: 'Sign CoW order', isSeparateTx: false })
 

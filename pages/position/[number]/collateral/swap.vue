@@ -29,7 +29,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { COWSWAP_ORDER_DEADLINE_SECONDS, COWSWAP_PROVIDER_EXTRA_DATA, type CowSwapCollateralSwapExecuteParams, getCowSwapChainConfig, isCowProvider } from '~/entities/cowswap'
-import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
+import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus, openCowSwapReviewModal, buildApprovalSignSteps } from '~/composables/cowswap'
 
 const route = useRoute()
 const { isConnected, address } = useAccount()
@@ -301,18 +301,17 @@ const submitCowSwapCollateralSwap = async () => {
     },
   }
 
-  // Check if approval is already sufficient (allowance is in vault shares)
-  let needsApproval = true
+  // Check current allowance for step display (including USDT reset)
+  let currentAllowance = 0n
   try {
     const client = rpcClient.value
     if (client) {
-      const currentAllowance = await client.readContract({
+      currentAllowance = await client.readContract({
         address: fromVault.value.address as Address,
         abi: erc20Abi,
         functionName: 'allowance',
         args: [address.value as Address, chainConfig.vaultRelayer],
       }) as bigint
-      needsApproval = currentAllowance < sellAmount
     }
   }
   catch {
@@ -325,9 +324,16 @@ const submitCowSwapCollateralSwap = async () => {
 
   const signSteps: DisplayStep[] = []
   let idx = 1
-  if (needsApproval) {
-    signSteps.push({ index: idx++, label: 'Approve for swap', isSeparateTx: true, assetInfo: { symbol: fromVault.value.symbol || fromAsset.symbol, address: fromAsset.address, amount: fromAmountStr } })
-  }
+  const approval = buildApprovalSignSteps({
+    tokenAddress: fromVault.value.address,
+    currentAllowance,
+    requiredAmount: sellAmount,
+    label: 'Approve for swap',
+    assetInfo: { symbol: fromVault.value.symbol || fromAsset.symbol, address: fromAsset.address, amount: fromAmountStr },
+    startIndex: idx,
+  })
+  signSteps.push(...approval.steps)
+  idx = approval.nextIndex
   signSteps.push({ index: idx++, label: 'Sign EVC permit', isSeparateTx: false })
   signSteps.push({ index: idx++, label: 'Sign CoW order', isSeparateTx: false })
 

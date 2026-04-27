@@ -3,4 +3,4 @@ export { useCowSwapOpenPositionExecution } from './useCowSwapOpenPositionExecuti
 export { useCowSwapCollateralSwapExecution } from './useCowSwapCollateralSwapExecution'
 export { useCowSwapClosePositionExecution } from './useCowSwapClosePositionExecution'
 export { useCowSwapOrderStatus } from './useCowSwapOrderStatus'
-export { openCowSwapReviewModal } from './openCowSwapReviewModal'
+export { openCowSwapReviewModal, buildApprovalSignSteps } from './openCowSwapReviewModal'
