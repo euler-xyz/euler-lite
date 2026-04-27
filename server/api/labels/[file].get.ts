@@ -207,6 +207,59 @@ function alternativesOverlap(left: RegexPrefixToken[], right: RegexPrefixToken[]
   return true
 }
 
+function escapeLiteralForPrefix(value: string): string {
+  return /^[a-zA-Z0-9 _-]$/.test(value) ? value : `\\${value}`
+}
+
+function escapeClassValue(value: string): string {
+  return value.replace(/[\\\]^-]/g, '\\$&')
+}
+
+function tokenToPattern(token: RegexPrefixToken): string {
+  if (token.type === 'wildcard') return '.'
+  if (token.type === 'literal') return escapeLiteralForPrefix(token.value)
+
+  const values = [...token.values].sort()
+  if (values.length === 1) return escapeLiteralForPrefix(values[0]!)
+  return `[${values.map(escapeClassValue).join('')}]`
+}
+
+function mergePrefixTokens(tokens: RegexPrefixToken[]): RegexPrefixToken {
+  if (tokens.some(token => token.type === 'wildcard')) return { type: 'wildcard' }
+
+  const values = new Set<string>()
+  for (const token of tokens) {
+    if (token.type === 'literal') {
+      values.add(token.value)
+      continue
+    }
+    if (token.type === 'wildcard') return { type: 'wildcard' }
+    for (const value of token.values) {
+      values.add(value)
+    }
+  }
+
+  return values.size === 1 ? { type: 'literal', value: [...values][0]! } : { type: 'class', values }
+}
+
+function summarizeAlternativePrefixes(alternatives: string[]): string {
+  const normalized = alternatives
+    .map(normalizeAlternativePrefix)
+    .filter(value => value !== null)
+
+  if (normalized.length === 0) return '.'
+
+  const length = Math.min(...normalized.map(value => value.length), 8)
+  if (length === 0) return '.'
+
+  const merged: RegexPrefixToken[] = []
+  for (let i = 0; i < length; i++) {
+    merged.push(mergePrefixTokens(normalized.map(value => value[i]!)))
+  }
+
+  return merged.map(tokenToPattern).join('')
+}
+
 function hasPrefixOverlap(alternatives: string[]): boolean {
   if (alternatives.length < 2) return false
 
@@ -270,7 +323,7 @@ function hasUnsafeRegexStructure(pattern: string): boolean {
         i += quantifier.length
         if (pattern[i + 1] === '?') i += 1
       }
-      append('()')
+      append(summarizeAlternativePrefixes(child.alternatives))
       continue
     }
 
