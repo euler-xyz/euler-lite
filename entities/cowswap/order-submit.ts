@@ -1,6 +1,8 @@
 import type { Address, Hex } from 'viem'
 import type { CowSwapOrderPayload, CowSwapOrderUid } from './types'
 
+const MAX_CANCEL_ERROR_MESSAGE_LENGTH = 180
+
 const coerceOrderUid = (data: unknown): CowSwapOrderUid => {
   if (typeof data === 'string') return data
   if (data && typeof data === 'object' && 'uid' in data) {
@@ -8,6 +10,29 @@ const coerceOrderUid = (data: unknown): CowSwapOrderUid => {
     if (typeof uid === 'string') return uid
   }
   throw new Error('Unexpected CoW order response format')
+}
+
+const truncateErrorMessage = (message: string): string => {
+  if (message.length <= MAX_CANCEL_ERROR_MESSAGE_LENGTH) return message
+  return `${message.slice(0, MAX_CANCEL_ERROR_MESSAGE_LENGTH).trimEnd()}...`
+}
+
+const extractCowSwapErrorMessage = (text: string): string => {
+  try {
+    const parsed = JSON.parse(text) as unknown
+    if (parsed && typeof parsed === 'object') {
+      const record = parsed as Record<string, unknown>
+      const type = typeof record.errorType === 'string' ? record.errorType : undefined
+      const detail = [record.description, record.message, record.error]
+        .find(value => typeof value === 'string') as string | undefined
+      return [type, detail].filter(Boolean).join(': ') || text
+    }
+  }
+  catch {
+    // Fall back to the raw response body below.
+  }
+
+  return text
 }
 
 export const submitCowSwapOrder = async (
@@ -81,6 +106,6 @@ export const cancelCowSwapOrder = async (params: CancelCowSwapOrderParams): Prom
 
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(`CoW cancel API ${res.status}: ${text.slice(0, 500)}`)
+    throw new Error(`CoW cancel API ${res.status}: ${truncateErrorMessage(extractCowSwapErrorMessage(text))}`)
   }
 }
