@@ -17,7 +17,7 @@ const makeQuote = (overrides: Partial<SwapApiQuote>): SwapApiQuote => ({
 
 const captureStdout = () => {
   const captured: string[] = []
-  const originalWrite = process.stdout.write.bind(process.stdout)
+  const originalWrite = process.stdout.write
   process.stdout.write = ((
     chunk: string | Uint8Array,
     encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
