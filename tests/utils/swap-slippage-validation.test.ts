@@ -74,7 +74,9 @@ describe('swap quote slippage validation', () => {
         ),
       ).toThrow('amountOutMin exceeds requested slippage')
 
-      const line = validationLogLines(stdout)[0]
+      const lines = validationLogLines(stdout)
+      expect(lines).toHaveLength(1)
+      const line = lines[0]
       expect(line).toMatchObject({
         ctx: 'swapQuoteSlippage',
         msg: 'Swap quote exceeds requested slippage',
@@ -107,7 +109,9 @@ describe('swap quote slippage validation', () => {
         ),
       ).toThrow('amountInMax exceeds requested slippage')
 
-      const line = validationLogLines(stdout)[0]
+      const lines = validationLogLines(stdout)
+      expect(lines).toHaveLength(1)
+      const line = lines[0]
       expect(line).toMatchObject({
         ctx: 'swapQuoteSlippage',
         msg: 'Swap quote exceeds requested slippage',
