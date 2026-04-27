@@ -741,6 +741,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
           type: 'repay',
           asset: reviewAsset,
           amount: inputDisplay,
+          quoteFetchedAt: quotes.effectiveQuoteFetchedAt.value,
           swapToAsset: borrowVault.value.asset,
           swapToAmount: direction.value === SwapperMode.TARGET_DEBT ? debtAmount.value : swapEstimatedOutput.value,
           swapMode: direction.value,

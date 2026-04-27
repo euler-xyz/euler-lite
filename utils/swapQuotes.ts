@@ -6,6 +6,7 @@ export type SwapQuoteCompare = 'max' | 'min'
 export type SwapQuoteCard = {
   provider: string
   quote: SwapApiQuote
+  fetchedAt?: number
   amountUsd?: number
   gasCostNative?: bigint
   gasCostUsd?: number
