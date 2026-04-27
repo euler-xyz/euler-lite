@@ -21,6 +21,7 @@ const modal = useModal()
 const route = useRoute()
 const {
   docsUrl,
+  stargateUrl,
   tosUrl,
   privacyPolicyUrl,
   riskDisclosuresUrl,
@@ -47,6 +48,7 @@ const links = computed(
   () =>
     [
       docsUrl ? { title: 'Docs', url: docsUrl } : null,
+      stargateUrl ? { title: 'Stargate', url: stargateUrl } : null,
       tosUrl ? { title: 'Terms of Use', url: tosUrl } : null,
       privacyPolicyUrl ? { title: 'Privacy Policy', url: privacyPolicyUrl } : null,
       riskDisclosuresUrl ? { title: 'Risk Disclosures', url: riskDisclosuresUrl } : null,
