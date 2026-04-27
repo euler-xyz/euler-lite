@@ -34,6 +34,7 @@ import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { formatSmartAmount } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
+import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { isOpDisabled, OP_DEPOSIT, OP_WITHDRAW } from '~/utils/vault-hooks'
 import { getHookDisabledWarning } from '~/composables/useVaultWarnings'
@@ -82,6 +83,7 @@ export interface UseCollateralFormOptions {
   buildSwapPlan: (quote: SwapApiQuote, ctx: {
     vaultAddress: string
     amountNano: bigint
+    slippage: number
     subAccount?: string
     includePermit2Call?: boolean
   }) => Promise<TxPlan>
@@ -142,7 +144,10 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const lastCollateralAddress = ref('')
 
   // --- Swap infrastructure ---
-  const { slippage: swapSlippage } = useSlippage()
+  const { slippage: swapSlippage } = useSlippage({
+    fromSymbol: () => collateralVault.value?.asset.symbol,
+    toSymbol: () => borrowVault.value?.asset.symbol,
+  })
   const {
     sortedQuoteCards: swapQuoteCardsSorted,
     selectedProvider: swapSelectedProvider,
@@ -161,6 +166,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     compare: 'max',
     buildTxPlanForQuote: quote => buildSwapTxPlanForQuote(quote, false),
   })
+  const swapQuoteSlippage = computed(() => computeQuoteSlippage(swapEffectiveQuote.value))
 
   // --- Position/vault computeds ---
   const position = computed(() => getPositionBySubAccountIndex(+positionIndex))
@@ -319,6 +325,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   })
 
   const swapRoutedVia = computed(() => {
+    if (!swapSelectedProvider.value) return 'Not selected'
     if (!swapEffectiveQuote.value?.route?.length) return null
     return swapEffectiveQuote.value.route.map((r: { providerName: string }) => r.providerName).join(', ')
   })
@@ -581,6 +588,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     return options.buildSwapPlan(quote, {
       vaultAddress: collateralVault.value.address,
       amountNano: valueToNano(amount.value || '0', asset.value.decimals),
+      slippage: swapSlippage.value,
       subAccount: position.value?.subAccount,
       includePermit2Call,
     })
@@ -656,6 +664,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
         txPlan = await options.buildSwapPlan(quote, {
           vaultAddress: collateralVault.value.address,
           amountNano: valueToNano(amount.value || '0', asset.value.decimals),
+          slippage: swapSlippage.value,
           subAccount: position.value?.subAccount,
         })
       }
@@ -770,6 +779,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     swapSelectedProvider,
     swapSelectedQuote,
     swapEffectiveQuote,
+    swapQuoteSlippage,
     swapProvidersCount,
     isSwapQuoteLoading,
     swapQuoteError,

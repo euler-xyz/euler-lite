@@ -21,6 +21,7 @@ export const createCrossAssetSwapBuilders = (
     quote,
     swapperMode,
     isRepay,
+    requestedSlippage,
     targetDebt = 0n,
     currentDebt = 0n,
     enableCollateral = false,
@@ -32,6 +33,7 @@ export const createCrossAssetSwapBuilders = (
     quote: SwapApiQuote
     swapperMode: SwapperMode
     isRepay: boolean
+    requestedSlippage: number
     targetDebt?: bigint
     currentDebt?: bigint
     enableCollateral?: boolean
@@ -61,7 +63,7 @@ export const createCrossAssetSwapBuilders = (
       throw new Error('Swap amount is zero')
     }
 
-    const verifierData = buildSwapVerifierData({ quote, swapperMode, isRepay, targetDebt, currentDebt })
+    const verifierData = buildSwapVerifierData({ quote, swapperMode, isRepay, requestedSlippage, targetDebt, currentDebt })
 
     if (verifierData.toLowerCase() !== quote.verify.verifierData.toLowerCase()) {
       logWarn('swap', 'SwapVerifier data mismatch')
@@ -180,6 +182,7 @@ export const createCrossAssetSwapBuilders = (
     quote,
     swapperMode = SwapperMode.EXACT_IN,
     isRepay = false,
+    requestedSlippage,
     targetDebt = 0n,
     currentDebt = 0n,
     enableCollateral = false,
@@ -191,6 +194,7 @@ export const createCrossAssetSwapBuilders = (
     quote: SwapApiQuote
     swapperMode?: SwapperMode
     isRepay?: boolean
+    requestedSlippage: number
     targetDebt?: bigint
     currentDebt?: bigint
     enableCollateral?: boolean
@@ -201,6 +205,7 @@ export const createCrossAssetSwapBuilders = (
   }): Promise<TxPlan> => {
     const { evcCalls, evcAddress: _evcAddress, totalValue: _totalValue } = await buildSwapEvcCalls({
       quote, swapperMode, isRepay, targetDebt, currentDebt,
+      requestedSlippage,
       enableCollateral, disableCollateral, liabilityVault, enabledCollaterals, isDebtSwap,
     })
 
@@ -216,6 +221,7 @@ export const createCrossAssetSwapBuilders = (
   const buildSwapFullRepayPlan = async ({
     quote,
     swapperMode = SwapperMode.EXACT_IN,
+    requestedSlippage,
     targetDebt = 0n,
     currentDebt = 0n,
     liabilityVault,
@@ -224,6 +230,7 @@ export const createCrossAssetSwapBuilders = (
   }: {
     quote: SwapApiQuote
     swapperMode?: SwapperMode
+    requestedSlippage: number
     targetDebt?: bigint
     currentDebt?: bigint
     liabilityVault?: string
@@ -240,6 +247,7 @@ export const createCrossAssetSwapBuilders = (
 
     const { evcCalls } = await buildSwapEvcCalls({
       quote, swapperMode, isRepay: true, targetDebt, currentDebt,
+      requestedSlippage,
       liabilityVault, enabledCollaterals,
     })
 

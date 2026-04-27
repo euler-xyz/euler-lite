@@ -18,6 +18,7 @@ import { amountToPercent, percentToAmountNano } from '~/utils/repayUtils'
 import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { createRaceGuard } from '~/utils/race-guard'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
+import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
 import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
@@ -32,6 +33,7 @@ interface UseWalletSwapRepayOptions {
   plan: Ref<TxPlan | null>
   isSubmitting: Ref<boolean>
   isPreparing: Ref<boolean>
+  slippage: Readonly<Ref<number>>
   clearSimulationError: () => void
   runSimulation: (plan: TxPlan) => Promise<boolean>
   netAPY: Ref<number>
@@ -51,6 +53,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     plan,
     isSubmitting,
     isPreparing,
+    slippage,
     clearSimulationError,
     runSimulation,
     netAPY,
@@ -69,7 +72,6 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const { eulerLensAddresses, chainId } = useEulerAddresses()
   const { isConnected, address } = useAccount()
   const { fetchSingleBalance } = useWallets()
-  const { slippage } = useSlippage()
   const { getVault: registryGetVault } = useVaultRegistry()
 
   // --- State ---
@@ -86,6 +88,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     direction,
     buildTxPlanForQuote: quote => buildRepayPlan(false, quote),
   })
+  const quoteSlippage = computed(() => computeQuoteSlippage(quotes.effectiveQuote.value, direction.value))
 
   // --- Derived ---
   const needsSwap = computed(() => {
@@ -151,6 +154,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   })
 
   const swapRoutedVia = computed(() => {
+    if (!quotes.selectedProvider.value) return 'Not selected'
     if (!quotes.effectiveQuote.value?.route?.length) return null
     return quotes.effectiveQuote.value.route.map((r: { providerName: string }) => r.providerName).join(', ')
   })
@@ -623,6 +627,14 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     }
   })
 
+  watch(slippage, () => {
+    if (formTab.value !== 'wallet' || !needsSwap.value) return
+    clearSimulationError()
+    quotes.reset()
+    resetDerivedState()
+    requestQuote()
+  })
+
   // --- Watch quote changes → sync opposite field + estimates ---
   watch([quotes.effectiveQuote, direction], () => {
     if (formTab.value !== 'wallet' || !needsSwap.value) return
@@ -680,6 +692,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       inputTokenAddress: (wrappedAddress || selectedAsset.value.address) as Address,
       inputAmount,
       quote: swapQuote,
+      requestedSlippage: slippage.value,
       borrowVaultAddress: borrowVault.value.address as Address,
       subAccount: (position.value.subAccount || address.value || zeroAddress) as Address,
       enabledCollaterals: position.value.collaterals ?? [collateralVault.value.address],
@@ -804,6 +817,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     swapInputDisplay,
     swapOutputDisplay,
     swapRoutedVia,
+    quoteSlippage,
     swapPriceImpact,
     swapRouteItems,
     isFullRepay,

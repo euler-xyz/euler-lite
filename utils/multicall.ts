@@ -1,6 +1,8 @@
-import { encodeFunctionData, decodeFunctionResult, zeroAddress, type Address, type Hex, type Abi, BaseError } from 'viem'
+import { encodeFunctionData, decodeFunctionResult, zeroAddress, type Address, type Hex, type Abi } from 'viem'
 import { EVC_ABI, type BatchItem, type BatchItemResult } from '~/abis/evc'
 import { getPublicClient } from '~/utils/public-client'
+import { isTransportError } from '~/utils/viem-errors'
+import { logger } from '~/utils/logger'
 
 export type MulticallResult<T = unknown> = {
   success: boolean
@@ -15,29 +17,13 @@ export type BatchLensResult<T = unknown> = {
   transportError?: boolean
 }
 
-/**
- * Check if an error is a transport/provider-level failure (HTTP error, network down,
- * timeout, RPC rate limit) vs an on-chain revert that could be retried individually.
- */
-const TRANSPORT_ERROR_NAMES = new Set([
-  'HttpRequestError',
-  'TimeoutError',
-  'WebSocketRequestError',
-  'LimitExceededRpcError', // JSON-RPC -32005 (provider rate limit)
-  'ResourceUnavailableRpcError', // JSON-RPC -32002 (provider temporarily unavailable)
-])
-
-const isTransportError = (err: unknown): boolean => {
-  // Non-viem errors (e.g. TypeError from a misconfigured client) are treated as transport errors.
-  // This is intentionally conservative: suppressing retries against an already-broken endpoint is
-  // safer than amplifying load by retrying every address individually.
-  if (!(err instanceof BaseError)) return true
-  // Walk to the deepest BaseError in the chain. If walk() returns a non-BaseError (e.g. a
-  // TypeError: Failed to fetch buried as the root cause), that is by definition a network-level
-  // failure — treat it as a transport error.
-  const root = err.walk()
-  if (!(root instanceof BaseError)) return true
-  return TRANSPORT_ERROR_NAMES.has(root.name)
+const isBatchTransportError = (err: unknown): boolean => {
+  // The shared classifier is precise for viem/Error values. For strange
+  // non-Error throwables from a provider/client boundary, keep the old
+  // conservative multicall behaviour: suppress per-item retries rather than
+  // amplifying load against an endpoint that may already be unhealthy.
+  if (!(err instanceof Error)) return true
+  return isTransportError(err)
 }
 
 /**
@@ -134,7 +120,7 @@ const executeLensChunk = async <T>(
     batchResults = await evcBatchCall(evcAddress, items, rpcUrl)
   }
   catch (err) {
-    if (isTransportError(err)) {
+    if (isBatchTransportError(err)) {
       return calls.map(() => ({ success: false, result: null, transportError: true }))
     }
     // On-chain revert of the whole batch (e.g. out of gas) — let caller retry individually
@@ -155,7 +141,10 @@ const executeLensChunk = async <T>(
       return { success: true, result: decoded as T }
     }
     catch (err) {
-      console.warn(`[batchLensCalls] Failed to decode result for ${calls[index].functionName}:`, err)
+      logger.warn(
+        { ctx: 'batchLensCalls', fn: calls[index].functionName, err },
+        'failed to decode batch result',
+      )
       return { success: false, result: null }
     }
   })

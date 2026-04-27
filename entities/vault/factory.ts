@@ -10,7 +10,7 @@
  * Replaces the old factory-based API (fetchVaultFactory / fetchVaultFactories)
  * which hit /api/vault-factories with a per-address subgraph lookup.
  */
-import { logWarn } from '~/utils/errorHandling'
+import { logger } from '~/utils/logger'
 
 export type VaultCategory = 'evk' | 'earn' | 'securitize' | 'escrow'
 
@@ -87,7 +87,7 @@ export const fetchChainVaultCategories = async (): Promise<VaultCategories> => {
       return categories
     })
     .catch((err) => {
-      logWarn('fetchChainVaultCategories', err)
+      logger.warn({ ctx: 'fetchChainVaultCategories', chainId, err }, 'failed to fetch chain vault categories')
       return null
     })
     .finally(() => { chainCategoriesInFlight.delete(chainId) })
@@ -130,7 +130,7 @@ export const fetchVaultCategory = async (address: string): Promise<VaultCategory
       return category
     })
     .catch((err) => {
-      logWarn('fetchVaultCategory', err)
+      logger.warn({ ctx: 'fetchVaultCategory', chainId, address, err }, 'failed to fetch vault category')
       return null
     })
     .finally(() => { perAddressInFlight.delete(key) })

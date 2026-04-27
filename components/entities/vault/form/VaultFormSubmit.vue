@@ -23,6 +23,7 @@ interface KeyringGuardState {
 
 const props = defineProps<{ disabled?: boolean, loading?: boolean, disabledReason?: string, disabledReasonVariant?: DisabledReasonVariant }>()
 const { isConnected } = useAccount()
+const { isSpyMode } = useSpyMode()
 const { chainId: _chainId } = useEulerAddresses()
 const { chainId, switchChain, connect } = useWagmi()
 const modal = useModal()
@@ -45,8 +46,9 @@ const { floatingStyles, update } = useFloating(reference, floating, {
 })
 
 const needToSwitchChain = computed(() => {
-  return isConnected.value && chainId.value !== _chainId.value
+  return !isSpyMode.value && isConnected.value && chainId.value !== _chainId.value
 })
+const hasActiveSession = computed(() => isConnected.value || isSpyMode.value)
 const _disabled = computed(() => {
   if (isOperationBlocked.value) return true
   return props.disabled && !needToSwitchChain.value
@@ -87,7 +89,7 @@ const onClick = (e: Event) => {
     switchChain({ chainId: _chainId.value })
     return
   }
-  if (!isConnected.value) {
+  if (!hasActiveSession.value) {
     e.preventDefault()
     connect()
     return
@@ -188,7 +190,7 @@ const openTermsModal = () => {
         <template v-if="needToSwitchChain">
           Switch chain
         </template>
-        <slot v-else-if="isConnected" />
+        <slot v-else-if="hasActiveSession" />
         <template v-else>
           Connect wallet
         </template>

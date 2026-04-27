@@ -392,13 +392,13 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     }
 
     if (direction.value === SwapperMode.EXACT_IN) {
-      debtAmount.value = formatSignificant(formatUnits(
+      debtAmount.value = trimTrailingZeros(formatUnits(
         BigInt(quotes.effectiveQuote.value.amountOut || 0),
         Number(borrowVault.value.asset.decimals),
       ))
     }
     else {
-      amount.value = formatSignificant(formatUnits(
+      amount.value = trimTrailingZeros(formatUnits(
         BigInt(quotes.effectiveQuote.value.amountIn || 0),
         Number(sourceVault.value.asset.decimals),
       ))

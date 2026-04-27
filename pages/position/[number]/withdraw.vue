@@ -88,12 +88,13 @@ const form = useCollateralForm({
     )
   },
 
-  buildSwapPlan: async (quote: SwapApiQuote, { vaultAddress, amountNano, subAccount }) => {
+  buildSwapPlan: async (quote: SwapApiQuote, { vaultAddress, amountNano, slippage, subAccount }) => {
     const hasBorrows = (form.position.value?.borrowed || 0n) > 0n
     return buildWithdrawAndSwapPlan({
       vaultAddress: vaultAddress as Address,
       assetsAmount: amountNano,
       quote,
+      requestedSlippage: slippage,
       subAccount,
       options: {
         includePythUpdate: hasBorrows,
@@ -141,6 +142,8 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (form.isSwapRestricted.value) return { message: 'Swapping from this vault is not available in your region', variant: 'warning' }
   if (form.estimatesError.value) return { message: form.estimatesError.value, variant: 'error' }
   if (form.simulationError.value) return { message: form.simulationError.value, variant: 'error' }
+  if (needsSwap.value && form.isSwapQuoteLoading.value && +form.amount.value > 0) return { message: 'Fetching swap quotes...', variant: 'warning' }
+  if (needsSwap.value && !form.swapSelectedQuote.value && +form.amount.value > 0) return { message: 'Select a swap quote to continue', variant: 'warning' }
   return undefined
 })
 const pairAssetsLabel = usePositionPairLabel(form.position)
@@ -261,6 +264,7 @@ watch(selectedOutputAsset, () => {
                   :output-display="form.swapOutputDisplay.value"
                   :price-impact="form.swapPriceImpact.value"
                   :slippage="form.swapSlippage.value"
+                  :quote-slippage="form.swapQuoteSlippage.value"
                   :routed-via="form.swapRoutedVia.value"
                   @open-slippage-settings="form.openSlippageSettings"
                 />

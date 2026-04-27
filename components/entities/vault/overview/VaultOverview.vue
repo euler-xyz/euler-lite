@@ -1,16 +1,12 @@
 <script setup lang="ts">
-import type { Vault } from '~/entities/vault'
-import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
+import { type Vault, isCyclicalNoteVault } from '~/entities/vault'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
 }>()
 const { vault } = defineProps<{ vault: Vault, desktopOverview?: boolean }>()
 
-const isCyclicalIRM = computed(() => {
-  return Number(vault.irmInfo?.interestRateModelInfo?.interestRateModelType)
-    === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY
-})
+const isCyclicalIRM = computed(() => isCyclicalNoteVault(vault))
 </script>
 
 <template>

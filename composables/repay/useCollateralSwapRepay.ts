@@ -24,8 +24,9 @@ import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verif
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createRaceGuard } from '~/utils/race-guard'
+import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { findBlockingDisabledOp, OP_REPAY, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
-import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
+import { getPlanHookDisabledWarning, getUtilisationWarning, type VaultWarning } from '~/composables/useVaultWarnings'
 
 interface UseCollateralSwapRepayOptions {
   position: Ref<AccountBorrowPosition | undefined>
@@ -168,6 +169,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     borrowVault,
     direction: core.direction,
   })
+  const quoteSlippage = computed(() => computeQuoteSlippage(core.quotes.effectiveQuote.value, core.direction.value))
 
   // --- APYs ---
   const collateralSupplyApy = computed(() => {
@@ -293,6 +295,13 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     return getSwapInputAmount(q, core.direction.value)
   })
   const isInsufficientSource = computed(() => requiredInput.value > 0n && requiredInput.value > sourceBalance.value)
+  const isInsufficientVaultLiquidity = computed(() =>
+    requiredInput.value > 0n && requiredInput.value > (sourceVault.value?.totalCash || 0n),
+  )
+  const liquidityWarning = computed<VaultWarning | null>(() => {
+    if (!sourceVault.value) return null
+    return getUtilisationWarning(sourceVault.value, 'repay')
+  })
 
   // --- Submit disabled ---
   const isSubmitDisabled = computed(() => {
@@ -301,6 +310,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     if (!sourceVault.value || !borrowVault.value) return true
     if (!core.debtAmount.value && !core.amount.value) return true
     if (isInsufficientSource.value) return true
+    if (isInsufficientVaultLiquidity.value) return true
     if (core.isSameAsset.value) {
       if (isHealthInsufficient.value) return true
       return false
@@ -318,6 +328,9 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     }
     if (isInsufficientSource.value) {
       return 'Insufficient collateral balance to cover the required swap amount.'
+    }
+    if (isInsufficientVaultLiquidity.value) {
+      return 'Not enough liquidity in the collateral vault.'
     }
     if (isHealthInsufficient.value) {
       return 'This swap will not restore account health. Repay the full debt from your wallet instead.'
@@ -409,6 +422,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       return buildSwapFullRepayPlan({
         quote: swapQuote,
         swapperMode: swapMode,
+        requestedSlippage: slippage.value,
         targetDebt,
         currentDebt,
         liabilityVault: borrowVault.value.address,
@@ -421,6 +435,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       quote: swapQuote,
       swapperMode: swapMode,
       isRepay: true,
+      requestedSlippage: slippage.value,
       targetDebt,
       currentDebt,
       liabilityVault: borrowVault.value.address,
@@ -664,6 +679,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     // Swap details
     currentPrice: details.currentPrice,
     summary: details.summary,
+    quoteSlippage,
     priceImpact: details.priceImpact,
     leveragedPriceImpact: details.leveragedPriceImpact,
     routedVia: details.routedVia,
@@ -673,6 +689,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     isSubmitDisabled,
     disabledReason,
     hookWarning,
+    liquidityWarning,
     isRepayExceedsDebt: core.isRepayExceedsDebt,
     // Handlers
     onAmountInput: core.onAmountInput,

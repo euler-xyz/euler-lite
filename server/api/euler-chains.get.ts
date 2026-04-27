@@ -3,7 +3,7 @@ import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { createInFlightDedup } from '~/server/utils/in-flight'
-import { logWarn } from '~/server/utils/log'
+import { logger } from '~/server/utils/logger'
 
 const CACHE_TTL_MS = 300_000
 const DEFAULT_URL = 'https://raw.githubusercontent.com/euler-xyz/euler-interfaces/refs/heads/master/EulerChains.json'
@@ -56,7 +56,7 @@ export default defineEventHandler(async (event) => {
     return await refreshEulerChains()
   }
   catch (err) {
-    logWarn('euler-chains', 'Upstream fetch failed:', err instanceof Error ? err.message : err)
+    logger.warn({ ctx: 'euler-chains', err }, 'upstream fetch failed')
 
     const stale = cache.getStale(CACHE_KEY)
     if (stale) return stale

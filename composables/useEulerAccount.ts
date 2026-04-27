@@ -12,6 +12,7 @@ import { fetchAccountPositions, type SubgraphPositionEntry } from '~/utils/subgr
 import { logWarn } from '~/utils/errorHandling'
 
 const {
+  allBorrowPositions,
   depositPositions,
   borrowPositions,
   isPositionsLoading,
@@ -138,7 +139,7 @@ export const useEulerAccount = () => {
     const owner = portfolioAddress.value || address.value
     if (!owner) return undefined
 
-    return borrowPositions.value.find((position) => {
+    return allBorrowPositions.value.find((position) => {
       try {
         const ownerBigInt = BigInt(getAddress(owner))
         const subAccountBigInt = BigInt(getAddress(position.subAccount))

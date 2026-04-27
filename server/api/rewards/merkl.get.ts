@@ -22,7 +22,7 @@
  */
 import { createError, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
-import { logWarn } from '~/server/utils/log'
+import { reportStatus } from '~/server/utils/log'
 import { resolveChainId } from '~/server/utils/resolve-chain-id'
 import {
   type CachedEntry,
@@ -68,11 +68,16 @@ export default defineEventHandler(async (event) => {
   const multi = results[1].status === 'fulfilled' ? results[1].value : []
   const erc20 = results[2].status === 'fulfilled' ? results[2].value : []
 
-  // Log individual failures but don't fail the whole response
+  // Log individual failures on state transition but don't fail the whole response
   for (const [i, type] of MERKL_TYPES.entries()) {
     const result = results[i]
     if (result.status === 'rejected') {
-      logWarn('rewards-merkl', `${type} failed chain=${chainId}:`, result.reason instanceof Error ? result.reason.message : result.reason)
+      const msg = result.reason instanceof Error ? result.reason.message : String(result.reason)
+      reportStatus('rewards-merkl', `cold-path:${type}:${chainId}`, `failed:${msg}`,
+        `${type} failed chain=${chainId}: ${msg}`)
+    }
+    else {
+      reportStatus('rewards-merkl', `cold-path:${type}:${chainId}`, 'ok')
     }
   }
 

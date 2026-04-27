@@ -8,7 +8,7 @@ import { collectPythFeedIds, collectPythFeedIdsForPair, type PythFeed } from '~/
 import type { Vault } from '~/entities/vault'
 import { getPublicClient } from '~/utils/public-client'
 import { evcBatchCall } from '~/utils/multicall'
-import { logWarn } from '~/utils/errorHandling'
+import { logger } from '~/utils/logger'
 
 const normalizeHex = (value: string): Hex => (value.startsWith('0x') ? value as Hex : (`0x${value}` as Hex))
 const normalizeFeedId = (value: string): Hex => normalizeHex(value).toLowerCase() as Hex
@@ -134,7 +134,7 @@ const fetchPythUpdateDataDirect = async (feedIds: Hex[], _endpoint: string): Pro
     return binaryData.map((item: string) => normalizeHex(item))
   }
   catch (err) {
-    logWarn('pyth/fetchPythUpdateDataDirect', err)
+    logger.warn({ ctx: 'pyth/fetchPythUpdateDataDirect', err }, 'failed to fetch Pyth update data')
     return []
   }
 }
@@ -297,7 +297,7 @@ export const buildPythUpdateCallsFromFeeds = async (
       }) as bigint
     }
     catch (err) {
-      console.warn('[buildPythUpdateCalls] getUpdateFee failed', err)
+      logger.warn({ ctx: 'pyth/buildPythUpdateCalls', err }, 'getUpdateFee failed')
       continue
     }
 
@@ -380,7 +380,7 @@ export const fetchPythPrices = async (
     })
   }
   catch (err) {
-    logWarn('pyth/fetchPythPrices', err)
+    logger.warn({ ctx: 'pyth/fetchPythPrices', err }, 'failed to fetch Pyth prices')
   }
 
   return prices
@@ -434,7 +434,7 @@ export const buildPythBatchItems = async (
       }) as bigint
     }
     catch (err) {
-      console.warn('[buildPythBatchItems] getUpdateFee failed', err)
+      logger.warn({ ctx: 'pyth/buildPythBatchItems', err }, 'getUpdateFee failed')
       continue
     }
 
@@ -499,7 +499,7 @@ export const buildPythBatchItemsFromFeeds = async (
       }) as bigint
     }
     catch (err) {
-      console.warn('[buildPythBatchItemsFromFeeds] getUpdateFee failed', err)
+      logger.warn({ ctx: 'pyth/buildPythBatchItemsFromFeeds', err }, 'getUpdateFee failed')
       continue
     }
 
@@ -581,7 +581,7 @@ export const executeLensWithPythSimulation = async <T>(
     }) as T
   }
   catch (err) {
-    logWarn('pyth/executeLensWithPythSimulation', err)
+    logger.warn({ ctx: 'pyth/executeLensWithPythSimulation', err }, 'lens-with-Pyth simulation failed')
     return undefined
   }
 }
@@ -690,7 +690,7 @@ export const executeBatchLensWithPythSimulation = async <T>(
     }
   }
   catch (err) {
-    logWarn('pyth/executeBatchLensWithPythSimulation', err)
+    logger.warn({ ctx: 'pyth/executeBatchLensWithPythSimulation', err }, 'batch lens-with-Pyth simulation failed')
   }
 
   return results

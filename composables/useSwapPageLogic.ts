@@ -9,10 +9,11 @@ import { getAssetUsdValue } from '~/services/pricing/priceProvider'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, getVaultTags } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
-import { getQuoteAmount, type SwapQuoteAmountField, type SwapQuoteCompare } from '~/utils/swapQuotes'
+import { computeQuoteSlippage, getQuoteAmount, type SwapQuoteAmountField, type SwapQuoteCompare } from '~/utils/swapQuotes'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import type { SwapApiRequestInput } from '~/composables/useSwapApi'
 import type { TxPlan } from '~/entities/txPlan'
+import { SwapperMode } from '~/entities/swap'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { isSameUnderlyingAsset, isSameVault as isSameVaultCheck } from '~/utils/vault-utils'
@@ -125,6 +126,10 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     includeCowSwap: options.includeCowSwap,
     buildTxPlanForQuote: quote => buildPlan(quote),
   })
+  const quoteSlippage = computed(() => computeQuoteSlippage(
+    effectiveQuote.value,
+    amountField === 'amountIn' ? SwapperMode.TARGET_DEBT : SwapperMode.EXACT_IN,
+  ))
 
   // ── Vault products & price invert ──────────────────────────────────────
   const fromProduct = useEulerProductOfVault(computed(() => fromVault.value?.address || ''))
@@ -410,6 +415,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
 
   // ── Routed via ─────────────────────────────────────────────────────────
   const routedVia = computed(() => {
+    if (!selectedProvider.value) return isSameAsset.value ? null : 'Not selected'
     if (!quote.value?.route?.length) return null
     return quote.value.route.map(r => r.providerName).join(', ')
   })
@@ -526,6 +532,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     isQuoteLoading,
     quoteError,
     quotesStatusLabel,
+    quoteSlippage,
     selectProvider,
 
     // Vault identity

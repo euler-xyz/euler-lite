@@ -10,6 +10,7 @@ import {
 } from '~/entities/vault'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
+import { logWarn } from '~/utils/errorHandling'
 import { VaultRampDownModal } from '#components'
 
 const modal = useModal()
@@ -30,10 +31,29 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: LTVRampConfig) => {
   })
 }
 
+// Module-scope dedupe so we warn at most once per (vault, missing-collateral)
+// pair across recomputes and SFC instances. Mirrors the dedupe in
+// composables/useMarketGroups.ts so a curator can spot the same gap reported
+// by either site without one suppressing the other.
+const warnedUnresolved = new Set<string>()
+
 const allCollateralPairs = computed(() =>
   getCollateralExposurePairs(
     vault,
-    addr => registryGet(addr)?.vault as Vault | SecuritizeVault | undefined,
+    (addr) => {
+      const entry = registryGet(addr)
+      if (!entry?.vault) {
+        const key = `${vault.address.toLowerCase()}:${addr.toLowerCase()}`
+        if (!warnedUnresolved.has(key)) {
+          warnedUnresolved.add(key)
+          logWarn(
+            'vault-overview/missing-collateral',
+            `Vault ${vault.address} references unresolved collateral ${addr}`,
+          )
+        }
+      }
+      return entry?.vault as Vault | SecuritizeVault | undefined
+    },
   ),
 )
 </script>

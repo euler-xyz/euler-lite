@@ -1,7 +1,7 @@
 import { createError, getQuery, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
-import { logWarn } from '~/server/utils/log'
+import { logger } from '~/server/utils/logger'
 
 const FEED_ID_RE = /^0x[0-9a-fA-F]{64}$/
 
@@ -66,7 +66,7 @@ export default defineEventHandler(async (event) => {
   }
   catch (err) {
     if ((err as Record<string, unknown>).statusCode) throw err
-    logWarn('pyth-updates', 'Failed to fetch from Hermes:', err instanceof Error ? err.message : err)
+    logger.warn({ ctx: 'pyth-updates', err }, 'failed to fetch from Pyth Hermes')
     throw createError({ statusCode: 502, statusMessage: 'Failed to fetch from Pyth Hermes' })
   }
 })

@@ -61,7 +61,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 4. **Reactive State**: Vue 3 reactivity system for state management
 5. **Modular Design**: Well-defined boundaries between different system parts
 6. **Directory-based Modules**: Large composables and entity files are split into focused modules within directories (e.g., `useEulerOperations/`, `entities/vault/`, `composables/repay/`). Each directory has an `index.ts` re-exporting the public API
-7. **Centralized Error Handling**: `logWarn()` and `logError()` from `utils/errorHandling.ts` replace raw `console.warn`/`console.error` calls, enabling structured logging
+7. **Structured Logging**: a single `logger` API from `~/utils/logger` (console-backed shim, used by shared code) and `~/server/utils/logger` (pino, JSON to stdout for BetterStack on Fargate). Errors passed in `err` are summarised by `~/utils/viem-errors` so viem's `abi` / `metaMessages` / hex request bodies never leak. `~/utils/errorHandling` exposes a small `logWarn` helper for the long tail of client-side call sites; it routes through the same shared logger
 
 ## 🔄 Data Flow Architecture
 
@@ -100,7 +100,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 ├─────────────────────────────────────────────────────────────────┤
 │                    TypeScript + SCSS                            │
 ├─────────────────────────────────────────────────────────────────┤
-│              ESLint (flat config) + Playwright (E2E)            │
+│         ESLint (flat config) + Vitest (unit/integration)        │
 ├─────────────────────────────────────────────────────────────────┤
 │          simple-git-hooks + lint-staged (pre-commit)            │
 └─────────────────────────────────────────────────────────────────┘
@@ -302,8 +302,8 @@ This prevents re-fetching and re-rendering when users navigate between listing p
 
 The `useSlippage` composable (`composables/useSlippage.ts`) manages swap slippage tolerance with two safety features:
 
-- **24-hour expiry**: Custom slippage values above 0.5% automatically expire after 24 hours, reverting to the default. This prevents users from forgetting high slippage settings across sessions. Values at or below 0.5% never expire.
-- **Stablecoin defaults**: Swaps between two stablecoins (detected by "USD" in the token symbol) default to 0.1% slippage instead of the general 0.5% default, reducing unnecessary losses on stable-to-stable pairs.
+- **24-hour expiry**: Custom slippage values above 0.3% automatically expire after 24 hours, reverting to the default. This prevents users from forgetting high slippage settings across sessions. Values at or below 0.3% never expire.
+- **Stablecoin defaults**: Swaps between two stablecoins (detected by "USD" in the token symbol) default to 0.05% slippage instead of the general 0.3% default, reducing unnecessary losses on stable-to-stable pairs.
 
 The composable accepts optional `fromSymbol`/`toSymbol` getters to detect stablecoin pairs reactively. Slippage state is persisted to `localStorage` with a timestamp for expiry tracking.
 

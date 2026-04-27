@@ -2,7 +2,8 @@ import { getAddress } from 'viem'
 import type { Vault, EarnVault, SecuritizeVault } from './types'
 import { type FetchVaultContext, fetchVaults, fetchEarnVaults, fetchSecuritizeVault } from './fetcher'
 import { fetchEscrowVault } from './escrow-fetcher'
-import { logWarn } from '~/utils/errorHandling'
+import { logger } from '~/utils/logger'
+import { summarizeViemError } from '~/utils/viem-errors'
 
 /**
  * A full snapshot of the public vault set for one chain. Everything here is
@@ -86,14 +87,33 @@ export const loadChainSnapshot = async (input: LoadSnapshotInput): Promise<Chain
   ])
 
   const evkVaults: Vault[] = evkSettled.ok ? evkSettled.value : []
-  if (!evkSettled.ok) logWarn('loader/evk', evkSettled.err)
+  if (!evkSettled.ok) {
+    logger.warn({ ctx: 'loader/evk', chainId, err: evkSettled.err }, 'EVK vault fetch failed')
+  }
   const earnVaults: EarnVault[] = earnSettled.ok ? earnSettled.value : []
-  if (!earnSettled.ok) logWarn('loader/earn', earnSettled.err)
+  if (!earnSettled.ok) {
+    logger.warn({ ctx: 'loader/earn', chainId, err: earnSettled.err }, 'earn vault fetch failed')
+  }
 
+  // Per-securitize-vault errors share the same dedup logic as the earn loop in
+  // fetcher.ts: a single transport failure against the RPC produces N "failed"
+  // log lines otherwise. We let the first transport error log normally and drop
+  // the rest in this batch (genuine on-chain reverts still log because they
+  // aren't classified as transport).
   const securitizeVaults: SecuritizeVault[] = []
+  let securitizeTransportLogged = false
   securitizeSettled.forEach((r, i) => {
-    if (r.status === 'fulfilled') securitizeVaults.push(r.value)
-    else logWarn(`loader/securitize/${explorableSecuritize[i]}`, r.reason)
+    if (r.status === 'fulfilled') {
+      securitizeVaults.push(r.value)
+      return
+    }
+    const summary = summarizeViemError(r.reason)
+    if (summary.isTransport && securitizeTransportLogged) return
+    if (summary.isTransport) securitizeTransportLogged = true
+    logger.warn(
+      { ctx: 'loader/securitize', chainId, vault: explorableSecuritize[i], err: r.reason },
+      `securitize vault fetch failed: ${explorableSecuritize[i]}`,
+    )
   })
 
   // Phase 3: derive the escrow subset referenced by EVK collateral LTVs and
@@ -119,9 +139,20 @@ export const loadChainSnapshot = async (input: LoadSnapshotInput): Promise<Chain
     [...needed].map(a => fetchEscrowVault(a, ctx)),
   )
   const escrowVaults: Vault[] = []
+  let escrowTransportLogged = false
+  const neededAddresses = [...needed]
   escrowSettled.forEach((r, i) => {
-    if (r.status === 'fulfilled') escrowVaults.push(r.value)
-    else logWarn(`loader/escrow/${[...needed][i]}`, r.reason)
+    if (r.status === 'fulfilled') {
+      escrowVaults.push(r.value)
+      return
+    }
+    const summary = summarizeViemError(r.reason)
+    if (summary.isTransport && escrowTransportLogged) return
+    if (summary.isTransport) escrowTransportLogged = true
+    logger.warn(
+      { ctx: 'loader/escrow', chainId, vault: neededAddresses[i], err: r.reason },
+      `escrow vault fetch failed: ${neededAddresses[i]}`,
+    )
   })
 
   return {
