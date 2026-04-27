@@ -4,11 +4,18 @@ import {
   sortQuoteCards,
   pickBestQuote,
   getQuoteDiffPct,
+  computeQuoteSlippage,
 } from '~/utils/swapQuotes'
-import type { SwapApiQuote } from '~/entities/swap'
+import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 
 const makeQuote = (amountIn: string, amountOut: string): SwapApiQuote =>
   ({ amountIn, amountOut }) as SwapApiQuote
+
+const makeSlippageQuote = (amountOut: string, amountOutMin: string): SwapApiQuote =>
+  ({ amountOut, amountOutMin }) as SwapApiQuote
+
+const makeTargetDebtSlippageQuote = (amountIn: string, amountInMax: string): SwapApiQuote =>
+  ({ amountIn, amountInMax }) as SwapApiQuote
 
 describe('getQuoteAmount', () => {
   it('returns 0n for null quote', () => {
@@ -132,5 +139,71 @@ describe('getQuoteDiffPct', () => {
   it('returns null when quote is better than best in max mode', () => {
     // quoteAmount=200 > bestAmount=100 => diff = 100-200 = -100 <= 0 => null
     expect(getQuoteDiffPct(200n, 100n, 'max')).toBeNull()
+  })
+})
+
+describe('computeQuoteSlippage', () => {
+  it('returns null for null quote', () => {
+    expect(computeQuoteSlippage(null)).toBeNull()
+  })
+
+  it('returns null when amountOut is zero', () => {
+    expect(computeQuoteSlippage(makeSlippageQuote('0', '95'))).toBeNull()
+  })
+
+  it('returns null when amountOutMin is missing', () => {
+    expect(computeQuoteSlippage({ amountOut: '100' } as SwapApiQuote)).toBeNull()
+  })
+
+  it('returns null when amountOutMin is invalid', () => {
+    expect(computeQuoteSlippage(makeSlippageQuote('100', 'invalid'))).toBeNull()
+  })
+
+  it('returns 100 when amountOutMin is zero', () => {
+    expect(computeQuoteSlippage(makeSlippageQuote('100', '0'))).toBe(100)
+  })
+
+  it('returns 0 when amountOutMin matches amountOut', () => {
+    expect(computeQuoteSlippage(makeSlippageQuote('100', '100'))).toBe(0)
+  })
+
+  it('returns null when amountOutMin is greater than amountOut', () => {
+    expect(computeQuoteSlippage(makeSlippageQuote('100', '101'))).toBeNull()
+  })
+
+  it('derives the quote slippage percentage from amountOut and amountOutMin', () => {
+    expect(computeQuoteSlippage(makeSlippageQuote('1000', '995'))).toBe(0.5)
+  })
+
+  it('rounds down to basis-point precision', () => {
+    expect(computeQuoteSlippage(makeSlippageQuote('3333', '3300'))).toBe(0.99)
+  })
+
+  it('derives target debt quote slippage from amountIn and amountInMax', () => {
+    expect(computeQuoteSlippage(
+      makeTargetDebtSlippageQuote('1000', '1005'),
+      SwapperMode.TARGET_DEBT,
+    )).toBe(0.5)
+  })
+
+  it('returns 0 when target debt amountInMax matches amountIn', () => {
+    expect(computeQuoteSlippage(
+      makeTargetDebtSlippageQuote('1000', '1000'),
+      SwapperMode.TARGET_DEBT,
+    )).toBe(0)
+  })
+
+  it('returns null when target debt amountInMax is below amountIn', () => {
+    expect(computeQuoteSlippage(
+      makeTargetDebtSlippageQuote('1000', '999'),
+      SwapperMode.TARGET_DEBT,
+    )).toBeNull()
+  })
+
+  it('returns null when target debt amountInMax is missing', () => {
+    expect(computeQuoteSlippage(
+      { amountIn: '1000' } as SwapApiQuote,
+      SwapperMode.TARGET_DEBT,
+    )).toBeNull()
   })
 })

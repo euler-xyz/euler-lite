@@ -1,4 +1,4 @@
-import type { Address } from 'viem'
+import { maxUint256, type Address } from 'viem'
 import type { Vault, SecuritizeVault, BorrowVaultPair } from './types'
 import {
   vaultConvertToAssetsAbi,
@@ -6,6 +6,15 @@ import {
   vaultMaxWithdrawAbi,
   vaultPreviewWithdrawAbi,
 } from '~/abis/vault'
+import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
+
+export const isCyclicalNoteVault = (
+  vault: Vault | SecuritizeVault | null | undefined,
+): boolean => {
+  if (!vault || !('irmInfo' in vault)) return false
+  const type = vault.irmInfo?.interestRateModelInfo?.interestRateModelType
+  return typeof type === 'number' && type === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY
+}
 
 export const getBorrowVaultsByMap = (vaultsMap: Map<string, Vault>) => {
   const arr: BorrowVaultPair[] = []
@@ -120,4 +129,24 @@ export const getUtilization = (totalAssets: bigint, totalBorrow: bigint): number
 
 export const getVaultUtilization = (vault: Vault | SecuritizeVault): number => {
   return getUtilization(vault.totalAssets, vault.borrow)
+}
+
+const bigintPercentage = (numerator: bigint, denominator: bigint): number => {
+  const scale = 10n ** 2n
+  const fraction = (numerator * scale * 100n) / denominator
+  const whole = fraction / scale
+  const remainder = fraction % scale
+  return parseFloat(`${whole}.${remainder.toString().padStart(2, '0')}`)
+}
+
+export const getSupplyCapPercentage = (vault: Vault): number => {
+  if (vault.supplyCap >= maxUint256) return 0
+  if (vault.supplyCap === 0n) return vault.supply > 0n ? 100 : 0
+  return bigintPercentage(vault.supply, vault.supplyCap)
+}
+
+export const getBorrowCapPercentage = (vault: Vault): number => {
+  if (vault.borrowCap >= maxUint256) return 0
+  if (vault.borrowCap === 0n) return vault.borrow > 0n ? 100 : 0
+  return bigintPercentage(vault.borrow, vault.borrowCap)
 }

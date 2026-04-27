@@ -5,12 +5,12 @@ This guide covers the concrete steps and scripts needed to work on this reposito
 ## Prerequisites
 
 - Node.js 24+
-- npm (or yarn/pnpm if you prefer)
+- npm
 
 ## Install and run
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
@@ -41,23 +41,13 @@ npm run lint:fix      # Auto-fix lint errors
 npm run typecheck     # Type-check the project
 ```
 
-## End-to-End Testing
-
-The project includes [Playwright](https://playwright.dev/) for E2E testing:
-
-```bash
-npx playwright test                # Run all E2E tests
-npx playwright test --ui           # Run with interactive UI
-npx playwright show-report         # Show last test report
-```
-
 ## Project configuration
 
 - Nuxt config: `nuxt.config.ts`
   - Modules, SSR disabled, CSS, SVG sprite, runtimeConfig, dev server HTTPS, Vite SCSS additionalData.
 - TypeScript config: `tsconfig.json`
 - ESLint config: `eslint.config.mjs` (flat config format)
-- Playwright config: `playwright.config.ts`
+- Tests: `vitest.config.ts` + `tests/**/*.test.ts`
 - Git hooks: `simple-git-hooks` + `lint-staged` (configured in `package.json`)
 
 ## Environment variables

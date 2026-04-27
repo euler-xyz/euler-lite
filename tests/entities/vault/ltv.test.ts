@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest'
 import {
   getCurrentLiquidationLTV,
   isLiquidationLTVRamping,
+  isLiveCollateralEdge,
   getRampTimeRemaining,
+  type CollateralEdgeConfig,
   type LTVRampConfig,
 } from '~/entities/vault/ltv'
 
@@ -11,6 +13,12 @@ const makeLtv = (overrides: Partial<LTVRampConfig> = {}): LTVRampConfig => ({
   initialLiquidationLTV: 9000n, // started at 90%
   targetTimestamp: 2000n, // completes at t=2000
   rampDuration: 1000n, // takes 1000 seconds
+  ...overrides,
+})
+
+const makeEdge = (overrides: Partial<CollateralEdgeConfig> = {}): CollateralEdgeConfig => ({
+  ...makeLtv(),
+  borrowLTV: 7500n,
   ...overrides,
 })
 
@@ -90,6 +98,33 @@ describe('isLiquidationLTVRamping', () => {
   it('returns false when LTV equals initial (no change)', () => {
     const ltv = makeLtv({ liquidationLTV: 9000n, initialLiquidationLTV: 9000n })
     expect(isLiquidationLTVRamping(ltv, 1500n)).toBe(false)
+  })
+})
+
+describe('isLiveCollateralEdge', () => {
+  it('is live when borrowLTV > 0 and liquidation LTV is non-zero', () => {
+    expect(isLiveCollateralEdge(makeEdge(), 1500n)).toBe(true)
+  })
+
+  it('is live mid-ramp even when borrowLTV is already 0', () => {
+    // The exact case the bug fix addresses: curator started LTV ramp-down,
+    // borrowLTV is zeroed immediately, liquidation LTV is still > 0 mid-ramp.
+    const edge = makeEdge({ borrowLTV: 0n, liquidationLTV: 0n })
+    expect(getCurrentLiquidationLTV(edge, 1500n)).toBeGreaterThan(0n)
+    expect(isLiveCollateralEdge(edge, 1500n)).toBe(true)
+  })
+
+  it('is not live once both borrowLTV and the ramped liquidation LTV are 0', () => {
+    const edge = makeEdge({ borrowLTV: 0n, liquidationLTV: 0n })
+    // now=3000 > target=2000 → ramp complete
+    expect(isLiveCollateralEdge(edge, 3000n)).toBe(false)
+  })
+
+  it('is live when borrowLTV > 0 even after the liquidation ramp has completed at zero', () => {
+    // Defensive: shouldn't happen on chain (you can't borrow against a 0 liq
+    // LTV), but the predicate is symmetric — borrow alone keeps it live.
+    const edge = makeEdge({ borrowLTV: 1n, liquidationLTV: 0n })
+    expect(isLiveCollateralEdge(edge, 3000n)).toBe(true)
   })
 })
 

@@ -9,6 +9,7 @@ import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
 import { isOpDisabled, OP_BORROW, OP_DEPOSIT, OP_TRANSFER } from '~/utils/vault-hooks'
+import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
 
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
@@ -250,36 +251,32 @@ const debtAssetOptions = computed(() => {
 })
 
 const marketOptions = computed(() => {
-  return activeBorrowList.value.reduce((result, pair) => {
+  const counted = new Set<string>()
+  return buildTvlSortedOptions(activeBorrowList.value.flatMap((pair) => {
     const market = getProductByVault(pair.collateral.address)
+    if (!market.name) return []
+    const dedupKey = `${market.name}:${pair.borrow.address}`
+    const pairKey = getPairKey(pair)
+    const tvl = counted.has(dedupKey) ? 0 : (pairLiquidityUsd.value.get(pairKey) ?? 0) + (pairBorrowedUsd.value.get(pairKey) ?? 0)
+    counted.add(dedupKey)
     const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
     const entityObj = entityName ? entities[entityName] : null
-
-    if (market.name && !result.find(option => option.label === market.name)) {
-      return [...result, { label: market.name, value: market.name, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
-    }
-
-    return result
-  }, [] as { label: string, value: string, icon?: string, iconFallback?: string }[])
+    return [{ key: market.name, label: market.name, tvl, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
+  }))
 })
 
 const riskManagerOptions = computed(() => {
-  const seen = new Set<string>()
-  const result: { label: string, value: string, icon?: string, iconFallback?: string }[] = []
-  for (const pair of activeBorrowList.value) {
-    for (const entity of getEntitiesByVault(pair.borrow)) {
-      if (!seen.has(entity.name)) {
-        seen.add(entity.name)
-        result.push({
-          label: entity.name,
-          value: entity.name,
-          icon: entity.logo ? `/entities/${entity.logo}` : undefined,
-          iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined,
-        })
-      }
-    }
-  }
-  return result
+  const counted = new Set<string>()
+  return buildTvlSortedOptions(activeBorrowList.value.flatMap((pair) => {
+    const pairKey = getPairKey(pair)
+    const pairTvl = (pairLiquidityUsd.value.get(pairKey) ?? 0) + (pairBorrowedUsd.value.get(pairKey) ?? 0)
+    return getEntitiesByVault(pair.borrow).map((entity) => {
+      const dedupKey = `${entity.name}:${pair.borrow.address}`
+      const tvl = counted.has(dedupKey) ? 0 : pairTvl
+      counted.add(dedupKey)
+      return { key: entity.name, label: entity.name, tvl, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined }
+    })
+  }))
 })
 
 const filteredBorrowList = computed(() => {

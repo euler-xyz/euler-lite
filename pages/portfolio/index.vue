@@ -3,9 +3,11 @@ import { useAccount } from '@wagmi/vue'
 import { getSubAccountIndex } from '~/entities/account'
 
 const { isConnected, address } = useAccount()
+const { isSpyMode } = useSpyMode()
 const { borrowPositions, isPositionsLoaded, portfolioAddress } = useEulerAccount()
 const { isReady } = useVaults()
 
+const hasActiveSession = computed(() => isConnected.value || isSpyMode.value)
 const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
 
 const sortedBorrowPositions = computed(() => {
@@ -32,7 +34,7 @@ const sortedBorrowPositions = computed(() => {
       class="flex flex-1 p-8 rounded-12 border border-line-default bg-card"
     >
       <div
-        v-if="isConnected && (!isPositionsLoaded || (!isReady && sortedBorrowPositions.length === 0))"
+        v-if="hasActiveSession && (!isPositionsLoaded || (!isReady && sortedBorrowPositions.length === 0))"
         class="flex flex-1 justify-center items-center"
       >
         <UiLoader class="text-neutral-500 my-8" />
@@ -46,7 +48,7 @@ const sortedBorrowPositions = computed(() => {
           <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
             <SvgIcon name="search" />
           </div>
-          <template v-if="isConnected">
+          <template v-if="hasActiveSession">
             You don't have positions yet
           </template>
           <template v-else>

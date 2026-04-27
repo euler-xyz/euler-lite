@@ -1,7 +1,8 @@
 import { decodeFunctionResult, encodeFunctionData, getAddress } from 'viem'
 import { createTtlCache } from './cache'
 import { fetchWithTimeout } from './fetchWithTimeout'
-import { logWarn } from './log'
+import { INTERNAL_FETCH_HEADERS } from './internal-headers'
+import { logger } from '~/server/utils/logger'
 import { resolveRpcUrl } from './rpc'
 
 const CACHE_TTL_MS = 300_000
@@ -47,11 +48,11 @@ function addChecksum(set: Set<string>, value: unknown): void {
 }
 
 async function fetchLabels<T>(chainId: number, file: 'products.json' | 'earn-vaults.json'): Promise<T> {
-  return await $fetch<T>(`/api/labels/${file}`, { query: { chainId } })
+  return await $fetch<T>(`/api/labels/${file}`, { query: { chainId }, headers: INTERNAL_FETCH_HEADERS })
 }
 
 async function fetchEulerChains(): Promise<EulerChainConfig[]> {
-  const data = await $fetch<unknown>('/api/euler-chains')
+  const data = await $fetch<unknown>('/api/euler-chains', { headers: INTERNAL_FETCH_HEADERS })
   return Array.isArray(data) ? data as EulerChainConfig[] : []
 }
 
@@ -135,14 +136,20 @@ async function buildVerifiedSet(chainId: number): Promise<Set<string>> {
     collectEarnAddresses(earn.value, set)
   }
   else if (earn.status === 'rejected') {
-    logWarn('verified-vaults', `earn-vaults fetch failed for chain ${chainId}:`, earn.reason)
+    logger.warn(
+      { ctx: 'verified-vaults', chainId, err: earn.reason },
+      'earn-vaults fetch failed',
+    )
   }
 
   if (escrow.status === 'fulfilled') {
     for (const a of escrow.value) addChecksum(set, a)
   }
   else {
-    logWarn('verified-vaults', `escrow fetch failed for chain ${chainId}:`, escrow.reason)
+    logger.warn(
+      { ctx: 'verified-vaults', chainId, err: escrow.reason },
+      'escrow fetch failed',
+    )
   }
 
   return set
@@ -163,7 +170,7 @@ export async function getVerifiedAddressSet(chainId: number): Promise<Set<string
       return set
     }
     catch (err) {
-      logWarn('verified-vaults', `Rebuild failed for chain ${chainId}:`, err instanceof Error ? err.message : err)
+      logger.warn({ ctx: 'verified-vaults', chainId, err }, 'rebuild failed')
       const stale = cache.getStale(key)
       if (stale) return stale
       throw err

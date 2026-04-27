@@ -123,6 +123,7 @@ const swap = useSwapPageLogic({
       quote: selectedQuote.value,
       swapperMode: SwapperMode.EXACT_IN,
       isRepay: false,
+      requestedSlippage: slippage.value,
       targetDebt: 0n,
       currentDebt: 0n,
     })
@@ -138,7 +139,7 @@ const {
   isGeoBlocked, reviewSwapDisabled, reviewSwapLabel, simulationError,
   isQuoteLoading, quoteError, quotesStatusLabel, selectedProvider, selectedQuote,
   fromProduct, toProduct, currentPrice, swapSummary, priceImpact, routedVia,
-  swapRouteItems, swapRouteEmptyMessage,
+  quoteSlippage, swapRouteItems, swapRouteEmptyMessage,
   selectProvider, onFromInput, onToVaultChange, onRefreshQuotes, submit, openSlippageSettings,
 } = swap
 
@@ -148,6 +149,8 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (errorText.value) return { message: errorText.value, variant: 'error' }
   if (quoteError.value) return { message: quoteError.value, variant: 'warning' }
   if (simulationError.value) return { message: simulationError.value, variant: 'error' }
+  if (!isSameAsset.value && isQuoteLoading.value && +fromAmount.value > 0) return { message: 'Fetching swap quotes...', variant: 'warning' }
+  if (!isSameAsset.value && !selectedQuote.value && +fromAmount.value > 0) return { message: 'Select a swap quote to continue', variant: 'warning' }
   return undefined
 })
 
@@ -320,6 +323,7 @@ watch([() => route.params.vault, () => route.query.to], () => {
                 :output-display="swapSummary?.to ?? null"
                 :price-impact="priceImpact"
                 :slippage="slippage"
+                :quote-slippage="quoteSlippage"
                 :routed-via="routedVia"
                 @open-slippage-settings="openSlippageSettings"
               />

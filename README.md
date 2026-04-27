@@ -23,7 +23,7 @@ Euler Lite provides all the core functionality of Euler Finance in a customizabl
 ```bash
 git clone <repository-url>
 cd euler-lite
-npm install
+npm ci
 ```
 
 ### 2. Environment Configuration
@@ -327,7 +327,7 @@ Before deploying:
 ### Build Errors
 
 - Ensure Node.js version is 24+ (24.14.1 recommended)
-- Clear and reinstall: `rm -rf node_modules && npm install`
+- Clear and reinstall: `rm -rf node_modules && npm ci`
 
 ### Wallet Connection Issues
 

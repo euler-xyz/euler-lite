@@ -2,7 +2,7 @@ import { createError } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
-import { logWarn } from '~/server/utils/log'
+import { logger } from '~/server/utils/logger'
 
 const CACHE_TTL_MS = 300_000
 
@@ -40,7 +40,7 @@ export default defineEventHandler(async (event) => {
     return text
   }
   catch (err) {
-    logWarn('tos', 'Upstream fetch failed:', err instanceof Error ? err.message : err)
+    logger.warn({ ctx: 'tos', err }, 'upstream fetch failed')
 
     const stale = cache.getStale('tos')
     if (stale) return stale

@@ -1,6 +1,6 @@
 import { getAddress } from 'viem'
 import axios from 'axios'
-import { logWarn } from '~/utils/errorHandling'
+import { logger } from '~/utils/logger'
 import { SUBGRAPH_TIMEOUT_MS } from '~/entities/tuning-constants'
 
 export interface SubgraphPositionEntry {
@@ -44,7 +44,10 @@ export async function fetchAccountPositions(subgraphUrl: string, walletAddress: 
     }
   }
   catch (error) {
-    logWarn('subgraph/fetchPositions', error)
+    logger.warn(
+      { ctx: 'subgraph/fetchPositions', wallet: walletAddress, err: error },
+      'failed to fetch account positions from subgraph',
+    )
     return { borrows: [], deposits: [] }
   }
 }

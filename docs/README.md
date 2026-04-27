@@ -109,7 +109,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - **Styling**: SCSS with custom design system
 - **State Management**: Vue Composition API with composables
 - **Linting**: ESLint (flat config) with pre-commit hooks (simple-git-hooks + lint-staged)
-- **Testing**: Playwright (E2E)
+- **Testing**: Vitest (unit/integration)
 
 ## 🔗 Quick Links
 

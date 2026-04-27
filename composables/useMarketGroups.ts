@@ -1,4 +1,4 @@
-import type { Vault } from '~/entities/vault'
+import { fetchVaults, type Vault } from '~/entities/vault'
 import { logWarn } from '~/utils/errorHandling'
 import type { EulerLabelEntity, EulerLabelProduct } from '~/entities/euler/labels'
 import type { MarketGroup, MarketGroupMetrics, CuratorGroup } from '~/entities/lend-discovery'
@@ -6,6 +6,7 @@ import type { AnyVault } from '~/composables/useVaultRegistry'
 import { getVaultUtilization } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import { isVaultNotExplorable, isVaultFeatured } from '~/utils/eulerLabelsUtils'
+import { buildFetchContext } from '~/composables/useFetchContext'
 
 // -- Helpers --
 
@@ -97,6 +98,10 @@ const buildProductGroups = (
 
 // -- Step 2: Augment with Collateral Graph --
 
+// Module-scope dedupe so we warn at most once per (vault → missing-collateral)
+// pair across recomputes.
+const warnedMissingCollateral = new Set<string>()
+
 const augmentWithCollateralGraph = (
   groups: MarketGroup[],
   allVaults: AnyVault[],
@@ -116,14 +121,27 @@ const augmentWithCollateralGraph = (
     const seenExternal = new Set<string>()
 
     for (const vault of group.vaults) {
+      const vaultAddr = getVaultAddress(vault)
       const collateralAddrs = getCollateralAddresses(vault)
       for (const colAddr of collateralAddrs) {
         const normalized = colAddr.toLowerCase()
-        if (!groupAddresses.has(normalized) && !seenExternal.has(normalized)) {
-          const externalVault = vaultMap.get(normalized)
-          if (externalVault) {
-            externalCollateral.push(externalVault)
-            seenExternal.add(normalized)
+        if (groupAddresses.has(normalized) || seenExternal.has(normalized)) continue
+        const externalVault = vaultMap.get(normalized)
+        if (externalVault) {
+          externalCollateral.push(externalVault)
+          seenExternal.add(normalized)
+        }
+        else {
+          // Curator referenced a collateral vault that isn't loaded into the
+          // registry — silently dropping it would hide the relationship from
+          // every discovery view. Warn once per pair so the gap is visible.
+          const key = `${vaultAddr.toLowerCase()}:${normalized}`
+          if (!warnedMissingCollateral.has(key)) {
+            warnedMissingCollateral.add(key)
+            logWarn(
+              'useMarketGroups/missing-collateral',
+              `Group "${group.name}": vault ${vaultAddr} references unresolved collateral ${colAddr}`,
+            )
           }
         }
       }
@@ -428,6 +446,57 @@ export const useMarketGroups = () => {
     )
   }
 
+  /** Fetch a market group on demand for non-explorable products accessed via direct URL */
+  const fetchMarketGroupOnDemand = async (productKey: string): Promise<MarketGroup | null> => {
+    const product = products[productKey]
+    if (!product) return null
+
+    const allAddresses = [...product.vaults, ...(product.deprecatedVaults || [])]
+    if (allAddresses.length === 0) return null
+
+    const memberVaults: Vault[] = []
+
+    try {
+      const ctx = buildFetchContext()
+      for await (const result of fetchVaults(ctx, allAddresses)) {
+        memberVaults.push(...result.vaults)
+        if (result.isFinished) break
+      }
+    }
+    catch (e) {
+      logWarn('useMarketGroups/fetchMarketGroupOnDemand', e)
+    }
+
+    if (memberVaults.length === 0) return null
+
+    const entityKeys = Array.isArray(product.entity) ? product.entity : [product.entity]
+    const curatorKey = entityKeys[0] || undefined
+    const curator = curatorKey ? entities[curatorKey] : undefined
+
+    const group: MarketGroup = {
+      id: productKey,
+      name: product.name,
+      source: 'product',
+      curator,
+      curatorKey,
+      vaults: memberVaults,
+      externalCollateral: [],
+      metrics: computeMetricsSync(memberVaults),
+    }
+
+    // Augment with collateral graph using registry vaults + fetched vaults
+    const registryVaults = getAll().map(entry => entry.vault)
+    const [augmented] = augmentWithCollateralGraph([group], [...registryVaults, ...memberVaults])
+
+    try {
+      return await resolveGroupTVL(augmented)
+    }
+    catch (e) {
+      logWarn(`useMarketGroups/fetchMarketGroupOnDemand/resolveGroupTVL [${productKey}]`, e)
+      return augmented
+    }
+  }
+
   return {
     allVaults,
     marketGroups,
@@ -435,5 +504,6 @@ export const useMarketGroups = () => {
     curatorGroups,
     isResolvingTVL,
     getGroupForVault,
+    fetchMarketGroupOnDemand,
   }
 }

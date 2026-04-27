@@ -3,8 +3,8 @@ import { maxUint256, type Address } from 'viem'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { vaultConvertToAssetsAbi } from '~/abis/vault'
-import type { Vault } from '~/entities/vault'
-import { getSupplyCapPercentage, getBorrowCapPercentage } from '~/composables/useVaultWarnings'
+import { type Vault, getSupplyCapPercentage, getBorrowCapPercentage } from '~/entities/vault'
+import { CFG_DONT_SOCIALIZE_DEBT } from '~/entities/constants'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import {
   decodeHookedOps,
@@ -163,7 +163,7 @@ const openHooksModal = () => {
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue
         v-if="isBorrowable"
-        :value="vault.configFlags === 0n ? 'Yes' : 'No'"
+        :value="(vault.configFlags & CFG_DONT_SOCIALIZE_DEBT) === 0n ? 'Yes' : 'No'"
         orientation="horizontal"
       >
         <template #label>
