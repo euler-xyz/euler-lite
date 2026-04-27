@@ -1,12 +1,20 @@
 import type { Address, Hash, Hex, StateOverride } from 'viem'
-import { getAccount, simulateContract } from '@wagmi/vue/actions'
+import { getAccount, getCapabilities, sendCalls, simulateContract, waitForCallsStatus } from '@wagmi/vue/actions'
 import type { OperationsContext, AllowanceHelpers } from './types'
 import type { TxPlan } from '~/entities/txPlan'
-import { catchToFallback } from '~/utils/errorHandling'
+import { catchToFallback, logWarn } from '~/utils/errorHandling'
 import { isNonBlockingSimulationError } from '~/utils/tx-errors'
 import { applyOperationGuards } from '~/utils/operationGuardRegistry'
+import { extractCallsStatusHash, isUserRejectedRequestError, shouldUseAtomicCalls, toWalletCall } from '~/utils/eip5792'
 
 const OKX_POST_APPROVE_DELAY_MS = 3000
+
+class AtomicCallsSubmittedError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options)
+    this.name = 'AtomicCallsSubmittedError'
+  }
+}
 
 const isOkxWallet = async (connector?: { id?: string, name?: string, getProvider?: () => Promise<unknown> }) => {
   if (!connector) return false
@@ -44,17 +52,12 @@ export const createExecutionHelpers = (ctx: OperationsContext, allowanceHelpers:
     }
   }
 
-  const executeTxPlan = async (plan: TxPlan) => {
-    const { isSpyMode } = useSpyMode()
-    if (isSpyMode.value) {
-      throw new Error('Transactions are disabled in spy mode')
-    }
+  const refreshAfterExecution = () => {
+    triggerPortfolioRefresh()
+    setTimeout(triggerPortfolioRefresh, 5000)
+  }
 
-    if (!ctx.address.value) {
-      throw new Error('Wallet not connected')
-    }
-
-    const guardedPlan = applyOperationGuards(plan)
+  const executeSequentialTxPlan = async (guardedPlan: TxPlan) => {
     let lastHash: Hex | undefined
 
     for (const step of guardedPlan.steps) {
@@ -79,9 +82,90 @@ export const createExecutionHelpers = (ctx: OperationsContext, allowanceHelpers:
       }
     }
 
-    triggerPortfolioRefresh()
-    setTimeout(triggerPortfolioRefresh, 5000)
+    refreshAfterExecution()
     return lastHash
+  }
+
+  const shouldUseAtomicTxPlan = async (guardedPlan: TxPlan) => {
+    const chainId = ctx.chainId.value
+    if (!chainId) return false
+
+    const capabilities = await catchToFallback(
+      () => getCapabilities(ctx.config, { chainId }),
+      undefined,
+      'executeTxPlan/getCapabilities',
+    )
+
+    return shouldUseAtomicCalls({
+      stepCount: guardedPlan.steps.length,
+      capabilities,
+      chainId,
+    })
+  }
+
+  const executeAtomicTxPlan = async (guardedPlan: TxPlan): Promise<Hex | string> => {
+    const chainId = ctx.chainId.value
+    if (!chainId) {
+      throw new Error('Chain not connected')
+    }
+
+    const result = await sendCalls(ctx.config, {
+      chainId,
+      calls: guardedPlan.steps.map(toWalletCall),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- wagmi call tuple inference cannot follow runtime TxPlan arrays
+    } as any)
+
+    const callId = typeof result === 'string'
+      ? result
+      : (result as { id?: string }).id
+
+    if (!callId) {
+      throw new AtomicCallsSubmittedError('sendCalls did not return a call id after submission')
+    }
+
+    const status = await catchToFallback(
+      () => waitForCallsStatus(ctx.config, { id: callId }),
+      undefined,
+      'executeTxPlan/waitForCallsStatus',
+    )
+    if (!status) {
+      throw new AtomicCallsSubmittedError('Unable to confirm batched transaction status')
+    }
+    const statusValue = (status as { status?: unknown, statusCode?: unknown }).status
+    const statusCode = (status as { statusCode?: unknown }).statusCode
+
+    if (statusValue === 'failure' || (typeof statusCode === 'number' && statusCode >= 400)) {
+      throw new AtomicCallsSubmittedError('Batched transaction failed')
+    }
+
+    refreshAfterExecution()
+    return extractCallsStatusHash(status) ?? callId
+  }
+
+  const executeTxPlan = async (plan: TxPlan) => {
+    const { isSpyMode } = useSpyMode()
+    if (isSpyMode.value) {
+      throw new Error('Transactions are disabled in spy mode')
+    }
+
+    if (!ctx.address.value) {
+      throw new Error('Wallet not connected')
+    }
+
+    const guardedPlan = applyOperationGuards(plan)
+    if (await shouldUseAtomicTxPlan(guardedPlan)) {
+      try {
+        return await executeAtomicTxPlan(guardedPlan)
+      }
+      catch (err) {
+        if (err instanceof AtomicCallsSubmittedError || isUserRejectedRequestError(err)) {
+          throw err
+        }
+        logWarn('executeTxPlan/sendCalls', err)
+      }
+    }
+
+    return executeSequentialTxPlan(guardedPlan)
   }
 
   const simulateTxPlan = async (plan: TxPlan) => {

@@ -109,6 +109,17 @@ NUXT_PUBLIC_SUBGRAPH_URI_42161=https://api.goldsky.com/.../euler-simple-arbitrum
 
 The app scans for `RPC_URL_HTTP_<chainId>` env vars at server startup and automatically enables those chains. No code changes needed to add or remove chains.
 
+#### Base App In-App Browser
+
+Euler Lite remains a normal multichain web app, but it supports opening inside the Base App in-app browser. The wallet flow prefers the injected Base App provider when it is available, then falls back to the standard Reown AppKit modal for all other browsers and wallets.
+
+To make Base mainnet available in that environment, configure the same runtime chain variables used by every other chain:
+
+```bash
+RPC_URL_HTTP_8453=https://your-base-rpc.com
+NUXT_PUBLIC_SUBGRAPH_URI_8453=https://api.goldsky.com/.../euler-simple-base/latest/gn
+```
+
 ### 3. Customize Your Instance
 
 #### Theme Colors (`assets/styles/variables.scss`)
