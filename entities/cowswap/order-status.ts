@@ -38,10 +38,10 @@ export const resolveCowSwapOrderStatusType = (params: {
   orderType?: CowSwapLifecycleOrderStatusType
 }): CowSwapOrderStatusType => {
   // Terminal statuses from either source take priority
+  if (params.competitionType === 'traded') return 'traded'
   if (params.orderType === 'fulfilled') return 'fulfilled'
   if (params.orderType === 'cancelled') return 'cancelled'
   if (params.orderType === 'expired') return 'expired'
-  if (params.competitionType === 'traded') return 'traded'
   if (params.competitionType === 'cancelled') return 'cancelled'
   // Non-terminal competition statuses (active, solved, executing) are transient —
   // solvers reconsider orders every auction round, so 'active' doesn't mean
