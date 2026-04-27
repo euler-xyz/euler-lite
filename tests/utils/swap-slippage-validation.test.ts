@@ -27,7 +27,18 @@ const captureStdout = () => {
     restore: () => {
       process.stdout.write = originalWrite
     },
-    lines: () => captured.join('').split('\n').filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>),
+    lines: () => captured.join('')
+      .split('\n')
+      .map(line => line.trim())
+      .filter(Boolean)
+      .flatMap((line) => {
+        try {
+          return [JSON.parse(line) as Record<string, unknown>]
+        }
+        catch {
+          return []
+        }
+      }),
   }
 }
 
@@ -193,6 +204,8 @@ describe('swap quote slippage validation', () => {
           makeQuote({ amountOut: '2000000', amountOutMin: '999979' }),
         ),
       ).toThrow('amountOutMin exceeds requested slippage')
+
+      expect(validationLogLines(stdout)).toHaveLength(1)
     }
     finally {
       stdout.restore()
