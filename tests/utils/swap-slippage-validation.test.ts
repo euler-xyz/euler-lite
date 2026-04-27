@@ -18,8 +18,14 @@ const makeQuote = (overrides: Partial<SwapApiQuote>): SwapApiQuote => ({
 const captureStdout = () => {
   const captured: string[] = []
   const originalWrite = process.stdout.write.bind(process.stdout)
-  process.stdout.write = ((chunk: unknown) => {
-    captured.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk as Uint8Array).toString())
+  process.stdout.write = ((
+    chunk: string | Uint8Array,
+    encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+    callback?: (error?: Error | null) => void,
+  ) => {
+    captured.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString())
+    const writeCallback = typeof encodingOrCallback === 'function' ? encodingOrCallback : callback
+    writeCallback?.()
     return true
   }) as typeof process.stdout.write
 
