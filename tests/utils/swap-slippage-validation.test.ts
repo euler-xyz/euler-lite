@@ -45,6 +45,16 @@ const captureStdout = () => {
 const validationLogLines = (capture: ReturnType<typeof captureStdout>) =>
   capture.lines().filter(line => line.ctx === 'swapQuoteSlippage')
 
+const withCapturedStdout = <T>(callback: (stdout: ReturnType<typeof captureStdout>) => T): T => {
+  const stdout = captureStdout()
+  try {
+    return callback(stdout)
+  }
+  finally {
+    stdout.restore()
+  }
+}
+
 describe('swap quote slippage validation', () => {
   it('rounds output slippage down like the SDK', () => {
     expect(applySlippageToOutput(950n, 0.5)).toBe(945n)
@@ -63,10 +73,8 @@ describe('swap quote slippage validation', () => {
     ).toThrow('Valid slippage between 0 and 50% must be provided for swap')
   })
 
-  it('rejects amountOutMin below requested slippage', () => {
-    const stdout = captureStdout()
-
-    try {
+  it('rejects amountOutMin below requested slippage', () =>
+    withCapturedStdout((stdout) => {
       expect(() =>
         validateSwapQuoteSlippageData(
           { slippage: 0.5, swapperMode: SwapperMode.EXACT_IN },
@@ -92,16 +100,10 @@ describe('swap quote slippage validation', () => {
       })
       expect(line.data).not.toHaveProperty('quote')
       expect(line.data).not.toHaveProperty('fullQuote')
-    }
-    finally {
-      stdout.restore()
-    }
-  })
+    }))
 
-  it('rejects amountInMax above requested slippage for target debt', () => {
-    const stdout = captureStdout()
-
-    try {
+  it('rejects amountInMax above requested slippage for target debt', () =>
+    withCapturedStdout((stdout) => {
       expect(() =>
         validateSwapQuoteSlippageData(
           { slippage: 0.5, swapperMode: SwapperMode.TARGET_DEBT },
@@ -127,16 +129,10 @@ describe('swap quote slippage validation', () => {
       })
       expect(line.data).not.toHaveProperty('quote')
       expect(line.data).not.toHaveProperty('fullQuote')
-    }
-    finally {
-      stdout.restore()
-    }
-  })
+    }))
 
-  it('allows output slippage up to the validator divergence tolerance', () => {
-    const stdout = captureStdout()
-
-    try {
+  it('allows output slippage up to the validator divergence tolerance', () =>
+    withCapturedStdout((stdout) => {
       // At slippage 0.5%, validator forgives up to +0.001pp absolute, so a quote
       // with amountOutMin = floor(2_000_000 * (1 - 0.00501)) = 1989980 must pass.
       expect(() =>
@@ -163,16 +159,10 @@ describe('swap quote slippage validation', () => {
           status: 'failed',
         }),
       })
-    }
-    finally {
-      stdout.restore()
-    }
-  })
+    }))
 
-  it('allows input slippage up to the validator divergence tolerance', () => {
-    const stdout = captureStdout()
-
-    try {
+  it('allows input slippage up to the validator divergence tolerance', () =>
+    withCapturedStdout((stdout) => {
       // At slippage 0.5%, validator forgives up to +0.001pp absolute, so a quote
       // with amountInMax = floor(2_000_000 * (1 + 0.00501)) = 2010020 must pass.
       expect(() =>
@@ -199,18 +189,12 @@ describe('swap quote slippage validation', () => {
           status: 'failed',
         }),
       })
-    }
-    finally {
-      stdout.restore()
-    }
-  })
+    }))
 
-  it('keeps validator divergence tolerance tiny at MAX_SLIPPAGE', () => {
-    const stdout = captureStdout()
-
-    // At MAX_SLIPPAGE = 50%, the validator forgives 0.001pp for rounding:
-    // boundary amountOutMin = floor(2_000_000 * (1 - 0.50001)) = 999_980.
-    try {
+  it('keeps validator divergence tolerance tiny at MAX_SLIPPAGE', () =>
+    withCapturedStdout((stdout) => {
+      // At MAX_SLIPPAGE = 50%, the validator forgives 0.001pp for rounding:
+      // boundary amountOutMin = floor(2_000_000 * (1 - 0.50001)) = 999_980.
       expect(() =>
         validateSwapQuoteSlippageData(
           { slippage: 50, swapperMode: SwapperMode.EXACT_IN },
@@ -234,9 +218,5 @@ describe('swap quote slippage validation', () => {
           status: 'failed',
         }),
       })
-    }
-    finally {
-      stdout.restore()
-    }
-  })
+    }))
 })
