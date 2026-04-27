@@ -42,8 +42,11 @@ const executionLabel = computed(() => {
 
 const orderStatusLabel = computed(() => {
   if (isCancelPending.value) return 'Cancelling order'
-  if (props.locallyCancelled) return 'Order cancelled'
-  if (!props.orderStatus) return 'Waiting for solver...'
+  if (!props.orderStatus) {
+    return props.locallyCancelled
+      ? 'Cancellation submitted — checking order status...'
+      : 'Waiting for solver...'
+  }
   switch (props.orderStatus.type) {
     case 'open': return 'Order open — waiting for solver...'
     case 'active': return 'Solver found — executing...'
@@ -61,7 +64,7 @@ const orderStatusDescription = computed(() => {
   if (isCancelPending.value) {
     return 'We are cancelling the swap order.'
   }
-  if (props.locallyCancelled) {
+  if (props.locallyCancelled && !props.orderStatus?.terminal) {
     return 'The cancellation request was submitted. CoW order status may take a moment to update.'
   }
   return undefined
