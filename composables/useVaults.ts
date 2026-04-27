@@ -42,6 +42,7 @@ const isEscrowLoadedOnce = ref(false)
 // Incremented in resetVaultsState(); any async operation capturing an older generation
 // must stop registering vaults.
 const loadGeneration = ref(0)
+const MAX_LAZY_COLLATERAL_RESOLVE_PASSES = 4
 
 const contextForGeneration = (gen: number) =>
   buildFetchContext(() => loadGeneration.value !== gen)
@@ -326,6 +327,30 @@ const fetchUnresolvedCollaterals = async (addresses: string[], generation: numbe
   ])
 }
 
+const resolveUnresolvedCollateralGraph = async (generation: number): Promise<void> => {
+  const { getEvkVaults, has: registryHas } = useVaultRegistry()
+  const attempted = new Set<string>()
+
+  for (let pass = 0; pass < MAX_LAZY_COLLATERAL_RESOLVE_PASSES; pass++) {
+    if (loadGeneration.value !== generation) return
+
+    const unresolvedAddresses = extractUnresolvedCollateralAddresses(
+      getEvkVaults(),
+      registryHas,
+    ).filter((addr) => {
+      if (isVaultNotExplorable(addr)) return false
+      const key = addr.toLowerCase()
+      if (attempted.has(key)) return false
+      attempted.add(key)
+      return true
+    })
+
+    if (!unresolvedAddresses.length) return
+
+    await fetchUnresolvedCollaterals(unresolvedAddresses, generation)
+  }
+}
+
 const updateSecuritizeVaults = async (securitizeAddresses: string[], generation: number, silent = false) => {
   const { setMany: registrySetMany } = useVaultRegistry()
 
@@ -561,20 +586,13 @@ const loadVaults = async () => {
 
     if (loadGeneration.value !== generation) return
 
-    // After bulk loaders + escrow lazy-fetch settle, sweep up any collateral
-    // address referenced by a member vault that isn't yet in the registry.
-    // These are typically EVK vaults that exist on chain but aren't part of
-    // any product label — without this, discovery views silently drop the
-    // relationship. Single pass is enough: discovery views iterate only
-    // member vaults, so a resolved off-label vault is a leaf in those views;
-    // any second-hop unknowns will surface as diagnostic warns and resolve
-    // on the next loadVaults cycle.
-    const { getEvkVaults, has: registryHas } = useVaultRegistry()
-    const unresolvedAddresses = extractUnresolvedCollateralAddresses(
-      getEvkVaults(),
-      registryHas,
-    ).filter(addr => !isVaultNotExplorable(addr))
-    await fetchUnresolvedCollaterals(unresolvedAddresses, generation)
+    // After bulk loaders + escrow lazy-fetch settle, sweep up collateral
+    // addresses referenced by loaded EVK vaults that are not yet in the
+    // registry. These are typically EVK vaults that exist on chain but are
+    // not part of any product label. Resolve in bounded passes so newly
+    // loaded off-label vaults can contribute their own live collateral edges
+    // without risking an unbounded crawl.
+    await resolveUnresolvedCollateralGraph(generation)
 
     if (loadGeneration.value !== generation) return
 
