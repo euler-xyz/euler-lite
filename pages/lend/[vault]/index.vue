@@ -18,6 +18,7 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
+import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
 import SecuritizeVaultOverview from '~/components/entities/vault/overview/SecuritizeVaultOverview.vue'
@@ -69,6 +70,7 @@ const reviewSupplyLabel = 'Review Supply'
 useFullBalances()
 const { buildSupplyPlan, buildSwapAndSupplyPlan, executeTxPlan } = useEulerOperations()
 const { getVault, getSecuritizeVault, getEscrowVault, updateVault, isEscrowLoadedOnce } = useVaults()
+const { isReady: isLabelsReady } = useEulerLabels()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
 const { isConnected, address } = useAccount()
 const { chainId } = useEulerAddresses()
@@ -128,6 +130,7 @@ const {
   requestQuotes: requestSwapQuotes,
   selectProvider: selectSwapQuote,
 } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+const swapQuoteSlippage = computed(() => computeQuoteSlippage(swapEffectiveQuote.value))
 
 // Vault data - only one will be populated based on type
 const evkVault: Ref<Vault | undefined> = ref(undefined)
@@ -161,6 +164,12 @@ const needsRefresh = (v: Vault | undefined): boolean => {
   const isSecuritize = await isSecuritizeVault(vaultAddress)
 
   if (isSecuritize) {
+    // Wait for labels so `verified` is set correctly on direct navigation.
+    // Otherwise getSecuritizeVault falls through to a direct fetch with
+    // empty verifiedVaultAddresses and returns verified: false.
+    if (!isLabelsReady.value) {
+      await until(isLabelsReady).toBe(true)
+    }
     securitizeVault.value = await getSecuritizeVault(vaultAddress)
   }
   else {
@@ -172,9 +181,13 @@ const needsRefresh = (v: Vault | undefined): boolean => {
       if (registryEntry?.type === 'evk') {
         evkVault.value = registryEntry.vault as Vault
       }
-      // Escrow vaults haven't loaded yet - wait for them
-      else if (!isEscrowLoadedOnce.value) {
-        await until(isEscrowLoadedOnce).toBe(true)
+      else {
+        // Wait for labels (so `verified` is set correctly) AND for the escrow
+        // address set (so isKnownEscrowAddress can dispatch) before resolving.
+        await Promise.all([
+          isLabelsReady.value ? null : until(isLabelsReady).toBe(true),
+          isEscrowLoadedOnce.value ? null : until(isEscrowLoadedOnce).toBe(true),
+        ])
         const entryAfterLoad = registryGet(normalizedAddress)
         if (entryAfterLoad?.type === 'evk') {
           evkVault.value = entryAfterLoad.vault as Vault
@@ -185,14 +198,6 @@ const needsRefresh = (v: Vault | undefined): boolean => {
         else {
           evkVault.value = await getVault(vaultAddress)
         }
-      }
-      // Escrow vaults loaded - check if known escrow address
-      else if (isKnownEscrowAddress(normalizedAddress)) {
-        evkVault.value = await getEscrowVault(vaultAddress) as Vault
-      }
-      // Regular vault
-      else {
-        evkVault.value = await getVault(vaultAddress)
       }
 
       // Load any collateral vaults that aren't already in registry
@@ -305,6 +310,8 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (evkVault.value && isOpDisabled(evkVault.value, OP_DEPOSIT)) return { message: 'Deposits are currently disabled for this vault', variant: 'warning' }
   if (isSupplyCapReached.value) return { message: 'Supply cap has been reached', variant: 'warning' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
+  if (needsSwap.value && isSwapQuoteLoading.value && +amount.value > 0) return { message: 'Fetching swap quotes...', variant: 'warning' }
+  if (needsSwap.value && !swapSelectedQuote.value && +amount.value > 0) return { message: 'Select a swap quote to continue', variant: 'warning' }
   return undefined
 })
 const totalRewardsAPY = computed(() => getSupplyRewardApy(vaultAddress))
@@ -392,6 +399,7 @@ const buildSwapSupplyPlanFromQuote = async (quote: SwapApiQuote, options: { incl
     inputTokenAddress: (wrappedAddress || selectedAsset.value.address) as Address,
     inputAmount,
     quote,
+    requestedSlippage: swapSlippage.value,
     includePermit2Call: options.includePermit2Call,
     wrappedNativeInfo: isNative && wrappedAddress
       ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
@@ -598,6 +606,7 @@ const swapOutputDisplay = computed(() => {
 })
 
 const swapRoutedVia = computed(() => {
+  if (!swapSelectedProvider.value) return 'Not selected'
   if (!swapEffectiveQuote.value?.route?.length) return null
   return swapEffectiveQuote.value.route.map((r: { providerName: string }) => r.providerName).join(', ')
 })
@@ -896,6 +905,7 @@ watch(address, () => {
                   :output-display="swapOutputDisplay"
                   :price-impact="swapPriceImpact"
                   :slippage="swapSlippage"
+                  :quote-slippage="swapQuoteSlippage"
                   :routed-via="swapRoutedVia"
                   @open-slippage-settings="openSlippageSettings"
                 />

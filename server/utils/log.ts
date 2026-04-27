@@ -1,10 +1,4 @@
-/**
- * Server-side structured logging utility.
- * Mirrors the client-side logWarn pattern from utils/errorHandling.ts.
- */
-export function logWarn(context: string, ...args: unknown[]): void {
-  console.warn(`[${context}]`, ...args)
-}
+import { logger } from '~/server/utils/logger'
 
 /**
  * Transition-based status logger for warm-cache upstream probes.
@@ -42,11 +36,13 @@ export function reportStatus(
 
   if (status === 'ok') {
     if (prev && prev !== 'ok') {
-      console.info(`[${context}]`, `${key} recovered (was: ${prev})`)
+      logger.info({ ctx: context, key, status, prevStatus: prev }, `${key} recovered`)
     }
     return
   }
 
-  const suffix = prev && prev !== 'ok' ? ` (was: ${prev})` : ''
-  console.warn(`[${context}]`, (message ?? `${key} status=${status}`) + suffix)
+  logger.warn(
+    { ctx: context, key, status, ...(prev && prev !== 'ok' ? { prevStatus: prev } : {}) },
+    message ?? `${key} status=${status}`,
+  )
 }

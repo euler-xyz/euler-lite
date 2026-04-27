@@ -2,6 +2,7 @@ import type { EulerLabelEntity, EulerLabelProduct, EulerLabelPointReward } from 
 import type { OracleAdapterMeta } from '~/entities/oracle'
 
 export const isLoading = ref(false)
+export const isReady = ref(false)
 
 // Use a simple object to track loaded state (survives HMR better than ref)
 export const loadState = { chainId: null as number | null, timestamp: 0 }
@@ -39,3 +40,10 @@ export const verifiedVaultAddresses: Ref<string[]> = ref([])
 export const oracleAdapters = shallowReactive<Record<string, OracleAdapterMeta>>({})
 
 export const loadingAdapters = new Set<string>()
+
+// Per-chain bulk-load state for the oracle-adapters all.json fetch.
+// loadedAt tracks when we last loaded the bulk payload per chain so we can
+// time-bound staleness. pendingBulkLoads holds in-flight promises so
+// concurrent callers share a request.
+export const bulkLoadedAdapterChains = new Map<number, number>()
+export const pendingBulkAdapterLoads = new Map<number, Promise<void>>()

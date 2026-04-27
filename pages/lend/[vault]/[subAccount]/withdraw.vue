@@ -21,6 +21,7 @@ import type { TxPlan } from '~/entities/txPlan'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { SwapperMode } from '~/entities/swap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
+import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { formatNumber, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -90,7 +91,10 @@ const needsSwap = computed(() => {
     return false
   }
 })
-const { slippage: swapSlippage } = useSlippage()
+const { slippage: swapSlippage } = useSlippage({
+  fromSymbol: () => asset.value?.symbol,
+  toSymbol: () => selectedOutputAsset.value?.symbol,
+})
 const {
   sortedQuoteCards: swapQuoteCardsSorted,
   selectedProvider: swapSelectedProvider,
@@ -104,6 +108,7 @@ const {
   requestQuotes: requestSwapQuotes,
   selectProvider: selectSwapQuote,
 } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+const swapQuoteSlippage = computed(() => computeQuoteSlippage(swapEffectiveQuote.value))
 
 const rewardApy = computed(() => getSupplyRewardApy(vault.value?.address || ''))
 const amountFixed = computed(() => {
@@ -122,7 +127,7 @@ const isSubmitDisabled = computed(() => {
   if (assetsBalance.value < amountFixed.value.value) return true
   if (isLoading.value || amountFixed.value.isZero() || amountFixed.value.isNegative()) return true
   if (estimatesError.value) return true
-  if (needsSwap.value && !swapEffectiveQuote.value && !isSwapQuoteLoading.value) return true
+  if (needsSwap.value && !swapSelectedQuote.value && !isSwapQuoteLoading.value) return true
   return false
 })
 const reviewWithdrawDisabled = isSubmitDisabled
@@ -130,6 +135,8 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return { message: 'Withdrawals are currently disabled for this vault', variant: 'warning' }
   if (estimatesError.value) return { message: estimatesError.value, variant: 'error' }
   if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return { message: 'Insufficient balance', variant: 'error' }
+  if (needsSwap.value && isSwapQuoteLoading.value && !amountFixed.value.isZero()) return { message: 'Fetching swap quotes...', variant: 'warning' }
+  if (needsSwap.value && !swapSelectedQuote.value && !amountFixed.value.isZero()) return { message: 'Select a swap quote to continue', variant: 'warning' }
   return undefined
 })
 const supplyAPYDisplay = computed(() => {
@@ -180,6 +187,7 @@ const swapOutputDisplay = computed(() => {
 })
 
 const swapRoutedVia = computed(() => {
+  if (!swapSelectedProvider.value) return 'Not selected'
   if (!swapEffectiveQuote.value?.route?.length) return null
   return swapEffectiveQuote.value.route.map((r: { providerName: string }) => r.providerName).join(', ')
 })
@@ -328,12 +336,13 @@ const submit = async () => {
       const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
 
       try {
-        if (needsSwap.value && swapEffectiveQuote.value) {
+        if (needsSwap.value && swapSelectedQuote.value) {
           if (isMax) {
             plan.value = await buildRedeemAndSwapPlan({
               vaultAddress: vaultAddress as Address,
               sharesAmount: sharesBalance.value,
-              quote: swapEffectiveQuote.value,
+              quote: swapSelectedQuote.value,
+              requestedSlippage: swapSlippage.value,
               subAccount: subAccount.value,
             })
           }
@@ -341,7 +350,8 @@ const submit = async () => {
             plan.value = await buildWithdrawAndSwapPlan({
               vaultAddress: vaultAddress as Address,
               assetsAmount: amountFixed.value.value,
-              quote: swapEffectiveQuote.value,
+              quote: swapSelectedQuote.value,
+              requestedSlippage: swapSlippage.value,
               subAccount: subAccount.value,
             })
           }
@@ -395,13 +405,14 @@ const send = async () => {
     const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
     let txPlan: TxPlan
 
-    if (needsSwap.value && (swapSelectedQuote.value || swapEffectiveQuote.value)) {
-      const quote = swapSelectedQuote.value || swapEffectiveQuote.value!
+    if (needsSwap.value && swapSelectedQuote.value) {
+      const quote = swapSelectedQuote.value
       if (isMax) {
         txPlan = await buildRedeemAndSwapPlan({
           vaultAddress: vaultAddress as Address,
           sharesAmount: sharesBalance.value,
           quote,
+          requestedSlippage: swapSlippage.value,
           subAccount: subAccount.value,
         })
       }
@@ -410,6 +421,7 @@ const send = async () => {
           vaultAddress: vaultAddress as Address,
           assetsAmount: amountFixed.value.value,
           quote,
+          requestedSlippage: swapSlippage.value,
           subAccount: subAccount.value,
         })
       }
@@ -612,6 +624,7 @@ watch(swapSelectedQuote, () => {
                   :output-display="swapOutputDisplay"
                   :price-impact="swapPriceImpact"
                   :slippage="swapSlippage"
+                  :quote-slippage="swapQuoteSlippage"
                   :routed-via="swapRoutedVia"
                   @open-slippage-settings="openSlippageSettings"
                 />

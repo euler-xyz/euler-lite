@@ -27,6 +27,7 @@ import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
+import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { calculateRoe, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
 import { computeMaxMultiplier, computeMinMultiplier, computeWeightedSupplyApy, computeLeverageDebt } from '~/utils/multiply-math'
 import type { TxPlan } from '~/entities/txPlan'
@@ -37,7 +38,7 @@ import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 
-type MultiplyPlanParams = {
+type MultiplyPlanParamsCommon = {
   supplyVaultAddress: string
   supplyAssetAddress: string
   supplyAmount: bigint
@@ -47,10 +48,12 @@ type MultiplyPlanParams = {
   longAssetAddress: string
   borrowVaultAddress: string
   debtAmount: bigint
-  quote?: SwapApiQuote
   swapperMode: SwapperMode
   subAccount: string
 }
+type MultiplyPlanParams
+  = | (MultiplyPlanParamsCommon & { quote: SwapApiQuote, requestedSlippage: number })
+    | (MultiplyPlanParamsCommon & { quote?: undefined, requestedSlippage?: never })
 
 export interface UseMultiplyFormOptions {
   pair: Ref<AnyBorrowVaultPair | undefined>
@@ -118,6 +121,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     requestQuotes: requestMultiplyQuotes,
     selectProvider: selectMultiplyQuote,
   } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+  const multiplyQuoteSlippage = computed(() => computeQuoteSlippage(multiplyEffectiveQuote.value))
 
   // --- Form state ---
   const multiplyInputAmount = ref('')
@@ -138,7 +142,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
   // --- Collateral options ---
   const { collateralOptions: multiplyCollateralOptions, collateralVaults: multiplyCollateralVaults } = useMultiplyCollateralOptions({
-    currentVault: multiplySupplyVault,
+    primaryCollateralVault: multiplyLongVault,
     liabilityVault: multiplyShortVault,
   })
 
@@ -511,7 +515,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   )
 
   const multiplyRoutedVia = computed(() => {
-    if (isMultiplyQuoteLoading.value) return null
+    if (!multiplySelectedProvider.value) return isMultiplyQuoteLoading.value ? null : 'Not selected'
     if (!multiplyEffectiveQuote.value?.route?.length) return null
     return multiplyEffectiveQuote.value.route.map(route => route.providerName).join(', ')
   })
@@ -770,7 +774,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         return
       }
 
-      const planParams: MultiplyPlanParams = {
+      const baseParams: MultiplyPlanParamsCommon = {
         supplyVaultAddress: multiplySupplyVault.value.address,
         supplyAssetAddress: multiplySupplyVault.value.asset.address,
         supplyAmount: supplyAmountNano,
@@ -780,10 +784,12 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         longAssetAddress: multiplyLongVault.value.asset.address,
         borrowVaultAddress: multiplyShortVault.value.address,
         debtAmount,
-        quote: quote || undefined,
         swapperMode: SwapperMode.EXACT_IN,
         subAccount,
       }
+      const planParams: MultiplyPlanParams = quote
+        ? { ...baseParams, quote, requestedSlippage: multiplySlippage.value }
+        : baseParams
       multiplyPlanParams.value = planParams
 
       try {
@@ -979,6 +985,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     isMultiplyQuoteLoading,
     multiplyQuoteError,
     multiplyQuotesStatusLabel,
+    multiplyQuoteSlippage,
     selectMultiplyQuote,
 
     // USD values

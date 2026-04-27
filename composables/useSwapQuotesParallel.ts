@@ -38,16 +38,30 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   const sortedQuoteCards = computed(() =>
     sortQuoteCards(quoteCards.value, options.amountField, options.compare),
   )
-  const bestQuote = computed(() => sortedQuoteCards.value[0]?.quote || null)
+  const bestQuoteCard = computed(() => sortedQuoteCards.value[0] || null)
+  const bestQuote = computed(() => bestQuoteCard.value?.quote || null)
   const bestAmount = computed(() => getQuoteAmount(bestQuote.value, options.amountField))
-  const selectedQuote = computed(() => {
+  const selectedQuoteCard = computed(() => {
     if (!selectedProvider.value) {
       return null
     }
     const match = quoteCards.value.find(card => card.provider === selectedProvider.value)
-    return match?.quote || null
+    return match || null
   })
-  const effectiveQuote = computed(() => selectedQuote.value || bestQuote.value)
+  const selectedQuote = computed(() => selectedQuoteCard.value?.quote || null)
+  const effectiveQuoteCard = computed<SwapQuoteCard | null>((previous) => {
+    const next = selectedQuoteCard.value || bestQuoteCard.value
+    if (
+      previous
+      && next
+      && previous.provider === next.provider
+      && previous.quote === next.quote
+    ) {
+      return previous
+    }
+    return next
+  })
+  const effectiveQuote = computed(() => effectiveQuoteCard.value?.quote || null)
   const statusLabel = computed(() => {
     if (!providersCount.value) {
       return null
@@ -186,6 +200,9 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   }
 
   const selectProvider = (provider: string) => {
+    if (selectedProvider.value === provider) {
+      return
+    }
     selectedProvider.value = provider
   }
 

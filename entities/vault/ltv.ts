@@ -3,6 +3,9 @@ import type { VaultCollateralLTV } from './types'
 /** Shared LTV ramp config fields used by both VaultCollateralLTV and BorrowVaultPair */
 export type LTVRampConfig = Pick<VaultCollateralLTV, 'liquidationLTV' | 'initialLiquidationLTV' | 'targetTimestamp' | 'rampDuration'>
 
+/** A collateral edge with both borrow side and liquidation-ramp config — covers VaultCollateralLTV. */
+export type CollateralEdgeConfig = LTVRampConfig & Pick<VaultCollateralLTV, 'borrowLTV'>
+
 /**
  * Calculate the current liquidation LTV, taking into account ramping.
  * When liquidation LTV is lowered, it ramps down linearly from initialLiquidationLTV
@@ -38,6 +41,27 @@ export const isLiquidationLTVRamping = (ltv: LTVRampConfig, nowSeconds?: bigint)
   // Ramping down if: not yet at target timestamp AND target is less than initial (ramping DOWN)
   return now < ltv.targetTimestamp && ltv.liquidationLTV < ltv.initialLiquidationLTV
 }
+
+/**
+ * Is this collateral edge still "live" from the protocol's perspective?
+ *
+ * True if either:
+ * - the edge accepts new borrows (borrowLTV > 0), or
+ * - the current (interpolated) liquidation LTV is still > 0 — i.e. positions
+ *   opened before the ramp are still being wound down rather than fully closed.
+ *
+ * Use this everywhere the UI asks "should this collateral relationship be visible
+ * / loaded / counted?". An LTV ramp-down sets borrowLTV to 0 immediately while
+ * liquidation LTV ramps over time, so a `borrowLTV > 0` check alone drops live
+ * mid-ramp edges (escrows, etc.) from discovery.
+ *
+ * This is the **edge-level** predicate (no collateral vault object available).
+ * For the borrow-side overview block, see `isLiveExposure` in
+ * `./collateral-exposure` — it additionally checks the collateral vault's
+ * `totalAssets`, so the two predicates are deliberately not equivalent.
+ */
+export const isLiveCollateralEdge = (ltv: CollateralEdgeConfig, nowSeconds?: bigint): boolean =>
+  ltv.borrowLTV > 0n || getCurrentLiquidationLTV(ltv, nowSeconds) > 0n
 
 /**
  * Get the time remaining until ramping completes (in seconds)

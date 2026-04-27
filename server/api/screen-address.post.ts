@@ -1,7 +1,7 @@
 import { createError, readBody } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { UPSTREAM_FETCH_TIMEOUT_MS } from '~/server/utils/fetchWithTimeout'
-import { logWarn } from '~/server/utils/log'
+import { logger } from '~/server/utils/logger'
 import { isAbortError } from '~/utils/errorHandling'
 
 const rateLimiter = createRateLimiter({
@@ -29,7 +29,7 @@ export default defineEventHandler(async (event) => {
   const screeningUri = process.env.WALLET_SCREENING_URI
 
   if (!screeningUri) {
-    logWarn('screen-address', 'WALLET_SCREENING_URI is not set — failing closed')
+    logger.warn({ ctx: 'screen-address' }, 'WALLET_SCREENING_URI is not set — failing closed')
     return { addressIsSuspicious: true }
   }
 
@@ -45,7 +45,7 @@ export default defineEventHandler(async (event) => {
     })
 
     if (!resp.ok) {
-      logWarn('screen-address', 'TRM API returned', resp.status, '— failing closed')
+      logger.warn({ ctx: 'screen-address', status: resp.status }, 'TRM API non-ok response — failing closed')
       return { addressIsSuspicious: true }
     }
 
@@ -53,17 +53,17 @@ export default defineEventHandler(async (event) => {
     const isSuspicious = Boolean(data?.addressIsSuspicious)
 
     if (isSuspicious) {
-      logWarn('screen-address', 'Flagged address:', address)
+      logger.warn({ ctx: 'screen-address', address }, 'flagged address')
     }
 
     return { addressIsSuspicious: isSuspicious }
   }
   catch (error) {
     if (isAbortError(error)) {
-      logWarn('screen-address', 'TRM API timeout — failing closed')
+      logger.warn({ ctx: 'screen-address' }, 'TRM API timeout — failing closed')
     }
     else {
-      logWarn('screen-address', 'TRM API error — failing closed:', error)
+      logger.warn({ ctx: 'screen-address', err: error }, 'TRM API error — failing closed')
     }
     return { addressIsSuspicious: true }
   }

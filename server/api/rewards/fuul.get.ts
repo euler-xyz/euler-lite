@@ -8,7 +8,7 @@
  */
 import { createError, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
-import { logWarn } from '~/server/utils/log'
+import { reportStatus } from '~/server/utils/log'
 import { resolveChainId } from '~/server/utils/resolve-chain-id'
 import {
   type FuulProtocol,
@@ -48,11 +48,16 @@ export default defineEventHandler(async (event) => {
   const euler = eulerResult.status === 'fulfilled' ? eulerResult.value : []
   const looping = loopingResult.status === 'fulfilled' ? loopingResult.value : []
 
-  if (eulerResult.status === 'rejected') {
-    logWarn('rewards-fuul', `euler cold fetch failed chain=${chainId}:`, eulerResult.reason instanceof Error ? eulerResult.reason.message : eulerResult.reason)
-  }
-  if (loopingResult.status === 'rejected') {
-    logWarn('rewards-fuul', `euler-looping cold fetch failed chain=${chainId}:`, loopingResult.reason instanceof Error ? loopingResult.reason.message : loopingResult.reason)
+  for (const protocol of FUUL_PROTOCOLS) {
+    const result = protocol === 'euler' ? eulerResult : loopingResult
+    if (result.status === 'rejected') {
+      const msg = result.reason instanceof Error ? result.reason.message : String(result.reason)
+      reportStatus('rewards-fuul', `cold-path:${protocol}:${chainId}`, `failed:${msg}`,
+        `${protocol} cold fetch failed chain=${chainId}: ${msg}`)
+    }
+    else {
+      reportStatus('rewards-fuul', `cold-path:${protocol}:${chainId}`, 'ok')
+    }
   }
 
   if (eulerResult.status === 'rejected' && loopingResult.status === 'rejected') {

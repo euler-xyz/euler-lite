@@ -2,7 +2,7 @@
 import { getAddress } from 'viem'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { type AnyBorrowVaultPair, type Vault, getVaultUtilization } from '~/entities/vault'
+import { type AnyBorrowVaultPair, type Vault, getVaultUtilization, isCyclicalNoteVault } from '~/entities/vault'
 import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
@@ -94,6 +94,7 @@ const isPairEffectivelyBlocked = computed(() => {
 
 const isFeatured = computed(() => isVaultFeatured(pair.collateral.address) || isVaultFeatured(pair.borrow.address))
 const isKeyring = computed(() => isVaultKeyring(pair.collateral.address) || isVaultKeyring(pair.borrow.address))
+const isCyclicalNote = computed(() => isCyclicalNoteVault(pair.borrow))
 
 const isAnyDeprecated = computed(() => {
   const collateralAddr = getAddress(pair.collateral.address)
@@ -271,6 +272,7 @@ const linkPath = computed(() => ({
             </span>
             <KeyringBadge v-if="isKeyring" />
             <GovernanceLimitedBadge v-if="isAnyGovernanceLimited" />
+            <CyclicalNoteBadge v-if="isCyclicalNote" />
             <RestrictedBadge
               v-if="isGeoBlocked"
               variant="blocked"

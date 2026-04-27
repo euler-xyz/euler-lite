@@ -4,6 +4,7 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import type { CollateralOption, Vault } from '~/entities/vault'
 import { buildCollateralOption, computeSupplyApy } from '~/utils/collateralOptions'
 import { useReactiveMap } from '~/composables/useReactiveMap'
+import { shouldIncludeWalletCollateral } from '~/utils/collateralFilters'
 
 type CollateralItem = {
   vault: Vault
@@ -11,10 +12,10 @@ type CollateralItem = {
 }
 
 export const useMultiplyCollateralOptions = ({
-  currentVault,
+  primaryCollateralVault,
   liabilityVault,
 }: {
-  currentVault: Ref<Vault | undefined>
+  primaryCollateralVault: Ref<Vault | undefined>
   liabilityVault?: Ref<Vault | undefined>
 }) => {
   const { getVault } = useVaultRegistry()
@@ -23,9 +24,9 @@ export const useMultiplyCollateralOptions = ({
   const { withIntrinsicSupplyApy, version: intrinsicVersion } = useIntrinsicApy()
   const { getSupplyRewardApy, version: rewardsVersion } = useRewardsApy()
 
-  const currentVaultAddress = computed(() => {
-    const current = currentVault.value
-    return current ? getAddress(current.address) : ''
+  const primaryCollateralAddress = computed(() => {
+    const primary = primaryCollateralVault.value
+    return primary ? getAddress(primary.address) : ''
   })
 
   const walletItemsInput = computed(() => {
@@ -42,9 +43,11 @@ export const useMultiplyCollateralOptions = ({
         if (!vault) return
 
         const balance = getBalance(vault.asset.address as Address)
-        const isCurrent = currentVaultAddress.value
-          && getAddress(vault.address) === currentVaultAddress.value
-        if (!balance && !isCurrent) return
+        if (!shouldIncludeWalletCollateral({
+          balance,
+          vaultAddress: vault.address as Address,
+          primaryCollateralAddress: primaryCollateralAddress.value as Address | '',
+        })) return
 
         items.push({ vault, balance })
       })

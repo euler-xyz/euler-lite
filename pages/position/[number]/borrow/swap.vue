@@ -224,6 +224,7 @@ const swap = useSwapPageLogic({
       quote: selectedQuote.value,
       swapperMode: SwapperMode.TARGET_DEBT,
       isRepay: true,
+      requestedSlippage: slippage.value,
       isDebtSwap: true,
       targetDebt: 0n,
       currentDebt: currentDebt.value,
@@ -251,7 +252,7 @@ const {
   isGeoBlocked, reviewSwapDisabled, reviewSwapLabel, simulationError,
   isQuoteLoading, quoteError, quotesStatusLabel, selectedProvider, selectedQuote,
   fromProduct, toProduct, swapPriceInvert, currentPrice, swapSummary, priceImpact, routedVia,
-  swapRouteItems, swapRouteEmptyMessage,
+  quoteSlippage, swapRouteItems, swapRouteEmptyMessage,
   selectProvider, onFromInput: _onFromInput, onRefreshQuotes, submit, openSlippageSettings,
   normalizeAddress, clearSimulationError, requestQuote,
 } = swap
@@ -263,6 +264,8 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (healthError.value) return { message: healthError.value, variant: 'error' }
   if (quoteError.value) return { message: quoteError.value, variant: 'warning' }
   if (simulationError.value) return { message: simulationError.value, variant: 'error' }
+  if (!isSameAsset.value && isQuoteLoading.value && +fromAmount.value > 0) return { message: 'Fetching swap quotes...', variant: 'warning' }
+  if (!isSameAsset.value && !selectedQuote.value && +fromAmount.value > 0) return { message: 'Select a swap quote to continue', variant: 'warning' }
   return undefined
 })
 
@@ -549,6 +552,7 @@ const onToVaultChange = (selectedIndex: number) => {
               :output-display="swapSummary?.to ?? null"
               :price-impact="priceImpact"
               :slippage="slippage"
+              :quote-slippage="quoteSlippage"
               :routed-via="routedVia"
               @open-slippage-settings="openSlippageSettings"
             />

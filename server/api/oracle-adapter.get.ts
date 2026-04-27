@@ -2,7 +2,7 @@ import { createError, getQuery } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
-import { logWarn } from '~/server/utils/log'
+import { logger } from '~/server/utils/logger'
 
 const CACHE_TTL_MS = 300_000
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
@@ -63,7 +63,7 @@ export default defineEventHandler(async (event) => {
     return data
   }
   catch (err) {
-    logWarn('oracle-adapter', `Failed to fetch ${address} for chain ${chainId}:`, err instanceof Error ? err.message : err)
+    logger.warn({ ctx: 'oracle-adapter', chainId, address, err }, 'failed to fetch oracle adapter')
 
     const stale = cache.getStale(key)
     if (stale !== undefined) return stale
