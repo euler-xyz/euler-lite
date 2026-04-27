@@ -6,9 +6,8 @@ import { type SwapApiQuote, SwapperMode, SwapVerificationType } from '~/entities
 import { logWarn } from '~/utils/errorHandling'
 
 // Absolute extra slippage (in percentage points) the validator forgives to absorb
-// BigInt rounding between the swap API and the SDK. Must stay strictly below
-// SLIPPAGE_DIFF_TOLERANCE in SwapDetailsSummary so the user-facing warning never
-// fires on a quote the validator has accepted.
+// BigInt rounding between the swap API and the SDK. Keep this intentionally tiny
+// so accepted verifier bounds cannot drift materially beyond the selected tolerance.
 const VALIDATION_DIVERGENCE_TOLERANCE_PP = 0.001
 
 type SwapQuoteSlippageValidationContext = {

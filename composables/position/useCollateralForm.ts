@@ -34,7 +34,6 @@ import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { formatSmartAmount } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { isOpDisabled, OP_DEPOSIT, OP_WITHDRAW } from '~/utils/vault-hooks'
 import { getHookDisabledWarning } from '~/composables/useVaultWarnings'
@@ -162,8 +161,6 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     requestQuotes: requestSwapQuotes,
     selectProvider: selectSwapQuote,
   } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
-  const swapQuoteSlippage = computed(() => computeQuoteSlippage(swapEffectiveQuote.value))
-
   // --- Position/vault computeds ---
   const position = computed(() => getPositionBySubAccountIndex(+positionIndex))
   const isPositionLoaded = computed(() => !!position.value)
@@ -768,7 +765,6 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     swapSelectedProvider,
     swapSelectedQuote,
     swapEffectiveQuote,
-    swapQuoteSlippage,
     swapProvidersCount,
     isSwapQuoteLoading,
     swapQuoteError,
