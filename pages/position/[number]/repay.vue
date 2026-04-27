@@ -625,7 +625,6 @@ watch(formTab, () => {
                 :output-display="walletSwap.swapOutputDisplay.value"
                 :price-impact="walletSwap.swapPriceImpact.value"
                 :slippage="slippage"
-                :quote-slippage="walletSwap.quoteSlippage.value"
                 :routed-via="walletSwap.swapRoutedVia.value"
                 @open-slippage-settings="openSlippageSettings"
               />
@@ -809,7 +808,6 @@ watch(formTab, () => {
                 :output-display="collateral.summary.value?.to ?? null"
                 :price-impact="collateral.priceImpact.value"
                 :slippage="slippage"
-                :quote-slippage="collateral.quoteSlippage.value"
                 :routed-via="collateral.routedVia.value"
                 @open-slippage-settings="openSlippageSettings"
               />
@@ -985,7 +983,6 @@ watch(formTab, () => {
                 :output-display="savings.summary.value?.to ?? null"
                 :price-impact="savings.priceImpact.value"
                 :slippage="slippage"
-                :quote-slippage="savings.quoteSlippage.value"
                 :routed-via="savings.routedVia.value"
                 @open-slippage-settings="openSlippageSettings"
               />

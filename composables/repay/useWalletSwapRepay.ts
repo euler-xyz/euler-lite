@@ -18,7 +18,6 @@ import { amountToPercent, percentToAmountNano } from '~/utils/repayUtils'
 import { SwapperMode } from '~/entities/swap'
 import { createRaceGuard } from '~/utils/race-guard'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
-import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
 import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
@@ -85,8 +84,6 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
   // --- Swap quotes (dual-direction) ---
   const quotes = useSwapRepayQuotes({ direction })
-  const quoteSlippage = computed(() => computeQuoteSlippage(quotes.effectiveQuote.value, direction.value))
-
   // --- Derived ---
   const needsSwap = computed(() => {
     if (!selectedAsset.value || !borrowVault.value) return false
@@ -808,7 +805,6 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     swapInputDisplay,
     swapOutputDisplay,
     swapRoutedVia,
-    quoteSlippage,
     swapPriceImpact,
     swapRouteItems,
     isFullRepay,

@@ -549,7 +549,6 @@ watch(formTab, () => {
                       :output-display="borrow.borrowSwapOutputDisplay.value"
                       :price-impact="borrow.borrowSwapPriceImpact.value"
                       :slippage="borrow.borrowSwapSlippage.value"
-                      :quote-slippage="borrow.borrowSwapQuoteSlippage.value"
                       :routed-via="borrow.borrowSwapRoutedVia.value"
                       @open-slippage-settings="openSlippageSettings"
                     />
@@ -861,7 +860,6 @@ watch(formTab, () => {
                         :output-display="multiply.multiplySwapSummary.value?.to ?? null"
                         :price-impact="multiply.multiplyPriceImpact.value"
                         :slippage="multiply.multiplySlippage.value"
-                        :quote-slippage="multiply.multiplyQuoteSlippage.value"
                         :routed-via="multiply.multiplyRoutedVia.value"
                         :multiplied-price-impact="multiply.multipliedPriceImpact.value"
                         @open-slippage-settings="openSlippageSettings"

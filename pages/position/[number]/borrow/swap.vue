@@ -252,7 +252,7 @@ const {
   isGeoBlocked, reviewSwapDisabled, reviewSwapLabel, simulationError,
   isQuoteLoading, quoteError, quotesStatusLabel, selectedProvider, selectedQuote,
   fromProduct, toProduct, swapPriceInvert, currentPrice, swapSummary, priceImpact, routedVia,
-  quoteSlippage, swapRouteItems, swapRouteEmptyMessage,
+  swapRouteItems, swapRouteEmptyMessage,
   selectProvider, onFromInput: _onFromInput, onRefreshQuotes, submit, openSlippageSettings,
   normalizeAddress, clearSimulationError, requestQuote,
 } = swap
@@ -552,7 +552,6 @@ const onToVaultChange = (selectedIndex: number) => {
               :output-display="swapSummary?.to ?? null"
               :price-impact="priceImpact"
               :slippage="slippage"
-              :quote-slippage="quoteSlippage"
               :routed-via="routedVia"
               @open-slippage-settings="openSlippageSettings"
             />

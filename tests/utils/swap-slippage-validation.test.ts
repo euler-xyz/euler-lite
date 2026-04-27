@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { SwapperMode, type SwapApiQuote } from '~/entities/swap'
 import {
   applySlippageToInput,
@@ -17,31 +17,51 @@ const makeQuote = (overrides: Partial<SwapApiQuote>): SwapApiQuote => ({
 
 const captureStdout = () => {
   const captured: string[] = []
-  const orig = process.stdout.write.bind(process.stdout)
-  process.stdout.write = ((chunk: unknown) => {
-    captured.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk as Uint8Array).toString())
+  const originalWrite = process.stdout.write
+  process.stdout.write = ((
+    chunk: string | Uint8Array,
+    encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+    callback?: (error?: Error | null) => void,
+  ) => {
+    captured.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString())
+    const writeCallback = typeof encodingOrCallback === 'function' ? encodingOrCallback : callback
+    writeCallback?.()
     return true
   }) as typeof process.stdout.write
+
   return {
     restore: () => {
-      process.stdout.write = orig
+      process.stdout.write = originalWrite
     },
-    lines: () => captured.join('').split('\n').filter(Boolean).map(l => JSON.parse(l) as Record<string, unknown>),
+    lines: () => captured.join('')
+      .split('\n')
+      .map(line => line.trim())
+      .filter(Boolean)
+      .flatMap((line) => {
+        try {
+          return [JSON.parse(line) as Record<string, unknown>]
+        }
+        catch {
+          return []
+        }
+      }),
+  }
+}
+
+const validationLogLines = (capture: ReturnType<typeof captureStdout>) =>
+  capture.lines().filter(line => line.ctx === 'swapQuoteSlippage')
+
+const withCapturedStdout = <T>(callback: (stdout: ReturnType<typeof captureStdout>) => T): T => {
+  const stdout = captureStdout()
+  try {
+    return callback(stdout)
+  }
+  finally {
+    stdout.restore()
   }
 }
 
 describe('swap quote slippage validation', () => {
-  let cap: ReturnType<typeof captureStdout>
-
-  beforeEach(() => {
-    cap = captureStdout()
-  })
-
-  afterEach(() => {
-    cap.restore()
-    vi.restoreAllMocks()
-  })
-
   it('rounds output slippage down like the SDK', () => {
     expect(applySlippageToOutput(950n, 0.5)).toBe(945n)
   })
@@ -59,123 +79,156 @@ describe('swap quote slippage validation', () => {
     ).toThrow('Valid slippage between 0 and 50% must be provided for swap')
   })
 
-  it('rejects amountOutMin below requested slippage', () => {
-    expect(() =>
-      validateSwapQuoteSlippageData(
-        { slippage: 0.5, swapperMode: SwapperMode.EXACT_IN },
-        makeQuote({ amountOutMin: '944' }),
-      ),
-    ).toThrow('amountOutMin exceeds requested slippage')
+  it('rejects amountOutMin below requested slippage', () =>
+    withCapturedStdout((stdout) => {
+      expect(() =>
+        validateSwapQuoteSlippageData(
+          { slippage: 0.5, swapperMode: SwapperMode.EXACT_IN },
+          makeQuote({ amountOutMin: '944' }),
+        ),
+      ).toThrow('amountOutMin exceeds requested slippage')
 
-    const lines = cap.lines()
-    expect(lines).toHaveLength(1)
-    expect(lines[0]).toMatchObject({
-      level: 'warn',
-      app: 'euler-lite',
-      ctx: 'swapQuoteSlippage',
-      msg: 'Swap quote exceeds requested slippage',
-      data: expect.objectContaining({
-        actualSlippage: '0.6315%',
-        checkedAmount: '944',
-        expectedAmount: '945',
-        field: 'amountOutMin',
-        mode: 'output',
-        requestedSlippage: '0.5%',
-        route: 'test-provider',
-      }),
-    })
-    expect(lines[0].data).not.toHaveProperty('quote')
-    expect(lines[0].data).not.toHaveProperty('fullQuote')
-  })
+      const lines = validationLogLines(stdout)
+      expect(lines).toHaveLength(1)
+      const line = lines[0]
+      expect(line).toMatchObject({
+        level: 'warn',
+        app: 'euler-lite',
+        ctx: 'swapQuoteSlippage',
+        msg: 'Swap quote exceeds requested slippage',
+        data: expect.objectContaining({
+          actualSlippage: '0.6315%',
+          checkedAmount: '944',
+          expectedAmount: '945',
+          field: 'amountOutMin',
+          mode: 'output',
+          requestedSlippage: '0.5%',
+          route: 'test-provider',
+        }),
+      })
+      expect(line.data).not.toHaveProperty('quote')
+      expect(line.data).not.toHaveProperty('fullQuote')
+    }))
 
-  it('rejects amountInMax above requested slippage for target debt', () => {
-    expect(() =>
-      validateSwapQuoteSlippageData(
-        { slippage: 0.5, swapperMode: SwapperMode.TARGET_DEBT },
-        makeQuote({ amountInMax: '1007' }),
-      ),
-    ).toThrow('amountInMax exceeds requested slippage')
+  it('rejects amountInMax above requested slippage for target debt', () =>
+    withCapturedStdout((stdout) => {
+      expect(() =>
+        validateSwapQuoteSlippageData(
+          { slippage: 0.5, swapperMode: SwapperMode.TARGET_DEBT },
+          makeQuote({ amountInMax: '1007' }),
+        ),
+      ).toThrow('amountInMax exceeds requested slippage')
 
-    const lines = cap.lines()
-    expect(lines).toHaveLength(1)
-    expect(lines[0]).toMatchObject({
-      level: 'warn',
-      app: 'euler-lite',
-      ctx: 'swapQuoteSlippage',
-      msg: 'Swap quote exceeds requested slippage',
-      data: expect.objectContaining({
-        actualSlippage: '0.7000%',
-        checkedAmount: '1007',
-        expectedAmount: '1006',
-        field: 'amountInMax',
-        mode: 'input',
-        requestedSlippage: '0.5%',
-        route: 'test-provider',
-      }),
-    })
-    expect(lines[0].data).not.toHaveProperty('quote')
-    expect(lines[0].data).not.toHaveProperty('fullQuote')
-  })
+      const lines = validationLogLines(stdout)
+      expect(lines).toHaveLength(1)
+      const line = lines[0]
+      expect(line).toMatchObject({
+        level: 'warn',
+        app: 'euler-lite',
+        ctx: 'swapQuoteSlippage',
+        msg: 'Swap quote exceeds requested slippage',
+        data: expect.objectContaining({
+          actualSlippage: '0.7000%',
+          checkedAmount: '1007',
+          expectedAmount: '1006',
+          field: 'amountInMax',
+          mode: 'input',
+          requestedSlippage: '0.5%',
+          route: 'test-provider',
+        }),
+      })
+      expect(line.data).not.toHaveProperty('quote')
+      expect(line.data).not.toHaveProperty('fullQuote')
+    }))
 
-  it('allows output slippage up to the validator divergence tolerance', () => {
-    // At slippage 0.5%, validator forgives up to +0.001pp absolute, so a quote
-    // with amountOutMin = floor(2_000_000 * (1 - 0.00501)) = 1989980 must pass.
-    expect(() =>
-      validateSwapQuoteSlippageData(
-        { slippage: 0.5, swapperMode: SwapperMode.EXACT_IN },
-        makeQuote({ amountOut: '2000000', amountOutMin: '1989980' }),
-      ),
-    ).not.toThrow()
+  it('allows output slippage up to the validator divergence tolerance', () =>
+    withCapturedStdout((stdout) => {
+      // At slippage 0.5%, validator forgives up to +0.001pp absolute, so a quote
+      // with amountOutMin = floor(2_000_000 * (1 - 0.00501)) = 1989980 must pass.
+      expect(() =>
+        validateSwapQuoteSlippageData(
+          { slippage: 0.5, swapperMode: SwapperMode.EXACT_IN },
+          makeQuote({ amountOut: '2000000', amountOutMin: '1989980' }),
+        ),
+      ).not.toThrow()
 
-    // One wei below the boundary must fail.
-    expect(() =>
-      validateSwapQuoteSlippageData(
-        { slippage: 0.5, swapperMode: SwapperMode.EXACT_IN },
-        makeQuote({ amountOut: '2000000', amountOutMin: '1989979' }),
-      ),
-    ).toThrow('amountOutMin exceeds requested slippage')
+      // One wei below the boundary must fail.
+      expect(() =>
+        validateSwapQuoteSlippageData(
+          { slippage: 0.5, swapperMode: SwapperMode.EXACT_IN },
+          makeQuote({ amountOut: '2000000', amountOutMin: '1989979' }),
+        ),
+      ).toThrow('amountOutMin exceeds requested slippage')
 
-    expect(cap.lines()).toHaveLength(1)
-  })
+      const lines = validationLogLines(stdout)
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toMatchObject({
+        data: expect.objectContaining({
+          checkedAmount: '1989979',
+          field: 'amountOutMin',
+          status: 'failed',
+        }),
+      })
+    }))
 
-  it('allows input slippage up to the validator divergence tolerance', () => {
-    // At slippage 0.5%, validator forgives up to +0.001pp absolute, so a quote
-    // with amountInMax = floor(2_000_000 * (1 + 0.00501)) = 2010020 must pass.
-    expect(() =>
-      validateSwapQuoteSlippageData(
-        { slippage: 0.5, swapperMode: SwapperMode.TARGET_DEBT },
-        makeQuote({ amountIn: '2000000', amountInMax: '2010020' }),
-      ),
-    ).not.toThrow()
+  it('allows input slippage up to the validator divergence tolerance', () =>
+    withCapturedStdout((stdout) => {
+      // At slippage 0.5%, validator forgives up to +0.001pp absolute, so a quote
+      // with amountInMax = floor(2_000_000 * (1 + 0.00501)) = 2010020 must pass.
+      expect(() =>
+        validateSwapQuoteSlippageData(
+          { slippage: 0.5, swapperMode: SwapperMode.TARGET_DEBT },
+          makeQuote({ amountIn: '2000000', amountInMax: '2010020' }),
+        ),
+      ).not.toThrow()
 
-    // One wei above the boundary must fail.
-    expect(() =>
-      validateSwapQuoteSlippageData(
-        { slippage: 0.5, swapperMode: SwapperMode.TARGET_DEBT },
-        makeQuote({ amountIn: '2000000', amountInMax: '2010021' }),
-      ),
-    ).toThrow('amountInMax exceeds requested slippage')
+      // One wei above the boundary must fail.
+      expect(() =>
+        validateSwapQuoteSlippageData(
+          { slippage: 0.5, swapperMode: SwapperMode.TARGET_DEBT },
+          makeQuote({ amountIn: '2000000', amountInMax: '2010021' }),
+        ),
+      ).toThrow('amountInMax exceeds requested slippage')
 
-    expect(cap.lines()).toHaveLength(1)
-  })
+      const lines = validationLogLines(stdout)
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toMatchObject({
+        data: expect.objectContaining({
+          checkedAmount: '2010021',
+          field: 'amountInMax',
+          status: 'failed',
+        }),
+      })
+    }))
 
-  it('keeps validator tolerance below SwapDetailsSummary warning threshold at MAX_SLIPPAGE', () => {
-    // SLIPPAGE_DIFF_TOLERANCE in SwapDetailsSummary is 0.005pp. The validator
-    // must allow strictly less so a quote it accepts never trips the user-facing
-    // warning. At MAX_SLIPPAGE = 50%, the validator forgives 0.001pp → boundary
-    // amountOutMin = floor(2_000_000 * (1 - 0.50001)) = 999_980.
-    expect(() =>
-      validateSwapQuoteSlippageData(
-        { slippage: 50, swapperMode: SwapperMode.EXACT_IN },
-        makeQuote({ amountOut: '2000000', amountOutMin: '999980' }),
-      ),
-    ).not.toThrow()
+  it('keeps validator tolerance below SwapDetailsSummary warning threshold at MAX_SLIPPAGE', () =>
+    withCapturedStdout((stdout) => {
+      // SLIPPAGE_DIFF_TOLERANCE in SwapDetailsSummary is 0.005pp. The validator
+      // must allow strictly less so a quote it accepts never trips the user-facing
+      // warning. At MAX_SLIPPAGE = 50%, the validator forgives 0.001pp:
+      // boundary amountOutMin = floor(2_000_000 * (1 - 0.50001)) = 999_980.
+      expect(() =>
+        validateSwapQuoteSlippageData(
+          { slippage: 50, swapperMode: SwapperMode.EXACT_IN },
+          makeQuote({ amountOut: '2000000', amountOutMin: '999980' }),
+        ),
+      ).not.toThrow()
 
-    expect(() =>
-      validateSwapQuoteSlippageData(
-        { slippage: 50, swapperMode: SwapperMode.EXACT_IN },
-        makeQuote({ amountOut: '2000000', amountOutMin: '999979' }),
-      ),
-    ).toThrow('amountOutMin exceeds requested slippage')
-  })
+      expect(() =>
+        validateSwapQuoteSlippageData(
+          { slippage: 50, swapperMode: SwapperMode.EXACT_IN },
+          makeQuote({ amountOut: '2000000', amountOutMin: '999979' }),
+        ),
+      ).toThrow('amountOutMin exceeds requested slippage')
+
+      const lines = validationLogLines(stdout)
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toMatchObject({
+        data: expect.objectContaining({
+          checkedAmount: '999979',
+          field: 'amountOutMin',
+          status: 'failed',
+        }),
+      })
+    }))
 })
