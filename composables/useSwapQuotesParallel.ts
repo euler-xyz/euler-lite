@@ -284,15 +284,22 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
 
       let rateLimitedCount = 0
       const client = rpcClient.value
-      // Prefer EIP-1559 fee estimation (baseFee * 2 + tip) — matches wallet
-      // "market" tier. Falls back to legacy eth_gasPrice for non-1559 chains.
+      // Prefer an EIP-1559 wallet-style fee cap: baseFee * 2 + tip.
+      // Falls back to legacy eth_gasPrice for non-1559 chains.
       const fetchGasPrice = async (): Promise<bigint | undefined> => {
         if (!client) return undefined
         try {
-          const fees = await client.estimateFeesPerGas()
-          return 'maxFeePerGas' in fees
-            ? fees.maxFeePerGas
-            : (fees as { gasPrice: bigint }).gasPrice
+          const [fees, block] = await Promise.all([
+            client.estimateFeesPerGas(),
+            client.getBlock(),
+          ])
+
+          if ('maxFeePerGas' in fees) {
+            return typeof block.baseFeePerGas === 'bigint'
+              ? block.baseFeePerGas * 2n + fees.maxPriorityFeePerGas
+              : fees.maxFeePerGas
+          }
+          return (fees as { gasPrice: bigint }).gasPrice
         }
         catch {
           return client.getGasPrice().catch(() => undefined)
