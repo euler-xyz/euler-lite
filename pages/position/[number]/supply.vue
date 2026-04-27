@@ -96,7 +96,7 @@ const form = useCollateralForm({
     })
   },
 
-  buildSwapPlan: async (quote: SwapApiQuote, { includePermit2Call }) => {
+  buildSwapPlan: async (quote: SwapApiQuote, { slippage, includePermit2Call }) => {
     if (!selectedAsset.value || !form.collateralVault.value) {
       throw new Error('No selected asset or vault')
     }
@@ -110,6 +110,7 @@ const form = useCollateralForm({
       inputTokenAddress: (wrappedAddress || selectedAsset.value.address) as Address,
       inputAmount,
       quote,
+      requestedSlippage: slippage,
       includePermit2Call,
       wrappedNativeInfo: isNative && wrappedAddress
         ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
@@ -319,6 +320,7 @@ watch(selectedAsset, async () => {
                   :output-display="form.swapOutputDisplay.value"
                   :price-impact="form.swapPriceImpact.value"
                   :slippage="form.swapSlippage.value"
+                  :quote-slippage="form.swapQuoteSlippage.value"
                   :routed-via="form.swapRoutedVia.value"
                   @open-slippage-settings="form.openSlippageSettings"
                 />

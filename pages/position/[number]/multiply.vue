@@ -9,6 +9,7 @@ import type { AccountBorrowPosition } from '~/entities/account'
 import type { Vault, VaultAsset } from '~/entities/vault'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
+import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
@@ -44,7 +45,7 @@ const openSlippageSettings = () => {
   modal.open(SlippageSettingsModal)
 }
 
-type MultiplyPlanParams = {
+type MultiplyPlanParamsCommon = {
   supplyVaultAddress: string
   supplyAssetAddress: string
   supplyAmount: bigint
@@ -54,10 +55,12 @@ type MultiplyPlanParams = {
   longAssetAddress: string
   borrowVaultAddress: string
   debtAmount: bigint
-  quote?: SwapApiQuote
   swapperMode: SwapperMode
   subAccount: string
 }
+type MultiplyPlanParams
+  = | (MultiplyPlanParamsCommon & { quote: SwapApiQuote, requestedSlippage: number })
+    | (MultiplyPlanParamsCommon & { quote?: undefined, requestedSlippage?: never })
 
 const priceInvert = usePriceInvert(
   () => multiplyShortVault.value?.asset.symbol,
@@ -96,6 +99,7 @@ const {
   requestQuotes: requestMultiplyQuotes,
   selectProvider: selectMultiplyQuote,
 } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+const multiplyQuoteSlippage = computed(() => computeQuoteSlippage(multiplyEffectiveQuote.value))
 
 const multiplyLongVault = computed(() => position.value?.collateral)
 const multiplyShortVault = computed(() => position.value?.borrow)
@@ -588,7 +592,7 @@ const submitMultiply = async () => {
         return
       }
 
-      const nextPlanParams: MultiplyPlanParams = {
+      const baseParams: MultiplyPlanParamsCommon = {
         supplyVaultAddress: multiplySupplyVault.value.address,
         supplyAssetAddress: multiplySupplyVault.value.asset.address,
         supplyAmount: 0n,
@@ -596,10 +600,12 @@ const submitMultiply = async () => {
         longAssetAddress: multiplyLongVault.value.asset.address,
         borrowVaultAddress: multiplyShortVault.value.address,
         debtAmount,
-        quote: quote || undefined,
         swapperMode: SwapperMode.EXACT_IN,
         subAccount,
       }
+      const nextPlanParams: MultiplyPlanParams = quote
+        ? { ...baseParams, quote, requestedSlippage: multiplySlippage.value }
+        : baseParams
       planParams.value = nextPlanParams
 
       try {
@@ -622,14 +628,19 @@ const submitMultiply = async () => {
         }
       }
 
+      const reviewBorrowAmount = trimTrailingZeros(formatUnits(debtAmount, Number(multiplyShortVault.value.asset.decimals)))
+      const reviewSwapToAmount = quote
+        ? trimTrailingZeros(formatUnits(BigInt(quote.amountOut || 0), Number(multiplyLongVault.value.asset.decimals)))
+        : undefined
+
       modal.open(OperationReviewModal, {
         props: {
           type: 'borrow',
           asset: multiplyShortVault.value.asset,
-          amount: multiplyShortAmount.value || formatUnits(debtAmount, Number(multiplyShortVault.value.asset.decimals)),
+          amount: reviewBorrowAmount,
           plan: plan.value || undefined,
           swapToAsset: quote ? multiplyLongVault.value.asset : undefined,
-          swapToAmount: quote ? multiplyLongAmount.value : undefined,
+          swapToAmount: reviewSwapToAmount,
           subAccount,
           submittingLabel: 'Submitting...',
           onConfirm: async () => {
@@ -948,6 +959,7 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
               :output-display="multiplySwapSummary?.to ?? null"
               :price-impact="multiplyPriceImpact"
               :slippage="multiplySlippage"
+              :quote-slippage="multiplyQuoteSlippage"
               :routed-via="multiplyRoutedVia"
               :multiplied-price-impact="multipliedPriceImpact"
               @open-slippage-settings="openSlippageSettings"

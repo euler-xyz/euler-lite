@@ -29,6 +29,7 @@ import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
+import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { TxPlan } from '~/entities/txPlan'
 import { getPlanHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
@@ -125,6 +126,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     requestQuotes: requestBorrowSwapQuotes,
     selectProvider: selectBorrowSwapQuote,
   } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+  const borrowSwapQuoteSlippage = computed(() => computeQuoteSlippage(borrowSwapEffectiveQuote.value))
 
   // --- Form state ---
   const ltv = ref(0)
@@ -598,6 +600,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       borrowVaultAddress: borrowVault.value.address as Address,
       borrowAmount: borrowAmountNano,
       swapQuote: quote,
+      requestedSlippage: borrowSwapSlippage.value,
       subAccount,
       includePermit2Call: planOptions.includePermit2Call,
       wrappedNativeInfo: isNative && wrappedAddress
@@ -948,6 +951,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     borrowSwapInputDisplay,
     borrowSwapOutputDisplay,
     borrowSwapRoutedVia,
+    borrowSwapQuoteSlippage,
     borrowSwapPriceImpact,
     borrowSwapRouteItems,
 

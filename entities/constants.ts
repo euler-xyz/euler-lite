@@ -63,7 +63,7 @@ export const DEFAULT_SLIPPAGE = 0.3
 export const DEFAULT_STABLECOIN_SLIPPAGE = 0.05
 export const SLIPPAGE_EXPIRY_MS = 24 * 60 * 60 * 1000
 export const SLIPPAGE_TIMESTAMP_STORAGE_KEY = 'swap-slippage-set-at'
-export const MIN_SLIPPAGE = 0
+export const MIN_SLIPPAGE = 0.01
 export const MAX_SLIPPAGE = 50
 export const HIGH_SLIPPAGE_THRESHOLD = 5
 
