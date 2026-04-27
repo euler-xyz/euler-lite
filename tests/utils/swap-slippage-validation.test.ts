@@ -154,7 +154,15 @@ describe('swap quote slippage validation', () => {
         ),
       ).toThrow('amountOutMin exceeds requested slippage')
 
-      expect(validationLogLines(stdout)).toHaveLength(1)
+      const lines = validationLogLines(stdout)
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toMatchObject({
+        data: expect.objectContaining({
+          checkedAmount: '1989979',
+          field: 'amountOutMin',
+          status: 'failed',
+        }),
+      })
     }
     finally {
       stdout.restore()
@@ -182,7 +190,15 @@ describe('swap quote slippage validation', () => {
         ),
       ).toThrow('amountInMax exceeds requested slippage')
 
-      expect(validationLogLines(stdout)).toHaveLength(1)
+      const lines = validationLogLines(stdout)
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toMatchObject({
+        data: expect.objectContaining({
+          checkedAmount: '2010021',
+          field: 'amountInMax',
+          status: 'failed',
+        }),
+      })
     }
     finally {
       stdout.restore()
@@ -209,7 +225,15 @@ describe('swap quote slippage validation', () => {
         ),
       ).toThrow('amountOutMin exceeds requested slippage')
 
-      expect(validationLogLines(stdout)).toHaveLength(1)
+      const lines = validationLogLines(stdout)
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toMatchObject({
+        data: expect.objectContaining({
+          checkedAmount: '999979',
+          field: 'amountOutMin',
+          status: 'failed',
+        }),
+      })
     }
     finally {
       stdout.restore()
