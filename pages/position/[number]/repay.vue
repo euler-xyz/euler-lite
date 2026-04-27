@@ -34,7 +34,14 @@ const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
 const { eulerLensAddresses: _eulerLensAddresses } = useEulerAddresses()
 const { fetchSingleBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
-const { slippage } = useSlippage()
+const { slippage } = useSlippage({
+  fromSymbol: () => {
+    if (formTab.value === 'wallet') return walletSwap.selectedAsset.value?.symbol
+    if (formTab.value === 'savings') return savings.sourceVault.value?.asset.symbol
+    return collateral.sourceVault.value?.asset.symbol
+  },
+  toSymbol: () => borrowVault.value?.asset.symbol,
+})
 // --- Shared state ---
 const isLoading = ref(false)
 const isSubmitting = ref(false)
@@ -140,6 +147,7 @@ const walletSwap = useWalletSwapRepay({
   plan,
   isSubmitting,
   isPreparing,
+  slippage,
   clearSimulationError,
   runSimulation,
   netAPY,
@@ -239,14 +247,14 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (formTab.value === 'savings') {
     if (savings.disabledReason.value) return { message: savings.disabledReason.value, variant: savings.isRepayExceedsDebt.value ? 'error' : 'warning' }
     if (simulationError.value) return { message: simulationError.value, variant: 'error' }
-    if (!savings.isSameAsset.value && savings.quotes.isLoading.value) return { message: 'Fetching swap quotes...', variant: 'warning' }
-    if (!savings.isSameAsset.value && !savings.quotes.selectedQuote.value) return { message: 'Select a swap quote to continue', variant: 'warning' }
+    if (!savings.isSameAsset.value && savings.quotes.isLoading.value && (savings.amount.value || savings.debtAmount.value)) return { message: 'Fetching swap quotes...', variant: 'warning' }
+    if (!savings.isSameAsset.value && !savings.quotes.selectedQuote.value && (savings.amount.value || savings.debtAmount.value)) return { message: 'Select a swap quote to continue', variant: 'warning' }
     return undefined
   }
   if (collateral.disabledReason.value) return { message: collateral.disabledReason.value, variant: collateral.isRepayExceedsDebt.value ? 'error' : 'warning' }
   if (simulationError.value) return { message: simulationError.value, variant: 'error' }
-  if (!collateral.isSameAsset.value && collateral.quotes.isLoading.value) return { message: 'Fetching swap quotes...', variant: 'warning' }
-  if (!collateral.isSameAsset.value && !collateral.quotes.selectedQuote.value) return { message: 'Select a swap quote to continue', variant: 'warning' }
+  if (!collateral.isSameAsset.value && collateral.quotes.isLoading.value && (collateral.amount.value || collateral.debtAmount.value)) return { message: 'Fetching swap quotes...', variant: 'warning' }
+  if (!collateral.isSameAsset.value && !collateral.quotes.selectedQuote.value && (collateral.amount.value || collateral.debtAmount.value)) return { message: 'Select a swap quote to continue', variant: 'warning' }
   return undefined
 })
 
@@ -601,6 +609,7 @@ watch(formTab, () => {
                 :output-display="walletSwap.swapOutputDisplay.value"
                 :price-impact="walletSwap.swapPriceImpact.value"
                 :slippage="slippage"
+                :quote-slippage="walletSwap.quoteSlippage.value"
                 :routed-via="walletSwap.swapRoutedVia.value"
                 @open-slippage-settings="openSlippageSettings"
               />
@@ -711,6 +720,8 @@ watch(formTab, () => {
                 :description="simulationError"
                 size="compact"
               />
+
+              <VaultWarningBanner :warnings="[collateral.liquidityWarning.value]" />
             </div>
 
             <VaultFormInfoBlock
@@ -782,6 +793,7 @@ watch(formTab, () => {
                 :output-display="collateral.summary.value?.to ?? null"
                 :price-impact="collateral.priceImpact.value"
                 :slippage="slippage"
+                :quote-slippage="collateral.quoteSlippage.value"
                 :routed-via="collateral.routedVia.value"
                 @open-slippage-settings="openSlippageSettings"
               />
@@ -884,6 +896,8 @@ watch(formTab, () => {
                 :description="simulationError"
                 size="compact"
               />
+
+              <VaultWarningBanner :warnings="[savings.liquidityWarning.value]" />
             </div>
 
             <VaultFormInfoBlock
@@ -955,6 +969,7 @@ watch(formTab, () => {
                 :output-display="savings.summary.value?.to ?? null"
                 :price-impact="savings.priceImpact.value"
                 :slippage="slippage"
+                :quote-slippage="savings.quoteSlippage.value"
                 :routed-via="savings.routedVia.value"
                 @open-slippage-settings="openSlippageSettings"
               />

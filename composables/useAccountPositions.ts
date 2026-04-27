@@ -78,6 +78,7 @@ const borrowPositions = computed(() => {
   if (isShowAllPositions.value) return _allBorrowPositions.value
   return _allBorrowPositions.value.filter(p => p.borrow.verified && p.collateral.verified)
 })
+const allBorrowPositions = computed(() => _allBorrowPositions.value)
 const depositPositions = computed(() => {
   if (isShowAllPositions.value) return _allDepositPositions.value
   return _allDepositPositions.value.filter(p => p.vault.verified)
@@ -738,6 +739,7 @@ const unresolvedDepositCount = computed(
 )
 
 export const useAccountPositions = () => ({
+  allBorrowPositions,
   depositPositions,
   borrowPositions,
   collateralUsageSet,

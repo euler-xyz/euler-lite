@@ -25,12 +25,14 @@ export const createSupplyBorrowSwapBuilders = (
     inputTokenAddress,
     inputAmount,
     quote,
+    requestedSlippage,
     includePermit2Call = true,
     wrappedNativeInfo,
   }: {
     inputTokenAddress: Address
     inputAmount: bigint
     quote: SwapApiQuote
+    requestedSlippage: number
     includePermit2Call?: boolean
     wrappedNativeInfo?: { wrappedTokenAddress: Address, nativeAmount: bigint }
   }): Promise<TxPlan> => {
@@ -95,7 +97,7 @@ export const createSupplyBorrowSwapBuilders = (
       throw new Error('Swap verifier type mismatch')
     }
 
-    const verifierData = buildSwapVerifierData({ quote, swapperMode: SwapperMode.EXACT_IN, isRepay: false })
+    const verifierData = buildSwapVerifierData({ quote, swapperMode: SwapperMode.EXACT_IN, isRepay: false, requestedSlippage })
     if (verifierData.toLowerCase() !== quote.verify.verifierData.toLowerCase()) {
       logWarn('swap-supply', 'SwapVerifier data mismatch')
       throw new Error('SwapVerifier data mismatch')
@@ -127,6 +129,7 @@ export const createSupplyBorrowSwapBuilders = (
     borrowVaultAddress,
     borrowAmount: borrowAmountParam,
     swapQuote,
+    requestedSlippage,
     subAccount,
     enabledCollaterals,
     includePermit2Call = true,
@@ -138,6 +141,7 @@ export const createSupplyBorrowSwapBuilders = (
     borrowVaultAddress: Address
     borrowAmount: bigint
     swapQuote: SwapApiQuote
+    requestedSlippage: number
     subAccount?: string
     enabledCollaterals?: string[]
     includePermit2Call?: boolean
@@ -209,7 +213,7 @@ export const createSupplyBorrowSwapBuilders = (
       throw new Error('Swap verifier type mismatch')
     }
 
-    const verifierData = buildSwapVerifierData({ quote: swapQuote, swapperMode: SwapperMode.EXACT_IN, isRepay: false })
+    const verifierData = buildSwapVerifierData({ quote: swapQuote, swapperMode: SwapperMode.EXACT_IN, isRepay: false, requestedSlippage })
     if (verifierData.toLowerCase() !== swapQuote.verify.verifierData.toLowerCase()) {
       logWarn('swap-borrow', 'SwapVerifier data mismatch')
       throw new Error('SwapVerifier data mismatch')
@@ -280,12 +284,14 @@ export const createSupplyBorrowSwapBuilders = (
     vaultAddress: vaultAddr,
     assetsAmount,
     quote,
+    requestedSlippage,
     subAccount,
     options = {},
   }: {
     vaultAddress: Address
     assetsAmount: bigint
     quote: SwapApiQuote
+    requestedSlippage: number
     subAccount?: string
     options?: { includePythUpdate?: boolean, liabilityVault?: string, enabledCollaterals?: string[] }
   }): Promise<TxPlan> => {
@@ -331,7 +337,7 @@ export const createSupplyBorrowSwapBuilders = (
       throw new Error('Swap verifier type mismatch')
     }
 
-    const verifierData = buildSwapVerifierData({ quote, swapperMode: SwapperMode.EXACT_IN, isRepay: false })
+    const verifierData = buildSwapVerifierData({ quote, swapperMode: SwapperMode.EXACT_IN, isRepay: false, requestedSlippage })
     if (verifierData.toLowerCase() !== quote.verify.verifierData.toLowerCase()) {
       logWarn('swap-withdraw', 'SwapVerifier data mismatch')
       throw new Error('SwapVerifier data mismatch')
@@ -368,12 +374,14 @@ export const createSupplyBorrowSwapBuilders = (
     vaultAddress: vaultAddr,
     sharesAmount,
     quote,
+    requestedSlippage,
     subAccount,
     options = {},
   }: {
     vaultAddress: Address
     sharesAmount: bigint
     quote: SwapApiQuote
+    requestedSlippage: number
     subAccount?: string
     options?: { includePythUpdate?: boolean, liabilityVault?: string, enabledCollaterals?: string[] }
   }): Promise<TxPlan> => {
@@ -419,7 +427,7 @@ export const createSupplyBorrowSwapBuilders = (
       throw new Error('Swap verifier type mismatch')
     }
 
-    const redeemVerifierData = buildSwapVerifierData({ quote, swapperMode: SwapperMode.EXACT_IN, isRepay: false })
+    const redeemVerifierData = buildSwapVerifierData({ quote, swapperMode: SwapperMode.EXACT_IN, isRepay: false, requestedSlippage })
     if (redeemVerifierData.toLowerCase() !== quote.verify.verifierData.toLowerCase()) {
       logWarn('swap-redeem', 'SwapVerifier data mismatch')
       throw new Error('SwapVerifier data mismatch')
@@ -457,6 +465,7 @@ export const createSupplyBorrowSwapBuilders = (
     inputTokenAddress,
     inputAmount,
     quote,
+    requestedSlippage,
     borrowVaultAddress,
     subAccount,
     enabledCollaterals,
@@ -470,6 +479,7 @@ export const createSupplyBorrowSwapBuilders = (
     inputTokenAddress: Address
     inputAmount: bigint
     quote: SwapApiQuote
+    requestedSlippage: number
     borrowVaultAddress: Address
     subAccount: Address
     enabledCollaterals?: string[]
@@ -495,7 +505,7 @@ export const createSupplyBorrowSwapBuilders = (
       throw new Error('Swap verifier type mismatch')
     }
 
-    const verifierData = buildSwapVerifierData({ quote, swapperMode, isRepay: true, targetDebt, currentDebt })
+    const verifierData = buildSwapVerifierData({ quote, swapperMode, isRepay: true, requestedSlippage, targetDebt, currentDebt })
     if (verifierData.toLowerCase() !== quote.verify.verifierData.toLowerCase()) {
       logWarn('swap-repay', 'SwapVerifier data mismatch')
       throw new Error('SwapVerifier data mismatch')

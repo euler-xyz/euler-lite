@@ -224,6 +224,7 @@ const swap = useSwapPageLogic({
       quote: selectedQuote.value,
       swapperMode: SwapperMode.TARGET_DEBT,
       isRepay: true,
+      requestedSlippage: slippage.value,
       isDebtSwap: true,
       targetDebt: 0n,
       currentDebt: currentDebt.value,
@@ -251,7 +252,7 @@ const {
   isGeoBlocked, reviewSwapDisabled, reviewSwapLabel, simulationError,
   isQuoteLoading, quoteError, quotesStatusLabel, selectedProvider, selectedQuote,
   fromProduct, toProduct, swapPriceInvert, currentPrice, swapSummary, priceImpact, routedVia,
-  swapRouteItems, swapRouteEmptyMessage,
+  quoteSlippage, swapRouteItems, swapRouteEmptyMessage,
   selectProvider, onFromInput: _onFromInput, onRefreshQuotes, submit, openSlippageSettings,
   normalizeAddress, clearSimulationError, requestQuote,
 } = swap
@@ -551,6 +552,7 @@ const onToVaultChange = (selectedIndex: number) => {
               :output-display="swapSummary?.to ?? null"
               :price-impact="priceImpact"
               :slippage="slippage"
+              :quote-slippage="quoteSlippage"
               :routed-via="routedVia"
               @open-slippage-settings="openSlippageSettings"
             />

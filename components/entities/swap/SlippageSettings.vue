@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { HIGH_SLIPPAGE_THRESHOLD } from '~/entities/constants'
+import { DEFAULT_SLIPPAGE, HIGH_SLIPPAGE_THRESHOLD } from '~/entities/constants'
 import { formatNumber } from '~/utils/string-utils'
 
 const _props = withDefaults(defineProps<{
@@ -12,8 +12,8 @@ const { slippage, setSlippage, minSlippage, maxSlippage, defaultSlippage, isOver
 
 const slippagePresets = [
   { label: '0.1%', value: 0.1 },
+  { label: '0.3%', value: 0.3 },
   { label: '0.5%', value: 0.5 },
-  { label: '1%', value: 1 },
 ]
 
 const presetValues = slippagePresets.map(option => option.value)
@@ -22,13 +22,13 @@ const customInput = ref('')
 const customInputError = ref('')
 const slippageSelection = useLocalStorage<'preset' | 'custom'>('swap-slippage-selection', 'preset')
 
-// Reset selection state when override expires back to a preset default
-if (!isOverrideActive.value && presetValues.includes(slippage.value)) {
+// Reset selection state when override expires back to a default (preset or stablecoin)
+if (!isOverrideActive.value && (presetValues.includes(slippage.value) || slippage.value === defaultSlippage.value)) {
   slippageSelection.value = 'preset'
 }
 
 const isCustomSelected = computed(() => slippageSelection.value === 'custom')
-const isCustomValue = computed(() => !presetValues.includes(slippage.value))
+const isCustomValue = computed(() => !presetValues.includes(slippage.value) && slippage.value !== defaultSlippage.value)
 const customChipActive = computed(() => isCustomInputVisible.value || isCustomSelected.value || isCustomValue.value)
 const customChipValue = computed(() => `${formatNumber(slippage.value, 2, 0)}%`)
 
@@ -88,7 +88,7 @@ const onSaveCustom = () => {
 }
 
 watch(slippage, (value) => {
-  if (slippageSelection.value === 'preset' && !presetValues.includes(value)) {
+  if (slippageSelection.value === 'preset' && !presetValues.includes(value) && value !== defaultSlippage.value) {
     slippageSelection.value = 'custom'
   }
 })
@@ -130,10 +130,10 @@ defineExpose({ savePending })
         Slippage settings
       </div>
       <div class="text-p3 text-content-muted">
-        <template v-if="isOverrideActive && slippage > 0.5">
+        <template v-if="isOverrideActive && slippage > DEFAULT_SLIPPAGE">
           Custom slippage (resets to {{ defaultSlippage }}% default after 24h)
         </template>
-        <template v-else-if="defaultSlippage !== 0.5">
+        <template v-else-if="defaultSlippage !== DEFAULT_SLIPPAGE">
           Default: {{ defaultSlippage }}% for stablecoin swaps
         </template>
         <template v-else>
@@ -145,14 +145,14 @@ defineExpose({ savePending })
           v-for="option in slippagePresets"
           :key="option.value"
           type="button"
-          :class="['ui-select__chip', { 'ui-select__chip--active': isPresetActive(option.value) }]"
+          :class="['slippage-settings__chip', { 'slippage-settings__chip--active': isPresetActive(option.value) }]"
           @click="onPresetSelect(option.value)"
         >
           {{ option.label }}
         </button>
         <button
           type="button"
-          :class="['ui-select__chip', { 'ui-select__chip--active': customChipActive }]"
+          :class="['slippage-settings__chip', { 'slippage-settings__chip--active': customChipActive }]"
           @click="onCustomChipClick"
         >
           <span v-if="isCustomSelected && !isCustomInputVisible">
@@ -212,3 +212,45 @@ defineExpose({ savePending })
     </div>
   </div>
 </template>
+
+<style scoped lang="scss">
+.slippage-settings__chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: 100px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  box-shadow: var(--ui-input-shadow);
+
+  &:hover {
+    color: var(--accent-600);
+    border-color: var(--border-emphasis);
+    background: var(--bg-surface-elevated);
+  }
+
+  &--active {
+    font-weight: 600;
+    color: var(--ui-select-chip-active-color);
+    background: var(--ui-select-chip-active-background-color);
+    border-color: transparent;
+    box-shadow: var(--accent-shadow-md);
+
+    &:hover {
+      color: var(--ui-select-chip-active-color);
+      background: var(--accent-600);
+      border-color: transparent;
+      box-shadow: var(--accent-shadow-lg);
+    }
+  }
+}
+</style>

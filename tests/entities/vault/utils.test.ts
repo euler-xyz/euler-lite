@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { getUtilization, getVaultUtilization, getBorrowVaultsByMap } from '~/entities/vault/utils'
-import type { Vault } from '~/entities/vault/types'
+import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
+import { getUtilization, getVaultUtilization, getBorrowVaultsByMap, isCyclicalNoteVault } from '~/entities/vault/utils'
+import type { Vault, SecuritizeVault } from '~/entities/vault/types'
 
 describe('getUtilization', () => {
   it('returns 0 when totalAssets is zero', () => {
@@ -107,5 +108,60 @@ describe('getBorrowVaultsByMap', () => {
     const map = new Map([['0xA', vault]])
     // Collateral vault not in map → pair.collateral is undefined → filtered
     expect(getBorrowVaultsByMap(map)).toEqual([])
+  })
+})
+
+describe('isCyclicalNoteVault', () => {
+  it('returns true for EVK vaults using the fixed cyclical IRM', () => {
+    const vault = {
+      irmInfo: {
+        interestRateModelInfo: {
+          interestRateModelType: INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY,
+        },
+      },
+    } as Vault
+
+    expect(isCyclicalNoteVault(vault)).toBe(true)
+  })
+
+  it('returns false for non-cyclical EVK vaults', () => {
+    const vault = {
+      irmInfo: {
+        interestRateModelInfo: {
+          interestRateModelType: INTEREST_RATE_MODEL_TYPE.KINK,
+        },
+      },
+    } as Vault
+
+    expect(isCyclicalNoteVault(vault)).toBe(false)
+  })
+
+  it('returns false for securitize vaults and missing vault data', () => {
+    const securitizeVault = {
+      type: 'securitize',
+    } as SecuritizeVault
+
+    expect(isCyclicalNoteVault(securitizeVault)).toBe(false)
+    expect(isCyclicalNoteVault(null)).toBe(false)
+    expect(isCyclicalNoteVault(undefined)).toBe(false)
+  })
+
+  it('returns false when the IRM type is missing or not numeric', () => {
+    const missingType = {
+      irmInfo: {
+        interestRateModelInfo: {},
+      },
+    } as Vault
+
+    const stringType = {
+      irmInfo: {
+        interestRateModelInfo: {
+          interestRateModelType: `${INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY}` as unknown as number,
+        },
+      },
+    } as Vault
+
+    expect(isCyclicalNoteVault(missingType)).toBe(false)
+    expect(isCyclicalNoteVault(stringType)).toBe(false)
   })
 })

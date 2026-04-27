@@ -38,8 +38,8 @@ jobs:
       - name: Verify tag is on master
         if: github.event_name == 'push'
         run: |
-          if ! git merge-base --is-ancestor "${{ github.sha }}" origin/master; then
-            echo "::error::Tag does not point to a commit on master. Aborting."
+          if ! git log --first-parent --format=%H origin/master | grep -q "^${{ github.sha }}$"; then
+            echo "::error::Tag does not point to a commit on master's first-parent history. Aborting."
             exit 1
           fi
 
