@@ -68,13 +68,29 @@ const MAX_ARRAY_LEN = 10_000
  */
 const MARKDOWN_LINK_INJECTION_RE = /\[[^\]]*\]\(https?:\/\/[^)]*"[^)]*\)/
 
-function getQuantifierLength(pattern: string, index: number): number {
+type QuantifierInfo = {
+  length: number
+  openEnded: boolean
+}
+
+type RegexPrefixToken
+  = | { type: 'literal', value: string }
+    | { type: 'class', values: Set<string> }
+    | { type: 'wildcard' }
+
+function getQuantifierInfo(pattern: string, index: number): QuantifierInfo {
   const char = pattern[index]
-  if (char === '*' || char === '+' || char === '?') return 1
-  if (char !== '{') return 0
+  if (char === '*' || char === '+') return { length: 1, openEnded: true }
+  if (char === '?') return { length: 1, openEnded: false }
+  if (char !== '{') return { length: 0, openEnded: false }
 
   const match = /^\{\d+(?:,\d*)?\}/.exec(pattern.slice(index))
-  return match ? match[0].length : 0
+  if (!match) return { length: 0, openEnded: false }
+
+  return {
+    length: match[0].length,
+    openEnded: /,\}$/.test(match[0]),
+  }
 }
 
 function getGroupPrefixLength(pattern: string, index: number): number {
@@ -101,16 +117,106 @@ function findClassEnd(pattern: string, start: number): number {
   return pattern.length - 1
 }
 
+function tokenOverlaps(left: RegexPrefixToken, right: RegexPrefixToken): boolean {
+  if (left.type === 'wildcard' || right.type === 'wildcard') return true
+  if (left.type === 'literal' && right.type === 'literal') return left.value === right.value
+  if (left.type === 'class' && right.type === 'literal') return left.values.has(right.value)
+  if (left.type === 'literal' && right.type === 'class') return right.values.has(left.value)
+
+  if (left.type === 'class' && right.type === 'class') {
+    for (const value of left.values) {
+      if (right.values.has(value)) return true
+    }
+  }
+
+  return false
+}
+
+function parseEscapedPrefixToken(pattern: string, index: number): RegexPrefixToken {
+  const escaped = pattern[index + 1]
+  if (!escaped) return { type: 'wildcard' }
+  if ('dDsSwWpP'.includes(escaped)) return { type: 'wildcard' }
+  return { type: 'literal', value: escaped }
+}
+
+function parseCharacterClassPrefixToken(pattern: string, start: number): RegexPrefixToken {
+  const end = findClassEnd(pattern, start)
+  const content = pattern.slice(start + 1, end)
+  if (!content || content.startsWith('^')) return { type: 'wildcard' }
+
+  const values = new Set<string>()
+  for (let i = 0; i < content.length; i++) {
+    let value = content[i]!
+    if (value === '\\') {
+      const escaped = content[i + 1]
+      if (!escaped || 'dDsSwWpP'.includes(escaped)) return { type: 'wildcard' }
+      value = escaped
+      i += 1
+    }
+
+    if (content[i + 1] === '-' && content[i + 2] && content[i + 2] !== ']') {
+      const startCode = value.charCodeAt(0)
+      const endCode = content[i + 2]!.charCodeAt(0)
+      if (startCode > endCode || endCode - startCode > 128) return { type: 'wildcard' }
+      for (let code = startCode; code <= endCode; code++) {
+        values.add(String.fromCharCode(code))
+      }
+      i += 2
+      continue
+    }
+
+    values.add(value)
+  }
+
+  return values.size > 0 ? { type: 'class', values } : { type: 'wildcard' }
+}
+
+function normalizeAlternativePrefix(value: string): RegexPrefixToken[] | null {
+  const normalized = value.replace(/^\^/, '').replace(/\$$/, '')
+  if (!normalized) return null
+
+  const tokens: RegexPrefixToken[] = []
+  for (let i = 0; i < normalized.length; i++) {
+    const char = normalized[i]!
+    if (char === '\\') {
+      tokens.push(parseEscapedPrefixToken(normalized, i))
+      i += 1
+      continue
+    }
+    if (char === '[') {
+      tokens.push(parseCharacterClassPrefixToken(normalized, i))
+      i = findClassEnd(normalized, i)
+      continue
+    }
+    if (char === '.') {
+      tokens.push({ type: 'wildcard' })
+      continue
+    }
+    if ('()|*+?{}'.includes(char)) return null
+    tokens.push({ type: 'literal', value: char })
+  }
+
+  return tokens.length > 0 ? tokens : null
+}
+
+function alternativesOverlap(left: RegexPrefixToken[], right: RegexPrefixToken[]): boolean {
+  const length = Math.min(left.length, right.length)
+  for (let i = 0; i < length; i++) {
+    if (!tokenOverlaps(left[i]!, right[i]!)) return false
+  }
+  return true
+}
+
 function hasPrefixOverlap(alternatives: string[]): boolean {
   if (alternatives.length < 2) return false
 
   const normalized = alternatives
-    .map(value => value.replace(/^\^/, '').replace(/\$$/, ''))
-    .filter(value => value.length > 0 && /^[a-zA-Z0-9 _-]+$/.test(value))
+    .map(normalizeAlternativePrefix)
+    .filter(value => value !== null)
 
   for (let i = 0; i < normalized.length; i++) {
     for (let j = i + 1; j < normalized.length; j++) {
-      if (normalized[i].startsWith(normalized[j]) || normalized[j].startsWith(normalized[i])) {
+      if (alternativesOverlap(normalized[i]!, normalized[j]!)) {
         return true
       }
     }
@@ -152,16 +258,16 @@ function hasUnsafeRegexStructure(pattern: string): boolean {
     if (char === ')' && stack.length > 1) {
       const child = stack.pop()!
       const parent = stack[stack.length - 1]!
-      const quantifierLength = getQuantifierLength(pattern, i + 1)
-      const isQuantified = quantifierLength > 0
+      const quantifier = getQuantifierInfo(pattern, i + 1)
+      const isQuantified = quantifier.length > 0
 
-      if (isQuantified && (child.hasQuantifier || hasPrefixOverlap(child.alternatives))) {
+      if (quantifier.openEnded && (child.hasQuantifier || hasPrefixOverlap(child.alternatives))) {
         return true
       }
 
       if (isQuantified) {
-        parent.hasQuantifier = true
-        i += quantifierLength
+        parent.hasQuantifier ||= quantifier.openEnded
+        i += quantifier.length
         if (pattern[i + 1] === '?') i += 1
       }
       append('()')
@@ -173,10 +279,10 @@ function hasUnsafeRegexStructure(pattern: string): boolean {
       continue
     }
 
-    const quantifierLength = getQuantifierLength(pattern, i)
-    if (quantifierLength > 0) {
-      frame.hasQuantifier = true
-      i += quantifierLength - 1
+    const quantifier = getQuantifierInfo(pattern, i)
+    if (quantifier.length > 0) {
+      frame.hasQuantifier ||= quantifier.openEnded
+      i += quantifier.length - 1
       if (pattern[i + 1] === '?') i += 1
       continue
     }
