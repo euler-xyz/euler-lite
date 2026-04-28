@@ -62,7 +62,7 @@ function onCopy() {
     border-radius: 8px;
     background-color: var(--ui-footnote-floating-background-color);
     box-shadow: 0 4px 16px var(--ui-footnote-floating-box-shadow-color);
-    z-index: 10;
+    z-index: 4000;
     font-size: 13px;
     line-height: 18px;
     font-weight: 400;
