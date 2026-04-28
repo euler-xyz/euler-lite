@@ -17,7 +17,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  close: []
+  'close': []
+  'prevent-close': [value: boolean]
 }>()
 
 const isExecuting = computed(() => {
@@ -78,6 +79,19 @@ const orderStatusVariant = computed<ToastVariant>(() => {
 })
 
 const internalSubmitting = ref(false)
+const hasUnresolvedSubmittedOrder = computed(() => isSubmitted.value && !props.orderStatus?.terminal)
+const canClose = computed(() => !internalSubmitting.value && !hasUnresolvedSubmittedOrder.value)
+
+watch(
+  canClose,
+  value => emit('prevent-close', !value),
+  { immediate: true },
+)
+
+const handleClose = () => {
+  if (!canClose.value) return
+  emit('close')
+}
 
 const handleConfirm = async () => {
   if (internalSubmitting.value) return
@@ -105,7 +119,8 @@ const handleCancel = async () => {
 <template>
   <BaseModalWrapper
     title="Transaction review"
-    @close="!internalSubmitting && emit('close')"
+    :close="canClose"
+    @close="handleClose"
   >
     <div class="flex flex-col gap-24">
       <!-- Review steps (hidden after submission) -->

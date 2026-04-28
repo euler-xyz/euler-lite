@@ -72,6 +72,7 @@ export const openCowSwapReviewModal = (
   },
 ) => {
   modal.open(CowSwapReviewModal, {
+    isNotClosable: true,
     props: {
       signSteps: options.signSteps,
       wrapperSteps: options.wrapperSteps,
