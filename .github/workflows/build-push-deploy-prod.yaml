@@ -99,7 +99,21 @@ jobs:
         run: |
           aws s3 sync ./static-output/_nuxt \
             s3://${{ secrets.S3_STATIC_ASSETS_BUCKET }}/_nuxt \
+            --exclude "builds/**" \
             --cache-control "public,max-age=31536000,immutable"
+
+          if [ -d ./static-output/_nuxt/builds ]; then
+            aws s3 sync ./static-output/_nuxt/builds \
+              s3://${{ secrets.S3_STATIC_ASSETS_BUCKET }}/_nuxt/builds \
+              --exclude "meta/**" \
+              --cache-control "no-cache"
+          fi
+
+          if [ -d ./static-output/_nuxt/builds/meta ]; then
+            aws s3 sync ./static-output/_nuxt/builds/meta \
+              s3://${{ secrets.S3_STATIC_ASSETS_BUCKET }}/_nuxt/builds/meta \
+              --cache-control "public,max-age=31536000,immutable"
+          fi
 
       - name: Tag and push docker image to Amazon ECR
         if: github.event_name == 'push'
