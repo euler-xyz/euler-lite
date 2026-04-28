@@ -67,8 +67,6 @@ export default defineNuxtPlugin((nuxtApp) => {
     transports,
   })
 
-  nuxtApp.vueApp.use(WagmiPlugin, { config: wagmiAdapter.wagmiConfig })
-
   let appKitInstance: ReturnType<typeof createAppKit> | null = null
   const ensureAppKit = () => {
     if (appKitInstance) return appKitInstance
@@ -90,13 +88,12 @@ export default defineNuxtPlugin((nuxtApp) => {
     kit.open()
   }
 
-  // Always eagerly initialize AppKit so chunk loads and initialization
-  // side-effects (connector discovery, remote feature fetches) complete
-  // during page load rather than on first "Connect Wallet" click.
-  // Previously this was deferred for first-time visitors to avoid Phantom's
-  // unsolicited connection prompt, but that auto-connect is a pre-existing
-  // wagmi-level behavior unrelated to AppKit initialization.
+  // Initialize AppKit before wagmi mounts and runs its automatic reconnect.
+  // Otherwise wagmi can briefly hydrate a persisted connector shell before
+  // AppKit has registered the real connector methods (for example getChainId).
   ensureAppKit()
+
+  nuxtApp.vueApp.use(WagmiPlugin, { config: wagmiAdapter.wagmiConfig })
 
   return {
     provide: {
