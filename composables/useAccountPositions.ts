@@ -1,5 +1,6 @@
 import { getAddress, type Address, type Abi } from 'viem'
 import { computed, ref, shallowRef, type Ref } from 'vue'
+import * as Sentry from '@sentry/nuxt'
 import { useVaultRegistry } from './useVaultRegistry'
 import { logWarn } from '~/utils/errorHandling'
 import { FixedPoint } from '~/utils/fixed-point'
@@ -16,6 +17,7 @@ import type {
   SecuritizeVault,
 } from '~/entities/vault'
 import { processRawVaultData } from '~/entities/vault/fetcher'
+import { fetchVaultCategory } from '~/entities/vault/factory'
 import { getCollateralUsdPrice } from '~/services/pricing/priceProvider'
 import { collectPythFeedIds } from '~/entities/oracle'
 import { executeBatchLensWithPythSimulation } from '~/utils/pyth'
@@ -32,6 +34,35 @@ import {
 const _allDepositPositions: Ref<AccountDepositPosition[]> = ref([])
 const _allBorrowPositions: Ref<AccountBorrowPosition[]> = ref([])
 
+// Unresolved positions — subgraph reported them but we couldn't materialise
+// the position, either because the vault object itself couldn't be resolved
+// (`fetch-failed` / `collateral-unresolved`) or because the per-account lens
+// call failed (`lens-failed`: RPC transport error or individual-call revert).
+// Surfaced on the portfolio page as an aggregate count so users know their
+// position exists even when we can't render details.
+export type UnresolvedPositionKind = 'deposit' | 'borrow'
+export type UnresolvedPositionReason = 'fetch-failed' | 'collateral-unresolved' | 'lens-failed'
+
+export interface UnresolvedPosition {
+  subAccount: string
+  vault: string
+  kind: UnresolvedPositionKind
+  reason: UnresolvedPositionReason
+}
+
+const _unresolvedPositions: Ref<UnresolvedPosition[]> = shallowRef([])
+
+// Keys captured during the current refresh cycle (reset at `beginRefreshCycle`,
+// used at `finalizeRefreshCycle` to prune entries from previous refreshes that
+// are no longer failing). Letting the displayed list persist across a refresh
+// (rather than clearing up-front) prevents the banner from flashing every poll.
+const currentRefreshCapturedKeys = new Set<string>()
+
+// Session-level dedup for Sentry emissions: `${chainId}:${vault}:${reason}`.
+// Cleared alongside positions on chain or address switch, so a broken RPC
+// recovering-and-failing-again re-emits once, rather than every 60s poll.
+const sentryEmittedKeys = new Set<string>()
+
 // Track which (subAccount, vaultAddress) pairs are used as collateral
 // Format: "subAccount:vaultAddress" (both checksummed)
 const collateralUsageSet: Ref<Set<string>> = shallowRef(new Set())
@@ -47,6 +78,7 @@ const borrowPositions = computed(() => {
   if (isShowAllPositions.value) return _allBorrowPositions.value
   return _allBorrowPositions.value.filter(p => p.borrow.verified && p.collateral.verified)
 })
+const allBorrowPositions = computed(() => _allBorrowPositions.value)
 const depositPositions = computed(() => {
   if (isShowAllPositions.value) return _allDepositPositions.value
   return _allDepositPositions.value.filter(p => p.vault.verified)
@@ -61,6 +93,120 @@ const hiddenDepositCount = computed(() =>
 // Generation counter to invalidate stale in-flight position fetches after chain switch.
 // Incremented on chain change; async operations capturing an older generation discard results.
 const positionGuard = createRaceGuard()
+
+const clearUnresolvedPositions = () => {
+  _unresolvedPositions.value = []
+  currentRefreshCapturedKeys.clear()
+}
+
+// Called by the orchestrator at the start of a refresh. We don't clear the
+// displayed list here — that would flash the banner off on every 60s poll —
+// only the per-refresh capture set, so `finalizeRefreshCycle` knows which
+// entries were re-captured this round.
+const beginRefreshCycle = () => {
+  currentRefreshCapturedKeys.clear()
+}
+
+// Called by the orchestrator after a successful refresh. Prunes entries from
+// `_unresolvedPositions` whose `(subAccount, vault)` wasn't re-captured this
+// cycle — that's how we remove positions that recovered (the underlying RPC
+// call now succeeds). Errored refreshes skip this step so a transient error
+// doesn't erroneously prune still-failing entries.
+const finalizeRefreshCycle = () => {
+  if (_unresolvedPositions.value.length === 0) return
+  const next = _unresolvedPositions.value.filter(p =>
+    currentRefreshCapturedKeys.has(`${p.subAccount}:${p.vault}`),
+  )
+  if (next.length !== _unresolvedPositions.value.length) {
+    _unresolvedPositions.value = next
+  }
+}
+
+// Best-effort lookup; does not block capture. Used only to classify Sentry
+// events by vault type. The async category fetch works even when RPC is the
+// failure mode, since `/api/vault-categories` is subgraph-backed.
+const resolveVaultType = async (
+  vault: string,
+): Promise<'evk' | 'earn' | 'securitize' | 'unknown'> => {
+  const { getType } = useVaultRegistry()
+  const cached = getType(vault)
+  if (cached === 'earn' || cached === 'securitize' || cached === 'evk') return cached
+
+  const category = await fetchVaultCategory(vault).catch(() => null)
+  if (category === 'earn' || category === 'securitize') return category
+  if (category === 'evk' || category === 'escrow') return 'evk'
+  return 'unknown'
+}
+
+// Register a position the subgraph reported but we couldn't materialise.
+// Dedup ignores `kind` so a failed borrow-collateral isn't double-counted
+// when the same vault re-appears in the deposit feed.
+const registerUnresolved = (
+  subAccount: string,
+  vault: string,
+  kind: UnresolvedPositionKind,
+  reason: UnresolvedPositionReason,
+  generation: number,
+): void => {
+  if (positionGuard.isStale(generation)) return
+
+  let normalizedVault: string
+  let normalizedSubAccount: string
+  try {
+    normalizedVault = getAddress(vault)
+    normalizedSubAccount = getAddress(subAccount)
+  }
+  catch {
+    return
+  }
+
+  const positionKey = `${normalizedSubAccount}:${normalizedVault}`
+  // Record the capture so finalize knows not to prune this entry.
+  currentRefreshCapturedKeys.add(positionKey)
+
+  const alreadyCaptured = _unresolvedPositions.value.some(p =>
+    p.subAccount === normalizedSubAccount && p.vault === normalizedVault,
+  )
+  if (alreadyCaptured) return
+
+  _unresolvedPositions.value = [..._unresolvedPositions.value, {
+    subAccount: normalizedSubAccount,
+    vault: normalizedVault,
+    kind,
+    reason,
+  }]
+
+  try {
+    const { chainId } = useEulerAddresses()
+    const runtimeConfig = useRuntimeConfig()
+    const currentChainId = chainId.value || 'unknown'
+    const dedupKey = `${currentChainId}:${normalizedVault}:${reason}`
+    if (!runtimeConfig.public.sentryDsn || sentryEmittedKeys.has(dedupKey)) return
+    sentryEmittedKeys.add(dedupKey)
+
+    // Resolve the type asynchronously; report once it's known so the Sentry
+    // event carries a useful `vaultType` tag. Address is deliberately omitted
+    // from the payload: subAccount is wallet-derived (wallet XOR sub-index),
+    // pairing it with session replay correlates replays to specific users.
+    void resolveVaultType(normalizedVault).then((vaultType) => {
+      Sentry.captureMessage('Unresolved position', {
+        level: 'warning',
+        tags: {
+          chainId: currentChainId,
+          vaultType,
+          kind,
+          reason,
+        },
+        contexts: {
+          unresolved: { vault: normalizedVault, kind, reason },
+        },
+      })
+    })
+  }
+  catch (e) {
+    logWarn('useAccountPositions/registerUnresolved/sentry', e)
+  }
+}
 
 const updateBorrowPositions = async (
   eulerLensAddresses: EulerLensAddresses,
@@ -147,9 +293,15 @@ const updateBorrowPositions = async (
 
     let hasTransportError = false
     for (let i = 0; i < results.length; i++) {
-      if (results[i].transportError) hasTransportError = true
+      if (results[i].transportError) {
+        hasTransportError = true
+        registerUnresolved(nonPythEntries[i].entry.subAccount, nonPythEntries[i].entry.vault, 'borrow', 'lens-failed', gen)
+      }
       else if (results[i].success && results[i].result) {
         accountInfoMap.set(nonPythEntries[i].key, results[i].result!)
+      }
+      else {
+        registerUnresolved(nonPythEntries[i].entry.subAccount, nonPythEntries[i].entry.vault, 'borrow', 'lens-failed', gen)
       }
     }
     if (hasTransportError) logWarn('useAccountPositions/accountInfo', 'RPC transport error — account info results may be incomplete')
@@ -178,6 +330,14 @@ const updateBorrowPositions = async (
     for (const [key, result] of pythResults) {
       if (result) {
         accountInfoMap.set(key, result)
+      }
+    }
+    // Capture Pyth entries whose simulation returned no result — the downstream
+    // processing loop would otherwise silently drop them when accountInfoMap
+    // has no entry for their key.
+    for (const pe of pythEntries) {
+      if (!pythResults.get(pe.key)) {
+        registerUnresolved(pe.entry.subAccount, pe.entry.vault, 'borrow', 'lens-failed', gen)
       }
     }
   }
@@ -260,7 +420,10 @@ const updateBorrowPositions = async (
     let borrow = prefetchedVault && prefetchedVault.address.toLowerCase() === borrowAddress.toLowerCase()
       ? prefetchedVault
       : await getOrFetch(borrowAddress) as Vault | undefined
-    if (!borrow) continue
+    if (!borrow) {
+      registerUnresolved(entry.subAccount, borrowAddress, 'borrow', 'fetch-failed', gen)
+      continue
+    }
 
     // Use batch-refreshed vault data if available (Pyth vaults with fresh prices)
     const refreshed = pythVaultRefreshMap.get(getAddress(borrow.address))
@@ -280,7 +443,10 @@ const updateBorrowPositions = async (
     if (!collateralAddress) continue
 
     const collateral = await getOrFetch(collateralAddress) as Vault | SecuritizeVault | undefined
-    if (!collateral) continue
+    if (!collateral) {
+      registerUnresolved(entry.subAccount, collateralAddress, 'borrow', 'collateral-unresolved', gen)
+      continue
+    }
 
     processed.push({
       entry,
@@ -497,7 +663,10 @@ const updateSavingsPositions = async (
     if (collateralUsageSet.value.has(collateralKey)) continue
 
     const vault = await getOrFetch(entry.vault)
-    if (!vault) continue
+    if (!vault) {
+      registerUnresolved(entry.subAccount, entry.vault, 'deposit', 'fetch-failed', gen)
+      continue
+    }
 
     validEntries.push({ entry, vault })
   }
@@ -526,9 +695,13 @@ const updateSavingsPositions = async (
       const r = results[i]
       if (r.transportError) {
         hasTransportError = true
+        registerUnresolved(validEntries[i].entry.subAccount, validEntries[i].entry.vault, 'deposit', 'lens-failed', gen)
         continue
       }
-      if (!r.success || !r.result) continue
+      if (!r.success || !r.result) {
+        registerUnresolved(validEntries[i].entry.subAccount, validEntries[i].entry.vault, 'deposit', 'lens-failed', gen)
+        continue
+      }
 
       const res = r.result
       if (res.vaultAccountInfo.shares === 0n) continue
@@ -554,9 +727,22 @@ const clearPositions = () => {
   _allBorrowPositions.value = []
   _allDepositPositions.value = []
   collateralUsageSet.value = new Set()
+  _unresolvedPositions.value = []
+  currentRefreshCapturedKeys.clear()
+  // Chain/address switch also resets the Sentry session dedup so a recovered
+  // endpoint that starts failing again emits once more.
+  sentryEmittedKeys.clear()
 }
 
+const unresolvedBorrowCount = computed(
+  () => _unresolvedPositions.value.filter(p => p.kind === 'borrow').length,
+)
+const unresolvedDepositCount = computed(
+  () => _unresolvedPositions.value.filter(p => p.kind === 'deposit').length,
+)
+
 export const useAccountPositions = () => ({
+  allBorrowPositions,
   depositPositions,
   borrowPositions,
   collateralUsageSet,
@@ -568,7 +754,12 @@ export const useAccountPositions = () => ({
   hiddenBorrowCount,
   hiddenDepositCount,
   positionGuard,
+  unresolvedBorrowCount,
+  unresolvedDepositCount,
   updateBorrowPositions,
   updateSavingsPositions,
   clearPositions,
+  clearUnresolvedPositions,
+  beginRefreshCycle,
+  finalizeRefreshCycle,
 })

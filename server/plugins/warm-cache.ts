@@ -37,7 +37,8 @@ import { refreshEulerChains } from '../api/euler-chains.get'
 import { refreshTokenList } from '../api/token-list.get'
 import { getEnabledChainIds } from '~/utils/chain-env'
 import { parseDeprecatedChains } from '~/utils/parseDeprecatedChains'
-import { logWarn, reportStatus } from '../utils/log'
+import { reportStatus } from '../utils/log'
+import { logger } from '~/server/utils/logger'
 import { refreshChainVaults } from '../utils/vaults-cache'
 import { refreshVaultCategories } from '../utils/vault-categories-store'
 import { refreshIntrinsicApyForChain } from '../utils/intrinsic-apy'
@@ -93,6 +94,13 @@ const reportWarm = <T>(context: string, task: Promise<T>): Promise<T | undefined
 
 const warmEulerChains = () =>
   reportWarm('euler-chains', refreshEulerChains())
+
+// Cross-chain pattern rules for asset geo-blocking live at `all/assets.json`
+// upstream. The /api/labels/assets.json handler unions this with the
+// per-chain file; warm it once so the first chain-scoped request doesn't
+// pay the cold-upstream cost.
+const warmGlobalAssets = () =>
+  reportWarm('labels/assets.json scope=all', refreshLabelFile('all', 'assets.json'))
 
 // --- Per-chain warms (parallel across chains and within a chain) ---
 
@@ -154,11 +162,12 @@ export default defineNitroPlugin(() => {
     try {
       await Promise.allSettled([
         warmEulerChains(),
+        warmGlobalAssets(),
         ...chainIds.flatMap(warmChainTasks),
       ])
     }
     catch (err) {
-      logWarn('warm-cache', 'warm-up iteration failed:', err instanceof Error ? err.message : err)
+      logger.warn({ ctx: 'warm-cache', err }, 'warm-up iteration failed')
     }
   }
 

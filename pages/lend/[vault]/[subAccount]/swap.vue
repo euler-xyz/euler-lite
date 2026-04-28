@@ -123,6 +123,7 @@ const swap = useSwapPageLogic({
       quote: selectedQuote.value,
       swapperMode: SwapperMode.EXACT_IN,
       isRepay: false,
+      requestedSlippage: slippage.value,
       targetDebt: 0n,
       currentDebt: 0n,
     })

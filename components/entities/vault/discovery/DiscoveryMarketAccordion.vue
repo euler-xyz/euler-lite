@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { maxUint256 } from 'viem'
 import type { MarketGroup } from '~/entities/lend-discovery'
 import type { Vault, SecuritizeVault, AnyBorrowVaultPair } from '~/entities/vault'
 import { formatCompactUsdValue } from '~/utils/string-utils'
@@ -9,10 +10,17 @@ import {
   getMiniDiagram,
   getCollateralMatrix,
   findVault,
-  DOT_METRIC_OPTIONS,
+  getAttributeMatrix,
+  isMatrixCompatibleVault,
+  formatCapDisplay,
+  isAttributeMatrixView,
+  MATRIX_VIEW_OPTIONS,
   type CollateralMatrixData,
   type DotMetric,
   type ExpandedViewMode,
+  type AttributeMatrixData,
+  type MatrixViewId,
+  type VaultUsdCacheEntry,
 } from '~/utils/discoveryCalculations'
 
 const props = defineProps<{
@@ -74,25 +82,48 @@ const setExpandedView = (marketId: string, mode: ExpandedViewMode) => {
 
 // -- Per-vault USD values (loaded on expand) --
 
-const vaultUsdCache = ref<Map<string, { supply: string, liquidity: string, supplyUsd: number }>>(new Map())
+const vaultUsdCache = ref<Map<string, VaultUsdCacheEntry>>(new Map())
+
+const formatUsdOrDisplay = (p: { hasPrice: boolean, usdValue: number, display: string }) =>
+  p.hasPrice ? formatCompactUsdValue(p.usdValue) : p.display
 
 const loadVaultUsdValues = async (market: MarketGroup) => {
   const newEntries = new Map(vaultUsdCache.value)
+  const allVaults = [...market.vaults, ...market.externalCollateral.filter(isMatrixCompatibleVault)]
 
   await Promise.all(
-    market.vaults.map(async (vault) => {
-      const addr = getVaultAddress(vault)
+    allVaults.map(async (vault) => {
+      const addr = getVaultAddress(vault).toLowerCase()
       if (!addr || newEntries.has(addr)) return
       const totalAssets = 'totalAssets' in vault ? vault.totalAssets as bigint : 0n
       const supply = 'supply' in vault ? vault.supply as bigint : totalAssets
       const borrow = 'borrow' in vault ? vault.borrow as bigint : 0n
-      const supplyPrice = await formatAssetValue(totalAssets, vault, 'off-chain')
+      const supplyCapRaw = 'supplyCap' in vault ? vault.supplyCap as bigint : maxUint256
+      const borrowCapRaw = 'borrowCap' in vault ? vault.borrowCap as bigint : maxUint256
+
       const liquidity = supply >= borrow ? supply - borrow : 0n
-      const liquidityPrice = await formatAssetValue(liquidity, vault, 'off-chain')
+      const supplyCapHasPrice = supplyCapRaw > 0n && supplyCapRaw < maxUint256
+      const borrowCapHasPrice = borrowCapRaw > 0n && borrowCapRaw < maxUint256
+
+      const [supplyPrice, borrowPrice, liquidityPrice, supplyCapPrice, borrowCapPrice] = await Promise.all([
+        formatAssetValue(totalAssets, vault, 'off-chain'),
+        formatAssetValue(borrow, vault, 'off-chain'),
+        formatAssetValue(liquidity, vault, 'off-chain'),
+        supplyCapHasPrice ? formatAssetValue(supplyCapRaw, vault, 'off-chain') : null,
+        borrowCapHasPrice ? formatAssetValue(borrowCapRaw, vault, 'off-chain') : null,
+      ])
+
       newEntries.set(addr, {
-        supply: supplyPrice.hasPrice ? formatCompactUsdValue(supplyPrice.usdValue) : supplyPrice.display,
-        liquidity: liquidityPrice.hasPrice ? formatCompactUsdValue(liquidityPrice.usdValue) : liquidityPrice.display,
+        supply: formatUsdOrDisplay(supplyPrice),
         supplyUsd: supplyPrice.hasPrice ? supplyPrice.usdValue : 0,
+        borrow: formatUsdOrDisplay(borrowPrice),
+        borrowUsd: borrowPrice.hasPrice ? borrowPrice.usdValue : 0,
+        liquidity: formatUsdOrDisplay(liquidityPrice),
+        liquidityUsd: liquidityPrice.hasPrice ? liquidityPrice.usdValue : 0,
+        supplyCap: formatCapDisplay(supplyCapRaw, supplyCapPrice ? formatUsdOrDisplay(supplyCapPrice) : null).display,
+        supplyCapUsd: supplyCapPrice?.hasPrice ? supplyCapPrice.usdValue : undefined,
+        borrowCap: formatCapDisplay(borrowCapRaw, borrowCapPrice ? formatUsdOrDisplay(borrowCapPrice) : null).display,
+        borrowCapUsd: borrowCapPrice?.hasPrice ? borrowCapPrice.usdValue : undefined,
       })
     }),
   )
@@ -106,10 +137,28 @@ const onToggle = (market: MarketGroup) => {
   if (!wasExpanded) loadVaultUsdValues(market)
 }
 
-// -- Metric selector --
+// -- Matrix view selector (single dropdown spans Stats, Configuration,
+// Oracles, and the four numeric pair metrics) --
 
-const dotMetric = ref<DotMetric>('net-apy')
-const metricDropdownOpen = ref(false)
+const matrixView = ref<MatrixViewId>('stats')
+const matrixDropdownOpen = ref(false)
+
+const matrixVariant = computed(() => isAttributeMatrixView(matrixView.value) ? matrixView.value : 'pairs')
+const dotMetric = computed<DotMetric>(() => {
+  if (isAttributeMatrixView(matrixView.value)) return 'net-apy' // unused for attribute matrices
+  return matrixView.value
+})
+
+const setMatrixView = (view: MatrixViewId) => {
+  if (matrixView.value === view) {
+    matrixDropdownOpen.value = false
+    return
+  }
+  matrixView.value = view
+  matrixDropdownOpen.value = false
+  selectedCell.value = null
+  selectedMatrixHeader.value = null
+}
 
 // -- Precomputed matrix map --
 
@@ -117,6 +166,15 @@ const matrixMap = computed((): Map<string, CollateralMatrixData | null> => {
   const result = new Map<string, CollateralMatrixData | null>()
   for (const market of props.markets) {
     result.set(market.id, getCollateralMatrix(market))
+  }
+  return result
+})
+
+const attributeMatrixMap = computed((): Map<string, AttributeMatrixData> => {
+  const result = new Map<string, AttributeMatrixData>()
+  if (!isAttributeMatrixView(matrixView.value)) return result
+  for (const market of props.markets) {
+    result.set(market.id, getAttributeMatrix(market, matrixView.value))
   }
   return result
 })
@@ -310,7 +368,7 @@ const hasSelection = (market: MarketGroup): boolean => {
 
 onMounted(() => {
   const onClick = () => {
-    metricDropdownOpen.value = false
+    matrixDropdownOpen.value = false
   }
   window.addEventListener('click', onClick)
   onUnmounted(() => {
@@ -409,38 +467,42 @@ onMounted(() => {
                 </button>
               </div>
 
-              <!-- Metric dropdown (matrix view only) -->
+              <!-- Unified matrix view dropdown (matrix view only).
+                   Stats / Configuration sit at the top, then Oracles, then
+                   the existing pair metrics. Selecting Stats/Configuration
+                   swaps in the attribute matrix; everything else uses the
+                   pair matrix with the corresponding dotMetric. -->
               <div
                 v-if="getExpandedView(market.id) === 'matrix'"
                 class="relative"
               >
                 <div
                   class="ui-select__field"
-                  @click.stop="metricDropdownOpen = !metricDropdownOpen"
+                  @click.stop="matrixDropdownOpen = !matrixDropdownOpen"
                 >
                   <UiIcon
                     name="filter"
                     class="ui-select__icon"
                   />
-                  <span class="ui-select__text">{{ DOT_METRIC_OPTIONS.find(o => o.id === dotMetric)?.label }}</span>
+                  <span class="ui-select__text">{{ MATRIX_VIEW_OPTIONS.find(o => o.id === matrixView)?.label }}</span>
                   <UiIcon
                     name="arrow-down"
                     class="ui-select__arrow"
-                    :style="metricDropdownOpen ? 'transform: rotate(180deg)' : ''"
+                    :style="matrixDropdownOpen ? 'transform: rotate(180deg)' : ''"
                   />
                 </div>
                 <div
-                  v-if="metricDropdownOpen"
-                  class="absolute left-0 top-full mt-4 z-30 bg-surface border border-line-default rounded-12 shadow-card py-4 min-w-[160px]"
+                  v-if="matrixDropdownOpen"
+                  class="absolute left-0 top-full mt-4 z-50 bg-surface border border-line-default rounded-12 shadow-card py-4 min-w-[180px]"
                 >
                   <button
-                    v-for="option in DOT_METRIC_OPTIONS"
+                    v-for="option in MATRIX_VIEW_OPTIONS"
                     :key="option.id"
                     class="w-full text-left px-14 py-6 text-p3 cursor-pointer transition-colors"
-                    :class="dotMetric === option.id
+                    :class="matrixView === option.id
                       ? 'text-accent-700 bg-accent-300/20 font-medium'
                       : 'text-content-secondary hover:bg-surface-secondary'"
-                    @click.stop="dotMetric = option.id; metricDropdownOpen = false"
+                    @click.stop="setMatrixView(option.id)"
                   >
                     {{ option.label }}
                   </button>
@@ -457,15 +519,24 @@ onMounted(() => {
               @select-node="toggleGraphNode(market.id, $event)"
             />
 
-            <!-- Matrix View -->
+            <!-- Matrix View: LTV pairs -->
             <DiscoveryMarketMatrix
-              v-else
+              v-else-if="matrixVariant === 'pairs'"
               :market="market"
               :matrix="matrix"
               :dot-metric="dotMetric"
               :selected-cell="selectedCell?.marketId === market.id ? { collateralAddr: selectedCell.collateralAddr, liabilityAddr: selectedCell.liabilityAddr } : null"
               :selected-header="selectedMatrixHeader?.marketId === market.id ? { address: selectedMatrixHeader.address, axis: selectedMatrixHeader.axis } : null"
               @select-cell="(col: string, lia: string) => onCellClick(market.id, col, lia)"
+              @select-header="(addr: string, axis: 'row' | 'column') => toggleMatrixHeader(market.id, addr, axis)"
+            />
+
+            <!-- Matrix View: Config / Stats attribute matrix -->
+            <DiscoveryMarketAttributeMatrix
+              v-else-if="attributeMatrixMap.get(market.id)"
+              :data="attributeMatrixMap.get(market.id)!"
+              :usd-cache="vaultUsdCache"
+              :selected-header="selectedMatrixHeader?.marketId === market.id ? { address: selectedMatrixHeader.address, axis: selectedMatrixHeader.axis } : null"
               @select-header="(addr: string, axis: 'row' | 'column') => toggleMatrixHeader(market.id, addr, axis)"
             />
 

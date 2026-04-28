@@ -63,7 +63,7 @@ export const DEFAULT_SLIPPAGE = 0.3
 export const DEFAULT_STABLECOIN_SLIPPAGE = 0.05
 export const SLIPPAGE_EXPIRY_MS = 24 * 60 * 60 * 1000
 export const SLIPPAGE_TIMESTAMP_STORAGE_KEY = 'swap-slippage-set-at'
-export const MIN_SLIPPAGE = 0
+export const MIN_SLIPPAGE = 0.01
 export const MAX_SLIPPAGE = 50
 export const HIGH_SLIPPAGE_THRESHOLD = 5
 
@@ -88,6 +88,11 @@ export const INTEREST_RATE_MODEL_TYPE = {
   KINKY: 3,
   FIXED_CYCLICAL_BINARY: 4,
 } as const
+
+// EVK Vault.configFlags is a bitmask. CFG_DONT_SOCIALIZE_DEBT is the only
+// publicly-defined bit today (0x01) — when set, bad debt is left in the vault
+// rather than being shared across depositors via share-price reduction.
+export const CFG_DONT_SOCIALIZE_DEBT = 1n
 
 export const KINK_IRM_COMPONENTS = [
   { name: 'baseRate', type: 'uint256' },

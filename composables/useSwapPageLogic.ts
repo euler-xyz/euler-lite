@@ -118,7 +118,6 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     requestQuotes,
     selectProvider,
   } = useSwapQuotesParallel({ amountField, compare })
-
   // ── Vault products & price invert ──────────────────────────────────────
   const fromProduct = useEulerProductOfVault(computed(() => fromVault.value?.address || ''))
   const toProduct = useEulerProductOfVault(computed(() => toVault.value?.address || ''))

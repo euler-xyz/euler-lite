@@ -19,7 +19,7 @@ import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verif
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
 import { createRaceGuard } from '~/utils/race-guard'
 import { findBlockingDisabledOp, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
-import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
+import { getPlanHookDisabledWarning, getUtilisationWarning, type VaultWarning } from '~/composables/useVaultWarnings'
 
 interface UseSavingsRepayOptions {
   position: Ref<AccountBorrowPosition | undefined>
@@ -107,7 +107,6 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     borrowVault,
     direction: core.direction,
   })
-
   // --- Savings-specific computeds ---
   const collateralAmountAfter = computed(() => {
     if (!collateralVault.value || !position.value) return null
@@ -197,6 +196,13 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     return getSwapInputAmount(q, core.direction.value)
   })
   const isInsufficientSource = computed(() => requiredInput.value > 0n && requiredInput.value > sourceBalance.value)
+  const isInsufficientVaultLiquidity = computed(() =>
+    requiredInput.value > 0n && requiredInput.value > (sourceVault.value?.totalCash || 0n),
+  )
+  const liquidityWarning = computed<VaultWarning | null>(() => {
+    if (!sourceVault.value) return null
+    return getUtilisationWarning(sourceVault.value, 'repay')
+  })
 
   // --- Submit disabled ---
   const isSubmitDisabled = computed(() => {
@@ -206,6 +212,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     if (!core.debtAmount.value && !core.amount.value) return true
     if (core.isRepayExceedsDebt.value) return true
     if (isInsufficientSource.value) return true
+    if (isInsufficientVaultLiquidity.value) return true
     if (core.isSameAsset.value) return false
     if (core.quotes.quoteError.value) return true
     if (!core.quotes.selectedQuote.value) return true
@@ -218,6 +225,9 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     }
     if (isInsufficientSource.value) {
       return 'Insufficient savings balance to cover the required swap amount.'
+    }
+    if (isInsufficientVaultLiquidity.value) {
+      return 'Not enough liquidity in the savings vault.'
     }
     return undefined
   })
@@ -290,6 +300,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
       return buildSwapFullRepayPlan({
         quote: core.quotes.selectedQuote.value,
         swapperMode: swapMode,
+        requestedSlippage: slippage.value,
         targetDebt,
         currentDebt,
         liabilityVault: borrowVault.value.address,
@@ -302,6 +313,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
       quote: core.quotes.selectedQuote.value,
       swapperMode: swapMode,
       isRepay: true,
+      requestedSlippage: slippage.value,
       targetDebt,
       currentDebt,
       liabilityVault: borrowVault.value.address,
@@ -436,6 +448,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     isSubmitDisabled,
     disabledReason,
     hookWarning,
+    liquidityWarning,
     isRepayExceedsDebt: core.isRepayExceedsDebt,
     // Handlers
     onAmountInput: core.onAmountInput,

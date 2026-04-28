@@ -4,7 +4,7 @@ import {
   eulerLabelProductEmpty,
   type EulerLabelVaultOverride,
 } from '~/entities/euler/labels'
-import type { EarnVault, Vault } from '~/entities/vault'
+import type { EarnVault } from '~/entities/vault'
 import { type OracleAdapterMeta, OracleAdapterCheckSeverity } from '~/entities/oracle'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import {
@@ -18,6 +18,8 @@ import {
   earnVaultDescriptions,
   earnVaultNotices,
   notExplorableEarnVaults,
+  assetBlocks,
+  assetRestrictions,
 } from '~/utils/eulerLabelsState'
 
 // ── Internal helpers ─────────────────────────────────────────
@@ -184,6 +186,18 @@ export const getEarnVaultRestricted = (vaultAddress: string): string[] | undefin
   return earnVaultRestrictions[normalized]
 }
 
+export const getAssetBlock = (assetAddress: string): string[] | undefined => {
+  if (!assetAddress) return undefined
+  const normalized = normalizeAddress(assetAddress).toLowerCase()
+  return assetBlocks[normalized]
+}
+
+export const getAssetRestricted = (assetAddress: string): string[] | undefined => {
+  if (!assetAddress) return undefined
+  const normalized = normalizeAddress(assetAddress).toLowerCase()
+  return assetRestrictions[normalized]
+}
+
 export const isVaultFeatured = (vaultAddress: string): boolean => {
   const normalized = normalizeAddress(vaultAddress)
   const inFeaturedProduct = Object.values(products).some(product =>
@@ -276,7 +290,10 @@ export const isProductKeyring = (productKey: string): boolean => {
   return products[productKey]?.keyring === true
 }
 
-export const getEntitiesByVault = (vault: Vault) => {
+// Widened to Vault | SecuritizeVault — both expose governorAdmin: string and
+// the helper only reads that one field. Callers from the discovery matrix
+// pass either type without casting.
+export const getEntitiesByVault = (vault: { governorAdmin: string }) => {
   const arr: EulerLabelEntity[] = []
   Object.values(entities).forEach((entity) => {
     if (Object.keys(entity.addresses).includes(vault.governorAdmin)) {

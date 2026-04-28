@@ -23,7 +23,7 @@ Euler Lite provides all the core functionality of Euler Finance in a customizabl
 ```bash
 git clone <repository-url>
 cd euler-lite
-npm install
+npm ci
 ```
 
 ### 2. Environment Configuration
@@ -71,6 +71,7 @@ These use Nuxt's `runtimeConfig` and are set via `NUXT_PUBLIC_CONFIG_*` env vars
 | `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` | —                                          | S3/CDN base URL for oracle checks (overrides repo)    |
 | `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL`       | —                                          | URL for EulerChains.json (overrides default upstream) |
 | `NUXT_PUBLIC_CONFIG_DOCS_URL`               | —                                          | Documentation link                                    |
+| `NUXT_PUBLIC_CONFIG_STARGATE_URL`           | —                                          | Stargate link                                         |
 | `NUXT_PUBLIC_CONFIG_TOS_URL`                | —                                          | Terms of Service link                                 |
 | `NUXT_PUBLIC_CONFIG_TOS_MD_URL`             | —                                          | TOS markdown URL (enables TOS signing when set)       |
 | `NUXT_PUBLIC_CONFIG_PRIVACY_POLICY_URL`     | `https://www.euler.finance/privacy-policy` | Privacy policy link                                   |
@@ -327,7 +328,7 @@ Before deploying:
 ### Build Errors
 
 - Ensure Node.js version is 24+ (24.14.1 recommended)
-- Clear and reinstall: `rm -rf node_modules && npm install`
+- Clear and reinstall: `rm -rf node_modules && npm ci`
 
 ### Wallet Connection Issues
 

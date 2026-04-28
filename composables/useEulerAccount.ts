@@ -12,6 +12,7 @@ import { fetchAccountPositions, type SubgraphPositionEntry } from '~/utils/subgr
 import { logWarn } from '~/utils/errorHandling'
 
 const {
+  allBorrowPositions,
   depositPositions,
   borrowPositions,
   isPositionsLoading,
@@ -22,9 +23,13 @@ const {
   hiddenBorrowCount,
   hiddenDepositCount,
   positionGuard,
+  unresolvedBorrowCount,
+  unresolvedDepositCount,
   updateBorrowPositions,
   updateSavingsPositions,
   clearPositions,
+  beginRefreshCycle,
+  finalizeRefreshCycle,
 } = useAccountPositions()
 
 let fetchInProgress = false
@@ -47,6 +52,7 @@ export const useEulerAccount = () => {
     if (fetchInProgress) return
     fetchInProgress = true
     try {
+      beginRefreshCycle()
       const gen = positionGuard.current()
       const targetAddress = portfolioAddress.value
       const { SUBGRAPH_URL } = useEulerConfig()
@@ -72,6 +78,7 @@ export const useEulerAccount = () => {
         false,
         gen,
       )
+      if (!positionGuard.isStale(gen)) finalizeRefreshCycle()
     }
     catch (error) {
       logWarn('useEulerAccount/updatePositions', error)
@@ -138,7 +145,7 @@ export const useEulerAccount = () => {
     const owner = portfolioAddress.value || address.value
     if (!owner) return undefined
 
-    return borrowPositions.value.find((position) => {
+    return allBorrowPositions.value.find((position) => {
       try {
         const ownerBigInt = BigInt(getAddress(owner))
         const subAccountBigInt = BigInt(getAddress(position.subAccount))
@@ -162,6 +169,7 @@ export const useEulerAccount = () => {
     if (fetchInProgress) return
     fetchInProgress = true
     try {
+      beginRefreshCycle()
       const gen = positionGuard.current()
       const { SUBGRAPH_URL } = useEulerConfig()
       const { borrows: borrowEntries, deposits: depositEntries } = walletAddress
@@ -172,6 +180,7 @@ export const useEulerAccount = () => {
 
       await updateBorrowPositions(lensAddresses, walletAddress, borrowEntries)
       await updateSavingsPositions(lensAddresses, walletAddress, depositEntries, false, gen)
+      if (!positionGuard.isStale(gen)) finalizeRefreshCycle()
     }
     catch (error) {
       logWarn('useEulerAccount/refreshAllPositions', error)
@@ -188,6 +197,8 @@ export const useEulerAccount = () => {
   return {
     borrowPositions,
     depositPositions,
+    unresolvedBorrowCount,
+    unresolvedDepositCount,
     isPositionsLoading,
     isPositionsLoaded,
     isDepositsLoading,

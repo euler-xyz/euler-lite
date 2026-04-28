@@ -163,12 +163,13 @@ const { guardWithPriceImpact: guardWithBorrowSwapPriceImpact } = usePriceImpactG
 })
 
 // --- Submit disabled ---
-const reviewBorrowDisabled = computed(() => isGeoBlocked.value || isBorrowRestricted.value || borrow.isBorrowSwapRestricted.value || borrow.isSubmitDisabled.value)
+const reviewBorrowDisabled = computed(() => isGeoBlocked.value || isBorrowRestricted.value || borrow.isBorrowSwapRestricted.value || borrow.isBorrowPayWithBlocked.value || borrow.isSubmitDisabled.value)
 const reviewMultiplyDisabled = computed(() => isGeoBlocked.value || isMultiplyRestricted.value || multiply.isMultiplySubmitDisabled.value)
 
 const borrowDisabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
   if (isBorrowRestricted.value) return { message: 'Borrowing this asset is not available in your region', variant: 'warning' }
+  if (borrow.isBorrowPayWithBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
   if (borrow.isBorrowSwapRestricted.value) return { message: 'Swapping into this collateral vault is not available in your region', variant: 'warning' }
   if (borrow.errorText.value) return { message: borrow.errorText.value, variant: 'error' }
   if (borrow.borrowSimulationError.value) return { message: borrow.borrowSimulationError.value, variant: 'error' }
@@ -611,7 +612,14 @@ watch(formTab, () => {
                   size="compact"
                 />
                 <UiToast
-                  v-if="!isGeoBlocked && !isPairFullyRestricted && !isBorrowRestricted && borrow.isBorrowSwapRestricted.value"
+                  v-if="!isGeoBlocked && !isPairFullyRestricted && !isBorrowRestricted && borrow.isBorrowPayWithBlocked.value"
+                  title="Asset restricted"
+                  description="Paying with this asset is not available in your region. Pick a different token."
+                  variant="warning"
+                  size="compact"
+                />
+                <UiToast
+                  v-if="!isGeoBlocked && !isPairFullyRestricted && !isBorrowRestricted && !borrow.isBorrowPayWithBlocked.value && borrow.isBorrowSwapRestricted.value"
                   title="Swap restricted"
                   description="Swapping into this collateral vault is not available in your region. You can provide the vault's underlying asset directly."
                   variant="warning"
@@ -728,7 +736,7 @@ watch(formTab, () => {
                     <AssetInput
                       v-model="multiply.multiplyLongAmount.value"
                       :desc="multiply.multiplyLongProduct.name"
-                      label="Long"
+                      label="Additional collateral"
                       :asset="multiply.multiplyLongVault.value.asset"
                       :vault="(multiply.multiplyLongVault.value as Vault)"
                       :readonly="true"
@@ -737,7 +745,7 @@ watch(formTab, () => {
                     <AssetInput
                       v-model="multiply.multiplyShortAmount.value"
                       :desc="multiply.multiplyShortProduct.name"
-                      label="Short"
+                      label="Debt"
                       :asset="multiply.multiplyShortVault.value.asset"
                       :vault="multiply.multiplyShortVault.value"
                       :readonly="true"

@@ -28,6 +28,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { isOpDisabled, OP_REDEEM, OP_WITHDRAW } from '~/utils/vault-hooks'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
 
 const router = useRouter()
 const route = useRoute()
@@ -107,7 +108,6 @@ const {
   requestQuotes: requestSwapQuotes,
   selectProvider: selectSwapQuote,
 } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
-
 const rewardApy = computed(() => getSupplyRewardApy(vault.value?.address || ''))
 const amountFixed = computed(() => {
   return FixedPoint.fromValue(
@@ -119,9 +119,16 @@ const effectiveWithdrawOp = computed(() => {
   const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
   return isMax ? OP_REDEEM : OP_WITHDRAW
 })
+const isOutputAssetBlocked = computed(() =>
+  needsSwap.value && isAssetBlockedByCountry(selectedOutputAsset.value),
+)
+const isOutputAssetRestricted = computed(() =>
+  needsSwap.value && isAssetRestrictedByCountry(selectedOutputAsset.value),
+)
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value) return false
   if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return true
+  if (isOutputAssetBlocked.value || isOutputAssetRestricted.value) return true
   if (assetsBalance.value < amountFixed.value.value) return true
   if (isLoading.value || amountFixed.value.isZero() || amountFixed.value.isNegative()) return true
   if (estimatesError.value) return true
@@ -131,6 +138,7 @@ const isSubmitDisabled = computed(() => {
 const reviewWithdrawDisabled = isSubmitDisabled
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return { message: 'Withdrawals are currently disabled for this vault', variant: 'warning' }
+  if (isOutputAssetBlocked.value || isOutputAssetRestricted.value) return { message: 'Receiving this asset is not available in your region', variant: 'warning' }
   if (estimatesError.value) return { message: estimatesError.value, variant: 'error' }
   if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return { message: 'Insufficient balance', variant: 'error' }
   if (needsSwap.value && isSwapQuoteLoading.value && !amountFixed.value.isZero()) return { message: 'Fetching swap quotes...', variant: 'warning' }
@@ -323,7 +331,7 @@ const updateBalance = async () => {
 }
 const submit = async () => {
   if (isOperationBlocked.value) return
-  if (isPreparing.value) return
+  if (isPreparing.value || isOutputAssetBlocked.value || isOutputAssetRestricted.value) return
   isPreparing.value = true
   try {
     await guardWithPriceImpact(async () => {
@@ -340,6 +348,7 @@ const submit = async () => {
               vaultAddress: vaultAddress as Address,
               sharesAmount: sharesBalance.value,
               quote: swapSelectedQuote.value,
+              requestedSlippage: swapSlippage.value,
               subAccount: subAccount.value,
             })
           }
@@ -348,6 +357,7 @@ const submit = async () => {
               vaultAddress: vaultAddress as Address,
               assetsAmount: amountFixed.value.value,
               quote: swapSelectedQuote.value,
+              requestedSlippage: swapSlippage.value,
               subAccount: subAccount.value,
             })
           }
@@ -408,6 +418,7 @@ const send = async () => {
           vaultAddress: vaultAddress as Address,
           sharesAmount: sharesBalance.value,
           quote,
+          requestedSlippage: swapSlippage.value,
           subAccount: subAccount.value,
         })
       }
@@ -416,6 +427,7 @@ const send = async () => {
           vaultAddress: vaultAddress as Address,
           assetsAmount: amountFixed.value.value,
           quote,
+          requestedSlippage: swapSlippage.value,
           subAccount: subAccount.value,
         })
       }
@@ -636,6 +648,13 @@ watch(swapSelectedQuote, () => {
               v-if="isUnknownSwapToken && needsSwap"
               title="Unknown token"
               description="This token is not on any recognized token list. It could be fraudulent or malicious. Verify the contract address before proceeding."
+              variant="warning"
+              size="compact"
+            />
+            <UiToast
+              v-if="isOutputAssetBlocked || isOutputAssetRestricted"
+              title="Asset restricted"
+              description="Receiving this asset is not available in your region. Pick a different token."
               variant="warning"
               size="compact"
             />

@@ -1,12 +1,14 @@
 /* eslint-disable @typescript-eslint/no-dynamic-delete */
 import axios from 'axios'
 import { getAddress } from 'viem'
-import type { EulerLabelPoint, EulerLabelEarnVaultEntry } from '~/entities/euler/labels'
+import type { EulerLabelPoint, EulerLabelEarnVaultEntry, EulerLabelAssetEntry } from '~/entities/euler/labels'
 import type { EarnVault, Vault } from '~/entities/vault'
 import { safeAssign } from '~/utils/safe-assign'
+import { logger } from '~/utils/logger'
 import { logWarn } from '~/utils/errorHandling'
 import { CACHE_TTL_5MIN_MS } from '~/entities/tuning-constants'
 import { normalizeAddress } from '~/utils/normalizeAddress'
+import { clearAssetGeoCache } from '~/composables/useGeoBlock'
 import {
   isLoading,
   isReady,
@@ -25,6 +27,12 @@ import {
   verifiedVaultAddresses,
   oracleAdapters,
   loadingAdapters,
+  assetBlocks,
+  assetRestrictions,
+  assetPatternRules,
+  type CompiledPatternRule,
+  bulkLoadedAdapterChains,
+  pendingBulkAdapterLoads,
 } from '~/utils/eulerLabelsState'
 import {
   normalizeProducts,
@@ -71,6 +79,39 @@ const loadOracleAdapters = async (chainId: number, addresses?: string[]) => {
   await Promise.all(addresses.map(addr => loadOracleAdapter(chainId, addr)))
 }
 
+// Bulk-load every adapter known for a chain via the all.json upstream.
+// Heavy call (~1 MB JSON, hundreds of adapters) — caller decides when to invoke.
+// Concurrent callers share one in-flight request; cached payloads are
+// considered fresh for CACHE_TTL_5MIN_MS, after which the next call refetches
+// (matches the labels load cadence so adapter checks don't drift).
+const loadAllOracleAdapters = async (chainId: number): Promise<void> => {
+  if (!Number.isInteger(chainId) || chainId <= 0) return
+
+  const loadedAt = bulkLoadedAdapterChains.get(chainId)
+  if (loadedAt !== undefined && (Date.now() - loadedAt) < CACHE_TTL_5MIN_MS) return
+
+  const inflight = pendingBulkAdapterLoads.get(chainId)
+  if (inflight) return inflight
+
+  const promise = (async () => {
+    try {
+      const res = await axios.get('/api/oracle-adapters', { params: { chainId } })
+      const meta = normalizeOracleAdapters(res.data)
+      safeAssign(oracleAdapters, meta)
+      bulkLoadedAdapterChains.set(chainId, Date.now())
+    }
+    catch (err) {
+      logWarn('useEulerLabels', `Failed to bulk-load oracle adapters for chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`)
+    }
+    finally {
+      pendingBulkAdapterLoads.delete(chainId)
+    }
+  })()
+
+  pendingBulkAdapterLoads.set(chainId, promise)
+  return promise
+}
+
 export const useEulerLabels = () => {
   const loadLabels = async (forceRefresh = false) => {
     try {
@@ -99,21 +140,30 @@ export const useEulerLabels = () => {
       Object.keys(entities).forEach(key => delete entities[key])
       Object.keys(points).forEach(key => delete points[key])
       Object.keys(oracleAdapters).forEach(key => delete oracleAdapters[key])
+      bulkLoadedAdapterChains.clear()
       Object.keys(earnVaultBlocks).forEach(key => delete earnVaultBlocks[key])
       Object.keys(earnVaultRestrictions).forEach(key => delete earnVaultRestrictions[key])
       Object.keys(deprecatedEarnVaults).forEach(key => delete deprecatedEarnVaults[key])
       Object.keys(earnVaultDescriptions).forEach(key => delete earnVaultDescriptions[key])
       Object.keys(earnVaultNotices).forEach(key => delete earnVaultNotices[key])
+      Object.keys(assetBlocks).forEach(key => delete assetBlocks[key])
+      Object.keys(assetRestrictions).forEach(key => delete assetRestrictions[key])
+      assetPatternRules.splice(0, assetPatternRules.length)
+      // Resolution cache in useGeoBlock may hold decisions computed against
+      // the now-cleared pattern rules and address maps; drop it so the next
+      // lookup recomputes against the freshly-loaded labels.
+      clearAssetGeoCache()
       featuredEarnVaults.clear()
       notExplorableEarnVaults.clear()
       earnVaults.value = []
       verifiedVaultAddresses.value = []
 
-      const [productRes, entitiesRes, earnRes, pointsRes] = await Promise.allSettled([
+      const [productRes, entitiesRes, earnRes, pointsRes, assetsRes] = await Promise.allSettled([
         axios.get('/api/labels/products.json', { params: { chainId } }),
         axios.get('/api/labels/entities.json', { params: { chainId } }),
         axios.get('/api/labels/earn-vaults.json', { params: { chainId } }),
         axios.get('/api/labels/points.json', { params: { chainId } }),
+        axios.get('/api/labels/assets.json', { params: { chainId } }),
       ])
 
       if (productRes.status === 'fulfilled') {
@@ -122,14 +172,14 @@ export const useEulerLabels = () => {
         verifiedVaultAddresses.value = normalizedProducts.vaultAddresses
       }
       else {
-        logWarn('labels/load', 'Failed to load products:', productRes.reason)
+        logger.warn({ ctx: 'labels/load', err: productRes.reason }, 'failed to load products')
       }
 
       if (entitiesRes.status === 'fulfilled') {
         safeAssign(entities, normalizeEntities(entitiesRes.value.data))
       }
       else {
-        logWarn('labels/load', 'Failed to load entities:', entitiesRes.reason)
+        logger.warn({ ctx: 'labels/load', err: entitiesRes.reason }, 'failed to load entities')
       }
 
       const earnEntries = (earnRes.status === 'fulfilled' ? earnRes.value.data ?? [] : []) as Array<string | EulerLabelEarnVaultEntry>
@@ -161,12 +211,12 @@ export const useEulerLabels = () => {
       })
 
       if (earnRes.status === 'rejected') {
-        logWarn('labels/load', 'Failed to load earn-vaults:', earnRes.reason)
+        logger.warn({ ctx: 'labels/load', err: earnRes.reason }, 'failed to load earn-vaults')
       }
 
       const pointsData = (pointsRes.status === 'fulfilled' ? pointsRes.value.data ?? [] : []) as EulerLabelPoint[]
       if (pointsRes.status === 'rejected') {
-        logWarn('labels/load', 'Failed to load points:', pointsRes.reason)
+        logger.warn({ ctx: 'labels/load', err: pointsRes.reason }, 'failed to load points')
       }
       pointsData.forEach((point) => {
         if (!point.collateralVaults) {
@@ -183,6 +233,89 @@ export const useEulerLabels = () => {
             logo: point.logo,
           })
         })
+      })
+
+      const assetEntries = (assetsRes.status === 'fulfilled' ? assetsRes.value.data ?? [] : []) as Array<EulerLabelAssetEntry>
+      if (assetsRes.status === 'rejected') {
+        logger.warn({ ctx: 'labels/load', err: assetsRes.reason }, 'failed to load assets')
+      }
+      assetEntries.forEach((entry, index) => {
+        if (!entry) return
+
+        const hasAddress = typeof entry.address === 'string'
+        const hasSymbols = Array.isArray(entry.symbols) && entry.symbols.length > 0
+        const hasSymbolRegex = typeof entry.symbolRegex === 'string' && entry.symbolRegex.length > 0
+        const hasNames = Array.isArray(entry.names) && entry.names.length > 0
+        const hasNameRegex = typeof entry.nameRegex === 'string' && entry.nameRegex.length > 0
+        const hasPattern = hasSymbols || hasSymbolRegex || hasNames || hasNameRegex
+
+        // Mixing address and pattern fields in one entry is confusing: the
+        // shared `block` / `restricted` arrays apply to both sides, so there's
+        // no way to scope different country lists to each match surface.
+        // Split into two entries instead.
+        if (hasAddress && hasPattern) {
+          logWarn('labels/load', `assets.json entry #${index} mixes 'address' with pattern fields; both will apply the same block/restricted rules — split into separate entries for clarity`)
+        }
+
+        // Address-based rule: populate the fast O(1) lookup map.
+        if (hasAddress) {
+          const key = normalizeAddress(entry.address!).toLowerCase()
+          if (entry.block?.length) {
+            assetBlocks[key] = entry.block
+          }
+          if (entry.restricted?.length) {
+            assetRestrictions[key] = entry.restricted
+          }
+        }
+
+        if (!hasPattern) {
+          // No pattern fields; either an address-only rule (already handled)
+          // or an entry with no match fields at all (skip).
+          if (!hasAddress) {
+            logWarn('labels/load', `assets.json entry #${index} has no match fields; skipping`)
+          }
+          return
+        }
+
+        const rule: CompiledPatternRule = {
+          block: entry.block?.length ? entry.block : undefined,
+          restricted: entry.restricted?.length ? entry.restricted : undefined,
+        }
+        if (!rule.block && !rule.restricted) {
+          // Pattern rule with no block/restricted is a no-op; drop it.
+          return
+        }
+
+        if (hasSymbols) {
+          rule.symbolsLower = new Set(entry.symbols!.map(s => s.toLowerCase()))
+        }
+        if (hasSymbolRegex) {
+          try {
+            rule.symbolRegex = new RegExp(entry.symbolRegex!, 'i')
+          }
+          catch (e) {
+            logWarn('labels/load', `assets.json entry #${index} has invalid symbolRegex; skipping regex`, { data: e })
+          }
+        }
+        if (hasNames) {
+          rule.namesLower = new Set(entry.names!.map(s => s.toLowerCase()))
+        }
+        if (hasNameRegex) {
+          try {
+            rule.nameRegex = new RegExp(entry.nameRegex!, 'i')
+          }
+          catch (e) {
+            logWarn('labels/load', `assets.json entry #${index} has invalid nameRegex; skipping regex`, { data: e })
+          }
+        }
+
+        // If every pattern field failed to populate (e.g. all regexes invalid),
+        // drop the entry entirely — no match surface.
+        if (!rule.symbolsLower && !rule.symbolRegex && !rule.namesLower && !rule.nameRegex) {
+          return
+        }
+
+        assetPatternRules.push(rule)
       })
 
       loadState.chainId = chainId
@@ -209,6 +342,7 @@ export const useEulerLabels = () => {
     loadLabels,
     loadOracleAdapter,
     loadOracleAdapters,
+    loadAllOracleAdapters,
   }
 }
 

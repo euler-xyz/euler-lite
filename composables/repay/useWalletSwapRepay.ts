@@ -32,6 +32,7 @@ interface UseWalletSwapRepayOptions {
   plan: Ref<TxPlan | null>
   isSubmitting: Ref<boolean>
   isPreparing: Ref<boolean>
+  slippage: Readonly<Ref<number>>
   clearSimulationError: () => void
   runSimulation: (plan: TxPlan) => Promise<boolean>
   netAPY: Ref<number>
@@ -51,6 +52,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     plan,
     isSubmitting,
     isPreparing,
+    slippage,
     clearSimulationError,
     runSimulation,
     netAPY,
@@ -69,10 +71,6 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const { eulerLensAddresses, chainId } = useEulerAddresses()
   const { isConnected, address } = useAccount()
   const { fetchSingleBalance } = useWallets()
-  const { slippage } = useSlippage({
-    fromSymbol: () => selectedAsset.value?.symbol,
-    toSymbol: () => borrowVault.value?.asset.symbol,
-  })
   const { getVault: registryGetVault } = useVaultRegistry()
 
   // --- State ---
@@ -86,7 +84,6 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
   // --- Swap quotes (dual-direction) ---
   const quotes = useSwapRepayQuotes({ direction })
-
   // --- Derived ---
   const needsSwap = computed(() => {
     if (!selectedAsset.value || !borrowVault.value) return false
@@ -619,6 +616,14 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     }
   })
 
+  watch(slippage, () => {
+    if (formTab.value !== 'wallet' || !needsSwap.value) return
+    clearSimulationError()
+    quotes.reset()
+    resetDerivedState()
+    requestQuote()
+  })
+
   // --- Watch quote changes → sync opposite field + estimates ---
   watch([quotes.effectiveQuote, direction], () => {
     if (formTab.value !== 'wallet' || !needsSwap.value) return
@@ -675,6 +680,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       inputTokenAddress: (wrappedAddress || selectedAsset.value.address) as Address,
       inputAmount,
       quote: quotes.selectedQuote.value,
+      requestedSlippage: slippage.value,
       borrowVaultAddress: borrowVault.value.address as Address,
       subAccount: (position.value.subAccount || address.value || zeroAddress) as Address,
       enabledCollaterals: position.value.collaterals ?? [collateralVault.value.address],

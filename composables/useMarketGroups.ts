@@ -6,6 +6,7 @@ import type { AnyVault } from '~/composables/useVaultRegistry'
 import { getVaultUtilization } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import { isVaultNotExplorable, isVaultFeatured } from '~/utils/eulerLabelsUtils'
+import { buildFetchContext } from '~/composables/useFetchContext'
 
 // -- Helpers --
 
@@ -97,6 +98,10 @@ const buildProductGroups = (
 
 // -- Step 2: Augment with Collateral Graph --
 
+// Module-scope dedupe so we warn at most once per (vault → missing-collateral)
+// pair across recomputes.
+const warnedMissingCollateral = new Set<string>()
+
 const augmentWithCollateralGraph = (
   groups: MarketGroup[],
   allVaults: AnyVault[],
@@ -116,14 +121,27 @@ const augmentWithCollateralGraph = (
     const seenExternal = new Set<string>()
 
     for (const vault of group.vaults) {
+      const vaultAddr = getVaultAddress(vault)
       const collateralAddrs = getCollateralAddresses(vault)
       for (const colAddr of collateralAddrs) {
         const normalized = colAddr.toLowerCase()
-        if (!groupAddresses.has(normalized) && !seenExternal.has(normalized)) {
-          const externalVault = vaultMap.get(normalized)
-          if (externalVault) {
-            externalCollateral.push(externalVault)
-            seenExternal.add(normalized)
+        if (groupAddresses.has(normalized) || seenExternal.has(normalized)) continue
+        const externalVault = vaultMap.get(normalized)
+        if (externalVault) {
+          externalCollateral.push(externalVault)
+          seenExternal.add(normalized)
+        }
+        else {
+          // Curator referenced a collateral vault that isn't loaded into the
+          // registry — silently dropping it would hide the relationship from
+          // every discovery view. Warn once per pair so the gap is visible.
+          const key = `${vaultAddr.toLowerCase()}:${normalized}`
+          if (!warnedMissingCollateral.has(key)) {
+            warnedMissingCollateral.add(key)
+            logWarn(
+              'useMarketGroups/missing-collateral',
+              `Group "${group.name}": vault ${vaultAddr} references unresolved collateral ${colAddr}`,
+            )
           }
         }
       }
@@ -439,7 +457,8 @@ export const useMarketGroups = () => {
     const memberVaults: Vault[] = []
 
     try {
-      for await (const result of fetchVaults(allAddresses)) {
+      const ctx = buildFetchContext()
+      for await (const result of fetchVaults(ctx, allAddresses)) {
         memberVaults.push(...result.vaults)
         if (result.isFinished) break
       }
