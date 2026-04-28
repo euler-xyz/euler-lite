@@ -29,6 +29,7 @@ const isExecuting = computed(() => {
 const isCancelling = ref(false)
 const isCancelPending = computed(() => props.executionStatus === 'cancelling' || isCancelling.value)
 const isSubmitted = computed(() => props.executionStatus === 'submitted' || isCancelPending.value)
+const canCancelOrder = computed(() => !props.orderStatus?.terminal && !props.locallyCancelled)
 
 const executionLabel = computed(() => {
   switch (props.executionStatus) {
@@ -67,7 +68,7 @@ const orderStatusDescription = computed(() => {
     return 'We are cancelling the swap order.'
   }
   if (props.locallyCancelled && !props.orderStatus?.terminal) {
-    return 'The cancellation request was submitted. CoW order status may take a moment to update.'
+    return 'The cancellation request was submitted. CoW cancellation is soft, so the order may still fill until CoW reports it cancelled.'
   }
   return undefined
 })
@@ -178,8 +179,17 @@ const handleCancel = async () => {
           View on CoW Explorer &rarr;
         </a>
 
+        <UiToast
+          v-if="canCancelOrder"
+          title="Cancellation is not guaranteed"
+          description="CoW cancellations are soft. This order may still fill until CoW reports it cancelled."
+          variant="warning"
+          size="compact"
+          persistent
+        />
+
         <UiButton
-          v-if="!orderStatus?.terminal && !locallyCancelled"
+          v-if="canCancelOrder"
           variant="secondary"
           size="xlarge"
           rounded
