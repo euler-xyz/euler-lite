@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ToastVariant } from '~/components/ui/toast.types'
 import type { DisplayStep } from '~/utils/stepDecoding'
-import type { CowSwapExecutionStatus, CowSwapOrderStatus } from '~/entities/cowswap'
+import { formatCowSwapExecutionErrorMessage, type CowSwapExecutionStatus, type CowSwapOrderStatus } from '~/entities/cowswap'
 
 const props = defineProps<{
   signSteps: DisplayStep[]
@@ -77,6 +77,9 @@ const orderStatusVariant = computed<ToastVariant>(() => {
   if (props.orderStatus?.type === 'expired') return 'warning'
   return 'info'
 })
+const executionErrorMessage = computed(() =>
+  props.executionError ? formatCowSwapExecutionErrorMessage(props.executionError) : undefined,
+)
 
 const internalSubmitting = ref(false)
 const hasUnresolvedSubmittedOrder = computed(() => isSubmitted.value && !props.orderStatus?.terminal)
@@ -190,9 +193,9 @@ const handleCancel = async () => {
 
       <!-- Error -->
       <UiToast
-        v-if="executionError"
+        v-if="executionErrorMessage"
         title="Something went wrong"
-        :description="executionError.message"
+        :description="executionErrorMessage"
         variant="error"
         size="compact"
         persistent
