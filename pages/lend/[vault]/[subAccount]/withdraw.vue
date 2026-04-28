@@ -389,6 +389,7 @@ const submit = async () => {
           plan: plan.value || undefined,
           swapToAsset: needsSwap.value ? selectedOutputAsset.value : undefined,
           swapToAmount: needsSwap.value ? swapEstimatedOutput.value : undefined,
+          swapMode: needsSwap.value ? SwapperMode.EXACT_IN : undefined,
           submittingLabel: 'Submitting...',
           onConfirm: async () => {
             await send()

@@ -84,6 +84,7 @@ const swap = useSwapPageLogic({
   displayAmountField: 'amountOut',
   quoteDiffPrefix: '-',
   redirectPath: '/portfolio/saving',
+  swapperMode: SwapperMode.EXACT_IN,
 
   buildQuoteRequest(amount) {
     if (!fromVault.value || !toVault.value) return null

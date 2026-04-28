@@ -426,6 +426,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
           plan: plan.value || undefined,
           swapToAsset: !core.isSameAsset.value ? borrowVault.value.asset : undefined,
           swapToAmount: !core.isSameAsset.value ? core.debtAmount.value : undefined,
+          swapMode: !core.isSameAsset.value ? core.direction.value : undefined,
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
           onConfirm: async () => {

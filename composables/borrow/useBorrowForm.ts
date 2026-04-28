@@ -657,6 +657,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             plan: plan.value || undefined,
             swapToAsset: collateralVault.value.asset,
             swapToAmount: borrowSwapEstimatedCollateral.value,
+            swapMode: SwapperMode.EXACT_IN,
             onConfirm: async () => {
               await send()
             },

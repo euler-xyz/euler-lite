@@ -183,6 +183,7 @@ const swap = useSwapPageLogic({
   targetVaultAddress,
   additionalErrors: [healthError],
   sameAssetModalType: 'swap',
+  swapperMode: SwapperMode.TARGET_DEBT,
 
   buildQuoteRequest(amount) {
     if (!fromVault.value || !toVault.value || !position.value) return null

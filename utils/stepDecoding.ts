@@ -1,6 +1,7 @@
 import { formatUnits, getAddress, toFunctionSelector, zeroAddress } from 'viem'
 import type { TxPlan } from '~/entities/txPlan'
 import type { EVCCall } from '~/utils/evc-converter'
+import { SwapperMode } from '~/entities/swap'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -11,6 +12,8 @@ export interface StepAssetInfo {
   address?: string
   amount?: number | string
   iconUrl?: string
+  /** When true, the displayed amount is an estimate (rendered with a "~" prefix). */
+  estimated?: boolean
 }
 
 export interface DisplayStep {
@@ -38,6 +41,14 @@ export interface StepDecodingContext {
   supplyingAmount?: number | string
   swapToAsset?: { symbol: string, address: string, decimals: bigint }
   swapToAmount?: number | string
+  /**
+   * Mode of the swap behind this operation, when one is involved. Drives the
+   * "Swap to repay" relabel and which leg is shown as estimated:
+   *   EXACT_IN     → output amount is an estimate
+   *   EXACT_OUT    → input amount is an estimate
+   *   TARGET_DEBT  → input amount is an estimate, label becomes "Swap to repay"
+   */
+  swapMode?: SwapperMode
   transferAmounts?: Record<string, string>
 }
 
@@ -372,7 +383,7 @@ export function buildDisplaySteps(
         for (const item of batchItems) {
           index++
           const label = decodeBatchItemLabel(item.data)
-          const stepAssetInfo = getAssetInfoForStep(label, item.data, item.targetContract, item, ctx, getVault, usedSupply, usedBorrow, usedSwapTo, lastWithdrawAmount)
+          let stepAssetInfo = getAssetInfoForStep(label, item.data, item.targetContract, item, ctx, getVault, usedSupply, usedBorrow, usedSwapTo, lastWithdrawAmount)
           const secondAsset = ctx.supplyingAssetForBorrow || ctx.swapToAsset
           let toAssetInfo: StepAssetInfo | undefined
           if (label === 'Wrap native currency') {
@@ -387,11 +398,28 @@ export function buildDisplaySteps(
           else if (label === 'Update price feeds' && stepAssetInfo && secondAsset && secondAsset.symbol !== ctx.asset.symbol) {
             toAssetInfo = { symbol: secondAsset.symbol, address: secondAsset.address }
           }
+          // For swap steps, the leg that the user did NOT pin is an estimate.
+          // EXACT_IN pins input (output is estimated); EXACT_OUT and TARGET_DEBT
+          // pin output / target debt (input is estimated). TARGET_DEBT additionally
+          // relabels the step to "Swap to repay".
+          if (label === 'Swap' && ctx.swapMode !== undefined) {
+            if (ctx.swapMode === SwapperMode.EXACT_IN && toAssetInfo) {
+              toAssetInfo = { ...toAssetInfo, estimated: true }
+            }
+            else if (
+              (ctx.swapMode === SwapperMode.EXACT_OUT || ctx.swapMode === SwapperMode.TARGET_DEBT)
+              && stepAssetInfo
+            ) {
+              stepAssetInfo = { ...stepAssetInfo, estimated: true }
+            }
+          }
           const displayLabel = label === 'Transfer to account'
             ? 'Transfer'
             : label === 'Wrap native currency'
               ? 'Wrap'
-              : label
+              : label === 'Swap' && ctx.swapMode === SwapperMode.TARGET_DEBT
+                ? 'Swap to repay'
+                : label
           const isWrapTransfer = label === 'Transfer' && prevLabel === 'Wrap native currency'
           const batchLabelSuffix = label === 'Transfer to account'
             ? 'to savings'

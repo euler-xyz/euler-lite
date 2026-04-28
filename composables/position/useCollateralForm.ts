@@ -26,7 +26,7 @@ import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedB
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
-import type { SwapApiQuote } from '~/entities/swap'
+import { SwapperMode, type SwapApiQuote } from '~/entities/swap'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import type { SwapApiRequestInput } from '~/composables/useSwapApi'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
@@ -659,6 +659,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
             hasBorrows: (position.value?.borrowed || 0n) > 0n,
             swapToAsset: options.needsSwap.value ? options.getSwapToAsset() : undefined,
             swapToAmount: options.needsSwap.value ? swapEstimatedOutput.value : undefined,
+            swapMode: options.needsSwap.value ? SwapperMode.EXACT_IN : undefined,
             onConfirm: async () => {
               await send()
             },
