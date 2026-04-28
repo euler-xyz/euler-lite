@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ToastVariant } from '~/components/ui/toast.types'
 import type { DisplayStep } from '~/utils/stepDecoding'
 import type { CowSwapExecutionStatus, CowSwapOrderStatus } from '~/entities/cowswap'
 
@@ -70,6 +71,12 @@ const orderStatusDescription = computed(() => {
   return undefined
 })
 
+const orderStatusVariant = computed<ToastVariant>(() => {
+  if (isCancelPending.value) return 'info'
+  if (props.orderStatus?.type === 'expired') return 'warning'
+  return 'info'
+})
+
 const internalSubmitting = ref(false)
 
 const handleConfirm = async () => {
@@ -138,7 +145,7 @@ const handleCancel = async () => {
         <UiToast
           :title="orderStatusLabel"
           :description="orderStatusDescription"
-          variant="info"
+          :variant="orderStatusVariant"
           size="compact"
           persistent
         />
