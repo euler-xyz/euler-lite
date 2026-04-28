@@ -21,7 +21,11 @@ const isBorrowableVault = (vault: AnyVault): boolean => {
 
 const getCollateralAddresses = (vault: AnyVault): string[] => {
   if (!isVaultType(vault)) return []
-  return vault.collateralLTVs.map(ltv => ltv.collateral)
+  // Skip inactive collateral entries — EVK retains zero-LTV rows for retired
+  // or never-activated collaterals which aren't part of any usable market.
+  return vault.collateralLTVs
+    .filter(ltv => ltv.liquidationLTV > 0n || ltv.borrowLTV > 0n)
+    .map(ltv => ltv.collateral)
 }
 
 const getVaultAddress = (vault: AnyVault): string =>
@@ -340,14 +344,15 @@ export const useMarketGroups = () => {
   const { getAll } = useVaultRegistry()
   const { products, entities } = useEulerLabels()
 
+  /** Every loaded vault, including non-explorable ones (used for collateral lookups) */
+  const registryVaults = computed((): AnyVault[] => getAll().map(entry => entry.vault))
+
   /** All vaults available for grouping */
   const allVaults = computed((): AnyVault[] => {
-    return getAll()
-      .map(entry => entry.vault)
-      .filter((vault) => {
-        const address = getVaultAddress(vault)
-        return address ? !isVaultNotExplorable(address) : true
-      })
+    return registryVaults.value.filter((vault) => {
+      const address = getVaultAddress(vault)
+      return address ? !isVaultNotExplorable(address) : true
+    })
   })
 
   /** Synchronous market groups (metrics without TVL) */
@@ -358,12 +363,15 @@ export const useMarketGroups = () => {
     // Step 1: Product-label groups
     const { groups: productGroups, assignedAddresses } = buildProductGroups(vaults, products, entities)
 
-    // Step 2: Augment with collateral graph
-    const augmented = augmentWithCollateralGraph(productGroups, vaults)
+    // Step 2: Augment with collateral graph — pass the full registry so active
+    // LTVs targeting non-explorable vaults still resolve as externalCollateral
+    // instead of triggering a missing-collateral warning.
+    const lookupVaults = registryVaults.value
+    const augmented = augmentWithCollateralGraph(productGroups, lookupVaults)
 
     // Step 3: Orphan clustering
     const orphanGroups = clusterOrphans(vaults, assignedAddresses)
-    const augmentedOrphans = augmentWithCollateralGraph(orphanGroups, vaults)
+    const augmentedOrphans = augmentWithCollateralGraph(orphanGroups, lookupVaults)
 
     return [...augmented, ...augmentedOrphans]
   })
@@ -485,8 +493,7 @@ export const useMarketGroups = () => {
     }
 
     // Augment with collateral graph using registry vaults + fetched vaults
-    const registryVaults = getAll().map(entry => entry.vault)
-    const [augmented] = augmentWithCollateralGraph([group], [...registryVaults, ...memberVaults])
+    const [augmented] = augmentWithCollateralGraph([group], [...registryVaults.value, ...memberVaults])
 
     try {
       return await resolveGroupTVL(augmented)
