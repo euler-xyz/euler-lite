@@ -1,6 +1,7 @@
 <script setup lang="ts">
 const props = defineProps<{
   exact: string
+  placement?: 'top' | 'bottom'
 }>()
 
 const copied = ref(false)
@@ -16,7 +17,10 @@ function onCopy() {
 </script>
 
 <template>
-  <span class="ui-exact-amount">
+  <span
+    class="ui-exact-amount"
+    :class="{ 'ui-exact-amount--bottom': props.placement === 'bottom' }"
+  >
     <slot />
     <span
       class="ui-exact-amount__tip"
@@ -81,6 +85,16 @@ function onCopy() {
       left: 0;
       width: 100%;
       height: 6px;
+    }
+  }
+
+  .ui-exact-amount--bottom:hover .ui-exact-amount__tip {
+    top: calc(100% + 6px);
+    bottom: auto;
+
+    &::after {
+      top: auto;
+      bottom: 100%;
     }
   }
 

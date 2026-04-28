@@ -37,7 +37,10 @@ const getFullAmountText = (assetInfo?: DisplayStep['assetInfo']) => {
             {{ step.assetInfo.amount }}&nbsp;{{ step.assetInfo.symbol }}
           </template>
           <template v-else-if="getFullAmountText(step.assetInfo)">
-            <UiExactAmount :exact="getFullAmountText(step.assetInfo)!">
+            <UiExactAmount
+              :exact="getFullAmountText(step.assetInfo)!"
+              :placement="step.index === 1 ? 'bottom' : 'top'"
+            >
               {{ step.assetInfo.estimated ? '~' : '' }}{{ formatNumber(step.assetInfo.amount, 8, 0) }}&nbsp;{{ step.assetInfo.symbol }}
             </UiExactAmount>
           </template>
@@ -68,7 +71,10 @@ const getFullAmountText = (assetInfo?: DisplayStep['assetInfo']) => {
           class="text-p3"
         >
           <template v-if="getFullAmountText(step.toAssetInfo)">
-            <UiExactAmount :exact="getFullAmountText(step.toAssetInfo)!">
+            <UiExactAmount
+              :exact="getFullAmountText(step.toAssetInfo)!"
+              :placement="step.index === 1 ? 'bottom' : 'top'"
+            >
               {{ step.toAssetInfo.estimated ? '~' : '' }}{{ formatNumber(step.toAssetInfo.amount, 8, 0) }}&nbsp;{{ step.toAssetInfo.symbol }}
             </UiExactAmount>
           </template>
