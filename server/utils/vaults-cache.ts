@@ -139,7 +139,7 @@ export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot>
     // Errors bubble up to callers (warm-cache plugin or /api/vaults handler),
     // both of which log with their own context. A middle-layer catch here
     // would double-log every failure.
-    const rpcUrl = process.env[`RPC_URL_HTTP_${chainId}`]
+    const rpcUrl = process.env[`RPC_URL_${chainId}`]
     if (!rpcUrl) throw new Error(`No RPC URL configured for chain ${chainId}`)
 
     const cfg = await getChainConfig(chainId)
