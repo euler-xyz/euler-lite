@@ -456,8 +456,7 @@ export const useMarketGroups = () => {
     const memberVaults: Vault[] = []
 
     try {
-      const ctx = buildFetchContext()
-      for await (const result of fetchVaults(ctx, allAddresses)) {
+      for await (const result of fetchVaults(allAddresses)) {
         memberVaults.push(...result.vaults)
         if (result.isFinished) break
       }
