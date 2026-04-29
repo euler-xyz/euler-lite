@@ -87,14 +87,13 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     borrowAddress: _borrowAddress,
   } = options
 
-  const router = useRouter()
   const modal = useModal()
   const { error } = useToast()
   const { buildBorrowPlan, buildBorrowBySavingPlan, buildSwapAndBorrowPlan, executeTxPlan } = useEulerOperations()
   const { address, isConnected } = useAccount()
-  const { refreshAllPositions } = useEulerAccount()
-  const { eulerLensAddresses, chainId } = useEulerAddresses()
+  const { chainId } = useEulerAddresses()
   const { fetchSingleBalance } = useWallets()
+  const { finalizeTxAndRedirect } = useTxFinalization()
 
   const {
     runSimulation: runBorrowSimulation,
@@ -794,12 +793,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             )
       }
       await executeTxPlan(txPlan)
-
-      modal.close()
-      refreshAllPositions(eulerLensAddresses.value, address.value || '')
-      setTimeout(() => {
-        router.replace('/portfolio')
-      }, 400)
+      await finalizeTxAndRedirect()
     }
     catch (e) {
       logWarn('borrow/send', e)

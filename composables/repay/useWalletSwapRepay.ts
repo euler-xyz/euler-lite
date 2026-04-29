@@ -63,14 +63,13 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     oraclePriceRatio,
   } = options
 
-  const router = useRouter()
   const modal = useModal()
   const { error } = useToast()
   const { buildSwapAndRepayPlan, executeTxPlan } = useEulerOperations()
-  const { refreshAllPositions } = useEulerAccount()
-  const { eulerLensAddresses, chainId } = useEulerAddresses()
+  const { chainId } = useEulerAddresses()
   const { isConnected, address } = useAccount()
   const { fetchSingleBalance } = useWallets()
+  const { finalizeTxAndRedirect } = useTxFinalization()
   const { getVault: registryGetVault } = useVaultRegistry()
 
   // --- State ---
@@ -757,12 +756,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
       const txPlan = await buildRepayPlan(true)
       await executeTxPlan(txPlan)
-
-      modal.close()
-      refreshAllPositions(eulerLensAddresses.value, address.value as string)
-      setTimeout(() => {
-        router.replace('/portfolio')
-      }, 400)
+      await finalizeTxAndRedirect()
     }
     catch (e) {
       error('Transaction failed')

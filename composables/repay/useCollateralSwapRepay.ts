@@ -54,13 +54,12 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     isEligibleForLiquidation,
   } = options
 
-  const router = useRouter()
   const modal = useModal()
   const { error } = useToast()
   const { isConnected, address } = useAccount()
   const { buildSwapPlan, buildSameAssetRepayPlan, buildSameAssetFullRepayPlan, buildSwapFullRepayPlan, executeTxPlan } = useEulerOperations()
-  const { refreshAllPositions } = useEulerAccount()
   const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
+  const { finalizeTxAndRedirect } = useTxFinalization()
   const { client: rpcClient } = useRpcClient()
   const { withIntrinsicSupplyApy, withIntrinsicBorrowApy } = useIntrinsicApy()
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
@@ -447,12 +446,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       isSubmitting.value = true
       const txPlan = await buildRepayPlan()
       await executeTxPlan(txPlan)
-
-      modal.close()
-      refreshAllPositions(eulerLensAddresses.value, address.value as string)
-      setTimeout(() => {
-        router.replace('/portfolio')
-      }, 400)
+      await finalizeTxAndRedirect()
     }
     catch (e) {
       error('Transaction failed')

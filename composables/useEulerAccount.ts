@@ -32,7 +32,11 @@ const {
   finalizeRefreshCycle,
 } = useAccountPositions()
 
-let fetchInProgress = false
+// Tracks the address whose fetch is currently in flight. Same-address calls
+// dedupe; different-address calls preempt. Combined with positionGuard
+// generations and the address watcher's reset, this protects against
+// stale results bleeding across address switches.
+let inFlightAddress: string | null = null
 
 const {
   totalSuppliedValue,
@@ -49,12 +53,12 @@ export const useEulerAccount = () => {
   const portfolioAddress = computed(() => normalizeAddressOrEmpty(spyAddress.value) || normalizeAddressOrEmpty(address.value))
 
   const updatePositions = async () => {
-    if (fetchInProgress) return
-    fetchInProgress = true
+    const targetAddress = portfolioAddress.value
+    if (inFlightAddress === targetAddress) return
+    inFlightAddress = targetAddress
     try {
       beginRefreshCycle()
       const gen = positionGuard.current()
-      const targetAddress = portfolioAddress.value
       const { SUBGRAPH_URL } = useEulerConfig()
 
       // Fetch both borrow and deposit entries in a single subgraph query
@@ -88,7 +92,7 @@ export const useEulerAccount = () => {
       isDepositsLoaded.value = true
     }
     finally {
-      fetchInProgress = false
+      inFlightAddress = null
     }
   }
 
@@ -107,7 +111,7 @@ export const useEulerAccount = () => {
     if (newAddress !== oldAddress) {
       // Invalidate in-flight fetches so they discard stale results
       positionGuard.next()
-      fetchInProgress = false
+      inFlightAddress = null
 
       // Clear stale data and reset loading state so UI shows loader
       clearPositions()
@@ -166,8 +170,8 @@ export const useEulerAccount = () => {
     lensAddresses: EulerLensAddresses,
     walletAddress: string,
   ) => {
-    if (fetchInProgress) return
-    fetchInProgress = true
+    if (inFlightAddress === walletAddress) return
+    inFlightAddress = walletAddress
     try {
       beginRefreshCycle()
       const gen = positionGuard.current()
@@ -190,7 +194,7 @@ export const useEulerAccount = () => {
       isDepositsLoaded.value = true
     }
     finally {
-      fetchInProgress = false
+      inFlightAddress = null
     }
   }
 

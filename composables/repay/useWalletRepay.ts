@@ -58,13 +58,11 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     oraclePriceRatio,
   } = options
 
-  const router = useRouter()
   const modal = useModal()
   const { error } = useToast()
   const { buildRepayPlan, buildFullRepayPlan, executeTxPlan } = useEulerOperations()
-  const { refreshAllPositions } = useEulerAccount()
-  const { eulerLensAddresses } = useEulerAddresses()
-  const { isConnected, address } = useAccount()
+  const { isConnected } = useAccount()
+  const { finalizeTxAndRedirect } = useTxFinalization()
 
   const amount = ref('')
   const walletRepayPercent = ref(0)
@@ -211,12 +209,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
             { includePermit2Call: true },
           )
       await executeTxPlan(txPlan)
-
-      modal.close()
-      refreshAllPositions(eulerLensAddresses.value, address.value as string)
-      setTimeout(() => {
-        router.replace('/portfolio')
-      }, 400)
+      await finalizeTxAndRedirect()
     }
     catch (e) {
       error('Transaction failed')

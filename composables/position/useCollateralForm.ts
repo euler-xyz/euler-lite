@@ -109,7 +109,6 @@ export interface UseCollateralFormOptions {
 }
 
 export const useCollateralForm = (options: UseCollateralFormOptions) => {
-  const router = useRouter()
   const route = useRoute()
   const modal = useModal()
   const { error } = useToast()
@@ -117,6 +116,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const { executeTxPlan } = useEulerOperations()
   const { isConnected, address } = useAccount()
   const { isSpyMode } = useSpyMode()
+  const { finalizeTxAndRedirect } = useTxFinalization()
   const positionIndex = usePositionIndex()
   const { isPositionsLoaded, getPositionBySubAccountIndex } = useEulerAccount()
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
@@ -698,12 +698,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
         })
       }
       await executeTxPlan(txPlan)
-
-      modal.close()
-      await options.onAfterSend?.()
-      setTimeout(() => {
-        router.replace('/portfolio')
-      }, 400)
+      await finalizeTxAndRedirect({ onAfterClose: options.onAfterSend })
     }
     catch (e) {
       logWarn('collateral/send', e)
