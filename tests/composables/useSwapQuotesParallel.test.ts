@@ -33,6 +33,19 @@ describe('useSwapQuotesParallel', () => {
       getSwapProviders,
       getSwapQuotes,
     }))
+    vi.stubGlobal('useRpcClient', () => ({
+      client: ref(null),
+    }))
+    vi.stubGlobal('useWagmi', () => ({
+      address: ref(undefined),
+      chain: ref(undefined),
+    }))
+    vi.stubGlobal('useEulerAddresses', () => ({
+      chainId: ref(1),
+    }))
+    vi.stubGlobal('useEulerOperations', () => ({
+      buildSimulationStateOverride: vi.fn().mockResolvedValue([]),
+    }))
   })
 
   it('keeps effectiveQuote stable when selecting the current best provider', async () => {

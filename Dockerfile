@@ -6,6 +6,8 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
 
+ENV NODE_OPTIONS=--max-old-space-size=4096
+
 # Sentry source-map upload (build-time only; token never reaches production stage)
 ARG SENTRY_AUTH_TOKEN
 

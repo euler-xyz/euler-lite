@@ -8,9 +8,12 @@ import { reportStatus } from '~/server/utils/log'
 const CACHE_TTL_MS = 300_000
 
 /** The set of label files this proxy serves. Also consumed by warm-cache. */
-export const LABEL_FILES = ['products.json', 'entities.json', 'earn-vaults.json', 'points.json'] as const
+export const LABEL_FILES = ['products.json', 'entities.json', 'earn-vaults.json', 'points.json', 'assets.json'] as const
 
 export type LabelFile = typeof LABEL_FILES[number]
+
+/** Scope for a label fetch: a chain ID for per-chain files, or 'all' for cross-chain rules. */
+export type LabelScope = number | 'all'
 
 // All label files are optional: any chain may legitimately ship without a given
 // file (new chains, test deployments, etc.). Missing or failing upstream fetches
@@ -21,6 +24,7 @@ const EMPTY_SHAPES: Record<LabelFile, unknown> = {
   'entities.json': {},
   'earn-vaults.json': [],
   'points.json': [],
+  'assets.json': [],
 }
 
 const rateLimiter = createRateLimiter({
@@ -36,6 +40,25 @@ const inFlight = createInFlightDedup<string, unknown>()
 const LINK_TEXT_KEYS = new Set(['description', 'deprecationReason', 'deprecateReason', 'portfolioNotice'])
 /** Fields whose values are bound directly to :href in Vue templates. */
 const URL_KEYS = new Set(['url'])
+/** Fields whose values must be compilable as regular expressions (assets.json pattern rules). */
+const REGEX_KEYS = new Set(['symbolRegex', 'nameRegex'])
+/** Cap regex length as a basic ReDoS sanity guard — labels are curated, not user-submitted. */
+const MAX_REGEX_LEN = 512
+/**
+ * Fields whose values are concatenated into image URLs (`${CDN}/${logo}`
+ * and `/entities/${logo}`). Must be a bare filename — no slashes, no `..`,
+ * no scheme — so a curator slip can't point the browser off-origin or
+ * traverse outside the intended asset directory.
+ */
+const LOGO_FILENAME_KEYS = new Set(['logo'])
+const SAFE_LOGO_FILENAME_RE = /^[a-zA-Z0-9_-]+\.(svg|png|jpg|jpeg|webp|gif)$/i
+/**
+ * Defensive size caps. Labels are trusted but version-controlled; these
+ * are there to prevent a mistake (or a compromise of the labels repo)
+ * from ballooning a single proxy response into a client-side DoS.
+ */
+const MAX_STRING_LEN = 16_384
+const MAX_ARRAY_LEN = 10_000
 
 /**
  * Detects the markdown-link href-injection pattern: [text](https://..."....)
@@ -56,19 +79,39 @@ function isSafeHttpUrl(value: string): boolean {
   }
 }
 
-function validateNode(node: unknown, path: string): void {
+export function validateNode(node: unknown, path: string): void {
   if (Array.isArray(node)) {
+    if (node.length > MAX_ARRAY_LEN) {
+      throw new Error(`Array too large at ${path}: ${node.length} exceeds ${MAX_ARRAY_LEN}`)
+    }
     node.forEach((item, i) => validateNode(item, `${path}[${i}]`))
     return
   }
   if (node !== null && typeof node === 'object') {
     for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
       if (typeof value === 'string') {
+        if (value.length > MAX_STRING_LEN) {
+          throw new Error(`String too long at ${path}.${key}: ${value.length} exceeds ${MAX_STRING_LEN}`)
+        }
         if (URL_KEYS.has(key) && !isSafeHttpUrl(value)) {
           throw new Error(`Unsafe URL in ${path}.${key}: protocol must be http or https`)
         }
+        if (LOGO_FILENAME_KEYS.has(key) && value !== '' && !SAFE_LOGO_FILENAME_RE.test(value)) {
+          throw new Error(`Unsafe logo filename in ${path}.${key}: ${value}`)
+        }
         if (LINK_TEXT_KEYS.has(key) && MARKDOWN_LINK_INJECTION_RE.test(value)) {
           throw new Error(`Injection pattern detected in ${path}.${key}`)
+        }
+        if (REGEX_KEYS.has(key)) {
+          if (value.length > MAX_REGEX_LEN) {
+            throw new Error(`Invalid regex in ${path}.${key}: pattern exceeds ${MAX_REGEX_LEN} chars`)
+          }
+          try {
+            new RegExp(value)
+          }
+          catch {
+            throw new Error(`Invalid regex in ${path}.${key}: ${value}`)
+          }
         }
       }
       else if (value !== null && typeof value === 'object') {
@@ -78,33 +121,33 @@ function validateNode(node: unknown, path: string): void {
   }
 }
 
-function getUpstreamUrl(chainId: number, file: string): string {
+function getUpstreamUrl(scope: LabelScope, file: string): string {
   const baseUrl = (process.env.NUXT_PUBLIC_CONFIG_LABELS_BASE_URL || '').trim().replace(/\/+$/, '')
   if (baseUrl) {
-    return `${baseUrl}/${chainId}/${file}`
+    return `${baseUrl}/${scope}/${file}`
   }
 
   const repo = process.env.NUXT_PUBLIC_CONFIG_LABELS_REPO || 'euler-xyz/euler-labels'
   const branch = process.env.NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH || 'master'
-  return `https://raw.githubusercontent.com/${repo}/refs/heads/${branch}/${chainId}/${file}`
+  return `https://raw.githubusercontent.com/${repo}/refs/heads/${branch}/${scope}/${file}`
 }
 
 /**
  * Forces an upstream fetch, bypassing the fresh-cache check. Used by the
  * warm-cache plugin so every cycle actually refreshes the entry instead
  * of cache-hitting a still-fresh value and letting it expire before the
- * next cycle. Collapses concurrent refresh calls per `chainId:file` via
+ * next cycle. Collapses concurrent refresh calls per `scope:file` via
  * the in-flight map.
  *
  * `persist=true` writes the empty shape into the cache so subsequent
  * requests skip upstream entirely. Reserved for the 404 case, where the
- * file is legitimately absent for this chain. For other failures
+ * file is legitimately absent for this scope. For other failures
  * (transient 5xx, network errors, JSON parse, validation) return empty
  * but DON'T persist — otherwise a single upstream blip pins the empty
  * allowlist for 5 minutes, making every verified vault appear unverified.
  */
-export function refreshLabelFile(chainId: number, file: LabelFile): Promise<unknown> {
-  const key = `${chainId}:${file}`
+export function refreshLabelFile(scope: LabelScope, file: LabelFile): Promise<unknown> {
+  const key = `${scope}:${file}`
 
   const fallback = (persist: boolean): unknown => {
     const stale = cache.getStale(key)
@@ -115,17 +158,17 @@ export function refreshLabelFile(chainId: number, file: LabelFile): Promise<unkn
   }
 
   return inFlight.run(key, async (): Promise<unknown> => {
-    const statusKey = `${file}:${chainId}`
+    const statusKey = `${file}:${scope}`
     try {
-      const resp = await fetchWithTimeout(getUpstreamUrl(chainId, file))
+      const resp = await fetchWithTimeout(getUpstreamUrl(scope, file))
       if (!resp.ok) {
-        // 404 is the expected signal for "file not published on this chain"
+        // 404 is the expected signal for "file not published at this scope"
         // — treat it as a steady-state "absent" and don't spam the logs
         // each warm cycle. Other non-2xx statuses (403/5xx) are reported
         // as transitions so the first occurrence surfaces but repeats do not.
         if (resp.status !== 404) {
           reportStatus('labels', statusKey, `http-${resp.status}`,
-            `${file} upstream returned ${resp.status} for chain ${chainId}; treating as absent`)
+            `${file} upstream returned ${resp.status} for scope ${scope}; treating as absent`)
           return fallback(false)
         }
         reportStatus('labels', statusKey, 'absent-404')
@@ -140,10 +183,19 @@ export function refreshLabelFile(chainId: number, file: LabelFile): Promise<unkn
     }
     catch (err) {
       reportStatus('labels', statusKey, 'fetch-error',
-        `Failed to fetch ${file} for chain ${chainId}: ${err instanceof Error ? err.message : err}`)
+        `Failed to fetch ${file} for scope ${scope}: ${err instanceof Error ? err.message : err}`)
       return fallback(false)
     }
   })
+}
+
+// Read-through helper: cache hit → return synchronously; otherwise refresh.
+// Used by the handler's assets.json union so each source can be served from
+// its own cache entry without triggering two upstream fetches on a warm cache.
+async function getOrRefresh(scope: LabelScope, file: LabelFile): Promise<unknown> {
+  const hit = cache.get(`${scope}:${file}`)
+  if (hit !== undefined) return hit
+  return refreshLabelFile(scope, file)
 }
 
 export default defineEventHandler(async (event) => {
@@ -160,12 +212,24 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Invalid chainId' })
   }
 
-  const key = `${chainId}:${file}`
-
   // Labels are curated external metadata — CDN can short-circuit polls
   // between warm cycles.
   setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
 
+  // assets.json is unioned with the cross-chain `all/assets.json` so global
+  // pattern rules (e.g. by issuer symbol) apply to every chain without the
+  // client knowing about the separate source.
+  if (file === 'assets.json') {
+    const [chainData, globalData] = await Promise.all([
+      getOrRefresh(chainId, 'assets.json'),
+      getOrRefresh('all', 'assets.json'),
+    ])
+    const chainArr = Array.isArray(chainData) ? chainData : []
+    const globalArr = Array.isArray(globalData) ? globalData : []
+    return [...chainArr, ...globalArr]
+  }
+
+  const key = `${chainId}:${file}`
   const cached = cache.get(key)
   if (cached) return cached
 
