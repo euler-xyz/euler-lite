@@ -547,6 +547,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       execution: cowSwapExecution,
       orderStatus: cowSwapOrderStatus,
       executeParams: cowParams,
+      quoteFetchedAt: core.quotes.effectiveQuoteFetchedAt.value,
       logPrefix: 'collateralSwapRepay/cowswap',
     })
   }

@@ -534,6 +534,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     quoteCardsSorted,
     selectedProvider,
     selectedQuote,
+    effectiveQuoteFetchedAt,
     providersCount,
     isQuoteLoading,
     quoteError,
