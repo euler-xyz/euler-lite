@@ -24,7 +24,6 @@ import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verif
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createRaceGuard } from '~/utils/race-guard'
-import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { findBlockingDisabledOp, OP_REPAY, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning, getUtilisationWarning, type VaultWarning } from '~/composables/useVaultWarnings'
 
@@ -169,8 +168,6 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     borrowVault,
     direction: core.direction,
   })
-  const quoteSlippage = computed(() => computeQuoteSlippage(core.quotes.effectiveQuote.value, core.direction.value))
-
   // --- APYs ---
   const collateralSupplyApy = computed(() => {
     if (!sourceVault.value) return null
@@ -679,7 +676,6 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     // Swap details
     currentPrice: details.currentPrice,
     summary: details.summary,
-    quoteSlippage,
     priceImpact: details.priceImpact,
     leveragedPriceImpact: details.leveragedPriceImpact,
     routedVia: details.routedVia,

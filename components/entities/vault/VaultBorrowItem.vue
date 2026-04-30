@@ -273,28 +273,14 @@ const linkPath = computed(() => ({
             <KeyringBadge v-if="isKeyring" />
             <GovernanceLimitedBadge v-if="isAnyGovernanceLimited" />
             <CyclicalNoteBadge v-if="isCyclicalNote" />
-            <span
+            <RestrictedBadge
               v-if="isGeoBlocked"
-              class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-              title="This vault is not available in your region"
-            >
-              <SvgIcon
-                name="warning"
-                class="!w-14 !h-14"
-              />
-              Restricted
-            </span>
-            <span
-              v-if="isGeoRestricted"
-              class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-              title="Borrowing this asset is restricted in your region"
-            >
-              <SvgIcon
-                name="warning"
-                class="!w-14 !h-14"
-              />
-              Restricted
-            </span>
+              variant="blocked"
+            />
+            <RestrictedBadge
+              v-else-if="isGeoRestricted"
+              variant="restricted"
+            />
             <span
               v-if="isAnyDeprecated"
               class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"

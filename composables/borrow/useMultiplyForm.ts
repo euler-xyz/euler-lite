@@ -29,7 +29,6 @@ import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
-import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { calculateRoe, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
 import { computeMaxMultiplier, computeMinMultiplier, computeWeightedSupplyApy, computeLeverageDebt } from '~/utils/multiply-math'
 import type { TxPlan } from '~/entities/txPlan'
@@ -128,8 +127,6 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     includeCowSwap: true,
     buildTxPlanForQuote: quote => buildMultiplyTxPlanForQuote(quote, false),
   })
-  const multiplyQuoteSlippage = computed(() => computeQuoteSlippage(multiplyEffectiveQuote.value))
-
   // --- Form state ---
   const multiplyInputAmount = ref('')
   const multiplier = ref(1)
@@ -1112,7 +1109,6 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     isMultiplyQuoteLoading,
     multiplyQuoteError,
     multiplyQuotesStatusLabel,
-    multiplyQuoteSlippage,
     selectMultiplyQuote,
 
     // USD values

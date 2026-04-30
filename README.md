@@ -40,7 +40,7 @@ cp .env.example .env
 | ------------------------------------ | ----------------------------------------------------------- |
 | `APPKIT_PROJECT_ID`                  | Reown (WalletConnect) project ID                            |
 | `NUXT_PUBLIC_APP_URL`                | Your app's public URL                                       |
-| `RPC_URL_HTTP_<chainId>`             | RPC endpoint per chain (e.g. `RPC_URL_HTTP_1` for Ethereum) |
+| `RPC_URL_<chainId>`                  | RPC endpoint per chain (e.g. `RPC_URL_1` for Ethereum)      |
 | `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` | Subgraph URI per chain                                      |
 
 #### API URLs
@@ -71,6 +71,7 @@ These use Nuxt's `runtimeConfig` and are set via `NUXT_PUBLIC_CONFIG_*` env vars
 | `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` | —                                          | S3/CDN base URL for oracle checks (overrides repo)    |
 | `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL`       | —                                          | URL for EulerChains.json (overrides default upstream) |
 | `NUXT_PUBLIC_CONFIG_DOCS_URL`               | —                                          | Documentation link                                    |
+| `NUXT_PUBLIC_CONFIG_STARGATE_URL`           | —                                          | Stargate link                                         |
 | `NUXT_PUBLIC_CONFIG_TOS_URL`                | —                                          | Terms of Service link                                 |
 | `NUXT_PUBLIC_CONFIG_TOS_MD_URL`             | —                                          | TOS markdown URL (enables TOS signing when set)       |
 | `NUXT_PUBLIC_CONFIG_PRIVACY_POLICY_URL`     | `https://www.euler.finance/privacy-policy` | Privacy policy link                                   |
@@ -98,15 +99,15 @@ Chains are configured dynamically at runtime. Each chain requires two env vars:
 
 ```bash
 # Ethereum Mainnet
-RPC_URL_HTTP_1=https://your-rpc-endpoint.com
+RPC_URL_1=https://your-rpc-endpoint.com
 NUXT_PUBLIC_SUBGRAPH_URI_1=https://api.goldsky.com/.../euler-simple-mainnet/latest/gn
 
 # Arbitrum
-RPC_URL_HTTP_42161=https://your-arbitrum-rpc.com
+RPC_URL_42161=https://your-arbitrum-rpc.com
 NUXT_PUBLIC_SUBGRAPH_URI_42161=https://api.goldsky.com/.../euler-simple-arbitrum/latest/gn
 ```
 
-The app scans for `RPC_URL_HTTP_<chainId>` env vars at server startup and automatically enables those chains. No code changes needed to add or remove chains.
+The app scans for `RPC_URL_<chainId>` env vars at server startup and automatically enables those chains. No code changes needed to add or remove chains.
 
 ### 3. Customize Your Instance
 
@@ -252,7 +253,7 @@ docker run -p 3000:3000 \
   -e SWAP_API_URL=https://swap.euler.finance \
   -e PRICE_API_URL=https://indexer.euler.finance \
   -e APPKIT_PROJECT_ID=your-project-id \
-  -e RPC_URL_HTTP_1=https://your-rpc.com \
+  -e RPC_URL_1=https://your-rpc.com \
   -e NUXT_PUBLIC_SUBGRAPH_URI_1=https://your-subgraph.com \
   euler-lite node .output/server/index.mjs
 ```
@@ -311,7 +312,7 @@ Before deploying:
 - [ ] Copied `.env.example` to `.env` and filled in values
 - [ ] Set `APPKIT_PROJECT_ID` and `NUXT_PUBLIC_APP_URL`
 - [ ] Set `EULER_API_URL`, `SWAP_API_URL`, `PRICE_API_URL`
-- [ ] Added at least one `RPC_URL_HTTP_<chainId>` with matching `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`
+- [ ] Added at least one `RPC_URL_<chainId>` with matching `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`
 - [ ] Configured branding via `NUXT_PUBLIC_CONFIG_*` env vars (title, description, logo, social links, social share image)
 - [ ] Customized theme colors in `assets/styles/variables.scss` (THEME CONFIGURATION section)
 - [ ] Replaced favicon files in `public/favicons/`
@@ -337,7 +338,7 @@ Before deploying:
 
 ### No Chains Available
 
-- Ensure at least one `RPC_URL_HTTP_<chainId>` env var is set
+- Ensure at least one `RPC_URL_<chainId>` env var is set
 - Each chain needs a matching `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`
 
 ## Additional Resources

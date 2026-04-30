@@ -139,6 +139,7 @@ useOperationGuard(computed(() => [form.collateralVault.value?.address, form.borr
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (form.isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (form.isOutputAssetBlocked.value || form.isOutputAssetRestricted.value) return { message: 'Receiving this asset is not available in your region', variant: 'warning' }
   if (form.isSwapRestricted.value) return { message: 'Swapping from this vault is not available in your region', variant: 'warning' }
   if (form.estimatesError.value) return { message: form.estimatesError.value, variant: 'error' }
   if (form.simulationError.value) return { message: form.simulationError.value, variant: 'error' }
@@ -264,7 +265,6 @@ watch(selectedOutputAsset, () => {
                   :output-display="form.swapOutputDisplay.value"
                   :price-impact="form.swapPriceImpact.value"
                   :slippage="form.swapSlippage.value"
-                  :quote-slippage="form.swapQuoteSlippage.value"
                   :routed-via="form.swapRoutedVia.value"
                   @open-slippage-settings="form.openSlippageSettings"
                 />
@@ -295,7 +295,14 @@ watch(selectedOutputAsset, () => {
               size="compact"
             />
             <UiToast
-              v-if="!form.isGeoBlocked.value && form.isSwapRestricted.value"
+              v-if="!form.isGeoBlocked.value && (form.isOutputAssetBlocked.value || form.isOutputAssetRestricted.value)"
+              title="Asset restricted"
+              description="Receiving this asset is not available in your region. Pick a different token."
+              variant="warning"
+              size="compact"
+            />
+            <UiToast
+              v-if="!form.isGeoBlocked.value && !form.isOutputAssetBlocked.value && !form.isOutputAssetRestricted.value && form.isSwapRestricted.value"
               title="Swap restricted"
               description="Swapping from this vault is not available in your region. You can withdraw the vault's underlying asset directly."
               variant="warning"

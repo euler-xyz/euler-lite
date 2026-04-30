@@ -18,6 +18,8 @@ import {
   earnVaultDescriptions,
   earnVaultNotices,
   notExplorableEarnVaults,
+  assetBlocks,
+  assetRestrictions,
 } from '~/utils/eulerLabelsState'
 
 // ── Internal helpers ─────────────────────────────────────────
@@ -182,6 +184,18 @@ export const getVaultRestricted = (vaultAddress: string): string[] | undefined =
 export const getEarnVaultRestricted = (vaultAddress: string): string[] | undefined => {
   const normalized = normalizeAddress(vaultAddress).toLowerCase()
   return earnVaultRestrictions[normalized]
+}
+
+export const getAssetBlock = (assetAddress: string): string[] | undefined => {
+  if (!assetAddress) return undefined
+  const normalized = normalizeAddress(assetAddress).toLowerCase()
+  return assetBlocks[normalized]
+}
+
+export const getAssetRestricted = (assetAddress: string): string[] | undefined => {
+  if (!assetAddress) return undefined
+  const normalized = normalizeAddress(assetAddress).toLowerCase()
+  return assetRestrictions[normalized]
 }
 
 export const isVaultFeatured = (vaultAddress: string): boolean => {
