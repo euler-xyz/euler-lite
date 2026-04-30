@@ -68,6 +68,7 @@ export const openCowSwapReviewModal = (
     execution: CowSwapExecutionRef
     orderStatus: CowSwapOrderStatusRef
     executeParams: unknown
+    quoteFetchedAt?: number | null
     logPrefix: string
   },
 ) => {
@@ -81,6 +82,7 @@ export const openCowSwapReviewModal = (
       explorerUrl: options.execution.explorerUrl,
       orderStatus: options.orderStatus.orderStatus,
       locallyCancelled: options.execution.locallyCancelled,
+      quoteFetchedAt: options.quoteFetchedAt,
       onConfirm: async () => {
         try {
           await options.execution.executeAsync(options.executeParams)

@@ -117,6 +117,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     selectedProvider: borrowSwapSelectedProvider,
     selectedQuote: borrowSwapSelectedQuote,
     effectiveQuote: borrowSwapEffectiveQuote,
+    effectiveQuoteFetchedAt: borrowSwapEffectiveQuoteFetchedAt,
     isLoading: isBorrowSwapQuoteLoading,
     quoteError: borrowSwapQuoteError,
     statusLabel: borrowSwapQuotesStatusLabel,
@@ -659,6 +660,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             asset: reviewAsset,
             amount: collateralAmount.value,
             plan: plan.value || undefined,
+            quoteFetchedAt: borrowSwapEffectiveQuoteFetchedAt.value,
             swapToAsset: collateralVault.value.asset,
             swapToAmount: borrowSwapEstimatedCollateral.value,
             onConfirm: async () => {
