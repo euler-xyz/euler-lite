@@ -6,10 +6,11 @@
 @use '/components/ui/styles/main';
 
 html {
+  overscroll-behavior-y: none;
+
   &.rtl {
     direction: rtl;
   }
-
 }
 
 // Styled scrollbar — dark mode only, light mode uses browser default.
@@ -39,6 +40,7 @@ html[data-theme="dark"] {
 }
 
 body {
+  overscroll-behavior-y: none;
   background-color: var(--bg-body);
   color: var(--c-text);
   font-weight: 400;
