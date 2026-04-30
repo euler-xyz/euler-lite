@@ -198,7 +198,7 @@ jobs:
           set -euo pipefail
 
           echo "Waiting for ECS service stability..."
-          timeout_seconds=900
+          timeout_seconds=600
           poll_interval_seconds=15
           deadline=$((SECONDS + timeout_seconds))
 
