@@ -92,33 +92,33 @@ jobs:
           docker cp temp-euler:/usr/src/app/.output/public ./static-output
           docker rm temp-euler
 
-      # - name: Configure AWS credentials for S3
-      #   if: github.event_name == 'push'
-      #   uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
-      #   with:
-      #     role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-      #     aws-region: ${{ secrets.AWS_REGION }}
+      - name: Configure AWS credentials for S3
+        if: github.event_name == 'push'
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-      # - name: Upload static assets to S3
-      #   if: github.event_name == 'push'
-      #   run: |
-      #     aws s3 sync ./static-output/_nuxt \
-      #       s3://${{ secrets.S3_STATIC_ASSETS_BUCKET_BASE }}/_nuxt \
-      #       --exclude "builds/**" \
-      #       --cache-control "public,max-age=31536000,immutable"
+      - name: Upload static assets to S3
+        if: github.event_name == 'push'
+        run: |
+          aws s3 sync ./static-output/_nuxt \
+            s3://${{ secrets.S3_STATIC_ASSETS_BUCKET_BASE }}/_nuxt \
+            --exclude "builds/**" \
+            --cache-control "public,max-age=31536000,immutable"
 
-      #     if [ -d ./static-output/_nuxt/builds ]; then
-      #       aws s3 sync ./static-output/_nuxt/builds \
-      #         s3://${{ secrets.S3_STATIC_ASSETS_BUCKET_BASE }}/_nuxt/builds \
-      #         --exclude "meta/**" \
-      #         --cache-control "no-cache"
-      #     fi
+          if [ -d ./static-output/_nuxt/builds ]; then
+            aws s3 sync ./static-output/_nuxt/builds \
+              s3://${{ secrets.S3_STATIC_ASSETS_BUCKET_BASE }}/_nuxt/builds \
+              --exclude "meta/**" \
+              --cache-control "no-cache"
+          fi
 
-      #     if [ -d ./static-output/_nuxt/builds/meta ]; then
-      #       aws s3 sync ./static-output/_nuxt/builds/meta \
-      #         s3://${{ secrets.S3_STATIC_ASSETS_BUCKET_BASE }}/_nuxt/builds/meta \
-      #         --cache-control "public,max-age=31536000,immutable"
-      #     fi
+          if [ -d ./static-output/_nuxt/builds/meta ]; then
+            aws s3 sync ./static-output/_nuxt/builds/meta \
+              s3://${{ secrets.S3_STATIC_ASSETS_BUCKET_BASE }}/_nuxt/builds/meta \
+              --cache-control "public,max-age=31536000,immutable"
+          fi
 
       - name: Tag and push docker image to Amazon ECR
         if: github.event_name == 'push'
