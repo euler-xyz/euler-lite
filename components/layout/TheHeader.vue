@@ -233,12 +233,12 @@ onClickOutside(wrapperRef, () => {
     <!-- Right: Wallet -->
     <div class="flex flex-nowrap gap-8 min-w-0">
       <UiButton
+        v-if="canSwitchChains"
         class="py-6 px-12"
-        :icon="canSwitchChains ? 'arrow-down' : undefined"
+        icon="arrow-down"
         variant="secondary"
         size="medium"
-        :icon-right="canSwitchChains"
-        :disabled="!canSwitchChains"
+        icon-right
         @click="onChainButtonClick"
       >
         <BaseAvatar
@@ -246,6 +246,18 @@ onClickOutside(wrapperRef, () => {
           :label="String(chainId)"
         />
       </UiButton>
+      <div
+        v-else
+        class="ui-button ui-button--medium ui-button--secondary chain-chip py-6 px-12"
+        aria-label="Current chain"
+      >
+        <div class="ui-button__wrap">
+          <BaseAvatar
+            :src="`/chains/${chainId}.webp`"
+            :label="String(chainId)"
+          />
+        </div>
+      </div>
       <UiButton
         class="min-w-0 [&>span]:truncate"
         :icon="(isConnected || isSpyMode) ? 'arrow-down' : 'plus'"
@@ -273,3 +285,10 @@ onClickOutside(wrapperRef, () => {
     </div>
   </header>
 </template>
+
+<style scoped>
+.chain-chip {
+  cursor: default;
+  pointer-events: none;
+}
+</style>
