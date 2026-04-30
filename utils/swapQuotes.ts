@@ -1,5 +1,4 @@
-import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
-import { BPS_BASE } from '~/entities/tuning-constants'
+import type { SwapApiQuote } from '~/entities/swap'
 
 export type SwapQuoteAmountField = 'amountIn' | 'amountOut'
 export type SwapQuoteCompare = 'max' | 'min'
@@ -118,43 +117,4 @@ export const getQuoteDiffPct = (
     return null
   }
   return (diff / bestAmount) * 100
-}
-
-const parseRequiredBigInt = (value?: string | number | bigint | null) => {
-  if (value === null || value === undefined) {
-    return null
-  }
-  try {
-    return BigInt(value)
-  }
-  catch {
-    return null
-  }
-}
-
-export const computeQuoteSlippage = (
-  quote: SwapApiQuote | null | undefined,
-  swapperMode = SwapperMode.EXACT_IN,
-) => {
-  if (!quote) {
-    return null
-  }
-
-  if (swapperMode === SwapperMode.TARGET_DEBT) {
-    const amountIn = getQuoteAmount(quote, 'amountIn')
-    const amountInMax = parseRequiredBigInt(quote.amountInMax)
-    if (amountIn <= 0n || amountInMax === null || amountInMax < amountIn) {
-      return null
-    }
-    const diffBps = ((amountInMax - amountIn) * BPS_BASE) / amountIn
-    return Number(diffBps) / 100
-  }
-
-  const amountOut = getQuoteAmount(quote, 'amountOut')
-  const amountOutMin = parseRequiredBigInt(quote.amountOutMin)
-  if (amountOut <= 0n || amountOutMin === null || amountOutMin > amountOut) {
-    return null
-  }
-  const diffBps = ((amountOut - amountOutMin) * BPS_BASE) / amountOut
-  return Number(diffBps) / 100
 }

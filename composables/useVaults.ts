@@ -15,10 +15,11 @@ import {
   fetchSecuritizeVault,
   fetchVaults,
   clearPriceCaches,
+  extractUnresolvedCollateralAddresses,
   isLiveCollateralEdge,
   type Vault,
 } from '~/entities/vault'
-import { fetchChainVaultCategories, isSecuritizeVault, resetVaultCategoryCache } from '~/entities/vault/factory'
+import { fetchChainVaultCategories, fetchVaultCategory, isSecuritizeVault, resetVaultCategoryCache } from '~/entities/vault/factory'
 import { getProductByVault, isVaultNotExplorable, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import { getEulerRouterGovernor } from '~/entities/oracle'
 
@@ -266,6 +267,65 @@ const fetchNeededEscrowVaults = async (addresses: string[], generation: number):
   registrySetMany(entries)
 }
 
+/**
+ * Lazy-resolve collateral addresses that aren't covered by the bulk loaders.
+ *
+ * `fetchChainVaultCategories` already ran earlier in this `loadVaults` call
+ * and populated the per-address category cache, so `fetchVaultCategory` is a
+ * cache hit for every address indexed by the subgraph. We group addresses
+ * by category and hand each group to the existing bulk loader for that type
+ * (`updateEVKVaults` / `updateEarnVaults` / `updateSecuritizeVaults` /
+ * `fetchNeededEscrowVaults`) — same multicall batching, same registry-write
+ * path, no parallel implementation. `silent=true` keeps loading flags
+ * untouched since this runs after the initial reveal.
+ *
+ * Addresses the subgraph has not indexed (category === null) are skipped —
+ * a probe-and-guess fallback would misidentify brand-new escrows as plain
+ * EVK, and the next `loadVaults` cycle picks them up once the subgraph
+ * catches up. The diagnostic warns in `useMarketGroups` and
+ * `VaultOverviewBlockBorrow` surface the gap in the meantime.
+ */
+const fetchUnresolvedCollaterals = async (addresses: string[], generation: number): Promise<void> => {
+  if (!addresses.length || loadGeneration.value !== generation) return
+
+  const evkAddrs: string[] = []
+  const earnAddrs: string[] = []
+  const securitizeAddrs: string[] = []
+  const escrowAddrs: string[] = []
+
+  await Promise.allSettled(addresses.map(async (addr) => {
+    const category = await fetchVaultCategory(addr)
+    switch (category) {
+      case 'escrow':
+        escrowAddrs.push(addr)
+        break
+      case 'evk':
+        evkAddrs.push(addr)
+        break
+      case 'earn':
+        earnAddrs.push(addr)
+        break
+      case 'securitize':
+        securitizeAddrs.push(addr)
+        break
+      default:
+        // Subgraph hasn't indexed this address — skip and let the next
+        // loadVaults cycle pick it up once the category endpoint warms.
+        break
+    }
+  }))
+
+  if (loadGeneration.value !== generation) return
+
+  // Bulk loaders short-circuit on empty input, so call unconditionally.
+  await Promise.all([
+    updateEVKVaults(evkAddrs, generation, true),
+    updateEarnVaults(earnAddrs, generation, true),
+    updateSecuritizeVaults(securitizeAddrs, generation, true),
+    fetchNeededEscrowVaults(escrowAddrs, generation),
+  ])
+}
+
 const updateSecuritizeVaults = async (securitizeAddresses: string[], generation: number, silent = false) => {
   const { setMany: registrySetMany } = useVaultRegistry()
 
@@ -498,6 +558,23 @@ const loadVaults = async () => {
         await fetchNeededEscrowVaults(neededEscrowAddresses, generation)
       }),
     ])
+
+    if (loadGeneration.value !== generation) return
+
+    // After bulk loaders + escrow lazy-fetch settle, sweep up any collateral
+    // address referenced by a member vault that isn't yet in the registry.
+    // These are typically EVK vaults that exist on chain but aren't part of
+    // any product label — without this, discovery views silently drop the
+    // relationship. Single pass is enough: discovery views iterate only
+    // member vaults, so a resolved off-label vault is a leaf in those views;
+    // any second-hop unknowns will surface as diagnostic warns and resolve
+    // on the next loadVaults cycle.
+    const { getEvkVaults, has: registryHas } = useVaultRegistry()
+    const unresolvedAddresses = extractUnresolvedCollateralAddresses(
+      getEvkVaults(),
+      registryHas,
+    ).filter(addr => !isVaultNotExplorable(addr))
+    await fetchUnresolvedCollaterals(unresolvedAddresses, generation)
 
     if (loadGeneration.value !== generation) return
 

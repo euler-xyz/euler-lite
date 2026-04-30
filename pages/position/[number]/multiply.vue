@@ -9,7 +9,6 @@ import type { AccountBorrowPosition } from '~/entities/account'
 import type { Vault, VaultAsset } from '~/entities/vault'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
-import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
@@ -130,8 +129,6 @@ const {
   compare: 'max',
   buildTxPlanForQuote: quote => buildIncreasePositionTxPlanForQuote(quote, false),
 })
-const multiplyQuoteSlippage = computed(() => computeQuoteSlippage(multiplyEffectiveQuote.value))
-
 const multiplyLongVault = computed(() => position.value?.collateral)
 const multiplyShortVault = computed(() => position.value?.borrow)
 const multiplySubAccount = computed(() => position.value?.subAccount || null)
@@ -991,7 +988,6 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
               :output-display="multiplySwapSummary?.to ?? null"
               :price-impact="multiplyPriceImpact"
               :slippage="multiplySlippage"
-              :quote-slippage="multiplyQuoteSlippage"
               :routed-via="multiplyRoutedVia"
               :multiplied-price-impact="multipliedPriceImpact"
               @open-slippage-settings="openSlippageSettings"

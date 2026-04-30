@@ -164,6 +164,7 @@ useOperationGuard(computed(() => [form.collateralVault.value?.address].filter(Bo
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (form.isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (form.isInputAssetBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
   if (form.isSwapRestricted.value) return { message: 'Swapping into this vault is not available in your region', variant: 'warning' }
   if (form.estimatesError.value) return { message: form.estimatesError.value, variant: 'error' }
   if (form.simulationError.value) return { message: form.simulationError.value, variant: 'error' }
@@ -320,7 +321,6 @@ watch(selectedAsset, async () => {
                   :output-display="form.swapOutputDisplay.value"
                   :price-impact="form.swapPriceImpact.value"
                   :slippage="form.swapSlippage.value"
-                  :quote-slippage="form.swapQuoteSlippage.value"
                   :routed-via="form.swapRoutedVia.value"
                   @open-slippage-settings="form.openSlippageSettings"
                 />
@@ -351,7 +351,14 @@ watch(selectedAsset, async () => {
               size="compact"
             />
             <UiToast
-              v-if="!form.isGeoBlocked.value && form.isSwapRestricted.value"
+              v-if="!form.isGeoBlocked.value && form.isInputAssetBlocked.value"
+              title="Asset restricted"
+              description="Paying with this asset is not available in your region. Pick a different token."
+              variant="warning"
+              size="compact"
+            />
+            <UiToast
+              v-if="!form.isGeoBlocked.value && !form.isInputAssetBlocked.value && form.isSwapRestricted.value"
               title="Swap restricted"
               description="Swapping into this vault is not available in your region. You can deposit the vault's underlying asset directly."
               variant="warning"

@@ -22,18 +22,18 @@ const BALANCE_ERC20 = keccak256(toHex('erc20'))
  * 12 fields × 32 bytes = 384 bytes.
  */
 const ORDER_ENCODE_DATA_ABI = [
-  { type: 'address' },  // sellToken
-  { type: 'address' },  // buyToken
-  { type: 'address' },  // receiver
-  { type: 'uint256' },  // sellAmount
-  { type: 'uint256' },  // buyAmount
-  { type: 'uint32' },   // validTo
-  { type: 'bytes32' },  // appData
-  { type: 'uint256' },  // feeAmount
-  { type: 'bytes32' },  // kind (keccak256-hashed)
-  { type: 'bool' },     // partiallyFillable
-  { type: 'bytes32' },  // sellTokenBalance (keccak256-hashed)
-  { type: 'bytes32' },  // buyTokenBalance (keccak256-hashed)
+  { type: 'address' }, // sellToken
+  { type: 'address' }, // buyToken
+  { type: 'address' }, // receiver
+  { type: 'uint256' }, // sellAmount
+  { type: 'uint256' }, // buyAmount
+  { type: 'uint32' }, // validTo
+  { type: 'bytes32' }, // appData
+  { type: 'uint256' }, // feeAmount
+  { type: 'bytes32' }, // kind (keccak256-hashed)
+  { type: 'bool' }, // partiallyFillable
+  { type: 'bytes32' }, // sellTokenBalance (keccak256-hashed)
+  { type: 'bytes32' }, // buyTokenBalance (keccak256-hashed)
 ] as const
 
 /**

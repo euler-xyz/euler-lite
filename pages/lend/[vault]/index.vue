@@ -13,12 +13,11 @@ import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import { fetchBackendPrice } from '~/services/pricing/backendClient'
 import type { TxPlan } from '~/entities/txPlan'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
+import { isVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
-import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
 import SecuritizeVaultOverview from '~/components/entities/vault/overview/SecuritizeVaultOverview.vue'
@@ -135,8 +134,6 @@ const {
   compare: 'max',
   buildTxPlanForQuote: quote => buildSwapSupplyPlanFromQuote(quote, { includePermit2Call: false }),
 })
-const swapQuoteSlippage = computed(() => computeQuoteSlippage(swapEffectiveQuote.value))
-
 // Vault data - only one will be populated based on type
 const evkVault: Ref<Vault | undefined> = ref(undefined)
 const securitizeVault: Ref<SecuritizeVault | undefined> = ref(undefined)
@@ -303,9 +300,14 @@ const isSubmitDisabled = computed(() => {
 })
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vaultAddress))
 const isSwapRestricted = computed(() => needsSwap.value && isVaultRestrictedByCountry(vaultAddress))
-const reviewSupplyDisabled = computed(() => isGeoBlocked.value || isSwapRestricted.value || isSubmitDisabled.value)
+// Swap-deposit source: user is giving up the selected asset (reducing exposure),
+// so only hard-block applies. Soft-restrict intentionally does not apply here.
+// Pass the asset object so symbol/name pattern rules also apply.
+const isSourceAssetBlocked = computed(() => needsSwap.value && isAssetBlockedByCountry(selectedAsset.value))
+const reviewSupplyDisabled = computed(() => isGeoBlocked.value || isSwapRestricted.value || isSourceAssetBlocked.value || isSubmitDisabled.value)
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isSourceAssetBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
   if (isSwapRestricted.value) return { message: 'Swap deposits are not available in your region', variant: 'warning' }
   if (evkVault.value && isOpDisabled(evkVault.value, OP_DEPOSIT)) return { message: 'Deposits are currently disabled for this vault', variant: 'warning' }
   if (isSupplyCapReached.value) return { message: 'Supply cap has been reached', variant: 'warning' }
@@ -409,7 +411,7 @@ const buildSwapSupplyPlanFromQuote = async (quote: SwapApiQuote, options: { incl
 
 const submit = async () => {
   if (isOperationBlocked.value) return
-  if (isPreparing.value || isGeoBlocked.value || isSwapRestricted.value) return
+  if (isPreparing.value || isGeoBlocked.value || isSwapRestricted.value || isSourceAssetBlocked.value) return
   isPreparing.value = true
   try {
     await guardWithPriceImpact(async () => {
@@ -906,7 +908,6 @@ watch(address, () => {
                   :output-display="swapOutputDisplay"
                   :price-impact="swapPriceImpact"
                   :slippage="swapSlippage"
-                  :quote-slippage="swapQuoteSlippage"
                   :routed-via="swapRoutedVia"
                   @open-slippage-settings="openSlippageSettings"
                 />
@@ -929,7 +930,14 @@ watch(address, () => {
               size="compact"
             />
             <UiToast
-              v-if="!isGeoBlocked && isSwapRestricted"
+              v-if="!isGeoBlocked && isSourceAssetBlocked"
+              title="Asset restricted"
+              description="Paying with this asset is not available in your region. Pick a different token."
+              variant="warning"
+              size="compact"
+            />
+            <UiToast
+              v-if="!isGeoBlocked && !isSourceAssetBlocked && isSwapRestricted"
               title="Swap restricted"
               description="Swapping into this vault is not available in your region. You can deposit the vault's underlying asset directly."
               variant="warning"

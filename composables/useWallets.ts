@@ -120,8 +120,9 @@ export const useWallets = () => {
       }
     }
 
+    const includesNativeCurrency = addresses.delete(zeroAddress)
     const tokenAddresses = [...addresses] as Address[]
-    if (!tokenAddresses.length) {
+    if (!tokenAddresses.length && !includesNativeCurrency) {
       isLoaded.value = true
       return
     }
@@ -136,6 +137,17 @@ export const useWallets = () => {
     try {
       const targetAddress = balanceAddress.value as Address
       const client = getPublicClient(rpcUrl.value)
+      const nativeBalancePromise = includesNativeCurrency
+        ? client.getBalance({ address: targetAddress }).catch((e) => {
+            logWarn('wallets/nativeBalance', e, {
+              data: {
+                chainId: currentChainId,
+                target: targetAddress,
+              },
+            })
+            return 0n
+          })
+        : Promise.resolve<bigint | undefined>(undefined)
 
       // Fetch balances via lens in chunks to stay within gas limits
       // All chunks fire concurrently so viem's HTTP transport batches them into fewer requests
@@ -145,38 +157,41 @@ export const useWallets = () => {
         chunks.push(tokenAddresses.slice(i, i + LENS_BATCH_SIZE))
       }
 
-      const chunkResults = await Promise.all(
-        chunks.map(async (batch, chunkIndex) => {
-          try {
-            return await client.readContract({
-              address: utilsLensAddress,
-              abi: eulerUtilsLensABI,
-              functionName: 'tokenBalances',
-              args: [targetAddress, batch],
-            }) as bigint[]
-          }
-          catch (e) {
-            logWarn(
-              'wallets/batchFetch',
-              `Lens tokenBalances failed, using zero fallback`,
-              {
-                data: {
-                  chainId: currentChainId,
-                  lens: utilsLensAddress,
-                  target: targetAddress,
-                  totalTokens: tokenAddresses.length,
-                  chunkIndex,
-                  chunkCount: chunks.length,
-                  chunkSize: batch.length,
-                  sampleTokens: batch.slice(0, 3),
-                  error: e,
+      const [chunkResults, nativeBalance] = await Promise.all([
+        Promise.all(
+          chunks.map(async (batch, chunkIndex) => {
+            try {
+              return await client.readContract({
+                address: utilsLensAddress,
+                abi: eulerUtilsLensABI,
+                functionName: 'tokenBalances',
+                args: [targetAddress, batch],
+              }) as bigint[]
+            }
+            catch (e) {
+              logWarn(
+                'wallets/batchFetch',
+                `Lens tokenBalances failed, using zero fallback`,
+                {
+                  data: {
+                    chainId: currentChainId,
+                    lens: utilsLensAddress,
+                    target: targetAddress,
+                    totalTokens: tokenAddresses.length,
+                    chunkIndex,
+                    chunkCount: chunks.length,
+                    chunkSize: batch.length,
+                    sampleTokens: batch.slice(0, 3),
+                    error: e,
+                  },
                 },
-              },
-            )
-            return batch.map(() => 0n)
-          }
-        }),
-      )
+              )
+              return batch.map(() => 0n)
+            }
+          }),
+        ),
+        nativeBalancePromise,
+      ])
       const result = chunkResults.flat()
 
       // Only update if still on same chain
@@ -189,6 +204,9 @@ export const useWallets = () => {
         result.forEach((balance: bigint, index: number) => {
           merged.set(tokenAddresses[index], balance)
         })
+        if (nativeBalance !== undefined) {
+          merged.set(zeroAddress, nativeBalance)
+        }
         balances.value = merged
         lastFetchChainId.value = currentChainId
         lastFetchAddress.value = targetAddress

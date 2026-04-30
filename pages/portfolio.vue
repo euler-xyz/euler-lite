@@ -109,6 +109,8 @@ watch(portfolioRefreshCounter, () => {
 
     <PortfolioShowAllHint />
 
+    <PortfolioUnresolvedBanner />
+
     <div class="flex flex-col gap-16 mx-16 laptop:flex-row laptop:items-stretch">
       <div class="flex flex-col gap-16 p-16 rounded-12 border border-line-default bg-card shadow-card laptop:flex-1">
         <div class="text-h4 text-content-primary">
