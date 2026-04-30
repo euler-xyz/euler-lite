@@ -787,6 +787,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     multiplySelectedProvider: computed(() => multiplySelectedProvider.value),
     multiplyEffectiveQuote: computed(() => multiplyEffectiveQuote.value),
     multiplySelectedQuote: computed(() => multiplySelectedQuote.value),
+    multiplyEffectiveQuoteFetchedAt: computed(() => multiplyEffectiveQuoteFetchedAt.value),
     multiplySlippage,
     multiplySupplyVault: computed(() => multiplySupplyVault.value),
     multiplyLongVault,

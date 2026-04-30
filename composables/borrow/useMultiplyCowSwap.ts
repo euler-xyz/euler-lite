@@ -24,6 +24,7 @@ interface UseMultiplyCowSwapOptions {
   multiplySelectedProvider: ComputedRef<string | null>
   multiplyEffectiveQuote: ComputedRef<SwapApiQuote | null>
   multiplySelectedQuote: ComputedRef<SwapApiQuote | null>
+  multiplyEffectiveQuoteFetchedAt: ComputedRef<number | null>
   multiplySlippage: Readonly<Ref<number>>
   multiplySupplyVault: ComputedRef<Vault | undefined>
   multiplyLongVault: ComputedRef<Vault | undefined>
@@ -240,6 +241,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
       execution: cowSwapExecution,
       orderStatus: cowSwapOrderStatus,
       executeParams: cowParams,
+      quoteFetchedAt: options.multiplyEffectiveQuoteFetchedAt.value,
       logPrefix: 'multiply/cowswap',
     })
   }

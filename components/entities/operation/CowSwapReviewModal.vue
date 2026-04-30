@@ -11,6 +11,7 @@ const props = defineProps<{
   explorerUrl: string | undefined
   orderStatus: CowSwapOrderStatus | null
   locallyCancelled: boolean
+  quoteFetchedAt?: number | null
   onConfirm: () => void
   onCancel: () => void
 }>()
@@ -27,6 +28,21 @@ const isExecuting = computed(() => {
 const isCancelling = ref(false)
 const isCancelPending = computed(() => props.executionStatus === 'cancelling' || isCancelling.value)
 const isSubmitted = computed(() => props.executionStatus === 'submitted' || isCancelPending.value)
+const nowMs = ref(Date.now())
+const staleQuoteThresholdMs = 3 * 60 * 1000
+let nowTimer: ReturnType<typeof setInterval> | undefined
+
+onMounted(() => {
+  nowTimer = setInterval(() => {
+    nowMs.value = Date.now()
+  }, 1000)
+})
+
+onUnmounted(() => {
+  if (nowTimer) {
+    clearInterval(nowTimer)
+  }
+})
 
 const executionLabel = computed(() => {
   switch (props.executionStatus) {
@@ -66,6 +82,12 @@ const orderStatusDescription = computed(() => {
   }
   return undefined
 })
+
+const isSwapQuoteStale = computed(() =>
+  !isSubmitted.value
+  && typeof props.quoteFetchedAt === 'number'
+  && nowMs.value - props.quoteFetchedAt > staleQuoteThresholdMs,
+)
 
 const internalSubmitting = ref(false)
 
@@ -120,6 +142,24 @@ const handleCancel = async () => {
         size="compact"
         persistent
       />
+
+      <div
+        v-if="isSwapQuoteStale"
+        class="flex items-start gap-8 rounded-12 bg-warning-100 p-12 text-warning-500"
+      >
+        <SvgIcon
+          name="warning-circle"
+          class="!w-16 !h-16 shrink-0 mt-1"
+        />
+        <p class="text-p4">
+          This swap quote is more than 3 minutes old. Consider refreshing quotes with the
+          <SvgIcon
+            name="refresh"
+            class="inline-block !w-14 !h-14 align-[-2px]"
+          />
+          icon before submitting to get the best execution price.
+        </p>
+      </div>
 
       <!-- Execution progress -->
       <UiToast
