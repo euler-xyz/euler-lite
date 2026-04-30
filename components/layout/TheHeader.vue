@@ -15,7 +15,7 @@ const { connect } = useWagmi()
 
 // Wagmi account info
 const { address, isConnected } = useAccount()
-const { chainId } = useEulerAddresses()
+const { chainId, allowedChainIds } = useEulerAddresses()
 const { isSpyMode, spyShortAddress } = useSpyMode()
 const modal = useModal()
 const route = useRoute()
@@ -43,6 +43,7 @@ const menuItems = getMenuItems(
   enableLendPage,
   enableExplorePage,
 )
+const canSwitchChains = computed(() => allowedChainIds.value.length > 1)
 
 const links = computed(
   () =>
@@ -85,6 +86,7 @@ const onWalletButtonClick = () => {
   }
 }
 const onChainButtonClick = () => {
+  if (!canSwitchChains.value) return
   modal.open(SelectChainModal)
 }
 const onSettingsClick = () => {
@@ -232,10 +234,11 @@ onClickOutside(wrapperRef, () => {
     <div class="flex flex-nowrap gap-8 min-w-0">
       <UiButton
         class="py-6 px-12"
-        icon="arrow-down"
+        :icon="canSwitchChains ? 'arrow-down' : undefined"
         variant="secondary"
         size="medium"
-        icon-right
+        :icon-right="canSwitchChains"
+        :disabled="!canSwitchChains"
         @click="onChainButtonClick"
       >
         <BaseAvatar
