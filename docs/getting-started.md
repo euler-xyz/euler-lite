@@ -99,7 +99,7 @@ SWAP_API_URL=https://swap.euler.finance
 PRICE_API_URL=https://indexer.euler.finance
 
 # Chain RPC endpoints (one per chain you want to enable)
-RPC_URL_HTTP_1=https://your-ethereum-rpc.com
+RPC_URL_1=https://your-ethereum-rpc.com
 NUXT_PUBLIC_SUBGRAPH_URI_1=https://your-subgraph.com
 ```
 
@@ -145,7 +145,7 @@ NUXT_PUBLIC_SUBGRAPH_URI_1=https://your-subgraph.com
 
 ### Blockchain Connection Issues
 
-- Verify `RPC_URL_HTTP_<chainId>` env vars are set correctly
+- Verify `RPC_URL_<chainId>` env vars are set correctly
 - Ensure matching `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` exists for each chain
 - Ensure RPC endpoints are accessible
 

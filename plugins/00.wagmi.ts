@@ -25,7 +25,7 @@ export default defineNuxtPlugin((nuxtApp) => {
 
   if (!enabledChainIds.length) {
     throw new Error(
-      '[wagmi] No enabled chains. Set at least one RPC_URL_HTTP_<chainId> env var.',
+      '[wagmi] No enabled chains. Set at least one RPC_URL_<chainId> env var.',
     )
   }
 
