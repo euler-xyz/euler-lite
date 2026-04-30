@@ -7,13 +7,10 @@ on:
         required: false
         default: 'latest'
   push:
-    branches:
-      - development
-      - chore/add_euler_lite_base_deployment
-    # tags:
-    #   - 'v*'
-    #   - '!v*-rc*'
-    #   - '!v*-beta*'
+    tags:
+      - 'v*'
+      - '!v*-rc*'
+      - '!v*-beta*'
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -38,13 +35,13 @@ jobs:
           ref: ${{ github.ref }}
           fetch-depth: 0
 
-      # - name: Verify tag is on master
-      #   if: github.event_name == 'push'
-      #   run: |
-      #     if ! git log --first-parent --format=%H origin/master | grep -q "^${{ github.sha }}$"; then
-      #       echo "::error::Tag does not point to a commit on master's first-parent history. Aborting."
-      #       exit 1
-      #     fi
+      - name: Verify tag is on master
+        if: github.event_name == 'push'
+        run: |
+          if ! git log --first-parent --format=%H origin/master | grep -q "^${{ github.sha }}$"; then
+            echo "::error::Tag does not point to a commit on master's first-parent history. Aborting."
+            exit 1
+          fi
 
       - name: Generate image tag
         if: github.event_name == 'push'
@@ -135,13 +132,13 @@ jobs:
           docker push "$LATEST_IMAGE"
 
       # ── Deploy ──
-      # - name: Verify dispatch is from master
-      #   if: github.event_name == 'workflow_dispatch'
-      #   run: |
-      #     if [ "${{ github.ref }}" != "refs/heads/master" ]; then
-      #       echo "::error::workflow_dispatch must be run from the master branch."
-      #       exit 1
-      #     fi
+      - name: Verify dispatch is from master
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/master" ]; then
+            echo "::error::workflow_dispatch must be run from the master branch."
+            exit 1
+          fi
 
       - name: Resolve image tag
         id: resolve-tag
