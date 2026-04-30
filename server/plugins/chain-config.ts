@@ -7,9 +7,18 @@
  * accessible to the client synchronously via window.__CHAIN_CONFIG__.
  */
 import { parseDeprecatedChains } from '../../utils/parseDeprecatedChains'
-import { getEnabledChainIds, getSubgraphUris } from '~/utils/chain-env'
+import { getConfiguredChainIds, getEnabledChainIds, getSubgraphUris } from '~/utils/chain-env'
+import { getUnknownChainIds } from '~/entities/chainRegistry'
 
 export default defineNitroPlugin((nitroApp) => {
+  const configuredChainIds = getConfiguredChainIds()
+  const unknownChainIds = getUnknownChainIds(configuredChainIds)
+  if (unknownChainIds.length) {
+    console.warn(
+      `[chainConfig] Ignoring unsupported chain IDs from RPC_URL_<chainId> env vars: ${unknownChainIds.join(', ')}. Add only chains exported by @reown/appkit/networks.`,
+    )
+  }
+
   const enabledChainIds = getEnabledChainIds()
   const subgraphUris = getSubgraphUris()
 
