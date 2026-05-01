@@ -8,45 +8,75 @@
  * This avoids runtimeConfig (which is frozen in production) and works
  * with runtime-injected env vars (e.g. Doppler on Railway).
  */
-import { getConfiguredChainIds, getEnabledChainIds, getSubgraphUris } from '~/utils/chain-env'
+import { getChainEnvIssues, getConfiguredChainIds, getEnabledChainIds, getSubgraphUris, type ChainEnvIssues } from '~/utils/chain-env'
 import { getUnknownChainIds } from '~/entities/chainRegistry'
+import { logger } from '~/utils/logger'
 
 interface ChainConfig {
   enabledChainIds: number[]
   deprecatedChainIds: number[]
   subgraphUris: Record<string, string>
+  unsupportedChainIds?: number[]
+  chainEnvIssues?: ChainEnvIssues
 }
 
 let cached: ChainConfig | null = null
 
-function warnUnknownChainIds(chainIds: readonly number[]) {
+function logUnknownChainIds(chainIds: readonly number[]) {
   if (chainIds.length) {
-    console.warn(
-      `[chainConfig] Ignoring unsupported chain IDs from RPC_URL_<chainId> env vars: ${chainIds.join(', ')}. Add only chains exported by @reown/appkit/networks.`,
+    logger.error(
+      { ctx: 'chain-config', chainIds },
+      'ignoring unsupported chain IDs from RPC_URL_<chainId> env vars; add only chains exported by @reown/appkit/networks',
+    )
+  }
+}
+
+function logChainEnvIssues(issues: ChainEnvIssues) {
+  if (issues.emptyRpcUrlChainIds.length) {
+    logger.error(
+      { ctx: 'chain-config', chainIds: issues.emptyRpcUrlChainIds },
+      'ignoring empty RPC_URL_<chainId> env vars; set a valid HTTP(S) RPC URL or remove the env var',
+    )
+  }
+  if (issues.malformedRpcUrlChainIds.length) {
+    logger.error(
+      { ctx: 'chain-config', chainIds: issues.malformedRpcUrlChainIds },
+      'ignoring malformed RPC_URL_<chainId> env vars; set a valid HTTP(S) RPC URL',
     )
   }
 }
 
 function normalizeChainConfig(config: ChainConfig): ChainConfig {
-  const unknownChainIds = getUnknownChainIds(config.enabledChainIds)
-  warnUnknownChainIds(unknownChainIds)
+  const unknownChainIds = [...new Set([
+    ...(config.unsupportedChainIds ?? []),
+    ...getUnknownChainIds(config.enabledChainIds),
+  ])]
+  const chainEnvIssues = config.chainEnvIssues ?? {
+    emptyRpcUrlChainIds: [],
+    malformedRpcUrlChainIds: [],
+  }
+  logUnknownChainIds(unknownChainIds)
+  logChainEnvIssues(chainEnvIssues)
 
   const enabledChainIds = config.enabledChainIds.filter(id => !unknownChainIds.includes(id))
   const enabledSet = new Set(enabledChainIds)
   const deprecatedChainIds = config.deprecatedChainIds.filter(id => enabledSet.has(id))
 
-  return { ...config, enabledChainIds, deprecatedChainIds }
+  return { ...config, enabledChainIds, deprecatedChainIds, unsupportedChainIds: unknownChainIds, chainEnvIssues }
 }
 
 function scanEnv(): ChainConfig {
-  warnUnknownChainIds(getUnknownChainIds(getConfiguredChainIds()))
+  const chainEnvIssues = getChainEnvIssues()
+  const unsupportedChainIds = getUnknownChainIds(getConfiguredChainIds())
+  logUnknownChainIds(unsupportedChainIds)
+  logChainEnvIssues(chainEnvIssues)
 
   const enabledChainIds = getEnabledChainIds()
   const subgraphUris = getSubgraphUris()
   const enabledSet = new Set(enabledChainIds)
   const deprecatedChainIds = parseDeprecatedChains(process.env.DEPRECATED_CHAINS, enabledSet)
 
-  return { enabledChainIds, deprecatedChainIds, subgraphUris }
+  return { enabledChainIds, deprecatedChainIds, subgraphUris, unsupportedChainIds, chainEnvIssues }
 }
 
 export const useChainConfig = (): ChainConfig => {
