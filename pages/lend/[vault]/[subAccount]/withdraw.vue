@@ -11,6 +11,7 @@ import {
   type Vault,
   type SecuritizeVault,
   type VaultAsset,
+  getCashLimitedWithdrawAmount,
   getProjectedRates,
 } from '~/entities/vault'
 import { isSecuritizeVault } from '~/entities/vault/factory'
@@ -115,6 +116,12 @@ const amountFixed = computed(() => {
     Number(asset.value?.decimals || 0),
   )
 })
+const withdrawableAssets = computed(() => getCashLimitedWithdrawAmount(
+  assetsBalance.value,
+  vault.value && !isSecuritizeVaultType.value
+    ? (vault.value as Vault).interestRateInfo.cash
+    : undefined,
+))
 const effectiveWithdrawOp = computed(() => {
   const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
   return isMax ? OP_REDEEM : OP_WITHDRAW
@@ -129,7 +136,7 @@ const isSubmitDisabled = computed(() => {
   if (!isConnected.value) return false
   if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return true
   if (isOutputAssetBlocked.value || isOutputAssetRestricted.value) return true
-  if (assetsBalance.value < amountFixed.value.value) return true
+  if (withdrawableAssets.value < amountFixed.value.value) return true
   if (isLoading.value || amountFixed.value.isZero() || amountFixed.value.isNegative()) return true
   if (estimatesError.value) return true
   if (needsSwap.value && !swapSelectedQuote.value && !isSwapQuoteLoading.value) return true
@@ -141,6 +148,7 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (isOutputAssetBlocked.value || isOutputAssetRestricted.value) return { message: 'Receiving this asset is not available in your region', variant: 'warning' }
   if (estimatesError.value) return { message: estimatesError.value, variant: 'error' }
   if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return { message: 'Insufficient balance', variant: 'error' }
+  if (!amountFixed.value.isZero() && withdrawableAssets.value < amountFixed.value.value) return { message: 'Not enough liquidity in vault', variant: 'error' }
   if (needsSwap.value && isSwapQuoteLoading.value && !amountFixed.value.isZero()) return { message: 'Fetching swap quotes...', variant: 'warning' }
   if (needsSwap.value && !swapSelectedQuote.value && !amountFixed.value.isZero()) return { message: 'Select a swap quote to continue', variant: 'warning' }
   return undefined
@@ -157,16 +165,19 @@ const estimateSupplyAPYDisplay = computed(() => {
 
 // Reactive USD prices for display
 const assetsBalanceUsd = ref(0)
+const withdrawableAssetsUsd = ref(0)
 const deltaUsd = ref(0)
 
 // Update USD prices when vault or amounts change
 watchEffect(async () => {
   if (!vault.value || isSecuritizeVaultType.value) {
     assetsBalanceUsd.value = 0
+    withdrawableAssetsUsd.value = 0
     deltaUsd.value = 0
     return
   }
   assetsBalanceUsd.value = await getAssetUsdValueOrZero(assetsBalance.value, vault.value as Vault, 'off-chain')
+  withdrawableAssetsUsd.value = await getAssetUsdValueOrZero(withdrawableAssets.value, vault.value as Vault, 'off-chain')
   deltaUsd.value = await getAssetUsdValueOrZero(delta.value, vault.value as Vault, 'off-chain')
 })
 
@@ -461,10 +472,7 @@ const updateSyncEstimates = () => {
       throw new Error('Not enough balance')
     }
 
-    // Check liquidity (securitize: borrow is always 0)
-    const liquidity = vault.value.supply - vault.value.borrow
-
-    if (liquidity < amountFixed.value.value) {
+    if (withdrawableAssets.value < amountFixed.value.value) {
       throw new Error('Not enough liquidity in vault')
     }
 
@@ -584,7 +592,7 @@ watch(swapSelectedQuote, () => {
               label="Withdraw amount"
               :asset="asset"
               :vault="(vault as Vault)"
-              :balance="assetsBalance"
+              :balance="withdrawableAssets"
               maxable
             />
 
@@ -703,14 +711,14 @@ watch(swapSelectedQuote, () => {
                 v-if="asset"
                 class="text-p2 flex items-center gap-4"
               >
-                <UiExactAmount :exact="formatExactAmount(assetsBalance, asset.decimals, asset.symbol)">
-                  {{ formatSmartAmount(nanoToValue(assetsBalance, asset.decimals)) }}
+                <UiExactAmount :exact="formatExactAmount(withdrawableAssets, asset.decimals, asset.symbol)">
+                  {{ formatSmartAmount(nanoToValue(withdrawableAssets, asset.decimals)) }}
                   <span class="text-p3 text-content-tertiary">{{ asset.symbol }}</span>
                 </UiExactAmount>
                 <span
                   v-if="!isSecuritizeVaultType"
                   class="text-p3 text-content-tertiary"
-                >≈ ${{ formatNumber(assetsBalanceUsd) }}</span>
+                >≈ ${{ formatNumber(withdrawableAssetsUsd) }}</span>
               </p>
             </SummaryRow>
           </VaultFormInfoBlock>

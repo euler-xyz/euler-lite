@@ -114,6 +114,18 @@ export const getMaxWithdraw = (vaultAddress: string, account: string): Promise<b
   }) as Promise<bigint>
 }
 
+export const getCashLimitedWithdrawAmount = (
+  userWithdrawableAssets: bigint,
+  vaultCash?: bigint,
+): bigint => {
+  if (vaultCash === undefined) {
+    return userWithdrawableAssets
+  }
+
+  const availableCash = vaultCash < 0n ? 0n : vaultCash
+  return userWithdrawableAssets < availableCash ? userWithdrawableAssets : availableCash
+}
+
 export const getUtilization = (totalAssets: bigint, totalBorrow: bigint): number => {
   if (!totalAssets || totalAssets <= 0n || !totalBorrow || totalBorrow <= 0n) {
     return 0

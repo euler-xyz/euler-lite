@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
-import { getUtilization, getVaultUtilization, getBorrowVaultsByMap, isCyclicalNoteVault } from '~/entities/vault/utils'
+import {
+  getCashLimitedWithdrawAmount,
+  getUtilization,
+  getVaultUtilization,
+  getBorrowVaultsByMap,
+  isCyclicalNoteVault,
+} from '~/entities/vault/utils'
 import type { Vault, SecuritizeVault } from '~/entities/vault/types'
 
 describe('getUtilization', () => {
@@ -54,6 +60,45 @@ describe('getVaultUtilization', () => {
   it('returns 0 for vault with no borrows', () => {
     const vault = { totalAssets: 1000n, borrow: 0n } as Vault
     expect(getVaultUtilization(vault)).toBe(0)
+  })
+})
+
+describe('getCashLimitedWithdrawAmount', () => {
+  it('returns the user withdrawable amount when cash is higher', () => {
+    expect(getCashLimitedWithdrawAmount(1_000n, 2_000n)).toBe(1_000n)
+  })
+
+  it('caps the amount to vault cash when cash is lower', () => {
+    expect(getCashLimitedWithdrawAmount(2_000n, 1_000n)).toBe(1_000n)
+  })
+
+  it('keeps existing behavior when vault cash is unavailable', () => {
+    expect(getCashLimitedWithdrawAmount(2_000n)).toBe(2_000n)
+  })
+
+  it('treats negative cash as zero', () => {
+    expect(getCashLimitedWithdrawAmount(2_000n, -1n)).toBe(0n)
+  })
+
+  it('models the withdraw form cap when vault cash is lower than user balance', () => {
+    const assetsBalance = 1_000n
+    const vaultCash = 300n
+    const amount = 301n
+    const withdrawableAssets = getCashLimitedWithdrawAmount(assetsBalance, vaultCash)
+
+    expect(withdrawableAssets).toBe(300n)
+    expect(assetsBalance < amount).toBe(false)
+    expect(withdrawableAssets < amount).toBe(true)
+  })
+
+  it('models the withdraw form allowing the cash-capped max amount', () => {
+    const assetsBalance = 1_000n
+    const vaultCash = 300n
+    const amount = 300n
+    const withdrawableAssets = getCashLimitedWithdrawAmount(assetsBalance, vaultCash)
+
+    expect(withdrawableAssets).toBe(amount)
+    expect(withdrawableAssets < amount).toBe(false)
   })
 })
 
