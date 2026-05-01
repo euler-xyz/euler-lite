@@ -22,7 +22,8 @@ defineOptions({
 const { borrowList, isEVKUpdating } = useVaults()
 const { getVerifiedEvkVaults } = useVaultRegistry()
 const { chainId } = useEulerAddresses()
-const list = computed(() => getVerifiedEvkVaults())
+const showAllLabelEntries = useShowAllLabelEntries()
+const list = computed(() => getVerifiedEvkVaults(showAllLabelEntries.value))
 
 const isPricesReady = ref(false)
 const isLoading = computed(() => isEVKUpdating.value || !isPricesReady.value)
@@ -111,7 +112,7 @@ watch(chainId, (newChainId, oldChainId) => {
 // regardless of OP_TRANSFER state. Contrast with borrow/index.vue which checks both.
 const borrowableVaults = computed(() => {
   return list.value.filter(vault =>
-    !isVaultNotExplorableLend(vault.address)
+    (showAllLabelEntries.value || !isVaultNotExplorableLend(vault.address))
     && borrowList.value.some(pair => pair.borrow.address === vault.address)
     && !isOpDisabled(vault, OP_DEPOSIT),
   )

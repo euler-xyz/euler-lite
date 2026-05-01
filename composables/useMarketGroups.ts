@@ -339,6 +339,7 @@ const resolveGroupTVL = async (group: MarketGroup): Promise<MarketGroup> => {
 export const useMarketGroups = () => {
   const { getAll } = useVaultRegistry()
   const { products, entities } = useEulerLabels()
+  const showAllLabelEntries = useShowAllLabelEntries()
 
   /** All vaults available for grouping */
   const allVaults = computed((): AnyVault[] => {
@@ -346,7 +347,7 @@ export const useMarketGroups = () => {
       .map(entry => entry.vault)
       .filter((vault) => {
         const address = getVaultAddress(vault)
-        return address ? !isVaultNotExplorable(address) : true
+        return address ? showAllLabelEntries.value || !isVaultNotExplorable(address) : true
       })
   })
 

@@ -46,6 +46,12 @@ const loadGeneration = ref(0)
 const contextForGeneration = (gen: number) =>
   buildFetchContext(() => loadGeneration.value !== gen)
 
+const showAllLabelEntries = ref(false)
+
+const setShowAllLabelEntries = (enabled: boolean) => {
+  showAllLabelEntries.value = enabled
+}
+
 // Pair-object cache keyed by `${borrow}:${collateral}`. Vault references in
 // the registry are stable across batch updates for vaults NOT in the current
 // batch — registrySetMany only replaces entries for the addresses it receives.
@@ -62,7 +68,7 @@ const borrowPairCache = new Map<string, AnyBorrowVaultPair>()
 const borrowList = computed((): AnyBorrowVaultPair[] => {
   const { getVerifiedEvkVaults, getVault: registryGetVault } = useVaultRegistry()
   const pairs: AnyBorrowVaultPair[] = []
-  const evkVaults = getVerifiedEvkVaults()
+  const evkVaults = getVerifiedEvkVaults(showAllLabelEntries.value)
   const seenKeys = new Set<string>()
 
   evkVaults.forEach((borrowVault) => {
@@ -71,7 +77,7 @@ const borrowList = computed((): AnyBorrowVaultPair[] => {
 
       const collateralVault = registryGetVault(ltv.collateral)
       if (!collateralVault) return
-      if (isVaultNotExplorable(collateralVault.address)) return
+      if (!showAllLabelEntries.value && isVaultNotExplorable(collateralVault.address)) return
 
       const key = `${borrowVault.address.toLowerCase()}:${ltv.collateral.toLowerCase()}`
       seenKeys.add(key)
@@ -490,12 +496,12 @@ const loadVaults = async () => {
   const silent = hydrated
 
   // Filter out non-explorable vaults before any on-chain work
-  const explorableVaultAddresses = verifiedVaultAddresses.value.filter(
-    addr => !isVaultNotExplorable(addr),
-  )
-  const explorableEarnAddresses = earnVaultAddresses.value.filter(
-    addr => !isEarnVaultNotExplorable(addr),
-  )
+  const explorableVaultAddresses = showAllLabelEntries.value
+    ? verifiedVaultAddresses.value
+    : verifiedVaultAddresses.value.filter(addr => !isVaultNotExplorable(addr))
+  const explorableEarnAddresses = showAllLabelEntries.value
+    ? earnVaultAddresses.value
+    : earnVaultAddresses.value.filter(addr => !isEarnVaultNotExplorable(addr))
 
   try {
     if (!silent) {
@@ -573,7 +579,7 @@ const loadVaults = async () => {
     const unresolvedAddresses = extractUnresolvedCollateralAddresses(
       getEvkVaults(),
       registryHas,
-    ).filter(addr => !isVaultNotExplorable(addr))
+    ).filter(addr => showAllLabelEntries.value || !isVaultNotExplorable(addr))
     await fetchUnresolvedCollaterals(unresolvedAddresses, generation)
 
     if (loadGeneration.value !== generation) return
@@ -978,6 +984,7 @@ export const useVaults = () => {
     // Loading
     loadVaults,
     resetVaultsState,
+    setShowAllLabelEntries,
 
     // Async getters (with wait-for-load logic)
     getVault,
