@@ -1,16 +1,25 @@
-import type { Ref, ComputedRef } from 'vue'
+import type { Component, ComputedRef, Ref } from 'vue'
 import { logWarn } from '~/utils/errorHandling'
 import type { DisplayStep, StepAssetInfo } from '~/utils/stepDecoding'
-import type { CowSwapExecutionStatus, CowSwapOrderStatus, CowSwapOrderUid } from '~/entities/cowswap'
+import type { ModalData } from '~/components/ui/composables/useModal'
+import type {
+  CowSwapCancellationMode,
+  CowSwapCancellationStatus,
+  CowSwapExecutionStatus,
+  CowSwapOrderStatus,
+  CowSwapOrderUid,
+} from '~/entities/cowswap'
 import { APPROVE_RESET_REQUIRED_TOKENS } from '~/entities/constants'
 import { CowSwapReviewModal } from '#components'
 
-type CowSwapExecutionRef = {
+type CowSwapExecutionRef<TExecuteParams> = {
   status: Ref<CowSwapExecutionStatus>
   error: Ref<Error | null>
   explorerUrl: ComputedRef<string | undefined>
   locallyCancelled: Ref<boolean>
-  executeAsync: (params: any) => Promise<CowSwapOrderUid>
+  cancellationMode: Ref<CowSwapCancellationMode | undefined>
+  cancellationStatus: Ref<CowSwapCancellationStatus>
+  executeAsync: (params: TExecuteParams) => Promise<CowSwapOrderUid>
   cancelOrder: () => Promise<void>
 }
 
@@ -59,20 +68,21 @@ export const buildApprovalSignSteps = (params: {
   return { steps, nextIndex: idx }
 }
 
-export const openCowSwapReviewModal = (
-  modal: { open: (component: any, options?: any) => void },
+export const openCowSwapReviewModal = <TExecuteParams>(
+  modal: { open: (component: Component, options?: ModalData) => void },
   options: {
     signSteps: DisplayStep[]
     wrapperSteps: DisplayStep[]
     walletWarningsDescription: string
-    execution: CowSwapExecutionRef
+    execution: CowSwapExecutionRef<TExecuteParams>
     orderStatus: CowSwapOrderStatusRef
-    executeParams: unknown
+    executeParams: TExecuteParams
     logPrefix: string
   },
 ) => {
   modal.open(CowSwapReviewModal, {
     isNotClosable: true,
+    closeOnBackdropWhenAllowed: true,
     props: {
       signSteps: options.signSteps,
       wrapperSteps: options.wrapperSteps,
@@ -82,6 +92,8 @@ export const openCowSwapReviewModal = (
       explorerUrl: options.execution.explorerUrl,
       orderStatus: options.orderStatus.orderStatus,
       locallyCancelled: options.execution.locallyCancelled,
+      cancellationMode: options.execution.cancellationMode,
+      cancellationStatus: options.execution.cancellationStatus,
       onConfirm: async () => {
         try {
           await options.execution.executeAsync(options.executeParams)

@@ -187,5 +187,7 @@ export const useCowSwapClosePositionExecution = () => {
     explorerUrl: core.explorerUrl,
     error: core.error,
     locallyCancelled: core.locallyCancelled,
+    cancellationStatus: core.cancellationStatus,
+    cancellationMode: core.cancelMode,
   }
 }

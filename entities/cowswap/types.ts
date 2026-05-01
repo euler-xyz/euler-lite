@@ -52,6 +52,16 @@ export type CowSwapExecutionStatus
     | 'cancelling'
     | 'submitted'
 
+export type CowSwapCancellationMode
+  = | 'cow-api'
+    | 'evc-permit'
+
+export type CowSwapCancellationStatus
+  = | 'none'
+    | 'pending'
+    | 'soft_submitted'
+    | 'hard_confirmed'
+
 export type CowSwapOpenPositionParams = {
   owner: Address
   account: Address

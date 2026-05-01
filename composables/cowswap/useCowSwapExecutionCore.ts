@@ -5,6 +5,8 @@ import { EVC_ABI } from '~/abis/evc'
 import { logWarn } from '~/utils/errorHandling'
 import { getAddressPrefix } from '~/utils/subgraph'
 import {
+  type CowSwapCancellationMode,
+  type CowSwapCancellationStatus,
   type CowSwapExecutionStatus,
   type CowSwapOrderUid,
   buildEvcPermitTypedData,
@@ -28,13 +30,14 @@ export const useCowSwapExecutionCore = () => {
   const submissionChainId = ref<number | undefined>()
   const error = ref<Error | null>(null)
   const locallyCancelled = ref(false)
+  const cancellationStatus = ref<CowSwapCancellationStatus>('none')
   const permitCancellation = ref<{
     evcAddress: Address
     addressPrefix: Hex
     nonceNamespace: bigint
     nonce: bigint
   } | undefined>()
-  const cancelMode = ref<'cow-api' | 'evc-permit' | undefined>()
+  const cancelMode = ref<CowSwapCancellationMode | undefined>()
   const cowApiCancellation = ref<{
     orderbookUrl: string
     settlementContract: Address
@@ -217,11 +220,15 @@ export const useCowSwapExecutionCore = () => {
     chainId: number
   }) => {
     cancelMode.value = 'cow-api'
+    cancellationStatus.value = 'none'
+    locallyCancelled.value = false
     cowApiCancellation.value = params
   }
 
   const configurePermitCancellation = () => {
     cancelMode.value = 'evc-permit'
+    cancellationStatus.value = 'none'
+    locallyCancelled.value = false
     cowApiCancellation.value = undefined
   }
 
@@ -231,7 +238,9 @@ export const useCowSwapExecutionCore = () => {
 
     error.value = null
     const previousStatus = status.value
+    const previousCancellationStatus = cancellationStatus.value
     status.value = 'cancelling'
+    cancellationStatus.value = 'pending'
 
     try {
       if (cancelMode.value === 'cow-api') {
@@ -252,6 +261,7 @@ export const useCowSwapExecutionCore = () => {
             }) as Hex
           },
         })
+        cancellationStatus.value = 'soft_submitted'
       }
       else {
         const permit = permitCancellation.value
@@ -273,6 +283,7 @@ export const useCowSwapExecutionCore = () => {
             args: [permit.addressPrefix, permit.nonceNamespace, permit.nonce + 1n],
           })
         }
+        cancellationStatus.value = 'hard_confirmed'
       }
 
       locallyCancelled.value = true
@@ -282,6 +293,7 @@ export const useCowSwapExecutionCore = () => {
       const wrapped = err instanceof Error ? err : new Error(String(err))
       error.value = wrapped
       status.value = previousStatus
+      cancellationStatus.value = previousCancellationStatus
       logWarn('cowswap/cancelOrder', wrapped)
       throw wrapped
     }
@@ -293,6 +305,7 @@ export const useCowSwapExecutionCore = () => {
     submissionChainId.value = undefined
     error.value = null
     locallyCancelled.value = false
+    cancellationStatus.value = 'none'
     permitCancellation.value = undefined
     cancelMode.value = undefined
     cowApiCancellation.value = undefined
@@ -305,6 +318,8 @@ export const useCowSwapExecutionCore = () => {
     submissionChainId,
     error,
     locallyCancelled,
+    cancellationStatus,
+    cancelMode,
     // Computed
     isPending,
     explorerUrl,
