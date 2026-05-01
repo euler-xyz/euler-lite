@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import type { ToastVariant } from '~/components/ui/toast.types'
 import type { DisplayStep } from '~/utils/stepDecoding'
-import { formatCowSwapExecutionErrorMessage, type CowSwapExecutionStatus, type CowSwapOrderStatus } from '~/entities/cowswap'
+import {
+  formatCowSwapExecutionErrorMessage,
+  type CowSwapCancellationMode,
+  type CowSwapCancellationStatus,
+  type CowSwapExecutionStatus,
+  type CowSwapOrderStatus,
+} from '~/entities/cowswap'
+import { resolveCowSwapReviewState } from './cowSwapReviewState'
 
 const props = defineProps<{
   signSteps: DisplayStep[]
@@ -12,6 +19,8 @@ const props = defineProps<{
   explorerUrl: string | undefined
   orderStatus: CowSwapOrderStatus | null
   locallyCancelled: boolean
+  cancellationMode?: CowSwapCancellationMode
+  cancellationStatus: CowSwapCancellationStatus
   onConfirm: () => void
   onCancel: () => void
 }>()
@@ -27,9 +36,18 @@ const isExecuting = computed(() => {
 })
 
 const isCancelling = ref(false)
-const isCancelPending = computed(() => props.executionStatus === 'cancelling' || isCancelling.value)
+const reviewState = computed(() => resolveCowSwapReviewState({
+  executionStatus: props.executionStatus,
+  orderStatus: props.orderStatus,
+  locallyCancelled: props.locallyCancelled,
+  cancellationMode: props.cancellationMode,
+  cancellationStatus: props.cancellationStatus,
+  isLocallyCancelling: isCancelling.value,
+}))
+const isCancelPending = computed(() => reviewState.value.isCancelPending)
 const isSubmitted = computed(() => props.executionStatus === 'submitted' || isCancelPending.value)
-const canCancelOrder = computed(() => !props.orderStatus?.terminal && !props.locallyCancelled)
+const canCancelOrder = computed(() => reviewState.value.canCancelOrder)
+const showSoftCancelWarning = computed(() => reviewState.value.showSoftCancelWarning)
 
 const executionLabel = computed(() => {
   switch (props.executionStatus) {
@@ -43,47 +61,15 @@ const executionLabel = computed(() => {
   }
 })
 
-const orderStatusLabel = computed(() => {
-  if (isCancelPending.value) return 'Cancelling order'
-  if (!props.orderStatus) {
-    return props.locallyCancelled
-      ? 'Cancellation submitted — checking order status...'
-      : 'Waiting for solver...'
-  }
-  switch (props.orderStatus.type) {
-    case 'open': return 'Order open — waiting for solver...'
-    case 'active': return 'Solver found — executing...'
-    case 'solved': return 'Order solved — settling...'
-    case 'executing': return 'Executing on-chain...'
-    case 'traded': return 'Order filled'
-    case 'fulfilled': return 'Order fulfilled'
-    case 'cancelled': return 'Order cancelled'
-    case 'expired': return 'Order expired'
-    default: return 'Waiting for solver...'
-  }
-})
-
-const orderStatusDescription = computed(() => {
-  if (isCancelPending.value) {
-    return 'We are cancelling the swap order.'
-  }
-  if (props.locallyCancelled && !props.orderStatus?.terminal) {
-    return 'The cancellation request was submitted. CoW cancellation is soft, so the order may still fill until CoW reports it cancelled.'
-  }
-  return undefined
-})
-
-const orderStatusVariant = computed<ToastVariant>(() => {
-  if (isCancelPending.value) return 'info'
-  if (props.orderStatus?.type === 'expired') return 'warning'
-  return 'info'
-})
+const orderStatusLabel = computed(() => reviewState.value.orderStatusLabel)
+const orderStatusDescription = computed(() => reviewState.value.orderStatusDescription)
+const orderStatusVariant = computed<ToastVariant>(() => reviewState.value.orderStatusVariant)
 const executionErrorMessage = computed(() =>
   props.executionError ? formatCowSwapExecutionErrorMessage(props.executionError) : undefined,
 )
 
 const internalSubmitting = ref(false)
-const hasUnresolvedSubmittedOrder = computed(() => isSubmitted.value && !props.orderStatus?.terminal)
+const hasUnresolvedSubmittedOrder = computed(() => reviewState.value.hasUnresolvedSubmittedOrder)
 const canClose = computed(() => !internalSubmitting.value && !hasUnresolvedSubmittedOrder.value)
 
 watch(
@@ -162,6 +148,7 @@ const handleCancel = async () => {
       <!-- Submitted state -->
       <template v-if="isSubmitted">
         <UiToast
+          class="cow-swap-review-status"
           :title="orderStatusLabel"
           :description="orderStatusDescription"
           :variant="orderStatusVariant"
@@ -180,7 +167,7 @@ const handleCancel = async () => {
         </a>
 
         <UiToast
-          v-if="canCancelOrder"
+          v-if="showSoftCancelWarning"
           title="Cancellation is not guaranteed"
           description="CoW cancellations are soft. This order may still fill until CoW reports it cancelled."
           variant="warning"
@@ -226,3 +213,34 @@ const handleCancel = async () => {
     </div>
   </BaseModalWrapper>
 </template>
+
+<style scoped>
+.cow-swap-review-status {
+  box-shadow: none;
+}
+
+.cow-swap-review-status :deep(.ui-toast__body) {
+  align-items: flex-start;
+  gap: 11px;
+  padding: 15px 16px;
+}
+
+.cow-swap-review-status :deep(.ui-toast__icon) {
+  margin-top: 2px;
+}
+
+.cow-swap-review-status :deep(.ui-toast__content) {
+  gap: 4px;
+}
+
+.cow-swap-review-status :deep(.ui-toast__title) {
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.cow-swap-review-status :deep(.ui-toast__description) {
+  max-width: 64ch;
+  font-size: 13px;
+  line-height: 19px;
+}
+</style>
