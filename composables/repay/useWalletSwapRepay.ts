@@ -438,10 +438,6 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       _estimateUserLTV.value = userLtvFixed.toScaledBigint(18)
       _estimateHealth.value = healthFixed ? healthFixed.toScaledBigint(18) : 10n ** 36n
       hasEstimate.value = true
-
-      if (userLtvFixed.gte(FixedPoint.fromValue(position.value!.liquidationLTV, 2))) {
-        throw new Error('Not enough liquidity for the vault, LTV is too large')
-      }
     }
     catch (e: unknown) {
       logWarn('walletSwapRepay/syncEstimates', e)
