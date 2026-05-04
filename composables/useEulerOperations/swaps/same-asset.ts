@@ -1,13 +1,12 @@
 import type { Address, Hash } from 'viem'
 import { maxUint256 } from 'viem'
 import { adjustForInterest } from '../helpers'
+import { hasPreExistingVaultDeposit } from '../preExistingDeposit'
 import type { OperationsContext, OperationHelpers } from '../types'
 import { evcDisableCollateralAbi, evcDisableControllerAbi, evcEnableCollateralAbi, evcEnableControllerAbi } from '~/abis/evc'
-import { erc20BalanceOfAbi } from '~/abis/erc20'
-import { vaultBorrowAbi, vaultConvertToAssetsAbi, vaultRedeemAbi, vaultRepayWithSharesAbi, vaultSkimAbi, vaultTransferFromMaxAbi, vaultWithdrawAbi } from '~/abis/vault'
+import { vaultBorrowAbi, vaultRedeemAbi, vaultRepayWithSharesAbi, vaultSkimAbi, vaultTransferFromMaxAbi, vaultWithdrawAbi } from '~/abis/vault'
 import { SaHooksBuilder } from '~/entities/saHooksSDK'
 import type { EVCCall } from '~/utils/evc-converter'
-import { logWarn } from '~/utils/errorHandling'
 import type { TxPlan } from '~/entities/txPlan'
 
 export const createSameAssetSwapBuilders = (
@@ -225,28 +224,12 @@ export const createSameAssetSwapBuilders = (
     const evcAddress = ctx.eulerCoreAddresses.value.evc as Address
     const subAccountAddr = subAccount as Address
 
-    // Pre-flight: read pre-existing deposit in borrow vault
-    let preExistingBorrowDeposit = 0n
-    try {
-      const balanceOfResult = await ctx.rpcProvider.readContract({
-        address: borrowVaultAddr,
-        abi: erc20BalanceOfAbi,
-        functionName: 'balanceOf',
-        args: [subAccountAddr],
-      }) as bigint
-      if (balanceOfResult > 0n) {
-        const assetsResult = await ctx.rpcProvider.readContract({
-          address: borrowVaultAddr,
-          abi: vaultConvertToAssetsAbi,
-          functionName: 'convertToAssets',
-          args: [balanceOfResult],
-        }) as bigint
-        preExistingBorrowDeposit = assetsResult
-      }
-    }
-    catch (err) {
-      logWarn('buildSameAssetFullRepayPlan', err)
-    }
+    const hasPreExistingBorrowDeposit = await hasPreExistingVaultDeposit(
+      ctx,
+      borrowVaultAddr,
+      subAccountAddr,
+      'buildSameAssetFullRepayPlan',
+    )
 
     const hooks = new SaHooksBuilder()
     hooks.addContractInterface(collateralVaultAddr, [...vaultWithdrawAbi, ...vaultSkimAbi, ...vaultTransferFromMaxAbi])
@@ -301,23 +284,25 @@ export const createSameAssetSwapBuilders = (
       })
     }
 
-    // 6. Redeem ALL remaining shares from borrow vault
-    evcCalls.push({
-      targetContract: borrowVaultAddr,
-      onBehalfOfAccount: subAccountAddr,
-      value: 0n,
-      data: hooks.getDataForCall(borrowVaultAddr, 'redeem', [maxUint256, collateralVaultAddr, subAccountAddr]) as Hash,
-    })
+    // Only sweep the repay cushion when the borrow vault did not already hold shares.
+    // Otherwise redeem(max) would also migrate the user's pre-existing borrow-vault deposit.
+    if (!hasPreExistingBorrowDeposit) {
+      evcCalls.push({
+        targetContract: borrowVaultAddr,
+        onBehalfOfAccount: subAccountAddr,
+        value: 0n,
+        data: hooks.getDataForCall(borrowVaultAddr, 'redeem', [maxUint256, collateralVaultAddr, subAccountAddr]) as Hash,
+      })
 
-    // 7. Skim on collateral vault
-    evcCalls.push({
-      targetContract: collateralVaultAddr,
-      onBehalfOfAccount: subAccountAddr,
-      value: 0n,
-      data: hooks.getDataForCall(collateralVaultAddr, 'skim', [preExistingBorrowDeposit, subAccountAddr]) as Hash,
-    })
+      evcCalls.push({
+        targetContract: collateralVaultAddr,
+        onBehalfOfAccount: subAccountAddr,
+        value: 0n,
+        data: hooks.getDataForCall(collateralVaultAddr, 'skim', [maxUint256, subAccountAddr]) as Hash,
+      })
+    }
 
-    // 8. Transfer remaining collateral back to main account
+    // Transfer remaining collateral back to main account.
     const isMainAccount = subAccountAddr.toLowerCase() === userAddr.toLowerCase()
     if (!isMainAccount) {
       evcCalls.push({
@@ -357,28 +342,12 @@ export const createSameAssetSwapBuilders = (
     const evcAddress = ctx.eulerCoreAddresses.value.evc as Address
     const subAccountAddr = subAccount as Address
 
-    // Pre-flight: read pre-existing deposit in OLD vault
-    let preExistingOldVaultDeposit = 0n
-    try {
-      const balanceOfResult = await ctx.rpcProvider.readContract({
-        address: oldVaultAddr,
-        abi: erc20BalanceOfAbi,
-        functionName: 'balanceOf',
-        args: [subAccountAddr],
-      }) as bigint
-      if (balanceOfResult > 0n) {
-        const assetsResult = await ctx.rpcProvider.readContract({
-          address: oldVaultAddr,
-          abi: vaultConvertToAssetsAbi,
-          functionName: 'convertToAssets',
-          args: [balanceOfResult],
-        }) as bigint
-        preExistingOldVaultDeposit = assetsResult
-      }
-    }
-    catch (err) {
-      logWarn('buildSameAssetDebtSwapPlan', err)
-    }
+    const hasPreExistingOldVaultDeposit = await hasPreExistingVaultDeposit(
+      ctx,
+      oldVaultAddr,
+      subAccountAddr,
+      'buildSameAssetDebtSwapPlan',
+    )
 
     const hooks = new SaHooksBuilder()
     hooks.addContractInterface(newVaultAddr, [...vaultBorrowAbi, ...vaultSkimAbi, ...vaultTransferFromMaxAbi])
@@ -436,23 +405,25 @@ export const createSameAssetSwapBuilders = (
       data: hooks.getDataForCall(oldVaultAddr, 'disableController', []) as Hash,
     })
 
-    // 6. Redeem ALL remaining shares from old vault
-    evcCalls.push({
-      targetContract: oldVaultAddr,
-      onBehalfOfAccount: subAccountAddr,
-      value: 0n,
-      data: hooks.getDataForCall(oldVaultAddr, 'redeem', [maxUint256, newVaultAddr, subAccountAddr]) as Hash,
-    })
+    // Only sweep the migration cushion when the old vault did not already hold shares.
+    // Otherwise redeem(max) would also migrate the user's pre-existing old-vault deposit.
+    if (!hasPreExistingOldVaultDeposit) {
+      evcCalls.push({
+        targetContract: oldVaultAddr,
+        onBehalfOfAccount: subAccountAddr,
+        value: 0n,
+        data: hooks.getDataForCall(oldVaultAddr, 'redeem', [maxUint256, newVaultAddr, subAccountAddr]) as Hash,
+      })
 
-    // 7. Skim on new vault
-    evcCalls.push({
-      targetContract: newVaultAddr,
-      onBehalfOfAccount: subAccountAddr,
-      value: 0n,
-      data: hooks.getDataForCall(newVaultAddr, 'skim', [preExistingOldVaultDeposit, subAccountAddr]) as Hash,
-    })
+      evcCalls.push({
+        targetContract: newVaultAddr,
+        onBehalfOfAccount: subAccountAddr,
+        value: 0n,
+        data: hooks.getDataForCall(newVaultAddr, 'skim', [maxUint256, subAccountAddr]) as Hash,
+      })
+    }
 
-    // 8. Transfer all new vault shares from sub-account to main account
+    // Transfer all new vault shares from sub-account to main account.
     const isMainAccount = subAccountAddr.toLowerCase() === userAddr.toLowerCase()
     if (!isMainAccount) {
       evcCalls.push({
