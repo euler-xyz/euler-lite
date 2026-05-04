@@ -104,4 +104,4 @@ const map = await res.json()
 - Handler: `server/api/public/is-known.get.ts`
 - Verified-set builder + cache: `server/utils/verified-vaults.ts`
 - CORS bypass for the `/api/public/` prefix lives in `server/middleware/cors.ts`.
-- Escrow vaults are read via an `eth_call` to `escrowedCollateralPerspective.verifiedArray()`. The perspective address is looked up from `EulerChains.json` (served by `/api/euler-chains`), and the RPC endpoint is taken from `RPC_URL_HTTP_<chainId>`. Products and earn-vault label files are fetched via internal self-calls to `/api/labels/<file>` to reuse the labels endpoint's own cache and validation.
+- Escrow vaults are read via an `eth_call` to `escrowedCollateralPerspective.verifiedArray()`. The perspective address is looked up from `EulerChains.json` (served by `/api/euler-chains`), and the RPC endpoint is taken from `RPC_URL_<chainId>`. Products and earn-vault label files are fetched via internal self-calls to `/api/labels/<file>` to reuse the labels endpoint's own cache and validation.
