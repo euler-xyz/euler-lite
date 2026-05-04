@@ -602,11 +602,25 @@ const swapInputDisplay = computed(() => {
   return `${formatSmartAmount(formatUnits(amountIn, Number(selectedAsset.value.decimals)))} ${selectedAsset.value.symbol}`
 })
 
+const swapInputExactDisplay = computed(() => {
+  if (!swapEffectiveQuote.value || !selectedAsset.value) return ''
+  const amountIn = BigInt(swapEffectiveQuote.value.amountIn || 0)
+  if (amountIn <= 0n) return ''
+  return `${formatUnits(amountIn, Number(selectedAsset.value.decimals))} ${selectedAsset.value.symbol}`
+})
+
 const swapOutputDisplay = computed(() => {
   if (!swapEffectiveQuote.value || !asset.value) return ''
   const amountOut = BigInt(swapEffectiveQuote.value.amountOut || 0)
   if (amountOut <= 0n) return ''
   return `${formatSmartAmount(formatUnits(amountOut, Number(asset.value.decimals)))} ${asset.value.symbol}`
+})
+
+const swapOutputExactDisplay = computed(() => {
+  if (!swapEffectiveQuote.value || !asset.value) return ''
+  const amountOut = BigInt(swapEffectiveQuote.value.amountOut || 0)
+  if (amountOut <= 0n) return ''
+  return `${formatUnits(amountOut, Number(asset.value.decimals))} ${asset.value.symbol}`
 })
 
 const swapRoutedVia = computed(() => {
@@ -906,7 +920,9 @@ watch(address, () => {
               >
                 <SwapDetailsSummary
                   :input-display="swapInputDisplay"
+                  :input-exact-display="swapInputExactDisplay"
                   :output-display="swapOutputDisplay"
+                  :output-exact-display="swapOutputExactDisplay"
                   :price-impact="swapPriceImpact"
                   :slippage="swapSlippage"
                   :routed-via="swapRoutedVia"

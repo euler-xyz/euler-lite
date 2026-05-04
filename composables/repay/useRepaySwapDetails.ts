@@ -36,6 +36,8 @@ export const useRepaySwapDetails = (options: UseRepaySwapDetailsOptions) => {
     return {
       from: `${formatSmartAmount(amountIn)} ${sourceVault.value.asset.symbol}`,
       to: `${formatSmartAmount(amountOut)} ${borrowVault.value.asset.symbol}`,
+      fromExact: `${amountIn} ${sourceVault.value.asset.symbol}`,
+      toExact: `${amountOut} ${borrowVault.value.asset.symbol}`,
     }
   })
 

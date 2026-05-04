@@ -267,11 +267,25 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     return `${formatSmartAmount(formatUnits(amountIn, Number(borrowSelectedAsset.value.decimals)))} ${borrowSelectedAsset.value.symbol}`
   })
 
+  const borrowSwapInputExactDisplay = computed(() => {
+    if (!borrowSwapEffectiveQuote.value || !borrowSelectedAsset.value) return ''
+    const amountIn = BigInt(borrowSwapEffectiveQuote.value.amountIn || 0)
+    if (amountIn <= 0n) return ''
+    return `${formatUnits(amountIn, Number(borrowSelectedAsset.value.decimals))} ${borrowSelectedAsset.value.symbol}`
+  })
+
   const borrowSwapOutputDisplay = computed(() => {
     if (!borrowSwapEffectiveQuote.value || !collateralVault.value) return ''
     const amountOut = BigInt(borrowSwapEffectiveQuote.value.amountOut || 0)
     if (amountOut <= 0n) return ''
     return `${formatSmartAmount(formatUnits(amountOut, Number(collateralVault.value.asset.decimals)))} ${collateralVault.value.asset.symbol}`
+  })
+
+  const borrowSwapOutputExactDisplay = computed(() => {
+    if (!borrowSwapEffectiveQuote.value || !collateralVault.value) return ''
+    const amountOut = BigInt(borrowSwapEffectiveQuote.value.amountOut || 0)
+    if (amountOut <= 0n) return ''
+    return `${formatUnits(amountOut, Number(collateralVault.value.asset.decimals))} ${collateralVault.value.asset.symbol}`
   })
 
   const borrowSwapRoutedVia = computed(() => {
@@ -956,7 +970,9 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     // Computed: swap
     borrowSwapEstimatedCollateral,
     borrowSwapInputDisplay,
+    borrowSwapInputExactDisplay,
     borrowSwapOutputDisplay,
+    borrowSwapOutputExactDisplay,
     borrowSwapRoutedVia,
     borrowSwapPriceImpact,
     borrowSwapRouteItems,

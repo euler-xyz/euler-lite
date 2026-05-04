@@ -330,7 +330,9 @@ watch([() => route.params.vault, () => route.query.to], () => {
               </SummaryRow>
               <SwapDetailsSummary
                 :input-display="swapSummary?.from ?? null"
+                :input-exact-display="swapSummary?.fromExact ?? null"
                 :output-display="swapSummary?.to ?? null"
+                :output-exact-display="swapSummary?.toExact ?? null"
                 :price-impact="priceImpact"
                 :slippage="slippage"
                 :routed-via="routedVia"

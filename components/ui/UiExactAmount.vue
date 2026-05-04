@@ -2,6 +2,7 @@
 const props = defineProps<{
   exact: string
   placement?: 'top' | 'bottom'
+  align?: 'center' | 'end'
 }>()
 
 const copied = ref(false)
@@ -19,7 +20,10 @@ function onCopy() {
 <template>
   <span
     class="ui-exact-amount"
-    :class="{ 'ui-exact-amount--bottom': props.placement === 'bottom' }"
+    :class="{
+      'ui-exact-amount--bottom': props.placement === 'bottom',
+      'ui-exact-amount--align-end': props.align === 'end',
+    }"
   >
     <slot />
     <span
@@ -96,6 +100,12 @@ function onCopy() {
       top: auto;
       bottom: 100%;
     }
+  }
+
+  .ui-exact-amount--align-end:hover .ui-exact-amount__tip {
+    right: 0;
+    left: auto;
+    transform: none;
   }
 
   .ui-exact-amount__copy {
