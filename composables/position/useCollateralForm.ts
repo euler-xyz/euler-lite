@@ -314,12 +314,28 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     return `${formatSmartAmount(formatUnits(amountIn, tokenIn.decimals))} ${tokenIn.symbol}`
   })
 
+  const swapInputExactDisplay = computed(() => {
+    if (!swapEffectiveQuote.value) return ''
+    const amountIn = BigInt(swapEffectiveQuote.value.amountIn || 0)
+    if (amountIn <= 0n) return ''
+    const tokenIn = swapEffectiveQuote.value.tokenIn
+    return `${formatUnits(amountIn, tokenIn.decimals)} ${tokenIn.symbol}`
+  })
+
   const swapOutputDisplay = computed(() => {
     const outputAsset = options.getSwapOutputAsset()
     if (!swapEffectiveQuote.value || !outputAsset) return ''
     const amountOut = BigInt(swapEffectiveQuote.value.amountOut || 0)
     if (amountOut <= 0n) return ''
     return `${formatSmartAmount(formatUnits(amountOut, Number(outputAsset.decimals)))} ${outputAsset.symbol}`
+  })
+
+  const swapOutputExactDisplay = computed(() => {
+    const outputAsset = options.getSwapOutputAsset()
+    if (!swapEffectiveQuote.value || !outputAsset) return ''
+    const amountOut = BigInt(swapEffectiveQuote.value.amountOut || 0)
+    if (amountOut <= 0n) return ''
+    return `${formatUnits(amountOut, Number(outputAsset.decimals))} ${outputAsset.symbol}`
   })
 
   const swapRoutedVia = computed(() => {
@@ -818,7 +834,9 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     swapQuotesStatusLabel,
     swapEstimatedOutput,
     swapInputDisplay,
+    swapInputExactDisplay,
     swapOutputDisplay,
+    swapOutputExactDisplay,
     swapRoutedVia,
     swapPriceImpact,
     swapRouteItems,

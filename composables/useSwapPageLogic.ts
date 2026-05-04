@@ -380,6 +380,8 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     return {
       from: `${formatSmartAmount(fromSide)} ${fromVault.value.asset.symbol}`,
       to: `${formatSmartAmount(toSide)} ${toVault.value.asset.symbol}`,
+      fromExact: `${fromSide} ${fromVault.value.asset.symbol}`,
+      toExact: `${toSide} ${toVault.value.asset.symbol}`,
     }
   })
 

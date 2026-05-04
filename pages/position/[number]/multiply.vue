@@ -443,6 +443,8 @@ const multiplySwapSummary = computed(() => {
   return {
     from: `${formatSmartAmount(amountIn)} ${multiplyShortVault.value.asset.symbol}`,
     to: `${formatSmartAmount(amountOut)} ${multiplyLongVault.value.asset.symbol}`,
+    fromExact: `${amountIn} ${multiplyShortVault.value.asset.symbol}`,
+    toExact: `${amountOut} ${multiplyLongVault.value.asset.symbol}`,
   }
 })
 const multiplyPriceImpact = ref<number | null>(null)
@@ -985,7 +987,9 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
             </SummaryRow>
             <SwapDetailsSummary
               :input-display="multiplySwapSummary?.from ?? null"
+              :input-exact-display="multiplySwapSummary?.fromExact ?? null"
               :output-display="multiplySwapSummary?.to ?? null"
+              :output-exact-display="multiplySwapSummary?.toExact ?? null"
               :price-impact="multiplyPriceImpact"
               :slippage="multiplySlippage"
               :routed-via="multiplyRoutedVia"

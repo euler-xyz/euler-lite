@@ -483,6 +483,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     return {
       from: `${formatSmartAmount(amountIn)} ${multiplyShortVault.value.asset.symbol}`,
       to: `${formatSmartAmount(amountOut)} ${multiplyLongVault.value.asset.symbol}`,
+      fromExact: `${amountIn} ${multiplyShortVault.value.asset.symbol}`,
+      toExact: `${amountOut} ${multiplyLongVault.value.asset.symbol}`,
     }
   })
 
