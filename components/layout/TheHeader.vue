@@ -15,7 +15,7 @@ const { connect } = useWagmi()
 
 // Wagmi account info
 const { address, isConnected } = useAccount()
-const { chainId } = useEulerAddresses()
+const { chainId, allowedChainIds } = useEulerAddresses()
 const { isSpyMode, spyShortAddress } = useSpyMode()
 const modal = useModal()
 const route = useRoute()
@@ -43,6 +43,7 @@ const menuItems = getMenuItems(
   enableLendPage,
   enableExplorePage,
 )
+const canSwitchChains = computed(() => allowedChainIds.value.length > 1)
 
 const links = computed(
   () =>
@@ -85,6 +86,7 @@ const onWalletButtonClick = () => {
   }
 }
 const onChainButtonClick = () => {
+  if (!canSwitchChains.value) return
   modal.open(SelectChainModal)
 }
 const onSettingsClick = () => {
@@ -231,6 +233,7 @@ onClickOutside(wrapperRef, () => {
     <!-- Right: Wallet -->
     <div class="flex flex-nowrap gap-8 min-w-0">
       <UiButton
+        v-if="canSwitchChains"
         class="py-6 px-12"
         icon="arrow-down"
         variant="secondary"
@@ -243,6 +246,18 @@ onClickOutside(wrapperRef, () => {
           :label="String(chainId)"
         />
       </UiButton>
+      <div
+        v-else
+        class="ui-button ui-button--medium ui-button--secondary chain-chip py-6 px-12"
+        aria-label="Current chain"
+      >
+        <div class="ui-button__wrap">
+          <BaseAvatar
+            :src="`/chains/${chainId}.webp`"
+            :label="String(chainId)"
+          />
+        </div>
+      </div>
       <UiButton
         class="min-w-0 [&>span]:truncate"
         :icon="(isConnected || isSpyMode) ? 'arrow-down' : 'plus'"
@@ -270,3 +285,10 @@ onClickOutside(wrapperRef, () => {
     </div>
   </header>
 </template>
+
+<style scoped>
+.chain-chip {
+  cursor: default;
+  pointer-events: none;
+}
+</style>
