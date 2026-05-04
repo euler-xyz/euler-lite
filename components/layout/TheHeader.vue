@@ -209,7 +209,7 @@ onClickOutside(wrapperRef, () => {
           v-for="item in menuItems"
           :key="item.name"
           :to="'/' + item.name"
-          class="flex gap-8 text-[13px] font-medium no-underline py-10 px-16 rounded-8 text-content-secondary items-center justify-center hover:text-content-primary hover:bg-surface-secondary transition-all"
+          class="flex gap-8 text-[13px] font-medium no-underline py-6 px-16 rounded-8 text-content-secondary items-center justify-center hover:text-content-primary hover:bg-surface-secondary transition-all"
           :class="[
             getIsMenuItemActive(item)
               ? 'bg-surface-secondary text-content-primary'
@@ -225,7 +225,14 @@ onClickOutside(wrapperRef, () => {
             ]"
             :name="item.icon"
           />
-          <span>{{ item.label }}</span>
+          <span
+            v-if="item.sublabel"
+            class="flex flex-col items-start leading-[1.15]"
+          >
+            <span>{{ item.label }}</span>
+            <span class="text-[10px] font-normal text-content-tertiary">{{ item.sublabel }}</span>
+          </span>
+          <span v-else>{{ item.label }}</span>
         </NuxtLink>
       </div>
     </div>
