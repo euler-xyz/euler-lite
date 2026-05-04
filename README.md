@@ -8,7 +8,7 @@ Euler Lite provides all the core functionality of Euler Finance in a customizabl
 - **Portfolio Management**: Track positions and performance
 - **Rewards**: Participate in Merkl, Incentra, and Fuul reward programs
 - **Multi-chain Support**: Connect to multiple EVM-compatible networks
-
+ 
 ## Prerequisites
 
 - **Node.js** 24+ (recommended: 24.14.1)
