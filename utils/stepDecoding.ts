@@ -43,12 +43,14 @@ export interface StepDecodingContext {
   swapToAmount?: number | string
   /**
    * Mode of the swap behind this operation, when one is involved. Drives the
-   * "Swap to repay" relabel and which leg is shown as estimated:
+   * "Swap to repay" relabel and the default estimated leg:
    *   EXACT_IN     → output amount is an estimate
    *   EXACT_OUT    → input amount is an estimate
    *   TARGET_DEBT  → input amount is an estimate, label becomes "Swap to repay"
    */
   swapMode?: SwapperMode
+  /** Display-side override for flows whose review order differs from swap input/output. */
+  swapEstimatedSide?: 'input' | 'output'
   transferAmounts?: Record<string, string>
 }
 
@@ -398,18 +400,13 @@ export function buildDisplaySteps(
           else if (label === 'Update price feeds' && stepAssetInfo && secondAsset && secondAsset.symbol !== ctx.asset.symbol) {
             toAssetInfo = { symbol: secondAsset.symbol, address: secondAsset.address }
           }
-          // For swap steps, the leg that the user did NOT pin is an estimate.
-          // EXACT_IN pins input (output is estimated); EXACT_OUT and TARGET_DEBT
-          // pin output / target debt (input is estimated). TARGET_DEBT additionally
-          // relabels the step to "Swap to repay".
-          if (label === 'Swap' && ctx.swapMode !== undefined) {
-            if (ctx.swapMode === SwapperMode.EXACT_IN && toAssetInfo) {
+          if (label === 'Swap' && (ctx.swapMode !== undefined || ctx.swapEstimatedSide)) {
+            const estimatedSide = ctx.swapEstimatedSide
+              ?? (ctx.swapMode === SwapperMode.EXACT_IN ? 'output' : 'input')
+            if (estimatedSide === 'output' && toAssetInfo) {
               toAssetInfo = { ...toAssetInfo, estimated: true }
             }
-            else if (
-              (ctx.swapMode === SwapperMode.EXACT_OUT || ctx.swapMode === SwapperMode.TARGET_DEBT)
-              && stepAssetInfo
-            ) {
+            else if (estimatedSide === 'input' && stepAssetInfo) {
               stepAssetInfo = { ...stepAssetInfo, estimated: true }
             }
           }

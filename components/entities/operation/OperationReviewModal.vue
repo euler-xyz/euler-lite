@@ -22,7 +22,7 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, amount, onConfirm, plan, swapToAsset, swapToAmount, swapMode, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel } = defineProps<{
+const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, amount, onConfirm, plan, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel } = defineProps<{
   type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
@@ -33,8 +33,10 @@ const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, 
   swapToAsset?: VaultAsset
   swapToAmount?: number | string
   /** Swap mode behind this operation, when one is involved. Drives the
-   *  "Swap to repay" relabel and which leg is shown as estimated. */
+   *  "Swap to repay" relabel and default estimated leg. */
   swapMode?: SwapperMode
+  /** Display-side override for which swap amount should receive "~". */
+  swapEstimatedSide?: 'input' | 'output'
   campaignInfo?: Campaign
   reulUnlockInfo?: REULUnlockInfo
   onConfirm: () => void | Promise<void>
@@ -142,7 +144,7 @@ const displaySteps = computed((): DisplayStep[] => {
   const ctx: StepDecodingContext = {
     type, asset, assetIconUrl, amount,
     supplyingAssetForBorrow, supplyingAmount,
-    swapToAsset, swapToAmount, swapMode, transferAmounts,
+    swapToAsset, swapToAmount, swapMode, swapEstimatedSide, transferAmounts,
   }
 
   return buildDisplaySteps(plan, ctx, getVault, getAssetLogoUrl, hasPermit2Approval.value)

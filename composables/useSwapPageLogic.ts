@@ -61,6 +61,8 @@ export interface UseSwapPageLogicOptions {
   /** Mode the page quotes its swap in. Drives the review-modal "Swap to repay" relabel
    *  and which leg is rendered as estimated. */
   swapperMode: SwapperMode
+  /** Override the displayed side marked as estimated in the review modal. */
+  reviewSwapEstimatedSide?: 'input' | 'output'
 }
 
 export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
@@ -83,6 +85,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     computePriceImpact,
     sameAssetModalType = 'transfer',
     swapperMode,
+    reviewSwapEstimatedSide,
   } = options
 
   const otherAmountField: SwapQuoteAmountField = displayAmountField === 'amountIn' ? 'amountOut' : 'amountIn'
@@ -468,6 +471,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
             swapToAsset: showSwapAmounts ? toVault.value?.asset : undefined,
             swapToAmount: showSwapAmounts ? toAmount.value : undefined,
             swapMode: showSwapAmounts ? swapperMode : undefined,
+            swapEstimatedSide: showSwapAmounts ? reviewSwapEstimatedSide : undefined,
             plan: plan.value || undefined,
             onConfirm: async () => {
               await send()
