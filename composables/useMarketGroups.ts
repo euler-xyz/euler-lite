@@ -93,6 +93,7 @@ const buildProductGroups = (
       curatorKey,
       vaults: memberVaults,
       externalCollateral: [],
+      unknownCollateral: [],
       metrics: computeMetricsSync(memberVaults),
     })
   }
@@ -109,6 +110,7 @@ const warnedMissingCollateral = new Set<string>()
 const augmentWithCollateralGraph = (
   groups: MarketGroup[],
   allVaults: AnyVault[],
+  isVaultGovernorVerified: (vault: Vault) => boolean,
 ): MarketGroup[] => {
   const vaultMap = new Map<string, AnyVault>()
   for (const vault of allVaults) {
@@ -123,6 +125,8 @@ const augmentWithCollateralGraph = (
 
     const externalCollateral: AnyVault[] = []
     const seenExternal = new Set<string>()
+    const unknownCollateral: string[] = []
+    const seenUnknown = new Set<string>()
 
     for (const vault of group.vaults) {
       const vaultAddr = getVaultAddress(vault)
@@ -134,11 +138,23 @@ const augmentWithCollateralGraph = (
         if (externalVault) {
           externalCollateral.push(externalVault)
           seenExternal.add(normalized)
+          // Mirror the per-pair "Unknown" risk-manager pill (see
+          // VaultBorrowItem). An external collateral whose governor isn't part
+          // of any declared product entity is the curator wiring in a vault
+          // they don't actually run — surface it in the market graph too so
+          // the gap is visible from discovery, not just inside one pair card.
+          if (isVaultType(externalVault) && !isVaultGovernorVerified(externalVault) && !seenUnknown.has(normalized)) {
+            seenUnknown.add(normalized)
+            unknownCollateral.push(normalized)
+          }
         }
         else {
           // Curator referenced a collateral vault that isn't loaded into the
-          // registry — silently dropping it would hide the relationship from
-          // every discovery view. Warn once per pair so the gap is visible.
+          // registry at all. Track it the same way and warn once per pair.
+          if (!seenUnknown.has(normalized)) {
+            seenUnknown.add(normalized)
+            unknownCollateral.push(normalized)
+          }
           const key = `${vaultAddr.toLowerCase()}:${normalized}`
           if (!warnedMissingCollateral.has(key)) {
             warnedMissingCollateral.add(key)
@@ -154,6 +170,7 @@ const augmentWithCollateralGraph = (
     return {
       ...group,
       externalCollateral,
+      unknownCollateral,
     }
   })
 }
@@ -235,6 +252,7 @@ const clusterOrphans = (
     curatorKey: undefined,
     vaults,
     externalCollateral: [],
+    unknownCollateral: [],
     metrics: computeMetricsSync(vaults),
   }))
 }
@@ -343,6 +361,7 @@ const resolveGroupTVL = async (group: MarketGroup): Promise<MarketGroup> => {
 export const useMarketGroups = () => {
   const { getAll } = useVaultRegistry()
   const { products, entities } = useEulerLabels()
+  const { isVaultGovernorVerified } = useVaults()
 
   /** Every loaded vault, including non-explorable ones (used for collateral lookups) */
   const registryVaults = computed((): AnyVault[] => getAll().map(entry => entry.vault))
@@ -367,11 +386,11 @@ export const useMarketGroups = () => {
     // LTVs targeting non-explorable vaults still resolve as externalCollateral
     // instead of triggering a missing-collateral warning.
     const lookupVaults = registryVaults.value
-    const augmented = augmentWithCollateralGraph(productGroups, lookupVaults)
+    const augmented = augmentWithCollateralGraph(productGroups, lookupVaults, isVaultGovernorVerified)
 
     // Step 3: Orphan clustering
     const orphanGroups = clusterOrphans(vaults, assignedAddresses)
-    const augmentedOrphans = augmentWithCollateralGraph(orphanGroups, lookupVaults)
+    const augmentedOrphans = augmentWithCollateralGraph(orphanGroups, lookupVaults, isVaultGovernorVerified)
 
     return [...augmented, ...augmentedOrphans]
   })
@@ -489,11 +508,12 @@ export const useMarketGroups = () => {
       curatorKey,
       vaults: memberVaults,
       externalCollateral: [],
+      unknownCollateral: [],
       metrics: computeMetricsSync(memberVaults),
     }
 
     // Augment with collateral graph using registry vaults + fetched vaults
-    const [augmented] = augmentWithCollateralGraph([group], [...registryVaults.value, ...memberVaults])
+    const [augmented] = augmentWithCollateralGraph([group], [...registryVaults.value, ...memberVaults], isVaultGovernorVerified)
 
     try {
       return await resolveGroupTVL(augmented)

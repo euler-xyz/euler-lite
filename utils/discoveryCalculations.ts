@@ -13,7 +13,7 @@ import {
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { getEntitiesByVault, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { formatNumber, compactNumber } from '~/utils/string-utils'
+import { formatNumber, compactNumber, truncate } from '~/utils/string-utils'
 import { decodeHookedOps, formatHookedOpsSummary, isVaultEffectivelyPaused } from '~/utils/vault-hooks'
 import { INTEREST_RATE_MODEL_TYPE, CFG_DONT_SOCIALIZE_DEBT } from '~/entities/constants'
 
@@ -128,11 +128,23 @@ export const getVaultAssetAddress = (vault: AnyVault): string => {
 // Market Data Helpers
 // ============================================================
 
-export const getDeprecatedVaultCount = (market: MarketGroup): number =>
-  market.vaults.filter((v) => {
-    const addr = getVaultAddress(v)
-    return addr ? isVaultDeprecated(addr) : false
-  }).length
+// Count members and externals so the headline matches the per-node badge in
+// the graph (which paints any deprecated address regardless of role). Dedupe
+// in case the same address appears in both lists.
+export const getDeprecatedVaultCount = (market: MarketGroup): number => {
+  const seen = new Set<string>()
+  let count = 0
+  for (const v of [...market.vaults, ...market.externalCollateral]) {
+    const addr = getVaultAddress(v).toLowerCase()
+    if (!addr || seen.has(addr)) continue
+    seen.add(addr)
+    if (isVaultDeprecated(addr)) count++
+  }
+  return count
+}
+
+export const getUnknownCollateralCount = (market: MarketGroup): number =>
+  market.unknownCollateral.length
 
 export const getMarketEntities = (market: MarketGroup): { name: string, logos: string[] } => {
   const seen = new Set<string>()
@@ -210,28 +222,35 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
     const addr = getVaultAddress(v).toLowerCase()
     if (addr) vaultByAddr.set(addr, v)
   }
+  const unknownSet = new Set(market.unknownCollateral.map(a => a.toLowerCase()))
 
   const directedEdges = new Set<string>()
   const displayEdges = new Set<string>()
   const connectedAddresses = new Set<string>()
+  const connectedUnknownAddresses = new Set<string>()
 
   for (const vault of market.vaults) {
     if (!isVaultType(vault)) continue
     for (const ltv of vault.collateralLTVs) {
       const colAddr = ltv.collateral.toLowerCase()
-      if (!vaultByAddr.has(colAddr)) continue
+      const isKnown = vaultByAddr.has(colAddr)
+      const isUnknownPlaceholder = !isKnown && unknownSet.has(colAddr)
+      if (!isKnown && !isUnknownPlaceholder) continue
       const liabAddr = vault.address.toLowerCase()
       // directedEdges drives the borrowable-pair count rendered next to the
-      // graph — only currently borrowable edges count. displayEdges drives
+      // graph — only currently borrowable edges count, and only against known
+      // collateral so the headline isn't inflated by truly missing references
+      // (those get their own "X unknown" indicator). displayEdges drives
       // graph rendering and includes mid-ramp edges so a winding-down
       // collateral remains visually connected.
-      if (ltv.borrowLTV > 0n) {
+      if (isKnown && ltv.borrowLTV > 0n) {
         directedEdges.add(`${colAddr}:${liabAddr}`)
       }
       if (isLiveCollateralEdge(ltv)) {
         displayEdges.add(`${colAddr}:${liabAddr}`)
-        connectedAddresses.add(colAddr)
         connectedAddresses.add(liabAddr)
+        if (isKnown) connectedAddresses.add(colAddr)
+        else connectedUnknownAddresses.add(colAddr)
       }
     }
   }
@@ -244,15 +263,26 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
     }
   }
 
-  if (connectedAddresses.size === 0 && disconnectedVaults.length === 0) {
+  if (connectedAddresses.size === 0 && connectedUnknownAddresses.size === 0 && disconnectedVaults.length === 0) {
     const assetSymbols = new Set<string>()
     for (const v of market.vaults) assetSymbols.add(getVaultAssetSymbol(v))
     return { nodes: [], edges: [], pairCount: 0, assetCount: assetSymbols.size, viewWidth: 0 }
   }
 
   const allNodeEntries = [
-    ...[...connectedAddresses].map(addr => ({ address: addr, vault: vaultByAddr.get(addr)! })),
-    ...disconnectedVaults,
+    ...[...connectedAddresses].map(addr => ({
+      address: addr,
+      vault: vaultByAddr.get(addr)!,
+      // A node can be "known" (resolved vault, full identity) yet still flagged
+      // as unknown when its governor isn't part of any declared product entity
+      // — same signal as the per-pair "Unknown" risk-manager pill. Keep the
+      // logo/symbol but render the red badge in either case.
+      isUnknown: unknownSet.has(addr),
+    })),
+    ...[...connectedUnknownAddresses].map(addr => ({ address: addr, vault: undefined, isUnknown: true })),
+    // Disconnected nodes are always group members; group members are never
+    // tracked in unknownCollateral (the curator's label is an attestation).
+    ...disconnectedVaults.map(d => ({ ...d, isUnknown: false })),
   ]
   const count = allNodeEntries.length
   const baseR = Math.min(24, 10 + count * 2)
@@ -263,12 +293,26 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
   const cy = 30
   const assetSymbols = new Set<string>()
 
-  const nodes: MiniNode[] = allNodeEntries.map(({ address, vault }, i) => {
+  const nodes: MiniNode[] = allNodeEntries.map(({ address, vault, isUnknown }, i) => {
     const angle = (Math.PI * 2 * i) / Math.max(count, 1) - Math.PI / 2
-    const assetSymbol = vault ? getVaultAssetSymbol(vault) : '?'
+    // Placeholder nodes have no asset metadata. Use the truncated vault
+    // address as the label so the curator can identify the missing entry,
+    // and let the standard logo-less fallback (stringToColor + 2-char head)
+    // handle the visual — the red badge alone signals the unknown state.
+    const assetSymbol = vault ? getVaultAssetSymbol(vault) : truncate(address)
     const assetAddress = vault ? getVaultAssetAddress(vault) : ''
-    assetSymbols.add(assetSymbol)
-    return { address, assetAddress, assetSymbol, x: cx + rx * Math.cos(angle), y: cy + ry * Math.sin(angle) }
+    // Resolvable nodes still contribute to "X assets" even when flagged as
+    // unknown (USDC stays USDC; only the badge is added). The asset count is
+    // suppressed only for placeholder nodes that have no resolved vault data.
+    if (vault) assetSymbols.add(assetSymbol)
+    return {
+      address,
+      assetAddress,
+      assetSymbol,
+      x: cx + rx * Math.cos(angle),
+      y: cy + ry * Math.sin(angle),
+      isUnknown,
+    }
   })
   const nodeMap = new Map(nodes.map(n => [n.address, n]))
 

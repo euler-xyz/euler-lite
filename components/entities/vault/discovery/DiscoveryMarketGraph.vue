@@ -212,8 +212,27 @@ const isNodeCyclicalNote = (address: string): boolean => {
           >
             {{ node.assetSymbol.slice(0, 2) }}
           </text>
+          <!-- Unknown collateral badge: governor not in any declared product entity, or vault truly missing -->
+          <g v-if="node.isUnknown">
+            <circle
+              :cx="node.x + 9"
+              :cy="node.y - 9"
+              r="6"
+              style="fill: var(--error-500)"
+            />
+            <text
+              :x="node.x + 9"
+              :y="node.y - 5.5"
+              text-anchor="middle"
+              fill="white"
+              font-size="9"
+              font-weight="700"
+            >
+              !
+            </text>
+          </g>
           <!-- Deprecated badge -->
-          <g v-if="isVaultDeprecated(node.address)">
+          <g v-else-if="isVaultDeprecated(node.address)">
             <circle
               :cx="node.x + 9"
               :cy="node.y - 9"
