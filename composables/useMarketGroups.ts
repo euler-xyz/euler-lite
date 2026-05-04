@@ -103,10 +103,6 @@ const buildProductGroups = (
 
 // -- Step 2: Augment with Collateral Graph --
 
-// Module-scope dedupe so we warn at most once per (vault → missing-collateral)
-// pair across recomputes.
-const warnedMissingCollateral = new Set<string>()
-
 const augmentWithCollateralGraph = (
   groups: MarketGroup[],
   allVaults: AnyVault[],
@@ -129,7 +125,6 @@ const augmentWithCollateralGraph = (
     const seenUnknown = new Set<string>()
 
     for (const vault of group.vaults) {
-      const vaultAddr = getVaultAddress(vault)
       const collateralAddrs = getCollateralAddresses(vault)
       for (const colAddr of collateralAddrs) {
         const normalized = colAddr.toLowerCase()
@@ -162,14 +157,6 @@ const augmentWithCollateralGraph = (
           if (!seenUnknown.has(normalized)) {
             seenUnknown.add(normalized)
             unknownCollateral.push(normalized)
-          }
-          const key = `${vaultAddr.toLowerCase()}:${normalized}`
-          if (!warnedMissingCollateral.has(key)) {
-            warnedMissingCollateral.add(key)
-            logWarn(
-              'useMarketGroups/missing-collateral',
-              `Group "${group.name}": vault ${vaultAddr} references unresolved collateral ${colAddr}`,
-            )
           }
         }
       }
