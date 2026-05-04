@@ -1,6 +1,7 @@
 import { formatUnits, getAddress, toFunctionSelector, zeroAddress } from 'viem'
 import type { TxPlan } from '~/entities/txPlan'
 import type { EVCCall } from '~/utils/evc-converter'
+import { SwapperMode } from '~/entities/swap'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -11,6 +12,8 @@ export interface StepAssetInfo {
   address?: string
   amount?: number | string
   iconUrl?: string
+  /** When true, the displayed amount is an estimate (rendered with a "~" prefix). */
+  estimated?: boolean
 }
 
 export interface DisplayStep {
@@ -38,12 +41,24 @@ export interface StepDecodingContext {
   supplyingAmount?: number | string
   swapToAsset?: { symbol: string, address: string, decimals: bigint }
   swapToAmount?: number | string
+  /**
+   * Mode of the swap behind this operation, when one is involved. Drives the
+   * "Swap to repay" relabel and the default estimated leg:
+   *   EXACT_IN     → output amount is an estimate
+   *   EXACT_OUT    → input amount is an estimate
+   *   TARGET_DEBT  → input amount is an estimate, label becomes "Swap to repay"
+   */
+  swapMode?: SwapperMode
+  /** Display-side override for flows whose review order differs from swap input/output. */
+  swapEstimatedSide?: 'input' | 'output'
   transferAmounts?: Record<string, string>
 }
 
 // ---------------------------------------------------------------------------
 // Constants (internal)
 // ---------------------------------------------------------------------------
+
+type SwapEstimatedSide = 'input' | 'output'
 
 const SELECTOR_LABELS: Record<string, string> = {
   [toFunctionSelector('function deposit(uint256,address)')]: 'Supply',
@@ -70,6 +85,20 @@ const SELECTOR_LABELS: Record<string, string> = {
 }
 
 const MAX_UINT256 = 2n ** 256n - 1n
+
+const getDefaultSwapEstimatedSide = (swapMode: SwapperMode): SwapEstimatedSide => {
+  switch (swapMode) {
+    case SwapperMode.EXACT_IN:
+      return 'output'
+    case SwapperMode.EXACT_OUT:
+    case SwapperMode.TARGET_DEBT:
+      return 'input'
+    default: {
+      const exhaustive: never = swapMode
+      return exhaustive
+    }
+  }
+}
 
 // Selectors where the first uint256 param is shares, not assets.
 // Decoding these as assets would show a wrong amount in the UI.
@@ -372,7 +401,7 @@ export function buildDisplaySteps(
         for (const item of batchItems) {
           index++
           const label = decodeBatchItemLabel(item.data)
-          const stepAssetInfo = getAssetInfoForStep(label, item.data, item.targetContract, item, ctx, getVault, usedSupply, usedBorrow, usedSwapTo, lastWithdrawAmount)
+          let stepAssetInfo = getAssetInfoForStep(label, item.data, item.targetContract, item, ctx, getVault, usedSupply, usedBorrow, usedSwapTo, lastWithdrawAmount)
           const secondAsset = ctx.supplyingAssetForBorrow || ctx.swapToAsset
           let toAssetInfo: StepAssetInfo | undefined
           if (label === 'Wrap native currency') {
@@ -387,11 +416,23 @@ export function buildDisplaySteps(
           else if (label === 'Update price feeds' && stepAssetInfo && secondAsset && secondAsset.symbol !== ctx.asset.symbol) {
             toAssetInfo = { symbol: secondAsset.symbol, address: secondAsset.address }
           }
+          if (label === 'Swap' && (ctx.swapMode !== undefined || ctx.swapEstimatedSide)) {
+            const estimatedSide = ctx.swapEstimatedSide
+              ?? (ctx.swapMode !== undefined ? getDefaultSwapEstimatedSide(ctx.swapMode) : undefined)
+            if (estimatedSide === 'output' && toAssetInfo) {
+              toAssetInfo = { ...toAssetInfo, estimated: true }
+            }
+            else if (estimatedSide === 'input' && stepAssetInfo) {
+              stepAssetInfo = { ...stepAssetInfo, estimated: true }
+            }
+          }
           const displayLabel = label === 'Transfer to account'
             ? 'Transfer'
             : label === 'Wrap native currency'
               ? 'Wrap'
-              : label
+              : label === 'Swap' && ctx.swapMode === SwapperMode.TARGET_DEBT
+                ? 'Swap to repay'
+                : label
           const isWrapTransfer = label === 'Transfer' && prevLabel === 'Wrap native currency'
           const batchLabelSuffix = label === 'Transfer to account'
             ? 'to savings'

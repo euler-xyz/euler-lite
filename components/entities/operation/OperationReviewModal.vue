@@ -4,6 +4,7 @@ import type { Address, Hex } from 'viem'
 import type { Campaign } from '~/entities/brevis'
 import type { VaultAsset } from '~/entities/vault'
 import type { TxPlan } from '~/entities/txPlan'
+import type { SwapperMode } from '~/entities/swap'
 import type { EVCCall } from '~/utils/evc-converter'
 import { applyOperationGuards } from '~/utils/operationGuardRegistry'
 import { buildDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
@@ -21,7 +22,7 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, amount, onConfirm, plan, swapToAsset, swapToAmount, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel } = defineProps<{
+const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, amount, onConfirm, plan, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel } = defineProps<{
   type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
@@ -31,6 +32,11 @@ const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, 
   supplyingAmount?: number | string
   swapToAsset?: VaultAsset
   swapToAmount?: number | string
+  /** Swap mode behind this operation, when one is involved. Drives the
+   *  "Swap to repay" relabel and default estimated leg. */
+  swapMode?: SwapperMode
+  /** Display-side override for which swap amount should receive "~". */
+  swapEstimatedSide?: 'input' | 'output'
   campaignInfo?: Campaign
   reulUnlockInfo?: REULUnlockInfo
   onConfirm: () => void | Promise<void>
@@ -138,7 +144,7 @@ const displaySteps = computed((): DisplayStep[] => {
   const ctx: StepDecodingContext = {
     type, asset, assetIconUrl, amount,
     supplyingAssetForBorrow, supplyingAmount,
-    swapToAsset, swapToAmount, transferAmounts,
+    swapToAsset, swapToAmount, swapMode, swapEstimatedSide, transferAmounts,
   }
 
   return buildDisplaySteps(plan, ctx, getVault, getAssetLogoUrl, hasPermit2Approval.value)

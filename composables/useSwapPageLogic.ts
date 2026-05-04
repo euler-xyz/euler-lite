@@ -4,7 +4,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { OperationReviewModal, SlippageSettingsModal } from '#components'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import type { Vault, SecuritizeVault } from '~/entities/vault'
-import type { SwapApiQuote } from '~/entities/swap'
+import type { SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { getAssetUsdValue } from '~/services/pricing/priceProvider'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, getVaultTags } from '~/composables/useGeoBlock'
@@ -58,6 +58,11 @@ export interface UseSwapPageLogicOptions {
   computePriceImpact?: (quote: SwapApiQuote) => Promise<number | null>
   /** Modal type when from/to share the same underlying asset. Default 'transfer'; borrow uses 'swap'. */
   sameAssetModalType?: 'transfer' | 'swap'
+  /** Mode the page quotes its swap in. Drives the review-modal "Swap to repay" relabel
+   *  and which leg is rendered as estimated. */
+  swapperMode: SwapperMode
+  /** Override the displayed side marked as estimated in the review modal. */
+  reviewSwapEstimatedSide?: 'input' | 'output'
 }
 
 export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
@@ -79,6 +84,8 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     additionalErrors = [],
     computePriceImpact,
     sameAssetModalType = 'transfer',
+    swapperMode,
+    reviewSwapEstimatedSide,
   } = options
 
   const otherAmountField: SwapQuoteAmountField = displayAmountField === 'amountIn' ? 'amountOut' : 'amountIn'
@@ -463,6 +470,8 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
             amount: fromAmount.value,
             swapToAsset: showSwapAmounts ? toVault.value?.asset : undefined,
             swapToAmount: showSwapAmounts ? toAmount.value : undefined,
+            swapMode: showSwapAmounts ? swapperMode : undefined,
+            swapEstimatedSide: showSwapAmounts ? reviewSwapEstimatedSide : undefined,
             plan: plan.value || undefined,
             onConfirm: async () => {
               await send()

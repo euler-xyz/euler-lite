@@ -815,6 +815,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           supplyingAmount: multiplyInputAmount.value,
           swapToAsset: quote ? multiplyLongVault.value.asset : undefined,
           swapToAmount: quote ? multiplyLongAmount.value : undefined,
+          swapMode: quote ? SwapperMode.EXACT_IN : undefined,
           subAccount,
           onConfirm: () => {
             setTimeout(() => {
