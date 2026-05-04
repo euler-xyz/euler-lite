@@ -58,7 +58,7 @@ Configuration is split into two mechanisms:
 
 2. **Nuxt `runtimeConfig`** (`useDeployConfig()`) — branding, social links, feature flags. Set via `NUXT_PUBLIC_CONFIG_*` env vars. Includes `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL`, `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL`, and `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` for configuring upstream data sources (GitHub or S3/CDN). All three are fetched through server-side proxy endpoints with 5-minute caching — see [Server-Side Data Proxies](#server-side-data-proxies) below.
 
-3. **Chain config** (`useChainConfig()`) — derived dynamically from `RPC_URL_HTTP_<chainId>` env vars at server startup, injected via `window.__CHAIN_CONFIG__`.
+3. **Chain config** (`useChainConfig()`) — derived dynamically from `RPC_URL_<chainId>` env vars at server startup, injected via `window.__CHAIN_CONFIG__`.
 
 See the [README](../README.md) for the full env var reference.
 
@@ -121,7 +121,7 @@ The `/api/pyth/updates` endpoint proxies Pyth Hermes price update requests throu
 ## Troubleshooting
 
 - If the app fails to start, ensure Node 24+ and reinstall deps.
-- If blockchain calls fail, verify `RPC_URL_HTTP_<chainId>` env vars and check that matching `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` is set.
+- If blockchain calls fail, verify `RPC_URL_<chainId>` env vars and check that matching `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` is set.
 - If token logos don't load, verify `EULER_API_URL` (or `NUXT_PUBLIC_EULER_API_URL`) is set. Token data is fetched server-side via `/api/token-list` which aggregates Euler API, Uniswap, and DefiLlama sources with fallback.
 
 ---

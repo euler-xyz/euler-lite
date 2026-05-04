@@ -113,7 +113,7 @@ const SAMPLE_DISTANCE = 10_000
 export const fetchBlockDataForAPY = async (rpcUrl: string, chainId: number): Promise<BlockDataCache | null> => {
   try {
     const client = getPublicClient(rpcUrl)
-    const currentBlock = Number(await client.getBlockNumber())
+    const currentBlock = Math.max(0, Number(await client.getBlockNumber()) - 1)
     const sampleDistance = Math.min(SAMPLE_DISTANCE, currentBlock)
 
     if (sampleDistance === 0) {

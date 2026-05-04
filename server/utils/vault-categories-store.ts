@@ -183,7 +183,7 @@ const fetchEscrowVerifiedArray = async (
   perspectiveAddress: string | undefined,
 ): Promise<Set<string>> => {
   if (!perspectiveAddress) return new Set()
-  const rpcUrl = process.env[`RPC_URL_HTTP_${chainId}`]
+  const rpcUrl = process.env[`RPC_URL_${chainId}`]
   if (!rpcUrl) {
     reportStatus('vault-categories', `no-rpc:${chainId}`, 'missing-rpc-url',
       `no RPC URL for chain=${chainId}, skipping escrow categorization`)
