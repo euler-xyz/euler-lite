@@ -5,7 +5,7 @@ import type { MarketGroup, MarketGroupMetrics, CuratorGroup } from '~/entities/l
 import type { AnyVault } from '~/composables/useVaultRegistry'
 import { getVaultUtilization } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import { isVaultNotExplorable, isVaultFeatured } from '~/utils/eulerLabelsUtils'
+import { isVaultNotExplorable, isVaultFeatured, isVaultDeprecated, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 import { buildFetchContext } from '~/composables/useFetchContext'
 
 // -- Helpers --
@@ -149,8 +149,16 @@ const augmentWithCollateralGraph = (
           }
         }
         else {
-          // Curator referenced a collateral vault that isn't loaded into the
-          // registry at all. Track it the same way and warn once per pair.
+          // The registry hasn't loaded this collateral yet. Labels are loaded
+          // upfront and survive lazy registry hydration, so a vault tagged
+          // deprecated or assigned to any product is *known* — just not yet
+          // fetched (it'll arrive when something like the per-vault page
+          // triggers a lazy fetch). Only flag as unknown when no label
+          // recognises the address either; otherwise silently drop it so the
+          // graph doesn't churn between "unknown placeholder" and "deprecated
+          // external" as the registry fills in.
+          const knownByLabels = isVaultDeprecated(colAddr) || getProductKeyByVault(colAddr) !== undefined
+          if (knownByLabels) continue
           if (!seenUnknown.has(normalized)) {
             seenUnknown.add(normalized)
             unknownCollateral.push(normalized)
