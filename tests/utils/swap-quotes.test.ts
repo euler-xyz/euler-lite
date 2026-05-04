@@ -12,6 +12,12 @@ import type { SwapApiQuote } from '~/entities/swap'
 const makeQuote = (amountIn: string, amountOut: string): SwapApiQuote =>
   ({ amountIn, amountOut }) as SwapApiQuote
 
+const makeCard = (provider: string, amountIn: string, amountOut: string) => ({
+  provider,
+  quote: makeQuote(amountIn, amountOut),
+  fetchedAt: 0,
+})
+
 describe('getQuoteAmount', () => {
   it('returns 0n for null quote', () => {
     expect(getQuoteAmount(null, 'amountIn')).toBe(0n)
@@ -41,9 +47,9 @@ describe('getQuoteAmount', () => {
 describe('sortQuoteCards', () => {
   it('sorts by max amountOut (descending)', () => {
     const cards = [
-      { provider: 'A', quote: makeQuote('100', '200') },
-      { provider: 'B', quote: makeQuote('100', '300') },
-      { provider: 'C', quote: makeQuote('100', '100') },
+      makeCard('A', '100', '200'),
+      makeCard('B', '100', '300'),
+      makeCard('C', '100', '100'),
     ]
     const sorted = sortQuoteCards(cards, 'amountOut', 'max')
     expect(sorted[0].provider).toBe('B')
@@ -53,9 +59,9 @@ describe('sortQuoteCards', () => {
 
   it('sorts by min amountIn (ascending)', () => {
     const cards = [
-      { provider: 'A', quote: makeQuote('300', '100') },
-      { provider: 'B', quote: makeQuote('100', '100') },
-      { provider: 'C', quote: makeQuote('200', '100') },
+      makeCard('A', '300', '100'),
+      makeCard('B', '100', '100'),
+      makeCard('C', '200', '100'),
     ]
     const sorted = sortQuoteCards(cards, 'amountIn', 'min')
     expect(sorted[0].provider).toBe('B')
@@ -65,8 +71,8 @@ describe('sortQuoteCards', () => {
 
   it('does not mutate original array', () => {
     const cards = [
-      { provider: 'A', quote: makeQuote('100', '100') },
-      { provider: 'B', quote: makeQuote('100', '200') },
+      makeCard('A', '100', '100'),
+      makeCard('B', '100', '200'),
     ]
     const sorted = sortQuoteCards(cards, 'amountOut', 'max')
     expect(cards[0].provider).toBe('A')

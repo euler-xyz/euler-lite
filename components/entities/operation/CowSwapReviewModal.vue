@@ -21,6 +21,7 @@ const props = defineProps<{
   locallyCancelled: boolean
   cancellationMode?: CowSwapCancellationMode
   cancellationStatus: CowSwapCancellationStatus
+  quoteFetchedAt?: number | null
   onConfirm: () => void
   onCancel: () => void
 }>()
@@ -48,6 +49,21 @@ const isCancelPending = computed(() => reviewState.value.isCancelPending)
 const isSubmitted = computed(() => props.executionStatus === 'submitted' || isCancelPending.value)
 const canCancelOrder = computed(() => reviewState.value.canCancelOrder)
 const showSoftCancelWarning = computed(() => reviewState.value.showSoftCancelWarning)
+const nowMs = ref(Date.now())
+const staleQuoteThresholdMs = 3 * 60 * 1000
+let nowTimer: ReturnType<typeof setInterval> | undefined
+
+onMounted(() => {
+  nowTimer = setInterval(() => {
+    nowMs.value = Date.now()
+  }, 1000)
+})
+
+onUnmounted(() => {
+  if (nowTimer) {
+    clearInterval(nowTimer)
+  }
+})
 
 const executionLabel = computed(() => {
   switch (props.executionStatus) {
@@ -66,6 +82,12 @@ const orderStatusDescription = computed(() => reviewState.value.orderStatusDescr
 const orderStatusVariant = computed<ToastVariant>(() => reviewState.value.orderStatusVariant)
 const executionErrorMessage = computed(() =>
   props.executionError ? formatCowSwapExecutionErrorMessage(props.executionError) : undefined,
+)
+
+const isSwapQuoteStale = computed(() =>
+  !isSubmitted.value
+  && typeof props.quoteFetchedAt === 'number'
+  && nowMs.value - props.quoteFetchedAt > staleQuoteThresholdMs,
 )
 
 const internalSubmitting = ref(false)
@@ -135,6 +157,24 @@ const handleCancel = async () => {
         size="compact"
         persistent
       />
+
+      <div
+        v-if="isSwapQuoteStale"
+        class="flex items-start gap-8 rounded-12 bg-warning-100 p-12 text-warning-500"
+      >
+        <SvgIcon
+          name="warning-circle"
+          class="!w-16 !h-16 shrink-0 mt-1"
+        />
+        <p class="text-p4">
+          This swap quote is more than 3 minutes old. Consider refreshing quotes with the
+          <SvgIcon
+            name="refresh"
+            class="inline-block !w-14 !h-14 align-[-2px]"
+          />
+          icon before submitting to get the best execution price.
+        </p>
+      </div>
 
       <!-- Execution progress -->
       <UiToast

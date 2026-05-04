@@ -56,6 +56,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   )
   const bestQuoteCard = computed(() => sortedQuoteCards.value[0] || null)
   const bestQuote = computed(() => bestQuoteCard.value?.quote || null)
+  const bestQuoteFetchedAt = computed(() => bestQuoteCard.value?.fetchedAt || null)
   const bestAmount = computed(() => getQuoteAmount(bestQuote.value, options.amountField))
   const selectedQuoteCard = computed(() => {
     if (!selectedProvider.value) {
@@ -65,6 +66,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     return match || null
   })
   const selectedQuote = computed(() => selectedQuoteCard.value?.quote || null)
+  const selectedQuoteFetchedAt = computed(() => selectedQuoteCard.value?.fetchedAt || null)
   const effectiveQuoteCard = computed<SwapQuoteCard | null>((previous) => {
     const next = selectedQuoteCard.value || bestQuoteCard.value
     if (
@@ -78,6 +80,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     return next
   })
   const effectiveQuote = computed(() => effectiveQuoteCard.value?.quote || null)
+  const effectiveQuoteFetchedAt = computed(() => effectiveQuoteCard.value?.fetchedAt || null)
   const statusLabel = computed(() => {
     if (!providersCount.value) {
       return null
@@ -229,7 +232,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   const upsertQuote = (card: SwapQuoteCard) => {
     const { provider } = card
     const next = quoteCards.value.filter(existing => existing.provider !== provider)
-    next.push(card)
+    next.push({ ...card, fetchedAt: card.fetchedAt ?? Date.now() })
     quoteCards.value = sortQuoteCards(next, options.amountField, options.compare)
     if (isLoading.value && next.length > 0) {
       isLoading.value = false
@@ -405,10 +408,13 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     quoteCards,
     sortedQuoteCards,
     bestQuote,
+    bestQuoteFetchedAt,
     bestAmount,
     selectedProvider,
     selectedQuote,
+    selectedQuoteFetchedAt,
     effectiveQuote,
+    effectiveQuoteFetchedAt,
     providersCount,
     providersFetchedCount,
     isLoading,

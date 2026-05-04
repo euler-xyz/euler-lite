@@ -35,6 +35,10 @@ export const useSwapRepayQuotes = (options: {
     ? exactInQuotes.effectiveQuote.value
     : targetDebtQuotes.effectiveQuote.value)
 
+  const effectiveQuoteFetchedAt = computed(() => isExactIn.value
+    ? exactInQuotes.effectiveQuoteFetchedAt.value
+    : targetDebtQuotes.effectiveQuoteFetchedAt.value)
+
   const providersCount = computed(() => isExactIn.value
     ? exactInQuotes.providersCount.value
     : targetDebtQuotes.providersCount.value)
@@ -78,6 +82,7 @@ export const useSwapRepayQuotes = (options: {
     selectedProvider,
     selectedQuote,
     effectiveQuote,
+    effectiveQuoteFetchedAt,
     providersCount,
     isLoading,
     quoteError,

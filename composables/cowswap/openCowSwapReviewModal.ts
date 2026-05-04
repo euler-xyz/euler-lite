@@ -77,6 +77,7 @@ export const openCowSwapReviewModal = <TExecuteParams>(
     execution: CowSwapExecutionRef<TExecuteParams>
     orderStatus: CowSwapOrderStatusRef
     executeParams: TExecuteParams
+    quoteFetchedAt?: number | null
     logPrefix: string
   },
 ) => {
@@ -94,6 +95,7 @@ export const openCowSwapReviewModal = <TExecuteParams>(
       locallyCancelled: options.execution.locallyCancelled,
       cancellationMode: options.execution.cancellationMode,
       cancellationStatus: options.execution.cancellationStatus,
+      quoteFetchedAt: options.quoteFetchedAt,
       onConfirm: async () => {
         try {
           await options.execution.executeAsync(options.executeParams)

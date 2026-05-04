@@ -204,6 +204,7 @@ const {
   isSameAsset, sameVaultError, errorText, quote,
   isGeoBlocked, reviewSwapDisabled, reviewSwapLabel, simulationError,
   isQuoteLoading, quoteError, quotesStatusLabel, selectedProvider, selectedQuote,
+  effectiveQuoteFetchedAt,
   fromProduct, toProduct, swapPriceInvert, currentPrice, swapSummary, priceImpact, routedVia,
   swapRouteItems, swapRouteEmptyMessage,
   selectProvider, onFromInput, onRefreshQuotes, submit: swapSubmit, openSlippageSettings,
@@ -357,6 +358,7 @@ const submitCowSwapCollateralSwap = async () => {
     execution: cowSwapExecution,
     orderStatus: cowSwapOrderStatus,
     executeParams: cowParams,
+    quoteFetchedAt: effectiveQuoteFetchedAt.value,
     logPrefix: 'collateralSwap/cowswap',
   })
 }
