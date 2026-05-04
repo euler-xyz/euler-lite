@@ -58,6 +58,8 @@ export interface StepDecodingContext {
 // Constants (internal)
 // ---------------------------------------------------------------------------
 
+type SwapEstimatedSide = 'input' | 'output'
+
 const SELECTOR_LABELS: Record<string, string> = {
   [toFunctionSelector('function deposit(uint256,address)')]: 'Supply',
   [toFunctionSelector('function borrow(uint256,address)')]: 'Borrow',
@@ -83,6 +85,20 @@ const SELECTOR_LABELS: Record<string, string> = {
 }
 
 const MAX_UINT256 = 2n ** 256n - 1n
+
+const getDefaultSwapEstimatedSide = (swapMode: SwapperMode): SwapEstimatedSide => {
+  switch (swapMode) {
+    case SwapperMode.EXACT_IN:
+      return 'output'
+    case SwapperMode.EXACT_OUT:
+    case SwapperMode.TARGET_DEBT:
+      return 'input'
+    default: {
+      const exhaustive: never = swapMode
+      return exhaustive
+    }
+  }
+}
 
 // Selectors where the first uint256 param is shares, not assets.
 // Decoding these as assets would show a wrong amount in the UI.
@@ -402,7 +418,7 @@ export function buildDisplaySteps(
           }
           if (label === 'Swap' && (ctx.swapMode !== undefined || ctx.swapEstimatedSide)) {
             const estimatedSide = ctx.swapEstimatedSide
-              ?? (ctx.swapMode === SwapperMode.EXACT_IN ? 'output' : 'input')
+              ?? (ctx.swapMode !== undefined ? getDefaultSwapEstimatedSide(ctx.swapMode) : undefined)
             if (estimatedSide === 'output' && toAssetInfo) {
               toAssetInfo = { ...toAssetInfo, estimated: true }
             }
