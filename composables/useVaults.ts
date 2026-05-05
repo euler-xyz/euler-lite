@@ -38,6 +38,13 @@ const isEscrowLoading = ref(false)
 const isEscrowUpdating = ref(false)
 const isEscrowLoadedOnce = ref(false)
 
+// True once the bulk loaders AND the unresolved-collateral sweep have settled.
+// Distinct from `isReady`, which flips as soon as the server snapshot lands —
+// the snapshot doesn't include lazy collateral references, so consumers that
+// classify "unknown collateral" need this stricter signal to avoid the brief
+// post-hydration flash where unfetched collaterals look unrecognised.
+const isCollateralResolved = ref(false)
+
 // Generation counter to invalidate stale in-flight operations after chain switch.
 // Incremented in resetVaultsState(); any async operation capturing an older generation
 // must stop registering vaults.
@@ -117,6 +124,7 @@ const resetVaultsState = () => {
   loadGeneration.value++
   borrowPairCache.clear()
   isReady.value = false
+  isCollateralResolved.value = false
   isEVKLoading.value = true
   isEVKUpdating.value = true
   isEarnLoading.value = true
@@ -584,6 +592,11 @@ const loadVaults = async () => {
 
     if (loadGeneration.value !== generation) return
 
+    // Bulk loaders + unresolved-collateral sweep are complete. Consumers
+    // gating "unknown collateral" classification can now run without
+    // misclassifying not-yet-hydrated lazy collateral references.
+    isCollateralResolved.value = true
+
     // Clear flags AFTER all needed escrow vaults are loaded.
     // Silent mode skips EVK/Earn flags (already false from hydration) but
     // still clears escrow + securitize which were never touched during
@@ -970,6 +983,7 @@ export const useVaults = () => {
   return {
     // State
     isReady,
+    isCollateralResolved,
     loadedChainId,
     isEVKLoading,
     isEVKUpdating,
