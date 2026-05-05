@@ -1,4 +1,4 @@
-import { fetchVaults, getVaultUtilization, isLiveCollateralEdge, type Vault } from '~/entities/vault'
+import { fetchVaults, getVaultUtilization, isLiveCollateralEdge, type SecuritizeVault, type Vault } from '~/entities/vault'
 import { logWarn } from '~/utils/errorHandling'
 import type { EulerLabelEntity, EulerLabelProduct } from '~/entities/euler/labels'
 import type { MarketGroup, MarketGroupMetrics, CuratorGroup } from '~/entities/lend-discovery'
@@ -11,6 +11,9 @@ import { buildFetchContext } from '~/composables/useFetchContext'
 
 const isVaultType = (vault: AnyVault): vault is Vault =>
   !('type' in vault) || (vault as { type?: string }).type === undefined
+
+const hasGovernorAdmin = (vault: AnyVault): vault is Vault | SecuritizeVault =>
+  'governorAdmin' in vault
 
 const isBorrowableVault = (vault: AnyVault): boolean => {
   if (!isVaultType(vault)) return false
@@ -106,7 +109,7 @@ const buildProductGroups = (
 const augmentWithCollateralGraph = (
   groups: MarketGroup[],
   allVaults: AnyVault[],
-  isVaultGovernorVerified: (vault: Vault) => boolean,
+  isVaultGovernorVerified: (vault: Vault | SecuritizeVault) => boolean,
 ): MarketGroup[] => {
   const vaultMap = new Map<string, AnyVault>()
   for (const vault of allVaults) {
@@ -138,7 +141,7 @@ const augmentWithCollateralGraph = (
           // of any declared product entity is the curator wiring in a vault
           // they don't actually run — surface it in the market graph too so
           // the gap is visible from discovery, not just inside one pair card.
-          if (isVaultType(externalVault) && !isVaultGovernorVerified(externalVault) && !seenUnknown.has(normalized)) {
+          if (hasGovernorAdmin(externalVault) && !isVaultGovernorVerified(externalVault) && !seenUnknown.has(normalized)) {
             seenUnknown.add(normalized)
             unknownCollateral.push(normalized)
           }
