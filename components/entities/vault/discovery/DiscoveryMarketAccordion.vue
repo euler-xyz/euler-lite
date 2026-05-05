@@ -14,6 +14,7 @@ import {
   isMatrixCompatibleVault,
   formatCapDisplay,
   isAttributeMatrixView,
+  buildVaultApyCache,
   MATRIX_VIEW_OPTIONS,
   type CollateralMatrixData,
   type DotMetric,
@@ -21,6 +22,7 @@ import {
   type AttributeMatrixData,
   type MatrixViewId,
   type VaultUsdCacheEntry,
+  type VaultApyCacheEntry,
 } from '~/utils/discoveryCalculations'
 
 const props = defineProps<{
@@ -177,6 +179,25 @@ const attributeMatrixMap = computed((): Map<string, AttributeMatrixData> => {
     result.set(market.id, getAttributeMatrix(market, matrixView.value))
   }
   return result
+})
+
+// Stats matrix needs the same APY users see on per-vault cards (base IRM rate
+// folded with intrinsic + supply/borrow rewards). The composables fetch this
+// data asynchronously and bump `version` when it lands; the explicit reads
+// here re-trigger the computed so the cells refresh in place.
+const { withIntrinsicSupplyApy, withIntrinsicBorrowApy, version: intrinsicVersion } = useIntrinsicApy()
+const { getSupplyRewardApy, getBorrowRewardApy, version: rewardsVersion } = useRewardsApy()
+
+const vaultApyCache = computed<Map<string, VaultApyCacheEntry>>(() => {
+  void intrinsicVersion.value
+  void rewardsVersion.value
+  return buildVaultApyCache(
+    props.markets,
+    withIntrinsicSupplyApy,
+    withIntrinsicBorrowApy,
+    getSupplyRewardApy,
+    getBorrowRewardApy,
+  )
 })
 
 // -- Cell selection state (matrix view) --
@@ -536,6 +557,7 @@ onMounted(() => {
               v-else-if="attributeMatrixMap.get(market.id)"
               :data="attributeMatrixMap.get(market.id)!"
               :usd-cache="vaultUsdCache"
+              :apy-cache="vaultApyCache"
               :selected-header="selectedMatrixHeader?.marketId === market.id ? { address: selectedMatrixHeader.address, axis: selectedMatrixHeader.axis } : null"
               @select-header="(addr: string, axis: 'row' | 'column') => toggleMatrixHeader(market.id, addr, axis)"
             />
