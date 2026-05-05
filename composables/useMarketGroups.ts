@@ -525,10 +525,12 @@ export const useMarketGroups = () => {
       metrics: computeMetricsSync(memberVaults),
     }
 
-    // Labels are guaranteed loaded here: the early return at the top of this
-    // function reads from `products[productKey]`, which is only populated
-    // after labels load. Pass `true` directly so the invariant is explicit.
-    const [augmented] = augmentWithCollateralGraph([group], [...registryVaults.value, ...memberVaults], isVaultGovernorVerified, true)
+    // The direct market page waits for labels and the unresolved-collateral
+    // sweep before calling this path. Keep the readiness value explicit here
+    // so unknown-collateral classification is still suppressed if this helper
+    // is ever called earlier from another route.
+    const ready = labelsReady.value && isCollateralResolved.value
+    const [augmented] = augmentWithCollateralGraph([group], [...registryVaults.value, ...memberVaults], isVaultGovernorVerified, ready)
 
     try {
       return await resolveGroupTVL(augmented)

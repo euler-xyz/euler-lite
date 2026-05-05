@@ -340,6 +340,16 @@ const fetchUnresolvedCollaterals = async (addresses: string[], generation: numbe
   ])
 }
 
+const resolveUnresolvedCollaterals = async (generation: number): Promise<void> => {
+  const { getEvkVaults, has: registryHas } = useVaultRegistry()
+  const unresolvedAddresses = extractUnresolvedCollateralAddresses(
+    getEvkVaults(),
+    registryHas,
+  ).filter(addr => showAllLabelEntries.value || !isVaultNotExplorable(addr))
+
+  await fetchUnresolvedCollaterals(unresolvedAddresses, generation)
+}
+
 const updateSecuritizeVaults = async (securitizeAddresses: string[], generation: number, silent = false) => {
   const { setMany: registrySetMany } = useVaultRegistry()
 
@@ -583,12 +593,7 @@ const loadVaults = async () => {
     // member vaults, so a resolved off-label vault is a leaf in those views;
     // any second-hop unknowns will surface as diagnostic warns and resolve
     // on the next loadVaults cycle.
-    const { getEvkVaults, has: registryHas } = useVaultRegistry()
-    const unresolvedAddresses = extractUnresolvedCollateralAddresses(
-      getEvkVaults(),
-      registryHas,
-    ).filter(addr => showAllLabelEntries.value || !isVaultNotExplorable(addr))
-    await fetchUnresolvedCollaterals(unresolvedAddresses, generation)
+    await resolveUnresolvedCollaterals(generation)
 
     if (loadGeneration.value !== generation) return
 
@@ -727,8 +732,15 @@ const refreshVaults = async () => {
   const { getEvkVaults, getEarnVaults, getSecuritizeVaults } = useVaultRegistry()
   const gen = loadGeneration.value
 
+  isCollateralResolved.value = false
+
   await updateEVKVaults(getEvkVaults().map(v => v.address), gen, true)
   if (loadGeneration.value !== gen) return
+
+  await resolveUnresolvedCollaterals(gen)
+  if (loadGeneration.value !== gen) return
+
+  isCollateralResolved.value = true
 
   await updateEarnVaults(getEarnVaults().map(v => v.address), gen, true)
   if (loadGeneration.value !== gen) return
