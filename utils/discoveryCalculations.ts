@@ -645,8 +645,6 @@ export interface VaultApyCacheEntry {
   borrowApy: number
 }
 
-export type AttributeDirection = 'higher-better' | 'lower-better' | 'neutral'
-
 export interface AttributeCell {
   display: string
   numeric?: number
@@ -661,7 +659,6 @@ export interface AttributeRow {
   id: string
   label: string
   tooltip?: string
-  direction: AttributeDirection
   getValue: (
     vault: Vault | SecuritizeVault,
     usd: VaultUsdCacheEntry | undefined,
@@ -755,7 +752,6 @@ export const CONFIG_ROWS: AttributeRow[] = [
   {
     id: 'supplyCap',
     label: 'Supply cap',
-    direction: 'neutral',
     getValue: (vault, usd) => {
       const rawCap = vault.supplyCap
       const { display } = formatCapDisplay(rawCap, usd?.supplyCap)
@@ -765,7 +761,6 @@ export const CONFIG_ROWS: AttributeRow[] = [
   {
     id: 'borrowCap',
     label: 'Borrow cap',
-    direction: 'neutral',
     getValue: (vault, usd) => {
       if (!isVaultType(vault)) return NA_CELL
       if (isEscrow(vault)) return NA_CELL
@@ -777,7 +772,6 @@ export const CONFIG_ROWS: AttributeRow[] = [
   {
     id: 'irmType',
     label: 'Interest rate model',
-    direction: 'neutral',
     getValue: (vault) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       const t = vault.irmInfo?.interestRateModelInfo?.interestRateModelType
@@ -788,7 +782,6 @@ export const CONFIG_ROWS: AttributeRow[] = [
   {
     id: 'interestFee',
     label: 'Interest fee',
-    direction: 'neutral',
     getValue: (vault) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       const pct = Number(nanoToValue(vault.interestFee, 2))
@@ -798,7 +791,6 @@ export const CONFIG_ROWS: AttributeRow[] = [
   {
     id: 'maxLiqDiscount',
     label: 'Max liquidation discount',
-    direction: 'neutral',
     getValue: (vault) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       const pct = Number(vault.maxLiquidationDiscount / 100n)
@@ -808,7 +800,6 @@ export const CONFIG_ROWS: AttributeRow[] = [
   {
     id: 'badDebtSocialised',
     label: 'Bad debt socialization',
-    direction: 'neutral',
     getValue: (vault) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       // Bitmask check — bad-debt socialisation is on when the
@@ -822,7 +813,6 @@ export const CONFIG_ROWS: AttributeRow[] = [
   {
     id: 'hooks',
     label: 'Hooked operations',
-    direction: 'neutral',
     getValue: (vault) => {
       if (!isVaultType(vault)) return NA_CELL
       // 'All' when every user-facing op is hooked (full disable). Specific
@@ -842,7 +832,6 @@ export const CONFIG_ROWS: AttributeRow[] = [
   {
     id: 'governor',
     label: 'Governor',
-    direction: 'neutral',
     getValue: vault => ({
       display: vault.governorAdmin,
       kind: 'governor',
@@ -855,7 +844,6 @@ export const STATS_ROWS: AttributeRow[] = [
   {
     id: 'totalSupply',
     label: 'Total supply',
-    direction: 'higher-better',
     getValue: (_vault, usd) => ({
       display: usd ? usd.supply : '…',
       numeric: usd?.supplyUsd,
@@ -865,7 +853,6 @@ export const STATS_ROWS: AttributeRow[] = [
   {
     id: 'totalBorrow',
     label: 'Total borrows',
-    direction: 'lower-better',
     getValue: (vault, usd) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       return {
@@ -878,7 +865,6 @@ export const STATS_ROWS: AttributeRow[] = [
   {
     id: 'liquidity',
     label: 'Available liquidity',
-    direction: 'higher-better',
     getValue: (vault, usd) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       return {
@@ -891,7 +877,6 @@ export const STATS_ROWS: AttributeRow[] = [
   {
     id: 'utilization',
     label: 'Utilization',
-    direction: 'lower-better',
     getValue: (vault) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       const pct = getVaultUtilization(vault)
@@ -901,7 +886,6 @@ export const STATS_ROWS: AttributeRow[] = [
   {
     id: 'supplyCapUsage',
     label: 'Supply cap usage',
-    direction: 'lower-better',
     getValue: (vault) => {
       if (!isVaultType(vault)) return NA_CELL
       const uncapped = vault.supplyCap >= maxUint256
@@ -921,7 +905,6 @@ export const STATS_ROWS: AttributeRow[] = [
   {
     id: 'borrowCapUsage',
     label: 'Borrow cap usage',
-    direction: 'lower-better',
     getValue: (vault) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       const uncapped = vault.borrowCap >= maxUint256
@@ -939,7 +922,6 @@ export const STATS_ROWS: AttributeRow[] = [
   {
     id: 'supplyApy',
     label: 'Supply APY',
-    direction: 'higher-better',
     getValue: (vault, _usd, apy) => {
       // Securitize vaults' interestRateInfo is documented as zero-valued,
       // so we'd render "0.00%" — avoid that misleading display.
@@ -954,7 +936,6 @@ export const STATS_ROWS: AttributeRow[] = [
   {
     id: 'borrowApy',
     label: 'Borrow APY',
-    direction: 'lower-better',
     getValue: (vault, _usd, apy) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
       const pct = apy?.borrowApy ?? borrowApyPercent(vault)
@@ -1013,18 +994,3 @@ export const buildAttributeRowCells = (
     usdCache.get(col.address),
     apyCache?.get(col.address),
   ))
-
-export const getAttributeRowColor = (
-  value: number | undefined,
-  min: number,
-  max: number,
-  direction: AttributeDirection,
-): string => {
-  if (direction === 'neutral') return 'transparent'
-  if (value === undefined || !Number.isFinite(value)) return 'transparent'
-  if (min === max) return 'transparent'
-  const normalized = ((value - min) / (max - min)) * 100
-  const clamped = Math.max(0, Math.min(100, normalized))
-  if (direction === 'lower-better') return getLtvColor(clamped)
-  return getLtvColor(100 - clamped)
-}

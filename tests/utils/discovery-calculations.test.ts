@@ -4,7 +4,6 @@ import {
   buildAttributeRowCells,
   buildVaultApyCache,
   getActiveExternalCollateral,
-  getAttributeRowColor,
   getCollateralMatrix,
   isNodeRampingDown,
   type VaultApyCacheEntry,
@@ -170,30 +169,17 @@ describe('attribute stats matrix', () => {
     const usdCache = new Map([[vault.address.toLowerCase(), usd]])
     const byRow = new Map(STATS_ROWS.map(row => [
       row.id,
-      { row, cell: buildAttributeRowCells(row, columns, usdCache)[0] },
+      buildAttributeRowCells(row, columns, usdCache)[0],
     ]))
 
-    expect(byRow.get('totalSupply')!.row.direction).toBe('higher-better')
-    expect(byRow.get('totalSupply')!.cell.numeric).toBe(1000)
-    expect(byRow.get('totalBorrow')!.row.direction).toBe('lower-better')
-    expect(byRow.get('totalBorrow')!.cell.numeric).toBe(500)
-    expect(byRow.get('liquidity')!.row.direction).toBe('higher-better')
-    expect(byRow.get('liquidity')!.cell.numeric).toBe(500)
-    expect(byRow.get('utilization')!.row.direction).toBe('lower-better')
-    expect(byRow.get('utilization')!.cell.numeric).toBe(50)
-    expect(byRow.get('supplyCapUsage')!.row.direction).toBe('lower-better')
-    expect(byRow.get('supplyCapUsage')!.cell.numeric).toBe(40)
-    expect(byRow.get('borrowCapUsage')!.row.direction).toBe('lower-better')
-    expect(byRow.get('borrowCapUsage')!.cell.numeric).toBe(50)
-    expect(byRow.get('supplyApy')!.row.direction).toBe('higher-better')
-    expect(byRow.get('supplyApy')!.cell.numeric).toBe(5)
-    expect(byRow.get('borrowApy')!.row.direction).toBe('lower-better')
-    expect(byRow.get('borrowApy')!.cell.numeric).toBe(12)
-  })
-
-  it('colors higher-better rows green at the high end and lower-better rows red at the high end', () => {
-    expect(getAttributeRowColor(100, 0, 100, 'higher-better')).toContain('hsla(145')
-    expect(getAttributeRowColor(100, 0, 100, 'lower-better')).toContain('hsla(0')
+    expect(byRow.get('totalSupply')!.numeric).toBe(1000)
+    expect(byRow.get('totalBorrow')!.numeric).toBe(500)
+    expect(byRow.get('liquidity')!.numeric).toBe(500)
+    expect(byRow.get('utilization')!.numeric).toBe(50)
+    expect(byRow.get('supplyCapUsage')!.numeric).toBe(40)
+    expect(byRow.get('borrowCapUsage')!.numeric).toBe(50)
+    expect(byRow.get('supplyApy')!.numeric).toBe(5)
+    expect(byRow.get('borrowApy')!.numeric).toBe(12)
   })
 
   it('uses the apy cache (intrinsic + rewards) for supply/borrow APY when supplied', () => {

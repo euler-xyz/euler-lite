@@ -7,7 +7,6 @@ import {
   type VaultUsdCacheEntry,
   type VaultApyCacheEntry,
   buildAttributeRowCells,
-  getAttributeRowColor,
   isVaultType,
 } from '~/utils/discoveryCalculations'
 import { getEntitiesByVault } from '~/utils/eulerLabelsUtils'
@@ -29,35 +28,17 @@ defineEmits<{
 const modal = useModal()
 
 // Each AttributeRow renders as a *table column*; each vault renders as a *table row*.
-// We pre-compute one entry per attribute with the per-attribute cells (one per vault)
-// and the min/max range needed for the heatmap.
 interface AttributeColumn {
   attribute: AttributeRow
   cells: AttributeCell[] // index aligned to data.columns (vaults)
-  min: number
-  max: number
 }
 
 const attributeColumns = computed<AttributeColumn[]>(() =>
-  props.data.rows.map((attribute) => {
-    const cells = buildAttributeRowCells(attribute, props.data.columns, props.usdCache, props.apyCache)
-    let min = Infinity
-    let max = -Infinity
-    for (const c of cells) {
-      if (c.numeric === undefined || !Number.isFinite(c.numeric)) continue
-      if (c.numeric < min) min = c.numeric
-      if (c.numeric > max) max = c.numeric
-    }
-    if (!Number.isFinite(min)) {
-      min = 0
-      max = 0
-    }
-    return { attribute, cells, min, max }
-  }),
+  props.data.rows.map(attribute => ({
+    attribute,
+    cells: buildAttributeRowCells(attribute, props.data.columns, props.usdCache, props.apyCache),
+  })),
 )
-
-const cellBgColor = (column: AttributeColumn, cell: AttributeCell): string =>
-  getAttributeRowColor(cell.numeric, column.min, column.max, column.attribute.direction)
 
 const onHooksClick = (vault: AttributeMatrixColumn) => {
   if (!isVaultType(vault.vault)) return
@@ -135,7 +116,6 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
               :key="col.attribute.id"
               class="text-center py-6 px-8 min-w-[80px] transition-colors border-b border-r border-white/[0.04]"
               :class="(isVaultRowHighlighted(vault.address) || isAttributeColumnHighlighted(col.attribute.id)) ? '!bg-white/[0.06]' : ''"
-              :style="{ backgroundColor: cellBgColor(col, col.cells[vaultIdx]) }"
               @mouseenter="hoveredCell = { vaultAddr: vault.address, attributeId: col.attribute.id }"
               @mouseleave="hoveredCell = null"
             >
