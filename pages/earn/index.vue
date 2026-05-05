@@ -22,7 +22,10 @@ const isLoading = computed(() => isEarnUpdating.value || !isPricesReady.value)
 const { isSlow } = useSlowLoading(isLoading)
 const { getEarnVaults } = useVaultRegistry()
 const { chainId } = useEulerAddresses()
-const list = computed(() => getEarnVaults().filter(v => v.verified && !isEarnVaultNotExplorable(v.address)))
+const showAllLabelEntries = useShowAllLabelEntries()
+const list = computed(() => getEarnVaults().filter(v =>
+  v.verified && (showAllLabelEntries.value || !isEarnVaultNotExplorable(v.address)),
+))
 
 const { enableEntityBranding } = useDeployConfig()
 

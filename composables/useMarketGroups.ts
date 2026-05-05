@@ -360,6 +360,7 @@ export const useMarketGroups = () => {
   const { getAll } = useVaultRegistry()
   const { products, entities } = useEulerLabels()
   const { isVaultGovernorVerified } = useVaults()
+  const showAllLabelEntries = useShowAllLabelEntries()
 
   /** Every loaded vault, including non-explorable ones (used for collateral lookups) */
   const registryVaults = computed((): AnyVault[] => getAll().map(entry => entry.vault))
@@ -368,7 +369,7 @@ export const useMarketGroups = () => {
   const allVaults = computed((): AnyVault[] => {
     return registryVaults.value.filter((vault) => {
       const address = getVaultAddress(vault)
-      return address ? !isVaultNotExplorable(address) : true
+      return address ? showAllLabelEntries.value || !isVaultNotExplorable(address) : true
     })
   })
 

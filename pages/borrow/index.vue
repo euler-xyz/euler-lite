@@ -51,11 +51,12 @@ const isLoading = computed(() => isEVKUpdating.value || isEscrowUpdating.value |
 const { isSlow } = useSlowLoading(isLoading)
 const { enableEntityBranding } = useDeployConfig()
 const { entities } = useEulerLabels()
+const showAllLabelEntries = useShowAllLabelEntries()
 
 const activeBorrowList = computed(() =>
   borrowList.value.filter((pair) => {
-    if (isVaultNotExplorableBorrow(pair.borrow.address)) return false
-    if (isVaultNotExplorableBorrow(pair.collateral.address)) return false
+    if (!showAllLabelEntries.value && isVaultNotExplorableBorrow(pair.borrow.address)) return false
+    if (!showAllLabelEntries.value && isVaultNotExplorableBorrow(pair.collateral.address)) return false
     if (isOpDisabled(pair.borrow, OP_BORROW)) return false
     // Securitize collateral has no hookedOps — only check EVK collateral.
     // Fresh-deposit needs OP_DEPOSIT, savings-sourced needs OP_TRANSFER.
