@@ -76,7 +76,7 @@ const onSelect = (provider: string) => {
         <div
           class="flex flex-col gap-8"
           :class="{
-            'mobile:max-h-[max(168px,min(320px,calc(100dvh-360px)))] mobile:overflow-y-auto mobile:overscroll-contain mobile:pr-4 styled-scrollbar': expanded && hasMore,
+            'mobile:max-h-[max(168px,min(320px,calc(100dvh-360px)))] mobile:overflow-y-auto mobile:overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden': expanded && hasMore,
           }"
         >
           <button
