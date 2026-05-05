@@ -171,6 +171,15 @@ const getPairBorrowApy = (pair: AnyBorrowVaultPair): number => {
   return borrowApy - borrowRewards
 }
 
+const getPairSupplyApy = (pair: AnyBorrowVaultPair): number => {
+  const baseSupplyApy = 'interestRateInfo' in pair.collateral
+    ? nanoToValue(pair.collateral.interestRateInfo.supplyAPY, 25)
+    : 0
+  const supplyApy = withIntrinsicSupplyApy(baseSupplyApy, pair.collateral.asset.address)
+  const supplyRewards = getSupplyRewardApy(pair.collateral.address)
+  return supplyApy + supplyRewards
+}
+
 const getPairMaxLtv = (pair: AnyBorrowVaultPair): number => {
   return nanoToValue(pair.borrowLTV, 2)
 }
@@ -190,6 +199,7 @@ const {
   [
     { key: 'liquidity', label: 'Available liquidity', shortLabel: 'Avail. liquidity', unit: 'usd' },
     { key: 'totalBorrowed', label: 'Total borrowed', shortLabel: 'Total borrowed', unit: 'usd' },
+    { key: 'supplyApy', label: 'Supply APY', shortLabel: 'Supply APY', unit: 'percent' },
     { key: 'borrowApy', label: 'Borrow APY', shortLabel: 'Borrow APY', unit: 'percent' },
     { key: 'netApy', label: 'Net APY', shortLabel: 'Net APY', unit: 'percent' },
     { key: 'maxRoe', label: 'Max ROE', shortLabel: 'Max ROE', unit: 'percent' },
@@ -202,6 +212,7 @@ const {
     switch (metric) {
       case 'liquidity': return pairLiquidityUsd.value.get(key) ?? 0
       case 'totalBorrowed': return pairBorrowedUsd.value.get(key) ?? 0
+      case 'supplyApy': return getPairSupplyApy(pair)
       case 'borrowApy': return getPairBorrowApy(pair)
       case 'netApy': return 'borrowLTV' in pair ? getNetApy(pair as BorrowVaultPair) : 0
       case 'maxRoe': return 'borrowLTV' in pair ? getSortMaxRoe(pair as BorrowVaultPair) : 0
@@ -357,6 +368,11 @@ const sortedBorrowList = computed(() => {
         return Number(a.borrow.interestRateInfo.borrowAPY) - Number(b.borrow.interestRateInfo.borrowAPY)
       }))
       break
+    case 'Supply APY':
+      sorted = applyFeaturedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
+        return getPairSupplyApy(b) - getPairSupplyApy(a)
+      }))
+      break
     case 'Utilization':
       sorted = applyFeaturedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
         return getVaultUtilization(b.borrow) - getVaultUtilization(a.borrow)
@@ -414,6 +430,7 @@ const sortedBorrowList = computed(() => {
             { label: 'Liquidity', icon: 'wallet' },
             { label: 'Total Borrowed', icon: 'borrow-outline' },
             { label: 'Utilization', icon: 'pulse' },
+            { label: 'Supply APY', icon: 'percent' },
             { label: 'Borrow APY', icon: 'percent' },
             { label: 'Net APY', icon: 'percent' },
             { label: 'Max ROE', icon: 'percent' },
