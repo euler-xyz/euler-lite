@@ -23,6 +23,10 @@ const reviewBorrowLabel = 'Review Borrow'
 const reviewMultiplyLabel = 'Review Multiply'
 const { getBorrowVaultPair, updateVault } = useVaults()
 const { address, isConnected } = useAccount()
+const { chainId } = useEulerAddresses()
+const shareLinkQuery = computed(() => ({
+  network: route.query.network ?? chainId.value,
+}))
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
 const { refreshAllPositions: _refreshAllPositions, depositPositions } = useEulerAccount()
@@ -407,16 +411,28 @@ watch(formTab, () => {
         class="hidden tablet:inline-flex tablet:absolute tablet:top-8 tablet:right-full tablet:mr-12"
         fallback="/borrow"
       />
-      <VaultLabelsAndAssets
+      <div
         v-if="collateralVault && borrowVault"
-        back
-        back-fallback="/borrow"
         class="mb-24"
-        :vault="collateralVault"
-        :pair-vault="borrowVault"
-        :assets="pairAssets as VaultAsset[]"
-        size="large"
-      />
+      >
+        <VaultLabelsAndAssets
+          back
+          back-fallback="/borrow"
+          :vault="collateralVault"
+          :pair-vault="borrowVault"
+          :assets="pairAssets as VaultAsset[]"
+          size="large"
+        >
+          <template #asset-actions>
+            <UiShareLinkButton
+              class="!w-28 !h-28"
+              :path="`/borrow/${collateralVault.address}/${borrowVault.address}`"
+              :query="shareLinkQuery"
+              label="Copy pair link"
+            />
+          </template>
+        </VaultLabelsAndAssets>
+      </div>
 
       <div class="flex gap-32">
         <div

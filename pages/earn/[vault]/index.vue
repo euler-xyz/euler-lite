@@ -20,6 +20,10 @@ const modal = useModal()
 const { error } = useToast()
 const { buildSupplyPlan, executeTxPlan } = useEulerOperations()
 const { getEarnVault, updateEarnVault } = useVaults()
+const { chainId } = useEulerAddresses()
+const shareLinkQuery = computed(() => ({
+  network: route.query.network ?? chainId.value,
+}))
 const { isReady: isLabelsReady } = useEulerLabels()
 const { isConnected, address } = useAccount()
 const { fetchSingleBalance } = useWallets()
@@ -245,15 +249,27 @@ watch(address, () => {
         class="hidden tablet:inline-flex tablet:absolute tablet:top-8 tablet:right-full tablet:mr-12"
         fallback="/earn"
       />
-      <VaultLabelsAndAssets
+      <div
         v-if="asset"
-        back
-        back-fallback="/earn"
         class="mb-24"
-        :vault="vault"
-        :assets="assets"
-        size="large"
-      />
+      >
+        <VaultLabelsAndAssets
+          back
+          back-fallback="/earn"
+          :vault="vault"
+          :assets="assets"
+          size="large"
+        >
+          <template #asset-actions>
+            <UiShareLinkButton
+              class="!w-28 !h-28"
+              :path="`/earn/${vault.address}`"
+              :query="shareLinkQuery"
+              label="Copy vault link"
+            />
+          </template>
+        </VaultLabelsAndAssets>
+      </div>
 
       <div class="flex gap-32">
         <div class="hidden laptop:!block laptop:flex-[55] min-w-0">

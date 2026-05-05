@@ -28,7 +28,12 @@ defineEmits<{
 const { withIntrinsicSupplyApy, withIntrinsicBorrowApy } = useIntrinsicApy()
 const { getBorrowRewardApy, getSupplyRewardApy, getLoopingRewardApy } = useRewardsApy()
 const { products } = useEulerLabels()
+const route = useRoute()
+const { chainId } = useEulerAddresses()
 const modal = useModal()
+const shareLinkQuery = computed(() => ({
+  network: route.query.network ?? chainId.value,
+}))
 
 const isGovernanceLimited = computed(() =>
   props.market.source === 'product' && !!products[props.market.id]?.isGovernanceLimited,
@@ -195,6 +200,14 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
           </span>
         </div>
       </template>
+      <UiShareLinkButton
+        tag="span"
+        stop-propagation
+        class="ml-8"
+        :path="`/explore/${market.id}`"
+        :query="shareLinkQuery"
+        label="Copy market link"
+      />
     </div>
 
     <div class="flex pt-12 items-center mobile:justify-between mobile:border-b mobile:border-line-subtle mobile:pb-12">
