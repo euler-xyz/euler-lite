@@ -618,6 +618,10 @@ const loadVaults = async () => {
   catch (e) {
     logWarn('useVaults/loadVaults', e)
     if (loadGeneration.value === generation) {
+      // A failed load means no collateral-resolution task is still in flight.
+      // Unblock consumers so direct market pages can render their fallback
+      // state instead of waiting forever on a failed sweep.
+      isCollateralResolved.value = true
       isEVKLoading.value = false
       isEVKUpdating.value = false
       isEarnLoading.value = false
@@ -734,13 +738,23 @@ const refreshVaults = async () => {
 
   isCollateralResolved.value = false
 
-  await updateEVKVaults(getEvkVaults().map(v => v.address), gen, true)
-  if (loadGeneration.value !== gen) return
+  try {
+    await updateEVKVaults(getEvkVaults().map(v => v.address), gen, true)
+    if (loadGeneration.value !== gen) return
 
-  await resolveUnresolvedCollaterals(gen)
-  if (loadGeneration.value !== gen) return
+    await resolveUnresolvedCollaterals(gen)
+    if (loadGeneration.value !== gen) return
+  }
+  catch (e) {
+    logWarn('useVaults/refreshVaults', e)
+  }
+  finally {
+    if (loadGeneration.value === gen) {
+      isCollateralResolved.value = true
+    }
+  }
 
-  isCollateralResolved.value = true
+  if (loadGeneration.value !== gen) return
 
   await updateEarnVaults(getEarnVaults().map(v => v.address), gen, true)
   if (loadGeneration.value !== gen) return
