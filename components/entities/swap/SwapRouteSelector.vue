@@ -73,35 +73,43 @@ const onSelect = (provider: string) => {
   <div class="bg-surface-secondary p-16 rounded-16 flex flex-col gap-12 border border-line-default">
     <div class="flex flex-col gap-8">
       <template v-if="items.length">
-        <button
-          v-for="item in visibleItems"
-          :key="item.provider"
-          type="button"
-          class="w-full text-left rounded-12 border p-12 transition-colors"
-          :class="selectedProvider === item.provider
-            ? 'border-accent-500 bg-neutral-200'
-            : 'border-line-default bg-surface hover:bg-surface-secondary'"
-          @click="onSelect(item.provider)"
+        <div
+          class="flex flex-col gap-8"
+          :class="{
+            'mobile:max-h-[max(168px,min(320px,calc(100dvh-360px)))] mobile:overflow-y-auto mobile:overscroll-contain mobile:pr-4 styled-scrollbar': expanded && hasMore,
+          }"
         >
-          <div class="flex items-center justify-between gap-8">
-            <p class="text-p2 text-content-primary">
-              {{ item.amount }} {{ item.symbol }}
-            </p>
-            <div class="flex flex-col items-end gap-2 text-p3 text-content-secondary">
-              <p
-                v-if="item.badge"
-                :class="item.badge.tone === 'best' ? 'text-success-600' : 'text-error-500'"
-              >
-                {{ item.badge.label }}
+          <button
+            v-for="item in visibleItems"
+            :key="item.provider"
+            type="button"
+            class="w-full text-left rounded-12 border p-12 transition-colors"
+            :class="selectedProvider === item.provider
+              ? 'border-accent-500 bg-neutral-200'
+              : 'border-line-default bg-surface hover:bg-surface-secondary'"
+            @click="onSelect(item.provider)"
+          >
+            <div class="flex items-center justify-between gap-8">
+              <p class="text-p2 text-content-primary">
+                {{ item.amount }} {{ item.symbol }}
               </p>
-              <span class="truncate">{{ item.routeLabel || '-' }}</span>
+              <div class="flex flex-col items-end gap-2 text-p3 text-content-secondary">
+                <p
+                  v-if="item.badge"
+                  :class="item.badge.tone === 'best' ? 'text-success-600' : 'text-error-500'"
+                >
+                  {{ item.badge.label }}
+                </p>
+                <span class="truncate">{{ item.routeLabel || '-' }}</span>
+              </div>
             </div>
-          </div>
-        </button>
+          </button>
+        </div>
         <button
           v-if="hasMore"
           type="button"
           class="flex items-center justify-center gap-4 text-p3 text-content-secondary hover:text-content-primary transition-colors py-4"
+          :aria-expanded="expanded"
           @click="expanded = !expanded"
         >
           <span>{{ expanded ? 'Show less' : `Show all ${items.length} quotes` }}</span>
