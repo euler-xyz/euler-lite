@@ -391,7 +391,7 @@ const sortedBorrowList = computed(() => {
 <template>
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
     <BasePageHeader
-      title="Borrow"
+      title="Borrow/Multiply"
       description="Borrow against your assets in isolated lending markets."
       class="mb-16"
     />

@@ -63,7 +63,7 @@ onBeforeUnmount(() => {
     :style="styles"
   >
     <Transition
-      name="modal"
+      name="modal-panel"
       mode="out-in"
       appear
       @after-leave="beforeComponentLeave"
@@ -73,13 +73,18 @@ onBeforeUnmount(() => {
         class="ui-modal__wrapper"
         @click.self="onClickWrapper"
       >
-        <component
-          :is="component"
-          v-bind="data.props"
-          :modal-id="id"
-          @prevent-close="handlePreventClose"
-          @close="close"
-        />
+        <div
+          class="ui-modal__panel-motion"
+          @click.self="onClickWrapper"
+        >
+          <component
+            :is="component"
+            v-bind="data.props"
+            :modal-id="id"
+            @prevent-close="handlePreventClose"
+            @close="close"
+          />
+        </div>
       </div>
     </Transition>
   </div>
@@ -103,6 +108,12 @@ onBeforeUnmount(() => {
     height: 100%;
     position: relative;
     margin: 0 auto;
+  }
+
+  &__panel-motion {
+    position: relative;
+    width: 100%;
+    height: 100%;
   }
 }
 </style>

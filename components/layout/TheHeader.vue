@@ -15,7 +15,7 @@ const { connect } = useWagmi()
 
 // Wagmi account info
 const { address, isConnected } = useAccount()
-const { chainId } = useEulerAddresses()
+const { chainId, allowedChainIds } = useEulerAddresses()
 const { isSpyMode, spyShortAddress } = useSpyMode()
 const modal = useModal()
 const route = useRoute()
@@ -43,6 +43,7 @@ const menuItems = getMenuItems(
   enableLendPage,
   enableExplorePage,
 )
+const canSwitchChains = computed(() => allowedChainIds.value.length > 1)
 
 const links = computed(
   () =>
@@ -85,6 +86,7 @@ const onWalletButtonClick = () => {
   }
 }
 const onChainButtonClick = () => {
+  if (!canSwitchChains.value) return
   modal.open(SelectChainModal)
 }
 const onSettingsClick = () => {
@@ -207,7 +209,7 @@ onClickOutside(wrapperRef, () => {
           v-for="item in menuItems"
           :key="item.name"
           :to="'/' + item.name"
-          class="flex gap-8 text-[13px] font-medium no-underline py-10 px-16 rounded-8 text-content-secondary items-center justify-center hover:text-content-primary hover:bg-surface-secondary transition-all"
+          class="flex gap-8 text-[13px] font-medium no-underline py-6 px-16 rounded-8 text-content-secondary items-center justify-center hover:text-content-primary hover:bg-surface-secondary transition-all"
           :class="[
             getIsMenuItemActive(item)
               ? 'bg-surface-secondary text-content-primary'
@@ -223,7 +225,14 @@ onClickOutside(wrapperRef, () => {
             ]"
             :name="item.icon"
           />
-          <span>{{ item.label }}</span>
+          <span
+            v-if="item.sublabel"
+            class="flex flex-col items-start leading-[1.15]"
+          >
+            <span>{{ item.label }}</span>
+            <span class="text-[10px] font-normal text-content-tertiary">{{ item.sublabel }}</span>
+          </span>
+          <span v-else>{{ item.label }}</span>
         </NuxtLink>
       </div>
     </div>
@@ -231,6 +240,7 @@ onClickOutside(wrapperRef, () => {
     <!-- Right: Wallet -->
     <div class="flex flex-nowrap gap-8 min-w-0">
       <UiButton
+        v-if="canSwitchChains"
         class="py-6 px-12"
         icon="arrow-down"
         variant="secondary"
@@ -243,6 +253,18 @@ onClickOutside(wrapperRef, () => {
           :label="String(chainId)"
         />
       </UiButton>
+      <div
+        v-else
+        class="ui-button ui-button--medium ui-button--secondary chain-chip py-6 px-12"
+        aria-label="Current chain"
+      >
+        <div class="ui-button__wrap">
+          <BaseAvatar
+            :src="`/chains/${chainId}.webp`"
+            :label="String(chainId)"
+          />
+        </div>
+      </div>
       <UiButton
         class="min-w-0 [&>span]:truncate"
         :icon="(isConnected || isSpyMode) ? 'arrow-down' : 'plus'"
@@ -270,3 +292,10 @@ onClickOutside(wrapperRef, () => {
     </div>
   </header>
 </template>
+
+<style scoped>
+.chain-chip {
+  cursor: default;
+  pointer-events: none;
+}
+</style>

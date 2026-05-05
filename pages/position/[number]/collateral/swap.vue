@@ -107,6 +107,7 @@ const swap = useSwapPageLogic({
   quoteDiffPrefix: '-',
   redirectPath: '/portfolio',
   targetVaultAddress,
+  swapperMode: SwapperMode.EXACT_IN,
 
   buildQuoteRequest(amount) {
     if (!fromVault.value || !toVault.value || !position.value) return null

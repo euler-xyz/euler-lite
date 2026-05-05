@@ -887,11 +887,11 @@ const getBorrowVaultPair = async (
 
 export const useVaults = () => {
   // Check if vault's on-chain governorAdmin matches any of the product's declared entities
-  const isVaultGovernorVerified = (vault: Vault): boolean => {
+  const isVaultGovernorVerified = (vault: Vault | SecuritizeVault): boolean => {
     const { entities } = useEulerLabels()
 
     // Escrow vaults don't have a risk manager - show "-" not "Unknown"
-    if (vault.vaultCategory === 'escrow') {
+    if ('vaultCategory' in vault && vault.vaultCategory === 'escrow') {
       return true
     }
 
@@ -923,7 +923,7 @@ export const useVaults = () => {
     }
 
     // Also verify oracle router governor if the oracle is an EulerRouter
-    const routerGovernor = getEulerRouterGovernor(vault.oracleDetailedInfo)
+    const routerGovernor = 'oracleDetailedInfo' in vault ? getEulerRouterGovernor(vault.oracleDetailedInfo) : undefined
     if (routerGovernor && routerGovernor !== zeroAddress) {
       const routerGovernorVerified = declaredEntityKeys.some((entityKey) => {
         const entity = entities[entityKey]

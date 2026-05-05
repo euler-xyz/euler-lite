@@ -638,6 +638,7 @@ const submitMultiply = async () => {
           plan: plan.value || undefined,
           swapToAsset: quote ? multiplyLongVault.value.asset : undefined,
           swapToAmount: reviewSwapToAmount,
+          swapMode: quote ? SwapperMode.EXACT_IN : undefined,
           subAccount,
           submittingLabel: 'Submitting...',
           onConfirm: async () => {

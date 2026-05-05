@@ -63,14 +63,13 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     oraclePriceRatio,
   } = options
 
-  const router = useRouter()
   const modal = useModal()
   const { error } = useToast()
   const { buildSwapAndRepayPlan, executeTxPlan } = useEulerOperations()
-  const { refreshAllPositions } = useEulerAccount()
-  const { eulerLensAddresses, chainId } = useEulerAddresses()
+  const { chainId } = useEulerAddresses()
   const { isConnected, address } = useAccount()
   const { fetchSingleBalance } = useWallets()
+  const { finalizeTxAndRedirect } = useTxFinalization()
   const { getVault: registryGetVault } = useVaultRegistry()
 
   // --- State ---
@@ -438,10 +437,6 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       _estimateUserLTV.value = userLtvFixed.toScaledBigint(18)
       _estimateHealth.value = healthFixed ? healthFixed.toScaledBigint(18) : 10n ** 36n
       hasEstimate.value = true
-
-      if (userLtvFixed.gte(FixedPoint.fromValue(position.value!.liquidationLTV, 2))) {
-        throw new Error('Not enough liquidity for the vault, LTV is too large')
-      }
     }
     catch (e: unknown) {
       logWarn('walletSwapRepay/syncEstimates', e)
@@ -734,7 +729,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
           asset: reviewAsset,
           amount: inputDisplay,
           swapToAsset: borrowVault.value.asset,
-          swapToAmount: swapEstimatedOutput.value,
+          swapToAmount: direction.value === SwapperMode.TARGET_DEBT ? debtAmount.value : swapEstimatedOutput.value,
+          swapMode: direction.value,
           plan: plan.value || undefined,
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
@@ -757,12 +753,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
       const txPlan = await buildRepayPlan(true)
       await executeTxPlan(txPlan)
-
-      modal.close()
-      refreshAllPositions(eulerLensAddresses.value, address.value as string)
-      setTimeout(() => {
-        router.replace('/portfolio')
-      }, 400)
+      await finalizeTxAndRedirect()
     }
     catch (e) {
       error('Transaction failed')
