@@ -26,6 +26,7 @@ defineEmits<{
 }>()
 
 const modal = useModal()
+const { isVaultGovernorVerified } = useVaults()
 
 // Each AttributeRow renders as a *table column*; each vault renders as a *table row*.
 interface AttributeColumn {
@@ -97,8 +98,10 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
                   && selectedHeader?.axis === 'row'
                   ? 'text-accent-500 !bg-accent-500/10'
                   : isVaultRowHighlighted(vault.address)
-                    ? 'text-content-primary !bg-white/[0.06]'
-                    : 'text-content-primary hover:bg-white/[0.04]'
+                    ? (vault.isExternal ? 'text-content-tertiary !bg-white/[0.06]' : 'text-content-primary !bg-white/[0.06]')
+                    : (vault.isExternal
+                      ? 'text-content-tertiary hover:bg-white/[0.04]'
+                      : 'text-content-primary hover:bg-white/[0.04]')
               "
               @click.stop="$emit('selectHeader', vault.address, 'row')"
             >
@@ -135,9 +138,19 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
                 </div>
               </template>
 
-              <!-- governor: entity logos + names, or unknown chip -->
+              <!-- governor: same precedence as VaultOverviewBlockGeneral —
+                   unverified governor wins ("Unknown"), then entities, else
+                   "—". Escrow vaults pass `isVaultGovernorVerified` and have
+                   no labeled entities, so they fall through to "—". -->
               <template v-else-if="col.cells[vaultIdx].kind === 'governor'">
-                <template v-if="entitiesFor(vault).length">
+                <template v-if="!isVaultGovernorVerified(vault.vault)">
+                  <VaultTypeChip
+                    :vault="vault.vault"
+                    type="unknown"
+                    class="inline-flex !py-2 !px-6 !text-p5"
+                  />
+                </template>
+                <template v-else-if="entitiesFor(vault).length">
                   <div class="inline-flex items-center justify-center gap-6 flex-wrap">
                     <div
                       v-for="(entity, idx) in entitiesFor(vault)"
@@ -154,11 +167,7 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
                   </div>
                 </template>
                 <template v-else>
-                  <VaultTypeChip
-                    :vault="vault.vault"
-                    type="unknown"
-                    class="inline-flex !py-2 !px-6 !text-p5"
-                  />
+                  <span class="text-p5 text-content-secondary whitespace-nowrap">—</span>
                 </template>
               </template>
 

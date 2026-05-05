@@ -345,7 +345,6 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
 export const getCollateralMatrix = (market: MarketGroup): CollateralMatrixData | null => {
   const borrowable = getDiscoveryColumnVaults(market)
   const nonBorrowable = getDiscoveryRowOnlyVaults(market)
-  const external = getActiveExternalCollateral(market)
 
   const knownAddresses = new Set<string>()
   for (const v of [...market.vaults, ...market.externalCollateral]) {
@@ -426,28 +425,30 @@ export const getCollateralMatrix = (market: MarketGroup): CollateralMatrixData |
   const seenRows = new Set<string>()
 
   const addRow = (addr: string, symbol: string, assetAddress: string, category: CollateralMatrixData['rows'][0]['category']) => {
-    if (referencedCollateral.has(addr) && !seenRows.has(addr)) {
-      seenRows.add(addr)
-      rows.push({ address: addr, symbol, assetAddress, category })
-    }
+    if (seenRows.has(addr)) return
+    seenRows.add(addr)
+    rows.push({ address: addr, symbol, assetAddress, category })
   }
 
   for (const v of sortedDiagonal) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, 'borrowable')
   for (const v of sortedRowOnly) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, 'borrowable')
 
+  // Escrow + external rows always render at the bottom, even when no
+  // borrowable vault references them, so curators can see same-asset escrow
+  // and external collateral at a glance. Rows without cells appear empty —
+  // the dim styling on the label conveys that they're inventory, not active.
   const sortedNonBorrowable = [...nonBorrowable]
-    .filter(v => referencedCollateral.has(v.address.toLowerCase()))
     .sort((a, b) => rowAvgLTV(b.address.toLowerCase()) - rowAvgLTV(a.address.toLowerCase()))
   for (const v of sortedNonBorrowable) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, 'escrow')
 
   const securitizeMembers = market.vaults
-    .filter((v): v is SecuritizeVault => 'type' in v && (v as { type?: string }).type === 'securitize')
-    .filter(v => referencedCollateral.has(v.address.toLowerCase()))
+    .filter(isSecuritizeVault)
     .sort((a, b) => rowAvgLTV(b.address.toLowerCase()) - rowAvgLTV(a.address.toLowerCase()))
   for (const v of securitizeMembers) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, 'external')
 
-  const sortedExternal = [...external]
-    .filter(v => referencedCollateral.has(getVaultAddress(v).toLowerCase()))
+  const sortedExternal = market.externalCollateral
+    .filter(isMatrixCompatibleVault)
+    .slice()
     .sort((a, b) => rowAvgLTV(getVaultAddress(b).toLowerCase()) - rowAvgLTV(getVaultAddress(a).toLowerCase()))
   for (const v of sortedExternal) addRow(getVaultAddress(v).toLowerCase(), getVaultAssetSymbol(v), getVaultAssetAddress(v), 'external')
 
@@ -671,6 +672,7 @@ export interface AttributeMatrixColumn {
   symbol: string
   assetAddress: string
   vault: Vault | SecuritizeVault
+  isExternal: boolean
 }
 
 export interface AttributeMatrixData {
@@ -684,8 +686,8 @@ const isEscrow = (v: Vault | SecuritizeVault): boolean =>
 const compareSymbolAsc = (a: Vault | SecuritizeVault, b: Vault | SecuritizeVault): number =>
   a.asset.symbol.localeCompare(b.asset.symbol, undefined, { sensitivity: 'base' })
 
-// Both Configuration and Stats matrices show only the curated product — external
-// collateral belongs to other governance and adds noise either way.
+// Members come first; externals (escrowed / cross-product collateral) are
+// appended at the end with `isExternal: true` so the view can dim them.
 export const getAttributeMatrixColumns = (market: MarketGroup): AttributeMatrixColumn[] => {
   const memberEvk: Vault[] = []
   const memberSecuritize: SecuritizeVault[] = []
@@ -697,14 +699,34 @@ export const getAttributeMatrixColumns = (market: MarketGroup): AttributeMatrixC
   memberEvk.sort(compareSymbolAsc)
   memberSecuritize.sort(compareSymbolAsc)
 
-  const toCol = (vault: Vault | SecuritizeVault): AttributeMatrixColumn => ({
+  const externalEvk: Vault[] = []
+  const externalSecuritize: SecuritizeVault[] = []
+  const seenExternal = new Set<string>()
+  for (const v of market.externalCollateral) {
+    const addr = getVaultAddress(v).toLowerCase()
+    if (!addr || seenExternal.has(addr)) continue
+    seenExternal.add(addr)
+    if (isVaultType(v)) externalEvk.push(v)
+    else if (isSecuritizeVault(v)) externalSecuritize.push(v)
+  }
+
+  externalEvk.sort(compareSymbolAsc)
+  externalSecuritize.sort(compareSymbolAsc)
+
+  const toCol = (vault: Vault | SecuritizeVault, isExternal: boolean): AttributeMatrixColumn => ({
     address: getVaultAddress(vault).toLowerCase(),
     symbol: vault.asset.symbol,
     assetAddress: vault.asset.address,
     vault,
+    isExternal,
   })
 
-  return [...memberEvk.map(toCol), ...memberSecuritize.map(toCol)]
+  return [
+    ...memberEvk.map(v => toCol(v, false)),
+    ...memberSecuritize.map(v => toCol(v, false)),
+    ...externalEvk.map(v => toCol(v, true)),
+    ...externalSecuritize.map(v => toCol(v, true)),
+  ]
 }
 
 const NA_CELL: AttributeCell = { display: '—', kind: 'text' }

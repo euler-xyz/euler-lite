@@ -165,7 +165,7 @@ describe('attribute stats matrix', () => {
       borrowCapUsd: 1000,
     }
 
-    const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, vault }]
+    const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, vault, isExternal: false }]
     const usdCache = new Map([[vault.address.toLowerCase(), usd]])
     const byRow = new Map(STATS_ROWS.map(row => [
       row.id,
@@ -196,7 +196,7 @@ describe('attribute stats matrix', () => {
         borrowAPY: 0n,
       },
     } as Vault
-    const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, vault }]
+    const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, vault, isExternal: false }]
     const usdCache = new Map<string, VaultUsdCacheEntry>()
     const apyCache = new Map<string, VaultApyCacheEntry>([
       [vault.address.toLowerCase(), { supplyApy: 5.31, borrowApy: 1.25 }],
