@@ -5,6 +5,7 @@ import {
   type AttributeMatrixColumn,
   type AttributeRow,
   type VaultUsdCacheEntry,
+  type VaultApyCacheEntry,
   buildAttributeRowCells,
   getAttributeRowColor,
   isVaultType,
@@ -17,6 +18,7 @@ import { VaultHooksInfoModal } from '#components'
 const props = defineProps<{
   data: AttributeMatrixData
   usdCache: Map<string, VaultUsdCacheEntry>
+  apyCache: Map<string, VaultApyCacheEntry>
   selectedHeader: { address: string, axis: 'row' | 'column' } | null
 }>()
 
@@ -38,7 +40,7 @@ interface AttributeColumn {
 
 const attributeColumns = computed<AttributeColumn[]>(() =>
   props.data.rows.map((attribute) => {
-    const cells = buildAttributeRowCells(attribute, props.data.columns, props.usdCache)
+    const cells = buildAttributeRowCells(attribute, props.data.columns, props.usdCache, props.apyCache)
     let min = Infinity
     let max = -Infinity
     for (const c of cells) {

@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   STATS_ROWS,
   buildAttributeRowCells,
+  buildVaultApyCache,
   getActiveExternalCollateral,
   getAttributeRowColor,
   getCollateralMatrix,
   isNodeRampingDown,
+  type VaultApyCacheEntry,
   type VaultUsdCacheEntry,
 } from '~/utils/discoveryCalculations'
 import type { MarketGroup } from '~/entities/lend-discovery'
@@ -192,5 +194,61 @@ describe('attribute stats matrix', () => {
   it('colors higher-better rows green at the high end and lower-better rows red at the high end', () => {
     expect(getAttributeRowColor(100, 0, 100, 'higher-better')).toContain('hsla(145')
     expect(getAttributeRowColor(100, 0, 100, 'lower-better')).toContain('hsla(0')
+  })
+
+  it('uses the apy cache (intrinsic + rewards) for supply/borrow APY when supplied', () => {
+    const vault = {
+      ...makeVault('0xApy', []),
+      supply: 0n,
+      borrow: 0n,
+      totalAssets: 0n,
+      supplyCap: 1000n,
+      borrowCap: 1000n,
+      interestRateInfo: {
+        // Raw IRM rate the matrix would have shown before this fix.
+        supplyAPY: 0n,
+        borrowAPY: 0n,
+      },
+    } as Vault
+    const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, vault }]
+    const usdCache = new Map<string, VaultUsdCacheEntry>()
+    const apyCache = new Map<string, VaultApyCacheEntry>([
+      [vault.address.toLowerCase(), { supplyApy: 5.31, borrowApy: 1.25 }],
+    ])
+    const byRow = new Map(STATS_ROWS.map(row => [
+      row.id,
+      buildAttributeRowCells(row, columns, usdCache, apyCache)[0],
+    ]))
+
+    expect(byRow.get('supplyApy')!.numeric).toBeCloseTo(5.31)
+    expect(byRow.get('supplyApy')!.display).toBe('5.31%')
+    expect(byRow.get('borrowApy')!.numeric).toBeCloseTo(1.25)
+    expect(byRow.get('borrowApy')!.display).toBe('1.25%')
+  })
+})
+
+describe('buildVaultApyCache', () => {
+  it('folds intrinsic and reward APY into the per-vault entries', () => {
+    const vault = {
+      ...makeVault('0xPT', []),
+      interestRateInfo: {
+        supplyAPY: 4n * 10n ** 25n,
+        borrowAPY: 6n * 10n ** 25n,
+      },
+    } as Vault
+    const market = makeMarket([vault])
+
+    const cache = buildVaultApyCache(
+      [market],
+      (apy, _addr) => apy + 1, // intrinsic supply contribution: +1
+      (apy, _addr) => apy + 2, // intrinsic borrow contribution: +2
+      _addr => 0.5, // supply rewards
+      _addr => 0.25, // general borrow rewards
+    )
+
+    const entry = cache.get(vault.address.toLowerCase())
+    expect(entry).toBeDefined()
+    expect(entry!.supplyApy).toBeCloseTo(4 + 1 + 0.5)
+    expect(entry!.borrowApy).toBeCloseTo(6 + 2 - 0.25)
   })
 })

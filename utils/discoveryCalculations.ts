@@ -637,6 +637,14 @@ export interface VaultUsdCacheEntry {
   borrowCapUsd: number | undefined
 }
 
+// Pre-computed APYs that fold in intrinsic + rewards. Computed in the component
+// where composables are accessible, then passed to the matrix as a cache so the
+// Stats matrix renders the same APY users see on the per-vault cards.
+export interface VaultApyCacheEntry {
+  supplyApy: number
+  borrowApy: number
+}
+
 export type AttributeDirection = 'higher-better' | 'lower-better' | 'neutral'
 
 export interface AttributeCell {
@@ -654,7 +662,11 @@ export interface AttributeRow {
   label: string
   tooltip?: string
   direction: AttributeDirection
-  getValue: (vault: Vault | SecuritizeVault, usd: VaultUsdCacheEntry | undefined) => AttributeCell
+  getValue: (
+    vault: Vault | SecuritizeVault,
+    usd: VaultUsdCacheEntry | undefined,
+    apy: VaultApyCacheEntry | undefined,
+  ) => AttributeCell
 }
 
 export interface AttributeMatrixColumn {
@@ -928,11 +940,14 @@ export const STATS_ROWS: AttributeRow[] = [
     id: 'supplyApy',
     label: 'Supply APY',
     direction: 'higher-better',
-    getValue: (vault) => {
+    getValue: (vault, _usd, apy) => {
       // Securitize vaults' interestRateInfo is documented as zero-valued,
       // so we'd render "0.00%" — avoid that misleading display.
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
-      const pct = supplyApyPercent(vault)
+      // Prefer the pre-computed APY (folds in intrinsic + supply rewards) so
+      // this matches the per-vault card. Fall back to the raw IRM rate when
+      // the cache hasn't been populated (e.g. unit tests).
+      const pct = apy?.supplyApy ?? supplyApyPercent(vault)
       return { display: `${formatNumber(pct, 2)}%`, numeric: pct, kind: 'text' }
     },
   },
@@ -940,13 +955,44 @@ export const STATS_ROWS: AttributeRow[] = [
     id: 'borrowApy',
     label: 'Borrow APY',
     direction: 'lower-better',
-    getValue: (vault) => {
+    getValue: (vault, _usd, apy) => {
       if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
-      const pct = borrowApyPercent(vault)
+      const pct = apy?.borrowApy ?? borrowApyPercent(vault)
       return { display: `${formatNumber(pct, 2)}%`, numeric: pct, kind: 'text' }
     },
   },
 ]
+
+// Build a per-vault APY cache that mirrors the per-vault card formula:
+//   supplyApy = withIntrinsicSupplyApy(base) + supplyRewards
+//   borrowApy = withIntrinsicBorrowApy(base) - borrowRewards (general only)
+//
+// Borrow rewards here use no collateral context, so collateral-conditional
+// campaigns (`euler_borrow_collateral`) are intentionally excluded — the
+// matrix shows per-vault stats, not per-pair.
+export const buildVaultApyCache = (
+  markets: MarketGroup[],
+  withIntrinsicSupplyApy: (apy: number, address: string) => number,
+  withIntrinsicBorrowApy: (apy: number, address: string) => number,
+  getSupplyRewardApy: (vaultAddress: string) => number,
+  getBorrowRewardApy: (vaultAddress: string) => number,
+): Map<string, VaultApyCacheEntry> => {
+  const result = new Map<string, VaultApyCacheEntry>()
+  for (const market of markets) {
+    for (const vault of market.vaults) {
+      if (!isVaultType(vault)) continue
+      const addr = vault.address.toLowerCase()
+      if (result.has(addr)) continue
+      const baseSupply = Number(nanoToValue(vault.interestRateInfo.supplyAPY, 25))
+      const baseBorrow = Number(nanoToValue(vault.interestRateInfo.borrowAPY, 25))
+      result.set(addr, {
+        supplyApy: withIntrinsicSupplyApy(baseSupply, vault.asset.address) + getSupplyRewardApy(vault.address),
+        borrowApy: withIntrinsicBorrowApy(baseBorrow, vault.asset.address) - getBorrowRewardApy(vault.address),
+      })
+    }
+  }
+  return result
+}
 
 export const getAttributeMatrix = (
   market: MarketGroup,
@@ -960,8 +1006,13 @@ export const buildAttributeRowCells = (
   row: AttributeRow,
   columns: AttributeMatrixColumn[],
   usdCache: Map<string, VaultUsdCacheEntry>,
+  apyCache?: Map<string, VaultApyCacheEntry>,
 ): AttributeCell[] =>
-  columns.map(col => row.getValue(col.vault, usdCache.get(col.address)))
+  columns.map(col => row.getValue(
+    col.vault,
+    usdCache.get(col.address),
+    apyCache?.get(col.address),
+  ))
 
 export const getAttributeRowColor = (
   value: number | undefined,
