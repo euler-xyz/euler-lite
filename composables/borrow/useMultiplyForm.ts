@@ -81,14 +81,13 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     isMultiplyRestricted,
   } = options
 
-  const router = useRouter()
   const modal = useModal()
   const { error } = useToast()
   const { buildMultiplyPlan, executeTxPlan } = useEulerOperations()
-  const { address, isConnected } = useAccount()
-  const { refreshAllPositions, depositPositions } = useEulerAccount()
-  const { eulerLensAddresses } = useEulerAddresses()
+  const { isConnected } = useAccount()
+  const { depositPositions } = useEulerAccount()
   const { fetchSingleBalance } = useWallets()
+  const { finalizeTxAndRedirect } = useTxFinalization()
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
   const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
   const {
@@ -840,11 +839,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       })
       multiplyPlan.value = plan
       await executeTxPlan(plan)
-      modal.close()
-      refreshAllPositions(eulerLensAddresses.value, address.value || '')
-      setTimeout(() => {
-        router.replace('/portfolio')
-      }, 400)
+      await finalizeTxAndRedirect()
     }
     catch (e) {
       logWarn('multiply/send', e)
