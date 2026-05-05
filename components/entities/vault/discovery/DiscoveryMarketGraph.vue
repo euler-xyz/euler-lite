@@ -173,10 +173,10 @@ const isNodeCyclicalNote = (address: string): boolean => {
         <g
           v-for="node in enlarged.nodes"
           :key="node.address"
-          class="cursor-pointer"
+          :class="node.hasVaultData === false ? 'cursor-default' : 'cursor-pointer'"
           :opacity="isGraphNodeHighlighted(node.address) ? 1 : 0.25"
           style="transition: opacity 0.2s"
-          @click.stop="$emit('selectNode', node.address)"
+          @click.stop="node.hasVaultData !== false && $emit('selectNode', node.address)"
         >
           <clipPath :id="`graph-clip-${market.id}-${node.address}`">
             <circle

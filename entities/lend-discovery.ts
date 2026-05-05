@@ -82,6 +82,8 @@ export interface MiniNode {
   assetSymbol: string
   x: number
   y: number
+  /** False for address-only placeholder nodes that have no loaded vault data. */
+  hasVaultData?: boolean
   /**
    * True when the node should render the red "unknown" badge. Applies to
    * external collaterals with an unverified governor (resolved vault, badge

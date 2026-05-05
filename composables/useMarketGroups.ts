@@ -1,9 +1,8 @@
-import { fetchVaults, type Vault } from '~/entities/vault'
+import { fetchVaults, getVaultUtilization, isLiveCollateralEdge, type Vault } from '~/entities/vault'
 import { logWarn } from '~/utils/errorHandling'
 import type { EulerLabelEntity, EulerLabelProduct } from '~/entities/euler/labels'
 import type { MarketGroup, MarketGroupMetrics, CuratorGroup } from '~/entities/lend-discovery'
 import type { AnyVault } from '~/composables/useVaultRegistry'
-import { getVaultUtilization } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import { isVaultNotExplorable, isVaultFeatured, isVaultDeprecated, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 import { buildFetchContext } from '~/composables/useFetchContext'
@@ -21,10 +20,11 @@ const isBorrowableVault = (vault: AnyVault): boolean => {
 
 const getCollateralAddresses = (vault: AnyVault): string[] => {
   if (!isVaultType(vault)) return []
-  // Skip inactive collateral entries — EVK retains zero-LTV rows for retired
-  // or never-activated collaterals which aren't part of any usable market.
+  // Skip inactive collateral entries - EVK retains zero-LTV rows for retired
+  // or never-activated collaterals, but keep liquidation ramp-down edges
+  // visible until their current liquidation LTV reaches zero.
   return vault.collateralLTVs
-    .filter(ltv => ltv.liquidationLTV > 0n || ltv.borrowLTV > 0n)
+    .filter(ltv => isLiveCollateralEdge(ltv))
     .map(ltv => ltv.collateral)
 }
 

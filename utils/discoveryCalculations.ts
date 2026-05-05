@@ -311,6 +311,7 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
       assetSymbol,
       x: cx + rx * Math.cos(angle),
       y: cy + ry * Math.sin(angle),
+      hasVaultData: Boolean(vault),
       isUnknown,
     }
   })
