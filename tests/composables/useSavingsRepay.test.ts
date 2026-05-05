@@ -1,5 +1,5 @@
 import { computed, ref, watch, watchEffect } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Vault } from '~/entities/vault'
 import type { AccountBorrowPosition, AccountDepositPosition } from '~/entities/account'
 import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
@@ -147,6 +147,11 @@ describe('useSavingsRepay', () => {
       getSwapProviders: vi.fn(async () => []),
       getSwapQuotes: vi.fn(async () => []),
     }))
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
   })
 
   it('skips the cash cap for same-vault savings repay max amount', () => {

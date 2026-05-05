@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useAccount } from '@wagmi/vue'
 import { isAddress, getAddress, zeroAddress, type Address } from 'viem'
-import { getCashLimitedWithdrawAmount, isEVKVault, type Vault, type SecuritizeVault, fetchSecuritizeVault } from '~/entities/vault'
+import { getCashLimitedWithdrawAmount, type Vault, type SecuritizeVault, fetchSecuritizeVault } from '~/entities/vault'
 import { isSecuritizeVault } from '~/entities/vault/factory'
 import { getSubAccountAddress } from '~/entities/account'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
@@ -62,7 +62,7 @@ const savingPosition = computed(() => {
 const assetsBalance = computed(() => savingPosition.value?.assets || 0n)
 const balance = computed(() => getCashLimitedWithdrawAmount(
   assetsBalance.value,
-  fromVault.value && isEVKVault(fromVault.value) ? fromVault.value.totalCash : undefined,
+  fromVault.value,
 ))
 
 // ── Supply APY ───────────────────────────────────────────────────────────

@@ -67,7 +67,7 @@ const amountFixed = computed(() => {
 })
 const withdrawableAssets = computed(() => getCashLimitedWithdrawAmount(
   assetsBalance.value,
-  vault.value?.availableAssets,
+  vault.value,
 ))
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value) return false

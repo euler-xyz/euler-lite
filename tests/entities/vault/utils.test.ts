@@ -7,7 +7,7 @@ import {
   getBorrowVaultsByMap,
   isCyclicalNoteVault,
 } from '~/entities/vault/utils'
-import type { Vault, SecuritizeVault } from '~/entities/vault/types'
+import type { Vault, SecuritizeVault, EarnVault } from '~/entities/vault/types'
 
 describe('getUtilization', () => {
   it('returns 0 when totalAssets is zero', () => {
@@ -64,23 +64,39 @@ describe('getVaultUtilization', () => {
 })
 
 describe('getCashLimitedWithdrawAmount', () => {
-  it('returns the user withdrawable amount when cash is higher', () => {
-    expect(getCashLimitedWithdrawAmount(1_000n, 2_000n)).toBe(1_000n)
+  const evkVault = (totalCash: bigint) => ({ totalCash } as Vault)
+  const securitizeVault = (totalAssets: bigint) =>
+    ({ type: 'securitize', totalAssets } as unknown as SecuritizeVault)
+  const earnVault = (availableAssets: bigint) =>
+    ({ type: 'earn', availableAssets } as unknown as EarnVault)
+
+  it('returns the user withdrawable amount when EVK cash is higher', () => {
+    expect(getCashLimitedWithdrawAmount(1_000n, evkVault(2_000n))).toBe(1_000n)
   })
 
-  it('caps the amount to vault cash when cash is lower', () => {
-    expect(getCashLimitedWithdrawAmount(2_000n, 1_000n)).toBe(1_000n)
+  it('caps the amount to EVK totalCash when cash is lower', () => {
+    expect(getCashLimitedWithdrawAmount(2_000n, evkVault(1_000n))).toBe(1_000n)
   })
 
-  it('keeps existing behavior when vault cash is unavailable', () => {
-    expect(getCashLimitedWithdrawAmount(2_000n)).toBe(2_000n)
+  it('returns the user amount when the vault is undefined', () => {
+    expect(getCashLimitedWithdrawAmount(2_000n, undefined)).toBe(2_000n)
+  })
+
+  it('caps SecuritizeVault by totalAssets (no borrowing on these vaults)', () => {
+    expect(getCashLimitedWithdrawAmount(2_000n, securitizeVault(1_000n))).toBe(1_000n)
+    expect(getCashLimitedWithdrawAmount(500n, securitizeVault(1_000n))).toBe(500n)
+  })
+
+  it('caps EarnVault by availableAssets (strategies may have allocated cash out)', () => {
+    expect(getCashLimitedWithdrawAmount(2_000n, earnVault(1_000n))).toBe(1_000n)
+    expect(getCashLimitedWithdrawAmount(500n, earnVault(1_000n))).toBe(500n)
   })
 
   it('models the withdraw form cap when vault cash is lower than user balance', () => {
     const assetsBalance = 1_000n
-    const vaultCash = 300n
+    const vault = evkVault(300n)
     const amount = 301n
-    const withdrawableAssets = getCashLimitedWithdrawAmount(assetsBalance, vaultCash)
+    const withdrawableAssets = getCashLimitedWithdrawAmount(assetsBalance, vault)
 
     expect(withdrawableAssets).toBe(300n)
     expect(assetsBalance < amount).toBe(false)
@@ -89,9 +105,9 @@ describe('getCashLimitedWithdrawAmount', () => {
 
   it('models the withdraw form allowing the cash-capped max amount', () => {
     const assetsBalance = 1_000n
-    const vaultCash = 300n
+    const vault = evkVault(300n)
     const amount = 300n
-    const withdrawableAssets = getCashLimitedWithdrawAmount(assetsBalance, vaultCash)
+    const withdrawableAssets = getCashLimitedWithdrawAmount(assetsBalance, vault)
 
     expect(withdrawableAssets).toBe(amount)
     expect(withdrawableAssets < amount).toBe(false)

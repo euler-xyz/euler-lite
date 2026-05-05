@@ -118,9 +118,7 @@ const amountFixed = computed(() => {
 })
 const withdrawableAssets = computed(() => getCashLimitedWithdrawAmount(
   assetsBalance.value,
-  vault.value && !isSecuritizeVaultType.value
-    ? (vault.value as Vault).totalCash
-    : undefined,
+  vault.value,
 ))
 const effectiveWithdrawOp = computed(() => {
   const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)

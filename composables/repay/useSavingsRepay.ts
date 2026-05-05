@@ -78,9 +78,11 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     && !!borrowVault.value
     && normalizeAddressOrEmpty(sourceVault.value.address) === normalizeAddressOrEmpty(borrowVault.value.address),
   )
+  // Same-vault repay never withdraws (uses repayWithShares directly), so cash
+  // capacity is irrelevant — only sourceAssets bounds the operation.
   const sourceBalance = computed(() => getCashLimitedWithdrawAmount(
     sourceAssets.value,
-    isSameVaultRepay.value ? undefined : sourceVault.value?.totalCash,
+    isSameVaultRepay.value ? undefined : sourceVault.value,
   ))
   const debtBalance = computed(() => position.value?.borrowed || 0n)
 

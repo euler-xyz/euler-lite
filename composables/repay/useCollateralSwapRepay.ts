@@ -71,7 +71,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const sourceAssets = ref(0n)
   const sourceBalance = computed(() => getCashLimitedWithdrawAmount(
     sourceAssets.value,
-    sourceVault.value?.totalCash,
+    sourceVault.value,
   ))
   const debtBalance = computed(() => position.value?.borrowed || 0n)
 
