@@ -51,7 +51,8 @@ export const useEulerAccount = () => {
 
   const updatePositions = async () => {
     const targetAddress = portfolioAddress.value
-    if (!refreshCoordinator.begin(targetAddress)) return
+    const refreshToken = refreshCoordinator.begin(targetAddress)
+    if (!refreshToken) return
     try {
       beginRefreshCycle()
       const gen = positionGuard.current()
@@ -88,7 +89,7 @@ export const useEulerAccount = () => {
       isDepositsLoaded.value = true
     }
     finally {
-      await refreshCoordinator.finish(targetAddress, updatePositions)
+      await refreshCoordinator.finish(refreshToken, updatePositions)
     }
   }
 
@@ -167,7 +168,8 @@ export const useEulerAccount = () => {
     lensAddresses: EulerLensAddresses,
     walletAddress: string,
   ) => {
-    if (!refreshCoordinator.begin(walletAddress)) return
+    const refreshToken = refreshCoordinator.begin(walletAddress)
+    if (!refreshToken) return
     try {
       beginRefreshCycle()
       const gen = positionGuard.current()
@@ -190,7 +192,7 @@ export const useEulerAccount = () => {
       isDepositsLoaded.value = true
     }
     finally {
-      await refreshCoordinator.finish(walletAddress, () => refreshAllPositions(lensAddresses, walletAddress))
+      await refreshCoordinator.finish(refreshToken, () => refreshAllPositions(lensAddresses, walletAddress))
     }
   }
 
