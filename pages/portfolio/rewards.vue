@@ -50,9 +50,9 @@ const sortedBrevisRewards = computed(() => {
           </div>
           <div
             v-else-if="rewards.length === 0"
-            class="flex flex-1 min-h-[100px] justify-center items-center py-32"
+            class="flex flex-1 min-h-[100px] justify-center items-center"
           >
-            <div class="flex flex-col gap-8 items-center text-neutral-500 text-p2">
+            <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
               <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
                 <SvgIcon name="search" />
               </div>
@@ -91,9 +91,9 @@ const sortedBrevisRewards = computed(() => {
           </div>
           <div
             v-else-if="brevisRewards.length === 0"
-            class="flex flex-1 min-h-[100px] justify-center items-center py-32"
+            class="flex flex-1 min-h-[100px] justify-center items-center"
           >
-            <div class="flex flex-col gap-8 items-center text-neutral-500 text-p2">
+            <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
               <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
                 <SvgIcon name="search" />
               </div>
@@ -132,9 +132,9 @@ const sortedBrevisRewards = computed(() => {
           </div>
           <div
             v-else-if="!hasUnclaimedFuul"
-            class="flex flex-1 min-h-[100px] justify-center items-center py-32"
+            class="flex flex-1 min-h-[100px] justify-center items-center"
           >
-            <div class="flex flex-col gap-8 items-center text-neutral-500 text-p2">
+            <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
               <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
                 <SvgIcon name="search" />
               </div>
@@ -174,7 +174,7 @@ const sortedBrevisRewards = computed(() => {
         </div>
         <div
           v-else-if="locks.length === 0"
-          class="flex flex-col flex-1 min-h-[100px] justify-center items-center py-32 text-neutral-500 gap-8 text-p2"
+          class="flex flex-col flex-1 min-h-[100px] justify-center items-center py-32 text-neutral-500 gap-8"
         >
           <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
             <SvgIcon name="search" />
