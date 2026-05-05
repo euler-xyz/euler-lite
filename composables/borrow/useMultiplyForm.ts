@@ -539,7 +539,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     if (multiplyBalance.value < valueToNano(multiplyInputAmount.value, multiplySupplyVault.value.asset.decimals)) {
       return 'Not enough balance'
     }
-    if (multiplyDebtAmountNano.value > 0n && (multiplyShortVault.value.supply || 0n) < multiplyDebtAmountNano.value) {
+    if (multiplyDebtAmountNano.value > 0n && (multiplyShortVault.value.totalCash || 0n) < multiplyDebtAmountNano.value) {
       return 'Not enough liquidity in the vault'
     }
     return null

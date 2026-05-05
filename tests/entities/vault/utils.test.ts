@@ -76,10 +76,6 @@ describe('getCashLimitedWithdrawAmount', () => {
     expect(getCashLimitedWithdrawAmount(2_000n)).toBe(2_000n)
   })
 
-  it('treats negative cash as zero', () => {
-    expect(getCashLimitedWithdrawAmount(2_000n, -1n)).toBe(0n)
-  })
-
   it('models the withdraw form cap when vault cash is lower than user balance', () => {
     const assetsBalance = 1_000n
     const vaultCash = 300n

@@ -122,8 +122,7 @@ export const getCashLimitedWithdrawAmount = (
     return userWithdrawableAssets
   }
 
-  const availableCash = vaultCash < 0n ? 0n : vaultCash
-  return userWithdrawableAssets < availableCash ? userWithdrawableAssets : availableCash
+  return userWithdrawableAssets < vaultCash ? userWithdrawableAssets : vaultCash
 }
 
 export const getUtilization = (totalAssets: bigint, totalBorrow: bigint): number => {

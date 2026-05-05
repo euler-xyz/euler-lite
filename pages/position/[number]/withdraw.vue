@@ -2,7 +2,7 @@
 import { useAccount } from '@wagmi/vue'
 import { getAddress, type Address, zeroAddress } from 'viem'
 import { FixedPoint } from '~/utils/fixed-point'
-import { getCashLimitedWithdrawAmount, type Vault, type VaultAsset } from '~/entities/vault'
+import { getCashLimitedWithdrawAmount, isEVKVault, type Vault, type VaultAsset } from '~/entities/vault'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import {
@@ -40,13 +40,19 @@ const needsSwap = computed(() => {
   }
 })
 
+function getCashLimitedCollateralAssets() {
+  return getCashLimitedWithdrawAmount(
+    form.collateralAssets.value,
+    form.collateralVault.value && isEVKVault(form.collateralVault.value)
+      ? form.collateralVault.value.totalCash
+      : undefined,
+  )
+}
+
 const form = useCollateralForm({
   mode: 'withdraw',
   needsSwap,
-  effectiveBalance: computed(() => getCashLimitedWithdrawAmount(
-    form.collateralAssets.value,
-    form.collateralVault.value?.interestRateInfo.cash,
-  )),
+  effectiveBalance: computed(() => getCashLimitedCollateralAssets()),
   effectiveAsset: computed(() => form.asset.value),
 
   computePriceFixed: (_pos, borrowVault, collateralVault) => {
@@ -75,10 +81,7 @@ const form = useCollateralForm({
     if (userLtvFixed.gte(FixedPoint.fromValue(form.position.value.liquidationLTV, 2))) {
       throw new Error('Not enough liquidity for the vault, LTV is too large')
     }
-    if (getCashLimitedWithdrawAmount(
-      form.collateralAssets.value,
-      form.collateralVault.value?.interestRateInfo.cash,
-    ) < amountFixed.value) {
+    if (getCashLimitedCollateralAssets() < amountFixed.value) {
       throw new Error('Not enough liquidity in vault')
     }
   },
@@ -145,10 +148,7 @@ const form = useCollateralForm({
   },
 })
 useOperationGuard(computed(() => [form.collateralVault.value?.address, form.borrowVault.value?.address].filter(Boolean)))
-const withdrawableCollateralAssets = computed(() => getCashLimitedWithdrawAmount(
-  form.collateralAssets.value,
-  form.collateralVault.value?.interestRateInfo.cash,
-))
+const withdrawableCollateralAssets = computed(() => getCashLimitedCollateralAssets())
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (form.isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
