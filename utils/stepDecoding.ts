@@ -28,18 +28,18 @@ export interface DisplayStep {
 
 /** Structurally matches useVaultRegistry().getVault */
 export type VaultLookup = (address: string) => {
-  asset: { symbol: string, address: string, decimals: bigint }
+  asset: { symbol: string, address: string, decimals: number | bigint }
 } | undefined
 
 /** All prop-derived context needed by the decoding functions */
 export interface StepDecodingContext {
   type?: string
-  asset: { symbol: string, address: string, decimals?: bigint }
+  asset: { symbol: string, address: string, decimals?: number | bigint }
   assetIconUrl?: string
   amount: number | string
   supplyingAssetForBorrow?: { symbol: string, address: string }
   supplyingAmount?: number | string
-  swapToAsset?: { symbol: string, address: string, decimals: bigint }
+  swapToAsset?: { symbol: string, address: string, decimals: number | bigint }
   swapToAmount?: number | string
   /**
    * Mode of the swap behind this operation, when one is involved. Drives the

@@ -290,26 +290,24 @@ The vault type determines how the vault is fetched and displayed:
 | `'earn'` | EulerEarn aggregator vault (yield optimization) |
 | `'securitize'` | Securitize vault (ERC-4626 without borrowing) |
 
-Type is detected via `/api/vault-categories`, which categorizes every vault on the chain using the subgraph's factory field plus an on-chain check against `EscrowedCollateralPerspective`.
+Type is detected in `entities/vault/factory.ts` through the Euler SDK: `vaultMetaService.fetchVaultType(s)` classifies EVault, EulerEarn, and Securitize vaults, while `eVaultService.fetchVerifiedVaultAddresses(...ESCROW)` provides escrow membership.
 
-### Vault Categorization Endpoint
+### SDK Vault Categorization
 
-Type detection (`entities/vault/factory.ts`) goes through `GET /api/vault-categories?chainId=X`, which returns the full chain's vault set grouped by category:
+The client keeps an in-session categorization cache with this shape:
 
 ```ts
 {
   evk: string[]        // EVK-family vaults; INCLUDES every escrow address
   earn: string[]       // EulerEarn aggregator vaults
   securitize: string[] // Securitize vaults
-  escrow: string[]     // subset of evk that is in EscrowedCollateralPerspective
+  escrow: string[]     // subset of evk from the SDK escrow verified array
 }
 ```
 
-The server pages through the subgraph's `vaults` query (up to 10k addresses per chain) and merges in the escrow perspective via a single RPC call to `verifiedArray()`. Categorization is cached for 5 min; warm-cache keeps it fresh ahead of the TTL so fresh-deployed vaults are picked up within one cycle.
+For per-address lookups during direct navigation to a not-yet-cached vault, `fetchVaultCategory(address)` checks the SDK escrow verified array first, then asks `vaultMetaService.fetchVaultType` for the vault type.
 
-For per-address lookups during direct navigation to a not-yet-indexed vault, the endpoint also accepts `&address=0x…` and returns `{ category: 'evk' | 'earn' | 'securitize' | 'escrow' | null }`. The per-address fallback runs a single-address subgraph query; it does NOT include the escrow perspective check (that requires the full refresh), so callers that need escrow precision should rely on the full categorization or a local `isInEscrowPerspective` probe as a safety net.
-
-**Important: labels remain authoritative for which vaults are _shown_.** The categorization endpoint says "what category each vault is"; `products.json` / `earn-vaults.json` still say "which vaults to include in lists". The two are composed in `useVaults.loadVaults`: labels select the set, categorization picks the right lens per address.
+**Important: labels remain authoritative for which vaults are _shown_.** SDK categorization says "what category each vault is"; `products.json` / `earn-vaults.json` still say "which vaults to include in lists". The two are composed in `useVaults.loadVaults`: labels select the set, categorization picks the right lens per address.
 
 ## Discovery Page Filtering
 

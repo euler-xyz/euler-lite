@@ -2,13 +2,12 @@ import { ref, watchEffect } from 'vue'
 import { useVaultRegistry } from './useVaultRegistry'
 import { useAccountPositions } from './useAccountPositions'
 import { useAccountValues } from './useAccountValues'
-import type { Vault } from '~/entities/vault'
+import type { EVault } from '~/entities/vault'
 import {
   getAssetUsdValue,
   getAssetUsdValueOrZero,
   getCollateralUsdValueOrZero,
 } from '~/services/pricing/priceProvider'
-import { nanoToValue } from '~/utils/crypto-utils'
 
 const portfolioRoe = ref(0)
 const portfolioNetApy = ref(0)
@@ -29,18 +28,18 @@ export const useAccountPortfolioMetrics = () => {
     let totalSupplyUSD = 0
 
     for (const position of borrowPositions.value) {
-      const registryVault = registryGetVault(position.borrow.address) as Vault | undefined
+      const registryVault = registryGetVault(position.borrow.address) as EVault | undefined
       const borrowVault = registryVault || position.borrow
 
       const supplyUSD = await getCollateralUsdValueOrZero(position.supplied, borrowVault, position.collateral, 'off-chain')
       const borrowUSD = (await getAssetUsdValue(position.borrowed, borrowVault, 'off-chain')) ?? 0
 
       const supplyApy = withIntrinsicSupplyApy(
-        nanoToValue(position.collateral.interestRateInfo?.supplyAPY || 0n, 25),
+        getVaultSupplyApy(position.collateral),
         position.collateral.asset.address,
       )
       const borrowApy = withIntrinsicBorrowApy(
-        nanoToValue(position.borrow.interestRateInfo.borrowAPY, 25),
+        getVaultBorrowApy(position.borrow),
         position.borrow.asset.address,
       )
 
@@ -63,7 +62,7 @@ export const useAccountPortfolioMetrics = () => {
       const supplyUSD = await getAssetUsdValueOrZero(position.assets, vault, 'off-chain')
 
       const supplyApy = withIntrinsicSupplyApy(
-        nanoToValue(vault.interestRateInfo?.supplyAPY || 0n, 25),
+        getVaultSupplyApy(vault),
         vault.asset.address,
       )
       const supplyRewardAPY = getSupplyRewardApy(vault.address)

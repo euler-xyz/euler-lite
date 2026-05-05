@@ -1,17 +1,12 @@
-import type { Vault, SecuritizeVault, VaultCollateralLTV } from './types'
-import { getCurrentLiquidationLTV } from './ltv'
+import type { EVault, SecuritizeCollateralVault, EVaultCollateral } from './types'
 
 /**
  * A collateral pair with live borrow-side exposure to a vault. Matches the
  * fields rendered by the "Collateral exposure" overview block.
  */
 export interface CollateralExposurePair {
-  collateral: Vault | SecuritizeVault
-  borrowLTV: bigint
-  liquidationLTV: bigint
-  initialLiquidationLTV: bigint
-  targetTimestamp: bigint
-  rampDuration: bigint
+  collateral: EVault | SecuritizeCollateralVault
+  ltv: EVaultCollateral
 }
 
 /**
@@ -19,7 +14,7 @@ export interface CollateralExposurePair {
  * collateral is unknown (not yet loaded in the vault registry).
  */
 export type CollateralVaultResolver
-  = (address: string) => Vault | SecuritizeVault | undefined
+  = (address: string) => EVault | SecuritizeCollateralVault | undefined
 
 /**
  * Internal predicate: is this collateral/LTV combination "live" — i.e. does it
@@ -45,12 +40,11 @@ export type CollateralVaultResolver
  * own, and is intentionally broader.
  */
 const isLiveExposure = (
-  ltv: VaultCollateralLTV,
-  collateral: Vault | SecuritizeVault,
-  nowSeconds?: bigint,
+  ltv: EVaultCollateral,
+  collateral: EVault | SecuritizeCollateralVault,
 ): boolean => {
-  if (getCurrentLiquidationLTV(ltv, nowSeconds) <= 0n) return false
-  return ltv.borrowLTV > 0n || collateral.totalAssets > 0n
+  if (ltv.currentLiquidationLTV <= 0) return false
+  return ltv.borrowLTV > 0 || collateral.totalAssets > 0n
 }
 
 /**
@@ -62,29 +56,24 @@ const isLiveExposure = (
  * skipped.
  */
 export const getCollateralExposurePairs = (
-  vault: Pick<Vault, 'collateralLTVs'>,
+  vault: Pick<EVault, 'collaterals'>,
   resolveCollateralVault: CollateralVaultResolver,
-  nowSeconds?: bigint,
 ): CollateralExposurePair[] => {
   const pairs: CollateralExposurePair[] = []
 
-  vault.collateralLTVs.forEach((ltv) => {
-    const collateral = resolveCollateralVault(ltv.collateral)
+  vault.collaterals.forEach((ltv) => {
+    const collateral = resolveCollateralVault(ltv.address)
     if (!collateral) return
-    if (!isLiveExposure(ltv, collateral, nowSeconds)) return
+    if (!isLiveExposure(ltv, collateral)) return
 
     pairs.push({
       collateral,
-      borrowLTV: ltv.borrowLTV,
-      liquidationLTV: ltv.liquidationLTV,
-      initialLiquidationLTV: ltv.initialLiquidationLTV,
-      targetTimestamp: ltv.targetTimestamp,
-      rampDuration: ltv.rampDuration,
+      ltv,
     })
   })
 
   return pairs.sort((a, b) =>
-    b.borrowLTV > a.borrowLTV ? 1 : b.borrowLTV < a.borrowLTV ? -1 : 0,
+    b.ltv.borrowLTV > a.ltv.borrowLTV ? 1 : b.ltv.borrowLTV < a.ltv.borrowLTV ? -1 : 0,
   )
 }
 
@@ -98,12 +87,11 @@ export const getCollateralExposurePairs = (
  * debt being wound down via a liquidation-LTV ramp.
  */
 export const hasCollateralExposure = (
-  vault: Pick<Vault, 'collateralLTVs'>,
+  vault: Pick<EVault, 'collaterals'>,
   resolveCollateralVault: CollateralVaultResolver,
-  nowSeconds?: bigint,
 ): boolean =>
-  vault.collateralLTVs.some((ltv) => {
-    const collateral = resolveCollateralVault(ltv.collateral)
+  vault.collaterals.some((ltv) => {
+    const collateral = resolveCollateralVault(ltv.address)
     if (!collateral) return false
-    return isLiveExposure(ltv, collateral, nowSeconds)
+    return isLiveExposure(ltv, collateral)
   })

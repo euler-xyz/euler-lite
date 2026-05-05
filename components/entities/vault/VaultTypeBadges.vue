@@ -1,31 +1,32 @@
 <script setup lang="ts">
 import { zeroAddress } from 'viem'
-import type { AnyVault } from '~/composables/useVaultRegistry'
-import type { Vault, EarnVault, SecuritizeVault } from '~/entities/vault'
-import { isCyclicalNoteVault } from '~/entities/vault'
+import type { EVault, EulerEarn, SecuritizeCollateralVault } from '~/entities/vault'
+import { isCyclicalNoteVault, isEVault } from '~/entities/vault'
 import { isVaultKeyring, getEntitiesByVault, getEntitiesByEarnVault } from '~/utils/eulerLabelsUtils'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 
 const { vault } = defineProps<{
-  vault: AnyVault
+  vault: EVault | EulerEarn | SecuritizeCollateralVault
 }>()
 
 const { isVaultGovernorVerified, isEarnVaultOwnerVerified } = useVaults()
+const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
 
 const addressRef = computed(() => vault.address)
 const product = useEulerProductOfVault(addressRef)
 
-const isEarn = computed(() => 'type' in vault && vault.type === 'earn')
-const isSecuritize = computed(() => 'type' in vault && vault.type === 'securitize')
+const isEarn = computed(() => vault.type === 'EulerEarn')
+const isSecuritize = computed(() => vault.type === 'SecuritizeCollateral')
 
 const entities = computed(() => {
-  if (isEarn.value) return getEntitiesByEarnVault(vault as EarnVault)
-  return getEntitiesByVault(vault as Vault | SecuritizeVault)
+  if (isEarn.value) return getEntitiesByEarnVault(vault as EulerEarn)
+  return getEntitiesByVault(vault as EVault | SecuritizeCollateralVault)
 })
 
 const isVerified = computed(() => {
-  if (isEarn.value) return isEarnVaultOwnerVerified(vault as EarnVault)
-  return isVaultGovernorVerified(vault as Vault)
+  if (isEarn.value) return isEarnVaultOwnerVerified(vault as EulerEarn)
+  if (isSecuritize.value) return isVerifiedVault(vault.address)
+  return isVaultGovernorVerified(vault as EVault)
 })
 
 const isGovernanceLimited = computed(() =>
@@ -37,10 +38,12 @@ const governanceType = computed(() => {
     return entities.value.length ? 'managed' : 'unknown'
   }
 
-  const v = vault as Vault | SecuritizeVault
-  if ('vaultCategory' in v && v.vaultCategory === 'escrow') return 'escrow'
-  if (!v.governorAdmin) return 'unknown'
-  if (v.governorAdmin === zeroAddress) return 'ungoverned'
+  if (isEVault(vault) && getVaultCategory(vault.address) === 'escrow') return 'escrow'
+  const governor = isSecuritize.value
+    ? (vault as SecuritizeCollateralVault).governor
+    : (vault as EVault).governorAdmin
+  if (!governor) return 'unknown'
+  if (governor === zeroAddress) return 'ungoverned'
   if (entities.value.length) {
     return 'governed'
   }
@@ -55,8 +58,8 @@ const extraType = computed(() => {
 const isKeyring = computed(() => isVaultKeyring(vault.address))
 
 const isCyclicalNote = computed(() => {
-  if (isEarn.value || isSecuritize.value) return false
-  return isCyclicalNoteVault(vault as Vault)
+  if (!isEVault(vault)) return false
+  return isCyclicalNoteVault(vault)
 })
 </script>
 

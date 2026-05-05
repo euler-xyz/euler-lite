@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { formatUnits } from 'viem'
-import type { Vault, SecuritizeVault, VaultAsset, CollateralOption, EarnVault } from '~/entities/vault'
+import type { EVault, SecuritizeCollateralVault, VaultAsset, CollateralOption, EulerEarn } from '~/entities/vault'
 import { getAssetUsdPrice } from '~/services/pricing/priceProvider'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { compactNumber, formatSmartAmount, trimTrailingZeros, formatExactAmount } from '~/utils/string-utils'
@@ -11,7 +11,7 @@ const props = defineProps<{
   label?: string
   desc?: string
   maxable?: boolean
-  vault?: Vault | EarnVault | SecuritizeVault
+  vault?: EVault | EulerEarn | SecuritizeCollateralVault
   asset: VaultAsset
   balance?: bigint
   balanceLoading?: boolean

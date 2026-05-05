@@ -2,7 +2,7 @@
 import { getAddress } from 'viem'
 import { DateTime } from 'luxon'
 import { logWarn } from '~/utils/errorHandling'
-import type { EarnVault, EarnVaultStrategyInfo, Vault } from '~/entities/vault'
+import type { EulerEarn, EulerEarnStrategyInfo, EVault } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { formatNumber, compactNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
@@ -18,7 +18,7 @@ const emits = defineEmits<{
 const onExposureClick = (address: string) => {
   emits('vault-click', address)
 }
-const { vault } = defineProps<{ vault: EarnVault }>()
+const { vault } = defineProps<{ vault: EulerEarn }>()
 
 const { getOrFetch } = useVaultRegistry()
 const { isEscrowLoadedOnce } = useVaults()
@@ -26,18 +26,18 @@ const { withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntr
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 const modal = useModal()
 
-const exposureVaults: Ref<Vault[]> = ref([])
+const exposureVaults: Ref<EVault[]> = ref([])
 const isLoading = ref(false)
 const exposureUsdPrices = ref<Map<string, number>>(new Map())
 const exposureCapUsdPrices = ref<Map<string, number>>(new Map())
 
 const UINT136_MAX = 2n ** 136n - 1n
 
-const isPendingRemoval = (strategy: EarnVaultStrategyInfo) => strategy.removableAt > 0n
+const isPendingRemoval = (strategy: EulerEarnStrategyInfo) => strategy.removableAt > 0
 
-const isUnlimitedCap = (strategy: EarnVaultStrategyInfo) => strategy.currentAllocationCap >= UINT136_MAX
+const isUnlimitedCap = (strategy: EulerEarnStrategyInfo) => strategy.allocationCap.current >= UINT136_MAX
 
-const getPendingRemovalTooltipText = (strategy: EarnVaultStrategyInfo) => {
+const getPendingRemovalTooltipText = (strategy: EulerEarnStrategyInfo) => {
   const removableAt = DateTime.fromSeconds(Number(strategy.removableAt))
   return `This strategy is pending removal. Removable ${removableAt.toRelative({ base: DateTime.now(), style: 'short' })}.`
 }
@@ -60,9 +60,9 @@ const load = async () => {
     // Wait for escrow vaults to load first, so they're properly identified in registry
     await until(isEscrowLoadedOnce).toBe(true)
     const promises = exposureList.value.map((exposure) => {
-      return getOrFetch(exposure.info.vault) as Promise<Vault>
+      return exposure.vault ?? getOrFetch(exposure.address) as Promise<EVault>
     })
-    exposureVaults.value = (await Promise.all(promises)).filter(Boolean)
+    exposureVaults.value = (await Promise.all(promises)).filter((vlt): vlt is EVault => Boolean(vlt) && vlt.type === 'EVault')
 
     // Load USD prices for all exposures
     await loadExposureUsdPrices()
@@ -77,15 +77,15 @@ const load = async () => {
 
 const loadExposureUsdPrices = async () => {
   const pricePromises = exposureList.value.map(async (exposure) => {
-    const exposureVault = getExposureVaultByAddress(exposure.info.vault)
-    if (!exposureVault) return { key: exposure.strategy, allocationUsd: 0, capUsd: 0 }
+    const exposureVault = getExposureVaultByAddress(exposure.address)
+    if (!exposureVault) return { key: exposure.address, allocationUsd: 0, capUsd: 0 }
     const [allocationUsd, capUsd] = await Promise.all([
       getAssetUsdValueOrZero(exposure.allocatedAssets, exposureVault, 'off-chain'),
       isUnlimitedCap(exposure)
         ? Promise.resolve(0)
-        : getAssetUsdValueOrZero(exposure.currentAllocationCap, exposureVault, 'off-chain'),
+        : getAssetUsdValueOrZero(exposure.allocationCap.current, exposureVault, 'off-chain'),
     ])
-    return { key: exposure.strategy, allocationUsd, capUsd }
+    return { key: exposure.address, allocationUsd, capUsd }
   })
 
   const results = await Promise.all(pricePromises)
@@ -106,7 +106,9 @@ const getExposureVaultByAddress = (address: string) => {
 
 const exposureRows = computed(() => {
   return exposureList.value.map((exposure) => {
-    const strategyVault = getExposureVaultByAddress(exposure.info.vault)
+    const strategyVault = exposure.vault?.type === 'EVault'
+      ? exposure.vault as EVault
+      : getExposureVaultByAddress(exposure.address)
     return {
       exposure,
       vault: strategyVault,
@@ -115,21 +117,21 @@ const exposureRows = computed(() => {
   })
 })
 
-const getAllocationPercentage = (exposure: EarnVaultStrategyInfo) => {
+const getAllocationPercentage = (exposure: EulerEarnStrategyInfo) => {
   if (totalAllocatedAssets.value === 0n) return 0
   return Number(exposure.allocatedAssets) / Number(totalAllocatedAssets.value) * 100
 }
 
-const getStrategySupplyApy = (strategyVault: Vault) => {
-  const lendingAPY = nanoToValue(strategyVault.interestRateInfo.supplyAPY, 25)
+const getStrategySupplyApy = (strategyVault: EVault) => {
+  const lendingAPY = getVaultSupplyApy(strategyVault)
   const supplyApy = withIntrinsicSupplyApy(lendingAPY, strategyVault.asset.address)
   return supplyApy + getSupplyRewardApy(strategyVault.address)
 }
 
-const onStrategySupplyInfoClick = (event: MouseEvent, strategyVault: Vault) => {
+const onStrategySupplyInfoClick = (event: MouseEvent, strategyVault: EVault) => {
   event.preventDefault()
   event.stopPropagation()
-  const lendingAPY = nanoToValue(strategyVault.interestRateInfo.supplyAPY, 25)
+  const lendingAPY = getVaultSupplyApy(strategyVault)
   modal.open(VaultSupplyApyModal, {
     props: {
       lendingAPY,
@@ -141,15 +143,16 @@ const onStrategySupplyInfoClick = (event: MouseEvent, strategyVault: Vault) => {
 }
 
 const hasExposureUsdPrice = (exposure: typeof exposureList.value[0]) => {
-  return exposureUsdPrices.value.has(exposure.strategy)
+  return exposureUsdPrices.value.has(exposure.address)
 }
 
 const getExposureUsdPrice = (exposure: typeof exposureList.value[0]) => {
-  return exposureUsdPrices.value.get(exposure.strategy) || 0
+  return exposureUsdPrices.value.get(exposure.address) || 0
 }
 
 const getExposureAssetAmount = (exposure: typeof exposureList.value[0]) => {
-  return `${roundAndCompactTokens(exposure.allocatedAssets, exposure.info.assetDecimals)} ${exposure.info.assetSymbol}`
+  const strategyVault = exposure.vault as EVault | undefined ?? getExposureVaultByAddress(exposure.address)
+  return `${roundAndCompactTokens(exposure.allocatedAssets, strategyVault?.asset.decimals ?? 18)} ${strategyVault?.asset.symbol ?? ''}`
 }
 
 load()
@@ -179,9 +182,9 @@ load()
     >
       <div
         v-for="row in exposureRows"
-        :key="row.exposure.strategy"
+        :key="row.exposure.address"
         class="bg-surface rounded-xl text-content-primary block no-underline cursor-pointer shadow-card hover:shadow-card-hover transition-shadow border border-line-default"
-        @click="onExposureClick(row.exposure.info.vault)"
+        @click="onExposureClick(row.exposure.address)"
       >
         <div
           class="px-16 pt-16 pb-12 border-b border-line-subtle flex items-center justify-between"
@@ -190,10 +193,10 @@ load()
             <VaultLabelsAndAssets
               :vault="row.vault"
               :assets="[{
-                address: row.exposure.info.asset,
-                decimals: row.exposure.info.assetDecimals,
-                name: row.exposure.info.assetName,
-                symbol: row.exposure.info.assetSymbol,
+                address: row.vault.asset.address,
+                decimals: row.vault.asset.decimals,
+                name: row.vault.asset.name,
+                symbol: row.vault.asset.symbol,
               }]"
             >
               <span
@@ -207,15 +210,15 @@ load()
           <template v-else>
             <div class="flex items-center gap-12">
               <AssetAvatar
-                :asset="{ address: row.exposure.info.asset, symbol: row.exposure.info.assetSymbol }"
+                :asset="{ address: row.exposure.vault?.asset.address ?? row.exposure.address, symbol: row.exposure.vault?.asset.symbol ?? '' }"
                 size="40"
               />
               <div>
                 <div class="text-content-tertiary text-p3">
-                  {{ row.exposure.info.vaultName }}
+                  {{ row.exposure.vault ? (row.exposure.vault as EVault).shares.name : row.exposure.address }}
                 </div>
                 <div class="text-h5 text-content-primary">
-                  {{ row.exposure.info.assetSymbol }}
+                  {{ row.exposure.vault?.asset.symbol ?? '' }}
                 </div>
               </div>
             </div>
@@ -253,7 +256,7 @@ load()
               <span class="text-content-secondary">({{ compactNumber(getAllocationPercentage(row.exposure), 2) }}%)</span>
             </template>
             <template v-else>
-              <UiExactAmount :exact="formatExactAmount(row.exposure.allocatedAssets, row.exposure.info.assetDecimals, row.exposure.info.assetSymbol)">
+              <UiExactAmount :exact="formatExactAmount(row.exposure.allocatedAssets, row.vault?.asset.decimals ?? 18, row.vault?.asset.symbol)">
                 {{ getExposureAssetAmount(row.exposure) }}
               </UiExactAmount>
               <span class="text-content-secondary">({{ compactNumber(getAllocationPercentage(row.exposure), 2) }}%)</span>
@@ -289,12 +292,12 @@ load()
               <template v-if="isUnlimitedCap(row.exposure)">
                 ∞
               </template>
-              <template v-else-if="exposureCapUsdPrices.has(row.exposure.strategy)">
-                {{ formatCompactUsdValue(exposureCapUsdPrices.get(row.exposure.strategy) || 0) }}
+              <template v-else-if="exposureCapUsdPrices.has(row.exposure.address)">
+                {{ formatCompactUsdValue(exposureCapUsdPrices.get(row.exposure.address) || 0) }}
               </template>
               <template v-else>
-                <UiExactAmount :exact="formatExactAmount(row.exposure.currentAllocationCap, row.exposure.info.assetDecimals, row.exposure.info.assetSymbol)">
-                  {{ roundAndCompactTokens(row.exposure.currentAllocationCap, row.exposure.info.assetDecimals) }} {{ row.exposure.info.assetSymbol }}
+                <UiExactAmount :exact="formatExactAmount(row.exposure.allocationCap.current, row.vault?.asset.decimals ?? 18, row.vault?.asset.symbol)">
+                  {{ roundAndCompactTokens(row.exposure.allocationCap.current, row.vault?.asset.decimals ?? 18) }} {{ row.vault?.asset.symbol }}
                 </UiExactAmount>
               </template>
             </span>

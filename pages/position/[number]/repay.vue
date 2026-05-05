@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useAccount } from '@wagmi/vue'
-import { type Vault, type VaultAsset, getNetAPY } from '~/entities/vault'
+import { type EVault, type VaultAsset, getNetAPY } from '~/entities/vault'
 import { getAssetUsdValueOrZero, getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import { type AccountBorrowPosition, isPositionEligibleForLiquidation } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
@@ -69,7 +69,7 @@ const walletPriceInvert = usePriceInvert(
 
 const oraclePriceRatio = computed(() => {
   if (!borrowVault.value || !collateralVault.value) return null
-  const collateralPrice = getCollateralOraclePrice(borrowVault.value, collateralVault.value as Vault)
+  const collateralPrice = getCollateralOraclePrice(borrowVault.value, collateralVault.value as EVault)
   const borrowPrice = getAssetOraclePrice(borrowVault.value)
   return conservativePriceRatioNumber(collateralPrice, borrowPrice)
 })
@@ -88,11 +88,11 @@ const liqPriceFromHealth = (health: number | null | undefined): number | null =>
 const collateralSupplyRewardApy = computed(() => getSupplyRewardApy(collateralVault.value?.address || ''))
 const borrowRewardApy = computed(() => getBorrowRewardApy(borrowVault.value?.address || '', collateralVault.value?.address || ''))
 const collateralSupplyApy = computed(() => withIntrinsicSupplyApy(
-  nanoToValue(collateralVault.value?.interestRateInfo.supplyAPY || 0n, 25),
+  getVaultSupplyApy(collateralVault.value),
   collateralVault.value?.asset.address,
 ))
 const borrowApy = computed(() => withIntrinsicBorrowApy(
-  nanoToValue(borrowVault.value?.interestRateInfo.borrowAPY || 0n, 25),
+  getVaultBorrowApy(borrowVault.value),
   borrowVault.value?.asset.address,
 ))
 
@@ -336,7 +336,7 @@ const load = async () => {
     position.value = getPositionBySubAccountIndex(+positionIndex)
     await fetchWalletBalance()
     wallet.initEstimates()
-    collateral.initVault(position.value?.collateral as Vault | undefined)
+    collateral.initVault(position.value?.collateral as EVault | undefined)
     savings.initVault()
   }
   catch (e) {

@@ -1,7 +1,7 @@
 import { getAddress } from 'viem'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import type { Vault } from '~/entities/vault'
+import type { EVault } from '~/entities/vault'
 import { buildCollateralOption, computeBorrowApy } from '~/utils/collateralOptions'
 import { useReactiveMap } from '~/composables/useReactiveMap'
 
@@ -9,8 +9,8 @@ export const useSwapDebtOptions = ({
   collateralVault,
   currentBorrowVault,
 }: {
-  collateralVault: Ref<Vault | undefined>
-  currentBorrowVault?: Ref<Vault | undefined>
+  collateralVault: Ref<EVault | undefined>
+  currentBorrowVault?: Ref<EVault | undefined>
 }) => {
   const { getVerifiedEvkVaults } = useVaultRegistry()
   const { withIntrinsicBorrowApy, version: intrinsicVersion } = useIntrinsicApy()
@@ -28,11 +28,11 @@ export const useSwapDebtOptions = ({
       : null
 
     return getVerifiedEvkVaults().filter((vault) => {
-      if (!vault.collateralLTVs?.length) {
+      if (!vault.collaterals?.length) {
         return false
       }
-      const hasCollateral = vault.collateralLTVs.some(ltv =>
-        getAddress(ltv.collateral) === collateralAddress && ltv.borrowLTV > 0n,
+      const hasCollateral = vault.collaterals.some(ltv =>
+        getAddress(ltv.address) === collateralAddress && ltv.borrowLTV > 0,
       )
       if (!hasCollateral) {
         return false
@@ -40,7 +40,7 @@ export const useSwapDebtOptions = ({
       if (currentBorrowAddress && getAddress(vault.address) === currentBorrowAddress) {
         return false
       }
-      return vault.supply > 0n && vault.borrowCap > 0n && vault.totalCash > 0n
+      return vault.totalAssets > 0n && vault.caps.borrowCap > 0n && vault.availableLiquidity > 0n
     })
   })
 

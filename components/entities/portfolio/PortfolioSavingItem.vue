@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useAccount } from '@wagmi/vue'
-import type { Vault } from '~/entities/vault'
+import type { EVault } from '~/entities/vault'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { getAssetUsdValue, formatAssetValue } from '~/services/pricing/priceProvider'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
@@ -28,7 +28,7 @@ const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRe
 const vault = computed(() => position.vault)
 const utilisationWarning = computed(() => {
   if ('type' in vault.value && vault.value.type === 'securitize') return null
-  return getUtilisationWarning(vault.value as Vault, 'lend')
+  return getUtilisationWarning(vault.value as EVault, 'lend')
 })
 
 // Check if securitize vault by type field
@@ -37,21 +37,22 @@ const isSecuritize = computed(() => 'type' in vault.value && vault.value.type ==
 const rewardsExist = computed(() => hasSupplyRewards(vault.value.address))
 const supplyApy = computed(() => {
   return withIntrinsicSupplyApy(
-    nanoToValue(vault.value.interestRateInfo.supplyAPY, 25),
+    getVaultSupplyApy(vault.value),
     vault.value.asset.address,
   )
 })
 const supplyApyWithRewards = computed(() => supplyApy.value + getSupplyRewardApy(vault.value.address))
 
 const product = useEulerProductOfVault(computed(() => vault.value.address))
+const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.value.address))
 const isDeprecated = computed(() => isVaultDeprecated(vault.value.address))
-const isEscrow = computed(() => 'vaultCategory' in vault.value && vault.value.vaultCategory === 'escrow')
-const isUnverified = computed(() => 'verified' in vault.value && !vault.value.verified)
+const isEscrow = computed(() => getVaultCategory(vault.value.address) === 'escrow')
+const isUnverified = computed(() => !isVerifiedVault(vault.value.address))
 const vaultNotice = computed(() => getVaultNotice(vault.value.address))
 const displayName = computed(() => {
   if (isEscrow.value) return 'Escrowed collateral'
-  return product.name || vault.value.name
+  return product.name || vault.value.shares.name
 })
 
 const supplyValueDisplay = ref('-')
@@ -86,7 +87,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
   event.stopPropagation()
   modal.open(VaultSupplyApyModal, {
     props: {
-      lendingAPY: nanoToValue(vault.value.interestRateInfo.supplyAPY, 25),
+      lendingAPY: getVaultSupplyApy(vault.value),
       intrinsicAPY: getIntrinsicApy(vault.value.asset.address),
       intrinsicApyInfo: getIntrinsicApyInfo(vault.value.asset.address),
       campaigns: getSupplyRewardCampaigns(vault.value.address),
@@ -297,9 +298,9 @@ const onClick = () => {
             <UiExactAmount
               v-if="hasPrice"
               class="text-content-tertiary text-p3"
-              :exact="formatExactAmount(position.assets, vault.decimals, vault.asset.symbol)"
+              :exact="formatExactAmount(position.assets, vault.asset.decimals, vault.asset.symbol)"
             >
-              ~ {{ roundAndCompactTokens(position.assets, vault.decimals) }}
+              ~ {{ roundAndCompactTokens(position.assets, vault.asset.decimals) }}
               {{ vault.asset.symbol }}
             </UiExactAmount>
           </div>

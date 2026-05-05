@@ -10,8 +10,10 @@ const SAFETY_MARGIN_BPS = 50n
  * @param borrowLTV - LTV in basis points (e.g. 9000n = 90%)
  * @returns max multiplier floored to 2 decimal places, minimum 1
  */
-export const getMaxMultiplier = (borrowLTV: bigint): number => {
-  const ltv = borrowLTV || 0n
+export const getMaxMultiplier = (borrowLTV: bigint | number): number => {
+  const ltv = typeof borrowLTV === 'number'
+    ? BigInt(Math.round(borrowLTV * 10_000))
+    : borrowLTV || 0n
   if (ltv <= 0n || ltv >= BPS_BASE) {
     return 1
   }

@@ -10,8 +10,8 @@ import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import {
   getNetAPY,
   getRoe,
-  type Vault,
-  type SecuritizeVault,
+  type EVault,
+  type SecuritizeCollateralVault,
 } from '~/entities/vault'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import {
@@ -30,6 +30,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { VaultNetApyModal, PortfolioRoeModal } from '#components'
 
 const { position } = defineProps<{ position: AccountBorrowPosition }>()
+const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
 
 const { address } = useAccount()
 const { portfolioAddress } = useEulerAccount()
@@ -47,7 +48,7 @@ const { name: collateralProductName } = useEulerProductOfVault(position.collater
 const { name: borrowProductName } = useEulerProductOfVault(position.borrow.address)
 
 type PositionCollateral = {
-  vault: Vault | SecuritizeVault
+  vault: EVault | SecuritizeCollateralVault
   assets: bigint
 }
 
@@ -110,18 +111,18 @@ const isAnyDeprecated = computed(() =>
 )
 
 const isAnyUnverified = computed(() => {
-  const collateralUnverified = 'verified' in position.collateral && !position.collateral.verified
-  const borrowUnverified = 'verified' in position.borrow && !position.borrow.verified
+  const collateralUnverified = !isVerifiedVault(position.collateral.address)
+  const borrowUnverified = !isVerifiedVault(position.borrow.address)
   return collateralUnverified || borrowUnverified
 })
 
 const collateralLabel = computed(() => {
-  if ('vaultCategory' in position.collateral && position.collateral.vaultCategory === 'escrow') {
+  if (getVaultCategory(position.collateral.address) === 'escrow') {
     return 'Escrowed collateral'
   }
-  return collateralProductName || position.collateral.name
+  return collateralProductName || position.collateral.shares.name
 })
-const borrowLabel = computed(() => borrowProductName || position.borrow.name)
+const borrowLabel = computed(() => borrowProductName || position.borrow.shares.name)
 
 const pairName = computed(() => {
   if (collateralLabel.value === borrowLabel.value) {
@@ -144,12 +145,12 @@ const hasRewards = computed(() =>
 )
 const collateralSupplyApy = computed(() => {
   return withIntrinsicSupplyApy(
-    nanoToValue(collateralVault.value.interestRateInfo.supplyAPY || 0n, 25),
+    getVaultSupplyApy(collateralVault.value),
     collateralVault.value?.asset.address,
   )
 })
 const borrowApy = computed(() => withIntrinsicBorrowApy(
-  nanoToValue(borrowVault.value?.interestRateInfo.borrowAPY || 0n, 25),
+  getVaultBorrowApy(borrowVault.value),
   borrowVault.value?.asset.address,
 ))
 
@@ -181,7 +182,7 @@ watchEffect(() => {
 const collateralValueDisplay = computed(() => {
   return collateralValue.value.hasPrice
     ? formatCompactUsdValue(collateralValue.value.usd)
-    : `${roundAndCompactTokens(collateralItems.value[0]?.assets ?? position.supplied, BigInt(position.collateral.decimals))} ${position.collateral.asset.symbol}`
+    : `${roundAndCompactTokens(collateralItems.value[0]?.assets ?? position.supplied, BigInt(position.collateral.shares.decimals))} ${position.collateral.asset.symbol}`
 })
 
 const borrowedValueInfo = ref<{ display: string, hasPrice: boolean }>({ display: '-', hasPrice: false })
@@ -250,8 +251,8 @@ const roe = computed(() => {
 
 const intrinsicSupplyApy = computed(() => getIntrinsicApy(collateralVault.value.asset.address))
 const intrinsicBorrowApy = computed(() => getIntrinsicApy(borrowVault.value.asset.address))
-const baseSupplyApy = computed(() => nanoToValue(collateralVault.value.interestRateInfo.supplyAPY || 0n, 25))
-const baseBorrowApy = computed(() => nanoToValue(borrowVault.value.interestRateInfo.borrowAPY || 0n, 25))
+const baseSupplyApy = computed(() => getVaultSupplyApy(collateralVault.value))
+const baseBorrowApy = computed(() => getVaultBorrowApy(borrowVault.value))
 const supplyCampaignsForModal = computed(() => getSupplyRewardCampaigns(collateralVault.value.address))
 const borrowCampaignsForModal = computed(() => getBorrowRewardCampaigns(borrowVault.value.address, collateralVault.value.address))
 const loopingCampaignsForModal = computed(() => getLoopingRewardCampaigns(borrowVault.value.address, collateralVault.value.address))
@@ -343,7 +344,7 @@ const loadCollaterals = async () => {
     const items = await Promise.all(
       orderedAddresses.map(async (address) => {
         try {
-          const vault = await getOrFetch(address) as Vault | SecuritizeVault | undefined
+          const vault = await getOrFetch(address) as EVault | SecuritizeCollateralVault | undefined
           let assets = 0n
 
           try {
@@ -532,9 +533,9 @@ onMounted(() => {
             <UiExactAmount
               v-if="borrowedValueInfo.hasPrice"
               class="text-content-tertiary text-p3"
-              :exact="formatExactAmount(position.borrowed, position.borrow.decimals, position.borrow.asset.symbol)"
+              :exact="formatExactAmount(position.borrowed, position.borrow.shares.decimals, position.borrow.asset.symbol)"
             >
-              ~ {{ roundAndCompactTokens(position.borrowed, position.borrow.decimals) }}
+              ~ {{ roundAndCompactTokens(position.borrowed, position.borrow.shares.decimals) }}
               {{ position.borrow.asset.symbol }}
             </UiExactAmount>
           </div>
@@ -550,7 +551,7 @@ onMounted(() => {
               </template>
               <UiExactAmount
                 v-else
-                :exact="formatExactAmount(collateralItems[0]?.assets ?? position.supplied, position.collateral.decimals, position.collateral.asset.symbol)"
+                :exact="formatExactAmount(collateralItems[0]?.assets ?? position.supplied, position.collateral.shares.decimals, position.collateral.asset.symbol)"
               >
                 {{ collateralValueDisplay }}
               </UiExactAmount>
@@ -558,9 +559,9 @@ onMounted(() => {
             <UiExactAmount
               v-if="collateralValue.hasPrice"
               class="text-content-tertiary text-p3"
-              :exact="formatExactAmount(collateralItems[0]?.assets ?? position.supplied, position.collateral.decimals, position.collateral.asset.symbol)"
+              :exact="formatExactAmount(collateralItems[0]?.assets ?? position.supplied, position.collateral.shares.decimals, position.collateral.asset.symbol)"
             >
-              ~ {{ roundAndCompactTokens(collateralItems[0]?.assets ?? position.supplied, position.collateral.decimals) }}
+              ~ {{ roundAndCompactTokens(collateralItems[0]?.assets ?? position.supplied, position.collateral.shares.decimals) }}
               {{ position.collateral.asset.symbol }} {{ collateralItems.length > 1 ? '& others' : '' }}
             </UiExactAmount>
           </div>
@@ -591,13 +592,13 @@ onMounted(() => {
               <UiProgress
                 style="width: 111px"
                 :model-value="nanoToValue(position.userLTV, 18)"
-                :max="nanoToValue(position.liquidationLTV, 2)"
-                :color="nanoToValue(position.userLTV, 18) >= (nanoToValue(position.liquidationLTV, 2) - 2) ? 'danger' : undefined"
+                :max="ltvToPercent(position.liquidationLTV)"
+                :color="nanoToValue(position.userLTV, 18) >= (ltvToPercent(position.liquidationLTV) - 2) ? 'danger' : undefined"
                 size="small"
               />
               <div class="flex justify-between gap-8 text-right">
                 <div class="text-content-primary text-p3">
-                  {{ formatNumber(nanoToValue(position.userLTV, 18), 2) }}/{{ nanoToValue(position.liquidationLTV, 2) }}%
+                  {{ formatNumber(nanoToValue(position.userLTV, 18), 2) }}/{{ ltvToPercent(position.liquidationLTV) }}%
                 </div>
               </div>
             </div>

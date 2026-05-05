@@ -3,13 +3,14 @@ import { useAccount } from '@wagmi/vue'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal, VaultSupplyApyModal, VaultUnverifiedDisclaimerModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
-import type { EarnVault, VaultAsset } from '~/entities/vault'
+import type { EulerEarn, VaultAsset } from '~/entities/vault'
+import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import type { TxPlan } from '~/entities/txPlan'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
-import { formatNumber } from '~/utils/string-utils'
+import { formatNumber, compactNumber } from '~/utils/string-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
@@ -19,14 +20,6 @@ const modal = useModal()
 const { error } = useToast()
 const { buildSupplyPlan, executeTxPlan } = useEulerOperations()
 const { getEarnVault, updateEarnVault } = useVaults()
-const { chainId } = useEulerAddresses()
-const shareLinkQuery = computed(() => {
-  const network = route.query.network
-
-  return {
-    network: Array.isArray(network) ? network[0] ?? chainId.value : network ?? chainId.value,
-  }
-})
 const { isReady: isLabelsReady } = useEulerLabels()
 const { isConnected, address } = useAccount()
 const { fetchSingleBalance } = useWallets()
@@ -43,9 +36,11 @@ const isPreparing = ref(false)
 const isEstimatesLoading = ref(false)
 const amount = ref('')
 const plan = ref<TxPlan | null>(null)
-const vault: Ref<EarnVault | undefined> = ref(undefined)
+const vault: Ref<EulerEarn | undefined> = ref(undefined)
 const asset: Ref<VaultAsset | undefined> = ref(undefined)
 const estimateSupplyAPY = ref(0)
+const monthlyEarnings = ref(0)
+const monthlyEarningsUsd = ref(0)
 const balance = ref(0n)
 
 const fetchBalance = async () => {
@@ -71,7 +66,7 @@ const fetchBalance = async () => {
     // Fetch fresh underlying asset balance for this specific vault
     await fetchBalance()
 
-    if (!vault.value?.verified) {
+    if (!useVaultRegistry().isVerifiedVault(vault.value.address)) {
       modal.open(VaultUnverifiedDisclaimerModal, {
         isNotClosable: true,
         props: {
@@ -111,7 +106,7 @@ const hasRewards = computed(() => hasSupplyRewards(vaultAddress))
 const intrinsicApy = computed(() => getIntrinsicApy(vault.value?.asset.address))
 const supplyAPYDisplay = computed(() => {
   if (!vault.value) return '0.00'
-  return formatNumber(nanoToValue(vault.value!.interestRateInfo.supplyAPY, 25) + totalRewardsAPY.value)
+  return formatNumber(getVaultSupplyApy(vault.value) + totalRewardsAPY.value)
 })
 const estimateSupplyAPYDisplay = computed(() => {
   return formatNumber(estimateSupplyAPY.value)
@@ -191,7 +186,10 @@ const updateEstimates = async () => {
   try {
     await updateEarnVault(vault.value.address)
     if (!asset.value?.address) return
-    estimateSupplyAPY.value = nanoToValue(vault.value.interestRateInfo.supplyAPY, 25) + totalRewardsAPY.value
+    estimateSupplyAPY.value = getVaultSupplyApy(vault.value) + totalRewardsAPY.value
+    monthlyEarnings.value = !amount.value
+      ? 0
+      : +(amount.value || 0) * (estimateSupplyAPY.value / 12 / 100)
   }
   catch (e) {
     logWarn('earn-supply/estimates', e)
@@ -203,7 +201,7 @@ const updateEstimates = async () => {
 const onSupplyInfoIconClick = () => {
   modal.open(VaultSupplyApyModal, {
     props: {
-      lendingAPY: nanoToValue(vault.value!.interestRateInfo.supplyAPY, 25),
+      lendingAPY: getVaultSupplyApy(vault.value),
       intrinsicAPY: intrinsicApy.value,
       intrinsicApyInfo: getIntrinsicApyInfo(vault.value?.asset.address),
       campaigns: getSupplyRewardCampaigns(vaultAddress),
@@ -213,7 +211,16 @@ const onSupplyInfoIconClick = () => {
 }
 
 // Initialize estimateSupplyAPY after vault is loaded
-estimateSupplyAPY.value = nanoToValue(vault.value?.interestRateInfo.supplyAPY ?? 0n, 25) + totalRewardsAPY.value
+estimateSupplyAPY.value = getVaultSupplyApy(vault.value) + totalRewardsAPY.value
+
+// Update USD value when monthlyEarnings or vault changes
+watchEffect(async () => {
+  if (!vault.value || !monthlyEarnings.value) {
+    monthlyEarningsUsd.value = 0
+    return
+  }
+  monthlyEarningsUsd.value = await getAssetUsdValueOrZero(monthlyEarnings.value, vault.value, 'off-chain')
+})
 
 watch(amount, () => {
   clearSimulationError()
@@ -238,32 +245,21 @@ watch(address, () => {
         class="hidden tablet:inline-flex tablet:absolute tablet:top-8 tablet:right-full tablet:mr-12"
         fallback="/earn"
       />
-      <div
+      <VaultLabelsAndAssets
         v-if="asset"
+        back
+        back-fallback="/earn"
         class="mb-24"
-      >
-        <VaultLabelsAndAssets
-          back
-          back-fallback="/earn"
-          :vault="vault"
-          :assets="assets"
-          size="large"
-        >
-          <UiShareLinkButton
-            class="-ml-4 !w-24 !h-24"
-            :path="`/earn/${vault.address}`"
-            :query="shareLinkQuery"
-            label="Copy vault link"
-            variant="ghost"
-          />
-        </VaultLabelsAndAssets>
-      </div>
+        :vault="vault"
+        :assets="assets"
+        size="large"
+      />
 
       <div class="flex gap-32">
         <div class="hidden laptop:!block laptop:flex-[55] min-w-0">
           <VaultOverviewEarn
             v-if="vault"
-            :vault="vault as EarnVault"
+            :vault="vault as EulerEarn"
             desktop-overview
             @vault-click="(address: string) => router.push({ path: `/lend/${address}`, query: { network: route.query.network } })"
           />
@@ -343,6 +339,18 @@ watch(address, () => {
               :loading="isEstimatesLoading"
               variant="card"
             >
+              <SummaryRow
+                label="Projected earnings per month"
+                align-top
+              >
+                <p class="text-content-tertiary">
+                  <span class="text-content-primary text-p2">{{ compactNumber(monthlyEarnings, 4) }}</span> {{
+                    asset.symbol
+                  }}
+                  ≈ ${{ compactNumber(monthlyEarningsUsd) }}
+                </p>
+              </SummaryRow>
+
               <SummaryRow label="Supply APY">
                 <SummaryValue
                   :after="estimateSupplyAPYDisplay"

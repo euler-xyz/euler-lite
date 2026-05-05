@@ -8,7 +8,7 @@ import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useBestMaxROE } from '~/composables/useBestMaxROE'
 import { useVaultSearch } from '~/composables/useVaultSearch'
 import type { MarketGroup } from '~/entities/lend-discovery'
-import type { Vault } from '~/entities/vault'
+import type { EVault } from '~/entities/vault'
 import { isVaultType, getVaultAddress, getVaultAssetSymbol, getVaultAssetAddress } from '~/utils/discoveryCalculations'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import type { FilterOptionEntry } from '~/utils/buildTvlSortedOptions'
@@ -35,7 +35,7 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<MarketGroup>(
     return [
       product.name,
       product.description,
-      ...getEntitiesByVault(vault as Vault).map(e => e.name),
+      ...getEntitiesByVault(vault as EVault).map(e => e.name),
     ]
   }),
 ])

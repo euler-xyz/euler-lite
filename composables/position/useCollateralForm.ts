@@ -12,9 +12,9 @@ import { eulerAccountLensABI } from '~/entities/euler/abis'
 import {
   getNetAPY,
   getProjectedRates,
-  isEVKVault,
-  type Vault,
-  type SecuritizeVault,
+  isEVault,
+  type EVault,
+  type SecuritizeCollateralVault,
   type VaultAsset,
 } from '~/entities/vault'
 import {
@@ -51,14 +51,14 @@ export interface UseCollateralFormOptions {
 
   computePriceFixed: (
     position: NonNullable<ReturnType<ReturnType<typeof useEulerAccount>['getPositionBySubAccountIndex']>>,
-    borrowVault?: Vault,
-    collateralVault?: Vault | SecuritizeVault,
+    borrowVault?: EVault,
+    collateralVault?: EVault | SecuritizeCollateralVault,
   ) => FixedPoint
 
   computeLiquidationPrice: (
     position: NonNullable<ReturnType<ReturnType<typeof useEulerAccount>['getPositionBySubAccountIndex']>>,
-    borrowVault?: Vault | undefined,
-    collateralVault?: Vault | SecuritizeVault,
+    borrowVault?: EVault | undefined,
+    collateralVault?: EVault | SecuritizeCollateralVault,
   ) => number | undefined
 
   validateEstimate: (ctx: {
@@ -138,7 +138,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const estimateUserLTV = ref(0n)
   const estimateHealth = ref(0n)
   const estimatesError = ref('')
-  const selectedCollateral = ref<Vault | SecuritizeVault | null>(null)
+  const selectedCollateral = ref<EVault | SecuritizeCollateralVault | null>(null)
   const selectedCollateralAssets = ref(0n)
   const lastCollateralAddress = ref('')
 
@@ -180,18 +180,18 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const collateralSupplyApy = computed(() => {
     if (!collateralVault.value) return 0
     return withIntrinsicSupplyApy(
-      nanoToValue(collateralVault.value.interestRateInfo.supplyAPY || 0n, 25),
+      getVaultSupplyApy(collateralVault.value),
       collateralVault.value?.asset.address,
     )
   })
   const borrowApy = computed(() => withIntrinsicBorrowApy(
-    nanoToValue(borrowVault.value?.interestRateInfo.borrowAPY || 0n, 25),
+    getVaultBorrowApy(borrowVault.value),
     borrowVault.value?.asset.address,
   ))
 
   const getCollateralValueUsdLocal = async (amt: bigint) => {
     if (!borrowVault.value || !collateralVault.value) return 0
-    return getCollateralUsdValueOrZero(amt, borrowVault.value, collateralVault.value as Vault, 'off-chain')
+    return getCollateralUsdValueOrZero(amt, borrowVault.value, collateralVault.value as EVault, 'off-chain')
   }
 
   const netAPY = ref(0)
@@ -219,11 +219,11 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
   // --- FixedPoint computeds ---
   const amountFixed = computed(() => FixedPoint.fromValue(
-    valueToNano(amount.value || '0', collateralVault.value?.decimals),
-    Number(collateralVault.value?.decimals),
+    valueToNano(amount.value || '0', collateralVault.value?.asset.decimals),
+    Number(collateralVault.value?.asset.decimals),
   ))
-  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, position.value?.borrow.decimals || 18))
-  const suppliedFixed = computed(() => FixedPoint.fromValue(collateralAssets.value, collateralVault.value?.decimals || 18))
+  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, position.value?.borrow.shares.decimals || 18))
+  const suppliedFixed = computed(() => FixedPoint.fromValue(collateralAssets.value, collateralVault.value?.asset.decimals || 18))
   const priceFixed = computed(() => {
     if (!position.value) return FixedPoint.fromValue(0n, 18)
     return options.computePriceFixed(position.value, borrowVault.value, collateralVault.value)
@@ -268,7 +268,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
       await until(isVaultsReady).toBe(true)
 
-      const vault = await getOrFetch(targetAddress) as Vault | SecuritizeVault | undefined
+      const vault = await getOrFetch(targetAddress) as EVault | SecuritizeCollateralVault | undefined
       selectedCollateral.value = vault || null
 
       const lensAddress = eulerLensAddresses.value?.accountLens
@@ -445,13 +445,13 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
   const hookWarning = computed(() => {
     // Securitize collateral doesn't implement hooks — skip non-EVK vaults.
-    if (!collateralVault.value || !isEVKVault(collateralVault.value)) return null
+    if (!collateralVault.value || !isEVault(collateralVault.value)) return null
     return getHookDisabledWarning(collateralVault.value, collateralOp.value)
   })
 
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
-    if (collateralVault.value && isEVKVault(collateralVault.value) && isOpDisabled(collateralVault.value, collateralOp.value)) return true
+    if (collateralVault.value && isEVault(collateralVault.value) && isOpDisabled(collateralVault.value, collateralOp.value)) return true
     if (options.effectiveBalance.value < valueToNano(amount.value, options.effectiveAsset.value?.decimals)) return true
     if (isLoading.value || !(+amount.value) || !!estimatesError.value || isEstimatesLoading.value) return true
     if (options.needsSwap.value && !swapSelectedQuote.value) return true
@@ -485,8 +485,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       const amountFl = amount18.toUnsafeFloat()
 
       // Only apply delta if this collateral is accepted by the controller (BLTV > 0)
-      const affectsLtv = borrowVault.value?.collateralLTVs.some(
-        ltv => ltv.collateral.toLowerCase() === collateralVault.value!.address.toLowerCase() && ltv.borrowLTV > 0n,
+      const affectsLtv = borrowVault.value?.collaterals.some(
+        ltv => ltv.address.toLowerCase() === collateralVault.value!.address.toLowerCase() && ltv.borrowLTV > 0,
       ) ?? false
 
       const collateralValueFl = totalValue !== null && priceFl > 0
@@ -541,14 +541,16 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     }
     const gen = asyncEstimatesGuard.next()
     try {
-      const amountNano = valueToNano(amount.value, collateralVault.value.decimals)
+      if (!isEVault(collateralVault.value)) return
+      const evault = collateralVault.value
+      const amountNano = valueToNano(amount.value, evault.asset.decimals)
       const cashDelta = options.mode === 'supply' ? amountNano : -amountNano
 
       const [projected, collateralUsd, borrowedUsd] = await Promise.all([
         getProjectedRates(
-          collateralVault.value.address,
-          collateralVault.value.interestRateInfo.cash,
-          collateralVault.value.interestRateInfo.borrows,
+          evault.address,
+          evault.totalCash,
+          evault.totalBorrowed,
           cashDelta,
           0n,
         ),
@@ -563,7 +565,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       if (asyncEstimatesGuard.isStale(gen)) return
 
       const projectedSupplyApy = projected
-        ? withIntrinsicSupplyApy(nanoToValue(projected.supplyAPY, 25), collateralVault.value?.asset.address)
+        ? withIntrinsicSupplyApy(nanoToValue(projected.supplyAPY, 25), evault.asset.address)
         : collateralSupplyApy.value
 
       estimateNetAPY.value = getNetAPY(

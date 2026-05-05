@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import type { Vault } from '~/entities/vault'
+import type { EVault } from '~/entities/vault'
 
-defineProps<{ items: Vault[], type: 'lend' | 'borrow' }>()
+defineProps<{ items: EVault[], type: 'lend' | 'borrow' }>()
 </script>
 
 <template>

@@ -7,7 +7,7 @@ import { useToast } from '~/components/ui/composables/useToast'
 import {
   convertSharesToAssets,
   getCashLimitedWithdrawAmount,
-  type EarnVault,
+  type EulerEarn,
   type VaultAsset,
 } from '~/entities/vault'
 import { getSubAccountAddress } from '~/entities/account'
@@ -45,7 +45,7 @@ const isPreparing = ref(false)
 const isEstimatesLoading = ref(false)
 const amount = ref('')
 const plan = ref<TxPlan | null>(null)
-const vault: Ref<EarnVault | undefined> = ref()
+const vault: Ref<EulerEarn | undefined> = ref()
 const asset: Ref<VaultAsset | undefined> = ref()
 const assetsBalance = ref(0n)
 const sharesBalance = ref(0n)
@@ -85,7 +85,7 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 })
 const supplyAPYDisplay = computed(() => {
   if (!vault.value) return '0.00'
-  return formatNumber(nanoToValue(vault.value.interestRateInfo.supplyAPY, 25) + rewardApy.value)
+  return formatNumber(getVaultSupplyApy(vault.value) + rewardApy.value)
 })
 const estimateSupplyAPYDisplay = computed(() => {
   return formatNumber(estimateSupplyAPY.value + rewardApy.value)
@@ -95,7 +95,7 @@ const load = async () => {
   isLoading.value = true
   try {
     vault.value = await getEarnVault(vaultAddress)
-    estimateSupplyAPY.value = nanoToValue(vault.value?.interestRateInfo.supplyAPY ?? 0n, 25)
+    estimateSupplyAPY.value = getVaultSupplyApy(vault.value)
     asset.value = vault.value?.asset
 
     // Fetch fresh share balance and convert to assets
@@ -217,12 +217,12 @@ const updateEstimates = () => {
       throw new Error('Not enough liquidity in vault')
     }
     delta.value = assetsBalance.value - amountFixed.value.value
-    estimateSupplyAPY.value = nanoToValue(vault.value.interestRateInfo.supplyAPY, 25)
+    estimateSupplyAPY.value = getVaultSupplyApy(vault.value)
   }
   catch (e) {
     logWarn('earn-withdraw/estimates', e)
     delta.value = assetsBalance.value || 0n
-    estimateSupplyAPY.value = nanoToValue(vault.value.interestRateInfo.supplyAPY, 25)
+    estimateSupplyAPY.value = getVaultSupplyApy(vault.value)
     estimatesError.value = (e as { message: string }).message
   }
   isEstimatesLoading.value = false

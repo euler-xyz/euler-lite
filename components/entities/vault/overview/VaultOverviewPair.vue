@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { AnyBorrowVaultPair, SecuritizeVault, Vault } from '~/entities/vault'
+import type { AnyBorrowVaultPair, SecuritizeCollateralVault, EVault } from '~/entities/vault'
 import type { AccountBorrowPosition } from '~/entities/account'
 
-defineProps<{ pair: AnyBorrowVaultPair | AccountBorrowPosition, desktopOverview?: boolean, collateralVaults?: (Vault | SecuritizeVault)[] }>()
+defineProps<{ pair: AnyBorrowVaultPair | AccountBorrowPosition, desktopOverview?: boolean, collateralVaults?: (EVault | SecuritizeCollateralVault)[] }>()
 </script>
 
 <template>

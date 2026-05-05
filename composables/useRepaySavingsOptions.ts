@@ -3,11 +3,10 @@ import { getVaultProductName } from '~/utils/eulerLabelsUtils'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import type { AccountDepositPosition } from '~/entities/account'
-import type { Vault } from '~/entities/vault'
+import type { EVault } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useReactiveMap } from '~/composables/useReactiveMap'
-import { computeSupplyApy } from '~/utils/collateralOptions'
 
 /**
  * Provides eligible savings positions that can be used to repay debt.
@@ -33,24 +32,25 @@ export const useRepaySavingsOptions = () => {
   })
 
   const savingsVaults = computed(() => {
-    return savingsPositions.value.map(position => position.vault as Vault)
+    return savingsPositions.value.map(position => position.vault as EVault)
   })
 
   const savingsOptions = useReactiveMap(
     savingsPositions,
     [rewardsVersion, intrinsicVersion],
     async (position) => {
-      const vault = position.vault as Vault
+      const vault = position.vault
       const amount = nanoToValue(position.assets, vault.asset.decimals)
-      const apy = computeSupplyApy(vault, withIntrinsicSupplyApy, getSupplyRewardApy)
+      const baseApy = getVaultSupplyApy(vault)
+      const apy = withIntrinsicSupplyApy(baseApy, vault.asset.address) + getSupplyRewardApy(vault.address)
       return {
-        type: 'saving' as const,
+        type: 'vault' as const,
         amount,
         price: await getAssetUsdValueOrZero(amount, vault, 'off-chain'),
         apy,
         symbol: vault.asset.symbol,
         assetAddress: vault.asset.address,
-        label: getVaultProductName(vault.address) || vault.name,
+        label: getVaultProductName(vault.address) || vault.shares.name,
         vaultAddress: vault.address,
       }
     },

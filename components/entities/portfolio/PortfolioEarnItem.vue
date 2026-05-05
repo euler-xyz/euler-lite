@@ -4,11 +4,11 @@ import { getAssetUsdValue, formatAssetValue } from '~/services/pricing/priceProv
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated, getVaultNotice } from '~/utils/eulerLabelsUtils'
 import { type AccountDepositPosition, getSubAccountIndex } from '~/entities/account'
-import type { EarnVault } from '~/entities/vault'
+import type { EulerEarn } from '~/entities/vault'
 import { VaultOverviewModal, VaultSupplyApyModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
-import { formatNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
-import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
+import { formatNumber, formatCompactUsdValue, compactNumber, formatExactAmount } from '~/utils/string-utils'
+import { roundAndCompactTokens } from '~/utils/crypto-utils'
 
 const { position } = defineProps<{ position: AccountDepositPosition }>()
 const modal = useModal()
@@ -24,15 +24,16 @@ const subAccountIndex = computed(() => {
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 
-const vault = computed(() => position.vault as EarnVault)
+const vault = computed(() => position.vault as EulerEarn)
 const rewardsExist = computed(() => hasSupplyRewards(vault.value.address))
+const { isVerifiedVault } = useVaultRegistry()
 
 const product = useEulerProductOfVault(computed(() => vault.value.address))
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.value.address))
 const isDeprecated = computed(() => isVaultDeprecated(vault.value.address))
-const isUnverified = computed(() => 'verified' in vault.value && !vault.value.verified)
+const isUnverified = computed(() => !isVerifiedVault(vault.value.address))
 const vaultNotice = computed(() => getVaultNotice(vault.value.address))
-const displayName = computed(() => product.name || vault.value.name)
+const displayName = computed(() => product.name || vault.value.shares.name)
 
 const supplyValueDisplay = ref('-')
 
@@ -45,7 +46,7 @@ watchEffect(() => {
   updateSupplyValueDisplay()
 })
 
-const supplyApyWithRewards = computed(() => nanoToValue(vault.value.interestRateInfo.supplyAPY, 25) + getSupplyRewardApy(vault.value.address))
+const supplyApyWithRewards = computed(() => getVaultSupplyApy(vault.value) + getSupplyRewardApy(vault.value.address))
 
 const hasPrice = ref(false)
 
@@ -58,12 +59,28 @@ watchEffect(() => {
   updateHasPrice()
 })
 
+const projectedEarningsPerMonth = ref('—')
+
+const updateProjectedEarningsPerMonth = async () => {
+  const price = await getAssetUsdValue(position.assets, vault.value, 'off-chain')
+  if (price === undefined || price === 0) {
+    projectedEarningsPerMonth.value = '—'
+    return
+  }
+  // Monthly earnings = (value * APY%) / 12
+  projectedEarningsPerMonth.value = compactNumber((price * supplyApyWithRewards.value) / 12 / 100)
+}
+
+watchEffect(() => {
+  updateProjectedEarningsPerMonth()
+})
+
 const onSupplyInfoIconClick = (event: MouseEvent) => {
   event.preventDefault()
   event.stopPropagation()
   modal.open(VaultSupplyApyModal, {
     props: {
-      lendingAPY: nanoToValue(vault.value.interestRateInfo.supplyAPY, 25),
+      lendingAPY: getVaultSupplyApy(vault.value),
       intrinsicAPY: getIntrinsicApy(vault.value.asset.address),
       intrinsicApyInfo: getIntrinsicApyInfo(vault.value.asset.address),
       campaigns: getSupplyRewardCampaigns(vault.value.address),
@@ -174,6 +191,19 @@ const onClick = () => {
             >
               ~ {{ roundAndCompactTokens(position.assets, vault.asset.decimals) }} {{ vault.asset.symbol }}
             </UiExactAmount>
+          </div>
+        </div>
+        <div
+          v-if="hasPrice"
+          class="flex justify-between"
+        >
+          <div class="text-content-tertiary text-p3">
+            Projected earnings per month
+          </div>
+          <div class="flex justify-between gap-8 text-right">
+            <div class="text-content-primary text-p3">
+              ${{ projectedEarningsPerMonth }}
+            </div>
           </div>
         </div>
         <div

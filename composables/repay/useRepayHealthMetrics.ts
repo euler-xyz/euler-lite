@@ -46,13 +46,13 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
 
   const currentLiquidationLtv = computed(() => {
     if (!position.value) return null
-    return nanoToValue(position.value.liquidationLTV, 2)
+    return ltvToPercent(position.value.liquidationLTV)
   })
 
   const borrowAmountAfter = computed(() => {
     if (!borrowVault.value || !position.value || debtRepaid.value === null) return null
     const nextBorrow = position.value.borrowed - debtRepaid.value
-    return nanoToValue(nextBorrow > 0n ? nextBorrow : 0n, borrowVault.value.decimals)
+    return nanoToValue(nextBorrow > 0n ? nextBorrow : 0n, borrowVault.value.shares.decimals)
   })
 
   const nextLtv = computed(() => {

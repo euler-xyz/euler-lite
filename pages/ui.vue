@@ -13,7 +13,7 @@ const inputWithValueModel = ref('Example value')
 const inputErrorModel = ref('Error value')
 const asset: VaultAsset = {
   name: 'Mock TON',
-  decimals: 18n,
+  decimals: 18,
   symbol: 'mTON',
   address: '0xc981cd0aC047D1Bc55aF4B6A9cF7fA82465363D0',
 }

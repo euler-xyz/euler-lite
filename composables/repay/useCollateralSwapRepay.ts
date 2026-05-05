@@ -5,7 +5,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
-import { getCashLimitedWithdrawAmount, isEVKVault, type Vault } from '~/entities/vault'
+import { getCashLimitedWithdrawAmount, isEVault, type EVault } from '~/entities/vault'
 import { getAssetUsdValue, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
@@ -67,7 +67,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 
   // --- Source vault state ---
-  const sourceVault: Ref<Vault | undefined> = ref()
+  const sourceVault: Ref<EVault | undefined> = ref()
   const sourceAssets = ref(0n)
   const sourceBalance = computed(() => getCashLimitedWithdrawAmount(
     sourceAssets.value,
@@ -135,13 +135,13 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   // --- APYs ---
   const collateralSupplyApy = computed(() => {
     if (!sourceVault.value) return null
-    const base = nanoToValue(sourceVault.value.interestRateInfo.supplyAPY || 0n, 25)
+    const base = getVaultSupplyApy(sourceVault.value)
     return withIntrinsicSupplyApy(base, sourceVault.value.asset.address) + getSupplyRewardApy(sourceVault.value.address)
   })
 
   const borrowApy = computed(() => {
     if (!borrowVault.value) return null
-    const base = nanoToValue(borrowVault.value.interestRateInfo.borrowAPY || 0n, 25)
+    const base = getVaultBorrowApy(borrowVault.value)
     return withIntrinsicBorrowApy(base, borrowVault.value.asset.address) - getBorrowRewardApy(borrowVault.value.address, collateralVault.value?.address)
   })
 
@@ -158,17 +158,17 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const collateralAmountAfter = computed(() => {
     if (!sourceVault.value || core.spent.value === null) return null
     const nextAssets = sourceAssets.value - core.spent.value
-    return nanoToValue(nextAssets > 0n ? nextAssets : 0n, sourceVault.value.decimals)
+    return nanoToValue(nextAssets > 0n ? nextAssets : 0n, sourceVault.value.shares.decimals)
   })
 
   const nextLiquidationLtv = computed(() => {
     if (!borrowVault.value || !sourceVault.value) return null
-    const match = borrowVault.value.collateralLTVs.find(
-      ltv => normalizeAddressOrEmpty(ltv.collateral) === normalizeAddressOrEmpty(sourceVault.value?.address),
+    const match = borrowVault.value.collaterals.find(
+      ltv => normalizeAddressOrEmpty(ltv.address) === normalizeAddressOrEmpty(sourceVault.value?.address),
     )
-    if (match) return nanoToValue(match.liquidationLTV, 2)
+    if (match) return ltvToPercent(match.liquidationLTV)
     if (!position.value) return null
-    return nanoToValue(position.value.liquidationLTV, 2)
+    return ltvToPercent(position.value.liquidationLTV)
   })
 
   // --- 4th USD watcher: next collateral value ---
@@ -223,21 +223,21 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
   const collateralSwapRepayPlannedOps = computed<PlannedOp[]>(() => {
     const steps: PlannedOp[] = []
-    if (sourceVault.value) steps.push({ vault: sourceVault.value as Vault, op: OP_WITHDRAW })
+    if (sourceVault.value) steps.push({ vault: sourceVault.value as EVault, op: OP_WITHDRAW })
     if (borrowVault.value) {
       if (core.isSameAsset.value) {
         // Same-asset: withdraw → skim → repayWithShares
-        steps.push({ vault: borrowVault.value as Vault, op: OP_SKIM })
-        steps.push({ vault: borrowVault.value as Vault, op: OP_REPAY_WITH_SHARES })
+        steps.push({ vault: borrowVault.value as EVault, op: OP_SKIM })
+        steps.push({ vault: borrowVault.value as EVault, op: OP_REPAY_WITH_SHARES })
       }
       else {
         // Cross-asset: swapper internally calls repay
-        steps.push({ vault: borrowVault.value as Vault, op: OP_REPAY })
+        steps.push({ vault: borrowVault.value as EVault, op: OP_REPAY })
       }
     }
     if (isEffectivelyFullRepay.value) {
       for (const vault of repayCollateralVaults.value) {
-        if (isEVKVault(vault)) {
+        if (isEVault(vault)) {
           steps.push({ vault, op: OP_TRANSFER })
         }
       }
@@ -260,7 +260,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   })
   const isInsufficientSource = computed(() => requiredInput.value > 0n && requiredInput.value > sourceAssets.value)
   const isInsufficientVaultLiquidity = computed(() =>
-    requiredInput.value > 0n && requiredInput.value > (sourceVault.value?.totalCash || 0n),
+    requiredInput.value > 0n && requiredInput.value > (sourceVault.value?.availableLiquidity ?? 0n),
   )
   const liquidityWarning = computed<VaultWarning | null>(() => {
     if (!sourceVault.value) return null
@@ -473,7 +473,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     }
   }
 
-  const initVault = (vault: Vault | undefined) => {
+  const initVault = (vault: EVault | undefined) => {
     sourceVault.value = vault
   }
 

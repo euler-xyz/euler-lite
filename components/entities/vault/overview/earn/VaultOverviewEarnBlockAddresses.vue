@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import type { EarnVault } from '~/entities/vault'
+import type { EulerEarn } from '~/entities/vault'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { getSpecialAddressLabel } from '~/utils/special-addresses'
 
-const { vault } = defineProps<{ vault: EarnVault }>()
+const { vault } = defineProps<{ vault: EulerEarn }>()
 const { chainId } = useEulerAddresses()
 
 const vaultAddresesInfo = computed(() => ([
@@ -17,7 +17,7 @@ const vaultAddresesInfo = computed(() => ([
   },
   {
     title: `Fee receiver`,
-    address: vault.feeReceiver,
+    address: vault.governance.feeReceiver,
   },
 ]))
 

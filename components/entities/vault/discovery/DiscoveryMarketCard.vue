@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { MarketGroup } from '~/entities/lend-discovery'
 import { formatCompactUsdValue, formatNumber, stringToColor } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import {
   getMarketEntities,
@@ -52,15 +51,15 @@ const getBestMaxRoe = (market: MarketGroup): BestMaxRoeResult => {
   let bestCollateralAddress = ''
 
   for (const liability of borrowable) {
-    const borrowBase = nanoToValue(liability.interestRateInfo.borrowAPY, 25)
+    const borrowBase = getVaultBorrowApy(liability)
     const borrowApy = withIntrinsicBorrowApy(borrowBase, liability.asset.address)
 
-    for (const ltv of liability.collateralLTVs) {
-      if (ltv.borrowLTV === 0n) continue
-      const collateral = findVault(market, ltv.collateral)
+    for (const ltv of liability.collaterals) {
+      if (ltv.borrowLTV === 0) continue
+      const collateral = findVault(market, ltv.address)
       if (!collateral) continue
 
-      const supplyBase = nanoToValue(collateral.interestRateInfo.supplyAPY, 25)
+      const supplyBase = getVaultSupplyApy(collateral)
       const supplyApy = withIntrinsicSupplyApy(supplyBase, collateral.asset.address)
       const supplyRewards = getSupplyRewardApy(collateral.address)
       const borrowRewards = getBorrowRewardApy(liability.address, collateral.address)
@@ -78,7 +77,7 @@ const getBestMaxRoe = (market: MarketGroup): BestMaxRoeResult => {
         bestMultiplier = multiplier
         bestSupplyAPY = supplyFinal
         bestBorrowAPY = borrowFinal
-        bestBorrowLTV = nanoToValue(ltv.borrowLTV, 2)
+        bestBorrowLTV = ltvToPercent(ltv.borrowLTV)
         bestBorrowVaultAddress = liability.address
         bestCollateralAddress = collateral.address
       }

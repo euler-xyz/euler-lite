@@ -1,39 +1,29 @@
 <script setup lang="ts">
-import { decodeAbiParameters, formatUnits, zeroAddress, type Hex } from 'viem'
-import { FIXED_CYCLICAL_BINARY_IRM_COMPONENTS, SECONDS_IN_YEAR } from '~/entities/constants'
-import type { Vault, SecuritizeVault, CyclicalNoteInfo } from '~/entities/vault'
+import { formatUnits, zeroAddress } from 'viem'
+import { SECONDS_IN_YEAR } from '~/entities/constants'
+import type { EVault, SecuritizeCollateralVault, FixedCyclicalBinaryIRMInfo } from '~/entities/vault'
 import { hasCollateralExposure } from '~/entities/vault'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 
-const { vault } = defineProps<{ vault: Vault }>()
+const { vault } = defineProps<{ vault: EVault }>()
 
 const { get: registryGet } = useVaultRegistry()
 
 // Parent already gates rendering to cyclical IRM vaults via v-if,
 // so this component only checks collateral exposure and IRM address.
 const hasValidIRM = computed(() => {
+  const interestRateModelAddress = vault.interestRateModel.address
   const hasExposure = hasCollateralExposure(
     vault,
-    addr => registryGet(addr)?.vault as Vault | SecuritizeVault | undefined,
+    addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
   )
   return hasExposure
-    && vault.interestRateModelAddress
-    && vault.interestRateModelAddress !== zeroAddress
+    && interestRateModelAddress
+    && interestRateModelAddress !== zeroAddress
 })
 
-const cyclicalInfo = computed((): CyclicalNoteInfo | null => {
-  const params = vault.irmInfo?.interestRateModelInfo?.interestRateModelParams
-  if (!params) return null
-  try {
-    const [decoded] = decodeAbiParameters(
-      [{ type: 'tuple', components: FIXED_CYCLICAL_BINARY_IRM_COMPONENTS }],
-      params as Hex,
-    )
-    return decoded as CyclicalNoteInfo
-  }
-  catch {
-    return null
-  }
+const cyclicalInfo = computed((): FixedCyclicalBinaryIRMInfo | null => {
+  return vault.interestRateModel.data as FixedCyclicalBinaryIRMInfo | null
 })
 
 const now = useNow({ interval: 60_000 })

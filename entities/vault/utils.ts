@@ -1,5 +1,5 @@
-import { maxUint256, type Address } from 'viem'
-import type { Vault, SecuritizeVault, EarnVault, BorrowVaultPair } from './types'
+import type { Address } from 'viem'
+import type { EVault, EulerEarn, SecuritizeCollateralVault, BorrowVaultPair } from './types'
 import {
   vaultConvertToAssetsAbi,
   vaultConvertToSharesAbi,
@@ -9,37 +9,33 @@ import {
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
 
 export const isCyclicalNoteVault = (
-  vault: Vault | SecuritizeVault | null | undefined,
+  vault: EVault | SecuritizeCollateralVault | null | undefined,
 ): boolean => {
-  if (!vault || !('irmInfo' in vault)) return false
-  const type = vault.irmInfo?.interestRateModelInfo?.interestRateModelType
+  if (!vault) return false
+  const type = (vault as { interestRateModel?: { type?: unknown } }).interestRateModel?.type
   return typeof type === 'number' && type === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY
 }
 
-export const getBorrowVaultsByMap = (vaultsMap: Map<string, Vault>) => {
+export const getBorrowVaultsByMap = (vaultsMap: Map<string, EVault>) => {
   const arr: BorrowVaultPair[] = []
   const list = [...vaultsMap.values()]
   list.forEach((vault) => {
-    vault.collateralLTVs.forEach((c) => {
-      if (c.borrowLTV <= 0n) {
+    vault.collaterals.forEach((c) => {
+      if (c.borrowLTV <= 0) {
         return
       }
-      const cVault = vaultsMap.get(c.collateral)
+      const cVault = vaultsMap.get(c.address)
       arr.push({
         borrow: vault,
         collateral: cVault!,
-        borrowLTV: c.borrowLTV,
-        liquidationLTV: c.liquidationLTV,
-        initialLiquidationLTV: c.initialLiquidationLTV,
-        targetTimestamp: c.targetTimestamp,
-        rampDuration: c.rampDuration,
+        ltv: c,
       })
     })
   })
   return arr.filter(o => !!o && o?.collateral)
 }
 export const getBorrowVaultPairByMapAndAddresses = (
-  vaultsMap: Map<string, Vault>,
+  vaultsMap: Map<string, EVault>,
   collateralAddress: string,
   borrowAddress: string,
 ): BorrowVaultPair => {
@@ -48,19 +44,15 @@ export const getBorrowVaultPairByMapAndAddresses = (
   if (!borrowVault) {
     throw '[getBorrowVaultPairByMapAndAddresses]: Borrow vault not found'
   }
-  borrowVault.collateralLTVs.forEach((c) => {
-    if (c.collateral !== collateralAddress) {
+  borrowVault.collaterals.forEach((c) => {
+    if (c.address !== collateralAddress) {
       return
     }
-    const cVault = vaultsMap.get(c.collateral)!
+    const cVault = vaultsMap.get(c.address)!
     obj = {
       borrow: borrowVault,
       collateral: cVault,
-      borrowLTV: c.borrowLTV,
-      liquidationLTV: c.liquidationLTV,
-      initialLiquidationLTV: c.initialLiquidationLTV,
-      targetTimestamp: c.targetTimestamp,
-      rampDuration: c.rampDuration,
+      ltv: c,
     } as BorrowVaultPair
   })
 
@@ -115,57 +107,20 @@ export const getMaxWithdraw = (vaultAddress: string, account: string): Promise<b
 }
 
 // What the vault can actually pay out right now in its underlying asset:
-// - EVK Vault: only cash on hand (the rest is lent out to borrowers).
-// - SecuritizeVault: the whole supply (no borrowing).
-// - EarnVault: liquidity reachable across allocated strategies.
-const getVaultWithdrawCapacity = (vault: Vault | SecuritizeVault | EarnVault): bigint => {
-  if ('type' in vault && vault.type === 'securitize') return vault.totalAssets
-  if ('type' in vault && vault.type === 'earn') return vault.availableAssets
-  return vault.totalCash
+// - EVault: only available liquidity; the rest is lent out.
+// - SecuritizeCollateralVault: the whole supply; these are collateral-only.
+// - EulerEarn: assets reachable across allocated strategies.
+const getVaultWithdrawCapacity = (vault: EVault | SecuritizeCollateralVault | EulerEarn): bigint => {
+  if ('availableAssets' in vault) return vault.availableAssets
+  if (vault.type === 'SecuritizeCollateral') return vault.totalAssets
+  return vault.availableLiquidity
 }
 
 export const getCashLimitedWithdrawAmount = (
   userWithdrawableAssets: bigint,
-  vault: Vault | SecuritizeVault | EarnVault | undefined,
+  vault: EVault | SecuritizeCollateralVault | EulerEarn | undefined,
 ): bigint => {
   if (!vault) return userWithdrawableAssets
   const capacity = getVaultWithdrawCapacity(vault)
   return userWithdrawableAssets < capacity ? userWithdrawableAssets : capacity
-}
-
-export const getUtilization = (totalAssets: bigint, totalBorrow: bigint): number => {
-  if (!totalAssets || totalAssets <= 0n || !totalBorrow || totalBorrow <= 0n) {
-    return 0
-  }
-
-  const assetsNum = Number(totalAssets)
-  const borrowNum = Number(totalBorrow)
-
-  const utilization = (borrowNum / assetsNum) * 100
-
-  return Number(utilization.toFixed(2))
-}
-
-export const getVaultUtilization = (vault: Vault | SecuritizeVault): number => {
-  return getUtilization(vault.totalAssets, vault.borrow)
-}
-
-const bigintPercentage = (numerator: bigint, denominator: bigint): number => {
-  const scale = 10n ** 2n
-  const fraction = (numerator * scale * 100n) / denominator
-  const whole = fraction / scale
-  const remainder = fraction % scale
-  return parseFloat(`${whole}.${remainder.toString().padStart(2, '0')}`)
-}
-
-export const getSupplyCapPercentage = (vault: Vault): number => {
-  if (vault.supplyCap >= maxUint256) return 0
-  if (vault.supplyCap === 0n) return vault.supply > 0n ? 100 : 0
-  return bigintPercentage(vault.supply, vault.supplyCap)
-}
-
-export const getBorrowCapPercentage = (vault: Vault): number => {
-  if (vault.borrowCap >= maxUint256) return 0
-  if (vault.borrowCap === 0n) return vault.borrow > 0n ? 100 : 0
-  return bigintPercentage(vault.borrow, vault.borrowCap)
 }

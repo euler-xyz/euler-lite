@@ -143,7 +143,7 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
                    "—". Escrow vaults pass `isVaultGovernorVerified` and have
                    no labeled entities, so they fall through to "—". -->
               <template v-else-if="col.cells[vaultIdx].kind === 'governor'">
-                <template v-if="!isVaultGovernorVerified(vault.vault)">
+                <template v-if="isVaultType(vault.vault) && !isVaultGovernorVerified(vault.vault)">
                   <VaultTypeChip
                     :vault="vault.vault"
                     type="unknown"

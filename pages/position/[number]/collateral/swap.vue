@@ -4,8 +4,8 @@ import { getAddress, zeroAddress, type Address, type Abi } from 'viem'
 import type { AccountBorrowPosition } from '~/entities/account'
 import { eulerAccountLensABI } from '~/entities/euler/abis'
 import type {
-  Vault,
-  SecuritizeVault,
+  EVault,
+  SecuritizeCollateralVault,
   VaultAsset,
 } from '~/entities/vault'
 import {
@@ -44,23 +44,23 @@ const positionIndex = usePositionIndex()
 // ── Vaults & position ────────────────────────────────────────────────────
 const position: Ref<AccountBorrowPosition | null> = ref(null)
 const pairAssetsLabel = usePositionPairLabel(position)
-const selectedCollateral = ref<Vault | SecuritizeVault | null>(null)
+const selectedCollateral = ref<EVault | SecuritizeCollateralVault | null>(null)
 const selectedCollateralAssets = ref(0n)
 const lastCollateralAddress = ref('')
 
 const fromVault = computed(() => selectedCollateral.value || position.value?.collateral)
 const borrowVault = computed(() => position.value?.borrow)
-const toVault: Ref<Vault | undefined> = ref()
+const toVault: Ref<EVault | undefined> = ref()
 useOperationGuard(computed(() => [fromVault.value?.address, toVault.value?.address, borrowVault.value?.address].filter(Boolean)))
 
 const isFromSecuritize = computed(() => fromVault.value && 'type' in fromVault.value && fromVault.value.type === 'securitize')
 const fromVaultAsRegular = computed(() => {
   if (!fromVault.value || isFromSecuritize.value) return undefined
-  return fromVault.value as Vault
+  return fromVault.value as EVault
 })
 const { collateralOptions, collateralVaults } = useSwapCollateralOptions({
   currentVault: fromVaultAsRegular,
-  liabilityVault: computed(() => borrowVault.value as Vault | undefined),
+  liabilityVault: computed(() => borrowVault.value as EVault | undefined),
 })
 const normalizeVaultAddress = (address?: string) => {
   if (!address) return ''
@@ -231,7 +231,7 @@ const loadSelectedCollateral = async () => {
 
     await until(isVaultsReady).toBe(true)
 
-    const vault = await getOrFetch(targetAddress) as Vault | SecuritizeVault | undefined
+    const vault = await getOrFetch(targetAddress) as EVault | SecuritizeCollateralVault | undefined
     selectedCollateral.value = vault || null
 
     const lensAddress = eulerLensAddresses.value?.accountLens
@@ -322,24 +322,24 @@ const onToVaultChange = (selectedIndex: number) => {
 // ── Supply & borrow APY ──────────────────────────────────────────────────
 const fromSupplyApy = computed(() => {
   if (!fromVault.value) return null
-  const base = nanoToValue(fromVault.value.interestRateInfo.supplyAPY || 0n, 25)
+  const base = getVaultSupplyApy(fromVault.value)
   return withIntrinsicSupplyApy(base, fromVault.value.asset.address) + getSupplyRewardApy(fromVault.value.address)
 })
 const toSupplyApy = computed(() => {
   if (!toVault.value) return null
-  const base = nanoToValue(toVault.value.interestRateInfo.supplyAPY || 0n, 25)
+  const base = getVaultSupplyApy(toVault.value)
   return withIntrinsicSupplyApy(base, toVault.value.asset.address) + getSupplyRewardApy(toVault.value.address)
 })
 const borrowApy = computed(() => {
   if (!borrowVault.value) return null
-  const base = nanoToValue(borrowVault.value.interestRateInfo.borrowAPY || 0n, 25)
+  const base = getVaultBorrowApy(borrowVault.value)
   return withIntrinsicBorrowApy(base, borrowVault.value.asset.address) - getBorrowRewardApy(borrowVault.value.address, fromVault.value?.address)
 })
 
 // ── Collateral USD valuation (from liability vault's perspective) ─────────
 const getCollateralValueUsdLocal = async (amount: bigint) => {
   if (!borrowVault.value || !fromVault.value) return 0
-  return getCollateralUsdValueOrZero(amount, borrowVault.value, fromVault.value as Vault, 'off-chain')
+  return getCollateralUsdValueOrZero(amount, borrowVault.value, fromVault.value as EVault, 'off-chain')
 }
 // ── ROE ──────────────────────────────────────────────────────────────────
 const supplyValueUsd = ref<number | null>(null)
@@ -395,32 +395,32 @@ const priceRatio = computed(() => {
 const nextCollateralAmount = computed(() => {
   if (isSameAsset.value && toVault.value && fromAmount.value) {
     try {
-      return nanoToValue(valueToNano(fromAmount.value, toVault.value.asset.decimals), toVault.value.decimals)
+      return nanoToValue(valueToNano(fromAmount.value, toVault.value.asset.decimals), toVault.value.shares.decimals)
     }
     catch { return null }
   }
   if (!quote.value || !toVault.value) return null
-  return nanoToValue(BigInt(quote.value.amountOut), toVault.value.decimals)
+  return nanoToValue(BigInt(quote.value.amountOut), toVault.value.shares.decimals)
 })
 const borrowAmount = computed(() => {
   if (!borrowVault.value || !position.value) return null
-  return nanoToValue(position.value.borrowed, borrowVault.value.decimals)
+  return nanoToValue(position.value.borrowed, borrowVault.value.shares.decimals)
 })
 
 const currentLtv = computed(() => position.value ? nanoToValue(position.value.userLTV, 18) : null)
 const fromLiquidationLtv = computed(() => {
   if (!borrowVault.value || !fromVault.value) return null
-  const match = borrowVault.value.collateralLTVs.find(
-    ltv => normalizeAddress(ltv.collateral) === normalizeAddress(fromVault.value?.address),
+  const match = borrowVault.value.collaterals.find(
+    ltv => normalizeAddress(ltv.address) === normalizeAddress(fromVault.value?.address),
   )
-  return match ? nanoToValue(match.liquidationLTV, 2) : null
+  return match ? ltvToPercent(match.liquidationLTV) : null
 })
 const nextLiquidationLtv = computed(() => {
   if (!borrowVault.value || !toVault.value) return null
-  const match = borrowVault.value.collateralLTVs.find(
-    ltv => normalizeAddress(ltv.collateral) === normalizeAddress(toVault.value?.address),
+  const match = borrowVault.value.collaterals.find(
+    ltv => normalizeAddress(ltv.address) === normalizeAddress(toVault.value?.address),
   )
-  return match ? nanoToValue(match.liquidationLTV, 2) : null
+  return match ? ltvToPercent(match.liquidationLTV) : null
 })
 // Remaining FROM collateral value after partial swap
 const remainingFromValue = computed(() => {
@@ -429,7 +429,7 @@ const remainingFromValue = computed(() => {
     const swapped = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
     const remaining = selectedCollateralAssets.value - swapped
     if (remaining <= 0n) return 0
-    return nanoToValue(remaining, fromVault.value.decimals) * currentPriceRatio.value
+    return nanoToValue(remaining, fromVault.value.shares.decimals) * currentPriceRatio.value
   }
   catch { return 0 }
 })
@@ -459,7 +459,7 @@ const nextHealth = computed(() => {
 })
 const currentPriceRatio = computed(() => {
   if (!fromVault.value || !borrowVault.value) return null
-  const collateralPrice = getCollateralOraclePrice(borrowVault.value, fromVault.value as Vault)
+  const collateralPrice = getCollateralOraclePrice(borrowVault.value, fromVault.value as EVault)
   const borrowPrice = getAssetOraclePrice(borrowVault.value)
   return conservativePriceRatioNumber(collateralPrice, borrowPrice)
 })

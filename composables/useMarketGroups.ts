@@ -1,24 +1,25 @@
-import { fetchVaults, getVaultUtilization, isLiveCollateralEdge, type SecuritizeVault, type Vault } from '~/entities/vault'
+import type { Address } from 'viem'
+import { getAddress } from 'viem'
+import { isEVault, isLiveCollateralEdge, type EVault } from '~/entities/vault'
 import { logWarn } from '~/utils/errorHandling'
 import type { EulerLabelEntity, EulerLabelProduct } from '~/entities/euler/labels'
 import type { MarketGroup, MarketGroupMetrics, CuratorGroup } from '~/entities/lend-discovery'
 import type { AnyVault } from '~/composables/useVaultRegistry'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import { isVaultNotExplorable, isVaultRecentlyAdded, isVaultDeprecated, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
-import { buildFetchContext } from '~/composables/useFetchContext'
+import { isVaultNotExplorable, isVaultFeatured, isVaultDeprecated, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 
 // -- Helpers --
 
-const isVaultType = (vault: AnyVault): vault is Vault =>
-  !('type' in vault) || (vault as { type?: string }).type === undefined
+const isVaultType = (vault: AnyVault): vault is EVault => isEVault(vault)
 
-const hasGovernorAdmin = (vault: AnyVault): vault is Vault | SecuritizeVault =>
-  'governorAdmin' in vault
+const hasGovernorAdmin = (vault: AnyVault): vault is EVault =>
+  isEVault(vault) && 'governorAdmin' in vault
 
 const isBorrowableVault = (vault: AnyVault): boolean => {
   if (!isVaultType(vault)) return false
-  if (vault.vaultCategory === 'escrow') return false
-  return vault.collateralLTVs.some(ltv => ltv.borrowLTV > 0n)
+  const { getVaultCategory } = useVaultRegistry()
+  if (getVaultCategory(vault.address) === 'escrow') return false
+  return vault.collaterals.some(ltv => ltv.borrowLTV > 0)
 }
 
 const getCollateralAddresses = (vault: AnyVault): string[] => {
@@ -26,9 +27,9 @@ const getCollateralAddresses = (vault: AnyVault): string[] => {
   // Skip inactive collateral entries - EVK retains zero-LTV rows for retired
   // or never-activated collaterals, but keep liquidation ramp-down edges
   // visible until their current liquidation LTV reaches zero.
-  return vault.collateralLTVs
+  return vault.collaterals
     .filter(ltv => isLiveCollateralEdge(ltv))
-    .map(ltv => ltv.collateral)
+    .map(ltv => ltv.address)
 }
 
 const getVaultAddress = (vault: AnyVault): string =>
@@ -42,16 +43,16 @@ const getAssetSymbol = (vault: AnyVault): string => {
   return 'Unknown'
 }
 
-const getSupplyAPY = (vault: AnyVault): bigint => {
-  if ('interestRateInfo' in vault && vault.interestRateInfo) {
-    return vault.interestRateInfo.supplyAPY
+const getSupplyAPY = (vault: AnyVault): number => {
+  if (isVaultType(vault)) {
+    return getVaultSupplyApy(vault)
   }
-  return 0n
+  return 0
 }
 
-const getBorrowAPY = (vault: AnyVault): bigint => {
-  if (!isVaultType(vault)) return 0n
-  return vault.interestRateInfo.borrowAPY
+const getBorrowAPY = (vault: AnyVault): number => {
+  if (!isVaultType(vault)) return 0
+  return getVaultBorrowApy(vault)
 }
 
 // -- Step 1: Product-Label Groups --
@@ -109,7 +110,7 @@ const buildProductGroups = (
 const augmentWithCollateralGraph = (
   groups: MarketGroup[],
   allVaults: AnyVault[],
-  isVaultGovernorVerified: (vault: Vault | SecuritizeVault) => boolean,
+  isVaultGovernorVerified: (vault: EVault) => boolean,
   dataReady: boolean,
 ): MarketGroup[] => {
   const vaultMap = new Map<string, AnyVault>()
@@ -266,12 +267,12 @@ const clusterOrphans = (
 // -- Metrics Computation --
 
 const computeMetricsSync = (vaults: AnyVault[]): MarketGroupMetrics => {
-  let bestSupplyAPY = 0n
-  let bestBorrowAPY = 0n
+  let bestSupplyAPY = 0
+  let bestBorrowAPY = 0
   let borrowableCount = 0
   let totalUtilization = 0
   const assetSymbols = new Set<string>()
-  let hasRecentlyAdded = false
+  let hasFeatured = false
 
   for (const vault of vaults) {
     const supplyAPY = getSupplyAPY(vault)
@@ -281,16 +282,16 @@ const computeMetricsSync = (vaults: AnyVault[]): MarketGroupMetrics => {
     assetSymbols.add(symbol)
 
     const addr = getVaultAddress(vault)
-    if (addr && isVaultRecentlyAdded(addr)) hasRecentlyAdded = true
+    if (addr && isVaultFeatured(addr)) hasFeatured = true
 
     if (isBorrowableVault(vault)) {
       borrowableCount++
       const borrowAPY = getBorrowAPY(vault)
-      if (bestBorrowAPY === 0n || (borrowAPY > 0n && borrowAPY < bestBorrowAPY)) {
+      if (bestBorrowAPY === 0 || (borrowAPY > 0 && borrowAPY < bestBorrowAPY)) {
         bestBorrowAPY = borrowAPY
       }
       if (isVaultType(vault)) {
-        totalUtilization += getVaultUtilization(vault)
+        totalUtilization += vault.utilization
       }
     }
   }
@@ -307,7 +308,7 @@ const computeMetricsSync = (vaults: AnyVault[]): MarketGroupMetrics => {
     borrowableVaultCount: borrowableCount,
     averageUtilization: borrowableCount > 0 ? totalUtilization / borrowableCount : 0,
     assetSymbols: [...assetSymbols],
-    hasRecentlyAdded,
+    hasFeatured,
   }
 }
 
@@ -328,7 +329,7 @@ const resolveGroupTVL = async (group: MarketGroup): Promise<MarketGroup> => {
       let liquidity = 0
       let borrowUsd = 0
       if (borrowable && usdValue > 0 && isVaultType(vault)) {
-        borrowUsd = await getAssetUsdValueOrZero(vault.borrow, vault, 'off-chain')
+        borrowUsd = await getAssetUsdValueOrZero(vault.totalBorrowed, vault, 'off-chain')
         liquidity = usdValue - borrowUsd
       }
       return { priced: usdValue > 0, value: usdValue, liquidity, borrowUsd, borrowable }
@@ -494,14 +495,23 @@ export const useMarketGroups = () => {
     const allAddresses = [...product.vaults, ...(product.deprecatedVaults || [])]
     if (allAddresses.length === 0) return null
 
-    const memberVaults: Vault[] = []
+    const memberVaults: EVault[] = []
 
     try {
-      const ctx = buildFetchContext()
-      for await (const result of fetchVaults(ctx, allAddresses)) {
-        memberVaults.push(...result.vaults)
-        if (result.isFinished) break
-      }
+      const { chainId } = useEulerAddresses()
+      const { getEulerSdk } = useEulerSdk()
+      const sdk = await getEulerSdk()
+      const result = await sdk.eVaultService.fetchVaults(
+        chainId.value,
+        allAddresses.map(addr => getAddress(addr) as Address),
+        {
+          populateMarketPrices: true,
+          populateCollaterals: true,
+          populateRewards: true,
+        },
+      )
+      result.errors.forEach(issue => logWarn('useMarketGroups/fetchMarketGroupOnDemand', issue))
+      memberVaults.push(...(result.result.filter(Boolean) as EVault[]))
     }
     catch (e) {
       logWarn('useMarketGroups/fetchMarketGroupOnDemand', e)

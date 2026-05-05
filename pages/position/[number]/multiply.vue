@@ -6,7 +6,7 @@ import { OperationReviewModal, SlippageSettingsModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { AccountBorrowPosition } from '~/entities/account'
-import type { Vault, VaultAsset } from '~/entities/vault'
+import type { EVault, VaultAsset } from '~/entities/vault'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -78,7 +78,7 @@ const planParams = ref<MultiplyPlanParams | null>(null)
 const multiplier = ref(1)
 const multiplyLongAmount = ref('')
 const multiplyShortAmount = ref('')
-const multiplySupplyVault: Ref<Vault | undefined> = ref()
+const multiplySupplyVault: Ref<EVault | undefined> = ref()
 
 const { slippage: multiplySlippage } = useSlippage({
   fromSymbol: () => position.value?.borrow.asset.symbol,
@@ -137,21 +137,21 @@ const multiplySupplyApy = computed(() => {
   if (!multiplySupplyVault.value) {
     return null
   }
-  const base = nanoToValue(multiplySupplyVault.value.interestRateInfo.supplyAPY || 0n, 25)
+  const base = getVaultSupplyApy(multiplySupplyVault.value)
   return withIntrinsicSupplyApy(base, multiplySupplyVault.value.asset.address) + getSupplyRewardApy(multiplySupplyVault.value.address)
 })
 const multiplyLongApy = computed(() => {
   if (!multiplyLongVault.value) {
     return null
   }
-  const base = nanoToValue(multiplyLongVault.value.interestRateInfo.supplyAPY || 0n, 25)
+  const base = getVaultSupplyApy(multiplyLongVault.value)
   return withIntrinsicSupplyApy(base, multiplyLongVault.value.asset.address) + getSupplyRewardApy(multiplyLongVault.value.address)
 })
 const multiplyBorrowApy = computed(() => {
   if (!multiplyShortVault.value) {
     return null
   }
-  const base = nanoToValue(multiplyShortVault.value.interestRateInfo.borrowAPY || 0n, 25)
+  const base = getVaultBorrowApy(multiplyShortVault.value)
   return withIntrinsicBorrowApy(base, multiplyShortVault.value.asset.address) - getBorrowRewardApy(multiplyShortVault.value.address, multiplySupplyVault.value?.address)
 })
 
@@ -177,10 +177,10 @@ const multiplyBorrowLtv = computed(() => {
   if (!multiplySupplyVault.value || !multiplyShortVault.value) {
     return 0
   }
-  const match = multiplyShortVault.value.collateralLTVs.find(
-    ltv => normalizeAddress(ltv.collateral) === normalizeAddress(multiplySupplyVault.value?.address),
+  const match = multiplyShortVault.value.collaterals.find(
+    ltv => normalizeAddress(ltv.address) === normalizeAddress(multiplySupplyVault.value?.address),
   )
-  return match ? nanoToValue(match.borrowLTV, 2) : 0
+  return match ? ltvToPercent(match.borrowLTV) : 0
 })
 const multiplyMaxMultiplier = computed(() => computeMaxMultiplier(multiplyBorrowLtv.value))
 const multiplyCurrentMultiple = computed(() => {
@@ -320,10 +320,10 @@ const multiplyLiquidationLtv = computed(() => {
   if (!multiplySupplyVault.value || !multiplyShortVault.value) {
     return null
   }
-  const match = multiplyShortVault.value.collateralLTVs.find(
-    ltv => normalizeAddress(ltv.collateral) === normalizeAddress(multiplySupplyVault.value?.address),
+  const match = multiplyShortVault.value.collaterals.find(
+    ltv => normalizeAddress(ltv.address) === normalizeAddress(multiplySupplyVault.value?.address),
   )
-  return match ? nanoToValue(match.liquidationLTV, 2) : null
+  return match ? ltvToPercent(match.liquidationLTV) : null
 })
 const multiplyCurrentLtv = computed(() => {
   if (!position.value) {
@@ -344,7 +344,7 @@ const multiplyCurrentLiquidationLtv = computed(() => {
   if (!position.value) {
     return null
   }
-  return nanoToValue(position.value.liquidationLTV, 2)
+  return ltvToPercent(position.value.liquidationLTV)
 })
 const multiplyNextLiquidationLtv = computed(() => {
   return multiplyLiquidationLtv.value ?? multiplyCurrentLiquidationLtv.value
@@ -453,7 +453,7 @@ const multiplyErrorText = computed(() => {
   if (!multiplyShortVault.value) {
     return null
   }
-  if (multiplyDebtAmountNano.value > 0n && (multiplyShortVault.value.totalCash || 0n) < multiplyDebtAmountNano.value) {
+  if (multiplyDebtAmountNano.value > 0n && multiplyShortVault.value.availableLiquidity < multiplyDebtAmountNano.value) {
     return 'Not enough liquidity in the vault'
   }
   return null
@@ -736,7 +736,7 @@ const loadPosition = async () => {
     isLoading.value = false
     return
   }
-  multiplySupplyVault.value = position.value.collateral as Vault
+  multiplySupplyVault.value = position.value.collateral as EVault
   isLoading.value = false
 }
 
@@ -838,7 +838,7 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
               :desc="multiplyLongProduct.name"
               label="Additional collateral"
               :asset="multiplyLongVault.asset"
-              :vault="(multiplyLongVault as Vault)"
+              :vault="(multiplyLongVault as EVault)"
               :readonly="true"
             />
 

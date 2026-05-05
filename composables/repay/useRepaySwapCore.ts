@@ -1,6 +1,6 @@
 import type { Ref, ComputedRef } from 'vue'
 import { formatUnits, type Address } from 'viem'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
+import type { EVault, SecuritizeCollateralVault } from '~/entities/vault'
 import { getAssetUsdValue } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import { SwapperMode } from '~/entities/swap'
@@ -19,7 +19,7 @@ interface QuoteAccounts {
 export interface UseRepaySwapCoreOptions {
   position: Ref<AccountBorrowPosition | undefined>
   borrowVault: ComputedRef<AccountBorrowPosition['borrow'] | undefined>
-  sourceVault: Ref<Vault | undefined>
+  sourceVault: Ref<EVault | undefined>
   sourceBalance: ComputedRef<bigint>
   formTab: Ref<string>
   formTabName: string
@@ -207,12 +207,12 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     requestQuote()
   }
 
-  const onSourceVaultChange = (selectedIndex: number, vaultList: Ref<(Vault | SecuritizeVault)[]>) => {
+  const onSourceVaultChange = (selectedIndex: number, vaultList: Ref<(EVault | SecuritizeCollateralVault)[]>) => {
     clearSimulationError()
     const nextVault = vaultList.value[selectedIndex]
     if (!nextVault) return
     if (!sourceVault.value || normalizeAddressOrEmpty(sourceVault.value.address) !== normalizeAddressOrEmpty(nextVault.address)) {
-      sourceVault.value = nextVault as Vault
+      sourceVault.value = nextVault as EVault
       amount.value = ''
       debtAmount.value = ''
       quotes.reset()

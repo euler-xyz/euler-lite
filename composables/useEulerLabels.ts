@@ -2,7 +2,7 @@
 import axios from 'axios'
 import { getAddress } from 'viem'
 import type { EulerLabelPoint, EulerLabelEarnVaultEntry, EulerLabelAssetEntry } from '~/entities/euler/labels'
-import type { EarnVault, Vault } from '~/entities/vault'
+import type { EulerEarn, EVault } from '~/entities/vault'
 import { safeAssign } from '~/utils/safe-assign'
 import { logger } from '~/utils/logger'
 import { logWarn } from '~/utils/errorHandling'
@@ -463,11 +463,11 @@ export const useEulerProductOfVault = (vaultAddress: string | Ref<string>) => {
   }))
 }
 
-export const useEulerEntitiesOfVault = (vault: Vault | Ref<Vault>) => {
+export const useEulerEntitiesOfVault = (vault: EVault | Ref<EVault>) => {
   return toReactive(computed(() => getEntitiesByVault(unref(vault))))
 }
 
-export const useEulerEntitiesOfEarnVault = (earnVault: EarnVault | Ref<EarnVault>) => {
+export const useEulerEntitiesOfEarnVault = (earnVault: EulerEarn | Ref<EulerEarn>) => {
   return toReactive(computed(() => getEntitiesByEarnVault(unref(earnVault))))
 }
 

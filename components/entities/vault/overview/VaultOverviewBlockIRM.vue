@@ -14,21 +14,15 @@ import {
   type ChartData,
 } from 'chart.js'
 import annotationPlugin from 'chartjs-plugin-annotation'
-import { formatUnits, zeroAddress, decodeAbiParameters, type Address, type Abi, type Hex } from 'viem'
+import { formatUnits, zeroAddress, type Address, type Abi } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
+import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
 import {
-  INTEREST_RATE_MODEL_TYPE,
-  KINK_IRM_COMPONENTS,
-  ADAPTIVE_CURVE_IRM_COMPONENTS,
-  KINKY_IRM_COMPONENTS,
-} from '~/entities/constants'
-import {
-  type Vault,
-  type SecuritizeVault,
-  type KinkIRMParams,
-  type AdaptiveCurveIRMParams,
-  type KinkyIRMParams,
-  getVaultUtilization,
+  type EVault,
+  type SecuritizeCollateralVault,
+  type KinkIRMInfo,
+  type AdaptiveCurveIRMInfo,
+  type KinkyIRMInfo,
   hasCollateralExposure,
 } from '~/entities/vault'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -47,7 +41,7 @@ ChartJS.register(
   annotationPlugin,
 )
 
-const { vault } = defineProps<{ vault: Vault }>()
+const { vault } = defineProps<{ vault: EVault }>()
 
 const chartData = ref<ChartData<'line'> | null>(null)
 const chartOptions = ref<ChartOptions<'line'> | null>(null)
@@ -67,13 +61,14 @@ const { get: registryGet } = useVaultRegistry()
 // the "Collateral exposure" block and correctly excludes collateral-only
 // vaults that may still carry a non-zero interestRateModelAddress.
 const hasValidIRM = computed(() => {
+  const interestRateModelAddress = vault.interestRateModel.address
   const hasExposure = hasCollateralExposure(
     vault,
-    addr => registryGet(addr)?.vault as Vault | SecuritizeVault | undefined,
+    addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
   )
   return hasExposure
-    && vault.interestRateModelAddress
-    && vault.interestRateModelAddress !== zeroAddress
+    && interestRateModelAddress
+    && interestRateModelAddress !== zeroAddress
 })
 
 const SECONDS_PER_YEAR = 31_557_600 // 365.25 days
@@ -85,7 +80,7 @@ const chartRateAtKink = ref<number | null>(null)
 const chartRateAtMax = ref<number | null>(null)
 // Adaptive-only: APY bounds on rate-at-target, computed via UtilsLens.computeAPYs
 // so values match exactly what the vault will accrue (APR × year is the wrong
-// conversion — see AdaptiveCurveIRMParams, baseline uses daily compounding).
+// conversion — see AdaptiveCurveIRMInfo, baseline uses daily compounding).
 const adaptiveMinRateAPY = ref<number | null>(null)
 const adaptiveMaxRateAPY = ref<number | null>(null)
 
@@ -99,7 +94,7 @@ const formatWadPercent = (wad: bigint): string => {
   return `${percent.toFixed(2)}%`
 }
 
-const irmModelType = computed(() => Number(vault.irmInfo?.interestRateModelInfo?.interestRateModelType))
+const irmModelType = computed(() => Number(vault.interestRateModel.type))
 
 const irmTypeLabel = computed(() => {
   const type = irmModelType.value
@@ -111,48 +106,24 @@ const irmTypeLabel = computed(() => {
 })
 
 type DecodedIRMParams
-  = ({ type: 'kink' } & KinkIRMParams)
-    | ({ type: 'adaptive' } & AdaptiveCurveIRMParams)
-    | ({ type: 'kinky' } & KinkyIRMParams)
+  = ({ type: 'kink' } & KinkIRMInfo)
+    | ({ type: 'adaptive' } & AdaptiveCurveIRMInfo)
+    | ({ type: 'kinky' } & KinkyIRMInfo)
 
 const decodedIRMParams = computed<DecodedIRMParams | null>(() => {
-  const params = vault.irmInfo?.interestRateModelInfo?.interestRateModelParams
-  if (!params || params === '0x') return null
-
   const type = irmModelType.value
+  const data = vault.interestRateModel.data
+  if (!data) return null
 
   try {
     if (type === INTEREST_RATE_MODEL_TYPE.KINK) {
-      const [decoded] = decodeAbiParameters(
-        [{ type: 'tuple', components: [...KINK_IRM_COMPONENTS] }],
-        params as Hex,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- viem decode returns dynamic shape
-      ) as unknown as any[]
-      return { type: 'kink', baseRate: decoded.baseRate, slope1: decoded.slope1, slope2: decoded.slope2, kink: decoded.kink }
+      return { type: 'kink', ...data } as DecodedIRMParams
     }
     if (type === INTEREST_RATE_MODEL_TYPE.ADAPTIVE_CURVE) {
-      const [decoded] = decodeAbiParameters(
-        [{ type: 'tuple', components: [...ADAPTIVE_CURVE_IRM_COMPONENTS] }],
-        params as Hex,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- viem decode returns dynamic shape
-      ) as unknown as any[]
-      return {
-        type: 'adaptive',
-        targetUtilization: decoded.targetUtilization,
-        initialRateAtTarget: decoded.initialRateAtTarget,
-        minRateAtTarget: decoded.minRateAtTarget,
-        maxRateAtTarget: decoded.maxRateAtTarget,
-        curveSteepness: decoded.curveSteepness,
-        adjustmentSpeed: decoded.adjustmentSpeed,
-      }
+      return { type: 'adaptive', ...data } as DecodedIRMParams
     }
     if (type === INTEREST_RATE_MODEL_TYPE.KINKY) {
-      const [decoded] = decodeAbiParameters(
-        [{ type: 'tuple', components: [...KINKY_IRM_COMPONENTS] }],
-        params as Hex,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- viem decode returns dynamic shape
-      ) as unknown as any[]
-      return { type: 'kinky', baseRate: decoded.baseRate, slope: decoded.slope, shape: decoded.shape, kink: decoded.kink, cutoff: decoded.cutoff }
+      return { type: 'kinky', ...data } as DecodedIRMParams
     }
   }
   catch (e) {
@@ -400,7 +371,7 @@ const renderChart = async () => {
       : null
 
     // Current utilization
-    const currentUtilization = getVaultUtilization(vault)
+    const currentUtilization = vault.utilization
 
     // Set chart data
     chartData.value = {

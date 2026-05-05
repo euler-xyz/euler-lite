@@ -1,7 +1,7 @@
 import { ref, watchEffect } from 'vue'
 import { useVaultRegistry } from './useVaultRegistry'
 import { useAccountPositions } from './useAccountPositions'
-import type { Vault } from '~/entities/vault'
+import type { EVault } from '~/entities/vault'
 import {
   getAssetUsdValue,
   getCollateralUsdValue,
@@ -28,7 +28,7 @@ const updateSupplyValues = async () => {
   }
 
   for (const position of borrowPositions.value) {
-    const borrowVault = registryGetVault(position.borrow.address) as Vault | undefined
+    const borrowVault = registryGetVault(position.borrow.address) as EVault | undefined
     if (!borrowVault) {
       if (position.supplied > 0n) hasMissingPrices = true
       continue

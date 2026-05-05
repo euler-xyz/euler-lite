@@ -195,7 +195,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Server-Side Proxy Layer**: External data sources (token lists, Pyth Hermes, labels, oracle checks, RPC, subgraph vault factories) are proxied through Nuxt server endpoints rather than called directly from the browser. This provides caching, rate limiting, CORS avoidance, and keeps credentials server-side. See [Development Guide - Server-Side Data Proxies](./development-guide.md#server-side-data-proxies) for the full endpoint reference.
+**Server-Side Proxy Layer**: External data sources (token lists, Pyth Hermes, labels, oracle checks, RPC) are proxied through Nuxt server endpoints rather than called directly from the browser. This provides caching, rate limiting, CORS avoidance, and keeps credentials server-side. Vault reads use the Euler SDK from the client layer. See [Development Guide - Server-Side Data Proxies](./development-guide.md#server-side-data-proxies) for the full endpoint reference.
 
 **Proxy cache strategy**:
 
@@ -204,7 +204,6 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 | `/api/labels/*` | 5 min | 404 → empty shape; stale-fallback on upstream error |
 | `/api/token-list` | 5 min | Three sources merged via `Promise.allSettled`; per-source cache with stale fallback |
 | `/api/intrinsic-apy` | 5 min | One endpoint, returns `{ [address]: { apy, provider, source? } }` for a chain; server orchestrates every upstream |
-| `/api/vault-categories` | 5 min | Full chain vault categorization (evk/earn/securitize/escrow) from subgraph + escrow-perspective RPC; `evk` is a superset that includes escrow. Per-address lookup mode via `&address=0x…` for direct-nav fallback |
 | `/api/oracle-adapter` | 5 min | Lazy per-address fetch |
 | `/api/euler-chains` | 5 min | Static chain-agnostic config from `euler-interfaces` repo |
 | `/api/vaults` | 5 min | Pre-computed chain vault snapshot; warm-cache rewrites every 5 min. Handler is read-only — no request-triggered refresh |
@@ -212,7 +211,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 
 Every cacheable proxy above uses the same pattern: TTL cache for fresh hits, stale-cache fallback on upstream failure, and in-flight request deduplication so concurrent cache-miss callers (e.g. warm-cache racing real traffic) collapse onto a single upstream fetch per cache key. The in-flight dedup pattern itself is a shared util — `createInFlightDedup` / `scheduleBackgroundRefresh` in `server/utils/in-flight.ts`.
 
-`server/plugins/warm-cache.ts` pre-populates labels, token-list, `/api/intrinsic-apy`, vault-categories, reward campaigns, and the vaults snapshot for every enabled chain, plus `/api/euler-chains` once globally. Every warm task is a **direct function call** to a `refreshX()` that bypasses the handler's fresh-cache short-circuit and writes straight to the cache. This matters: if warm cycled via HTTP, the handler would short-circuit on the still-fresh entry from the previous cycle (age ≈ 298 s at the 5-min mark) and the entry would then expire with no refresh until the next cycle — leaving a ~5 min stale window per cycle. With direct refresh calls, the cache is always rewritten while the previous entry is still serving live traffic, so user requests arriving during a refresh continue to read the fresh old entry (no blocking on the in-flight refresh). Warming runs fire-and-forget so Nitro's listener is never delayed; caches are typically hot within ~5 s of boot, and users arriving before that just pay the usual cold-upstream latency for whichever endpoints they hit.
+`server/plugins/warm-cache.ts` pre-populates labels, token-list, `/api/intrinsic-apy`, and reward campaigns for every enabled chain, plus `/api/euler-chains` once globally. Every warm task is a **direct function call** to a `refreshX()` that bypasses the handler's fresh-cache short-circuit and writes straight to the cache. This matters: if warm cycled via HTTP, the handler would short-circuit on the still-fresh entry from the previous cycle (age ≈ 298 s at the 5-min mark) and the entry would then expire with no refresh until the next cycle — leaving a ~5 min stale window per cycle. With direct refresh calls, the cache is always rewritten while the previous entry is still serving live traffic, so user requests arriving during a refresh continue to read the fresh old entry (no blocking on the in-flight refresh). Warming runs fire-and-forget so Nitro's listener is never delayed; caches are typically hot within ~5 s of boot, and users arriving before that just pay the usual cold-upstream latency for whichever endpoints they hit.
 
 ### Vault snapshot pipeline
 
