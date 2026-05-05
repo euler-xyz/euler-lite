@@ -8,7 +8,7 @@ import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
-import { getNetAPY, getProjectedRates, type Vault, type VaultAsset } from '~/entities/vault'
+import { getNetAPY, getProjectedRates, type EVault, type VaultAsset } from '~/entities/vault'
 import { getAssetUsdValue, getAssetUsdValueOrZero, getTokenUsdValue } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
@@ -155,7 +155,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
   const { priceImpact: swapPriceImpact } = useSwapPriceImpact({
     quote: quotes.effectiveQuote,
-    toVault: borrowVault as Ref<Vault | undefined>,
+    toVault: borrowVault as Ref<EVault | undefined>,
   })
 
   const swapRouteItems = computed(() => {
@@ -180,8 +180,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const estimatesError = ref('')
   const isEstimatesLoading = ref(false)
 
-  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, position.value?.borrow.decimals || 18))
-  const suppliedFixed = computed(() => FixedPoint.fromValue(position.value?.supplied || 0n, position.value?.collateral.decimals || 18))
+  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, position.value?.borrow.shares.decimals || 18))
+  const suppliedFixed = computed(() => FixedPoint.fromValue(position.value?.supplied || 0n, position.value?.collateral.shares.decimals || 18))
   const priceFixed = computed(() => {
     const ratio = oraclePriceRatio.value
     if (ratio && Number.isFinite(ratio) && ratio > 0) {
@@ -256,7 +256,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     if (isFullRepay.value) {
       const collAddrs = position.value?.collaterals ?? (collateralVault.value ? [collateralVault.value.address] : [])
       for (const addr of collAddrs) {
-        const v = registryGetVault(addr) as Vault | undefined
+        const v = registryGetVault(addr) as EVault | undefined
         if (v) steps.push({ vault: v, op: OP_TRANSFER })
       }
     }
@@ -417,7 +417,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       }
 
       const debtRepaidNano = getDebtRepaidNano()
-      const debtRepaidFixed = FixedPoint.fromValue(debtRepaidNano, Number(borrowVault.value.decimals))
+      const debtRepaidFixed = FixedPoint.fromValue(debtRepaidNano, Number(borrowVault.value.shares.decimals))
       const totalValue = getTotalCollateralValue(position.value!)
       const collateralValueFl = totalValue !== null
         ? totalValue
@@ -460,8 +460,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       const [projected, supplyUsd, borrowUsd] = await Promise.all([
         getProjectedRates(
           borrowVault.value.address,
-          borrowVault.value.interestRateInfo.cash,
-          borrowVault.value.interestRateInfo.borrows,
+          borrowVault.value.totalCash,
+          borrowVault.value.totalBorrowed,
           debtRepaidNano,
           -debtRepaidNano,
         ),
@@ -471,7 +471,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       if (estimatesGuard.isStale(gen)) return
 
       const projectedBorrowApy = projected
-        ? borrowApy.value + (nanoToValue(projected.borrowAPY, 25) - nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25))
+        ? borrowApy.value + (nanoToValue(projected.borrowAPY, 25) - getVaultBorrowApy(borrowVault.value))
         : borrowApy.value
 
       _estimateNetAPY.value = getNetAPY(

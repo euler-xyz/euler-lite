@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useAccount } from '@wagmi/vue'
 import { getAddress } from 'viem'
-import { getVaultUtilization, getCurrentLiquidationLTV, isCyclicalNoteVault, type Vault } from '~/entities/vault'
+import { isCyclicalNoteVault, type EVault } from '~/entities/vault'
 import { getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
@@ -9,20 +9,20 @@ import { isVaultRecentlyAdded, isVaultKeyring } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { VaultSupplyApyModal, VaultCollateralExposureModal } from '#components'
 
 const { isConnected } = useAccount()
-const { vault } = defineProps<{ vault: Vault }>()
+const { vault } = defineProps<{ vault: EVault }>()
 const vaultAddress = computed(() => vault.address)
 const product = useEulerProductOfVault(vaultAddress)
 const { enableEntityBranding } = useDeployConfig()
 const { isVaultGovernorVerified } = useVaults()
 const entities = useEulerEntitiesOfVault(vault)
-const isUnverified = computed(() => !vault.verified)
+const { getVaultCategory, isVerifiedVault, get: registryGet } = useVaultRegistry()
+const isUnverified = computed(() => !isVerifiedVault(vault.address))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
 const isGovernanceLimited = computed(() => product.isGovernanceLimited && isGovernorVerified.value)
 const entityName = computed(() => {
@@ -35,26 +35,24 @@ const entityLogos = computed(() => {
   if (!entityName.value || entities.length === 0) return []
   return entities.map(e => getEulerLabelEntityLogo(e.logo))
 })
-const isEscrow = computed(() => vault.vaultCategory === 'escrow')
-const isBorrowable = computed(() => vault.vaultCategory !== 'escrow' && vault.collateralLTVs.some(ltv => ltv.borrowLTV > 0n))
+const isEscrow = computed(() => getVaultCategory(vault.address) === 'escrow')
+const isBorrowable = computed(() => !isEscrow.value && vault.collaterals.some(ltv => ltv.borrowLTV > 0))
 const displayName = computed(() => {
   if (isEscrow.value) return 'Escrowed collateral'
-  return product.name || vault.name
+  return product.name || vault.shares.name
 })
 const { getBalance, isLoading: isBalancesLoading } = useWallets()
 const { withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 const modal = useModal()
-const { get: registryGet } = useVaultRegistry()
-
 const collateralAssets = computed(() => {
   if (!isBorrowable.value) return []
   const seen = new Set<string>()
   const assets: { address: string, symbol: string }[] = []
-  for (const ltv of vault.collateralLTVs) {
-    if (ltv.borrowLTV <= 0n) continue
-    if (getCurrentLiquidationLTV(ltv) <= 0n) continue
-    const entry = registryGet(ltv.collateral)
+  for (const ltv of vault.collaterals) {
+    if (ltv.borrowLTV <= 0) continue
+    if (ltv.currentLiquidationLTV <= 0) continue
+    const entry = registryGet(ltv.address)
     if (entry) {
       const assetAddr = entry.vault.asset.address.toLowerCase()
       if (seen.has(assetAddr)) continue
@@ -73,7 +71,7 @@ const balance = computed(() =>
 const totalRewardsAPY = computed(() => getSupplyRewardApy(vault.address))
 const hasRewards = computed(() => hasSupplyRewards(vault.address))
 const lendingAPY = computed(() =>
-  nanoToValue(vault.interestRateInfo.supplyAPY, 25),
+  getVaultSupplyApy(vault),
 )
 const intrinsicAPY = computed(() => getIntrinsicApy(vault.asset.address))
 const supplyApy = computed(() =>
@@ -82,7 +80,7 @@ const supplyApy = computed(() =>
 const supplyApyWithRewards = computed(
   () => supplyApy.value + totalRewardsAPY.value,
 )
-const utilization = computed(() => getVaultUtilization(vault))
+const utilization = computed(() => vault.utilization)
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
 const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address))
 const isKeyring = computed(() => isVaultKeyring(vault.address))
@@ -140,7 +138,7 @@ const prices = ref<{ totalSupply: string, liquidity: string, walletBalance: stri
 })
 
 watchEffect(async () => {
-  const liquidity = vault.supply >= vault.borrow ? vault.supply - vault.borrow : 0n
+  const liquidity = vault.availableLiquidity
   const walletBal = balance.value
   const [supplyResult, liquidityResult, walletResult] = await Promise.all([
     formatAssetValue(vault.totalAssets, vault, 'off-chain'),

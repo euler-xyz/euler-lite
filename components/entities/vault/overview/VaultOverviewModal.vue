@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { getAddress } from 'viem'
-import type { AnyBorrowVaultPair, EarnVault, SecuritizeVault, Vault } from '~/entities/vault'
+import type { AnyBorrowVaultPair, EulerEarn, SecuritizeCollateralVault, EVault } from '~/entities/vault'
 
 import type { AccountBorrowPosition } from '~/entities/account'
 
@@ -8,7 +8,7 @@ const emits = defineEmits(['close'])
 const router = useRouter()
 const route = useRoute()
 
-const { pair, vault, earnVault, extraVault, securitizeVault, collateralVaults, title = 'Market information' } = defineProps<{ pair?: AnyBorrowVaultPair | AccountBorrowPosition, vault?: Vault, earnVault?: EarnVault, extraVault?: Vault, securitizeVault?: SecuritizeVault, collateralVaults?: (Vault | SecuritizeVault)[], title?: string }>()
+const { pair, vault, earnVault, extraVault, securitizeVault, collateralVaults, title = 'Market information' } = defineProps<{ pair?: AnyBorrowVaultPair | AccountBorrowPosition, vault?: EVault, earnVault?: EulerEarn, extraVault?: EVault, securitizeVault?: SecuritizeCollateralVault, collateralVaults?: (EVault | SecuritizeCollateralVault)[], title?: string }>()
 
 const tab = ref()
 const normalizeAddress = (address?: string) => {
@@ -124,12 +124,12 @@ const navigateToBorrow = (collateralAddress: string, borrowVaultAddress: string)
           />
           <SecuritizeVaultOverview
             v-else-if="activeCollateralVault && 'type' in activeCollateralVault && activeCollateralVault.type === 'securitize'"
-            :vault="(activeCollateralVault as SecuritizeVault)"
+            :vault="(activeCollateralVault as SecuritizeCollateralVault)"
           />
           <VaultOverview
             v-else-if="activeCollateralVault"
-            :vault="(activeCollateralVault as Vault)"
-            @vault-click="(address: string) => navigateToBorrow(address, (activeCollateralVault as Vault).address)"
+            :vault="(activeCollateralVault as EVault)"
+            @vault-click="(address: string) => navigateToBorrow(address, (activeCollateralVault as EVault).address)"
           />
           <VaultOverview
             v-else-if="tab === 'multiply-collateral' && extraVault"

@@ -4,7 +4,7 @@ import { getAddress, type Address, zeroAddress } from 'viem'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { FixedPoint } from '~/utils/fixed-point'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import type { Vault, VaultAsset } from '~/entities/vault'
+import type { EVault, VaultAsset } from '~/entities/vault'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatio } from '~/services/pricing/priceProvider'
 import { fetchBackendPrice } from '~/services/pricing/backendClient'
@@ -173,7 +173,7 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   return undefined
 })
 
-const balanceFixed = computed(() => FixedPoint.fromValue(balance.value, form.collateralVault.value?.decimals || 18))
+const balanceFixed = computed(() => FixedPoint.fromValue(balance.value, form.collateralVault.value?.asset.decimals || 18))
 const assets = computed(() => [form.asset.value].filter((v): v is VaultAsset => !!v))
 const pairAssetsLabel = usePositionPairLabel(form.position)
 const { name } = useEulerProductOfVault(computed(() => form.collateralVault.value?.address || ''))
@@ -273,7 +273,7 @@ watch(selectedAsset, async () => {
               label="Supply amount"
               :desc="name"
               :asset="(needsSwap || isNativeWrap) && selectedAsset ? selectedAsset : form.asset.value"
-              :vault="(needsSwap || isNativeWrap) ? undefined : (form.collateralVault.value as Vault)"
+              :vault="(needsSwap || isNativeWrap) ? undefined : (form.collateralVault.value as EVault)"
               :price-override="(needsSwap || isNativeWrap) ? swapAssetUsdPrice : undefined"
               :balance="activeBalance"
               maxable

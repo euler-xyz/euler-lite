@@ -9,7 +9,7 @@ import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
 import {
   type AnyBorrowVaultPair,
-  type Vault,
+  type EVault,
   type ProjectedRates,
   convertAssetsToShares,
   getProjectedRates,
@@ -56,8 +56,8 @@ type MultiplyPlanParams
 
 export interface UseMultiplyFormOptions {
   pair: Ref<AnyBorrowVaultPair | undefined>
-  borrowVault: ComputedRef<Vault | undefined>
-  collateralVault: ComputedRef<Vault | undefined>
+  borrowVault: ComputedRef<EVault | undefined>
+  collateralVault: ComputedRef<EVault | undefined>
   formTab: Ref<'borrow' | 'multiply'>
 
   resolvePendingSubAccount: () => Promise<string>
@@ -124,7 +124,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const multiplier = ref(1)
   const multiplyLongAmount = ref('')
   const multiplyShortAmount = ref('')
-  const multiplySupplyVault: Ref<Vault | undefined> = ref()
+  const multiplySupplyVault: Ref<EVault | undefined> = ref()
   const multiplyAssetBalance: Ref<bigint> = ref(0n)
   const isMultiplySavingCollateral = ref(false)
   const isMultiplySubmitting = ref(false)
@@ -178,18 +178,18 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
     const rawSharePrice = getCollateralShareOraclePrice(multiplyShortVault.value, multiplySupplyVault.value)
     const collateralPriceInfo = getCollateralOraclePrice(multiplyShortVault.value, multiplySupplyVault.value)
-    const liabilityPrice = multiplyShortVault.value.liabilityPriceInfo
+    const liabilityPrice = getAssetOraclePrice(multiplyShortVault.value)
 
     if (!rawSharePrice || !rawSharePrice.amountIn || rawSharePrice.amountIn <= 0n) return 0n
     if (!collateralPriceInfo || collateralPriceInfo.amountOutMid <= 0n) return 0n
-    if (!liabilityPrice || liabilityPrice.queryFailure || !liabilityPrice.amountOutAsk || liabilityPrice.amountOutAsk <= 0n || !liabilityPrice.amountIn || liabilityPrice.amountIn <= 0n) return 0n
+    if (!liabilityPrice || !liabilityPrice.amountOutAsk || liabilityPrice.amountOutAsk <= 0n) return 0n
 
     return computeLeverageDebt({
       suppliedCollateral,
       collateralOutBid: collateralPriceInfo.amountOutBid || collateralPriceInfo.amountOutMid,
       collateralAmountIn: rawSharePrice.amountIn,
       multiplier: multiplier.value,
-      liabilityIn: liabilityPrice.amountIn,
+      liabilityIn: 10n ** BigInt(multiplyShortVault.value.asset.decimals),
       liabilityOutAsk: liabilityPrice.amountOutAsk || liabilityPrice.amountOutMid,
     })
   })
@@ -197,10 +197,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   // --- LTV / multiplier bounds ---
   const multiplyBorrowLtv = computed(() => {
     if (!multiplySupplyVault.value || !multiplyShortVault.value) return 0
-    const match = multiplyShortVault.value.collateralLTVs.find(
-      ltv => normalizeAddress(ltv.collateral) === normalizeAddress(multiplySupplyVault.value?.address),
+    const match = multiplyShortVault.value.collaterals.find(
+      ltv => normalizeAddress(ltv.address) === normalizeAddress(multiplySupplyVault.value?.address),
     )
-    return match ? nanoToValue(match.borrowLTV, 2) : 0
+    return match ? ltvToPercent(match.borrowLTV) : 0
   })
 
   const multiplyMaxMultiplier = computed(() => computeMaxMultiplier(multiplyBorrowLtv.value))
@@ -303,8 +303,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       if (supplyAndLongSameVault) {
         // Combined delta for supply + long vault
         const [combined, shortResult] = await Promise.all([
-          getProjectedRates(supply.address, supply.interestRateInfo.cash, supply.interestRateInfo.borrows, supplyNano + swapOut, 0n),
-          getProjectedRates(short.address, short.interestRateInfo.cash, short.interestRateInfo.borrows, -debtNano, debtNano),
+          getProjectedRates(supply.address, supply.totalCash, supply.totalBorrowed, supplyNano + swapOut, 0n),
+          getProjectedRates(short.address, short.totalCash, short.totalBorrowed, -debtNano, debtNano),
         ])
         if (projectedRatesGuard.isStale(gen)) return
         projectedSupplyRates.value = combined
@@ -313,9 +313,9 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       }
       else {
         const [supplyResult, shortResult, longResult] = await Promise.all([
-          getProjectedRates(supply.address, supply.interestRateInfo.cash, supply.interestRateInfo.borrows, supplyNano, 0n),
-          getProjectedRates(short.address, short.interestRateInfo.cash, short.interestRateInfo.borrows, -debtNano, debtNano),
-          getProjectedRates(long.address, long.interestRateInfo.cash, long.interestRateInfo.borrows, swapOut, 0n),
+          getProjectedRates(supply.address, supply.totalCash, supply.totalBorrowed, supplyNano, 0n),
+          getProjectedRates(short.address, short.totalCash, short.totalBorrowed, -debtNano, debtNano),
+          getProjectedRates(long.address, long.totalCash, long.totalBorrowed, swapOut, 0n),
         ])
         if (projectedRatesGuard.isStale(gen)) return
         projectedSupplyRates.value = supplyResult
@@ -335,7 +335,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   // --- APYs ---
   const multiplySupplyApy = computed(() => {
     if (!multiplySupplyVault.value) return null
-    const currentRaw = nanoToValue(multiplySupplyVault.value.interestRateInfo.supplyAPY || 0n, 25)
+    const currentRaw = getVaultSupplyApy(multiplySupplyVault.value)
     const base = withIntrinsicSupplyApy(currentRaw, multiplySupplyVault.value.asset.address) + getSupplyRewardApy(multiplySupplyVault.value.address)
     if (!projectedSupplyRates.value) return base
     const projectedRaw = nanoToValue(projectedSupplyRates.value.supplyAPY, 25)
@@ -344,7 +344,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
   const multiplyLongApy = computed(() => {
     if (!multiplyLongVault.value) return null
-    const currentRaw = nanoToValue(multiplyLongVault.value.interestRateInfo.supplyAPY || 0n, 25)
+    const currentRaw = getVaultSupplyApy(multiplyLongVault.value)
     const base = withIntrinsicSupplyApy(currentRaw, multiplyLongVault.value.asset.address) + getSupplyRewardApy(multiplyLongVault.value.address)
     if (!projectedLongRates.value) return base
     const projectedRaw = nanoToValue(projectedLongRates.value.supplyAPY, 25)
@@ -353,7 +353,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
   const multiplyBorrowApy = computed(() => {
     if (!multiplyShortVault.value) return null
-    const currentRaw = nanoToValue(multiplyShortVault.value.interestRateInfo.borrowAPY || 0n, 25)
+    const currentRaw = getVaultBorrowApy(multiplyShortVault.value)
     const base = withIntrinsicBorrowApy(currentRaw, multiplyShortVault.value.asset.address) - getBorrowRewardApy(multiplyShortVault.value.address, multiplySupplyVault.value?.address)
     if (!projectedBorrowRates.value) return base
     const projectedRaw = nanoToValue(projectedBorrowRates.value.borrowAPY, 25)
@@ -396,10 +396,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   // --- Health / LTV ---
   const multiplyLiquidationLtv = computed(() => {
     if (!multiplySupplyVault.value || !multiplyShortVault.value) return null
-    const match = multiplyShortVault.value.collateralLTVs.find(
-      ltv => normalizeAddress(ltv.collateral) === normalizeAddress(multiplySupplyVault.value?.address),
+    const match = multiplyShortVault.value.collaterals.find(
+      ltv => normalizeAddress(ltv.address) === normalizeAddress(multiplySupplyVault.value?.address),
     )
-    return match ? nanoToValue(match.liquidationLTV, 2) : null
+    return match ? ltvToPercent(match.liquidationLTV) : null
   })
 
   const multiplyCurrentLtv = computed(() => {
@@ -538,7 +538,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     if (multiplyBalance.value < valueToNano(multiplyInputAmount.value, multiplySupplyVault.value.asset.decimals)) {
       return 'Not enough balance'
     }
-    if (multiplyDebtAmountNano.value > 0n && (multiplyShortVault.value.totalCash || 0n) < multiplyDebtAmountNano.value) {
+    if (multiplyDebtAmountNano.value > 0n && multiplyShortVault.value.availableLiquidity < multiplyDebtAmountNano.value) {
       return 'Not enough liquidity in the vault'
     }
     return null
@@ -861,7 +861,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   }
 
   // --- Init ---
-  const initMultiplySupplyVault = (vault: Vault) => {
+  const initMultiplySupplyVault = (vault: EVault) => {
     multiplySupplyVault.value = vault
     isMultiplySavingCollateral.value = false
   }

@@ -1,17 +1,14 @@
 <script setup lang="ts">
 import type { CSSProperties } from 'vue'
 import type { Address } from 'viem'
+import { selectLeafAdaptersForPair, type OracleAdapterEntry } from '@eulerxyz/euler-v2-sdk'
 import type { MarketGroup } from '~/entities/lend-discovery'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
-import { nanoToValue } from '~/utils/crypto-utils'
+import type { EVault, SecuritizeCollateralVault } from '~/entities/vault'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import {
   findVault,
   formatMetricValue,
   getCellBgColor,
-  isLiquidationLTVRamping,
-  getCurrentLiquidationLTV,
-  getVaultUtilization,
   isVaultType,
   isMatrixCompatibleVault,
   type CollateralMatrixData,
@@ -20,10 +17,8 @@ import {
   type EnhancedCellApys,
 } from '~/utils/discoveryCalculations'
 import {
-  collectOracleAdapters,
   getChecksStatus,
   OracleAdapterCheckSeverity,
-  type OracleAdapterEntry,
   type OracleAdapterCheck,
 } from '~/entities/oracle'
 import { getOracleProviderLogo } from '~/entities/oracle-providers'
@@ -82,7 +77,7 @@ const computeEnhancedApys = (
   let supplyApy = 0
   let supplyRewards = 0
   if (collateral) {
-    const base = nanoToValue(collateral.interestRateInfo.supplyAPY, 25)
+    const base = getVaultSupplyApy(collateral)
     supplyApy = withIntrinsicSupplyApy(base, collateral.asset.address)
     supplyRewards = getSupplyRewardApy(collateral.address)
   }
@@ -91,10 +86,10 @@ const computeEnhancedApys = (
   let utilization = 0
   let borrowRewards = 0
   if (liability) {
-    const base = nanoToValue(liability.interestRateInfo.borrowAPY, 25)
+    const base = getVaultBorrowApy(liability)
     borrowApy = withIntrinsicBorrowApy(base, liability.asset.address)
     borrowRewards = getBorrowRewardApy(liability.address, collateral?.address)
-    utilization = getVaultUtilization(liability)
+    utilization = isVaultType(liability) ? liability.utilization : 0
   }
 
   const loopingRewards = liability ? getLoopingRewardApy(liability.address, collateral?.address) : 0
@@ -121,9 +116,9 @@ const getCellMetricValue = (
 ): number => {
   switch (props.dotMetric) {
     case 'bltv':
-      return Number(nanoToValue(cell.ltv.borrowLTV, 2))
+      return Number(ltvToPercent(cell.ltv.borrowLTV))
     case 'lltv':
-      return Number(nanoToValue(getCurrentLiquidationLTV(cell.ltv), 2))
+      return Number(ltvToPercent(cell.ltv.currentLiquidationLTV))
     case 'multiplier':
       return getMaxMultiplier(cell.ltv.borrowLTV)
     case 'net-apy':
@@ -185,16 +180,15 @@ const cellOracleAdapters = computed((): Map<string, OracleAdapterEntry[]> => {
       const liability = findVault(props.market, liabAddr)
       if (!collateral || !liability) continue
       if (!isMatrixCompatibleVault(collateral)) continue
-      if (!isVaultType(liability) || !liability.oracleDetailedInfo) continue
+      if (!isVaultType(liability) || !liability.oracle.adapters.length || !liability.unitOfAccount) continue
       // The borrow vault's oracle resolves the collateral *vault* (eToken)
       // address against its unit of account — not the collateral's underlying
       // asset. Mirrors VaultOverviewBlockOracleAdapters' collateralVaults path.
-      const adapters = collectOracleAdapters(liability.oracleDetailedInfo, 3, {
-        base: collateral.address as Address,
-        quote: liability.unitOfAccount as Address,
-        leafOnly: true,
-        skipERC4626Bases,
-      })
+      const adapters = selectLeafAdaptersForPair(
+        liability.oracle.adapters,
+        collateral.address as Address,
+        liability.unitOfAccount.address as Address,
+      ).filter(adapter => !skipERC4626Bases.has(adapter.base.toLowerCase()))
       if (adapters.length) result.set(`${colAddr}:${liabAddr}`, adapters)
     }
   }
@@ -209,12 +203,12 @@ const columnAssetOracleAdapters = computed((): Map<string, OracleAdapterEntry[]>
   if (props.dotMetric !== 'oracle') return result
   for (const col of props.matrix.columns) {
     const liability = findVault(props.market, col.address)
-    if (!liability || !isVaultType(liability) || !liability.oracleDetailedInfo) continue
-    const adapters = collectOracleAdapters(liability.oracleDetailedInfo, 3, {
-      base: liability.asset.address as Address,
-      quote: liability.unitOfAccount as Address,
-      leafOnly: true,
-    })
+    if (!liability || !isVaultType(liability) || !liability.oracle.adapters.length || !liability.unitOfAccount) continue
+    const adapters = selectLeafAdaptersForPair(
+      liability.oracle.adapters,
+      liability.asset.address as Address,
+      liability.unitOfAccount.address as Address,
+    )
     if (adapters.length) result.set(col.address, adapters)
   }
   return result
@@ -290,8 +284,8 @@ const TOOLTIP_WIDTH = 360
 
 interface TooltipContext {
   view: AdapterView
-  sourceVault: Vault
-  collateralVault: Vault | SecuritizeVault | null
+  sourceVault: EVault
+  collateralVault: EVault | SecuritizeCollateralVault | null
 }
 
 const tooltipContext = ref<TooltipContext | null>(null)
@@ -322,9 +316,9 @@ const allOracleAdapters = computed<OracleAdapterEntry[]>(() => {
   return [...seen.values()]
 })
 
-const oraclePriceSourceVaults = computed<Vault[]>(() => {
+const oraclePriceSourceVaults = computed<EVault[]>(() => {
   if (props.dotMetric !== 'oracle') return []
-  const seen = new Map<string, Vault>()
+  const seen = new Map<string, EVault>()
   for (const col of props.matrix.columns) {
     const liability = findVault(props.market, col.address)
     if (liability && isVaultType(liability)) {
@@ -334,9 +328,9 @@ const oraclePriceSourceVaults = computed<Vault[]>(() => {
   return [...seen.values()]
 })
 
-const oraclePriceCollateralVaults = computed<(Vault | SecuritizeVault)[]>(() => {
+const oraclePriceCollateralVaults = computed<(EVault | SecuritizeCollateralVault)[]>(() => {
   if (props.dotMetric !== 'oracle') return []
-  const seen = new Map<string, Vault | SecuritizeVault>()
+  const seen = new Map<string, EVault | SecuritizeCollateralVault>()
   for (const row of props.matrix.rows) {
     const v = findVault(props.market, row.address)
     if (v && isMatrixCompatibleVault(v)) {
@@ -648,9 +642,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                   <SvgIcon
                     v-if="
                       dotMetric === 'lltv'
-                        && isLiquidationLTVRamping(
-                          matrix.cells.get(row.address)!.get(col.address)!.ltv,
-                        )
+                        && matrix.cells.get(row.address)!.get(col.address)!.ltv.isLiquidationLTVRamping
                     "
                     name="arrow-top-right"
                     class="!w-10 !h-10 text-warning-500 shrink-0 rotate-180"

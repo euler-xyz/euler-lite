@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { getAddress } from 'viem'
-import type { EarnVault } from '~/entities/vault'
+import type { EulerEarn } from '~/entities/vault'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { useEulerEntitiesOfEarnVault, useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
@@ -8,7 +8,7 @@ import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isEarnVaultDeprecated, getEarnVaultDeprecationReason, getEarnVaultDescription } from '~/utils/eulerLabelsUtils'
 import { autoLink } from '~/utils/autoLink'
 
-const { vault } = defineProps<{ vault: EarnVault }>()
+const { vault } = defineProps<{ vault: EulerEarn }>()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
 const { isEarnVaultOwnerVerified } = useVaults()

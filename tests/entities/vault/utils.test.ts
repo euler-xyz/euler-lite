@@ -2,79 +2,23 @@ import { describe, it, expect } from 'vitest'
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
 import {
   getCashLimitedWithdrawAmount,
-  getUtilization,
-  getVaultUtilization,
   getBorrowVaultsByMap,
   isCyclicalNoteVault,
 } from '~/entities/vault/utils'
-import type { Vault, SecuritizeVault, EarnVault } from '~/entities/vault/types'
-
-describe('getUtilization', () => {
-  it('returns 0 when totalAssets is zero', () => {
-    expect(getUtilization(0n, 100n)).toBe(0)
-  })
-
-  it('returns 0 when totalBorrow is zero', () => {
-    expect(getUtilization(1000n, 0n)).toBe(0)
-  })
-
-  it('returns 0 when totalAssets is negative', () => {
-    expect(getUtilization(-1n, 100n)).toBe(0)
-  })
-
-  it('returns 0 when totalBorrow is negative', () => {
-    expect(getUtilization(1000n, -1n)).toBe(0)
-  })
-
-  it('calculates utilization correctly', () => {
-    // borrow=750, assets=1000 → 75%
-    expect(getUtilization(1000n, 750n)).toBe(75)
-  })
-
-  it('handles 100% utilization', () => {
-    expect(getUtilization(1000n, 1000n)).toBe(100)
-  })
-
-  it('handles utilization above 100%', () => {
-    // Can happen due to interest accrual
-    expect(getUtilization(1000n, 1200n)).toBe(120)
-  })
-
-  it('rounds to 2 decimal places', () => {
-    expect(getUtilization(1000n, 333n)).toBe(33.3)
-  })
-
-  it('handles large bigint values', () => {
-    const large = 10n ** 18n
-    const borrow = 75n * 10n ** 16n // 75% of 10^18
-    expect(getUtilization(large, borrow)).toBe(75)
-  })
-})
-
-describe('getVaultUtilization', () => {
-  it('delegates to getUtilization with vault fields', () => {
-    const vault = { totalAssets: 1000n, borrow: 750n } as Vault
-    expect(getVaultUtilization(vault)).toBe(75)
-  })
-
-  it('returns 0 for vault with no borrows', () => {
-    const vault = { totalAssets: 1000n, borrow: 0n } as Vault
-    expect(getVaultUtilization(vault)).toBe(0)
-  })
-})
+import type { EVault, EulerEarn, SecuritizeCollateralVault } from '~/entities/vault/types'
 
 describe('getCashLimitedWithdrawAmount', () => {
-  const evkVault = (totalCash: bigint) => ({ totalCash } as Vault)
+  const evkVault = (availableLiquidity: bigint) => ({ type: 'EVault', availableLiquidity } as EVault)
   const securitizeVault = (totalAssets: bigint) =>
-    ({ type: 'securitize', totalAssets } as unknown as SecuritizeVault)
+    ({ type: 'SecuritizeCollateral', totalAssets } as SecuritizeCollateralVault)
   const earnVault = (availableAssets: bigint) =>
-    ({ type: 'earn', availableAssets } as unknown as EarnVault)
+    ({ type: 'EulerEarn', availableAssets } as EulerEarn)
 
-  it('returns the user withdrawable amount when EVK cash is higher', () => {
+  it('returns the user withdrawable amount when EVault liquidity is higher', () => {
     expect(getCashLimitedWithdrawAmount(1_000n, evkVault(2_000n))).toBe(1_000n)
   })
 
-  it('caps the amount to EVK totalCash when cash is lower', () => {
+  it('caps the amount to EVault available liquidity when liquidity is lower', () => {
     expect(getCashLimitedWithdrawAmount(2_000n, evkVault(1_000n))).toBe(1_000n)
   })
 
@@ -82,12 +26,12 @@ describe('getCashLimitedWithdrawAmount', () => {
     expect(getCashLimitedWithdrawAmount(2_000n, undefined)).toBe(2_000n)
   })
 
-  it('caps SecuritizeVault by totalAssets (no borrowing on these vaults)', () => {
+  it('caps SecuritizeCollateralVault by totalAssets', () => {
     expect(getCashLimitedWithdrawAmount(2_000n, securitizeVault(1_000n))).toBe(1_000n)
     expect(getCashLimitedWithdrawAmount(500n, securitizeVault(1_000n))).toBe(500n)
   })
 
-  it('caps EarnVault by availableAssets (strategies may have allocated cash out)', () => {
+  it('caps EulerEarn by availableAssets', () => {
     expect(getCashLimitedWithdrawAmount(2_000n, earnVault(1_000n))).toBe(1_000n)
     expect(getCashLimitedWithdrawAmount(500n, earnVault(1_000n))).toBe(500n)
   })
@@ -115,8 +59,8 @@ describe('getCashLimitedWithdrawAmount', () => {
 })
 
 describe('getBorrowVaultsByMap', () => {
-  const makeVault = (address: string, collateralLTVs: Array<{ collateral: string, borrowLTV: bigint, liquidationLTV: bigint, initialLiquidationLTV: bigint, targetTimestamp: bigint, rampDuration: bigint }>) =>
-    ({ address, collateralLTVs }) as unknown as Vault
+  const makeVault = (address: string, collaterals: Array<{ address: string, borrowLTV: number, liquidationLTV: number, initialLiquidationLTV: number, targetTimestamp: number, rampDuration: bigint }>) =>
+    ({ address, collaterals }) as unknown as EVault
 
   it('returns empty array for empty map', () => {
     expect(getBorrowVaultsByMap(new Map())).toEqual([])
@@ -124,11 +68,11 @@ describe('getBorrowVaultsByMap', () => {
 
   it('returns pairs for vaults with borrowLTV > 0', () => {
     const vaultA = makeVault('0xA', [{
-      collateral: '0xB',
-      borrowLTV: 8000n,
-      liquidationLTV: 8500n,
-      initialLiquidationLTV: 8500n,
-      targetTimestamp: 0n,
+      address: '0xB',
+      borrowLTV: 0.8,
+      liquidationLTV: 0.85,
+      initialLiquidationLTV: 0.85,
+      targetTimestamp: 0,
       rampDuration: 0n,
     }])
     const vaultB = makeVault('0xB', [])
@@ -137,16 +81,16 @@ describe('getBorrowVaultsByMap', () => {
     expect(pairs).toHaveLength(1)
     expect(pairs[0].borrow).toBe(vaultA)
     expect(pairs[0].collateral).toBe(vaultB)
-    expect(pairs[0].borrowLTV).toBe(8000n)
+    expect(pairs[0].ltv.borrowLTV).toBe(0.8)
   })
 
   it('skips LTVs with borrowLTV = 0', () => {
     const vault = makeVault('0xA', [{
-      collateral: '0xB',
-      borrowLTV: 0n,
-      liquidationLTV: 0n,
-      initialLiquidationLTV: 0n,
-      targetTimestamp: 0n,
+      address: '0xB',
+      borrowLTV: 0,
+      liquidationLTV: 0,
+      initialLiquidationLTV: 0,
+      targetTimestamp: 0,
       rampDuration: 0n,
     }])
     const map = new Map([['0xA', vault]])
@@ -155,11 +99,11 @@ describe('getBorrowVaultsByMap', () => {
 
   it('filters out pairs where collateral vault is not in map', () => {
     const vault = makeVault('0xA', [{
-      collateral: '0xMissing',
-      borrowLTV: 8000n,
-      liquidationLTV: 8500n,
-      initialLiquidationLTV: 8500n,
-      targetTimestamp: 0n,
+      address: '0xMissing',
+      borrowLTV: 0.8,
+      liquidationLTV: 0.85,
+      initialLiquidationLTV: 0.85,
+      targetTimestamp: 0,
       rampDuration: 0n,
     }])
     const map = new Map([['0xA', vault]])
@@ -171,32 +115,28 @@ describe('getBorrowVaultsByMap', () => {
 describe('isCyclicalNoteVault', () => {
   it('returns true for EVK vaults using the fixed cyclical IRM', () => {
     const vault = {
-      irmInfo: {
-        interestRateModelInfo: {
-          interestRateModelType: INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY,
-        },
+      interestRateModel: {
+        type: INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY,
       },
-    } as Vault
+    } as unknown as EVault
 
     expect(isCyclicalNoteVault(vault)).toBe(true)
   })
 
   it('returns false for non-cyclical EVK vaults', () => {
     const vault = {
-      irmInfo: {
-        interestRateModelInfo: {
-          interestRateModelType: INTEREST_RATE_MODEL_TYPE.KINK,
-        },
+      interestRateModel: {
+        type: INTEREST_RATE_MODEL_TYPE.KINK,
       },
-    } as Vault
+    } as unknown as EVault
 
     expect(isCyclicalNoteVault(vault)).toBe(false)
   })
 
   it('returns false for securitize vaults and missing vault data', () => {
     const securitizeVault = {
-      type: 'securitize',
-    } as SecuritizeVault
+      type: 'SecuritizeCollateral',
+    } as SecuritizeCollateralVault
 
     expect(isCyclicalNoteVault(securitizeVault)).toBe(false)
     expect(isCyclicalNoteVault(null)).toBe(false)
@@ -205,18 +145,14 @@ describe('isCyclicalNoteVault', () => {
 
   it('returns false when the IRM type is missing or not numeric', () => {
     const missingType = {
-      irmInfo: {
-        interestRateModelInfo: {},
-      },
-    } as Vault
+      interestRateModel: {},
+    } as unknown as EVault
 
     const stringType = {
-      irmInfo: {
-        interestRateModelInfo: {
-          interestRateModelType: `${INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY}` as unknown as number,
-        },
+      interestRateModel: {
+        type: `${INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY}`,
       },
-    } as Vault
+    } as unknown as EVault
 
     expect(isCyclicalNoteVault(missingType)).toBe(false)
     expect(isCyclicalNoteVault(stringType)).toBe(false)

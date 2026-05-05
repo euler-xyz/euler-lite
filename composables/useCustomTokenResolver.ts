@@ -52,7 +52,7 @@ export const useCustomTokenResolver = () => {
       }
 
       const symbol = symbolResult as string
-      const decimals = BigInt(decimalsResult as number)
+      const decimals = decimalsResult as number
       const name = (nameResult as string) || symbol
 
       customToken.value = { address: input, symbol, decimals, name }

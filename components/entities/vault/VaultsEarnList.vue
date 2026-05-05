@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import type { EarnVault } from '~/entities/vault'
+import type { EulerEarn } from '~/entities/vault'
 
-defineProps<{ items: EarnVault[] }>()
+defineProps<{ items: EulerEarn[] }>()
 </script>
 
 <template>

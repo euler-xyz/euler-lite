@@ -3,7 +3,7 @@ import { useAccount } from '@wagmi/vue'
 import { logWarn } from '~/utils/errorHandling'
 import { OperationReviewModal, SlippageSettingsModal } from '#components'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
+import type { EVault, SecuritizeCollateralVault } from '~/entities/vault'
 import type { SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { getAssetUsdValue } from '~/services/pricing/priceProvider'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
@@ -23,14 +23,14 @@ export interface UseSwapPageLogicOptions {
   amountField: SwapQuoteAmountField
   /** Quote ranking direction */
   compare: SwapQuoteCompare
-  /** Source vault — may be SecuritizeVault (collateral/lend) */
-  fromVault: Ref<Vault | SecuritizeVault | undefined>
+  /** Source vault — may be SecuritizeCollateralVault (collateral/lend) */
+  fromVault: Ref<EVault | SecuritizeCollateralVault | undefined>
   /** Target vault — composable writes to this ref via syncToVault / onToVaultChange */
-  toVault: Ref<Vault | undefined>
+  toVault: Ref<EVault | undefined>
   /** Source balance (e.g. currentDebt or deposit assets) */
   balance: ComputedRef<bigint>
   /** Vault list shown in the "To" dropdown */
-  vaultOptions: ComputedRef<Vault[]>
+  vaultOptions: ComputedRef<EVault[]>
   /** Which quote field to display as the "To" amount and in route cards */
   displayAmountField: SwapQuoteAmountField
   /** Prefix for non-best quote diff badges ('+' for min compare, '-' for max compare) */
@@ -157,7 +157,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
       toAmount.value = ''
       return
     }
-    const formatted = formatUnits(amount, Number(toVault.value.decimals))
+    const formatted = formatUnits(amount, Number(toVault.value.shares.decimals))
     toAmount.value = formatSmartAmount(formatted).replace(/,/g, '')
   }, { immediate: true })
 
@@ -420,7 +420,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     return buildSwapRouteItems({
       quoteCards: quoteCardsSorted.value,
       getQuoteDiffPct,
-      decimals: Number(toVault.value.decimals),
+      decimals: Number(toVault.value.shares.decimals),
       symbol: toVault.value.asset.symbol,
       formatAmount: formatSmartAmount,
       amountField: displayAmountField,

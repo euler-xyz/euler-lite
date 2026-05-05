@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import { useAccount } from '@wagmi/vue'
 import { getAddress } from 'viem'
+import { collectPythFeedsFromAdapters } from '@eulerxyz/euler-v2-sdk'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultUnverifiedDisclaimerModal, SlippageSettingsModal } from '#components'
-import { type AnyBorrowVaultPair, type BorrowVaultPair, type VaultAsset, type CollateralOption, type Vault, type SecuritizeVault, isSecuritizeBorrowPair } from '~/entities/vault'
-import { collectPythFeedIds } from '~/entities/oracle'
+import { type AnyBorrowVaultPair, type BorrowVaultPair, type VaultAsset, type CollateralOption, type EVault, type SecuritizeCollateralVault, isSecuritizeBorrowPair } from '~/entities/vault'
+import { getAssetOraclePrice, getCollateralShareOraclePrice } from '~/services/pricing/priceProvider'
 import { getNewSubAccount } from '~/entities/account'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
-import { nanoToValue } from '~/utils/crypto-utils'
+import { ltvToPercent } from '~/utils/crypto-utils'
 import { useBorrowForm } from '~/composables/borrow/useBorrowForm'
 import { useMultiplyForm } from '~/composables/borrow/useMultiplyForm'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
@@ -101,12 +102,12 @@ const resolvePendingSubAccount = async (): Promise<string> => {
 const collateralSupplyRewardApy = computed(() => getSupplyRewardApy(pair.value?.collateral.address || ''))
 const borrowRewardApy = computed(() => getBorrowRewardApy(pair.value?.borrow.address || '', pair.value?.collateral.address || ''))
 const collateralSupplyApy = computed(() => withIntrinsicSupplyApy(
-  nanoToValue(collateralVault.value?.interestRateInfo.supplyAPY || 0n, 25),
+  getVaultSupplyApy(collateralVault.value),
   collateralVault.value?.asset.address,
 ))
 const collateralSupplyApyWithRewards = computed(() => collateralSupplyApy.value + collateralSupplyRewardApy.value)
 const borrowApy = computed(() => withIntrinsicBorrowApy(
-  nanoToValue(borrowVault.value?.interestRateInfo.borrowAPY || 0n, 25),
+  getVaultBorrowApy(borrowVault.value),
   borrowVault.value?.asset.address,
 ))
 
@@ -130,8 +131,8 @@ const collateralProduct = useEulerProductOfVault(computed(() => collateralVault.
 // --- Composable instantiation ---
 const borrow = useBorrowForm({
   pair,
-  borrowVault: borrowVault as ComputedRef<Vault | undefined>,
-  collateralVault: collateralVault as ComputedRef<Vault | undefined>,
+  borrowVault: borrowVault as ComputedRef<EVault | undefined>,
+  collateralVault: collateralVault as ComputedRef<EVault | undefined>,
   formTab,
   savingCollateral: savingCollateral as ComputedRef<{ assets: bigint, subAccount?: string, shares: bigint } | undefined>,
   balance,
@@ -152,8 +153,8 @@ const borrow = useBorrowForm({
 
 const multiply = useMultiplyForm({
   pair,
-  borrowVault: borrowVault as ComputedRef<Vault | undefined>,
-  collateralVault: collateralVault as ComputedRef<Vault | undefined>,
+  borrowVault: borrowVault as ComputedRef<EVault | undefined>,
+  collateralVault: collateralVault as ComputedRef<EVault | undefined>,
   formTab,
   resolvePendingSubAccount,
   isPendingSubAccountLoading,
@@ -287,26 +288,24 @@ const onSubmit = async () => {
 }
 
 // --- Pyth oracle refresh logic ---
-const hasPythOracles = (vault: Vault | undefined): boolean => {
+const hasPythOracles = (vault: EVault | undefined): boolean => {
   if (!vault) return false
-  const feeds = collectPythFeedIds(vault.oracleDetailedInfo)
+  const feeds = collectPythFeedsFromAdapters(vault.oracle.adapters)
   return feeds.length > 0
 }
 
-const hasBorrowPriceFailure = (vault: Vault | undefined): boolean => {
+const hasBorrowPriceFailure = (vault: EVault | undefined): boolean => {
   if (!vault) return false
+  const price = getAssetOraclePrice(vault)
   return (
-    vault.liabilityPriceInfo?.queryFailure
-    || vault.liabilityPriceInfo?.amountOutMid === undefined
-    || vault.liabilityPriceInfo?.amountOutMid === null
+    price?.amountOutMid === undefined
+    || price?.amountOutMid === null
   )
 }
 
-const hasCollateralPriceFailure = (bVault: Vault | undefined, collAddr: string | undefined): boolean => {
+const hasCollateralPriceFailure = (bVault: EVault | undefined, collAddr: string | undefined): boolean => {
   if (!bVault || !collAddr) return false
-  const collateralPrice = bVault.collateralPrices.find(
-    p => p.asset.toLowerCase() === collAddr.toLowerCase(),
-  )
+  const collateralPrice = getCollateralShareOraclePrice(bVault, { address: collAddr })
   if (!collateralPrice) return true
   return (
     collateralPrice.queryFailure
@@ -315,11 +314,11 @@ const hasCollateralPriceFailure = (bVault: Vault | undefined, collAddr: string |
   )
 }
 
-const needsRefresh = (vault: Vault | undefined): boolean => {
+const needsRefresh = (vault: EVault | undefined): boolean => {
   return hasPythOracles(vault) || hasBorrowPriceFailure(vault)
 }
 
-const needsRefreshForCollateral = (bVault: Vault | undefined, collAddr: string | undefined): boolean => {
+const needsRefreshForCollateral = (bVault: EVault | undefined, collAddr: string | undefined): boolean => {
   return hasPythOracles(bVault) || hasCollateralPriceFailure(bVault, collAddr)
 }
 
@@ -355,8 +354,8 @@ watch(pair, async (val) => {
     current = pair.value
   }
 
-  if ('liabilityPriceInfo' in current.collateral) {
-    const collateralVaultTyped = current.collateral as Vault
+  if (current.collateral.type === 'EVault') {
+    const collateralVaultTyped = current.collateral as EVault
     const collateralAddr = collateralVaultTyped.address.toLowerCase()
 
     if (needsRefresh(collateralVaultTyped) && !refreshedVaultAddresses.has(collateralAddr)) {
@@ -369,12 +368,13 @@ watch(pair, async (val) => {
 
   const supplyAddress = normalizeAddress(multiply.multiplySupplyVault.value?.address)
   const isSupplyAllowed = supplyAddress
-    ? current.borrow.collateralLTVs.some(ltv => normalizeAddress(ltv.collateral) === supplyAddress)
+    ? current.borrow.collaterals.some(ltv => normalizeAddress(ltv.address) === supplyAddress)
     : false
   if (!multiply.multiplySupplyVault.value || !isSupplyAllowed) {
-    multiply.initMultiplySupplyVault(current.collateral as Vault)
+    multiply.initMultiplySupplyVault(current.collateral as EVault)
   }
-  if (!current.collateral.verified || !current.borrow.verified) {
+  const { isVerifiedVault } = useVaultRegistry()
+  if (!isVerifiedVault(current.collateral.address) || !isVerifiedVault(current.borrow.address)) {
     if (!unverifiedDisclaimerShown) {
       unverifiedDisclaimerShown = true
       modal.open(VaultUnverifiedDisclaimerModal, {
@@ -470,12 +470,12 @@ watch(formTab, () => {
             />
             <SecuritizeVaultOverview
               v-else-if="tab === 'collateral' && isSecuritizeCollateral"
-              :vault="(pair.collateral as SecuritizeVault)"
+              :vault="(pair.collateral as SecuritizeCollateralVault)"
               desktop-overview
             />
             <VaultOverview
               v-else-if="tab === 'collateral'"
-              :vault="(pair.collateral as Vault)"
+              :vault="(pair.collateral as EVault)"
               desktop-overview
               @vault-click="(address: string) => router.push({ path: `/lend/${address}`, query: { network: route.query.network } })"
             />
@@ -594,7 +594,7 @@ watch(formTab, () => {
                   v-model="borrow.ltv.value"
                   label="LTV"
                   :step="0.1"
-                  :max="Number(pair.borrowLTV / 100n)"
+                  :max="ltvToPercent(pair.ltv.borrowLTV)"
                   :number-filter="(n: number) => `${formatNumber(n, 2, 0)}%`"
                   @update:model-value="borrow.onLtvInput"
                 />
@@ -757,7 +757,7 @@ watch(formTab, () => {
                       :desc="multiply.multiplyLongProduct.name"
                       label="Additional collateral"
                       :asset="multiply.multiplyLongVault.value.asset"
-                      :vault="(multiply.multiplyLongVault.value as Vault)"
+                      :vault="(multiply.multiplyLongVault.value as EVault)"
                       :readonly="true"
                     />
 

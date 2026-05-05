@@ -7,9 +7,8 @@ import { OperationReviewModal, SwapTokenSelector, SlippageSettingsModal } from '
 import { useToast } from '~/components/ui/composables/useToast'
 import {
   convertSharesToAssets,
-  fetchSecuritizeVault,
-  type Vault,
-  type SecuritizeVault,
+  type EVault,
+  type SecuritizeCollateralVault,
   type VaultAsset,
   getCashLimitedWithdrawAmount,
   getProjectedRates,
@@ -61,7 +60,7 @@ const isPreparing = ref(false)
 const isEstimatesLoading = ref(false)
 const amount = ref('')
 const plan = ref<TxPlan | null>(null)
-const vault: Ref<Vault | SecuritizeVault | undefined> = ref()
+const vault: Ref<EVault | SecuritizeCollateralVault | undefined> = ref()
 const asset: Ref<VaultAsset | undefined> = ref()
 
 // Check if vault is securitize (for things like supply/borrow which securitize doesn't have)
@@ -70,14 +69,14 @@ const isSecuritizeVaultType = computed(() => vault.value && 'type' in vault.valu
 const withdrawWarnings = computed(() => {
   if (!vault.value || isSecuritizeVaultType.value) return []
   return [
-    getHookDisabledWarning(vault.value as Vault, effectiveWithdrawOp.value),
-    getUtilisationWarning(vault.value as Vault, 'lend'),
+    getHookDisabledWarning(vault.value as EVault, effectiveWithdrawOp.value),
+    getUtilisationWarning(vault.value as EVault, 'lend'),
   ]
 })
 const assetsBalance = ref(0n)
 const sharesBalance = ref(0n)
 const delta = ref(0n)
-const estimateSupplyAPY = ref(0n)
+const estimateSupplyAPY = ref<number | bigint>(0)
 const estimatesError = ref('')
 
 // Withdraw & swap state
@@ -132,7 +131,7 @@ const isOutputAssetRestricted = computed(() =>
 )
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value) return false
-  if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return true
+  if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as EVault, effectiveWithdrawOp.value)) return true
   if (isOutputAssetBlocked.value || isOutputAssetRestricted.value) return true
   if (withdrawableAssets.value < amountFixed.value.value) return true
   if (isLoading.value || amountFixed.value.isZero() || amountFixed.value.isNegative()) return true
@@ -142,7 +141,7 @@ const isSubmitDisabled = computed(() => {
 })
 const reviewWithdrawDisabled = isSubmitDisabled
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return { message: 'Withdrawals are currently disabled for this vault', variant: 'warning' }
+  if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as EVault, effectiveWithdrawOp.value)) return { message: 'Withdrawals are currently disabled for this vault', variant: 'warning' }
   if (isOutputAssetBlocked.value || isOutputAssetRestricted.value) return { message: 'Receiving this asset is not available in your region', variant: 'warning' }
   if (estimatesError.value) return { message: estimatesError.value, variant: 'error' }
   if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return { message: 'Insufficient balance', variant: 'error' }
@@ -153,11 +152,14 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 })
 const supplyAPYDisplay = computed(() => {
   if (!vault.value) return '0.00'
-  const base = withIntrinsicSupplyApy(nanoToValue(vault.value.interestRateInfo.supplyAPY, 25), vault.value.asset.address)
+  const base = withIntrinsicSupplyApy(getVaultSupplyApy(vault.value), vault.value.asset.address)
   return formatNumber(base + rewardApy.value)
 })
 const estimateSupplyAPYDisplay = computed(() => {
-  const base = withIntrinsicSupplyApy(nanoToValue(estimateSupplyAPY.value, 25), vault.value?.asset.address)
+  const estimate = typeof estimateSupplyAPY.value === 'bigint'
+    ? nanoToValue(estimateSupplyAPY.value, 25)
+    : estimateSupplyAPY.value
+  const base = withIntrinsicSupplyApy(estimate, vault.value?.asset.address)
   return formatNumber(base + rewardApy.value)
 })
 
@@ -174,9 +176,9 @@ watchEffect(async () => {
     deltaUsd.value = 0
     return
   }
-  assetsBalanceUsd.value = await getAssetUsdValueOrZero(assetsBalance.value, vault.value as Vault, 'off-chain')
-  withdrawableAssetsUsd.value = await getAssetUsdValueOrZero(withdrawableAssets.value, vault.value as Vault, 'off-chain')
-  deltaUsd.value = await getAssetUsdValueOrZero(delta.value, vault.value as Vault, 'off-chain')
+  assetsBalanceUsd.value = await getAssetUsdValueOrZero(assetsBalance.value, vault.value as EVault, 'off-chain')
+  withdrawableAssetsUsd.value = await getAssetUsdValueOrZero(withdrawableAssets.value, vault.value as EVault, 'off-chain')
+  deltaUsd.value = await getAssetUsdValueOrZero(delta.value, vault.value as EVault, 'off-chain')
 })
 
 // Swap quote helpers
@@ -296,12 +298,12 @@ const load = async () => {
     // Check if securitize vault first
     const isSecuritize = await isSecuritizeVault(vaultAddress)
     if (isSecuritize) {
-      vault.value = await fetchSecuritizeVault(vaultAddress, buildFetchContext())
-      estimateSupplyAPY.value = 0n // Securitize vaults don't have interest rate
+      vault.value = await _getSecuritizeVault(vaultAddress)
+      estimateSupplyAPY.value = 0 // Securitize vaults don't have interest rate
     }
     else {
       vault.value = await getVault(vaultAddress)
-      estimateSupplyAPY.value = (vault.value as Vault).interestRateInfo.supplyAPY
+      estimateSupplyAPY.value = getVaultSupplyApy(vault.value as EVault)
     }
 
     asset.value = vault.value?.asset
@@ -494,22 +496,22 @@ const updateAsyncEstimates = useDebounceFn(async () => {
   }
   const gen = estimatesGuard.next()
   try {
-    const v = vault.value as Vault
-    const amountNano = valueToNano(amount.value, v.decimals)
+    const v = vault.value as EVault
+    const amountNano = valueToNano(amount.value, v.shares.decimals)
     const projected = await getProjectedRates(
       v.address,
-      v.interestRateInfo.cash,
-      v.interestRateInfo.borrows,
+      v.totalCash,
+      v.totalBorrowed,
       -amountNano,
       0n,
     )
     if (estimatesGuard.isStale(gen)) return
-    estimateSupplyAPY.value = projected?.supplyAPY ?? v.interestRateInfo.supplyAPY
+    estimateSupplyAPY.value = projected?.supplyAPY ?? getVaultSupplyApy(v)
   }
   catch (e) {
     if (estimatesGuard.isStale(gen)) return
     logWarn('lend-withdraw/asyncEstimates', e)
-    estimateSupplyAPY.value = (vault.value as Vault)?.interestRateInfo.supplyAPY || 0n
+    estimateSupplyAPY.value = getVaultSupplyApy(vault.value as EVault)
   }
   finally {
     if (!estimatesGuard.isStale(gen)) {
@@ -591,7 +593,7 @@ watch(swapSelectedQuote, () => {
               v-model="amount"
               label="Withdraw amount"
               :asset="asset"
-              :vault="(vault as Vault)"
+              :vault="(vault as EVault)"
               :balance="withdrawableAssets"
               maxable
             />

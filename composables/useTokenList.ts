@@ -153,7 +153,7 @@ const toVaultAsset = (entry: TokenListEntry): VaultAsset => ({
   name: entry.name,
   symbol: entry.symbol,
   address: getAddress(entry.address),
-  decimals: BigInt(entry.decimals),
+  decimals: entry.decimals,
 })
 
 const tokenIconOverrides = new Map(

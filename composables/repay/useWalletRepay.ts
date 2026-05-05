@@ -17,7 +17,7 @@ import { trimTrailingZeros } from '~/utils/string-utils'
 import { amountToPercent, percentToAmountNano } from '~/utils/repayUtils'
 import { findBlockingDisabledOp, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
-import type { Vault } from '~/entities/vault'
+import type { EVault } from '~/entities/vault'
 
 interface UseWalletRepayOptions {
   position: Ref<AccountBorrowPosition | undefined>
@@ -77,11 +77,11 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   const isEstimatesLoading = ref(false)
 
   const amountFixed = computed(() => FixedPoint.fromValue(
-    valueToNano(amount.value || '0', borrowVault.value?.decimals),
-    Number(borrowVault.value?.decimals),
+    valueToNano(amount.value || '0', borrowVault.value?.asset.decimals),
+    Number(borrowVault.value?.asset.decimals),
   ))
-  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, position.value?.borrow.decimals || 18))
-  const suppliedFixed = computed(() => FixedPoint.fromValue(position.value?.supplied || 0n, position.value?.collateral.decimals || 18))
+  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, position.value?.borrow.shares.decimals || 18))
+  const suppliedFixed = computed(() => FixedPoint.fromValue(position.value?.supplied || 0n, position.value?.collateral.shares.decimals || 18))
   const priceFixed = computed(() => {
     const ratio = oraclePriceRatio.value
     if (ratio && Number.isFinite(ratio) && ratio > 0) {
@@ -110,7 +110,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     if (isFullRepay) {
       const collAddrs = position.value?.collaterals ?? (collateralVault.value ? [collateralVault.value.address] : [])
       for (const addr of collAddrs) {
-        const v = registryGetVault(addr) as Vault | undefined
+        const v = registryGetVault(addr) as EVault | undefined
         if (v) steps.push({ vault: v, op: OP_TRANSFER })
       }
     }
@@ -225,7 +225,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     estimatesError.value = ''
     if (!position.value || !collateralVault.value || !borrowVault.value) return
     try {
-      if (walletBalance.value < valueToNano(amount.value, borrowVault.value.decimals)) {
+      if (walletBalance.value < valueToNano(amount.value, borrowVault.value.shares.decimals)) {
         throw new Error('Not enough balance')
       }
       if (borrowedFixed.value.lt(amountFixed.value)) {
@@ -267,14 +267,14 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     }
     const gen = asyncEstimatesGuard.next()
     try {
-      const repayNano = valueToNano(amount.value, borrowVault.value.decimals)
+      const repayNano = valueToNano(amount.value, borrowVault.value.shares.decimals)
       const remainingBorrow = (position.value.borrowed || 0n) - repayNano
 
       const [projected, supplyUsd, borrowUsd] = await Promise.all([
         getProjectedRates(
           borrowVault.value.address,
-          borrowVault.value.interestRateInfo.cash,
-          borrowVault.value.interestRateInfo.borrows,
+          borrowVault.value.totalCash,
+          borrowVault.value.totalBorrowed,
           repayNano,
           -repayNano,
         ),
@@ -285,7 +285,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       if (asyncEstimatesGuard.isStale(gen)) return
 
       const projectedBorrowApy = projected
-        ? borrowApy.value + (nanoToValue(projected.borrowAPY, 25) - nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25))
+        ? borrowApy.value + (nanoToValue(projected.borrowAPY, 25) - getVaultBorrowApy(borrowVault.value))
         : borrowApy.value
 
       _estimateNetAPY.value = getNetAPY(

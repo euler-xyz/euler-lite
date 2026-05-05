@@ -4,7 +4,7 @@ import {
   eulerLabelProductEmpty,
   type EulerLabelVaultOverride,
 } from '~/entities/euler/labels'
-import type { EarnVault } from '~/entities/vault'
+import type { EulerEarn } from '~/entities/vault'
 import { type OracleAdapterMeta, OracleAdapterCheckSeverity } from '~/entities/oracle'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import {
@@ -341,22 +341,21 @@ export const isProductKeyring = (productKey: string): boolean => {
   return products[productKey]?.keyring === true
 }
 
-// Widened to Vault | SecuritizeVault — both expose governorAdmin: string and
-// the helper only reads that one field. Callers from the discovery matrix
-// pass either type without casting.
-export const getEntitiesByVault = (vault: { governorAdmin: string }) => {
+export const getEntitiesByVault = (vault: { governorAdmin?: string, governor?: string }) => {
   const arr: EulerLabelEntity[] = []
+  const governor = vault.governorAdmin ?? vault.governor
+  if (!governor) return arr
   Object.values(entities).forEach((entity) => {
-    if (Object.keys(entity.addresses).includes(vault.governorAdmin)) {
+    if (Object.keys(entity.addresses).includes(governor)) {
       arr.push(entity)
     }
   })
   return arr
 }
 
-export const getEntitiesByEarnVault = (earnVault: EarnVault) => {
+export const getEntitiesByEarnVault = (earnVault: EulerEarn) => {
   const arr: EulerLabelEntity[] = []
-  const ownerAddress = normalizeAddress(earnVault.owner)
+  const ownerAddress = normalizeAddress(earnVault.governance.owner)
 
   Object.values(entities).forEach((entity) => {
     if (entity.addresses && Object.keys(entity.addresses).includes(ownerAddress)) {

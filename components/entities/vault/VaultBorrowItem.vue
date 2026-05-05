@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { getAddress } from 'viem'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
-import { type AnyBorrowVaultPair, type Vault, getVaultUtilization, isCyclicalNoteVault } from '~/entities/vault'
-import { getUtilisationWarning, getBorrowCapWarning, getCollateralSupplyCapWarning } from '~/composables/useVaultWarnings'
+import { type AnyBorrowVaultPair, type EVault, isCyclicalNoteVault } from '~/entities/vault'
+import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isVaultRecentlyAdded, isVaultKeyring, getEntitiesByVault } from '~/utils/eulerLabelsUtils'
+import { isVaultFeatured, isVaultKeyring, getEntitiesByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -16,20 +15,21 @@ import { VaultBorrowApyModal, VaultMaxRoeModal, VaultNetApyPairModal, VaultSuppl
 const { pair } = defineProps<{ pair: AnyBorrowVaultPair }>()
 const { enableEntityBranding } = useDeployConfig()
 const { isVaultGovernorVerified } = useVaults()
+const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
 
 const isAnyGovernorUnverified = computed(() => {
   const borrowUnverified = !isVaultGovernorVerified(pair.borrow)
   const collateralUnverified = 'governorAdmin' in pair.collateral
-    ? !isVaultGovernorVerified(pair.collateral as Vault)
+    ? !isVaultGovernorVerified(pair.collateral as EVault)
     : false
   return borrowUnverified || collateralUnverified
 })
 
 const entityDisplay = computed(() => {
   const borrowEntities = getEntitiesByVault(pair.borrow)
-  // Collateral may be SecuritizeVault but getEntitiesByVault only needs governorAdmin
+  // Collateral may be SecuritizeCollateralVault but getEntitiesByVault only needs governorAdmin
   const collateralEntities = 'governorAdmin' in pair.collateral
-    ? getEntitiesByVault(pair.collateral as Vault)
+    ? getEntitiesByVault(pair.collateral as EVault)
     : []
   // Deduplicate by name
   const seen = new Set<string>()
@@ -67,15 +67,12 @@ const isAnyGovernanceLimited = computed(() =>
 )
 
 const isEscrowCollateral = computed(
-  () =>
-    'vaultCategory' in pair.collateral
-    && pair.collateral.vaultCategory === 'escrow',
+  () => getVaultCategory(pair.collateral.address) === 'escrow',
 )
 
 const isAnyUnverified = computed(() => {
-  const collateralUnverified
-    = 'verified' in pair.collateral && !pair.collateral.verified
-  const borrowUnverified = 'verified' in pair.borrow && !pair.borrow.verified
+  const collateralUnverified = !isVerifiedVault(pair.collateral.address)
+  const borrowUnverified = !isVerifiedVault(pair.borrow.address)
   return collateralUnverified || borrowUnverified
 })
 
@@ -92,7 +89,7 @@ const isPairEffectivelyBlocked = computed(() => {
     && isVaultRestrictedByCountry(pair.collateral.address)
 })
 
-const isRecentlyAdded = computed(() => isVaultRecentlyAdded(pair.collateral.address) || isVaultRecentlyAdded(pair.borrow.address))
+const isFeatured = computed(() => isVaultFeatured(pair.collateral.address) || isVaultFeatured(pair.borrow.address))
 const isKeyring = computed(() => isVaultKeyring(pair.collateral.address) || isVaultKeyring(pair.borrow.address))
 const isCyclicalNote = computed(() => isCyclicalNoteVault(pair.borrow))
 
@@ -108,8 +105,8 @@ const pairName = computed(() => {
   // Handle escrow collateral specially
   const collateralName = isEscrowCollateral.value
     ? 'Escrowed collateral'
-    : collateralProduct.name || pair.collateral.name
-  const borrowName = borrowProduct.name || pair.borrow.name
+    : collateralProduct.name || pair.collateral.shares.name
+  const borrowName = borrowProduct.name || pair.borrow.shares.name
 
   if (collateralName === borrowName) {
     return collateralName
@@ -132,18 +129,12 @@ const hasAnyRewards = computed(() =>
   hasSupplyRewards(pair.collateral.address) || hasBorrowApyRewards.value || hasLoopingRewards(pair.borrow.address, pair.collateral.address),
 )
 const supplyApy = computed(() => {
-  const interestRateInfo
-    = 'interestRateInfo' in pair.collateral
-      ? pair.collateral.interestRateInfo
-      : null
-  const baseApy = interestRateInfo
-    ? nanoToValue(interestRateInfo.supplyAPY, 25)
-    : 0
+  const baseApy = getVaultSupplyApy(pair.collateral)
   return withIntrinsicSupplyApy(baseApy, pair.collateral.asset.address)
 })
 const borrowApy = computed(() =>
   withIntrinsicBorrowApy(
-    nanoToValue(pair.borrow.interestRateInfo.borrowAPY, 25),
+    getVaultBorrowApy(pair.borrow),
     pair.borrow.asset.address,
   ),
 )
@@ -153,23 +144,22 @@ const supplyApyWithRewards = computed(
 const borrowApyWithRewards = computed(
   () => borrowApy.value - borrowRewardsAPY.value,
 )
-const maxMultiplier = computed(() => getMaxMultiplier(pair.borrowLTV))
+const maxMultiplier = computed(() => getMaxMultiplier(pair.ltv.borrowLTV))
 const netApy = computed(
   () => supplyApyWithRewards.value - borrowApyWithRewards.value + loopingRewardsAPY.value,
 )
 const maxRoe = computed(() =>
   getMaxRoe(maxMultiplier.value, supplyApyWithRewards.value, borrowApyWithRewards.value, loopingRewardsAPY.value),
 )
-const maxLTV = computed(() => formatNumber(nanoToValue(pair.borrowLTV, 2), 2))
-const utilization = computed(() => getVaultUtilization(pair.borrow))
+const maxLTV = computed(() => formatNumber(ltvToPercent(pair.ltv.borrowLTV), 2))
+const utilization = computed(() => pair.borrow.utilization)
 const utilisationWarning = computed(() => getUtilisationWarning(pair.borrow, 'borrow'))
 const borrowCapInfo = computed(() => getBorrowCapWarning(pair.borrow))
-const supplyCapInfo = computed(() => getCollateralSupplyCapWarning(pair.collateral))
 
 const liquidityDisplay = ref('-')
 
 watchEffect(async () => {
-  const liquidity = pair.borrow.supply - pair.borrow.borrow
+  const liquidity = pair.borrow.availableLiquidity
   const price = await formatAssetValue(liquidity, pair.borrow, 'off-chain')
   liquidityDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
 })
@@ -179,7 +169,7 @@ const onBorrowInfoIconClick = (event: MouseEvent) => {
   event.stopPropagation()
   modal.open(VaultBorrowApyModal, {
     props: {
-      borrowingAPY: nanoToValue(pair.borrow.interestRateInfo.borrowAPY, 25),
+      borrowingAPY: getVaultBorrowApy(pair.borrow),
       intrinsicAPY: getIntrinsicApy(pair.borrow.asset.address),
       intrinsicApyInfo: getIntrinsicApyInfo(pair.borrow.asset.address),
       campaigns: getBorrowRewardCampaigns(pair.borrow.address, pair.collateral.address),
@@ -206,10 +196,8 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
 const onNetApyInfoIconClick = (event: MouseEvent) => {
   event.preventDefault()
   event.stopPropagation()
-  const baseSupply = 'interestRateInfo' in pair.collateral
-    ? nanoToValue(pair.collateral.interestRateInfo.supplyAPY, 25)
-    : 0
-  const baseBorrow = nanoToValue(pair.borrow.interestRateInfo.borrowAPY, 25)
+  const baseSupply = getVaultSupplyApy(pair.collateral)
+  const baseBorrow = getVaultBorrowApy(pair.borrow)
   modal.open(VaultNetApyPairModal, {
     props: {
       supplyAPY: baseSupply,
@@ -235,7 +223,7 @@ const onMaxRoeInfoIconClick = (event: MouseEvent) => {
       maxMultiplier: maxMultiplier.value,
       supplyAPY: supplyApyWithRewards.value,
       borrowAPY: borrowApyWithRewards.value,
-      borrowLTV: nanoToValue(pair.borrowLTV, 2),
+      borrowLTV: ltvToPercent(pair.ltv.borrowLTV),
       borrowVaultAddress: pair.borrow.address,
       collateralAddress: pair.collateral.address,
     },
@@ -277,15 +265,15 @@ const linkPath = computed(() => ({
               :is-unverified="isAnyUnverified"
             />
             <span
-              v-if="isRecentlyAdded"
+              v-if="isFeatured"
               class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5"
-              title="Recently added vault"
+              title="Featured Vault"
             >
               <SvgIcon
                 name="star"
                 class="!w-14 !h-14"
               />
-              Recently added
+              Featured
             </span>
             <KeyringBadge v-if="isKeyring" />
             <GovernanceLimitedBadge v-if="isAnyGovernanceLimited" />
@@ -419,7 +407,7 @@ const linkPath = computed(() => ({
         <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
           Available liquidity
           <VaultWarningIcon
-            :warning="[borrowCapInfo, supplyCapInfo]"
+            :warning="borrowCapInfo"
             tooltip-placement="top-start"
           />
         </div>

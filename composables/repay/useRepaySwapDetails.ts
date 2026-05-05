@@ -1,6 +1,6 @@
 import type { Ref, ComputedRef } from 'vue'
 import { formatUnits } from 'viem'
-import type { Vault } from '~/entities/vault'
+import type { EVault } from '~/entities/vault'
 import type { AccountBorrowPosition } from '~/entities/account'
 import { getAssetUsdValue } from '~/services/pricing/priceProvider'
 import { SwapperMode } from '~/entities/swap'
@@ -10,7 +10,7 @@ import type { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
 
 interface UseRepaySwapDetailsOptions {
   quotes: ReturnType<typeof useSwapRepayQuotes>
-  sourceVault: Ref<Vault | undefined>
+  sourceVault: Ref<EVault | undefined>
   borrowVault: ComputedRef<AccountBorrowPosition['borrow'] | undefined>
   direction: Ref<SwapperMode>
 }

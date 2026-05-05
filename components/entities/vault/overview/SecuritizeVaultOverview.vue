@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { getAddress, maxUint256, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
-import type { SecuritizeVault, Vault, VaultCollateralLTV } from '~/entities/vault'
+import type { SecuritizeCollateralVault, EVault, EVaultCollateral } from '~/entities/vault'
 import { useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
 import { getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -16,7 +16,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
 
-const { vault } = defineProps<{ vault: SecuritizeVault, desktopOverview?: boolean }>()
+const { vault } = defineProps<{ vault: SecuritizeCollateralVault, desktopOverview?: boolean }>()
 const route = useRoute()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
@@ -32,8 +32,8 @@ const product = useEulerProductOfVault(vaultAddress)
 const description = computed(() => {
   return product.vaultOverrides?.[vaultAddress.value]?.description ?? product.description
 })
-const entities = useEulerEntitiesOfVault(vault as unknown as Vault)
-const isGovernorVerified = computed(() => isVaultGovernorVerified(vault as unknown as Vault))
+const entities = useEulerEntitiesOfVault(vault as unknown as EVault)
+const isGovernorVerified = computed(() => isVaultGovernorVerified(vault as unknown as EVault))
 const isGovernanceLimited = computed(() => product.isGovernanceLimited && isGovernorVerified.value)
 const marketProductKey = computed(() => getProductKeyByVault(vault.address))
 
@@ -59,12 +59,12 @@ const borrowCount = computed(() => 0)
 // Find EVK vaults where this securitize vault can be used as collateral
 const borrowMarkets = computed(() => {
   const markets: Array<{
-    borrowVault: Vault
-    ltv: VaultCollateralLTV
+    borrowVault: EVault
+    ltv: EVaultCollateral
   }> = []
 
   getEvkVaults().forEach((v) => {
-    const ltv = v.collateralLTVs.find(l => l.collateral === vault.address && l.borrowLTV > 0n)
+    const ltv = v.collaterals.find(l => l.address === vault.address && l.borrowLTV > 0)
     if (ltv) {
       markets.push({ borrowVault: v, ltv })
     }
@@ -107,7 +107,7 @@ const loadRiskParameters = async () => {
         stateMutability: 'view',
       }] as const,
       functionName: 'convertToAssets',
-      args: [1n * 10n ** vault.decimals],
+      args: [1n * 10n ** BigInt(vault.shares.decimals)],
     }) as bigint
   }
   catch (e) {
@@ -403,21 +403,21 @@ const supplyCapPercentageDisplay = computed(() => {
           </div>
         </VaultOverviewLabelValue>
         <VaultOverviewLabelValue
-          v-if="vault.governorAdmin && vault.governorAdmin !== '0x0000000000000000000000000000000000000000'"
+          v-if="vault.governor && vault.governor !== '0x0000000000000000000000000000000000000000'"
           label="Risk manager"
           orientation="horizontal"
         >
           <div class="flex gap-4 items-center">
             <NuxtLink
-              :to="getExplorerAddressLink(vault.governorAdmin)"
+              :to="getExplorerAddressLink(vault.governor)"
               class="text-accent-600 underline cursor-pointer hover:text-accent-500"
               target="_blank"
             >
-              {{ getSpecialAddressLabel(vault.governorAdmin) || shortenAddress(vault.governorAdmin) }}
+              {{ getSpecialAddressLabel(vault.governor) || shortenAddress(vault.governor) }}
             </NuxtLink>
             <button
               class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary"
-              @click="onCopyClick(vault.governorAdmin)"
+              @click="onCopyClick(vault.governor)"
             >
               <SvgIcon
                 class="!w-18 !h-18"

@@ -1,7 +1,7 @@
 import { nanoToValue } from '~/utils/crypto-utils'
 import type { AccountBorrowPosition } from '~/entities/account'
 import { getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
+import type { EVault, SecuritizeCollateralVault } from '~/entities/vault'
 
 /**
  * Derives the total collateral value (in borrow-asset terms) from the position's
@@ -11,7 +11,7 @@ import type { Vault, SecuritizeVault } from '~/entities/vault'
  * Returns null if the position has no borrow or LTV is zero.
  */
 export function getTotalCollateralValue(position: AccountBorrowPosition): number | null {
-  const borrowed = nanoToValue(position.borrowed, position.borrow.decimals || 18)
+  const borrowed = nanoToValue(position.borrowed, position.borrow.shares.decimals || 18)
   const userLtv = nanoToValue(position.userLTV, 18)
   if (userLtv <= 0 || borrowed <= 0) return null
   return borrowed / userLtv * 100
@@ -22,8 +22,8 @@ export function getTotalCollateralValue(position: AccountBorrowPosition): number
  * Returns the value of 1 unit of collateral in borrow-asset terms.
  */
 export function getCollateralPriceRatio(
-  borrowVault: Vault,
-  collateralVault: Vault | SecuritizeVault,
+  borrowVault: EVault,
+  collateralVault: EVault | SecuritizeCollateralVault,
 ): number | null {
   const collateralPrice = getCollateralOraclePrice(borrowVault, collateralVault)
   const borrowPrice = getAssetOraclePrice(borrowVault)
@@ -57,7 +57,7 @@ export function estimatePositionAfterChange(params: EstimateParams): PositionEst
   const totalCollateralValue = getTotalCollateralValue(position)
   if (totalCollateralValue === null) return null
 
-  const borrowed = nanoToValue(position.borrowed, position.borrow.decimals || 18)
+  const borrowed = nanoToValue(position.borrowed, position.borrow.shares.decimals || 18)
   const liquidationLtv = Number(position.liquidationLTV) / 100
 
   // Adjust collateral value

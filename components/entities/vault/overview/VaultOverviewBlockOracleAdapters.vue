@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import type { CSSProperties } from 'vue'
 import type { Address } from 'viem'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
-import { collectOracleAdapters, getChecksStatus, OracleAdapterCheckSeverity, type OracleAdapterEntry, type OracleAdapterMeta } from '~/entities/oracle'
+import { selectLeafAdaptersForPair, type OracleAdapterEntry } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, SecuritizeCollateralVault } from '~/entities/vault'
+import { getChecksStatus, OracleAdapterCheckSeverity, type OracleAdapterMeta } from '~/entities/oracle'
 import { getOracleProviderLogo } from '~/entities/oracle-providers'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { formatNumber } from '~/utils/string-utils'
 import { useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
 
 const props = defineProps<{
-  vault?: Vault
-  vaults?: Vault[]
-  collateralVaults?: (Vault | SecuritizeVault)[]
+  vault?: EVault
+  vaults?: EVault[]
+  collateralVaults?: (EVault | SecuritizeCollateralVault)[]
 }>()
 const { oracleAdapters, loadOracleAdapter } = useEulerLabels()
 const { chainId } = useEulerAddresses()
@@ -42,20 +43,21 @@ const adapters = computed(() => {
   const deduped = new Map<string, OracleAdapterEntry>()
 
   sourceVaults.value.forEach((vault) => {
-    entries.push(...collectOracleAdapters(vault.oracleDetailedInfo, 3, {
-      base: vault.asset.address as Address,
-      quote: vault.unitOfAccount as Address,
-      leafOnly: true,
-    }))
+    if (!vault.unitOfAccount) return
+
+    entries.push(...selectLeafAdaptersForPair(
+      vault.oracle.adapters,
+      vault.asset.address as Address,
+      vault.unitOfAccount.address as Address,
+    ))
 
     if (props.collateralVaults?.length) {
       props.collateralVaults.forEach((collateralVault) => {
-        entries.push(...collectOracleAdapters(vault.oracleDetailedInfo, 3, {
-          base: collateralVault.address as Address,
-          quote: vault.unitOfAccount as Address,
-          leafOnly: true,
-          skipERC4626Bases: skipERC4626Bases.value,
-        }))
+        entries.push(...selectLeafAdaptersForPair(
+          vault.oracle.adapters,
+          collateralVault.address as Address,
+          vault.unitOfAccount!.address as Address,
+        ).filter(adapter => !skipERC4626Bases.value.has(adapter.base.toLowerCase())))
       })
     }
   })
@@ -75,8 +77,8 @@ const knownSymbols = computed(() => {
 
   sourceVaults.value.forEach((vault) => {
     map.set(vault.asset.address.toLowerCase(), vault.asset.symbol)
-    if (vault.unitOfAccountSymbol) {
-      map.set(vault.unitOfAccount.toLowerCase(), vault.unitOfAccountSymbol)
+    if (vault.unitOfAccount) {
+      map.set(vault.unitOfAccount.address.toLowerCase(), vault.unitOfAccount.symbol)
     }
   })
 

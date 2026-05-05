@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import type { BorrowVaultPair, EarnVault, SecuritizeVault, Vault } from '~/entities/vault'
+import type { BorrowVaultPair, EulerEarn, SecuritizeCollateralVault, EVault } from '~/entities/vault'
 import { VaultOverviewModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import type { AccountBorrowPosition } from '~/entities/account'
 
-const { vault, pair, earnVault, extraVault } = defineProps<{ vault?: Vault | SecuritizeVault, pair?: BorrowVaultPair | AccountBorrowPosition, earnVault?: EarnVault, extraVault?: Vault, disabled?: boolean }>()
+const { vault, pair, earnVault, extraVault } = defineProps<{ vault?: EVault | SecuritizeCollateralVault, pair?: BorrowVaultPair | AccountBorrowPosition, earnVault?: EulerEarn, extraVault?: EVault, disabled?: boolean }>()
 const modal = useModal()
 
-const isSecuritize = (v: Vault | SecuritizeVault | undefined): v is SecuritizeVault =>
+const isSecuritize = (v: EVault | SecuritizeCollateralVault | undefined): v is SecuritizeCollateralVault =>
   !!v && 'type' in v && v.type === 'securitize'
 
 const onClick = () => {

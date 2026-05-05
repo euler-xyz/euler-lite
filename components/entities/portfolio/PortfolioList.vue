@@ -6,7 +6,7 @@ import type { FuulClaimableReward } from '~/entities/fuul'
 
 defineProps<{
   type: 'lend' | 'borrow' | 'earn' | 'rewards' | 'brevis-rewards' | 'fuul-rewards'
-  items: AccountDepositPosition[] | AccountBorrowPosition[] | Reward[] | Campaign[] | FuulClaimableReward[]
+  items: any[]
 }>()
 </script>
 

@@ -1,26 +1,25 @@
 <script setup lang="ts">
-import { getVaultUtilization, type Vault } from '~/entities/vault'
+import type { EVault } from '~/entities/vault'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal, VaultBorrowApyModal } from '#components'
 
-const { vault } = defineProps<{ vault: Vault }>()
+const { vault } = defineProps<{ vault: EVault }>()
 
 const modal = useModal()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, getBorrowRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, hasSupplyRewards, hasBorrowRewards } = useRewardsApy()
-const isBorrowable = computed(() => vault.collateralLTVs.some(ltv => ltv.borrowLTV > 0n))
+const isBorrowable = computed(() => vault.collaterals.some(ltv => ltv.borrowLTV > 0))
 
 const supplyApyWithRewards = computed(() => withIntrinsicSupplyApy(
-  nanoToValue(vault.interestRateInfo.supplyAPY, 25),
+  getVaultSupplyApy(vault),
   vault.asset.address,
 ) + getSupplyRewardApy(vault.address))
 // Vault overview shows generic borrow rewards (no specific collateral context available here)
 const borrowApyWithRewards = computed(() => withIntrinsicBorrowApy(
-  nanoToValue(vault.interestRateInfo.borrowAPY, 25),
+  getVaultBorrowApy(vault),
   vault.asset.address,
 ) - getBorrowRewardApy(vault.address))
 
@@ -30,7 +29,7 @@ const borrowRewardInfo = computed(() => getBorrowRewardCampaigns(vault.address))
 const onSupplyInfoIconClick = () => {
   modal.open(VaultSupplyApyModal, {
     props: {
-      lendingAPY: nanoToValue(vault.interestRateInfo.supplyAPY, 25),
+      lendingAPY: getVaultSupplyApy(vault),
       intrinsicAPY: getIntrinsicApy(vault.asset.address),
       intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
       campaigns: supplyRewardInfo.value,
@@ -41,7 +40,7 @@ const onSupplyInfoIconClick = () => {
 const onBorrowInfoIconClick = () => {
   modal.open(VaultBorrowApyModal, {
     props: {
-      borrowingAPY: nanoToValue(vault.interestRateInfo.borrowAPY, 25),
+      borrowingAPY: getVaultBorrowApy(vault),
       intrinsicAPY: getIntrinsicApy(vault.asset.address),
       intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
       campaigns: borrowRewardInfo.value,
@@ -49,7 +48,7 @@ const onBorrowInfoIconClick = () => {
   })
 }
 
-const utilization = computed(() => getVaultUtilization(vault))
+const utilization = computed(() => vault.utilization)
 const utilisationWarning = computed(() => getUtilisationWarning(vault, 'general'))
 
 const totalSupplyDisplay = ref('-')
@@ -57,17 +56,17 @@ const totalBorrowedDisplay = ref('-')
 const availableLiquidityDisplay = ref('-')
 
 watchEffect(async () => {
-  const price = await formatAssetValue(vault.supply, vault, 'off-chain')
+  const price = await formatAssetValue(vault.totalAssets, vault, 'off-chain')
   totalSupplyDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
 })
 
 watchEffect(async () => {
-  const price = await formatAssetValue(vault.borrow, vault, 'off-chain')
+  const price = await formatAssetValue(vault.totalBorrowed, vault, 'off-chain')
   totalBorrowedDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
 })
 
 watchEffect(async () => {
-  const liquidity = vault.supply >= vault.borrow ? vault.supply - vault.borrow : 0n
+  const liquidity = vault.availableLiquidity
   const price = await formatAssetValue(liquidity, vault, 'off-chain')
   availableLiquidityDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
 })

@@ -1,24 +1,24 @@
 <script setup lang="ts">
-import type { EarnVault } from '~/entities/vault'
+import type { EulerEarn } from '~/entities/vault'
 import { formatTtl } from '~/utils/crypto-utils'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { getSpecialAddressLabel } from '~/utils/special-addresses'
 
-const { vault } = defineProps<{ vault: EarnVault }>()
+const { vault } = defineProps<{ vault: EulerEarn }>()
 const { chainId } = useEulerAddresses()
 
 const vaultAddressesInfo = computed(() => ([
   {
     title: `Owner`,
-    address: vault.owner,
+    address: vault.governance.owner,
   },
   {
     title: `Curator`,
-    address: vault.curator,
+    address: vault.governance.curator,
   },
   {
     title: `Guardian`,
-    address: vault.guardian,
+    address: vault.governance.guardian,
   },
 ]))
 
@@ -27,12 +27,12 @@ const shortenAddress = (address: string) => {
 }
 
 const timelockDisplay = computed(() => {
-  if (vault.timelock === 0n) {
+  if (vault.governance.timelock === 0) {
     return '0 days'
   }
 
-  const timelockInSeconds = vault.timelock
-  const timelockInDays = timelockInSeconds / 86400n
+  const timelockInSeconds = vault.governance.timelock
+  const timelockInDays = BigInt(Math.floor(timelockInSeconds / 86400))
   return formatTtl(timelockInDays)?.display || 'Unknown'
 })
 

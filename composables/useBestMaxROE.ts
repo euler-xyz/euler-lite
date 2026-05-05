@@ -1,6 +1,5 @@
 import type { MarketGroup } from '~/entities/lend-discovery'
 import { type BestMaxRoeResult, getBorrowableVaults, isVaultType } from '~/utils/discoveryCalculations'
-import { nanoToValue } from '~/utils/crypto-utils'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 
 /**
@@ -33,12 +32,12 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
     let bestCollateralAddress = ''
 
     for (const liability of borrowableVaults) {
-      const borrowBase = nanoToValue(liability.interestRateInfo.borrowAPY, 25)
+      const borrowBase = getVaultBorrowApy(liability)
       const borrowApy = withIntrinsicBorrowApy(borrowBase, liability.asset.address)
 
-      for (const ltv of liability.collateralLTVs) {
-        if (ltv.borrowLTV <= 0n) continue
-        const colAddr = ltv.collateral.toLowerCase()
+      for (const ltv of liability.collaterals) {
+        if (ltv.borrowLTV <= 0) continue
+        const colAddr = ltv.address.toLowerCase()
         if (!knownAddresses.has(colAddr)) continue
 
         const collateral = allVaults.find(
@@ -46,7 +45,7 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
         )
         if (!collateral || !isVaultType(collateral)) continue
 
-        const supplyBase = nanoToValue(collateral.interestRateInfo.supplyAPY, 25)
+        const supplyBase = getVaultSupplyApy(collateral)
         const supplyApy = withIntrinsicSupplyApy(supplyBase, collateral.asset.address)
         const supplyRewards = getSupplyRewardApy(collateral.address)
         const borrowRewards = getBorrowRewardApy(liability.address, collateral.address)
@@ -64,7 +63,7 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
           bestMultiplier = maxMultiplier
           bestSupplyAPY = supplyFinal
           bestBorrowAPY = borrowFinal
-          bestBorrowLTV = nanoToValue(ltv.borrowLTV, 2)
+          bestBorrowLTV = ltvToPercent(ltv.borrowLTV)
           bestBorrowVaultAddress = liability.address
           bestCollateralAddress = collateral.address
         }

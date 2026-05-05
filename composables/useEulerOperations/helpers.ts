@@ -10,7 +10,7 @@ import type { TxStep } from '~/entities/txPlan'
 import { buildPythUpdateCalls, buildPythUpdateCallsFromFeeds, collectPythFeedsForHealthCheck, sumCallValues } from '~/utils/pyth'
 import { logWarn } from '~/utils/errorHandling'
 import { INTEREST_ADJUSTMENT_BPS, BPS_BASE } from '~/entities/tuning-constants'
-import type { Vault } from '~/entities/vault'
+import type { EVault } from '~/entities/vault'
 
 /** Pad amount by 0.01% to cover interest accrual between plan build and tx execution */
 export const adjustForInterest = (amount: bigint) => (amount * INTEREST_ADJUSTMENT_BPS) / BPS_BASE
@@ -37,7 +37,7 @@ export const createOperationHelpers = (ctx: OperationsContext, permit2: Permit2H
   const preparePythUpdates = async (vaultAddresses: string[], sender: Address) => {
     try {
       const vaults = vaultAddresses.map((addr) => {
-        return ctx.registryGetVault(getAddress(addr)) as Vault | undefined
+        return ctx.registryGetVault(getAddress(addr)) as EVault | undefined
       })
       return await buildPythUpdateCalls(vaults, ctx.rpcUrl, ctx.PYTH_HERMES_URL, sender)
     }
@@ -53,7 +53,7 @@ export const createOperationHelpers = (ctx: OperationsContext, permit2: Permit2H
     sender: Address,
   ) => {
     try {
-      const liabilityVault = ctx.registryGetVault(getAddress(liabilityVaultAddress)) as Vault | undefined
+      const liabilityVault = ctx.registryGetVault(getAddress(liabilityVaultAddress)) as EVault | undefined
       if (!liabilityVault) {
         logWarn('preparePythUpdatesForHealthCheck', `liability vault not found: ${liabilityVaultAddress}`)
         return { calls: [], totalFee: 0n }

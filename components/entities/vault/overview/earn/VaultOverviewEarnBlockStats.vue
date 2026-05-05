@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import type { EarnVault } from '~/entities/vault'
+import type { EulerEarn } from '~/entities/vault'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
 
-const { vault } = defineProps<{ vault: EarnVault }>()
+const { vault } = defineProps<{ vault: EulerEarn }>()
 
 const modal = useModal()
 const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
@@ -31,7 +30,7 @@ watchEffect(async () => {
 const onSupplyInfoIconClick = () => {
   modal.open(VaultSupplyApyModal, {
     props: {
-      lendingAPY: nanoToValue(vault.interestRateInfo.supplyAPY, 25),
+      lendingAPY: getVaultSupplyApy(vault),
       intrinsicAPY: getIntrinsicApy(vault.asset.address),
       intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
       campaigns: getSupplyRewardCampaigns(vault.address),
@@ -75,7 +74,7 @@ const onSupplyInfoIconClick = () => {
             name="sparks"
             @click="onSupplyInfoIconClick"
           />
-          {{ formatNumber(nanoToValue(vault.interestRateInfo.supplyAPY, 25) + rewardSupplyAPY) }}%
+          {{ formatNumber(getVaultSupplyApy(vault) + rewardSupplyAPY) }}%
         </span>
       </VaultOverviewLabelValue>
     </div>

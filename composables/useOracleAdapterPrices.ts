@@ -6,7 +6,7 @@ import { priceOracleAbi } from '~/abis/oracle'
 import { vaultConvertToAssetsAbi } from '~/abis/vault'
 import { USD_ADDRESS, EUR_ADDRESS, BTC_ADDRESS, ETH_ADDRESS } from '~/entities/constants'
 import type { OracleAdapterEntry } from '~/entities/oracle'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
+import type { EVault, SecuritizeCollateralVault } from '~/entities/vault'
 import { buildPythBatchItems } from '~/utils/pyth'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { buildBatchItem } from '~/utils/multicall'
@@ -22,8 +22,8 @@ const getAdapterKey = (adapter: OracleAdapterEntry) =>
   `${adapter.oracle.toLowerCase()}:${adapter.base.toLowerCase()}:${adapter.quote.toLowerCase()}`
 
 const buildKnownDecimals = (
-  sourceVaults: Vault[],
-  collateralVaults: (Vault | SecuritizeVault)[],
+  sourceVaults: EVault[],
+  collateralVaults: (EVault | SecuritizeCollateralVault)[],
 ): Map<string, number> => {
   const decimals = new Map<string, number>()
 
@@ -35,20 +35,20 @@ const buildKnownDecimals = (
   decimals.set(BTC_ADDRESS.toLowerCase(), 18)
   decimals.set(ETH_ADDRESS.toLowerCase(), 18)
 
-  const addVaultDecimals = (vault: Vault | SecuritizeVault) => {
+  const addVaultDecimals = (vault: EVault | SecuritizeCollateralVault) => {
     if (vault.asset?.address && vault.asset?.decimals !== undefined) {
       decimals.set(vault.asset.address.toLowerCase(), Number(vault.asset.decimals))
     }
-    if (vault.address && vault.decimals !== undefined) {
-      decimals.set(vault.address.toLowerCase(), Number(vault.decimals))
+    if (vault.address && vault.shares.decimals !== undefined) {
+      decimals.set(vault.address.toLowerCase(), Number(vault.shares.decimals))
     }
   }
 
   // Add unit of account decimals from source vaults
   sourceVaults.forEach((vault) => {
     addVaultDecimals(vault)
-    if (vault.unitOfAccount && vault.unitOfAccountDecimals !== undefined) {
-      decimals.set(vault.unitOfAccount.toLowerCase(), Number(vault.unitOfAccountDecimals))
+    if (vault.unitOfAccount) {
+      decimals.set(vault.unitOfAccount.address.toLowerCase(), Number(vault.unitOfAccount.decimals))
     }
   })
 
@@ -229,8 +229,8 @@ const decodePriceResults = (
 
 export const useOracleAdapterPrices = (
   adapters: ComputedRef<OracleAdapterEntry[]>,
-  sourceVaults: ComputedRef<Vault[]>,
-  collateralVaults: ComputedRef<(Vault | SecuritizeVault)[]>,
+  sourceVaults: ComputedRef<EVault[]>,
+  collateralVaults: ComputedRef<(EVault | SecuritizeCollateralVault)[]>,
 ) => {
   const prices: Ref<Map<string, AdapterPriceInfo>> = shallowRef(new Map())
   const isLoading = ref(false)

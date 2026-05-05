@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { type Vault, isCyclicalNoteVault } from '~/entities/vault'
+import { type EVault, isCyclicalNoteVault } from '~/entities/vault'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
 }>()
-const { vault } = defineProps<{ vault: Vault, desktopOverview?: boolean }>()
+const { vault } = defineProps<{ vault: EVault, desktopOverview?: boolean }>()
 
 const isCyclicalIRM = computed(() => isCyclicalNoteVault(vault))
 </script>

@@ -1,13 +1,13 @@
 import { getAddress, type Address } from 'viem'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import type { CollateralOption, Vault } from '~/entities/vault'
+import type { CollateralOption, EVault } from '~/entities/vault'
 import { buildCollateralOption, computeSupplyApy } from '~/utils/collateralOptions'
 import { useReactiveMap } from '~/composables/useReactiveMap'
 import { shouldIncludeWalletCollateral } from '~/utils/collateralFilters'
 
 type CollateralItem = {
-  vault: Vault
+  vault: EVault
   option: CollateralOption
 }
 
@@ -15,8 +15,8 @@ export const useMultiplyCollateralOptions = ({
   primaryCollateralVault,
   liabilityVault,
 }: {
-  primaryCollateralVault: Ref<Vault | undefined>
-  liabilityVault?: Ref<Vault | undefined>
+  primaryCollateralVault: Ref<EVault | undefined>
+  liabilityVault?: Ref<EVault | undefined>
 }) => {
   const { getVault } = useVaultRegistry()
   const { getBalance } = useWallets()
@@ -35,11 +35,11 @@ export const useMultiplyCollateralOptions = ({
       return []
     }
 
-    const items: { vault: Vault, balance: bigint }[] = []
-    liability.collateralLTVs
-      .filter(ltv => ltv.borrowLTV > 0n)
+    const items: { vault: EVault, balance: bigint }[] = []
+    liability.collaterals
+      .filter(ltv => ltv.borrowLTV > 0)
       .forEach((ltv) => {
-        const vault = getVault(ltv.collateral) as Vault | undefined
+        const vault = getVault(ltv.address) as EVault | undefined
         if (!vault) return
 
         const balance = getBalance(vault.asset.address as Address)
@@ -74,11 +74,11 @@ export const useMultiplyCollateralOptions = ({
     const liability = liabilityVault?.value
     if (!liability) return []
     const validCollaterals = new Set(
-      liability.collateralLTVs.filter(ltv => ltv.borrowLTV > 0n).map(ltv => getAddress(ltv.collateral)),
+      liability.collaterals.filter(ltv => ltv.borrowLTV > 0).map(ltv => getAddress(ltv.address)),
     )
     return depositPositions.value
       .filter(position => position.assets > 0n && validCollaterals.has(getAddress(position.vault.address)))
-      .map(position => ({ vault: position.vault as Vault, assets: position.assets }))
+      .map(position => ({ vault: position.vault as EVault, assets: position.assets }))
   })
 
   const savingItems = useReactiveMap(
@@ -106,7 +106,7 @@ export const useMultiplyCollateralOptions = ({
     return combinedItems.value.map(item => item.option)
   })
 
-  const collateralVaults = computed<Vault[]>(() => {
+  const collateralVaults = computed<EVault[]>(() => {
     return combinedItems.value.map(item => item.vault)
   })
 

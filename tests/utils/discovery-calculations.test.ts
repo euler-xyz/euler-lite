@@ -10,7 +10,7 @@ import {
   type VaultUsdCacheEntry,
 } from '~/utils/discoveryCalculations'
 import type { MarketGroup } from '~/entities/lend-discovery'
-import type { Vault, VaultCollateralLTV } from '~/entities/vault/types'
+import type { EVault, EVaultCollateral } from '~/entities/vault/types'
 
 vi.mock('~/entities/euler/labels', () => ({
   getEulerLabelEntityLogo: () => undefined,
@@ -21,26 +21,35 @@ vi.mock('~/utils/eulerLabelsUtils', () => ({
   isVaultDeprecated: () => false,
 }))
 
-const nowSeconds = BigInt(Math.floor(Date.now() / 1000))
+vi.stubGlobal('useVaultRegistry', () => ({
+  getVaultCategory: () => undefined,
+}))
 
-const makeLtv = (overrides: Partial<VaultCollateralLTV> = {}): VaultCollateralLTV => ({
-  collateral: '0xCollateral',
-  borrowLTV: 0n,
-  liquidationLTV: 7000n,
-  initialLiquidationLTV: 8500n,
-  targetTimestamp: nowSeconds + 1000n,
-  rampDuration: 2000n,
+const makeLtv = (overrides: Partial<any> = {}): EVaultCollateral => ({
+  address: '0xCollateral',
+  borrowLTV: 0,
+  liquidationLTV: 0.7,
+  currentLiquidationLTV: 0.75,
+  isLiquidationLTVRamping: true,
+  rampTimeRemaining: 1000n,
+  oraclePriceRaw: {
+    amountIn: 0n,
+    amountOutMid: 0n,
+    amountOutBid: 0n,
+    amountOutAsk: 0n,
+    timestamp: 0,
+  },
   ...overrides,
-})
+}) as unknown as EVaultCollateral
 
-const makeVault = (address: string, collateralLTVs: VaultCollateralLTV[]): Vault =>
+const makeVault = (address: string, collaterals: EVaultCollateral[]): EVault =>
   ({
     address,
-    collateralLTVs,
+    collaterals,
     asset: { address, symbol: 'TST' },
-  }) as unknown as Vault
+  }) as unknown as EVault
 
-const makeMarket = (vaults: Vault[], externalCollateral: Vault[] = []): MarketGroup =>
+const makeMarket = (vaults: EVault[], externalCollateral: EVault[] = []): MarketGroup =>
   ({
     vaults,
     externalCollateral,
@@ -48,7 +57,7 @@ const makeMarket = (vaults: Vault[], externalCollateral: Vault[] = []): MarketGr
 
 describe('isNodeRampingDown', () => {
   it('marks the vault whose own collateral LTV is ramping down after borrow LTV is zeroed', () => {
-    const borrowVault = makeVault('0xBorrow', [makeLtv({ collateral: '0xCollateral' })])
+    const borrowVault = makeVault('0xBorrow', [makeLtv({ address: '0xCollateral' })])
     const collateralVault = makeVault('0xCollateral', [])
     const market = makeMarket([borrowVault, collateralVault])
 
@@ -56,7 +65,7 @@ describe('isNodeRampingDown', () => {
   })
 
   it('does not mark a collateral vault just because another vault is ramping against it', () => {
-    const borrowVault = makeVault('0xBorrow', [makeLtv({ collateral: '0xCollateral' })])
+    const borrowVault = makeVault('0xBorrow', [makeLtv({ address: '0xCollateral' })])
     const collateralVault = makeVault('0xCollateral', [])
     const market = makeMarket([borrowVault, collateralVault])
 
@@ -66,11 +75,13 @@ describe('isNodeRampingDown', () => {
   it('does not mark completed or upward LTV changes as ramping down', () => {
     const vault = makeVault('0xBorrow', [
       makeLtv({
-        liquidationLTV: 9000n,
-        initialLiquidationLTV: 8500n,
+        liquidationLTV: 0.9,
+        currentLiquidationLTV: 0.9,
+        isLiquidationLTVRamping: false,
       }),
       makeLtv({
-        targetTimestamp: nowSeconds - 1n,
+        currentLiquidationLTV: 0.7,
+        isLiquidationLTVRamping: false,
       }),
     ])
     const market = makeMarket([vault])
@@ -81,7 +92,7 @@ describe('isNodeRampingDown', () => {
 
 describe('getCollateralMatrix', () => {
   it('keeps a vault as a matrix column while its liquidation LTV is still ramping down', () => {
-    const borrowVault = makeVault('0xBorrow', [makeLtv({ collateral: '0xCollateral', borrowLTV: 0n })])
+    const borrowVault = makeVault('0xBorrow', [makeLtv({ address: '0xCollateral', borrowLTV: 0 })])
     const collateralVault = makeVault('0xCollateral', [])
     const market = makeMarket([borrowVault, collateralVault])
 
@@ -95,11 +106,11 @@ describe('getCollateralMatrix', () => {
   it('drops a vault from matrix columns once all of its collateral relationships are fully ramped out', () => {
     const phasedOutVault = makeVault('0xBorrow', [
       makeLtv({
-        collateral: '0xCollateral',
-        borrowLTV: 0n,
-        liquidationLTV: 0n,
-        initialLiquidationLTV: 8500n,
-        targetTimestamp: nowSeconds - 1n,
+        address: '0xCollateral',
+        borrowLTV: 0,
+        liquidationLTV: 0,
+        currentLiquidationLTV: 0,
+        isLiquidationLTVRamping: false,
       }),
     ])
     const collateralVault = makeVault('0xCollateral', [])
@@ -112,23 +123,23 @@ describe('getCollateralMatrix', () => {
 describe('getActiveExternalCollateral', () => {
   it('keeps an external collateral vault visible while the borrow vault is ramping it out', () => {
     const borrowVault = makeVault('0xBorrow', [
-      makeLtv({ collateral: '0xExternal', borrowLTV: 0n }),
+      makeLtv({ address: '0xExternal', borrowLTV: 0 }),
     ])
     const externalVault = makeVault('0xExternal', [])
     const market = makeMarket([borrowVault], [externalVault])
 
     const active = getActiveExternalCollateral(market)
-    expect(active.map(v => (v as Vault).address)).toContain('0xExternal')
+    expect(active.map(v => (v as EVault).address)).toContain('0xExternal')
   })
 
   it('drops an external collateral once the relationship is fully ramped out', () => {
     const borrowVault = makeVault('0xBorrow', [
       makeLtv({
-        collateral: '0xExternal',
-        borrowLTV: 0n,
-        liquidationLTV: 0n,
-        initialLiquidationLTV: 8500n,
-        targetTimestamp: nowSeconds - 1n,
+        address: '0xExternal',
+        borrowLTV: 0,
+        liquidationLTV: 0,
+        currentLiquidationLTV: 0,
+        isLiquidationLTVRamping: false,
       }),
     ])
     const externalVault = makeVault('0xExternal', [])
@@ -142,16 +153,22 @@ describe('attribute stats matrix', () => {
   it('emits numeric values and directional rows for heatmap rendering', () => {
     const vault = {
       ...makeVault('0xStats', []),
-      supply: 400n,
-      borrow: 500n,
+      totalCash: 500n,
+      totalBorrowed: 500n,
       totalAssets: 1000n,
-      supplyCap: 1000n,
-      borrowCap: 1000n,
-      interestRateInfo: {
-        supplyAPY: 5n * 10n ** 25n,
-        borrowAPY: 12n * 10n ** 25n,
+      availableLiquidity: 500n,
+      utilization: 50,
+      caps: {
+        supplyCap: 1000n,
+        borrowCap: 1000n,
+        supplyCapUtilization: 40,
+        borrowCapUtilization: 50,
       },
-    } as Vault
+      interestRates: {
+        supplyAPY: 5,
+        borrowAPY: 12,
+      },
+    } as unknown as EVault
     const usd: VaultUsdCacheEntry = {
       supply: '$1K',
       supplyUsd: 1000,

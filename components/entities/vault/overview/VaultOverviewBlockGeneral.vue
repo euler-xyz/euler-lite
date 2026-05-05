@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { getAddress } from 'viem'
-import type { Vault } from '~/entities/vault'
+import type { EVault } from '~/entities/vault'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { useEulerEntitiesOfVault, useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { getProductKeyByVault } from '~/utils/eulerLabelsUtils'
@@ -8,7 +8,7 @@ import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { autoLink } from '~/utils/autoLink'
 
-const { vault } = defineProps<{ vault: Vault }>()
+const { vault } = defineProps<{ vault: EVault }>()
 const route = useRoute()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
@@ -45,7 +45,7 @@ const collateralCount = computed(() => {
 
 // Count how many borrow pairs have this vault as the liability (borrow) side
 const borrowCount = computed(() => {
-  return vault.collateralLTVs.filter(ltv => ltv.borrowLTV > 0n).length
+  return vault.collaterals.filter(ltv => ltv.borrowLTV > 0).length
 })
 
 const priceDisplay = ref('-')

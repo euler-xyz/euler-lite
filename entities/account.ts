@@ -1,5 +1,5 @@
 import { getAddress, pad, toHex } from 'viem'
-import type { EarnVault, SecuritizeVault, Vault } from '~/entities/vault'
+import type { EulerEarn, SecuritizeCollateralVault, EVault } from '~/entities/vault'
 import { fetchAccountPositions } from '~/utils/subgraph'
 
 export interface AccountVaultLiquidity {
@@ -36,8 +36,8 @@ export interface AccountVault {
   vault: string
 }
 export interface AccountBorrowPosition {
-  borrow: Vault
-  collateral: Vault | SecuritizeVault
+  borrow: EVault
+  collateral: EVault | SecuritizeCollateralVault
   collaterals?: string[]
   subAccount: string
   health: bigint
@@ -54,7 +54,7 @@ export interface AccountBorrowPosition {
   liquidityQueryFailure?: boolean
 }
 export interface AccountDepositPosition {
-  vault: Vault | SecuritizeVault | EarnVault
+  vault: EVault | SecuritizeCollateralVault | EulerEarn
   subAccount: string
   shares: bigint
   assets: bigint

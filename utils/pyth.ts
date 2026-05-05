@@ -1,11 +1,12 @@
 import { encodeFunctionData, decodeFunctionResult, zeroAddress, type Address, type Hex, type Abi } from 'viem'
+import { collectPythFeedsFromAdapters, selectLeafAdaptersForPair } from '@eulerxyz/euler-v2-sdk'
 import type { EVCCall } from './evc-converter'
 import { PYTH_ABI } from '~/abis/pyth'
 import type { BatchItem } from '~/abis/evc'
 import { DEFAULT_PRICE_CACHE_TTL_MS } from '~/entities/constants'
 import { CACHE_TTL_15S_MS, BATCH_DELAY_COLLECT_MS } from '~/entities/tuning-constants'
-import { collectPythFeedIds, collectPythFeedIdsForPair, type PythFeed } from '~/entities/oracle'
-import type { Vault } from '~/entities/vault'
+import type { PythFeed } from '~/entities/oracle'
+import type { EVault } from '~/entities/vault'
 import { getPublicClient } from '~/utils/public-client'
 import { evcBatchCall } from '~/utils/multicall'
 import { logger } from '~/utils/logger'
@@ -148,10 +149,10 @@ const priceToAmountOutMid = (price: { price: string, expo: number }): bigint => 
   return raw / (10n ** BigInt(-scale))
 }
 
-const collectFeedsFromVault = (vault: Vault | undefined, maxDepth: number): PythFeed[] => {
+const collectFeedsFromVault = (vault: EVault | undefined, _maxDepth: number): PythFeed[] => {
   if (!vault) return []
 
-  const feeds = collectPythFeedIds(vault.oracleDetailedInfo, maxDepth)
+  const feeds = collectPythFeedsFromAdapters(vault.oracle.adapters)
 
   const unique = new Map<string, PythFeed>()
   feeds.forEach((feed) => {
@@ -165,7 +166,7 @@ const collectFeedsFromVault = (vault: Vault | undefined, maxDepth: number): Pyth
 }
 
 export const collectPythFeedsFromVaults = (
-  vaults: (Vault | undefined)[],
+  vaults: (EVault | undefined)[],
   maxDepth = 3,
 ): PythFeed[] => {
   const merged = vaults.flatMap(vault => collectFeedsFromVault(vault, maxDepth))
@@ -186,30 +187,29 @@ export const collectPythFeedsFromVaults = (
  * oracle chain that are used to price the enabled collaterals and the liability itself.
  */
 export const collectPythFeedsForHealthCheck = (
-  liabilityVault: Vault,
+  liabilityVault: EVault,
   collateralAssets: string[],
 ): PythFeed[] => {
-  const oracleInfo = liabilityVault.oracleDetailedInfo
-  if (!oracleInfo) return []
+  const unitOfAccount = liabilityVault.unitOfAccount?.address
+  if (!unitOfAccount) return []
 
-  const unitOfAccount = liabilityVault.unitOfAccount as `0x${string}`
   const allFeeds: PythFeed[] = []
 
   // Feeds for liability asset pricing
-  const liabilityFeeds = collectPythFeedIdsForPair(
-    oracleInfo,
+  const liabilityFeeds = collectPythFeedsFromAdapters(selectLeafAdaptersForPair(
+    liabilityVault.oracle.adapters,
     liabilityVault.asset.address as `0x${string}`,
     unitOfAccount,
-  )
+  ))
   allFeeds.push(...liabilityFeeds)
 
   // Feeds for each collateral asset pricing
   for (const collateralAsset of collateralAssets) {
-    const feeds = collectPythFeedIdsForPair(
-      oracleInfo,
+    const feeds = collectPythFeedsFromAdapters(selectLeafAdaptersForPair(
+      liabilityVault.oracle.adapters,
       collateralAsset as `0x${string}`,
       unitOfAccount,
-    )
+    ))
     allFeeds.push(...feeds)
   }
 
@@ -319,7 +319,7 @@ export const buildPythUpdateCallsFromFeeds = async (
 }
 
 export const buildPythUpdateCalls = async (
-  vaults: (Vault | undefined)[],
+  vaults: (EVault | undefined)[],
   providerUrl: string,
   hermesEndpoint: string | undefined,
   sender: Address,
@@ -398,7 +398,7 @@ export const sumCallValues = (calls: EVCCall[]): bigint => calls.reduce((acc, ca
  * @returns BatchItem array for Pyth updates and total fee required
  */
 export const buildPythBatchItems = async (
-  vaults: (Vault | undefined)[],
+  vaults: (EVault | undefined)[],
   providerUrl: string,
   hermesEndpoint: string | undefined,
 ): Promise<{ items: BatchItem[], totalFee: bigint }> => {

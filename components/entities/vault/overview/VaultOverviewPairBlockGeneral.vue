@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { type AnyBorrowVaultPair, getCurrentLiquidationLTV, isLiquidationLTVRamping } from '~/entities/vault'
+import type { AnyBorrowVaultPair, EVaultCollateral } from '~/entities/vault'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import { getCollateralOraclePrice, getAssetOraclePrice } from '~/services/pricing/priceProvider'
@@ -7,18 +7,21 @@ import { formatNumber, formatSignificant } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import type { AccountBorrowPosition } from '~/entities/account'
-import type { LTVRampConfig } from '~/entities/vault/ltv'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultNetApyPairModal, VaultMaxRoeModal, VaultRampDownModal, VaultSupplyApyModal, VaultBorrowApyModal } from '#components'
 
 const { pair } = defineProps<{ pair: AnyBorrowVaultPair | AccountBorrowPosition }>()
 
-const hasRampConfig = computed(() => 'initialLiquidationLTV' in pair)
+const isBorrowVaultPair = (value: AnyBorrowVaultPair | AccountBorrowPosition): value is AnyBorrowVaultPair =>
+  'ltv' in value
+
+const pairBorrowLTV = computed(() => isBorrowVaultPair(pair) ? pair.ltv.borrowLTV : pair.borrowLTV)
+const rampConfig = computed(() => isBorrowVaultPair(pair) ? pair.ltv : null)
 const currentLiquidationLTV = computed(() =>
-  hasRampConfig.value ? getCurrentLiquidationLTV(pair as AnyBorrowVaultPair) : pair.liquidationLTV,
+  isBorrowVaultPair(pair) ? pair.ltv.currentLiquidationLTV : pair.liquidationLTV,
 )
 const isRamping = computed(() =>
-  hasRampConfig.value && isLiquidationLTVRamping(pair as AnyBorrowVaultPair),
+  !!rampConfig.value && rampConfig.value.isLiquidationLTVRamping,
 )
 
 const modal = useModal()
@@ -37,23 +40,23 @@ const isDeprecated = computed(() => isVaultDeprecated(pair.collateral.address) |
 const collateralRewardAPY = computed(() => getSupplyRewardApy(pair.collateral.address))
 const borrowRewardAPY = computed(() => getBorrowRewardApy(pair.borrow.address, pair.collateral.address))
 const supplyApyWithRewards = computed(() => withIntrinsicSupplyApy(
-  nanoToValue(pair.collateral.interestRateInfo.supplyAPY, 25),
+  getVaultSupplyApy(pair.collateral),
   pair.collateral.asset.address,
 ) + collateralRewardAPY.value)
 const borrowApyWithRewards = computed(() => withIntrinsicBorrowApy(
-  nanoToValue(pair.borrow.interestRateInfo.borrowAPY, 25),
+  getVaultBorrowApy(pair.borrow),
   pair.borrow.asset.address,
 ) - borrowRewardAPY.value)
 
 const loopingRewardAPY = computed(() => getLoopingRewardApy(pair.borrow.address, pair.collateral.address))
-const maxMultiplier = computed(() => getMaxMultiplier(pair.borrowLTV))
+const maxMultiplier = computed(() => getMaxMultiplier(pairBorrowLTV.value))
 const netApy = computed(() => supplyApyWithRewards.value - borrowApyWithRewards.value + loopingRewardAPY.value)
 const maxRoe = computed(() =>
   getMaxRoe(maxMultiplier.value, supplyApyWithRewards.value, borrowApyWithRewards.value, loopingRewardAPY.value),
 )
 
-const baseSupplyApy = computed(() => nanoToValue(pair.collateral.interestRateInfo.supplyAPY, 25))
-const baseBorrowApy = computed(() => nanoToValue(pair.borrow.interestRateInfo.borrowAPY, 25))
+const baseSupplyApy = computed(() => getVaultSupplyApy(pair.collateral))
+const baseBorrowApy = computed(() => getVaultBorrowApy(pair.borrow))
 const intrinsicSupplyApy = computed(() => getIntrinsicApy(pair.collateral.asset.address))
 const intrinsicBorrowApy = computed(() => getIntrinsicApy(pair.borrow.asset.address))
 
@@ -124,14 +127,14 @@ const onMaxRoeInfoIconClick = () => {
       maxMultiplier: maxMultiplier.value,
       supplyAPY: supplyApyWithRewards.value,
       borrowAPY: borrowApyWithRewards.value,
-      borrowLTV: nanoToValue(pair.borrowLTV, 2),
+      borrowLTV: ltvToPercent(pairBorrowLTV.value),
       borrowVaultAddress: pair.borrow.address,
       collateralAddress: pair.collateral.address,
     },
   })
 }
 
-const onRampDownInfoIconClick = (event: MouseEvent, pair: LTVRampConfig) => {
+const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
   modal.open(VaultRampDownModal, {
     props: pair,
   })
@@ -290,7 +293,7 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: LTVRampConfig) => {
         </VaultOverviewLabelValue>
         <VaultOverviewLabelValue
           label="Max LTV"
-          :value="`${formatNumber(nanoToValue(pair.borrowLTV, 2), 2)}%`"
+          :value="`${formatNumber(ltvToPercent(pairBorrowLTV), 2)}%`"
         />
         <VaultOverviewLabelValue>
           <template #label>
@@ -300,7 +303,7 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: LTVRampConfig) => {
                 v-if="isRamping"
                 class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
                 name="info-circle"
-                @click.stop.prevent="onRampDownInfoIconClick($event, pair as AnyBorrowVaultPair)"
+                @click.stop.prevent="rampConfig && onRampDownInfoIconClick($event, rampConfig)"
               />
             </span>
           </template>
@@ -310,9 +313,9 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: LTVRampConfig) => {
               name="arrow-top-right"
               class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
               title="Liquidation LTV ramping down"
-              @click.stop.prevent="onRampDownInfoIconClick($event, pair as AnyBorrowVaultPair)"
+              @click.stop.prevent="rampConfig && onRampDownInfoIconClick($event, rampConfig)"
             />
-            {{ `${formatNumber(nanoToValue(currentLiquidationLTV, 2), 2)}%` }}
+            {{ `${formatNumber(ltvToPercent(currentLiquidationLTV), 2)}%` }}
           </span>
         </VaultOverviewLabelValue>
       </div>

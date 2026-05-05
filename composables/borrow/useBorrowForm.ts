@@ -13,7 +13,7 @@ import {
   type AnyBorrowVaultPair,
   type VaultAsset,
   type CollateralOption,
-  type Vault,
+  type EVault,
   convertAssetsToShares,
 } from '~/entities/vault'
 import {
@@ -39,8 +39,8 @@ import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, ty
 
 export interface UseBorrowFormOptions {
   pair: Ref<AnyBorrowVaultPair | undefined>
-  borrowVault: ComputedRef<Vault | undefined>
-  collateralVault: ComputedRef<Vault | undefined>
+  borrowVault: ComputedRef<EVault | undefined>
+  collateralVault: ComputedRef<EVault | undefined>
   formTab: Ref<'borrow' | 'multiply'>
 
   savingCollateral: ComputedRef<{ assets: bigint, subAccount?: string, shares: bigint } | undefined>
@@ -161,7 +161,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       collateralUnitPrice.value = undefined
       return
     }
-    const priceInfo = await getCollateralUsdPrice(borrowVault.value, collateralVault.value as Vault, 'off-chain')
+    const priceInfo = await getCollateralUsdPrice(borrowVault.value, collateralVault.value as EVault, 'off-chain')
     if (!priceInfo) {
       collateralUnitPrice.value = undefined
       return
@@ -190,16 +190,17 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   // --- Computed: math ---
   const collateralAmountFixed = computed(() => FixedPoint.fromValue(
-    valueToNano(collateralAmount.value || '0', collateralVault.value?.decimals),
-    Number(collateralVault.value?.decimals),
+    valueToNano(collateralAmount.value || '0', collateralVault.value?.asset.decimals),
+    Number(collateralVault.value?.asset.decimals),
   ))
   const borrowAmountFixed = computed(() => FixedPoint.fromValue(
-    valueToNano(borrowAmount.value || '0', borrowVault.value?.decimals),
-    Number(borrowVault.value?.decimals),
+    valueToNano(borrowAmount.value || '0', borrowVault.value?.asset.decimals),
+    Number(borrowVault.value?.asset.decimals),
   ))
   const ltvFixed = computed(() => {
     const fn = FixedPoint.fromValue(valueToNano(ltv.value, 4), 4)
-    if (fn.gte(FixedPoint.fromValue(pair.value?.borrowLTV || 0n, 2))) {
+    const maxLtv = FixedPoint.fromValue(valueToNano(ltvToPercent(pair.value?.ltv.borrowLTV ?? 0), 4), 4)
+    if (fn.gte(maxLtv)) {
       return fn.sub(FixedPoint.fromValue(100n, 4))
     }
     return fn
@@ -342,7 +343,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     if (borrowActiveBalance.value < valueToNano(collateralAmount.value, borrowActiveAssetDecimals.value)) {
       return 'Not enough balance'
     }
-    else if ((borrowVault.value?.supply || 0n) < valueToNano(borrowAmount.value, borrowVault.value?.decimals)) {
+    else if ((borrowVault.value?.availableLiquidity ?? 0n) < valueToNano(borrowAmount.value, borrowVault.value?.asset.decimals)) {
       return 'Not enough liquidity in the vault'
     }
     if (borrowNeedsSwap.value && !borrowSwapQuoteCards.value.length && +collateralAmount.value > 0) {
@@ -380,8 +381,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     if (findBlockingDisabledOp(borrowPlannedOps.value)) return true
     if (borrowActiveBalance.value < valueToNano(collateralAmount.value, borrowActiveAssetDecimals.value)) return true
     if (!(+collateralAmount.value)) return true
-    if ((borrowVault.value?.supply || 0n) < valueToNano(borrowAmount.value, borrowVault.value?.decimals)) return true
-    if (!valueToNano(borrowAmount.value, borrowVault.value?.decimals)) return true
+    if ((borrowVault.value?.availableLiquidity ?? 0n) < valueToNano(borrowAmount.value, borrowVault.value?.asset.decimals)) return true
+    if (!valueToNano(borrowAmount.value, borrowVault.value?.asset.decimals)) return true
     if (borrowNeedsSwap.value && !borrowSwapSelectedQuote.value) return true
     if (isSupplyCapReached.value || isBorrowCapReached.value) return true
     return false
@@ -470,7 +471,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     borrowAmount.value = trimTrailingZeros(effectiveCollateralFixed.value
       .mul(priceFixed.value)
       .mul(ltvFixed.value)
-      .div(FixedPoint.fromValue(100n, 0)).round(Number(borrowVault.value?.decimals || 18))
+      .div(FixedPoint.fromValue(100n, 0)).round(Number(borrowVault.value?.asset.decimals || 18))
       .toString())
   }
 
@@ -508,7 +509,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     if (!pair.value) return
     try {
       health.value = computeNextHealth(
-        Number(pair.value?.liquidationLTV || 0n) / 100,
+        ltvToPercent(pair.value.ltv.liquidationLTV),
         ltvFixed.value.toUnsafeFloat(),
       ) ?? Infinity
       liquidationPrice.value = computeLiquidationPrice(
@@ -532,21 +533,21 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       // When swapping, use the quote output amount (collateral-vault-asset denominated)
       const collateralAmountNano = borrowNeedsSwap.value
         ? borrowSwapEffectiveQuote.value ? BigInt(borrowSwapEffectiveQuote.value.amountOut || 0) : 0n
-        : valueToNano(collateralAmount.value || '0', collateralVault.value.decimals)
-      const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value.decimals)
+        : valueToNano(collateralAmount.value || '0', collateralVault.value.shares.decimals)
+      const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value.shares.decimals)
 
       const [collateralProjected, borrowProjected, collateralUsdValue, borrowUsdValue] = await Promise.all([
         getProjectedRates(
           collateralVault.value.address,
-          collateralVault.value.interestRateInfo.cash,
-          collateralVault.value.interestRateInfo.borrows,
+          collateralVault.value.totalCash,
+          collateralVault.value.totalBorrowed,
           collateralAmountNano,
           0n,
         ),
         getProjectedRates(
           borrowVault.value.address,
-          borrowVault.value.interestRateInfo.cash,
-          borrowVault.value.interestRateInfo.borrows,
+          borrowVault.value.totalCash,
+          borrowVault.value.totalBorrowed,
           -borrowAmountNano,
           borrowAmountNano,
         ),
@@ -560,11 +561,11 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
       // Apply projected rate deltas on top of current APYs (which include intrinsic APY)
       const projectedSupplyApy = collateralProjected
-        ? collateralSupplyApy.value + (nanoToValue(collateralProjected.supplyAPY, 25) - nanoToValue(collateralVault.value.interestRateInfo.supplyAPY, 25))
+        ? collateralSupplyApy.value + (nanoToValue(collateralProjected.supplyAPY, 25) - getVaultSupplyApy(collateralVault.value))
         : collateralSupplyApy.value
 
       const projectedBorrowApy = borrowProjected
-        ? borrowApy.value + (nanoToValue(borrowProjected.borrowAPY, 25) - nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25))
+        ? borrowApy.value + (nanoToValue(borrowProjected.borrowAPY, 25) - getVaultBorrowApy(borrowVault.value))
         : borrowApy.value
 
       netAPY.value = getNetAPY(
@@ -599,7 +600,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     if (isNative && !wrappedAddress) {
       throw new Error('Wrapped native token not found')
     }
-    const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value.decimals)
+    const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value.shares.decimals)
     const subAccount = await resolvePendingSubAccount()
     return buildSwapAndBorrowPlan({
       inputTokenAddress: (wrappedAddress || borrowSelectedAsset.value.address) as Address,
@@ -671,8 +672,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       }
 
       // Standard borrow path
-      const collateralAmountNano = valueToNano(collateralAmount.value || '0', collateralVault.value?.decimals)
-      const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value?.decimals)
+      const collateralAmountNano = valueToNano(collateralAmount.value || '0', collateralVault.value?.asset.decimals)
+      const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value?.asset.decimals)
       let collateralAmountForPlan = collateralAmountNano
 
       if (isSavingCollateral.value) {
@@ -762,7 +763,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       }
       else {
         // Standard borrow path
-        let collateralAmountForPlan = collateralAmountFixed.value.toFormat({ decimals: Number(collateralVault.value.decimals) }).value
+        let collateralAmountForPlan = collateralAmountFixed.value.toFormat({ decimals: Number(collateralVault.value.shares.decimals) }).value
         if (isSavingCollateral.value) {
           if (savingCollateral.value?.assets === collateralAmountForPlan) {
             collateralAmountForPlan = savingBalance.value
@@ -771,7 +772,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             collateralAmountForPlan = await convertAssetsToShares(collateralVault.value.address, collateralAmountForPlan)
           }
         }
-        const borrowAmountNano = borrowAmountFixed.value.toFormat({ decimals: Number(borrowVault.value.decimals) }).value
+        const borrowAmountNano = borrowAmountFixed.value.toFormat({ decimals: Number(borrowVault.value.shares.decimals) }).value
         txPlan = isSavingCollateral.value
           ? await buildBorrowBySavingPlan(
               collateralVault.value.address,

@@ -1,4 +1,4 @@
-import { getVaultUtilization, getSupplyCapPercentage, getBorrowCapPercentage, isEVKVault, type SecuritizeVault, type Vault } from '~/entities/vault'
+import type { EVault } from '~/entities/vault'
 import {
   findBlockingDisabledOp,
   getOpMeta,
@@ -15,6 +15,7 @@ import {
   OP_VAULT_STATUS_CHECK,
   OP_WITHDRAW,
   type PlannedOp,
+  type VaultOperation,
 } from '~/utils/vault-hooks'
 
 export type WarningLevel = 'info' | 'high' | 'critical'
@@ -87,15 +88,11 @@ const getCapLevel = (percentage: number): WarningLevel | null => {
   return null
 }
 
-// Re-export cap helpers from entities/vault so existing call sites that
-// imported them from useVaultWarnings still work after the move.
-export { getSupplyCapPercentage, getBorrowCapPercentage } from '~/entities/vault'
-
 export const getUtilisationWarning = (
-  vault: Vault,
+  vault: EVault,
   context: WarningContext = 'general',
 ): VaultWarning | null => {
-  const utilisation = getVaultUtilization(vault)
+  const utilisation = vault.utilization
   const level = getUtilisationLevel(utilisation)
   if (!level) return null
 
@@ -103,45 +100,35 @@ export const getUtilisationWarning = (
   return { level, title, message }
 }
 
-// Cap level only determines the message text, not the visual severity.
-// Reaching a cap means the vault is popular, not that something is wrong.
-const buildSupplyCapWarning = (noun: string, percentage: number): VaultWarning | null => {
+export const getSupplyCapWarning = (vault: EVault): VaultWarning | null => {
+  const percentage = vault.caps.supplyCapUtilization
   const level = getCapLevel(percentage)
   if (!level) return null
 
-  const Noun = noun[0].toUpperCase() + noun.slice(1)
   const title = percentage >= 100
-    ? `${Noun} reached`
+    ? 'Supply cap reached'
     : percentage >= CAP_CRITICAL
-      ? `${Noun} nearly reached`
-      : `${Noun} approaching limit`
+      ? 'Supply cap nearly reached'
+      : 'Supply cap approaching limit'
   const message = percentage >= 100
-    ? `The ${noun} has been reached. New deposits will fail.`
+    ? 'The supply cap has been reached. New deposits will fail.'
     : percentage >= CAP_CRITICAL
-      ? `The ${noun} is nearly reached. New deposits may be limited or fail.`
-      : `The ${noun} is approaching its limit. Available capacity for new deposits is limited.`
+      ? 'The supply cap is nearly reached. New deposits may be limited or fail.'
+      : 'The supply cap is approaching its limit. Available capacity for new deposits is limited.'
 
+  // Cap level only determines the message text, not the visual severity.
+  // Reaching a cap means the vault is popular, not that something is wrong.
   return { level: 'info', title, message }
 }
 
-export const getSupplyCapWarning = (vault: Vault): VaultWarning | null =>
-  buildSupplyCapWarning('supply cap', getSupplyCapPercentage(vault))
-
-export const getCollateralSupplyCapWarning = (
-  vault: Vault | SecuritizeVault,
-): VaultWarning | null => {
-  if (!isEVKVault(vault)) return null
-  return buildSupplyCapWarning('collateral supply cap', getSupplyCapPercentage(vault))
-}
-
-export const getIsSupplyCapReached = (vault: Vault): boolean => {
-  const percentage = getSupplyCapPercentage(vault)
+export const getIsSupplyCapReached = (vault: EVault): boolean => {
+  const percentage = vault.caps.supplyCapUtilization
 
   return percentage >= 100
 }
 
-export const getBorrowCapWarning = (vault: Vault): VaultWarning | null => {
-  const percentage = getBorrowCapPercentage(vault)
+export const getBorrowCapWarning = (vault: EVault): VaultWarning | null => {
+  const percentage = vault.caps.borrowCapUtilization
   const level = getCapLevel(percentage)
   if (!level) return null
 
@@ -161,8 +148,8 @@ export const getBorrowCapWarning = (vault: Vault): VaultWarning | null => {
   return { level: 'info', title, message }
 }
 
-export const getIsBorrowCapReached = (vault: Vault): boolean => {
-  const percentage = getBorrowCapPercentage(vault)
+export const getIsBorrowCapReached = (vault: EVault): boolean => {
+  const percentage = vault.caps.borrowCapUtilization
 
   return percentage >= 100
 }
@@ -171,7 +158,7 @@ export const getIsBorrowCapReached = (vault: Vault): boolean => {
 // OP_SKIM, OP_REPAY_WITH_SHARES) aren't checked as primary form-level ops
 // today but are included here so that getPlanHookDisabledWarning can surface
 // them when they appear as secondary steps in multi-step PlannedOp lists.
-const hookDisabledCopy = (op: bigint): { title: string, message: string } | null => {
+const hookDisabledCopy = (op: VaultOperation): { title: string, message: string } | null => {
   switch (op) {
     case OP_DEPOSIT:
       return { title: 'Deposits disabled', message: 'The vault risk manager has disabled deposits. New deposits will fail.' }
@@ -198,9 +185,9 @@ const hookDisabledCopy = (op: bigint): { title: string, message: string } | null
   }
 }
 
-export const getHookDisabledWarning = (vault: Vault, op: bigint): VaultWarning | null => {
+export const getHookDisabledWarning = (vault: EVault, op: VaultOperation): VaultWarning | null => {
   if (!isOpDisabled(vault, op)) return null
-  // When OP_VAULT_STATUS_CHECK is hooked the entire vault is effectively
+  // When vaultStatusCheck is hooked the entire vault is effectively
   // paused — show a generic "paused" message instead of op-specific copy.
   if (isOpHooked(vault, OP_VAULT_STATUS_CHECK)) {
     return { level: 'critical', title: 'Vault paused', message: 'All operations on this vault are currently disabled because the vault-status check has been paused by the risk manager.' }
@@ -215,10 +202,11 @@ export const getPlanHookDisabledWarning = (steps: readonly PlannedOp[]): VaultWa
   return getHookDisabledWarning(blocking.vault, blocking.op)
 }
 
-export const getStrategyHookWarning = (strategyVault: Vault): VaultWarning | null => {
-  const bits = [OP_DEPOSIT, OP_MINT, OP_WITHDRAW, OP_REDEEM].filter(bit => isOpDisabled(strategyVault, bit))
-  if (bits.length === 0) return null
-  const names = bits.map(bit => getOpMeta(bit)?.name).filter(Boolean) as string[]
+export const getStrategyHookWarning = (strategyVault: EVault): VaultWarning | null => {
+  const strategyOperations: readonly VaultOperation[] = [OP_DEPOSIT, OP_MINT, OP_WITHDRAW, OP_REDEEM]
+  const operations = strategyOperations.filter(op => isOpDisabled(strategyVault, op))
+  if (operations.length === 0) return null
+  const names = operations.map(op => getOpMeta(op)?.name).filter(Boolean) as string[]
   const verb = names.length === 1 ? 'is' : 'are'
   return {
     level: 'critical',

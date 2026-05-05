@@ -18,10 +18,11 @@
  * The 5-min warm cycle force-refreshes each entry before it expires,
  * so user requests always read from a fresh cache under normal operation.
  */
+import { getAddress } from 'viem'
 import { createTtlCache } from './cache'
 import { fetchWithTimeout, withWallClock } from './fetchWithTimeout'
 import { createInFlightDedup, scheduleBackgroundRefresh } from './in-flight'
-import { getVaultCategories } from './vault-categories-store'
+import { refreshLabelFile } from '../api/labels/[file].get'
 import {
   BREVIS_API_URL,
   FUUL_API_BASE_URL,
@@ -50,21 +51,42 @@ const inFlight = createInFlightDedup<string, unknown>()
 const fetchDeduped = <T>(key: string, task: () => Promise<T>): Promise<T> =>
   inFlight.run(key, task as () => Promise<unknown>) as Promise<T>
 
+interface EarnVaultEntryObject {
+  address?: unknown
+  deprecated?: unknown
+}
+
 // --- Merkl -----------------------------------------------------------------
 
 const merklTypeKey = (chainId: number, type: MerklOpportunityType): string =>
   `merkl:${type.toLowerCase()}:${chainId}`
 
 /**
- * Loads the earn-vault address set from the chain's vault categorization.
- * Reads the factories-subgraph-derived set (not labels), so unlabeled earn
- * vaults are included — this means direct navigation to an unlabeled earn
- * vault shows its Merkl ERC20LOGPROCESSOR campaigns instead of silently
- * dropping them. Filtering on the server keeps the client payload small.
+ * Loads the earn-vault address set from labels. Filtering on the server keeps
+ * the client payload small without keeping a separate server-side subgraph
+ * classification path alive for SDK vault reads.
  */
 const getEarnVaultSet = async (chainId: number): Promise<Set<string>> => {
-  const categories = await getVaultCategories(chainId)
-  return new Set(categories.earn.map(a => a.toLowerCase()))
+  const entries = await refreshLabelFile(chainId, 'earn-vaults.json')
+  const set = new Set<string>()
+  if (!Array.isArray(entries)) return set
+
+  for (const entry of entries) {
+    const rawAddress = typeof entry === 'string'
+      ? entry
+      : entry && typeof entry === 'object' && (entry as EarnVaultEntryObject).deprecated !== true
+        ? (entry as EarnVaultEntryObject).address
+        : undefined
+    if (typeof rawAddress !== 'string') continue
+    try {
+      set.add(getAddress(rawAddress).toLowerCase())
+    }
+    catch {
+      // Ignore malformed label entries.
+    }
+  }
+
+  return set
 }
 
 const filterErc20LogProcessor = (

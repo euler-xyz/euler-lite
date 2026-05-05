@@ -1,5 +1,5 @@
 import { getAddress, zeroAddress } from 'viem'
-import type { Vault } from './types'
+import type { EVault } from './types'
 import { isLiveCollateralEdge } from './ltv'
 
 /**
@@ -18,20 +18,14 @@ import { isLiveCollateralEdge } from './ltv'
  * testable in isolation from the reactive registry.
  */
 export const extractUnresolvedCollateralAddresses = (
-  evkVaults: readonly Vault[],
+  evkVaults: readonly EVault[],
   isInRegistry: (address: string) => boolean,
-  nowSeconds?: bigint,
 ): string[] => {
-  // Snapshot the clock once so all edges see the same "now" — without this,
-  // two edges in the same vault could be evaluated with millisecond-different
-  // values across a ramp boundary. Defaulting here keeps the documented
-  // contract ("we don't fetch fully ramped-out edges") tight.
-  const now = nowSeconds ?? BigInt(Math.floor(Date.now() / 1000))
   const unresolved = new Set<string>()
   evkVaults.forEach((vault) => {
-    vault.collateralLTVs.forEach((ltv) => {
-      if (!isLiveCollateralEdge(ltv, now)) return
-      const addr = ltv.collateral
+    vault.collaterals.forEach((ltv) => {
+      if (!isLiveCollateralEdge(ltv)) return
+      const addr = ltv.address
       if (addr === zeroAddress) return
       const normalised = getAddress(addr)
       if (isInRegistry(normalised)) return

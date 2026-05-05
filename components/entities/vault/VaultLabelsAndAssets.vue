@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { getAddress } from 'viem'
-import type { EarnVault, SecuritizeVault, Vault, VaultAsset } from '~/entities/vault'
+import type { EulerEarn, SecuritizeCollateralVault, EVault, VaultAsset } from '~/entities/vault'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 
 const { vault, assets, size, assetsLabel, pairVault, back, backFallback } = defineProps<{
-  vault?: Vault | EarnVault | SecuritizeVault
+  vault?: EVault | EulerEarn | SecuritizeCollateralVault
   assets: VaultAsset[]
   size?: 'large'
   assetsLabel?: string
-  pairVault?: Vault
+  pairVault?: EVault
   back?: boolean
   backFallback?: string
 }>()
@@ -24,13 +24,14 @@ const normalizeAddress = (address?: string) => {
 }
 
 const vaultAddress = computed(() => normalizeAddress(vault?.address))
+const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
 const product = useEulerProductOfVault(vaultAddress)
 const displayName = computed(() => {
   if (!vault) return ''
-  if ('vaultCategory' in vault && vault.vaultCategory === 'escrow') {
+  if (getVaultCategory(vault.address) === 'escrow') {
     return 'Escrowed collateral'
   }
-  return product.name || vault.name
+  return product.name || vault.shares.name
 })
 
 const pairVaultAddress = computed(() => pairVault ? normalizeAddress(pairVault.address) : '')
@@ -54,16 +55,16 @@ const isRestricted = computed(() => {
   return isAnyVaultBlockedByCountry(...addresses)
 })
 
-const getVaultLabel = (v?: Vault | EarnVault | SecuritizeVault) => {
+const getVaultLabel = (v?: EVault | EulerEarn | SecuritizeCollateralVault) => {
   if (!v) return ''
-  if ('vaultCategory' in v && v.vaultCategory === 'escrow') {
+  if (getVaultCategory(v.address) === 'escrow') {
     return 'Escrowed collateral'
   }
   const addr = normalizeAddress(v.address)
   if (addr === vaultAddress.value) {
-    return product.name || vault?.name || v.name
+    return product.name || vault?.shares.name || v.shares.name
   }
-  return pairProduct.name || v.name
+  return pairProduct.name || v.shares.name
 }
 
 const displayLabel = computed(() => {
@@ -107,7 +108,7 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
         <span class="text-content-tertiary">
           <VaultDisplayName
             :name="pairVault ? displayLabel : displayName"
-            :is-unverified="(!!vault && 'verified' in vault && !vault.verified) || !!(pairVault && 'verified' in pairVault && !pairVault.verified)"
+            :is-unverified="(!!vault && !isVerifiedVault(vault.address)) || !!(pairVault && !isVerifiedVault(pairVault.address))"
           />
         </span>
         <span

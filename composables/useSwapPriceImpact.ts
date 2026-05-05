@@ -1,10 +1,10 @@
 import type { Ref } from 'vue'
 import type { SwapApiQuote } from '~/entities/swap'
-import type { Vault, SecuritizeVault, EarnVault } from '~/entities/vault'
+import type { EVault, SecuritizeCollateralVault, EulerEarn } from '~/entities/vault'
 import { getTokenUsdValue } from '~/services/pricing/priceProvider'
 import { createRaceGuard } from '~/utils/race-guard'
 
-type AnyVault = Vault | SecuritizeVault | EarnVault
+type AnyVault = EVault | SecuritizeCollateralVault | EulerEarn
 
 export const useSwapPriceImpact = (options: {
   quote: Ref<SwapApiQuote | null>

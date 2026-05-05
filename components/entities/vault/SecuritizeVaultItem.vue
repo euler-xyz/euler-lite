@@ -1,28 +1,28 @@
 <script setup lang="ts">
 import { useAccount } from '@wagmi/vue'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
+import type { EVault, SecuritizeCollateralVault } from '~/entities/vault'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 
 const { isConnected } = useAccount()
-const { vault } = defineProps<{ vault: SecuritizeVault }>()
+const { vault } = defineProps<{ vault: SecuritizeCollateralVault }>()
 
 const vaultAddress = computed(() => vault.address)
 const product = useEulerProductOfVault(vaultAddress)
 const { enableEntityBranding } = useDeployConfig()
 const { isVaultGovernorVerified } = useVaults()
-// SecuritizeVault has governorAdmin, safe to cast for entity lookup
-const entities = useEulerEntitiesOfVault(vault as unknown as Vault)
+const { isVerifiedVault } = useVaultRegistry()
+// SecuritizeCollateralVault has governorAdmin, safe to cast for entity lookup
+const entities = useEulerEntitiesOfVault(vault as unknown as EVault)
 
-const isUnverified = computed(() => !vault.verified)
-const isGovernorVerified = computed(() => isVaultGovernorVerified(vault as unknown as Vault))
+const isUnverified = computed(() => !isVerifiedVault(vault.address))
+const isGovernorVerified = computed(() => isVaultGovernorVerified(vault as unknown as EVault))
 const isGovernanceLimited = computed(() => product.isGovernanceLimited && isGovernorVerified.value)
 const entityName = computed(() => {
   if (!isGovernorVerified.value || entities.length === 0) return ''
@@ -34,7 +34,7 @@ const entityLogos = computed(() => {
   if (!entityName.value || entities.length === 0) return []
   return entities.map(e => getEulerLabelEntityLogo(e.logo))
 })
-const displayName = computed(() => product.name || vault.name)
+const displayName = computed(() => product.name || vault.shares.name)
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
 
 const { getBalance, isLoading: isBalancesLoading } = useWallets()
@@ -48,7 +48,7 @@ const balance = computed(() =>
 const totalRewardsAPY = computed(() => getSupplyRewardApy(vault.address))
 const hasRewards = computed(() => hasSupplyRewards(vault.address))
 const lendingAPY = computed(() =>
-  nanoToValue(vault.interestRateInfo.supplyAPY, 25),
+  getVaultSupplyApy(vault),
 )
 const supplyApy = computed(() =>
   withIntrinsicSupplyApy(lendingAPY.value, vault.asset.address),

@@ -1,6 +1,5 @@
 import { getRequestURL, sendRedirect } from 'h3'
 import { isAddress } from 'viem'
-import { getVaultCategory } from '../utils/vault-categories-store'
 
 /**
  * Vault route patterns:
@@ -50,18 +49,7 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  // Resolve chain from ?network= query param
-  const networkParam = url.searchParams.get('network')
-  const chainId = networkParam ? parseInt(networkParam, 10) : NaN
-  if (!chainId || isNaN(chainId)) {
-    return
-  }
-
-  // Check each vault address exists in the factory
-  for (const addr of addresses) {
-    const category = await getVaultCategory(chainId, addr)
-    if (!category) {
-      return sendRedirect(event, redirectUrl, 302)
-    }
-  }
+  // Existence/type validation is SDK-backed on the client. Server middleware
+  // only rejects malformed route addresses so direct navigation does not keep
+  // a duplicate vault-classification fetch path alive.
 })
