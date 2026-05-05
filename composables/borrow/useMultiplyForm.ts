@@ -12,7 +12,8 @@ import {
   type Vault,
   type ProjectedRates,
   convertAssetsToShares,
-  getProjectedRates,
+  getProjectedRatesBatch,
+  getRoe,
 } from '~/entities/vault'
 import {
   getAssetUsdValue,
@@ -27,7 +28,7 @@ import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
-import { calculateRoe, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
+import { computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
 import { computeMaxMultiplier, computeMinMultiplier, computeWeightedSupplyApy, computeLeverageDebt } from '~/utils/multiply-math'
 import type { TxPlan } from '~/entities/txPlan'
 import { getPlanHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
@@ -302,9 +303,9 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
       if (supplyAndLongSameVault) {
         // Combined delta for supply + long vault
-        const [combined, shortResult] = await Promise.all([
-          getProjectedRates(supply.address, supply.interestRateInfo.cash, supply.interestRateInfo.borrows, supplyNano + swapOut, 0n),
-          getProjectedRates(short.address, short.interestRateInfo.cash, short.interestRateInfo.borrows, -debtNano, debtNano),
+        const [combined, shortResult] = await getProjectedRatesBatch([
+          { vaultAddress: supply.address, currentCash: supply.interestRateInfo.cash, currentBorrows: supply.interestRateInfo.borrows, cashDelta: supplyNano + swapOut, borrowsDelta: 0n },
+          { vaultAddress: short.address, currentCash: short.interestRateInfo.cash, currentBorrows: short.interestRateInfo.borrows, cashDelta: -debtNano, borrowsDelta: debtNano },
         ])
         if (projectedRatesGuard.isStale(gen)) return
         projectedSupplyRates.value = combined
@@ -312,10 +313,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         projectedBorrowRates.value = shortResult
       }
       else {
-        const [supplyResult, shortResult, longResult] = await Promise.all([
-          getProjectedRates(supply.address, supply.interestRateInfo.cash, supply.interestRateInfo.borrows, supplyNano, 0n),
-          getProjectedRates(short.address, short.interestRateInfo.cash, short.interestRateInfo.borrows, -debtNano, debtNano),
-          getProjectedRates(long.address, long.interestRateInfo.cash, long.interestRateInfo.borrows, swapOut, 0n),
+        const [supplyResult, shortResult, longResult] = await getProjectedRatesBatch([
+          { vaultAddress: supply.address, currentCash: supply.interestRateInfo.cash, currentBorrows: supply.interestRateInfo.borrows, cashDelta: supplyNano, borrowsDelta: 0n },
+          { vaultAddress: short.address, currentCash: short.interestRateInfo.cash, currentBorrows: short.interestRateInfo.borrows, cashDelta: -debtNano, borrowsDelta: debtNano },
+          { vaultAddress: long.address, currentCash: long.interestRateInfo.cash, currentBorrows: long.interestRateInfo.borrows, cashDelta: swapOut, borrowsDelta: 0n },
         ])
         if (projectedRatesGuard.isStale(gen)) return
         projectedSupplyRates.value = supplyResult
@@ -373,8 +374,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   // --- ROE ---
   const multiplyRoeBefore = computed(() => {
     if (isMultiplyQuoteLoading.value) return null
-    if (multiplySupplyValueUsd.value === null) return null
-    return 0
+    return null
   })
 
   const multiplyRoeAfter = computed(() => {
@@ -385,10 +385,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       || multiplyWeightedSupplyApy.value === null
       || multiplyBorrowApy.value === null
     ) return null
-    return calculateRoe(
+    return getRoe(
       multiplyTotalSupplyUsd.value,
-      multiplyBorrowValueUsd.value,
       multiplyWeightedSupplyApy.value,
+      multiplyBorrowValueUsd.value,
       multiplyBorrowApy.value,
     )
   })

@@ -2,14 +2,14 @@
 import { useAccount } from '@wagmi/vue'
 import { formatUnits, zeroAddress, type Address } from 'viem'
 import type { AccountBorrowPosition } from '~/entities/account'
-import type { Vault, VaultAsset } from '~/entities/vault'
+import { getProjectedRates, getRoe, type Vault, type VaultAsset } from '~/entities/vault'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import { useSwapDebtOptions } from '~/composables/useSwapDebtOptions'
 import { SwapperMode } from '~/entities/swap'
 import type { TxPlan } from '~/entities/txPlan'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
-import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/utils/repayUtils'
+import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
@@ -88,6 +88,7 @@ const toBorrowApy = computed(() => {
   const base = nanoToValue(toVault.value.interestRateInfo.borrowAPY || 0n, 25)
   return withIntrinsicBorrowApy(base, toVault.value.asset.address) - getBorrowRewardApy(toVault.value.address, collateralVault.value?.address)
 })
+const projectedToBorrowApy = ref<number | null>(null)
 
 const supplyValueUsd = ref<number | null>(null)
 watchEffect(async () => {
@@ -107,8 +108,8 @@ watchEffect(async () => {
 })
 const nextBorrowValueUsd = ref<number | null>(null)
 
-const roeBefore = computed(() => calculateRoe(supplyValueUsd.value, currentBorrowValueUsd.value, collateralSupplyApy.value, fromBorrowApy.value))
-const roeAfter = computed(() => calculateRoe(supplyValueUsd.value, nextBorrowValueUsd.value, collateralSupplyApy.value, toBorrowApy.value))
+const roeBefore = computed(() => getRoe(supplyValueUsd.value, collateralSupplyApy.value, currentBorrowValueUsd.value, fromBorrowApy.value))
+const roeAfter = computed(() => getRoe(supplyValueUsd.value, collateralSupplyApy.value, nextBorrowValueUsd.value, projectedToBorrowApy.value ?? toBorrowApy.value))
 
 // ── Health metrics ───────────────────────────────────────────────────────
 const priceRatio = computed(() => {
@@ -275,9 +276,29 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 watchEffect(async () => {
   if (!quote.value || !toVault.value) {
     nextBorrowValueUsd.value = null
+    projectedToBorrowApy.value = null
     return
   }
-  nextBorrowValueUsd.value = (await getAssetUsdValue(BigInt(quote.value.amountIn), toVault.value, 'off-chain')) ?? null
+  const borrowAmount = BigInt(quote.value.amountIn)
+  const [borrowUsd, projected] = await Promise.all([
+    getAssetUsdValue(borrowAmount, toVault.value, 'off-chain'),
+    getProjectedRates(
+      toVault.value.address,
+      toVault.value.interestRateInfo.cash,
+      toVault.value.interestRateInfo.borrows,
+      -borrowAmount,
+      borrowAmount,
+    ),
+  ])
+  nextBorrowValueUsd.value = borrowUsd ?? null
+  if (projected) {
+    const currentRaw = nanoToValue(toVault.value.interestRateInfo.borrowAPY || 0n, 25)
+    const projectedRaw = nanoToValue(projected.borrowAPY, 25)
+    projectedToBorrowApy.value = (toBorrowApy.value ?? 0) + (projectedRaw - currentRaw)
+  }
+  else {
+    projectedToBorrowApy.value = null
+  }
 })
 
 // ── Position loading ─────────────────────────────────────────────────────

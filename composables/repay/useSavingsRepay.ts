@@ -6,7 +6,6 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
 import { isEVKVault, type Vault, type SecuritizeVault } from '~/entities/vault'
-import { getAssetUsdValue } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
 import { SwapperMode } from '~/entities/swap'
@@ -62,6 +61,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   const { buildSwapPlan, buildSavingsRepayPlan, buildSavingsFullRepayPlan, buildSwapFullRepayPlan, executeTxPlan } = useEulerOperations()
   const { getVault: registryGetVault } = useVaultRegistry()
   const { finalizeTxAndRedirect } = useTxFinalization()
+  const { getCollateralApySnapshot } = usePositionCollateralApy()
 
   // --- Savings options ---
   const { savingsPositions, savingsVaults, savingsOptions, getSavingsPosition } = useRepaySavingsOptions()
@@ -116,20 +116,24 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     return nanoToValue(position.value.liquidationLTV, 2)
   })
 
-  // --- 4th USD watcher: primary collateral value (unchanged for savings) ---
+  // --- Collateral portfolio value/APY (unchanged for savings repay) ---
   const savingsCollateralUsdGuard = createRaceGuard()
   const savingsCollateralUsd = ref<number | null>(null)
+  const savingsWeightedCollateralApy = ref<number | null>(null)
 
   watchEffect(async () => {
-    if (!collateralVault.value || !position.value) {
+    if (!borrowVault.value || !position.value) {
       savingsCollateralUsd.value = null
+      savingsWeightedCollateralApy.value = null
       return
     }
     const gen = savingsCollateralUsdGuard.next()
-    const result = (await getAssetUsdValue(position.value.supplied || 0n, collateralVault.value, 'off-chain')) ?? null
+    const snapshot = await getCollateralApySnapshot(position.value, borrowVault.value)
     if (savingsCollateralUsdGuard.isStale(gen)) return
-    savingsCollateralUsd.value = result
+    savingsCollateralUsd.value = snapshot.supplyUsd
+    savingsWeightedCollateralApy.value = snapshot.weightedSupplyApy
   })
+  const effectiveCollateralSupplyApy = computed(() => savingsWeightedCollateralApy.value ?? collateralSupplyApy.value)
 
   // --- Health metrics ---
   const health = useRepayHealthMetrics({
@@ -139,7 +143,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     priceRatio: oraclePriceRatio,
     nextLiquidationLtv,
     collateralAmountAfter,
-    collateralSupplyApy,
+    collateralSupplyApy: effectiveCollateralSupplyApy,
     borrowApy,
     collateralValueUsd: savingsCollateralUsd,
     nextCollateralValueUsd: savingsCollateralUsd,

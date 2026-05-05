@@ -8,6 +8,7 @@ import type {
   SecuritizeVault,
   VaultAsset,
 } from '~/entities/vault'
+import { getProjectedRates, getRoe } from '~/entities/vault'
 import {
   getAssetUsdValue,
   getAssetOraclePrice,
@@ -22,7 +23,7 @@ import type { TxPlan } from '~/entities/txPlan'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
-import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/utils/repayUtils'
+import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
@@ -330,6 +331,7 @@ const toSupplyApy = computed(() => {
   const base = nanoToValue(toVault.value.interestRateInfo.supplyAPY || 0n, 25)
   return withIntrinsicSupplyApy(base, toVault.value.asset.address) + getSupplyRewardApy(toVault.value.address)
 })
+const projectedToSupplyApy = ref<number | null>(null)
 const borrowApy = computed(() => {
   if (!borrowVault.value) return null
   const base = nanoToValue(borrowVault.value.interestRateInfo.borrowAPY || 0n, 25)
@@ -355,18 +357,57 @@ watchEffect(async () => {
   if (isSameAsset.value && toVault.value && fromAmount.value) {
     try {
       const amount = valueToNano(fromAmount.value, toVault.value.asset.decimals)
-      nextSupplyValueUsd.value = (await getAssetUsdValue(amount, toVault.value, 'off-chain')) ?? null
+      const [supplyUsd, projected] = await Promise.all([
+        getAssetUsdValue(amount, toVault.value, 'off-chain'),
+        getProjectedRates(
+          toVault.value.address,
+          toVault.value.interestRateInfo.cash,
+          toVault.value.interestRateInfo.borrows,
+          amount,
+          0n,
+        ),
+      ])
+      nextSupplyValueUsd.value = supplyUsd ?? null
+      if (projected) {
+        const currentRaw = nanoToValue(toVault.value.interestRateInfo.supplyAPY || 0n, 25)
+        const projectedRaw = nanoToValue(projected.supplyAPY, 25)
+        projectedToSupplyApy.value = (toSupplyApy.value ?? 0) + (projectedRaw - currentRaw)
+      }
+      else {
+        projectedToSupplyApy.value = null
+      }
     }
     catch {
       nextSupplyValueUsd.value = null
+      projectedToSupplyApy.value = null
     }
     return
   }
   if (!quote.value || !toVault.value) {
     nextSupplyValueUsd.value = null
+    projectedToSupplyApy.value = null
     return
   }
-  nextSupplyValueUsd.value = (await getAssetUsdValue(BigInt(quote.value.amountOut), toVault.value, 'off-chain')) ?? null
+  const amount = BigInt(quote.value.amountOut)
+  const [supplyUsd, projected] = await Promise.all([
+    getAssetUsdValue(amount, toVault.value, 'off-chain'),
+    getProjectedRates(
+      toVault.value.address,
+      toVault.value.interestRateInfo.cash,
+      toVault.value.interestRateInfo.borrows,
+      amount,
+      0n,
+    ),
+  ])
+  nextSupplyValueUsd.value = supplyUsd ?? null
+  if (projected) {
+    const currentRaw = nanoToValue(toVault.value.interestRateInfo.supplyAPY || 0n, 25)
+    const projectedRaw = nanoToValue(projected.supplyAPY, 25)
+    projectedToSupplyApy.value = (toSupplyApy.value ?? 0) + (projectedRaw - currentRaw)
+  }
+  else {
+    projectedToSupplyApy.value = null
+  }
 })
 const borrowValueUsd = ref<number | null>(null)
 watchEffect(async () => {
@@ -377,8 +418,8 @@ watchEffect(async () => {
   borrowValueUsd.value = (await getAssetUsdValue(position.value.borrowed, borrowVault.value, 'off-chain')) ?? null
 })
 
-const roeBefore = computed(() => calculateRoe(supplyValueUsd.value, borrowValueUsd.value, fromSupplyApy.value, borrowApy.value))
-const roeAfter = computed(() => calculateRoe(nextSupplyValueUsd.value, borrowValueUsd.value, toSupplyApy.value, borrowApy.value))
+const roeBefore = computed(() => getRoe(supplyValueUsd.value, fromSupplyApy.value, borrowValueUsd.value, borrowApy.value))
+const roeAfter = computed(() => getRoe(nextSupplyValueUsd.value, projectedToSupplyApy.value ?? toSupplyApy.value, borrowValueUsd.value, borrowApy.value))
 
 // ── Health metrics ───────────────────────────────────────────────────────
 const liqPriceInvert = usePriceInvert(

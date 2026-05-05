@@ -79,10 +79,11 @@ export type {
 export {
   computeAPYs,
   getProjectedRates,
+  getProjectedRatesBatch,
   getNetAPY,
   getRoe,
 } from './apy'
-export type { ProjectedRates } from './apy'
+export type { ProjectedRates, ProjectedRatesRequest } from './apy'
 
 // Utility functions
 export {

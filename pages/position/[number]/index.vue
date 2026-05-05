@@ -394,7 +394,7 @@ const onNetApyInfoClick = () => {
 const onRoeInfoClick = () => {
   modal.open(PortfolioRoeModal, {
     props: {
-      roe: roe.value,
+      roe: roe.value ?? 0,
       multiplier: Number.isFinite(positionMultiplier.value) ? positionMultiplier.value : 0,
       supplyAPY: collateralSupplyApy.value,
       borrowAPY: borrowApy.value,
@@ -771,7 +771,7 @@ watch([isConnected, isSpyMode, address], () => {
             </div>
             <div
               class="text-h5 flex items-center gap-4"
-              :class="[roe >= 0 ? 'text-accent-600' : 'text-error-500']"
+              :class="[(roe ?? 0) >= 0 ? 'text-accent-600' : 'text-error-500']"
             >
               <SvgIcon
                 v-if="hasSupplyRewards(collateralVault?.address || '') || hasBorrowRewards(borrowVault?.address || '', collateralVault?.address || '')"
@@ -779,7 +779,7 @@ watch([isConnected, isSpyMode, address], () => {
                 name="sparks"
                 @click="onRoeInfoClick"
               />
-              {{ Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}
+              {{ roe !== null && Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}
             </div>
           </div>
           <div class="flex justify-between items-center">

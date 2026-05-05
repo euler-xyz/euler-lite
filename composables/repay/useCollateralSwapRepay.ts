@@ -6,7 +6,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
 import { isEVKVault, type Vault } from '~/entities/vault'
-import { getAssetUsdValue, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
+import { getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
 import { SwapperMode } from '~/entities/swap'
@@ -63,6 +63,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const { client: rpcClient } = useRpcClient()
   const { withIntrinsicSupplyApy, withIntrinsicBorrowApy } = useIntrinsicApy()
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
+  const { getCollateralApySnapshot } = usePositionCollateralApy()
 
   // --- Source vault state ---
   const sourceVault: Ref<Vault | undefined> = ref()
@@ -166,21 +167,37 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     return nanoToValue(position.value.liquidationLTV, 2)
   })
 
-  // --- 4th USD watcher: next collateral value ---
-  const nextCollateralUsdGuard = createRaceGuard()
+  // --- Collateral portfolio value/APY ---
+  const collateralPortfolioGuard = createRaceGuard()
+  const weightedCollateralSupplyApy = ref<number | null>(null)
+  const collateralValueUsd = ref<number | null>(null)
   const nextCollateralValueUsd = ref<number | null>(null)
 
   watchEffect(async () => {
-    if (!sourceVault.value || core.spent.value === null) {
+    if (!position.value || !borrowVault.value || !sourceVault.value) {
+      weightedCollateralSupplyApy.value = null
+      collateralValueUsd.value = null
       nextCollateralValueUsd.value = null
       return
     }
-    const gen = nextCollateralUsdGuard.next()
-    const nextAssets = sourceAssets.value - core.spent.value
-    const result = (await getAssetUsdValue(nextAssets > 0n ? nextAssets : 0n, sourceVault.value, 'off-chain')) ?? null
-    if (nextCollateralUsdGuard.isStale(gen)) return
-    nextCollateralValueUsd.value = result
+    const gen = collateralPortfolioGuard.next()
+    const spent = core.spent.value ?? 0n
+    const [currentSnapshot, nextSnapshot] = await Promise.all([
+      getCollateralApySnapshot(position.value, borrowVault.value),
+      getCollateralApySnapshot(position.value, borrowVault.value, {
+        deltas: [{
+          vaultAddress: sourceVault.value.address,
+          assetsDelta: -spent,
+          projectRates: spent > 0n,
+        }],
+      }),
+    ])
+    if (collateralPortfolioGuard.isStale(gen)) return
+    weightedCollateralSupplyApy.value = currentSnapshot.weightedSupplyApy
+    collateralValueUsd.value = currentSnapshot.supplyUsd
+    nextCollateralValueUsd.value = nextSnapshot.supplyUsd
   })
+  const effectiveCollateralSupplyApy = computed(() => weightedCollateralSupplyApy.value ?? collateralSupplyApy.value)
 
   // --- Health metrics ---
   const health = useRepayHealthMetrics({
@@ -190,9 +207,9 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     priceRatio,
     nextLiquidationLtv,
     collateralAmountAfter,
-    collateralSupplyApy,
+    collateralSupplyApy: effectiveCollateralSupplyApy,
     borrowApy,
-    collateralValueUsd: core.sourceValueUsd,
+    collateralValueUsd,
     nextCollateralValueUsd,
     borrowValueUsd: core.borrowValueUsd,
     nextBorrowValueUsd: core.nextBorrowValueUsd,

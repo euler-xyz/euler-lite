@@ -34,6 +34,7 @@ const { fetchSingleBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
+const { getCollateralApySnapshot } = usePositionCollateralApy()
 
 const priceInvert = usePriceInvert(
   () => collateralVault.value?.asset.symbol,
@@ -189,13 +190,13 @@ const load = async () => {
       ? Infinity
       : (Number(pair.value?.liquidationLTV || 0n) / 100) / currentLtvFloat
     currentLiquidationPrice.value = currentHealth.value < 0.1 ? Infinity : priceFixed.value.toUnsafeFloat() / currentHealth.value
-    const [collUsd, borUsd] = await Promise.all([
-      getAssetUsdValueOrZero(position.value!.supplied || 0, collateralVault.value!, 'off-chain'),
+    const [collateralSnapshot, borUsd] = await Promise.all([
+      getCollateralApySnapshot(position.value, borrowVault.value),
       getAssetUsdValueOrZero(position.value!.borrowed || 0, borrowVault.value!, 'off-chain'),
     ])
     currentNetAPY.value = getNetAPY(
-      collUsd,
-      collateralSupplyApy.value,
+      collateralSnapshot.supplyUsd,
+      collateralSnapshot.weightedSupplyApy ?? collateralSupplyApy.value,
       borUsd,
       borrowApy.value,
       collateralSupplyRewardApy.value || null,
@@ -375,7 +376,7 @@ const updateAsyncEstimates = useDebounceFn(async () => {
     const existingBorrow = nanoToValue(position.value?.borrowed || 0n, borrowVault.value.decimals)
     const totalBorrow = existingBorrow + (+borrowAmount.value || 0)
 
-    const [borrowProjected, collateralUsd, borrowUsd] = await Promise.all([
+    const [borrowProjected, collateralSnapshot, borrowUsd] = await Promise.all([
       getProjectedRates(
         borrowVault.value.address,
         borrowVault.value.interestRateInfo.cash,
@@ -383,7 +384,7 @@ const updateAsyncEstimates = useDebounceFn(async () => {
         -additionalBorrowNano,
         additionalBorrowNano,
       ),
-      getAssetUsdValueOrZero(+collateralAmount.value || 0, collateralVault.value!, 'off-chain'),
+      getCollateralApySnapshot(position.value, borrowVault.value),
       getAssetUsdValueOrZero(totalBorrow, borrowVault.value!, 'off-chain'),
     ])
 
@@ -394,8 +395,8 @@ const updateAsyncEstimates = useDebounceFn(async () => {
       : borrowApy.value
 
     netAPY.value = getNetAPY(
-      collateralUsd,
-      collateralSupplyApy.value,
+      collateralSnapshot.supplyUsd,
+      collateralSnapshot.weightedSupplyApy ?? collateralSupplyApy.value,
       borrowUsd,
       projectedBorrowApy,
       collateralSupplyRewardApy.value || null,

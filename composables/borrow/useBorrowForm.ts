@@ -34,7 +34,7 @@ import type { TxPlan } from '~/entities/txPlan'
 import { getPlanHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { getVaultTags, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
-import { getNetAPY, getProjectedRates } from '~/entities/vault'
+import { getNetAPY, getProjectedRatesBatch } from '~/entities/vault'
 import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 
 export interface UseBorrowFormOptions {
@@ -531,26 +531,29 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         : valueToNano(collateralAmount.value || '0', collateralVault.value.decimals)
       const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value.decimals)
 
-      const [collateralProjected, borrowProjected, collateralUsdValue, borrowUsdValue] = await Promise.all([
-        getProjectedRates(
-          collateralVault.value.address,
-          collateralVault.value.interestRateInfo.cash,
-          collateralVault.value.interestRateInfo.borrows,
-          collateralAmountNano,
-          0n,
-        ),
-        getProjectedRates(
-          borrowVault.value.address,
-          borrowVault.value.interestRateInfo.cash,
-          borrowVault.value.interestRateInfo.borrows,
-          -borrowAmountNano,
-          borrowAmountNano,
-        ),
+      const [projectedRates, collateralUsdValue, borrowUsdValue] = await Promise.all([
+        getProjectedRatesBatch([
+          {
+            vaultAddress: collateralVault.value.address,
+            currentCash: collateralVault.value.interestRateInfo.cash,
+            currentBorrows: collateralVault.value.interestRateInfo.borrows,
+            cashDelta: collateralAmountNano,
+            borrowsDelta: 0n,
+          },
+          {
+            vaultAddress: borrowVault.value.address,
+            currentCash: borrowVault.value.interestRateInfo.cash,
+            currentBorrows: borrowVault.value.interestRateInfo.borrows,
+            cashDelta: -borrowAmountNano,
+            borrowsDelta: borrowAmountNano,
+          },
+        ]),
         borrowNeedsSwap.value && borrowSwapAssetUsdPrice.value
           ? Promise.resolve((+collateralAmount.value || 0) * borrowSwapAssetUsdPrice.value)
           : getAssetUsdValueOrZero(collateralAmountNano, collateralVault.value!, 'off-chain'),
         getAssetUsdValueOrZero(borrowAmountNano, borrowVault.value!, 'off-chain'),
       ])
+      const [collateralProjected, borrowProjected] = projectedRates
 
       if (asyncEstimatesGuard.isStale(gen)) return
 

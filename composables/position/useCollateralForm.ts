@@ -11,7 +11,6 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { eulerAccountLensABI } from '~/entities/euler/abis'
 import {
   getNetAPY,
-  getProjectedRates,
   isEVKVault,
   type Vault,
   type SecuritizeVault,
@@ -19,7 +18,6 @@ import {
 } from '~/entities/vault'
 import {
   getAssetUsdValueOrZero,
-  getCollateralUsdValueOrZero,
 } from '~/services/pricing/priceProvider'
 import type { TxPlan } from '~/entities/txPlan'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
@@ -126,6 +124,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const { getOrFetch } = useVaultRegistry()
   const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
   const { client: rpcClient } = useRpcClient()
+  const { getCollateralApySnapshot } = usePositionCollateralApy()
 
   // --- Shared reactive state ---
   const isLoading = ref(false)
@@ -189,11 +188,6 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     borrowVault.value?.asset.address,
   ))
 
-  const getCollateralValueUsdLocal = async (amt: bigint) => {
-    if (!borrowVault.value || !collateralVault.value) return 0
-    return getCollateralUsdValueOrZero(amt, borrowVault.value, collateralVault.value as Vault, 'off-chain')
-  }
-
   const netAPY = ref(0)
 
   watchEffect(async () => {
@@ -202,14 +196,14 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       return
     }
 
-    const [collateralUsd, borrowedUsd] = await Promise.all([
-      getCollateralValueUsdLocal(collateralAssets.value),
+    const [collateralSnapshot, borrowedUsd] = await Promise.all([
+      getCollateralApySnapshot(position.value, borrowVault.value),
       getAssetUsdValueOrZero(position.value.borrowed ?? 0n, borrowVault.value, 'off-chain'),
     ])
 
     netAPY.value = getNetAPY(
-      collateralUsd,
-      collateralSupplyApy.value,
+      collateralSnapshot.supplyUsd,
+      collateralSnapshot.weightedSupplyApy ?? collateralSupplyApy.value,
       borrowedUsd,
       borrowApy.value,
       collateralSupplyRewardApy.value || null,
@@ -530,7 +524,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
   const asyncEstimatesGuard = createRaceGuard()
   const updateAsyncEstimates = useDebounceFn(async () => {
-    if (!collateralVault.value || !borrowVault.value) {
+    if (!position.value || !collateralVault.value || !borrowVault.value) {
       isEstimatesLoading.value = false
       return
     }
@@ -539,31 +533,22 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       const amountNano = valueToNano(amount.value, collateralVault.value.decimals)
       const cashDelta = options.mode === 'supply' ? amountNano : -amountNano
 
-      const [projected, collateralUsd, borrowedUsd] = await Promise.all([
-        getProjectedRates(
-          collateralVault.value.address,
-          collateralVault.value.interestRateInfo.cash,
-          collateralVault.value.interestRateInfo.borrows,
-          cashDelta,
-          0n,
-        ),
-        getCollateralValueUsdLocal(
-          options.mode === 'supply'
-            ? collateralAssets.value + amountNano
-            : collateralAssets.value - amountNano,
-        ),
+      const [collateralSnapshot, borrowedUsd] = await Promise.all([
+        getCollateralApySnapshot(position.value, borrowVault.value, {
+          deltas: [{
+            vaultAddress: collateralVault.value.address,
+            assetsDelta: cashDelta,
+            projectRates: true,
+          }],
+        }),
         getAssetUsdValueOrZero(position.value!.borrowed || 0n, borrowVault.value!, 'off-chain'),
       ])
 
       if (asyncEstimatesGuard.isStale(gen)) return
 
-      const projectedSupplyApy = projected
-        ? withIntrinsicSupplyApy(nanoToValue(projected.supplyAPY, 25), collateralVault.value?.asset.address)
-        : collateralSupplyApy.value
-
       estimateNetAPY.value = getNetAPY(
-        collateralUsd,
-        projectedSupplyApy,
+        collateralSnapshot.supplyUsd,
+        collateralSnapshot.weightedSupplyApy ?? collateralSupplyApy.value,
         borrowedUsd,
         borrowApy.value,
         collateralSupplyRewardApy.value || null,

@@ -71,6 +71,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const { fetchSingleBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { getVault: registryGetVault } = useVaultRegistry()
+  const { getCollateralApySnapshot } = usePositionCollateralApy()
 
   // --- State ---
   const selectedAsset = ref<VaultAsset | undefined>()
@@ -456,7 +457,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       const currentDebt = getCurrentDebt()
       const nextBorrowed = currentDebt - debtRepaidNano
 
-      const [projected, supplyUsd, borrowUsd] = await Promise.all([
+      const [projected, collateralSnapshot, borrowUsd] = await Promise.all([
         getProjectedRates(
           borrowVault.value.address,
           borrowVault.value.interestRateInfo.cash,
@@ -464,7 +465,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
           debtRepaidNano,
           -debtRepaidNano,
         ),
-        getAssetUsdValueOrZero(position.value.supplied || 0n, collateralVault.value, 'off-chain'),
+        getCollateralApySnapshot(position.value, borrowVault.value),
         getAssetUsdValueOrZero(nextBorrowed > 0n ? nextBorrowed : 0n, borrowVault.value, 'off-chain'),
       ])
       if (estimatesGuard.isStale(gen)) return
@@ -474,8 +475,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
         : borrowApy.value
 
       _estimateNetAPY.value = getNetAPY(
-        supplyUsd,
-        collateralSupplyApy.value,
+        collateralSnapshot.supplyUsd,
+        collateralSnapshot.weightedSupplyApy ?? collateralSupplyApy.value,
         borrowUsd,
         projectedBorrowApy,
         collateralSupplyRewardApy.value || null,

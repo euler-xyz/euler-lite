@@ -63,6 +63,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   const { buildRepayPlan, buildFullRepayPlan, executeTxPlan } = useEulerOperations()
   const { isConnected } = useAccount()
   const { finalizeTxAndRedirect } = useTxFinalization()
+  const { getCollateralApySnapshot } = usePositionCollateralApy()
 
   const amount = ref('')
   const walletRepayPercent = ref(0)
@@ -270,7 +271,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       const repayNano = valueToNano(amount.value, borrowVault.value.decimals)
       const remainingBorrow = (position.value.borrowed || 0n) - repayNano
 
-      const [projected, supplyUsd, borrowUsd] = await Promise.all([
+      const [projected, collateralSnapshot, borrowUsd] = await Promise.all([
         getProjectedRates(
           borrowVault.value.address,
           borrowVault.value.interestRateInfo.cash,
@@ -278,7 +279,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
           repayNano,
           -repayNano,
         ),
-        getAssetUsdValueOrZero(position.value.supplied || 0n, collateralVault.value, 'off-chain'),
+        getCollateralApySnapshot(position.value, borrowVault.value),
         getAssetUsdValueOrZero(remainingBorrow > 0n ? remainingBorrow : 0n, borrowVault.value, 'off-chain'),
       ])
 
@@ -289,8 +290,8 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
         : borrowApy.value
 
       _estimateNetAPY.value = getNetAPY(
-        supplyUsd,
-        collateralSupplyApy.value,
+        collateralSnapshot.supplyUsd,
+        collateralSnapshot.weightedSupplyApy ?? collateralSupplyApy.value,
         borrowUsd,
         projectedBorrowApy,
         collateralSupplyRewardApy.value || null,

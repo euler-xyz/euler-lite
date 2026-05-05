@@ -31,6 +31,7 @@ const positionIndex = usePositionIndex()
 const { isPositionsLoading, isPositionsLoaded, isDepositsLoaded, refreshAllPositions: _refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
+const { getCollateralApySnapshot } = usePositionCollateralApy()
 const { eulerLensAddresses: _eulerLensAddresses } = useEulerAddresses()
 const { fetchSingleBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
@@ -104,14 +105,14 @@ watchEffect(async () => {
     return
   }
   const gen = netApyGuard.next()
-  const [supplyUsd, borrowUsd] = await Promise.all([
-    getAssetUsdValueOrZero(position.value.supplied || 0n, collateralVault.value, 'off-chain'),
+  const [collateralSnapshot, borrowUsd] = await Promise.all([
+    getCollateralApySnapshot(position.value, borrowVault.value),
     getAssetUsdValueOrZero(position.value.borrowed ?? 0n, borrowVault.value, 'off-chain'),
   ])
   if (netApyGuard.isStale(gen)) return
   netAPY.value = getNetAPY(
-    supplyUsd,
-    collateralSupplyApy.value,
+    collateralSnapshot.supplyUsd,
+    collateralSnapshot.weightedSupplyApy ?? collateralSupplyApy.value,
     borrowUsd,
     borrowApy.value,
     collateralSupplyRewardApy.value || null,

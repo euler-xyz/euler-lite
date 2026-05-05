@@ -6,11 +6,12 @@ import { OperationReviewModal, SlippageSettingsModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { AccountBorrowPosition } from '~/entities/account'
-import type { Vault, VaultAsset } from '~/entities/vault'
+import { getProjectedRatesBatch, getRoe, type ProjectedRates, type Vault, type VaultAsset } from '~/entities/vault'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
+import { createRaceGuard } from '~/utils/race-guard'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
@@ -18,7 +19,7 @@ import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import type { TxPlan } from '~/entities/txPlan'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
-import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
+import { formatLiquidationBuffer as formatLiqBuffer, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { computeMaxMultiplier } from '~/utils/multiply-math'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
@@ -33,8 +34,9 @@ const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
 const { buildMultiplyPlan, executeTxPlan } = useEulerOperations()
 const { eulerLensAddresses } = useEulerAddresses()
-const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
-const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
+const { getBorrowRewardApy } = useRewardsApy()
+const { withIntrinsicBorrowApy } = useIntrinsicApy()
+const { getCollateralApySnapshot } = usePositionCollateralApy()
 const {
   runSimulation: runMultiplySimulation,
   simulationError: multiplySimulationError,
@@ -133,26 +135,47 @@ const multiplyRouteEmptyMessage = computed(() => {
   return 'No quotes found'
 })
 
-const multiplySupplyApy = computed(() => {
-  if (!multiplySupplyVault.value) {
-    return null
+const projectedBorrowRates = ref<ProjectedRates | null>(null)
+const projectedRatesGuard = createRaceGuard()
+
+watchEffect(async () => {
+  const short = multiplyShortVault.value
+  const debtNano = multiplyDebtAmountNano.value
+  const gen = projectedRatesGuard.next()
+
+  if (!short || !debtNano) {
+    projectedBorrowRates.value = null
+    return
   }
-  const base = nanoToValue(multiplySupplyVault.value.interestRateInfo.supplyAPY || 0n, 25)
-  return withIntrinsicSupplyApy(base, multiplySupplyVault.value.asset.address) + getSupplyRewardApy(multiplySupplyVault.value.address)
-})
-const multiplyLongApy = computed(() => {
-  if (!multiplyLongVault.value) {
-    return null
+
+  try {
+    const [shortResult] = await getProjectedRatesBatch([
+      {
+        vaultAddress: short.address,
+        currentCash: short.interestRateInfo.cash,
+        currentBorrows: short.interestRateInfo.borrows,
+        cashDelta: -debtNano,
+        borrowsDelta: debtNano,
+      },
+    ])
+    if (projectedRatesGuard.isStale(gen)) return
+    projectedBorrowRates.value = shortResult
   }
-  const base = nanoToValue(multiplyLongVault.value.interestRateInfo.supplyAPY || 0n, 25)
-  return withIntrinsicSupplyApy(base, multiplyLongVault.value.asset.address) + getSupplyRewardApy(multiplyLongVault.value.address)
+  catch (e) {
+    if (projectedRatesGuard.isStale(gen)) return
+    console.warn('[Multiply] failed to project rates', e)
+    projectedBorrowRates.value = null
+  }
 })
 const multiplyBorrowApy = computed(() => {
   if (!multiplyShortVault.value) {
     return null
   }
-  const base = nanoToValue(multiplyShortVault.value.interestRateInfo.borrowAPY || 0n, 25)
-  return withIntrinsicBorrowApy(base, multiplyShortVault.value.asset.address) - getBorrowRewardApy(multiplyShortVault.value.address, multiplySupplyVault.value?.address)
+  const currentRaw = nanoToValue(multiplyShortVault.value.interestRateInfo.borrowAPY || 0n, 25)
+  const base = withIntrinsicBorrowApy(currentRaw, multiplyShortVault.value.asset.address) - getBorrowRewardApy(multiplyShortVault.value.address, multiplySupplyVault.value?.address)
+  if (!projectedBorrowRates.value) return base
+  const projectedRaw = nanoToValue(projectedBorrowRates.value.borrowAPY, 25)
+  return base + (projectedRaw - currentRaw)
 })
 
 const multiplyDebtAmountNano = computed(() => {
@@ -236,18 +259,6 @@ const multiplySwapReady = computed(() => {
   }
   return Boolean(multiplyEffectiveQuote.value || (multiplyIsSameAsset.value && multiplyDebtAmountNano.value > 0n))
 })
-const multiplyLongValueUsd = ref<number | null>(null)
-watchEffect(async () => {
-  if (!multiplyLongVault.value) {
-    multiplyLongValueUsd.value = null
-    return
-  }
-  if (!multiplySwapAmountOut.value) {
-    multiplyLongValueUsd.value = null
-    return
-  }
-  multiplyLongValueUsd.value = (await getAssetUsdValue(multiplySwapAmountOut.value, multiplyLongVault.value, 'off-chain')) ?? null
-})
 const multiplyBorrowValueUsd = ref<number | null>(null)
 watchEffect(async () => {
   if (!multiplyShortVault.value) {
@@ -261,12 +272,16 @@ watchEffect(async () => {
   multiplyBorrowValueUsd.value = (await getAssetUsdValue(multiplyDebtAmountNano.value, multiplyShortVault.value, 'off-chain')) ?? null
 })
 const currentSupplyValueUsd = ref<number | null>(null)
+const currentWeightedSupplyApy = ref<number | null>(null)
 watchEffect(async () => {
-  if (!position.value || !multiplyLongVault.value) {
+  if (!position.value || !multiplyShortVault.value) {
     currentSupplyValueUsd.value = null
+    currentWeightedSupplyApy.value = null
     return
   }
-  currentSupplyValueUsd.value = (await getAssetUsdValue(position.value.supplied, multiplyLongVault.value, 'off-chain')) ?? null
+  const snapshot = await getCollateralApySnapshot(position.value, multiplyShortVault.value)
+  currentSupplyValueUsd.value = snapshot.supplyUsd
+  currentWeightedSupplyApy.value = snapshot.weightedSupplyApy
 })
 const currentBorrowValueUsd = ref<number | null>(null)
 watchEffect(async () => {
@@ -276,11 +291,23 @@ watchEffect(async () => {
   }
   currentBorrowValueUsd.value = (await getAssetUsdValue(position.value.borrowed, multiplyShortVault.value, 'off-chain')) ?? null
 })
-const nextSupplyValueUsd = computed(() => {
-  if (currentSupplyValueUsd.value === null) {
-    return null
+const nextSupplyValueUsd = ref<number | null>(null)
+const multiplyWeightedSupplyApy = ref<number | null>(null)
+watchEffect(async () => {
+  if (!position.value || !multiplyShortVault.value || !multiplyLongVault.value) {
+    nextSupplyValueUsd.value = null
+    multiplyWeightedSupplyApy.value = null
+    return
   }
-  return currentSupplyValueUsd.value + (multiplyLongValueUsd.value || 0)
+  const snapshot = await getCollateralApySnapshot(position.value, multiplyShortVault.value, {
+    deltas: [{
+      vaultAddress: multiplyLongVault.value.address,
+      assetsDelta: multiplySwapAmountOut.value,
+      projectRates: true,
+    }],
+  })
+  nextSupplyValueUsd.value = snapshot.supplyUsd
+  multiplyWeightedSupplyApy.value = snapshot.weightedSupplyApy
 })
 const nextBorrowValueUsd = computed(() => {
   if (currentBorrowValueUsd.value === null) {
@@ -288,31 +315,24 @@ const nextBorrowValueUsd = computed(() => {
   }
   return currentBorrowValueUsd.value + (multiplyBorrowValueUsd.value || 0)
 })
-const multiplyWeightedSupplyApy = computed(() => {
-  if (currentSupplyValueUsd.value === null || multiplyLongApy.value === null) {
-    return null
-  }
-  const longUsd = multiplyLongValueUsd.value || 0
-  const total = currentSupplyValueUsd.value + longUsd
-  if (!Number.isFinite(total) || total <= 0) {
-    return null
-  }
-  const supplyApy = multiplySupplyApy.value ?? multiplyLongApy.value
-  return (currentSupplyValueUsd.value * supplyApy + longUsd * multiplyLongApy.value) / total
-})
 const multiplyRoeBefore = computed(() => {
-  return calculateRoe(
+  if (!multiplyShortVault.value) return null
+  const borrowApy = withIntrinsicBorrowApy(
+    nanoToValue(multiplyShortVault.value.interestRateInfo.borrowAPY || 0n, 25),
+    multiplyShortVault.value.asset.address,
+  ) - getBorrowRewardApy(multiplyShortVault.value.address, multiplySupplyVault.value?.address)
+  return getRoe(
     currentSupplyValueUsd.value,
+    currentWeightedSupplyApy.value,
     currentBorrowValueUsd.value,
-    multiplyLongApy.value,
-    multiplyBorrowApy.value,
+    borrowApy,
   )
 })
 const multiplyRoeAfter = computed(() => {
-  return calculateRoe(
+  return getRoe(
     nextSupplyValueUsd.value,
-    nextBorrowValueUsd.value,
     multiplyWeightedSupplyApy.value,
+    nextBorrowValueUsd.value,
     multiplyBorrowApy.value,
   )
 })

@@ -1,7 +1,8 @@
 import type { Ref, ComputedRef } from 'vue'
 import type { AccountBorrowPosition } from '~/entities/account'
+import { getProjectedRates, getRoe } from '~/entities/vault'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { calculateRoe, computeNextLtv, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
+import { computeNextLtv, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
 
 interface UseRepayHealthMetricsOptions {
   position: Ref<AccountBorrowPosition | undefined>
@@ -69,11 +70,41 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
   const nextLiquidationPrice = computed(() =>
     computeLiquidationPrice(priceRatio.value, nextHealth.value))
 
+  const projectedBorrowApy = ref<number | null>(null)
+
+  watchEffect(async () => {
+    if (!borrowVault.value || !position.value || debtRepaid.value === null) {
+      projectedBorrowApy.value = null
+      return
+    }
+
+    const repayAmount = debtRepaid.value > position.value.borrowed
+      ? position.value.borrowed
+      : debtRepaid.value
+
+    const projected = await getProjectedRates(
+      borrowVault.value.address,
+      borrowVault.value.interestRateInfo.cash,
+      borrowVault.value.interestRateInfo.borrows,
+      repayAmount,
+      -repayAmount,
+    )
+
+    if (!projected) {
+      projectedBorrowApy.value = null
+      return
+    }
+
+    const currentRaw = nanoToValue(borrowVault.value.interestRateInfo.borrowAPY || 0n, 25)
+    const projectedRaw = nanoToValue(projected.borrowAPY, 25)
+    projectedBorrowApy.value = (borrowApy.value ?? 0) + (projectedRaw - currentRaw)
+  })
+
   const roeBefore = computed(() =>
-    calculateRoe(collateralValueUsd.value, borrowValueUsd.value, collateralSupplyApy.value, borrowApy.value))
+    getRoe(collateralValueUsd.value, collateralSupplyApy.value, borrowValueUsd.value, borrowApy.value))
 
   const roeAfter = computed(() =>
-    calculateRoe(nextCollateralValueUsd.value, nextBorrowValueUsd.value, collateralSupplyApy.value, borrowApy.value))
+    getRoe(nextCollateralValueUsd.value, collateralSupplyApy.value, nextBorrowValueUsd.value, projectedBorrowApy.value ?? borrowApy.value))
 
   return {
     currentHealth,

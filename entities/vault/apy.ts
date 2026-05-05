@@ -4,11 +4,119 @@ import { SECONDS_IN_YEAR, TARGET_TIME_AGO } from '~/entities/constants'
 import { eulerUtilsLensABI, eulerVaultLensABI } from '~/entities/euler/abis'
 import { vaultConvertToAssetsAbi } from '~/abis/vault'
 import { getPublicClient } from '~/utils/public-client'
+import { batchLensCalls } from '~/utils/multicall'
 import { logConciseFetchError } from './log-fetch-error'
 
 export interface ProjectedRates {
   supplyAPY: bigint // 27 decimals
   borrowAPY: bigint // 27 decimals
+}
+
+export interface ProjectedRatesRequest {
+  vaultAddress: string
+  currentCash: bigint
+  currentBorrows: bigint
+  cashDelta: bigint
+  borrowsDelta: bigint
+}
+
+const toAdjustedRateState = (request: ProjectedRatesRequest) => {
+  const adjustedCash = request.currentCash + request.cashDelta < 0n ? 0n : request.currentCash + request.cashDelta
+  const adjustedBorrows = request.currentBorrows + request.borrowsDelta < 0n ? 0n : request.currentBorrows + request.borrowsDelta
+
+  return { adjustedCash, adjustedBorrows }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic lens contract return
+const parseProjectedRatesResult = (result: Record<string, any> | null): ProjectedRates | null => {
+  if (!result || result.queryFailure || !result.interestRateInfo?.length) {
+    return null
+  }
+
+  const info = result.interestRateInfo[0]
+  return {
+    supplyAPY: info.supplyAPY as bigint,
+    borrowAPY: info.borrowAPY as bigint,
+  }
+}
+
+export const getProjectedRatesBatch = async (
+  requests: ProjectedRatesRequest[],
+): Promise<Array<ProjectedRates | null>> => {
+  const { client: rpcClient, rpcUrl } = useRpcClient()
+  const { eulerLensAddresses, eulerCoreAddresses } = useEulerAddresses()
+
+  if (!requests.length) {
+    return []
+  }
+
+  if (!eulerLensAddresses.value?.vaultLens) {
+    return requests.map(() => null)
+  }
+
+  const prepared = requests.map((request) => {
+    const { adjustedCash, adjustedBorrows } = toAdjustedRateState(request)
+    return {
+      request,
+      adjustedCash,
+      adjustedBorrows,
+      isEmpty: adjustedCash === 0n && adjustedBorrows === 0n,
+    }
+  })
+
+  const results: Array<ProjectedRates | null> = prepared.map(item =>
+    item.isEmpty ? { supplyAPY: 0n, borrowAPY: 0n } : null,
+  )
+  const active = prepared
+    .map((item, index) => ({ ...item, index }))
+    .filter(item => !item.isEmpty)
+
+  if (!active.length) {
+    return results
+  }
+
+  const calls = active.map(item => ({
+    functionName: 'getVaultInterestRateModelInfo',
+    args: [
+      item.request.vaultAddress as Address,
+      [item.adjustedCash],
+      [item.adjustedBorrows],
+    ],
+  }))
+
+  if (eulerCoreAddresses.value?.evc && rpcUrl.value) {
+    const batchResults = await batchLensCalls<Record<string, unknown>>(
+      eulerCoreAddresses.value.evc,
+      eulerLensAddresses.value.vaultLens,
+      eulerVaultLensABI,
+      calls,
+      rpcUrl.value,
+    )
+
+    active.forEach((item, activeIndex) => {
+      if (batchResults[activeIndex]?.success) {
+        results[item.index] = parseProjectedRatesResult(batchResults[activeIndex].result as Record<string, unknown> | null)
+      }
+    })
+
+    return results
+  }
+
+  const fallbackResults = await Promise.all(calls.map(async call =>
+    rpcClient.value!.readContract({
+      address: eulerLensAddresses.value!.vaultLens as Address,
+      abi: eulerVaultLensABI,
+      functionName: 'getVaultInterestRateModelInfo',
+      args: call.args as [Address, bigint[], bigint[]],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic lens contract return
+    }) as Promise<Record<string, any>>,
+  ))
+
+  active.forEach((item, activeIndex) => {
+    results[item.index] = parseProjectedRatesResult(fallbackResults[activeIndex])
+  })
+
+  return results
 }
 
 export const getProjectedRates = async (
@@ -18,37 +126,14 @@ export const getProjectedRates = async (
   cashDelta: bigint,
   borrowsDelta: bigint,
 ): Promise<ProjectedRates | null> => {
-  const { client: rpcClient } = useRpcClient()
-  const { eulerLensAddresses } = useEulerAddresses()
-
-  if (!eulerLensAddresses.value?.vaultLens) {
-    return null
-  }
-
-  const adjustedCash = currentCash + cashDelta < 0n ? 0n : currentCash + cashDelta
-  const adjustedBorrows = currentBorrows + borrowsDelta < 0n ? 0n : currentBorrows + borrowsDelta
-
-  if (adjustedCash === 0n && adjustedBorrows === 0n) {
-    return { supplyAPY: 0n, borrowAPY: 0n }
-  }
-
-  const result = await rpcClient.value!.readContract({
-    address: eulerLensAddresses.value.vaultLens as Address,
-    abi: eulerVaultLensABI,
-    functionName: 'getVaultInterestRateModelInfo',
-    args: [vaultAddress as Address, [adjustedCash], [adjustedBorrows]],
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic lens contract return
-  }) as Record<string, any>
-
-  if (result.queryFailure || !result.interestRateInfo?.length) {
-    return null
-  }
-
-  const info = result.interestRateInfo[0]
-  return {
-    supplyAPY: info.supplyAPY as bigint,
-    borrowAPY: info.borrowAPY as bigint,
-  }
+  const [result] = await getProjectedRatesBatch([{
+    vaultAddress,
+    currentCash,
+    currentBorrows,
+    cashDelta,
+    borrowsDelta,
+  }])
+  return result
 }
 
 export const computeAPYs = (borrowSPY: bigint, cash: bigint, borrows: bigint, interestFee: bigint) => {
@@ -85,7 +170,7 @@ export const getNetAPY = (
       + equity * (loopingRewardAPY || 0)
   return sum / supplyUSD
 }
-export const getRoe = (
+export function getRoe(
   supplyUSD: number,
   supplyAPY: number,
   borrowUSD: number,
@@ -93,13 +178,38 @@ export const getRoe = (
   supplyRewardAPY?: number | null,
   borrowRewardAPY?: number | null,
   loopingRewardAPY?: number | null,
-) => {
+): number
+export function getRoe(
+  supplyUSD: number | null,
+  supplyAPY: number | null,
+  borrowUSD: number | null,
+  borrowAPY: number | null,
+  supplyRewardAPY?: number | null,
+  borrowRewardAPY?: number | null,
+  loopingRewardAPY?: number | null,
+): number | null
+export function getRoe(
+  supplyUSD: number | null,
+  supplyAPY: number | null,
+  borrowUSD: number | null,
+  borrowAPY: number | null,
+  supplyRewardAPY?: number | null,
+  borrowRewardAPY?: number | null,
+  loopingRewardAPY?: number | null,
+) {
+  if (supplyUSD === null || borrowUSD === null || supplyAPY === null || borrowAPY === null) {
+    return null
+  }
   const equity = supplyUSD - borrowUSD
+  if (!Number.isFinite(equity)) return null
   if (equity <= 0) return 0
   const netYield
     = supplyUSD * (supplyAPY + (supplyRewardAPY || 0))
       - borrowUSD * (borrowAPY - (borrowRewardAPY || 0))
       + equity * (loopingRewardAPY || 0)
+  if (!Number.isFinite(netYield)) {
+    return null
+  }
   return netYield / equity
 }
 
