@@ -51,6 +51,15 @@ const createContext = (existingShares: bigint): OperationsContext => ({
   } as unknown as OperationsContext['rpcProvider'],
 })
 
+const createFailingContext = (): OperationsContext => ({
+  ...createContext(0n),
+  rpcProvider: {
+    readContract: vi.fn(async () => {
+      throw new Error('balance read failed')
+    }),
+  } as unknown as OperationsContext['rpcProvider'],
+})
+
 const helpers: OperationHelpers = {
   prepareTokenApproval: vi.fn(),
   injectPythHealthCheckUpdates: vi.fn(async () => undefined),
@@ -115,6 +124,22 @@ describe('full repay pre-existing liability deposit cleanup', () => {
       functionName: 'skim',
       args: [maxUint256, SUB_ACCOUNT],
     }))
+  })
+
+  it('skips same-asset full repay cushion cleanup when the pre-existing deposit read fails', async () => {
+    const builders = createSameAssetSwapBuilders(createFailingContext(), helpers)
+
+    const plan = await builders.buildSameAssetFullRepayPlan({
+      collateralVaultAddress: COLLATERAL_VAULT,
+      borrowVaultAddress: BORROW_VAULT,
+      amount: 100n,
+      subAccount: SUB_ACCOUNT,
+    })
+
+    const calls = decodedCalls(plan)
+
+    expect(calls.map(call => call.functionName)).not.toContain('redeem')
+    expect(calls.some(call => call.target === COLLATERAL_VAULT && call.functionName === 'skim')).toBe(false)
   })
 
   it('keeps savings full repay borrow-vault shares when they pre-exist', async () => {
