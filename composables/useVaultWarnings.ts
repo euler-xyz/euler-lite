@@ -1,4 +1,4 @@
-import { getVaultUtilization, getSupplyCapPercentage, getBorrowCapPercentage, type Vault } from '~/entities/vault'
+import { getVaultUtilization, getSupplyCapPercentage, getBorrowCapPercentage, isEVKVault, type SecuritizeVault, type Vault } from '~/entities/vault'
 import {
   findBlockingDisabledOp,
   getOpMeta,
@@ -122,6 +122,21 @@ export const getSupplyCapWarning = (vault: Vault): VaultWarning | null => {
   // Cap level only determines the message text, not the visual severity.
   // Reaching a cap means the vault is popular, not that something is wrong.
   return { level: 'info', title, message }
+}
+
+export const getCollateralSupplyCapWarning = (
+  vault: Vault | SecuritizeVault,
+): VaultWarning | null => {
+  if (!isEVKVault(vault)) return null
+
+  const warning = getSupplyCapWarning(vault)
+  if (!warning) return null
+
+  return {
+    ...warning,
+    title: warning.title.replace('Supply cap', 'Collateral supply cap'),
+    message: warning.message.replace('The supply cap', 'The collateral supply cap'),
+  }
 }
 
 export const getIsSupplyCapReached = (vault: Vault): boolean => {

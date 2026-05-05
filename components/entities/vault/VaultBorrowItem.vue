@@ -3,7 +3,7 @@ import { getAddress } from 'viem'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { type AnyBorrowVaultPair, type Vault, getVaultUtilization, isCyclicalNoteVault } from '~/entities/vault'
-import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
+import { getUtilisationWarning, getBorrowCapWarning, getCollateralSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
@@ -164,6 +164,7 @@ const maxLTV = computed(() => formatNumber(nanoToValue(pair.borrowLTV, 2), 2))
 const utilization = computed(() => getVaultUtilization(pair.borrow))
 const utilisationWarning = computed(() => getUtilisationWarning(pair.borrow, 'borrow'))
 const borrowCapInfo = computed(() => getBorrowCapWarning(pair.borrow))
+const supplyCapInfo = computed(() => getCollateralSupplyCapWarning(pair.collateral))
 
 const liquidityDisplay = ref('-')
 
@@ -258,6 +259,10 @@ const linkPath = computed(() => ({
             <VaultDisplayName
               :name="pairName"
               :is-unverified="isAnyUnverified"
+            />
+            <VaultWarningIcon
+              :warning="supplyCapInfo"
+              tooltip-placement="top-start"
             />
             <span
               v-if="isFeatured"
