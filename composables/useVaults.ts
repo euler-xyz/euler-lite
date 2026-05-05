@@ -736,8 +736,6 @@ const refreshVaults = async () => {
   const { getEvkVaults, getEarnVaults, getSecuritizeVaults } = useVaultRegistry()
   const gen = loadGeneration.value
 
-  isCollateralResolved.value = false
-
   try {
     await updateEVKVaults(getEvkVaults().map(v => v.address), gen, true)
     if (loadGeneration.value !== gen) return

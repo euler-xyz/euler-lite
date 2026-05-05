@@ -48,7 +48,7 @@ watch(
     isLoadingOnDemand.value = true
     try {
       const result = await fetchMarketGroupOnDemand(key)
-      if (runId === onDemandRunId) {
+      if (runId === onDemandRunId && marketKey.value === key) {
         onDemandMarket.value = result
       }
     }
