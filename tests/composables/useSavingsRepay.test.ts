@@ -4,14 +4,32 @@ import type { Vault } from '~/entities/vault'
 import type { AccountBorrowPosition, AccountDepositPosition } from '~/entities/account'
 import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
 
-const USER = '0x0000000000000000000000000000000000000001'
-const VAULT = '0x0000000000000000000000000000000000000002'
-const ASSET = '0x0000000000000000000000000000000000000003'
+const { USER, VAULT, sameVault, mocks } = vi.hoisted(() => {
+  const USER = '0x0000000000000000000000000000000000000001'
+  const VAULT = '0x0000000000000000000000000000000000000002'
+  const ASSET = '0x0000000000000000000000000000000000000003'
+  const sameVault = {
+    address: VAULT,
+    totalCash: 100n,
+    decimals: 0n,
+    asset: {
+      address: ASSET,
+      symbol: 'USDe',
+      decimals: 0n,
+    },
+    collateralLTVs: [],
+  } as unknown as Vault
 
-const mocks = vi.hoisted(() => ({
-  getSavingsPosition: vi.fn(),
-  runSimulation: vi.fn(),
-}))
+  return {
+    USER,
+    VAULT,
+    sameVault,
+    mocks: {
+      getSavingsPosition: vi.fn(),
+      runSimulation: vi.fn(),
+    },
+  }
+})
 
 vi.mock('@wagmi/vue', () => ({
   useAccount: () => ({
@@ -92,18 +110,6 @@ vi.mock('~/composables/useRepaySavingsOptions', () => ({
     }
   },
 }))
-
-const sameVault = {
-  address: VAULT,
-  totalCash: 100n,
-  decimals: 0n,
-  asset: {
-    address: ASSET,
-    symbol: 'USDe',
-    decimals: 0n,
-  },
-  collateralLTVs: [],
-} as unknown as Vault
 
 const position = {
   borrow: sameVault,
