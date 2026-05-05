@@ -982,7 +982,10 @@ export const buildVaultApyCache = (
 ): Map<string, VaultApyCacheEntry> => {
   const result = new Map<string, VaultApyCacheEntry>()
   for (const market of markets) {
-    for (const vault of market.vaults) {
+    // Walk both members and external collateral — the attribute matrix now
+    // renders externals as columns too, and they need the same intrinsic +
+    // rewards adjustment so Stats agrees with the per-vault card.
+    for (const vault of [...market.vaults, ...market.externalCollateral]) {
       if (!isVaultType(vault)) continue
       const addr = vault.address.toLowerCase()
       if (result.has(addr)) continue

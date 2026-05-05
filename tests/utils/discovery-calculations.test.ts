@@ -237,4 +237,31 @@ describe('buildVaultApyCache', () => {
     expect(entry!.supplyApy).toBeCloseTo(4 + 1 + 0.5)
     expect(entry!.borrowApy).toBeCloseTo(6 + 2 - 0.25)
   })
+
+  it('caches external-collateral vaults so attribute matrix externals match the per-vault card', () => {
+    // External EVK vaults render as columns in the attribute matrix and need
+    // the same intrinsic + rewards adjustment as members — without this, the
+    // Stats column would silently fall back to raw IRM for externals.
+    const externalVault = {
+      ...makeVault('0xExternalApy', []),
+      interestRateInfo: {
+        supplyAPY: 3n * 10n ** 25n,
+        borrowAPY: 5n * 10n ** 25n,
+      },
+    } as Vault
+    const market = makeMarket([], [externalVault])
+
+    const cache = buildVaultApyCache(
+      [market],
+      (apy, _addr) => apy + 1,
+      (apy, _addr) => apy + 2,
+      _addr => 0.5,
+      _addr => 0.25,
+    )
+
+    const entry = cache.get(externalVault.address.toLowerCase())
+    expect(entry).toBeDefined()
+    expect(entry!.supplyApy).toBeCloseTo(3 + 1 + 0.5)
+    expect(entry!.borrowApy).toBeCloseTo(5 + 2 - 0.25)
+  })
 })
