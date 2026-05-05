@@ -149,6 +149,7 @@ describe('useSavingsRepay', () => {
     vi.stubGlobal('useEulerAccount', () => ({ refreshAllPositions: vi.fn() }))
     vi.stubGlobal('useEulerAddresses', () => ({ eulerLensAddresses: ref({}) }))
     vi.stubGlobal('useVaultRegistry', () => ({ getVault: vi.fn() }))
+    vi.stubGlobal('useTxFinalization', () => ({ finalizeTxAndRedirect: vi.fn() }))
     vi.stubGlobal('useSwapApi', () => ({
       getSwapProviders: vi.fn(async () => []),
       getSwapQuotes: vi.fn(async () => []),
