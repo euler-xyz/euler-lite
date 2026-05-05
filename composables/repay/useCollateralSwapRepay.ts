@@ -16,6 +16,7 @@ import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { useRepaySwapCore } from '~/composables/repay/useRepaySwapCore'
 import { useRepaySwapDetails } from '~/composables/repay/useRepaySwapDetails'
 import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics'
+import { getRepaySwapReviewInputAmount } from '~/composables/repay/reviewAmount'
 import { adjustForInterest } from '~/composables/useEulerOperations/helpers'
 import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
@@ -424,11 +425,18 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
         if (!ok) return
       }
 
+      const inputDisplay = getRepaySwapReviewInputAmount({
+        amount: core.amount.value,
+        quote: core.quotes.selectedQuote.value,
+        sourceDecimals: sourceVault.value.asset.decimals,
+        swapperMode: core.direction.value,
+      })
+
       modal.open(OperationReviewModal, {
         props: {
           type: 'repay',
           asset: sourceVault.value.asset,
-          amount: core.amount.value,
+          amount: inputDisplay,
           plan: plan.value || undefined,
           swapToAsset: !core.isSameAsset.value ? borrowVault.value.asset : undefined,
           swapToAmount: !core.isSameAsset.value ? core.debtAmount.value : undefined,

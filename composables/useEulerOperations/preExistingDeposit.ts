@@ -21,6 +21,6 @@ export const hasPreExistingVaultDeposit = async (
   }
   catch (err) {
     logWarn(logScope, err)
-    return false
+    return true
   }
 }
