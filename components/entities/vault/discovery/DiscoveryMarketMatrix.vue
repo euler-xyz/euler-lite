@@ -1,31 +1,16 @@
 <script setup lang="ts">
-import type { CSSProperties } from 'vue'
-import type { Address } from 'viem'
-import { selectLeafAdaptersForPair, type OracleAdapterEntry } from '@eulerxyz/euler-v2-sdk'
-import type { MarketGroup } from '~/entities/lend-discovery'
-import type { EVault, SecuritizeCollateralVault } from '~/entities/vault'
+import { isEVault, selectLeafAdaptersForPair, type SecuritizeCollateralVault, type OracleAdapterEntry, type EVault } from '@eulerxyz/euler-v2-sdk'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
-import {
-  findVault,
-  formatMetricValue,
-  getCellBgColor,
-  isVaultType,
-  isMatrixCompatibleVault,
-  type CollateralMatrixData,
-  type MatrixCell,
-  type DotMetric,
-  type EnhancedCellApys,
-} from '~/utils/discoveryCalculations'
-import {
-  getChecksStatus,
-  OracleAdapterCheckSeverity,
-  type OracleAdapterCheck,
-} from '~/entities/oracle'
+import { findVault, formatMetricValue, getCellBgColor, isMatrixCompatibleVault, type CollateralMatrixData, type MatrixCell, type DotMetric, type EnhancedCellApys } from '~/utils/discoveryCalculations'
+import { getChecksStatus, OracleAdapterCheckSeverity, type OracleAdapterCheck } from '~/entities/oracle'
 import { getOracleProviderLogo } from '~/entities/oracle-providers'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { truncate, formatNumber } from '~/utils/string-utils'
 import { shouldInvertOraclePrice } from '~/utils/oracle-label'
 import { useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
+import type { MarketGroup } from '~/entities/lend-discovery'
+import type { Address } from 'viem'
+import type { CSSProperties } from 'vue'
 
 const props = defineProps<{
   market: MarketGroup
@@ -90,7 +75,7 @@ const computeEnhancedApys = (
     const base = getVaultBorrowApy(liability)
     borrowApy = withIntrinsicBorrowApy(base, liability.asset.address)
     borrowRewards = getBorrowRewardApy(liability.address, collateral?.address)
-    utilization = isVaultType(liability) ? liability.utilization : 0
+    utilization = isEVault(liability) ? liability.utilization : 0
   }
 
   const loopingRewards = liability ? getLoopingRewardApy(liability.address, collateral?.address) : 0
@@ -181,7 +166,7 @@ const cellOracleAdapters = computed((): Map<string, OracleAdapterEntry[]> => {
       const liability = findVault(props.market, liabAddr)
       if (!collateral || !liability) continue
       if (!isMatrixCompatibleVault(collateral)) continue
-      if (!isVaultType(liability) || !liability.oracle.adapters.length || !liability.unitOfAccount) continue
+      if (!isEVault(liability) || !liability.oracle.adapters.length || !liability.unitOfAccount) continue
       // The borrow vault's oracle resolves the collateral *vault* (eToken)
       // address against its unit of account — not the collateral's underlying
       // asset. Mirrors VaultOverviewBlockOracleAdapters' collateralVaults path.
@@ -204,7 +189,7 @@ const columnAssetOracleAdapters = computed((): Map<string, OracleAdapterEntry[]>
   if (props.dotMetric !== 'oracle') return result
   for (const col of props.matrix.columns) {
     const liability = findVault(props.market, col.address)
-    if (!liability || !isVaultType(liability) || !liability.oracle.adapters.length || !liability.unitOfAccount) continue
+    if (!liability || !isEVault(liability) || !liability.oracle.adapters.length || !liability.unitOfAccount) continue
     const adapters = selectLeafAdaptersForPair(
       liability.oracle.adapters,
       liability.asset.address as Address,
@@ -326,7 +311,7 @@ const oraclePriceSourceVaults = computed<EVault[]>(() => {
   const seen = new Map<string, EVault>()
   for (const col of props.matrix.columns) {
     const liability = findVault(props.market, col.address)
-    if (liability && isVaultType(liability)) {
+    if (liability && isEVault(liability)) {
       seen.set(liability.address.toLowerCase(), liability)
     }
   }
@@ -403,7 +388,7 @@ const onCellAdapterClick = (
   }
   const liability = findVault(props.market, liabilityAddr)
   const collateral = findVault(props.market, collateralAddr)
-  if (!liability || !isVaultType(liability)) return
+  if (!liability || !isEVault(liability)) return
   positionTooltip(event)
   tooltipContext.value = {
     view,
@@ -422,7 +407,7 @@ const onAssetAdapterClick = (
     return
   }
   const liability = findVault(props.market, liabilityAddr)
-  if (!liability || !isVaultType(liability)) return
+  if (!liability || !isEVault(liability)) return
   positionTooltip(event)
   tooltipContext.value = {
     view,

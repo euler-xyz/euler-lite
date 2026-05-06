@@ -1,24 +1,9 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import { getAddress, type Address, type Abi } from 'viem'
-import { eulerAccountLensABI } from '~/entities/euler/abis'
-import {
-  getNetAPY,
-  getRoe,
-  type EVault,
-  type SecuritizeCollateralVault,
-} from '~/entities/vault'
+import { getRoe, getNetAPY } from '~/utils/vault/apy'
+import { isSecuritizeCollateralVault, type EVault, type SecuritizeCollateralVault, type PortfolioBorrowPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
-import {
-  getAssetUsdValue,
-  getAssetUsdPrice,
-  getCollateralUsdPrice,
-  getCollateralUsdValue,
-  getUnitOfAccountUsdRate,
-  toUsdAmount,
-  type UsdAmount,
-} from '~/services/pricing/priceProvider'
-import { type AccountBorrowPosition, isPositionEligibleForLiquidation } from '~/entities/account'
+import { getAssetUsdValue, getAssetUsdPrice, getCollateralUsdPrice, getCollateralUsdValue, getUnitOfAccountUsdRate, toUsdAmount, type UsdAmount } from '~/services/pricing/priceProvider'
+import { getBorrowPositionEffectiveLiquidationLTV, getBorrowPositionTimeToLiquidation } from '~/utils/ltv'
 import type { TxPlan } from '~/entities/txPlan'
 import { formatTtl, nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { formatNumber, formatHealthScore, formatUsdValue, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
@@ -28,6 +13,9 @@ import { VaultOverviewModal, OperationReviewModal, VaultSupplyApyModal, VaultBor
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
+import { useAccount } from '@wagmi/vue'
+import { getAddress, type Address, type Abi } from 'viem'
+import { eulerAccountLensABI } from '~/entities/euler/abis'
 
 const _route = useRoute()
 const router = useRouter()
@@ -52,7 +40,7 @@ type PositionCollateral = {
   assets: bigint
 }
 
-const position: Ref<AccountBorrowPosition | undefined> = ref()
+const position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined> = ref()
 const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const collateralItems = ref<PositionCollateral[]>([])
@@ -64,69 +52,92 @@ const { getOrFetch } = useVaultRegistry()
 const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
 const { client: rpcClient } = useRpcClient()
 
-const borrowVault = computed(() => position.value?.borrow)
-const collateralVault = computed(() => position.value?.collateral)
-const primaryCollateralAddress = computed(() => position.value ? getAddress(position.value.collateral.address) : '')
-const collateralCount = computed(() => position.value?.collaterals?.length ?? collateralItems.value.length)
+const borrowVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
+const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() => position.value ? position.value.collateralVault as EVault | SecuritizeCollateralVault | undefined : undefined)
+const positionCollateralAddresses = computed(() => position.value ? position.value.collateralVaults : [])
+const primaryCollateralAddress = computed(() => collateralVault.value ? getAddress(collateralVault.value.address) : '')
+const collateralCount = computed(() => positionCollateralAddresses.value.length || collateralItems.value.length)
 const collateralSymbolLabel = computed(() => {
   if (!position.value) {
     return ''
   }
-  const symbol = position.value.collateral.asset.symbol
+  const symbol = collateralVault.value?.asset.symbol || ''
   return collateralCount.value > 1 ? `${symbol} & others` : symbol
 })
 const pairAssetsLabel = computed(() => {
   if (!position.value) {
     return ''
   }
-  return `${collateralSymbolLabel.value}/${position.value.borrow.asset.symbol}`
+  return `${collateralSymbolLabel.value}/${borrowVault.value?.asset.symbol || ''}`
 })
 const pairAssets = computed(() => {
   if (!collateralVault.value || !borrowVault.value) return []
   return [collateralVault.value.asset, borrowVault.value.asset]
 })
 const hasNoBorrow = computed(() => (position.value?.borrowed ?? 0n) === 0n)
-const hasQueryFailure = computed(() => Boolean(position.value?.liquidityQueryFailure))
-const isEligibleForLiquidation = computed(() => isPositionEligibleForLiquidation(position.value))
+const hasQueryFailure = computed(() => !borrowVault.value || !collateralVault.value)
+const isEligibleForLiquidation = computed(() => position.value?.liquidatable ?? false)
+const effectiveLiquidationLTVPercent = computed(() => {
+  if (!position.value) return null
+  const liquidationLTV = getBorrowPositionEffectiveLiquidationLTV(position.value)
+  return liquidationLTV === undefined ? null : ltvToPercent(liquidationLTV)
+})
+const positionLTVValue = computed(() => position.value?.userLTV ?? position.value?.currentLTV)
+const positionLTVPercent = computed(() =>
+  positionLTVValue.value === undefined ? null : nanoToValue(positionLTVValue.value, 18),
+)
+const positionHealthValue = computed(() => position.value?.healthFactor)
+const positionHealthScore = computed(() =>
+  positionHealthValue.value === undefined ? null : nanoToValue(positionHealthValue.value, 18),
+)
+const pairLiquidationLTVPercent = computed(() => {
+  if (!position.value || position.value.liquidationLTV === undefined) return null
+  return ltvToPercent(position.value.liquidationLTV)
+})
 const isPositionGeoBlocked = computed(() => {
   if (!position.value) return false
-  const addresses: string[] = [position.value.borrow.address]
-  const collateralAddresses: string[] = position.value.collaterals?.length
-    ? position.value.collaterals
-    : [position.value.collateral.address]
+  if (!borrowVault.value) return false
+  const addresses: string[] = [borrowVault.value.address]
+  const collateralAddresses = positionCollateralAddresses.value
   addresses.push(...collateralAddresses)
   return isAnyVaultBlockedByCountry(...addresses)
 })
 
 const isOverBorrowLTV = computed(() => {
   if (!position.value || hasNoBorrow.value) return false
-  const userLtv = nanoToValue(position.value.userLTV, 18)
+  const userLtv = positionLTVPercent.value
+  if (userLtv === null) return false
+  if (position.value.borrowLTV === undefined) return false
   const borrowLtv = ltvToPercent(position.value.borrowLTV)
   return borrowLtv > 0 && userLtv >= borrowLtv
 })
 
 const isBorrowRestricted = computed(() =>
-  position.value ? isVaultRestrictedByCountry(position.value.borrow.address) : false)
+  borrowVault.value ? isVaultRestrictedByCountry(borrowVault.value.address) : false)
 
 const isMultiplyRestricted = computed(() => {
   if (!position.value) return false
-  return isVaultRestrictedByCountry(position.value.borrow.address)
-    || isVaultRestrictedByCountry(position.value.collateral.address)
+  return !!borrowVault.value && !!collateralVault.value
+    && (isVaultRestrictedByCountry(borrowVault.value.address)
+      || isVaultRestrictedByCountry(collateralVault.value.address))
 })
 
 // Both vaults restricted = pair effectively blocked (no borrow, no multiply, no useful swaps)
 const isPairFullyRestricted = computed(() => {
   if (!position.value) return false
-  return isVaultRestrictedByCountry(position.value.borrow.address)
-    && isVaultRestrictedByCountry(position.value.collateral.address)
+  return !!borrowVault.value && !!collateralVault.value
+    && isVaultRestrictedByCountry(borrowVault.value.address)
+    && isVaultRestrictedByCountry(collateralVault.value.address)
 })
 
 const borrowVaultNotice = computed(() => {
   if (!position.value) return ''
-  return getVaultNotice(position.value.borrow.address)
+  return borrowVault.value ? getVaultNotice(borrowVault.value.address) : ''
 })
 
 const getCollateralNotice = (vaultAddress: string): string => getVaultNotice(vaultAddress)
+const asPositionCollateralVault = (vault: unknown): EVault | SecuritizeCollateralVault =>
+  vault as EVault | SecuritizeCollateralVault
 
 const supplyRewardAPY = computed(() => getSupplyRewardApy(collateralVault.value?.address || ''))
 const borrowRewardAPY = computed(() => getBorrowRewardApy(borrowVault.value?.address || '', collateralVault.value?.address || ''))
@@ -182,7 +193,7 @@ const collateralRows = computed(() => {
 
 // Update collateral rows data when collateral items change
 watchEffect(async () => {
-  if (!position.value || !collateralItems.value.length) {
+  if (!position.value || !borrowVault.value || !collateralItems.value.length) {
     collateralRowsData.value = []
     return
   }
@@ -199,13 +210,13 @@ watchEffect(async () => {
       let unitPriceUsd = 0
       let oraclePriceUsd = 0
 
-      const valueRaw = await getCollateralUsdValue(item.assets, position.value!.borrow, item.vault as EVault, 'off-chain')
-      const priceInfo = await getCollateralUsdPrice(position.value!.borrow, item.vault as EVault, 'off-chain')
+      const valueRaw = await getCollateralUsdValue(item.assets, borrowVault.value!, item.vault as EVault, 'off-chain')
+      const priceInfo = await getCollateralUsdPrice(borrowVault.value!, item.vault as EVault, 'off-chain')
       if (priceInfo) {
         unitPriceUsd = nanoToValue(priceInfo.amountOutMid, 18)
       }
 
-      const oraclePriceInfo = await getCollateralUsdPrice(position.value!.borrow, item.vault as EVault, 'on-chain')
+      const oraclePriceInfo = await getCollateralUsdPrice(borrowVault.value!, item.vault as EVault, 'on-chain')
       if (oraclePriceInfo) {
         oraclePriceUsd = nanoToValue(oraclePriceInfo.amountOutMid, 18)
       }
@@ -227,21 +238,21 @@ watchEffect(async () => {
 const collateralValue = ref<UsdAmount>({ usd: 0, hasPrice: false })
 
 watchEffect(async () => {
-  if (!position.value) {
+  if (!position.value || !borrowVault.value) {
     collateralValue.value = { usd: 0, hasPrice: false }
     return
   }
 
   // Collateral price ALWAYS comes from liability vault's oracle, converted to USD
-  if (!collateralItems.value.length) {
-    collateralValue.value = toUsdAmount(await getCollateralUsdValue(position.value.supplied, position.value.borrow, position.value.collateral as EVault, 'off-chain'))
+  if (!collateralItems.value.length && collateralVault.value) {
+    collateralValue.value = toUsdAmount(await getCollateralUsdValue(position.value.supplied, borrowVault.value, collateralVault.value as EVault, 'off-chain'))
     return
   }
 
   // For multiple collaterals, sum up using liability vault's oracle for each
   const totals = await Promise.all(
     collateralItems.value.map(item =>
-      getCollateralUsdValue(item.assets, position.value!.borrow, item.vault as EVault, 'off-chain'),
+      getCollateralUsdValue(item.assets, borrowVault.value!, item.vault as EVault, 'off-chain'),
     ),
   )
   const allHavePrice = totals.every(v => v !== undefined)
@@ -290,7 +301,7 @@ watchEffect(async () => {
 const liquidationPrice = computed(() => {
   if (!position.value) return undefined
 
-  const price = position.value.price || 0n
+  const price = position.value.primaryCollateralLiquidationPrice ?? 0n
 
   if (price <= 0n) {
     return undefined
@@ -312,8 +323,8 @@ watchEffect(async () => {
     return
   }
 
-  const collateralValueLiquidation = position.value.collateralValueLiquidation
-  const liabilityValueBorrowing = position.value.liabilityValueBorrowing
+  const collateralValueLiquidation = position.value.collateralValueLiquidation ?? 0n
+  const liabilityValueBorrowing = position.value.liabilityValueBorrowing ?? 0n
 
   if (liabilityValueBorrowing === 0n || collateralValueLiquidation === 0n) {
     borrowLiquidationPrice.value = undefined
@@ -336,7 +347,7 @@ const timeToLiquidationDisplay = computed(() => {
     return '-'
   }
 
-  const result = formatTtl(position.value.timeToLiquidation)
+  const result = formatTtl(getBorrowPositionTimeToLiquidation(position.value))
   return result?.display || '-'
 })
 // Net APY: sync computed so it tracks collateralValue, borrowMarketValue, and APY values
@@ -400,7 +411,7 @@ const onRoeInfoClick = () => {
       borrowAPY: borrowApy.value,
       supplyRewardAPY: supplyRewardAPY.value || null,
       borrowRewardAPY: borrowRewardAPY.value || null,
-      userLTV: position.value ? nanoToValue(position.value.userLTV, 18) : 0,
+      userLTV: positionLTVPercent.value ?? 0,
       supplyCampaigns: supplyCampaignsForModal.value,
       borrowCampaigns: borrowCampaignsForModal.value,
     },
@@ -442,12 +453,12 @@ watchEffect(async () => {
 const borrowUnitPrice = ref<UsdAmount>({ usd: 0, hasPrice: false })
 
 watchEffect(async () => {
-  if (!position.value?.borrow) {
+  if (!borrowVault.value) {
     borrowUnitPrice.value = { usd: 0, hasPrice: false }
     return
   }
 
-  const priceInfo = await getAssetUsdPrice(position.value.borrow, 'off-chain')
+  const priceInfo = await getAssetUsdPrice(borrowVault.value, 'off-chain')
   borrowUnitPrice.value = priceInfo
     ? { usd: nanoToValue(priceInfo.amountOutMid, 18), hasPrice: true }
     : { usd: 0, hasPrice: false }
@@ -471,9 +482,7 @@ const loadCollaterals = async () => {
     return
   }
 
-  const collateralAddresses = position.value.collaterals?.length
-    ? position.value.collaterals
-    : [position.value.collateral.address]
+  const collateralAddresses = positionCollateralAddresses.value
 
   const normalized = collateralAddresses.reduce<string[]>((acc, address) => {
     try {
@@ -485,7 +494,7 @@ const loadCollaterals = async () => {
     return acc
   }, [])
 
-  const primaryAddress = getAddress(position.value.collateral.address)
+  const primaryAddress = primaryCollateralAddress.value
   const unique = Array.from(new Set(normalized))
   const orderedAddresses = [primaryAddress, ...unique.filter(address => address !== primaryAddress)]
 
@@ -508,7 +517,7 @@ const loadCollaterals = async () => {
     const items = await Promise.all(
       orderedAddresses.map(async (address) => {
         try {
-          const vault = await getOrFetch(address) as EVault | SecuritizeCollateralVault | undefined
+          const vault = await getOrFetch(address) as unknown as EVault | SecuritizeCollateralVault | undefined
           let assets = 0n
 
           try {
@@ -526,7 +535,7 @@ const loadCollaterals = async () => {
             }
           }
 
-          return { vault, assets }
+          return vault ? { vault, assets } : null
         }
         catch (e) {
           console.warn('[Position] failed to load collateral vault', address, e)
@@ -535,7 +544,7 @@ const loadCollaterals = async () => {
       }),
     )
 
-    collateralItems.value = items.filter((item): item is PositionCollateral => !!item)
+    collateralItems.value = items.filter((item): item is PositionCollateral => !!item?.vault)
   }
   catch (e) {
     console.warn('[Position] failed to load collaterals', e)
@@ -556,8 +565,8 @@ const disableCollateral = async (vault: EVault) => {
       plan = await buildDisableCollateralPlan(
         position.value!.subAccount,
         vault.address,
-        position.value!.borrow.address,
-        position.value!.collaterals,
+        borrowVault.value!.address,
+        position.value!.collateralVaults,
       )
     }
     catch (e) {
@@ -575,7 +584,7 @@ const disableCollateral = async (vault: EVault) => {
     modal.open(OperationReviewModal, {
       props: {
         type: 'disableCollateral',
-        asset: position.value!.borrow.asset,
+        asset: borrowVault.value!.asset,
         amount: '0',
         plan: plan || undefined,
         subAccount: position.value?.subAccount,
@@ -597,8 +606,8 @@ const send = async (collateralAddress: string) => {
     const txPlan = await buildDisableCollateralPlan(
       position.value!.subAccount,
       collateralAddress,
-      position.value!.borrow.address,
-      position.value!.collaterals,
+      borrowVault.value!.address,
+      position.value!.collateralVaults,
     )
     await executeTxPlan(txPlan)
 
@@ -627,11 +636,11 @@ const load = async () => {
     position.value = getPositionBySubAccountIndex(+positionIndex)
     if (position.value) {
       collateralItems.value = [{
-        vault: position.value.collateral as EVault,
+        vault: collateralVault.value as EVault,
         assets: position.value.supplied,
       }]
       // Load collaterals: always for multi-collateral, or when oracle failed (to get actual assets)
-      if ((position.value.collaterals?.length && position.value.collaterals.length > 1) || position.value.liquidityQueryFailure) {
+      if (positionCollateralAddresses.value.length > 1 || hasQueryFailure.value) {
         await loadCollaterals()
       }
     }
@@ -672,7 +681,7 @@ const onSupplyInfoIconClick = (event: MouseEvent, vault: EVault | SecuritizeColl
 }
 
 const openCollateralInfoModal = (vault: EVault | SecuritizeCollateralVault) => {
-  const isSecuritize = 'type' in vault && vault.type === 'securitize'
+  const isSecuritize = isSecuritizeCollateralVault(vault)
   modal.open(VaultOverviewModal, {
     props: isSecuritize
       ? { title: 'Position information', securitizeVault: vault as SecuritizeCollateralVault }
@@ -717,7 +726,7 @@ watch([isConnected, isSpyMode, address], () => {
       </div>
 
       <VaultLabelsAndAssets
-        :vault="position.collateral"
+        :vault="collateralVault"
         :assets="pairAssets"
         :assets-label="pairAssetsLabel"
       />
@@ -805,7 +814,7 @@ watch([isConnected, isSpyMode, address], () => {
                 class="text-warning-500"
               >Unknown</span>
               <template v-else>
-                {{ formatHealthScore(nanoToValue(position.health, 18)) }}
+                {{ formatHealthScore(positionHealthScore ?? 0) }}
               </template>
             </div>
           </div>
@@ -829,19 +838,19 @@ watch([isConnected, isSpyMode, address], () => {
             </div>
             <div class="text-content-primary text-p3">
               <span
-                v-if="hasQueryFailure"
+                v-if="hasQueryFailure || effectiveLiquidationLTVPercent === null"
                 class="text-warning-500"
               >Unknown</span>
               <template v-else>
-                {{ formatNumber(nanoToValue(position.userLTV, 18), 2) }}% / {{ ltvToPercent(position.liquidationLTV) }}%
+                {{ formatNumber(positionLTVPercent ?? 0, 2) }}% / {{ effectiveLiquidationLTVPercent }}%
               </template>
             </div>
           </div>
           <UiProgress
-            v-if="!hasQueryFailure"
-            :model-value="nanoToValue(position.userLTV, 18)"
-            :max="ltvToPercent(position.liquidationLTV)"
-            :color="nanoToValue(position.userLTV, 18) >= (ltvToPercent(position.liquidationLTV) - 2) ? 'danger' : undefined"
+            v-if="!hasQueryFailure && effectiveLiquidationLTVPercent !== null && positionLTVPercent !== null"
+            :model-value="positionLTVPercent"
+            :max="effectiveLiquidationLTVPercent"
+            :color="positionLTVPercent >= (effectiveLiquidationLTVPercent - 2) ? 'danger' : undefined"
             size="small"
           />
         </div>
@@ -857,8 +866,8 @@ watch([isConnected, isSpyMode, address], () => {
         <div class="rounded-12 bg-card border border-line-default shadow-card">
           <div class="flex justify-between items-center p-16 pb-12 border-b border-line-default">
             <VaultLabelsAndAssets
-              :vault="position.borrow"
-              :assets="[position.borrow.asset]"
+              :vault="borrowVault"
+              :assets="borrowVault ? [borrowVault.asset] : []"
             />
             <div class="flex flex-col items-end">
               <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
@@ -1024,11 +1033,11 @@ watch([isConnected, isSpyMode, address], () => {
             v-for="collateral in collateralRows"
             :key="collateral.vault.address"
             class="rounded-12 bg-card border border-line-default shadow-card cursor-pointer"
-            @click="openCollateralInfoModal(collateral.vault)"
+            @click="openCollateralInfoModal(asPositionCollateralVault(collateral.vault))"
           >
             <div class="flex justify-between items-center p-16 pb-12 border-b border-line-default">
               <VaultLabelsAndAssets
-                :vault="collateral.vault"
+                :vault="asPositionCollateralVault(collateral.vault)"
                 :assets="[collateral.vault.asset]"
               />
               <div class="flex flex-col items-end">
@@ -1037,7 +1046,7 @@ watch([isConnected, isSpyMode, address], () => {
                   <SvgIcon
                     class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                     name="info-circle"
-                    @click.stop="(e: MouseEvent) => onSupplyInfoIconClick(e, collateral.vault)"
+                    @click.stop="(e: MouseEvent) => onSupplyInfoIconClick(e, asPositionCollateralVault(collateral.vault))"
                   />
                 </div>
                 <div class="text-p2 flex items-center text-accent-600 font-semibold">
@@ -1045,7 +1054,7 @@ watch([isConnected, isSpyMode, address], () => {
                     v-if="hasSupplyRewards(collateral.vault.address)"
                     class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
                     name="sparks"
-                    @click.stop="(e: MouseEvent) => onSupplyInfoIconClick(e, collateral.vault)"
+                    @click.stop="(e: MouseEvent) => onSupplyInfoIconClick(e, asPositionCollateralVault(collateral.vault))"
                   />
                   {{ formatNumber(collateral.supplyApyWithRewards) }}%
                 </div>
@@ -1102,7 +1111,7 @@ watch([isConnected, isSpyMode, address], () => {
                 </div>
               </div>
               <div
-                v-if="!hasNoBorrow && isPrimaryCollateral(collateral.vault)"
+                v-if="!hasNoBorrow && isPrimaryCollateral(asPositionCollateralVault(collateral.vault))"
                 class="flex justify-between gap-8 flex-wrap mb-16"
               >
                 <div class="text-neutral-500 text-p3">
@@ -1113,14 +1122,14 @@ watch([isConnected, isSpyMode, address], () => {
                 </div>
               </div>
               <div
-                v-if="!hasNoBorrow && isPrimaryCollateral(collateral.vault)"
+                v-if="!hasNoBorrow && isPrimaryCollateral(asPositionCollateralVault(collateral.vault))"
                 class="flex justify-between gap-8 flex-wrap mb-16"
               >
                 <div class="text-neutral-500 text-p3">
                   Liquidation LTV
                 </div>
                 <div class="text-neutral-800 text-p3">
-                  {{ formatNumber(ltvToPercent(position.liquidationLTV)) }}%
+                  {{ pairLiquidationLTVPercent === null ? '-' : `${formatNumber(pairLiquidationLTVPercent)}%` }}
                 </div>
               </div>
               <UiToast
@@ -1178,7 +1187,7 @@ watch([isConnected, isSpyMode, address], () => {
                   Disable collateral
                 </UiButton>
                 <UiToast
-                  v-if="disableCollateralSimulationError && isDisableCollateralError(collateral.vault)"
+                  v-if="disableCollateralSimulationError && isDisableCollateralError(asPositionCollateralVault(collateral.vault))"
                   class="mt-12"
                   title="Error"
                   variant="error"

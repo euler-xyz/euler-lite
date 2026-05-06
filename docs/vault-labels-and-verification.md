@@ -256,7 +256,7 @@ This keeps the bridge endpoints forward-compatible with the successor backend, w
 
 | Vault Source | Verification Method |
 |-------------|---------------------|
-| **EVK vaults** | Address appears in `verifiedVaultAddresses` from labels |
+| **EVaults** | Address appears in `verifiedVaultAddresses` from labels |
 | **Earn vaults** | Default repo: loaded from `eulerEarnGovernedPerspective` on-chain. Alternative repos: verified if in `earnVaults` from labels |
 | **Escrow vaults** | Loaded from `escrowedCollateralPerspective` on-chain (always verified) |
 | **Securitize vaults** | Address appears in `verifiedVaultAddresses` from labels |
@@ -273,7 +273,7 @@ Two on-chain perspective contracts provide additional verification:
 
 ### Categories
 
-Every EVK vault belongs to one of two categories:
+Every EVault belongs to one of two categories:
 
 | Category | Description |
 |----------|-------------|
@@ -290,7 +290,7 @@ The vault type determines how the vault is fetched and displayed:
 | `'earn'` | EulerEarn aggregator vault (yield optimization) |
 | `'securitize'` | Securitize vault (ERC-4626 without borrowing) |
 
-Type is detected in `entities/vault/factory.ts` through the Euler SDK: `vaultMetaService.fetchVaultType(s)` classifies EVault, EulerEarn, and Securitize vaults, while `eVaultService.fetchVerifiedVaultAddresses(...ESCROW)` provides escrow membership.
+Type is detected through SDK vault metadata and Lite UI categorization helpers in `utils/vault/categories.ts`: `vaultMetaService.fetchVaultType(s)` classifies EVault, EulerEarn, and Securitize vaults, while `eVaultService.fetchVerifiedVaultAddresses(...ESCROW)` provides escrow membership.
 
 ### SDK Vault Categorization
 

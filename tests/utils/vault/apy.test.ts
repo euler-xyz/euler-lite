@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getNetAPY, getRoe } from '~/entities/vault/apy'
+import { getNetAPY, getRoe } from '~/utils/vault/apy'
 
 describe('getNetAPY', () => {
   it('returns 0 when supplyUSD is 0', () => {

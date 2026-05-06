@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import { getAddress } from 'viem'
-import { isCyclicalNoteVault, type EVault } from '~/entities/vault'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
@@ -13,6 +11,9 @@ import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { VaultSupplyApyModal, VaultCollateralExposureModal } from '#components'
+import { useAccount } from '@wagmi/vue'
+import { isCyclicalNoteVault } from '~/utils/vault/classification'
+import { getAddress } from 'viem'
 
 const { isConnected } = useAccount()
 const { vault } = defineProps<{ vault: EVault }>()

@@ -6,8 +6,12 @@ import {
   resolveGoverningEntityKeys,
   resolveEarnGoverningEntityKeys,
   type VerificationLabels,
-} from '~/entities/vault/governor-verification'
-import type { EarnVault, SecuritizeVault, Vault } from '~/entities/vault/types'
+} from '~/utils/vault/governor-verification'
+import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+
+type Vault = EVault & { verified?: boolean, vaultCategory?: 'standard' | 'escrow' }
+type SecuritizeVault = SecuritizeCollateralVault & { verified?: boolean, vaultCategory?: 'standard' | 'escrow' }
+type EarnVault = EulerEarn & { verified?: boolean }
 
 const VAULT_ADDR = getAddress('0x0000000000000000000000000000000000000001')
 const SECOND_VAULT_ADDR = getAddress('0x0000000000000000000000000000000000000099')
@@ -60,12 +64,15 @@ const makeSecuritize = (overrides: Partial<SecuritizeVault> = {}): SecuritizeVau
   ...overrides,
 } as unknown as SecuritizeVault)
 
-const makeEarn = (overrides: Partial<EarnVault> = {}): EarnVault => ({
-  verified: true,
-  address: VAULT_ADDR,
-  owner: GOV_A,
-  ...overrides,
-} as unknown as EarnVault)
+const makeEarn = (overrides: Partial<EarnVault> & { owner?: string } = {}): EarnVault => {
+  const { owner = GOV_A, ...rest } = overrides
+  return {
+    verified: true,
+    address: VAULT_ADDR,
+    governance: { owner },
+    ...rest,
+  } as unknown as EarnVault
+}
 
 const makeRouterOracle = (governor: Address | typeof getAddress = ROUTER_GOV_A) => {
   // Encode an EulerRouter info payload with the given governor in the

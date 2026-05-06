@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import type { EVault, SecuritizeCollateralVault } from '~/entities/vault'
+import type { SecuritizeCollateralVault, EVault } from '@eulerxyz/euler-v2-sdk'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
@@ -9,6 +8,7 @@ import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
+import { useAccount } from '@wagmi/vue'
 
 const { isConnected } = useAccount()
 const { vault } = defineProps<{ vault: SecuritizeCollateralVault }>()

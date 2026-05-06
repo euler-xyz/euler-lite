@@ -5,7 +5,7 @@
  * membership from the SDK EVault service. The client caches the full per-chain
  * categorization and individual-address lookups in memory for the session.
  */
-import { StandardEVaultPerspectives } from '@eulerxyz/euler-v2-sdk'
+import { StandardEVaultPerspectives, VaultType } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, isAddress, type Address } from 'viem'
 import { logger } from '~/utils/logger'
 
@@ -13,7 +13,7 @@ export type VaultCategory = 'evk' | 'earn' | 'securitize' | 'escrow'
 
 /**
  * Invariant: every address in `escrow` also appears in `evk`. Consumers that
- * want "all EVK-compatible vaults" iterate `evk`; consumers that want to
+ * want "all EVault-compatible vaults" iterate `evk`; consumers that want to
  * distinguish escrow check `escrow` (or the per-address lookup).
  */
 export interface VaultCategories {
@@ -58,11 +58,11 @@ const uniqueAddresses = (addresses: Iterable<string>): Address[] => {
 
 const mapVaultType = (type: unknown): Exclude<VaultCategory, 'escrow'> | null => {
   switch (type) {
-    case 'EVault':
+    case VaultType.EVault:
       return 'evk'
-    case 'EulerEarn':
+    case VaultType.EulerEarn:
       return 'earn'
-    case 'SecuritizeCollateral':
+    case VaultType.SecuritizeCollateral:
       return 'securitize'
     default:
       return null

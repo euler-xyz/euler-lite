@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { EVault, EulerEarn, SecuritizeCollateralVault } from '~/entities/vault'
-import { getVaultTypeLabel, getVaultTypeDescription } from '~/entities/vault/descriptions'
+import type { EVault, EulerEarn, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import { getVaultTypeLabel, getVaultTypeDescription } from '~/utils/vault/descriptions'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultTypeInfoModal } from '#components'
 

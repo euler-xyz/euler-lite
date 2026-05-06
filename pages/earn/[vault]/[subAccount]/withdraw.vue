@@ -1,22 +1,20 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import { FixedPoint } from '~/utils/fixed-point'
-import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal } from '#components'
-import { useToast } from '~/components/ui/composables/useToast'
-import {
-  convertSharesToAssets,
-  getCashLimitedWithdrawAmount,
-  type EulerEarn,
-  type VaultAsset,
-} from '~/entities/vault'
-import { getSubAccountAddress } from '~/entities/account'
+import type { VaultAsset } from '~/types/asset'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import type { TxPlan } from '~/entities/txPlan'
 import { formatNumber, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { useModal } from '~/components/ui/composables/useModal'
+import { useToast } from '~/components/ui/composables/useToast'
+import { useAccount } from '@wagmi/vue'
+import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import { getSubAccountAddress } from '@eulerxyz/euler-v2-sdk'
+import { getAddress } from 'viem'
+import { OperationReviewModal } from '#components'
+import { FixedPoint } from '~/utils/fixed-point'
+import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 
 const router = useRouter()
 const route = useRoute()
@@ -36,7 +34,7 @@ const subAccountIndex = Number(route.params.subAccount)
 const subAccount = computed(() => {
   const addr = effectiveAddress.value
   if (!addr || isNaN(subAccountIndex)) return undefined
-  return getSubAccountAddress(addr, subAccountIndex)
+  return getSubAccountAddress(getAddress(addr), subAccountIndex)
 })
 
 const isLoading = ref(false)
@@ -120,17 +118,13 @@ const fetchShareBalance = async () => {
 }
 
 const updateBalance = async () => {
-  if ((!isConnected.value && !isSpyMode.value) || sharesBalance.value === 0n) {
+  if (!vault.value || (!isConnected.value && !isSpyMode.value) || sharesBalance.value === 0n) {
     assetsBalance.value = 0n
     delta.value = 0n
     return
   }
 
-  // Convert shares to assets
-  assetsBalance.value = await convertSharesToAssets(
-    vaultAddress,
-    sharesBalance.value,
-  )
+  assetsBalance.value = vault.value.convertToAssets(sharesBalance.value)
   delta.value = assetsBalance.value
 }
 const submit = async () => {

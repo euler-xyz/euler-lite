@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import type { CSSProperties } from 'vue'
-import type { Address } from 'viem'
-import { selectLeafAdaptersForPair, type OracleAdapterEntry } from '@eulerxyz/euler-v2-sdk'
-import type { EVault, SecuritizeCollateralVault } from '~/entities/vault'
+import type { SecuritizeCollateralVault, EVault, OracleAdapterEntry } from '@eulerxyz/euler-v2-sdk'
+import { selectLeafAdaptersForPair } from '@eulerxyz/euler-v2-sdk'
 import { getChecksStatus, OracleAdapterCheckSeverity, type OracleAdapterMeta } from '~/entities/oracle'
 import { getOracleProviderLogo } from '~/entities/oracle-providers'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { formatNumber } from '~/utils/string-utils'
 import { shouldInvertOraclePrice } from '~/utils/oracle-label'
 import { useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
+import type { Address } from 'viem'
+import type { CSSProperties } from 'vue'
 
 const props = defineProps<{
   vault?: EVault

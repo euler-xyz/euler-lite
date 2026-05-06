@@ -60,7 +60,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 3. **Type Safety**: Full TypeScript integration for better development experience
 4. **Reactive State**: Vue 3 reactivity system for state management
 5. **Modular Design**: Well-defined boundaries between different system parts
-6. **Directory-based Modules**: Large composables and entity files are split into focused modules within directories (e.g., `useEulerOperations/`, `entities/vault/`, `composables/repay/`). Each directory has an `index.ts` re-exporting the public API
+6. **Directory-based Modules**: Large composables and UI workflow helpers are split into focused modules within directories (e.g., `useEulerOperations/`, `utils/vault/`, `composables/repay/`). SDK entities are imported directly from `@eulerxyz/euler-v2-sdk`
 7. **Structured Logging**: a single `logger` API from `~/utils/logger` (console-backed shim, used by shared code) and `~/server/utils/logger` (pino, JSON to stdout for BetterStack on Fargate). Errors passed in `err` are summarised by `~/utils/viem-errors` so viem's `abi` / `metaMessages` / hex request bodies never leak. `~/utils/errorHandling` exposes a small `logWarn` helper for the long tail of client-side call sites; it routes through the same shared logger
 
 ## 🔄 Data Flow Architecture
@@ -215,14 +215,14 @@ Every cacheable proxy above uses the same pattern: TTL cache for fresh hits, sta
 
 ### Vault snapshot pipeline
 
-`/api/vaults?chainId=X` serves a pre-computed snapshot of the public vault set for a chain: every EVK vault, Earn vault, Securitize vault, and referenced escrow vault, with all on-chain state (caps, rates, LTV matrices, oracle prices) already resolved. Per-user data (balances, positions, collateral flags) is **not** in this snapshot — the client fetches it separately after wallet connect via `useAccountPositions` / `useEulerAccount`.
+`/api/vaults?chainId=X` serves a pre-computed snapshot of the public vault set for a chain: every EVault, Earn vault, Securitize vault, and referenced escrow vault, with all on-chain state (caps, rates, LTV matrices, oracle prices) already resolved. Per-user data (balances, positions, collateral flags) is **not** in this snapshot — the client fetches it separately after wallet connect via `useEulerAccount`.
 
 The client composable `useVaults.loadVaults()` runs in two phases:
 
 1. **Hydrate** (`~100 ms`): `$fetch('/api/vaults?chainId=X')`, deserialise, populate the vault registry, flip `isReady=true`. UI renders a fully populated `borrowList` immediately.
 2. **Fresh RPC pass** (`~3-6 s`): the existing batched lens pipeline (`fetchVaults`/`fetchEarnVaults`/`fetchSecuritizeVault`/`fetchEscrowVault`) runs against the client's RPC with Pyth simulation, overwriting registry entries with live prices and rates.
 
-The public interface of `useVaults()` is unchanged — the 15 exports (`isReady`, `borrowList`, `getVault`, etc.) keep their names, types, and semantics. All RPC-level fetchers are extracted to pure functions in `entities/vault/{fetcher,apy,pricing,escrow-fetcher}.ts` that accept a `FetchVaultContext`; both the client composable and the server-side `loadChainSnapshot` (`entities/vault/loader.ts`) share the same code path. bigint fields in the wire payload are tagged (`__bi:<decimal>`) by `entities/vault/loader-serde.ts` so the JSON transport doesn't lose precision.
+The public interface of `useVaults()` is unchanged — the 15 exports (`isReady`, `borrowList`, `getVault`, etc.) keep their names, types, and semantics. Vault entities are SDK-owned (`EVault`, `EulerEarn`, `SecuritizeCollateralVault`), while Lite keeps UI-only categorization, LTV, APY, collateral discovery, and presentation helpers under `utils/vault/`.
 
 ### Reward campaigns pipeline
 

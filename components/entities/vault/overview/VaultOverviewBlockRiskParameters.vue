@@ -1,18 +1,12 @@
 <script setup lang="ts">
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { maxUint256, type Address } from 'viem'
+import { vaultConvertToAssetsAbi } from '~/abis/vault'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { vaultConvertToAssetsAbi } from '~/abis/vault'
-import type { EVault } from '~/entities/vault'
+
 import { formatAssetValue } from '~/services/pricing/priceProvider'
-import {
-  formatHookedOpsSummary,
-  getHookedOperationMetas,
-  getVaultHookedOperations,
-  hasAnyHookedOperation,
-  isHookDisabling,
-  isVaultEffectivelyPaused,
-} from '~/utils/vault-hooks'
+import { formatHookedOpsSummary, getHookedOperationMetas, getVaultHookedOperations, hasAnyHookedOperation, isHookDisabling, isVaultEffectivelyPaused } from '~/utils/vault-hooks'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultHooksInfoModal } from '#components'
 

@@ -1,3 +1,6 @@
+import type { EVault, SecuritizeCollateralVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { isEVault } from '@eulerxyz/euler-v2-sdk'
+import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import type { Ref, ComputedRef } from 'vue'
 import { useAccount } from '@wagmi/vue'
 import { zeroAddress, type Address, type Abi } from 'viem'
@@ -5,9 +8,8 @@ import { logWarn } from '~/utils/errorHandling'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
-import { getCashLimitedWithdrawAmount, isEVault, type EVault } from '~/entities/vault'
 import { getAssetUsdValue, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
-import type { AccountBorrowPosition } from '~/entities/account'
+import { getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
 import type { TxPlan } from '~/entities/txPlan'
 import { SwapperMode } from '~/entities/swap'
 import { eulerAccountLensABI } from '~/entities/euler/abis'
@@ -26,9 +28,9 @@ import { findBlockingDisabledOp, OP_REPAY, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRA
 import { getPlanHookDisabledWarning, getUtilisationWarning, type VaultWarning } from '~/composables/useVaultWarnings'
 
 interface UseCollateralSwapRepayOptions {
-  position: Ref<AccountBorrowPosition | undefined>
-  borrowVault: ComputedRef<AccountBorrowPosition['borrow'] | undefined>
-  collateralVault: ComputedRef<AccountBorrowPosition['collateral'] | undefined>
+  position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
+  borrowVault: ComputedRef<EVault | undefined>
+  collateralVault: ComputedRef<EVault | SecuritizeCollateralVault | undefined>
   formTab: Ref<string>
   plan: Ref<TxPlan | null>
   isSubmitting: Ref<boolean>
@@ -90,8 +92,9 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
   const repayCollateralVaults = computed(() => {
     if (!position.value) return []
-    const allowed = position.value.collaterals?.length
-      ? new Set(position.value.collaterals.map(addr => normalizeAddressOrEmpty(addr)))
+    const collateralAddresses = position.value.collateralVaults
+    const allowed = collateralAddresses.length
+      ? new Set(collateralAddresses.map(addr => normalizeAddressOrEmpty(addr)))
       : null
     const candidates = swapCollateralVaults.value
     const filtered = allowed
@@ -168,7 +171,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     )
     if (match) return ltvToPercent(match.liquidationLTV)
     if (!position.value) return null
-    return ltvToPercent(position.value.liquidationLTV)
+    const liquidationLTV = getBorrowPositionEffectiveLiquidationLTV(position.value)
+    return liquidationLTV === undefined ? null : ltvToPercent(liquidationLTV)
   })
 
   // --- 4th USD watcher: next collateral value ---
@@ -308,7 +312,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       sourceAssets.value = 0n
       return
     }
-    const primaryAddress = normalizeAddressOrEmpty(position.value.collateral.address)
+    const primaryAddress = normalizeAddressOrEmpty(position.value.collateralVault?.address)
     const targetAddress = normalizeAddressOrEmpty(sourceVault.value.address)
     sourceAssets.value = targetAddress === primaryAddress ? (position.value.supplied || 0n) : 0n
 
@@ -356,7 +360,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
           borrowVaultAddress: borrowVault.value.address,
           amount: currentDebtVal,
           subAccount: position.value.subAccount,
-          enabledCollaterals: position.value.collaterals,
+          enabledCollaterals: position.value.collateralVaults,
         })
       }
       return buildSameAssetRepayPlan({
@@ -364,7 +368,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
         borrowVaultAddress: borrowVault.value.address,
         amount: debtNano,
         subAccount: position.value.subAccount,
-        enabledCollaterals: position.value.collaterals,
+        enabledCollaterals: position.value.collateralVaults,
       })
     }
 
@@ -389,7 +393,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
         targetDebt,
         currentDebt,
         liabilityVault: borrowVault.value.address,
-        enabledCollaterals: position.value.collaterals,
+        enabledCollaterals: position.value.collateralVaults,
         source: 'collateral',
       })
     }
@@ -402,7 +406,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       targetDebt,
       currentDebt,
       liabilityVault: borrowVault.value.address,
-      enabledCollaterals: position.value.collaterals,
+      enabledCollaterals: position.value.collateralVaults,
     })
   }
 

@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import { getAddress, maxUint256, type Address } from 'viem'
-import { logWarn } from '~/utils/errorHandling'
-import type { SecuritizeCollateralVault, EVault, EVaultCollateral } from '~/entities/vault'
+import type { EVault, EVaultCollateral, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
 import { getProductByVault, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -15,6 +13,8 @@ import { formatNumber, compactNumber, formatUsdValue, formatCompactUsdValue } fr
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
+import { getAddress, type Address, maxUint256 } from 'viem'
+import { logWarn } from '~/utils/errorHandling'
 
 const { vault } = defineProps<{ vault: SecuritizeCollateralVault, desktopOverview?: boolean }>()
 const route = useRoute()
@@ -22,8 +22,8 @@ const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enab
 
 const { client: rpcClient } = useRpcClient()
 const { chainId } = useEulerAddresses()
-const { isVaultGovernorVerified } = useVaults()
-const { getEvkVaults } = useVaultRegistry()
+const { borrowList: _borrowList, isVaultGovernorVerified } = useVaults()
+const { getEVaults } = useVaultRegistry()
 const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const modal = useModal()
 const { getSupplyRewardApy, getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
@@ -57,14 +57,14 @@ const getExplorerAddressLink = (address: string) => getExplorerLink(address, cha
 // Count markets where this can be borrowed (securitize vaults cannot be borrow destinations)
 const borrowCount = computed(() => 0)
 
-// Find EVK vaults where this securitize vault can be used as collateral
+// Find EVaults where this securitize vault can be used as collateral
 const borrowMarkets = computed(() => {
   const markets: Array<{
     borrowVault: EVault
     ltv: EVaultCollateral
   }> = []
 
-  getEvkVaults().forEach((v) => {
+  getEVaults().forEach((v) => {
     const ltv = v.collaterals.find(l => l.address === vault.address && l.borrowLTV > 0)
     if (ltv) {
       markets.push({ borrowVault: v, ltv })

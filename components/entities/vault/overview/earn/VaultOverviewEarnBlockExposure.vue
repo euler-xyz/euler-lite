@@ -1,8 +1,5 @@
 <script setup lang="ts">
-import { getAddress } from 'viem'
-import { DateTime } from 'luxon'
-import { logWarn } from '~/utils/errorHandling'
-import type { EulerEarn, EulerEarnStrategyInfo, EVault } from '~/entities/vault'
+import { isEVault, type EVault, type EulerEarnStrategyInfo, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { formatNumber, compactNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
@@ -10,6 +7,9 @@ import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
 import { getStrategyHookWarning } from '~/composables/useVaultWarnings'
+import { DateTime } from 'luxon'
+import { getAddress } from 'viem'
+import { logWarn } from '~/utils/errorHandling'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
@@ -62,7 +62,7 @@ const load = async () => {
     const promises = exposureList.value.map((exposure) => {
       return exposure.vault ?? getOrFetch(exposure.address) as Promise<EVault>
     })
-    exposureVaults.value = (await Promise.all(promises)).filter((vlt): vlt is EVault => Boolean(vlt) && vlt.type === 'EVault')
+    exposureVaults.value = (await Promise.all(promises)).filter((vlt): vlt is EVault => Boolean(vlt) && isEVault(vlt))
 
     // Load USD prices for all exposures
     await loadExposureUsdPrices()
@@ -106,7 +106,7 @@ const getExposureVaultByAddress = (address: string) => {
 
 const exposureRows = computed(() => {
   return exposureList.value.map((exposure) => {
-    const strategyVault = exposure.vault?.type === 'EVault'
+    const strategyVault = exposure.vault && isEVault(exposure.vault)
       ? exposure.vault as EVault
       : getExposureVaultByAddress(exposure.address)
     return {

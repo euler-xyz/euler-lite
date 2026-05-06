@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { useVaults } from '~/composables/useVaults'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
-import type { EVault } from '~/entities/vault'
+
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
@@ -17,14 +18,14 @@ defineOptions({
   name: 'LendPage',
 })
 
-const { borrowList, isEVKUpdating } = useVaults()
-const { getVerifiedEvkVaults } = useVaultRegistry()
+const { borrowList, isEVaultUpdating } = useVaults()
+const { getVerifiedEVaults } = useVaultRegistry()
 const { chainId } = useEulerAddresses()
 const showAllLabelEntries = useShowAllLabelEntries()
-const list = computed(() => getVerifiedEvkVaults(showAllLabelEntries.value))
+const list = computed(() => getVerifiedEVaults(showAllLabelEntries.value))
 
 const isPricesReady = ref(false)
-const isLoading = computed(() => isEVKUpdating.value || !isPricesReady.value)
+const isLoading = computed(() => isEVaultUpdating.value || !isPricesReady.value)
 const { isSlow } = useSlowLoading(isLoading)
 const { entities } = useEulerLabels()
 const { withIntrinsicSupplyApy } = useIntrinsicApy()
@@ -65,7 +66,7 @@ const vaultUsdValues = ref<Map<string, number>>(new Map())
 const vaultLiquidityUsd = ref<Map<string, number>>(new Map())
 const vaultWalletUsd = ref<Map<string, number>>(new Map())
 
-const getVaultSupplyApy = (vault: EVault): number => {
+const getDisplayedVaultSupplyApy = (vault: EVault): number => {
   const baseApy = getVaultSupplyApy(vault)
   return withIntrinsicSupplyApy(baseApy, vault.asset.address) + getSupplyRewardApy(vault.address)
 }
@@ -89,7 +90,7 @@ const {
       case 'totalSupply': return vaultUsdValues.value.get(vault.address) ?? 0
       case 'liquidity': return vaultLiquidityUsd.value.get(vault.address) ?? 0
       case 'inWallet': return vaultWalletUsd.value.get(vault.address) ?? 0
-      case 'supplyApy': return getVaultSupplyApy(vault)
+      case 'supplyApy': return getDisplayedVaultSupplyApy(vault)
       case 'utilization': return vault.utilization
       default: return 0
     }
@@ -248,7 +249,7 @@ const sortedList = computed(() => {
       break
     case 'Supply APY':
       sorted = applyFeaturedSort([...filteredList.value].sort((a: EVault, b: EVault) => {
-        return Number(getVaultSupplyApy(b)) - Number(getVaultSupplyApy(a))
+        return Number(getDisplayedVaultSupplyApy(b)) - Number(getDisplayedVaultSupplyApy(a))
       }))
       break
     case 'Utilization':

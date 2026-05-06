@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { zeroAddress } from 'viem'
-import type { EVault, EVaultHookedOperations } from '~/entities/vault'
+import type { EVault, EVaultHookedOperations } from '@eulerxyz/euler-v2-sdk'
 import {
   OP_DEPOSIT,
   OP_WITHDRAW,

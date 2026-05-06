@@ -1,18 +1,8 @@
-import {
-  fetchBackendPrice,
-  backendPriceToBigInt,
-  isBackendConfigured,
-  type BackendPriceData,
-} from './backendClient'
-import type { OraclePrice } from '@eulerxyz/euler-v2-sdk'
-import { USD_ADDRESS } from '~/entities/constants'
-import type {
-  EVault,
-  EulerEarn,
-  SecuritizeCollateralVault,
-} from '~/entities/vault'
+import type { EulerEarn, SecuritizeCollateralVault, EVault, OraclePrice } from '@eulerxyz/euler-v2-sdk'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { formatSmartAmount } from '~/utils/string-utils'
+import { USD_ADDRESS } from '~/entities/constants'
+import { isBackendConfigured, fetchBackendPrice, backendPriceToBigInt, type BackendPriceData } from './backendClient'
 
 // UI-edge pricing accepts SDK vault instances and Vue-unwrapped equivalents.
 type AnyVault = any
@@ -24,8 +14,7 @@ type CollateralShareOraclePrice = OraclePrice & {
 
 export const ONE_18 = 10n ** 18n
 
-// Note: UoA price caching is handled in entities/vault.ts (unitOfAccountPriceCache)
-// which caches during vault loading. No separate cache needed here.
+// Vault entity prices are populated by the SDK. No separate UoA cache is needed here.
 
 /**
  * Price result with mid, ask, and bid prices.

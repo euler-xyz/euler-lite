@@ -1,7 +1,8 @@
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import type { EVault } from '~/entities/vault'
+
 import { buildCollateralOption, computeBorrowApy } from '~/utils/collateralOptions'
 import { useReactiveMap } from '~/composables/useReactiveMap'
 
@@ -12,7 +13,7 @@ export const useSwapDebtOptions = ({
   collateralVault: Ref<EVault | undefined>
   currentBorrowVault?: Ref<EVault | undefined>
 }) => {
-  const { getVerifiedEvkVaults } = useVaultRegistry()
+  const { getVerifiedEVaults } = useVaultRegistry()
   const { withIntrinsicBorrowApy, version: intrinsicVersion } = useIntrinsicApy()
   const { getBorrowRewardApy, version: rewardsVersion } = useRewardsApy()
 
@@ -27,7 +28,7 @@ export const useSwapDebtOptions = ({
       ? getAddress(currentBorrowVault.value.address)
       : null
 
-    return getVerifiedEvkVaults().filter((vault) => {
+    return getVerifiedEVaults().filter((vault) => {
       if (!vault.collaterals?.length) {
         return false
       }

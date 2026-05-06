@@ -1,11 +1,12 @@
+import type { EVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import type { Ref, ComputedRef } from 'vue'
-import type { AccountBorrowPosition } from '~/entities/account'
+
 import { nanoToValue } from '~/utils/crypto-utils'
 import { calculateRoe, computeNextLtv, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
 
 interface UseRepayHealthMetricsOptions {
-  position: Ref<AccountBorrowPosition | undefined>
-  borrowVault: ComputedRef<AccountBorrowPosition['borrow'] | undefined>
+  position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
+  borrowVault: ComputedRef<EVault | undefined>
   debtRepaid: ComputedRef<bigint | null>
   priceRatio: ComputedRef<number | null>
   nextLiquidationLtv: ComputedRef<number | null>
@@ -36,17 +37,20 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
 
   const currentHealth = computed(() => {
     if (!position.value) return null
-    return nanoToValue(position.value.health, 18)
+    const health = position.value.healthFactor
+    return health === undefined ? null : nanoToValue(health, 18)
   })
 
   const currentLtv = computed(() => {
     if (!position.value) return null
-    return nanoToValue(position.value.userLTV, 18)
+    const ltv = position.value.userLTV ?? position.value.currentLTV
+    return ltv === undefined ? null : nanoToValue(ltv, 18)
   })
 
   const currentLiquidationLtv = computed(() => {
     if (!position.value) return null
-    return ltvToPercent(position.value.liquidationLTV)
+    const liquidationLTV = getBorrowPositionEffectiveLiquidationLTV(position.value)
+    return liquidationLTV === undefined ? null : ltvToPercent(liquidationLTV)
   })
 
   const borrowAmountAfter = computed(() => {

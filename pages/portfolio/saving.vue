@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useAccount } from '@wagmi/vue'
-import type { AccountDepositPosition } from '~/entities/account'
+import type { PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 
 const { isConnected } = useAccount()
@@ -8,10 +8,16 @@ const { depositPositions, isDepositsLoaded } = useEulerAccount()
 const { isReady } = useVaults()
 const { isEarnVault } = useVaultRegistry()
 
-const earnItems = computed(() => depositPositions.value.filter(p => isEarnVault(p.vault.address)))
-const lendItems = computed(() => depositPositions.value.filter(p => !isEarnVault(p.vault.address)))
+const earnItems = computed(() => depositPositions.value.filter((p) => {
+  const vault = p.vault
+  return vault ? isEarnVault(vault.address) : false
+}))
+const lendItems = computed(() => depositPositions.value.filter((p) => {
+  const vault = p.vault
+  return vault ? !isEarnVault(vault.address) : false
+}))
 
-const sortByUsdValue = async (positions: AccountDepositPosition[]): Promise<AccountDepositPosition[]> => {
+const sortByUsdValue = async (positions: PortfolioSavingsPosition<VaultEntity>[]): Promise<PortfolioSavingsPosition<VaultEntity>[]> => {
   if (positions.length <= 1) return positions
   const withValues = await Promise.all(
     positions.map(async p => ({
@@ -24,8 +30,8 @@ const sortByUsdValue = async (positions: AccountDepositPosition[]): Promise<Acco
     .map(item => item.position)
 }
 
-const sortedEarnItems = ref<AccountDepositPosition[]>([])
-const sortedLendItems = ref<AccountDepositPosition[]>([])
+const sortedEarnItems = ref<PortfolioSavingsPosition<VaultEntity>[]>([])
+const sortedLendItems = ref<PortfolioSavingsPosition<VaultEntity>[]>([])
 
 watchEffect(async () => {
   sortedEarnItems.value = await sortByUsdValue(earnItems.value)

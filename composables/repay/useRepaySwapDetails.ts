@@ -1,7 +1,7 @@
-import type { Ref, ComputedRef } from 'vue'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { formatUnits } from 'viem'
-import type { EVault } from '~/entities/vault'
-import type { AccountBorrowPosition } from '~/entities/account'
+import type { Ref, ComputedRef } from 'vue'
+
 import { getAssetUsdValue } from '~/services/pricing/priceProvider'
 import { SwapperMode } from '~/entities/swap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
@@ -11,7 +11,7 @@ import type { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
 interface UseRepaySwapDetailsOptions {
   quotes: ReturnType<typeof useSwapRepayQuotes>
   sourceVault: Ref<EVault | undefined>
-  borrowVault: ComputedRef<AccountBorrowPosition['borrow'] | undefined>
+  borrowVault: ComputedRef<EVault | undefined>
   direction: Ref<SwapperMode>
 }
 

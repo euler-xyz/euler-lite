@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { EVault } from '~/entities/vault'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import {
   areAllUserOpsHooked,
   getHookedOperationMetas,

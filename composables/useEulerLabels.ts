@@ -1,55 +1,16 @@
+import { getAddress } from 'viem'
+import type { EulerLabelEarnVaultEntry, EulerLabelPoint, EulerLabelAssetEntry } from '~/entities/euler/labels'
+import type { EulerEarn, EVault } from '@eulerxyz/euler-v2-sdk'
 /* eslint-disable @typescript-eslint/no-dynamic-delete */
 import axios from 'axios'
-import { getAddress } from 'viem'
-import type { EulerLabelPoint, EulerLabelEarnVaultEntry, EulerLabelAssetEntry } from '~/entities/euler/labels'
-import type { EulerEarn, EVault } from '~/entities/vault'
 import { safeAssign } from '~/utils/safe-assign'
 import { logger } from '~/utils/logger'
 import { logWarn } from '~/utils/errorHandling'
 import { CACHE_TTL_5MIN_MS } from '~/entities/tuning-constants'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { clearAssetGeoCache } from '~/composables/useGeoBlock'
-import {
-  isLoading,
-  isReady,
-  loadState,
-  products,
-  entities,
-  points,
-  earnVaults,
-  earnVaultBlocks,
-  earnVaultRestrictions,
-  recentlyAddedEarnVaults,
-  deprecatedEarnVaults,
-  earnVaultDescriptions,
-  earnVaultNotices,
-  notExplorableEarnVaults,
-  verifiedVaultAddresses,
-  oracleAdapters,
-  loadingAdapters,
-  assetBlocks,
-  assetRestrictions,
-  assetPatternRules,
-  wrapPairs,
-  type CompiledPatternRule,
-  bulkLoadedAdapterChains,
-  pendingBulkAdapterLoads,
-} from '~/utils/eulerLabelsState'
-import {
-  normalizeProducts,
-  normalizeEntities,
-  normalizeOracleAdapters,
-  getProductByVault,
-  getEntitiesByVault,
-  getEntitiesByEarnVault,
-  getPointsByVault,
-  applyVaultOverrides,
-} from '~/utils/eulerLabelsUtils'
-import { evcBatchCall, buildBatchItem } from '~/utils/multicall'
-import { encodeFunctionData, decodeFunctionResult, type Hex } from 'viem'
-import { erc4626AssetAbi } from '~/abis/erc4626'
-
-let wrapPairProbeGeneration = 0
+import { isLoading, isReady, loadState, products, entities, points, earnVaults, earnVaultBlocks, earnVaultRestrictions, featuredEarnVaults, deprecatedEarnVaults, earnVaultDescriptions, earnVaultNotices, notExplorableEarnVaults, verifiedVaultAddresses, oracleAdapters, loadingAdapters, assetBlocks, assetRestrictions, assetPatternRules, type CompiledPatternRule, bulkLoadedAdapterChains, pendingBulkAdapterLoads } from '~/utils/eulerLabelsState'
+import { normalizeProducts, normalizeEntities, normalizeOracleAdapters, getProductByVault, getEntitiesByVault, getEntitiesByEarnVault, getPointsByVault, applyVaultOverrides } from '~/utils/eulerLabelsUtils'
 
 const loadOracleAdapter = async (chainId: number, oracleAddress: string) => {
   const checksummed = getAddress(oracleAddress)
@@ -141,7 +102,6 @@ export const useEulerLabels = () => {
 
       isReady.value = false
       isLoading.value = true
-      const probeGeneration = ++wrapPairProbeGeneration
 
       Object.keys(products).forEach(key => delete products[key])
       Object.keys(entities).forEach(key => delete entities[key])
@@ -160,9 +120,8 @@ export const useEulerLabels = () => {
       // the now-cleared pattern rules and address maps; drop it so the next
       // lookup recomputes against the freshly-loaded labels.
       clearAssetGeoCache()
-      recentlyAddedEarnVaults.clear()
+      featuredEarnVaults.clear()
       notExplorableEarnVaults.clear()
-      Object.keys(wrapPairs).forEach(key => delete wrapPairs[key])
       earnVaults.value = []
       verifiedVaultAddresses.value = []
 
@@ -200,8 +159,8 @@ export const useEulerLabels = () => {
         if (entry.restricted?.length) {
           earnVaultRestrictions[addr.toLowerCase()] = entry.restricted
         }
-        if (entry.recentlyAdded) {
-          recentlyAddedEarnVaults.add(addr)
+        if (entry.featured) {
+          featuredEarnVaults.add(addr)
         }
         if (entry.deprecated) {
           deprecatedEarnVaults[addr.toLowerCase()] = entry.deprecationReason ?? ''
@@ -328,17 +287,6 @@ export const useEulerLabels = () => {
 
       loadState.chainId = chainId
       loadState.timestamp = Date.now()
-      // Wrap-pair discovery: probes every vault asset for an ERC-4626
-      // underlying. Deferred until the vault registry is populated (loadVaults
-      // runs after loadLabels per the chain in app.vue) so the asset
-      // enumeration is complete. Fire-and-forget — does not block isReady.
-      // Reverts and non-ERC-4626 contracts yield no entry, in which case the
-      // bypass in isAssetRestrictedByCountry is a no-op for them.
-      //
-      // Placed inside the try-success path so cache-hit `loadLabels()` calls
-      // don't re-trigger the probe — `wrapPairs` is only cleared above when
-      // the main load actually runs, so a cache hit keeps the prior map.
-      void probeWrapPairs(chainId, probeGeneration)
     }
     catch (e) {
       logWarn('labels/load', e)
@@ -362,97 +310,6 @@ export const useEulerLabels = () => {
     loadOracleAdapter,
     loadOracleAdapters,
     loadAllOracleAdapters,
-  }
-}
-
-// Matches the chunk size used by `batchLensCalls` so per-call gas in the EVC
-// batchSimulation stays well within block limits even on chains with many
-// vaults.
-const WRAP_PAIR_PROBE_BATCH_SIZE = 25
-
-// Probes every unique vault asset for an ERC-4626 `asset()` underlying. We
-// intentionally do not filter by "asset matches a restrict rule" — restricting
-// only one side of the pair (just the underlying, or just the wrapper) is a
-// legitimate label-author choice and `isWrapPair` is symmetric, so populating
-// the map from any direction makes the bypass work both ways. Reverts on
-// non-ERC-4626 contracts are silently dropped.
-//
-// `startChainId` is the chain the calling `loadLabels` was bound to. Captured
-// at the call site (not re-read from current config) so a chain switch during
-// the async wait/probe cannot land stale results in `wrapPairs` for the new
-// chain.
-const probeWrapPairs = async (startChainId: number, generation: number) => {
-  const isCurrentProbe = () =>
-    generation === wrapPairProbeGeneration && loadState.chainId === startChainId
-
-  try {
-    const { getCurrentChainConfig } = useEulerAddresses()
-    const config = getCurrentChainConfig.value
-    if (!config || config.chainId !== startChainId || generation !== wrapPairProbeGeneration) return
-
-    const evcAddress = config.addresses.coreAddrs.evc
-    const { rpcUrl } = useRpcClient()
-    const startRpcUrl = rpcUrl.value
-
-    // Wait for vaults so vault.asset metadata is populated. Loaded via
-    // dynamic import to break the auto-import cycle: `useVaults` references
-    // `useEulerLabels`, so referencing `useVaults` from this module via
-    // unimport's hoisted import closes the cycle and produces a TDZ on
-    // `_$__useVaults` under Vite's dev module loader. Same applies to
-    // `useVaultRegistry`, which transitively imports `useEulerLabels` via
-    // `buildFetchContext` in `useFetchContext`. Matches the pattern used in
-    // `entities/vault/factory.ts` for the same reason.
-    const { useVaults } = await import('~/composables/useVaults')
-    const { useVaultRegistry } = await import('~/composables/useVaultRegistry')
-    const { isReady: isVaultsReady } = useVaults()
-    if (!isVaultsReady.value) await until(isVaultsReady).toBe(true)
-    if (!isCurrentProbe()) return // chain switched or labels reloaded during wait
-
-    const { getEvkVaults, getEarnVaults, getSecuritizeVaults } = useVaultRegistry()
-    const seen = new Set<string>()
-    const candidates: string[] = []
-    for (const vault of [...getEvkVaults(), ...getEarnVaults(), ...getSecuritizeVaults()]) {
-      const asset = vault.asset
-      if (!asset?.address) continue
-      const checksummed = normalizeAddress(asset.address)
-      if (seen.has(checksummed)) continue
-      seen.add(checksummed)
-      candidates.push(checksummed)
-    }
-    if (candidates.length === 0) return
-
-    const callData = encodeFunctionData({ abi: erc4626AssetAbi, functionName: 'asset' })
-
-    for (let offset = 0; offset < candidates.length; offset += WRAP_PAIR_PROBE_BATCH_SIZE) {
-      const chunk = candidates.slice(offset, offset + WRAP_PAIR_PROBE_BATCH_SIZE)
-      let chunkResults
-      try {
-        chunkResults = await evcBatchCall(evcAddress, chunk.map(addr => buildBatchItem(addr, callData)), startRpcUrl)
-      }
-      catch (err) {
-        // Transport-level failure on this chunk — log and stop; the next
-        // labels reload (~5 min) will retry the whole probe.
-        logWarn('labels/wrap-pairs', err)
-        return
-      }
-      if (!isCurrentProbe()) return // chain switched or labels reloaded mid-chunks
-
-      for (let i = 0; i < chunkResults.length; i++) {
-        if (!isCurrentProbe()) return // prevent stale per-item writes
-        const res = chunkResults[i]
-        if (!res.success || !res.result || res.result === '0x') continue
-        try {
-          const decoded = decodeFunctionResult({ abi: erc4626AssetAbi, functionName: 'asset', data: res.result as Hex }) as string
-          const underlying = decoded.toLowerCase()
-          if (underlying === '0x0000000000000000000000000000000000000000') continue
-          wrapPairs[chunk[i].toLowerCase()] = underlying
-        }
-        catch { /* non-conforming asset() — skip */ }
-      }
-    }
-  }
-  catch (e) {
-    logWarn('labels/wrap-pairs', e)
   }
 }
 

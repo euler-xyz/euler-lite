@@ -1,27 +1,28 @@
+import type { EVault, PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 import { getVaultProductName } from '~/utils/eulerLabelsUtils'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import type { AccountDepositPosition } from '~/entities/account'
-import type { EVault } from '~/entities/vault'
+
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useReactiveMap } from '~/composables/useReactiveMap'
 
 /**
  * Provides eligible savings positions that can be used to repay debt.
- * Only includes standard EVK vaults — Earn vaults have an incompatible ABI
+ * Only includes standard EVaults — Earn vaults have an incompatible ABI
  * and Securitize vaults have restricted withdrawals.
  */
 export const useRepaySavingsOptions = () => {
   const { depositPositions } = useEulerAccount()
-  const { isEvkVault } = useVaultRegistry()
+  const { isEVaultAddress } = useVaultRegistry()
   const { withIntrinsicSupplyApy, version: intrinsicVersion } = useIntrinsicApy()
   const { getSupplyRewardApy, version: rewardsVersion } = useRewardsApy()
 
   const savingsPositions = computed(() => {
     return depositPositions.value.filter((position) => {
-      if (!isEvkVault(position.vault.address)) {
+      const vault = position.vault
+      if (!vault || !isEVaultAddress(vault.address)) {
         return false
       }
       if (position.assets <= 0n) {
@@ -32,14 +33,19 @@ export const useRepaySavingsOptions = () => {
   })
 
   const savingsVaults = computed(() => {
-    return savingsPositions.value.map(position => position.vault as EVault)
+    return savingsPositions.value
+      .map(position => position.vault as EVault | undefined)
+      .filter((vault): vault is EVault => !!vault)
   })
 
   const savingsOptions = useReactiveMap(
     savingsPositions,
     [rewardsVersion, intrinsicVersion],
     async (position) => {
-      const vault = position.vault
+      const vault = position.vault as EVault | undefined
+      if (!vault) {
+        throw new Error('Savings vault not resolved')
+      }
       const amount = nanoToValue(position.assets, vault.asset.decimals)
       const baseApy = getVaultSupplyApy(vault)
       const apy = withIntrinsicSupplyApy(baseApy, vault.asset.address) + getSupplyRewardApy(vault.address)
@@ -56,10 +62,10 @@ export const useRepaySavingsOptions = () => {
     },
   )
 
-  const getSavingsPosition = (vaultAddress: string): AccountDepositPosition | undefined => {
+  const getSavingsPosition = (vaultAddress: string): PortfolioSavingsPosition<VaultEntity> | undefined => {
     const normalized = getAddress(vaultAddress)
     return savingsPositions.value.find(
-      position => getAddress(position.vault.address) === normalized,
+      position => getAddress(position.vault?.address || '0x0000000000000000000000000000000000000000') === normalized,
     )
   }
 

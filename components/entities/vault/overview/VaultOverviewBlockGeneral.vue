@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
-import type { EVault } from '~/entities/vault'
+
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { useEulerEntitiesOfVault, useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { getProductByVault, getProductKeyByVault } from '~/utils/eulerLabelsUtils'

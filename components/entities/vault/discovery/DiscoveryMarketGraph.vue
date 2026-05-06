@@ -1,18 +1,10 @@
 <script setup lang="ts">
 import type { MarketGroup, MiniDiagramData } from '~/entities/lend-discovery'
+import { isCyclicalNoteVault } from '~/utils/vault/classification'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { isVaultDeprecated, isVaultKeyring } from '~/utils/eulerLabelsUtils'
 import { stringToColor } from '~/utils/string-utils'
-import {
-  getEnlargedDiagram,
-  getArrow,
-  getLabelPosition,
-  getGraphConnectedAddresses,
-  isNodeRampingDown,
-  isExternalCollateral,
-  findVault,
-} from '~/utils/discoveryCalculations'
-import { isCyclicalNoteVault } from '~/entities/vault'
+import { getEnlargedDiagram, getArrow, getLabelPosition, getGraphConnectedAddresses, isNodeRampingDown, isExternalCollateral, findVault } from '~/utils/discoveryCalculations'
 
 const props = defineProps<{
   market: MarketGroup

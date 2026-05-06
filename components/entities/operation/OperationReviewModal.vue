@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { encodeFunctionData } from 'viem'
-import type { Address, Hex } from 'viem'
+import type { VaultAsset } from '~/types/asset'
 import type { Campaign } from '~/entities/brevis'
-import type { VaultAsset } from '~/entities/vault'
+import { type Address, encodeFunctionData, type Hex } from 'viem'
+
 import type { TxPlan } from '~/entities/txPlan'
 import type { SwapperMode } from '~/entities/swap'
 import type { EVCCall } from '~/utils/evc-converter'

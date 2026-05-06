@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { type EVault, isCyclicalNoteVault } from '~/entities/vault'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
+import { isCyclicalNoteVault } from '~/utils/vault/classification'
 
 const emits = defineEmits<{
   'vault-click': [address: string]

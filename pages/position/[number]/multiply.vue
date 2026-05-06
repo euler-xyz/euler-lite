@@ -1,12 +1,5 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import { formatUnits, type Address } from 'viem'
-import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
-import { OperationReviewModal, SlippageSettingsModal } from '#components'
-import { useModal } from '~/components/ui/composables/useModal'
-import { useToast } from '~/components/ui/composables/useToast'
-import type { AccountBorrowPosition } from '~/entities/account'
-import type { EVault, VaultAsset } from '~/entities/vault'
+import type { VaultAsset } from '~/types/asset'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -23,6 +16,13 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { computeMaxMultiplier } from '~/utils/multiply-math'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { useModal } from '~/components/ui/composables/useModal'
+import { useToast } from '~/components/ui/composables/useToast'
+import { useAccount } from '@wagmi/vue'
+import { SlippageSettingsModal, OperationReviewModal } from '#components'
+import { isEVault, type EVault, type PortfolioBorrowPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { formatUnits, type Address } from 'viem'
+import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 
 const route = useRoute()
 const router = useRouter()
@@ -67,7 +67,7 @@ const priceInvert = usePriceInvert(
 )
 
 const positionIndex = usePositionIndex()
-const position: Ref<AccountBorrowPosition | null> = ref(null)
+const position: Ref<PortfolioBorrowPosition<VaultEntity> | null> = ref(null)
 
 const isLoading = ref(false)
 const isSubmitting = ref(false)
@@ -81,8 +81,8 @@ const multiplyShortAmount = ref('')
 const multiplySupplyVault: Ref<EVault | undefined> = ref()
 
 const { slippage: multiplySlippage } = useSlippage({
-  fromSymbol: () => position.value?.borrow.asset.symbol,
-  toSymbol: () => position.value?.collateral.asset.symbol,
+  fromSymbol: () => multiplyShortVault.value?.asset.symbol,
+  toSymbol: () => multiplyLongVault.value?.asset.symbol,
 })
 const {
   sortedQuoteCards: multiplyQuoteCardsSorted,
@@ -98,12 +98,15 @@ const {
   requestQuotes: requestMultiplyQuotes,
   selectProvider: selectMultiplyQuote,
 } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
-const multiplyLongVault = computed(() => position.value?.collateral)
-const multiplyShortVault = computed(() => position.value?.borrow)
+const multiplyLongVault = computed<EVault | undefined>(() => {
+  const vault = position.value ? position.value.collateralVault : undefined
+  return vault && isEVault(vault) ? vault : undefined
+})
+const multiplyShortVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
 const multiplySubAccount = computed(() => position.value?.subAccount || null)
 useOperationGuard(computed(() => [multiplySupplyVault.value?.address, multiplyLongVault.value?.address, multiplyShortVault.value?.address].filter(Boolean)))
 
-const pairAssets = computed(() => {
+const pairAssets = computed<VaultAsset[]>(() => {
   if (!multiplyLongVault.value || !multiplyShortVault.value) {
     return []
   }
@@ -187,7 +190,9 @@ const multiplyCurrentMultiple = computed(() => {
   if (!position.value) {
     return 1
   }
-  const ltvPercent = nanoToValue(position.value.userLTV, 18)
+  const ltvValue = position.value.userLTV ?? position.value.currentLTV
+  if (ltvValue === undefined) return 1
+  const ltvPercent = nanoToValue(ltvValue, 18)
   if (!Number.isFinite(ltvPercent) || ltvPercent <= 0) {
     return 1
   }
@@ -329,7 +334,8 @@ const multiplyCurrentLtv = computed(() => {
   if (!position.value) {
     return null
   }
-  return nanoToValue(position.value.userLTV, 18)
+  const ltv = position.value.userLTV ?? position.value.currentLTV
+  return ltv === undefined ? null : nanoToValue(ltv, 18)
 })
 const multiplyNextLtv = computed(() => {
   if (nextBorrowValueUsd.value === null || nextSupplyValueUsd.value === null) {
@@ -344,7 +350,8 @@ const multiplyCurrentLiquidationLtv = computed(() => {
   if (!position.value) {
     return null
   }
-  return ltvToPercent(position.value.liquidationLTV)
+  const liquidationLTV = getBorrowPositionEffectiveLiquidationLTV(position.value)
+  return liquidationLTV === undefined ? null : ltvToPercent(liquidationLTV)
 })
 const multiplyNextLiquidationLtv = computed(() => {
   return multiplyLiquidationLtv.value ?? multiplyCurrentLiquidationLtv.value
@@ -353,7 +360,8 @@ const multiplyCurrentHealth = computed(() => {
   if (!position.value) {
     return null
   }
-  return nanoToValue(position.value.health, 18)
+  const health = position.value.healthFactor
+  return health === undefined ? null : nanoToValue(health, 18)
 })
 const multiplyNextHealth = computed(() => {
   if (!multiplyNextLiquidationLtv.value || !multiplyNextLtv.value) {
@@ -609,8 +617,8 @@ const submitMultiply = async () => {
         plan.value = await buildMultiplyPlan({
           ...nextPlanParams,
           includePermit2Call: false,
-          enabledCollaterals: position.value?.collaterals,
-          enabledController: position.value?.borrow.address,
+          enabledCollaterals: position.value ? position.value.collateralVaults : undefined,
+          enabledController: multiplyShortVault.value.address,
         })
       }
       catch (e) {
@@ -662,8 +670,8 @@ const sendMultiply = async () => {
     const nextPlan = await buildMultiplyPlan({
       ...planParams.value,
       includePermit2Call: true,
-      enabledCollaterals: position.value?.collaterals,
-      enabledController: position.value?.borrow.address,
+      enabledCollaterals: position.value ? position.value.collateralVaults : undefined,
+      enabledController: multiplyShortVault.value?.address,
     })
     plan.value = nextPlan
     await executeTxPlan(nextPlan)
@@ -736,7 +744,7 @@ const loadPosition = async () => {
     isLoading.value = false
     return
   }
-  multiplySupplyVault.value = position.value.collateral as EVault
+  multiplySupplyVault.value = multiplyLongVault.value
   isLoading.value = false
 }
 
@@ -806,7 +814,7 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
       <template v-if="position && multiplySupplyVault && multiplyLongVault && multiplyShortVault">
         <VaultLabelsAndAssets
           :vault="multiplyLongVault"
-          :assets="pairAssets as VaultAsset[]"
+          :assets="pairAssets"
           :assets-label="pairAssetsLabel"
           size="large"
         />

@@ -1,5 +1,5 @@
-import { getAddress, zeroAddress } from 'viem'
-import type { EVault, EVaultHookedOperations } from '~/entities/vault'
+import type { EVaultHookedOperations, EVault } from '@eulerxyz/euler-v2-sdk'
+import { zeroAddress, getAddress } from 'viem'
 
 export type VaultOperation = keyof EVaultHookedOperations
 
@@ -27,7 +27,7 @@ export interface VaultOpMeta {
   internal: boolean
 }
 
-// Human-facing metadata for every EVK hook operation.
+// Human-facing metadata for every EVault hook operation.
 // `affectedFlows` lists the euler-lite user flows that call the op; used to
 // explain blast-radius when a risk manager has paused or hooked the op.
 export const VAULT_OPS: readonly VaultOpMeta[] = [

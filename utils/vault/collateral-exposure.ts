@@ -1,4 +1,4 @@
-import type { EVault, SecuritizeCollateralVault, EVaultCollateral } from './types'
+import type { EVault, SecuritizeCollateralVault, EVaultCollateral } from '@eulerxyz/euler-v2-sdk'
 
 /**
  * A collateral pair with live borrow-side exposure to a vault. Matches the

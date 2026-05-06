@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { EulerEarn } from '~/entities/vault'
+import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { useModal } from '~/components/ui/composables/useModal'

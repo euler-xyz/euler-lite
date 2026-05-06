@@ -1,41 +1,32 @@
-import type { Ref, ComputedRef } from 'vue'
+import type { VaultAsset } from '~/types/asset'
+import type { CollateralOption } from '~/types/collateral-option'
+import { isEVault, type EVault } from '@eulerxyz/euler-v2-sdk'
+import { getProjectedRates, getNetAPY } from '~/utils/vault/apy'
+import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
+import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
+import { useModal } from '~/components/ui/composables/useModal'
+import { useToast } from '~/components/ui/composables/useToast'
 import { useAccount } from '@wagmi/vue'
+import type { TxPlan } from '~/entities/txPlan'
+import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatio, getCollateralUsdPrice, getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import { getAddress, formatUnits, zeroAddress, type Address } from 'viem'
+import { SwapperMode, type SwapApiQuote } from '~/entities/swap'
+import { SwapTokenSelector, OperationReviewModal } from '#components'
+import { fetchBackendPrice } from '~/services/pricing/backendClient'
+import type { Ref, ComputedRef } from 'vue'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { logWarn } from '~/utils/errorHandling'
 import { createRaceGuard } from '~/utils/race-guard'
 import { computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
 import { FixedPoint } from '~/utils/fixed-point'
-import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal, SwapTokenSelector } from '#components'
-import { useToast } from '~/components/ui/composables/useToast'
-import {
-  type AnyBorrowVaultPair,
-  type VaultAsset,
-  type CollateralOption,
-  type EVault,
-  convertAssetsToShares,
-} from '~/entities/vault'
-import {
-  getAssetUsdValueOrZero,
-  getAssetOraclePrice,
-  getCollateralOraclePrice,
-  getCollateralUsdPrice,
-  conservativePriceRatio,
-} from '~/services/pricing/priceProvider'
-import { fetchBackendPrice } from '~/services/pricing/backendClient'
-import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
-import type { TxPlan } from '~/entities/txPlan'
 import { getPlanHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { getVaultTags, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
-import { getNetAPY, getProjectedRates } from '~/entities/vault'
-import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 
 export interface UseBorrowFormOptions {
   pair: Ref<AnyBorrowVaultPair | undefined>
@@ -395,7 +386,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       getPlanHookDisabledWarning(borrowPlannedOps.value),
       getUtilisationWarning(borrowVault.value, 'borrow'),
       getBorrowCapWarning(borrowVault.value),
-      collateralVault.value && !('type' in collateralVault.value) ? getSupplyCapWarning(collateralVault.value) : null,
+      collateralVault.value && isEVault(collateralVault.value) ? getSupplyCapWarning(collateralVault.value) : null,
     ]
   })
 
@@ -681,7 +672,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
           collateralAmountForPlan = savingBalance.value
         }
         else {
-          collateralAmountForPlan = await convertAssetsToShares(collateralVault.value.address, collateralAmountNano)
+          collateralAmountForPlan = collateralVault.value.convertToShares(collateralAmountNano)
         }
       }
 
@@ -769,7 +760,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             collateralAmountForPlan = savingBalance.value
           }
           else {
-            collateralAmountForPlan = await convertAssetsToShares(collateralVault.value.address, collateralAmountForPlan)
+            collateralAmountForPlan = collateralVault.value.convertToShares(collateralAmountForPlan)
           }
         }
         const borrowAmountNano = borrowAmountFixed.value.toFormat({ decimals: Number(borrowVault.value.shares.decimals) }).value

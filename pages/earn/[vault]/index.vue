@@ -1,9 +1,5 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal, VaultSupplyApyModal, VaultUnverifiedDisclaimerModal } from '#components'
-import { useToast } from '~/components/ui/composables/useToast'
-import type { EulerEarn, VaultAsset } from '~/entities/vault'
+import type { VaultAsset } from '~/types/asset'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import type { TxPlan } from '~/entities/txPlan'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
@@ -13,6 +9,11 @@ import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vu
 import { formatNumber, compactNumber } from '~/utils/string-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { useModal } from '~/components/ui/composables/useModal'
+import { useToast } from '~/components/ui/composables/useToast'
+import { useAccount } from '@wagmi/vue'
+import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultSupplyApyModal } from '#components'
 
 const router = useRouter()
 const route = useRoute()

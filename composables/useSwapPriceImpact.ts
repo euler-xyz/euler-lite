@@ -1,8 +1,8 @@
-import type { Ref } from 'vue'
-import type { SwapApiQuote } from '~/entities/swap'
-import type { EVault, SecuritizeCollateralVault, EulerEarn } from '~/entities/vault'
+import type { SecuritizeCollateralVault, EulerEarn, EVault } from '@eulerxyz/euler-v2-sdk'
 import { getTokenUsdValue } from '~/services/pricing/priceProvider'
 import { createRaceGuard } from '~/utils/race-guard'
+import type { SwapApiQuote } from '~/entities/swap'
+import type { Ref } from 'vue'
 
 type AnyVault = EVault | SecuritizeCollateralVault | EulerEarn
 

@@ -1,10 +1,5 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import { getAddress, type Address, zeroAddress } from 'viem'
-import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
-import { FixedPoint } from '~/utils/fixed-point'
-import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import type { EVault, VaultAsset } from '~/entities/vault'
+import type { VaultAsset } from '~/types/asset'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatio } from '~/services/pricing/priceProvider'
 import { fetchBackendPrice } from '~/services/pricing/backendClient'
@@ -15,6 +10,12 @@ import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useCollateralForm } from '~/composables/position/useCollateralForm'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { useAccount } from '@wagmi/vue'
+import { getAddress, type Address, zeroAddress } from 'viem'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
+import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
+import { FixedPoint } from '~/utils/fixed-point'
+import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 
 const positionIndex = usePositionIndex()
 const { isConnected, address } = useAccount()
@@ -65,7 +66,9 @@ const form = useCollateralForm({
   },
 
   computeLiquidationPrice: (pos, borrowVault, collateralVault) => {
-    const health = nanoToValue(pos.health || 0n, 18)
+    const healthValue = pos.healthFactor
+    if (healthValue === undefined) return undefined
+    const health = nanoToValue(healthValue, 18)
     if (health < 1) return undefined
     const cp = borrowVault && collateralVault ? getCollateralOraclePrice(borrowVault, collateralVault) : undefined
     const bp = borrowVault ? getAssetOraclePrice(borrowVault) : undefined
@@ -420,14 +423,14 @@ watch(selectedAsset, async () => {
             </SummaryRow>
             <SummaryRow label="LTV">
               <SummaryValue
-                :before="formatNumber(nanoToValue(form.position.value.userLTV, 18))"
+                :before="formatNumber(nanoToValue(form.position.value.userLTV ?? form.position.value.currentLTV ?? 0n, 18))"
                 :after="formatNumber(nanoToValue(form.estimateUserLTV.value, 18))"
                 suffix="%"
               />
             </SummaryRow>
             <SummaryRow label="Health score">
               <SummaryValue
-                :before="formatHealthScore(nanoToValue(form.position.value.health, 18))"
+                :before="formatHealthScore(nanoToValue(form.position.value.healthFactor ?? 0n, 18))"
                 :after="formatHealthScore(nanoToValue(form.estimateHealth.value, 18))"
               />
             </SummaryRow>

@@ -1,20 +1,8 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import { getAddress, formatUnits, type Address, zeroAddress } from 'viem'
-import { FixedPoint } from '~/utils/fixed-point'
-import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal, SwapTokenSelector, SlippageSettingsModal } from '#components'
-import { useToast } from '~/components/ui/composables/useToast'
-import {
-  convertSharesToAssets,
-  type EVault,
-  type SecuritizeCollateralVault,
-  type VaultAsset,
-  getCashLimitedWithdrawAmount,
-  getProjectedRates,
-} from '~/entities/vault'
-import { isSecuritizeVault } from '~/entities/vault/factory'
-import { getSubAccountAddress } from '~/entities/account'
+import { getSubAccountAddress, isSecuritizeCollateralVault, type SecuritizeCollateralVault, type EVault } from '@eulerxyz/euler-v2-sdk'
+import type { VaultAsset } from '~/types/asset'
+import { getProjectedRates } from '~/utils/vault/apy'
+import { isSecuritizeVault } from '~/utils/vault/categories'
 import { getHookDisabledWarning, getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import type { TxPlan } from '~/entities/txPlan'
@@ -29,6 +17,13 @@ import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { isOpDisabled, OP_REDEEM, OP_WITHDRAW } from '~/utils/vault-hooks'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
+import { useModal } from '~/components/ui/composables/useModal'
+import { useToast } from '~/components/ui/composables/useToast'
+import { useAccount } from '@wagmi/vue'
+import { getAddress, formatUnits, zeroAddress, type Address } from 'viem'
+import { SwapTokenSelector, SlippageSettingsModal, OperationReviewModal } from '#components'
+import { FixedPoint } from '~/utils/fixed-point'
+import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 
 const router = useRouter()
 const route = useRoute()
@@ -51,7 +46,7 @@ const subAccountIndex = Number(route.params.subAccount)
 const subAccount = computed(() => {
   const addr = effectiveAddress.value
   if (!addr || isNaN(subAccountIndex)) return undefined
-  return getSubAccountAddress(addr, subAccountIndex)
+  return getSubAccountAddress(getAddress(addr), subAccountIndex)
 })
 
 const isLoading = ref(false)
@@ -64,7 +59,7 @@ const vault: Ref<EVault | SecuritizeCollateralVault | undefined> = ref()
 const asset: Ref<VaultAsset | undefined> = ref()
 
 // Check if vault is securitize (for things like supply/borrow which securitize doesn't have)
-const isSecuritizeVaultType = computed(() => vault.value && 'type' in vault.value && vault.value.type === 'securitize')
+const isSecuritizeVaultType = computed(() => !!vault.value && isSecuritizeCollateralVault(vault.value))
 
 const withdrawWarnings = computed(() => {
   if (!vault.value || isSecuritizeVaultType.value) return []
@@ -328,17 +323,13 @@ const fetchShareBalance = async () => {
   sharesBalance.value = await fetchVaultShareBalance(vault.value.address, subAccount.value)
 }
 const updateBalance = async () => {
-  if ((!isConnected.value && !isSpyMode.value) || sharesBalance.value === 0n) {
+  if (!vault.value || (!isConnected.value && !isSpyMode.value) || sharesBalance.value === 0n) {
     assetsBalance.value = 0n
     delta.value = 0n
     return
   }
 
-  // Convert shares to assets
-  assetsBalance.value = await convertSharesToAssets(
-    vaultAddress,
-    sharesBalance.value,
-  )
+  assetsBalance.value = vault.value.convertToAssets(sharesBalance.value)
   delta.value = assetsBalance.value
 }
 const submit = async () => {

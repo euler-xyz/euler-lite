@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { formatUnits } from 'viem'
-import type { EVault, SecuritizeCollateralVault, VaultAsset, CollateralOption, EulerEarn } from '~/entities/vault'
+import type { SecuritizeCollateralVault, EulerEarn, EVault } from '@eulerxyz/euler-v2-sdk'
+import type { VaultAsset } from '~/types/asset'
+import type { CollateralOption } from '~/types/collateral-option'
 import { getAssetUsdPrice } from '~/services/pricing/priceProvider'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { compactNumber, formatSmartAmount, trimTrailingZeros, formatExactAmount } from '~/utils/string-utils'
 import { ChooseCollateralModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
+import { formatUnits } from 'viem'
 
 const props = defineProps<{
   label?: string

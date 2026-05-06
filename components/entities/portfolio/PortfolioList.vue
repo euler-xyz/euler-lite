@@ -1,13 +1,18 @@
 <script setup lang="ts">
-import type { AccountBorrowPosition, AccountDepositPosition } from '~/entities/account'
+import type { PortfolioBorrowPosition, PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import type { Reward } from '~/entities/merkl'
 import type { Campaign } from '~/entities/brevis'
 import type { FuulClaimableReward } from '~/entities/fuul'
 
 defineProps<{
   type: 'lend' | 'borrow' | 'earn' | 'rewards' | 'brevis-rewards' | 'fuul-rewards'
-  items: any[]
+  items: unknown[]
 }>()
+
+const getDepositPositionKey = (position: PortfolioSavingsPosition<VaultEntity>) =>
+  `${position.subAccount}-${position.position.vaultAddress}`
+const getBorrowPositionKey = (position: PortfolioBorrowPosition<VaultEntity>) =>
+  `${position.subAccount}-${position.borrow.vaultAddress}-${position.collateral?.vaultAddress ?? position.collateralVaults[0] ?? 'none'}`
 </script>
 
 <template>
@@ -17,22 +22,22 @@ defineProps<{
     <template v-if="type === 'lend'">
       <PortfolioSavingItem
         v-for="(position) in items"
-        :key="(position as AccountDepositPosition).vault.address"
-        :position="position as AccountDepositPosition"
+        :key="getDepositPositionKey(position as PortfolioSavingsPosition<VaultEntity>)"
+        :position="position as PortfolioSavingsPosition<VaultEntity>"
       />
     </template>
     <template v-else-if="type === 'borrow'">
       <PortfolioBorrowItem
         v-for="position in items"
-        :key="`${(position as AccountBorrowPosition).collateral.address}-${(position as AccountBorrowPosition).borrow.address}-${(position as AccountBorrowPosition).subAccount}`"
-        :position="position as AccountBorrowPosition"
+        :key="getBorrowPositionKey(position as PortfolioBorrowPosition<VaultEntity>)"
+        :position="position as PortfolioBorrowPosition<VaultEntity>"
       />
     </template>
     <template v-else-if="type === 'earn'">
       <PortfolioEarnItem
         v-for="(position) in items"
-        :key="(position as AccountDepositPosition).vault.address"
-        :position="position as AccountDepositPosition"
+        :key="getDepositPositionKey(position as PortfolioSavingsPosition<VaultEntity>)"
+        :position="position as PortfolioSavingsPosition<VaultEntity>"
       />
     </template>
     <template v-else-if="type === 'rewards'">

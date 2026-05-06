@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { formatNumber, formatSignificant } from '~/utils/string-utils'
-import type { EVaultCollateral, SecuritizeBorrowVaultPair } from '~/entities/vault'
+import type { SecuritizeBorrowVaultPair } from '~/types/borrow-pair'
 import { getAssetOraclePrice, getCollateralOraclePrice } from '~/services/pricing/priceProvider'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultBorrowApyModal, VaultRampDownModal, VaultSupplyApyModal } from '#components'
+import type { EVaultCollateral } from '@eulerxyz/euler-v2-sdk'
+import { formatNumber, formatSignificant } from '~/utils/string-utils'
 
 const { pair } = defineProps<{ pair: SecuritizeBorrowVaultPair }>()
 
@@ -15,7 +16,7 @@ const modal = useModal()
 const { withIntrinsicBorrowApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, hasSupplyRewards, hasBorrowRewards } = useRewardsApy()
 
-// Borrow APY (from EVK borrow vault)
+// Borrow APY (from EVault borrow vault)
 const totalBorrowRewardsAPY = computed(() => getBorrowRewardApy(pair.borrow.address, pair.collateral.address))
 
 const borrowApyWithRewards = computed(() => withIntrinsicBorrowApy(

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { extractUnresolvedCollateralAddresses } from '~/entities/vault/collateral-discovery'
-import type { EVault, EVaultCollateral } from '~/entities/vault/types'
+import type { EVault, EVaultCollateral } from '@eulerxyz/euler-v2-sdk'
+import { extractUnresolvedCollateralAddresses } from '~/utils/vault/collateral-discovery'
 
 const ADDR_A = '0x000000000000000000000000000000000000c0a1'
 const ADDR_B = '0x000000000000000000000000000000000000c0a2'

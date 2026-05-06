@@ -1,26 +1,8 @@
-import type { ComputedRef } from 'vue'
-import { useAccount } from '@wagmi/vue'
-import { formatUnits, type Address, type Abi, zeroAddress } from 'viem'
-import { logWarn } from '~/utils/errorHandling'
-import { createRaceGuard } from '~/utils/race-guard'
-import { FixedPoint } from '~/utils/fixed-point'
-import { getTotalCollateralValue } from '~/utils/position-estimates'
-import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal, SwapTokenSelector, SlippageSettingsModal } from '#components'
-import { useToast } from '~/components/ui/composables/useToast'
-import { eulerAccountLensABI } from '~/entities/euler/abis'
-import {
-  getNetAPY,
-  getProjectedRates,
-  isEVault,
-  type EVault,
-  type SecuritizeCollateralVault,
-  type VaultAsset,
-} from '~/entities/vault'
-import {
-  getAssetUsdValueOrZero,
-  getCollateralUsdValueOrZero,
-} from '~/services/pricing/priceProvider'
+import { getProjectedRates, getNetAPY } from '~/utils/vault/apy'
+import type { EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import { isEVault } from '@eulerxyz/euler-v2-sdk'
+import type { VaultAsset } from '~/types/asset'
+import { getAssetUsdValueOrZero, getCollateralUsdValueOrZero } from '~/services/pricing/priceProvider'
 import type { TxPlan } from '~/entities/txPlan'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
@@ -37,6 +19,18 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { isOpDisabled, OP_DEPOSIT, OP_WITHDRAW } from '~/utils/vault-hooks'
 import { getHookDisabledWarning } from '~/composables/useVaultWarnings'
+import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
+import { type Address, type Abi, formatUnits, zeroAddress } from 'viem'
+import { useModal } from '~/components/ui/composables/useModal'
+import { useToast } from '~/components/ui/composables/useToast'
+import { useAccount } from '@wagmi/vue'
+import { eulerAccountLensABI } from '~/entities/euler/abis'
+import { SwapTokenSelector, SlippageSettingsModal, OperationReviewModal } from '#components'
+import type { ComputedRef } from 'vue'
+import { logWarn } from '~/utils/errorHandling'
+import { createRaceGuard } from '~/utils/race-guard'
+import { FixedPoint } from '~/utils/fixed-point'
+import { getTotalCollateralValue } from '~/utils/position-estimates'
 
 export interface UseCollateralFormOptions {
   mode: 'supply' | 'withdraw'
@@ -164,8 +158,10 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   // --- Position/vault computeds ---
   const position = computed(() => getPositionBySubAccountIndex(+positionIndex))
   const isPositionLoaded = computed(() => !!position.value)
-  const collateralVault = computed(() => selectedCollateral.value || position.value?.collateral)
-  const borrowVault = computed(() => position.value?.borrow)
+  const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() =>
+    (selectedCollateral.value || (position.value ? position.value.collateralVault : undefined)) as EVault | SecuritizeCollateralVault | undefined,
+  )
+  const borrowVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
   const collateralAssets = computed(() => selectedCollateralAssets.value)
   const asset = computed(() => collateralVault.value?.asset)
 
@@ -222,7 +218,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     valueToNano(amount.value || '0', collateralVault.value?.asset.decimals),
     Number(collateralVault.value?.asset.decimals),
   ))
-  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, position.value?.borrow.shares.decimals || 18))
+  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, borrowVault.value?.shares.decimals || 18))
   const suppliedFixed = computed(() => FixedPoint.fromValue(collateralAssets.value, collateralVault.value?.asset.decimals || 18))
   const priceFixed = computed(() => {
     if (!position.value) return FixedPoint.fromValue(0n, 18)
@@ -251,7 +247,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       return
     }
 
-    const primaryAddress = normalizeAddressOrEmpty(position.value.collateral.address)
+    const primaryCollateral = position.value.collateralVault
+    const primaryAddress = normalizeAddressOrEmpty(primaryCollateral?.address)
     const targetAddress = normalizeAddressOrEmpty(getSelectedCollateralAddress()) || primaryAddress
 
     if (targetAddress !== lastCollateralAddress.value) {
@@ -287,7 +284,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     catch (e) {
       logWarn(`collateral/${options.mode}`, e)
       if (!selectedCollateral.value) {
-        selectedCollateral.value = position.value.collateral
+        selectedCollateral.value = primaryCollateral as EVault | SecuritizeCollateralVault | null
       }
     }
   }
@@ -325,8 +322,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
   const { priceImpact: swapPriceImpact } = useSwapPriceImpact({
     quote: swapEffectiveQuote,
-    fromVault: computed(() => options.mode === 'withdraw' ? collateralVault.value : null),
-    toVault: computed(() => options.mode === 'supply' ? collateralVault.value : null),
+    fromVault: computed(() => options.mode === 'withdraw' ? collateralVault.value as EVault | SecuritizeCollateralVault : null),
+    toVault: computed(() => options.mode === 'supply' ? collateralVault.value as EVault | SecuritizeCollateralVault : null),
   })
 
   const { guardWithPriceImpact } = usePriceImpactGate({
@@ -444,7 +441,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const collateralOp = computed(() => options.mode === 'supply' ? OP_DEPOSIT : OP_WITHDRAW)
 
   const hookWarning = computed(() => {
-    // Securitize collateral doesn't implement hooks — skip non-EVK vaults.
+    // Securitize collateral doesn't implement hooks — skip non-EVaults.
     if (!collateralVault.value || !isEVault(collateralVault.value)) return null
     return getHookDisabledWarning(collateralVault.value, collateralOp.value)
   })
@@ -521,14 +518,17 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       estimateUserLTV.value = userLtvFixed.value
       // liquidationLTV is in basis points (e.g. 8600 = 86%). Convert to 18-decimal
       // percentage (8600 * 10^16 = 86 * 10^18) to match userLtvFixed's 18 decimals.
+      const effectiveLiquidationLtv = getBorrowPositionEffectiveLiquidationLTV(position.value!)
+      if (effectiveLiquidationLtv === undefined) throw new Error('Liquidation LTV unavailable')
+      const liquidationLtvBps = decimalLtvToBps(effectiveLiquidationLtv)
       estimateHealth.value = (userLtvFixed.isZero() || userLtvFixed.isNegative())
         ? 0n
-        : FixedPoint.fromValue(position.value!.liquidationLTV * (10n ** 16n), 18).div(userLtvFixed).value
+        : FixedPoint.fromValue(liquidationLtvBps * (10n ** 16n), 18).div(userLtvFixed).value
     }
     catch (e: unknown) {
       logWarn('collateral/syncEstimates', e)
-      estimateUserLTV.value = position.value!.userLTV
-      estimateHealth.value = position.value!.health
+      estimateUserLTV.value = position.value!.userLTV ?? position.value!.currentLTV ?? 0n
+      estimateHealth.value = position.value!.healthFactor ?? 0n
       estimatesError.value = (e as { message: string }).message
     }
   }
@@ -598,8 +598,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       await loadSelectedCollateral()
       await options.onAfterLoad?.()
       estimateNetAPY.value = netAPY.value
-      estimateUserLTV.value = position.value!.userLTV
-      estimateHealth.value = position.value!.health
+      estimateUserLTV.value = position.value!.userLTV ?? position.value!.currentLTV ?? 0n
+      estimateHealth.value = position.value!.healthFactor ?? 0n
     }
     catch (e) {
       showError('Unable to load Vault')
@@ -728,8 +728,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     await loadSelectedCollateral()
     await options.onAfterLoad?.()
     estimateNetAPY.value = netAPY.value
-    estimateUserLTV.value = position.value?.userLTV || 0n
-    estimateHealth.value = position.value?.health || 0n
+    estimateUserLTV.value = position.value ? position.value.userLTV ?? position.value.currentLTV ?? 0n : 0n
+    estimateHealth.value = position.value ? position.value.healthFactor ?? 0n : 0n
   })
 
   watch(amount, async () => {

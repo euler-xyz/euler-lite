@@ -1,7 +1,8 @@
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import type { EVault } from '~/entities/vault'
+
 import type { VaultTagContext } from '~/composables/useGeoBlock'
 import { buildCollateralOption, computeSupplyApy } from '~/utils/collateralOptions'
 import { useReactiveMap } from '~/composables/useReactiveMap'
@@ -16,7 +17,7 @@ export const useSwapCollateralOptions = ({
   tagContext?: VaultTagContext
 }) => {
   const { borrowList } = useVaults()
-  const { getVault: registryGetVault, getVerifiedEvkVaults, getEscrowVaults, getVaultCategory } = useVaultRegistry()
+  const { getVault: registryGetVault, getVerifiedEVaults, getEscrowVaults, getVaultCategory } = useVaultRegistry()
   const { getBalance } = useWallets()
   const { withIntrinsicSupplyApy, version: intrinsicVersion } = useIntrinsicApy()
   const { getSupplyRewardApy, version: rewardsVersion } = useRewardsApy()
@@ -40,8 +41,8 @@ export const useSwapCollateralOptions = ({
       const borrowable = new Set(
         borrowList.value.map(pair => getAddress(pair.borrow.address)),
       )
-      // Get verified EVK vaults that are borrowable and non-escrow
-      const standardVaults = getVerifiedEvkVaults()
+      // Get verified EVaults that are borrowable and non-escrow
+      const standardVaults = getVerifiedEVaults()
         .filter(vault => getVaultCategory(vault.address) !== 'escrow')
         .filter(vault => borrowable.has(getAddress(vault.address)))
       // Get all escrow vaults (always valid as collateral, already have verified: true)

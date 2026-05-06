@@ -1,4 +1,4 @@
-import type { EVaultCollateral } from './types'
+import type { EVaultCollateral } from '@eulerxyz/euler-v2-sdk'
 
 /**
  * Is this collateral edge still "live" from the protocol's perspective?

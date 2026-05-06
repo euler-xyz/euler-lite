@@ -1,27 +1,6 @@
-import type { Ref, ComputedRef } from 'vue'
-import { useAccount } from '@wagmi/vue'
-import { formatUnits, type Address } from 'viem'
-import { logWarn } from '~/utils/errorHandling'
-import { createRaceGuard } from '~/utils/race-guard'
-import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
-import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal } from '#components'
-import { useToast } from '~/components/ui/composables/useToast'
-import {
-  type AnyBorrowVaultPair,
-  type EVault,
-  type ProjectedRates,
-  convertAssetsToShares,
-  getProjectedRates,
-} from '~/entities/vault'
-import {
-  getAssetUsdValue,
-  getAssetUsdValueOrZero,
-  getAssetOraclePrice,
-  getCollateralOraclePrice,
-  getCollateralShareOraclePrice,
-  conservativePriceRatioNumber,
-} from '~/services/pricing/priceProvider'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
+import { type ProjectedRates, getProjectedRates } from '~/utils/vault/apy'
+import { getAssetUsdValue, getAssetUsdValueOrZero, getAssetOraclePrice, getCollateralOraclePrice, getCollateralShareOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
@@ -36,6 +15,16 @@ import { useMultiplyCollateralOptions } from '~/composables/useMultiplyCollatera
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
+import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
+import { useModal } from '~/components/ui/composables/useModal'
+import { useToast } from '~/components/ui/composables/useToast'
+import { useAccount } from '@wagmi/vue'
+import { formatUnits, type Address } from 'viem'
+import { OperationReviewModal } from '#components'
+import type { Ref, ComputedRef } from 'vue'
+import { logWarn } from '~/utils/errorHandling'
+import { createRaceGuard } from '~/utils/race-guard'
+import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 
 type MultiplyPlanParamsCommon = {
   supplyVaultAddress: string
@@ -151,7 +140,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const multiplySavingPosition = computed(() => {
     if (!multiplySupplyVault.value) return null
     return depositPositions.value.find(
-      position => normalizeAddress(position.vault.address) === normalizeAddress(multiplySupplyVault.value?.address),
+      position => position.vault && normalizeAddress(position.vault.address) === normalizeAddress(multiplySupplyVault.value?.address),
     ) || null
   })
   const multiplySavingBalance = computed(() => multiplySavingPosition.value?.shares || 0n)
@@ -746,7 +735,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           supplySharesAmount = multiplySavingBalance.value
         }
         else {
-          supplySharesAmount = await convertAssetsToShares(multiplySupplyVault.value.address, supplyAmountNano)
+          supplySharesAmount = multiplySupplyVault.value.convertToShares(supplyAmountNano)
         }
         if (!supplySharesAmount || supplySharesAmount <= 0n) {
           error('Unable to resolve savings amount')

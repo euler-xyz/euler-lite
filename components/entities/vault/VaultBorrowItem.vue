@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { getAddress } from 'viem'
-import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { type AnyBorrowVaultPair, type EVault, isCyclicalNoteVault } from '~/entities/vault'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
+import { isCyclicalNoteVault } from '~/utils/vault/classification'
 import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
@@ -11,6 +10,9 @@ import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultBorrowApyModal, VaultMaxRoeModal, VaultNetApyPairModal, VaultSupplyApyModal } from '#components'
+import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
+import { getAddress } from 'viem'
+import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 
 const { pair } = defineProps<{ pair: AnyBorrowVaultPair }>()
 const { enableEntityBranding } = useDeployConfig()

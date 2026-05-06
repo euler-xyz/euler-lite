@@ -1,6 +1,15 @@
 import { getAddress, zeroAddress, type Address } from 'viem'
 import { getEulerRouterGovernor } from '~/entities/oracle'
-import type { EarnVault, SecuritizeVault, Vault } from './types'
+import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+
+type VerifiableEVault = (EVault | SecuritizeCollateralVault) & {
+  verified?: boolean
+  vaultCategory?: 'standard' | 'escrow'
+}
+
+type VerifiableEarnVault = EulerEarn & {
+  verified?: boolean
+}
 
 /**
  * Pure data needed to decide whether a vault's on-chain governor (and, for
@@ -41,7 +50,7 @@ const findAllDeclaredEntitiesFor = (
 ): string[] => declaredKeys.filter(key => labels.hasEntityAddress(key, address))
 
 export const isVaultGovernorVerified = (
-  vault: Vault | SecuritizeVault,
+  vault: VerifiableEVault,
   labels: VerificationLabels,
 ): boolean => {
   // Escrow vaults have no risk manager — labels treat them as a separate
@@ -73,7 +82,7 @@ export const isVaultGovernorVerified = (
 }
 
 export const isEarnVaultOwnerVerified = (
-  earnVault: EarnVault,
+  earnVault: VerifiableEarnVault,
   labels: VerificationLabels,
 ): boolean => {
   if (!earnVault.verified) return false
@@ -87,7 +96,7 @@ export const isEarnVaultOwnerVerified = (
   // the product has no on-chain authority to claim it — treat as unverified.
   if (declaredKeys.length === 0) return false
 
-  return findDeclaredEntityFor(getAddress(earnVault.owner), declaredKeys, labels) !== null
+  return findDeclaredEntityFor(getAddress(earnVault.governance.owner), declaredKeys, labels) !== null
 }
 
 /**
@@ -102,7 +111,7 @@ export const isEarnVaultOwnerVerified = (
  * `getVerifiedAddressSet`.
  */
 export const resolveGoverningEntityKeys = (
-  vault: Vault | SecuritizeVault,
+  vault: VerifiableEVault,
   labels: VerificationLabels,
 ): string[] => {
   if ('vaultCategory' in vault && vault.vaultCategory === 'escrow') return []
@@ -113,11 +122,11 @@ export const resolveGoverningEntityKeys = (
 }
 
 export const resolveEarnGoverningEntityKeys = (
-  earnVault: EarnVault,
+  earnVault: VerifiableEarnVault,
   labels: VerificationLabels,
 ): string[] => {
   if (!earnVault.verified) return []
   const declaredKeys = labels.getDeclaredEntityKeys(earnVault.address)
   if (!declaredKeys || declaredKeys.length === 0) return []
-  return findAllDeclaredEntitiesFor(getAddress(earnVault.owner), declaredKeys, labels)
+  return findAllDeclaredEntitiesFor(getAddress(earnVault.governance.owner), declaredKeys, labels)
 }

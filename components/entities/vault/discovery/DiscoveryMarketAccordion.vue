@@ -1,11 +1,9 @@
 <script setup lang="ts">
-import { maxUint256 } from 'viem'
-import type { MarketGroup } from '~/entities/lend-discovery'
-import type { EVault, SecuritizeCollateralVault, AnyBorrowVaultPair } from '~/entities/vault'
+import { isEVault, type SecuritizeCollateralVault, type EVault } from '@eulerxyz/euler-v2-sdk'
+import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { formatCompactUsdValue } from '~/utils/string-utils'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import {
-  isVaultType,
   getVaultAddress,
   getMiniDiagram,
   getCollateralMatrix,
@@ -25,6 +23,8 @@ import {
   type VaultUsdCacheEntry,
   type VaultApyCacheEntry,
 } from '~/utils/discoveryCalculations'
+import type { MarketGroup } from '~/entities/lend-discovery'
+import { maxUint256 } from 'viem'
 
 const props = defineProps<{
   markets: MarketGroup[]
@@ -313,7 +313,7 @@ const getSelectedBorrowPair = (market: MarketGroup): AnyBorrowVaultPair | null =
   if (!cell) return null
   const collateral = findVault(market, selectedCell.value.collateralAddr)
   const borrow = findVault(market, selectedCell.value.liabilityAddr)
-  if (!collateral || !borrow || !isVaultType(borrow)) return null
+  if (!collateral || !borrow || !isEVault(borrow)) return null
   return {
     borrow,
     collateral,
@@ -340,7 +340,7 @@ const getMatrixHeaderBorrowPairs = (market: MarketGroup): AnyBorrowVaultPair[] =
       if (!cell || cell.ltv.borrowLTV <= 0) continue
       const collateral = findVault(market, collateralAddr)
       const borrow = findVault(market, addr)
-      if (!collateral || !borrow || !isVaultType(borrow)) continue
+      if (!collateral || !borrow || !isEVault(borrow)) continue
       pairs.push({
         borrow,
         collateral,
@@ -355,7 +355,7 @@ const getMatrixHeaderBorrowPairs = (market: MarketGroup): AnyBorrowVaultPair[] =
       if (cell.ltv.borrowLTV <= 0) continue
       const collateral = findVault(market, addr)
       const borrow = findVault(market, liabilityAddr)
-      if (!collateral || !borrow || !isVaultType(borrow)) continue
+      if (!collateral || !borrow || !isEVault(borrow)) continue
       pairs.push({
         borrow,
         collateral,
@@ -385,7 +385,7 @@ const getGraphBorrowPairs = (market: MarketGroup): AnyBorrowVaultPair[] => {
     if (!cell || cell.ltv.borrowLTV <= 0) continue
     const collateral = findVault(market, collateralAddr)
     const borrow = findVault(market, selectedAddr)
-    if (!collateral || !borrow || !isVaultType(borrow)) continue
+    if (!collateral || !borrow || !isEVault(borrow)) continue
     pairs.push({
       borrow,
       collateral,
@@ -455,7 +455,7 @@ onMounted(() => {
                 :key="getVaultAddress(vault)"
               >
                 <VaultItem
-                  v-if="isVaultType(vault)"
+                  v-if="isEVault(vault)"
                   :vault="vault"
                 />
                 <SecuritizeVaultItem
@@ -615,7 +615,7 @@ onMounted(() => {
                             Lend
                           </h4>
                           <VaultItem
-                            v-if="isVaultType(vault)"
+                            v-if="isEVault(vault)"
                             :vault="vault"
                           />
                           <SecuritizeVaultItem
@@ -651,7 +651,7 @@ onMounted(() => {
                             Lend
                           </h4>
                           <VaultItem
-                            v-if="isVaultType(lendVault)"
+                            v-if="isEVault(lendVault)"
                             :vault="lendVault"
                           />
                           <SecuritizeVaultItem
@@ -688,7 +688,7 @@ onMounted(() => {
                           Lend
                         </h4>
                         <VaultItem
-                          v-if="isVaultType(vault)"
+                          v-if="isEVault(vault)"
                           :vault="vault"
                         />
                         <SecuritizeVaultItem

@@ -1,6 +1,6 @@
-import { getAddress, type Address } from 'viem'
+import type { SecuritizeCollateralVault, EVault } from '@eulerxyz/euler-v2-sdk'
 import { collectPythFeedsFromAdapters } from '@eulerxyz/euler-v2-sdk'
-import type { EVault, SecuritizeCollateralVault } from '~/entities/vault'
+import { type Address, getAddress } from 'viem'
 
 /** Decoded shape of the AccountLiquidityInfo struct from the Euler lens */
 export interface LensLiquidityInfo {

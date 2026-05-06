@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { EulerEarn, EVault } from '~/entities/vault'
+import type { EulerEarn, EVault } from '@eulerxyz/euler-v2-sdk'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultPointsModal } from '#components'

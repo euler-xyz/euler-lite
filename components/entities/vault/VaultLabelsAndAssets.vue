@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { getAddress } from 'viem'
-import type { EulerEarn, SecuritizeCollateralVault, EVault, VaultAsset } from '~/entities/vault'
+import type { SecuritizeCollateralVault, EVault, EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import type { VaultAsset } from '~/types/asset'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
+import { getAddress } from 'viem'
 
 const { vault, assets, size, assetsLabel, pairVault, back, backFallback } = defineProps<{
   vault?: EVault | EulerEarn | SecuritizeCollateralVault
