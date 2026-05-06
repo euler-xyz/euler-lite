@@ -77,6 +77,53 @@ const decodedCalls = (plan: TxPlan) => planCalls(plan).map(call => ({
 }))
 
 describe('full repay pre-existing liability deposit cleanup', () => {
+  it('builds same-asset swap calls on the supplied subaccount', async () => {
+    const builders = createSameAssetSwapBuilders(createContext(0n), helpers)
+
+    const plan = await builders.buildSameAssetSwapPlan({
+      fromVaultAddress: SAVINGS_VAULT,
+      toVaultAddress: NEW_VAULT,
+      amount: 100n,
+      subAccount: SUB_ACCOUNT,
+    })
+
+    const calls = decodedCalls(plan)
+
+    expect(calls).toContainEqual(expect.objectContaining({
+      target: SAVINGS_VAULT,
+      functionName: 'withdraw',
+      args: [100n, NEW_VAULT, SUB_ACCOUNT],
+    }))
+    expect(calls).toContainEqual(expect.objectContaining({
+      target: NEW_VAULT,
+      functionName: 'skim',
+      args: [100n, SUB_ACCOUNT],
+    }))
+  })
+
+  it('keeps same-asset swap main-account fallback when no subaccount is provided', async () => {
+    const builders = createSameAssetSwapBuilders(createContext(0n), helpers)
+
+    const plan = await builders.buildSameAssetSwapPlan({
+      fromVaultAddress: SAVINGS_VAULT,
+      toVaultAddress: NEW_VAULT,
+      amount: 100n,
+    })
+
+    const calls = decodedCalls(plan)
+
+    expect(calls).toContainEqual(expect.objectContaining({
+      target: SAVINGS_VAULT,
+      functionName: 'withdraw',
+      args: [100n, NEW_VAULT, USER],
+    }))
+    expect(calls).toContainEqual(expect.objectContaining({
+      target: NEW_VAULT,
+      functionName: 'skim',
+      args: [100n, USER],
+    }))
+  })
+
   it('keeps same-asset full repay borrow-vault shares when they pre-exist', async () => {
     const builders = createSameAssetSwapBuilders(createContext(1n), helpers)
 
