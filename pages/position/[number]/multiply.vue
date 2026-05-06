@@ -135,49 +135,6 @@ const multiplyRouteEmptyMessage = computed(() => {
   return 'No quotes found'
 })
 
-const projectedBorrowRates = ref<ProjectedRates | null>(null)
-const projectedRatesGuard = createRaceGuard()
-
-watchEffect(async () => {
-  const short = multiplyShortVault.value
-  const debtNano = multiplyDebtAmountNano.value
-  const gen = projectedRatesGuard.next()
-
-  if (!short || !debtNano) {
-    projectedBorrowRates.value = null
-    return
-  }
-
-  try {
-    const [shortResult] = await getProjectedRatesBatch([
-      {
-        vaultAddress: short.address,
-        currentCash: short.interestRateInfo.cash,
-        currentBorrows: short.interestRateInfo.borrows,
-        cashDelta: -debtNano,
-        borrowsDelta: debtNano,
-      },
-    ])
-    if (projectedRatesGuard.isStale(gen)) return
-    projectedBorrowRates.value = shortResult
-  }
-  catch (e) {
-    if (projectedRatesGuard.isStale(gen)) return
-    console.warn('[Multiply] failed to project rates', e)
-    projectedBorrowRates.value = null
-  }
-})
-const multiplyBorrowApy = computed(() => {
-  if (!multiplyShortVault.value) {
-    return null
-  }
-  const currentRaw = nanoToValue(multiplyShortVault.value.interestRateInfo.borrowAPY || 0n, 25)
-  const base = withIntrinsicBorrowApy(currentRaw, multiplyShortVault.value.asset.address) - getBorrowRewardApy(multiplyShortVault.value.address, multiplySupplyVault.value?.address)
-  if (!projectedBorrowRates.value) return base
-  const projectedRaw = nanoToValue(projectedBorrowRates.value.borrowAPY, 25)
-  return base + (projectedRaw - currentRaw)
-})
-
 const multiplyDebtAmountNano = computed(() => {
   const currentBorrowed = position.value?.borrowed || 0n
   const currentMultiple = multiplyCurrentMultiple.value
@@ -221,6 +178,48 @@ const multiplyCurrentMultiple = computed(() => {
   const rawMultiple = ltv >= 0.9999 ? multiplyMaxMultiplier.value : 1 / (1 - ltv)
   const rounded = Math.max(1, Math.round(rawMultiple * 100) / 100)
   return Math.min(rounded, multiplyMaxMultiplier.value || rounded)
+})
+const projectedBorrowRates = ref<ProjectedRates | null>(null)
+const projectedRatesGuard = createRaceGuard()
+
+watchEffect(async () => {
+  const short = multiplyShortVault.value
+  const debtNano = multiplyDebtAmountNano.value
+  const gen = projectedRatesGuard.next()
+
+  if (!short || !debtNano) {
+    projectedBorrowRates.value = null
+    return
+  }
+
+  try {
+    const [shortResult] = await getProjectedRatesBatch([
+      {
+        vaultAddress: short.address,
+        currentCash: short.interestRateInfo.cash,
+        currentBorrows: short.interestRateInfo.borrows,
+        cashDelta: -debtNano,
+        borrowsDelta: debtNano,
+      },
+    ])
+    if (projectedRatesGuard.isStale(gen)) return
+    projectedBorrowRates.value = shortResult
+  }
+  catch (e) {
+    if (projectedRatesGuard.isStale(gen)) return
+    console.warn('[Multiply] failed to project rates', e)
+    projectedBorrowRates.value = null
+  }
+})
+const multiplyBorrowApy = computed(() => {
+  if (!multiplyShortVault.value) {
+    return null
+  }
+  const currentRaw = nanoToValue(multiplyShortVault.value.interestRateInfo.borrowAPY || 0n, 25)
+  const base = withIntrinsicBorrowApy(currentRaw, multiplyShortVault.value.asset.address) - getBorrowRewardApy(multiplyShortVault.value.address, multiplySupplyVault.value?.address)
+  if (!projectedBorrowRates.value) return base
+  const projectedRaw = nanoToValue(projectedBorrowRates.value.borrowAPY, 25)
+  return base + (projectedRaw - currentRaw)
 })
 const multiplyMinMultiplier = computed(() => {
   const current = multiplyCurrentMultiple.value
