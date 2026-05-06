@@ -13,6 +13,7 @@ import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { createRaceGuard } from '~/utils/race-guard'
 
 const route = useRoute()
 const { isConnected, address } = useAccount()
@@ -107,6 +108,7 @@ watchEffect(async () => {
   currentBorrowValueUsd.value = (await getAssetUsdValue(position.value.borrowed, fromVault.value, 'off-chain')) ?? null
 })
 const nextBorrowValueUsd = ref<number | null>(null)
+const nextBorrowGuard = createRaceGuard()
 
 const roeBefore = computed(() => getRoe(supplyValueUsd.value, collateralSupplyApy.value, currentBorrowValueUsd.value, fromBorrowApy.value))
 const roeAfter = computed(() => getRoe(supplyValueUsd.value, collateralSupplyApy.value, nextBorrowValueUsd.value, nextBorrowApy.value))
@@ -274,6 +276,8 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 
 // Must be after `swap` destructuring so `quote` is in scope
 watchEffect(async () => {
+  const gen = nextBorrowGuard.next()
+
   if (!quote.value || !toVault.value || !fromVault.value) {
     nextBorrowValueUsd.value = null
     nextBorrowApy.value = null
@@ -308,6 +312,7 @@ watchEffect(async () => {
       newBorrowAmount,
     ),
   ])
+  if (nextBorrowGuard.isStale(gen)) return
 
   const oldBorrowUsd = remainingBorrowUsd ?? 0
   const targetBorrowUsd = newBorrowUsd ?? 0

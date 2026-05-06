@@ -362,6 +362,8 @@ const collateralSwapDeltas = computed(() => {
 })
 
 watchEffect(async () => {
+  const gen = roeSnapshotGuard.next()
+
   if (!position.value || !borrowVault.value || !fromVault.value || !toVault.value) {
     supplyValueUsd.value = null
     weightedSupplyApy.value = null
@@ -370,7 +372,6 @@ watchEffect(async () => {
     return
   }
 
-  const gen = roeSnapshotGuard.next()
   const deltas = collateralSwapDeltas.value
   const [currentSnapshot, nextSnapshot] = await Promise.all([
     getCollateralApySnapshot(position.value, borrowVault.value),
