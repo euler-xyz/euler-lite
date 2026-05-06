@@ -166,8 +166,18 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
             </span>
             <GovernanceLimitedBadge v-if="isGovernanceLimited" />
           </div>
-          <div class="text-h5 text-content-primary">
-            {{ market.name }}
+          <div class="flex items-center gap-8 min-w-0">
+            <div class="text-h5 text-content-primary min-w-0">
+              {{ market.name }}
+            </div>
+            <UiShareLinkButton
+              tag="span"
+              stop-propagation
+              class="!w-28 !h-28"
+              :path="`/explore/${market.id}`"
+              :query="shareLinkQuery"
+              label="Copy market link"
+            />
           </div>
           <div
             v-if="getProductDescription(market)"
@@ -200,14 +210,6 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
           </span>
         </div>
       </template>
-      <UiShareLinkButton
-        tag="span"
-        stop-propagation
-        class="ml-8"
-        :path="`/explore/${market.id}`"
-        :query="shareLinkQuery"
-        label="Copy market link"
-      />
     </div>
 
     <div class="flex pt-12 items-center mobile:justify-between mobile:border-b mobile:border-line-subtle mobile:pb-12">
