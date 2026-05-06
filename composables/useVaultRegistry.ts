@@ -188,6 +188,7 @@ const isEarnVault = (address: string): boolean => getType(address) === 'earn'
 const isSecuritizeVault = (address: string): boolean => getType(address) === 'securitize'
 const isEVaultAddress = (address: string): boolean => getType(address) === 'evk'
 const isVerifiedVault = (address: string): boolean => {
+  const { verifiedVaultAddresses, earnVaults } = useEulerLabels()
   const normalized = normalizeAddress(address)
   return get(normalized)?.verified === true
     || escrowAddresses.value.has(normalized)

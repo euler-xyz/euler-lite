@@ -6,11 +6,12 @@ import {
   getEarnVaultRestricted,
   getAssetBlock,
   getAssetRestricted,
+  getAssetPatternRules,
   isVaultDeprecated,
   patternRuleMatches,
   isWrapPair,
 } from '~/utils/eulerLabelsUtils'
-import { assetPatternRules } from '~/utils/eulerLabelsState'
+import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { SANCTIONED_COUNTRIES, COUNTRY_GROUPS } from '~/entities/constants'
 
@@ -72,15 +73,14 @@ const toAssetFields = (asset: AssetLike): { address?: string, symbol?: string, n
 // render; the pattern-rule scan is O(rules) which adds up. Cache key
 // composes country + address + symbol + name so a country change (rare) or
 // a new unique asset produces a fresh entry without ever serving stale data.
-// Pattern-rule content lives in module-scoped `assetPatternRules`; the
-// labels loader calls `clearAssetGeoCache()` after repopulating that list
-// so we never serve a decision computed against removed rules.
+// Pattern-rule content comes from the current SDK labels snapshot. Include the
+// labels version in the key so a refreshed snapshot cannot reuse old decisions.
 const MAX_ASSET_CACHE_SIZE = 1000
 const assetBlockCache = new Map<string, boolean>()
 const assetRestrictedCache = new Map<string, boolean>()
 
 const makeAssetCacheKey = (fields: { address?: string, symbol?: string, name?: string }): string =>
-  `${country.value ?? ''}|${fields.address?.toLowerCase() ?? ''}|${fields.symbol?.toLowerCase() ?? ''}|${fields.name?.toLowerCase() ?? ''}`
+  `${getEulerLabelsVersion()}|${country.value ?? ''}|${fields.address?.toLowerCase() ?? ''}|${fields.symbol?.toLowerCase() ?? ''}|${fields.name?.toLowerCase() ?? ''}`
 
 const cacheSet = (cache: Map<string, boolean>, key: string, value: boolean): boolean => {
   if (cache.size >= MAX_ASSET_CACHE_SIZE) cache.clear()
@@ -139,7 +139,7 @@ export const isAssetBlockedByCountry = (asset: AssetLike): boolean => {
   const symbolLower = fields.symbol?.toLowerCase()
   const nameLower = fields.name?.toLowerCase()
   if (symbolLower || nameLower) {
-    for (const rule of assetPatternRules) {
+    for (const rule of getAssetPatternRules()) {
       if (!rule.block?.length) continue
       if (!patternRuleMatches(rule, symbolLower, nameLower)) continue
       if (isCountryInList(expandBlockList(rule.block))) {
@@ -151,16 +151,6 @@ export const isAssetBlockedByCountry = (asset: AssetLike): boolean => {
   return cacheSet(assetBlockCache, cacheKey, false)
 }
 
-/**
- * Determine whether `asset` is soft-restricted in the detected country.
- *
- * `opts.counterpart` lets the caller pass the asset on the other side of the
- * flow (e.g. the input asset of a swap when checking the output). When the
- * two form an ERC-4626 wrap pair, the restriction is bypassed: wrapping or
- * unwrapping existing exposure is a technical conversion, not a new
- * acquisition. Hard-block (`isAssetBlockedByCountry`) is never bypassed and
- * remains the unconditional gate.
- */
 export const isAssetRestrictedByCountry = (
   asset: AssetLike,
   opts?: { counterpart?: AssetLike },
@@ -175,13 +165,6 @@ export const isAssetRestrictedByCountry = (
   const restricted = cached !== undefined ? cached : computeAssetRestricted(fields, cacheKey)
   if (!restricted) return false
 
-  // Counterpart bypass: cached against the asset alone so the counterpart check
-  // sits outside the cache. Two cases bypass the soft-restrict — both reflect
-  // "already-held exposure, not a new acquisition":
-  // 1. Identity: candidate and counterpart are the same on-chain asset (e.g.
-  //    receiving the vault's underlying back during withdraw, no swap involved).
-  // 2. Wrap pair: candidate and counterpart form an ERC-4626 wrap pair per the
-  //    map populated by the labels loader once per reload cycle.
   if (opts?.counterpart) {
     const counterFields = toAssetFields(opts.counterpart)
     if (counterFields?.address && fields.address) {
@@ -208,7 +191,7 @@ const computeAssetRestricted = (
   const symbolLower = fields.symbol?.toLowerCase()
   const nameLower = fields.name?.toLowerCase()
   if (symbolLower || nameLower) {
-    for (const rule of assetPatternRules) {
+    for (const rule of getAssetPatternRules()) {
       if (!rule.restricted?.length) continue
       if (!patternRuleMatches(rule, symbolLower, nameLower)) continue
       if (isCountryInList(expandBlockList(rule.restricted))) {
@@ -257,11 +240,7 @@ export const isVaultRestrictedByCountry = (
   const earnRestricted = getEarnVaultRestricted(vaultAddress)
   if (earnRestricted?.length && isCountryInList(expandBlockList(earnRestricted))) return true
 
-  // Asset-level restriction: a vault is restricted whenever its underlying asset is
-  // restricted. Forward `counterpart` so swap flows depositing into the vault can
-  // bypass soft-restrict when input and underlying are an ERC-4626 wrap pair —
-  // mirrors the asset-level bypass in `isAssetRestrictedByCountry`. Vault-level
-  // restrictions above (product/earn) are unconditional and not bypassable.
+  // Asset-level restriction: a vault is restricted whenever its underlying asset is restricted.
   if (isAssetRestrictedByCountry(getVaultUnderlyingAsset(vaultAddress), opts)) return true
 
   return false

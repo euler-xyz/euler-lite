@@ -5,9 +5,15 @@ const SECOND = 1_000
 const MINUTE = 60 * SECOND
 
 const STALE_TIMES: Partial<Record<EulerSDKQueryName, number>> = {
-  queryDeployments: Infinity,
+  queryDeployments: 5 * MINUTE,
   queryABI: Infinity,
   queryTokenList: Infinity,
+  queryEulerLabelsEntities: 5 * MINUTE,
+  queryEulerLabelsProducts: 5 * MINUTE,
+  queryEulerLabelsPoints: 5 * MINUTE,
+  queryEulerLabelsEarnVaults: 5 * MINUTE,
+  queryEulerLabelsAssets: 5 * MINUTE,
+  queryOracleAdapters: 5 * MINUTE,
 
   queryEVaultVerifiedArray: 5 * MINUTE,
   queryEulerEarnVerifiedArray: 5 * MINUTE,
@@ -53,4 +59,14 @@ export const sdkBuildQuery: BuildQueryFn = (
   }) as typeof fn
 
   return wrapped
+}
+
+export const invalidateSdkQueries = (queryNames: EulerSDKQueryName[]) => {
+  const names = new Set<string>(queryNames)
+  return sdkQueryClient.invalidateQueries({
+    predicate: query =>
+      query.queryKey[0] === 'sdk'
+      && typeof query.queryKey[1] === 'string'
+      && names.has(query.queryKey[1]),
+  })
 }
