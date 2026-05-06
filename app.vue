@@ -33,6 +33,7 @@ const { theme } = useTheme()
 watch(theme, (newTheme) => {
   if (import.meta.client) {
     document.documentElement.setAttribute('data-theme', newTheme)
+    document.documentElement.style.colorScheme = newTheme
   }
 }, { immediate: true })
 

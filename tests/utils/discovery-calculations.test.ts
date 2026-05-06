@@ -2,10 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   STATS_ROWS,
   buildAttributeRowCells,
+  buildVaultApyCache,
   getActiveExternalCollateral,
-  getAttributeRowColor,
   getCollateralMatrix,
   isNodeRampingDown,
+  type VaultApyCacheEntry,
   type VaultUsdCacheEntry,
 } from '~/utils/discoveryCalculations'
 import type { MarketGroup } from '~/entities/lend-discovery'
@@ -164,33 +165,103 @@ describe('attribute stats matrix', () => {
       borrowCapUsd: 1000,
     }
 
-    const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, vault }]
+    const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, vault, isExternal: false }]
     const usdCache = new Map([[vault.address.toLowerCase(), usd]])
     const byRow = new Map(STATS_ROWS.map(row => [
       row.id,
-      { row, cell: buildAttributeRowCells(row, columns, usdCache)[0] },
+      buildAttributeRowCells(row, columns, usdCache)[0],
     ]))
 
-    expect(byRow.get('totalSupply')!.row.direction).toBe('higher-better')
-    expect(byRow.get('totalSupply')!.cell.numeric).toBe(1000)
-    expect(byRow.get('totalBorrow')!.row.direction).toBe('lower-better')
-    expect(byRow.get('totalBorrow')!.cell.numeric).toBe(500)
-    expect(byRow.get('liquidity')!.row.direction).toBe('higher-better')
-    expect(byRow.get('liquidity')!.cell.numeric).toBe(500)
-    expect(byRow.get('utilization')!.row.direction).toBe('lower-better')
-    expect(byRow.get('utilization')!.cell.numeric).toBe(50)
-    expect(byRow.get('supplyCapUsage')!.row.direction).toBe('lower-better')
-    expect(byRow.get('supplyCapUsage')!.cell.numeric).toBe(40)
-    expect(byRow.get('borrowCapUsage')!.row.direction).toBe('lower-better')
-    expect(byRow.get('borrowCapUsage')!.cell.numeric).toBe(50)
-    expect(byRow.get('supplyApy')!.row.direction).toBe('higher-better')
-    expect(byRow.get('supplyApy')!.cell.numeric).toBe(5)
-    expect(byRow.get('borrowApy')!.row.direction).toBe('lower-better')
-    expect(byRow.get('borrowApy')!.cell.numeric).toBe(12)
+    expect(byRow.get('totalSupply')!.numeric).toBe(1000)
+    expect(byRow.get('totalBorrow')!.numeric).toBe(500)
+    expect(byRow.get('liquidity')!.numeric).toBe(500)
+    expect(byRow.get('utilization')!.numeric).toBe(50)
+    expect(byRow.get('supplyCapUsage')!.numeric).toBe(40)
+    expect(byRow.get('borrowCapUsage')!.numeric).toBe(50)
+    expect(byRow.get('supplyApy')!.numeric).toBe(5)
+    expect(byRow.get('borrowApy')!.numeric).toBe(12)
   })
 
-  it('colors higher-better rows green at the high end and lower-better rows red at the high end', () => {
-    expect(getAttributeRowColor(100, 0, 100, 'higher-better')).toContain('hsla(145')
-    expect(getAttributeRowColor(100, 0, 100, 'lower-better')).toContain('hsla(0')
+  it('uses the apy cache (intrinsic + rewards) for supply/borrow APY when supplied', () => {
+    const vault = {
+      ...makeVault('0xApy', []),
+      supply: 0n,
+      borrow: 0n,
+      totalAssets: 0n,
+      supplyCap: 1000n,
+      borrowCap: 1000n,
+      interestRateInfo: {
+        // Raw IRM rate the matrix would have shown before this fix.
+        supplyAPY: 0n,
+        borrowAPY: 0n,
+      },
+    } as Vault
+    const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, vault, isExternal: false }]
+    const usdCache = new Map<string, VaultUsdCacheEntry>()
+    const apyCache = new Map<string, VaultApyCacheEntry>([
+      [vault.address.toLowerCase(), { supplyApy: 5.31, borrowApy: 1.25 }],
+    ])
+    const byRow = new Map(STATS_ROWS.map(row => [
+      row.id,
+      buildAttributeRowCells(row, columns, usdCache, apyCache)[0],
+    ]))
+
+    expect(byRow.get('supplyApy')!.numeric).toBeCloseTo(5.31)
+    expect(byRow.get('supplyApy')!.display).toBe('5.31%')
+    expect(byRow.get('borrowApy')!.numeric).toBeCloseTo(1.25)
+    expect(byRow.get('borrowApy')!.display).toBe('1.25%')
+  })
+})
+
+describe('buildVaultApyCache', () => {
+  it('folds intrinsic and reward APY into the per-vault entries', () => {
+    const vault = {
+      ...makeVault('0xPT', []),
+      interestRateInfo: {
+        supplyAPY: 4n * 10n ** 25n,
+        borrowAPY: 6n * 10n ** 25n,
+      },
+    } as Vault
+    const market = makeMarket([vault])
+
+    const cache = buildVaultApyCache(
+      [market],
+      (apy, _addr) => apy + 1, // intrinsic supply contribution: +1
+      (apy, _addr) => apy + 2, // intrinsic borrow contribution: +2
+      _addr => 0.5, // supply rewards
+      _addr => 0.25, // general borrow rewards
+    )
+
+    const entry = cache.get(vault.address.toLowerCase())
+    expect(entry).toBeDefined()
+    expect(entry!.supplyApy).toBeCloseTo(4 + 1 + 0.5)
+    expect(entry!.borrowApy).toBeCloseTo(6 + 2 - 0.25)
+  })
+
+  it('caches external-collateral vaults so attribute matrix externals match the per-vault card', () => {
+    // External EVK vaults render as columns in the attribute matrix and need
+    // the same intrinsic + rewards adjustment as members — without this, the
+    // Stats column would silently fall back to raw IRM for externals.
+    const externalVault = {
+      ...makeVault('0xExternalApy', []),
+      interestRateInfo: {
+        supplyAPY: 3n * 10n ** 25n,
+        borrowAPY: 5n * 10n ** 25n,
+      },
+    } as Vault
+    const market = makeMarket([], [externalVault])
+
+    const cache = buildVaultApyCache(
+      [market],
+      (apy, _addr) => apy + 1,
+      (apy, _addr) => apy + 2,
+      _addr => 0.5,
+      _addr => 0.25,
+    )
+
+    const entry = cache.get(externalVault.address.toLowerCase())
+    expect(entry).toBeDefined()
+    expect(entry!.supplyApy).toBeCloseTo(3 + 1 + 0.5)
+    expect(entry!.borrowApy).toBeCloseTo(5 + 2 - 0.25)
   })
 })

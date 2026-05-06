@@ -9,7 +9,7 @@ import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { LTVRampConfig } from '~/entities/vault/ltv'
 import { useModal } from '~/components/ui/composables/useModal'
-import { VaultNetApyPairModal, VaultMaxRoeModal, VaultRampDownModal } from '#components'
+import { VaultNetApyPairModal, VaultMaxRoeModal, VaultRampDownModal, VaultSupplyApyModal, VaultBorrowApyModal } from '#components'
 
 const { pair } = defineProps<{ pair: AnyBorrowVaultPair | AccountBorrowPosition }>()
 
@@ -22,7 +22,7 @@ const isRamping = computed(() =>
 )
 
 const modal = useModal()
-const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy } = useIntrinsicApy()
+const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, getLoopingRewardCampaigns, hasSupplyRewards, hasBorrowRewards, hasLoopingRewards } = useRewardsApy()
 const { borrowList } = useVaults()
 
@@ -77,6 +77,28 @@ const price = computed(() => {
 
   return nanoToValue(collateralPrice.amountOutMid, 18) / nanoToValue(borrowPrice.amountOutMid, 18)
 })
+
+const onSupplyInfoIconClick = () => {
+  modal.open(VaultSupplyApyModal, {
+    props: {
+      lendingAPY: baseSupplyApy.value,
+      intrinsicAPY: intrinsicSupplyApy.value,
+      intrinsicApyInfo: getIntrinsicApyInfo(pair.collateral.asset.address),
+      campaigns: supplyCampaignsForModal.value,
+    },
+  })
+}
+
+const onBorrowInfoIconClick = () => {
+  modal.open(VaultBorrowApyModal, {
+    props: {
+      borrowingAPY: baseBorrowApy.value,
+      intrinsicAPY: intrinsicBorrowApy.value,
+      intrinsicApyInfo: getIntrinsicApyInfo(pair.borrow.asset.address),
+      campaigns: borrowCampaignsForModal.value,
+    },
+  })
+}
 
 const onNetApyInfoIconClick = () => {
   modal.open(VaultNetApyPairModal, {
@@ -182,6 +204,48 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: LTVRampConfig) => {
           label="Max multiplier"
           :value="`${formatNumber(maxMultiplier, 2, 2)}x`"
         />
+        <VaultOverviewLabelValue>
+          <template #label>
+            <span class="flex items-center gap-4">
+              Supply APY
+              <SvgIcon
+                class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                name="info-circle"
+                @click="onSupplyInfoIconClick"
+              />
+            </span>
+          </template>
+          <span class="flex items-center gap-4">
+            <SvgIcon
+              v-if="hasSupplyRewards(pair.collateral.address)"
+              class="!w-20 !h-20 text-accent-500 cursor-pointer"
+              name="sparks"
+              @click="onSupplyInfoIconClick"
+            />
+            {{ formatNumber(supplyApyWithRewards) }}%
+          </span>
+        </VaultOverviewLabelValue>
+        <VaultOverviewLabelValue>
+          <template #label>
+            <span class="flex items-center gap-4">
+              Borrow APY
+              <SvgIcon
+                class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                name="info-circle"
+                @click="onBorrowInfoIconClick"
+              />
+            </span>
+          </template>
+          <span class="flex items-center gap-4">
+            <SvgIcon
+              v-if="hasBorrowRewards(pair.borrow.address, pair.collateral.address)"
+              class="!w-20 !h-20 text-accent-500 cursor-pointer"
+              name="sparks"
+              @click="onBorrowInfoIconClick"
+            />
+            {{ formatNumber(borrowApyWithRewards) }}%
+          </span>
+        </VaultOverviewLabelValue>
         <VaultOverviewLabelValue>
           <template #label>
             <span class="flex items-center gap-4">

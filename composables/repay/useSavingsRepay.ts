@@ -5,7 +5,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
-import { isEVKVault, type Vault, type SecuritizeVault } from '~/entities/vault'
+import { getCashLimitedWithdrawAmount, isEVKVault, type Vault, type SecuritizeVault } from '~/entities/vault'
 import { getAssetUsdValue } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
@@ -15,8 +15,11 @@ import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { useRepaySwapCore } from '~/composables/repay/useRepaySwapCore'
 import { useRepaySwapDetails } from '~/composables/repay/useRepaySwapDetails'
 import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics'
+import { getRepaySwapReviewInputAmount } from '~/composables/repay/reviewAmount'
+import { adjustForInterest } from '~/composables/useEulerOperations/helpers'
 import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
+import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createRaceGuard } from '~/utils/race-guard'
 import { findBlockingDisabledOp, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning, getUtilisationWarning, type VaultWarning } from '~/composables/useVaultWarnings'
@@ -69,7 +72,17 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   // --- Source vault state ---
   const sourceVault: Ref<Vault | undefined> = ref()
   const sourceAssets = ref(0n)
-  const sourceBalance = computed(() => sourceAssets.value)
+  const isSameVaultRepay = computed(() =>
+    !!sourceVault.value
+    && !!borrowVault.value
+    && normalizeAddressOrEmpty(sourceVault.value.address) === normalizeAddressOrEmpty(borrowVault.value.address),
+  )
+  // Same-vault repay never withdraws (uses repayWithShares directly), so cash
+  // capacity is irrelevant — only sourceAssets bounds the operation.
+  const sourceBalance = computed(() => getCashLimitedWithdrawAmount(
+    sourceAssets.value,
+    isSameVaultRepay.value ? undefined : sourceVault.value,
+  ))
   const debtBalance = computed(() => position.value?.borrowed || 0n)
 
   const priceInvert = usePriceInvert(
@@ -164,9 +177,11 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
 
   const savingsRepayPlannedOps = computed<PlannedOp[]>(() => {
     const steps: PlannedOp[] = []
-    if (sourceVault.value) steps.push({ vault: sourceVault.value as Vault, op: OP_WITHDRAW })
+    if (sourceVault.value && !isSameVaultRepay.value) steps.push({ vault: sourceVault.value as Vault, op: OP_WITHDRAW })
     if (borrowVault.value) {
-      steps.push({ vault: borrowVault.value as Vault, op: OP_SKIM })
+      if (!isSameVaultRepay.value) {
+        steps.push({ vault: borrowVault.value as Vault, op: OP_SKIM })
+      }
       steps.push({ vault: borrowVault.value as Vault, op: OP_REPAY_WITH_SHARES })
     }
     if (isEffectivelyFullRepay.value) {
@@ -188,14 +203,19 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   // Uses amountInMax (slippage-padded) when available so the user sees an
   // insufficient-balance error before hitting an on-chain revert.
   const requiredInput = computed(() => {
-    if (core.isSameAsset.value) return core.spent.value ?? 0n
+    if (core.isSameAsset.value) {
+      const spent = core.spent.value ?? 0n
+      return isEffectivelyFullRepay.value
+        ? adjustForInterest(spent)
+        : spent
+    }
     const q = core.quotes.selectedQuote.value
     if (!q) return 0n
     return getSwapInputAmount(q, core.direction.value)
   })
-  const isInsufficientSource = computed(() => requiredInput.value > 0n && requiredInput.value > sourceBalance.value)
+  const isInsufficientSource = computed(() => requiredInput.value > 0n && requiredInput.value > sourceAssets.value)
   const isInsufficientVaultLiquidity = computed(() =>
-    requiredInput.value > 0n && requiredInput.value > (sourceVault.value?.totalCash || 0n),
+    !isSameVaultRepay.value && requiredInput.value > 0n && requiredInput.value > (sourceVault.value?.totalCash || 0n),
   )
   const liquidityWarning = computed<VaultWarning | null>(() => {
     if (!sourceVault.value) return null
@@ -344,11 +364,18 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
         transferAmounts[addr] = nanoToValue(position.value.supplied, collateralVault.value.decimals).toString()
       }
 
+      const inputDisplay = getRepaySwapReviewInputAmount({
+        amount: core.amount.value,
+        quote: core.quotes.selectedQuote.value,
+        sourceDecimals: sourceVault.value.asset.decimals,
+        swapperMode: core.direction.value,
+      })
+
       modal.open(OperationReviewModal, {
         props: {
           type: 'repay',
           asset: sourceVault.value.asset,
-          amount: core.amount.value,
+          amount: inputDisplay,
           swapToAsset: !core.isSameAsset.value ? borrowVault.value.asset : undefined,
           swapToAmount: !core.isSameAsset.value ? core.debtAmount.value : undefined,
           swapMode: !core.isSameAsset.value ? core.direction.value : undefined,

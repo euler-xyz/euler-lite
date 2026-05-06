@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useAccount } from '@wagmi/vue'
 import { isAddress, getAddress, zeroAddress, type Address } from 'viem'
-import { type Vault, type SecuritizeVault, fetchSecuritizeVault } from '~/entities/vault'
+import { getCashLimitedWithdrawAmount, type Vault, type SecuritizeVault, fetchSecuritizeVault } from '~/entities/vault'
 import { isSecuritizeVault } from '~/entities/vault/factory'
 import { getSubAccountAddress } from '~/entities/account'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
@@ -59,7 +59,11 @@ const savingPosition = computed(() => {
   ) || null
 })
 
-const balance = computed(() => savingPosition.value?.assets || 0n)
+const assetsBalance = computed(() => savingPosition.value?.assets || 0n)
+const balance = computed(() => getCashLimitedWithdrawAmount(
+  assetsBalance.value,
+  fromVault.value,
+))
 
 // ── Supply APY ───────────────────────────────────────────────────────────
 const fromSupplyApy = computed(() => {
@@ -110,7 +114,7 @@ const swap = useSwapPageLogic({
     if (isSameAsset.value) {
       if (!fromVault.value || !toVault.value) throw new Error('Vaults not loaded')
       const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
-      const isMax = balance.value > 0n && amount >= balance.value
+      const isMax = assetsBalance.value > 0n && amount >= assetsBalance.value
       return buildSameAssetSwapPlan({
         fromVaultAddress: fromVault.value.address,
         toVaultAddress: toVault.value.address,
@@ -130,7 +134,11 @@ const swap = useSwapPageLogic({
     })
   },
 
-  getBalanceError: amountNano => balance.value < amountNano ? 'Not enough balance' : null,
+  getBalanceError: (amountNano) => {
+    if (assetsBalance.value < amountNano) return 'Not enough balance'
+    if (balance.value < amountNano) return 'Not enough liquidity in vault'
+    return null
+  },
   getGeoBlockedAddresses: () => [getVaultAddress()],
 })
 
