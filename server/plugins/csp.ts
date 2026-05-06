@@ -98,8 +98,8 @@ function parseChainPublicRpcOrigins(): string[] {
 
 /** Derive CSP origins from URL env vars so deployers don't need to duplicate them. */
 function parseEnvOrigins(): { connect: string[] } {
-  // Labels, oracle checks, token lists, and euler-chains are proxied through
-  // server /api/* endpoints, so their origins are not needed in connect-src.
+  // Labels, oracle checks, and token lists are proxied through server /api/*
+  // endpoints, so their origins are not needed in connect-src.
   const connectVars = [
     env('EULER_API_URL', 'NUXT_PUBLIC_EULER_API_URL'),
     env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL'),
@@ -141,6 +141,9 @@ const CONNECT_SRC_BASE = [
   'https://cca-lite.coinbase.com',
   // External data APIs
   'https://api.fuul.xyz',
+  'https://v3.eul.dev',
+  // SDK default deployments source
+  'https://raw.githubusercontent.com',
   // Reown AppKit SDK version check
   'https://registry.npmjs.org',
   // RPC providers (wildcard — operators configure per chain)

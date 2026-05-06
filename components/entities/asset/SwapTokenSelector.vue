@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { getAddress, isAddress, zeroAddress, type Address } from 'viem'
-import type { VaultAsset } from '~/entities/vault'
+import type { VaultAsset } from '~/types/asset'
+import { getAddress, type Address, zeroAddress, isAddress } from 'viem'
+
 import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'

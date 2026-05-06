@@ -1,32 +1,14 @@
 <script setup lang="ts">
-import { Line } from 'vue-chartjs'
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler,
-  type ChartOptions,
-  type ChartData,
-} from 'chart.js'
-import annotationPlugin from 'chartjs-plugin-annotation'
-import { formatUnits, zeroAddress, type Address, type Abi } from 'viem'
-import { logWarn } from '~/utils/errorHandling'
-import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
-import {
-  type EVault,
-  type SecuritizeCollateralVault,
-  type KinkIRMInfo,
-  type AdaptiveCurveIRMInfo,
-  type KinkyIRMInfo,
-  hasCollateralExposure,
-} from '~/entities/vault'
+import type { SecuritizeCollateralVault, KinkIRMInfo, AdaptiveCurveIRMInfo, KinkyIRMInfo, EVault } from '@eulerxyz/euler-v2-sdk'
+import { hasCollateralExposure } from '~/utils/vault/collateral-exposure'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { eulerUtilsLensABI, eulerVaultLensABI } from '~/entities/euler/abis'
+import annotationPlugin from 'chartjs-plugin-annotation'
+import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler, type ChartData, type ChartOptions } from 'chart.js'
+import { zeroAddress, formatUnits, type Address, type Abi } from 'viem'
+import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
+import { Line } from 'vue-chartjs'
+import { logWarn } from '~/utils/errorHandling'
 
 // Register Chart.js components
 ChartJS.register(

@@ -1,10 +1,11 @@
-import { getAddress, type Address } from 'viem'
-import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
-import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import type { CollateralOption, EVault } from '~/entities/vault'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { buildCollateralOption, computeSupplyApy } from '~/utils/collateralOptions'
 import { useReactiveMap } from '~/composables/useReactiveMap'
 import { shouldIncludeWalletCollateral } from '~/utils/collateralFilters'
+import type { CollateralOption } from '~/types/collateral-option'
+import { getAddress, type Address } from 'viem'
+import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
+import { useVaultRegistry } from '~/composables/useVaultRegistry'
 
 type CollateralItem = {
   vault: EVault
@@ -77,8 +78,9 @@ export const useMultiplyCollateralOptions = ({
       liability.collaterals.filter(ltv => ltv.borrowLTV > 0).map(ltv => getAddress(ltv.address)),
     )
     return depositPositions.value
-      .filter(position => position.assets > 0n && validCollaterals.has(getAddress(position.vault.address)))
-      .map(position => ({ vault: position.vault as EVault, assets: position.assets }))
+      .map(position => ({ position, vault: position.vault as EVault | undefined }))
+      .filter(({ position, vault }) => !!vault && position.assets > 0n && validCollaterals.has(getAddress(vault.address)))
+      .map(({ position, vault }) => ({ vault: vault!, assets: position.assets }))
   })
 
   const savingItems = useReactiveMap(

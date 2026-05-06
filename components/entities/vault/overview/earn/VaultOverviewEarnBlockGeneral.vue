@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
-import type { EulerEarn } from '~/entities/vault'
+
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { useEulerEntitiesOfEarnVault, useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'

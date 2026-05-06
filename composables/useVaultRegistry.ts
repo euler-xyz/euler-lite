@@ -1,20 +1,30 @@
+import type { EulerEarn, SecuritizeCollateralVault, EVault, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { fetchVaultCategory } from '~/utils/vault/categories'
 import { getAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { isVaultNotExplorable } from '~/utils/eulerLabelsUtils'
-import type {
-  EVault,
-  EulerEarn,
-  SecuritizeCollateralVault,
-} from '~/entities/vault'
-import { fetchVaultCategory } from '~/entities/vault/factory'
 
 // Vault type enum - 3 types (escrow is a category of evk, not a separate type)
 export type VaultType = 'evk' | 'earn' | 'securitize'
 
-// Union of all vault types. Kept intentionally loose at registry boundaries
-// because Vue unwraps SDK class instances in refs/computed values.
-export type AnyVault = any
+interface RegistryToken {
+  address: Address
+  name: string
+  symbol: string
+  decimals: number
+  logoURI?: string
+}
+
+export interface AnyVault {
+  type: string
+  chainId: number
+  address: Address
+  shares: RegistryToken
+  asset: RegistryToken
+  totalShares: bigint
+  totalAssets: bigint
+}
 
 // Registry entry containing vault and its type
 export interface VaultEntry {
@@ -32,9 +42,10 @@ interface VaultEntryMetadata {
 // Registry state
 const registry: Ref<Map<string, VaultEntry>> = shallowRef(new Map())
 const isLoading = ref(false)
+const registryVersion = ref(0)
 
 // In-flight resolution promises — deduplicates concurrent getOrFetch() calls for the same vault
-const pendingResolutions = new Map<string, Promise<AnyVault | undefined>>()
+const pendingResolutions = new Map<string, Promise<VaultEntity | undefined>>()
 
 // Escrow address set - populated early, before full vault info is loaded
 // Used for O(1) lookups to determine if an address is an escrow vault
@@ -51,8 +62,8 @@ const has = (address: string): boolean => {
 }
 
 // Get just the vault (for backward compatibility)
-const getVault = (address: string): AnyVault | undefined => {
-  return get(address)?.vault
+const getVault = (address: string): VaultEntity | undefined => {
+  return get(address)?.vault as VaultEntity | undefined
 }
 
 // Get just the type
@@ -61,9 +72,9 @@ const getType = (address: string): VaultType | undefined => {
 }
 
 // Register a vault
-const inferEntryMetadata = (vault: AnyVault, type: VaultType, metadata?: VaultEntryMetadata): VaultEntryMetadata => ({
-  verified: metadata?.verified ?? ('verified' in vault ? vault.verified : false),
-  vaultCategory: metadata?.vaultCategory ?? (type === 'evk' && 'vaultCategory' in vault ? vault.vaultCategory : undefined),
+const inferEntryMetadata = (_vault: AnyVault, _type: VaultType, metadata?: VaultEntryMetadata): VaultEntryMetadata => ({
+  verified: metadata?.verified ?? false,
+  vaultCategory: metadata?.vaultCategory,
 })
 
 const set = (address: string, vault: AnyVault, type: VaultType, metadata?: VaultEntryMetadata): void => {
@@ -76,6 +87,7 @@ const set = (address: string, vault: AnyVault, type: VaultType, metadata?: Vault
     ...(entryMetadata.vaultCategory ? { vaultCategory: entryMetadata.vaultCategory } : {}),
   })
   registry.value = new Map(registry.value) // Trigger reactivity
+  registryVersion.value++
 }
 
 // Register multiple vaults
@@ -90,6 +102,7 @@ const setMany = (entries: Array<{ address: string, vault: AnyVault, type: VaultT
     })
   })
   registry.value = new Map(registry.value) // Trigger reactivity
+  registryVersion.value++
 }
 
 // Clear registry (for chain switching)
@@ -97,6 +110,7 @@ const clear = (): void => {
   registry.value = new Map()
   escrowAddresses.value = new Set()
   pendingResolutions.clear()
+  registryVersion.value++
 }
 
 // Set escrow addresses (populated early, before vault info is loaded)
@@ -130,26 +144,26 @@ const getByTypes = (types: VaultType[]): AnyVault[] => {
 }
 
 // Typed getters for each vault type
-const getEvkVaults = (): EVault[] => getByType('evk') as EVault[]
+const getEVaults = (): EVault[] => getByType('evk') as EVault[]
 const getEarnVaults = (): EulerEarn[] => getByType('earn') as EulerEarn[]
 const getSecuritizeVaults = (): SecuritizeCollateralVault[] => getByType('securitize') as SecuritizeCollateralVault[]
 
-// Escrow vaults are EVK vaults with vaultCategory: 'escrow'
+// Escrow vaults are EVaults with vaultCategory: 'escrow'
 const getEscrowVaults = (): EVault[] => {
   return [...registry.value.values()]
     .filter(entry => entry.type === 'evk' && entry.vaultCategory === 'escrow')
     .map(entry => entry.vault) as EVault[]
 }
 
-// Standard EVK vaults (non-escrow)
-const getStandardEvkVaults = (): EVault[] => {
+// Standard EVaults (non-escrow)
+const getStandardEVaults = (): EVault[] => {
   return [...registry.value.values()]
     .filter(entry => entry.type === 'evk' && entry.vaultCategory !== 'escrow')
     .map(entry => entry.vault) as EVault[]
 }
 
-// Verified EVK vaults (for display in tables) - excludes dynamically fetched unknown vaults
-const getVerifiedEvkVaults = (includeNotExplorable = false): EVault[] => {
+// Verified EVaults (for display in tables) - excludes dynamically fetched unknown vaults
+const getVerifiedEVaults = (includeNotExplorable = false): EVault[] => {
   return [...registry.value.values()]
     .filter(entry =>
       entry.type === 'evk'
@@ -172,8 +186,14 @@ const isEscrowVault = (address: string): boolean => {
 
 const isEarnVault = (address: string): boolean => getType(address) === 'earn'
 const isSecuritizeVault = (address: string): boolean => getType(address) === 'securitize'
-const isEvkVault = (address: string): boolean => getType(address) === 'evk'
-const isVerifiedVault = (address: string): boolean => get(address)?.verified === true
+const isEVaultAddress = (address: string): boolean => getType(address) === 'evk'
+const isVerifiedVault = (address: string): boolean => {
+  const normalized = normalizeAddress(address)
+  return get(normalized)?.verified === true
+    || escrowAddresses.value.has(normalized)
+    || verifiedVaultAddresses.value.some(vault => normalizeAddress(vault) === normalized)
+    || earnVaults.value.some(vault => normalizeAddress(vault) === normalized)
+}
 const getVaultCategory = (address: string): 'standard' | 'escrow' | undefined => get(address)?.vaultCategory
 
 // Reactive size for watchers
@@ -181,9 +201,9 @@ const size = computed(() => registry.value.size)
 
 /**
  * Fetch vault using the appropriate SDK service based on type.
- * Escrow vaults are an EVK category, so they use the EVault service.
+ * Escrow vaults are an EVault category, so they use the EVault service.
  */
-const fetchVaultByType = async (address: string, type: VaultType): Promise<AnyVault> => {
+const fetchVaultByType = async (address: string, type: VaultType): Promise<VaultEntity> => {
   const { chainId } = useEulerAddresses()
   const { getEulerSdk } = useEulerSdk()
   const sdk = await getEulerSdk()
@@ -214,7 +234,7 @@ const fetchVaultByType = async (address: string, type: VaultType): Promise<AnyVa
     case 'evk':
     default: {
       const { result } = await sdk.eVaultService.fetchVault(chainId.value, vaultAddress, options)
-      if (!result) throw new Error(`EVK vault not found for ${address}`)
+      if (!result) throw new Error(`EVault not found for ${address}`)
       return result
     }
   }
@@ -242,7 +262,7 @@ const resolveUnknown = async (address: string): Promise<VaultEntry> => {
   else {
     // SDK metadata returned null/unknown. This can happen for brand-new
     // deployments. Try securitize first (has distinct structure), fall back to
-    // EVK.
+    // EVault.
     logWarn('resolveUnknown', `Category not found for ${address}, trying fetch methods`)
     try {
       const vault = await fetchVaultByType(normalized, 'securitize')
@@ -269,11 +289,11 @@ const resolveUnknown = async (address: string): Promise<VaultEntry> => {
  * Get vault from registry, or fetch and cache if not found.
  * Primary method for vault resolution. After calling, use getType(address) if you need the type.
  */
-const getOrFetch = async (address: string): Promise<AnyVault | undefined> => {
+const getOrFetch = async (address: string): Promise<VaultEntity | undefined> => {
   // Check registry first
   const existing = get(address)
   if (existing) {
-    return existing.vault
+    return existing.vault as VaultEntity
   }
 
   const normalized = normalizeAddress(address)
@@ -286,7 +306,7 @@ const getOrFetch = async (address: string): Promise<AnyVault | undefined> => {
 
   // Create and track new resolution promise
   const resolution = resolveUnknown(address)
-    .then(entry => entry.vault)
+    .then(entry => entry.vault as VaultEntity)
     .catch((e) => {
       logWarn('vaultRegistry/resolve', e)
       return undefined
@@ -305,6 +325,7 @@ export const useVaultRegistry = () => {
     registry,
     isLoading,
     size,
+    registryVersion,
     escrowAddresses,
 
     // Basic operations
@@ -326,18 +347,18 @@ export const useVaultRegistry = () => {
     getAll,
 
     // Typed getters
-    getEvkVaults,
+    getEVaults,
     getEarnVaults,
     getEscrowVaults,
     getSecuritizeVaults,
-    getStandardEvkVaults,
-    getVerifiedEvkVaults,
+    getStandardEVaults,
+    getVerifiedEVaults,
 
     // Type checkers
     isEscrowVault,
     isEarnVault,
     isSecuritizeVault,
-    isEvkVault,
+    isEVaultAddress,
     isVerifiedVault,
     getVaultCategory,
 

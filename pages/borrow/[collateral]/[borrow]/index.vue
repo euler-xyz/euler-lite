@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import { getAddress } from 'viem'
-import { collectPythFeedsFromAdapters } from '@eulerxyz/euler-v2-sdk'
-import { useModal } from '~/components/ui/composables/useModal'
-import { VaultUnverifiedDisclaimerModal, SlippageSettingsModal } from '#components'
-import { type AnyBorrowVaultPair, type BorrowVaultPair, type VaultAsset, type CollateralOption, type EVault, type SecuritizeCollateralVault, isSecuritizeBorrowPair } from '~/entities/vault'
+import { type BorrowVaultPair, isSecuritizeBorrowPair, type AnyBorrowVaultPair } from '~/types/borrow-pair'
+import type { VaultAsset } from '~/types/asset'
+import type { CollateralOption } from '~/types/collateral-option'
+import { collectPythFeedsFromAdapters, isEVault, type EVault, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { getAssetOraclePrice, getCollateralShareOraclePrice } from '~/services/pricing/priceProvider'
-import { getNewSubAccount } from '~/entities/account'
+import { getNewSubAccount } from '~/composables/useSubAccounts'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
@@ -16,6 +14,10 @@ import { ltvToPercent } from '~/utils/crypto-utils'
 import { useBorrowForm } from '~/composables/borrow/useBorrowForm'
 import { useMultiplyForm } from '~/composables/borrow/useMultiplyForm'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { useModal } from '~/components/ui/composables/useModal'
+import { useAccount } from '@wagmi/vue'
+import { SlippageSettingsModal, VaultUnverifiedDisclaimerModal } from '#components'
+import { getAddress } from 'viem'
 
 const router = useRouter()
 const route = useRoute()
@@ -121,7 +123,7 @@ const isPairFullyRestricted = computed(() =>
 
 // --- Savings collateral ---
 const savingCollateral = computed(() => {
-  return depositPositions.value.find(position => position.vault.address === route.params.collateral)
+  return depositPositions.value.find(position => position.vault?.address === route.params.collateral)
 })
 
 // --- Product labels ---
@@ -354,7 +356,7 @@ watch(pair, async (val) => {
     current = pair.value
   }
 
-  if (current.collateral.type === 'EVault') {
+  if (isEVault(current.collateral)) {
     const collateralVaultTyped = current.collateral as EVault
     const collateralAddr = collateralVaultTyped.address.toLowerCase()
 

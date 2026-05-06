@@ -1,13 +1,11 @@
 <script setup lang="ts">
-import { formatNumber } from '~/utils/string-utils'
-import type { EVault, SecuritizeCollateralVault, EVaultCollateral } from '~/entities/vault'
-import {
-  getCollateralExposurePairs,
-} from '~/entities/vault'
+import type { SecuritizeCollateralVault, EVaultCollateral, EVault } from '@eulerxyz/euler-v2-sdk'
+import { getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { logWarn } from '~/utils/errorHandling'
 import { VaultRampDownModal } from '#components'
+import { formatNumber } from '~/utils/string-utils'
 
 const modal = useModal()
 

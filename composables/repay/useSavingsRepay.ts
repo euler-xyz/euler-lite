@@ -1,3 +1,6 @@
+import type { EVault, SecuritizeCollateralVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { isEVault } from '@eulerxyz/euler-v2-sdk'
+import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import type { Ref, ComputedRef } from 'vue'
 import { useAccount } from '@wagmi/vue'
 import { zeroAddress, type Address } from 'viem'
@@ -5,9 +8,8 @@ import { logWarn } from '~/utils/errorHandling'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
-import { getCashLimitedWithdrawAmount, isEVault, type EVault, type SecuritizeCollateralVault } from '~/entities/vault'
 import { getAssetUsdValue } from '~/services/pricing/priceProvider'
-import type { AccountBorrowPosition } from '~/entities/account'
+import { getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
 import type { TxPlan } from '~/entities/txPlan'
 import { SwapperMode } from '~/entities/swap'
 import { useRepaySavingsOptions } from '~/composables/useRepaySavingsOptions'
@@ -25,9 +27,9 @@ import { findBlockingDisabledOp, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_
 import { getPlanHookDisabledWarning, getUtilisationWarning, type VaultWarning } from '~/composables/useVaultWarnings'
 
 interface UseSavingsRepayOptions {
-  position: Ref<AccountBorrowPosition | undefined>
-  borrowVault: ComputedRef<AccountBorrowPosition['borrow'] | undefined>
-  collateralVault: ComputedRef<AccountBorrowPosition['collateral'] | undefined>
+  position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
+  borrowVault: ComputedRef<EVault | undefined>
+  collateralVault: ComputedRef<EVault | SecuritizeCollateralVault | undefined>
   formTab: Ref<string>
   plan: Ref<TxPlan | null>
   isSubmitting: Ref<boolean>
@@ -126,7 +128,8 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
 
   const nextLiquidationLtv = computed(() => {
     if (!position.value) return null
-    return ltvToPercent(position.value.liquidationLTV)
+    const liquidationLTV = getBorrowPositionEffectiveLiquidationLTV(position.value)
+    return liquidationLTV === undefined ? null : ltvToPercent(liquidationLTV)
   })
 
   // --- 4th USD watcher: primary collateral value (unchanged for savings) ---
@@ -186,7 +189,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     }
     if (isEffectivelyFullRepay.value) {
       // Full repay sweeps all enabled collaterals via transferFromMax.
-      const collateralAddresses = position.value?.collaterals ?? []
+      const collateralAddresses = position.value ? position.value.collateralVaults : []
       for (const addr of collateralAddresses) {
         const vault = registryGetVault(addr) as EVault | SecuritizeCollateralVault | undefined
         if (vault && isEVault(vault)) {
@@ -289,7 +292,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
           amount: currentDebtVal,
           savingsSubAccount: savingsPos.subAccount,
           borrowSubAccount: position.value.subAccount,
-          enabledCollaterals: position.value.collaterals,
+          enabledCollaterals: position.value.collateralVaults,
         })
       }
       return buildSavingsRepayPlan({
@@ -322,7 +325,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
         targetDebt,
         currentDebt,
         liabilityVault: borrowVault.value.address,
-        enabledCollaterals: position.value.collaterals,
+        enabledCollaterals: position.value.collateralVaults,
         source: 'savings',
       })
     }
@@ -335,7 +338,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
       targetDebt,
       currentDebt,
       liabilityVault: borrowVault.value.address,
-      enabledCollaterals: position.value.collaterals,
+      enabledCollaterals: position.value.collateralVaults,
     })
   }
 

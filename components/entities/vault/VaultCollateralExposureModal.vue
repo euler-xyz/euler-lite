@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { formatNumber } from '~/utils/string-utils'
-import type { EVault, SecuritizeCollateralVault, EVaultCollateral } from '~/entities/vault'
+import type { SecuritizeCollateralVault, EVaultCollateral, EVault } from '@eulerxyz/euler-v2-sdk'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
+import { formatNumber } from '~/utils/string-utils'
 
 const emits = defineEmits(['close'])
 const router = useRouter()

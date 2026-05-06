@@ -1,15 +1,16 @@
 <script setup lang="ts">
+import type { MarketGroup } from '~/entities/lend-discovery'
+import { isEVault, type EVault } from '@eulerxyz/euler-v2-sdk'
+import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useMarketGroups } from '~/composables/useMarketGroups'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
-import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useBestMaxROE } from '~/composables/useBestMaxROE'
 import { useVaultSearch } from '~/composables/useVaultSearch'
-import type { MarketGroup } from '~/entities/lend-discovery'
-import type { EVault } from '~/entities/vault'
-import { isVaultType, getVaultAddress, getVaultAssetSymbol, getVaultAssetAddress } from '~/utils/discoveryCalculations'
+
+import { getVaultAddress, getVaultAssetSymbol, getVaultAssetAddress } from '~/utils/discoveryCalculations'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import type { FilterOptionEntry } from '~/utils/buildTvlSortedOptions'
 
@@ -19,7 +20,7 @@ defineOptions({
 
 const { marketGroups, isResolvingTVL } = useMarketGroups()
 const { getBestMaxROE } = useBestMaxROE(marketGroups)
-const { isEVKUpdating, isEarnUpdating, isSecuritizeUpdating, isEscrowUpdating } = useVaults()
+const { isEVaultUpdating, isEarnUpdating, isSecuritizeUpdating, isEscrowUpdating } = useVaults()
 const { chainId } = useEulerAddresses()
 const { entities } = useEulerLabels()
 const { enableEntityBranding } = useDeployConfig()
@@ -29,7 +30,7 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<MarketGroup>(
   group.curator?.name,
   ...group.metrics.assetSymbols,
   ...group.vaults.flatMap((vault) => {
-    const addr = isVaultType(vault) ? vault.address : ''
+    const addr = isEVault(vault) ? vault.address : ''
     if (!addr) return []
     const product = applyVaultOverrides(getProductByVault(addr), addr)
     return [
@@ -135,7 +136,7 @@ const riskManagerOptions = computed(() => {
     if (group.source !== 'product') continue
     const seenInGroup = new Set<string>()
     for (const vault of group.vaults) {
-      if (!isVaultType(vault)) continue
+      if (!isEVault(vault)) continue
       for (const entity of getEntitiesByVault(vault)) {
         if (seenInGroup.has(entity.name)) continue
         seenInGroup.add(entity.name)
@@ -165,7 +166,7 @@ const matchesAssetFilter = (group: MarketGroup): boolean => {
 const matchesRiskManagerFilter = (group: MarketGroup): boolean => {
   if (!selectedRiskManagers.value.length) return true
   return group.vaults.some((vault) => {
-    if (!isVaultType(vault)) return false
+    if (!isEVault(vault)) return false
     return getEntitiesByVault(vault).some(e => selectedRiskManagers.value.includes(e.name))
   })
 }
@@ -262,7 +263,7 @@ const sortedMarkets = computed(() => {
 })
 
 const isLoading = computed(() =>
-  isEVKUpdating.value || isEarnUpdating.value || isSecuritizeUpdating.value || isEscrowUpdating.value
+  isEVaultUpdating.value || isEarnUpdating.value || isSecuritizeUpdating.value || isEscrowUpdating.value
   || isResolvingTVL.value,
 )
 const { isSlow } = useSlowLoading(isLoading)

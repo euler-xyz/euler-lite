@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import { useAccount } from '@wagmi/vue'
-import type { EVault } from '~/entities/vault'
+import { getSubAccountId as getSubAccountIndex, isSecuritizeCollateralVault, type EVault, type PortfolioSavingsPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { getAddress } from 'viem'
+
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { getAssetUsdValue, formatAssetValue } from '~/services/pricing/priceProvider'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated, getVaultNotice } from '~/utils/eulerLabelsUtils'
 import { formatNumber, formatCompactUsdValue, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
-import { type AccountDepositPosition, getSubAccountIndex } from '~/entities/account'
 import { VaultOverviewModal, VaultSupplyApyModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 
-const { position } = defineProps<{ position: AccountDepositPosition }>()
+const { position } = defineProps<{ position: PortfolioSavingsPosition<VaultEntity> }>()
 const modal = useModal()
 
 const { address } = useAccount()
@@ -19,20 +20,19 @@ const { portfolioAddress } = useEulerAccount()
 const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
 const subAccountIndex = computed(() => {
   if (!ownerAddress.value || !position.subAccount) return 0
-  return getSubAccountIndex(ownerAddress.value, position.subAccount)
+  return getSubAccountIndex(getAddress(ownerAddress.value), getAddress(position.subAccount))
 })
 
 const { withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 
-const vault = computed(() => position.vault)
+const vault = computed(() => position.vault!)
 const utilisationWarning = computed(() => {
-  if ('type' in vault.value && vault.value.type === 'securitize') return null
+  if (isSecuritizeCollateralVault(vault.value)) return null
   return getUtilisationWarning(vault.value as EVault, 'lend')
 })
 
-// Check if securitize vault by type field
-const isSecuritize = computed(() => 'type' in vault.value && vault.value.type === 'securitize')
+const isSecuritize = computed(() => isSecuritizeCollateralVault(vault.value))
 
 const rewardsExist = computed(() => hasSupplyRewards(vault.value.address))
 const supplyApy = computed(() => {

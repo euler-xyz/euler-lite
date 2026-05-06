@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AnyBorrowVaultPair } from '~/entities/vault'
+import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { LIST_INITIAL_BATCH_ROWS, LIST_ROW_HEIGHT_PX } from '~/entities/tuning-constants'
 
 const props = defineProps<{ items: AnyBorrowVaultPair[] }>()

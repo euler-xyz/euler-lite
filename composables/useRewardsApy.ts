@@ -1,11 +1,10 @@
 import type { RewardCampaign } from '~/entities/reward-campaign'
+import type { RewardCampaign as SdkRewardCampaign, VaultRewardInfo } from '@eulerxyz/euler-v2-sdk'
 
 export const useRewardsApy = () => {
   const { settings } = useUserSettings()
   const { enableMerkl, enableIncentra, enableFuul } = useDeployConfig()
-  const { merklCampaigns, getMerklCampaignsForVault } = useMerkl()
-  const { brevisCampaigns, getBrevisCampaignsForVault } = useBrevis()
-  const { fuulCampaigns, getFuulCampaignsForVault } = useFuul()
+  const { getVault, registryVersion } = useVaultRegistry()
 
   const isEnabled = computed(() => settings.value.enableRewardsApy)
 
@@ -14,18 +13,54 @@ export const useRewardsApy = () => {
   // to ensure they re-run when reward data updates.
   const _versionCounter = ref(0)
   watch(
-    [isEnabled, merklCampaigns, brevisCampaigns, fuulCampaigns],
+    [isEnabled, registryVersion],
     () => { _versionCounter.value++ },
   )
   const version = computed(() => _versionCounter.value)
 
+  const getVaultRewards = (vaultAddress: string): VaultRewardInfo | undefined => {
+    const vault = getVault(vaultAddress) as { rewards?: VaultRewardInfo } | undefined
+    return vault?.rewards
+  }
+
+  const isCampaignProviderEnabled = (campaign: SdkRewardCampaign): boolean => {
+    if (campaign.source === 'merkl') return enableMerkl
+    if (campaign.source === 'brevis') return enableIncentra
+    if (campaign.source === 'fuul') return enableFuul
+    return false
+  }
+
+  const normalizeEndTimestamp = (timestamp?: number): number => {
+    if (!timestamp) return 0
+    return timestamp > 1_000_000_000_000 ? Math.floor(timestamp / 1000) : timestamp
+  }
+
+  const toRewardCampaign = (vaultAddress: string, campaign: SdkRewardCampaign): RewardCampaign | null => {
+    if (!isCampaignProviderEnabled(campaign)) return null
+    const type = campaign.action === 'LEND'
+      ? 'euler_lend'
+      : campaign.action === 'BORROW'
+        ? 'euler_borrow'
+        : null
+    if (!type) return null
+
+    return {
+      vault: vaultAddress.toLowerCase(),
+      type,
+      apr: campaign.apr * 100,
+      provider: campaign.source,
+      endTimestamp: normalizeEndTimestamp(campaign.endTimestamp),
+      rewardToken: campaign.rewardTokenSymbol
+        ? { symbol: campaign.rewardTokenSymbol, icon: '' }
+        : undefined,
+    }
+  }
+
   const getCampaignsForVault = (vaultAddress: string): RewardCampaign[] => {
     if (!isEnabled.value) return []
-    return [
-      ...(enableMerkl ? getMerklCampaignsForVault(vaultAddress) : []),
-      ...(enableIncentra ? getBrevisCampaignsForVault(vaultAddress) : []),
-      ...(enableFuul ? getFuulCampaignsForVault(vaultAddress) : []),
-    ]
+    return (getVaultRewards(vaultAddress)?.campaigns ?? [])
+      .map(campaign => toRewardCampaign(vaultAddress, campaign))
+      .filter((campaign): campaign is RewardCampaign => campaign !== null)
   }
 
   const getSupplyRewardApy = (vaultAddress: string): number => {

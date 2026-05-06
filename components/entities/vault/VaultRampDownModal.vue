@@ -1,7 +1,7 @@
 <script setup lang="ts">
+import type { EVaultCollateral } from '@eulerxyz/euler-v2-sdk'
 import { DateTime } from 'luxon'
 import { formatNumber } from '~/utils/string-utils'
-import type { EVaultCollateral } from '~/entities/vault'
 
 const emits = defineEmits(['close'])
 const { liquidationLTV, ramping } = defineProps<EVaultCollateral>()

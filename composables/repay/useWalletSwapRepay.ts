@@ -1,16 +1,8 @@
-import type { Ref, ComputedRef } from 'vue'
-import { useAccount } from '@wagmi/vue'
-import { formatUnits, getAddress, zeroAddress, type Address } from 'viem'
-import { isNativeCurrencyAddress, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
-import { FixedPoint } from '~/utils/fixed-point'
-import { logWarn } from '~/utils/errorHandling'
-import { getTotalCollateralValue } from '~/utils/position-estimates'
-import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal } from '#components'
-import { useToast } from '~/components/ui/composables/useToast'
-import { getNetAPY, getProjectedRates, type EVault, type VaultAsset } from '~/entities/vault'
+import { getProjectedRates, getNetAPY } from '~/utils/vault/apy'
+import type { EVault, SecuritizeCollateralVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import type { VaultAsset } from '~/types/asset'
 import { getAssetUsdValue, getAssetUsdValueOrZero, getTokenUsdValue } from '~/services/pricing/priceProvider'
-import type { AccountBorrowPosition } from '~/entities/account'
+import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
 import type { TxPlan } from '~/entities/txPlan'
 import { valueToNano } from '~/utils/crypto-utils'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
@@ -24,11 +16,21 @@ import { getRepaySwapReviewInputAmount } from '~/composables/repay/reviewAmount'
 import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
 import { findBlockingDisabledOp, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
+import { useModal } from '~/components/ui/composables/useModal'
+import { useToast } from '~/components/ui/composables/useToast'
+import { useAccount } from '@wagmi/vue'
+import { getAddress, formatUnits, zeroAddress, type Address } from 'viem'
+import { OperationReviewModal } from '#components'
+import type { Ref, ComputedRef } from 'vue'
+import { isNativeCurrencyAddress, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
+import { FixedPoint } from '~/utils/fixed-point'
+import { logWarn } from '~/utils/errorHandling'
+import { getTotalCollateralValue } from '~/utils/position-estimates'
 
 interface UseWalletSwapRepayOptions {
-  position: Ref<AccountBorrowPosition | undefined>
-  borrowVault: ComputedRef<AccountBorrowPosition['borrow'] | undefined>
-  collateralVault: ComputedRef<AccountBorrowPosition['collateral'] | undefined>
+  position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
+  borrowVault: ComputedRef<EVault | undefined>
+  collateralVault: ComputedRef<EVault | SecuritizeCollateralVault | undefined>
   formTab: Ref<string>
   plan: Ref<TxPlan | null>
   isSubmitting: Ref<boolean>
@@ -175,13 +177,13 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const _estimateUserLTV = ref(0n)
   const _estimateHealth = ref(0n)
   const estimateNetAPY = computed(() => hasEstimate.value ? _estimateNetAPY.value : netAPY.value)
-  const estimateUserLTV = computed(() => hasEstimate.value ? _estimateUserLTV.value : (position.value?.userLTV ?? 0n))
-  const estimateHealth = computed(() => hasEstimate.value ? _estimateHealth.value : (position.value?.health ?? 0n))
+  const estimateUserLTV = computed(() => hasEstimate.value ? _estimateUserLTV.value : (position.value ? position.value.userLTV : 0n))
+  const estimateHealth = computed(() => hasEstimate.value ? _estimateHealth.value : (position.value ? position.value.healthFactor ?? 0n : 0n))
   const estimatesError = ref('')
   const isEstimatesLoading = ref(false)
 
-  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, position.value?.borrow.shares.decimals || 18))
-  const suppliedFixed = computed(() => FixedPoint.fromValue(position.value?.supplied || 0n, position.value?.collateral.shares.decimals || 18))
+  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, borrowVault.value?.shares.decimals || 18))
+  const suppliedFixed = computed(() => FixedPoint.fromValue(position.value?.supplied || 0n, collateralVault.value?.shares.decimals || 18))
   const priceFixed = computed(() => {
     const ratio = oraclePriceRatio.value
     if (ratio && Number.isFinite(ratio) && ratio > 0) {
@@ -254,7 +256,9 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     const steps: PlannedOp[] = []
     if (borrowVault.value) steps.push({ vault: borrowVault.value, op: OP_REPAY })
     if (isFullRepay.value) {
-      const collAddrs = position.value?.collaterals ?? (collateralVault.value ? [collateralVault.value.address] : [])
+      const collAddrs = position.value
+        ? position.value.collateralVaults
+        : (collateralVault.value ? [collateralVault.value.address] : [])
       for (const addr of collAddrs) {
         const v = registryGetVault(addr) as EVault | undefined
         if (v) steps.push({ vault: v, op: OP_TRANSFER })
@@ -431,13 +435,20 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
         : (borrowedFixed.value.sub(debtRepaidFixed))
             .div(collateralValue)
             .mul(FixedPoint.fromValue(100n, 0))
+      const effectiveLiquidationLtv = getBorrowPositionEffectiveLiquidationLTV(position.value!)
+      if (effectiveLiquidationLtv === undefined) throw new Error('Liquidation LTV unavailable')
+      const liquidationLtv = decimalLtvToBps(effectiveLiquidationLtv)
       const healthFixed = (userLtvFixed.isZero() || userLtvFixed.isNegative())
         ? null
-        : FixedPoint.fromValue(position.value!.liquidationLTV, 2).div(userLtvFixed)
+        : FixedPoint.fromValue(liquidationLtv, 2).div(userLtvFixed)
 
       _estimateUserLTV.value = userLtvFixed.toScaledBigint(18)
       _estimateHealth.value = healthFixed ? healthFixed.toScaledBigint(18) : 10n ** 36n
       hasEstimate.value = true
+
+      if (userLtvFixed.gte(FixedPoint.fromValue(liquidationLtv, 2))) {
+        throw new Error('Not enough liquidity for the vault, LTV is too large')
+      }
     }
     catch (e: unknown) {
       logWarn('walletSwapRepay/syncEstimates', e)
@@ -679,7 +690,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       requestedSlippage: slippage.value,
       borrowVaultAddress: borrowVault.value.address as Address,
       subAccount: (position.value.subAccount || address.value || zeroAddress) as Address,
-      enabledCollaterals: position.value.collaterals ?? [collateralVault.value.address],
+      enabledCollaterals: position.value.collateralVaults,
       isFullRepay: isFullRepay.value,
       swapperMode: swapMode,
       targetDebt,

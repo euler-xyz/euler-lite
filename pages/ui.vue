@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import AssetInput from '~/components/entities/asset/AssetInput.vue'
-import type { VaultAsset } from '~/entities/vault'
+import type { VaultAsset } from '~/types/asset'
 import { useModal } from '~/components/ui/composables/useModal'
 import { AcknowledgeTermsModal } from '#components'
 

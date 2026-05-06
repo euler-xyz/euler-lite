@@ -3,272 +3,26 @@ import type { Address } from 'viem'
 import axios from 'axios'
 
 import { merklDistributorABI } from '~/abis/merkl'
-import type { Opportunity, Reward, RewardsResponseItem } from '~/entities/merkl'
-import type { RewardCampaign, RewardCampaignType } from '~/entities/reward-campaign'
-import { mapMerklSubType } from '~/entities/reward-campaign'
+import type { Reward, RewardsResponseItem } from '~/entities/merkl'
 import type { TxPlan } from '~/entities/txPlan'
 import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 import { logWarn } from '~/utils/errorHandling'
-import { createInFlightDedup } from '~/utils/in-flight'
 
-// The per-user /users/{addr}/rewards endpoint stays direct (it carries the
-// wallet address, which we deliberately keep off the shared server cache).
-// Resolved lazily: `useEulerConfig()` must be called inside a Vue setup
-// or Nuxt context; evaluating it at module-load time fails when this
-// module is pulled in early (e.g. via an import from app.vue).
-const userRewardsEndpoint = (addr: string): string => {
-  const { MERKL_API_BASE_URL } = useEulerConfig()
-  return `${MERKL_API_BASE_URL}/users/${addr}/rewards`
-}
+// Per-user rewards stay behind a same-origin proxy because Merkl does not
+// consistently allow localhost browser origins. Public campaign APY now comes
+// from SDK-populated vault.rewards, not from this composable.
+const userRewardsEndpoint = '/api/rewards/merkl-user'
 
 const address = ref('')
-
-const isLoaded = ref(false)
-const merklCampaigns: Ref<Map<string, RewardCampaign[]>> = shallowRef(new Map())
 const rewards: Ref<Reward[]> = ref([])
-const isOpportunitiesLoading = ref(true)
 const isRewardsLoading = ref(true)
 
-// Both public campaigns and user-specific rewards poll at 60s. Public polls
-// mostly hit CDN (60s total window = max-age 30s + stale-while-revalidate 30s)
-// so the cost is near-zero while keeping the UI fresh. User-specific
-// `/users/{addr}/rewards` is not proxied (per-wallet data).
-//
-// Note: Merkl's /tokens/reward payload is merged into /api/token-list on the
-// server, so reward-token metadata (icons, decimals) comes from the unified
-// token list rather than a dedicated Merkl fetch here.
-let publicInterval: NodeJS.Timeout | null = null
 let userInterval: NodeJS.Timeout | null = null
-// Module-singleton refcount: multiple components / composables (useRewardsApy,
-// PortfolioRewardItem, vault list rows, etc.) call useMerkl simultaneously.
-// Clearing intervals on the first unmount would starve everyone else still
-// subscribed. Mirrors the pattern already used in useFuul.
 let subscriberCount = 0
-
-const cacheState = {
-  opportunities: { chainId: 0, timestamp: 0 },
-  rewards: { chainId: 0, address: '', timestamp: 0 },
-}
-
-let latestOpportunitiesRequestId = 0
 let latestRewardsRequestId = 0
 
-interface MerklProxyResponse {
-  opportunities: {
-    euler: Opportunity[]
-    multilendborrow: Opportunity[]
-    erc20logprocessor: Opportunity[]
-  }
-}
-
-const MERKL_EULER_SOURCE_URL = 'https://app.merkl.xyz/?protocol=euler'
-
-const merklOpportunityUrl = (
-  opportunity: Opportunity,
-  type: 'EULER' | 'ERC20LOGPROCESSOR' | 'MULTILENDBORROW',
-): string => {
-  if (!opportunity.identifier) return MERKL_EULER_SOURCE_URL
-
-  const chain = (opportunity.chain?.name || opportunity.chainId?.toString())?.trim()
-  if (!chain) return MERKL_EULER_SOURCE_URL
-
-  const chainSlug = chain.toLowerCase().replace(/\s+/g, '-')
-  return `https://app.merkl.xyz/opportunities/${encodeURIComponent(chainSlug)}/${type}/${encodeURIComponent(opportunity.identifier)}`
-}
-
-// Public campaign data flows through `/api/rewards/merkl`, which warms the
-// three Merkl opportunity types server-side and returns one CDN-cacheable
-// GET. User-specific /users/{addr}/rewards stays direct (per-wallet data
-// not safe to put on a shared cache).
-//
-// Per-chain in-flight dedup so concurrent callers fired from the same
-// watcher tick share a single HTTP round-trip. Keyed by chainId because
-// chain-switch invalidates the relevant in-flight promise naturally.
-const inFlightMerkl = createInFlightDedup<number, MerklProxyResponse | null>()
-
-const fetchMerklProxy = (chainId: number): Promise<MerklProxyResponse | null> =>
-  inFlightMerkl.run(chainId, () =>
-    $fetch<MerklProxyResponse>('/api/rewards/merkl', { query: { chainId } })
-      .catch((e) => {
-        logWarn('merkl/proxy', e)
-        return null
-      }))
-
-const processOpportunitiesToCampaigns = (
-  opportunities: Opportunity[],
-  opType: 'EULER' | 'ERC20LOGPROCESSOR',
-): Map<string, RewardCampaign[]> => {
-  const campaignMap = new Map<string, RewardCampaign[]>()
-  const now = Math.floor(Date.now() / 1000)
-
-  for (const opportunity of opportunities) {
-    if (opportunity.status !== 'LIVE') continue
-    if (!opportunity.campaigns?.length) continue
-    if (!opportunity.aprRecord?.breakdowns) continue
-
-    // Build APR map from aprRecord breakdowns (keyed by campaign ID)
-    // This is the actual computed APR, not the stale campaign.apr field
-    const aprs = new Map<string, number>()
-    for (const breakdown of opportunity.aprRecord.breakdowns) {
-      aprs.set(breakdown.identifier, breakdown.value)
-    }
-
-    for (const campaign of opportunity.campaigns) {
-      if (campaign.subType === null || campaign.subType === undefined) continue
-
-      const campaignType = mapMerklSubType(campaign.subType)
-      if (!campaignType) continue
-
-      if (!campaign.rewardToken || !campaign.params?.targetToken) continue
-
-      const apr = aprs.get(campaign.campaignId) || 0
-
-      // Skip active campaigns with no APR
-      if (campaign.endTimestamp > now && !apr) continue
-
-      const vaultAddress = opType === 'ERC20LOGPROCESSOR'
-        ? (campaign.params.targetToken).toLowerCase()
-        : (campaign.params.evkAddress || campaign.params.targetToken).toLowerCase()
-
-      const collateral = campaignType === 'euler_borrow_collateral'
-        ? campaign.params.collateralAddress?.toLowerCase()
-        : undefined
-
-      const rewardCampaign: RewardCampaign = {
-        vault: vaultAddress,
-        collateral,
-        type: campaignType,
-        apr,
-        provider: 'merkl',
-        endTimestamp: campaign.endTimestamp,
-        rewardToken: { symbol: campaign.rewardToken.symbol, icon: campaign.rewardToken.icon },
-        sourceUrl: merklOpportunityUrl(opportunity, opType),
-      }
-
-      const existing = campaignMap.get(vaultAddress)
-      if (existing) existing.push(rewardCampaign)
-      else campaignMap.set(vaultAddress, [rewardCampaign])
-    }
-  }
-
-  return campaignMap
-}
-
-// MULTILENDBORROW campaigns target multiple vaults under one budget. We emit one
-// RewardCampaign per market using the existing euler_lend/euler_borrow types, so
-// the existing APY aggregation and UI pick them up with no further changes.
-const processMultiLendBorrowOpportunities = (
-  opportunities: Opportunity[],
-): Map<string, RewardCampaign[]> => {
-  const campaignMap = new Map<string, RewardCampaign[]>()
-  const now = Math.floor(Date.now() / 1000)
-
-  for (const opportunity of opportunities) {
-    if (opportunity.status !== 'LIVE') continue
-    if (!opportunity.campaigns?.length) continue
-
-    const side: RewardCampaignType | null
-      = opportunity.action === 'LEND'
-        ? 'euler_lend'
-        : opportunity.action === 'BORROW'
-          ? 'euler_borrow'
-          : null
-    if (!side) continue
-
-    const aprs = new Map<string, number>()
-    for (const breakdown of opportunity.aprRecord?.breakdowns ?? []) {
-      aprs.set(breakdown.identifier, breakdown.value)
-    }
-
-    for (const campaign of opportunity.campaigns) {
-      const markets = campaign.params?.markets
-      if (!markets?.length || !campaign.rewardToken) continue
-
-      // Merkl provides a single campaign-level APR (keyed by campaignId in
-      // aprRecord.breakdowns), shared across all markets under MAX_APR. For
-      // MULTILENDBORROW that breakdown can be absent/zero while the top-level
-      // campaign.apr is populated, so fall back to it.
-      const apr = aprs.get(campaign.campaignId) || campaign.apr || 0
-      if (campaign.endTimestamp > now && !apr) continue
-
-      for (const market of markets) {
-        const vaultAddress = (
-          market.campaignParameters.evkAddress
-          || market.campaignParameters.targetToken
-        )?.toLowerCase()
-        if (!vaultAddress) continue
-
-        const rewardCampaign: RewardCampaign = {
-          vault: vaultAddress,
-          type: side,
-          apr,
-          provider: 'merkl',
-          endTimestamp: campaign.endTimestamp,
-          rewardToken: { symbol: campaign.rewardToken.symbol, icon: campaign.rewardToken.icon },
-          sourceUrl: merklOpportunityUrl(opportunity, 'MULTILENDBORROW'),
-        }
-
-        const existing = campaignMap.get(vaultAddress)
-        if (existing) existing.push(rewardCampaign)
-        else campaignMap.set(vaultAddress, [rewardCampaign])
-      }
-    }
-  }
-
-  return campaignMap
-}
-
-const loadOpportunities = async (chainId: number, isInitialLoading = true, forceRefresh = false) => {
-  const now = Date.now()
-  // Skip if cached and not expired
-  if (!forceRefresh
-    && cacheState.opportunities.chainId === chainId
-    && merklCampaigns.value.size > 0
-    && (now - cacheState.opportunities.timestamp) < CACHE_TTL_1MIN_MS) {
-    return
-  }
-
-  const requestId = ++latestOpportunitiesRequestId
-
-  try {
-    if (isInitialLoading) {
-      isOpportunitiesLoading.value = true
-    }
-
-    // Server proxy returns the three Merkl opportunity types already
-    // paginated and (for ERC20LOGPROCESSOR) already filtered against the
-    // chain's earn-vault label set — so this composable just merges and
-    // transforms.
-    const res = await fetchMerklProxy(chainId)
-    if (!res) return
-
-    if (requestId !== latestOpportunitiesRequestId) return
-
-    const merged = new Map<string, RewardCampaign[]>()
-
-    const mergeInto = (partial: Map<string, RewardCampaign[]>) => {
-      for (const [vault, campaigns] of partial) {
-        const existing = merged.get(vault)
-        if (existing) existing.push(...campaigns)
-        else merged.set(vault, [...campaigns])
-      }
-    }
-
-    mergeInto(processOpportunitiesToCampaigns(res.opportunities.euler, 'EULER'))
-    mergeInto(processOpportunitiesToCampaigns(res.opportunities.erc20logprocessor, 'ERC20LOGPROCESSOR'))
-    mergeInto(processMultiLendBorrowOpportunities(res.opportunities.multilendborrow))
-
-    merklCampaigns.value = merged
-    cacheState.opportunities = { chainId, timestamp: Date.now() }
-  }
-  catch (e) {
-    logWarn('merkl/loadOpportunities', e)
-  }
-  finally {
-    if (requestId === latestOpportunitiesRequestId) {
-      isOpportunitiesLoading.value = false
-    }
-  }
+const cacheState = {
+  rewards: { chainId: 0, address: '', timestamp: 0 },
 }
 
 const loadRewards = async (chainId: number, isInitialLoading = true, forceRefresh = false) => {
@@ -279,7 +33,6 @@ const loadRewards = async (chainId: number, isInitialLoading = true, forceRefres
   }
 
   const now = Date.now()
-  // Skip if cached and not expired (check address too since rewards are per-user)
   if (!forceRefresh
     && cacheState.rewards.chainId === chainId
     && cacheState.rewards.address === address.value
@@ -293,8 +46,9 @@ const loadRewards = async (chainId: number, isInitialLoading = true, forceRefres
     if (isInitialLoading) {
       isRewardsLoading.value = true
     }
-    const res = await axios.get(userRewardsEndpoint(address.value), {
+    const res = await axios.get(userRewardsEndpoint, {
       params: {
+        address: address.value,
         chainId,
       },
     })
@@ -319,10 +73,6 @@ const loadRewards = async (chainId: number, isInitialLoading = true, forceRefres
       isRewardsLoading.value = false
     }
   }
-}
-
-const getMerklCampaignsForVault = (vaultAddress: string): RewardCampaign[] => {
-  return merklCampaigns.value.get(vaultAddress.toLowerCase()) || []
 }
 
 export const useMerkl = () => {
@@ -407,7 +157,6 @@ export const useMerkl = () => {
 
   watch(effectiveAddress, (val, oldVal) => {
     address.value = val || ''
-    // Force-refresh rewards when the effective address changes (skip initial mount)
     if (enableMerkl && oldVal && val && val !== oldVal && chainId.value) {
       loadRewards(chainId.value, true, true)
     }
@@ -417,47 +166,30 @@ export const useMerkl = () => {
     const [oldActive, oldChainId] = oldVal ?? [undefined, undefined]
 
     if (oldChainId && currentChainId !== oldChainId) {
-      isLoaded.value = false
-      merklCampaigns.value = new Map()
       rewards.value = []
-      cacheState.opportunities = { chainId: 0, timestamp: 0 }
       cacheState.rewards = { chainId: 0, address: '', timestamp: 0 }
     }
 
-    // Clear user-specific data on deactivation (disconnect + no spy)
     if (oldActive && !active) {
       rewards.value = []
       isRewardsLoading.value = false
       cacheState.rewards = { chainId: 0, address: '', timestamp: 0 }
     }
 
-    if (enableMerkl && !isLoaded.value) {
-      loadOpportunities(chainId.value)
-      loadRewards(chainId.value)
-      isLoaded.value = true
+    if (enableMerkl) {
+      loadRewards(currentChainId)
     }
 
     if (enableMerkl && active) {
-      if (!publicInterval) {
-        publicInterval = setInterval(() => {
-          loadOpportunities(chainId.value, false)
-        }, POLL_INTERVAL_60S_MS)
-      }
       if (!userInterval) {
         userInterval = setInterval(() => {
           loadRewards(chainId.value, false)
         }, POLL_INTERVAL_60S_MS)
       }
     }
-    else if (!active) {
-      if (publicInterval) {
-        clearInterval(publicInterval)
-        publicInterval = null
-      }
-      if (userInterval) {
-        clearInterval(userInterval)
-        userInterval = null
-      }
+    else if (!active && userInterval) {
+      clearInterval(userInterval)
+      userInterval = null
     }
   }, { immediate: true })
 
@@ -465,27 +197,17 @@ export const useMerkl = () => {
 
   onUnmounted(() => {
     subscriberCount--
-    if (subscriberCount === 0) {
-      if (publicInterval) {
-        clearInterval(publicInterval)
-        publicInterval = null
-      }
-      if (userInterval) {
-        clearInterval(userInterval)
-        userInterval = null
-      }
+    if (subscriberCount === 0 && userInterval) {
+      clearInterval(userInterval)
+      userInterval = null
     }
   })
 
   return {
-    merklCampaigns,
     rewards,
-    isOpportunitiesLoading,
     isRewardsLoading,
     claimReward,
     buildClaimRewardPlan,
-    loadOpportunities,
     loadRewards,
-    getMerklCampaignsForVault,
   }
 }

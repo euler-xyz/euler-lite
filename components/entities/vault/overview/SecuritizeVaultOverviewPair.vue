@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { SecuritizeBorrowVaultPair, EVault } from '~/entities/vault'
+import type { SecuritizeBorrowVaultPair } from '~/types/borrow-pair'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 
 defineProps<{ pair: SecuritizeBorrowVaultPair, desktopOverview?: boolean }>()
 </script>

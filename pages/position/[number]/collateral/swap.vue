@@ -1,20 +1,6 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import { getAddress, zeroAddress, type Address, type Abi } from 'viem'
-import type { AccountBorrowPosition } from '~/entities/account'
-import { eulerAccountLensABI } from '~/entities/euler/abis'
-import type {
-  EVault,
-  SecuritizeCollateralVault,
-  VaultAsset,
-} from '~/entities/vault'
-import {
-  getAssetUsdValue,
-  getAssetOraclePrice,
-  getCollateralOraclePrice,
-  conservativePriceRatioNumber,
-  getCollateralUsdValueOrZero,
-} from '~/services/pricing/priceProvider'
+import { isSecuritizeCollateralVault, type SecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber, getCollateralUsdValueOrZero } from '~/services/pricing/priceProvider'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
 import { SwapperMode } from '~/entities/swap'
 import type { SwapApiQuote } from '~/entities/swap'
@@ -26,6 +12,9 @@ import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/util
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { useAccount } from '@wagmi/vue'
+import { getAddress, zeroAddress, type Address, type Abi } from 'viem'
+import { eulerAccountLensABI } from '~/entities/euler/abis'
 
 const route = useRoute()
 const { isConnected, address } = useAccount()
@@ -42,18 +31,23 @@ const { client: rpcClient } = useRpcClient()
 const positionIndex = usePositionIndex()
 
 // ── Vaults & position ────────────────────────────────────────────────────
-const position: Ref<AccountBorrowPosition | null> = ref(null)
+const position: Ref<PortfolioBorrowPosition<VaultEntity> | null> = ref(null)
 const pairAssetsLabel = usePositionPairLabel(position)
 const selectedCollateral = ref<EVault | SecuritizeCollateralVault | null>(null)
 const selectedCollateralAssets = ref(0n)
 const lastCollateralAddress = ref('')
 
-const fromVault = computed(() => selectedCollateral.value || position.value?.collateral)
-const borrowVault = computed(() => position.value?.borrow)
+const primaryCollateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() =>
+  (position.value ? position.value.collateralVault : undefined) as EVault | SecuritizeCollateralVault | undefined,
+)
+const fromVault = computed<EVault | SecuritizeCollateralVault | undefined>(() =>
+  (selectedCollateral.value || primaryCollateralVault.value) as EVault | SecuritizeCollateralVault | undefined,
+)
+const borrowVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
 const toVault: Ref<EVault | undefined> = ref()
 useOperationGuard(computed(() => [fromVault.value?.address, toVault.value?.address, borrowVault.value?.address].filter(Boolean)))
 
-const isFromSecuritize = computed(() => fromVault.value && 'type' in fromVault.value && fromVault.value.type === 'securitize')
+const isFromSecuritize = computed(() => !!fromVault.value && isSecuritizeCollateralVault(fromVault.value))
 const fromVaultAsRegular = computed(() => {
   if (!fromVault.value || isFromSecuritize.value) return undefined
   return fromVault.value as EVault
@@ -143,7 +137,7 @@ const swap = useSwapPageLogic({
         enableCollateral: true,
         disableCollateral: isMaxSwap.value,
         liabilityVault: borrowVault.value?.address,
-        enabledCollaterals: position.value.collaterals,
+        enabledCollaterals: position.value.collateralVaults,
       })
     }
     if (!selectedQuote.value) throw new Error('No quote selected')
@@ -157,7 +151,7 @@ const swap = useSwapPageLogic({
       enableCollateral: true,
       disableCollateral: isMaxSwap.value ? fromVault.value.address : undefined,
       liabilityVault: borrowVault.value?.address,
-      enabledCollaterals: position.value.collaterals,
+      enabledCollaterals: position.value.collateralVaults,
     })
   },
 
@@ -213,7 +207,7 @@ const loadSelectedCollateral = async () => {
     return
   }
 
-  const primaryAddress = normalizeAddress(position.value.collateral.address)
+  const primaryAddress = normalizeAddress(primaryCollateralVault.value?.address)
   const targetAddress = normalizeAddress(getSelectedCollateralAddress()) || primaryAddress
 
   if (targetAddress !== lastCollateralAddress.value) {
@@ -251,7 +245,7 @@ const loadSelectedCollateral = async () => {
   catch (e) {
     console.warn('[Collateral swap] failed to load collateral', e)
     if (!selectedCollateral.value) {
-      selectedCollateral.value = position.value.collateral
+      selectedCollateral.value = primaryCollateralVault.value || null
     }
   }
 }
@@ -407,7 +401,10 @@ const borrowAmount = computed(() => {
   return nanoToValue(position.value.borrowed, borrowVault.value.shares.decimals)
 })
 
-const currentLtv = computed(() => position.value ? nanoToValue(position.value.userLTV, 18) : null)
+const currentLtv = computed(() => {
+  const ltv = position.value?.userLTV ?? position.value?.currentLTV
+  return ltv === undefined ? null : nanoToValue(ltv, 18)
+})
 const fromLiquidationLtv = computed(() => {
   if (!borrowVault.value || !fromVault.value) return null
   const match = borrowVault.value.collaterals.find(
@@ -445,7 +442,10 @@ const nextLtv = computed(() => {
   if (totalValue <= 0) return null
   return (borrowAmount.value / totalValue) * 100
 })
-const currentHealth = computed(() => position.value ? nanoToValue(position.value.health, 18) : null)
+const currentHealth = computed(() => {
+  const health = position.value?.healthFactor
+  return health === undefined ? null : nanoToValue(health, 18)
+})
 const nextHealth = computed(() => {
   if (!nextLtv.value || nextLtv.value <= 0) return null
   const totalValue = remainingFromValue.value + newToValue.value
@@ -493,7 +493,7 @@ const nextLiquidationPrice = computed(() => {
       <template v-if="fromVault">
         <VaultLabelsAndAssets
           :vault="fromVault"
-          :assets="[fromVault.asset] as VaultAsset[]"
+          :assets="[fromVault.asset]"
           :assets-label="pairAssetsLabel"
           size="large"
         />

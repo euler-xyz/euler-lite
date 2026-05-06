@@ -1,8 +1,5 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import { formatUnits, zeroAddress, type Address } from 'viem'
-import type { AccountBorrowPosition } from '~/entities/account'
-import type { EVault, VaultAsset } from '~/entities/vault'
+import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import { useSwapDebtOptions } from '~/composables/useSwapDebtOptions'
 import { SwapperMode } from '~/entities/swap'
@@ -13,6 +10,8 @@ import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/util
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { useAccount } from '@wagmi/vue'
+import { formatUnits, zeroAddress, type Address } from 'viem'
 
 const route = useRoute()
 const { isConnected, address } = useAccount()
@@ -25,11 +24,11 @@ const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const positionIndex = usePositionIndex()
 
 // ── Position & vaults ────────────────────────────────────────────────────
-const position: Ref<AccountBorrowPosition | null> = ref(null)
+const position: Ref<PortfolioBorrowPosition<VaultEntity> | null> = ref(null)
 
 const pairAssetsLabel = usePositionPairLabel(position)
-const fromVault = computed(() => position.value?.borrow)
-const collateralVault = computed(() => position.value?.collateral)
+const fromVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
+const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() => position.value ? position.value.collateralVault as EVault | SecuritizeCollateralVault | undefined : undefined)
 const toVault: Ref<EVault | undefined> = ref()
 useOperationGuard(computed(() => [fromVault.value?.address, toVault.value?.address, collateralVault.value?.address].filter(Boolean)))
 
@@ -126,8 +125,15 @@ const nextBorrowAmount = computed(() => {
   return nanoToValue(BigInt(quote.value.amountIn), toVault.value.shares.decimals)
 })
 
-const currentLtv = computed(() => position.value ? nanoToValue(position.value.userLTV, 18) : null)
-const _currentLiquidationLtv = computed(() => position.value ? ltvToPercent(position.value.liquidationLTV) : null)
+const currentLtv = computed(() => {
+  const ltv = position.value?.userLTV ?? position.value?.currentLTV
+  return ltv === undefined ? null : nanoToValue(ltv, 18)
+})
+const _currentLiquidationLtv = computed(() => {
+  if (!position.value) return null
+  const liquidationLTV = getBorrowPositionEffectiveLiquidationLTV(position.value)
+  return liquidationLTV === undefined ? null : ltvToPercent(liquidationLTV)
+})
 const nextLiquidationLtv = computed(() => {
   if (!toVault.value || !collateralVault.value) return null
   const match = toVault.value.collaterals.find(
@@ -140,7 +146,10 @@ const nextLtv = computed(() => {
   if (priceRatio.value <= 0 || collateralAmount.value <= 0) return null
   return (nextBorrowAmount.value / (collateralAmount.value * priceRatio.value)) * 100
 })
-const currentHealth = computed(() => position.value ? nanoToValue(position.value.health, 18) : null)
+const currentHealth = computed(() => {
+  const health = position.value?.healthFactor
+  return health === undefined ? null : nanoToValue(health, 18)
+})
 const nextHealth = computed(() => {
   if (!nextLiquidationLtv.value || !nextLtv.value) return null
   if (nextLtv.value <= 0) return null
@@ -218,7 +227,7 @@ const swap = useSwapPageLogic({
         newVaultAddress: toVault.value.address,
         amount,
         subAccount: position.value?.subAccount || address.value!,
-        enabledCollaterals: position.value?.collaterals,
+        enabledCollaterals: position.value ? position.value.collateralVaults : undefined,
       })
     }
     if (!selectedQuote.value) throw new Error('No quote selected')
@@ -231,7 +240,7 @@ const swap = useSwapPageLogic({
       targetDebt: 0n,
       currentDebt: currentDebt.value,
       liabilityVault: fromVault.value.address,
-      enabledCollaterals: position.value?.collaterals,
+      enabledCollaterals: position.value ? position.value.collateralVaults : undefined,
     })
   },
 
@@ -345,7 +354,7 @@ const onToVaultChange = (selectedIndex: number) => {
       <template v-if="fromVault">
         <VaultLabelsAndAssets
           :vault="fromVault"
-          :assets="[fromVault.asset] as VaultAsset[]"
+          :assets="[fromVault.asset]"
           :assets-label="pairAssetsLabel"
           size="large"
         />

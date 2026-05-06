@@ -3,8 +3,8 @@ import {
   getCollateralExposurePairs,
   hasCollateralExposure,
   type CollateralVaultResolver,
-} from '~/entities/vault/collateral-exposure'
-import type { EVault, SecuritizeCollateralVault, EVaultCollateral } from '~/entities/vault/types'
+} from '~/utils/vault/collateral-exposure'
+import type { EVault, SecuritizeCollateralVault, EVaultCollateral } from '@eulerxyz/euler-v2-sdk'
 
 /**
  * Build a EVaultCollateral with reasonable defaults. By default the

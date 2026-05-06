@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useAccount } from '@wagmi/vue'
-import { getSubAccountIndex } from '~/entities/account'
+import { getSubAccountId as getSubAccountIndex } from '@eulerxyz/euler-v2-sdk'
+import { getAddress } from 'viem'
 
 const { isConnected, address } = useAccount()
 const { isSpyMode } = useSpyMode()
@@ -13,8 +14,8 @@ const ownerAddress = computed(() => portfolioAddress.value || address.value || '
 const sortedBorrowPositions = computed(() => {
   if (!ownerAddress.value) return borrowPositions.value
   return [...borrowPositions.value].sort((a, b) => {
-    const indexA = getSubAccountIndex(ownerAddress.value, a.subAccount)
-    const indexB = getSubAccountIndex(ownerAddress.value, b.subAccount)
+    const indexA = getSubAccountIndex(getAddress(ownerAddress.value), getAddress(a.subAccount))
+    const indexB = getSubAccountIndex(getAddress(ownerAddress.value), getAddress(b.subAccount))
     return indexA - indexB
   })
 })

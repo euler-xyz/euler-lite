@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { isLiveCollateralEdge } from '~/entities/vault/ltv'
-import type { EVaultCollateral } from '~/entities/vault/types'
+import type { EVaultCollateral } from '@eulerxyz/euler-v2-sdk'
+import { isLiveCollateralEdge } from '~/utils/vault/ltv'
 
 const makeEdge = (overrides: Partial<EVaultCollateral> = {}): EVaultCollateral => ({
   address: '0x0000000000000000000000000000000000000001',

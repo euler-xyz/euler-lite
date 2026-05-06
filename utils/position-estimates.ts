@@ -1,7 +1,6 @@
+import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import { nanoToValue } from '~/utils/crypto-utils'
-import type { AccountBorrowPosition } from '~/entities/account'
-import { getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
-import type { EVault, SecuritizeCollateralVault } from '~/entities/vault'
 
 /**
  * Derives the total collateral value (in borrow-asset terms) from the position's
@@ -10,9 +9,12 @@ import type { EVault, SecuritizeCollateralVault } from '~/entities/vault'
  *
  * Returns null if the position has no borrow or LTV is zero.
  */
-export function getTotalCollateralValue(position: AccountBorrowPosition): number | null {
-  const borrowed = nanoToValue(position.borrowed, position.borrow.shares.decimals || 18)
-  const userLtv = nanoToValue(position.userLTV, 18)
+export function getTotalCollateralValue(position: PortfolioBorrowPosition<VaultEntity>): number | null {
+  const borrowVault = position.borrowVault
+  const borrowed = nanoToValue(position.borrowed, borrowVault?.shares.decimals || 18)
+  const userLtvValue = position.userLTV ?? position.currentLTV
+  if (userLtvValue === undefined) return null
+  const userLtv = nanoToValue(userLtvValue, 18)
   if (userLtv <= 0 || borrowed <= 0) return null
   return borrowed / userLtv * 100
 }
@@ -31,7 +33,7 @@ export function getCollateralPriceRatio(
 }
 
 interface EstimateParams {
-  position: AccountBorrowPosition
+  position: PortfolioBorrowPosition<VaultEntity>
   /** Change in collateral amount (in collateral asset units). Positive = supply, negative = withdraw. */
   collateralDelta?: number
   /** Change in borrow amount (in borrow asset units). Positive = borrow more, negative = repay. */
@@ -57,8 +59,11 @@ export function estimatePositionAfterChange(params: EstimateParams): PositionEst
   const totalCollateralValue = getTotalCollateralValue(position)
   if (totalCollateralValue === null) return null
 
-  const borrowed = nanoToValue(position.borrowed, position.borrow.shares.decimals || 18)
-  const liquidationLtv = Number(position.liquidationLTV) / 100
+  const borrowVault = position.borrowVault
+  const borrowed = nanoToValue(position.borrowed, borrowVault?.shares.decimals || 18)
+  const effectiveLiquidationLtv = getBorrowPositionEffectiveLiquidationLTV(position)
+  if (effectiveLiquidationLtv === undefined) return null
+  const liquidationLtv = effectiveLiquidationLtv * 100
 
   // Adjust collateral value
   let newCollateralValue = totalCollateralValue

@@ -1,5 +1,6 @@
 import type { MarketGroup } from '~/entities/lend-discovery'
-import { type BestMaxRoeResult, getBorrowableVaults, isVaultType } from '~/utils/discoveryCalculations'
+import { isEVault } from '@eulerxyz/euler-v2-sdk'
+import { type BestMaxRoeResult, getBorrowableVaults } from '~/utils/discoveryCalculations'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 
 /**
@@ -18,7 +19,7 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
 
     const allVaults = [...group.vaults, ...group.externalCollateral]
     const knownAddresses = new Set(
-      allVaults.map(v => (isVaultType(v) ? v.address : '').toLowerCase()).filter(Boolean),
+      allVaults.map(v => (isEVault(v) ? v.address : '').toLowerCase()).filter(Boolean),
     )
 
     let best = -Infinity
@@ -41,9 +42,9 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
         if (!knownAddresses.has(colAddr)) continue
 
         const collateral = allVaults.find(
-          v => isVaultType(v) && v.address.toLowerCase() === colAddr,
+          v => isEVault(v) && v.address.toLowerCase() === colAddr,
         )
-        if (!collateral || !isVaultType(collateral)) continue
+        if (!collateral || !isEVault(collateral)) continue
 
         const supplyBase = getVaultSupplyApy(collateral)
         const supplyApy = withIntrinsicSupplyApy(supplyBase, collateral.asset.address)

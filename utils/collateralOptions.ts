@@ -1,7 +1,8 @@
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
+import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
+import type { CollateralOption } from '~/types/collateral-option'
 import { getVaultProductName } from '~/utils/eulerLabelsUtils'
 import { getVaultTags, type VaultTagContext } from '~/composables/useGeoBlock'
-import type { CollateralOption, EVault } from '~/entities/vault'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 
 export function computeSupplyApy(
   vault: EVault,

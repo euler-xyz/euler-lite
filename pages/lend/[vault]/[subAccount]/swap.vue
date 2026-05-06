@@ -1,9 +1,7 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import { isAddress, getAddress, zeroAddress, type Address } from 'viem'
-import { getCashLimitedWithdrawAmount, type EVault, type SecuritizeCollateralVault } from '~/entities/vault'
-import { isSecuritizeVault } from '~/entities/vault/factory'
-import { getSubAccountAddress } from '~/entities/account'
+import type { SecuritizeCollateralVault, EVault } from '@eulerxyz/euler-v2-sdk'
+import { getSubAccountAddress } from '@eulerxyz/euler-v2-sdk'
+import { isSecuritizeVault } from '~/utils/vault/categories'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
 import { SwapperMode } from '~/entities/swap'
 import type { TxPlan } from '~/entities/txPlan'
@@ -13,12 +11,13 @@ import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { useAccount } from '@wagmi/vue'
+import { getAddress, type Address, zeroAddress, isAddress } from 'viem'
+import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 
 const route = useRoute()
 const { getVault, getSecuritizeVault } = useVaults()
 const { address } = useAccount()
-const { isSpyMode, spyAddress } = useSpyMode()
-const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const { depositPositions } = useEulerAccount()
 const { buildSwapPlan, buildSameAssetSwapPlan } = useEulerOperations()
 const { withIntrinsicSupplyApy } = useIntrinsicApy()
@@ -26,9 +25,8 @@ const { getSupplyRewardApy } = useRewardsApy()
 
 const subAccountIndex = Number(route.params.subAccount)
 const subAccount = computed(() => {
-  const addr = effectiveAddress.value
-  if (!addr || isNaN(subAccountIndex)) return undefined
-  return getSubAccountAddress(addr, subAccountIndex)
+  if (!address.value || isNaN(subAccountIndex)) return undefined
+  return getSubAccountAddress(getAddress(address.value), subAccountIndex)
 })
 
 // ── Vaults ───────────────────────────────────────────────────────────────
@@ -56,7 +54,7 @@ const savingPosition = computed(() => {
   const currentAddress = normalizeAddress(fromVault.value.address)
   if (!currentAddress) return null
   return depositPositions.value.find(position =>
-    normalizeAddress(position.vault.address) === currentAddress
+    normalizeAddress(position.vault?.address || '') === currentAddress
     && (!subAccount.value || normalizeAddress(position.subAccount) === normalizeAddress(subAccount.value)),
   ) || null
 })
@@ -94,13 +92,12 @@ const swap = useSwapPageLogic({
 
   buildQuoteRequest(amount) {
     if (!fromVault.value || !toVault.value) return null
-    const account = (subAccount.value || effectiveAddress.value || zeroAddress) as Address
     return {
       params: {
         tokenIn: fromVault.value.asset.address as Address,
         tokenOut: toVault.value.asset.address as Address,
-        accountIn: account,
-        accountOut: account,
+        accountIn: (address.value || zeroAddress) as Address,
+        accountOut: (address.value || zeroAddress) as Address,
         amount,
         vaultIn: fromVault.value.address as Address,
         receiver: toVault.value.address as Address,
@@ -124,7 +121,6 @@ const swap = useSwapPageLogic({
         amount,
         isMax,
         maxShares: isMax ? savingPosition.value?.shares : undefined,
-        subAccount: subAccount.value,
       })
     }
     if (!selectedQuote.value) throw new Error('No quote selected')

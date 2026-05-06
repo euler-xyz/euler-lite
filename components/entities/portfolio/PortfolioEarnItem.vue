@@ -1,16 +1,18 @@
 <script setup lang="ts">
+import type { EulerEarn, PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { getSubAccountId as getSubAccountIndex } from '@eulerxyz/euler-v2-sdk'
 import { useAccount } from '@wagmi/vue'
-import { getAssetUsdValue, formatAssetValue } from '~/services/pricing/priceProvider'
+import { getAddress } from 'viem'
+import { formatAssetValue, getAssetUsdValue } from '~/services/pricing/priceProvider'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated, getVaultNotice } from '~/utils/eulerLabelsUtils'
-import { type AccountDepositPosition, getSubAccountIndex } from '~/entities/account'
-import type { EulerEarn } from '~/entities/vault'
+
 import { VaultOverviewModal, VaultSupplyApyModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { formatNumber, formatCompactUsdValue, compactNumber, formatExactAmount } from '~/utils/string-utils'
 import { roundAndCompactTokens } from '~/utils/crypto-utils'
 
-const { position } = defineProps<{ position: AccountDepositPosition }>()
+const { position } = defineProps<{ position: PortfolioSavingsPosition<VaultEntity> }>()
 const modal = useModal()
 
 const { address } = useAccount()
@@ -18,7 +20,7 @@ const { portfolioAddress } = useEulerAccount()
 const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
 const subAccountIndex = computed(() => {
   if (!ownerAddress.value || !position.subAccount) return 0
-  return getSubAccountIndex(ownerAddress.value, position.subAccount)
+  return getSubAccountIndex(getAddress(ownerAddress.value), getAddress(position.subAccount))
 })
 
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()

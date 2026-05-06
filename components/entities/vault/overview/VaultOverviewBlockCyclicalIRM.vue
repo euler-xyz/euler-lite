@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { formatUnits, zeroAddress } from 'viem'
-import { SECONDS_IN_YEAR } from '~/entities/constants'
-import type { EVault, SecuritizeCollateralVault, FixedCyclicalBinaryIRMInfo } from '~/entities/vault'
-import { hasCollateralExposure } from '~/entities/vault'
+import type { SecuritizeCollateralVault, FixedCyclicalBinaryIRMInfo, EVault } from '@eulerxyz/euler-v2-sdk'
+import { hasCollateralExposure } from '~/utils/vault/collateral-exposure'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
+import { zeroAddress, formatUnits } from 'viem'
+import { SECONDS_IN_YEAR } from '~/entities/constants'
 
 const { vault } = defineProps<{ vault: EVault }>()
 

@@ -1,6 +1,7 @@
+import type { VaultAsset } from '~/types/asset'
 import { isAddress, type Address } from 'viem'
 import { erc20SymbolAbi, erc20DecimalsAbi, erc20NameAbi } from '~/abis/erc20'
-import type { VaultAsset } from '~/entities/vault'
+
 import { createRaceGuard } from '~/utils/race-guard'
 
 export const useCustomTokenResolver = () => {

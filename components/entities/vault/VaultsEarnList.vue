@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { EulerEarn } from '~/entities/vault'
+import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
 
 defineProps<{ items: EulerEarn[] }>()
 </script>

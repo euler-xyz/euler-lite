@@ -1,15 +1,8 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import { getAddress, type Address, zeroAddress } from 'viem'
-import { FixedPoint } from '~/utils/fixed-point'
-import { getCashLimitedWithdrawAmount, type EVault, type VaultAsset } from '~/entities/vault'
+import type { VaultAsset } from '~/types/asset'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
-import {
-  getAssetOraclePrice,
-  getCollateralOraclePrice,
-  conservativePriceRatio,
-} from '~/services/pricing/priceProvider'
+import { getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatio } from '~/services/pricing/priceProvider'
 import type { SwapApiQuote } from '~/entities/swap'
 import { SwapperMode } from '~/entities/swap'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
@@ -17,6 +10,12 @@ import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useCollateralForm } from '~/composables/position/useCollateralForm'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
+import { useAccount } from '@wagmi/vue'
+import { getAddress, type Address, zeroAddress } from 'viem'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
+import { FixedPoint } from '~/utils/fixed-point'
+import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 
 const positionIndex = usePositionIndex()
 const { address } = useAccount()
@@ -58,7 +57,9 @@ const form = useCollateralForm({
   },
 
   computeLiquidationPrice: (pos, borrowVault, collateralVault) => {
-    const health = nanoToValue(pos.health || 0n, 18)
+    const healthValue = pos.healthFactor
+    if (healthValue === undefined) return undefined
+    const health = nanoToValue(healthValue, 18)
     if (health < 1) return undefined
     const cp = borrowVault && collateralVault ? getCollateralOraclePrice(borrowVault, collateralVault) : undefined
     const bp = borrowVault ? getAssetOraclePrice(borrowVault) : undefined
@@ -72,7 +73,11 @@ const form = useCollateralForm({
       throw new Error('Not enough liquidity in your position')
     }
     if (!form.position.value) return
-    if (userLtvFixed.gte(FixedPoint.fromValue(form.position.value.liquidationLTV, 2))) {
+    const effectiveLiquidationLtv = getBorrowPositionEffectiveLiquidationLTV(form.position.value)
+    if (effectiveLiquidationLtv === undefined) {
+      throw new Error('Liquidation LTV unavailable')
+    }
+    if (userLtvFixed.gte(FixedPoint.fromValue(decimalLtvToBps(effectiveLiquidationLtv), 2))) {
       throw new Error('Not enough liquidity for the vault, LTV is too large')
     }
     if (cashLimitedCollateralAssets() < amountFixed.value) {
@@ -89,7 +94,7 @@ const form = useCollateralForm({
       {
         includePythUpdate: hasBorrows,
         liabilityVault: form.borrowVault.value?.address,
-        enabledCollaterals: form.position.value?.collaterals,
+        enabledCollaterals: form.position.value ? form.position.value.collateralVaults : undefined,
       },
     )
   },
@@ -105,7 +110,7 @@ const form = useCollateralForm({
       options: {
         includePythUpdate: hasBorrows,
         liabilityVault: form.borrowVault.value?.address,
-        enabledCollaterals: form.position.value?.collaterals,
+        enabledCollaterals: form.position.value ? form.position.value.collateralVaults : undefined,
       },
     })
   },
@@ -372,14 +377,14 @@ watch(selectedOutputAsset, () => {
             </SummaryRow>
             <SummaryRow label="LTV">
               <SummaryValue
-                :before="formatNumber(nanoToValue(form.position.value.userLTV, 18))"
+                :before="formatNumber(nanoToValue(form.position.value.userLTV ?? form.position.value.currentLTV ?? 0n, 18))"
                 :after="formatNumber(nanoToValue(form.estimateUserLTV.value, 18))"
                 suffix="%"
               />
             </SummaryRow>
             <SummaryRow label="Health score">
               <SummaryValue
-                :before="formatHealthScore(nanoToValue(form.position.value.health, 18))"
+                :before="formatHealthScore(nanoToValue(form.position.value.healthFactor ?? 0n, 18))"
                 :after="formatHealthScore(nanoToValue(form.estimateHealth.value, 18))"
               />
             </SummaryRow>

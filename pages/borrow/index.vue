@@ -1,8 +1,5 @@
 <script setup lang="ts">
-import { useVaults } from '~/composables/useVaults'
-import { useEulerAddresses } from '~/composables/useEulerAddresses'
-import { getAssetLogoUrl } from '~/composables/useTokenList'
-import { isSecuritizeBorrowPair, type AnyBorrowVaultPair } from '~/entities/vault'
+import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
@@ -11,6 +8,10 @@ import { useVaultSearch } from '~/composables/useVaultSearch'
 import { isOpDisabled, OP_BORROW, OP_DEPOSIT, OP_TRANSFER } from '~/utils/vault-hooks'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
+import { isSecuritizeBorrowPair } from '~/types/borrow-pair'
+import { useVaults } from '~/composables/useVaults'
+import { useEulerAddresses } from '~/composables/useEulerAddresses'
+import { getAssetLogoUrl } from '~/composables/useTokenList'
 
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy } = useRewardsApy()
@@ -43,11 +44,11 @@ defineOptions({
   name: 'BorrowPage',
 })
 
-const { borrowList, isEVKUpdating, isEscrowUpdating } = useVaults()
+const { borrowList, isEVaultUpdating, isEscrowUpdating } = useVaults()
 const { chainId } = useEulerAddresses()
 
 const isPricesReady = ref(false)
-const isLoading = computed(() => isEVKUpdating.value || isEscrowUpdating.value || !isPricesReady.value)
+const isLoading = computed(() => isEVaultUpdating.value || isEscrowUpdating.value || !isPricesReady.value)
 const { isSlow } = useSlowLoading(isLoading)
 const { enableEntityBranding } = useDeployConfig()
 const { entities } = useEulerLabels()
@@ -58,7 +59,7 @@ const activeBorrowList = computed(() =>
     if (!showAllLabelEntries.value && isVaultNotExplorableBorrow(pair.borrow.address)) return false
     if (!showAllLabelEntries.value && isVaultNotExplorableBorrow(pair.collateral.address)) return false
     if (isOpDisabled(pair.borrow, OP_BORROW)) return false
-    // Securitize collateral has no EVK hook flags — only check EVK collateral.
+    // Securitize collateral has no EVault hook flags — only check EVault collateral.
     // Fresh-deposit needs OP_DEPOSIT, savings-sourced needs OP_TRANSFER.
     // Hide only when BOTH paths are blocked; the form guards the active path.
     if (!isSecuritizeBorrowPair(pair) && isOpDisabled(pair.collateral, OP_DEPOSIT) && isOpDisabled(pair.collateral, OP_TRANSFER)) return false

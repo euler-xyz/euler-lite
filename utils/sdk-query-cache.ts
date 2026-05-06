@@ -1,17 +1,8 @@
-import { QueryClient } from '@tanstack/query-core'
-import type { BuildQueryFn, EulerSDKQueryName } from '@eulerxyz/euler-v2-sdk'
+import { QueryClient } from '@tanstack/vue-query'
+import { serializeQueryArgs, type BuildQueryFn, type EulerSDKQueryName } from '@eulerxyz/euler-v2-sdk'
 
 const SECOND = 1_000
 const MINUTE = 60 * SECOND
-
-const sdkQueryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: false,
-      refetchOnWindowFocus: false,
-    },
-  },
-})
 
 const STALE_TIMES: Partial<Record<EulerSDKQueryName, number>> = {
   queryDeployments: Infinity,
@@ -36,26 +27,21 @@ const STALE_TIMES: Partial<Record<EulerSDKQueryName, number>> = {
   queryPythUpdateFee: 10 * SECOND,
 }
 
-const serializeArg = (arg: unknown): unknown => {
-  if (typeof arg === 'bigint') return `bigint:${arg.toString()}`
-  if (typeof arg === 'function') return '[function]'
-  if (arg && typeof arg === 'object') {
-    const candidate = arg as { chain?: { id?: unknown } }
-    if (candidate.chain?.id !== undefined) {
-      return { clientChainId: candidate.chain.id }
-    }
-  }
-  return arg
-}
+export const sdkQueryClient = new QueryClient()
 
-export const sdkBuildQuery: BuildQueryFn = <T extends (...args: any[]) => Promise<any>>(
+export const sdkBuildQuery: BuildQueryFn = (
   queryName: string,
-  fn: T,
+  fn,
   _target: object,
-): T => {
-  const wrapped = (async (...args: Parameters<T>) => {
+) => {
+  const wrapped = (async (...args: Parameters<typeof fn>) => {
+    const serializedArgs = serializeQueryArgs(args)
+    if (serializedArgs === null) {
+      return fn(...args)
+    }
+
     const result = await sdkQueryClient.fetchQuery({
-      queryKey: ['sdk', queryName, ...args.map(serializeArg)],
+      queryKey: ['sdk', queryName, serializedArgs],
       queryFn: async () => {
         const value = await fn(...args)
         return value === undefined ? null : value
@@ -64,7 +50,7 @@ export const sdkBuildQuery: BuildQueryFn = <T extends (...args: any[]) => Promis
     })
 
     return result === null ? undefined : result
-  }) as T
+  }) as typeof fn
 
   return wrapped
 }

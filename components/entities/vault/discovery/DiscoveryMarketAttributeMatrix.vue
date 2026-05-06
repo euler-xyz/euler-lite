@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isEVault } from '@eulerxyz/euler-v2-sdk'
 import {
   type AttributeMatrixData,
   type AttributeCell,
@@ -8,6 +9,7 @@ import {
   type VaultApyCacheEntry,
   buildAttributeRowCells,
   isVaultType,
+  getAttributeRowColor,
 } from '~/utils/discoveryCalculations'
 import { getEntitiesByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
@@ -42,7 +44,7 @@ const attributeColumns = computed<AttributeColumn[]>(() =>
 )
 
 const onHooksClick = (vault: AttributeMatrixColumn) => {
-  if (!isVaultType(vault.vault)) return
+  if (!isEVault(vault.vault)) return
   modal.open(VaultHooksInfoModal, { props: { vault: vault.vault } })
 }
 

@@ -175,7 +175,7 @@ Located in `services/pricing/priceProvider.ts`:
 
 - **`getAssetUsdPrice(vault)`** - Routes based on vault type:
   - Earn/Escrow/Securitize vaults: Returns `assetPriceInfo` directly (already in USD)
-  - Regular EVK vaults: Returns `oraclePrice × uoaRate`
+  - Regular EVaults: Returns `oraclePrice × uoaRate`
 
 - **`getCollateralUsdPrice(liabilityVault, collateralVault)`** - Returns collateral price in USD using the liability vault's oracle and UoA rate
 
@@ -187,7 +187,7 @@ Located in `services/pricing/priceProvider.ts`:
 - **`getCollateralUsdValueOrZero(amount, liabilityVault, collateralVault)`** - Same convenience wrapper for collateral values.
 - **`formatAssetValue(amount, vault)`** - Formats value for UI display with price availability flag
 
-## USD Price Calculation for Regular EVK Vault
+## USD Price Calculation for Regular EVault
 
 ```typescript
 getAssetUsdPrice(vault, source, backend):
@@ -234,7 +234,7 @@ getCollateralUsdPrice(liabilityVault, collateralVault, source, backend):
 
 ## EulerRouter Oracle Configuration
 
-Most EVK vaults use an EulerRouter as their oracle. The router's `oracleDetailedInfo` contains the complete configuration for ALL pricing pairs the vault needs:
+Most EVaults use an EulerRouter as their oracle. The router's `oracleDetailedInfo` contains the complete configuration for ALL pricing pairs the vault needs:
 
 ```typescript
 type EulerRouterInfo = {
@@ -427,7 +427,7 @@ Located in `utils/pyth.ts`:
 **Utilities:**
 - `sumCallValues(calls)` - Sum fees from multiple calls
 
-**fetchVault() in `entities/vault/fetcher.ts`:**
+**Vault fetching in the SDK:**
 ```typescript
 // 1. Standard query first (fast path)
 const raw = await vaultLensContract.getVaultInfoFull(vaultAddress)
@@ -542,12 +542,9 @@ See [Intrinsic APY](./intrinsic-apy.md) for the full architecture and provider d
 
 ## Files
 
-- `services/pricing/priceProvider.ts` - Core pricing functions (Layers 1-3)
-- `entities/vault/` - Vault data models (split into focused modules)
-  - `entities/vault/fetcher.ts` - Vault fetching with Pyth simulation support
-  - `entities/vault/pricing.ts` - Vault pricing helpers
-  - `entities/vault/types.ts` - Vault type definitions
-  - `entities/vault/utils.ts` - Type guards (`isEarnVault`, `isEscrowVault`, etc.)
+- `services/pricing/priceProvider.ts` - UI-edge pricing functions for SDK vault instances
+- `@eulerxyz/euler-v2-sdk` - SDK-owned vault entities and vault/account fetch services
+- `utils/vault/` - Lite-only vault presentation helpers (APY, LTV, collateral exposure, categorization)
 - `entities/oracle.ts` - Oracle decoding and Pyth feed collection (EulerRouter, CrossAdapter, PythOracle)
 - `composables/useEulerAccount.ts` - Portfolio/account loading with Pyth simulation for borrow positions
 - `composables/useIntrinsicApy.ts` - Intrinsic APY orchestrator (multi-provider, address-based lookup)

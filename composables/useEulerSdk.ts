@@ -2,9 +2,10 @@ import { buildEulerSDK, createPythPlugin } from '@eulerxyz/euler-v2-sdk'
 import type { EulerSDK } from '@eulerxyz/euler-v2-sdk'
 import { sdkBuildQuery } from '~/utils/sdk-query-cache'
 
-let sdkInstance: EulerSDK | undefined
-let sdkPromise: Promise<EulerSDK> | undefined
-let sdkKey: string | undefined
+type SdkBuild = { key: string, promise?: Promise<EulerSDK> }
+
+let sdkInstance: { key: string, sdk: EulerSDK } | undefined
+let sdkBuild: SdkBuild | undefined
 
 const buildRpcUrls = (): Record<number, string> => {
   const { allowedChainIds } = useEulerAddresses()
@@ -29,24 +30,32 @@ export const getEulerSdk = async (): Promise<EulerSDK> => {
   const rpcUrls = buildRpcUrls()
   const nextKey = getSdkKey(rpcUrls)
 
-  if (sdkInstance && sdkKey === nextKey) return sdkInstance
-  if (sdkPromise && sdkKey === nextKey) return sdkPromise
+  if (sdkInstance?.key === nextKey) return sdkInstance.sdk
+  if (sdkBuild?.key === nextKey && sdkBuild.promise) return sdkBuild.promise
 
-  const { SWAP_API_URL } = useEulerConfig()
-  sdkKey = nextKey
-  sdkPromise = buildEulerSDK({
+  const buildKey = nextKey
+  const buildState: SdkBuild = { key: buildKey }
+  const buildPromise = buildEulerSDK({
     rpcUrls,
     buildQuery: sdkBuildQuery,
     plugins: [createPythPlugin({ buildQuery: sdkBuildQuery })],
-    swapServiceConfig: {
-      swapApiUrl: SWAP_API_URL || '/api/swap',
-    },
   }).then((sdk) => {
-    sdkInstance = sdk
+    if (sdkBuild === buildState) {
+      sdkInstance = { key: buildKey, sdk }
+      sdkBuild = undefined
+    }
     return sdk
   })
+    .catch((error) => {
+      if (sdkBuild === buildState) {
+        sdkBuild = undefined
+      }
+      throw error
+    })
 
-  return sdkPromise
+  buildState.promise = buildPromise
+  sdkBuild = buildState
+  return buildPromise
 }
 
 export const useEulerSdk = () => ({

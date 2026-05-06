@@ -1,8 +1,5 @@
-import type { Ref, ComputedRef } from 'vue'
-import { formatUnits, type Address } from 'viem'
-import type { EVault, SecuritizeCollateralVault } from '~/entities/vault'
+import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getAssetUsdValue } from '~/services/pricing/priceProvider'
-import type { AccountBorrowPosition } from '~/entities/account'
 import { SwapperMode } from '~/entities/swap'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
 import { valueToNano } from '~/utils/crypto-utils'
@@ -10,6 +7,8 @@ import { trimTrailingZeros } from '~/utils/string-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { amountToPercent, percentToAmountNano } from '~/utils/repayUtils'
 import { createRaceGuard } from '~/utils/race-guard'
+import { type Address, formatUnits } from 'viem'
+import type { Ref, ComputedRef } from 'vue'
 
 interface QuoteAccounts {
   accountIn: Address
@@ -17,8 +16,8 @@ interface QuoteAccounts {
 }
 
 export interface UseRepaySwapCoreOptions {
-  position: Ref<AccountBorrowPosition | undefined>
-  borrowVault: ComputedRef<AccountBorrowPosition['borrow'] | undefined>
+  position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
+  borrowVault: ComputedRef<EVault | undefined>
   sourceVault: Ref<EVault | undefined>
   sourceBalance: ComputedRef<bigint>
   formTab: Ref<string>

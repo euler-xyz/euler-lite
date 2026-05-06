@@ -7,7 +7,7 @@ import { vaultBorrowAbi, vaultRedeemAbi, vaultTransferFromMaxAbi, vaultWithdrawA
 import { SaHooksBuilder } from '~/entities/saHooksSDK'
 import { swapperAbi, swapVerifierAbi, transferFromSenderAbi } from '~/entities/euler/abis'
 import { convertSaHooksToEVCCalls, type EVCCall } from '~/utils/evc-converter'
-import { getNewSubAccount } from '~/entities/account'
+import { getNewSubAccount } from '~/composables/useSubAccounts'
 import { buildCollateralCleanupCalls } from '~/utils/collateral-cleanup'
 import type { TxPlan } from '~/entities/txPlan'
 import { type SwapApiQuote, SwapperMode, SwapVerificationType } from '~/entities/swap'

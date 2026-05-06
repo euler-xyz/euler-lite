@@ -1,17 +1,13 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import { FixedPoint } from '~/utils/fixed-point'
-import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal } from '#components'
-import { useToast } from '~/components/ui/composables/useToast'
-import { type BorrowVaultPair, getNetAPY, getProjectedRates, type VaultAsset } from '~/entities/vault'
+import { getNetAPY, getProjectedRates } from '~/utils/vault/apy'
+import type { VaultAsset } from '~/types/asset'
 import { getHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
 import { isOpDisabled, OP_BORROW } from '~/utils/vault-hooks'
 import { getAssetUsdValueOrZero, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatio } from '~/services/pricing/priceProvider'
 import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
-import type { AccountBorrowPosition } from '~/entities/account'
+import type { PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import type { TxPlan } from '~/entities/txPlan'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
@@ -19,6 +15,12 @@ import { ltvToPercent, nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { createRaceGuard } from '~/utils/race-guard'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { useModal } from '~/components/ui/composables/useModal'
+import { useToast } from '~/components/ui/composables/useToast'
+import { useAccount } from '@wagmi/vue'
+import type { BorrowVaultPair } from '~/types/borrow-pair'
+import { OperationReviewModal } from '#components'
+import { FixedPoint } from '~/utils/fixed-point'
 
 const router = useRouter()
 const _route = useRoute()
@@ -54,7 +56,7 @@ const pair: Ref<BorrowVaultPair | undefined> = ref()
 const health = ref()
 const netAPY = ref()
 const liquidationPrice = ref()
-const position: Ref<AccountBorrowPosition | undefined> = ref()
+const position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined> = ref()
 const userLTV = ref(0)
 const currentNetAPY = ref<number>()
 const currentHealth = ref<number>()
@@ -122,7 +124,7 @@ const borrowWarnings = computed(() => {
     getBorrowCapWarning(borrowVault.value),
   ]
 })
-const pairAssets = computed(() => [collateralVault.value?.asset, borrowVault.value?.asset])
+const pairAssets = computed<VaultAsset[]>(() => [collateralVault.value?.asset, borrowVault.value?.asset].filter((asset): asset is VaultAsset => !!asset))
 const pairAssetsLabel = usePositionPairLabel(position)
 const priceFixed = computed(() => {
   const collateralPrice = borrowVault.value && collateralVault.value
@@ -169,9 +171,18 @@ const load = async () => {
     isLoading.value = false
     return
   }
-  const collateralAddress = position.value.collateral.address
-  const borrowAddress = position.value.borrow.address
-  userLTV.value = Number(formatNumber(nanoToValue(position.value.userLTV, 18)))
+  const collateralAddress = position.value.collateralVault?.address
+  const borrowAddress = position.value.borrowVault?.address
+  if (!collateralAddress || !borrowAddress) {
+    isLoading.value = false
+    return
+  }
+  const positionLtv = position.value.userLTV ?? position.value.currentLTV
+  if (positionLtv === undefined) {
+    isLoading.value = false
+    return
+  }
+  userLTV.value = Number(formatNumber(nanoToValue(positionLtv, 18)))
   currentUserLTV.value = userLTV.value
   ltv.value = userLTV.value
   try {
@@ -185,7 +196,7 @@ const load = async () => {
     // Fetch fresh underlying asset balance for this specific vault
     await updateBalance()
     // Compute current position values for before→after display
-    const currentLtvFloat = nanoToValue(position.value!.userLTV, 18)
+    const currentLtvFloat = nanoToValue(positionLtv, 18)
     currentHealth.value = currentLtvFloat <= 0
       ? Infinity
       : ltvToPercent(pair.value!.ltv.liquidationLTV) / currentLtvFloat
@@ -240,8 +251,8 @@ const submit = async () => {
         position.value?.subAccount,
         {
           includePermit2Call: false,
-          enabledCollaterals: position.value?.collaterals,
-          enabledController: position.value?.borrow.address,
+          enabledCollaterals: position.value ? position.value.collateralVaults : undefined,
+          enabledController: borrowVault.value.address,
           acceptedCollaterals: borrowVault.value.collaterals.filter(c => c.borrowLTV > 0).map(c => c.address),
         },
       )
@@ -292,8 +303,8 @@ const send = async () => {
       position.value.subAccount,
       {
         includePermit2Call: true,
-        enabledCollaterals: position.value?.collaterals,
-        enabledController: position.value?.borrow.address,
+        enabledCollaterals: position.value.collateralVaults,
+        enabledController: borrowVault.value.address,
         acceptedCollaterals: borrowVault.value.collaterals.filter(c => c.borrowLTV > 0).map(c => c.address),
       },
     )
@@ -345,7 +356,7 @@ const onBorrowInput = async () => {
   if (!position.value) return
   const totalCollateral = getTotalCollateralValue(position.value)
   if (!totalCollateral || totalCollateral <= 0) return
-  const totalBorrow = nanoToValue(position.value.borrowed, position.value.borrow.shares.decimals || 18) + (+borrowAmount.value || 0)
+  const totalBorrow = nanoToValue(position.value.borrowed, borrowVault.value?.shares.decimals || 18) + (+borrowAmount.value || 0)
   ltv.value = +((totalBorrow / totalCollateral) * 100).toFixed(2)
 }
 const onLtvInput = () => {
@@ -459,7 +470,7 @@ watch([collateralAmount, borrowAmount], async () => {
           v-if="collateralVault && borrowVault"
           :vault="collateralVault"
           :pair-vault="borrowVault"
-          :assets="pairAssets as VaultAsset[]"
+          :assets="pairAssets"
           :assets-label="pairAssetsLabel"
           size="large"
         />

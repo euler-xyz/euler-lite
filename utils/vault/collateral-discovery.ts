@@ -1,9 +1,9 @@
 import { getAddress, zeroAddress } from 'viem'
-import type { EVault } from './types'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { isLiveCollateralEdge } from './ltv'
 
 /**
- * Pure helper: from a list of EVK vaults, return the unique set of
+ * Pure helper: from a list of EVaults, return the unique set of
  * collateral addresses that are referenced by *live* edges but are NOT
  * present in the registry yet.
  *
@@ -18,11 +18,11 @@ import { isLiveCollateralEdge } from './ltv'
  * testable in isolation from the reactive registry.
  */
 export const extractUnresolvedCollateralAddresses = (
-  evkVaults: readonly EVault[],
+  eVaults: readonly EVault[],
   isInRegistry: (address: string) => boolean,
 ): string[] => {
   const unresolved = new Set<string>()
-  evkVaults.forEach((vault) => {
+  eVaults.forEach((vault) => {
     vault.collaterals.forEach((ltv) => {
       if (!isLiveCollateralEdge(ltv)) return
       const addr = ltv.address
