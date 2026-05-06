@@ -110,6 +110,7 @@ const augmentWithCollateralGraph = (
   groups: MarketGroup[],
   allVaults: AnyVault[],
   isVaultGovernorVerified: (vault: Vault | SecuritizeVault) => boolean,
+  dataReady: boolean,
 ): MarketGroup[] => {
   const vaultMap = new Map<string, AnyVault>()
   for (const vault of allVaults) {
@@ -141,7 +142,10 @@ const augmentWithCollateralGraph = (
           // of any declared product entity is the curator wiring in a vault
           // they don't actually run — surface it in the market graph too so
           // the gap is visible from discovery, not just inside one pair card.
-          if (hasGovernorAdmin(externalVault) && !isVaultGovernorVerified(externalVault) && !seenUnknown.has(normalized)) {
+          // Suppress until labels and the vault registry are both ready —
+          // otherwise verifiedVaultAddresses is empty / partial and every
+          // external briefly looks unknown.
+          if (dataReady && hasGovernorAdmin(externalVault) && !isVaultGovernorVerified(externalVault) && !seenUnknown.has(normalized)) {
             seenUnknown.add(normalized)
             unknownCollateral.push(normalized)
           }
@@ -154,7 +158,11 @@ const augmentWithCollateralGraph = (
           // triggers a lazy fetch). Only flag as unknown when no label
           // recognises the address either; otherwise silently drop it so the
           // graph doesn't churn between "unknown placeholder" and "deprecated
-          // external" as the registry fills in.
+          // external" as the registry fills in. Equally, suppress entirely
+          // until labels + registry are ready — otherwise truly known-by-
+          // label vaults that just haven't been hydrated yet briefly render
+          // as `0x...` placeholders for the first second of page load.
+          if (!dataReady) continue
           const knownByLabels = isVaultDeprecated(colAddr) || getProductKeyByVault(colAddr) !== undefined
           if (knownByLabels) continue
           if (!seenUnknown.has(normalized)) {
@@ -358,8 +366,8 @@ const resolveGroupTVL = async (group: MarketGroup): Promise<MarketGroup> => {
 
 export const useMarketGroups = () => {
   const { getAll } = useVaultRegistry()
-  const { products, entities } = useEulerLabels()
-  const { isVaultGovernorVerified } = useVaults()
+  const { products, entities, isReady: labelsReady } = useEulerLabels()
+  const { isVaultGovernorVerified, isCollateralResolved } = useVaults()
   const showAllLabelEntries = useShowAllLabelEntries()
 
   /** Every loaded vault, including non-explorable ones (used for collateral lookups) */
@@ -383,13 +391,19 @@ export const useMarketGroups = () => {
 
     // Step 2: Augment with collateral graph — pass the full registry so active
     // LTVs targeting non-explorable vaults still resolve as externalCollateral
-    // instead of triggering a missing-collateral warning.
+    // instead of triggering a missing-collateral warning. dataReady gates the
+    // unknown-collateral classification on labels AND the unresolved-collateral
+    // sweep so lazy collateral references that just haven't been fetched yet
+    // don't briefly render as `0x...` placeholders. isReady on its own flips
+    // after the server snapshot lands — too early, since the snapshot doesn't
+    // include lazy collateral references.
     const lookupVaults = registryVaults.value
-    const augmented = augmentWithCollateralGraph(productGroups, lookupVaults, isVaultGovernorVerified)
+    const ready = labelsReady.value && isCollateralResolved.value
+    const augmented = augmentWithCollateralGraph(productGroups, lookupVaults, isVaultGovernorVerified, ready)
 
     // Step 3: Orphan clustering
     const orphanGroups = clusterOrphans(vaults, assignedAddresses)
-    const augmentedOrphans = augmentWithCollateralGraph(orphanGroups, lookupVaults, isVaultGovernorVerified)
+    const augmentedOrphans = augmentWithCollateralGraph(orphanGroups, lookupVaults, isVaultGovernorVerified, ready)
 
     return [...augmented, ...augmentedOrphans]
   })
@@ -511,8 +525,12 @@ export const useMarketGroups = () => {
       metrics: computeMetricsSync(memberVaults),
     }
 
-    // Augment with collateral graph using registry vaults + fetched vaults
-    const [augmented] = augmentWithCollateralGraph([group], [...registryVaults.value, ...memberVaults], isVaultGovernorVerified)
+    // The direct market page waits for labels and the unresolved-collateral
+    // sweep before calling this path. Keep the readiness value explicit here
+    // so unknown-collateral classification is still suppressed if this helper
+    // is ever called earlier from another route.
+    const ready = labelsReady.value && isCollateralResolved.value
+    const [augmented] = augmentWithCollateralGraph([group], [...registryVaults.value, ...memberVaults], isVaultGovernorVerified, ready)
 
     try {
       return await resolveGroupTVL(augmented)

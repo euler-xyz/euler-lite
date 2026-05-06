@@ -20,6 +20,7 @@ import { createRaceGuard } from '~/utils/race-guard'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
+import { getRepaySwapReviewInputAmount } from '~/composables/repay/reviewAmount'
 import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
 import { findBlockingDisabledOp, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
@@ -716,9 +717,12 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       if (!ok) return
 
       // For review modal: show input token as primary asset, borrow asset as swap target
-      const inputDisplay = direction.value === SwapperMode.TARGET_DEBT && amount.value
-        ? amount.value
-        : (amount.value || '0')
+      const inputDisplay = getRepaySwapReviewInputAmount({
+        amount: amount.value,
+        quote: quotes.selectedQuote.value,
+        sourceDecimals: selectedAsset.value.decimals,
+        swapperMode: direction.value,
+      })
 
       const isNativeRepay = isNativeCurrencyAddress(selectedAsset.value.address)
       const reviewAsset = isNativeRepay

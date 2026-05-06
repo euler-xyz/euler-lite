@@ -11,7 +11,7 @@ import { isVaultFeatured, isVaultKeyring, getEntitiesByVault } from '~/utils/eul
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { useModal } from '~/components/ui/composables/useModal'
-import { VaultBorrowApyModal, VaultMaxRoeModal, VaultNetApyPairModal } from '#components'
+import { VaultBorrowApyModal, VaultMaxRoeModal, VaultNetApyPairModal, VaultSupplyApyModal } from '#components'
 
 const { pair } = defineProps<{ pair: AnyBorrowVaultPair }>()
 const { enableEntityBranding } = useDeployConfig()
@@ -186,6 +186,22 @@ const onBorrowInfoIconClick = (event: MouseEvent) => {
   })
 }
 
+const onSupplyInfoIconClick = (event: MouseEvent) => {
+  event.preventDefault()
+  event.stopPropagation()
+  const baseSupply = 'interestRateInfo' in pair.collateral
+    ? nanoToValue(pair.collateral.interestRateInfo.supplyAPY, 25)
+    : 0
+  modal.open(VaultSupplyApyModal, {
+    props: {
+      lendingAPY: baseSupply,
+      intrinsicAPY: getIntrinsicApy(pair.collateral.asset.address),
+      intrinsicApyInfo: getIntrinsicApyInfo(pair.collateral.asset.address),
+      campaigns: getSupplyRewardCampaigns(pair.collateral.address),
+    },
+  })
+}
+
 const onNetApyInfoIconClick = (event: MouseEvent) => {
   event.preventDefault()
   event.stopPropagation()
@@ -238,15 +254,15 @@ const linkPath = computed(() => ({
     :to="linkPath"
     class="grid gap-x-16 mobile:block no-underline text-content-primary bg-surface rounded-12 border border-line-default shadow-card hover:shadow-card-hover hover:border-line-emphasis transition-all"
     :class="[
-      enableEntityBranding ? '' : 'grid-cols-5',
+      enableEntityBranding ? '' : 'grid-cols-6',
       (isGeoBlocked || isPairEffectivelyBlocked) ? 'opacity-50' : '',
     ]"
-    :style="enableEntityBranding ? { gridTemplateColumns: 'repeat(6, 1fr)' } : undefined"
+    :style="enableEntityBranding ? { gridTemplateColumns: 'repeat(7, 1fr)' } : undefined"
   >
     <!-- Header: contents on desktop (children become grid items), flex on mobile -->
     <div class="contents mobile:!flex mobile:py-16 mobile:px-16 mobile:pb-12 mobile:border-b mobile:border-line-subtle">
       <div
-        :class="enableEntityBranding ? 'col-span-4' : 'col-span-3'"
+        :class="enableEntityBranding ? 'col-span-5' : 'col-span-4'"
         class="flex pl-16 py-16 pb-12 mobile:!p-0 mobile:flex-1 mobile:min-w-0 mobile:items-center"
       >
         <AssetAvatar
@@ -410,6 +426,25 @@ const linkPath = computed(() => ({
           {{ liquidityDisplay }}
         </div>
       </div>
+      <div class="py-12 pb-12 text-center mobile:!hidden">
+        <div class="text-content-tertiary text-p3 mb-4 flex items-center justify-center gap-4">
+          Supply APY
+          <SvgIcon
+            class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+            name="info-circle"
+            @click="onSupplyInfoIconClick"
+          />
+        </div>
+        <div class="text-p2 text-content-primary flex items-center justify-center">
+          <SvgIcon
+            v-if="hasSupplyRewards(pair.collateral.address)"
+            class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
+            name="sparks"
+            @click="onSupplyInfoIconClick"
+          />
+          {{ formatNumber(supplyApyWithRewards, 2, 2) }}%
+        </div>
+      </div>
       <div class="py-12 pb-12 text-center mobile:!p-0">
         <div class="text-content-tertiary text-p3 mb-4 flex items-center justify-center gap-4">
           Net APY
@@ -503,6 +538,29 @@ const linkPath = computed(() => ({
         <div class="flex gap-8 justify-end items-center text-right flex-1">
           <div class="text-p2 text-content-primary">
             {{ compactNumber(maxLTV, 2, 2) }}%
+          </div>
+        </div>
+      </div>
+      <div class="flex w-full justify-between">
+        <div class="flex-1">
+          <div class="text-content-tertiary text-p3 flex items-center gap-4">
+            Supply APY
+            <SvgIcon
+              class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+              name="info-circle"
+              @click="onSupplyInfoIconClick"
+            />
+          </div>
+        </div>
+        <div class="flex gap-8 justify-end items-center text-right flex-1">
+          <SvgIcon
+            v-if="hasSupplyRewards(pair.collateral.address)"
+            class="!w-20 !h-20 text-accent-500 cursor-pointer"
+            name="sparks"
+            @click="onSupplyInfoIconClick"
+          />
+          <div class="text-p2 text-content-primary">
+            {{ formatNumber(supplyApyWithRewards, 2, 2) }}%
           </div>
         </div>
       </div>

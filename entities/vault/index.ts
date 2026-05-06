@@ -93,6 +93,7 @@ export {
   convertAssetsToShares,
   previewWithdraw,
   getMaxWithdraw,
+  getCashLimitedWithdrawAmount,
   getUtilization,
   getVaultUtilization,
   getSupplyCapPercentage,

@@ -493,8 +493,8 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                   && selectedHeader?.axis === 'row'
                   ? 'text-accent-500 !bg-accent-500/10'
                   : isRowHighlighted(row.address)
-                    ? (row.category === 'external' ? 'text-content-tertiary !bg-white/[0.06]' : 'text-content-primary !bg-white/[0.06]')
-                    : (row.category === 'external'
+                    ? (row.category !== 'borrowable' ? 'text-content-tertiary !bg-white/[0.06]' : 'text-content-primary !bg-white/[0.06]')
+                    : (row.category !== 'borrowable'
                       ? 'text-content-tertiary hover:bg-white/[0.04]'
                       : 'text-content-primary hover:bg-white/[0.04]')
               "

@@ -5,7 +5,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
-import { isEVKVault, type Vault } from '~/entities/vault'
+import { getCashLimitedWithdrawAmount, isEVKVault, type Vault } from '~/entities/vault'
 import { getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
@@ -16,6 +16,8 @@ import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { useRepaySwapCore } from '~/composables/repay/useRepaySwapCore'
 import { useRepaySwapDetails } from '~/composables/repay/useRepaySwapDetails'
 import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics'
+import { getRepaySwapReviewInputAmount } from '~/composables/repay/reviewAmount'
+import { adjustForInterest } from '~/composables/useEulerOperations/helpers'
 import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
@@ -68,7 +70,10 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   // --- Source vault state ---
   const sourceVault: Ref<Vault | undefined> = ref()
   const sourceAssets = ref(0n)
-  const sourceBalance = computed(() => sourceAssets.value)
+  const sourceBalance = computed(() => getCashLimitedWithdrawAmount(
+    sourceAssets.value,
+    sourceVault.value,
+  ))
   const debtBalance = computed(() => position.value?.borrowed || 0n)
 
   const priceInvert = usePriceInvert(
@@ -262,12 +267,15 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   // Uses amountInMax (slippage-padded) when available so the user sees an
   // insufficient-balance error before hitting an on-chain revert.
   const requiredInput = computed(() => {
-    if (core.isSameAsset.value) return core.spent.value ?? 0n
+    if (core.isSameAsset.value) {
+      const spent = core.spent.value ?? 0n
+      return isEffectivelyFullRepay.value ? adjustForInterest(spent) : spent
+    }
     const q = core.quotes.selectedQuote.value
     if (!q) return 0n
     return getSwapInputAmount(q, core.direction.value)
   })
-  const isInsufficientSource = computed(() => requiredInput.value > 0n && requiredInput.value > sourceBalance.value)
+  const isInsufficientSource = computed(() => requiredInput.value > 0n && requiredInput.value > sourceAssets.value)
   const isInsufficientVaultLiquidity = computed(() =>
     requiredInput.value > 0n && requiredInput.value > (sourceVault.value?.totalCash || 0n),
   )
@@ -434,11 +442,18 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
         if (!ok) return
       }
 
+      const inputDisplay = getRepaySwapReviewInputAmount({
+        amount: core.amount.value,
+        quote: core.quotes.selectedQuote.value,
+        sourceDecimals: sourceVault.value.asset.decimals,
+        swapperMode: core.direction.value,
+      })
+
       modal.open(OperationReviewModal, {
         props: {
           type: 'repay',
           asset: sourceVault.value.asset,
-          amount: core.amount.value,
+          amount: inputDisplay,
           plan: plan.value || undefined,
           swapToAsset: !core.isSameAsset.value ? borrowVault.value.asset : undefined,
           swapToAmount: !core.isSameAsset.value ? core.debtAmount.value : undefined,
