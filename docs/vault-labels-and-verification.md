@@ -370,9 +370,8 @@ These labels appear in address fields across all vault overview types (EVK, Earn
 | File | Purpose |
 |------|---------|
 | `entities/euler/labels.ts` | TypeScript type definitions for all label types |
-| `utils/eulerLabelsState.ts` | Reactive state stores (products, entities, points, earn vaults) |
-| `utils/eulerLabelsUtils.ts` | Normalization, extraction, lookup, and helper functions |
-| `composables/useEulerLabels.ts` | Label fetching, caching, and reactive composables |
+| `utils/eulerLabelsUtils.ts` | Lookup and helper functions backed by the current SDK label snapshot |
+| `composables/useEulerLabels.ts` | SDK-backed label loading and reactive composables |
 | `composables/useVaultRegistry.ts` | Vault registry with type detection and unknown resolution |
 | `composables/useGeoBlock.ts` | Geo-blocking logic using label block/restricted fields |
 

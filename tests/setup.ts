@@ -20,7 +20,7 @@ if (!g.defineNitroPlugin) {
 }
 
 // Vue reactivity primitives Nuxt auto-imports. Required by any app/ module
-// loaded from a test (composables, entities, utils/eulerLabelsState, etc.)
+// loaded from a test (composables, entities, utils, etc.)
 const vueGlobals: Record<string, unknown> = {
   ref,
   shallowRef,

@@ -509,9 +509,8 @@ Changes to `products.json`, `earn-vaults.json`, `{chainId}/assets.json`, or `all
 | `server/middleware/cors.ts` | Strips client `x-country-code`, derives authoritative value from `CF-IPCountry`, emits as response header |
 | `server/middleware/geo-gate.ts` | Server-side sanctioned-country block; fail-closed on unknown country in prod |
 | `composables/useGeoBlock.ts` | Core blocking logic, `isVaultBlockedByCountry`, `isVaultRestrictedByCountry`, `isAssetBlockedByCountry`, `isAssetRestrictedByCountry`, `getVaultTags`; `AssetLike` type |
-| `composables/useEulerLabels.ts` | Label fetching and parsing, including asset address map + compiled `assetPatternRules` |
-| `utils/eulerLabelsUtils.ts` | Getter helpers `getVaultBlock`, `getEarnVaultBlock`, `getVaultRestricted`, `getEarnVaultRestricted`, `getAssetBlock`, `getAssetRestricted` |
-| `utils/eulerLabelsState.ts` | Reactive state: `assetBlocks`, `assetRestrictions`, `assetPatternRules`; `CompiledPatternRule` type |
+| `composables/useEulerLabels.ts` | SDK-backed label loading and current label snapshot |
+| `utils/eulerLabelsUtils.ts` | Getter helpers `getVaultBlock`, `getEarnVaultBlock`, `getVaultRestricted`, `getEarnVaultRestricted`, `getAssetBlock`, `getAssetRestricted`, `getAssetPatternRules` |
 | `server/api/labels/[file].get.ts` | Labels proxy. Unions `{chainId}/assets.json` with `all/assets.json`. Validates `symbolRegex` / `nameRegex` (compile check + 512-char cap). `refreshLabelFile(scope, file)` where `scope: number \| 'all'` |
 | `server/plugins/warm-cache.ts` | Warms `all/assets.json` once globally plus per-chain label files |
 | `entities/constants.ts` | `SANCTIONED_COUNTRIES`, `COUNTRY_GROUPS` (EU/EEA/EFTA) |
