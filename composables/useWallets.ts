@@ -1,4 +1,5 @@
 import { type Address, getAddress, zeroAddress } from 'viem'
+import { useVaults } from '~/composables/useVaults'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { eulerUtilsLensABI } from '~/entities/euler/abis'
 import { erc20BalanceOfAbi } from '~/abis/erc20'

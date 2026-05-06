@@ -37,13 +37,8 @@ const isRamping = computed(() =>
 const modal = useModal()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, getLoopingRewardCampaigns, hasSupplyRewards, hasBorrowRewards, hasLoopingRewards } = useRewardsApy()
-const { borrowList } = useVaults()
 
-const borrowCount = computed(() => {
-  return borrowList.value.filter(p => p.borrow.address === borrowVault.value.address).length
-})
-
-const isBorrowable = computed(() => borrowCount.value > 0)
+const isBorrowable = computed(() => borrowVault.value.isBorrowable)
 const isRestricted = computed(() => isAnyVaultBlockedByCountry(collateralVault.value.address, borrowVault.value.address))
 const isDeprecated = computed(() => isVaultDeprecated(collateralVault.value.address) || isVaultDeprecated(borrowVault.value.address))
 
@@ -96,7 +91,7 @@ const onSupplyInfoIconClick = () => {
     props: {
       lendingAPY: baseSupplyApy.value,
       intrinsicAPY: intrinsicSupplyApy.value,
-      intrinsicApyInfo: getIntrinsicApyInfo(pair.collateral.asset.address),
+      intrinsicApyInfo: getIntrinsicApyInfo(collateralVault.value.asset.address),
       campaigns: supplyCampaignsForModal.value,
     },
   })
@@ -107,7 +102,7 @@ const onBorrowInfoIconClick = () => {
     props: {
       borrowingAPY: baseBorrowApy.value,
       intrinsicAPY: intrinsicBorrowApy.value,
-      intrinsicApyInfo: getIntrinsicApyInfo(pair.borrow.asset.address),
+      intrinsicApyInfo: getIntrinsicApyInfo(borrowVault.value.asset.address),
       campaigns: borrowCampaignsForModal.value,
     },
   })
@@ -230,7 +225,7 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
           </template>
           <span class="flex items-center gap-4">
             <SvgIcon
-              v-if="hasSupplyRewards(pair.collateral.address)"
+              v-if="hasSupplyRewards(collateralVault.address)"
               class="!w-20 !h-20 text-accent-500 cursor-pointer"
               name="sparks"
               @click="onSupplyInfoIconClick"
@@ -251,7 +246,7 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
           </template>
           <span class="flex items-center gap-4">
             <SvgIcon
-              v-if="hasBorrowRewards(pair.borrow.address, pair.collateral.address)"
+              v-if="hasBorrowRewards(borrowVault.address, collateralVault.address)"
               class="!w-20 !h-20 text-accent-500 cursor-pointer"
               name="sparks"
               @click="onBorrowInfoIconClick"

@@ -149,15 +149,44 @@ const metricRange = computed((): { min: number, max: number } => {
 
 // ── Oracle metric: per-cell adapter list + tooltip ────────────────────────────
 
+const getCollateralRouteBases = (
+  liability: EVault,
+  collateral: EVault | SecuritizeCollateralVault,
+) => {
+  if (!liability.unitOfAccount) return [collateral.address as Address]
+
+  const resolved = liability.oracle.resolvedVaults.find(resolvedVault =>
+    resolvedVault.vault.toLowerCase() === collateral.address.toLowerCase()
+    && resolvedVault.quote.toLowerCase() === liability.unitOfAccount!.address.toLowerCase(),
+  )
+
+  return [
+    resolved?.asset as Address | undefined,
+    collateral.address as Address,
+  ].filter((address): address is Address => Boolean(address))
+}
+
+const getCollateralOracleAdapters = (
+  liability: EVault,
+  collateral: EVault | SecuritizeCollateralVault,
+) => {
+  if (!liability.unitOfAccount) return []
+
+  for (const base of getCollateralRouteBases(liability, collateral)) {
+    const route = selectLeafAdaptersForPair(
+      liability.oracle.adapters,
+      base,
+      liability.unitOfAccount.address as Address,
+    )
+    if (route.length) return route
+  }
+
+  return []
+}
+
 const cellOracleAdapters = computed((): Map<string, OracleAdapterEntry[]> => {
   const result = new Map<string, OracleAdapterEntry[]>()
   if (props.dotMetric !== 'oracle') return result
-
-  // Skip the ERC4626 wrapper adapter for any address that already appears
-  // as a collateral row — the matrix already names the collateral, so the
-  // wrapper-to-underlying hop is noise in the cell.
-  const skipERC4626Bases = new Set<string>()
-  for (const row of props.matrix.rows) skipERC4626Bases.add(row.address.toLowerCase())
 
   for (const [colAddr, rowCells] of props.matrix.cells) {
     for (const [liabAddr] of rowCells) {
@@ -166,14 +195,7 @@ const cellOracleAdapters = computed((): Map<string, OracleAdapterEntry[]> => {
       if (!collateral || !liability) continue
       if (!isMatrixCompatibleVault(collateral)) continue
       if (!isEVault(liability) || !liability.oracle.adapters.length || !liability.unitOfAccount) continue
-      // The borrow vault's oracle resolves the collateral *vault* (eToken)
-      // address against its unit of account — not the collateral's underlying
-      // asset. Mirrors VaultOverviewBlockOracleAdapters' collateralVaults path.
-      const adapters = selectLeafAdaptersForPair(
-        liability.oracle.adapters,
-        collateral.address as Address,
-        liability.unitOfAccount.address as Address,
-      ).filter(adapter => !skipERC4626Bases.has(adapter.base.toLowerCase()))
+      const adapters = getCollateralOracleAdapters(liability, collateral)
       if (adapters.length) result.set(`${colAddr}:${liabAddr}`, adapters)
     }
   }

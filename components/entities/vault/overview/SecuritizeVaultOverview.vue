@@ -11,6 +11,7 @@ import { getSpecialAddressLabel } from '~/utils/special-addresses'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { formatNumber, compactNumber, formatUsdValue, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
+import { normalizeAddress } from '~/utils/normalizeAddress'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
 import { getAddress, type Address, maxUint256 } from 'viem'
@@ -64,7 +65,7 @@ const borrowMarkets = computed(() => {
   }> = []
 
   getEVaults().forEach((v) => {
-    const ltv = v.collaterals.find(l => l.address === vault.address && l.borrowLTV > 0)
+    const ltv = v.collaterals.find(l => normalizeAddress(l.address) === vaultAddress.value && l.borrowLTV > 0)
     if (ltv) {
       markets.push({ borrowVault: v, ltv })
     }
