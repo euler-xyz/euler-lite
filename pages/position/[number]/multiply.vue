@@ -453,7 +453,7 @@ const multiplyErrorText = computed(() => {
   if (!multiplyShortVault.value) {
     return null
   }
-  if (multiplyDebtAmountNano.value > 0n && (multiplyShortVault.value.supply || 0n) < multiplyDebtAmountNano.value) {
+  if (multiplyDebtAmountNano.value > 0n && (multiplyShortVault.value.totalCash || 0n) < multiplyDebtAmountNano.value) {
     return 'Not enough liquidity in the vault'
   }
   return null
@@ -638,6 +638,7 @@ const submitMultiply = async () => {
           plan: plan.value || undefined,
           swapToAsset: quote ? multiplyLongVault.value.asset : undefined,
           swapToAmount: reviewSwapToAmount,
+          swapMode: quote ? SwapperMode.EXACT_IN : undefined,
           subAccount,
           submittingLabel: 'Submitting...',
           onConfirm: async () => {

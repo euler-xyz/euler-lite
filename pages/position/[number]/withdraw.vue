@@ -2,7 +2,7 @@
 import { useAccount } from '@wagmi/vue'
 import { getAddress, type Address, zeroAddress } from 'viem'
 import { FixedPoint } from '~/utils/fixed-point'
-import type { Vault, VaultAsset } from '~/entities/vault'
+import { getCashLimitedWithdrawAmount, type Vault, type VaultAsset } from '~/entities/vault'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import {
@@ -40,10 +40,13 @@ const needsSwap = computed(() => {
   }
 })
 
+const cashLimitedCollateralAssets = () =>
+  getCashLimitedWithdrawAmount(form.collateralAssets.value, form.collateralVault.value)
+
 const form = useCollateralForm({
   mode: 'withdraw',
   needsSwap,
-  effectiveBalance: computed(() => form.collateralAssets.value),
+  effectiveBalance: computed(() => cashLimitedCollateralAssets()),
   effectiveAsset: computed(() => form.asset.value),
 
   computePriceFixed: (_pos, borrowVault, collateralVault) => {
@@ -71,6 +74,9 @@ const form = useCollateralForm({
     if (!form.position.value) return
     if (userLtvFixed.gte(FixedPoint.fromValue(form.position.value.liquidationLTV, 2))) {
       throw new Error('Not enough liquidity for the vault, LTV is too large')
+    }
+    if (cashLimitedCollateralAssets() < amountFixed.value) {
+      throw new Error('Not enough liquidity in vault')
     }
   },
 
@@ -136,6 +142,7 @@ const form = useCollateralForm({
   },
 })
 useOperationGuard(computed(() => [form.collateralVault.value?.address, form.borrowVault.value?.address].filter(Boolean)))
+const withdrawableCollateralAssets = computed(() => cashLimitedCollateralAssets())
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (form.isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
@@ -219,7 +226,7 @@ watch(selectedOutputAsset, () => {
               label="Withdraw amount"
               :asset="form.asset.value"
               :vault="(form.collateralVault.value as Vault)"
-              :balance="form.collateralAssets.value"
+              :balance="withdrawableCollateralAssets"
               maxable
             />
 

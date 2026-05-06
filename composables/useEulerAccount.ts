@@ -8,6 +8,7 @@ import { useAccountPortfolioMetrics } from './useAccountPortfolioMetrics'
 import type { EulerLensAddresses } from '~/composables/useEulerAddresses'
 import type { AccountBorrowPosition } from '~/entities/account'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
+import { createAddressRefreshCoordinator } from '~/utils/address-refresh-coordinator'
 import { fetchAccountPositions, type SubgraphPositionEntry } from '~/utils/subgraph'
 import { logWarn } from '~/utils/errorHandling'
 
@@ -32,7 +33,7 @@ const {
   finalizeRefreshCycle,
 } = useAccountPositions()
 
-let fetchInProgress = false
+const refreshCoordinator = createAddressRefreshCoordinator(() => positionGuard.next())
 
 const {
   totalSuppliedValue,
@@ -49,12 +50,12 @@ export const useEulerAccount = () => {
   const portfolioAddress = computed(() => normalizeAddressOrEmpty(spyAddress.value) || normalizeAddressOrEmpty(address.value))
 
   const updatePositions = async () => {
-    if (fetchInProgress) return
-    fetchInProgress = true
+    const targetAddress = portfolioAddress.value
+    const refreshToken = refreshCoordinator.begin(targetAddress)
+    if (!refreshToken) return
     try {
       beginRefreshCycle()
       const gen = positionGuard.current()
-      const targetAddress = portfolioAddress.value
       const { SUBGRAPH_URL } = useEulerConfig()
 
       // Fetch both borrow and deposit entries in a single subgraph query
@@ -88,7 +89,7 @@ export const useEulerAccount = () => {
       isDepositsLoaded.value = true
     }
     finally {
-      fetchInProgress = false
+      await refreshCoordinator.finish(refreshToken, updatePositions)
     }
   }
 
@@ -107,7 +108,7 @@ export const useEulerAccount = () => {
     if (newAddress !== oldAddress) {
       // Invalidate in-flight fetches so they discard stale results
       positionGuard.next()
-      fetchInProgress = false
+      refreshCoordinator.reset()
 
       // Clear stale data and reset loading state so UI shows loader
       clearPositions()
@@ -128,6 +129,7 @@ export const useEulerAccount = () => {
   // Clear stale positions and invalidate in-flight fetches on chain change
   watch(chainId, () => {
     positionGuard.next()
+    refreshCoordinator.reset()
     clearPositions()
     isPositionsLoaded.value = false
     isPositionsLoading.value = true
@@ -166,8 +168,8 @@ export const useEulerAccount = () => {
     lensAddresses: EulerLensAddresses,
     walletAddress: string,
   ) => {
-    if (fetchInProgress) return
-    fetchInProgress = true
+    const refreshToken = refreshCoordinator.begin(walletAddress)
+    if (!refreshToken) return
     try {
       beginRefreshCycle()
       const gen = positionGuard.current()
@@ -190,7 +192,7 @@ export const useEulerAccount = () => {
       isDepositsLoaded.value = true
     }
     finally {
-      fetchInProgress = false
+      await refreshCoordinator.finish(refreshToken, () => refreshAllPositions(lensAddresses, walletAddress))
     }
   }
 

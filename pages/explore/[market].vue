@@ -10,12 +10,14 @@ const route = useRoute()
 const marketKey = computed(() => route.params.market as string)
 
 const { marketGroups, isResolvingTVL, fetchMarketGroupOnDemand } = useMarketGroups()
-const { isEVKUpdating, isEarnUpdating, isSecuritizeUpdating, isEscrowUpdating } = useVaults()
+const { isEVKUpdating, isEarnUpdating, isSecuritizeUpdating, isEscrowUpdating, isCollateralResolved } = useVaults()
 
 const isVaultsLoading = computed(() =>
   isEVKUpdating.value || isEarnUpdating.value || isSecuritizeUpdating.value || isEscrowUpdating.value
   || isResolvingTVL.value,
 )
+
+const isOnDemandBlocked = computed(() => isVaultsLoading.value || !isCollateralResolved.value)
 
 // Regular market from pre-loaded groups
 const indexedMarket = computed(() =>
@@ -28,7 +30,7 @@ const isLoadingOnDemand = ref(false)
 let onDemandRunId = 0
 
 watch(
-  [indexedMarket, isVaultsLoading, marketKey],
+  [indexedMarket, isOnDemandBlocked, marketKey],
   async ([found, loading, key]) => {
     // If the market appeared in regular groups, clear on-demand data
     if (found) {
@@ -36,7 +38,7 @@ watch(
       return
     }
 
-    // Skip while vaults are still loading, or no key — keep stale data visible
+    // Skip while vault/collateral data is still loading, or no key — keep stale data visible
     if (loading || !key) return
 
     // Skip if already loaded for this key
@@ -46,7 +48,7 @@ watch(
     isLoadingOnDemand.value = true
     try {
       const result = await fetchMarketGroupOnDemand(key)
-      if (runId === onDemandRunId) {
+      if (runId === onDemandRunId && marketKey.value === key) {
         onDemandMarket.value = result
       }
     }
@@ -60,7 +62,9 @@ watch(
 )
 
 const market = computed(() => indexedMarket.value || onDemandMarket.value)
-const isLoading = computed(() => isVaultsLoading.value || isLoadingOnDemand.value)
+const isLoading = computed(() =>
+  isVaultsLoading.value || isLoadingOnDemand.value || (!market.value && !isCollateralResolved.value),
+)
 </script>
 
 <template>

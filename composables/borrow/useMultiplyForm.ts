@@ -81,14 +81,13 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     isMultiplyRestricted,
   } = options
 
-  const router = useRouter()
   const modal = useModal()
   const { error } = useToast()
   const { buildMultiplyPlan, executeTxPlan } = useEulerOperations()
-  const { address, isConnected } = useAccount()
-  const { refreshAllPositions, depositPositions } = useEulerAccount()
-  const { eulerLensAddresses } = useEulerAddresses()
+  const { isConnected } = useAccount()
+  const { depositPositions } = useEulerAccount()
   const { fetchSingleBalance } = useWallets()
+  const { finalizeTxAndRedirect } = useTxFinalization()
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
   const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
   const {
@@ -539,7 +538,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     if (multiplyBalance.value < valueToNano(multiplyInputAmount.value, multiplySupplyVault.value.asset.decimals)) {
       return 'Not enough balance'
     }
-    if (multiplyDebtAmountNano.value > 0n && (multiplyShortVault.value.supply || 0n) < multiplyDebtAmountNano.value) {
+    if (multiplyDebtAmountNano.value > 0n && (multiplyShortVault.value.totalCash || 0n) < multiplyDebtAmountNano.value) {
       return 'Not enough liquidity in the vault'
     }
     return null
@@ -815,6 +814,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           supplyingAmount: multiplyInputAmount.value,
           swapToAsset: quote ? multiplyLongVault.value.asset : undefined,
           swapToAmount: quote ? multiplyLongAmount.value : undefined,
+          swapMode: quote ? SwapperMode.EXACT_IN : undefined,
           subAccount,
           onConfirm: () => {
             setTimeout(() => {
@@ -839,11 +839,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       })
       multiplyPlan.value = plan
       await executeTxPlan(plan)
-      modal.close()
-      refreshAllPositions(eulerLensAddresses.value, address.value || '')
-      setTimeout(() => {
-        router.replace('/portfolio')
-      }, 400)
+      await finalizeTxAndRedirect()
     }
     catch (e) {
       logWarn('multiply/send', e)
