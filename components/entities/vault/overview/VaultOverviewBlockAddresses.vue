@@ -8,13 +8,7 @@ const { vault } = defineProps<{ vault: EVault }>()
 
 const { chainId } = useEulerAddresses()
 
-// "Borrowable" = the vault has at least one collateral configured to allow
-// borrowing. Read from the vault's own LTV table rather than `borrowList`
-// membership so unverified (off-label) borrow vaults still surface their
-// debt-token / fee-receiver / oracle addresses.
-const isBorrowable = computed(() =>
-  vault.collateralLTVs.some(ltv => ltv.borrowLTV > 0n),
-)
+const isBorrowable = computed(() => vault.isBorrowable)
 
 const interestRateModelAddress = computed(() =>
   vault.interestRateModel.address,

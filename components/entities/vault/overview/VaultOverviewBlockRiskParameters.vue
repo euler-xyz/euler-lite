@@ -15,16 +15,11 @@ const { vault } = defineProps<{ vault: EVault }>()
 const modal = useModal()
 
 const { client: rpcClient } = useRpcClient()
-const { borrowList } = useVaults()
 const { getVaultCategory } = useVaultRegistry()
 
 const shareTokenExchangeRate: Ref<bigint | undefined> = ref()
 
-const borrowCount = computed(() => {
-  return borrowList.value.filter(pair => pair.borrow.address === vault.address).length
-})
-
-const isBorrowable = computed(() => borrowCount.value > 0)
+const isBorrowable = computed(() => vault.isBorrowable)
 
 const supplyCapPercentageDisplay = computed(() => vault.caps.supplyCapUtilization)
 const borrowCapPercentageDisplay = computed(() => vault.caps.borrowCapUtilization)

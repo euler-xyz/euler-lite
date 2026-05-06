@@ -8,13 +8,13 @@ import { getProductByVault, getProductKeyByVault } from '~/utils/eulerLabelsUtil
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { autoLink } from '~/utils/autoLink'
+import { normalizeAddress } from '~/utils/normalizeAddress'
 
 const { vault } = defineProps<{ vault: EVault }>()
 const route = useRoute()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
-const { isVaultGovernorVerified } = useVaults()
-const { getEvkVaults } = useVaultRegistry()
+const { borrowList, isVaultGovernorVerified } = useVaults()
 
 const vaultAddress = computed(() => getAddress(vault.address))
 const product = useEulerProductOfVault(vaultAddress)
@@ -33,16 +33,9 @@ const isRestricted = computed(() => isVaultBlockedByCountry(vault.address))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
 const isGovernanceLimited = computed(() => product.isGovernanceLimited && isGovernorVerified.value)
 
-// Count how many EVK vaults reference this vault as a borrowable collateral.
-// Sources from the registry directly (not `borrowList`) so deep-linked
-// unverified pairs still report "Yes in N markets" — `borrowList` is filtered
-// to verified vaults for discovery views and would otherwise hide the
-// relationship even though we're literally rendering it. Mirrors the pattern
-// in SecuritizeVaultOverview.vue.
+// Count how many borrow pairs have this vault as collateral
 const collateralCount = computed(() => {
-  return getEvkVaults().filter(v => v.collateralLTVs.some(
-    ltv => ltv.collateral === vault.address && ltv.borrowLTV > 0n,
-  )).length
+  return borrowList.value.filter(pair => normalizeAddress(pair.collateral.address) === vaultAddress.value).length
 })
 
 // Count how many borrow pairs have this vault as the liability (borrow) side

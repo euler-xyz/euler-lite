@@ -31,13 +31,34 @@ const sourceVaults = computed(() => {
   return []
 })
 
-const skipERC4626Bases = computed(() => {
-  const bases = new Set<string>()
-  props.collateralVaults?.forEach((vault) => {
-    bases.add(vault.address.toLowerCase())
-  })
-  return bases
-})
+const getCollateralRouteBases = (vault: EVault, collateralVault: EVault | SecuritizeCollateralVault) => {
+  if (!vault.unitOfAccount) return [collateralVault.address as Address]
+
+  const resolved = vault.oracle.resolvedVaults.find(resolvedVault =>
+    resolvedVault.vault.toLowerCase() === collateralVault.address.toLowerCase()
+    && resolvedVault.quote.toLowerCase() === vault.unitOfAccount!.address.toLowerCase(),
+  )
+
+  return [
+    resolved?.asset as Address | undefined,
+    collateralVault.address as Address,
+  ].filter((address): address is Address => Boolean(address))
+}
+
+const getCollateralAdapters = (vault: EVault, collateralVault: EVault | SecuritizeCollateralVault) => {
+  if (!vault.unitOfAccount) return []
+
+  for (const base of getCollateralRouteBases(vault, collateralVault)) {
+    const route = selectLeafAdaptersForPair(
+      vault.oracle.adapters,
+      base,
+      vault.unitOfAccount.address as Address,
+    )
+    if (route.length) return route
+  }
+
+  return []
+}
 
 const adapters = computed(() => {
   const entries: OracleAdapterEntry[] = []
@@ -54,11 +75,7 @@ const adapters = computed(() => {
 
     if (props.collateralVaults?.length) {
       props.collateralVaults.forEach((collateralVault) => {
-        entries.push(...selectLeafAdaptersForPair(
-          vault.oracle.adapters,
-          collateralVault.address as Address,
-          vault.unitOfAccount!.address as Address,
-        ).filter(adapter => !skipERC4626Bases.value.has(adapter.base.toLowerCase())))
+        entries.push(...getCollateralAdapters(vault, collateralVault))
       })
     }
   })
