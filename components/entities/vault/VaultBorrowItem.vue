@@ -253,7 +253,7 @@ const linkPath = computed(() => ({
           :asset="[pair.collateral.asset, pair.borrow.asset]"
           size="40"
         />
-        <div class="flex-grow ml-12">
+        <div class="flex-grow min-w-0 ml-12">
           <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-8">
             <VaultDisplayName
               :name="pairName"
@@ -292,10 +292,20 @@ const linkPath = computed(() => ({
               Deprecated
             </span>
           </div>
-          <div class="text-h5 text-content-primary">
-            {{
-              [pair.collateral.asset.symbol, pair.borrow.asset.symbol].join("/")
-            }}
+          <div class="flex items-center gap-8 min-w-0">
+            <div class="text-h5 text-content-primary min-w-0">
+              {{
+                [pair.collateral.asset.symbol, pair.borrow.asset.symbol].join("/")
+              }}
+            </div>
+            <UiShareLinkButton
+              tag="span"
+              stop-propagation
+              class="!w-28 !h-28"
+              :path="`/borrow/${pair.collateral.address}/${pair.borrow.address}`"
+              :query="{ network: route.query.network }"
+              label="Copy pair link"
+            />
           </div>
         </div>
       </div>
