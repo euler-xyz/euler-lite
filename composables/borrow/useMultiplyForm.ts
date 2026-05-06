@@ -87,7 +87,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const { error } = useToast()
   const { buildMultiplyPlan, executeTxPlan } = useEulerOperations()
   const { isConnected } = useAccount()
-  const { depositPositions } = useEulerAccount()
+  const { depositPositions, refreshAllPositions } = useEulerAccount()
+  const { eulerLensAddresses } = useEulerAddresses()
   const { fetchSingleBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
@@ -836,6 +837,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       borrowVaultAddress: multiplyShortVault.value.address,
       debtAmount: multiplyDebtAmountNano.value,
       quote,
+      requestedSlippage: multiplySlippage.value,
       swapperMode: SwapperMode.EXACT_IN,
       subAccount,
       includePermit2Call,

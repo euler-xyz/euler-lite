@@ -28,6 +28,7 @@ import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createRaceGuard } from '~/utils/race-guard'
 import { findBlockingDisabledOp, OP_REPAY, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning, getUtilisationWarning, type VaultWarning } from '~/composables/useVaultWarnings'
+import { formatNumber } from '~/utils/string-utils'
 
 interface UseCollateralSwapRepayOptions {
   position: Ref<AccountBorrowPosition | undefined>
@@ -60,12 +61,14 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     isEligibleForLiquidation,
   } = options
 
+  const router = useRouter()
   const modal = useModal()
   const { error } = useToast()
   const { isConnected, address } = useAccount()
   const { buildSwapPlan, buildSameAssetRepayPlan, buildSameAssetFullRepayPlan, buildSwapFullRepayPlan, executeTxPlan } = useEulerOperations()
   const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
   const { finalizeTxAndRedirect } = useTxFinalization()
+  const { refreshAllPositions } = useEulerAccount()
   const { client: rpcClient } = useRpcClient()
   const { withIntrinsicSupplyApy, withIntrinsicBorrowApy } = useIntrinsicApy()
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
@@ -518,6 +521,9 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
     const sourceAsset = sourceVault.value.asset
     const borrowAsset = borrowVault.value.asset
+    const transferredAssets = srcTS > 0n ? sellAmount * srcTA / srcTS : sellAmount
+    const transferredAssetAmount = nanoToValue(transferredAssets, sourceAsset.decimals)
+    const transferLabelSuffix = `(Selling max ${formatNumber(transferredAssetAmount, 8, 0)} ${sourceAsset.symbol})`
 
     const signSteps: DisplayStep[] = []
     let idx = 1
@@ -530,7 +536,17 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
     let wIdx = 1
     const wrapperSteps: DisplayStep[] = [
-      { index: wIdx++, label: 'Transfer collateral to Inbox', isSeparateTx: false, assetInfo: { symbol: sourceVault.value.symbol || sourceAsset.symbol, address: sourceAsset.address, amount: core.amount.value } },
+      {
+        index: wIdx++,
+        label: 'Transfer collateral to Inbox',
+        labelSuffix: transferLabelSuffix,
+        isSeparateTx: false,
+        assetInfo: {
+          symbol: sourceVault.value.symbol || sourceAsset.symbol,
+          address: sourceAsset.address,
+          amount: core.amount.value,
+        },
+      },
       { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: sourceAsset.symbol, address: sourceAsset.address, amount: core.amount.value }, toAssetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: core.debtAmount.value || '?' } },
       { index: wIdx++, label: 'Repay', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address } },
     ]
