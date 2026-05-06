@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useAccount } from '@wagmi/vue'
-import { type Vault, type VaultAsset, getNetAPY } from '~/entities/vault'
+import { type Vault, type VaultAsset, getNetAPYFromWeightedSupplySnapshot } from '~/entities/vault'
 import { getAssetUsdValueOrZero, getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import { type AccountBorrowPosition, isPositionEligibleForLiquidation } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
@@ -110,15 +110,12 @@ watchEffect(async () => {
     getAssetUsdValueOrZero(position.value.borrowed ?? 0n, borrowVault.value, 'off-chain'),
   ])
   if (netApyGuard.isStale(gen)) return
-  const collateralRewardApy = collateralSnapshot.weightedSupplyApy === null
-    ? collateralSupplyRewardApy.value || null
-    : null
-  netAPY.value = getNetAPY(
-    collateralSnapshot.supplyUsd,
-    collateralSnapshot.weightedSupplyApy ?? collateralSupplyApy.value,
+  netAPY.value = getNetAPYFromWeightedSupplySnapshot(
+    collateralSnapshot,
+    collateralSupplyApy.value,
     borrowUsd,
     borrowApy.value,
-    collateralRewardApy,
+    collateralSupplyRewardApy.value || null,
     borrowRewardApy.value || null,
   )
 })

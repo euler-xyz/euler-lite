@@ -8,7 +8,7 @@ import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
-import { getNetAPY, getProjectedRates } from '~/entities/vault'
+import { getNetAPYFromWeightedSupplySnapshot, getProjectedRates } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
@@ -289,15 +289,12 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
         ? borrowApy.value + (nanoToValue(projected.borrowAPY, 25) - nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25))
         : borrowApy.value
 
-      const collateralRewardApy = collateralSnapshot.weightedSupplyApy === null
-        ? collateralSupplyRewardApy.value || null
-        : null
-      _estimateNetAPY.value = getNetAPY(
-        collateralSnapshot.supplyUsd,
-        collateralSnapshot.weightedSupplyApy ?? collateralSupplyApy.value,
+      _estimateNetAPY.value = getNetAPYFromWeightedSupplySnapshot(
+        collateralSnapshot,
+        collateralSupplyApy.value,
         borrowUsd,
         projectedBorrowApy,
-        collateralRewardApy,
+        collateralSupplyRewardApy.value || null,
         borrowRewardApy.value || null,
       )
     }

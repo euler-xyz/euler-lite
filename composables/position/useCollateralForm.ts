@@ -10,7 +10,7 @@ import { OperationReviewModal, SwapTokenSelector, SlippageSettingsModal } from '
 import { useToast } from '~/components/ui/composables/useToast'
 import { eulerAccountLensABI } from '~/entities/euler/abis'
 import {
-  getNetAPY,
+  getNetAPYFromWeightedSupplySnapshot,
   isEVKVault,
   type Vault,
   type SecuritizeVault,
@@ -201,15 +201,12 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       getAssetUsdValueOrZero(position.value.borrowed ?? 0n, borrowVault.value, 'off-chain'),
     ])
 
-    const collateralRewardApy = collateralSnapshot.weightedSupplyApy === null
-      ? collateralSupplyRewardApy.value || null
-      : null
-    netAPY.value = getNetAPY(
-      collateralSnapshot.supplyUsd,
-      collateralSnapshot.weightedSupplyApy ?? collateralSupplyApy.value,
+    netAPY.value = getNetAPYFromWeightedSupplySnapshot(
+      collateralSnapshot,
+      collateralSupplyApy.value,
       borrowedUsd,
       borrowApy.value,
-      collateralRewardApy,
+      collateralSupplyRewardApy.value || null,
       borrowRewardApy.value || null,
     )
   })
@@ -549,15 +546,12 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
       if (asyncEstimatesGuard.isStale(gen)) return
 
-      const collateralRewardApy = collateralSnapshot.weightedSupplyApy === null
-        ? collateralSupplyRewardApy.value || null
-        : null
-      estimateNetAPY.value = getNetAPY(
-        collateralSnapshot.supplyUsd,
-        collateralSnapshot.weightedSupplyApy ?? collateralSupplyApy.value,
+      estimateNetAPY.value = getNetAPYFromWeightedSupplySnapshot(
+        collateralSnapshot,
+        collateralSupplyApy.value,
         borrowedUsd,
         borrowApy.value,
-        collateralRewardApy,
+        collateralSupplyRewardApy.value || null,
         borrowRewardApy.value || null,
       )
     }

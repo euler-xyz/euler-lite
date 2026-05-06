@@ -4,7 +4,7 @@ import { FixedPoint } from '~/utils/fixed-point'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
-import { type BorrowVaultPair, getNetAPY, getProjectedRates, type VaultAsset } from '~/entities/vault'
+import { type BorrowVaultPair, getNetAPYFromWeightedSupplySnapshot, getProjectedRates, type VaultAsset } from '~/entities/vault'
 import { getHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
 import { isOpDisabled, OP_BORROW } from '~/utils/vault-hooks'
 import { getAssetUsdValueOrZero, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatio } from '~/services/pricing/priceProvider'
@@ -194,15 +194,12 @@ const load = async () => {
       getCollateralApySnapshot(position.value, borrowVault.value),
       getAssetUsdValueOrZero(position.value!.borrowed || 0, borrowVault.value!, 'off-chain'),
     ])
-    const collateralRewardApy = collateralSnapshot.weightedSupplyApy === null
-      ? collateralSupplyRewardApy.value || null
-      : null
-    currentNetAPY.value = getNetAPY(
-      collateralSnapshot.supplyUsd,
-      collateralSnapshot.weightedSupplyApy ?? collateralSupplyApy.value,
+    currentNetAPY.value = getNetAPYFromWeightedSupplySnapshot(
+      collateralSnapshot,
+      collateralSupplyApy.value,
       borUsd,
       borrowApy.value,
-      collateralRewardApy,
+      collateralSupplyRewardApy.value || null,
       borrowRewardApy.value || null,
     )
   }
@@ -397,15 +394,12 @@ const updateAsyncEstimates = useDebounceFn(async () => {
       ? borrowApy.value + (nanoToValue(borrowProjected.borrowAPY, 25) - nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25))
       : borrowApy.value
 
-    const collateralRewardApy = collateralSnapshot.weightedSupplyApy === null
-      ? collateralSupplyRewardApy.value || null
-      : null
-    netAPY.value = getNetAPY(
-      collateralSnapshot.supplyUsd,
-      collateralSnapshot.weightedSupplyApy ?? collateralSupplyApy.value,
+    netAPY.value = getNetAPYFromWeightedSupplySnapshot(
+      collateralSnapshot,
+      collateralSupplyApy.value,
       borrowUsd,
       projectedBorrowApy,
-      collateralRewardApy,
+      collateralSupplyRewardApy.value || null,
       borrowRewardApy.value || null,
     )
   }

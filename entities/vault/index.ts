@@ -81,6 +81,7 @@ export {
   getProjectedRates,
   getProjectedRatesBatch,
   getNetAPY,
+  getNetAPYFromWeightedSupplySnapshot,
   getRoe,
 } from './apy'
 export type { ProjectedRates, ProjectedRatesRequest } from './apy'

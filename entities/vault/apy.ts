@@ -170,6 +170,30 @@ export const getNetAPY = (
       + equity * (loopingRewardAPY || 0)
   return sum / supplyUSD
 }
+
+interface WeightedSupplySnapshot {
+  supplyUsd: number
+  weightedSupplyApy: number | null
+}
+
+export const getNetAPYFromWeightedSupplySnapshot = (
+  snapshot: WeightedSupplySnapshot,
+  fallbackSupplyAPY: number,
+  borrowUSD: number,
+  borrowAPY: number,
+  fallbackSupplyRewardAPY?: number | null,
+  borrowRewardAPY?: number | null,
+  loopingRewardAPY?: number | null,
+) => getNetAPY(
+  snapshot.supplyUsd,
+  snapshot.weightedSupplyApy ?? fallbackSupplyAPY,
+  borrowUSD,
+  borrowAPY,
+  snapshot.weightedSupplyApy === null ? fallbackSupplyRewardAPY : null,
+  borrowRewardAPY,
+  loopingRewardAPY,
+)
+
 export function getRoe(
   supplyUSD: number,
   supplyAPY: number,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getNetAPY, getRoe } from '~/entities/vault/apy'
+import { getNetAPY, getNetAPYFromWeightedSupplySnapshot, getRoe } from '~/entities/vault/apy'
 
 describe('getNetAPY', () => {
   it('returns 0 when supplyUSD is 0', () => {
@@ -43,6 +43,36 @@ describe('getNetAPY', () => {
   it('handles supply-only position (no borrow)', () => {
     // supply=100 at 5%, borrow=0 → netAPY = 5%
     expect(getNetAPY(100, 0.05, 0, 0)).toBeCloseTo(0.05, 6)
+  })
+
+  it('does not double-count rewards already included in weighted snapshots', () => {
+    const snapshot = {
+      supplyUsd: 200,
+      weightedSupplyApy: 0.07,
+    }
+
+    expect(getNetAPYFromWeightedSupplySnapshot(
+      snapshot,
+      0.05,
+      100,
+      0.08,
+      0.02,
+    )).toBeCloseTo(0.03, 6)
+  })
+
+  it('falls back to separate rewards when a weighted snapshot APY is unavailable', () => {
+    const snapshot = {
+      supplyUsd: 200,
+      weightedSupplyApy: null,
+    }
+
+    expect(getNetAPYFromWeightedSupplySnapshot(
+      snapshot,
+      0.05,
+      100,
+      0.08,
+      0.02,
+    )).toBeCloseTo(0.03, 6)
   })
 })
 
