@@ -201,12 +201,15 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       getAssetUsdValueOrZero(position.value.borrowed ?? 0n, borrowVault.value, 'off-chain'),
     ])
 
+    const collateralRewardApy = collateralSnapshot.weightedSupplyApy === null
+      ? collateralSupplyRewardApy.value || null
+      : null
     netAPY.value = getNetAPY(
       collateralSnapshot.supplyUsd,
       collateralSnapshot.weightedSupplyApy ?? collateralSupplyApy.value,
       borrowedUsd,
       borrowApy.value,
-      collateralSupplyRewardApy.value || null,
+      collateralRewardApy,
       borrowRewardApy.value || null,
     )
   })
@@ -546,12 +549,15 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
       if (asyncEstimatesGuard.isStale(gen)) return
 
+      const collateralRewardApy = collateralSnapshot.weightedSupplyApy === null
+        ? collateralSupplyRewardApy.value || null
+        : null
       estimateNetAPY.value = getNetAPY(
         collateralSnapshot.supplyUsd,
         collateralSnapshot.weightedSupplyApy ?? collateralSupplyApy.value,
         borrowedUsd,
         borrowApy.value,
-        collateralSupplyRewardApy.value || null,
+        collateralRewardApy,
         borrowRewardApy.value || null,
       )
     }

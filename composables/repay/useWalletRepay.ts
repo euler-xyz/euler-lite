@@ -289,12 +289,15 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
         ? borrowApy.value + (nanoToValue(projected.borrowAPY, 25) - nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25))
         : borrowApy.value
 
+      const collateralRewardApy = collateralSnapshot.weightedSupplyApy === null
+        ? collateralSupplyRewardApy.value || null
+        : null
       _estimateNetAPY.value = getNetAPY(
         collateralSnapshot.supplyUsd,
         collateralSnapshot.weightedSupplyApy ?? collateralSupplyApy.value,
         borrowUsd,
         projectedBorrowApy,
-        collateralSupplyRewardApy.value || null,
+        collateralRewardApy,
         borrowRewardApy.value || null,
       )
     }

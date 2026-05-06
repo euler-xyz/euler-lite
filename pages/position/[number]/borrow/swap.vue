@@ -10,7 +10,7 @@ import type { TxPlan } from '~/entities/txPlan'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
-import { nanoToValue } from '~/utils/crypto-utils'
+import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
@@ -88,7 +88,7 @@ const toBorrowApy = computed(() => {
   const base = nanoToValue(toVault.value.interestRateInfo.borrowAPY || 0n, 25)
   return withIntrinsicBorrowApy(base, toVault.value.asset.address) - getBorrowRewardApy(toVault.value.address, collateralVault.value?.address)
 })
-const projectedToBorrowApy = ref<number | null>(null)
+const nextBorrowApy = ref<number | null>(null)
 
 const supplyValueUsd = ref<number | null>(null)
 watchEffect(async () => {
@@ -109,7 +109,7 @@ watchEffect(async () => {
 const nextBorrowValueUsd = ref<number | null>(null)
 
 const roeBefore = computed(() => getRoe(supplyValueUsd.value, collateralSupplyApy.value, currentBorrowValueUsd.value, fromBorrowApy.value))
-const roeAfter = computed(() => getRoe(supplyValueUsd.value, collateralSupplyApy.value, nextBorrowValueUsd.value, projectedToBorrowApy.value ?? toBorrowApy.value))
+const roeAfter = computed(() => getRoe(supplyValueUsd.value, collateralSupplyApy.value, nextBorrowValueUsd.value, nextBorrowApy.value))
 
 // ── Health metrics ───────────────────────────────────────────────────────
 const priceRatio = computed(() => {
@@ -274,30 +274,64 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 
 // Must be after `swap` destructuring so `quote` is in scope
 watchEffect(async () => {
-  if (!quote.value || !toVault.value) {
+  if (!quote.value || !toVault.value || !fromVault.value) {
     nextBorrowValueUsd.value = null
-    projectedToBorrowApy.value = null
+    nextBorrowApy.value = null
     return
   }
-  const borrowAmount = BigInt(quote.value.amountIn)
-  const [borrowUsd, projected] = await Promise.all([
-    getAssetUsdValue(borrowAmount, toVault.value, 'off-chain'),
+  const newBorrowAmount = BigInt(quote.value.amountIn)
+  const swappedDebt = fromAmount.value
+    ? valueToNano(fromAmount.value, fromVault.value.decimals)
+    : currentDebt.value
+  const repaidDebt = swappedDebt > currentDebt.value ? currentDebt.value : swappedDebt
+  const remainingDebt = currentDebt.value - repaidDebt
+
+  const [remainingBorrowUsd, newBorrowUsd, projectedFromBorrow, projectedToBorrow] = await Promise.all([
+    remainingDebt > 0n
+      ? getAssetUsdValue(remainingDebt, fromVault.value, 'off-chain')
+      : Promise.resolve(0),
+    getAssetUsdValue(newBorrowAmount, toVault.value, 'off-chain'),
+    remainingDebt > 0n
+      ? getProjectedRates(
+          fromVault.value.address,
+          fromVault.value.interestRateInfo.cash,
+          fromVault.value.interestRateInfo.borrows,
+          repaidDebt,
+          -repaidDebt,
+        )
+      : Promise.resolve(null),
     getProjectedRates(
       toVault.value.address,
       toVault.value.interestRateInfo.cash,
       toVault.value.interestRateInfo.borrows,
-      -borrowAmount,
-      borrowAmount,
+      -newBorrowAmount,
+      newBorrowAmount,
     ),
   ])
-  nextBorrowValueUsd.value = borrowUsd ?? null
-  if (projected) {
-    const currentRaw = nanoToValue(toVault.value.interestRateInfo.borrowAPY || 0n, 25)
-    const projectedRaw = nanoToValue(projected.borrowAPY, 25)
-    projectedToBorrowApy.value = (toBorrowApy.value ?? 0) + (projectedRaw - currentRaw)
+
+  const oldBorrowUsd = remainingBorrowUsd ?? 0
+  const targetBorrowUsd = newBorrowUsd ?? 0
+  const totalBorrowUsd = oldBorrowUsd + targetBorrowUsd
+  nextBorrowValueUsd.value = totalBorrowUsd > 0 ? totalBorrowUsd : null
+
+  const oldBorrowApy = projectedFromBorrow
+    ? (fromBorrowApy.value ?? 0) + (nanoToValue(projectedFromBorrow.borrowAPY, 25) - nanoToValue(fromVault.value.interestRateInfo.borrowAPY, 25))
+    : fromBorrowApy.value
+  const targetBorrowApy = projectedToBorrow
+    ? (toBorrowApy.value ?? 0) + (nanoToValue(projectedToBorrow.borrowAPY, 25) - nanoToValue(toVault.value.interestRateInfo.borrowAPY, 25))
+    : toBorrowApy.value
+
+  if (totalBorrowUsd > 0 && oldBorrowApy !== null && targetBorrowApy !== null) {
+    nextBorrowApy.value = (
+      oldBorrowUsd * oldBorrowApy
+      + targetBorrowUsd * targetBorrowApy
+    ) / totalBorrowUsd
+  }
+  else if (totalBorrowUsd > 0 && targetBorrowApy !== null) {
+    nextBorrowApy.value = targetBorrowApy
   }
   else {
-    projectedToBorrowApy.value = null
+    nextBorrowApy.value = null
   }
 })
 

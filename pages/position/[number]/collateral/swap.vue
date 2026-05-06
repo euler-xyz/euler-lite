@@ -8,7 +8,7 @@ import type {
   SecuritizeVault,
   VaultAsset,
 } from '~/entities/vault'
-import { getProjectedRates, getRoe } from '~/entities/vault'
+import { getRoe } from '~/entities/vault'
 import {
   getAssetUsdValue,
   getAssetOraclePrice,
@@ -27,18 +27,20 @@ import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { createRaceGuard } from '~/utils/race-guard'
 
 const route = useRoute()
 const { isConnected, address } = useAccount()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = useEulerAccount()
 const { buildSwapPlan, buildSameAssetSwapPlan } = useEulerOperations()
-const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
-const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
+const { withIntrinsicBorrowApy } = useIntrinsicApy()
+const { getBorrowRewardApy } = useRewardsApy()
 const { isReady: isVaultsReady } = useVaults()
 const { getOrFetch } = useVaultRegistry()
 const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
 const { client: rpcClient } = useRpcClient()
+const { getCollateralApySnapshot } = usePositionCollateralApy()
 
 const positionIndex = usePositionIndex()
 
@@ -321,17 +323,6 @@ const onToVaultChange = (selectedIndex: number) => {
 }
 
 // ── Supply & borrow APY ──────────────────────────────────────────────────
-const fromSupplyApy = computed(() => {
-  if (!fromVault.value) return null
-  const base = nanoToValue(fromVault.value.interestRateInfo.supplyAPY || 0n, 25)
-  return withIntrinsicSupplyApy(base, fromVault.value.asset.address) + getSupplyRewardApy(fromVault.value.address)
-})
-const toSupplyApy = computed(() => {
-  if (!toVault.value) return null
-  const base = nanoToValue(toVault.value.interestRateInfo.supplyAPY || 0n, 25)
-  return withIntrinsicSupplyApy(base, toVault.value.asset.address) + getSupplyRewardApy(toVault.value.address)
-})
-const projectedToSupplyApy = ref<number | null>(null)
 const borrowApy = computed(() => {
   if (!borrowVault.value) return null
   const base = nanoToValue(borrowVault.value.interestRateInfo.borrowAPY || 0n, 25)
@@ -345,69 +336,66 @@ const getCollateralValueUsdLocal = async (amount: bigint) => {
 }
 // ── ROE ──────────────────────────────────────────────────────────────────
 const supplyValueUsd = ref<number | null>(null)
-watchEffect(async () => {
-  if (!fromVault.value || !position.value || !borrowVault.value) {
-    supplyValueUsd.value = null
-    return
-  }
-  supplyValueUsd.value = await getCollateralValueUsdLocal(selectedCollateralAssets.value)
-})
+const weightedSupplyApy = ref<number | null>(null)
 const nextSupplyValueUsd = ref<number | null>(null)
+const nextWeightedSupplyApy = ref<number | null>(null)
+const roeSnapshotGuard = createRaceGuard()
+
+const collateralSwapDeltas = computed(() => {
+  if (!fromVault.value || !toVault.value || !fromAmount.value) return null
+  try {
+    if (isSameAsset.value) {
+      return {
+        amountIn: valueToNano(fromAmount.value, fromVault.value.asset.decimals),
+        amountOut: valueToNano(fromAmount.value, toVault.value.asset.decimals),
+      }
+    }
+    if (!quote.value) return null
+    return {
+      amountIn: BigInt(quote.value.amountIn),
+      amountOut: BigInt(quote.value.amountOut),
+    }
+  }
+  catch {
+    return null
+  }
+})
+
 watchEffect(async () => {
-  if (isSameAsset.value && toVault.value && fromAmount.value) {
-    try {
-      const amount = valueToNano(fromAmount.value, toVault.value.asset.decimals)
-      const [supplyUsd, projected] = await Promise.all([
-        getAssetUsdValue(amount, toVault.value, 'off-chain'),
-        getProjectedRates(
-          toVault.value.address,
-          toVault.value.interestRateInfo.cash,
-          toVault.value.interestRateInfo.borrows,
-          amount,
-          0n,
-        ),
-      ])
-      nextSupplyValueUsd.value = supplyUsd ?? null
-      if (projected) {
-        const currentRaw = nanoToValue(toVault.value.interestRateInfo.supplyAPY || 0n, 25)
-        const projectedRaw = nanoToValue(projected.supplyAPY, 25)
-        projectedToSupplyApy.value = (toSupplyApy.value ?? 0) + (projectedRaw - currentRaw)
-      }
-      else {
-        projectedToSupplyApy.value = null
-      }
-    }
-    catch {
-      nextSupplyValueUsd.value = null
-      projectedToSupplyApy.value = null
-    }
-    return
-  }
-  if (!quote.value || !toVault.value) {
+  if (!position.value || !borrowVault.value || !fromVault.value || !toVault.value) {
+    supplyValueUsd.value = null
+    weightedSupplyApy.value = null
     nextSupplyValueUsd.value = null
-    projectedToSupplyApy.value = null
+    nextWeightedSupplyApy.value = null
     return
   }
-  const amount = BigInt(quote.value.amountOut)
-  const [supplyUsd, projected] = await Promise.all([
-    getAssetUsdValue(amount, toVault.value, 'off-chain'),
-    getProjectedRates(
-      toVault.value.address,
-      toVault.value.interestRateInfo.cash,
-      toVault.value.interestRateInfo.borrows,
-      amount,
-      0n,
-    ),
+
+  const gen = roeSnapshotGuard.next()
+  const deltas = collateralSwapDeltas.value
+  const [currentSnapshot, nextSnapshot] = await Promise.all([
+    getCollateralApySnapshot(position.value, borrowVault.value),
+    deltas
+      ? getCollateralApySnapshot(position.value, borrowVault.value, {
+          deltas: [
+            {
+              vaultAddress: fromVault.value.address,
+              assetsDelta: -deltas.amountIn,
+              projectRates: true,
+            },
+            {
+              vaultAddress: toVault.value.address,
+              assetsDelta: deltas.amountOut,
+              projectRates: true,
+            },
+          ],
+        })
+      : Promise.resolve(null),
   ])
-  nextSupplyValueUsd.value = supplyUsd ?? null
-  if (projected) {
-    const currentRaw = nanoToValue(toVault.value.interestRateInfo.supplyAPY || 0n, 25)
-    const projectedRaw = nanoToValue(projected.supplyAPY, 25)
-    projectedToSupplyApy.value = (toSupplyApy.value ?? 0) + (projectedRaw - currentRaw)
-  }
-  else {
-    projectedToSupplyApy.value = null
-  }
+  if (roeSnapshotGuard.isStale(gen)) return
+  supplyValueUsd.value = currentSnapshot.supplyUsd
+  weightedSupplyApy.value = currentSnapshot.weightedSupplyApy
+  nextSupplyValueUsd.value = nextSnapshot?.supplyUsd ?? null
+  nextWeightedSupplyApy.value = nextSnapshot?.weightedSupplyApy ?? null
 })
 const borrowValueUsd = ref<number | null>(null)
 watchEffect(async () => {
@@ -418,8 +406,8 @@ watchEffect(async () => {
   borrowValueUsd.value = (await getAssetUsdValue(position.value.borrowed, borrowVault.value, 'off-chain')) ?? null
 })
 
-const roeBefore = computed(() => getRoe(supplyValueUsd.value, fromSupplyApy.value, borrowValueUsd.value, borrowApy.value))
-const roeAfter = computed(() => getRoe(nextSupplyValueUsd.value, projectedToSupplyApy.value ?? toSupplyApy.value, borrowValueUsd.value, borrowApy.value))
+const roeBefore = computed(() => getRoe(supplyValueUsd.value, weightedSupplyApy.value, borrowValueUsd.value, borrowApy.value))
+const roeAfter = computed(() => getRoe(nextSupplyValueUsd.value, nextWeightedSupplyApy.value, borrowValueUsd.value, borrowApy.value))
 
 // ── Health metrics ───────────────────────────────────────────────────────
 const liqPriceInvert = usePriceInvert(

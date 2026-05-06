@@ -194,12 +194,15 @@ const load = async () => {
       getCollateralApySnapshot(position.value, borrowVault.value),
       getAssetUsdValueOrZero(position.value!.borrowed || 0, borrowVault.value!, 'off-chain'),
     ])
+    const collateralRewardApy = collateralSnapshot.weightedSupplyApy === null
+      ? collateralSupplyRewardApy.value || null
+      : null
     currentNetAPY.value = getNetAPY(
       collateralSnapshot.supplyUsd,
       collateralSnapshot.weightedSupplyApy ?? collateralSupplyApy.value,
       borUsd,
       borrowApy.value,
-      collateralSupplyRewardApy.value || null,
+      collateralRewardApy,
       borrowRewardApy.value || null,
     )
   }
@@ -394,12 +397,15 @@ const updateAsyncEstimates = useDebounceFn(async () => {
       ? borrowApy.value + (nanoToValue(borrowProjected.borrowAPY, 25) - nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25))
       : borrowApy.value
 
+    const collateralRewardApy = collateralSnapshot.weightedSupplyApy === null
+      ? collateralSupplyRewardApy.value || null
+      : null
     netAPY.value = getNetAPY(
       collateralSnapshot.supplyUsd,
       collateralSnapshot.weightedSupplyApy ?? collateralSupplyApy.value,
       borrowUsd,
       projectedBorrowApy,
-      collateralSupplyRewardApy.value || null,
+      collateralRewardApy,
       borrowRewardApy.value || null,
     )
   }

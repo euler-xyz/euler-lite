@@ -110,12 +110,15 @@ watchEffect(async () => {
     getAssetUsdValueOrZero(position.value.borrowed ?? 0n, borrowVault.value, 'off-chain'),
   ])
   if (netApyGuard.isStale(gen)) return
+  const collateralRewardApy = collateralSnapshot.weightedSupplyApy === null
+    ? collateralSupplyRewardApy.value || null
+    : null
   netAPY.value = getNetAPY(
     collateralSnapshot.supplyUsd,
     collateralSnapshot.weightedSupplyApy ?? collateralSupplyApy.value,
     borrowUsd,
     borrowApy.value,
-    collateralSupplyRewardApy.value || null,
+    collateralRewardApy,
     borrowRewardApy.value || null,
   )
 })
