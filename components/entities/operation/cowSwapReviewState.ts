@@ -83,7 +83,9 @@ export const resolveCowSwapReviewState = (params: CowSwapReviewStateParams) => {
 
   const isCancellationComplete = isHardCancelled || isSoftCancellationSubmitted
   const canCancelOrder = !params.orderStatus?.terminal && !isCancellationComplete
-  const showSoftCancelWarning = canCancelOrder && params.cancellationMode === 'cow-api'
+  const showSoftCancelWarning = isSoftCancellationSubmitted
+    && !params.orderStatus?.terminal
+    && params.cancellationMode === 'cow-api'
   const orderStatusVariant: ToastVariant = params.orderStatus?.type === 'expired' ? 'warning' : 'info'
   const hasUnresolvedSubmittedOrder = (params.executionStatus === 'submitted' || isCancelPending)
     && !params.orderStatus?.terminal

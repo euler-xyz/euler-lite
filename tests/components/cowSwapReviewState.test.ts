@@ -29,6 +29,7 @@ describe('resolveCowSwapReviewState', () => {
     expect(state.orderStatusLabel).toBe('Cancellation submitted — checking order status...')
     expect(state.canCancelOrder).toBe(false)
     expect(state.hasUnresolvedSubmittedOrder).toBe(true)
+    expect(state.showSoftCancelWarning).toBe(true)
   })
 
   it('treats confirmed EVC nonce invalidation as terminal for the modal without implying CoW orderbook cancellation', () => {
@@ -63,13 +64,22 @@ describe('resolveCowSwapReviewState', () => {
     expect(state.hasUnresolvedSubmittedOrder).toBe(false)
   })
 
-  it('only shows the soft cancellation warning for CoW API cancellation', () => {
+  it('only shows the soft cancellation warning after CoW API cancellation was requested', () => {
     expect(resolveCowSwapReviewState({
       executionStatus: 'submitted',
       orderStatus: openOrder,
       locallyCancelled: false,
       cancellationMode: 'cow-api',
       cancellationStatus: 'none',
+      isLocallyCancelling: false,
+    }).showSoftCancelWarning).toBe(false)
+
+    expect(resolveCowSwapReviewState({
+      executionStatus: 'submitted',
+      orderStatus: openOrder,
+      locallyCancelled: true,
+      cancellationMode: 'cow-api',
+      cancellationStatus: 'soft_submitted',
       isLocallyCancelling: false,
     }).showSoftCancelWarning).toBe(true)
 
