@@ -7,7 +7,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
 import { CLOSE_POSITION_WRAPPER_ABI } from '~/abis/cowswap-wrapper'
-import { getCashLimitedWithdrawAmount, isEVKVault, type Vault } from '~/entities/vault'
+import { getCashLimitedWithdrawAmount, isEVKVault, previewWithdraw, type Vault } from '~/entities/vault'
 import { COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapClosePositionExecuteParams, getCowSwapChainConfig, isCowProvider } from '~/entities/cowswap'
 import { useCowSwapClosePositionExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
 import { getAssetUsdValue, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
@@ -480,15 +480,17 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     // targetDebt. Exact-in mode stays a SELL.
     const orderKind: 'buy' | 'sell' = isTargetDebt ? 'buy' : 'sell'
 
-    // Quote amountIn is in underlying tokens, but CoW sellToken = collateralVault (shares).
-    // Convert underlying → shares using the vault's exchange rate. For BUY orders
-    // use amountInMax so the wrapper has enough collateral to cover slippage.
+    // Quote amountIn/amountInMax is in underlying tokens for UI display.
+    // CoW sellToken is the collateral vault, so convert the asset cap back to
+    // vault shares before signing and submitting the order.
     const underlyingSellAmount = isTargetDebt
       ? BigInt(core.quotes.selectedQuote.value.amountInMax || core.quotes.selectedQuote.value.amountIn)
       : BigInt(core.quotes.selectedQuote.value.amountIn)
-    const srcTA = sourceVault.value.totalAssets
-    const srcTS = sourceVault.value.totalShares
-    const sellAmount = srcTA > 0n ? underlyingSellAmount * srcTS / srcTA : underlyingSellAmount
+    const sellAmount = await previewWithdraw(sourceVault.value.address, underlyingSellAmount)
+    if (!sellAmount || sellAmount <= 0n) {
+      error('Invalid quote: unable to convert sell amount')
+      return
+    }
 
     // buyToken = borrowVault.asset() (underlying) — no conversion needed.
     // Target-debt BUY: full repay adds a 0.1% interest buffer, partial repay
@@ -521,8 +523,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
     const sourceAsset = sourceVault.value.asset
     const borrowAsset = borrowVault.value.asset
-    const transferredAssets = srcTS > 0n ? sellAmount * srcTA / srcTS : sellAmount
-    const transferredAssetAmount = nanoToValue(transferredAssets, sourceAsset.decimals)
+    const transferredAssetAmount = nanoToValue(underlyingSellAmount, sourceAsset.decimals)
     const transferLabelSuffix = `(Selling max ${formatNumber(transferredAssetAmount, 8, 0)} ${sourceAsset.symbol})`
 
     const signSteps: DisplayStep[] = []

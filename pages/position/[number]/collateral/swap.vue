@@ -3,10 +3,11 @@ import { useAccount } from '@wagmi/vue'
 import { erc20Abi, getAddress, maxUint256, zeroAddress, type Address, type Abi } from 'viem'
 import type { AccountBorrowPosition } from '~/entities/account'
 import { eulerAccountLensABI } from '~/entities/euler/abis'
-import type {
-  Vault,
-  SecuritizeVault,
-  VaultAsset,
+import {
+  previewWithdraw,
+  type Vault,
+  type SecuritizeVault,
+  type VaultAsset,
 } from '~/entities/vault'
 import {
   getAssetUsdValue,
@@ -265,22 +266,22 @@ const submitCowSwapCollateralSwap = async () => {
 
   const validTo = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
 
-  // Quote amounts are in underlying tokens (swap API was called with asset addresses).
-  // CoW order operates on vault shares (sellToken/buyToken = vault addresses).
-  // Convert underlying → shares using each vault's exchange rate.
+  // Quote amounts are in underlying tokens so the UI can display asset amounts.
+  // CoW orders use vault shares as sell/buy tokens, so convert assets -> shares
+  // before signing and submitting the order.
   const underlyingSellAmount = BigInt(selectedQuote.value.amountIn)
   const underlyingBuyAmount = BigInt(selectedQuote.value.amountOutMin || selectedQuote.value.amountOut || '1')
 
-  const fromTA = fromVault.value.totalAssets
-  const fromTS = fromVault.value.totalShares
-  const quotedSellAmount = fromTA > 0n ? underlyingSellAmount * fromTS / fromTA : underlyingSellAmount
+  const quotedSellAmount = await previewWithdraw(fromVault.value.address, underlyingSellAmount)
   const sellAmount = isMaxSwap.value && selectedCollateralShares.value > 0n
     ? selectedCollateralShares.value
     : quotedSellAmount
 
-  const toTA = toVault.value.totalAssets
-  const toTS = toVault.value.totalShares
-  const buyAmount = toTA > 0n ? underlyingBuyAmount * toTS / toTA : underlyingBuyAmount
+  const buyAmount = await previewWithdraw(toVault.value.address, underlyingBuyAmount)
+  if (!sellAmount || sellAmount <= 0n || !buyAmount || buyAmount <= 0n) {
+    logWarn('collateralSwap/cowswap/convertAmounts', new Error('Unable to convert quote asset amounts to vault shares'))
+    return
+  }
 
   const cowParams: CowSwapCollateralSwapExecuteParams = {
     chainId,

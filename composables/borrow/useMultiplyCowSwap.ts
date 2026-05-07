@@ -3,7 +3,7 @@ import { useAccount } from '@wagmi/vue'
 import { erc20Abi, formatUnits, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import type { DisplayStep } from '~/utils/stepDecoding'
-import type { Vault } from '~/entities/vault'
+import { previewWithdraw, type Vault } from '~/entities/vault'
 import type { SwapApiQuote } from '~/entities/swap'
 import {
   COWSWAP_ORDER_DEADLINE_SECONDS,
@@ -129,10 +129,11 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
       error('Invalid quote: no minimum buy amount')
       return
     }
-    const { totalAssets, totalShares } = longVault
-    const buyAmount = totalAssets > 0n
-      ? underlyingBuyAmount * totalShares / totalAssets
-      : underlyingBuyAmount
+    const buyAmount = await previewWithdraw(longVault.address, underlyingBuyAmount)
+    if (!buyAmount || buyAmount <= 0n) {
+      error('Invalid quote: unable to convert buy amount')
+      return
+    }
 
     const cowParams: CowSwapOpenPositionExecuteParams = {
       chainId,

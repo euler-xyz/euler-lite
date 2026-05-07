@@ -1,4 +1,5 @@
 import type { Address, Hex } from 'viem'
+import { logger } from '~/utils/logger'
 import type { CowSwapOrderPayload, CowSwapOrderUid } from './types'
 
 const MAX_CANCEL_ERROR_MESSAGE_LENGTH = 180
@@ -54,7 +55,17 @@ export const submitCowSwapOrder = async (
   }
 
   const data: unknown = await res.json()
-  return coerceOrderUid(data)
+  const uid = coerceOrderUid(data)
+  logger.info(
+    {
+      ctx: 'cowswap/orderSubmit',
+      orderbookUrl,
+      orderUid: uid,
+      order: payload,
+    },
+    'submitted CoW order',
+  )
+  return uid
 }
 
 // EIP-712 typed data for order cancellation
