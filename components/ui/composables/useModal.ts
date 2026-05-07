@@ -6,8 +6,12 @@ export interface ModalData {
   dropdown?: boolean
   noLock?: boolean
   absolute?: boolean
+  pointerThrough?: boolean
+  skipHistory?: boolean
   isNotClosable?: boolean
   custom?: boolean
+  onMouseEnter?: () => void
+  onMouseLeave?: () => void
   props?: Record<string, any> // eslint-disable-line
   [key: string]: any // eslint-disable-line
 }
@@ -34,6 +38,7 @@ let popstateHandler: EventListener | undefined
 const list: { id: number, component: Raw<Component>, data: ModalData }[] = reactive([])
 const hasModal = computed(() => list.length > 0)
 const bus = useEventBus<string>('modal')
+const requestCloseHandlers = new Map<number, () => void>()
 
 export const useModal = () => {
   const onClickBack = (id?: number | undefined) => {
@@ -55,7 +60,7 @@ export const useModal = () => {
     // Skip history management for non-closable modals — they can't be
     // dismissed via the back button and pushing state would cause
     // history.back() in close() to undo any navigation the modal triggers.
-    if (!data.isNotClosable) {
+    if (!data.isNotClosable && !data.skipHistory) {
       popstateHandler = () => onClickBack(id)
       window.history.pushState({ ...window.history.state, modalId: id }, component.name || 'Modal window')
       window.addEventListener('popstate', popstateHandler)
@@ -68,6 +73,24 @@ export const useModal = () => {
     if (data.absolute) {
       bus.emit('open')
     }
+
+    return id
+  }
+
+  const registerRequestClose = (id: number, handler: () => void) => {
+    requestCloseHandlers.set(id, handler)
+
+    return () => {
+      if (requestCloseHandlers.get(id) === handler) {
+        requestCloseHandlers.delete(id)
+      }
+    }
+  }
+
+  const requestClose = (id: number) => {
+    const handler = requestCloseHandlers.get(id)
+    handler?.()
+    return Boolean(handler)
   }
 
   const close = (id?: number | undefined, isBack = false) => {
@@ -76,11 +99,18 @@ export const useModal = () => {
       popstateHandler = undefined
     }
 
-    if (!id) {
+    if (id === undefined) {
       list.pop()
     }
     else {
-      list.splice(list.findIndex(item => item.id === id), 1)
+      const index = list.findIndex(item => item.id === id)
+      if (index !== -1) {
+        list.splice(index, 1)
+      }
+    }
+
+    if (id !== undefined) {
+      requestCloseHandlers.delete(id)
     }
 
     if (!isBack && window.history.state?.modalId === id) {
@@ -98,6 +128,8 @@ export const useModal = () => {
     list,
     open,
     close,
+    registerRequestClose,
+    requestClose,
     hasModal,
   }
 }

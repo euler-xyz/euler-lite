@@ -78,20 +78,15 @@ watchEffect(() => {
   updateProjectedEarningsPerMonth()
 })
 
-const onSupplyInfoIconClick = (event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY: getVaultSupplyApy(vault.value),
-      intrinsicAPY: getIntrinsicApy(vault.value.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.value.asset.address),
-      campaigns: getSupplyRewardCampaigns(vault.value.address),
-      rewardVaultAddress: vault.value.address,
-      baseApyAverageLabel: '1h',
-    },
-  })
-}
+const supplyApyModalData = computed(() => ({
+  props: {
+    lendingAPY: nanoToValue(vault.value.interestRateInfo.supplyAPY, 25),
+    intrinsicAPY: getIntrinsicApy(vault.value.asset.address),
+    intrinsicApyInfo: getIntrinsicApyInfo(vault.value.asset.address),
+    campaigns: getSupplyRewardCampaigns(vault.value.address),
+    baseApyAverageLabel: '1h',
+  },
+}))
 
 const onClick = () => {
   modal.open(VaultOverviewModal, {
@@ -173,12 +168,16 @@ const onClick = () => {
             <span class="inline-flex items-center rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5">
               1h
             </span>
-            <SvgIcon
-              class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-              name="info-circle"
-              data-modal-trigger="supply-apy"
-              @click.stop="onSupplyInfoIconClick"
-            />
+            <UiHoverModalTrigger
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY breakdown"
+            >
+              <SvgIcon
+                class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+                name="info-circle"
+              />
+            </UiHoverModalTrigger>
           </div>
           <div
             class="text-p2 flex text-accent-600"
@@ -187,13 +186,17 @@ const onClick = () => {
             data-field="supply-apy"
             :data-value="supplyApyWithRewards"
           >
-            <SvgIcon
+            <UiHoverModalTrigger
               v-if="rewardsExist"
-              name="sparks"
-              class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
-              data-modal-trigger="supply-apy"
-              @click.stop="onSupplyInfoIconClick"
-            />
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY rewards breakdown"
+            >
+              <SvgIcon
+                name="sparks"
+                class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
+              />
+            </UiHoverModalTrigger>
             {{ formatNumber(supplyApyWithRewards) }}%
           </div>
         </div>

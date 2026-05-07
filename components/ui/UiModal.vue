@@ -7,6 +7,7 @@ const { id = 0, data } = defineProps<{ id?: number, component: Component, data: 
 
 const isComponentVisible = ref(false)
 const isPreventClose = ref(false)
+let unregisterRequestClose: (() => void) | undefined
 
 const styles = computed(() => {
   return {
@@ -47,12 +48,20 @@ const beforeComponentLeave = () => {
 const handlePreventClose = (value: boolean) => {
   isPreventClose.value = value
 }
+const handleMouseEnter = () => {
+  data.onMouseEnter?.()
+}
+const handleMouseLeave = () => {
+  data.onMouseLeave?.()
+}
 
 onMounted(() => {
+  unregisterRequestClose = modal.registerRequestClose(id, close)
   isComponentVisible.value = true
 })
 
 onBeforeUnmount(() => {
+  unregisterRequestClose?.()
   isComponentVisible.value = false
 })
 </script>
@@ -60,6 +69,7 @@ onBeforeUnmount(() => {
 <template>
   <div
     class="ui-modal"
+    :class="{ 'ui-modal--pointer-through': data.pointerThrough }"
     :style="styles"
   >
     <Transition
@@ -72,19 +82,17 @@ onBeforeUnmount(() => {
         v-if="isComponentVisible"
         class="ui-modal__wrapper"
         @click.self="onClickWrapper"
+        @mousemove.self="handleMouseLeave"
       >
-        <div
-          class="ui-modal__panel-motion"
-          @click.self="onClickWrapper"
-        >
-          <component
-            :is="component"
-            v-bind="data.props"
-            :modal-id="id"
-            @prevent-close="handlePreventClose"
-            @close="close"
-          />
-        </div>
+        <component
+          :is="component"
+          v-bind="data.props"
+          :modal-id="id"
+          @mouseenter="handleMouseEnter"
+          @mouseleave="handleMouseLeave"
+          @prevent-close="handlePreventClose"
+          @close="close"
+        />
       </div>
     </Transition>
   </div>
@@ -102,6 +110,10 @@ onBeforeUnmount(() => {
   background-color: rgba(0, 0, 0, 0.6);
   transform: translate3d(0, 0, 0);
 
+  &--pointer-through {
+    pointer-events: none;
+  }
+
   &__wrapper {
     display: flex;
     width: 100%;
@@ -110,10 +122,12 @@ onBeforeUnmount(() => {
     margin: 0 auto;
   }
 
-  &__panel-motion {
-    position: relative;
-    width: 100%;
-    height: 100%;
+  &--pointer-through &__wrapper {
+    pointer-events: none;
+
+    > * {
+      pointer-events: auto;
+    }
   }
 }
 </style>
