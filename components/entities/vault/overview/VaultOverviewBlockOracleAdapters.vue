@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import type { SecuritizeCollateralVault, EVault, OracleAdapterEntry } from '@eulerxyz/euler-v2-sdk'
-import { selectLeafAdaptersForPair } from '@eulerxyz/euler-v2-sdk'
 import { getChecksStatus, OracleAdapterCheckSeverity, type OracleAdapterMeta } from '~/entities/oracle'
 import { getOracleProviderLogo } from '~/entities/oracle-providers'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { formatNumber } from '~/utils/string-utils'
 import { shouldInvertOraclePrice } from '~/utils/oracle-label'
 import { useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
-import type { Address } from 'viem'
 import type { CSSProperties } from 'vue'
 
 const props = defineProps<{
@@ -31,47 +29,17 @@ const sourceVaults = computed(() => {
   return []
 })
 
-const getCollateralRouteBases = (vault: EVault, collateralVault: EVault | SecuritizeCollateralVault) => {
-  if (!vault.unitOfAccount) return [collateralVault.address as Address]
-
-  const resolved = vault.oracle.resolvedVaults.find(resolvedVault =>
-    resolvedVault.vault.toLowerCase() === collateralVault.address.toLowerCase()
-    && resolvedVault.quote.toLowerCase() === vault.unitOfAccount!.address.toLowerCase(),
-  )
-
-  return [
-    resolved?.asset as Address | undefined,
-    collateralVault.address as Address,
-  ].filter((address): address is Address => Boolean(address))
-}
-
-const getCollateralAdapters = (vault: EVault, collateralVault: EVault | SecuritizeCollateralVault) => {
-  if (!vault.unitOfAccount) return []
-
-  for (const base of getCollateralRouteBases(vault, collateralVault)) {
-    const route = selectLeafAdaptersForPair(
-      vault.oracle.adapters,
-      base,
-      vault.unitOfAccount.address as Address,
-    )
-    if (route.length) return route
-  }
-
-  return []
-}
+const getCollateralAdapters = (vault: EVault, collateralVault: EVault | SecuritizeCollateralVault) =>
+  vault.collaterals.find(collateral =>
+    collateral.address.toLowerCase() === collateralVault.address.toLowerCase(),
+  )?.oracleAdapters ?? []
 
 const adapters = computed(() => {
   const entries: OracleAdapterEntry[] = []
   const deduped = new Map<string, OracleAdapterEntry>()
 
   sourceVaults.value.forEach((vault) => {
-    if (!vault.unitOfAccount) return
-
-    entries.push(...selectLeafAdaptersForPair(
-      vault.oracle.adapters,
-      vault.asset.address as Address,
-      vault.unitOfAccount.address as Address,
-    ))
+    entries.push(...vault.debtPricingOracleAdapters)
 
     if (props.collateralVaults?.length) {
       props.collateralVaults.forEach((collateralVault) => {
