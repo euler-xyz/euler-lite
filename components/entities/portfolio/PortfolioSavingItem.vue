@@ -97,18 +97,14 @@ const assetAmount = computed(() => {
   return nanoToValue(position.assets, vault.value.asset.decimals)
 })
 
-const onSupplyInfoIconClick = (event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY: nanoToValue(vault.value.interestRateInfo.supplyAPY, 25),
-      intrinsicAPY: getIntrinsicApy(vault.value.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.value.asset.address),
-      campaigns: getSupplyRewardCampaigns(vault.value.address),
-    },
-  })
-}
+const supplyApyModalData = computed(() => ({
+  props: {
+    lendingAPY: nanoToValue(vault.value.interestRateInfo.supplyAPY, 25),
+    intrinsicAPY: getIntrinsicApy(vault.value.asset.address),
+    intrinsicApyInfo: getIntrinsicApyInfo(vault.value.asset.address),
+    campaigns: getSupplyRewardCampaigns(vault.value.address),
+  },
+}))
 
 const onClick = () => {
   modal.open(VaultOverviewModal, {
@@ -168,19 +164,29 @@ const onClick = () => {
         <div class="flex flex-col items-end">
           <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
             Supply APY
-            <SvgIcon
-              class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-              name="info-circle"
-              @click.stop="onSupplyInfoIconClick"
-            />
+            <UiHoverModalTrigger
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY breakdown"
+            >
+              <SvgIcon
+                class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+                name="info-circle"
+              />
+            </UiHoverModalTrigger>
           </div>
           <div class="text-p2 flex text-accent-600">
-            <SvgIcon
+            <UiHoverModalTrigger
               v-if="rewardsExist"
-              name="sparks"
-              class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
-              @click.stop="onSupplyInfoIconClick"
-            />
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY rewards breakdown"
+            >
+              <SvgIcon
+                name="sparks"
+                class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
+              />
+            </UiHoverModalTrigger>
             {{ formatNumber(supplyApyWithRewards) }}%
           </div>
         </div>
@@ -280,19 +286,29 @@ const onClick = () => {
         <div class="flex flex-col items-end">
           <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
             Supply APY
-            <SvgIcon
-              class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-              name="info-circle"
-              @click.stop="onSupplyInfoIconClick"
-            />
+            <UiHoverModalTrigger
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY breakdown"
+            >
+              <SvgIcon
+                class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+                name="info-circle"
+              />
+            </UiHoverModalTrigger>
           </div>
           <div class="text-p2 flex text-accent-600">
-            <SvgIcon
+            <UiHoverModalTrigger
               v-if="rewardsExist"
-              name="sparks"
-              class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
-              @click.stop="onSupplyInfoIconClick"
-            />
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY rewards breakdown"
+            >
+              <SvgIcon
+                name="sparks"
+                class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
+              />
+            </UiHoverModalTrigger>
             {{ formatNumber(supplyApyWithRewards) }}%
           </div>
         </div>
