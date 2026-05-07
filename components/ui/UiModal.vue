@@ -62,7 +62,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   unregisterRequestClose?.()
-  isComponentVisible.value = false
 })
 </script>
 
@@ -82,7 +81,6 @@ onBeforeUnmount(() => {
         v-if="isComponentVisible"
         class="ui-modal__wrapper"
         @click.self="onClickWrapper"
-        @mousemove.self="handleMouseLeave"
       >
         <div
           class="ui-modal__panel-motion"
