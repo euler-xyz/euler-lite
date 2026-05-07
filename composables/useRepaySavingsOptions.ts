@@ -44,7 +44,7 @@ export const useRepaySavingsOptions = () => {
       const baseApy = nanoToValue(vault.interestRateInfo.supplyAPY || 0n, 25)
       const apy = withIntrinsicSupplyApy(baseApy, vault.asset.address) + getSupplyRewardApy(vault.address)
       return {
-        type: 'vault' as const,
+        type: 'saving' as const,
         amount,
         price: await getAssetUsdValueOrZero(amount, vault, 'off-chain'),
         apy,

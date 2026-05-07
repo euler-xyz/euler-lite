@@ -249,6 +249,8 @@ export interface CollateralOption {
   amount: number
   price: number
   apy?: number
+  balanceLabel?: string
+  showBalance?: boolean
   label?: string
   symbol?: string
   assetAddress?: string
