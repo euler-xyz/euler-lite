@@ -1,5 +1,7 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 
+const themeBootstrapScript = '(function(){var theme="dark";try{theme=localStorage.getItem("theme")==="light"?"light":"dark"}catch(e){}document.documentElement.setAttribute("data-theme",theme);document.documentElement.style.colorScheme=theme})()'
+
 export default defineNuxtConfig({
   modules: ['@nuxtjs/tailwindcss', '@nuxt/eslint', '@gvade/nuxt3-svg-sprite', '@vueuse/nuxt', '@sentry/nuxt/module'],
   ssr: false,
@@ -29,8 +31,17 @@ export default defineNuxtConfig({
     head: {
       title: 'Euler Lite',
       htmlAttrs: {
-        lang: 'en',
+        'lang': 'en',
+        'data-theme': 'dark',
       },
+      script: [
+        {
+          id: 'theme-bootstrap',
+          innerHTML: themeBootstrapScript,
+          tagPosition: 'head',
+          tagPriority: 'critical',
+        },
+      ],
       meta: [
         {
           name: 'description',
@@ -100,6 +111,7 @@ export default defineNuxtConfig({
     public: {
       // CONFIG_ vars (Doppler: NUXT_PUBLIC_CONFIG_*)
       configDocsUrl: '',
+      configStargateUrl: '',
       configTosUrl: '',
       configTosMdUrl: '',
       configPrivacyPolicyUrl: '',
@@ -148,7 +160,6 @@ export default defineNuxtConfig({
       pythHermesUrl: '',
       eulerApiUrl: '',
       swapApiUrl: '',
-      priceApiUrl: '',
       sentryDsn: '', // set via NUXT_PUBLIC_SENTRY_DSN
     },
   },

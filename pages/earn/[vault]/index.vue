@@ -20,6 +20,7 @@ const modal = useModal()
 const { error } = useToast()
 const { buildSupplyPlan, executeTxPlan } = useEulerOperations()
 const { getEarnVault, updateEarnVault } = useVaults()
+const { isReady: isLabelsReady } = useEulerLabels()
 const { isConnected, address } = useAccount()
 const { fetchSingleBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
@@ -53,6 +54,12 @@ const fetchBalance = async () => {
 // Non-blocking to avoid Suspense + pageTransition crash on direct navigation
 ;(async () => {
   try {
+    // Wait for labels so `verified` is set correctly on direct navigation.
+    // Otherwise getEarnVault falls through to a direct fetch with empty
+    // earnVaultAddresses and returns verified: false.
+    if (!isLabelsReady.value) {
+      await until(isLabelsReady).toBe(true)
+    }
     vault.value = await getEarnVault(vaultAddress)
     asset.value = vault.value?.asset
 

@@ -1,6 +1,6 @@
 import type { Address } from 'viem'
 import { CACHE_TTL_1MIN_MS, BATCH_DELAY_COLLECT_MS } from '~/entities/tuning-constants'
-import { logWarn } from '~/utils/errorHandling'
+import { logger } from '~/utils/logger'
 
 // -------------------------------------------
 // Backend Response Types
@@ -248,7 +248,7 @@ const fetchBackendPricesBatch = async (
     return results.size > 0 ? results : undefined
   }
   catch (err) {
-    logWarn('backendClient/fetchPrices', err)
+    logger.warn({ ctx: 'backendClient/fetchPrices', err }, 'backend price fetch failed')
     return results.size > 0 ? results : undefined
   }
 }
@@ -269,7 +269,7 @@ export const fetchBackendPrices = async (
 
 /**
  * Fetch a single asset price from backend.
- * Requests are automatically batched - multiple calls within 50ms
+ * Requests are automatically batched - multiple calls within 100ms
  * are combined into a single network request.
  */
 export const fetchBackendPrice = async (

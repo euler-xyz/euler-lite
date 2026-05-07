@@ -1,6 +1,7 @@
 export interface MenuItem {
   name: string
   label: string
+  sublabel?: string
   icon: string
   activeIcon: string
 }
@@ -33,6 +34,7 @@ const allMenuItems: MenuItem[] = [
   {
     name: 'borrow',
     label: 'Borrow',
+    sublabel: 'Multiply',
     icon: 'borrow-outline',
     activeIcon: 'borrow-filled',
   },

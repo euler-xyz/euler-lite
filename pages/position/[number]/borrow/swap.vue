@@ -183,6 +183,8 @@ const swap = useSwapPageLogic({
   targetVaultAddress,
   additionalErrors: [healthError],
   sameAssetModalType: 'swap',
+  swapperMode: SwapperMode.TARGET_DEBT,
+  reviewSwapEstimatedSide: 'output',
 
   buildQuoteRequest(amount) {
     if (!fromVault.value || !toVault.value || !position.value) return null
@@ -224,6 +226,7 @@ const swap = useSwapPageLogic({
       quote: selectedQuote.value,
       swapperMode: SwapperMode.TARGET_DEBT,
       isRepay: true,
+      requestedSlippage: slippage.value,
       isDebtSwap: true,
       targetDebt: 0n,
       currentDebt: currentDebt.value,
@@ -263,6 +266,8 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (healthError.value) return { message: healthError.value, variant: 'error' }
   if (quoteError.value) return { message: quoteError.value, variant: 'warning' }
   if (simulationError.value) return { message: simulationError.value, variant: 'error' }
+  if (!isSameAsset.value && isQuoteLoading.value && +fromAmount.value > 0) return { message: 'Fetching swap quotes...', variant: 'warning' }
+  if (!isSameAsset.value && !selectedQuote.value && +fromAmount.value > 0) return { message: 'Select a swap quote to continue', variant: 'warning' }
   return undefined
 })
 

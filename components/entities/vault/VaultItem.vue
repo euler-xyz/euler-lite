@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useAccount } from '@wagmi/vue'
 import { getAddress } from 'viem'
-import { getVaultUtilization, getCurrentLiquidationLTV, type Vault } from '~/entities/vault'
+import { getVaultUtilization, getCurrentLiquidationLTV, isCyclicalNoteVault, type Vault } from '~/entities/vault'
 import { getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
@@ -86,6 +86,7 @@ const utilization = computed(() => getVaultUtilization(vault))
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
 const isFeatured = computed(() => isVaultFeatured(vault.address))
 const isKeyring = computed(() => isVaultKeyring(vault.address))
+const isCyclicalNote = computed(() => isCyclicalNoteVault(vault))
 const utilisationWarning = computed(() => getUtilisationWarning(vault, 'lend'))
 const supplyCapWarning = computed(() => getSupplyCapWarning(vault))
 const statsGridCols = computed(() => {
@@ -184,17 +185,8 @@ watchEffect(async () => {
           </span>
           <KeyringBadge v-if="isKeyring" />
           <GovernanceLimitedBadge v-if="isGovernanceLimited" />
-          <span
-            v-if="isGeoBlocked"
-            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-            title="This vault is not available in your region"
-          >
-            <SvgIcon
-              name="warning"
-              class="!w-14 !h-14"
-            />
-            Restricted
-          </span>
+          <CyclicalNoteBadge v-if="isCyclicalNote" />
+          <RestrictedBadge v-if="isGeoBlocked" />
           <span
             v-if="isDeprecated"
             class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"

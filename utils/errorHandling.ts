@@ -1,3 +1,5 @@
+import { logger } from '~/utils/logger'
+
 type LogSeverity = 'warn' | 'error' | 'silent'
 
 /**
@@ -13,12 +15,13 @@ export function isAbortError(error: unknown): boolean {
 }
 
 /**
- * Structured warning with [context] tag.
+ * Compact `(context, error)` warning helper for client-side call sites.
  *
- * @param context - Tag for the log message, e.g. 'merkl/loadTokens'
- * @param error - The error or message to log
- * @param options.severity - 'warn' (default) | 'error' | 'silent'
- * @param options.data - Additional data to log after the error
+ * Routes through the shared `logger` so the output goes through the same
+ * structured pipeline as direct `logger.warn` calls (one console line per
+ * event, errors summarised via `summarizeViemError` so `abi`/`metaMessages`
+ * payloads never leak). Server-side code should call `logger.warn({ ctx, ... }, 'msg')`
+ * directly.
  */
 export function logWarn(
   context: string,
@@ -28,13 +31,18 @@ export function logWarn(
   const severity = options?.severity ?? 'warn'
   if (severity === 'silent') return
 
-  const log = severity === 'error' ? console.error : console.warn
-  if (options?.data !== undefined) {
-    log(`[${context}]`, error, options.data)
+  const fields: Record<string, unknown> = { ctx: context }
+  if (options?.data !== undefined) fields.data = options.data
+  if (error instanceof Error) {
+    fields.err = error
+    const log = severity === 'error' ? logger.error : logger.warn
+    log(fields, error.message)
+    return
   }
-  else {
-    log(`[${context}]`, error)
-  }
+  const msg = typeof error === 'string' ? error : ''
+  const log = severity === 'error' ? logger.error : logger.warn
+  if (msg) log(fields, msg)
+  else log({ ...fields, value: error }, '')
 }
 
 /**

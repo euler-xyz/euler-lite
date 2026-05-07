@@ -1,12 +1,21 @@
+import { maxUint256 } from 'viem'
 import type { MarketGroup, MiniDiagramData, MiniNode, MiniEdge } from '~/entities/lend-discovery'
 import type { Vault, SecuritizeVault, VaultCollateralLTV } from '~/entities/vault'
 import type { AnyVault } from '~/composables/useVaultRegistry'
 import type { EulerLabelEntity } from '~/entities/euler/labels'
-import { getCurrentLiquidationLTV, isLiquidationLTVRamping } from '~/entities/vault'
+import {
+  isLiquidationLTVRamping,
+  getVaultUtilization,
+  getSupplyCapPercentage,
+  getBorrowCapPercentage,
+  isLiveCollateralEdge,
+} from '~/entities/vault'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { getEntitiesByVault, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { formatNumber } from '~/utils/string-utils'
+import { formatNumber, compactNumber, truncate } from '~/utils/string-utils'
+import { decodeHookedOps, formatHookedOpsSummary, isVaultEffectivelyPaused } from '~/utils/vault-hooks'
+import { INTEREST_RATE_MODEL_TYPE, CFG_DONT_SOCIALIZE_DEBT } from '~/entities/constants'
 
 // ============================================================
 // Types & Constants
@@ -43,7 +52,7 @@ export interface EnhancedCellApys {
   utilization: number
 }
 
-export type DotMetric = 'bltv' | 'lltv' | 'net-apy' | 'roe' | 'multiplier'
+export type DotMetric = 'bltv' | 'lltv' | 'net-apy' | 'roe' | 'multiplier' | 'oracle'
 
 export interface DotMetricOption {
   id: DotMetric
@@ -57,9 +66,35 @@ export const DOT_METRIC_OPTIONS: DotMetricOption[] = [
   { id: 'multiplier', label: 'Multiplier', higherIsBetter: false },
   { id: 'bltv', label: 'Borrow LTV', higherIsBetter: false },
   { id: 'lltv', label: 'Liquidation LTV', higherIsBetter: false },
+  { id: 'oracle', label: 'Oracles', higherIsBetter: false },
 ]
 
 export type ExpandedViewMode = 'graph' | 'matrix'
+
+export type MatrixVariant = 'pairs' | 'config' | 'stats'
+export type AttributeMatrixMode = 'config' | 'stats'
+
+// Unified matrix-view selector. Wraps both attribute matrices (stats / config)
+// and pair-matrix metric variants (oracle + numeric metrics). Order is the
+// order shown in the dropdown.
+export type MatrixViewId = AttributeMatrixMode | DotMetric
+export interface MatrixViewOption {
+  id: MatrixViewId
+  label: string
+}
+export const MATRIX_VIEW_OPTIONS: MatrixViewOption[] = [
+  { id: 'stats', label: 'Stats' },
+  { id: 'config', label: 'Configuration' },
+  { id: 'oracle', label: 'Oracles' },
+  { id: 'net-apy', label: 'Net APY' },
+  { id: 'roe', label: 'Max ROE' },
+  { id: 'multiplier', label: 'Multiplier' },
+  { id: 'bltv', label: 'Borrow LTV' },
+  { id: 'lltv', label: 'Liquidation LTV' },
+]
+
+export const isAttributeMatrixView = (id: MatrixViewId): id is AttributeMatrixMode =>
+  id === 'stats' || id === 'config'
 
 // ============================================================
 // Vault Type Guards & Accessors
@@ -93,11 +128,23 @@ export const getVaultAssetAddress = (vault: AnyVault): string => {
 // Market Data Helpers
 // ============================================================
 
-export const getDeprecatedVaultCount = (market: MarketGroup): number =>
-  market.vaults.filter((v) => {
-    const addr = getVaultAddress(v)
-    return addr ? isVaultDeprecated(addr) : false
-  }).length
+// Count members and externals so the headline matches the per-node badge in
+// the graph (which paints any deprecated address regardless of role). Dedupe
+// in case the same address appears in both lists.
+export const getDeprecatedVaultCount = (market: MarketGroup): number => {
+  const seen = new Set<string>()
+  let count = 0
+  for (const v of [...market.vaults, ...market.externalCollateral]) {
+    const addr = getVaultAddress(v).toLowerCase()
+    if (!addr || seen.has(addr)) continue
+    seen.add(addr)
+    if (isVaultDeprecated(addr)) count++
+  }
+  return count
+}
+
+export const getUnknownCollateralCount = (market: MarketGroup): number =>
+  market.unknownCollateral.length
 
 export const getMarketEntities = (market: MarketGroup): { name: string, logos: string[] } => {
   const seen = new Set<string>()
@@ -128,18 +175,27 @@ export const getBorrowableVaults = (market: MarketGroup): Vault[] =>
 export const getNonBorrowableMemberVaults = (market: MarketGroup): Vault[] =>
   market.vaults.filter(isVaultType).filter(v => !hasBorrowableLTV(v))
 
+const hasLiveDiscoveryColumn = (vault: Vault): boolean =>
+  vault.collateralLTVs.some(ltv => isLiveCollateralEdge(ltv))
+
+const getDiscoveryColumnVaults = (market: MarketGroup): Vault[] =>
+  market.vaults.filter(isVaultType).filter(hasLiveDiscoveryColumn)
+
+const getDiscoveryRowOnlyVaults = (market: MarketGroup): Vault[] =>
+  market.vaults.filter(isVaultType).filter(v => !hasLiveDiscoveryColumn(v))
+
 export const isExternalCollateral = (market: MarketGroup, address: string): boolean => {
   const normalized = address.toLowerCase()
   return market.externalCollateral.some(v => getVaultAddress(v).toLowerCase() === normalized)
 }
 
 export const getActiveExternalCollateral = (market: MarketGroup): AnyVault[] => {
-  const borrowableVaults = getBorrowableVaults(market)
+  const columnVaults = getDiscoveryColumnVaults(market)
   return market.externalCollateral.filter((ext) => {
     const extAddr = getVaultAddress(ext).toLowerCase()
-    return borrowableVaults.some(v =>
+    return columnVaults.some(v =>
       v.collateralLTVs.some(ltv =>
-        ltv.collateral.toLowerCase() === extAddr && ltv.liquidationLTV > 0n,
+        ltv.collateral.toLowerCase() === extAddr && isLiveCollateralEdge(ltv),
       ),
     )
   })
@@ -166,24 +222,35 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
     const addr = getVaultAddress(v).toLowerCase()
     if (addr) vaultByAddr.set(addr, v)
   }
+  const unknownSet = new Set(market.unknownCollateral.map(a => a.toLowerCase()))
 
   const directedEdges = new Set<string>()
   const displayEdges = new Set<string>()
   const connectedAddresses = new Set<string>()
+  const connectedUnknownAddresses = new Set<string>()
 
   for (const vault of market.vaults) {
     if (!isVaultType(vault)) continue
     for (const ltv of vault.collateralLTVs) {
       const colAddr = ltv.collateral.toLowerCase()
-      if (!vaultByAddr.has(colAddr)) continue
+      const isKnown = vaultByAddr.has(colAddr)
+      const isUnknownPlaceholder = !isKnown && unknownSet.has(colAddr)
+      if (!isKnown && !isUnknownPlaceholder) continue
       const liabAddr = vault.address.toLowerCase()
-      if (ltv.borrowLTV > 0n) {
+      // directedEdges drives the borrowable-pair count rendered next to the
+      // graph — only currently borrowable edges count, and only against known
+      // collateral so the headline isn't inflated by truly missing references
+      // (those get their own "X unknown" indicator). displayEdges drives
+      // graph rendering and includes mid-ramp edges so a winding-down
+      // collateral remains visually connected.
+      if (isKnown && ltv.borrowLTV > 0n) {
         directedEdges.add(`${colAddr}:${liabAddr}`)
       }
-      if (getCurrentLiquidationLTV(ltv) > 0n) {
+      if (isLiveCollateralEdge(ltv)) {
         displayEdges.add(`${colAddr}:${liabAddr}`)
-        connectedAddresses.add(colAddr)
         connectedAddresses.add(liabAddr)
+        if (isKnown) connectedAddresses.add(colAddr)
+        else connectedUnknownAddresses.add(colAddr)
       }
     }
   }
@@ -196,15 +263,26 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
     }
   }
 
-  if (connectedAddresses.size === 0 && disconnectedVaults.length === 0) {
+  if (connectedAddresses.size === 0 && connectedUnknownAddresses.size === 0 && disconnectedVaults.length === 0) {
     const assetSymbols = new Set<string>()
     for (const v of market.vaults) assetSymbols.add(getVaultAssetSymbol(v))
     return { nodes: [], edges: [], pairCount: 0, assetCount: assetSymbols.size, viewWidth: 0 }
   }
 
   const allNodeEntries = [
-    ...[...connectedAddresses].map(addr => ({ address: addr, vault: vaultByAddr.get(addr)! })),
-    ...disconnectedVaults,
+    ...[...connectedAddresses].map(addr => ({
+      address: addr,
+      vault: vaultByAddr.get(addr)!,
+      // A node can be "known" (resolved vault, full identity) yet still flagged
+      // as unknown when its governor isn't part of any declared product entity
+      // — same signal as the per-pair "Unknown" risk-manager pill. Keep the
+      // logo/symbol but render the red badge in either case.
+      isUnknown: unknownSet.has(addr),
+    })),
+    ...[...connectedUnknownAddresses].map(addr => ({ address: addr, vault: undefined, isUnknown: true })),
+    // Disconnected nodes are always group members; group members are never
+    // tracked in unknownCollateral (the curator's label is an attestation).
+    ...disconnectedVaults.map(d => ({ ...d, isUnknown: false })),
   ]
   const count = allNodeEntries.length
   const baseR = Math.min(24, 10 + count * 2)
@@ -215,12 +293,27 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
   const cy = 30
   const assetSymbols = new Set<string>()
 
-  const nodes: MiniNode[] = allNodeEntries.map(({ address, vault }, i) => {
+  const nodes: MiniNode[] = allNodeEntries.map(({ address, vault, isUnknown }, i) => {
     const angle = (Math.PI * 2 * i) / Math.max(count, 1) - Math.PI / 2
-    const assetSymbol = vault ? getVaultAssetSymbol(vault) : '?'
+    // Placeholder nodes have no asset metadata. Use the truncated vault
+    // address as the label so the curator can identify the missing entry,
+    // and let the standard logo-less fallback (stringToColor + 2-char head)
+    // handle the visual — the red badge alone signals the unknown state.
+    const assetSymbol = vault ? getVaultAssetSymbol(vault) : truncate(address)
     const assetAddress = vault ? getVaultAssetAddress(vault) : ''
-    assetSymbols.add(assetSymbol)
-    return { address, assetAddress, assetSymbol, x: cx + rx * Math.cos(angle), y: cy + ry * Math.sin(angle) }
+    // Resolvable nodes still contribute to "X assets" even when flagged as
+    // unknown (USDC stays USDC; only the badge is added). The asset count is
+    // suppressed only for placeholder nodes that have no resolved vault data.
+    if (vault) assetSymbols.add(assetSymbol)
+    return {
+      address,
+      assetAddress,
+      assetSymbol,
+      x: cx + rx * Math.cos(angle),
+      y: cy + ry * Math.sin(angle),
+      hasVaultData: Boolean(vault),
+      isUnknown,
+    }
   })
   const nodeMap = new Map(nodes.map(n => [n.address, n]))
 
@@ -250,9 +343,8 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
 // ============================================================
 
 export const getCollateralMatrix = (market: MarketGroup): CollateralMatrixData | null => {
-  const borrowable = getBorrowableVaults(market)
-  const nonBorrowable = getNonBorrowableMemberVaults(market)
-  const external = getActiveExternalCollateral(market)
+  const borrowable = getDiscoveryColumnVaults(market)
+  const nonBorrowable = getDiscoveryRowOnlyVaults(market)
 
   const knownAddresses = new Set<string>()
   for (const v of [...market.vaults, ...market.externalCollateral]) {
@@ -267,7 +359,7 @@ export const getCollateralMatrix = (market: MarketGroup): CollateralMatrixData |
 
   for (const vault of borrowable) {
     for (const ltv of vault.collateralLTVs) {
-      if (getCurrentLiquidationLTV(ltv) <= 0n) continue
+      if (!isLiveCollateralEdge(ltv)) continue
       const colAddr = ltv.collateral.toLowerCase()
       if (!knownAddresses.has(colAddr)) continue
 
@@ -333,28 +425,30 @@ export const getCollateralMatrix = (market: MarketGroup): CollateralMatrixData |
   const seenRows = new Set<string>()
 
   const addRow = (addr: string, symbol: string, assetAddress: string, category: CollateralMatrixData['rows'][0]['category']) => {
-    if (referencedCollateral.has(addr) && !seenRows.has(addr)) {
-      seenRows.add(addr)
-      rows.push({ address: addr, symbol, assetAddress, category })
-    }
+    if (seenRows.has(addr)) return
+    seenRows.add(addr)
+    rows.push({ address: addr, symbol, assetAddress, category })
   }
 
   for (const v of sortedDiagonal) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, 'borrowable')
   for (const v of sortedRowOnly) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, 'borrowable')
 
+  // Escrow + external rows always render at the bottom, even when no
+  // borrowable vault references them, so curators can see same-asset escrow
+  // and external collateral at a glance. Rows without cells appear empty —
+  // the dim styling on the label conveys that they're inventory, not active.
   const sortedNonBorrowable = [...nonBorrowable]
-    .filter(v => referencedCollateral.has(v.address.toLowerCase()))
     .sort((a, b) => rowAvgLTV(b.address.toLowerCase()) - rowAvgLTV(a.address.toLowerCase()))
   for (const v of sortedNonBorrowable) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, 'escrow')
 
   const securitizeMembers = market.vaults
-    .filter((v): v is SecuritizeVault => 'type' in v && (v as { type?: string }).type === 'securitize')
-    .filter(v => referencedCollateral.has(v.address.toLowerCase()))
+    .filter(isSecuritizeVault)
     .sort((a, b) => rowAvgLTV(b.address.toLowerCase()) - rowAvgLTV(a.address.toLowerCase()))
   for (const v of securitizeMembers) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, 'external')
 
-  const sortedExternal = [...external]
-    .filter(v => referencedCollateral.has(getVaultAddress(v).toLowerCase()))
+  const sortedExternal = market.externalCollateral
+    .filter(isMatrixCompatibleVault)
+    .slice()
     .sort((a, b) => rowAvgLTV(getVaultAddress(b).toLowerCase()) - rowAvgLTV(getVaultAddress(a).toLowerCase()))
   for (const v of sortedExternal) addRow(getVaultAddress(v).toLowerCase(), getVaultAssetSymbol(v), getVaultAssetAddress(v), 'external')
 
@@ -374,6 +468,8 @@ export const formatMetricValue = (value: number, metric: DotMetric): string => {
   switch (metric) {
     case 'multiplier':
       return `${formatNumber(value, 1, 1)}x`
+    case 'oracle':
+      return ''
     default:
       return `${formatNumber(value, 1, 1)}%`
   }
@@ -467,13 +563,11 @@ export const getGraphConnectedAddresses = (diagram: MiniDiagramData, address: st
 
 export const isNodeRampingDown = (market: MarketGroup, address: string): boolean => {
   const normalized = address.toLowerCase()
-  for (const v of market.vaults) {
-    if (!isVaultType(v)) continue
-    for (const ltv of v.collateralLTVs) {
-      if (ltv.collateral.toLowerCase() === normalized && isLiquidationLTVRamping(ltv)) return true
-    }
-  }
-  return false
+  const vault = market.vaults
+    .filter(isVaultType)
+    .find(v => v.address.toLowerCase() === normalized)
+
+  return vault?.collateralLTVs.some(ltv => isLiquidationLTVRamping(ltv)) ?? false
 }
 
 // ============================================================
@@ -513,8 +607,415 @@ export const getCellBgColor = (value: number, metric: DotMetric, min: number, ma
     case 'net-apy':
     case 'roe':
       return getDivergingColor(value, min, max)
+    case 'oracle':
+      return 'transparent'
   }
 }
 
 // Re-export vault helpers for convenience
 export { isLiquidationLTVRamping, getCurrentLiquidationLTV, getVaultUtilization } from '~/entities/vault'
+
+// ============================================================
+// Attribute Matrix (Configuration & Stats)
+// ============================================================
+
+const isSecuritizeVault = (v: AnyVault): v is SecuritizeVault =>
+  'type' in v && (v as { type?: string }).type === 'securitize'
+
+export const isMatrixCompatibleVault = (v: AnyVault): v is Vault | SecuritizeVault =>
+  isVaultType(v) || isSecuritizeVault(v)
+
+export interface VaultUsdCacheEntry {
+  supply: string
+  supplyUsd: number
+  borrow: string
+  borrowUsd: number
+  liquidity: string
+  liquidityUsd: number
+  supplyCap: string
+  supplyCapUsd: number | undefined
+  borrowCap: string
+  borrowCapUsd: number | undefined
+}
+
+// Pre-computed APYs that fold in intrinsic + rewards. Computed in the component
+// where composables are accessible, then passed to the matrix as a cache so the
+// Stats matrix renders the same APY users see on the per-vault cards.
+export interface VaultApyCacheEntry {
+  supplyApy: number
+  borrowApy: number
+}
+
+export interface AttributeCell {
+  display: string
+  numeric?: number
+  hint?: string
+  kind?: 'text' | 'capProgress' | 'governor' | 'hooks'
+  capPercent?: number
+  capUncapped?: boolean
+  hookable?: boolean
+}
+
+export interface AttributeRow {
+  id: string
+  label: string
+  tooltip?: string
+  getValue: (
+    vault: Vault | SecuritizeVault,
+    usd: VaultUsdCacheEntry | undefined,
+    apy: VaultApyCacheEntry | undefined,
+  ) => AttributeCell
+}
+
+export interface AttributeMatrixColumn {
+  address: string
+  symbol: string
+  assetAddress: string
+  vault: Vault | SecuritizeVault
+  isExternal: boolean
+}
+
+export interface AttributeMatrixData {
+  rows: AttributeRow[]
+  columns: AttributeMatrixColumn[]
+}
+
+const isEscrow = (v: Vault | SecuritizeVault): boolean =>
+  isVaultType(v) && v.vaultCategory === 'escrow'
+
+const compareSymbolAsc = (a: Vault | SecuritizeVault, b: Vault | SecuritizeVault): number =>
+  a.asset.symbol.localeCompare(b.asset.symbol, undefined, { sensitivity: 'base' })
+
+// Members come first; externals (escrowed / cross-product collateral) are
+// appended at the end with `isExternal: true` so the view can dim them.
+export const getAttributeMatrixColumns = (market: MarketGroup): AttributeMatrixColumn[] => {
+  const memberEvk: Vault[] = []
+  const memberSecuritize: SecuritizeVault[] = []
+  for (const v of market.vaults) {
+    if (isVaultType(v)) memberEvk.push(v)
+    else if (isSecuritizeVault(v)) memberSecuritize.push(v)
+  }
+
+  memberEvk.sort(compareSymbolAsc)
+  memberSecuritize.sort(compareSymbolAsc)
+
+  const externalEvk: Vault[] = []
+  const externalSecuritize: SecuritizeVault[] = []
+  const seenExternal = new Set<string>()
+  for (const v of market.externalCollateral) {
+    const addr = getVaultAddress(v).toLowerCase()
+    if (!addr || seenExternal.has(addr)) continue
+    seenExternal.add(addr)
+    if (isVaultType(v)) externalEvk.push(v)
+    else if (isSecuritizeVault(v)) externalSecuritize.push(v)
+  }
+
+  externalEvk.sort(compareSymbolAsc)
+  externalSecuritize.sort(compareSymbolAsc)
+
+  const toCol = (vault: Vault | SecuritizeVault, isExternal: boolean): AttributeMatrixColumn => ({
+    address: getVaultAddress(vault).toLowerCase(),
+    symbol: vault.asset.symbol,
+    assetAddress: vault.asset.address,
+    vault,
+    isExternal,
+  })
+
+  return [
+    ...memberEvk.map(v => toCol(v, false)),
+    ...memberSecuritize.map(v => toCol(v, false)),
+    ...externalEvk.map(v => toCol(v, true)),
+    ...externalSecuritize.map(v => toCol(v, true)),
+  ]
+}
+
+const NA_CELL: AttributeCell = { display: '—', kind: 'text' }
+
+// Shared cap renderer used by both the attribute matrix (CONFIG_ROWS) and the
+// USD cache loader in DiscoveryMarketAccordion. `formatted` is the pre-built
+// USD or asset-amount string when available; the boundary cases (uncapped /
+// zero cap) win regardless of whether the formatted string is supplied.
+export const formatCapDisplay = (
+  rawCap: bigint,
+  formatted: string | null | undefined,
+): { display: string, hint?: string } => {
+  if (rawCap >= maxUint256) return { display: '∞' }
+  if (rawCap === 0n) return { display: '$0' }
+  return { display: formatted ?? '…' }
+}
+
+const getIrmTypeLabel = (t: number | undefined): string => {
+  if (t === INTEREST_RATE_MODEL_TYPE.KINK) return 'Kink'
+  if (t === INTEREST_RATE_MODEL_TYPE.ADAPTIVE_CURVE) return 'Adaptive'
+  if (t === INTEREST_RATE_MODEL_TYPE.KINKY) return 'Kinky'
+  if (t === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY) return 'Cyclical note'
+  return '—'
+}
+
+const formatCapPercentDisplay = (pct: number, uncapped: boolean, exceeded: boolean): string => {
+  if (uncapped) return '—'
+  // Both the supply > supplyCap case and the supplyCap === 0n / supply > 0n
+  // edge case (where getSupplyCapPercentage clamps to 100) collapse to one
+  // visual signal: '>100%'. Without this, an exceeded cap was displayed as
+  // exactly 100%, which read as 'at cap' rather than 'over'.
+  if (exceeded || pct > 100) return '>100%'
+  return `${compactNumber(pct, 2)}%`
+}
+
+// nanoToValue(supplyAPY, 25) already returns a percentage value (e.g. 5.2 for
+// 5.2%) — matches VaultOverviewBlockStats. No further scaling needed.
+const supplyApyPercent = (vault: Vault | SecuritizeVault): number =>
+  Number(nanoToValue(vault.interestRateInfo.supplyAPY, 25))
+
+const borrowApyPercent = (vault: Vault | SecuritizeVault): number =>
+  Number(nanoToValue(vault.interestRateInfo.borrowAPY, 25))
+
+export const CONFIG_ROWS: AttributeRow[] = [
+  {
+    id: 'supplyCap',
+    label: 'Supply cap',
+    getValue: (vault, usd) => {
+      const rawCap = vault.supplyCap
+      const { display } = formatCapDisplay(rawCap, usd?.supplyCap)
+      return { display, kind: 'text' }
+    },
+  },
+  {
+    id: 'borrowCap',
+    label: 'Borrow cap',
+    getValue: (vault, usd) => {
+      if (!isVaultType(vault)) return NA_CELL
+      if (isEscrow(vault)) return NA_CELL
+      const rawCap = vault.borrowCap
+      const { display } = formatCapDisplay(rawCap, usd?.borrowCap)
+      return { display, kind: 'text' }
+    },
+  },
+  {
+    id: 'irmType',
+    label: 'Interest rate model',
+    getValue: (vault) => {
+      if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
+      const t = vault.irmInfo?.interestRateModelInfo?.interestRateModelType
+      const label = getIrmTypeLabel(typeof t === 'number' ? t : undefined)
+      return { display: label, kind: 'text', hint: vault.interestRateModelAddress }
+    },
+  },
+  {
+    id: 'interestFee',
+    label: 'Interest fee',
+    getValue: (vault) => {
+      if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
+      const pct = Number(nanoToValue(vault.interestFee, 2))
+      return { display: `${formatNumber(pct)}%`, kind: 'text' }
+    },
+  },
+  {
+    id: 'maxLiqDiscount',
+    label: 'Max liquidation discount',
+    getValue: (vault) => {
+      if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
+      const pct = Number(vault.maxLiquidationDiscount / 100n)
+      return { display: `${pct}%`, kind: 'text' }
+    },
+  },
+  {
+    id: 'badDebtSocialised',
+    label: 'Bad debt socialization',
+    getValue: (vault) => {
+      if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
+      // Bitmask check — bad-debt socialisation is on when the
+      // CFG_DONT_SOCIALIZE_DEBT bit is *not* set. configFlags may carry
+      // other bits in the future, so testing strict equality against 0n
+      // would silently flip to "No" when an unrelated flag is enabled.
+      const yes = (vault.configFlags & CFG_DONT_SOCIALIZE_DEBT) === 0n
+      return { display: yes ? 'Yes' : 'No', kind: 'text' }
+    },
+  },
+  {
+    id: 'hooks',
+    label: 'Hooked operations',
+    getValue: (vault) => {
+      if (!isVaultType(vault)) return NA_CELL
+      // 'All' when every user-facing op is hooked (full disable). Specific
+      // op summary otherwise. 'None' when no ops are hooked.
+      const display = isVaultEffectivelyPaused(vault)
+        ? 'All'
+        : vault.hookedOps === 0n
+          ? 'None'
+          : formatHookedOpsSummary(decodeHookedOps(vault.hookedOps))
+      return {
+        display,
+        kind: 'hooks',
+        hookable: vault.hookedOps !== 0n,
+      }
+    },
+  },
+  {
+    id: 'governor',
+    label: 'Governor',
+    getValue: vault => ({
+      display: vault.governorAdmin,
+      kind: 'governor',
+      hint: vault.governorAdmin,
+    }),
+  },
+]
+
+export const STATS_ROWS: AttributeRow[] = [
+  {
+    id: 'totalSupply',
+    label: 'Total supply',
+    getValue: (_vault, usd) => ({
+      display: usd ? usd.supply : '…',
+      numeric: usd?.supplyUsd,
+      kind: 'text',
+    }),
+  },
+  {
+    id: 'totalBorrow',
+    label: 'Total borrows',
+    getValue: (vault, usd) => {
+      if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
+      return {
+        display: usd ? usd.borrow : '…',
+        numeric: usd?.borrowUsd,
+        kind: 'text',
+      }
+    },
+  },
+  {
+    id: 'liquidity',
+    label: 'Available liquidity',
+    getValue: (vault, usd) => {
+      if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
+      return {
+        display: usd ? usd.liquidity : '…',
+        numeric: usd?.liquidityUsd,
+        kind: 'text',
+      }
+    },
+  },
+  {
+    id: 'utilization',
+    label: 'Utilization',
+    getValue: (vault) => {
+      if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
+      const pct = getVaultUtilization(vault)
+      return { display: `${formatNumber(pct, 2)}%`, numeric: pct, kind: 'text' }
+    },
+  },
+  {
+    id: 'supplyCapUsage',
+    label: 'Supply cap usage',
+    getValue: (vault) => {
+      if (!isVaultType(vault)) return NA_CELL
+      const uncapped = vault.supplyCap >= maxUint256
+      const pct = getSupplyCapPercentage(vault)
+      // Edge case: supplyCap === 0 with supply > 0 — the percentage helper
+      // clamps to 100, but conceptually any deposit against a 0 cap is over.
+      const exceeded = vault.supplyCap === 0n && vault.supply > 0n
+      return {
+        display: formatCapPercentDisplay(pct, uncapped, exceeded),
+        numeric: uncapped ? undefined : pct,
+        kind: 'capProgress',
+        capPercent: pct,
+        capUncapped: uncapped,
+      }
+    },
+  },
+  {
+    id: 'borrowCapUsage',
+    label: 'Borrow cap usage',
+    getValue: (vault) => {
+      if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
+      const uncapped = vault.borrowCap >= maxUint256
+      const pct = getBorrowCapPercentage(vault)
+      const exceeded = vault.borrowCap === 0n && vault.borrow > 0n
+      return {
+        display: formatCapPercentDisplay(pct, uncapped, exceeded),
+        numeric: uncapped ? undefined : pct,
+        kind: 'capProgress',
+        capPercent: pct,
+        capUncapped: uncapped,
+      }
+    },
+  },
+  {
+    id: 'supplyApy',
+    label: 'Supply APY',
+    getValue: (vault, _usd, apy) => {
+      // Securitize vaults' interestRateInfo is documented as zero-valued,
+      // so we'd render "0.00%" — avoid that misleading display.
+      if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
+      // Prefer the pre-computed APY (folds in intrinsic + supply rewards) so
+      // this matches the per-vault card. Fall back to the raw IRM rate when
+      // the cache hasn't been populated (e.g. unit tests).
+      const pct = apy?.supplyApy ?? supplyApyPercent(vault)
+      return { display: `${formatNumber(pct, 2)}%`, numeric: pct, kind: 'text' }
+    },
+  },
+  {
+    id: 'borrowApy',
+    label: 'Borrow APY',
+    getValue: (vault, _usd, apy) => {
+      if (!isVaultType(vault) || isEscrow(vault)) return NA_CELL
+      const pct = apy?.borrowApy ?? borrowApyPercent(vault)
+      return { display: `${formatNumber(pct, 2)}%`, numeric: pct, kind: 'text' }
+    },
+  },
+]
+
+// Build a per-vault APY cache that mirrors the per-vault card formula:
+//   supplyApy = withIntrinsicSupplyApy(base) + supplyRewards
+//   borrowApy = withIntrinsicBorrowApy(base) - borrowRewards (general only)
+//
+// Borrow rewards here use no collateral context, so collateral-conditional
+// campaigns (`euler_borrow_collateral`) are intentionally excluded — the
+// matrix shows per-vault stats, not per-pair.
+export const buildVaultApyCache = (
+  markets: MarketGroup[],
+  withIntrinsicSupplyApy: (apy: number, address: string) => number,
+  withIntrinsicBorrowApy: (apy: number, address: string) => number,
+  getSupplyRewardApy: (vaultAddress: string) => number,
+  getBorrowRewardApy: (vaultAddress: string) => number,
+): Map<string, VaultApyCacheEntry> => {
+  const result = new Map<string, VaultApyCacheEntry>()
+  for (const market of markets) {
+    // Walk both members and external collateral — the attribute matrix now
+    // renders externals as columns too, and they need the same intrinsic +
+    // rewards adjustment so Stats agrees with the per-vault card.
+    for (const vault of [...market.vaults, ...market.externalCollateral]) {
+      if (!isVaultType(vault)) continue
+      const addr = vault.address.toLowerCase()
+      if (result.has(addr)) continue
+      const baseSupply = Number(nanoToValue(vault.interestRateInfo.supplyAPY, 25))
+      const baseBorrow = Number(nanoToValue(vault.interestRateInfo.borrowAPY, 25))
+      result.set(addr, {
+        supplyApy: withIntrinsicSupplyApy(baseSupply, vault.asset.address) + getSupplyRewardApy(vault.address),
+        borrowApy: withIntrinsicBorrowApy(baseBorrow, vault.asset.address) - getBorrowRewardApy(vault.address),
+      })
+    }
+  }
+  return result
+}
+
+export const getAttributeMatrix = (
+  market: MarketGroup,
+  mode: AttributeMatrixMode,
+): AttributeMatrixData => ({
+  rows: mode === 'config' ? CONFIG_ROWS : STATS_ROWS,
+  columns: getAttributeMatrixColumns(market),
+})
+
+export const buildAttributeRowCells = (
+  row: AttributeRow,
+  columns: AttributeMatrixColumn[],
+  usdCache: Map<string, VaultUsdCacheEntry>,
+  apyCache?: Map<string, VaultApyCacheEntry>,
+): AttributeCell[] =>
+  columns.map(col => row.getValue(
+    col.vault,
+    usdCache.get(col.address),
+    apyCache?.get(col.address),
+  ))

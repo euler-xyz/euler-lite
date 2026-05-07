@@ -20,6 +20,7 @@ import { createRaceGuard } from '~/utils/race-guard'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
+import { getRepaySwapReviewInputAmount } from '~/composables/repay/reviewAmount'
 import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
 import { findBlockingDisabledOp, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
@@ -32,6 +33,7 @@ interface UseWalletSwapRepayOptions {
   plan: Ref<TxPlan | null>
   isSubmitting: Ref<boolean>
   isPreparing: Ref<boolean>
+  slippage: Readonly<Ref<number>>
   clearSimulationError: () => void
   runSimulation: (plan: TxPlan) => Promise<boolean>
   netAPY: Ref<number>
@@ -51,6 +53,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     plan,
     isSubmitting,
     isPreparing,
+    slippage,
     clearSimulationError,
     runSimulation,
     netAPY,
@@ -61,15 +64,13 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     oraclePriceRatio,
   } = options
 
-  const router = useRouter()
   const modal = useModal()
   const { error } = useToast()
   const { buildSwapAndRepayPlan, executeTxPlan } = useEulerOperations()
-  const { refreshAllPositions } = useEulerAccount()
-  const { eulerLensAddresses, chainId } = useEulerAddresses()
+  const { chainId } = useEulerAddresses()
   const { isConnected, address } = useAccount()
   const { fetchSingleBalance } = useWallets()
-  const { slippage } = useSlippage()
+  const { finalizeTxAndRedirect } = useTxFinalization()
   const { getVault: registryGetVault } = useVaultRegistry()
 
   // --- State ---
@@ -83,7 +84,6 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
   // --- Swap quotes (dual-direction) ---
   const quotes = useSwapRepayQuotes({ direction })
-
   // --- Derived ---
   const needsSwap = computed(() => {
     if (!selectedAsset.value || !borrowVault.value) return false
@@ -148,6 +148,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   })
 
   const swapRoutedVia = computed(() => {
+    if (!quotes.selectedProvider.value) return 'Not selected'
     if (!quotes.effectiveQuote.value?.route?.length) return null
     return quotes.effectiveQuote.value.route.map((r: { providerName: string }) => r.providerName).join(', ')
   })
@@ -437,10 +438,6 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       _estimateUserLTV.value = userLtvFixed.toScaledBigint(18)
       _estimateHealth.value = healthFixed ? healthFixed.toScaledBigint(18) : 10n ** 36n
       hasEstimate.value = true
-
-      if (userLtvFixed.gte(FixedPoint.fromValue(position.value!.liquidationLTV, 2))) {
-        throw new Error('Not enough liquidity for the vault, LTV is too large')
-      }
     }
     catch (e: unknown) {
       logWarn('walletSwapRepay/syncEstimates', e)
@@ -615,6 +612,14 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     }
   })
 
+  watch(slippage, () => {
+    if (formTab.value !== 'wallet' || !needsSwap.value) return
+    clearSimulationError()
+    quotes.reset()
+    resetDerivedState()
+    requestQuote()
+  })
+
   // --- Watch quote changes → sync opposite field + estimates ---
   watch([quotes.effectiveQuote, direction], () => {
     if (formTab.value !== 'wallet' || !needsSwap.value) return
@@ -671,6 +676,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       inputTokenAddress: (wrappedAddress || selectedAsset.value.address) as Address,
       inputAmount,
       quote: quotes.selectedQuote.value,
+      requestedSlippage: slippage.value,
       borrowVaultAddress: borrowVault.value.address as Address,
       subAccount: (position.value.subAccount || address.value || zeroAddress) as Address,
       enabledCollaterals: position.value.collaterals ?? [collateralVault.value.address],
@@ -710,9 +716,12 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       if (!ok) return
 
       // For review modal: show input token as primary asset, borrow asset as swap target
-      const inputDisplay = direction.value === SwapperMode.TARGET_DEBT && amount.value
-        ? amount.value
-        : (amount.value || '0')
+      const inputDisplay = getRepaySwapReviewInputAmount({
+        amount: amount.value,
+        quote: quotes.selectedQuote.value,
+        sourceDecimals: selectedAsset.value.decimals,
+        swapperMode: direction.value,
+      })
 
       const isNativeRepay = isNativeCurrencyAddress(selectedAsset.value.address)
       const reviewAsset = isNativeRepay
@@ -724,7 +733,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
           asset: reviewAsset,
           amount: inputDisplay,
           swapToAsset: borrowVault.value.asset,
-          swapToAmount: swapEstimatedOutput.value,
+          swapToAmount: direction.value === SwapperMode.TARGET_DEBT ? debtAmount.value : swapEstimatedOutput.value,
+          swapMode: direction.value,
           plan: plan.value || undefined,
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
@@ -747,12 +757,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
       const txPlan = await buildRepayPlan(true)
       await executeTxPlan(txPlan)
-
-      modal.close()
-      refreshAllPositions(eulerLensAddresses.value, address.value as string)
-      setTimeout(() => {
-        router.replace('/portfolio')
-      }, 400)
+      await finalizeTxAndRedirect()
     }
     catch (e) {
       error('Transaction failed')

@@ -32,7 +32,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { TxPlan } from '~/entities/txPlan'
 import { getPlanHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
-import { getVaultTags, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
+import { getVaultTags, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { getNetAPY, getProjectedRates } from '~/entities/vault'
 import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
@@ -87,14 +87,13 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     borrowAddress: _borrowAddress,
   } = options
 
-  const router = useRouter()
   const modal = useModal()
   const { error } = useToast()
   const { buildBorrowPlan, buildBorrowBySavingPlan, buildSwapAndBorrowPlan, executeTxPlan } = useEulerOperations()
   const { address, isConnected } = useAccount()
-  const { refreshAllPositions } = useEulerAccount()
-  const { eulerLensAddresses, chainId } = useEulerAddresses()
+  const { chainId } = useEulerAddresses()
   const { fetchSingleBalance } = useWallets()
+  const { finalizeTxAndRedirect } = useTxFinalization()
 
   const {
     runSimulation: runBorrowSimulation,
@@ -125,7 +124,6 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     requestQuotes: requestBorrowSwapQuotes,
     selectProvider: selectBorrowSwapQuote,
   } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
-
   // --- Form state ---
   const ltv = ref(0)
   const borrowAmount = ref('')
@@ -272,6 +270,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   })
 
   const borrowSwapRoutedVia = computed(() => {
+    if (!borrowSwapSelectedProvider.value) return 'Not selected'
     if (!borrowSwapEffectiveQuote.value?.route?.length) return null
     return borrowSwapEffectiveQuote.value.route.map((r: { providerName: string }) => r.providerName).join(', ')
   })
@@ -328,6 +327,14 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     borrowNeedsSwap.value && isVaultRestrictedByCountry(collateralAddress),
   )
 
+  // Pay-with asset can be any ERC-20 not tied to any vault, so the
+  // vault-level check above can't see it. Hard-block the asset directly.
+  // Soft-restrict does not apply: pay-with reduces exposure to that asset.
+  // Pass the asset object so symbol/name pattern rules also apply.
+  const isBorrowPayWithBlocked = computed(() =>
+    borrowNeedsSwap.value && isAssetBlockedByCountry(borrowSelectedAsset.value),
+  )
+
   const errorText = computed(() => {
     if (borrowActiveBalance.value < valueToNano(collateralAmount.value, borrowActiveAssetDecimals.value)) {
       return 'Not enough balance'
@@ -335,7 +342,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     else if ((borrowVault.value?.supply || 0n) < valueToNano(borrowAmount.value, borrowVault.value?.decimals)) {
       return 'Not enough liquidity in the vault'
     }
-    if (borrowNeedsSwap.value && !borrowSwapSelectedQuote.value && +collateralAmount.value > 0) {
+    if (borrowNeedsSwap.value && !borrowSwapQuoteCards.value.length && +collateralAmount.value > 0) {
       return isBorrowSwapQuoteLoading.value ? null : 'No swap quote available'
     }
     return null
@@ -597,6 +604,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       borrowVaultAddress: borrowVault.value.address as Address,
       borrowAmount: borrowAmountNano,
       swapQuote: quote,
+      requestedSlippage: borrowSwapSlippage.value,
       subAccount,
       includePermit2Call: planOptions.includePermit2Call,
       wrappedNativeInfo: isNative && wrappedAddress
@@ -607,7 +615,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   const submit = async () => {
     if (isOperationBlocked.value) return
-    if (isPreparing.value || isGeoBlocked.value || isBorrowRestricted.value || isBorrowSwapRestricted.value) return
+    if (isPreparing.value || isGeoBlocked.value || isBorrowRestricted.value || isBorrowSwapRestricted.value || isBorrowPayWithBlocked.value) return
     isPreparing.value = true
     try {
       if (!isConnected.value) {
@@ -648,6 +656,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             plan: plan.value || undefined,
             swapToAsset: collateralVault.value.asset,
             swapToAmount: borrowSwapEstimatedCollateral.value,
+            swapMode: SwapperMode.EXACT_IN,
             onConfirm: async () => {
               await send()
             },
@@ -785,12 +794,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             )
       }
       await executeTxPlan(txPlan)
-
-      modal.close()
-      refreshAllPositions(eulerLensAddresses.value, address.value || '')
-      setTimeout(() => {
-        router.replace('/portfolio')
-      }, 400)
+      await finalizeTxAndRedirect()
     }
     catch (e) {
       logWarn('borrow/send', e)
@@ -938,6 +942,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     errorText,
     isSubmitDisabled,
     isBorrowSwapRestricted,
+    isBorrowPayWithBlocked,
 
     // Computed: warnings
     borrowFormWarnings,

@@ -9,6 +9,8 @@ on:
   push:
     tags:
       - 'v*'
+      - '!v*-rc*'
+      - '!v*-beta*'
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -36,8 +38,8 @@ jobs:
       - name: Verify tag is on master
         if: github.event_name == 'push'
         run: |
-          if ! git merge-base --is-ancestor "${{ github.sha }}" origin/master; then
-            echo "::error::Tag does not point to a commit on master. Aborting."
+          if ! git log --first-parent --format=%H origin/master | grep -q "^${{ github.sha }}$"; then
+            echo "::error::Tag does not point to a commit on master's first-parent history. Aborting."
             exit 1
           fi
 
@@ -67,30 +69,125 @@ jobs:
         if: github.event_name == 'push'
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
-      - name: Build, tag, and push docker image to Amazon ECR
+      - name: Build docker image
         if: github.event_name == 'push'
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: .
           platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ steps.generate-tag.outputs.image_tag }}
-            ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:latest
+          load: true
+          tags: euler-lite
           build-args: |
             SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Extract static assets from image
+        if: github.event_name == 'push'
+        run: |
+          docker create --name temp-euler euler-lite
+          docker cp temp-euler:/usr/src/app/.output/public ./static-output
+          docker rm temp-euler
+
+      - name: Configure AWS credentials for S3
+        if: github.event_name == 'push'
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload static assets to S3
+        if: github.event_name == 'push'
+        run: |
+          aws s3 sync ./static-output/_nuxt \
+            s3://${{ secrets.S3_STATIC_ASSETS_BUCKET }}/_nuxt \
+            --exclude "builds/**" \
+            --cache-control "public,max-age=31536000,immutable"
+
+          if [ -d ./static-output/_nuxt/builds ]; then
+            aws s3 sync ./static-output/_nuxt/builds \
+              s3://${{ secrets.S3_STATIC_ASSETS_BUCKET }}/_nuxt/builds \
+              --exclude "meta/**" \
+              --cache-control "no-cache"
+          fi
+
+          if [ -d ./static-output/_nuxt/builds/meta ]; then
+            aws s3 sync ./static-output/_nuxt/builds/meta \
+              s3://${{ secrets.S3_STATIC_ASSETS_BUCKET }}/_nuxt/builds/meta \
+              --cache-control "public,max-age=31536000,immutable"
+          fi
+
+      - name: Tag and push docker image to Amazon ECR
+        if: github.event_name == 'push'
+        env:
+          REGISTRY: ${{ secrets.ECR_REGISTRY }}
+          IMAGE_TAG: ${{ steps.generate-tag.outputs.image_tag }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+        run: |
+          FULL_IMAGE="$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          LATEST_IMAGE="$REGISTRY/$ECR_REPOSITORY:latest"
+          docker tag euler-lite "$FULL_IMAGE"
+          docker tag euler-lite "$LATEST_IMAGE"
+          docker push "$FULL_IMAGE"
+          docker push "$LATEST_IMAGE"
+
       # ── Deploy ──
+      - name: Verify dispatch is from master
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/master" ]; then
+            echo "::error::workflow_dispatch must be run from the master branch."
+            exit 1
+          fi
+
       - name: Resolve image tag
         id: resolve-tag
+        env:
+          INPUT_TAG: ${{ inputs.image_tag }}
+          BUILD_TAG: ${{ steps.generate-tag.outputs.image_tag }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "image_tag=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
+            TAG="$INPUT_TAG"
           else
-            echo "image_tag=${{ steps.generate-tag.outputs.image_tag }}" >> $GITHUB_OUTPUT
+            TAG="$BUILD_TAG"
           fi
+          if ! echo "$TAG" | grep -qE '^[a-zA-Z0-9_.-]+$'; then
+            echo "::error::Invalid image tag: must match [a-zA-Z0-9_.-]+"
+            exit 1
+          fi
+          echo "image_tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Notify Slack deployment started
+        env:
+          IMAGE_TAG: ${{ steps.resolve-tag.outputs.image_tag }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+            echo "SLACK_WEBHOOK_URL is not configured; skipping Slack notification."
+            exit 0
+          fi
+
+          VERSION="manual deploy (${GITHUB_REF_NAME})"
+          RELEASE_NOTES_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases"
+          RELEASE_NOTES_LABEL="Releases"
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME}"
+            RELEASE_NOTES_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}"
+            RELEASE_NOTES_LABEL="${VERSION} release notes"
+          fi
+
+          TEXT=$(printf '%s\n' \
+            ":rocket: *Euler Lite prod deploy started*" \
+            "*Version:* ${VERSION}" \
+            "*Image tag:* ${IMAGE_TAG}" \
+            "*Status:* deployment started" \
+            "*Release notes:* <${RELEASE_NOTES_URL}|${RELEASE_NOTES_LABEL}>" \
+            "*Workflow run:* <${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}|${GITHUB_WORKFLOW} #${GITHUB_RUN_NUMBER}>")
+
+          jq -n --arg text "$TEXT" '{text: $text}' \
+            | curl -fsS --max-time 10 --retry 2 --retry-delay 2 -X POST -H 'Content-type: application/json' --data @- "$SLACK_WEBHOOK_URL" \
+            || echo "::warning::Slack notification failed"
 
       - name: Configure AWS credentials (ECS deploy)
         uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
@@ -172,3 +269,51 @@ jobs:
 
           echo "Timed out waiting for ECS service stability after ${timeout_seconds}s."
           exit 1
+
+      - name: Notify Slack deployment finished
+        if: always()
+        env:
+          IMAGE_TAG: ${{ steps.resolve-tag.outputs.image_tag }}
+          JOB_STATUS: ${{ job.status }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+            echo "SLACK_WEBHOOK_URL is not configured; skipping Slack notification."
+            exit 0
+          fi
+
+          VERSION="manual deploy (${GITHUB_REF_NAME})"
+          RELEASE_NOTES_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases"
+          RELEASE_NOTES_LABEL="Releases"
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME}"
+            RELEASE_NOTES_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}"
+            RELEASE_NOTES_LABEL="${VERSION} release notes"
+          fi
+
+          STATUS_EMOJI=":white_check_mark:"
+          STATUS_TEXT="completed"
+          PROGRESS_TEXT="ECS rollout completed"
+
+          if [ "${JOB_STATUS}" != "success" ]; then
+            STATUS_EMOJI=":x:"
+            STATUS_TEXT="failed"
+            PROGRESS_TEXT="deploy did not complete successfully"
+
+            if [ "${JOB_STATUS}" = "cancelled" ]; then
+              STATUS_TEXT="cancelled"
+            fi
+          fi
+
+          TEXT=$(printf '%s\n' \
+            "${STATUS_EMOJI} *Euler Lite prod deploy ${STATUS_TEXT}*" \
+            "*Version:* ${VERSION:-unknown}" \
+            "*Image tag:* ${IMAGE_TAG:-unknown}" \
+            "*Status:* ${PROGRESS_TEXT}" \
+            "*Release notes:* <${RELEASE_NOTES_URL}|${RELEASE_NOTES_LABEL}>" \
+            "*Workflow run:* <${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}|${GITHUB_WORKFLOW} #${GITHUB_RUN_NUMBER}>")
+
+          jq -n --arg text "$TEXT" '{text: $text}' \
+            | curl -fsS --max-time 10 --retry 2 --retry-delay 2 -X POST -H 'Content-type: application/json' --data @- "$SLACK_WEBHOOK_URL" \
+            || echo "::warning::Slack notification failed"

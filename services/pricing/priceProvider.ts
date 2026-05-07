@@ -399,7 +399,7 @@ export const getCollateralUsdPrice = async (
 
   // Try backend first if configured and source is 'off-chain'
   // Use fetchBackendPrice directly with the collateral asset address
-  // (the /v1/prices endpoint returns asset prices without needing liability context)
+  // (the /v3/prices endpoint returns asset prices without needing liability context)
   if (source === 'off-chain' && isBackendConfigured()) {
     try {
       const backendPrice = await fetchBackendPrice(

@@ -37,6 +37,19 @@ export const LIST_ROW_HEIGHT_PX = 88
  * within this window reuses the cached Map rather than re-fetching. */
 export const FULL_BALANCES_TTL_MS = 60_000
 
+// ── UI/Interaction Timings ────────────────────────────────
+/** Delay after modal close before redirecting to /portfolio so the close
+ * animation can play before the route change unmounts the form. */
+export const MODAL_CLOSE_REDIRECT_DELAY_MS = 400
+
+// ── Subgraph indexing catch-up ────────────────────────────
+/** Poll interval while waiting for the subgraph to index the tx's block. */
+export const SUBGRAPH_BLOCK_POLL_INTERVAL_MS = 1_000
+/** Hard cap on the catch-up wait. If subgraph is this far behind, we fall
+ * back on the immediate triggerPortfolioRefresh + the 60s portfolio page
+ * poll to eventually reconcile state. */
+export const SUBGRAPH_BLOCK_CATCHUP_TIMEOUT_MS = 30_000
+
 // ── Basis Points ──────────────────────────────────────────
 export const BPS_BASE = 10_000n
 /** BPS_BASE + 1: pads amounts by 0.01% to cover interest accrual */

@@ -1,11 +1,20 @@
-import type { Address } from 'viem'
-import type { Vault, SecuritizeVault, BorrowVaultPair } from './types'
+import { maxUint256, type Address } from 'viem'
+import type { Vault, SecuritizeVault, EarnVault, BorrowVaultPair } from './types'
 import {
   vaultConvertToAssetsAbi,
   vaultConvertToSharesAbi,
   vaultMaxWithdrawAbi,
   vaultPreviewWithdrawAbi,
 } from '~/abis/vault'
+import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
+
+export const isCyclicalNoteVault = (
+  vault: Vault | SecuritizeVault | null | undefined,
+): boolean => {
+  if (!vault || !('irmInfo' in vault)) return false
+  const type = vault.irmInfo?.interestRateModelInfo?.interestRateModelType
+  return typeof type === 'number' && type === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY
+}
 
 export const getBorrowVaultsByMap = (vaultsMap: Map<string, Vault>) => {
   const arr: BorrowVaultPair[] = []
@@ -105,6 +114,25 @@ export const getMaxWithdraw = (vaultAddress: string, account: string): Promise<b
   }) as Promise<bigint>
 }
 
+// What the vault can actually pay out right now in its underlying asset:
+// - EVK Vault: only cash on hand (the rest is lent out to borrowers).
+// - SecuritizeVault: the whole supply (no borrowing).
+// - EarnVault: liquidity reachable across allocated strategies.
+const getVaultWithdrawCapacity = (vault: Vault | SecuritizeVault | EarnVault): bigint => {
+  if ('type' in vault && vault.type === 'securitize') return vault.totalAssets
+  if ('type' in vault && vault.type === 'earn') return vault.availableAssets
+  return vault.totalCash
+}
+
+export const getCashLimitedWithdrawAmount = (
+  userWithdrawableAssets: bigint,
+  vault: Vault | SecuritizeVault | EarnVault | undefined,
+): bigint => {
+  if (!vault) return userWithdrawableAssets
+  const capacity = getVaultWithdrawCapacity(vault)
+  return userWithdrawableAssets < capacity ? userWithdrawableAssets : capacity
+}
+
 export const getUtilization = (totalAssets: bigint, totalBorrow: bigint): number => {
   if (!totalAssets || totalAssets <= 0n || !totalBorrow || totalBorrow <= 0n) {
     return 0
@@ -120,4 +148,24 @@ export const getUtilization = (totalAssets: bigint, totalBorrow: bigint): number
 
 export const getVaultUtilization = (vault: Vault | SecuritizeVault): number => {
   return getUtilization(vault.totalAssets, vault.borrow)
+}
+
+const bigintPercentage = (numerator: bigint, denominator: bigint): number => {
+  const scale = 10n ** 2n
+  const fraction = (numerator * scale * 100n) / denominator
+  const whole = fraction / scale
+  const remainder = fraction % scale
+  return parseFloat(`${whole}.${remainder.toString().padStart(2, '0')}`)
+}
+
+export const getSupplyCapPercentage = (vault: Vault): number => {
+  if (vault.supplyCap >= maxUint256) return 0
+  if (vault.supplyCap === 0n) return vault.supply > 0n ? 100 : 0
+  return bigintPercentage(vault.supply, vault.supplyCap)
+}
+
+export const getBorrowCapPercentage = (vault: Vault): number => {
+  if (vault.borrowCap >= maxUint256) return 0
+  if (vault.borrowCap === 0n) return vault.borrow > 0n ? 100 : 0
+  return bigintPercentage(vault.borrow, vault.borrowCap)
 }

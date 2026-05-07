@@ -12,7 +12,7 @@ import { createRaceGuard } from '~/utils/race-guard'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
-import { isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
+import { isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useWalletRepay } from '~/composables/repay/useWalletRepay'
 import { useWalletSwapRepay } from '~/composables/repay/useWalletSwapRepay'
 import { useCollateralSwapRepay } from '~/composables/repay/useCollateralSwapRepay'
@@ -34,7 +34,14 @@ const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
 const { eulerLensAddresses: _eulerLensAddresses } = useEulerAddresses()
 const { fetchSingleBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
-const { slippage } = useSlippage()
+const { slippage } = useSlippage({
+  fromSymbol: () => {
+    if (formTab.value === 'wallet') return walletSwap.selectedAsset.value?.symbol
+    if (formTab.value === 'savings') return savings.sourceVault.value?.asset.symbol
+    return collateral.sourceVault.value?.asset.symbol
+  },
+  toSymbol: () => borrowVault.value?.asset.symbol,
+})
 // --- Shared state ---
 const isLoading = ref(false)
 const isSubmitting = ref(false)
@@ -140,6 +147,7 @@ const walletSwap = useWalletSwapRepay({
   plan,
   isSubmitting,
   isPreparing,
+  slippage,
   clearSimulationError,
   runSimulation,
   netAPY,
@@ -156,6 +164,14 @@ const { guardWithPriceImpact: guardWithWalletSwapPriceImpact } = usePriceImpactG
 
 const isWalletSwapRestricted = computed(() =>
   walletSwap.needsSwap.value && isVaultRestrictedByCountry(borrowVault.value?.address || ''),
+)
+
+// Pay-with asset can be an arbitrary ERC-20 not tied to any vault, so the
+// vault-level geo-check above can't see it. Hard-block the asset directly.
+// Soft-restrict does not apply: pay-with reduces exposure to that asset.
+// Pass the asset object (not just address) so symbol/name pattern rules apply.
+const isPayWithAssetBlocked = computed(() =>
+  walletSwap.needsSwap.value && isAssetBlockedByCountry(walletSwap.selectedAsset.value),
 )
 
 const collateral = useCollateralSwapRepay({
@@ -214,7 +230,7 @@ const reviewRepayLabel = 'Review Repay'
 const reviewRepayDisabled = computed(() => {
   if (formTab.value === 'wallet') {
     return walletSwap.needsSwap.value
-      ? (isWalletSwapRestricted.value || walletSwap.isSubmitDisabled.value)
+      ? (isWalletSwapRestricted.value || isPayWithAssetBlocked.value || walletSwap.isSubmitDisabled.value)
       : wallet.isSubmitDisabled.value
   }
   if (formTab.value === 'savings') return savings.isSubmitDisabled.value
@@ -224,6 +240,7 @@ const reviewRepayDisabled = computed(() => {
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (formTab.value === 'wallet') {
     if (walletSwap.needsSwap.value) {
+      if (isPayWithAssetBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
       if (isWalletSwapRestricted.value) return { message: 'Swapping into this vault is not available in your region', variant: 'warning' }
       if (walletSwap.disabledReason.value) return { message: walletSwap.disabledReason.value, variant: 'error' }
       if (walletSwap.estimatesError.value) return { message: walletSwap.estimatesError.value, variant: 'error' }
@@ -232,15 +249,21 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
       if (wallet.estimatesError.value) return { message: wallet.estimatesError.value, variant: 'error' }
     }
     if (simulationError.value) return { message: simulationError.value, variant: 'error' }
+    if (walletSwap.needsSwap.value && walletSwap.quotes.isLoading.value && +walletSwap.amount.value > 0) return { message: 'Fetching swap quotes...', variant: 'warning' }
+    if (walletSwap.needsSwap.value && !walletSwap.quotes.selectedQuote.value && +walletSwap.amount.value > 0) return { message: 'Select a swap quote to continue', variant: 'warning' }
     return undefined
   }
   if (formTab.value === 'savings') {
     if (savings.disabledReason.value) return { message: savings.disabledReason.value, variant: savings.isRepayExceedsDebt.value ? 'error' : 'warning' }
     if (simulationError.value) return { message: simulationError.value, variant: 'error' }
+    if (!savings.isSameAsset.value && savings.quotes.isLoading.value && (savings.amount.value || savings.debtAmount.value)) return { message: 'Fetching swap quotes...', variant: 'warning' }
+    if (!savings.isSameAsset.value && !savings.quotes.selectedQuote.value && (savings.amount.value || savings.debtAmount.value)) return { message: 'Select a swap quote to continue', variant: 'warning' }
     return undefined
   }
   if (collateral.disabledReason.value) return { message: collateral.disabledReason.value, variant: collateral.isRepayExceedsDebt.value ? 'error' : 'warning' }
   if (simulationError.value) return { message: simulationError.value, variant: 'error' }
+  if (!collateral.isSameAsset.value && collateral.quotes.isLoading.value && (collateral.amount.value || collateral.debtAmount.value)) return { message: 'Fetching swap quotes...', variant: 'warning' }
+  if (!collateral.isSameAsset.value && !collateral.quotes.selectedQuote.value && (collateral.amount.value || collateral.debtAmount.value)) return { message: 'Select a swap quote to continue', variant: 'warning' }
   return undefined
 })
 
@@ -258,7 +281,7 @@ const onSubmitForm = async () => {
   if (isOperationBlocked.value) return
   if (formTab.value === 'wallet') {
     if (walletSwap.needsSwap.value) {
-      if (isWalletSwapRestricted.value) return
+      if (isWalletSwapRestricted.value || isPayWithAssetBlocked.value) return
       await guardWithWalletSwapPriceImpact(() => walletSwap.submit())
     }
     else {
@@ -498,14 +521,21 @@ watch(formTab, () => {
               />
 
               <UiToast
-                v-if="isWalletSwapRestricted"
+                v-if="isPayWithAssetBlocked"
+                title="Asset restricted"
+                description="Paying with this asset is not available in your region. Pick a different asset."
+                variant="warning"
+                size="compact"
+              />
+              <UiToast
+                v-if="!isPayWithAssetBlocked && isWalletSwapRestricted"
                 title="Swap restricted"
                 description="Swapping into this vault is not available in your region. You can repay with the vault's underlying asset directly."
                 variant="warning"
                 size="compact"
               />
               <UiToast
-                v-if="walletSwap.needsSwap.value && !isWalletSwapRestricted && walletSwap.disabledReason.value"
+                v-if="walletSwap.needsSwap.value && !isWalletSwapRestricted && !isPayWithAssetBlocked && walletSwap.disabledReason.value"
                 title="Error"
                 variant="error"
                 :description="walletSwap.disabledReason.value"
@@ -705,6 +735,8 @@ watch(formTab, () => {
                 :description="simulationError"
                 size="compact"
               />
+
+              <VaultWarningBanner :warnings="[collateral.liquidityWarning.value]" />
             </div>
 
             <VaultFormInfoBlock
@@ -878,6 +910,8 @@ watch(formTab, () => {
                 :description="simulationError"
                 size="compact"
               />
+
+              <VaultWarningBanner :warnings="[savings.liquidityWarning.value]" />
             </div>
 
             <VaultFormInfoBlock

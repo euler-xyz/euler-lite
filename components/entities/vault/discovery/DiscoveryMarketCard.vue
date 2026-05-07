@@ -6,12 +6,12 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import {
   getMarketEntities,
   getDeprecatedVaultCount,
+  getUnknownCollateralCount,
   getMiniDiagram,
   getBorrowableVaults,
   findVault,
   type BestMaxRoeResult,
 } from '~/utils/discoveryCalculations'
-import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultMaxRoeModal } from '#components'
@@ -33,14 +33,6 @@ const modal = useModal()
 const isGovernanceLimited = computed(() =>
   props.market.source === 'product' && !!products[props.market.id]?.isGovernanceLimited,
 )
-
-const isKeyring = computed(() => {
-  if (props.market.source === 'product' && products[props.market.id]?.keyring) return true
-  return props.market.vaults.some((v) => {
-    const addr = 'address' in v ? v.address : ''
-    return addr && isVaultKeyring(addr)
-  })
-})
 
 const getProductDescription = (market: MarketGroup): string => {
   if (market.source !== 'product') return ''
@@ -167,7 +159,6 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
               />
               Featured
             </span>
-            <KeyringBadge v-if="isKeyring" />
             <GovernanceLimitedBadge v-if="isGovernanceLimited" />
           </div>
           <div class="text-h5 text-content-primary">
@@ -194,6 +185,13 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
             class="text-warning-500 text-p5 mt-4"
           >
             {{ getDeprecatedVaultCount(market) }} deprecated
+          </span>
+          <span
+            v-if="getUnknownCollateralCount(market) > 0"
+            class="text-error-500 text-p5 mt-4"
+            title="Collateral vaults whose risk manager isn't part of any declared product entity (or whose vault isn't loaded into the registry)."
+          >
+            {{ getUnknownCollateralCount(market) }} unknown
           </span>
         </div>
       </template>

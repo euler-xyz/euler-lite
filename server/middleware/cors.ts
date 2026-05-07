@@ -1,5 +1,5 @@
 import { createError, getRequestURL, setResponseHeader, sendNoContent } from 'h3'
-import { logWarn } from '../utils/log'
+import { logger } from '~/server/utils/logger'
 
 function parseAllowedOrigins(): Set<string> {
   // CORS_ALLOWED_ORIGINS is the dedicated CORS var (comma-separated).
@@ -99,7 +99,7 @@ export default defineEventHandler((event) => {
   }
   else if (origin && process.env.DOPPLER_ENVIRONMENT !== 'dev') {
     if (allowedOrigins.size > 0) {
-      logWarn('cors', 'Rejected origin not in allow list:', origin)
+      logger.warn({ ctx: 'cors', origin }, 'rejected origin not in allow list')
     }
     throw createError({ statusCode: 403, statusMessage: 'Origin not allowed' })
   }

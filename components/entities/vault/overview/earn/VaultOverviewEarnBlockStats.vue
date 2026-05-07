@@ -9,11 +9,8 @@ import { VaultSupplyApyModal } from '#components'
 const { vault } = defineProps<{ vault: EarnVault }>()
 
 const modal = useModal()
-const { getVault } = useVaults()
 const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
-
-const availableLiquidityOfStrategies = ref(0n)
 
 const rewardSupplyAPY = computed(() => getSupplyRewardApy(vault.address))
 
@@ -27,19 +24,9 @@ watchEffect(async () => {
 const availableLiquidityDisplay = ref('-')
 
 watchEffect(async () => {
-  const price = await formatAssetValue(availableLiquidityOfStrategies.value, vault, 'off-chain')
+  const price = await formatAssetValue(vault.availableAssets, vault, 'off-chain')
   availableLiquidityDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
 })
-
-const load = async () => {
-  vault.strategies.forEach(async (strategy) => {
-    const vlt = await getVault(strategy.info.vault)
-    const liquidity = vlt.supply - vlt.borrow
-    availableLiquidityOfStrategies.value += strategy.allocatedAssets - (liquidity < strategy.allocatedAssets ? strategy.allocatedAssets - liquidity : 0n)
-  })
-}
-
-load()
 
 const onSupplyInfoIconClick = () => {
   modal.open(VaultSupplyApyModal, {

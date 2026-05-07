@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { getUtilization, getVaultUtilization, getBorrowVaultsByMap } from '~/entities/vault/utils'
-import type { Vault } from '~/entities/vault/types'
+import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
+import {
+  getCashLimitedWithdrawAmount,
+  getUtilization,
+  getVaultUtilization,
+  getBorrowVaultsByMap,
+  isCyclicalNoteVault,
+} from '~/entities/vault/utils'
+import type { Vault, SecuritizeVault, EarnVault } from '~/entities/vault/types'
 
 describe('getUtilization', () => {
   it('returns 0 when totalAssets is zero', () => {
@@ -56,6 +63,57 @@ describe('getVaultUtilization', () => {
   })
 })
 
+describe('getCashLimitedWithdrawAmount', () => {
+  const evkVault = (totalCash: bigint) => ({ totalCash } as Vault)
+  const securitizeVault = (totalAssets: bigint) =>
+    ({ type: 'securitize', totalAssets } as unknown as SecuritizeVault)
+  const earnVault = (availableAssets: bigint) =>
+    ({ type: 'earn', availableAssets } as unknown as EarnVault)
+
+  it('returns the user withdrawable amount when EVK cash is higher', () => {
+    expect(getCashLimitedWithdrawAmount(1_000n, evkVault(2_000n))).toBe(1_000n)
+  })
+
+  it('caps the amount to EVK totalCash when cash is lower', () => {
+    expect(getCashLimitedWithdrawAmount(2_000n, evkVault(1_000n))).toBe(1_000n)
+  })
+
+  it('returns the user amount when the vault is undefined', () => {
+    expect(getCashLimitedWithdrawAmount(2_000n, undefined)).toBe(2_000n)
+  })
+
+  it('caps SecuritizeVault by totalAssets (no borrowing on these vaults)', () => {
+    expect(getCashLimitedWithdrawAmount(2_000n, securitizeVault(1_000n))).toBe(1_000n)
+    expect(getCashLimitedWithdrawAmount(500n, securitizeVault(1_000n))).toBe(500n)
+  })
+
+  it('caps EarnVault by availableAssets (strategies may have allocated cash out)', () => {
+    expect(getCashLimitedWithdrawAmount(2_000n, earnVault(1_000n))).toBe(1_000n)
+    expect(getCashLimitedWithdrawAmount(500n, earnVault(1_000n))).toBe(500n)
+  })
+
+  it('models the withdraw form cap when vault cash is lower than user balance', () => {
+    const assetsBalance = 1_000n
+    const vault = evkVault(300n)
+    const amount = 301n
+    const withdrawableAssets = getCashLimitedWithdrawAmount(assetsBalance, vault)
+
+    expect(withdrawableAssets).toBe(300n)
+    expect(assetsBalance < amount).toBe(false)
+    expect(withdrawableAssets < amount).toBe(true)
+  })
+
+  it('models the withdraw form allowing the cash-capped max amount', () => {
+    const assetsBalance = 1_000n
+    const vault = evkVault(300n)
+    const amount = 300n
+    const withdrawableAssets = getCashLimitedWithdrawAmount(assetsBalance, vault)
+
+    expect(withdrawableAssets).toBe(amount)
+    expect(withdrawableAssets < amount).toBe(false)
+  })
+})
+
 describe('getBorrowVaultsByMap', () => {
   const makeVault = (address: string, collateralLTVs: Array<{ collateral: string, borrowLTV: bigint, liquidationLTV: bigint, initialLiquidationLTV: bigint, targetTimestamp: bigint, rampDuration: bigint }>) =>
     ({ address, collateralLTVs }) as unknown as Vault
@@ -107,5 +165,60 @@ describe('getBorrowVaultsByMap', () => {
     const map = new Map([['0xA', vault]])
     // Collateral vault not in map → pair.collateral is undefined → filtered
     expect(getBorrowVaultsByMap(map)).toEqual([])
+  })
+})
+
+describe('isCyclicalNoteVault', () => {
+  it('returns true for EVK vaults using the fixed cyclical IRM', () => {
+    const vault = {
+      irmInfo: {
+        interestRateModelInfo: {
+          interestRateModelType: INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY,
+        },
+      },
+    } as Vault
+
+    expect(isCyclicalNoteVault(vault)).toBe(true)
+  })
+
+  it('returns false for non-cyclical EVK vaults', () => {
+    const vault = {
+      irmInfo: {
+        interestRateModelInfo: {
+          interestRateModelType: INTEREST_RATE_MODEL_TYPE.KINK,
+        },
+      },
+    } as Vault
+
+    expect(isCyclicalNoteVault(vault)).toBe(false)
+  })
+
+  it('returns false for securitize vaults and missing vault data', () => {
+    const securitizeVault = {
+      type: 'securitize',
+    } as SecuritizeVault
+
+    expect(isCyclicalNoteVault(securitizeVault)).toBe(false)
+    expect(isCyclicalNoteVault(null)).toBe(false)
+    expect(isCyclicalNoteVault(undefined)).toBe(false)
+  })
+
+  it('returns false when the IRM type is missing or not numeric', () => {
+    const missingType = {
+      irmInfo: {
+        interestRateModelInfo: {},
+      },
+    } as Vault
+
+    const stringType = {
+      irmInfo: {
+        interestRateModelInfo: {
+          interestRateModelType: `${INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY}` as unknown as number,
+        },
+      },
+    } as Vault
+
+    expect(isCyclicalNoteVault(missingType)).toBe(false)
+    expect(isCyclicalNoteVault(stringType)).toBe(false)
   })
 })

@@ -11,6 +11,7 @@ import {
   type Vault,
   type SecuritizeVault,
   type VaultAsset,
+  getCashLimitedWithdrawAmount,
   getProjectedRates,
 } from '~/entities/vault'
 import { isSecuritizeVault } from '~/entities/vault/factory'
@@ -28,6 +29,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { isOpDisabled, OP_REDEEM, OP_WITHDRAW } from '~/utils/vault-hooks'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
 
 const router = useRouter()
 const route = useRoute()
@@ -90,7 +92,10 @@ const needsSwap = computed(() => {
     return false
   }
 })
-const { slippage: swapSlippage } = useSlippage()
+const { slippage: swapSlippage } = useSlippage({
+  fromSymbol: () => asset.value?.symbol,
+  toSymbol: () => selectedOutputAsset.value?.symbol,
+})
 const {
   sortedQuoteCards: swapQuoteCardsSorted,
   selectedProvider: swapSelectedProvider,
@@ -104,7 +109,6 @@ const {
   requestQuotes: requestSwapQuotes,
   selectProvider: selectSwapQuote,
 } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
-
 const rewardApy = computed(() => getSupplyRewardApy(vault.value?.address || ''))
 const amountFixed = computed(() => {
   return FixedPoint.fromValue(
@@ -112,24 +116,39 @@ const amountFixed = computed(() => {
     Number(asset.value?.decimals || 0),
   )
 })
+const withdrawableAssets = computed(() => getCashLimitedWithdrawAmount(
+  assetsBalance.value,
+  vault.value,
+))
 const effectiveWithdrawOp = computed(() => {
   const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
   return isMax ? OP_REDEEM : OP_WITHDRAW
 })
+const isOutputAssetBlocked = computed(() =>
+  needsSwap.value && isAssetBlockedByCountry(selectedOutputAsset.value),
+)
+const isOutputAssetRestricted = computed(() =>
+  needsSwap.value && isAssetRestrictedByCountry(selectedOutputAsset.value),
+)
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value) return false
   if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return true
-  if (assetsBalance.value < amountFixed.value.value) return true
+  if (isOutputAssetBlocked.value || isOutputAssetRestricted.value) return true
+  if (withdrawableAssets.value < amountFixed.value.value) return true
   if (isLoading.value || amountFixed.value.isZero() || amountFixed.value.isNegative()) return true
   if (estimatesError.value) return true
-  if (needsSwap.value && !swapEffectiveQuote.value && !isSwapQuoteLoading.value) return true
+  if (needsSwap.value && !swapSelectedQuote.value && !isSwapQuoteLoading.value) return true
   return false
 })
 const reviewWithdrawDisabled = isSubmitDisabled
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return { message: 'Withdrawals are currently disabled for this vault', variant: 'warning' }
+  if (isOutputAssetBlocked.value || isOutputAssetRestricted.value) return { message: 'Receiving this asset is not available in your region', variant: 'warning' }
   if (estimatesError.value) return { message: estimatesError.value, variant: 'error' }
   if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return { message: 'Insufficient balance', variant: 'error' }
+  if (!amountFixed.value.isZero() && withdrawableAssets.value < amountFixed.value.value) return { message: 'Not enough liquidity in vault', variant: 'error' }
+  if (needsSwap.value && isSwapQuoteLoading.value && !amountFixed.value.isZero()) return { message: 'Fetching swap quotes...', variant: 'warning' }
+  if (needsSwap.value && !swapSelectedQuote.value && !amountFixed.value.isZero()) return { message: 'Select a swap quote to continue', variant: 'warning' }
   return undefined
 })
 const supplyAPYDisplay = computed(() => {
@@ -144,16 +163,19 @@ const estimateSupplyAPYDisplay = computed(() => {
 
 // Reactive USD prices for display
 const assetsBalanceUsd = ref(0)
+const withdrawableAssetsUsd = ref(0)
 const deltaUsd = ref(0)
 
 // Update USD prices when vault or amounts change
 watchEffect(async () => {
   if (!vault.value || isSecuritizeVaultType.value) {
     assetsBalanceUsd.value = 0
+    withdrawableAssetsUsd.value = 0
     deltaUsd.value = 0
     return
   }
   assetsBalanceUsd.value = await getAssetUsdValueOrZero(assetsBalance.value, vault.value as Vault, 'off-chain')
+  withdrawableAssetsUsd.value = await getAssetUsdValueOrZero(withdrawableAssets.value, vault.value as Vault, 'off-chain')
   deltaUsd.value = await getAssetUsdValueOrZero(delta.value, vault.value as Vault, 'off-chain')
 })
 
@@ -180,6 +202,7 @@ const swapOutputDisplay = computed(() => {
 })
 
 const swapRoutedVia = computed(() => {
+  if (!swapSelectedProvider.value) return 'Not selected'
   if (!swapEffectiveQuote.value?.route?.length) return null
   return swapEffectiveQuote.value.route.map((r: { providerName: string }) => r.providerName).join(', ')
 })
@@ -317,7 +340,7 @@ const updateBalance = async () => {
 }
 const submit = async () => {
   if (isOperationBlocked.value) return
-  if (isPreparing.value) return
+  if (isPreparing.value || isOutputAssetBlocked.value || isOutputAssetRestricted.value) return
   isPreparing.value = true
   try {
     await guardWithPriceImpact(async () => {
@@ -328,12 +351,13 @@ const submit = async () => {
       const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
 
       try {
-        if (needsSwap.value && swapEffectiveQuote.value) {
+        if (needsSwap.value && swapSelectedQuote.value) {
           if (isMax) {
             plan.value = await buildRedeemAndSwapPlan({
               vaultAddress: vaultAddress as Address,
               sharesAmount: sharesBalance.value,
-              quote: swapEffectiveQuote.value,
+              quote: swapSelectedQuote.value,
+              requestedSlippage: swapSlippage.value,
               subAccount: subAccount.value,
             })
           }
@@ -341,7 +365,8 @@ const submit = async () => {
             plan.value = await buildWithdrawAndSwapPlan({
               vaultAddress: vaultAddress as Address,
               assetsAmount: amountFixed.value.value,
-              quote: swapEffectiveQuote.value,
+              quote: swapSelectedQuote.value,
+              requestedSlippage: swapSlippage.value,
               subAccount: subAccount.value,
             })
           }
@@ -373,6 +398,7 @@ const submit = async () => {
           plan: plan.value || undefined,
           swapToAsset: needsSwap.value ? selectedOutputAsset.value : undefined,
           swapToAmount: needsSwap.value ? swapEstimatedOutput.value : undefined,
+          swapMode: needsSwap.value ? SwapperMode.EXACT_IN : undefined,
           submittingLabel: 'Submitting...',
           onConfirm: async () => {
             await send()
@@ -395,13 +421,14 @@ const send = async () => {
     const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
     let txPlan: TxPlan
 
-    if (needsSwap.value && (swapSelectedQuote.value || swapEffectiveQuote.value)) {
-      const quote = swapSelectedQuote.value || swapEffectiveQuote.value!
+    if (needsSwap.value && swapSelectedQuote.value) {
+      const quote = swapSelectedQuote.value
       if (isMax) {
         txPlan = await buildRedeemAndSwapPlan({
           vaultAddress: vaultAddress as Address,
           sharesAmount: sharesBalance.value,
           quote,
+          requestedSlippage: swapSlippage.value,
           subAccount: subAccount.value,
         })
       }
@@ -410,6 +437,7 @@ const send = async () => {
           vaultAddress: vaultAddress as Address,
           assetsAmount: amountFixed.value.value,
           quote,
+          requestedSlippage: swapSlippage.value,
           subAccount: subAccount.value,
         })
       }
@@ -443,10 +471,7 @@ const updateSyncEstimates = () => {
       throw new Error('Not enough balance')
     }
 
-    // Check liquidity (securitize: borrow is always 0)
-    const liquidity = vault.value.supply - vault.value.borrow
-
-    if (liquidity < amountFixed.value.value) {
+    if (withdrawableAssets.value < amountFixed.value.value) {
       throw new Error('Not enough liquidity in vault')
     }
 
@@ -566,7 +591,7 @@ watch(swapSelectedQuote, () => {
               label="Withdraw amount"
               :asset="asset"
               :vault="(vault as Vault)"
-              :balance="assetsBalance"
+              :balance="withdrawableAssets"
               maxable
             />
 
@@ -633,6 +658,13 @@ watch(swapSelectedQuote, () => {
               variant="warning"
               size="compact"
             />
+            <UiToast
+              v-if="isOutputAssetBlocked || isOutputAssetRestricted"
+              title="Asset restricted"
+              description="Receiving this asset is not available in your region. Pick a different token."
+              variant="warning"
+              size="compact"
+            />
 
             <UiToast
               v-show="estimatesError"
@@ -678,14 +710,14 @@ watch(swapSelectedQuote, () => {
                 v-if="asset"
                 class="text-p2 flex items-center gap-4"
               >
-                <UiExactAmount :exact="formatExactAmount(assetsBalance, asset.decimals, asset.symbol)">
-                  {{ formatSmartAmount(nanoToValue(assetsBalance, asset.decimals)) }}
+                <UiExactAmount :exact="formatExactAmount(withdrawableAssets, asset.decimals, asset.symbol)">
+                  {{ formatSmartAmount(nanoToValue(withdrawableAssets, asset.decimals)) }}
                   <span class="text-p3 text-content-tertiary">{{ asset.symbol }}</span>
                 </UiExactAmount>
                 <span
                   v-if="!isSecuritizeVaultType"
                   class="text-p3 text-content-tertiary"
-                >≈ ${{ formatNumber(assetsBalanceUsd) }}</span>
+                >≈ ${{ formatNumber(withdrawableAssetsUsd) }}</span>
               </p>
             </SummaryRow>
           </VaultFormInfoBlock>

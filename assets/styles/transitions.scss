@@ -46,25 +46,58 @@
   transition: color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-// Modal - slide up with spring easing
-.modal-enter-active {
-  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
-              opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+// Modal layer - calm backdrop fade
+.modal-layer-enter-active {
+  transition: opacity 0.18s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.modal-leave-active {
-  transition: transform 0.25s cubic-bezier(0.4, 0, 1, 1),
-              opacity 0.2s cubic-bezier(0.4, 0, 1, 1);
+.modal-layer-leave-active {
+  transition: opacity 0.14s cubic-bezier(0.4, 0, 1, 1);
 }
 
-.modal-enter-from {
-  transform: translateY(100%);
-  opacity: 0.5;
-}
-
-.modal-leave-to {
-  transform: translateY(100%);
+.modal-layer-enter-from,
+.modal-layer-leave-to {
   opacity: 0;
+}
+
+// Modal panel - straight bottom-up entrance without overshoot
+.modal-panel-enter-active,
+.modal-panel-leave-active {
+  transition: opacity 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+
+  .ui-modal__panel-motion {
+    transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+                opacity 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
+
+.modal-panel-leave-active {
+  transition-duration: 0.14s;
+
+  .ui-modal__panel-motion {
+    transition-duration: 0.16s, 0.14s;
+    transition-timing-function: cubic-bezier(0.4, 0, 1, 1),
+                                cubic-bezier(0.4, 0, 1, 1);
+  }
+}
+
+.modal-panel-enter-from,
+.modal-panel-leave-to {
+  opacity: 0;
+
+  .ui-modal__panel-motion {
+    transform: translateY(88px);
+    opacity: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .modal-panel-enter-from,
+  .modal-panel-leave-to {
+    .ui-modal__panel-motion {
+      transform: translateY(100%);
+    }
+  }
 }
 
 // Layout transitions

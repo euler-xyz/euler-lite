@@ -5,7 +5,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
-import { isEVKVault, type Vault } from '~/entities/vault'
+import { getCashLimitedWithdrawAmount, isEVKVault, type Vault } from '~/entities/vault'
 import { getAssetUsdValue, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
@@ -16,12 +16,14 @@ import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { useRepaySwapCore } from '~/composables/repay/useRepaySwapCore'
 import { useRepaySwapDetails } from '~/composables/repay/useRepaySwapDetails'
 import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics'
+import { getRepaySwapReviewInputAmount } from '~/composables/repay/reviewAmount'
+import { adjustForInterest } from '~/composables/useEulerOperations/helpers'
 import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
 import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createRaceGuard } from '~/utils/race-guard'
 import { findBlockingDisabledOp, OP_REPAY, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
-import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
+import { getPlanHookDisabledWarning, getUtilisationWarning, type VaultWarning } from '~/composables/useVaultWarnings'
 
 interface UseCollateralSwapRepayOptions {
   position: Ref<AccountBorrowPosition | undefined>
@@ -54,13 +56,12 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     isEligibleForLiquidation,
   } = options
 
-  const router = useRouter()
   const modal = useModal()
   const { error } = useToast()
   const { isConnected, address } = useAccount()
   const { buildSwapPlan, buildSameAssetRepayPlan, buildSameAssetFullRepayPlan, buildSwapFullRepayPlan, executeTxPlan } = useEulerOperations()
-  const { refreshAllPositions } = useEulerAccount()
   const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
+  const { finalizeTxAndRedirect } = useTxFinalization()
   const { client: rpcClient } = useRpcClient()
   const { withIntrinsicSupplyApy, withIntrinsicBorrowApy } = useIntrinsicApy()
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
@@ -68,7 +69,10 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   // --- Source vault state ---
   const sourceVault: Ref<Vault | undefined> = ref()
   const sourceAssets = ref(0n)
-  const sourceBalance = computed(() => sourceAssets.value)
+  const sourceBalance = computed(() => getCashLimitedWithdrawAmount(
+    sourceAssets.value,
+    sourceVault.value,
+  ))
   const debtBalance = computed(() => position.value?.borrowed || 0n)
 
   const priceInvert = usePriceInvert(
@@ -128,7 +132,6 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     borrowVault,
     direction: core.direction,
   })
-
   // --- APYs ---
   const collateralSupplyApy = computed(() => {
     if (!sourceVault.value) return null
@@ -247,12 +250,22 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   // Uses amountInMax (slippage-padded) when available so the user sees an
   // insufficient-balance error before hitting an on-chain revert.
   const requiredInput = computed(() => {
-    if (core.isSameAsset.value) return core.spent.value ?? 0n
+    if (core.isSameAsset.value) {
+      const spent = core.spent.value ?? 0n
+      return isEffectivelyFullRepay.value ? adjustForInterest(spent) : spent
+    }
     const q = core.quotes.selectedQuote.value
     if (!q) return 0n
     return getSwapInputAmount(q, core.direction.value)
   })
-  const isInsufficientSource = computed(() => requiredInput.value > 0n && requiredInput.value > sourceBalance.value)
+  const isInsufficientSource = computed(() => requiredInput.value > 0n && requiredInput.value > sourceAssets.value)
+  const isInsufficientVaultLiquidity = computed(() =>
+    requiredInput.value > 0n && requiredInput.value > (sourceVault.value?.totalCash || 0n),
+  )
+  const liquidityWarning = computed<VaultWarning | null>(() => {
+    if (!sourceVault.value) return null
+    return getUtilisationWarning(sourceVault.value, 'repay')
+  })
 
   // --- Submit disabled ---
   const isSubmitDisabled = computed(() => {
@@ -261,6 +274,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     if (!sourceVault.value || !borrowVault.value) return true
     if (!core.debtAmount.value && !core.amount.value) return true
     if (isInsufficientSource.value) return true
+    if (isInsufficientVaultLiquidity.value) return true
     if (core.isSameAsset.value) {
       if (isHealthInsufficient.value) return true
       return false
@@ -278,6 +292,9 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     }
     if (isInsufficientSource.value) {
       return 'Insufficient collateral balance to cover the required swap amount.'
+    }
+    if (isInsufficientVaultLiquidity.value) {
+      return 'Not enough liquidity in the collateral vault.'
     }
     if (isHealthInsufficient.value) {
       return 'This swap will not restore account health. Repay the full debt from your wallet instead.'
@@ -368,6 +385,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       return buildSwapFullRepayPlan({
         quote: core.quotes.selectedQuote.value,
         swapperMode: swapMode,
+        requestedSlippage: slippage.value,
         targetDebt,
         currentDebt,
         liabilityVault: borrowVault.value.address,
@@ -380,6 +398,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       quote: core.quotes.selectedQuote.value,
       swapperMode: swapMode,
       isRepay: true,
+      requestedSlippage: slippage.value,
       targetDebt,
       currentDebt,
       liabilityVault: borrowVault.value.address,
@@ -406,14 +425,22 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
         if (!ok) return
       }
 
+      const inputDisplay = getRepaySwapReviewInputAmount({
+        amount: core.amount.value,
+        quote: core.quotes.selectedQuote.value,
+        sourceDecimals: sourceVault.value.asset.decimals,
+        swapperMode: core.direction.value,
+      })
+
       modal.open(OperationReviewModal, {
         props: {
           type: 'repay',
           asset: sourceVault.value.asset,
-          amount: core.amount.value,
+          amount: inputDisplay,
           plan: plan.value || undefined,
           swapToAsset: !core.isSameAsset.value ? borrowVault.value.asset : undefined,
           swapToAmount: !core.isSameAsset.value ? core.debtAmount.value : undefined,
+          swapMode: !core.isSameAsset.value ? core.direction.value : undefined,
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
           onConfirm: async () => {
@@ -435,12 +462,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       isSubmitting.value = true
       const txPlan = await buildRepayPlan()
       await executeTxPlan(txPlan)
-
-      modal.close()
-      refreshAllPositions(eulerLensAddresses.value, address.value as string)
-      setTimeout(() => {
-        router.replace('/portfolio')
-      }, 400)
+      await finalizeTxAndRedirect()
     }
     catch (e) {
       error('Transaction failed')
@@ -506,6 +528,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     isSubmitDisabled,
     disabledReason,
     hookWarning,
+    liquidityWarning,
     isRepayExceedsDebt: core.isRepayExceedsDebt,
     // Handlers
     onAmountInput: core.onAmountInput,

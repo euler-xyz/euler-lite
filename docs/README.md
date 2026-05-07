@@ -77,9 +77,10 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 ### 🌍 [Geo-Blocking](./geo-blocking.md)
 
 - Country detection and sanctioned country lists
-- Product-level and per-vault blocking overrides
+- Product-level, per-vault, earn-vault, and asset-level blocking rules
+- Asset-level pattern matching (exact `symbols`/`names` + `symbolRegex`/`nameRegex`) and cross-chain `all/assets.json`
 - Country group aliases (EU, EEA, EFTA)
-- UI enforcement across browse, detail, action, and modal pages
+- UI enforcement across browse, detail, action, and modal pages, plus the arbitrary-asset swap selector
 
 ### 🌐 [Public API](./public-api.md)
 
@@ -109,7 +110,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - **Styling**: SCSS with custom design system
 - **State Management**: Vue Composition API with composables
 - **Linting**: ESLint (flat config) with pre-commit hooks (simple-git-hooks + lint-staged)
-- **Testing**: Playwright (E2E)
+- **Testing**: Vitest (unit/integration)
 
 ## 🔗 Quick Links
 

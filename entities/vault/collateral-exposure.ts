@@ -38,6 +38,11 @@ export type CollateralVaultResolver
  * deposits are actively backing borrows on *this* vault. This errs on the side
  * of showing the IRM chart (false positive) rather than hiding it (false
  * negative), and matches the heuristic used by the original inline code.
+ *
+ * Distinct from {@link isLiveCollateralEdge} (in `./ltv`), which is the
+ * edge-level predicate used by discovery views — it does not have access to
+ * the collateral vault object, treats `borrowLTV > 0` as sufficient on its
+ * own, and is intentionally broader.
  */
 const isLiveExposure = (
   ltv: VaultCollateralLTV,

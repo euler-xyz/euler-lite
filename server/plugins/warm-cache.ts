@@ -19,6 +19,10 @@
  *                Merkl opportunities × 3, Brevis campaigns, Fuul × 2,
  *                refreshChainVaults(chainId)
  *
+ * Per-chain warms skip chains listed in `DEPRECATED_CHAINS`. Their data
+ * is still served — the first visitor to a deprecated chain pays a
+ * cold-upstream fetch, cached from then on under normal TTL behavior.
+ *
  * `refreshChainVaults` internally $fetches /api/euler-chains and
  * /api/labels/*, and calls `getVaultCategories(chainId)` — those all
  * collapse onto the parallel warms via in-flight dedup at the cache layer,
@@ -32,7 +36,9 @@ import { LABEL_FILES, refreshLabelFile } from '../api/labels/[file].get'
 import { refreshEulerChains } from '../api/euler-chains.get'
 import { refreshTokenList } from '../api/token-list.get'
 import { getEnabledChainIds } from '~/utils/chain-env'
-import { logWarn } from '../utils/log'
+import { parseDeprecatedChains } from '~/utils/parseDeprecatedChains'
+import { reportStatus } from '../utils/log'
+import { logger } from '~/server/utils/logger'
 import { refreshChainVaults } from '../utils/vaults-cache'
 import { refreshVaultCategories } from '../utils/vault-categories-store'
 import { refreshIntrinsicApyForChain } from '../utils/intrinsic-apy'
@@ -57,9 +63,22 @@ const FUUL_PROTOCOLS: FuulProtocol[] = ['euler', 'euler-looping']
 const WARM_LATCH_KEY = '__eulerLiteWarmCacheStarted'
 type WarmLatchedGlobal = typeof globalThis & { [WARM_LATCH_KEY]?: true }
 
-const logFail = (context: string) => (err: unknown) => {
-  logWarn('warm-cache', `${context} failed:`, err instanceof Error ? err.message : err)
-}
+// Wraps a warm task so success and failure flow through transition-based
+// logging. A persistently-failing task logs once on first failure, then
+// stays silent until it recovers (info) or the error message changes.
+// Swallows the rejection so the caller's Promise.allSettled stays clean.
+const reportWarm = <T>(context: string, task: Promise<T>): Promise<T | undefined> =>
+  task.then(
+    (value) => {
+      reportStatus('warm-cache', context, 'ok')
+      return value
+    },
+    (err) => {
+      const msg = err instanceof Error ? err.message : String(err)
+      reportStatus('warm-cache', context, `failed:${msg}`, `${context} failed: ${msg}`)
+      return undefined
+    },
+  )
 
 // --- Global warms (no dependencies, run once per cycle) ---
 
@@ -74,40 +93,47 @@ const logFail = (context: string) => (err: unknown) => {
 // downtime.
 
 const warmEulerChains = () =>
-  refreshEulerChains().catch(logFail('euler-chains'))
+  reportWarm('euler-chains', refreshEulerChains())
+
+// Cross-chain pattern rules for asset geo-blocking live at `all/assets.json`
+// upstream. The /api/labels/assets.json handler unions this with the
+// per-chain file; warm it once so the first chain-scoped request doesn't
+// pay the cold-upstream cost.
+const warmGlobalAssets = () =>
+  reportWarm('labels/assets.json scope=all', refreshLabelFile('all', 'assets.json'))
 
 // --- Per-chain warms (parallel across chains and within a chain) ---
 
 const warmLabels = (chainId: number): Promise<unknown>[] =>
   LABEL_FILES.map(file =>
-    refreshLabelFile(chainId, file).catch(logFail(`labels/${file} chain=${chainId}`)),
+    reportWarm(`labels/${file} chain=${chainId}`, refreshLabelFile(chainId, file)),
   )
 
 const warmTokenList = (chainId: number) =>
-  refreshTokenList(chainId).catch(logFail(`token-list chain=${chainId}`))
+  reportWarm(`token-list chain=${chainId}`, refreshTokenList(chainId))
 
 const warmIntrinsicApy = (chainId: number) =>
-  refreshIntrinsicApyForChain(chainId).catch(logFail(`intrinsic-apy chain=${chainId}`))
+  reportWarm(`intrinsic-apy chain=${chainId}`, refreshIntrinsicApyForChain(chainId))
 
 const warmRewardCampaigns = (chainId: number): Promise<unknown>[] => [
   ...MERKL_TYPES.map(type =>
-    refreshMerklType(chainId, type).catch(logFail(`merkl/${type} chain=${chainId}`)),
+    reportWarm(`merkl/${type} chain=${chainId}`, refreshMerklType(chainId, type)),
   ),
-  refreshBrevisCampaigns(chainId).catch(logFail(`brevis chain=${chainId}`)),
+  reportWarm(`brevis chain=${chainId}`, refreshBrevisCampaigns(chainId)),
   ...FUUL_PROTOCOLS.map(protocol =>
-    refreshFuulProtocol(chainId, protocol).catch(logFail(`fuul/${protocol} chain=${chainId}`)),
+    reportWarm(`fuul/${protocol} chain=${chainId}`, refreshFuulProtocol(chainId, protocol)),
   ),
 ]
 
 const warmVaultCategories = (chainId: number) =>
-  refreshVaultCategories(chainId).catch(logFail(`vault-categories chain=${chainId}`))
+  reportWarm(`vault-categories chain=${chainId}`, refreshVaultCategories(chainId))
 
 // Direct call (no $fetch HTTP round-trip) so we get typed errors. Its internal
 // $fetches to /api/euler-chains + /api/labels/* collapse onto Stage A's
 // parallel warms via in-flight dedup at the cache layer, and its call to
 // getVaultCategories() joins the warmVaultCategories task above.
 const warmChainVaults = (chainId: number) =>
-  refreshChainVaults(chainId).catch(logFail(`vaults chain=${chainId}`))
+  reportWarm(`vaults chain=${chainId}`, refreshChainVaults(chainId))
 
 const warmChainTasks = (chainId: number): Promise<unknown>[] => [
   ...warmLabels(chainId),
@@ -125,18 +151,23 @@ export default defineNitroPlugin(() => {
   if (g[WARM_LATCH_KEY]) return
   g[WARM_LATCH_KEY] = true
 
-  const chainIds = getEnabledChainIds()
+  const enabledChainIds = getEnabledChainIds()
+  const deprecatedChainIds = new Set(
+    parseDeprecatedChains(process.env.DEPRECATED_CHAINS, new Set(enabledChainIds)),
+  )
+  const chainIds = enabledChainIds.filter(id => !deprecatedChainIds.has(id))
   if (chainIds.length === 0) return
 
   const warmAll = async () => {
     try {
       await Promise.allSettled([
         warmEulerChains(),
+        warmGlobalAssets(),
         ...chainIds.flatMap(warmChainTasks),
       ])
     }
     catch (err) {
-      logWarn('warm-cache', 'warm-up iteration failed:', err instanceof Error ? err.message : err)
+      logger.warn({ ctx: 'warm-cache', err }, 'warm-up iteration failed')
     }
   }
 

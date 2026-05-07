@@ -3,6 +3,7 @@ import { getAddress, isAddress, zeroAddress, type Address } from 'viem'
 import type { VaultAsset } from '~/entities/vault'
 import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
+import { isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
 
 export interface SwapTokenSelectMeta {
   isUnknownToken?: boolean
@@ -39,6 +40,22 @@ interface TokenOption {
   balance: bigint
   balanceFormatted: number
   source: 'vault' | 'tokenList'
+}
+
+// Picker-geo semantics:
+// - 'input' (pay-with): user gives up this asset. Hard-block disables, soft-restrict
+//   does not (reducing exposure).
+// - 'output' (receive-as): user acquires this asset. Both hard-block and
+//   soft-restrict disable.
+// Accepts the full asset so symbol/name pattern rules (assets.json + all/assets.json)
+// are consulted, not just the address map.
+const getAssetGeoState = (asset: VaultAsset, pickerMode: 'input' | 'output'): { disabled: boolean, showChip: boolean } => {
+  const blocked = isAssetBlockedByCountry(asset)
+  if (blocked) return { disabled: true, showChip: true }
+  if (pickerMode === 'output' && isAssetRestrictedByCountry(asset)) {
+    return { disabled: true, showChip: true }
+  }
+  return { disabled: false, showChip: false }
 }
 
 const tokenOptions = computed((): TokenOption[] => {
@@ -135,6 +152,23 @@ const filteredOptions = computed(() => {
   return base
 })
 
+// Compute geo state once per visible row rather than 3x per render
+// (class binding + bg-card-hover + click guard).
+const geoByAddress = computed(() => {
+  const map = new Map<string, { disabled: boolean, showChip: boolean }>()
+  for (const opt of filteredOptions.value) {
+    map.set(opt.asset.address.toLowerCase(), getAssetGeoState(opt.asset, mode))
+  }
+  return map
+})
+
+const rowGeo = (address: string) =>
+  geoByAddress.value.get(address.toLowerCase()) ?? { disabled: false, showChip: false }
+
+const customTokenGeo = computed(() =>
+  customToken.value ? getAssetGeoState(customToken.value, mode) : { disabled: false, showChip: false },
+)
+
 watch(searchQuery, (q) => {
   const trimmed = q.trim()
   if (isAddress(trimmed) && !knownAddresses.value.has(trimmed.toLowerCase())) {
@@ -160,8 +194,14 @@ const handleSelect = (opt: TokenOption) => {
   emits('close')
 }
 
+const onRowClick = (opt: TokenOption) => {
+  if (rowGeo(opt.asset.address).disabled) return
+  handleSelect(opt)
+}
+
 const handleSelectCustomToken = () => {
   if (!customToken.value) return
+  if (customTokenGeo.value.disabled) return
   onSelect(customToken.value, { isUnknownToken: true })
   emits('close')
 }
@@ -186,9 +226,12 @@ const handleSelectCustomToken = () => {
         <div
           v-for="opt in filteredOptions"
           :key="opt.asset.address"
-          class="flex items-center py-12 px-16 rounded-16 cursor-pointer"
-          :class="isSelected(opt.asset.address) ? 'bg-card-hover' : ''"
-          @click="handleSelect(opt)"
+          class="flex items-center py-12 px-16 rounded-16"
+          :class="[
+            rowGeo(opt.asset.address).disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+            isSelected(opt.asset.address) && !rowGeo(opt.asset.address).disabled ? 'bg-card-hover' : '',
+          ]"
+          @click="onRowClick(opt)"
         >
           <AssetAvatar
             :asset="opt.asset"
@@ -199,8 +242,14 @@ const handleSelectCustomToken = () => {
             <div class="text-content-primary mb-2">
               {{ opt.asset.name }}
             </div>
-            <div class="text-h5">
+            <div class="text-h5 flex items-center">
               {{ opt.asset.symbol }}
+              <span
+                v-if="rowGeo(opt.asset.address).showChip"
+                class="ml-6 inline-flex items-center rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
+              >
+                Restricted
+              </span>
             </div>
           </div>
           <div class="text-right">
@@ -224,7 +273,8 @@ const handleSelectCustomToken = () => {
         <!-- Custom token: resolved -->
         <div
           v-else-if="isUnknownAddress && customToken"
-          class="flex items-center py-12 px-16 rounded-16 cursor-pointer hover:bg-surface-secondary"
+          class="flex items-center py-12 px-16 rounded-16 hover:bg-surface-secondary"
+          :class="customTokenGeo.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'"
           @click="handleSelectCustomToken"
         >
           <AssetAvatar
@@ -237,6 +287,12 @@ const handleSelectCustomToken = () => {
               <span class="text-content-primary">{{ customToken.name }}</span>
               <span class="inline-flex items-center rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5">
                 Import
+              </span>
+              <span
+                v-if="customTokenGeo.showChip"
+                class="inline-flex items-center rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
+              >
+                Restricted
               </span>
             </div>
             <div class="text-h5">

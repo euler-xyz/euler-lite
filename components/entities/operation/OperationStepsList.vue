@@ -31,7 +31,7 @@ defineProps<{
             {{ step.assetInfo.amount }}&nbsp;
           </template>
           <template v-else-if="step.assetInfo.amount !== undefined">
-            {{ formatNumber(step.assetInfo.amount, 8, 0) }}&nbsp;
+            {{ step.assetInfo.estimated ? '~' : '' }}{{ formatNumber(step.assetInfo.amount, 8, 0) }}&nbsp;
           </template>{{ step.assetInfo.symbol }}
         </p>
       </template>
@@ -57,7 +57,7 @@ defineProps<{
           class="text-p3"
         >
           <template v-if="step.toAssetInfo.amount !== undefined">
-            {{ formatNumber(step.toAssetInfo.amount, 8, 0) }}&nbsp;
+            {{ step.toAssetInfo.estimated ? '~' : '' }}{{ formatNumber(step.toAssetInfo.amount, 8, 0) }}&nbsp;
           </template>{{ step.toAssetInfo.symbol }}
         </p>
       </template>

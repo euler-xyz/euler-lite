@@ -39,7 +39,7 @@ Welcome to the Euler Lite project! This guide will help you get up and running w
 ### Prerequisites
 
 - Node.js 24+
-- npm or yarn package manager
+- npm package manager
 - Git
 - Basic knowledge of Vue.js and TypeScript
 
@@ -55,9 +55,7 @@ Welcome to the Euler Lite project! This guide will help you get up and running w
 2. **Install dependencies**
 
    ```bash
-   npm install
-   # or
-   yarn install
+   npm ci
    ```
 
 3. **Set up environment variables**
@@ -71,8 +69,6 @@ Welcome to the Euler Lite project! This guide will help you get up and running w
 
    ```bash
    npm run dev
-   # or
-   yarn dev
    ```
 
 5. **Open your browser**
@@ -102,7 +98,7 @@ EULER_API_URL=https://your-euler-api.com
 SWAP_API_URL=https://your-swap-api.com
 
 # Chain RPC endpoints (one per chain you want to enable)
-RPC_URL_HTTP_1=https://your-ethereum-rpc.com
+RPC_URL_1=https://your-ethereum-rpc.com
 NUXT_PUBLIC_SUBGRAPH_URI_1=https://your-subgraph.com
 ```
 
@@ -148,7 +144,7 @@ NUXT_PUBLIC_SUBGRAPH_URI_1=https://your-subgraph.com
 
 ### Blockchain Connection Issues
 
-- Verify `RPC_URL_HTTP_<chainId>` env vars are set correctly
+- Verify `RPC_URL_<chainId>` env vars are set correctly
 - Ensure matching `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` exists for each chain
 - Ensure RPC endpoints are accessible
 
