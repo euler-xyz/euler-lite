@@ -82,15 +82,20 @@ onBeforeUnmount(() => {
         class="ui-modal__wrapper"
         @click.self="onClickWrapper"
       >
-        <component
-          :is="component"
-          v-bind="data.props"
-          :modal-id="id"
-          @mouseenter="handleMouseEnter"
-          @mouseleave="handleMouseLeave"
-          @prevent-close="handlePreventClose"
-          @close="close"
-        />
+        <div
+          class="ui-modal__panel-motion"
+          @click.self="onClickWrapper"
+        >
+          <component
+            :is="component"
+            v-bind="data.props"
+            :modal-id="id"
+            @mouseenter="handleMouseEnter"
+            @mouseleave="handleMouseLeave"
+            @prevent-close="handlePreventClose"
+            @close="close"
+          />
+        </div>
       </div>
     </Transition>
   </div>
@@ -123,9 +128,12 @@ onBeforeUnmount(() => {
   &--pointer-through &__wrapper {
     pointer-events: none;
 
-    > * {
-      pointer-events: auto;
-    }
+  &--pointer-through &__panel-motion {
+    pointer-events: none;
+  }
+
+  &--pointer-through &__panel-motion > * {
+    pointer-events: auto;
   }
 }
 </style>
