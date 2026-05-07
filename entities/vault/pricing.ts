@@ -152,8 +152,9 @@ export const resolveUnitOfAccountPriceInfo = async (
     return undefined
   }
 
+  const gen = cacheGeneration
   const priceInfo = await resolveAssetPriceInfo(rpcUrl, utilsLensAddress, unitOfAccount)
-  if (priceInfo || assetPriceCache.has(normalized)) {
+  if (cacheGeneration === gen && (priceInfo || assetPriceCache.has(normalized))) {
     unitOfAccountPriceCache.set(normalized, priceInfo || null)
   }
   return priceInfo

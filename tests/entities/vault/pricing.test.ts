@@ -195,4 +195,42 @@ describe('resolveAssetPriceInfo cache behaviour', () => {
     expect(second).toBeUndefined()
     expect(readContractMock).toHaveBeenCalledTimes(1)
   })
+
+  it('does NOT cache a unit-of-account price resolved after caches are cleared', async () => {
+    let resolveFirst!: (value: Record<string, unknown>) => void
+    const firstRead = new Promise<Record<string, unknown>>((resolve) => {
+      resolveFirst = resolve
+    })
+    readContractMock.mockReturnValueOnce(firstRead)
+
+    const { clearPriceCaches, resolveUnitOfAccountPriceInfo } = await import('~/entities/vault/pricing')
+    const firstPromise = resolveUnitOfAccountPriceInfo(RPC_URL, LENS, ASSET)
+    clearPriceCaches()
+
+    resolveFirst({
+      queryFailure: false,
+      amountIn: 10n ** 18n,
+      amountOutAsk: 400n,
+      amountOutBid: 399n,
+      amountOutMid: 400n,
+      timestamp: 1n,
+      oracle: '0x0000000000000000000000000000000000000001',
+    })
+    readContractMock.mockResolvedValueOnce({
+      queryFailure: false,
+      amountIn: 10n ** 18n,
+      amountOutAsk: 500n,
+      amountOutBid: 499n,
+      amountOutMid: 500n,
+      timestamp: 2n,
+      oracle: '0x0000000000000000000000000000000000000001',
+    })
+
+    const first = await firstPromise
+    const second = await resolveUnitOfAccountPriceInfo(RPC_URL, LENS, ASSET)
+
+    expect(first?.amountOutMid).toBe(400n)
+    expect(second?.amountOutMid).toBe(500n)
+    expect(readContractMock).toHaveBeenCalledTimes(2)
+  })
 })
