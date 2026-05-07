@@ -31,6 +31,12 @@ const STALE_TIMES: Partial<Record<EulerSDKQueryName, number>> = {
   queryBatchSimulation: 10 * SECOND,
   queryPythUpdateData: 10 * SECOND,
   queryPythUpdateFee: 10 * SECOND,
+
+  queryNativeBalance: 5 * SECOND,
+  queryTokenBalances: 5 * SECOND,
+  queryBalanceOf: 5 * SECOND,
+  queryAllowance: 5 * SECOND,
+  queryPermit2Allowance: 5 * SECOND,
 }
 
 export const sdkQueryClient = new QueryClient()

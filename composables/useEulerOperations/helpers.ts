@@ -1,7 +1,7 @@
 import { INTEREST_ADJUSTMENT_BPS, BPS_BASE } from '~/entities/tuning-constants'
 import type { OperationsContext, Permit2Helpers, AllowanceHelpers, OperationHelpers } from './types'
 import { type Address, getAddress, type Abi, maxUint256, encodeFunctionData, type Hash } from 'viem'
-import type { EVault } from '@eulerxyz/euler-v2-sdk'
+import type { AssetAllowances, EVault } from '@eulerxyz/euler-v2-sdk'
 import type { TxStep } from '~/entities/txPlan'
 import { erc20ABI } from '~/entities/euler/abis'
 import { EVC_ABI } from '~/abis/evc'
@@ -10,6 +10,7 @@ import { erc20TransferAbi } from '~/abis/erc20'
 import type { EVCCall } from '~/utils/evc-converter'
 import { buildPythUpdateCalls, buildPythUpdateCallsFromFeeds, collectPythFeedsForHealthCheck, sumCallValues } from '~/utils/pyth'
 import { logWarn } from '~/utils/errorHandling'
+import { getEulerSdk } from '~/composables/useEulerSdk'
 
 /** Pad amount by 0.01% to cover interest accrual between plan build and tx execution */
 export const adjustForInterest = (amount: bigint) => (amount * INTEREST_ADJUSTMENT_BPS) / BPS_BASE
@@ -75,7 +76,36 @@ export const createOperationHelpers = (ctx: OperationsContext, permit2: Permit2H
     includePermit2Call?: boolean
   }) => {
     const { assetAddr, spenderAddr, userAddr, amount, includePermit2Call: includePermit2 = true } = params
-    const currentAllowance = await allowance.checkAllowance(assetAddr, spenderAddr, userAddr)
+    const fetchWalletAllowances = async (): Promise<AssetAllowances | undefined> => {
+      if (!ctx.chainId.value) return undefined
+
+      try {
+        const sdk = await getEulerSdk()
+        const walletFetch = await sdk.walletService.fetchWallet(ctx.chainId.value, userAddr, [
+          { asset: assetAddr, spenders: [spenderAddr] },
+        ])
+        if (walletFetch.errors.length) {
+          logWarn('prepareTokenApproval/walletService', 'wallet service returned diagnostics', {
+            data: {
+              chainId: ctx.chainId.value,
+              asset: assetAddr,
+              spender: spenderAddr,
+              owner: userAddr,
+              errors: walletFetch.errors,
+            },
+          })
+        }
+        return walletFetch.result.getAllowances(assetAddr, spenderAddr)
+      }
+      catch (err) {
+        logWarn('prepareTokenApproval/walletService', err)
+        return undefined
+      }
+    }
+
+    const walletAllowances = await fetchWalletAllowances()
+    const currentAllowance = walletAllowances?.assetForVault
+      ?? await allowance.checkAllowance(assetAddr, spenderAddr, userAddr)
     const permit2Address = permit2.resolvePermit2Address()
     const canUsePermit2 = !!ctx.chainId.value && !!permit2Address && ctx.permit2Enabled.value
 
@@ -84,7 +114,8 @@ export const createOperationHelpers = (ctx: OperationsContext, permit2: Permit2H
     const usesPermit2 = canUsePermit2 && currentAllowance < amount
 
     if (usesPermit2 && permit2Address) {
-      const permit2Allowance = await allowance.checkAllowance(assetAddr, permit2Address, userAddr)
+      const permit2Allowance = walletAllowances?.assetForPermit2
+        ?? await allowance.checkAllowance(assetAddr, permit2Address, userAddr)
       const needsPermit2Approval = permit2Allowance < amount
       if (needsPermit2Approval) {
         steps.push({
@@ -99,7 +130,14 @@ export const createOperationHelpers = (ctx: OperationsContext, permit2: Permit2H
       }
 
       if (includePermit2) {
-        permitCall = await permit2.buildPermit2Call(assetAddr, spenderAddr, amount, userAddr, permit2Address)
+        const knownPermit2Allowance = walletAllowances
+          ? {
+              amount: walletAllowances.assetForVaultInPermit2,
+              expiration: BigInt(walletAllowances.permit2ExpirationTime),
+              nonce: BigInt(walletAllowances.permit2Nonce),
+            }
+          : undefined
+        permitCall = await permit2.buildPermit2Call(assetAddr, spenderAddr, amount, userAddr, permit2Address, knownPermit2Allowance)
       }
     }
     else if (currentAllowance < amount) {
