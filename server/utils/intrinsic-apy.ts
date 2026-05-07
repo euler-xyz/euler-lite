@@ -38,6 +38,7 @@ const UPSTREAM_URLS = {
   securitize: 'https://public-feed.securitize.io/asset-stats',
   stablewatch: 'https://api.stablewatch.io/api/pools',
   infinifi: 'https://eth-api.infinifi.xyz/api/protocol/data',
+  accountable: 'https://yield.accountable.capital/api/loan/address',
 } as const
 
 const PENDLE_API_BASE = 'https://api-v2.pendle.finance/core/v2'
@@ -315,6 +316,39 @@ async function extractInfinifi(sources: InfinifiSource[]): Promise<Array<[string
   })
 }
 
+type AccountableSource = Extract<IntrinsicApySourceConfig, { provider: 'accountable' }>
+type AccountableLoanResponse = {
+  loan_computed?: {
+    net_apy?: number
+  }
+}
+
+const ACCOUNTABLE_CONCURRENCY = 10
+
+async function extractAccountable(sources: AccountableSource[]): Promise<Array<[string, IntrinsicApyInfo]>> {
+  const settled = await mapWithConcurrency(sources, ACCOUNTABLE_CONCURRENCY, async (s) => {
+    const loan = s.loanAddress.toLowerCase()
+    const key = `accountable:${loan}`
+    const url = `${UPSTREAM_URLS.accountable}/${s.loanAddress}`
+    const data = await fetchUpstream<AccountableLoanResponse>(key, url)
+    return { source: s, data }
+  })
+
+  const out: Array<[string, IntrinsicApyInfo]> = []
+  for (const r of settled) {
+    if (r.status !== 'fulfilled') continue
+    const { source, data } = r.value
+    const apy = Number(data?.loan_computed?.net_apy)
+    if (!Number.isFinite(apy)) continue
+    out.push([normalize(source.address), {
+      apy,
+      provider: 'Accountable',
+      source: 'https://accountable.capital',
+    }])
+  }
+  return out
+}
+
 type YoSource = Extract<IntrinsicApySourceConfig, { provider: 'yo' }>
 
 async function extractYo(sources: YoSource[]): Promise<Array<[string, IntrinsicApyInfo]>> {
@@ -369,7 +403,7 @@ async function extractSimple<S extends IntrinsicApySourceConfig, T>(
 }
 
 // Providers with dedicated extractors in the switch below.
-type ExplicitProvider = 'defillama' | 'pendle' | 'securitize' | 'stablewatch' | 'renzo' | 'midas' | 'yo' | 'infinifi'
+type ExplicitProvider = 'defillama' | 'pendle' | 'securitize' | 'stablewatch' | 'renzo' | 'midas' | 'yo' | 'infinifi' | 'accountable'
 // Every remaining provider must have an entry in SIMPLE_SPECS — enforced at the type level.
 type SimpleProvider = Exclude<IntrinsicApySourceConfig['provider'], ExplicitProvider>
 
@@ -435,6 +469,7 @@ async function extractForProvider(
     case 'midas': return extractMidas(sources as MidasSource[])
     case 'yo': return extractYo(sources as YoSource[])
     case 'infinifi': return extractInfinifi(sources as InfinifiSource[])
+    case 'accountable': return extractAccountable(sources as AccountableSource[])
     default: {
       const simpleProvider: SimpleProvider = provider
       const spec = SIMPLE_SPECS[simpleProvider]

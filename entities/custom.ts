@@ -18,6 +18,7 @@ export type IntrinsicApySourceConfig
     | { provider: 'benqi', address: string, chainId: number }
     | { provider: 'avant', address: string, chainId: number }
     | { provider: 'infinifi', address: string, chainId: number, infinifiVariant: 'locked' | 'staked', infinifiLockedKey?: string }
+    | { provider: 'accountable', address: string, chainId: number, loanAddress: string }
 
 export const intrinsicApySources: readonly IntrinsicApySourceConfig[] = [
   // DefiLlama pools — Ethereum (1)
@@ -85,6 +86,9 @@ export const intrinsicApySources: readonly IntrinsicApySourceConfig[] = [
   // DefiLlama pools — Monad (143)
   { provider: 'defillama', chainId: 143, address: '0x10Aeaf63194db8d453d4D85a06E5eFE1dd0b5417', poolId: '747c1d2a-c668-4682-b9f9-296708a3dd90' },
   { provider: 'defillama', chainId: 143, address: '0x1b68626dca36c7fe922fd2d55e4f631d962de19c', poolId: 'ee40513c-9356-4c53-9f26-446b484a8ae2' },
+
+  // Accountable loans — Monad (143)
+  { provider: 'accountable', chainId: 143, address: '0x8d3F9f9Eb2f5E8B48EFBB4074440D1E2A34Bc365', loanAddress: '0x8dCE15fc6a98484C995Fc702cBfBdA14A30454af' },
 
   // DefiLlama pools — Sonic (146)
   { provider: 'defillama', chainId: 146, address: '0x16af6b1315471Dc306D47e9CcEfEd6e5996285B6', poolId: '24b3096a-488d-4a61-afa6-e5e9be2ce4bf' },
