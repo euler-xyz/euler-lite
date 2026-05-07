@@ -69,7 +69,7 @@ const merklOpportunityUrl = (
 ): string => {
   if (!opportunity.identifier) return MERKL_EULER_SOURCE_URL
 
-  const chain = (opportunity.chain?.name || String(opportunity.chainId)).trim()
+  const chain = (opportunity.chain?.name || opportunity.chainId?.toString())?.trim()
   if (!chain) return MERKL_EULER_SOURCE_URL
 
   const chainSlug = chain.toLowerCase().replace(/\s+/g, '-')
