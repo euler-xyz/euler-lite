@@ -146,8 +146,8 @@ Lens contracts are read-only helpers deployed on every Euler chain. They aggrega
 Returns the complete state of an EVK vault in a single call:
 
 - **Basic info**: name, symbol, decimals, totalAssets, totalShares, supply/borrow caps
-- **`liabilityPriceInfo`**: The vault asset's price in the vault's unit of account (UoA). Contains `amountOutMid`, `amountOutAsk`, `amountOutBid` (18-decimal fixed-point).
-- **`collateralPrices[]`**: Price of each accepted collateral in the vault's UoA. These are **share prices** (price per vault share, not per underlying asset).
+- **`liabilityPriceInfo`**: The vault asset's price in the vault's unit of account (UoA). Contains `amountOutMid`, `amountOutAsk`, `amountOutBid` scaled in the **UoA token's native decimals** (`unitOfAccountDecimals`) — not always 18. The USD-magic UoA address (`0x…0348`) is treated as 18 decimals on-chain, which is why USD-denominated vaults look like 18-decimal fixed-point. Conversion to USD must divide by `10^unitOfAccountDecimals`, not by `1e18`.
+- **`collateralPrices[]`**: Price of each accepted collateral in the vault's UoA, same scaling rules as `liabilityPriceInfo`. These are **share prices** (price per vault share, not per underlying asset).
 - **`collateralLTVs[]`**: Borrow LTV, liquidation LTV, and ramp parameters for each collateral.
 - **`oracleDetailedInfo`**: Recursive oracle configuration tree (see Oracle section below).
 - **`interestRateInfo`**: Current borrow/supply APY, cash, borrows.
