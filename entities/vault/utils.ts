@@ -1,5 +1,5 @@
 import { maxUint256, type Address } from 'viem'
-import type { Vault, SecuritizeVault, BorrowVaultPair } from './types'
+import type { Vault, SecuritizeVault, EarnVault, BorrowVaultPair } from './types'
 import {
   vaultConvertToAssetsAbi,
   vaultConvertToSharesAbi,
@@ -112,6 +112,25 @@ export const getMaxWithdraw = (vaultAddress: string, account: string): Promise<b
     functionName: 'maxWithdraw',
     args: [account as Address],
   }) as Promise<bigint>
+}
+
+// What the vault can actually pay out right now in its underlying asset:
+// - EVK Vault: only cash on hand (the rest is lent out to borrowers).
+// - SecuritizeVault: the whole supply (no borrowing).
+// - EarnVault: liquidity reachable across allocated strategies.
+const getVaultWithdrawCapacity = (vault: Vault | SecuritizeVault | EarnVault): bigint => {
+  if ('type' in vault && vault.type === 'securitize') return vault.totalAssets
+  if ('type' in vault && vault.type === 'earn') return vault.availableAssets
+  return vault.totalCash
+}
+
+export const getCashLimitedWithdrawAmount = (
+  userWithdrawableAssets: bigint,
+  vault: Vault | SecuritizeVault | EarnVault | undefined,
+): bigint => {
+  if (!vault) return userWithdrawableAssets
+  const capacity = getVaultWithdrawCapacity(vault)
+  return userWithdrawableAssets < capacity ? userWithdrawableAssets : capacity
 }
 
 export const getUtilization = (totalAssets: bigint, totalBorrow: bigint): number => {

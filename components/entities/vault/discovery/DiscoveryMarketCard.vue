@@ -6,6 +6,7 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import {
   getMarketEntities,
   getDeprecatedVaultCount,
+  getUnknownCollateralCount,
   getMiniDiagram,
   getBorrowableVaults,
   findVault,
@@ -184,6 +185,13 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
             class="text-warning-500 text-p5 mt-4"
           >
             {{ getDeprecatedVaultCount(market) }} deprecated
+          </span>
+          <span
+            v-if="getUnknownCollateralCount(market) > 0"
+            class="text-error-500 text-p5 mt-4"
+            title="Collateral vaults whose risk manager isn't part of any declared product entity (or whose vault isn't loaded into the registry)."
+          >
+            {{ getUnknownCollateralCount(market) }} unknown
           </span>
         </div>
       </template>

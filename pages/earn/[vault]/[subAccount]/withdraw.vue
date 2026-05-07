@@ -6,6 +6,7 @@ import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
 import {
   convertSharesToAssets,
+  getCashLimitedWithdrawAmount,
   type EarnVault,
   type VaultAsset,
 } from '~/entities/vault'
@@ -54,6 +55,7 @@ const estimatesError = ref('')
 
 // Reactive USD prices for display
 const assetsBalanceUsd = ref(0)
+const withdrawableAssetsUsd = ref(0)
 const deltaUsd = ref(0)
 
 const rewardApy = computed(() => getSupplyRewardApy(vault.value?.address || ''))
@@ -63,9 +65,13 @@ const amountFixed = computed(() => {
     Number(asset.value?.decimals || 0),
   )
 })
+const withdrawableAssets = computed(() => getCashLimitedWithdrawAmount(
+  assetsBalance.value,
+  vault.value,
+))
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value) return false
-  return assetsBalance.value < amountFixed.value.value
+  return withdrawableAssets.value < amountFixed.value.value
     || isLoading.value
     || amountFixed.value.isZero() || amountFixed.value.isNegative()
     || !!(estimatesError.value)
@@ -74,6 +80,7 @@ const reviewWithdrawDisabled = isSubmitDisabled
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (estimatesError.value) return { message: estimatesError.value, variant: 'error' }
   if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return { message: 'Insufficient balance', variant: 'error' }
+  if (!amountFixed.value.isZero() && withdrawableAssets.value < amountFixed.value.value) return { message: 'Not enough liquidity in vault', variant: 'error' }
   return undefined
 })
 const supplyAPYDisplay = computed(() => {
@@ -206,6 +213,9 @@ const updateEstimates = () => {
     if (assetsBalance.value < amountFixed.value.value) {
       throw new Error('Not enough balance')
     }
+    if (withdrawableAssets.value < amountFixed.value.value) {
+      throw new Error('Not enough liquidity in vault')
+    }
     delta.value = assetsBalance.value - amountFixed.value.value
     estimateSupplyAPY.value = nanoToValue(vault.value.interestRateInfo.supplyAPY, 25)
   }
@@ -224,10 +234,12 @@ load()
 watchEffect(async () => {
   if (!vault.value) {
     assetsBalanceUsd.value = 0
+    withdrawableAssetsUsd.value = 0
     deltaUsd.value = 0
     return
   }
   assetsBalanceUsd.value = await getAssetUsdValueOrZero(assetsBalance.value, vault.value, 'off-chain')
+  withdrawableAssetsUsd.value = await getAssetUsdValueOrZero(withdrawableAssets.value, vault.value, 'off-chain')
   deltaUsd.value = await getAssetUsdValueOrZero(delta.value, vault.value, 'off-chain')
 })
 
@@ -272,7 +284,7 @@ watch(amount, () => {
               label="Withdraw amount"
               :asset="asset"
               :vault="vault"
-              :balance="assetsBalance"
+              :balance="withdrawableAssets"
               maxable
             />
 
@@ -315,11 +327,11 @@ watch(amount, () => {
                 v-if="asset"
                 class="text-p2 flex items-center gap-4"
               >
-                <UiExactAmount :exact="formatExactAmount(assetsBalance, asset.decimals, asset.symbol)">
-                  {{ formatSmartAmount(nanoToValue(assetsBalance, asset.decimals)) }}
+                <UiExactAmount :exact="formatExactAmount(withdrawableAssets, asset.decimals, asset.symbol)">
+                  {{ formatSmartAmount(nanoToValue(withdrawableAssets, asset.decimals)) }}
                   <span class="text-p3 text-content-tertiary">{{ asset.symbol }}</span>
                 </UiExactAmount>
-                <span class="text-p3 text-content-tertiary">&asymp; ${{ formatNumber(assetsBalanceUsd) }}</span>
+                <span class="text-p3 text-content-tertiary">&asymp; ${{ formatNumber(withdrawableAssetsUsd) }}</span>
               </p>
             </SummaryRow>
           </VaultFormInfoBlock>

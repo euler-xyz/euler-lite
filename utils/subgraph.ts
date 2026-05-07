@@ -1,7 +1,11 @@
 import { getAddress } from 'viem'
 import axios from 'axios'
 import { logger } from '~/utils/logger'
-import { SUBGRAPH_TIMEOUT_MS } from '~/entities/tuning-constants'
+import {
+  SUBGRAPH_TIMEOUT_MS,
+  SUBGRAPH_BLOCK_POLL_INTERVAL_MS,
+  SUBGRAPH_BLOCK_CATCHUP_TIMEOUT_MS,
+} from '~/entities/tuning-constants'
 
 export interface SubgraphPositionEntry {
   subAccount: string
@@ -50,4 +54,34 @@ export async function fetchAccountPositions(subgraphUrl: string, walletAddress: 
     )
     return { borrows: [], deposits: [] }
   }
+}
+
+export async function waitForSubgraphBlock(
+  subgraphUrl: string,
+  targetBlock: bigint,
+  opts: { intervalMs?: number, timeoutMs?: number } = {},
+): Promise<boolean> {
+  const intervalMs = opts.intervalMs ?? SUBGRAPH_BLOCK_POLL_INTERVAL_MS
+  const timeoutMs = opts.timeoutMs ?? SUBGRAPH_BLOCK_CATCHUP_TIMEOUT_MS
+  const deadline = Date.now() + timeoutMs
+
+  while (Date.now() < deadline) {
+    try {
+      const { data } = await axios.post(
+        subgraphUrl,
+        { query: '{ _meta { block { number } } }' },
+        { timeout: SUBGRAPH_TIMEOUT_MS },
+      )
+      const indexed = BigInt(data?.data?._meta?.block?.number ?? 0)
+      if (indexed >= targetBlock) return true
+    }
+    catch (error) {
+      logger.warn(
+        { ctx: 'subgraph/waitForBlock', target: targetBlock.toString(), err: error },
+        'failed to poll subgraph block height',
+      )
+    }
+    await new Promise(resolve => setTimeout(resolve, intervalMs))
+  }
+  return false
 }

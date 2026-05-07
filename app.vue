@@ -10,12 +10,13 @@ const migrationAnnouncementSeen = useLocalStorage('migration-announcement-seen',
 const modal = useModal()
 
 const { loadEulerConfig, chainId } = useEulerAddresses()
-const { loadVaults, isReady: isVaultsReady, resetVaultsState, refreshVaults } = useVaults()
+const { loadVaults, isReady: isVaultsReady, resetVaultsState, refreshVaults, setShowAllLabelEntries } = useVaults()
 const { loadTokenList, isLoaded: isTokenListLoaded } = useTokenList()
 const { loadLabels } = useEulerLabels()
 const { loadCountry } = useGeoBlock()
 const { updateBalances, resetBalances } = useWallets()
 const { isConnected, address } = useWagmi()
+const showAllLabelEntries = useShowAllLabelEntries()
 
 // Eagerly instantiate useEulerAccount at app root so its internal watchers
 // trigger updatePositions() as soon as balances + lens addresses are ready.
@@ -32,6 +33,7 @@ const { theme } = useTheme()
 watch(theme, (newTheme) => {
   if (import.meta.client) {
     document.documentElement.setAttribute('data-theme', newTheme)
+    document.documentElement.style.colorScheme = newTheme
   }
 }, { immediate: true })
 
@@ -116,15 +118,18 @@ checkOnboarding()
 // onMounted (not synchronous like checkOnboarding) because the modal system requires the DOM
 onMounted(checkMigrationAnnouncement)
 
-watch(chainId, () => {
+watch([chainId, showAllLabelEntries], () => {
+  setShowAllLabelEntries(showAllLabelEntries.value)
   resetVaultsState()
   resetBalances()
   const targetChainId = chainId.value
+  const targetShowAll = showAllLabelEntries.value
   const labelsPromise = loadLabels()
   void loadTokenList()
   void loadCountry()
   void labelsPromise.then(() => {
     if (chainId.value !== targetChainId) return
+    if (showAllLabelEntries.value !== targetShowAll) return
     void loadVaults()
   })
 }, { immediate: true })

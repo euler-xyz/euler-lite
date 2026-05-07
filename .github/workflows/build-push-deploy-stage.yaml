@@ -151,6 +151,38 @@ jobs:
           fi
           echo "image_tag=$TAG" >> $GITHUB_OUTPUT
 
+      - name: Notify Slack deployment started
+        env:
+          IMAGE_TAG: ${{ steps.resolve-tag.outputs.image_tag }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+            echo "SLACK_WEBHOOK_URL is not configured; skipping Slack notification."
+            exit 0
+          fi
+
+          VERSION="manual deploy (${GITHUB_REF_NAME})"
+          RELEASE_NOTES_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases"
+          RELEASE_NOTES_LABEL="Releases"
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME}"
+            RELEASE_NOTES_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}"
+            RELEASE_NOTES_LABEL="${VERSION} release notes"
+          fi
+
+          TEXT=$(printf '%s\n' \
+            ":rocket: *Euler Lite stage deploy started*" \
+            "*Version:* ${VERSION}" \
+            "*Image tag:* ${IMAGE_TAG}" \
+            "*Status:* deployment started" \
+            "*Release notes:* <${RELEASE_NOTES_URL}|${RELEASE_NOTES_LABEL}>" \
+            "*Workflow run:* <${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}|${GITHUB_WORKFLOW} #${GITHUB_RUN_NUMBER}>")
+
+          jq -n --arg text "$TEXT" '{text: $text}' \
+            | curl -fsS --max-time 10 --retry 2 --retry-delay 2 -X POST -H 'Content-type: application/json' --data @- "$SLACK_WEBHOOK_URL" \
+            || echo "::warning::Slack notification failed"
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
         with:
@@ -231,3 +263,95 @@ jobs:
 
           echo "Timed out waiting for ECS service stability after ${timeout_seconds}s."
           exit 1
+
+      - name: Notify Slack deployment finished
+        if: always()
+        env:
+          IMAGE_TAG: ${{ steps.resolve-tag.outputs.image_tag }}
+          JOB_STATUS: ${{ job.status }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+            echo "SLACK_WEBHOOK_URL is not configured; skipping Slack notification."
+            exit 0
+          fi
+
+          VERSION="manual deploy (${GITHUB_REF_NAME})"
+          RELEASE_NOTES_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases"
+          RELEASE_NOTES_LABEL="Releases"
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME}"
+            RELEASE_NOTES_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}"
+            RELEASE_NOTES_LABEL="${VERSION} release notes"
+          fi
+
+          STATUS_EMOJI=":white_check_mark:"
+          STATUS_TEXT="completed"
+          PROGRESS_TEXT="ECS rollout completed"
+
+          if [ "${JOB_STATUS}" != "success" ]; then
+            STATUS_EMOJI=":x:"
+            STATUS_TEXT="failed"
+            PROGRESS_TEXT="deploy did not complete successfully"
+
+            if [ "${JOB_STATUS}" = "cancelled" ]; then
+              STATUS_TEXT="cancelled"
+            fi
+          fi
+
+          TEXT=$(printf '%s\n' \
+            "${STATUS_EMOJI} *Euler Lite stage deploy ${STATUS_TEXT}*" \
+            "*Version:* ${VERSION:-unknown}" \
+            "*Image tag:* ${IMAGE_TAG:-unknown}" \
+            "*Status:* ${PROGRESS_TEXT}" \
+            "*Release notes:* <${RELEASE_NOTES_URL}|${RELEASE_NOTES_LABEL}>" \
+            "*Workflow run:* <${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}|${GITHUB_WORKFLOW} #${GITHUB_RUN_NUMBER}>")
+
+          jq -n --arg text "$TEXT" '{text: $text}' \
+            | curl -fsS --max-time 10 --retry 2 --retry-delay 2 -X POST -H 'Content-type: application/json' --data @- "$SLACK_WEBHOOK_URL" \
+            || echo "::warning::Slack notification failed"
+
+  notify-slack-build-push-failed:
+    name: Notify Slack Build/Push Failed
+    if: always() && github.event_name == 'push' && needs.build-push.result != 'success'
+    needs: build-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Slack build/push failed
+        env:
+          BUILD_RESULT: ${{ needs.build-push.result }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+            echo "SLACK_WEBHOOK_URL is not configured; skipping Slack notification."
+            exit 0
+          fi
+
+          VERSION="manual deploy (${GITHUB_REF_NAME})"
+          RELEASE_NOTES_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases"
+          RELEASE_NOTES_LABEL="Releases"
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME}"
+            RELEASE_NOTES_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}"
+            RELEASE_NOTES_LABEL="${VERSION} release notes"
+          fi
+
+          STATUS_TEXT="failed"
+
+          if [ "${BUILD_RESULT}" = "cancelled" ]; then
+            STATUS_TEXT="cancelled"
+          fi
+
+          TEXT=$(printf '%s\n' \
+            ":x: *Euler Lite stage deploy ${STATUS_TEXT}*" \
+            "*Version:* ${VERSION:-unknown}" \
+            "*Image tag:* not generated" \
+            "*Status:* build/push did not complete; deploy was not started" \
+            "*Release notes:* <${RELEASE_NOTES_URL}|${RELEASE_NOTES_LABEL}>" \
+            "*Workflow run:* <${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}|${GITHUB_WORKFLOW} #${GITHUB_RUN_NUMBER}>")
+
+          jq -n --arg text "$TEXT" '{text: $text}' \
+            | curl -fsS --max-time 10 --retry 2 --retry-delay 2 -X POST -H 'Content-type: application/json' --data @- "$SLACK_WEBHOOK_URL" \
+            || echo "::warning::Slack notification failed"
