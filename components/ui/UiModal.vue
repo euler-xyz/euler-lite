@@ -85,13 +85,13 @@ onBeforeUnmount(() => {
         <div
           class="ui-modal__panel-motion"
           @click.self="onClickWrapper"
-          @mouseenter="handleMouseEnter"
-          @mouseleave="handleMouseLeave"
         >
           <component
             :is="component"
             v-bind="data.props"
             :modal-id="id"
+            @mouseenter="handleMouseEnter"
+            @mouseleave="handleMouseLeave"
             @prevent-close="handlePreventClose"
             @close="close"
           />
@@ -136,6 +136,10 @@ onBeforeUnmount(() => {
   }
 
   &--pointer-through &__panel-motion {
+    pointer-events: none;
+  }
+
+  &--pointer-through &__panel-motion > * {
     pointer-events: auto;
   }
 }
