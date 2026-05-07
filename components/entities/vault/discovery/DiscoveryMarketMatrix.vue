@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { isEVault, selectLeafAdaptersForPair, type SecuritizeCollateralVault, type OracleAdapterEntry, type EVault } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, type SecuritizeCollateralVault, type OracleAdapterEntry, type EVault } from '@eulerxyz/euler-v2-sdk'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import { findVault, formatMetricValue, getCellBgColor, isMatrixCompatibleVault, type CollateralMatrixData, type MatrixCell, type DotMetric, type EnhancedCellApys } from '~/utils/discoveryCalculations'
 import { getChecksStatus, OracleAdapterCheckSeverity, type OracleAdapterCheck } from '~/entities/oracle'
@@ -149,40 +149,13 @@ const metricRange = computed((): { min: number, max: number } => {
 
 // ── Oracle metric: per-cell adapter list + tooltip ────────────────────────────
 
-const getCollateralRouteBases = (
-  liability: EVault,
-  collateral: EVault | SecuritizeCollateralVault,
-) => {
-  if (!liability.unitOfAccount) return [collateral.address as Address]
-
-  const resolved = liability.oracle.resolvedVaults.find(resolvedVault =>
-    resolvedVault.vault.toLowerCase() === collateral.address.toLowerCase()
-    && resolvedVault.quote.toLowerCase() === liability.unitOfAccount!.address.toLowerCase(),
-  )
-
-  return [
-    resolved?.asset as Address | undefined,
-    collateral.address as Address,
-  ].filter((address): address is Address => Boolean(address))
-}
-
 const getCollateralOracleAdapters = (
   liability: EVault,
   collateral: EVault | SecuritizeCollateralVault,
-) => {
-  if (!liability.unitOfAccount) return []
-
-  for (const base of getCollateralRouteBases(liability, collateral)) {
-    const route = selectLeafAdaptersForPair(
-      liability.oracle.adapters,
-      base,
-      liability.unitOfAccount.address as Address,
-    )
-    if (route.length) return route
-  }
-
-  return []
-}
+) =>
+  liability.collaterals.find(item =>
+    item.address.toLowerCase() === collateral.address.toLowerCase(),
+  )?.oracleAdapters ?? []
 
 const cellOracleAdapters = computed((): Map<string, OracleAdapterEntry[]> => {
   const result = new Map<string, OracleAdapterEntry[]>()
@@ -194,7 +167,7 @@ const cellOracleAdapters = computed((): Map<string, OracleAdapterEntry[]> => {
       const liability = findVault(props.market, liabAddr)
       if (!collateral || !liability) continue
       if (!isMatrixCompatibleVault(collateral)) continue
-      if (!isEVault(liability) || !liability.oracle.adapters.length || !liability.unitOfAccount) continue
+      if (!isEVault(liability)) continue
       const adapters = getCollateralOracleAdapters(liability, collateral)
       if (adapters.length) result.set(`${colAddr}:${liabAddr}`, adapters)
     }
@@ -210,12 +183,8 @@ const columnAssetOracleAdapters = computed((): Map<string, OracleAdapterEntry[]>
   if (props.dotMetric !== 'oracle') return result
   for (const col of props.matrix.columns) {
     const liability = findVault(props.market, col.address)
-    if (!liability || !isEVault(liability) || !liability.oracle.adapters.length || !liability.unitOfAccount) continue
-    const adapters = selectLeafAdaptersForPair(
-      liability.oracle.adapters,
-      liability.asset.address as Address,
-      liability.unitOfAccount.address as Address,
-    )
+    if (!liability || !isEVault(liability)) continue
+    const adapters = liability.debtPricingOracleAdapters
     if (adapters.length) result.set(col.address, adapters)
   }
   return result

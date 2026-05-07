@@ -1,6 +1,6 @@
 import { type Hex, type Address, encodeFunctionData, zeroAddress, type Abi, decodeFunctionResult } from 'viem'
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
-import { collectPythFeedsFromAdapters, selectLeafAdaptersForPair } from '@eulerxyz/euler-v2-sdk'
+import { collectPythFeedsFromAdapters } from '@eulerxyz/euler-v2-sdk'
 import { PYTH_ABI } from '~/abis/pyth'
 import { DEFAULT_PRICE_CACHE_TTL_MS } from '~/entities/constants'
 import { CACHE_TTL_15S_MS, BATCH_DELAY_COLLECT_MS } from '~/entities/tuning-constants'
@@ -189,28 +189,20 @@ export const collectPythFeedsFromVaults = (
  */
 export const collectPythFeedsForHealthCheck = (
   liabilityVault: EVault,
-  collateralAssets: string[],
+  collateralVaultAddresses: string[],
 ): PythFeed[] => {
-  const unitOfAccount = liabilityVault.unitOfAccount?.address
-  if (!unitOfAccount) return []
-
   const allFeeds: PythFeed[] = []
 
   // Feeds for liability asset pricing
-  const liabilityFeeds = collectPythFeedsFromAdapters(selectLeafAdaptersForPair(
-    liabilityVault.oracle.adapters,
-    liabilityVault.asset.address as `0x${string}`,
-    unitOfAccount,
-  ))
-  allFeeds.push(...liabilityFeeds)
+  allFeeds.push(...collectPythFeedsFromAdapters(liabilityVault.debtPricingOracleAdapters))
 
-  // Feeds for each collateral asset pricing
-  for (const collateralAsset of collateralAssets) {
-    const feeds = collectPythFeedsFromAdapters(selectLeafAdaptersForPair(
-      liabilityVault.oracle.adapters,
-      collateralAsset as `0x${string}`,
-      unitOfAccount,
-    ))
+  // Feeds for each collateral vault pricing
+  for (const collateralVaultAddress of collateralVaultAddresses) {
+    const feeds = collectPythFeedsFromAdapters(
+      liabilityVault.collaterals.find(collateral =>
+        collateral.address.toLowerCase() === collateralVaultAddress.toLowerCase(),
+      )?.oracleAdapters ?? [],
+    )
     allFeeds.push(...feeds)
   }
 

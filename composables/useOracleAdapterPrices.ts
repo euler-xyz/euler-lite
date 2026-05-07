@@ -1,5 +1,13 @@
-import type { SecuritizeCollateralVault, EVault, OracleAdapterEntry } from '@eulerxyz/euler-v2-sdk'
-import { buildPythBatchItems } from '~/utils/pyth'
+import {
+  buildOracleAdapterQuoteRequests,
+  collectPythFeedsFromAdapters,
+  getOracleAdapterKey,
+  type SecuritizeCollateralVault,
+  type EVault,
+  type OracleAdapterEntry,
+  type OracleAdapterQuoteRequest,
+} from '@eulerxyz/euler-v2-sdk'
+import { buildPythBatchItemsFromFeeds } from '~/utils/pyth'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { buildBatchItem } from '~/utils/multicall'
 import { getPublicClient } from '~/utils/public-client'
@@ -16,9 +24,6 @@ export type AdapterPriceInfo = {
   rate: number
   success: boolean
 }
-
-const getAdapterKey = (adapter: OracleAdapterEntry) =>
-  `${adapter.oracle.toLowerCase()}:${adapter.base.toLowerCase()}:${adapter.quote.toLowerCase()}`
 
 const buildKnownDecimals = (
   sourceVaults: EVault[],
@@ -148,49 +153,37 @@ const fetchMissingDecimals = async (
 const buildPriceQueryItems = (
   adapters: OracleAdapterEntry[],
   decimals: Map<string, number>,
-): { filteredAdapters: OracleAdapterEntry[], items: BatchItem[] } => {
-  const filteredAdapters: OracleAdapterEntry[] = []
-  const items: BatchItem[] = []
-
-  for (const adapter of adapters) {
-    const baseDecimals = decimals.get(adapter.base.toLowerCase())
-    const quoteDecimals = decimals.get(adapter.quote.toLowerCase())
-    if (baseDecimals === undefined || quoteDecimals === undefined) continue
-
-    const inAmount = 10n ** BigInt(baseDecimals)
-
-    if (adapter.name === 'ERC4626Vault') {
+): { quoteRequests: OracleAdapterQuoteRequest[], items: BatchItem[] } => {
+  const { requests: quoteRequests } = buildOracleAdapterQuoteRequests(adapters, decimals)
+  const items = quoteRequests.map((request) => {
+    if (request.kind === 'erc4626-convertToAssets') {
       const callData = encodeFunctionData({
         abi: vaultConvertToAssetsAbi,
         functionName: 'convertToAssets',
-        args: [inAmount],
+        args: [request.amountIn],
       })
-      items.push(buildBatchItem(adapter.oracle, callData))
-    }
-    else {
-      const callData = encodeFunctionData({
-        abi: priceOracleAbi,
-        functionName: 'getQuote',
-        args: [inAmount, adapter.base, adapter.quote],
-      })
-      items.push(buildBatchItem(adapter.oracle, callData))
+      return buildBatchItem(request.target, callData)
     }
 
-    filteredAdapters.push(adapter)
-  }
+    const callData = encodeFunctionData({
+      abi: priceOracleAbi,
+      functionName: 'getQuote',
+      args: [request.amountIn, request.base, request.quote],
+    })
+    return buildBatchItem(request.target, callData)
+  })
 
-  return { filteredAdapters, items }
+  return { quoteRequests, items }
 }
 
 const decodePriceResults = (
-  adapters: OracleAdapterEntry[],
+  quoteRequests: OracleAdapterQuoteRequest[],
   results: BatchItemResult[],
-  decimals: Map<string, number>,
 ): Map<string, AdapterPriceInfo> => {
   const prices = new Map<string, AdapterPriceInfo>()
 
-  adapters.forEach((adapter, i) => {
-    const key = getAdapterKey(adapter)
+  quoteRequests.forEach((request, i) => {
+    const key = getOracleAdapterKey(request.adapter)
     const res = results[i]
 
     if (!res?.success) {
@@ -199,7 +192,7 @@ const decodePriceResults = (
     }
 
     try {
-      const isERC4626 = adapter.name === 'ERC4626Vault'
+      const isERC4626 = request.kind === 'erc4626-convertToAssets'
       const decoded = isERC4626
         ? decodeFunctionResult({
             abi: vaultConvertToAssetsAbi,
@@ -213,8 +206,7 @@ const decodePriceResults = (
           })
 
       const outAmount = decoded as bigint
-      const quoteDecimals = decimals.get(adapter.quote.toLowerCase()) ?? 18
-      const rate = nanoToValue(outAmount, quoteDecimals)
+      const rate = nanoToValue(outAmount, request.quoteDecimals)
 
       prices.set(key, { rate, success: true })
     }
@@ -261,15 +253,15 @@ export const useOracleAdapterPrices = (
         fetched.forEach((dec, addr) => knownDecimals.set(addr, dec))
       }
 
-      // 4. Build Pyth update batch items
-      const { items: pythItems, totalFee } = await buildPythBatchItems(
-        sourceVaults.value,
+      // 4. Build Pyth update batch items for the adapters being quoted
+      const { items: pythItems, totalFee } = await buildPythBatchItemsFromFeeds(
+        collectPythFeedsFromAdapters(adapterList),
         rpcUrl.value,
         PYTH_HERMES_URL,
       )
 
       // 5. Build price query batch items (skipping adapters with unknown decimals)
-      const { filteredAdapters, items: priceItems } = buildPriceQueryItems(adapterList, knownDecimals)
+      const { quoteRequests, items: priceItems } = buildPriceQueryItems(adapterList, knownDecimals)
 
       // 6. Execute single batchSimulation
       const allItems = [...pythItems, ...priceItems]
@@ -300,7 +292,7 @@ export const useOracleAdapterPrices = (
 
       // 7. Decode price results (skip Pyth update results)
       const priceResults = batchResults.slice(pythItems.length)
-      prices.value = decodePriceResults(filteredAdapters, priceResults, knownDecimals)
+      prices.value = decodePriceResults(quoteRequests, priceResults)
     }
     catch (err) {
       logWarn('oracleAdapterPrices/fetchPrices', err)
