@@ -11,7 +11,7 @@ Every on-chain deposit a user holds falls into one of three categories:
 | **Borrow Position** | A deposit used as collateral backing a loan | Subgraph `borrows` + AccountLens |
 | **Savings (Deposit/Earn)** | A standalone deposit not used as collateral (includes both EVK and EulerEarn vaults) | Subgraph `deposits` + AccountLens |
 
-Savings positions are stored in a single `depositPositions` array. The UI splits them into "Managed lending" (earn vaults) and "Direct lending" (EVK/securitize vaults) using `isEarnVault()` from the vault registry.
+Savings positions are stored in a single `depositPositions` array. The UI splits them into "Curated lending" (earn vaults) and "Direct lending" (EVK/securitize vaults) using `isEarnVault()` from the vault registry.
 
 Portfolio cards can display operational **portfolio notices** from the labels system (e.g. migration announcements, temporary pauses). Notices are resolved via `getVaultNotice()` which checks earn vault notices, vault overrides, and product-level `portfolioNotice` in priority order. On borrow cards, collateral and borrow notices are shown separately with deduplication when both vaults share the same product-level notice.
 
@@ -93,7 +93,7 @@ deposit entry
 ```
 
 The UI then filters the unified `depositPositions` array:
-- **Managed lending (earn)**: `depositPositions.filter(p => isEarnVault(p.vault.address))`
+- **Curated lending (earn)**: `depositPositions.filter(p => isEarnVault(p.vault.address))`
 - **Direct lending (EVK/securitize)**: `depositPositions.filter(p => !isEarnVault(p.vault.address))`
 
 ### Position Types
