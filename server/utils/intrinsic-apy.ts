@@ -317,7 +317,12 @@ async function extractInfinifi(sources: InfinifiSource[]): Promise<Array<[string
 }
 
 type AccountableSource = Extract<IntrinsicApySourceConfig, { provider: 'accountable' }>
-type AccountableLoanResponse = { loan_computed?: { net_apy?: number } }
+type AccountableLoanResponse = {
+  loan_computed?: {
+    net_apy?: number
+    rewards_apy_boost?: { total_apy_boost_percent?: number }
+  }
+}
 
 const ACCOUNTABLE_CONCURRENCY = 10
 
@@ -334,8 +339,10 @@ async function extractAccountable(sources: AccountableSource[]): Promise<Array<[
   for (const r of settled) {
     if (r.status !== 'fulfilled') continue
     const { source, data } = r.value
-    const apy = Number(data?.loan_computed?.net_apy)
-    if (!Number.isFinite(apy)) continue
+    const netApy = Number(data?.loan_computed?.net_apy)
+    if (!Number.isFinite(netApy)) continue
+    const rewardsBoost = Number(data?.loan_computed?.rewards_apy_boost?.total_apy_boost_percent ?? 0)
+    const apy = Math.max(0, netApy - (Number.isFinite(rewardsBoost) ? rewardsBoost : 0))
     out.push([normalize(source.address), {
       apy,
       provider: 'Accountable',
