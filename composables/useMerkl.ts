@@ -61,6 +61,21 @@ interface MerklProxyResponse {
   }
 }
 
+const MERKL_EULER_SOURCE_URL = 'https://app.merkl.xyz/?protocol=euler'
+
+const merklOpportunityUrl = (
+  opportunity: Opportunity,
+  type: 'EULER' | 'ERC20LOGPROCESSOR' | 'MULTILENDBORROW',
+): string => {
+  if (!opportunity.identifier) return MERKL_EULER_SOURCE_URL
+
+  const chain = (opportunity.chain?.name || String(opportunity.chainId)).trim()
+  if (!chain) return MERKL_EULER_SOURCE_URL
+
+  const chainSlug = chain.toLowerCase().replace(/\s+/g, '-')
+  return `https://app.merkl.xyz/opportunities/${encodeURIComponent(chainSlug)}/${type}/${encodeURIComponent(opportunity.identifier)}`
+}
+
 // Public campaign data flows through `/api/rewards/merkl`, which warms the
 // three Merkl opportunity types server-side and returns one CDN-cacheable
 // GET. User-specific /users/{addr}/rewards stays direct (per-wallet data
@@ -127,7 +142,7 @@ const processOpportunitiesToCampaigns = (
         provider: 'merkl',
         endTimestamp: campaign.endTimestamp,
         rewardToken: { symbol: campaign.rewardToken.symbol, icon: campaign.rewardToken.icon },
-        sourceUrl: 'https://app.merkl.xyz/?protocol=euler',
+        sourceUrl: merklOpportunityUrl(opportunity, opType),
       }
 
       const existing = campaignMap.get(vaultAddress)
@@ -190,7 +205,7 @@ const processMultiLendBorrowOpportunities = (
           provider: 'merkl',
           endTimestamp: campaign.endTimestamp,
           rewardToken: { symbol: campaign.rewardToken.symbol, icon: campaign.rewardToken.icon },
-          sourceUrl: `https://app.merkl.xyz/opportunities/${(opportunity.chain?.name || String(opportunity.chainId)).toLowerCase()}/MULTILENDBORROW/${opportunity.identifier}`,
+          sourceUrl: merklOpportunityUrl(opportunity, 'MULTILENDBORROW'),
         }
 
         const existing = campaignMap.get(vaultAddress)
