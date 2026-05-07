@@ -1,7 +1,6 @@
 import { computed, ref, watch, watchEffect } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Vault } from '~/entities/vault'
-import type { AccountBorrowPosition, AccountDepositPosition } from '~/entities/account'
+import type { EVault, PortfolioBorrowPosition, PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
 
 const { USER, VAULT, sameVault, mocks } = vi.hoisted(() => {
@@ -11,14 +10,19 @@ const { USER, VAULT, sameVault, mocks } = vi.hoisted(() => {
   const sameVault = {
     address: VAULT,
     totalCash: 100n,
-    decimals: 0n,
+    availableLiquidity: 100n,
     asset: {
       address: ASSET,
       symbol: 'USDe',
-      decimals: 0n,
+      decimals: 0,
     },
-    collateralLTVs: [],
-  } as unknown as Vault
+    shares: {
+      address: VAULT,
+      symbol: 'eUSDe',
+      decimals: 0,
+    },
+    collaterals: [],
+  } as unknown as EVault
 
   return {
     USER,
@@ -55,7 +59,7 @@ vi.mock('~/components/ui/composables/useToast', () => ({
   }),
 }))
 
-vi.mock('~/services/pricing/priceProvider', () => ({
+vi.mock('~/utils/sdk-prices', () => ({
   getAssetUsdValue: vi.fn(async () => null),
 }))
 
@@ -92,11 +96,12 @@ vi.mock('~/composables/useRepaySavingsOptions', () => ({
   useRepaySavingsOptions: () => {
     const savingsVaults = ref([sameVault])
     const savingsPosition = {
+      position: {},
       vault: sameVault,
       subAccount: USER,
       assets: 1_000n,
       shares: 1_000n,
-    } as AccountDepositPosition
+    } as PortfolioSavingsPosition<VaultEntity>
 
     mocks.getSavingsPosition.mockImplementation((vaultAddress: string) =>
       vaultAddress.toLowerCase() === VAULT.toLowerCase() ? savingsPosition : undefined,
@@ -127,7 +132,9 @@ const position = {
   liabilityValueLiquidation: 0n,
   timeToLiquidation: 0n,
   collateralValueLiquidation: 0n,
-} as AccountBorrowPosition
+  collateralVaults: [],
+  liquidatable: false,
+} as PortfolioBorrowPosition<VaultEntity>
 
 describe('useSavingsRepay', () => {
   beforeEach(() => {

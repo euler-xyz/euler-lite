@@ -192,73 +192,29 @@ During vault loading (`fetchVaults`), vaults are batched in groups of ~25 per RP
 
 ## Pricing Architecture
 
-The pricing system (`services/pricing/priceProvider.ts`) is a 3-layer architecture. For full details see [pricing-system.md](./pricing-system.md).
+Pricing is SDK-backed. Lite keeps compatibility helpers in `utils/sdk-prices.ts`. For full details see [pricing-system.md](./pricing-system.md).
 
-### Layer 1: Raw Oracle Prices (Unit of Account)
+Raw oracle calculations use SDK helpers such as `getAssetOraclePrice()` and `getCollateralOraclePrice()`. Display USD values use SDK precomputed market fields:
 
-Always on-chain. No backend fallback.
+| UI value | SDK-backed source |
+|----------|-------------------|
+| Vault asset USD price | `vault.marketPriceUsd` |
+| Borrow-context collateral USD price | `borrowVault.collaterals[].marketPriceUsd` |
+| Borrowed position value | `position.borrow.borrowedValueUsd` |
+| Total borrow-position collateral value | `position.totalCollateralValueUsd` |
+| Per-collateral borrow-position value | `position.borrow.liquidity.collaterals[].valueUsd` |
 
-| Function | Input | Output |
-|----------|-------|--------|
-| `getAssetOraclePrice(vault)` | EVault | Asset price in vault's UoA |
-| `getCollateralOraclePrice(liabilityVault, collateralVault)` | Borrow + collateral vault | Collateral asset price in borrow vault's UoA |
-
-**Collateral pricing** always uses the borrow (liability) vault's oracle, not the collateral vault's oracle. The borrow vault stores `collateralPrices[]` which are share prices. These are converted to asset prices:
-
-```
-assetPrice = sharePrice * (totalShares / totalAssets)
-```
-
-For empty vaults (both zero), the ERC-4626 standard defines a 1:1 ratio.
-
-### Layer 2: USD Prices
-
-Adds USD conversion. Supports `'on-chain'` and `'off-chain'` price sources.
-
-| Function | Notes |
-|----------|-------|
-| `getAssetUsdPrice(vault, source)` | Off-chain tries backend first |
-| `getCollateralUsdPrice(liabilityVault, collateralVault, source)` | Always uses liability vault's oracle |
-
-**Vault type routing** determines how the USD price is calculated:
-
-```
-Is vault earn/escrow/securitize?
-  YES -> Use assetPriceInfo (UtilsLens, already in USD)
-  NO  -> oraclePrice (Layer 1) * unitOfAccountUsdRate
-```
-
-The UoA-to-USD rate is fetched once per vault during loading and cached on the vault object as `unitOfAccountPriceInfo`. For vaults where the UoA is already USD (common case), the rate is 1.0.
-
-### Layer 3: USD Values
-
-Combines a token amount with a USD price:
-
-```typescript
-getAssetUsdValue(amount, vault, source)      // amount * assetUsdPrice
-getCollateralUsdValue(amount, liabilityVault, collateralVault, source)
-```
-
-### Backend Price Client
-
-The backend (`services/pricing/backendClient.ts`) provides off-chain prices from the Euler indexer:
-
-- **Endpoint**: `GET /v1/prices?chainId={id}&assets={addr1,addr2,...}`
-- **Response**: `Record<string, { address, price, source, symbol, timestamp }>`
-- **Batching**: Requests within a 50ms window are combined into a single HTTP call
-- **Cache**: 60-second TTL per asset per chain
-
-The backend is a **soft fallback** - on-chain pricing is always available. The backend is preferred for display-only values (portfolio totals) because it avoids the latency of multiple RPC calls.
+Collateral pricing always uses the borrow or liability vault's collateral edge, not the collateral vault's own asset price. This keeps display values aligned with the same borrow context used by the protocol.
 
 ### Total Portfolio Value Calculation
 
 ```
 totalSuppliedValue = sum of:
-  - deposit positions (all types): getAssetUsdValue(assets, vault, 'off-chain')
-  - borrow collateral: getCollateralUsdValue(supplied, borrowVault, collateralVault, 'off-chain')
+  - deposit positions (all types): assets * vault.marketPriceUsd
+  - borrow collateral: SDK borrow-position collateral USD fields, or the borrow vault's collateral edge marketPriceUsd
 
 totalBorrowedValue = sum of:
-  - borrow positions:  getAssetUsdValue(borrowed, borrowVault, 'off-chain')
+  - borrow positions: SDK borrowedValueUsd or borrowed * borrowVault.marketPriceUsd
 ```
 
 Both are computed reactively and update when position data changes.
@@ -368,10 +324,10 @@ When submitting transactions that interact with Pyth-priced vaults, Pyth update 
               | deposits)            |
               v                      v
           +-----------------------------+
-          | priceProvider (3-layer)     |
-          |  Layer 1: Oracle (UoA)      |
-          |  Layer 2: USD conversion    |
-          |  Layer 3: USD values        |
+          | SDK pricing fields          |
+          |  Raw oracle helpers         |
+          |  marketPriceUsd fields      |
+          |  position USD aggregates    |
           +-----------------------------+
               |
               v

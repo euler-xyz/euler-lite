@@ -2,7 +2,7 @@ import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { formatUnits } from 'viem'
 import type { Ref, ComputedRef } from 'vue'
 
-import { getAssetUsdValue } from '~/services/pricing/priceProvider'
+import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { SwapperMode } from '~/entities/swap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { createRaceGuard } from '~/utils/race-guard'

@@ -3,7 +3,7 @@ import { type BorrowVaultPair, isSecuritizeBorrowPair, type AnyBorrowVaultPair }
 import type { VaultAsset } from '~/types/asset'
 import type { CollateralOption } from '~/types/collateral-option'
 import { collectPythFeedsFromAdapters, isEVault, type EVault, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
-import { getAssetOraclePrice, getCollateralShareOraclePrice } from '~/services/pricing/priceProvider'
+import { getAssetOraclePrice, getCollateralShareOraclePrice } from '~/utils/sdk-prices'
 import { getNewSubAccount } from '~/composables/useSubAccounts'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'

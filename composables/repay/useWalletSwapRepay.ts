@@ -1,7 +1,7 @@
 import { getProjectedRates, getNetAPY } from '~/utils/vault/apy'
 import type { EVault, SecuritizeCollateralVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
-import { getAssetUsdValue, getAssetUsdValueOrZero, getTokenUsdValue } from '~/services/pricing/priceProvider'
+import { getAssetUsdValue, getAssetUsdValueOrZero, getTokenUsdValue } from '~/utils/sdk-prices'
 import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
 import type { TxPlan } from '~/entities/txPlan'
 import { valueToNano } from '~/utils/crypto-utils'

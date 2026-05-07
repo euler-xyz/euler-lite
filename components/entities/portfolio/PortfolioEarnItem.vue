@@ -3,7 +3,7 @@ import type { EulerEarn, PortfolioSavingsPosition, VaultEntity } from '@eulerxyz
 import { getSubAccountId as getSubAccountIndex } from '@eulerxyz/euler-v2-sdk'
 import { useAccount } from '@wagmi/vue'
 import { getAddress } from 'viem'
-import { formatAssetValue, getAssetUsdValue } from '~/services/pricing/priceProvider'
+import { formatAssetValue, getAssetUsdValue } from '~/utils/sdk-prices'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated, getVaultNotice } from '~/utils/eulerLabelsUtils'
 

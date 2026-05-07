@@ -1,5 +1,5 @@
 import type { SecuritizeCollateralVault, EulerEarn, EVault } from '@eulerxyz/euler-v2-sdk'
-import { getTokenUsdValue } from '~/services/pricing/priceProvider'
+import { getTokenUsdValue } from '~/utils/sdk-prices'
 import { createRaceGuard } from '~/utils/race-guard'
 import type { SwapApiQuote } from '~/entities/swap'
 import type { Ref } from 'vue'

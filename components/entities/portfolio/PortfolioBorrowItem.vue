@@ -10,7 +10,7 @@ import {
   type VaultEntity,
 } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
-import { getAssetUsdValue, formatAssetValue, getCollateralUsdValue, toUsdAmount, type UsdAmount } from '~/services/pricing/priceProvider'
+import { getAssetUsdValue, formatAssetValue, getCollateralUsdValue, toUsdAmount, type UsdAmount } from '~/utils/sdk-prices'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated, getVaultNotice, isVaultNoticeSpecific } from '~/utils/eulerLabelsUtils'

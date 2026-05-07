@@ -2,7 +2,7 @@
 import { useAccount } from '@wagmi/vue'
 import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
 
-import { formatAssetValue } from '~/services/pricing/priceProvider'
+import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault, useEulerEntitiesOfEarnVault } from '~/composables/useEulerLabels'
 import { isVaultFeatured, getEarnVaultDescription } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'

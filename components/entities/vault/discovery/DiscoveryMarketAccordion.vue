@@ -2,7 +2,7 @@
 import { isEVault, type SecuritizeCollateralVault, type EVault } from '@eulerxyz/euler-v2-sdk'
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { formatCompactUsdValue } from '~/utils/string-utils'
-import { formatAssetValue } from '~/services/pricing/priceProvider'
+import { formatAssetValue } from '~/utils/sdk-prices'
 import {
   getVaultAddress,
   getMiniDiagram,

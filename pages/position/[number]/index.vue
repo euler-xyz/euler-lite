@@ -2,7 +2,7 @@
 import { getRoe, getNetAPY } from '~/utils/vault/apy'
 import { isSecuritizeCollateralVault, type EVault, type SecuritizeCollateralVault, type PortfolioBorrowPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
-import { getAssetUsdValue, getAssetUsdPrice, getCollateralUsdPrice, getCollateralUsdValue, getUnitOfAccountUsdRate, toUsdAmount, type UsdAmount } from '~/services/pricing/priceProvider'
+import { getAssetUsdPrice, getCollateralUsdPrice, getCollateralUsdValue, toUsdAmount, type UsdAmount } from '~/utils/sdk-prices'
 import { getBorrowPositionEffectiveLiquidationLTV, getBorrowPositionTimeToLiquidation } from '~/utils/ltv'
 import type { TxPlan } from '~/entities/txPlan'
 import { formatTtl, nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
@@ -139,6 +139,22 @@ const getCollateralNotice = (vaultAddress: string): string => getVaultNotice(vau
 const asPositionCollateralVault = (vault: unknown): EVault | SecuritizeCollateralVault =>
   vault as EVault | SecuritizeCollateralVault
 
+const usdWadToAmount = (value: bigint | undefined): UsdAmount => ({
+  usd: value === undefined ? 0 : nanoToValue(value, 18),
+  hasPrice: value !== undefined,
+})
+
+const getBorrowLiquidityCollateral = (vaultAddress: string) => {
+  const liquidityCollaterals = position.value?.borrow.liquidity?.collaterals ?? []
+  try {
+    const normalized = getAddress(vaultAddress)
+    return liquidityCollaterals.find(collateral => getAddress(collateral.address) === normalized)
+  }
+  catch {
+    return undefined
+  }
+}
+
 const supplyRewardAPY = computed(() => getSupplyRewardApy(collateralVault.value?.address || ''))
 const borrowRewardAPY = computed(() => getBorrowRewardApy(borrowVault.value?.address || '', collateralVault.value?.address || ''))
 const baseSupplyAPY = computed(() => {
@@ -210,7 +226,10 @@ watchEffect(async () => {
       let unitPriceUsd = 0
       let oraclePriceUsd = 0
 
-      const valueRaw = await getCollateralUsdValue(item.assets, borrowVault.value!, item.vault as EVault, 'off-chain')
+      const liquidityCollateral = getBorrowLiquidityCollateral(item.vault.address)
+      const valueRaw = liquidityCollateral?.valueUsd !== undefined
+        ? nanoToValue(liquidityCollateral.valueUsd, 18)
+        : await getCollateralUsdValue(item.assets, borrowVault.value!, item.vault as EVault, 'off-chain')
       const priceInfo = await getCollateralUsdPrice(borrowVault.value!, item.vault as EVault, 'off-chain')
       if (priceInfo) {
         unitPriceUsd = nanoToValue(priceInfo.amountOutMid, 18)
@@ -243,7 +262,11 @@ watchEffect(async () => {
     return
   }
 
-  // Collateral price ALWAYS comes from liability vault's oracle, converted to USD
+  if (position.value.totalCollateralValueUsd !== undefined) {
+    collateralValue.value = usdWadToAmount(position.value.totalCollateralValueUsd)
+    return
+  }
+
   if (!collateralItems.value.length && collateralVault.value) {
     collateralValue.value = toUsdAmount(await getCollateralUsdValue(position.value.supplied, borrowVault.value, collateralVault.value as EVault, 'off-chain'))
     return
@@ -271,7 +294,7 @@ watchEffect(async () => {
     return
   }
 
-  borrowMarketValue.value = toUsdAmount(await getAssetUsdValue(position.value.borrowed, borrowVault.value, 'off-chain'))
+  borrowMarketValue.value = usdWadToAmount(position.value.borrow.borrowedValueUsd)
 })
 
 // Net asset value in USD: sync computed so it tracks both collateralValue and borrowMarketValue
@@ -286,18 +309,6 @@ const netAssetValue = computed<UsdAmount>(() => {
   }
 })
 
-// Pre-computed unit of account USD price (async)
-const unitOfAccountUsdPrice = ref<number>(0)
-watchEffect(async () => {
-  if (!position.value) {
-    unitOfAccountUsdPrice.value = 0
-    return
-  }
-  const rate = await getUnitOfAccountUsdRate(borrowVault.value)
-  unitOfAccountUsdPrice.value = rate ? nanoToValue(rate, 18) : 0
-})
-
-// Pre-computed liquidation price (depends on async unitOfAccountUsdPrice)
 const liquidationPrice = computed(() => {
   if (!position.value) return undefined
 
@@ -307,40 +318,11 @@ const liquidationPrice = computed(() => {
     return undefined
   }
 
-  const unitPrice = unitOfAccountUsdPrice.value
-  if (!unitPrice) {
-    return undefined
-  }
-
-  return nanoToValue(price, 18) * unitPrice
+  return nanoToValue(price, 18)
 })
-// Pre-computed borrow liquidation price (async)
-const borrowLiquidationPrice = ref<number | undefined>(undefined)
-
-watchEffect(async () => {
-  if (!position.value) {
-    borrowLiquidationPrice.value = undefined
-    return
-  }
-
-  const collateralValueLiquidation = position.value.collateralValueLiquidation ?? 0n
-  const liabilityValueBorrowing = position.value.liabilityValueBorrowing ?? 0n
-
-  if (liabilityValueBorrowing === 0n || collateralValueLiquidation === 0n) {
-    borrowLiquidationPrice.value = undefined
-    return
-  }
-
-  const multiplier = nanoToValue(collateralValueLiquidation, 18) / nanoToValue(liabilityValueBorrowing, 18)
-  const borrowPriceInfo = await getAssetUsdPrice(borrowVault.value, 'off-chain')
-  const currentBorrowPrice = borrowPriceInfo ? nanoToValue(borrowPriceInfo.amountOutMid, 18) : 0
-
-  if (!currentBorrowPrice) {
-    borrowLiquidationPrice.value = undefined
-    return
-  }
-
-  borrowLiquidationPrice.value = currentBorrowPrice * multiplier
+const borrowLiquidationPrice = computed(() => {
+  const price = position.value?.borrowLiquidationPriceUsd
+  return price === undefined ? undefined : nanoToValue(price, 18)
 })
 const timeToLiquidationDisplay = computed(() => {
   if (!position.value) {

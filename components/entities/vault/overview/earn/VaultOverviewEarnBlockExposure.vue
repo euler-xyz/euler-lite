@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { isEVault, type EVault, type EulerEarnStrategyInfo, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
+import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { formatNumber, compactNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'

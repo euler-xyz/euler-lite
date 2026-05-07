@@ -4,7 +4,7 @@ import { getSubAccountId as getSubAccountIndex, isSecuritizeCollateralVault, typ
 import { getAddress } from 'viem'
 
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
-import { getAssetUsdValue, formatAssetValue } from '~/services/pricing/priceProvider'
+import { getAssetUsdValue, formatAssetValue } from '~/utils/sdk-prices'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated, getVaultNotice } from '~/utils/eulerLabelsUtils'
 import { formatNumber, formatCompactUsdValue, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
