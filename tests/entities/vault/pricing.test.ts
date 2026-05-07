@@ -148,4 +148,51 @@ describe('resolveAssetPriceInfo cache behaviour', () => {
     expect(c).toBeUndefined()
     expect(readContractMock).toHaveBeenCalledTimes(1)
   })
+
+  it('does NOT cache a unit-of-account miss caused by a transport error', async () => {
+    const transport = new HttpRequestError({
+      url: 'https://rpc.example/tac',
+      status: 503,
+      body: { jsonrpc: '2.0', id: 1, method: 'eth_call', params: [] },
+      details: 'Service Unavailable',
+    })
+    readContractMock.mockRejectedValueOnce(transport)
+    readContractMock.mockResolvedValueOnce({
+      queryFailure: false,
+      amountIn: 10n ** 18n,
+      amountOutAsk: 300n,
+      amountOutBid: 299n,
+      amountOutMid: 300n,
+      timestamp: 1n,
+      oracle: '0x0000000000000000000000000000000000000001',
+    })
+
+    const { resolveUnitOfAccountPriceInfo } = await import('~/entities/vault/pricing')
+    const first = await resolveUnitOfAccountPriceInfo(RPC_URL, LENS, ASSET)
+    const second = await resolveUnitOfAccountPriceInfo(RPC_URL, LENS, ASSET)
+
+    expect(first).toBeUndefined()
+    expect(second?.amountOutMid).toBe(300n)
+    expect(readContractMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('caches unit-of-account queryFailure: true so the call is not retried', async () => {
+    readContractMock.mockResolvedValue({
+      queryFailure: true,
+      amountIn: 10n ** 18n,
+      amountOutAsk: 0n,
+      amountOutBid: 0n,
+      amountOutMid: 0n,
+      timestamp: 0n,
+      oracle: '0x0000000000000000000000000000000000000001',
+    })
+
+    const { resolveUnitOfAccountPriceInfo } = await import('~/entities/vault/pricing')
+    const first = await resolveUnitOfAccountPriceInfo(RPC_URL, LENS, ASSET)
+    const second = await resolveUnitOfAccountPriceInfo(RPC_URL, LENS, ASSET)
+
+    expect(first).toBeUndefined()
+    expect(second).toBeUndefined()
+    expect(readContractMock).toHaveBeenCalledTimes(1)
+  })
 })
