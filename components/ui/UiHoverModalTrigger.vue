@@ -21,6 +21,7 @@ const trigger = ref<HTMLElement>()
 const canHover = ref(false)
 const isOpen = ref(false)
 const openedByHover = ref(false)
+const isPointerInTrigger = ref(false)
 const isPointerInModal = ref(false)
 
 let mediaQuery: MediaQueryList | undefined
@@ -85,7 +86,11 @@ const buildModalData = (source: 'click' | 'hover'): ModalData => {
   data.beforeComponentLeave = () => {
     previousBeforeComponentLeave?.()
     removeDocumentListeners()
+    const shouldReopenOnHover = canHover.value && isPointerInTrigger.value
     resetOpenState()
+    if (shouldReopenOnHover) {
+      scheduleOpen()
+    }
   }
 
   if (source === 'hover') {
@@ -142,9 +147,7 @@ const scheduleClose = () => {
   }, closeDelay)
 }
 
-const onMouseEnter = () => {
-  if (!canHover.value) return
-
+const scheduleOpen = () => {
   clearCloseTimer()
   clearOpenTimer()
   openTimer = window.setTimeout(() => {
@@ -152,7 +155,15 @@ const onMouseEnter = () => {
   }, openDelay)
 }
 
+const onMouseEnter = () => {
+  isPointerInTrigger.value = true
+  if (!canHover.value) return
+
+  scheduleOpen()
+}
+
 const onMouseLeave = () => {
+  isPointerInTrigger.value = false
   if (!canHover.value) return
 
   clearOpenTimer()
@@ -163,8 +174,8 @@ const onDocumentMouseMove = (event: MouseEvent) => {
   if (!canHover.value || !openedByHover.value) return
 
   const target = event.target
-  const isPointerInTrigger = isEventInTrigger(target)
-  if (isPointerInTrigger || isPointerInModal.value) {
+  isPointerInTrigger.value = isEventInTrigger(target)
+  if (isPointerInTrigger.value || isPointerInModal.value) {
     clearCloseTimer()
     return
   }
@@ -223,6 +234,7 @@ onBeforeUnmount(() => {
     role="button"
     tabindex="0"
     :aria-label="ariaLabel"
+    aria-haspopup="dialog"
     @pointerdown="stopPointerPropagation"
     @pointerup="stopPointerPropagation"
     @click.capture="onClick"
