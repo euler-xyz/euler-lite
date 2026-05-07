@@ -29,7 +29,7 @@ export interface OperationsContext {
 export interface Permit2Helpers {
   resolvePermit2Address: () => Address | undefined
   getPermit2Allowance: (token: Address, spender: Address, owner: Address, permit2Address?: Address) => Promise<{ amount: bigint, expiration: bigint, nonce: bigint }>
-  buildPermit2Call: (token: Address, spender: Address, requiredAmount: bigint, owner: Address, permit2Address?: Address) => Promise<import('~/utils/evc-converter').EVCCall | undefined>
+  buildPermit2Call: (token: Address, spender: Address, requiredAmount: bigint, owner: Address, permit2Address?: Address, knownAllowance?: { amount: bigint, expiration: bigint, nonce: bigint }) => Promise<import('~/utils/evc-converter').EVCCall | undefined>
   computePermit2AllowanceSlot: (owner: Address, token: Address, spender: Address) => Hex
   buildPermit2Overrides: (pairsByPermit2: Map<string, { address: Address, pairs: { token: Address, spender: Address }[] }>, owner: Address) => import('viem').StateOverride
 }

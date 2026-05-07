@@ -39,13 +39,20 @@ export const createPermit2Helpers = (ctx: OperationsContext): Permit2Helpers => 
     }
   }
 
-  const buildPermit2Call = async (token: Address, spender: Address, requiredAmount: bigint, owner: Address, permit2Address?: Address): Promise<EVCCall | undefined> => {
+  const buildPermit2Call = async (
+    token: Address,
+    spender: Address,
+    requiredAmount: bigint,
+    owner: Address,
+    permit2Address?: Address,
+    knownAllowance?: { amount: bigint, expiration: bigint, nonce: bigint },
+  ): Promise<EVCCall | undefined> => {
     const resolvedPermit2 = permit2Address ?? resolvePermit2Address()
     if (!ctx.chainId.value || !resolvedPermit2) {
       return undefined
     }
 
-    const allowance = await getPermit2Allowance(token, spender, owner, resolvedPermit2)
+    const allowance = knownAllowance ?? await getPermit2Allowance(token, spender, owner, resolvedPermit2)
     const currentTime = nowInSeconds()
 
     if (allowance.amount >= requiredAmount && allowance.expiration > currentTime) {

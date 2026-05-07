@@ -1,7 +1,7 @@
 import { formatUnits, getAddress, type Address } from 'viem'
 import { watch, computed, ref, shallowRef, type Ref } from 'vue'
 import { useAccount } from '@wagmi/vue'
-import type { DataIssue, Portfolio, PortfolioBorrowPosition, PortfolioPositionFilter, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { accountDiagnosticOwner, dataIssueLocation, type DataIssue, type Portfolio, type PortfolioBorrowPosition, type PortfolioPositionFilter, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import type { EulerLensAddresses } from '~/composables/useEulerAddresses'
 import { useVaults } from '~/composables/useVaults'
 import { useWallets } from '~/composables/useWallets'
@@ -136,7 +136,9 @@ export const useEulerAccount = () => {
         code: 'SOURCE_UNAVAILABLE',
         severity: 'error',
         message: 'Failed to load portfolio data.',
-        paths: ['$'],
+        locations: [
+          dataIssueLocation(accountDiagnosticOwner(chainId.value, getAddress(walletAddress) as Address)),
+        ],
         source: 'portfolioService',
         originalValue: error instanceof Error ? error.message : String(error),
       }]
