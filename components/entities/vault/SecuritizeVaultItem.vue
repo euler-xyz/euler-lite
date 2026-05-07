@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { SecuritizeCollateralVault, EVault } from '@eulerxyz/euler-v2-sdk'
-import { formatAssetValue } from '~/services/pricing/priceProvider'
+import { formatAssetValue } from '~/utils/sdk-prices'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'

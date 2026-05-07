@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
+import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import type { TxPlan } from '~/entities/txPlan'
 import { formatNumber, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'

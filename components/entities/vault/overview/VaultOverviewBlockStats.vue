@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
-import { formatAssetValue } from '~/services/pricing/priceProvider'
+import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal, VaultBorrowApyModal } from '#components'

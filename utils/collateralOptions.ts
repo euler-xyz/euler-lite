@@ -1,5 +1,5 @@
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
+import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import type { CollateralOption } from '~/types/collateral-option'
 import { getVaultProductName } from '~/utils/eulerLabelsUtils'
 import { getVaultTags, type VaultTagContext } from '~/composables/useGeoBlock'

@@ -4,7 +4,7 @@ import { logWarn } from '~/utils/errorHandling'
 import type { EulerLabelEntity, EulerLabelProduct } from '~/entities/euler/labels'
 import type { MarketGroup, MarketGroupMetrics, CuratorGroup } from '~/entities/lend-discovery'
 import type { AnyVault } from '~/composables/useVaultRegistry'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
+import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import { isVaultNotExplorable, isVaultFeatured, isVaultDeprecated, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 import { isLiveCollateralEdge } from '~/utils/vault/ltv'
 

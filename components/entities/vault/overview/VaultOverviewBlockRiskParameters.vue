@@ -5,7 +5,7 @@ import { vaultConvertToAssetsAbi } from '~/abis/vault'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 
-import { formatAssetValue } from '~/services/pricing/priceProvider'
+import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatHookedOpsSummary, getHookedOperationMetas, getVaultHookedOperations, hasAnyHookedOperation, isHookDisabling, isVaultEffectivelyPaused } from '~/utils/vault-hooks'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultHooksInfoModal } from '#components'

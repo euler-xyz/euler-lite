@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { SecuritizeBorrowVaultPair } from '~/types/borrow-pair'
-import { getAssetOraclePrice, getCollateralOraclePrice } from '~/services/pricing/priceProvider'
+import { getAssetOraclePrice, getCollateralOraclePrice } from '~/utils/sdk-prices'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultBorrowApyModal, VaultRampDownModal, VaultSupplyApyModal } from '#components'

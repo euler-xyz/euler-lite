@@ -4,8 +4,7 @@ import { collectPythFeedsFromAdapters } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { isSecuritizeVault } from '~/utils/vault/categories'
 import { getHookDisabledWarning, getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
-import { getAssetOraclePrice, getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import { fetchBackendPrice } from '~/services/pricing/backendClient'
+import { getAssetOraclePrice, getAssetUsdValueOrZero, getTokenUsdPrice } from '~/utils/sdk-prices'
 import type { TxPlan } from '~/entities/txPlan'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
@@ -705,8 +704,7 @@ watch(selectedAsset, async () => {
     const priceAddr = isNativeCurrencyAddress(selectedAsset.value.address)
       ? resolveWrappedNativeAddress(chainId.value!) || selectedAsset.value.address
       : selectedAsset.value.address
-    const priceData = await fetchBackendPrice(priceAddr as Address)
-    swapAssetUsdPrice.value = priceData?.price
+    swapAssetUsdPrice.value = await getTokenUsdPrice(priceAddr as Address)
   }
   else {
     swapAssetUsdPrice.value = undefined

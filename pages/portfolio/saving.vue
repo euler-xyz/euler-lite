@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useAccount } from '@wagmi/vue'
 import type { PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
+import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 
 const { isConnected } = useAccount()
 const { depositPositions, isDepositsLoaded } = useEulerAccount()

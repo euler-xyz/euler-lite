@@ -1,6 +1,6 @@
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { type ProjectedRates, getProjectedRates } from '~/utils/vault/apy'
-import { getAssetUsdValue, getAssetUsdValueOrZero, getAssetOraclePrice, getCollateralOraclePrice, getCollateralShareOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
+import { getAssetUsdValue, getAssetUsdValueOrZero, getAssetOraclePrice, getCollateralOraclePrice, getCollateralShareOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'

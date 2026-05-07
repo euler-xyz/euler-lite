@@ -1,5 +1,5 @@
 import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
+import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { nanoToValue } from '~/utils/crypto-utils'
 
 /**

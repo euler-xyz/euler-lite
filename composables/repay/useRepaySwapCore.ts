@@ -1,5 +1,5 @@
 import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import { getAssetUsdValue } from '~/services/pricing/priceProvider'
+import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { SwapperMode } from '~/entities/swap'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
 import { valueToNano } from '~/utils/crypto-utils'

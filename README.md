@@ -47,7 +47,7 @@ cp .env.example .env
 
 | Variable          | Default                       | Description                           |
 | ----------------- | ----------------------------- | ------------------------------------- |
-| `EULER_API_URL`   | —                             | Euler API (tokens, prices, logos)     |
+| `EULER_API_URL`   | —                             | Euler indexer API (token data, logos) |
 | `SWAP_API_URL`    | —                             | Euler swap API                        |
 | `PYTH_HERMES_URL` | `https://hermes.pyth.network` | Pyth oracle endpoint (server-only, proxied via `/api/pyth/updates`) |
 
@@ -259,8 +259,8 @@ To run without Doppler, override the `CMD` and pass env vars directly:
 
 ```bash
 docker run -p 3000:3000 \
-  -e EULER_API_URL=https://your-euler-api.com \
-  -e SWAP_API_URL=https://your-swap-api.com \
+  -e EULER_API_URL=https://indexer.euler.finance \
+  -e SWAP_API_URL=https://swap.euler.finance \
   -e APPKIT_PROJECT_ID=your-project-id \
   -e RPC_URL_1=https://your-rpc.com \
   -e NUXT_PUBLIC_SUBGRAPH_URI_1=https://your-subgraph.com \

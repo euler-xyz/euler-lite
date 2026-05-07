@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
+import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'

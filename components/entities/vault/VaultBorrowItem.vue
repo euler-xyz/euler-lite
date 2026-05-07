@@ -2,7 +2,7 @@
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { isCyclicalNoteVault } from '~/utils/vault/classification'
 import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
-import { formatAssetValue } from '~/services/pricing/priceProvider'
+import { formatAssetValue } from '~/utils/sdk-prices'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isVaultFeatured, isVaultKeyring, getEntitiesByVault } from '~/utils/eulerLabelsUtils'

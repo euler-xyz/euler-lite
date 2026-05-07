@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
-import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatio } from '~/services/pricing/priceProvider'
-import { fetchBackendPrice } from '~/services/pricing/backendClient'
+import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatio, getTokenUsdPrice } from '~/utils/sdk-prices'
 import type { SwapApiQuote } from '~/entities/swap'
 import { SwapperMode } from '~/entities/swap'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
@@ -233,8 +232,7 @@ watch(selectedAsset, async () => {
     const priceAddr = isNativeCurrencyAddress(selectedAsset.value.address)
       ? resolveWrappedNativeAddress(chainId.value!) || selectedAsset.value.address
       : selectedAsset.value.address
-    const priceData = await fetchBackendPrice(priceAddr as Address)
-    swapAssetUsdPrice.value = priceData?.priceUsd
+    swapAssetUsdPrice.value = await getTokenUsdPrice(priceAddr as Address)
   }
   else {
     swapAssetUsdPrice.value = undefined

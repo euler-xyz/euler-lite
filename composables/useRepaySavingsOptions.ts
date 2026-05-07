@@ -4,7 +4,7 @@ import { getVaultProductName } from '~/utils/eulerLabelsUtils'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
+import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useReactiveMap } from '~/composables/useReactiveMap'
 

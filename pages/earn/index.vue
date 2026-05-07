@@ -5,7 +5,7 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
+import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import { getProductByVault, applyVaultOverrides, getEntitiesByEarnVault, isVaultFeatured, isVaultDeprecated, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'

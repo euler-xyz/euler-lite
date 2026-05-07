@@ -2,7 +2,7 @@
 import type { SecuritizeCollateralVault, EulerEarn, EVault } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import type { CollateralOption } from '~/types/collateral-option'
-import { getAssetUsdPrice } from '~/services/pricing/priceProvider'
+import { getAssetUsdPrice } from '~/utils/sdk-prices'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { compactNumber, formatSmartAmount, trimTrailingZeros, formatExactAmount } from '~/utils/string-utils'
 import { ChooseCollateralModal } from '#components'
