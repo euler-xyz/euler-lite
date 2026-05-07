@@ -32,6 +32,7 @@ const isBorrowable = computed(() => borrowCount.value > 0)
 
 const supplyCapPercentageDisplay = computed(() => getSupplyCapPercentage(vault))
 const borrowCapPercentageDisplay = computed(() => getBorrowCapPercentage(vault))
+const showShareTokenExchangeRate = computed(() => vault.vaultCategory !== 'escrow' && vault.borrowCap !== 0n)
 
 const supplyCapDisplay = ref('-')
 const borrowCapDisplay = ref('-')
@@ -63,6 +64,8 @@ watchEffect(async () => {
 })
 
 const load = async () => {
+  if (!showShareTokenExchangeRate.value) return
+
   const client = rpcClient.value!
   shareTokenExchangeRate.value = await client.readContract({
     address: vault.address as Address,
@@ -151,6 +154,7 @@ const openHooksModal = () => {
         </div>
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue
+        v-if="showShareTokenExchangeRate"
         label="Share token exchange rate"
         orientation="horizontal"
       >
