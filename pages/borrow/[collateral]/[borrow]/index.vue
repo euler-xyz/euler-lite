@@ -868,6 +868,15 @@ watch(formTab, () => {
                   </div>
                 </div>
               </template>
+
+              <template v-else-if="formTab === 'multiply'">
+                <div
+                  class="flex min-h-[624px] items-center justify-center rounded-16 bg-surface-secondary shadow-card"
+                  aria-busy="true"
+                >
+                  <UiLoader class="text-content-muted" />
+                </div>
+              </template>
             </template>
 
             <template #buttons>
