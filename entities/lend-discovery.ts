@@ -18,6 +18,17 @@ export interface MarketGroup {
   vaults: AnyVault[]
   /** Vaults referenced as collateral but not in this group */
   externalCollateral: AnyVault[]
+  /**
+   * Lowercased addresses of external collateral references the discovery view
+   * should flag with a red indicator. Two cases qualify:
+   *  1. The vault is in the registry but its governor isn't part of any
+   *     declared product entity — same signal as the per-pair "Unknown"
+   *     risk-manager pill (see `useVaults.isVaultGovernorVerified`).
+   *  2. The vault isn't loaded into the registry at all (truly missing).
+   * Group-member vaults are never included — the curator's product label
+   * is an explicit attestation that those are theirs.
+   */
+  unknownCollateral: string[]
   metrics: MarketGroupMetrics
 }
 
@@ -71,6 +82,16 @@ export interface MiniNode {
   assetSymbol: string
   x: number
   y: number
+  /** False for address-only placeholder nodes that have no loaded vault data. */
+  hasVaultData?: boolean
+  /**
+   * True when the node should render the red "unknown" badge. Applies to
+   * external collaterals with an unverified governor (resolved vault, badge
+   * sits beside the asset logo) and to placeholder nodes for truly missing
+   * vaults (no vault data — they fall back to the standard logo-less node
+   * with the truncated vault address as their label).
+   */
+  isUnknown?: boolean
 }
 
 export interface MiniEdge {

@@ -20,6 +20,7 @@ import { createRaceGuard } from '~/utils/race-guard'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
+import { getRepaySwapReviewInputAmount } from '~/composables/repay/reviewAmount'
 import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
 import { findBlockingDisabledOp, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
@@ -63,14 +64,13 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     oraclePriceRatio,
   } = options
 
-  const router = useRouter()
   const modal = useModal()
   const { error } = useToast()
   const { buildSwapAndRepayPlan, executeTxPlan } = useEulerOperations()
-  const { refreshAllPositions } = useEulerAccount()
-  const { eulerLensAddresses, chainId } = useEulerAddresses()
+  const { chainId } = useEulerAddresses()
   const { isConnected, address } = useAccount()
   const { fetchSingleBalance } = useWallets()
+  const { finalizeTxAndRedirect } = useTxFinalization()
   const { getVault: registryGetVault } = useVaultRegistry()
 
   // --- State ---
@@ -716,9 +716,12 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       if (!ok) return
 
       // For review modal: show input token as primary asset, borrow asset as swap target
-      const inputDisplay = direction.value === SwapperMode.TARGET_DEBT && amount.value
-        ? amount.value
-        : (amount.value || '0')
+      const inputDisplay = getRepaySwapReviewInputAmount({
+        amount: amount.value,
+        quote: quotes.selectedQuote.value,
+        sourceDecimals: selectedAsset.value.decimals,
+        swapperMode: direction.value,
+      })
 
       const isNativeRepay = isNativeCurrencyAddress(selectedAsset.value.address)
       const reviewAsset = isNativeRepay
@@ -754,12 +757,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
       const txPlan = await buildRepayPlan(true)
       await executeTxPlan(txPlan)
-
-      modal.close()
-      refreshAllPositions(eulerLensAddresses.value, address.value as string)
-      setTimeout(() => {
-        router.replace('/portfolio')
-      }, 400)
+      await finalizeTxAndRedirect()
     }
     catch (e) {
       error('Transaction failed')
