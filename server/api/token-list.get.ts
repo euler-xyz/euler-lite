@@ -58,24 +58,33 @@ function refreshEulerApi(chainId: number): Promise<TokenEntry[]> {
   if (!baseUrl) return Promise.resolve([])
 
   const PAGE_LIMIT = 100
+  // Hard cap on iterations: 100 pages × 100 tokens = 10k tokens. Far above any
+  // realistic chain's token count, so hitting this cap means upstream metadata
+  // is broken (e.g. meta.hasMore stuck at true with empty data).
+  const MAX_PAGES = 100
 
   return eulerInFlight.run(key, async () => {
     const allTokens: EulerApiToken[] = []
     let offset = 0
-    let hasMore = true
 
-    while (hasMore) {
+    for (let pageNum = 0; pageNum < MAX_PAGES; pageNum++) {
       const resp = await fetchWithTimeout(
         `${baseUrl}/v3/tokens?chainId=${chainId}&limit=${PAGE_LIMIT}&offset=${offset}`,
       )
       if (!resp.ok) throw new Error(`Euler API returned ${resp.status}`)
 
       const body = await resp.json()
-      const page: EulerApiToken[] = body.data || []
+      const page: EulerApiToken[] = Array.isArray(body.data) ? body.data : []
       allTokens.push(...page)
       offset += PAGE_LIMIT
-      hasMore = body.meta?.hasMore === true
-        || (body.meta?.total != null && offset < body.meta.total)
+
+      // Stop on empty or short page: backend always returns up to PAGE_LIMIT
+      // when more data exists, so a short page is authoritatively the last one.
+      if (page.length < PAGE_LIMIT) break
+
+      const total = typeof body.meta?.total === 'number' ? body.meta.total : undefined
+      if (total != null && offset >= total) break
+      if (body.meta?.hasMore === false) break
     }
 
     const tokens: TokenEntry[] = allTokens.map(t => ({

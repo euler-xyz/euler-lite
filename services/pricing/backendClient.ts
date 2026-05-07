@@ -229,7 +229,13 @@ const fetchBackendPricesBatch = async (
         headers: { Accept: 'application/json' },
       })
 
-      if (!response.ok) return
+      if (!response.ok) {
+        logger.warn(
+          { ctx: 'backendClient/fetchChunk', status: response.status, chainId: effectiveChainId, count: chunk.length },
+          'backend price chunk returned non-2xx',
+        )
+        return
+      }
 
       const body = await response.json()
       const prices: BackendPriceData[] = body.data || []
