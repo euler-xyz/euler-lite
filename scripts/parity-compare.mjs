@@ -597,20 +597,25 @@ async function openAndCapture({ app, context, scenario, pageId, pathName, waitFo
     consoleMessages.push({
       type: message.type(),
       text: message.text(),
+      location: message.location(),
     })
   })
 
-  let captureError = null
+  let waitError = null
 
   await page.goto(url.href, { waitUntil: 'domcontentloaded' })
   try {
     await waitForSelectors(page, waitFor, waitTimeoutMs)
   }
   catch (error) {
-    captureError = error.message
+    waitError = error.message
   }
   await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {})
   await page.waitForTimeout(scenario.settleMs ?? scenario.defaults?.settleMs ?? 0)
+
+  const missingSelectors = waitError
+    ? await missingWaitSelectors(page, waitFor)
+    : []
 
   const snapshot = await page.evaluate(scrapePage, {
     pageId,
@@ -622,7 +627,9 @@ async function openAndCapture({ app, context, scenario, pageId, pathName, waitFo
   snapshot.requestedPath = pathName
   snapshot.url = url.href
   snapshot.path = url.pathname + url.search
-  snapshot.captureError = captureError
+  snapshot.captureError = missingSelectors.length
+    ? waitError + '\nMissing after final scrape: ' + missingSelectors.join(', ')
+    : null
   snapshot.console = consoleMessages
 
   if (keepPage) {
@@ -637,6 +644,12 @@ async function waitForSelectors(page, selectors = [], timeout = 45_000) {
   for (const selector of selectors || []) {
     await page.waitForSelector(selector, { state: 'attached', timeout })
   }
+}
+
+async function missingWaitSelectors(page, selectors = []) {
+  return page.evaluate((items) => {
+    return (items || []).filter(selector => !document.querySelector(selector))
+  }, selectors || [])
 }
 
 async function extractFollowLinks(page, selector) {
@@ -824,8 +837,12 @@ function compareSnapshots(baseline, candidate, config = {}) {
     candidate.captureError ? { side: 'candidate', message: candidate.captureError } : null,
   ].filter(Boolean)
   const consoleErrors = [
-    ...((baseline.console || []).filter(message => message.type === 'error').map(message => ({ side: 'baseline', message: message.text }))),
-    ...((candidate.console || []).filter(message => message.type === 'error').map(message => ({ side: 'candidate', message: message.text }))),
+    ...((baseline.console || [])
+      .filter(message => message.type === 'error' && !isIgnoredConsoleError(message))
+      .map(message => ({ side: 'baseline', message: message.text, location: message.location }))),
+    ...((candidate.console || [])
+      .filter(message => message.type === 'error' && !isIgnoredConsoleError(message))
+      .map(message => ({ side: 'candidate', message: message.text, location: message.location }))),
   ]
 
   return {
@@ -852,6 +869,13 @@ function compareSnapshots(baseline, candidate, config = {}) {
     listDiffs,
     elementDiffs,
   }
+}
+
+function isIgnoredConsoleError(message) {
+  const text = String(message?.text || '')
+  if (!text.startsWith('Failed to load resource:')) return false
+  return text.includes('net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin')
+    || text.includes('the server responded with a status of 404')
 }
 
 function compareLists(baseline, candidate) {

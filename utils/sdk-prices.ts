@@ -8,7 +8,7 @@ import {
   type SecuritizeCollateralVault,
   type OraclePrice,
 } from '@eulerxyz/euler-v2-sdk'
-import { formatUnits, getAddress, type Address } from 'viem'
+import { getAddress, parseUnits, type Address } from 'viem'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { formatSmartAmount } from '~/utils/string-utils'
 import { USD_ADDRESS } from '~/entities/constants'
@@ -20,14 +20,14 @@ type PriceableVault = {
     decimals: number
     symbol: string
   }
-  marketPriceUsd?: bigint
+  marketPriceUsd?: bigint | number
 }
 
 type AnyVault = PriceableVault | ERC4626Vault | EVault | SecuritizeCollateralVault
 
 type CollateralPriceEdge = {
   address: string
-  marketPriceUsd?: bigint
+  marketPriceUsd?: bigint | number
 }
 
 type LiabilityPricedVault = {
@@ -62,12 +62,28 @@ export const toUsdAmount = (value: number | undefined): UsdAmount => ({
   hasPrice: value !== undefined,
 })
 
-const priceWadToResult = (price: bigint | undefined | null): PriceResult | undefined => {
+const numberUsdPriceToWad = (price: number): bigint | undefined => {
+  if (!Number.isFinite(price) || price < 0) return undefined
+  const normalized = price.toLocaleString('en-US', {
+    maximumFractionDigits: 18,
+    useGrouping: false,
+  })
+  return parseUnits(normalized, 18)
+}
+
+const priceUsdToWad = (price: bigint | number | undefined | null): bigint | undefined => {
   if (price == null) return undefined
+  if (typeof price === 'bigint') return price
+  return numberUsdPriceToWad(price)
+}
+
+const priceWadToResult = (price: bigint | number | undefined | null): PriceResult | undefined => {
+  const priceWad = priceUsdToWad(price)
+  if (priceWad === undefined) return undefined
   return {
-    amountOutMid: price,
-    amountOutAsk: price,
-    amountOutBid: price,
+    amountOutMid: priceWad,
+    amountOutAsk: priceWad,
+    amountOutBid: priceWad,
   }
 }
 
@@ -188,7 +204,7 @@ export const getUnitOfAccountUsdRate = async (
   if (!vault) return undefined
   if (isUsdUnitOfAccount(vault)) return ONE_18
   const sdk = await getEulerSdk()
-  return vault.fetchUnitOfAccountMarketPriceUsd(sdk.priceService)
+  return priceUsdToWad(await vault.fetchUnitOfAccountMarketPriceUsd(sdk.priceService))
 }
 
 export const getAssetUsdValue = async (
@@ -235,8 +251,7 @@ export const getTokenUsdPrice = async (
     chainId.value,
     getAddress(tokenAddress as Address),
   )
-  if (!price) return undefined
-  return Number(formatUnits(price.amountOutMid, price.decimals))
+  return price
 }
 
 export const getTokenUsdValue = async (

@@ -3,6 +3,10 @@ import type { EulerSDK, EulerSDKConfig } from '@eulerxyz/euler-v2-sdk'
 import { sdkBuildQuery } from '~/utils/sdk-query-cache'
 
 type SdkBuild = { key: string, promise?: Promise<EulerSDK> }
+type QueryOracleAdapters = (chainId: number) => Promise<unknown>
+type ConfigurableOracleAdapterService = EulerSDK['oracleAdapterService'] & {
+  setQueryOracleAdapters?: (fn: QueryOracleAdapters) => void
+}
 
 let sdkInstance: { key: string, sdk: EulerSDK } | undefined
 let sdkBuild: SdkBuild | undefined
@@ -59,6 +63,28 @@ const getSdkKey = (rpcUrls: Record<number, string>, staticDataCacheKey: string) 
     staticDataCacheKey,
   ].join('|')
 
+const buildAppApiPath = (path: string) => {
+  const requestUrl = import.meta.server && typeof useRequestURL === 'function'
+    ? useRequestURL()
+    : undefined
+  return `${requestUrl?.origin ?? ''}${path}`
+}
+
+const configureAppProxies = (sdk: EulerSDK) => {
+  const oracleAdapterService = sdk.oracleAdapterService as ConfigurableOracleAdapterService
+  oracleAdapterService.setQueryOracleAdapters?.(sdkBuildQuery(
+    'queryOracleAdapters',
+    async (chainId: number) => {
+      const response = await fetch(`${buildAppApiPath('/api/oracle-adapters')}?chainId=${encodeURIComponent(String(chainId))}`)
+      if (!response.ok) {
+        throw new Error(`Oracle adapters request failed: ${response.status} ${response.statusText}`)
+      }
+      return response.json()
+    },
+    oracleAdapterService,
+  ))
+}
+
 export const getEulerSdk = async (): Promise<EulerSDK> => {
   const rpcUrls = buildRpcUrls()
   const { cacheKey, config: staticConfig } = buildSdkStaticConfig()
@@ -78,6 +104,7 @@ export const getEulerSdk = async (): Promise<EulerSDK> => {
     buildQuery: sdkBuildQuery,
     plugins: [createPythPlugin({ buildQuery: sdkBuildQuery })],
   }).then((sdk) => {
+    configureAppProxies(sdk)
     if (sdkBuild === buildState) {
       sdkInstance = { key: buildKey, sdk }
       sdkBuild = undefined

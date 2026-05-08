@@ -1,6 +1,5 @@
 import {
   applyEulerLabelVaultOverrides,
-  createEmptyEulerLabelsData,
   getEulerLabelEntitiesByEarnVault,
   getEulerLabelEntitiesByVault,
   getEulerLabelPointsByVault,
@@ -29,6 +28,25 @@ const LABEL_QUERY_NAMES = [
   'queryEulerLabelsEarnVaults',
   'queryEulerLabelsAssets',
 ] as const
+
+const createEmptyEulerLabelsData = (): EulerLabelsData => ({
+  products: {},
+  entities: {},
+  points: {},
+  verifiedVaultAddresses: [],
+  earnVaults: [],
+  earnVaultEntries: {},
+  earnVaultBlocks: {},
+  earnVaultRestrictions: {},
+  featuredEarnVaults: new Set(),
+  deprecatedEarnVaults: {},
+  earnVaultDescriptions: {},
+  earnVaultNotices: {},
+  notExplorableEarnVaults: new Set(),
+  assetBlocks: {},
+  assetRestrictions: {},
+  assetPatternRules: [],
+})
 
 const labelsData = shallowRef<EulerLabelsData>(createEmptyEulerLabelsData())
 const labelsChainId = ref<number | null>(null)
