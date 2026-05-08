@@ -39,11 +39,11 @@ watchEffect(async () => {
   <div class="mx-16">
     <div class="flex justify-between items-center mb-8">
       <h3 class="text-h3 font-normal text-neutral-800">
-        Managed lending
+        Curated lending
       </h3>
     </div>
     <p class="text-p2 text-neutral-500 mb-16">
-      Passive yield earned across professionally curated strategies.
+      Supplied assets in curated vault strategies.
     </p>
     <div class="flex flex-1 p-8 rounded-12 mb-16 border border-line-default bg-card">
       <div

@@ -11,7 +11,7 @@ Every on-chain deposit a user holds falls into one of three categories:
 | **Borrow Position** | A deposit used as collateral backing a loan | Subgraph `borrows` + AccountLens |
 | **Savings (Deposit/Earn)** | A standalone deposit not used as collateral (includes both EVK and EulerEarn vaults) | Subgraph `deposits` + AccountLens |
 
-Savings positions are stored in a single `depositPositions` array. The UI splits them into "Managed lending" (earn vaults) and "Direct lending" (EVK/securitize vaults) using `isEarnVault()` from the vault registry.
+Savings positions are stored in a single `depositPositions` array. The UI splits them into "Curated lending" (earn vaults) and "Direct lending" (EVK/securitize vaults) using `isEarnVault()` from the vault registry.
 
 Portfolio cards can display operational **portfolio notices** from the labels system (e.g. migration announcements, temporary pauses). Notices are resolved via `getVaultNotice()` which checks earn vault notices, vault overrides, and product-level `portfolioNotice` in priority order. On borrow cards, collateral and borrow notices are shown separately with deduplication when both vaults share the same product-level notice.
 
@@ -93,7 +93,7 @@ deposit entry
 ```
 
 The UI then filters the unified `depositPositions` array:
-- **Managed lending (earn)**: `depositPositions.filter(p => isEarnVault(p.vault.address))`
+- **Curated lending (earn)**: `depositPositions.filter(p => isEarnVault(p.vault.address))`
 - **Direct lending (EVK/securitize)**: `depositPositions.filter(p => !isEarnVault(p.vault.address))`
 
 ### Position Types
@@ -146,8 +146,8 @@ Lens contracts are read-only helpers deployed on every Euler chain. They aggrega
 Returns the complete state of an EVK vault in a single call:
 
 - **Basic info**: name, symbol, decimals, totalAssets, totalShares, supply/borrow caps
-- **`liabilityPriceInfo`**: The vault asset's price in the vault's unit of account (UoA). Contains `amountOutMid`, `amountOutAsk`, `amountOutBid` (18-decimal fixed-point).
-- **`collateralPrices[]`**: Price of each accepted collateral in the vault's UoA. These are **share prices** (price per vault share, not per underlying asset).
+- **`liabilityPriceInfo`**: The vault asset's price in the vault's unit of account (UoA). Contains `amountOutMid`, `amountOutAsk`, `amountOutBid` scaled in the **UoA token's native decimals** (`unitOfAccountDecimals`) — not always 18. The USD-magic UoA address (`0x…0348`) is treated as 18 decimals on-chain, which is why USD-denominated vaults look like 18-decimal fixed-point. Conversion to USD must divide by `10^unitOfAccountDecimals`, not by `1e18`.
+- **`collateralPrices[]`**: Price of each accepted collateral in the vault's UoA, same scaling rules as `liabilityPriceInfo`. These are **share prices** (price per vault share, not per underlying asset).
 - **`collateralLTVs[]`**: Borrow LTV, liquidation LTV, and ramp parameters for each collateral.
 - **`oracleDetailedInfo`**: Recursive oracle configuration tree (see Oracle section below).
 - **`interestRateInfo`**: Current borrow/supply APY, cash, borrows.

@@ -535,10 +535,14 @@ const updateBorrowPositions = async (
 
     if (liabilityValueBorrowing === 0n && p.res.vaultAccountInfo.borrowed > 0n) {
       logWarn('updateBorrowPositions', 'liabilityValueBorrowing is 0 but borrowed amount exists, calculating manually')
-      const borrowedInUnitOfAccount = FixedPoint.fromValue(p.res.vaultAccountInfo.borrowed, p.borrowVault.decimals)
-        .mul(FixedPoint.fromValue(p.borrowVault.liabilityPriceInfo.amountOutMid, 18))
-        .div(FixedPoint.fromValue(p.borrowVault.liabilityPriceInfo.amountIn, 0))
-      liabilityValueBorrowing = borrowedInUnitOfAccount.value
+      // liabilityPriceInfo prices are scaled in the UoA token's native decimals,
+      // not 18. The lens normalizes UoA values to 18 decimals — match that target
+      // by computing in UoA-decimal space then rescaling.
+      const uoaDecimals = Number(p.borrowVault.unitOfAccountDecimals ?? 18n)
+      const borrowedInUoA = FixedPoint.fromValue(p.res.vaultAccountInfo.borrowed, p.borrowVault.decimals)
+        .mul(FixedPoint.fromValue(p.borrowVault.liabilityPriceInfo.amountOutMid, uoaDecimals))
+        .div(FixedPoint.fromValue(p.borrowVault.liabilityPriceInfo.amountIn, p.borrowVault.decimals))
+      liabilityValueBorrowing = borrowedInUoA.toScaledBigint(18)
     }
 
     const healthFixed = liabilityValueBorrowing === 0n
