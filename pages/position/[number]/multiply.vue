@@ -272,13 +272,16 @@ watchEffect(async () => {
 })
 const currentSupplyValueUsd = ref<number | null>(null)
 const currentWeightedSupplyApy = ref<number | null>(null)
+const currentSupplySnapshotGuard = createRaceGuard()
 watchEffect(async () => {
+  const gen = currentSupplySnapshotGuard.next()
   if (!position.value || !multiplyShortVault.value) {
     currentSupplyValueUsd.value = null
     currentWeightedSupplyApy.value = null
     return
   }
   const snapshot = await getCollateralApySnapshot(position.value, multiplyShortVault.value)
+  if (currentSupplySnapshotGuard.isStale(gen)) return
   currentSupplyValueUsd.value = snapshot.supplyUsd
   currentWeightedSupplyApy.value = snapshot.weightedSupplyApy
 })
@@ -292,7 +295,9 @@ watchEffect(async () => {
 })
 const nextSupplyValueUsd = ref<number | null>(null)
 const multiplyWeightedSupplyApy = ref<number | null>(null)
+const nextSupplySnapshotGuard = createRaceGuard()
 watchEffect(async () => {
+  const gen = nextSupplySnapshotGuard.next()
   if (!position.value || !multiplyShortVault.value || !multiplyLongVault.value) {
     nextSupplyValueUsd.value = null
     multiplyWeightedSupplyApy.value = null
@@ -305,6 +310,7 @@ watchEffect(async () => {
       projectRates: true,
     }],
   })
+  if (nextSupplySnapshotGuard.isStale(gen)) return
   nextSupplyValueUsd.value = snapshot.supplyUsd
   multiplyWeightedSupplyApy.value = snapshot.weightedSupplyApy
 })

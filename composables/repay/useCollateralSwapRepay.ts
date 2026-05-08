@@ -175,12 +175,14 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   // --- Collateral portfolio value/APY ---
   const collateralPortfolioGuard = createRaceGuard()
   const weightedCollateralSupplyApy = ref<number | null>(null)
+  const nextWeightedCollateralSupplyApy = ref<number | null>(null)
   const collateralValueUsd = ref<number | null>(null)
   const nextCollateralValueUsd = ref<number | null>(null)
 
   watchEffect(async () => {
     if (!position.value || !borrowVault.value || !sourceVault.value) {
       weightedCollateralSupplyApy.value = null
+      nextWeightedCollateralSupplyApy.value = null
       collateralValueUsd.value = null
       nextCollateralValueUsd.value = null
       return
@@ -199,10 +201,12 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     ])
     if (collateralPortfolioGuard.isStale(gen)) return
     weightedCollateralSupplyApy.value = currentSnapshot.weightedSupplyApy
+    nextWeightedCollateralSupplyApy.value = nextSnapshot.weightedSupplyApy
     collateralValueUsd.value = currentSnapshot.supplyUsd
     nextCollateralValueUsd.value = nextSnapshot.supplyUsd
   })
   const effectiveCollateralSupplyApy = computed(() => weightedCollateralSupplyApy.value ?? collateralSupplyApy.value)
+  const effectiveNextCollateralSupplyApy = computed(() => nextWeightedCollateralSupplyApy.value ?? effectiveCollateralSupplyApy.value)
 
   // --- Health metrics ---
   const health = useRepayHealthMetrics({
@@ -213,6 +217,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     nextLiquidationLtv,
     collateralAmountAfter,
     collateralSupplyApy: effectiveCollateralSupplyApy,
+    nextCollateralSupplyApy: effectiveNextCollateralSupplyApy,
     borrowApy,
     collateralValueUsd,
     nextCollateralValueUsd,

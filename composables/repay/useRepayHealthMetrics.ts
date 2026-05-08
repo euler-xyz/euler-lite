@@ -3,6 +3,7 @@ import type { AccountBorrowPosition } from '~/entities/account'
 import { getProjectedRates, getRoe } from '~/entities/vault'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { computeNextLtv, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
+import { createRaceGuard } from '~/utils/race-guard'
 
 interface UseRepayHealthMetricsOptions {
   position: Ref<AccountBorrowPosition | undefined>
@@ -12,6 +13,7 @@ interface UseRepayHealthMetricsOptions {
   nextLiquidationLtv: ComputedRef<number | null>
   collateralAmountAfter: ComputedRef<number | null>
   collateralSupplyApy: ComputedRef<number | null>
+  nextCollateralSupplyApy?: ComputedRef<number | null>
   borrowApy: ComputedRef<number | null>
   collateralValueUsd: Ref<number | null>
   nextCollateralValueUsd: Ref<number | null>
@@ -28,6 +30,7 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
     nextLiquidationLtv,
     collateralAmountAfter,
     collateralSupplyApy,
+    nextCollateralSupplyApy,
     borrowApy,
     collateralValueUsd,
     nextCollateralValueUsd,
@@ -71,40 +74,56 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
     computeLiquidationPrice(priceRatio.value, nextHealth.value))
 
   const projectedBorrowApy = ref<number | null>(null)
+  const projectedBorrowApyGuard = createRaceGuard()
 
   watchEffect(async () => {
-    if (!borrowVault.value || !position.value || debtRepaid.value === null) {
+    const gen = projectedBorrowApyGuard.next()
+    const vault = borrowVault.value
+    const currentPosition = position.value
+    const repaid = debtRepaid.value
+    const currentBorrowApy = borrowApy.value
+
+    if (!vault || !currentPosition || repaid === null) {
       projectedBorrowApy.value = null
       return
     }
 
-    const repayAmount = debtRepaid.value > position.value.borrowed
-      ? position.value.borrowed
-      : debtRepaid.value
+    try {
+      const repayAmount = repaid > currentPosition.borrowed
+        ? currentPosition.borrowed
+        : repaid
 
-    const projected = await getProjectedRates(
-      borrowVault.value.address,
-      borrowVault.value.interestRateInfo.cash,
-      borrowVault.value.interestRateInfo.borrows,
-      repayAmount,
-      -repayAmount,
-    )
+      const projected = await getProjectedRates(
+        vault.address,
+        vault.interestRateInfo.cash,
+        vault.interestRateInfo.borrows,
+        repayAmount,
+        -repayAmount,
+      )
 
-    if (!projected) {
-      projectedBorrowApy.value = null
-      return
+      if (projectedBorrowApyGuard.isStale(gen)) return
+
+      if (!projected) {
+        projectedBorrowApy.value = null
+        return
+      }
+
+      const currentRaw = nanoToValue(vault.interestRateInfo.borrowAPY || 0n, 25)
+      const projectedRaw = nanoToValue(projected.borrowAPY, 25)
+      projectedBorrowApy.value = (currentBorrowApy ?? 0) + (projectedRaw - currentRaw)
     }
-
-    const currentRaw = nanoToValue(borrowVault.value.interestRateInfo.borrowAPY || 0n, 25)
-    const projectedRaw = nanoToValue(projected.borrowAPY, 25)
-    projectedBorrowApy.value = (borrowApy.value ?? 0) + (projectedRaw - currentRaw)
+    catch {
+      if (!projectedBorrowApyGuard.isStale(gen)) {
+        projectedBorrowApy.value = null
+      }
+    }
   })
 
   const roeBefore = computed(() =>
     getRoe(collateralValueUsd.value, collateralSupplyApy.value, borrowValueUsd.value, borrowApy.value))
 
   const roeAfter = computed(() =>
-    getRoe(nextCollateralValueUsd.value, collateralSupplyApy.value, nextBorrowValueUsd.value, projectedBorrowApy.value ?? borrowApy.value))
+    getRoe(nextCollateralValueUsd.value, nextCollateralSupplyApy?.value ?? collateralSupplyApy.value, nextBorrowValueUsd.value, projectedBorrowApy.value ?? borrowApy.value))
 
   return {
     currentHealth,

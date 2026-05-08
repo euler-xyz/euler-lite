@@ -125,7 +125,13 @@ const collateralAmount = computed(() => {
   return nanoToValue(position.value.supplied, collateralVault.value.decimals)
 })
 const nextBorrowAmount = computed(() => {
-  if (!quote.value || !toVault.value) return null
+  if (!toVault.value) return null
+  if (isSameAsset.value && fromVault.value && fromAmount.value) {
+    const amount = valueToNano(fromAmount.value, fromVault.value.decimals)
+    const repaidDebt = amount > currentDebt.value ? currentDebt.value : amount
+    return nanoToValue(repaidDebt, toVault.value.decimals)
+  }
+  if (!quote.value) return null
   return nanoToValue(BigInt(quote.value.amountIn), toVault.value.decimals)
 })
 
@@ -167,7 +173,7 @@ const nextLiquidationPrice = computed(() => {
 })
 
 const healthError = computed(() => {
-  if (!quote.value || nextHealth.value === null) return null
+  if ((!quote.value && !isSameAsset.value) || nextHealth.value === null) return null
   if (!Number.isFinite(nextHealth.value)) return null
   return nextHealth.value <= 1 ? 'Swap would make position unhealthy' : null
 })
@@ -278,17 +284,25 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 watchEffect(async () => {
   const gen = nextBorrowGuard.next()
 
-  if (!quote.value || !toVault.value || !fromVault.value) {
+  if ((!quote.value && !isSameAsset.value) || !toVault.value || !fromVault.value) {
     nextBorrowValueUsd.value = null
     nextBorrowApy.value = null
     return
   }
-  const newBorrowAmount = BigInt(quote.value.amountIn)
   const swappedDebt = fromAmount.value
     ? valueToNano(fromAmount.value, fromVault.value.decimals)
-    : currentDebt.value
+    : quote.value ? currentDebt.value : 0n
   const repaidDebt = swappedDebt > currentDebt.value ? currentDebt.value : swappedDebt
+  const newBorrowAmount = isSameAsset.value
+    ? repaidDebt
+    : BigInt(quote.value!.amountIn)
   const remainingDebt = currentDebt.value - repaidDebt
+
+  if (newBorrowAmount <= 0n) {
+    nextBorrowValueUsd.value = null
+    nextBorrowApy.value = null
+    return
+  }
 
   const [remainingBorrowUsd, newBorrowUsd, projectedFromBorrow, projectedToBorrow] = await Promise.all([
     remainingDebt > 0n
@@ -541,7 +555,7 @@ const onToVaultChange = (selectedIndex: number) => {
             <SummaryRow label="ROE">
               <SummaryValue
                 :before="roeBefore !== null ? formatNumber(roeBefore) : undefined"
-                :after="roeAfter !== null && quote ? formatNumber(roeAfter) : undefined"
+                :after="roeAfter !== null && (quote || isSameAsset) ? formatNumber(roeAfter) : undefined"
                 suffix="%"
               />
             </SummaryRow>
@@ -563,7 +577,7 @@ const onToVaultChange = (selectedIndex: number) => {
             >
               <!-- Borrow swap changes the borrow vault, so before/after symbols may differ -->
               <p class="text-p2 text-right inline-flex items-center flex-wrap justify-end gap-x-4">
-                <template v-if="currentLiquidationPrice !== null && nextLiquidationPrice !== null && quote">
+                <template v-if="currentLiquidationPrice !== null && nextLiquidationPrice !== null && (quote || isSameAsset)">
                   <span class="text-content-tertiary">{{ formatSmartAmount(liqPriceInvert.invertValue(currentLiquidationPrice)) }}<span class="text-p3 ml-2">{{ currentLiqDisplaySymbol }}</span></span>
                   &rarr; <span class="text-content-primary">{{ formatSmartAmount(liqPriceInvert.invertValue(nextLiquidationPrice)) }}<span class="text-content-tertiary text-p3 ml-2">{{ liqPriceInvert.displaySymbol }}</span></span>
                 </template>
@@ -589,7 +603,7 @@ const onToVaultChange = (selectedIndex: number) => {
             <SummaryRow label="Liq. buffer">
               <SummaryValue
                 :before="formatLiqBuffer(liqPriceInvert.invertValue(currentPriceRatio), liqPriceInvert.invertValue(currentLiquidationPrice))"
-                :after="nextLiquidationPrice !== null && quote
+                :after="nextLiquidationPrice !== null && (quote || isSameAsset)
                   ? formatLiqBuffer(liqPriceInvert.invertValue(priceRatio), liqPriceInvert.invertValue(nextLiquidationPrice))
                   : undefined"
                 suffix="%"
@@ -598,14 +612,14 @@ const onToVaultChange = (selectedIndex: number) => {
             <SummaryRow label="LTV">
               <SummaryValue
                 :before="currentLtv !== null ? formatNumber(currentLtv) : undefined"
-                :after="nextLtv !== null && quote ? formatNumber(nextLtv) : undefined"
+                :after="nextLtv !== null && (quote || isSameAsset) ? formatNumber(nextLtv) : undefined"
                 suffix="%"
               />
             </SummaryRow>
             <SummaryRow label="Health score">
               <SummaryValue
                 :before="currentHealth !== null ? formatHealthScore(currentHealth) : undefined"
-                :after="nextHealth !== null && quote ? formatHealthScore(nextHealth) : undefined"
+                :after="nextHealth !== null && (quote || isSameAsset) ? formatHealthScore(nextHealth) : undefined"
               />
             </SummaryRow>
             <SwapDetailsSummary

@@ -90,81 +90,86 @@ export const usePositionCollateralApy = () => {
       return { supplyUsd: 0, weightedSupplyApy: null }
     }
 
-    if (!isEulerAddressesReady.value) {
-      await loadEulerConfig()
-    }
-    await until(isVaultsReady).toBe(true)
-
-    const primaryAddress = normalize(position.collateral.address)
-    const deltaByAddress = new Map(
-      (options.deltas || [])
-        .map(delta => [normalize(delta.vaultAddress), delta])
-        .filter(([address]) => Boolean(address)) as Array<[string, CollateralApyDelta]>,
-    )
-    const collateralAddresses = position.collaterals?.length
-      ? position.collaterals
-      : [position.collateral.address]
-    const normalized = collateralAddresses.map(normalize).filter(Boolean)
-    const allAddresses = Array.from(new Set([
-      primaryAddress,
-      ...normalized,
-      ...deltaByAddress.keys(),
-    ].filter(Boolean)))
-
-    const entries = (await Promise.all(allAddresses.map(async (address): Promise<CollateralApyEntry | null> => {
-      const vault = await getOrFetch(address) as PositionCollateralVault | undefined
-      if (!vault) return null
-      const currentAssets = await getCollateralAssets(position, address, primaryAddress)
-      const delta = deltaByAddress.get(address)?.assetsDelta || 0n
-      const nextAssets = currentAssets + delta
-      return {
-        address,
-        vault,
-        assets: nextAssets > 0n ? nextAssets : 0n,
-        delta,
-        projectRates: deltaByAddress.get(address)?.projectRates,
+    try {
+      if (!isEulerAddressesReady.value) {
+        await loadEulerConfig()
       }
-    }))).filter((entry): entry is CollateralApyEntry => entry !== null)
+      await until(isVaultsReady).toBe(true)
 
-    const projectionRequests = entries.reduce<Array<{ index: number, request: ProjectedRatesRequest }>>((acc, entry, index) => {
-      if (!entry.projectRates || entry.delta === 0n) return acc
-      acc.push({
-        index,
-        request: {
-          vaultAddress: entry.vault.address,
-          currentCash: entry.vault.interestRateInfo.cash,
-          currentBorrows: entry.vault.interestRateInfo.borrows,
-          cashDelta: entry.delta,
-          borrowsDelta: 0n,
-        },
-      })
-      return acc
-    }, [])
-    const projectedRates = projectionRequests.length
-      ? await getProjectedRatesBatch(projectionRequests.map(item => item.request))
-      : []
-    const projectedByIndex = new Map(projectionRequests.map((item, index) => [item.index, projectedRates[index]]))
+      const primaryAddress = normalize(position.collateral.address)
+      const deltaByAddress = new Map(
+        (options.deltas || [])
+          .map(delta => [normalize(delta.vaultAddress), delta])
+          .filter(([address]) => Boolean(address)) as Array<[string, CollateralApyDelta]>,
+      )
+      const collateralAddresses = position.collaterals?.length
+        ? position.collaterals
+        : [position.collateral.address]
+      const normalized = collateralAddresses.map(normalize).filter(Boolean)
+      const allAddresses = Array.from(new Set([
+        primaryAddress,
+        ...normalized,
+        ...deltaByAddress.keys(),
+      ].filter(Boolean)))
 
-    const valued = await Promise.all(entries.map(async (entry, index) => {
-      const supplyUsd = await getCollateralUsdValueOrZero(entry.assets, liabilityVault, entry.vault as Vault, 'off-chain')
-      const currentRaw = nanoToValue(entry.vault.interestRateInfo.supplyAPY || 0n, 25)
-      const baseApy = withIntrinsicSupplyApy(currentRaw, entry.vault.asset.address) + getSupplyRewardApy(entry.vault.address)
-      const projected = projectedByIndex.get(index)
-      const supplyApy = projected
-        ? baseApy + (nanoToValue(projected.supplyAPY, 25) - currentRaw)
-        : baseApy
+      const entries = (await Promise.all(allAddresses.map(async (address): Promise<CollateralApyEntry | null> => {
+        const vault = await getOrFetch(address) as PositionCollateralVault | undefined
+        if (!vault) return null
+        const currentAssets = await getCollateralAssets(position, address, primaryAddress)
+        const delta = deltaByAddress.get(address)?.assetsDelta || 0n
+        const nextAssets = currentAssets + delta
+        return {
+          address,
+          vault,
+          assets: nextAssets > 0n ? nextAssets : 0n,
+          delta,
+          projectRates: deltaByAddress.get(address)?.projectRates,
+        }
+      }))).filter((entry): entry is CollateralApyEntry => entry !== null)
 
-      return { supplyUsd, supplyApy }
-    }))
+      const projectionRequests = entries.reduce<Array<{ index: number, request: ProjectedRatesRequest }>>((acc, entry, index) => {
+        if (!entry.projectRates || entry.delta === 0n) return acc
+        acc.push({
+          index,
+          request: {
+            vaultAddress: entry.vault.address,
+            currentCash: entry.vault.interestRateInfo.cash,
+            currentBorrows: entry.vault.interestRateInfo.borrows,
+            cashDelta: entry.delta,
+            borrowsDelta: 0n,
+          },
+        })
+        return acc
+      }, [])
+      const projectedRates = projectionRequests.length
+        ? await getProjectedRatesBatch(projectionRequests.map(item => item.request))
+        : []
+      const projectedByIndex = new Map(projectionRequests.map((item, index) => [item.index, projectedRates[index]]))
 
-    const supplyUsd = valued.reduce((sum, item) => sum + item.supplyUsd, 0)
-    if (!Number.isFinite(supplyUsd) || supplyUsd <= 0) {
-      return { supplyUsd: 0, weightedSupplyApy: null }
+      const valued = await Promise.all(entries.map(async (entry, index) => {
+        const supplyUsd = await getCollateralUsdValueOrZero(entry.assets, liabilityVault, entry.vault as Vault, 'off-chain')
+        const currentRaw = nanoToValue(entry.vault.interestRateInfo.supplyAPY || 0n, 25)
+        const baseApy = withIntrinsicSupplyApy(currentRaw, entry.vault.asset.address) + getSupplyRewardApy(entry.vault.address)
+        const projected = projectedByIndex.get(index)
+        const supplyApy = projected
+          ? baseApy + (nanoToValue(projected.supplyAPY, 25) - currentRaw)
+          : baseApy
+
+        return { supplyUsd, supplyApy }
+      }))
+
+      const supplyUsd = valued.reduce((sum, item) => sum + item.supplyUsd, 0)
+      if (!Number.isFinite(supplyUsd) || supplyUsd <= 0) {
+        return { supplyUsd: 0, weightedSupplyApy: null }
+      }
+
+      return {
+        supplyUsd,
+        weightedSupplyApy: valued.reduce((sum, item) => sum + item.supplyUsd * item.supplyApy, 0) / supplyUsd,
+      }
     }
-
-    return {
-      supplyUsd,
-      weightedSupplyApy: valued.reduce((sum, item) => sum + item.supplyUsd * item.supplyApy, 0) / supplyUsd,
+    catch {
+      return { supplyUsd: 0, weightedSupplyApy: null }
     }
   }
 
