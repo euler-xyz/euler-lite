@@ -9,9 +9,9 @@ Every on-chain deposit a user holds falls into one of three categories:
 | Category | Description | Data Source |
 |----------|-------------|-------------|
 | **Borrow Position** | A deposit used as collateral backing a loan | Subgraph `borrows` + AccountLens |
-| **Yield Position (Deposit/Earn)** | A standalone deposit not used as collateral (includes both EVK and EulerEarn vaults) | Subgraph `deposits` + AccountLens |
+| **Deposit Position (Deposit/Earn)** | A standalone deposit not used as collateral (includes both EVK and EulerEarn vaults) | Subgraph `deposits` + AccountLens |
 
-Yield positions are stored in a single `depositPositions` array. The UI splits them into "Curated lending" (earn vaults) and "Direct lending" (EVK/securitize vaults) using `isEarnVault()` from the vault registry.
+Deposit positions are stored in a single `depositPositions` array. The UI splits them into "Curated lending" (earn vaults) and "Direct lending" (EVK/securitize vaults) using `isEarnVault()` from the vault registry.
 
 Portfolio cards can display operational **portfolio notices** from the labels system (e.g. migration announcements, temporary pauses). Notices are resolved via `getVaultNotice()` which checks earn vault notices, vault overrides, and product-level `portfolioNotice` in priority order. On borrow cards, collateral and borrow notices are shown separately with deduplication when both vaults share the same product-level notice.
 
@@ -58,9 +58,9 @@ borrow entry (from subgraph)
   +-- Include as borrow position
 ```
 
-After processing all entries, a `collateralUsageSet` is built containing every `"subAccount:collateralVaultAddress"` pair. This is the key data structure that enables the yield/position split — deposits that appear in this set are shown under their borrow position rather than as standalone yield positions.
+After processing all entries, a `collateralUsageSet` is built containing every `"subAccount:collateralVaultAddress"` pair. This is the key data structure that enables the deposit/position split — deposits that appear in this set are shown under their borrow position rather than as standalone deposit positions.
 
-#### Step 2: Load Yield Positions
+#### Step 2: Load Deposit Positions
 
 `updateSavingsPositions()` makes a **single** subgraph query for deposits and processes all vault types (EVK, securitize, and earn) in one pass:
 
@@ -89,7 +89,7 @@ deposit entry
   |-- Does accountLens return shares > 0?
   |     NO  -> skip
   |
-  +-- Include as yield position (in depositPositions array)
+  +-- Include as deposit position (in depositPositions array)
 ```
 
 The UI then filters the unified `depositPositions` array:
@@ -117,7 +117,7 @@ interface AccountBorrowPosition {
 }
 
 interface AccountDepositPosition {
-  vault: Vault | SecuritizeVault | EarnVault  // Any standalone yield vault type
+  vault: Vault | SecuritizeVault | EarnVault  // Any standalone deposit vault type
   subAccount: string           // EVC sub-account address
   shares: bigint               // Vault share balance
   assets: bigint               // Equivalent asset amount

@@ -61,10 +61,10 @@ watchEffect(async () => {
             <SvgIcon name="search" />
           </div>
           <template v-if="isConnected">
-            You don't have yield positions yet
+            You don't have deposit positions yet
           </template>
           <template v-else>
-            Connect your wallet to see your yield positions
+            Connect your wallet to see your deposit positions
           </template>
         </div>
       </div>
@@ -91,7 +91,7 @@ watchEffect(async () => {
       </h3>
     </div>
     <p class="text-p2 text-neutral-500 mb-16">
-      Yield from assets supplied to Euler vaults.
+      Assets supplied to Euler vaults.
     </p>
     <div class="flex flex-1 p-8 rounded-12 border border-line-default bg-card">
       <div
@@ -109,10 +109,10 @@ watchEffect(async () => {
             <SvgIcon name="search" />
           </div>
           <template v-if="isConnected">
-            You don't have yield positions yet
+            You don't have deposit positions yet
           </template>
           <template v-else>
-            Connect your wallet to see your yield positions
+            Connect your wallet to see your deposit positions
           </template>
         </div>
       </div>
