@@ -140,11 +140,12 @@ function getUpstreamUrl(scope: LabelScope, file: string): string {
  * the in-flight map.
  *
  * `persist=true` writes the empty shape into the cache so subsequent
- * requests skip upstream entirely. Reserved for the 404 case, where the
- * file is legitimately absent for this scope. For other failures
- * (transient 5xx, network errors, JSON parse, validation) return empty
- * but DON'T persist — otherwise a single upstream blip pins the empty
- * allowlist for 5 minutes, making every verified vault appear unverified.
+ * requests skip upstream entirely. Reserved for the absent-file cases
+ * (404 and 403 — see below), where the file is legitimately not published
+ * for this scope. For other failures (transient 5xx, network errors,
+ * JSON parse, validation) return empty but DON'T persist — otherwise a
+ * single upstream blip pins the empty allowlist for 5 minutes, making
+ * every verified vault appear unverified.
  */
 export function refreshLabelFile(scope: LabelScope, file: LabelFile): Promise<unknown> {
   const key = `${scope}:${file}`
@@ -162,17 +163,20 @@ export function refreshLabelFile(scope: LabelScope, file: LabelFile): Promise<un
     try {
       const resp = await fetchWithTimeout(getUpstreamUrl(scope, file))
       if (!resp.ok) {
-        // 404 is the expected signal for "file not published at this scope"
-        // — treat it as a steady-state "absent" and don't spam the logs
-        // each warm cycle. Other non-2xx statuses (403/5xx) are reported
-        // as transitions so the first occurrence surfaces but repeats do not.
-        if (resp.status !== 404) {
-          reportStatus('labels', statusKey, `http-${resp.status}`,
-            `${file} upstream returned ${resp.status} for scope ${scope}; treating as absent`)
-          return fallback(false)
+        // 404 and 403 are both expected signals for "file not published
+        // at this scope". The labels CDN (S3+CloudFront origin without
+        // ListBucket grant) returns 403 AccessDenied for missing keys
+        // rather than 404, so we treat them identically: persist the
+        // empty fallback and stay quiet on subsequent warm cycles.
+        // Other non-2xx statuses (5xx etc.) are reported as transitions
+        // so the first occurrence surfaces but repeats do not.
+        if (resp.status === 404 || resp.status === 403) {
+          reportStatus('labels', statusKey, `absent-${resp.status}`)
+          return fallback(true)
         }
-        reportStatus('labels', statusKey, 'absent-404')
-        return fallback(true)
+        reportStatus('labels', statusKey, `http-${resp.status}`,
+          `${file} upstream returned ${resp.status} for scope ${scope}; treating as absent`)
+        return fallback(false)
       }
 
       const data: unknown = await resp.json()
