@@ -8,7 +8,6 @@ import type { SwapApiQuote } from '~/entities/swap'
 import {
   COWSWAP_ORDER_DEADLINE_SECONDS,
   type CowSwapOpenPositionExecuteParams,
-  deriveCowSwapBuyAmountFromQuote,
   getCowSwapChainConfig,
   isCowProvider,
   isCowQuote,
@@ -121,10 +120,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     const debtAmount = options.multiplyDebtAmountNano.value
     const validTo = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
 
-    const underlyingBuyAmount = deriveCowSwapBuyAmountFromQuote({
-      amountOutMin: quote.amountOutMin,
-      amountOut: quote.amountOut,
-    })
+    const underlyingBuyAmount = BigInt(quote.amountOutMin) // CoW expects min amount after slippage
     if (!underlyingBuyAmount || underlyingBuyAmount <= 0n) {
       error('Invalid quote: no minimum buy amount')
       return
