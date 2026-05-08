@@ -28,11 +28,13 @@ void main().catch((error) => {
 })
 
 async function main() {
+  const envFiles = await loadLocalEnvFiles()
   const config = await buildConfig()
   const run = {
     runId: config.runId,
     generatedAt: new Date().toISOString(),
     scenarioFile: config.scenarioFile,
+    envFiles,
     baseline: await resolveApp('baseline', config),
     candidate: await resolveApp('candidate', config),
   }
@@ -63,6 +65,7 @@ async function main() {
       ...run,
       outputDir: config.outputDir,
       maxFollowItems: config.maxFollowItems,
+      numericTolerance: config.numericTolerance,
       scenarioFilter: config.scenarioFilter,
     })
 
@@ -73,30 +76,17 @@ async function main() {
     let pageDiffs = []
 
     if (config.sequential) {
-      const baselineApp = await startOrAttach(run.baseline, config)
-      state.apps = [baselineApp]
-      const baselineResult = await captureBaselinePlans({
+      const result = await runScenariosSequentialByPage({
         scenarios,
         config,
         browser: state.browser,
-        app: baselineApp,
+        baseline: run.baseline,
+        candidate: run.candidate,
+        state,
       })
-      baselineSnapshots = baselineResult.snapshots
-
-      await stopServer(baselineApp.serverProcess)
-      state.apps = []
-
-      const candidateApp = await startOrAttach(run.candidate, config)
-      state.apps = [candidateApp]
-      candidateSnapshots = await capturePlans({
-        plans: baselineResult.plans,
-        config,
-        browser: state.browser,
-        app: candidateApp,
-      })
-
-      const candidateByPageId = new Map(candidateSnapshots.map(snapshot => [snapshot.pageId, snapshot]))
-      pageDiffs = baselineSnapshots.map(snapshot => compareSnapshots(snapshot, candidateByPageId.get(snapshot.pageId)))
+      baselineSnapshots = result.baseline
+      candidateSnapshots = result.candidate
+      pageDiffs = result.diffs
     }
     else {
       state.apps = await Promise.all([
@@ -122,6 +112,7 @@ async function main() {
 
     const diff = buildDiff({
       run,
+      config,
       outputDir: config.outputDir,
       baselineSnapshots,
       candidateSnapshots,
@@ -177,8 +168,86 @@ async function buildConfig() {
     skipInstall: Boolean(args.flags.skipInstall || args.flags['skip-install'] || process.env.PARITY_SKIP_INSTALL === '1'),
     maxFollowItems: numberOrNull(valueOf('max-follow-items') || process.env.PARITY_MAX_FOLLOW_ITEMS),
     waitTimeoutMs: Number(valueOf('wait-timeout-ms') || process.env.PARITY_WAIT_TIMEOUT_MS || 45_000),
+    numericTolerance: parseNumericTolerance(valueOf('numeric-tolerance') || process.env.PARITY_NUMERIC_TOLERANCE || '1%'),
     sequential: Boolean(args.flags.sequential || process.env.PARITY_SEQUENTIAL === '1'),
   }
+}
+
+async function loadLocalEnvFiles() {
+  const requested = valueOf('env-file') || process.env.PARITY_ENV_FILE
+  const envFiles = requested
+    ? requested.split(',').map(item => item.trim()).filter(Boolean)
+    : ['.env']
+
+  if (envFiles.includes('none')) return []
+
+  const loaded = []
+  for (const envFile of envFiles) {
+    const filePath = path.resolve(ROOT_DIR, envFile)
+    let content = ''
+
+    try {
+      content = await fs.readFile(filePath, 'utf8')
+    }
+    catch (error) {
+      if (error?.code === 'ENOENT') continue
+      throw error
+    }
+
+    const entries = parseEnvFile(content)
+    let applied = 0
+    for (const [key, value] of Object.entries(entries)) {
+      if (Object.prototype.hasOwnProperty.call(process.env, key)) continue
+      process.env[key] = value
+      applied += 1
+    }
+
+    loaded.push({ file: filePath, applied })
+  }
+
+  if (loaded.length) {
+    console.log('[parity-compare] Loaded env files: ' + loaded.map(item => item.file + ' (' + item.applied + ' vars)').join(', '))
+  }
+
+  return loaded
+}
+
+function parseEnvFile(content) {
+  const values = {}
+
+  for (const rawLine of content.split(/\r?\n/)) {
+    let line = rawLine.trim()
+    if (!line || line.startsWith('#')) continue
+    if (line.startsWith('export ')) line = line.slice('export '.length).trim()
+
+    const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
+    if (!match) continue
+
+    const [, key, rawValue] = match
+    values[key] = parseEnvValue(rawValue)
+  }
+
+  return values
+}
+
+function parseEnvValue(rawValue) {
+  const value = String(rawValue ?? '').trim()
+  if (!value) return ''
+
+  if (value.startsWith('"') && value.endsWith('"')) {
+    return value
+      .slice(1, -1)
+      .replaceAll('\\n', '\n')
+      .replaceAll('\\r', '\r')
+      .replaceAll('\\"', '"')
+      .replaceAll('\\\\', '\\')
+  }
+
+  if (value.startsWith('\'') && value.endsWith('\'')) {
+    return value.slice(1, -1)
+  }
+
+  return value.replace(/\s+#.*$/, '').trim()
 }
 
 async function resolveApp(name, config) {
@@ -308,7 +377,7 @@ async function runScenario({ scenario, config, browser, baseline, candidate }) {
 
     baselineSnapshots.push(basePageResult.snapshot)
     candidateSnapshots.push(candidatePageResult.snapshot)
-    diffs.push(compareSnapshots(basePageResult.snapshot, candidatePageResult.snapshot))
+    diffs.push(compareSnapshots(basePageResult.snapshot, candidatePageResult.snapshot, config))
 
     for (const follow of scenario.follow || []) {
       const links = await extractFollowLinks(basePageResult.page, follow.selector)
@@ -343,7 +412,7 @@ async function runScenario({ scenario, config, browser, baseline, candidate }) {
 
         baselineSnapshots.push(baseDetail.snapshot)
         candidateSnapshots.push(candidateDetail.snapshot)
-        diffs.push(compareSnapshots(baseDetail.snapshot, candidateDetail.snapshot))
+        diffs.push(compareSnapshots(baseDetail.snapshot, candidateDetail.snapshot, config))
       }
     }
 
@@ -362,103 +431,146 @@ async function runScenario({ scenario, config, browser, baseline, candidate }) {
   }
 }
 
-async function captureBaselinePlans({ scenarios, config, browser, app }) {
-  const snapshots = []
-  const plans = []
+async function runScenariosSequentialByPage({ scenarios, config, browser, baseline, candidate, state }) {
+  const baselineSnapshots = []
+  const candidateSnapshots = []
+  const diffs = []
 
   for (const scenario of scenarios) {
-    console.log('[parity-compare] Recording baseline ' + scenario.id)
-    const context = await createContext(browser, scenario)
-    let pageResult = null
-
-    try {
-      pageResult = await openAndCapture({
-        app,
-        context,
-        scenario,
-        pageId: scenario.id,
-        pathName: scenario.path,
-        waitFor: scenario.waitFor,
-        waitTimeoutMs: config.waitTimeoutMs,
-        keepPage: true,
-      })
-
-      snapshots.push(pageResult.snapshot)
-      plans.push({
-        pageId: scenario.id,
-        scenario,
-        pathName: scenario.path,
-        waitFor: scenario.waitFor,
-      })
-
-      for (const follow of scenario.follow || []) {
-        const links = await extractFollowLinks(pageResult.page, follow.selector)
-        const limited = limitFollowLinks(links, follow, config)
-
-        console.log('[parity-compare] ' + scenario.id + ' follow ' + follow.id + ': ' + limited.length + ' pages')
-
-        for (let index = 0; index < limited.length; index += 1) {
-          const link = limited[index]
-          const detailPath = pathFromUrl(link.href)
-          const pageId = scenario.id + '/' + follow.id + '/' + String(index + 1).padStart(4, '0') + '-' + sanitizeFilePart(link.key || 'item')
-          const label = (follow.label || follow.id) + ' ' + (link.key || index + 1)
-          const detailScenario = { ...scenario, label }
-
-          const detail = await openAndCapture({
-            app,
-            context,
-            scenario: detailScenario,
-            pageId,
-            pathName: detailPath,
-            waitFor: follow.waitFor || scenario.waitFor,
-            waitTimeoutMs: config.waitTimeoutMs,
-          })
-
-          snapshots.push(detail.snapshot)
-          plans.push({
-            pageId,
-            scenario: detailScenario,
-            pathName: detailPath,
-            waitFor: follow.waitFor || scenario.waitFor,
-          })
-        }
-      }
+    console.log('[parity-compare] Running ' + scenario.id + ' page-by-page')
+    const mainPlan = {
+      pageId: scenario.id,
+      scenario,
+      pathName: scenario.path,
+      waitFor: scenario.waitFor,
     }
-    finally {
-      await pageResult?.page?.close().catch(() => {})
-      await context.close()
+    const baselineResult = await capturePlanAndFollowPlans({
+      appDefinition: baseline,
+      config,
+      browser,
+      plan: mainPlan,
+      follows: scenario.follow || [],
+      state,
+    })
+    const candidateSnapshot = await capturePlanSequential({
+      appDefinition: candidate,
+      config,
+      browser,
+      plan: mainPlan,
+      state,
+    })
+
+    baselineSnapshots.push(baselineResult.snapshot)
+    candidateSnapshots.push(candidateSnapshot)
+    diffs.push(compareSnapshots(baselineResult.snapshot, candidateSnapshot, config))
+
+    for (const followPlan of baselineResult.followPlans) {
+      const baselineDetail = await capturePlanSequential({
+        appDefinition: baseline,
+        config,
+        browser,
+        plan: followPlan,
+        state,
+      })
+      const candidateDetail = await capturePlanSequential({
+        appDefinition: candidate,
+        config,
+        browser,
+        plan: followPlan,
+        state,
+      })
+
+      baselineSnapshots.push(baselineDetail)
+      candidateSnapshots.push(candidateDetail)
+      diffs.push(compareSnapshots(baselineDetail, candidateDetail, config))
     }
   }
 
-  return { snapshots, plans }
+  return {
+    baseline: baselineSnapshots,
+    candidate: candidateSnapshots,
+    diffs,
+  }
 }
 
-async function capturePlans({ plans, config, browser, app }) {
-  const snapshots = []
+async function capturePlanAndFollowPlans({ appDefinition, config, browser, plan, follows, state }) {
+  const app = await startOrAttach(appDefinition, config)
+  state.apps = [app]
+  const context = await createContext(browser, plan.scenario)
+  let pageResult = null
 
-  for (const plan of plans) {
+  try {
     console.log('[parity-compare] Capturing ' + app.name + ' ' + plan.pageId)
-    const context = await createContext(browser, plan.scenario)
+    pageResult = await openAndCapture({
+      app,
+      context,
+      scenario: plan.scenario,
+      pageId: plan.pageId,
+      pathName: plan.pathName,
+      waitFor: plan.waitFor,
+      waitTimeoutMs: config.waitTimeoutMs,
+      keepPage: true,
+    })
 
-    try {
-      const result = await openAndCapture({
-        app,
-        context,
-        scenario: plan.scenario,
-        pageId: plan.pageId,
-        pathName: plan.pathName,
-        waitFor: plan.waitFor,
-        waitTimeoutMs: config.waitTimeoutMs,
-      })
+    const followPlans = []
+    for (const follow of follows) {
+      const links = await extractFollowLinks(pageResult.page, follow.selector)
+      const limited = limitFollowLinks(links, follow, config)
 
-      snapshots.push(result.snapshot)
+      console.log('[parity-compare] ' + plan.pageId + ' follow ' + follow.id + ': ' + limited.length + ' pages')
+
+      for (let index = 0; index < limited.length; index += 1) {
+        const link = limited[index]
+        const detailPath = pathFromUrl(link.href)
+        const pageId = plan.pageId + '/' + follow.id + '/' + String(index + 1).padStart(4, '0') + '-' + sanitizeFilePart(link.key || 'item')
+        const label = (follow.label || follow.id) + ' ' + (link.key || index + 1)
+
+        followPlans.push({
+          pageId,
+          scenario: { ...plan.scenario, label },
+          pathName: detailPath,
+          waitFor: follow.waitFor || plan.waitFor,
+        })
+      }
     }
-    finally {
-      await context.close()
+
+    return {
+      snapshot: pageResult.snapshot,
+      followPlans,
     }
   }
+  finally {
+    await pageResult?.page?.close().catch(() => {})
+    await context.close()
+    await stopServer(app.serverProcess)
+    state.apps = []
+  }
+}
 
-  return snapshots
+async function capturePlanSequential({ appDefinition, config, browser, plan, state }) {
+  const app = await startOrAttach(appDefinition, config)
+  state.apps = [app]
+  const context = await createContext(browser, plan.scenario)
+
+  try {
+    console.log('[parity-compare] Capturing ' + app.name + ' ' + plan.pageId)
+    const result = await openAndCapture({
+      app,
+      context,
+      scenario: plan.scenario,
+      pageId: plan.pageId,
+      pathName: plan.pathName,
+      waitFor: plan.waitFor,
+      waitTimeoutMs: config.waitTimeoutMs,
+    })
+
+    return result.snapshot
+  }
+  finally {
+    await context.close()
+    await stopServer(app.serverProcess)
+    state.apps = []
+  }
 }
 
 async function createContext(browser, scenario) {
@@ -670,7 +782,7 @@ function scrapePage(meta) {
   }
 }
 
-function compareSnapshots(baseline, candidate) {
+function compareSnapshots(baseline, candidate, config = {}) {
   if (!candidate) {
     return {
       pageId: baseline.pageId,
@@ -704,7 +816,7 @@ function compareSnapshots(baseline, candidate) {
   }
 
   const listDiffs = compareLists(baseline, candidate)
-  const elementDiffs = compareElements(baseline, candidate)
+  const elementDiffs = compareElements(baseline, candidate, config)
   const failedElements = elementDiffs.filter(diff => diff.status !== 'match')
   const failedLists = listDiffs.filter(diff => diff.status !== 'match')
   const captureErrors = [
@@ -772,10 +884,11 @@ function compareLists(baseline, candidate) {
   })
 }
 
-function compareElements(baseline, candidate) {
+function compareElements(baseline, candidate, config = {}) {
   const baselineMap = new Map(baseline.elements.map(element => [element.key, element]))
   const candidateMap = new Map(candidate.elements.map(element => [element.key, element]))
   const keys = Array.from(new Set([...baselineMap.keys(), ...candidateMap.keys()])).sort()
+  const numericTolerance = config.numericTolerance ?? 0.01
 
   return keys.map((key) => {
     const base = baselineMap.get(key)
@@ -799,9 +912,15 @@ function compareElements(baseline, candidate) {
       }
     }
 
-    const valueMatches = base.compareValue === cand.compareValue
-    const textMatches = base.text === cand.text
-    const status = valueMatches && textMatches ? 'match' : 'value-mismatch'
+    const valueComparison = compareComparableValues(base.compareValue, cand.compareValue, numericTolerance)
+    const textComparison = compareComparableValues(base.text, cand.text, numericTolerance)
+    const status = valueComparison.matches && textComparison.matches ? 'match' : 'value-mismatch'
+    const mismatch = status === 'match'
+      ? null
+      : {
+          value: buildMismatchEntry(valueComparison, base.compareValue, cand.compareValue),
+          text: buildMismatchEntry(textComparison, base.text, cand.text),
+        }
 
     return {
       key,
@@ -809,14 +928,78 @@ function compareElements(baseline, candidate) {
       status,
       baseline: summarizeElement(base),
       candidate: summarizeElement(cand),
-      mismatch: status === 'match'
-        ? null
-        : {
-            value: valueMatches ? null : { baseline: base.compareValue, candidate: cand.compareValue },
-            text: textMatches ? null : { baseline: base.text, candidate: cand.text },
-          },
+      mismatch,
     }
   })
+}
+
+function buildMismatchEntry(comparison, baseline, candidate) {
+  if (comparison.matches) return null
+
+  return {
+    baseline,
+    candidate,
+    comparison,
+  }
+}
+
+function compareComparableValues(baseline, candidate, numericTolerance) {
+  if (baseline === candidate) {
+    return { matches: true, mode: 'exact' }
+  }
+
+  const baselineNumber = parseDisplayNumber(baseline)
+  const candidateNumber = parseDisplayNumber(candidate)
+  if (baselineNumber && candidateNumber) {
+    const difference = Math.abs(baselineNumber.value - candidateNumber.value)
+    const denominator = Math.max(Math.abs(baselineNumber.value), Math.abs(candidateNumber.value), Number.EPSILON)
+    const allowedDifference = denominator * numericTolerance
+
+    return {
+      matches: difference <= allowedDifference,
+      mode: 'numeric',
+      tolerance: numericTolerance,
+      baselineNumber: baselineNumber.value,
+      candidateNumber: candidateNumber.value,
+      difference,
+      allowedDifference,
+    }
+  }
+
+  return { matches: false, mode: 'exact' }
+}
+
+function parseDisplayNumber(value) {
+  const text = String(value ?? '').trim()
+  if (!text || /^[-–—]+$/.test(text) || /^n\/?a$/i.test(text)) return null
+
+  const normalized = text.replace(/\u00a0/g, ' ').replaceAll(',', '')
+  const matches = Array.from(normalized.matchAll(/[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi))
+  if (matches.length !== 1) return null
+
+  const match = matches[0]
+  const before = normalized.slice(0, match.index)
+  const after = normalized.slice((match.index || 0) + match[0].length)
+  if (!/^[\s$€£¥₿~≈<>+-]*$/.test(before)) return null
+
+  const suffixMatch = after.match(/^\s*([kKmMbBtT])?([xX])?\s*%?\s*$/)
+  if (!suffixMatch || (suffixMatch[1] && suffixMatch[2])) return null
+
+  const parsed = Number(match[0])
+  if (!Number.isFinite(parsed)) return null
+
+  const suffix = suffixMatch[1]?.toLowerCase()
+  const multiplier = suffix === 'k'
+    ? 1_000
+    : suffix === 'm'
+      ? 1_000_000
+      : suffix === 'b'
+        ? 1_000_000_000
+        : suffix === 't'
+          ? 1_000_000_000_000
+          : 1
+
+  return { value: parsed * multiplier }
 }
 
 function summarizeElement(element) {
@@ -833,7 +1016,7 @@ function summarizeElement(element) {
   }
 }
 
-function buildDiff({ run, outputDir, baselineSnapshots, candidateSnapshots, pageDiffs }) {
+function buildDiff({ run, config, outputDir, baselineSnapshots, candidateSnapshots, pageDiffs }) {
   const failedPages = pageDiffs.filter(page => page.status !== 'pass')
 
   return {
@@ -860,6 +1043,7 @@ function buildDiff({ run, outputDir, baselineSnapshots, candidateSnapshots, page
       missingInCandidate: pageDiffs.reduce((total, page) => total + page.summary.missingInCandidate, 0),
       extraInCandidate: pageDiffs.reduce((total, page) => total + page.summary.extraInCandidate, 0),
       valueMismatches: pageDiffs.reduce((total, page) => total + page.summary.valueMismatches, 0),
+      numericTolerance: config.numericTolerance,
     },
     pages: pageDiffs,
     pagesWithDiscrepancies: failedPages.map(page => ({
@@ -1042,6 +1226,19 @@ function numberOrNull(value) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+function parseNumericTolerance(value) {
+  const raw = String(value ?? '').trim()
+  const parsed = raw.endsWith('%')
+    ? Number(raw.slice(0, -1)) / 100
+    : Number(raw)
+
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error('Invalid numeric tolerance: ' + value)
+  }
+
+  return parsed
+}
+
 function startDevServer(dir, host, port) {
   const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
   const child = spawn(npmCommand, ['run', 'dev', '--', '--host', host, '--port', String(port)], {
@@ -1206,9 +1403,11 @@ Options:
   --baseline-url <url>        Attach to a running baseline app.
   --candidate-url <url>       Attach to a running candidate app.
   --output-dir <dir>          Artifact directory. Default: artifacts/parity/<timestamp>
+  --env-file <file[,file]>    Load app env from root-relative file(s). Default: .env. Use "none" to disable.
   --max-follow-items <n>      Limit list item detail pages. Default: all.
   --wait-timeout-ms <n>       Per-selector wait timeout. Default: 45000.
-  --sequential                Capture baseline first, then candidate, to avoid two dev watchers.
+  --numeric-tolerance <n|%>   Relative tolerance for numeric values. Default: 1%.
+  --sequential                Capture baseline/candidate page-by-page to avoid two dev watchers.
   --headed                    Show browser.
   --no-fail                   Exit 0 even when diffs are found.
   --skip-install              Do not run npm ci in missing-node_modules worktrees.
@@ -1222,6 +1421,8 @@ Artifacts:
 Environment:
   PARITY_SPY_ADDRESS          Enables recorded portfolio spy scenarios.
   PARITY_BASELINE_BRANCH      Baseline branch when --baseline-* is omitted.
+  PARITY_ENV_FILE             Same as --env-file.
+  PARITY_NUMERIC_TOLERANCE    Same as --numeric-tolerance.
   PARITY_HEADED=1             Show browser.
 `)
 }
