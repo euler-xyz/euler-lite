@@ -1,12 +1,6 @@
 import {
   DEFILLAMA_YIELDS_URL,
-  BREVIS_API_URL,
-  BREVIS_MERKLE_PROOF_URL,
-  FUUL_API_BASE_URL,
-  FUUL_FACTORY_ADDRESS,
-  FUUL_MANAGER_ADDRESS,
   MERKL_API_BASE_URL,
-  MERKL_DISTRIBUTOR_ADDRESS,
 } from '~/entities/constants'
 
 export const useEulerConfig = () => {
@@ -23,9 +17,6 @@ export const useEulerConfig = () => {
   return {
     // APIs (from constants)
     DEFILLAMA_YIELDS_URL,
-    BREVIS_API_URL,
-    BREVIS_MERKLE_PROOF_URL,
-    FUUL_API_BASE_URL,
     MERKL_API_BASE_URL,
 
     // Labels
@@ -38,8 +29,5 @@ export const useEulerConfig = () => {
 
     // Chain-specific (computed)
     SUBGRAPH_URL: computed(() => subgraphUris[String(chainId.value)] || '').value,
-    MERKL_ADDRESS: MERKL_DISTRIBUTOR_ADDRESS,
-    FUUL_MANAGER_ADDRESS,
-    FUUL_FACTORY_ADDRESS,
   }
 }

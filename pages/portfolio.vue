@@ -20,7 +20,7 @@ const {
   isShowAllPositions,
   refreshAllPositions,
 } = useEulerAccount()
-const { rewards } = useMerkl()
+const { rewards } = useSdkRewards()
 const { locks } = useREULLocks()
 const { isConnected, address } = useAccount()
 const { isLoaded: isBalancesLoaded, updateBalances } = useWallets()

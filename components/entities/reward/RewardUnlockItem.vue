@@ -104,7 +104,7 @@ const onUnlockClick = async () => {
       }
     }
 
-    // Open the operation review modal (same pattern as Merkl/Brevis)
+    // Open the operation review modal (same pattern as reward claims)
     modal.open(OperationReviewModal, {
       props: {
         type: 'reul-unlock',

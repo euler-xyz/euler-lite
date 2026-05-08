@@ -19,6 +19,7 @@ const cleanUrl = (value: string | undefined) => {
 
 const buildSdkStaticConfig = () => {
   const rc = getPublicRuntimeConfig()
+  const { enableMerkl, enableIncentra, enableFuul } = useDeployConfig()
   const deploymentsUrl = cleanUrl(rc.configEulerChainsUrl)
   const labelsBaseUrl = cleanUrl(rc.configLabelsBaseUrl)
   const oracleChecksBaseUrl = cleanUrl(rc.configOracleChecksBaseUrl)
@@ -26,6 +27,9 @@ const buildSdkStaticConfig = () => {
     ...(deploymentsUrl ? { deploymentsUrl } : {}),
     ...(labelsBaseUrl ? { eulerLabelsBaseUrl: labelsBaseUrl } : {}),
     ...(oracleChecksBaseUrl ? { oracleAdaptersBaseUrl: oracleChecksBaseUrl } : {}),
+    ...(enableMerkl ? {} : { rewardsEnableMerkl: false }),
+    ...(enableIncentra ? {} : { rewardsEnableBrevis: false }),
+    ...(enableFuul ? {} : { rewardsEnableFuul: false }),
   }
 
   return {

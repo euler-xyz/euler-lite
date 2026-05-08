@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
-import type { Campaign } from '~/entities/brevis'
 import { type Address, encodeFunctionData, type Hex } from 'viem'
 
 import type { TxPlan } from '~/entities/txPlan'
@@ -22,7 +21,7 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, amount, onConfirm, plan, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel } = defineProps<{
+const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel } = defineProps<{
   type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
@@ -37,7 +36,6 @@ const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, 
   swapMode?: SwapperMode
   /** Display-side override for which swap amount should receive "~". */
   swapEstimatedSide?: 'input' | 'output'
-  campaignInfo?: Campaign
   reulUnlockInfo?: REULUnlockInfo
   onConfirm: () => void | Promise<void>
   subAccount?: string

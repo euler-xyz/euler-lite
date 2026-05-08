@@ -8,6 +8,9 @@ type BuildEulerSDKOptions = {
     deploymentsUrl?: string
     eulerLabelsBaseUrl?: string
     oracleAdaptersBaseUrl?: string
+    rewardsEnableMerkl?: boolean
+    rewardsEnableBrevis?: boolean
+    rewardsEnableFuul?: boolean
   }
   rpcUrls?: Record<number, string>
   deploymentServiceConfig?: unknown
@@ -42,6 +45,11 @@ const importUseEulerSdk = async (
     createPythPlugin: vi.fn(() => ({ name: 'pyth' })),
   }))
   vi.stubGlobal('useEulerAddresses', () => ({ allowedChainIds: chainIds }))
+  vi.stubGlobal('useDeployConfig', () => ({
+    enableMerkl: true,
+    enableIncentra: true,
+    enableFuul: true,
+  }))
 
   return await import('~/composables/useEulerSdk')
 }
@@ -133,6 +141,35 @@ describe('useEulerSdk', () => {
         1: '/api/rpc/1',
       },
     })
+  })
+
+  it('passes disabled reward providers through SDK config only when disabled', async () => {
+    const chainIds = ref([1])
+    const sdk: MockSdk = { id: 'rewards-disabled' }
+    const buildEulerSDK = vi.fn().mockResolvedValue(sdk)
+    vi.stubGlobal('useRuntimeConfig', () => ({
+      public: {
+        configEulerChainsUrl: '',
+        configLabelsBaseUrl: '',
+        configOracleChecksBaseUrl: '',
+      },
+    }))
+
+    const { getEulerSdk } = await importUseEulerSdk(chainIds, buildEulerSDK)
+    vi.stubGlobal('useDeployConfig', () => ({
+      enableMerkl: false,
+      enableIncentra: true,
+      enableFuul: false,
+    }))
+
+    await expect(getEulerSdk()).resolves.toBe(sdk)
+
+    const options = buildEulerSDK.mock.calls[0]?.[0] as BuildEulerSDKOptions
+    expect(options.config).toMatchObject({
+      rewardsEnableMerkl: false,
+      rewardsEnableFuul: false,
+    })
+    expect(options.config.rewardsEnableBrevis).toBeUndefined()
   })
 
   it('clears a rejected build so the same config can retry', async () => {
