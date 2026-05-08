@@ -53,7 +53,7 @@ const tabs = computed(() => [
     badge: borrowPositions.value.length || null,
   },
   {
-    label: 'Savings',
+    label: 'Yield',
     value: 'portfolio-saving',
     badge: depositPositions.value.length || null,
   },
