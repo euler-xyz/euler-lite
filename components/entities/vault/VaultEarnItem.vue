@@ -96,6 +96,10 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
     class="block no-underline bg-surface rounded-xl border border-line-default shadow-card transition-all duration-default ease-default hover:shadow-card-hover hover:border-line-emphasis"
     :class="isGeoBlocked ? 'opacity-50' : ''"
     :to="{ path: `/earn/${vault.address}`, query: { network: $route.query.network } }"
+    data-id="vault-list-item"
+    data-list="earn"
+    :data-key="vault.address.toLowerCase()"
+    :data-vault-address="vault.address.toLowerCase()"
   >
     <div class="flex py-16 px-16 pb-12 border-b border-line-subtle">
       <AssetAvatar
@@ -103,7 +107,13 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
         size="40"
       />
       <div class="flex-grow ml-12">
-        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-8">
+        <div
+          class="text-content-tertiary text-p3 mb-4 flex items-center gap-8"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="name"
+          :data-value="displayName"
+        >
           <VaultDisplayName
             :name="displayName"
             :is-unverified="isUnverified"
@@ -121,12 +131,22 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
           </span>
           <RestrictedBadge v-if="isGeoBlocked" />
         </div>
-        <div class="text-h5 text-content-primary">
+        <div
+          class="text-h5 text-content-primary"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="asset-symbol"
+          :data-value="vault.asset.symbol"
+        >
           {{ vault.asset.symbol }}
         </div>
         <div
           v-if="description"
           class="text-p3 text-content-tertiary mt-4 line-clamp-1"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="description"
+          :data-value="description"
         >
           {{ description }}
         </div>
@@ -143,7 +163,13 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
             @click="onSupplyInfoIconClick"
           />
         </div>
-        <div class="text-p2 flex items-center text-accent-600">
+        <div
+          class="text-p2 flex items-center text-accent-600"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="supply-apy"
+          :data-value="nanoToValue(vault.interestRateInfo.supplyAPY, 25) + totalRewardsAPY"
+        >
           <div class="mr-6">
             <VaultPoints :vault="vault" />
           </div>
@@ -185,7 +211,13 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
             :label="entityName"
             :src="entityLogos"
           />
-          <span class="text-p2 text-content-primary truncate">{{ entityName }}</span>
+          <span
+            class="text-p2 text-content-primary truncate"
+            data-id="data-point"
+            :data-key="vault.address.toLowerCase()"
+            data-field="capital-allocator"
+            :data-value="entityName"
+          >{{ entityName }}</span>
         </div>
         <div
           v-else
@@ -194,7 +226,13 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
       </div>
       <div class="flex-1 flex flex-col items-center mobile:items-start">
         <div class="text-content-tertiary text-p3 mb-4">Total supply</div>
-        <div class="text-p2 text-content-primary">
+        <div
+          class="text-p2 text-content-primary"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="total-supply"
+          :data-value="prices.totalSupply"
+        >
           {{ prices.totalSupply }}
         </div>
       </div>
@@ -202,7 +240,13 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
         <div class="text-content-tertiary text-p3 mb-4">
           Available liquidity
         </div>
-        <div class="text-p2 text-content-primary">
+        <div
+          class="text-p2 text-content-primary"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="available-liquidity"
+          :data-value="prices.liquidity"
+        >
           {{ prices.liquidity }}
         </div>
       </div>
@@ -213,7 +257,13 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
         <div class="text-content-tertiary text-p3 mb-4">
           Allocates into
         </div>
-        <div class="text-p2 text-content-primary">
+        <div
+          class="text-p2 text-content-primary"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="allocates-into"
+          :data-value="vault.strategies.length"
+        >
           {{ vault.strategies.length }} {{ vault.strategies.length === 1 ? 'strategy' : 'strategies' }}
         </div>
       </div>
@@ -224,7 +274,13 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
             :loading="isBalancesLoading"
             style="width: 70px; height: 20px"
           >
-            <div class="text-p2 text-content-primary">
+            <div
+              class="text-p2 text-content-primary"
+              data-id="data-point"
+              :data-key="vault.address.toLowerCase()"
+              data-field="wallet-balance"
+              :data-value="prices.walletBalance"
+            >
               {{ prices.walletBalance }}
             </div>
           </BaseLoadableContent>

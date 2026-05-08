@@ -93,6 +93,10 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
     v-if="vault"
     :class="[size === 'large' ? 'gap-16' : 'gap-12']"
     class="flex items-center"
+    data-id="vault-header"
+    :data-key="pairVault ? `${vault.address.toLowerCase()}:${pairVault.address.toLowerCase()}` : vault.address.toLowerCase()"
+    :data-vault-address="vault.address.toLowerCase()"
+    :data-pair-vault-address="pairVault?.address.toLowerCase()"
   >
     <BackButton
       v-if="back"
@@ -106,7 +110,13 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
 
     <div>
       <div class="flex items-center gap-8 mb-4">
-        <span class="text-content-tertiary">
+        <span
+          class="text-content-tertiary"
+          data-id="data-point"
+          :data-key="pairVault ? `${vault.address.toLowerCase()}:${pairVault.address.toLowerCase()}` : vault.address.toLowerCase()"
+          data-field="name"
+          :data-value="pairVault ? displayLabel : displayName"
+        >
           <VaultDisplayName
             :name="pairVault ? displayLabel : displayName"
             :is-unverified="(!!vault && !isVerifiedVault(vault.address)) || !!(pairVault && !isVerifiedVault(pairVault.address))"
@@ -136,7 +146,13 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
         <slot />
       </div>
 
-      <p class="text-p2 font-semibold text-content-primary">
+      <p
+        class="text-p2 font-semibold text-content-primary"
+        data-id="data-point"
+        :data-key="pairVault ? `${vault.address.toLowerCase()}:${pairVault.address.toLowerCase()}` : vault.address.toLowerCase()"
+        data-field="asset-symbols"
+        :data-value="displayAssetsLabel"
+      >
         {{ displayAssetsLabel }}
       </p>
     </div>

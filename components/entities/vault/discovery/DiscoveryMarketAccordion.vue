@@ -427,11 +427,21 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-8">
+  <div
+    class="flex flex-col gap-8"
+    data-id="discovery-market-list"
+    :data-count="markets.length"
+  >
     <article
       v-for="market in markets"
       :key="market.id"
       class="bg-surface rounded-12 border border-line-default shadow-card transition-all"
+      data-id="discovery-market-list-item"
+      :data-key="market.id"
+      :data-market-id="market.id"
+      :data-vault-count="market.vaults.length"
+      :data-external-collateral-count="market.externalCollateral.length"
+      :data-pair-count="getMiniDiagram(market).pairCount"
       :class="isExpanded(market.id) ? 'shadow-card-hover border-line-emphasis' : 'hover:shadow-card-hover hover:border-line-emphasis'"
     >
       <!-- Collapsed Row Card -->

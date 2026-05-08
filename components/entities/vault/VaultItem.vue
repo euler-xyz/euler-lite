@@ -16,7 +16,7 @@ import { isCyclicalNoteVault } from '~/utils/vault/classification'
 import { getAddress } from 'viem'
 
 const { isConnected } = useAccount()
-const { vault } = defineProps<{ vault: EVault }>()
+const { vault, type = 'lend' } = defineProps<{ vault: EVault, type?: 'lend' | 'borrow' }>()
 const vaultAddress = computed(() => vault.address)
 const product = useEulerProductOfVault(vaultAddress)
 const { enableEntityBranding } = useDeployConfig()
@@ -159,6 +159,10 @@ watchEffect(async () => {
     class="block no-underline text-content-primary bg-surface rounded-12 border border-line-default shadow-card hover:shadow-card-hover hover:border-line-emphasis transition-all"
     :class="isGeoBlocked ? 'opacity-50' : ''"
     :to="{ path: `/lend/${vault.address}`, query: { network: $route.query.network } }"
+    data-id="vault-list-item"
+    :data-list="type"
+    :data-key="vault.address.toLowerCase()"
+    :data-vault-address="vault.address.toLowerCase()"
   >
     <div class="flex pb-12 p-16 border-b border-line-subtle">
       <AssetAvatar
@@ -166,7 +170,13 @@ watchEffect(async () => {
         size="40"
       />
       <div class="flex-grow ml-12">
-        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-8">
+        <div
+          class="text-content-tertiary text-p3 mb-4 flex items-center gap-8"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="name"
+          :data-value="displayName"
+        >
           <VaultDisplayName
             :name="displayName"
             :is-unverified="isUnverified"
@@ -198,7 +208,13 @@ watchEffect(async () => {
             Deprecated
           </span>
         </div>
-        <div class="text-h5 text-content-primary">
+        <div
+          class="text-h5 text-content-primary"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="asset-symbol"
+          :data-value="vault.asset.symbol"
+        >
           {{ vault.asset.symbol }}
         </div>
       </div>
@@ -215,7 +231,13 @@ watchEffect(async () => {
           <div class="mr-6">
             <VaultPoints :vault="vault" />
           </div>
-          <div class="text-p2 flex items-center text-accent-600 font-semibold">
+          <div
+            class="text-p2 flex items-center text-accent-600 font-semibold"
+            data-id="data-point"
+            :data-key="vault.address.toLowerCase()"
+            data-field="supply-apy"
+            :data-value="supplyApyWithRewards"
+          >
             <SvgIcon
               v-if="hasRewards"
               class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
@@ -256,7 +278,13 @@ watchEffect(async () => {
             :label="entityName"
             :src="entityLogos"
           />
-          <span class="text-p2 text-content-primary truncate">{{ entityName }}</span>
+          <span
+            class="text-p2 text-content-primary truncate"
+            data-id="data-point"
+            :data-key="vault.address.toLowerCase()"
+            data-field="risk-manager"
+            :data-value="entityName"
+          >{{ entityName }}</span>
         </div>
         <div
           v-else
@@ -271,7 +299,13 @@ watchEffect(async () => {
             tooltip-placement="top-start"
           />
         </div>
-        <div class="text-p2 text-content-primary">
+        <div
+          class="text-p2 text-content-primary"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="total-supply"
+          :data-value="prices.totalSupply"
+        >
           {{ prices.totalSupply }}
         </div>
       </div>
@@ -282,7 +316,13 @@ watchEffect(async () => {
         <div class="text-content-tertiary text-p3 mb-4">
           Available liquidity
         </div>
-        <div class="text-p2 text-content-primary">
+        <div
+          class="text-p2 text-content-primary"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="available-liquidity"
+          :data-value="prices.liquidity"
+        >
           {{ prices.liquidity }}
         </div>
       </div>
@@ -302,7 +342,13 @@ watchEffect(async () => {
             :value="utilization"
             :max="100"
           />
-          <div class="text-p2 text-content-primary">
+          <div
+            class="text-p2 text-content-primary"
+            data-id="data-point"
+            :data-key="vault.address.toLowerCase()"
+            data-field="utilization"
+            :data-value="utilization"
+          >
             {{ compactNumber(utilization, 2, 2) }}%
           </div>
         </div>
@@ -333,6 +379,10 @@ watchEffect(async () => {
           <span
             v-if="collateralOverflowCount > 0"
             class="text-p3 text-content-tertiary whitespace-nowrap"
+            data-id="data-point"
+            :data-key="vault.address.toLowerCase()"
+            data-field="collateral-exposure-overflow"
+            :data-value="collateralOverflowCount"
           >
             & {{ collateralOverflowCount }} more
           </span>
@@ -464,7 +514,13 @@ watchEffect(async () => {
             :loading="isBalancesLoading"
             style="min-width: 70px; height: 20px"
           >
-            <div class="text-p2 text-content-primary whitespace-nowrap">
+            <div
+              class="text-p2 text-content-primary whitespace-nowrap"
+              data-id="data-point"
+              :data-key="vault.address.toLowerCase()"
+              data-field="wallet-balance"
+              :data-value="prices.walletBalance"
+            >
               {{ prices.walletBalance }}
             </div>
           </BaseLoadableContent>

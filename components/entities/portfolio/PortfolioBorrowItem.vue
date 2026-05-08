@@ -43,6 +43,9 @@ const collateralVault = computed(() => position.collateralVault as EVault | Secu
 const collateralAddresses = computed(() => position.collateralVaults)
 const primaryCollateralAddress = computed(() => collateralVault.value.address)
 const borrowAddress = computed(() => borrowVault.value.address)
+const positionKey = computed(() =>
+  `${position.subAccount.toLowerCase()}:${primaryCollateralAddress.value.toLowerCase()}:${borrowAddress.value.toLowerCase()}`,
+)
 const supplied = computed(() => position.supplied)
 const borrowed = computed(() => position.borrowed)
 const health = computed(() => position.healthFactor)
@@ -325,6 +328,12 @@ const onRoeClick = () => {
   <NuxtLink
     :to="{ path: `/position/${subAccountIndex}`, query: { network: $route.query.network } }"
     class="block no-underline bg-surface rounded-xl border border-line-subtle shadow-card transition-all duration-default ease-default hover:shadow-card-hover hover:border-line-emphasis"
+    data-id="portfolio-list-item"
+    data-list="borrow"
+    :data-key="positionKey"
+    :data-sub-account="position.subAccount.toLowerCase()"
+    :data-collateral-address="position.collateral.address.toLowerCase()"
+    :data-borrow-address="position.borrow.address.toLowerCase()"
   >
     <div class="flex py-16 px-16 pb-12 border-b border-line-default">
       <div
@@ -332,6 +341,10 @@ const onRoeClick = () => {
       >
         <div
           class="text-h6 text-content-secondary bg-surface-secondary py-4 px-12 rounded-8 border border-line-default"
+          data-id="data-point"
+          :data-key="positionKey"
+          data-field="position-index"
+          :data-value="subAccountIndex"
         >
           Position {{ subAccountIndex }}
         </div>
@@ -341,7 +354,13 @@ const onRoeClick = () => {
             size="40"
           />
           <div class="flex-grow min-w-0">
-            <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+            <div
+              class="text-content-tertiary text-p3 mb-4 flex items-center gap-4"
+              data-id="data-point"
+              :data-key="positionKey"
+              data-field="name"
+              :data-value="pairName"
+            >
               <VaultDisplayName
                 :name="pairName"
                 :is-unverified="isAnyUnverified"
@@ -369,7 +388,13 @@ const onRoeClick = () => {
                 Deprecated
               </span>
             </div>
-            <div class="text-h5 text-content-primary truncate">
+            <div
+              class="text-h5 text-content-primary truncate"
+              data-id="data-point"
+              :data-key="positionKey"
+              data-field="asset-symbols"
+              :data-value="pairSymbols"
+            >
               {{ pairSymbols }}
             </div>
           </div>
@@ -385,6 +410,10 @@ const onRoeClick = () => {
               </div>
               <div
                 class="text-p2 flex items-center"
+                data-id="data-point"
+                :data-key="positionKey"
+                data-field="net-apy"
+                :data-value="Number.isFinite(netAPY) ? netAPY : null"
                 :class="[netAPY >= 0 ? 'text-accent-600' : 'text-error-500']"
               >
                 <SvgIcon
@@ -407,6 +436,10 @@ const onRoeClick = () => {
               </div>
               <div
                 class="text-p2 flex items-center"
+                data-id="data-point"
+                :data-key="positionKey"
+                data-field="roe"
+                :data-value="Number.isFinite(roe) ? roe : null"
                 :class="[roe >= 0 ? 'text-accent-600' : 'text-error-500']"
               >
                 <SvgIcon
@@ -449,7 +482,13 @@ const onRoeClick = () => {
             Net asset value
           </div>
           <div class="flex justify-between gap-8 text-right">
-            <div class="text-content-primary text-p3">
+            <div
+              class="text-content-primary text-p3"
+              data-id="data-point"
+              :data-key="positionKey"
+              data-field="net-asset-value"
+              :data-value="netAssetValueDisplay"
+            >
               {{ netAssetValueDisplay }}
             </div>
           </div>
@@ -459,7 +498,13 @@ const onRoeClick = () => {
             My Debt
           </div>
           <div class="flex justify-between gap-8 text-right">
-            <div class="text-content-primary text-p3">
+            <div
+              class="text-content-primary text-p3"
+              data-id="data-point"
+              :data-key="positionKey"
+              data-field="debt-value"
+              :data-value="borrowedValueDisplay"
+            >
               {{ borrowedValueDisplay }}
             </div>
             <UiExactAmount
@@ -477,7 +522,13 @@ const onRoeClick = () => {
             Collateral value
           </div>
           <div class="flex justify-between gap-8 text-right">
-            <div class="text-content-primary text-p3">
+            <div
+              class="text-content-primary text-p3"
+              data-id="data-point"
+              :data-key="positionKey"
+              data-field="collateral-value"
+              :data-value="collateralValueDisplay"
+            >
               <template v-if="collateralValue.hasPrice">
                 {{ collateralValueDisplay }}
               </template>
@@ -502,7 +553,13 @@ const onRoeClick = () => {
           <div class="text-content-tertiary text-p3">
             Health score
           </div>
-          <div class="text-content-primary text-p3">
+          <div
+            class="text-content-primary text-p3"
+            data-id="data-point"
+            :data-key="positionKey"
+            data-field="health-score"
+            :data-value="hasQueryFailure ? 'Unknown' : nanoToValue(position.health, 18)"
+          >
             <span
               v-if="hasQueryFailure || health === undefined"
               class="text-warning-500"
@@ -529,7 +586,13 @@ const onRoeClick = () => {
                 size="small"
               />
               <div class="flex justify-between gap-8 text-right">
-                <div class="text-content-primary text-p3">
+                <div
+                  class="text-content-primary text-p3"
+                  data-id="data-point"
+                  :data-key="positionKey"
+                  data-field="ltv"
+                  :data-value="`${userLTV}/${liquidationLTVPercent}`"
+                >
                   {{ formatNumber(userLTV, 2) }}/{{ liquidationLTVPercent }}%
                 </div>
               </div>

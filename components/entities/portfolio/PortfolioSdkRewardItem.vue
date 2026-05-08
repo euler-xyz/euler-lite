@@ -10,6 +10,9 @@ import { formatNumber, formatUsdValue } from '~/utils/string-utils'
 import { getRewardPlanKind, getRewardProviderLabel } from '~/utils/sdk-rewards'
 
 const { reward } = defineProps<{ reward: UserReward }>()
+const rewardKey = computed(() =>
+  `${reward.chainId}:${reward.provider}:${reward.token.address.toLowerCase()}:${reward.unclaimed}`,
+)
 
 const { buildClaimRewardPlan, refreshRewards } = useSdkRewards()
 const { executeTxPlan } = useEulerOperations()
@@ -113,7 +116,13 @@ const onClaimClick = async () => {
 </script>
 
 <template>
-  <div class="bg-surface rounded-xl border border-line-subtle shadow-card p-16">
+  <div
+    class="bg-surface rounded-xl border border-line-subtle shadow-card p-16"
+    data-id="portfolio-list-item"
+    data-list="sdk-rewards"
+    :data-key="rewardKey"
+    :data-token-address="reward.token.address.toLowerCase()"
+  >
     <div class="flex flex-col gap-12">
       <div class="flex justify-between items-center mb-12">
         <AssetAvatar
@@ -129,18 +138,42 @@ const onClaimClick = async () => {
           {{ reward.token.symbol[0].toUpperCase() }}
         </div>
         <div class="ml-12">
-          <h4 class="text-h5 text-content-primary">
+          <h4
+            class="text-h5 text-content-primary"
+            data-id="data-point"
+            :data-key="rewardKey"
+            data-field="reward-symbol"
+            :data-value="reward.token.symbol"
+          >
             {{ reward.token.symbol }}
           </h4>
-          <p class="text-p3 text-content-tertiary">
+          <p
+            class="text-p3 text-content-tertiary"
+            data-id="data-point"
+            :data-key="rewardKey"
+            data-field="reward-provider"
+            :data-value="providerLabel"
+          >
             {{ providerLabel }}
           </p>
         </div>
         <div class="flex flex-col gap-8 ml-auto text-right">
-          <p class="text-p2 text-content-primary">
+          <p
+            class="text-p2 text-content-primary"
+            data-id="data-point"
+            :data-key="rewardKey"
+            data-field="reward-usd-value"
+            :data-value="rewardUsdValue"
+          >
             {{ formatUsdValue(rewardUsdValue) }}
           </p>
-          <p class="text-p3 text-content-tertiary">
+          <p
+            class="text-p3 text-content-tertiary"
+            data-id="data-point"
+            :data-key="rewardKey"
+            data-field="reward-amount"
+            :data-value="rewardAmount"
+          >
             ~ {{ rewardAmount < 0.01 ? '< 0.01' : formatNumber(rewardAmount, 2) }} {{ reward.token.symbol }}
           </p>
         </div>

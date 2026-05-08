@@ -119,6 +119,10 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
 <template>
   <button
     class="w-full text-left cursor-pointer p-16"
+    data-id="discovery-market-card"
+    :data-key="market.id"
+    :data-market-id="market.id"
+    :data-expanded="isExpanded"
     @click="$emit('toggle')"
   >
     <div class="flex items-center pb-12 border-b border-line-subtle">
@@ -137,7 +141,13 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
           class="flex-grow min-w-0"
           :class="marketEntities.logos.length > 0 ? 'ml-12' : ''"
         >
-          <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-8">
+          <div
+            class="text-content-tertiary text-p3 mb-4 flex items-center gap-8"
+            data-id="data-point"
+            :data-key="market.id"
+            data-field="market-entity"
+            :data-value="marketEntities.name || market.curator?.name || 'Ungrouped'"
+          >
             <span
               v-if="marketEntities.name"
               :class="{ 'opacity-20': isGovernanceLimited }"
@@ -161,12 +171,22 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
             </span>
             <GovernanceLimitedBadge v-if="isGovernanceLimited" />
           </div>
-          <div class="text-h5 text-content-primary">
+          <div
+            class="text-h5 text-content-primary"
+            data-id="data-point"
+            :data-key="market.id"
+            data-field="market-name"
+            :data-value="market.name"
+          >
             {{ market.name }}
           </div>
           <div
             v-if="getProductDescription(market)"
             class="text-p3 text-content-tertiary mt-4"
+            data-id="data-point"
+            :data-key="market.id"
+            data-field="market-description"
+            :data-value="getProductDescription(market)"
             :class="isExpanded ? '' : 'line-clamp-1'"
           >
             {{ getProductDescription(market) }}
@@ -178,8 +198,19 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
         :key="'counts-' + diagramIdx"
       >
         <div class="flex flex-col items-end shrink-0 ml-12 text-content-tertiary text-p3">
-          <span>{{ diagram.assetCount }} assets</span>
-          <span class="text-content-muted">{{ diagram.pairCount }} pairs</span>
+          <span
+            data-id="data-point"
+            :data-key="market.id"
+            data-field="asset-count"
+            :data-value="diagram.assetCount"
+          >{{ diagram.assetCount }} assets</span>
+          <span
+            class="text-content-muted"
+            data-id="data-point"
+            :data-key="market.id"
+            data-field="pair-count"
+            :data-value="diagram.pairCount"
+          >{{ diagram.pairCount }} pairs</span>
           <span
             v-if="getDeprecatedVaultCount(market) > 0"
             class="text-warning-500 text-p5 mt-4"
@@ -203,7 +234,13 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
           <div class="text-content-tertiary text-p3 mb-4">
             Total supply
           </div>
-          <div class="text-p2 text-content-primary">
+          <div
+            class="text-p2 text-content-primary"
+            data-id="data-point"
+            :data-key="market.id"
+            data-field="total-supply"
+            :data-value="market.metrics.totalTVL"
+          >
             {{ formatCompactUsdValue(market.metrics.totalTVL) }}
           </div>
         </div>
@@ -211,7 +248,13 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
           <div class="text-content-tertiary text-p3 mb-4">
             Total borrowed
           </div>
-          <div class="text-p2 text-content-primary">
+          <div
+            class="text-p2 text-content-primary"
+            data-id="data-point"
+            :data-key="market.id"
+            data-field="total-borrowed"
+            :data-value="market.metrics.totalBorrowed"
+          >
             {{ formatCompactUsdValue(market.metrics.totalBorrowed) }}
           </div>
         </div>
@@ -219,7 +262,13 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
           <div class="text-content-tertiary text-p3 mb-4">
             Available liquidity
           </div>
-          <div class="text-p2 text-content-primary">
+          <div
+            class="text-p2 text-content-primary"
+            data-id="data-point"
+            :data-key="market.id"
+            data-field="available-liquidity"
+            :data-value="market.metrics.totalAvailableLiquidity"
+          >
             {{ formatCompactUsdValue(market.metrics.totalAvailableLiquidity) }}
           </div>
         </div>
@@ -237,7 +286,13 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
                   @click="onMaxRoeInfoIconClick($event, bestRoe)"
                 />
               </div>
-              <div class="text-p2 text-content-primary flex items-center gap-4 min-w-0">
+              <div
+                class="text-p2 text-content-primary flex items-center gap-4 min-w-0"
+                data-id="data-point"
+                :data-key="market.id"
+                data-field="best-max-roe"
+                :data-value="bestRoe.value"
+              >
                 <SvgIcon
                   v-if="bestRoe.hasRewards"
                   name="sparks"
