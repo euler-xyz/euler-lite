@@ -25,6 +25,7 @@ const props = defineProps<{
   onConfirm: () => void
   onCancel: () => void
 }>()
+const { isSpyMode } = useSpyMode()
 
 const emit = defineEmits<{
   'close': []
@@ -106,6 +107,7 @@ const handleClose = () => {
 }
 
 const handleConfirm = async () => {
+  if (isSpyMode.value) return
   if (internalSubmitting.value) return
   internalSubmitting.value = true
   try {
@@ -117,6 +119,7 @@ const handleConfirm = async () => {
 }
 
 const handleCancel = async () => {
+  if (isSpyMode.value) return
   if (isCancelling.value) return
   isCancelling.value = true
   try {
@@ -220,7 +223,7 @@ const handleCancel = async () => {
           variant="secondary"
           size="xlarge"
           rounded
-          :disabled="isCancelPending"
+          :disabled="isSpyMode || isCancelPending"
           :loading="isCancelPending"
           @click="handleCancel"
         >
@@ -244,11 +247,11 @@ const handleCancel = async () => {
         variant="primary"
         size="xlarge"
         rounded
-        :disabled="isExecuting || internalSubmitting"
+        :disabled="isSpyMode || isExecuting || internalSubmitting"
         :loading="isExecuting || internalSubmitting"
         @click="handleConfirm"
       >
-        {{ isExecuting ? executionLabel : 'Confirm & Sign' }}
+        {{ isSpyMode ? 'Spy mode (read-only)' : (isExecuting ? executionLabel : 'Confirm & Sign') }}
       </UiButton>
     </div>
   </BaseModalWrapper>

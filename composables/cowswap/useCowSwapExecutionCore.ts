@@ -24,6 +24,7 @@ export const useCowSwapExecutionCore = () => {
   const { writeContractAsync } = useWriteContract()
   const { signTypedDataAsync } = useSignTypedData()
   const { prepareTokenApproval } = useEulerOperations()
+  const { isSpyMode } = useSpyMode()
 
   const status = ref<CowSwapExecutionStatus>('idle')
   const orderUid = ref<CowSwapOrderUid | undefined>()
@@ -50,7 +51,14 @@ export const useCowSwapExecutionCore = () => {
     return `https://explorer.cow.fi/orders/${orderUid.value}`
   })
 
+  const assertTransactionsEnabled = () => {
+    if (isSpyMode.value) {
+      throw new Error('Transactions are disabled in spy mode')
+    }
+  }
+
   const requireWallet = () => {
+    assertTransactionsEnabled()
     const userAddress = address.value
     if (!userAddress) throw new Error('Wallet not connected')
     return userAddress as Address
@@ -109,6 +117,7 @@ export const useCowSwapExecutionCore = () => {
     functionName: string
     args?: unknown[]
   }): Promise<Hex> => {
+    assertTransactionsEnabled()
     const client = requireRpc()
     const tx = await writeContractAsync({
       address: params.address,
@@ -191,6 +200,7 @@ export const useCowSwapExecutionCore = () => {
     primaryType: string
     message: Record<string, unknown>
   }): Promise<string> => {
+    assertTransactionsEnabled()
     const signature = await signTypedDataAsync({
       domain: typedData.domain,
       types: typedData.types,
@@ -207,6 +217,7 @@ export const useCowSwapExecutionCore = () => {
     orderbookUrl: string,
     flowChainId: number,
   ): Promise<CowSwapOrderUid> => {
+    assertTransactionsEnabled()
     const uid = await submitCowSwapOrder(payload, orderbookUrl)
     orderUid.value = uid
     submissionChainId.value = flowChainId
@@ -233,6 +244,7 @@ export const useCowSwapExecutionCore = () => {
   }
 
   const cancelOrder = async (): Promise<void> => {
+    assertTransactionsEnabled()
     const uid = orderUid.value
     if (!uid) throw new Error('No order to cancel')
 
@@ -253,6 +265,7 @@ export const useCowSwapExecutionCore = () => {
           settlementContract: config.settlementContract,
           chainId: config.chainId,
           signTypedData: async (params) => {
+            assertTransactionsEnabled()
             return await signTypedDataAsync({
               domain: params.domain as Record<string, unknown>,
               types: params.types as Record<string, unknown>,
