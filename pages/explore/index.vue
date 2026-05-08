@@ -63,7 +63,7 @@ const {
   matchesCustomFilters,
 } = useCustomFilters<MarketGroup>(
   [
-    { key: 'bestMaxROE', label: 'Best max ROE', shortLabel: 'Best max ROE', unit: 'percent' },
+    { key: 'bestMaxROE', label: 'Max ROE', shortLabel: 'Max ROE', unit: 'percent' },
     { key: 'totalTVL', label: 'Total supply', shortLabel: 'Total supply', unit: 'usd' },
     { key: 'totalBorrowed', label: 'Total borrowed', shortLabel: 'Total borrowed', unit: 'usd' },
     { key: 'totalAvailableLiquidity', label: 'Available liquidity', shortLabel: 'Avail. liquidity', unit: 'usd' },
@@ -291,8 +291,8 @@ const { isSlow } = useSlowLoading(isLoading)
           v-model="sortBy"
           v-model:dir="sortDir"
           :options="[
-            { label: 'Recommended', icon: 'sparks' },
-            { label: 'Best Max ROE', icon: 'percent' },
+            { label: 'Active', value: 'Recommended', icon: 'sparks' },
+            { label: 'Max ROE', value: 'Best Max ROE', icon: 'percent' },
             { label: 'Total Supply', icon: 'lend-outline' },
             { label: 'Total Borrowed', icon: 'borrow-outline' },
             { label: 'Available Liquidity', icon: 'wallet' },

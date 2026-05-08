@@ -4,14 +4,19 @@ import { VaultSortTypeModal } from '#components'
 
 const model = defineModel<string>({ required: true })
 const dir = defineModel<'desc' | 'asc'>('dir', { default: 'desc' })
+
+type SortOption = { label: string, value?: string, icon?: string }
+
 const props = defineProps<{
-  options: { label: string, icon?: string }[]
+  options: SortOption[]
   placeholder?: string
   title?: string
   disableDir?: boolean
 }>()
 
 const modal = useModal()
+const optionValue = (option: SortOption) => option.value ?? option.label
+const selectedOption = computed(() => props.options.find(option => optionValue(option) === model.value))
 
 const open = () => {
   modal.open(VaultSortTypeModal, {
@@ -47,7 +52,7 @@ const toggleDir = (e: Event) => {
     <span
       v-if="model"
       class="inline-flex justify-center items-center text-accent-700 text-[14px] font-medium py-2 px-8 bg-accent-300/30 rounded-[100px]"
-    >{{ model }}</span>
+    >{{ selectedOption?.label ?? model }}</span>
     <button
       class="flex items-center justify-center w-20 h-20 rounded-full transition-all"
       :class="disableDir ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:bg-surface-tertiary'"

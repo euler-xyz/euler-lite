@@ -427,7 +427,7 @@ const sortedBorrowList = computed(() => {
           v-model:dir="sortDir"
           class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
           :options="[
-            { label: 'Recommended', icon: 'sparks' },
+            { label: 'Active', value: 'Recommended', icon: 'sparks' },
             { label: 'Liquidity', icon: 'wallet' },
             { label: 'Total Borrowed', icon: 'borrow-outline' },
             { label: 'Utilization', icon: 'pulse' },
