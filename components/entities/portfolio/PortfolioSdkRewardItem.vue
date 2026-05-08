@@ -1,21 +1,22 @@
 <script setup lang="ts">
 import { OperationReviewModal } from '#components'
+import { formatUnits } from 'viem'
+import type { UserReward } from '@eulerxyz/euler-v2-sdk'
+import type { TxPlan } from '~/entities/txPlan'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
-import type { Reward } from '~/entities/merkl'
-import type { TxPlan } from '~/entities/txPlan'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber, formatUsdValue } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
+import { getRewardPlanKind, getRewardProviderLabel } from '~/utils/sdk-rewards'
 
-const { reward } = defineProps<{ reward: Reward }>()
+const { reward } = defineProps<{ reward: UserReward }>()
 
-const { claimReward, loadRewards, buildClaimRewardPlan } = useMerkl()
+const { buildClaimRewardPlan, refreshRewards } = useSdkRewards()
+const { executeTxPlan } = useEulerOperations()
 const { getTokenByAddress } = useTokenList()
 const { isSpyMode } = useSpyMode()
 const modal = useModal()
 const { error } = useToast()
-const { chainId: siteChainId } = useEulerAddresses()
 const { chainId: walletChainId, switchChain } = useWagmi()
 const { runSimulation, simulationError } = useTxPlanSimulation()
 
@@ -23,10 +24,10 @@ const isClaiming = ref(false)
 const isPreparing = ref(false)
 const plan = ref<TxPlan | null>(null)
 
-const amount = computed(() => nanoToValue(reward.amount, reward.token.decimals))
-const claimed = computed(() => nanoToValue(reward.claimed, reward.token.decimals))
-const amountToClaim = computed(() => amount.value - claimed.value)
-const amountInUsd = computed(() => amountToClaim.value * reward.token.price)
+const rewardAmount = computed(() => Number(formatUnits(BigInt(reward.unclaimed), reward.token.decimals)))
+const rewardUsdValue = computed(() => rewardAmount.value * reward.tokenPrice)
+const providerLabel = computed(() => getRewardProviderLabel(reward.provider))
+const planKind = computed(() => getRewardPlanKind(reward.provider))
 const isEulFamily = computed(() => ['rEUL', 'EUL'].includes(reward.token.symbol))
 const externalIconUrl = computed(() => {
   if (isEulFamily.value) return undefined
@@ -35,18 +36,11 @@ const externalIconUrl = computed(() => {
 const hasIcon = computed(() => isEulFamily.value || !!externalIconUrl.value)
 const avatarAsset = computed(() => isEulFamily.value
   ? { address: reward.token.address, symbol: 'EUL' }
-  : { address: reward.token.address, symbol: reward.token.symbol },
-)
+  : { address: reward.token.address, symbol: reward.token.symbol })
 
-const ensureWalletOnSiteChain = async () => {
-  const targetChainId = siteChainId.value
-  if (!targetChainId) {
-    return
-  }
-
-  if (walletChainId.value === targetChainId) {
-    return
-  }
+const ensureWalletOnClaimChain = async () => {
+  const targetChainId = reward.chainId
+  if (walletChainId.value === targetChainId) return
 
   await switchChain({ chainId: targetChainId })
   await until(walletChainId).toBe(targetChainId, { timeout: 8000, throwOnTimeout: false })
@@ -56,13 +50,16 @@ const claim = async () => {
   try {
     isClaiming.value = true
 
-    await claimReward(reward)
+    if (!plan.value) {
+      plan.value = await buildClaimRewardPlan(reward)
+    }
+    await executeTxPlan(plan.value)
     modal.close()
-    loadRewards(siteChainId.value, false, true)
+    await refreshRewards()
   }
   catch (e) {
     error('Transaction failed')
-    logWarn('PortfolioRewardItem/claim', e)
+    logWarn('PortfolioSdkRewardItem/claim', e)
   }
   finally {
     isClaiming.value = false
@@ -73,29 +70,31 @@ const onClaimClick = async () => {
   if (isPreparing.value) return
   isPreparing.value = true
   try {
-    await ensureWalletOnSiteChain()
+    await ensureWalletOnClaimChain()
 
     try {
       plan.value = await buildClaimRewardPlan(reward)
     }
     catch (e) {
-      logWarn('PortfolioRewardItem/buildPlan', e)
+      logWarn('PortfolioSdkRewardItem/buildPlan', e)
       plan.value = null
     }
 
     if (plan.value) {
       const ok = await runSimulation(plan.value)
-      if (!ok) {
-        return
-      }
+      if (!ok) return
     }
 
     modal.open(OperationReviewModal, {
       props: {
-        type: 'reward',
-        asset: reward.token,
+        type: planKind.value,
+        asset: {
+          symbol: reward.token.symbol,
+          address: reward.token.address,
+          decimals: reward.token.decimals,
+        },
         assetIconUrl: externalIconUrl.value,
-        amount: amountToClaim.value,
+        amount: rewardAmount.value,
         plan: plan.value || undefined,
         submittingLabel: 'Claiming...',
         onConfirm: async () => {
@@ -105,7 +104,7 @@ const onClaimClick = async () => {
     })
   }
   catch (e) {
-    logWarn('PortfolioRewardItem/onClaimClick', e)
+    logWarn('PortfolioSdkRewardItem/onClaimClick', e)
   }
   finally {
     isPreparing.value = false
@@ -114,12 +113,8 @@ const onClaimClick = async () => {
 </script>
 
 <template>
-  <div
-    class="bg-surface rounded-xl border border-line-subtle shadow-card p-16"
-  >
-    <div
-      class="flex flex-col gap-12"
-    >
+  <div class="bg-surface rounded-xl border border-line-subtle shadow-card p-16">
+    <div class="flex flex-col gap-12">
       <div class="flex justify-between items-center mb-12">
         <AssetAvatar
           v-if="hasIcon"
@@ -133,15 +128,20 @@ const onClaimClick = async () => {
         >
           {{ reward.token.symbol[0].toUpperCase() }}
         </div>
-        <h4 class="text-h5 ml-12 text-content-primary">
-          {{ reward.token.symbol }}
-        </h4>
+        <div class="ml-12">
+          <h4 class="text-h5 text-content-primary">
+            {{ reward.token.symbol }}
+          </h4>
+          <p class="text-p3 text-content-tertiary">
+            {{ providerLabel }}
+          </p>
+        </div>
         <div class="flex flex-col gap-8 ml-auto text-right">
           <p class="text-p2 text-content-primary">
-            {{ formatUsdValue(amountInUsd) }}
+            {{ formatUsdValue(rewardUsdValue) }}
           </p>
           <p class="text-p3 text-content-tertiary">
-            ~ {{ amountToClaim < 0.01 ? '< 0.01' : formatNumber(amountToClaim, 2) }} {{ reward.token.symbol }}
+            ~ {{ rewardAmount < 0.01 ? '< 0.01' : formatNumber(rewardAmount, 2) }} {{ reward.token.symbol }}
           </p>
         </div>
       </div>

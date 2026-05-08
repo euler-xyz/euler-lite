@@ -24,7 +24,7 @@ export const mapMerklSubType = (subType: number): RewardCampaignType | null =>
 
 export const PROVIDER_LABELS: Record<string, string> = {
   merkl: 'Merkl',
-  brevis: 'Brevis',
+  brevis: 'Incentra',
   fuul: 'Fuul',
 }
 

@@ -31,11 +31,11 @@ Four data sources, each with its own 5-minute TTL cache and in-flight request de
 | Euler API | Per-chain | Primary. Reliable logo URLs. |
 | DefiLlama | Per-chain | Supplemental. |
 | Uniswap | All chains | Supplemental. |
-| Merkl reward-tokens | Per-chain | Fallback. Fills in rEUL and other reward-specific tokens that rarely appear in general-purpose lists. Shares the rewards-cache state used by warm-cache, so in steady state this is a synchronous cache hit. |
+| Merkl reward-tokens | Per-chain | Fallback. Fills in rEUL and other reward-specific tokens that rarely appear in general-purpose lists. This source has its own token-list cache and is warmed through `/api/token-list`. |
 
 All four sources run concurrently via `Promise.allSettled`. Each fetcher has its own 5-minute TTL cache, in-flight dedup, and a 10-second timeout that falls back to the stale cached value. On a warm cache the request returns immediately; on a cold cache the response is bounded by the slowest source and contains whatever resolved in time.
 
-**Startup warming**: `server/plugins/warm-cache.ts` calls `refreshTokenList(chainId)` directly every 5 minutes for each enabled chain. The direct refresh bypasses the handler's fresh-cache short-circuit and always fetches all four sources + rebuilds the merged cache, so the entry is rewritten while the previous one is still serving live traffic. User requests arriving during a refresh continue to read the still-fresh old entry from `mergedCache`. Warming runs fire-and-forget (Nitro's node-server preset doesn't await plugin promises), so caches are typically hot within ~5 s of boot; users arriving before that pay the usual cold-upstream latency.
+**Startup warming**: `server/plugins/warm-cache.ts` calls `refreshTokenList(chainId)` directly every 5 minutes for each enabled chain. The direct refresh bypasses the handler's fresh-cache short-circuit and always fetches all four sources + rebuilds the merged cache, so the entry is rewritten while the previous one is still serving live traffic. User requests arriving during a refresh continue to read the still-fresh previous entry from `mergedCache`. Warming runs fire-and-forget (Nitro's node-server preset doesn't await plugin promises), so caches are typically hot within ~5 s of boot; users arriving before that pay the usual cold-upstream latency.
 
 **Deduplication**: tokens are merged with Euler taking priority. If the same `chainId:address` appears in multiple sources, the higher-priority entry wins. This ensures Euler's metadata (name, symbol, decimals, logo URL) takes precedence over supplemental sources.
 

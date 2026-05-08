@@ -207,11 +207,10 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 | `/api/oracle-adapter` | 5 min | Lazy per-address fetch |
 | `/api/euler-chains` | 5 min | Static chain-agnostic config from `euler-interfaces` repo |
 | `/api/vaults` | 5 min | Pre-computed chain vault snapshot; warm-cache rewrites every 5 min. Handler is read-only — no request-triggered refresh |
-| `/api/rewards/{merkl,brevis,fuul}` | 5 min | Public reward campaigns per provider; see Reward campaigns pipeline below |
 
 Every cacheable proxy above uses the same pattern: TTL cache for fresh hits, stale-cache fallback on upstream failure, and in-flight request deduplication so concurrent cache-miss callers (e.g. warm-cache racing real traffic) collapse onto a single upstream fetch per cache key. The in-flight dedup pattern itself is a shared util — `createInFlightDedup` / `scheduleBackgroundRefresh` in `server/utils/in-flight.ts`.
 
-`server/plugins/warm-cache.ts` pre-populates labels, token-list, `/api/intrinsic-apy`, and reward campaigns for every enabled chain, plus `/api/euler-chains` once globally. Every warm task is a **direct function call** to a `refreshX()` that bypasses the handler's fresh-cache short-circuit and writes straight to the cache. This matters: if warm cycled via HTTP, the handler would short-circuit on the still-fresh entry from the previous cycle (age ≈ 298 s at the 5-min mark) and the entry would then expire with no refresh until the next cycle — leaving a ~5 min stale window per cycle. With direct refresh calls, the cache is always rewritten while the previous entry is still serving live traffic, so user requests arriving during a refresh continue to read the fresh old entry (no blocking on the in-flight refresh). Warming runs fire-and-forget so Nitro's listener is never delayed; caches are typically hot within ~5 s of boot, and users arriving before that just pay the usual cold-upstream latency for whichever endpoints they hit.
+`server/plugins/warm-cache.ts` pre-populates labels, token-list, and `/api/intrinsic-apy` for every enabled chain, plus `/api/euler-chains` once globally. Every warm task is a **direct function call** to a `refreshX()` that bypasses the handler's fresh-cache short-circuit and writes straight to the cache. This matters: if warm cycled via HTTP, the handler would short-circuit on the still-fresh entry from the previous cycle (age ≈ 298 s at the 5-min mark) and the entry would then expire with no refresh until the next cycle — leaving a ~5 min stale window per cycle. With direct refresh calls, the cache is always rewritten while the previous entry is still serving live traffic, so user requests arriving during a refresh continue to read the fresh previous entry (no blocking on the in-flight refresh). Warming runs fire-and-forget so Nitro's listener is never delayed; caches are typically hot within ~5 s of boot, and users arriving before that just pay the usual cold-upstream latency for whichever endpoints they hit.
 
 ### Vault snapshot pipeline
 
@@ -224,22 +223,11 @@ The client composable `useVaults.loadVaults()` runs in two phases:
 
 The public interface of `useVaults()` is unchanged — the 15 exports (`isReady`, `borrowList`, `getVault`, etc.) keep their names, types, and semantics. Vault entities are SDK-owned (`EVault`, `EulerEarn`, `SecuritizeCollateralVault`), while Lite keeps UI-only categorization, LTV, APY, collateral discovery, and presentation helpers under `utils/vault/`.
 
-### Reward campaigns pipeline
+### Reward campaign and claim pipeline
 
-`/api/rewards/{merkl,brevis,fuul}?chainId=X` proxies the three reward providers' **public** campaign surface (chain-scoped, identical for every user). The composables `useMerkl`, `useBrevis`, `useFuul` each do one `$fetch('/api/rewards/<provider>')` per poll instead of the previous 4-6 direct upstream requests per user per poll.
+Reward APRs and account claimable rewards are SDK-owned data. Lite reads reward campaigns through SDK-populated vault entities and reads claimable user rewards from `portfolio.account.userRewards`. Claim plans are built through `sdk.rewardsService.buildClaimPlan(s)` and converted into Lite `TxPlan` steps only at the UI execution boundary.
 
-- **Merkl**: the handler consolidates the three opportunity types (EULER, MULTILENDBORROW, ERC20LOGPROCESSOR — paginated internally up to 10×100 items per type) into one response. The global `/tokens/reward` payload is **not** included here — it flows through `/api/token-list` instead (see `fetchMerkl` there). Each type caches separately under `merkl:{type}:{chainId}` so one flaky upstream doesn't blank out the others.
-- **Brevis**: the upstream POST body is hardcoded server-side (`{ action: [LEND, BORROW], status: [3] }`), so the cache key reduces to `brevis:{chainId}` and the handler exposes a cacheable GET.
-- **Fuul**: the two `protocol=euler` and `protocol=euler-looping` queries fan out server-side and return as `{ euler, looping }`.
-
-Semantics:
-
-- **Raw pass-through**: the server never interprets `Opportunity[]` / `Campaign[]` / `FuulIncentive[]`. All transforms (Merkl subType mapping, MULTILENDBORROW expansion, Brevis snake_case/camelCase normalisation) stay in the composables so provider feature work doesn't need a backend redeploy.
-- **SWR + warm-cache**: the three handlers serve `fresh → stale-with-background-revalidate → cold-await-upstream` against a 5-min TTL. The warm-cache plugin (`server/plugins/warm-cache.ts`) refreshes all six per-chain keys plus the global `merkl:tokens` every 5 min, so steady-state requests always hit fresh entries.
-- **Pagination partial-response gate**: if a Merkl paginated fetch fails mid-flight or exceeds the 10-page cap, the partial response is **not** cached — the next call re-runs the pagination rather than serving a truncated dataset for 5 minutes.
-- **Rate limiting + CDN**: each handler has its own rate-limit label (`rewards-merkl-proxy`, etc.) so a noisy client against one endpoint can't starve the others. Handlers set `Cache-Control: public, max-age=30, stale-while-revalidate=30` so Cloudflare short-circuits repeat hits between warm cycles.
-- **Poll cadence** (see `entities/tuning-constants.ts`): both public campaigns and user-specific claimable rewards poll every 60 s. Public polls mostly hit the CDN (30s `max-age` + 30s `stale-while-revalidate` = 60s total window) so they're near-free; user-specific polls go to upstream directly.
-- **User-specific traffic stays direct**: Merkl `/users/{addr}/rewards`, Brevis `getMerkleProofsBatch`, Fuul `/claimable-rewards` are **not** proxied — they remain direct axios calls from the browser. Only the chain-scoped public surface flows through the shared cache.
+The SDK's default rewards adapter reads V3 reward APIs and uses direct provider reads where V3 does not expose claim-specific helper data. Lite's provider feature flags are passed into SDK config as `rewardsEnableMerkl`, `rewardsEnableBrevis`, and `rewardsEnableFuul` only when a provider is disabled. Display formatting, provider labels, sorting, and transaction review remain in Lite.
 
 ## 🔍 Explore Page & Market Discovery
 
@@ -280,7 +268,7 @@ The app uses Vue's `<KeepAlive>` to preserve component state across navigation f
 />
 ```
 
-This prevents re-fetching and re-rendering when users navigate between listing pages and detail views (e.g., clicking a vault then pressing back). Suspense was removed from `app.vue` to avoid conflicts with keepalive cache invalidation.
+This prevents re-fetching and re-rendering when users navigate between listing pages and detail views (e.g., clicking a vault then pressing back). `app.vue` keeps route rendering outside Suspense to avoid conflicts with keepalive cache invalidation.
 
 ### Optimization Strategies
 

@@ -1,11 +1,8 @@
 <script setup lang="ts">
-import type { PortfolioBorrowPosition, PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import type { Reward } from '~/entities/merkl'
-import type { Campaign } from '~/entities/brevis'
-import type { FuulClaimableReward } from '~/entities/fuul'
+import type { PortfolioBorrowPosition, PortfolioSavingsPosition, UserReward, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 
 defineProps<{
-  type: 'lend' | 'borrow' | 'earn' | 'rewards' | 'brevis-rewards' | 'fuul-rewards'
+  type: 'lend' | 'borrow' | 'earn' | 'sdk-rewards'
   items: unknown[]
 }>()
 
@@ -40,25 +37,11 @@ const getBorrowPositionKey = (position: PortfolioBorrowPosition<VaultEntity>) =>
         :position="position as PortfolioSavingsPosition<VaultEntity>"
       />
     </template>
-    <template v-else-if="type === 'rewards'">
-      <PortfolioRewardItem
+    <template v-else-if="type === 'sdk-rewards'">
+      <PortfolioSdkRewardItem
         v-for="(reward, idx) in items"
-        :key="`position-${idx}`"
-        :reward="reward as Reward"
-      />
-    </template>
-    <template v-else-if="type === 'brevis-rewards'">
-      <PortfolioBrevisRewardItem
-        v-for="(campaign, idx) in items"
-        :key="`brevis-${idx}`"
-        :campaign="campaign as Campaign"
-      />
-    </template>
-    <template v-else-if="type === 'fuul-rewards'">
-      <PortfolioFuulRewardItem
-        v-for="(reward, idx) in items"
-        :key="`fuul-${idx}`"
-        :reward="reward as FuulClaimableReward"
+        :key="`sdk-reward-${idx}`"
+        :reward="reward as UserReward"
       />
     </template>
   </div>

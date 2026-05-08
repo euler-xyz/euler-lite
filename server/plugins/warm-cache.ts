@@ -1,7 +1,6 @@
 /**
  * Pre-populates the in-memory TTL caches for every proxy that serves
- * static/low-churn data (labels, token-list, intrinsic APY, euler-chains,
- * public reward campaigns).
+ * static/low-churn data (labels, token-list, intrinsic APY, euler-chains).
  *
  * Nitro's node-server preset calls `server.listen()` synchronously right
  * after firing plugins and does NOT await plugin promises, so warming
@@ -17,9 +16,7 @@
  *   • Global (parallel with the chain loop): /api/euler-chains and
  *     cross-chain `all/assets.json`.
  *   • Per-chain (serialized one chain at a time): labels, token-list,
- *     intrinsic-apy, vault-categories, Merkl opportunities × 3,
- *     Brevis campaigns, Fuul × 2, refreshChainVaults(chainId). Tasks
- *     within a single chain still run in parallel.
+ *     intrinsic-apy. Tasks within a single chain still run in parallel.
  *
  * Serializing chains avoids a cold-start thundering herd (~250
  * simultaneous HTTPS requests across all chains × all providers) that
@@ -34,8 +31,7 @@
  * cold-upstream fetch, cached from then on under normal TTL behavior.
  *
  * Merkl's /tokens/reward payload is fetched transitively by /api/token-list
- * (one of its sources). Merkl's ERC20LOGPROCESSOR refresh also reads the
- * labels earn set to keep non-Euler opportunities out of the cached payload.
+ * (one of its sources).
  */
 import { LABEL_FILES, refreshLabelFile } from '../api/labels/[file].get'
 import { refreshEulerChains } from '../api/euler-chains.get'
@@ -45,18 +41,8 @@ import { parseDeprecatedChains } from '~/utils/parseDeprecatedChains'
 import { reportStatus } from '../utils/log'
 import { logger } from '~/server/utils/logger'
 import { refreshIntrinsicApyForChain } from '../utils/intrinsic-apy'
-import {
-  type FuulProtocol,
-  type MerklOpportunityType,
-  refreshBrevisCampaigns,
-  refreshFuulProtocol,
-  refreshMerklType,
-} from '../utils/rewards-cache'
 
 const REWARM_INTERVAL_MS = 5 * 60_000
-
-const MERKL_TYPES: MerklOpportunityType[] = ['EULER', 'MULTILENDBORROW', 'ERC20LOGPROCESSOR']
-const FUUL_PROTOCOLS: FuulProtocol[] = ['euler', 'euler-looping']
 
 // Nitro dev mode re-imports server plugins across its double-init (Vite
 // client build + Nitro server build), which would fire two warm cycles
@@ -118,21 +104,10 @@ const warmTokenList = (chainId: number) =>
 const warmIntrinsicApy = (chainId: number) =>
   reportWarm(`intrinsic-apy chain=${chainId}`, refreshIntrinsicApyForChain(chainId))
 
-const warmRewardCampaigns = (chainId: number): Promise<unknown>[] => [
-  ...MERKL_TYPES.map(type =>
-    reportWarm(`merkl/${type} chain=${chainId}`, refreshMerklType(chainId, type)),
-  ),
-  reportWarm(`brevis chain=${chainId}`, refreshBrevisCampaigns(chainId)),
-  ...FUUL_PROTOCOLS.map(protocol =>
-    reportWarm(`fuul/${protocol} chain=${chainId}`, refreshFuulProtocol(chainId, protocol)),
-  ),
-]
-
 const warmChainTasks = (chainId: number): Promise<unknown>[] => [
   ...warmLabels(chainId),
   warmTokenList(chainId),
   warmIntrinsicApy(chainId),
-  ...warmRewardCampaigns(chainId),
 ]
 
 // --- Orchestration ---

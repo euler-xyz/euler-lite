@@ -486,7 +486,7 @@ export function buildDisplaySteps(
           ? 'for permit2'
           : undefined
 
-      const isRewardOrUnlock = !isApproval && (ctx.type === 'reward' || ctx.type === 'brevis-reward' || ctx.type === 'reul-unlock')
+      const isRewardOrUnlock = !isApproval && (ctx.type === 'reward' || ctx.type === 'brevis-reward' || ctx.type === 'fuul-reward' || ctx.type === 'reul-unlock')
       const rewardIconUrl = ['EUL', 'rEUL'].includes(ctx.asset.symbol)
         ? getLogoUrl(ctx.asset.address, 'EUL')
         : ctx.assetIconUrl
