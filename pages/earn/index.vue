@@ -51,7 +51,7 @@ useUrlQuerySync([
   { ref: sortBy, default: 'Total Supply', queryKey: 'sort' },
   { ref: sortDir, default: 'desc', queryKey: 'dir' },
   { ref: selectedCollateral, default: [], queryKey: 'vault' },
-  { ref: selectedCurators, default: [], queryKey: 'allocator' },
+  { ref: selectedCurators, default: [], queryKey: 'curator' },
 ])
 
 // Cache for USD values used in sorting (keyed by vault address)
