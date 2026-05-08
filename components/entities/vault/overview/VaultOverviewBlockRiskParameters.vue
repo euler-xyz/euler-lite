@@ -32,7 +32,7 @@ const isBorrowable = computed(() => borrowCount.value > 0)
 
 const supplyCapPercentageDisplay = computed(() => getSupplyCapPercentage(vault))
 const borrowCapPercentageDisplay = computed(() => getBorrowCapPercentage(vault))
-const showShareTokenExchangeRate = computed(() => vault.vaultCategory !== 'escrow' && vault.borrowCap !== 0n)
+const showShareTokenExchangeRate = computed(() => vault.vaultCategory !== 'escrow' && (vault.borrowCap !== 0n || vault.borrow > 0n))
 
 const supplyCapDisplay = ref('-')
 const borrowCapDisplay = ref('-')
