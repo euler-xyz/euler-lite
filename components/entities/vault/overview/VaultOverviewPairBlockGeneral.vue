@@ -24,13 +24,13 @@ const isRamping = computed(() =>
 const modal = useModal()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, getLoopingRewardCampaigns, hasSupplyRewards, hasBorrowRewards, hasLoopingRewards } = useRewardsApy()
-const { borrowList } = useVaults()
 
-const borrowCount = computed(() => {
-  return borrowList.value.filter(p => p.borrow.address === pair.borrow.address).length
-})
-
-const isBorrowable = computed(() => borrowCount.value > 0)
+// On a borrow pair detail page the pair only exists because the on-chain
+// collateralLTV has a non-zero borrowLTV — gate on that directly so deep links
+// to unverified (off-label) pairs render the borrow-side metrics. Sourcing this
+// from `useVaults().borrowList` would skip pairs whose borrow vault isn't in
+// the labels repo.
+const isBorrowable = computed(() => pair.borrowLTV > 0n)
 const isRestricted = computed(() => isAnyVaultBlockedByCountry(pair.collateral.address, pair.borrow.address))
 const isDeprecated = computed(() => isVaultDeprecated(pair.collateral.address) || isVaultDeprecated(pair.borrow.address))
 

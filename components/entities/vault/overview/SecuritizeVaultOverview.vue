@@ -22,7 +22,7 @@ const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enab
 
 const { client: rpcClient } = useRpcClient()
 const { chainId } = useEulerAddresses()
-const { borrowList: _borrowList, isVaultGovernorVerified } = useVaults()
+const { isVaultGovernorVerified } = useVaults()
 const { getEvkVaults } = useVaultRegistry()
 const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const modal = useModal()
