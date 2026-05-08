@@ -227,7 +227,7 @@ const hasTenderlyFailedSimulation = computed(() => {
   return !!(tenderlyUrl.value && tenderlyError.value)
 })
 
-const permit2DisclaimerText = 'You are granting the Permit2 contract approval to spend this token. Permit2 is a Uniswap contract used to authorize future transfers with signatures. Each future transaction still requires your explicit signature and can be limited by amount and duration.'
+const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract used to authorize future transfers with signatures. Each future transfer still requires your explicit signature and can be limited by amount and duration.'
 </script>
 
 <template>
