@@ -2,6 +2,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref, type Ref } from 'vue'
 
 type MockSdk = { id: string }
+type BuildEulerSDKOptions = {
+  config: {
+    rpcUrls: Record<number, string>
+    deploymentsUrl?: string
+    eulerLabelsBaseUrl?: string
+    oracleAdaptersBaseUrl?: string
+  }
+  rpcUrls?: Record<number, string>
+  deploymentServiceConfig?: unknown
+  eulerLabelsAdapterConfig?: unknown
+  oracleAdapterServiceConfig?: unknown
+}
 
 interface Deferred<T> {
   promise: Promise<T>
@@ -45,7 +57,7 @@ describe('useEulerSdk', () => {
     const sdkA: MockSdk = { id: 'a' }
     const sdkB: MockSdk = { id: 'b' }
     const builds: Array<Deferred<MockSdk>> = []
-    const buildEulerSDK = vi.fn((_options: { rpcUrls: Record<number, string> }) => {
+    const buildEulerSDK = vi.fn((_options: BuildEulerSDKOptions) => {
       const deferred = createDeferred<MockSdk>()
       builds.push(deferred)
       return deferred.promise
@@ -67,6 +79,60 @@ describe('useEulerSdk', () => {
 
     await expect(getEulerSdk()).resolves.toBe(sdkB)
     expect(buildEulerSDK).toHaveBeenCalledTimes(2)
+  })
+
+  it('passes runtime values through the SDK config object', async () => {
+    const chainIds = ref([1, 8453])
+    const sdk: MockSdk = { id: 'configured' }
+    const buildEulerSDK = vi.fn().mockResolvedValue(sdk)
+    vi.stubGlobal('useRuntimeConfig', () => ({
+      public: {
+        configEulerChainsUrl: 'https://example.test/EulerChains.json',
+        configLabelsBaseUrl: 'https://labels.example.test/',
+        configOracleChecksBaseUrl: 'https://oracles.example.test/data/',
+      },
+    }))
+
+    const { getEulerSdk } = await importUseEulerSdk(chainIds, buildEulerSDK)
+    await expect(getEulerSdk()).resolves.toBe(sdk)
+
+    const options = buildEulerSDK.mock.calls[0]?.[0] as BuildEulerSDKOptions
+    expect(options.config).toMatchObject({
+      rpcUrls: {
+        1: '/api/rpc/1',
+        8453: '/api/rpc/8453',
+      },
+      deploymentsUrl: 'https://example.test/EulerChains.json',
+      eulerLabelsBaseUrl: 'https://labels.example.test',
+      oracleAdaptersBaseUrl: 'https://oracles.example.test/data',
+    })
+    expect(options.rpcUrls).toBeUndefined()
+    expect(options.deploymentServiceConfig).toBeUndefined()
+    expect(options.eulerLabelsAdapterConfig).toBeUndefined()
+    expect(options.oracleAdapterServiceConfig).toBeUndefined()
+  })
+
+  it('delegates SDK-owned defaults to the SDK', async () => {
+    const chainIds = ref([1])
+    const sdk: MockSdk = { id: 'defaults' }
+    const buildEulerSDK = vi.fn().mockResolvedValue(sdk)
+    vi.stubGlobal('useRuntimeConfig', () => ({
+      public: {
+        configEulerChainsUrl: '',
+        configLabelsBaseUrl: '',
+        configOracleChecksBaseUrl: '',
+      },
+    }))
+
+    const { getEulerSdk } = await importUseEulerSdk(chainIds, buildEulerSDK)
+    await expect(getEulerSdk()).resolves.toBe(sdk)
+
+    const options = buildEulerSDK.mock.calls[0]?.[0] as BuildEulerSDKOptions
+    expect(options.config).toEqual({
+      rpcUrls: {
+        1: '/api/rpc/1',
+      },
+    })
   })
 
   it('clears a rejected build so the same config can retry', async () => {

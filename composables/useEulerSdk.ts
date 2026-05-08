@@ -1,13 +1,8 @@
 import { buildEulerSDK, createPythPlugin } from '@eulerxyz/euler-v2-sdk'
-import type { EulerSDK } from '@eulerxyz/euler-v2-sdk'
+import type { EulerSDK, EulerSDKConfig } from '@eulerxyz/euler-v2-sdk'
 import { sdkBuildQuery } from '~/utils/sdk-query-cache'
 
 type SdkBuild = { key: string, promise?: Promise<EulerSDK> }
-
-const DEFAULT_EULER_CHAINS_URL = 'https://raw.githubusercontent.com/euler-xyz/euler-interfaces/refs/heads/master/EulerChains.json'
-const DEFAULT_LABELS_REPO = 'euler-xyz/euler-labels'
-const DEFAULT_LABELS_BRANCH = 'master'
-const DEFAULT_ORACLE_CHECKS_REPO = 'euler-xyz/oracle-checks'
 
 let sdkInstance: { key: string, sdk: EulerSDK } | undefined
 let sdkBuild: SdkBuild | undefined
@@ -17,35 +12,25 @@ const getPublicRuntimeConfig = (): Record<string, string> => {
   return useRuntimeConfig().public as unknown as Record<string, string>
 }
 
-const buildStaticDataConfig = () => {
+const cleanUrl = (value: string | undefined) => {
+  const trimmed = value?.trim().replace(/\/+$/, '')
+  return trimmed || undefined
+}
+
+const buildSdkStaticConfig = () => {
   const rc = getPublicRuntimeConfig()
-  const labelsRepo = rc.configLabelsRepo || DEFAULT_LABELS_REPO
-  const labelsBranch = rc.configLabelsRepoBranch || DEFAULT_LABELS_BRANCH
-  const labelsBaseUrl = (rc.configLabelsBaseUrl || `https://raw.githubusercontent.com/${labelsRepo}/refs/heads/${labelsBranch}`).replace(/\/+$/, '')
-  const oracleChecksRepo = rc.configOracleChecksRepo || DEFAULT_ORACLE_CHECKS_REPO
-  const oracleChecksBaseUrl = (rc.configOracleChecksBaseUrl || `https://raw.githubusercontent.com/${oracleChecksRepo}/refs/heads/master/data`).replace(/\/+$/, '')
+  const deploymentsUrl = cleanUrl(rc.configEulerChainsUrl)
+  const labelsBaseUrl = cleanUrl(rc.configLabelsBaseUrl)
+  const oracleChecksBaseUrl = cleanUrl(rc.configOracleChecksBaseUrl)
+  const config: EulerSDKConfig = {
+    ...(deploymentsUrl ? { deploymentsUrl } : {}),
+    ...(labelsBaseUrl ? { eulerLabelsBaseUrl: labelsBaseUrl } : {}),
+    ...(oracleChecksBaseUrl ? { oracleAdaptersBaseUrl: oracleChecksBaseUrl } : {}),
+  }
 
   return {
-    cacheKey: JSON.stringify({
-      deploymentsUrl: (rc.configEulerChainsUrl || DEFAULT_EULER_CHAINS_URL).trim(),
-      labelsBaseUrl,
-      oracleChecksBaseUrl,
-    }),
-    deploymentServiceConfig: {
-      deploymentsUrl: (rc.configEulerChainsUrl || DEFAULT_EULER_CHAINS_URL).trim(),
-    },
-    eulerLabelsAdapterConfig: {
-      getEulerLabelsEntitiesUrl: (chainId: number) => `${labelsBaseUrl}/${chainId}/entities.json`,
-      getEulerLabelsProductsUrl: (chainId: number) => `${labelsBaseUrl}/${chainId}/products.json`,
-      getEulerLabelsPointsUrl: (chainId: number) => `${labelsBaseUrl}/${chainId}/points.json`,
-      getEulerLabelsEarnVaultsUrl: (chainId: number) => `${labelsBaseUrl}/${chainId}/earn-vaults.json`,
-      getEulerLabelsAssetsUrl: (chainId: number) => `${labelsBaseUrl}/${chainId}/assets.json`,
-      getEulerLabelsGlobalAssetsUrl: () => `${labelsBaseUrl}/all/assets.json`,
-      getEulerLabelsLogoUrl: (filename: string) => `${labelsBaseUrl}/logo/${filename}`,
-    },
-    oracleAdapterServiceConfig: {
-      baseUrl: oracleChecksBaseUrl,
-    },
+    cacheKey: JSON.stringify(config),
+    config,
   }
 }
 
@@ -72,7 +57,11 @@ const getSdkKey = (rpcUrls: Record<number, string>, staticDataCacheKey: string) 
 
 export const getEulerSdk = async (): Promise<EulerSDK> => {
   const rpcUrls = buildRpcUrls()
-  const { cacheKey, ...staticDataConfig } = buildStaticDataConfig()
+  const { cacheKey, config: staticConfig } = buildSdkStaticConfig()
+  const config: EulerSDKConfig = {
+    ...staticConfig,
+    rpcUrls,
+  }
   const nextKey = getSdkKey(rpcUrls, cacheKey)
 
   if (sdkInstance?.key === nextKey) return sdkInstance.sdk
@@ -81,10 +70,9 @@ export const getEulerSdk = async (): Promise<EulerSDK> => {
   const buildKey = nextKey
   const buildState: SdkBuild = { key: buildKey }
   const buildPromise = buildEulerSDK({
-    rpcUrls,
+    config,
     buildQuery: sdkBuildQuery,
     plugins: [createPythPlugin({ buildQuery: sdkBuildQuery })],
-    ...staticDataConfig,
   }).then((sdk) => {
     if (sdkBuild === buildState) {
       sdkInstance = { key: buildKey, sdk }
