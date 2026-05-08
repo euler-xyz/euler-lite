@@ -13,6 +13,9 @@ defineProps<{
 <template>
   <div
     class="flex flex-col gap-8"
+    data-id="portfolio-list"
+    :data-list="type"
+    :data-count="items.length"
   >
     <template v-if="type === 'lend'">
       <PortfolioSavingItem

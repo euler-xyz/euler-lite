@@ -9,6 +9,7 @@ import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 
 const { reward } = defineProps<{ reward: FuulClaimableReward }>()
+const rewardKey = computed(() => `${reward.currency_address}:${reward.amount.toString()}`.toLowerCase())
 
 const { claimReward, loadClaimableRewards, buildClaimRewardPlan } = useFuul()
 const { isSpyMode } = useSpyMode()
@@ -101,6 +102,10 @@ const onClaimClick = async () => {
 <template>
   <div
     class="bg-surface rounded-xl border border-line-subtle shadow-card p-16"
+    data-id="portfolio-list-item"
+    data-list="fuul-rewards"
+    :data-key="rewardKey"
+    :data-token-address="reward.currency_address.toLowerCase()"
   >
     <div
       class="flex flex-col gap-12"
@@ -108,13 +113,25 @@ const onClaimClick = async () => {
       <div class="flex justify-between items-center mb-12">
         <div class="flex items-center">
           <div class="ml-12">
-            <h4 class="text-h5 mb-4 text-content-primary">
+            <h4
+              class="text-h5 mb-4 text-content-primary"
+              data-id="data-point"
+              :data-key="rewardKey"
+              data-field="reward-symbol"
+              :data-value="reward.currency_name"
+            >
               {{ reward.currency_name }}
             </h4>
           </div>
         </div>
         <div class="flex flex-col gap-8 text-right">
-          <p class="text-p2 text-content-primary">
+          <p
+            class="text-p2 text-content-primary"
+            data-id="data-point"
+            :data-key="rewardKey"
+            data-field="reward-amount"
+            :data-value="rewardAmount"
+          >
             ~ {{ rewardAmount < 0.01 ? '< 0.01' : formatNumber(rewardAmount, 2) }} {{ reward.currency_name }}
           </p>
         </div>

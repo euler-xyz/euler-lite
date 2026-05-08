@@ -61,7 +61,12 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
 </script>
 
 <template>
-  <div class="px-16 pb-12 flex items-center justify-center">
+  <div
+    class="px-16 pb-12 flex items-center justify-center"
+    data-id="attribute-matrix"
+    :data-row-count="data.columns.length"
+    :data-column-count="attributeColumns.length"
+  >
     <div
       class="relative max-h-[60vh] overflow-auto rounded-8 border border-line-subtle px-12 pb-12 pt-0"
     >
@@ -80,6 +85,9 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
               v-for="col in attributeColumns"
               :key="col.attribute.id"
               class="text-center text-p4 text-content-secondary font-medium py-6 px-8 whitespace-nowrap bg-surface border-b border-r border-white/[0.04] transition-colors"
+              data-id="attribute-matrix-column"
+              :data-key="col.attribute.id"
+              :data-field="col.attribute.id"
               :class="isAttributeColumnHighlighted(col.attribute.id) ? '!bg-white/[0.06] text-content-primary' : ''"
             >
               <span :title="col.attribute.tooltip">{{ col.attribute.label }}</span>
@@ -90,9 +98,15 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
           <tr
             v-for="(vault, vaultIdx) in data.columns"
             :key="vault.address"
+            data-id="attribute-matrix-row"
+            :data-key="vault.address"
+            :data-vault-address="vault.address"
           >
             <td
               class="text-p4 font-medium py-6 pr-10 pl-6 whitespace-nowrap sticky left-0 z-10 bg-surface border-b border-r border-white/[0.04] cursor-pointer transition-colors"
+              data-id="attribute-matrix-row-header"
+              :data-key="vault.address"
+              :data-vault-address="vault.address"
               :class="
                 selectedHeader?.address === vault.address
                   && selectedHeader?.axis === 'row'
@@ -118,6 +132,11 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
               v-for="col in attributeColumns"
               :key="col.attribute.id"
               class="text-center py-6 px-8 min-w-[80px] transition-colors border-b border-r border-white/[0.04]"
+              data-id="attribute-matrix-cell"
+              :data-key="`${vault.address}:${col.attribute.id}`"
+              :data-vault-address="vault.address"
+              :data-field="col.attribute.id"
+              :data-value="col.cells[vaultIdx].numeric ?? col.cells[vaultIdx].display"
               :class="(isVaultRowHighlighted(vault.address) || isAttributeColumnHighlighted(col.attribute.id)) ? '!bg-white/[0.06]' : ''"
               @mouseenter="hoveredCell = { vaultAddr: vault.address, attributeId: col.attribute.id }"
               @mouseleave="hoveredCell = null"

@@ -9,6 +9,7 @@ import { formatNumber, formatUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 
 const { reward } = defineProps<{ reward: Reward }>()
+const rewardKey = computed(() => `${reward.token.address.toLowerCase()}:${reward.amount.toString()}:${reward.claimed.toString()}`)
 
 const { claimReward, loadRewards, buildClaimRewardPlan } = useMerkl()
 const { getTokenByAddress } = useTokenList()
@@ -116,6 +117,10 @@ const onClaimClick = async () => {
 <template>
   <div
     class="bg-surface rounded-xl border border-line-subtle shadow-card p-16"
+    data-id="portfolio-list-item"
+    data-list="rewards"
+    :data-key="rewardKey"
+    :data-token-address="reward.token.address.toLowerCase()"
   >
     <div
       class="flex flex-col gap-12"
@@ -133,14 +138,32 @@ const onClaimClick = async () => {
         >
           {{ reward.token.symbol[0].toUpperCase() }}
         </div>
-        <h4 class="text-h5 ml-12 text-content-primary">
+        <h4
+          class="text-h5 ml-12 text-content-primary"
+          data-id="data-point"
+          :data-key="rewardKey"
+          data-field="reward-symbol"
+          :data-value="reward.token.symbol"
+        >
           {{ reward.token.symbol }}
         </h4>
         <div class="flex flex-col gap-8 ml-auto text-right">
-          <p class="text-p2 text-content-primary">
+          <p
+            class="text-p2 text-content-primary"
+            data-id="data-point"
+            :data-key="rewardKey"
+            data-field="reward-usd-value"
+            :data-value="amountInUsd"
+          >
             {{ formatUsdValue(amountInUsd) }}
           </p>
-          <p class="text-p3 text-content-tertiary">
+          <p
+            class="text-p3 text-content-tertiary"
+            data-id="data-point"
+            :data-key="rewardKey"
+            data-field="reward-amount"
+            :data-value="amountToClaim"
+          >
             ~ {{ amountToClaim < 0.01 ? '< 0.01' : formatNumber(amountToClaim, 2) }} {{ reward.token.symbol }}
           </p>
         </div>

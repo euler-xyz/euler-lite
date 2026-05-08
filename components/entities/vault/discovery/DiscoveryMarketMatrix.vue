@@ -442,7 +442,13 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
 </script>
 
 <template>
-  <div class="px-16 pb-12 flex items-center justify-center">
+  <div
+    class="px-16 pb-12 flex items-center justify-center"
+    data-id="collateral-matrix"
+    :data-field="dotMetric"
+    :data-row-count="matrix.rows.length"
+    :data-column-count="matrix.columns.length"
+  >
     <div
       class="relative max-h-[50vh] overflow-auto rounded-8 border border-line-subtle px-12 pb-12 pt-0"
     >
@@ -461,6 +467,9 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
               v-for="col in matrix.columns"
               :key="col.address"
               class="text-center text-p4 font-medium py-6 px-8 whitespace-nowrap bg-surface border-b border-r border-white/[0.04] cursor-pointer transition-colors"
+              data-id="collateral-matrix-column"
+              :data-key="col.address"
+              :data-vault-address="col.address"
               :class="
                 selectedHeader?.address === col.address
                   && selectedHeader?.axis === 'column'
@@ -485,9 +494,15 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
           <tr
             v-for="row in matrix.rows"
             :key="row.address"
+            data-id="collateral-matrix-row"
+            :data-key="row.address"
+            :data-vault-address="row.address"
           >
             <td
               class="text-p4 font-medium py-6 pr-10 pl-6 whitespace-nowrap sticky left-0 z-10 bg-surface border-b border-r border-white/[0.04] cursor-pointer transition-colors"
+              data-id="collateral-matrix-row-header"
+              :data-key="row.address"
+              :data-vault-address="row.address"
               :class="
                 selectedHeader?.address === row.address
                   && selectedHeader?.axis === 'row'
@@ -513,6 +528,13 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
               v-for="col in matrix.columns"
               :key="col.address"
               class="text-center py-6 px-8 min-w-[56px] transition-colors border-b border-r border-white/[0.04]"
+              data-id="collateral-matrix-cell"
+              :data-key="`${row.address}:${col.address}`"
+              :data-collateral-address="row.address"
+              :data-borrow-address="col.address"
+              :data-field="dotMetric"
+              :data-present="!!matrix.cells.get(row.address)?.get(col.address)"
+              :data-value="matrix.cells.get(row.address)?.get(col.address) ? getCellMetricValue(matrix.cells.get(row.address)!.get(col.address)!, row.address, col.address) : undefined"
               :class="[
                 selectedCell?.collateralAddr === row.address
                   && selectedCell?.liabilityAddr === col.address
@@ -573,6 +595,12 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                     :key="adapter.oracle"
                     type="button"
                     class="relative inline-flex items-center justify-center cursor-pointer"
+                    data-id="oracle-adapter"
+                    :data-key="`${col.address}:${adapter.oracle}:${adapter.base}:${adapter.quote}`"
+                    :data-borrow-address="col.address"
+                    :data-oracle-address="adapter.oracle"
+                    :data-base-address="adapter.base"
+                    :data-quote-address="adapter.quote"
                     :title="adapter.provider"
                     @click.stop="onAssetAdapterClick(adapter, $event, col.address)"
                   >
@@ -611,6 +639,13 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                       :key="adapter.oracle"
                       type="button"
                       class="relative inline-flex items-center justify-center cursor-pointer"
+                      data-id="oracle-adapter"
+                      :data-key="`${row.address}:${col.address}:${adapter.oracle}:${adapter.base}:${adapter.quote}`"
+                      :data-collateral-address="row.address"
+                      :data-borrow-address="col.address"
+                      :data-oracle-address="adapter.oracle"
+                      :data-base-address="adapter.base"
+                      :data-quote-address="adapter.quote"
                       :title="adapter.provider"
                       @click.stop="onCellAdapterClick(adapter, $event, row.address, col.address)"
                     >

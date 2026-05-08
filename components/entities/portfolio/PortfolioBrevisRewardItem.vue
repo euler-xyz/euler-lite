@@ -8,6 +8,9 @@ import { logWarn } from '~/utils/errorHandling'
 import { formatNumber, formatUsdValue } from '~/utils/string-utils'
 
 const { campaign } = defineProps<{ campaign: Campaign }>()
+const campaignKey = computed(() =>
+  `${campaign.vault_address || 'unknown'}:${campaign.reward_info.token_address}:${campaign.action}`.toLowerCase(),
+)
 
 const { getVault } = useVaults()
 const { claimReward, loadRewards, buildClaimRewardPlan } = useBrevis()
@@ -108,6 +111,11 @@ const onClaimClick = async () => {
 <template>
   <div
     class="bg-surface rounded-xl border border-line-subtle shadow-card p-16"
+    data-id="portfolio-list-item"
+    data-list="brevis-rewards"
+    :data-key="campaignKey"
+    :data-vault-address="campaign.vault_address?.toLowerCase()"
+    :data-token-address="campaign.reward_info.token_address.toLowerCase()"
   >
     <div
       class="flex flex-col gap-12"
@@ -120,19 +128,43 @@ const onClaimClick = async () => {
             size="40"
           />
           <div class="ml-12">
-            <h4 class="text-h5 mb-4 text-content-primary">
+            <h4
+              class="text-h5 mb-4 text-content-primary"
+              data-id="data-point"
+              :data-key="campaignKey"
+              data-field="reward-symbol"
+              :data-value="campaign.reward_info.token_symbol"
+            >
               {{ campaign.reward_info.token_symbol }}
             </h4>
-            <p class="text-p3 text-content-tertiary">
+            <p
+              class="text-p3 text-content-tertiary"
+              data-id="data-point"
+              :data-key="campaignKey"
+              data-field="reward-action"
+              :data-value="actionLabel"
+            >
               {{ actionLabel }} {{ vault?.asset.symbol }}
             </p>
           </div>
         </div>
         <div class="flex flex-col gap-8 text-right">
-          <p class="text-p2 text-content-primary">
+          <p
+            class="text-p2 text-content-primary"
+            data-id="data-point"
+            :data-key="campaignKey"
+            data-field="reward-usd-value"
+            :data-value="rewardUsdValue"
+          >
             {{ formatUsdValue(rewardUsdValue) }}
           </p>
-          <p class="text-p3 text-content-tertiary">
+          <p
+            class="text-p3 text-content-tertiary"
+            data-id="data-point"
+            :data-key="campaignKey"
+            data-field="reward-amount"
+            :data-value="rewardAmount"
+          >
             ~ {{ rewardAmount < 0.01 ? '< 0.01' : formatNumber(rewardAmount, 2) }} {{ campaign.reward_info.token_symbol }}
           </p>
         </div>

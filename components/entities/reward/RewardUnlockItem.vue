@@ -18,6 +18,7 @@ const { chainId: siteChainId } = useEulerAddresses()
 const { chainId: walletChainId, switchChain, address: wagmiAddress } = useWagmi()
 const { runSimulation, simulationError } = useTxPlanSimulation()
 const { item } = defineProps<{ item: REULLock }>()
+const itemKey = computed(() => item.timestamp.toString())
 
 const isUnlocking = ref(false)
 const isPreparing = ref(false)
@@ -140,6 +141,10 @@ const onUnlockClick = async () => {
 <template>
   <div
     class="flex flex-col gap-12 bg-card rounded-16"
+    data-id="reward-unlock-list-item"
+    data-list="reul-unlock"
+    :data-key="itemKey"
+    :data-timestamp="item.timestamp.toString()"
   >
     <div
       class="flex justify-between items-center p-16 pb-12 border-b border-line-default"
@@ -152,10 +157,22 @@ const onUnlockClick = async () => {
         rEUL
       </h4>
       <div class="flex flex-col gap-8 ml-auto text-right">
-        <p class="text-p2">
+        <p
+          class="text-p2"
+          data-id="data-point"
+          :data-key="itemKey"
+          data-field="unlockable-amount"
+          :data-value="unlockableAmount"
+        >
           {{ reulToken ? `${formatNumber(unlockableAmount, 6)} rEUL` : '...' }}
         </p>
-        <p class="text-p3 text-content-primary">
+        <p
+          class="text-p3 text-content-primary"
+          data-id="data-point"
+          :data-key="itemKey"
+          data-field="locked-amount"
+          :data-value="amount"
+        >
           {{ reulToken ? `of ${formatNumber(amount, 6)} rEUL` : '...' }}
         </p>
       </div>
@@ -166,10 +183,21 @@ const onUnlockClick = async () => {
           Maturity date
         </div>
         <div class="text-right flex flex-col gap-4 text-p2">
-          <div>
+          <div
+            data-id="data-point"
+            :data-key="itemKey"
+            data-field="days-until-maturity"
+            :data-value="daysUntilMaturity"
+          >
             in {{ daysUntilMaturity }} days
           </div>
-          <div class="text-content-primary">
+          <div
+            class="text-content-primary"
+            data-id="data-point"
+            :data-key="itemKey"
+            data-field="maturity-date"
+            :data-value="formattedDate"
+          >
             {{ formattedDate }}
           </div>
         </div>

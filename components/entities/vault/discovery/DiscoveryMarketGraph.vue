@@ -52,7 +52,13 @@ const isNodeCyclicalNote = (address: string): boolean => {
     v-for="(enlarged, enlargedIdx) in [getEnlargedDiagram(diagram)]"
     :key="'edata-' + enlargedIdx"
   >
-    <div class="px-16 pb-12 flex items-center justify-center">
+    <div
+      class="px-16 pb-12 flex items-center justify-center"
+      data-id="discovery-graph"
+      :data-key="market.id"
+      :data-node-count="enlarged.nodes.length"
+      :data-edge-count="enlarged.edges.length"
+    >
       <svg
         class="h-auto max-w-full"
         :style="{ width: `${Math.min(enlarged.viewWidth * 1.5, 900)}px` }"
@@ -174,6 +180,11 @@ const isNodeCyclicalNote = (address: string): boolean => {
           v-for="node in enlarged.nodes"
           :key="node.address"
           :class="node.hasVaultData === false ? 'cursor-default' : 'cursor-pointer'"
+          data-id="discovery-graph-node"
+          :data-key="node.address"
+          :data-vault-address="node.address"
+          :data-asset-address="node.assetAddress"
+          :data-symbol="node.assetSymbol"
           :opacity="isGraphNodeHighlighted(node.address) ? 1 : 0.25"
           style="transition: opacity 0.2s"
           @click.stop="node.hasVaultData !== false && $emit('selectNode', node.address)"
