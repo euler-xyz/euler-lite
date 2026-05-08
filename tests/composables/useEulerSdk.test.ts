@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref, type Ref } from 'vue'
 
-type MockSdk = { id: string }
+type MockSdk = {
+  id: string
+  oracleAdapterService: {
+    setQueryOracleAdapters: ReturnType<typeof vi.fn>
+  }
+}
 type BuildEulerSDKOptions = {
   config: {
     rpcUrls: Record<number, string>
@@ -35,6 +40,13 @@ const createDeferred = <T>(): Deferred<T> => {
   return { promise, resolve, reject }
 }
 
+const createMockSdk = (id: string): MockSdk => ({
+  id,
+  oracleAdapterService: {
+    setQueryOracleAdapters: vi.fn(),
+  },
+})
+
 const importUseEulerSdk = async (
   chainIds: Ref<number[]>,
   buildEulerSDK: ReturnType<typeof vi.fn>,
@@ -62,8 +74,8 @@ describe('useEulerSdk', () => {
 
   it('does not let an older build overwrite the SDK for the current config', async () => {
     const chainIds = ref([1])
-    const sdkA: MockSdk = { id: 'a' }
-    const sdkB: MockSdk = { id: 'b' }
+    const sdkA = createMockSdk('a')
+    const sdkB = createMockSdk('b')
     const builds: Array<Deferred<MockSdk>> = []
     const buildEulerSDK = vi.fn((_options: BuildEulerSDKOptions) => {
       const deferred = createDeferred<MockSdk>()
@@ -91,7 +103,7 @@ describe('useEulerSdk', () => {
 
   it('passes runtime values through the SDK config object', async () => {
     const chainIds = ref([1, 8453])
-    const sdk: MockSdk = { id: 'configured' }
+    const sdk = createMockSdk('configured')
     const buildEulerSDK = vi.fn().mockResolvedValue(sdk)
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
@@ -122,7 +134,7 @@ describe('useEulerSdk', () => {
 
   it('delegates SDK-owned defaults to the SDK', async () => {
     const chainIds = ref([1])
-    const sdk: MockSdk = { id: 'defaults' }
+    const sdk = createMockSdk('defaults')
     const buildEulerSDK = vi.fn().mockResolvedValue(sdk)
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
@@ -145,7 +157,7 @@ describe('useEulerSdk', () => {
 
   it('passes disabled reward providers through SDK config only when disabled', async () => {
     const chainIds = ref([1])
-    const sdk: MockSdk = { id: 'rewards-disabled' }
+    const sdk = createMockSdk('rewards-disabled')
     const buildEulerSDK = vi.fn().mockResolvedValue(sdk)
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
@@ -174,7 +186,7 @@ describe('useEulerSdk', () => {
 
   it('clears a rejected build so the same config can retry', async () => {
     const chainIds = ref([1])
-    const sdk: MockSdk = { id: 'retry' }
+    const sdk = createMockSdk('retry')
     const buildEulerSDK = vi.fn()
       .mockRejectedValueOnce(new Error('build failed'))
       .mockResolvedValueOnce(sdk)

@@ -1,11 +1,8 @@
 import {
-  buildOracleAdapterQuoteRequests,
   collectPythFeedsFromAdapters,
-  getOracleAdapterKey,
   type SecuritizeCollateralVault,
   type EVault,
   type OracleAdapterEntry,
-  type OracleAdapterQuoteRequest,
 } from '@eulerxyz/euler-v2-sdk'
 import { buildPythBatchItemsFromFeeds } from '~/utils/pyth'
 import { nanoToValue } from '~/utils/crypto-utils'
@@ -24,6 +21,19 @@ export type AdapterPriceInfo = {
   rate: number
   success: boolean
 }
+
+type OracleAdapterQuoteRequest = {
+  kind: 'erc4626-convertToAssets' | 'oracle-getQuote'
+  adapter: OracleAdapterEntry
+  target: Address
+  amountIn: bigint
+  base: Address
+  quote: Address
+  quoteDecimals: number
+}
+
+const getOracleAdapterKey = (adapter: OracleAdapterEntry) =>
+  `${adapter.oracle.toLowerCase()}:${adapter.base.toLowerCase()}:${adapter.quote.toLowerCase()}`
 
 const buildKnownDecimals = (
   sourceVaults: EVault[],
@@ -154,7 +164,23 @@ const buildPriceQueryItems = (
   adapters: OracleAdapterEntry[],
   decimals: Map<string, number>,
 ): { quoteRequests: OracleAdapterQuoteRequest[], items: BatchItem[] } => {
-  const { requests: quoteRequests } = buildOracleAdapterQuoteRequests(adapters, decimals)
+  const quoteRequests: OracleAdapterQuoteRequest[] = []
+  for (const adapter of adapters) {
+    const baseDecimals = decimals.get(adapter.base.toLowerCase())
+    const quoteDecimals = decimals.get(adapter.quote.toLowerCase())
+    if (baseDecimals === undefined || quoteDecimals === undefined) continue
+
+    quoteRequests.push({
+      kind: adapter.name === 'ERC4626Vault' ? 'erc4626-convertToAssets' : 'oracle-getQuote',
+      adapter,
+      target: adapter.oracle,
+      amountIn: 10n ** BigInt(baseDecimals),
+      base: adapter.base,
+      quote: adapter.quote,
+      quoteDecimals,
+    })
+  }
+
   const items = quoteRequests.map((request) => {
     if (request.kind === 'erc4626-convertToAssets') {
       const callData = encodeFunctionData({
