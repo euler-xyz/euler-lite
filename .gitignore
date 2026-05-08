@@ -12,8 +12,10 @@ node_modules
 # Logs
 logs
 *.log
+
+# Parity test artifacts and cached branch worktrees
 artifacts/parity
-.parity
+.parity/
 
 # Misc
 .DS_Store
