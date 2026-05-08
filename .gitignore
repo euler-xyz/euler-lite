@@ -12,6 +12,8 @@ node_modules
 # Logs
 logs
 *.log
+artifacts/parity
+.parity
 
 # Misc
 .DS_Store

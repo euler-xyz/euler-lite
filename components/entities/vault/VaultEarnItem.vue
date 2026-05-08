@@ -168,7 +168,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
           data-id="data-point"
           :data-key="vault.address.toLowerCase()"
           data-field="supply-apy"
-          :data-value="nanoToValue(vault.interestRateInfo.supplyAPY, 25) + totalRewardsAPY"
+          :data-value="getVaultSupplyApy(vault) + totalRewardsAPY"
         >
           <div class="mr-6">
             <VaultPoints :vault="vault" />

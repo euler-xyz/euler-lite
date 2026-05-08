@@ -14,7 +14,6 @@ import { useModal } from '~/components/ui/composables/useModal'
 
 const { position } = defineProps<{ position: PortfolioSavingsPosition<VaultEntity> }>()
 const modal = useModal()
-const positionKey = computed(() => `${position.subAccount.toLowerCase()}:${position.vault.address.toLowerCase()}`)
 
 const { address } = useAccount()
 const { portfolioAddress } = useEulerAccount()
@@ -28,6 +27,7 @@ const { withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntr
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 
 const vault = computed(() => position.vault!)
+const positionKey = computed(() => `${position.subAccount.toLowerCase()}:${vault.value.address.toLowerCase()}`)
 const utilisationWarning = computed(() => {
   if (isSecuritizeCollateralVault(vault.value)) return null
   return getUtilisationWarning(vault.value as EVault, 'lend')
