@@ -197,7 +197,7 @@ const onClick = () => {
           class="flex justify-between"
         >
           <div class="text-content-tertiary text-p3">
-            Projected earnings per month
+            Estimated monthly yield
           </div>
           <div class="flex justify-between gap-8 text-right">
             <div class="text-content-primary text-p3">

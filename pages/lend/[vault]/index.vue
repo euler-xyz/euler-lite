@@ -969,7 +969,7 @@ watch(address, () => {
               variant="card"
             >
               <SummaryRow
-                label="Projected earnings per month"
+                label="Estimated monthly yield"
                 align-top
               >
                 <p class="text-content-tertiary">
