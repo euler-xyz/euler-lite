@@ -49,7 +49,7 @@ jobs:
         run: |
           TIMESTAMP=$(date -u +'%H%M_%d%m%Y')
           SHORT_SHA=$(git rev-parse --short=12 HEAD)
-          IMAGE_TAG="${TIMESTAMP}_${SHORT_SHA}"
+          IMAGE_TAG="prod_${TIMESTAMP}_${SHORT_SHA}"
           echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
           echo "Generated image tag: ${IMAGE_TAG}"
 
