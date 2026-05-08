@@ -20,15 +20,16 @@ const { vault } = defineProps<{ vault: Vault }>()
 const modal = useModal()
 
 const { client: rpcClient } = useRpcClient()
-const { borrowList } = useVaults()
 
 const shareTokenExchangeRate: Ref<bigint | undefined> = ref()
 
-const borrowCount = computed(() => {
-  return borrowList.value.filter(pair => pair.borrow.address === vault.address).length
-})
-
-const isBorrowable = computed(() => borrowCount.value > 0)
+// "Borrowable" = the vault has at least one collateral configured to allow
+// borrowing. Read from the vault's own LTV table rather than `borrowList`
+// membership so unverified (off-label) borrow vaults still expose their
+// borrow-side risk parameters.
+const isBorrowable = computed(() =>
+  vault.collateralLTVs.some(ltv => ltv.borrowLTV > 0n),
+)
 
 const supplyCapPercentageDisplay = computed(() => getSupplyCapPercentage(vault))
 const borrowCapPercentageDisplay = computed(() => getBorrowCapPercentage(vault))
