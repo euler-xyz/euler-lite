@@ -43,12 +43,12 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<MarketGroup>(
 const selectedMarkets = ref<string[]>([])
 const selectedAssets = ref<string[]>([])
 const selectedRiskManagers = ref<string[]>([])
-const sortBy = ref<string>('Recommended')
+const sortBy = ref<string>('Active')
 const sortDir = ref<'desc' | 'asc'>('desc')
 
 useUrlQuerySync([
   { ref: searchQuery, default: '', queryKey: 'search' },
-  { ref: sortBy, default: 'Recommended', queryKey: 'sort' },
+  { ref: sortBy, default: 'Active', queryKey: 'sort' },
   { ref: sortDir, default: 'desc', queryKey: 'dir' },
   { ref: selectedMarkets, default: [], queryKey: 'market' },
   { ref: selectedAssets, default: [], queryKey: 'asset' },
@@ -76,7 +76,7 @@ const {
 )
 
 watch(sortBy, (newSortBy) => {
-  if (newSortBy === 'Recommended') {
+  if (newSortBy === 'Active') {
     sortDir.value = 'desc'
   }
 })
@@ -206,7 +206,7 @@ const applyDeprecatedGroupSort = (sorted: MarketGroup[]): MarketGroup[] => {
 const sortedMarkets = computed(() => {
   let sorted: MarketGroup[]
   switch (sortBy.value) {
-    case 'Recommended': {
+    case 'Active': {
       const list = [...filteredMarkets.value]
 
       const maxTVL = Math.max(...list.map(g => g.metrics.totalTVL), 0)
@@ -234,7 +234,7 @@ const sortedMarkets = computed(() => {
       scored.sort((a, b) => b.compositeScore - a.compositeScore)
       return applyDeprecatedGroupSort(applyFeaturedSort(scored.map(s => s.group)))
     }
-    case 'Best Max ROE':
+    case 'Max ROE':
       sorted = applyFeaturedSort([...filteredMarkets.value].sort((a, b) =>
         getBestMaxROE(b.id).value - getBestMaxROE(a.id).value,
       ))
@@ -291,13 +291,13 @@ const { isSlow } = useSlowLoading(isLoading)
           v-model="sortBy"
           v-model:dir="sortDir"
           :options="[
-            { label: 'Active', value: 'Recommended', icon: 'sparks' },
-            { label: 'Max ROE', value: 'Best Max ROE', icon: 'percent' },
+            { label: 'Active', icon: 'sparks' },
+            { label: 'Max ROE', icon: 'percent' },
             { label: 'Total Supply', icon: 'lend-outline' },
             { label: 'Total Borrowed', icon: 'borrow-outline' },
             { label: 'Available Liquidity', icon: 'wallet' },
           ]"
-          :disable-dir="sortBy === 'Recommended'"
+          :disable-dir="sortBy === 'Active'"
           title="Sorting type"
         />
         <UiSelect

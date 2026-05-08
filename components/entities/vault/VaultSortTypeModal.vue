@@ -1,7 +1,7 @@
 <script setup lang="ts">
 const emits = defineEmits(['close'])
 
-type SortOption = { label: string, value?: string, icon?: string }
+type SortOption = { label: string, icon?: string }
 
 const { options, selected, onSave } = defineProps<{
   options: SortOption[]
@@ -10,8 +10,7 @@ const { options, selected, onSave } = defineProps<{
   onSave: (selected: string) => void
 }>()
 
-const optionValue = (option: SortOption) => option.value ?? option.label
-const selectedIdx = ref(options.findIndex(option => optionValue(option) === selected))
+const selectedIdx = ref(options.findIndex(option => option.label === selected))
 
 const handleClose = () => {
   emits('close')
@@ -28,7 +27,7 @@ const handleClose = () => {
       :key="`options-${idx}`"
       class="flex items-center gap-12 py-12 px-16 cursor-pointer rounded-16"
       :class="[selectedIdx === idx ? 'bg-card-hover' : '']"
-      @click="onSave(optionValue(option))"
+      @click="onSave(option.label)"
     >
       <UiIcon
         v-if="option.icon"
