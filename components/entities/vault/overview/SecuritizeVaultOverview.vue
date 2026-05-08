@@ -251,7 +251,7 @@ const supplyCapPercentageDisplay = computed(() => {
           v-if="enableVaultTypeDisplay"
           label="Vault type"
         >
-          <VaultTypeBadges :vault-address="vault.address" />
+          <VaultTypeBadges :vault="vault" />
         </VaultOverviewLabelValue>
         <VaultOverviewLabelValue label="Can be borrowed">
           <div class="flex items-center gap-8">

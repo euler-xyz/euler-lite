@@ -871,6 +871,7 @@ const getBorrowVaultPair = async (
   if (!borrowVault) {
     throw '[getBorrowVaultPair]: Borrow vault not found'
   }
+  registrySet(borrowAddr, borrowVault, 'evk')
 
   const collateralLTV = borrowVault.collateralLTVs.find(c => c.collateral === collateralAddr)
   if (!collateralLTV) {
@@ -890,11 +891,13 @@ const getBorrowVaultPair = async (
   else {
     try {
       collateralVault = await fetchVault(collateralAddr, ctx)
+      registrySet(collateralAddr, collateralVault, 'evk')
     }
     catch {
       // Try escrow vault first
       try {
         collateralVault = await fetchEscrowVault(collateralAddr, ctx)
+        registrySet(collateralAddr, collateralVault, 'evk')
       }
       catch {
         // Check if it's a securitize vault
