@@ -210,7 +210,7 @@ const sortedList = computed(() => {
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
     <BasePageHeader
       title="Earn"
-      description="One deposit, diversified yield. Curators allocate your capital across multiple lending strategies."
+      description="Explore curator-configured vaults that allocate supplied assets across multiple lending strategies."
       class="mb-16"
       arrow-right
     />
@@ -240,9 +240,9 @@ const sortedList = computed(() => {
           :key="`curators-${chainId}`"
           v-model="selectedCurators"
           :options="curatorOptions"
-          placeholder="Capital allocator"
-          title="Capital allocator"
-          modal-input-placeholder="Search allocator"
+          placeholder="Curator"
+          title="Curator"
+          modal-input-placeholder="Search curator"
           icon="search-user"
         />
         <UiSelect
