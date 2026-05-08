@@ -126,10 +126,8 @@ const collateralAmount = computed(() => {
 })
 const nextBorrowAmount = computed(() => {
   if (!toVault.value) return null
-  if (isSameAsset.value && fromVault.value && fromAmount.value) {
-    const amount = valueToNano(fromAmount.value, fromVault.value.decimals)
-    const repaidDebt = amount > currentDebt.value ? currentDebt.value : amount
-    return nanoToValue(repaidDebt, toVault.value.decimals)
+  if (isSameAsset.value) {
+    return currentDebt.value > 0n ? nanoToValue(currentDebt.value, toVault.value.decimals) : null
   }
   if (!quote.value) return null
   return nanoToValue(BigInt(quote.value.amountIn), toVault.value.decimals)
@@ -221,11 +219,10 @@ const swap = useSwapPageLogic({
   async buildPlan(): Promise<TxPlan> {
     if (!fromVault.value || !toVault.value) throw new Error('Vaults not loaded')
     if (isSameAsset.value) {
-      const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
       return buildSameAssetDebtSwapPlan({
         oldVaultAddress: fromVault.value.address,
         newVaultAddress: toVault.value.address,
-        amount,
+        amount: currentDebt.value,
         subAccount: position.value?.subAccount || address.value!,
         enabledCollaterals: position.value?.collaterals,
       })
@@ -289,68 +286,79 @@ watchEffect(async () => {
     nextBorrowApy.value = null
     return
   }
-  const swappedDebt = fromAmount.value
-    ? valueToNano(fromAmount.value, fromVault.value.decimals)
-    : quote.value ? currentDebt.value : 0n
-  const repaidDebt = swappedDebt > currentDebt.value ? currentDebt.value : swappedDebt
-  const newBorrowAmount = isSameAsset.value
-    ? repaidDebt
-    : BigInt(quote.value!.amountIn)
-  const remainingDebt = currentDebt.value - repaidDebt
 
-  if (newBorrowAmount <= 0n) {
-    nextBorrowValueUsd.value = null
-    nextBorrowApy.value = null
-    return
+  try {
+    const swappedDebt = isSameAsset.value
+      ? currentDebt.value
+      : fromAmount.value
+        ? valueToNano(fromAmount.value, fromVault.value.decimals)
+        : quote.value ? currentDebt.value : 0n
+    const repaidDebt = swappedDebt > currentDebt.value ? currentDebt.value : swappedDebt
+    const newBorrowAmount = isSameAsset.value
+      ? currentDebt.value
+      : BigInt(quote.value!.amountIn)
+    const remainingDebt = currentDebt.value - repaidDebt
+
+    if (newBorrowAmount <= 0n) {
+      nextBorrowValueUsd.value = null
+      nextBorrowApy.value = null
+      return
+    }
+
+    const [remainingBorrowUsd, newBorrowUsd, projectedFromBorrow, projectedToBorrow] = await Promise.all([
+      remainingDebt > 0n
+        ? getAssetUsdValue(remainingDebt, fromVault.value, 'off-chain')
+        : Promise.resolve(0),
+      getAssetUsdValue(newBorrowAmount, toVault.value, 'off-chain'),
+      remainingDebt > 0n
+        ? getProjectedRates(
+            fromVault.value.address,
+            fromVault.value.interestRateInfo.cash,
+            fromVault.value.interestRateInfo.borrows,
+            repaidDebt,
+            -repaidDebt,
+          )
+        : Promise.resolve(null),
+      getProjectedRates(
+        toVault.value.address,
+        toVault.value.interestRateInfo.cash,
+        toVault.value.interestRateInfo.borrows,
+        -newBorrowAmount,
+        newBorrowAmount,
+      ),
+    ])
+    if (nextBorrowGuard.isStale(gen)) return
+
+    const oldBorrowUsd = remainingBorrowUsd ?? 0
+    const targetBorrowUsd = newBorrowUsd ?? 0
+    const totalBorrowUsd = oldBorrowUsd + targetBorrowUsd
+    nextBorrowValueUsd.value = totalBorrowUsd > 0 ? totalBorrowUsd : null
+
+    const oldBorrowApy = projectedFromBorrow
+      ? (fromBorrowApy.value ?? 0) + (nanoToValue(projectedFromBorrow.borrowAPY, 25) - nanoToValue(fromVault.value.interestRateInfo.borrowAPY, 25))
+      : fromBorrowApy.value
+    const targetBorrowApy = projectedToBorrow
+      ? (toBorrowApy.value ?? 0) + (nanoToValue(projectedToBorrow.borrowAPY, 25) - nanoToValue(toVault.value.interestRateInfo.borrowAPY, 25))
+      : toBorrowApy.value
+
+    if (totalBorrowUsd > 0 && oldBorrowApy !== null && targetBorrowApy !== null) {
+      nextBorrowApy.value = (
+        oldBorrowUsd * oldBorrowApy
+        + targetBorrowUsd * targetBorrowApy
+      ) / totalBorrowUsd
+    }
+    else if (totalBorrowUsd > 0 && targetBorrowApy !== null) {
+      nextBorrowApy.value = targetBorrowApy
+    }
+    else {
+      nextBorrowApy.value = null
+    }
   }
-
-  const [remainingBorrowUsd, newBorrowUsd, projectedFromBorrow, projectedToBorrow] = await Promise.all([
-    remainingDebt > 0n
-      ? getAssetUsdValue(remainingDebt, fromVault.value, 'off-chain')
-      : Promise.resolve(0),
-    getAssetUsdValue(newBorrowAmount, toVault.value, 'off-chain'),
-    remainingDebt > 0n
-      ? getProjectedRates(
-          fromVault.value.address,
-          fromVault.value.interestRateInfo.cash,
-          fromVault.value.interestRateInfo.borrows,
-          repaidDebt,
-          -repaidDebt,
-        )
-      : Promise.resolve(null),
-    getProjectedRates(
-      toVault.value.address,
-      toVault.value.interestRateInfo.cash,
-      toVault.value.interestRateInfo.borrows,
-      -newBorrowAmount,
-      newBorrowAmount,
-    ),
-  ])
-  if (nextBorrowGuard.isStale(gen)) return
-
-  const oldBorrowUsd = remainingBorrowUsd ?? 0
-  const targetBorrowUsd = newBorrowUsd ?? 0
-  const totalBorrowUsd = oldBorrowUsd + targetBorrowUsd
-  nextBorrowValueUsd.value = totalBorrowUsd > 0 ? totalBorrowUsd : null
-
-  const oldBorrowApy = projectedFromBorrow
-    ? (fromBorrowApy.value ?? 0) + (nanoToValue(projectedFromBorrow.borrowAPY, 25) - nanoToValue(fromVault.value.interestRateInfo.borrowAPY, 25))
-    : fromBorrowApy.value
-  const targetBorrowApy = projectedToBorrow
-    ? (toBorrowApy.value ?? 0) + (nanoToValue(projectedToBorrow.borrowAPY, 25) - nanoToValue(toVault.value.interestRateInfo.borrowAPY, 25))
-    : toBorrowApy.value
-
-  if (totalBorrowUsd > 0 && oldBorrowApy !== null && targetBorrowApy !== null) {
-    nextBorrowApy.value = (
-      oldBorrowUsd * oldBorrowApy
-      + targetBorrowUsd * targetBorrowApy
-    ) / totalBorrowUsd
-  }
-  else if (totalBorrowUsd > 0 && targetBorrowApy !== null) {
-    nextBorrowApy.value = targetBorrowApy
-  }
-  else {
-    nextBorrowApy.value = null
+  catch {
+    if (!nextBorrowGuard.isStale(gen)) {
+      nextBorrowValueUsd.value = null
+      nextBorrowApy.value = null
+    }
   }
 })
 
