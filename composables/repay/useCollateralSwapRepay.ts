@@ -462,22 +462,11 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     if (!chainConfig) return
 
     const validTo = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
-    const currentDebt = getCurrentDebt()
     const swapMode = core.direction.value
-
-    let targetDebt = 0n
-    if (swapMode === SwapperMode.TARGET_DEBT && core.debtAmount.value) {
-      const debtAmountNano = valueToNano(core.debtAmount.value, borrowVault.value.asset.decimals)
-      targetDebt = debtAmountNano >= currentDebt ? 0n : currentDebt - debtAmountNano
-    }
-
     const isTargetDebt = swapMode === SwapperMode.TARGET_DEBT
-    const isFullRepay = isTargetDebt && targetDebt === 0n
 
-    // Target-debt mode always uses a BUY order: buyAmount is the exact debt
-    // reduction, sellAmount is the collateral cap. The close wrapper returns
-    // any unused collateral to the subaccount, so the user lands exactly at
-    // targetDebt. Exact-in mode stays a SELL.
+    // Target-debt mode always uses a BUY order. The quote fixes buyAmount
+    // and the wrapper returns any unused collateral to the subaccount.
     const orderKind: 'buy' | 'sell' = isTargetDebt ? 'buy' : 'sell'
 
     // Quote amountIn/amountInMax is in underlying tokens for UI display.
@@ -493,13 +482,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     }
 
     // buyToken = borrowVault.asset() (underlying) — no conversion needed.
-    // Target-debt BUY: full repay adds a 0.1% interest buffer, partial repay
-    // buys exactly (currentDebt - targetDebt).
-    const buyAmount = isTargetDebt
-      ? (isFullRepay
-          ? currentDebt + (currentDebt / 1000n)
-          : currentDebt - targetDebt)
-      : BigInt(core.quotes.selectedQuote.value.amountOutMin || core.quotes.selectedQuote.value.amountOut || '1')
+    // Target-debt BUY quotes already include any full-repay interest buffer.
+    const buyAmount = BigInt(core.quotes.selectedQuote.value.amountOutMin || core.quotes.selectedQuote.value.amountOut || '1')
 
     const cowParams: CowSwapClosePositionExecuteParams = {
       chainId,
