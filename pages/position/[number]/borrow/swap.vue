@@ -10,7 +10,7 @@ import type { TxPlan } from '~/entities/txPlan'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
-import { nanoToValue, valueToNano } from '~/utils/crypto-utils'
+import { nanoToValue } from '~/utils/crypto-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { createRaceGuard } from '~/utils/race-guard'
@@ -196,6 +196,8 @@ const swap = useSwapPageLogic({
   buildQuoteRequest(amount) {
     if (!fromVault.value || !toVault.value || !position.value) return null
     if (amount > currentDebt.value) return null
+    const refinanceAmount = currentDebt.value
+    if (refinanceAmount <= 0n) return null
     const accountIn = (address.value || zeroAddress) as Address
     const accountOut = (position.value.subAccount || accountIn) as Address
     return {
@@ -204,7 +206,7 @@ const swap = useSwapPageLogic({
         tokenOut: fromVault.value.asset.address as Address,
         accountIn,
         accountOut,
-        amount,
+        amount: refinanceAmount,
         vaultIn: toVault.value.address as Address,
         receiver: fromVault.value.address as Address,
         slippage: slippage.value,
@@ -290,9 +292,7 @@ watchEffect(async () => {
   try {
     const swappedDebt = isSameAsset.value
       ? currentDebt.value
-      : fromAmount.value
-        ? valueToNano(fromAmount.value, fromVault.value.decimals)
-        : quote.value ? currentDebt.value : 0n
+      : currentDebt.value
     const repaidDebt = swappedDebt > currentDebt.value ? currentDebt.value : swappedDebt
     const newBorrowAmount = isSameAsset.value
       ? currentDebt.value
