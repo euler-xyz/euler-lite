@@ -18,6 +18,7 @@ const { pair } = defineProps<{ pair: AnyBorrowVaultPair }>()
 const { enableEntityBranding } = useDeployConfig()
 const { isVaultGovernorVerified } = useVaults()
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
+const pairKey = computed(() => `${pair.collateral.address.toLowerCase()}:${pair.borrow.address.toLowerCase()}`)
 
 const isAnyGovernorUnverified = computed(() => {
   const borrowUnverified = !isVaultGovernorVerified(pair.borrow)
@@ -244,6 +245,11 @@ const linkPath = computed(() => ({
   <NuxtLink
     :to="linkPath"
     class="grid gap-x-16 mobile:block no-underline text-content-primary bg-surface rounded-12 border border-line-default shadow-card hover:shadow-card-hover hover:border-line-emphasis transition-all"
+    data-id="vault-list-item"
+    data-list="borrow-pair"
+    :data-key="pairKey"
+    :data-collateral-address="pair.collateral.address.toLowerCase()"
+    :data-borrow-address="pair.borrow.address.toLowerCase()"
     :class="[
       enableEntityBranding ? '' : 'grid-cols-6',
       (isGeoBlocked || isPairEffectivelyBlocked) ? 'opacity-50' : '',
@@ -261,7 +267,13 @@ const linkPath = computed(() => ({
           size="40"
         />
         <div class="flex-grow ml-12">
-          <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-8">
+          <div
+            class="text-content-tertiary text-p3 mb-4 flex items-center gap-8"
+            data-id="data-point"
+            :data-key="pairKey"
+            data-field="name"
+            :data-value="pairName"
+          >
             <VaultDisplayName
               :name="pairName"
               :is-unverified="isAnyUnverified"
@@ -299,7 +311,13 @@ const linkPath = computed(() => ({
               Deprecated
             </span>
           </div>
-          <div class="text-h5 text-content-primary">
+          <div
+            class="text-h5 text-content-primary"
+            data-id="data-point"
+            :data-key="pairKey"
+            data-field="asset-symbols"
+            :data-value="[pair.collateral.asset.symbol, pair.borrow.asset.symbol].join('/')"
+          >
             {{
               [pair.collateral.asset.symbol, pair.borrow.asset.symbol].join("/")
             }}
@@ -315,7 +333,13 @@ const linkPath = computed(() => ({
             @click="onBorrowInfoIconClick"
           />
         </div>
-        <div class="text-p2 flex items-center text-accent-600 font-semibold">
+        <div
+          class="text-p2 flex items-center text-accent-600 font-semibold"
+          data-id="data-point"
+          :data-key="pairKey"
+          data-field="borrow-apy"
+          :data-value="borrowApyWithRewards"
+        >
           <SvgIcon
             v-if="hasBorrowApyRewards"
             class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
@@ -333,7 +357,13 @@ const linkPath = computed(() => ({
               @click="onMaxRoeInfoIconClick"
             />
           </div>
-          <div class="text-p2 text-accent-600 font-semibold flex items-center">
+          <div
+            class="text-p2 text-accent-600 font-semibold flex items-center"
+            data-id="data-point"
+            :data-key="pairKey"
+            data-field="max-roe"
+            :data-value="maxRoe"
+          >
             <SvgIcon
               v-if="hasAnyRewards"
               class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
@@ -353,7 +383,13 @@ const linkPath = computed(() => ({
             @click="onMaxRoeInfoIconClick"
           />
         </div>
-        <div class="text-p2 text-accent-600 font-semibold flex items-center">
+        <div
+          class="text-p2 text-accent-600 font-semibold flex items-center"
+          data-id="data-point"
+          :data-key="pairKey"
+          data-field="max-roe"
+          :data-value="maxRoe"
+        >
           <SvgIcon
             v-if="hasAnyRewards"
             class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
@@ -395,7 +431,13 @@ const linkPath = computed(() => ({
             :label="entityDisplay.name"
             :src="entityDisplay.logos"
           />
-          <span class="text-p2 text-content-primary truncate">{{ entityDisplay.name }}</span>
+          <span
+            class="text-p2 text-content-primary truncate"
+            data-id="data-point"
+            :data-key="pairKey"
+            data-field="risk-manager"
+            :data-value="entityDisplay.name"
+          >{{ entityDisplay.name }}</span>
         </div>
         <div
           v-else
@@ -413,7 +455,13 @@ const linkPath = computed(() => ({
             tooltip-placement="top-start"
           />
         </div>
-        <div class="text-p2 text-content-primary">
+        <div
+          class="text-p2 text-content-primary"
+          data-id="data-point"
+          :data-key="pairKey"
+          data-field="available-liquidity"
+          :data-value="liquidityDisplay"
+        >
           {{ liquidityDisplay }}
         </div>
       </div>
@@ -426,7 +474,13 @@ const linkPath = computed(() => ({
             @click="onSupplyInfoIconClick"
           />
         </div>
-        <div class="text-p2 text-content-primary flex items-center justify-center">
+        <div
+          class="text-p2 text-content-primary flex items-center justify-center"
+          data-id="data-point"
+          :data-key="pairKey"
+          data-field="supply-apy"
+          :data-value="supplyApyWithRewards"
+        >
           <SvgIcon
             v-if="hasSupplyRewards(pair.collateral.address)"
             class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
@@ -445,7 +499,13 @@ const linkPath = computed(() => ({
             @click="onNetApyInfoIconClick"
           />
         </div>
-        <div class="text-p2 text-content-primary flex items-center justify-center">
+        <div
+          class="text-p2 text-content-primary flex items-center justify-center"
+          data-id="data-point"
+          :data-key="pairKey"
+          data-field="net-apy"
+          :data-value="netApy"
+        >
           <SvgIcon
             v-if="hasAnyRewards"
             class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
@@ -457,13 +517,25 @@ const linkPath = computed(() => ({
       </div>
       <div class="py-12 pb-12 text-center mobile:!hidden">
         <div class="text-content-tertiary text-p3 mb-4">Max multiplier</div>
-        <div class="text-p2 text-content-primary">
+        <div
+          class="text-p2 text-content-primary"
+          data-id="data-point"
+          :data-key="pairKey"
+          data-field="max-multiplier"
+          :data-value="maxMultiplier"
+        >
           {{ formatNumber(maxMultiplier, 2, 2) }}x
         </div>
       </div>
       <div class="py-12 pb-12 text-center mobile:!hidden">
         <div class="text-content-tertiary text-p3 mb-4">Max LTV</div>
-        <div class="text-p2 text-content-primary">
+        <div
+          class="text-p2 text-content-primary"
+          data-id="data-point"
+          :data-key="pairKey"
+          data-field="max-ltv"
+          :data-value="maxLTV"
+        >
           {{ compactNumber(maxLTV, 2, 2) }}%
         </div>
       </div>
@@ -477,7 +549,13 @@ const linkPath = computed(() => ({
             :value="utilization"
             :max="100"
           />
-          <div class="text-p2 text-content-primary">
+          <div
+            class="text-p2 text-content-primary"
+            data-id="data-point"
+            :data-key="pairKey"
+            data-field="utilization"
+            :data-value="utilization"
+          >
             {{ compactNumber(utilization, 2, 2) }}%
           </div>
         </div>

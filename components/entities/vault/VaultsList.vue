@@ -7,6 +7,9 @@ defineProps<{ items: EVault[], type: 'lend' | 'borrow' }>()
 <template>
   <div
     class="flex flex-col gap-8"
+    data-id="vault-list"
+    :data-list="type"
+    :data-count="items.length"
   >
     <VaultItem
       v-for="(vault, index) in items"

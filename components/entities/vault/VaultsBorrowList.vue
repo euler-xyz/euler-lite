@@ -42,7 +42,13 @@ const reservedSpacerPx = computed(() => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-8">
+  <div
+    class="flex flex-col gap-8"
+    data-id="vault-list"
+    data-list="borrow-pair"
+    :data-count="items.length"
+    :data-rendered-count="visibleItems.length"
+  >
     <VaultBorrowItem
       v-for="(pair, index) in visibleItems"
       :key="`${pair.collateral.address}-${pair.borrow.address}`"

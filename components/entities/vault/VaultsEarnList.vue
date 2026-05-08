@@ -7,6 +7,9 @@ defineProps<{ items: EulerEarn[] }>()
 <template>
   <div
     class="flex flex-col gap-8"
+    data-id="vault-list"
+    data-list="earn"
+    :data-count="items.length"
   >
     <VaultEarnItem
       v-for="(vault, index) in items"
