@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import fs from 'node:fs/promises'
 import net from 'node:net'
 import process from 'node:process'
 import { chromium } from 'playwright'
@@ -13,6 +14,7 @@ const overlayInitScript = `
 
   const STYLE_ID = '__parity_data_overlay_style__'
   const TOOLBAR_ID = '__parity_data_overlay_toolbar__'
+  const DIFF_PANEL_ID = '__parity_data_overlay_diff_panel__'
   let scheduled = false
 
   const hashHue = (value) => {
@@ -40,6 +42,21 @@ const overlayInitScript = `
     return parts.join(' | ')
   }
 
+  const diffForCurrentPage = () => {
+    const diff = window.__PARITY_DIFF__
+    if (!diff || !diff.pages) return null
+
+    const path = window.location.pathname + window.location.search
+    return diff.pages[path] || diff.pages[window.location.pathname] || null
+  }
+
+  const baseParityKey = (element) => [
+    element.getAttribute('data-id') || '',
+    element.getAttribute('data-list') || '',
+    element.getAttribute('data-key') || '',
+    element.getAttribute('data-field') || '',
+  ].join('|')
+
   const ensureStyle = () => {
     if (document.getElementById(STYLE_ID)) return
 
@@ -59,6 +76,22 @@ const overlayInitScript = `
       'html[data-parity-overlay="on"] :where([data-id="data-point"]) {',
       '  border-radius: 4px !important;',
       '  background: hsl(var(--parity-hue) 92% 58% / 0.07) !important;',
+      '}',
+      'html[data-parity-overlay="on"] :where([data-parity-status="match"]) {',
+      '  outline-color: rgb(34 197 94 / 0.95) !important;',
+      '  box-shadow: inset 0 0 0 9999px rgb(34 197 94 / 0.045) !important;',
+      '}',
+      'html[data-parity-overlay="on"] :where([data-parity-status="value-mismatch"]) {',
+      '  outline: 2px solid rgb(220 38 38 / 0.98) !important;',
+      '  box-shadow: inset 0 0 0 9999px rgb(220 38 38 / 0.09) !important;',
+      '}',
+      'html[data-parity-overlay="on"] :where([data-parity-status="missing-in-candidate"]) {',
+      '  outline: 2px solid rgb(245 158 11 / 0.98) !important;',
+      '  box-shadow: inset 0 0 0 9999px rgb(245 158 11 / 0.11) !important;',
+      '}',
+      'html[data-parity-overlay="on"] :where([data-parity-status="extra-in-candidate"]) {',
+      '  outline: 2px solid rgb(168 85 247 / 0.98) !important;',
+      '  box-shadow: inset 0 0 0 9999px rgb(168 85 247 / 0.11) !important;',
       '}',
       'html[data-parity-overlay="on"] :where([data-id])::after {',
       '  content: attr(data-id);',
@@ -84,6 +117,12 @@ const overlayInitScript = `
       'html[data-parity-overlay="on"] :where([data-id="data-point"][data-field])::after {',
       '  content: attr(data-field);',
       '}',
+      'html[data-parity-overlay="on"] :where([data-parity-status][data-field])::after {',
+      '  content: attr(data-parity-status) " " attr(data-field);',
+      '}',
+      'html[data-parity-overlay="on"] :where([data-parity-status]:not([data-field]))::after {',
+      '  content: attr(data-parity-status) " " attr(data-id);',
+      '}',
       'html[data-parity-overlay="on"][data-parity-labels="off"] :where([data-id])::after {',
       '  display: none !important;',
       '}',
@@ -107,6 +146,26 @@ const overlayInitScript = `
       '}',
       '#' + TOOLBAR_ID + ' strong { color: #8fd3ff !important; font-weight: 700 !important; }',
       '#' + TOOLBAR_ID + ' span { color: rgb(255 255 255 / 0.7) !important; }',
+      '#' + DIFF_PANEL_ID + ' {',
+      '  position: fixed !important;',
+      '  left: 12px !important;',
+      '  bottom: 12px !important;',
+      '  z-index: 2147483647 !important;',
+      '  max-width: min(560px, calc(100vw - 24px)) !important;',
+      '  max-height: 36vh !important;',
+      '  overflow: auto !important;',
+      '  padding: 10px 12px !important;',
+      '  border: 1px solid rgb(255 255 255 / 0.18) !important;',
+      '  border-radius: 6px !important;',
+      '  background: rgb(12 18 28 / 0.92) !important;',
+      '  color: white !important;',
+      '  box-shadow: 0 8px 30px rgb(0 0 0 / 0.24) !important;',
+      '  font: 12px/16px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;',
+      '  pointer-events: auto !important;',
+      '}',
+      '#' + DIFF_PANEL_ID + ' strong { color: #fca5a5 !important; }',
+      '#' + DIFF_PANEL_ID + ' div { margin-top: 4px !important; }',
+      '#' + DIFF_PANEL_ID + ' code { color: #d1d5db !important; }',
     ].join('\\n')
 
     document.head.appendChild(style)
@@ -123,10 +182,28 @@ const overlayInitScript = `
     return toolbar
   }
 
+  const ensureDiffPanel = () => {
+    let panel = document.getElementById(DIFF_PANEL_ID)
+    if (panel) return panel
+
+    panel = document.createElement('div')
+    panel.id = DIFF_PANEL_ID
+    panel.setAttribute('aria-hidden', 'true')
+    document.body.appendChild(panel)
+    return panel
+  }
+
   const applyMetadata = () => {
     const elements = document.querySelectorAll('[data-id]')
+    const pageDiff = diffForCurrentPage()
+    const occurrenceByBaseKey = new Map()
 
     elements.forEach((element) => {
+      const baseKey = baseParityKey(element)
+      const occurrence = occurrenceByBaseKey.get(baseKey) || 0
+      const parityKey = baseKey + '#' + occurrence
+      occurrenceByBaseKey.set(baseKey, occurrence + 1)
+
       const seed = [
         element.getAttribute('data-id') || '',
         element.getAttribute('data-list') || '',
@@ -135,10 +212,37 @@ const overlayInitScript = `
 
       element.style.setProperty('--parity-hue', String(hashHue(seed)))
       element.setAttribute('data-parity-tagged', 'true')
+      element.setAttribute('data-parity-key', parityKey)
+
+      const status = pageDiff?.statuses?.[parityKey]
+      if (status) {
+        element.setAttribute('data-parity-status', status)
+      } else {
+        element.removeAttribute('data-parity-status')
+      }
 
       const description = describe(element)
       if (description) element.setAttribute('data-parity-label', description)
     })
+  }
+
+  const updateDiffPanel = () => {
+    const pageDiff = diffForCurrentPage()
+    const existing = document.getElementById(DIFF_PANEL_ID)
+
+    if (!pageDiff || !pageDiff.problems || pageDiff.problems.length === 0) {
+      if (existing) existing.remove()
+      return
+    }
+
+    const panel = ensureDiffPanel()
+    const visibleProblems = pageDiff.problems.slice(0, 12)
+    panel.innerHTML =
+      '<strong>' + pageDiff.problems.length + ' parity discrepancies</strong>' +
+      visibleProblems.map(problem =>
+        '<div><code>' + problem.status + '</code> ' + (problem.field || problem.id || problem.key) + '</div>',
+      ).join('') +
+      (pageDiff.problems.length > visibleProblems.length ? '<div>...and ' + (pageDiff.problems.length - visibleProblems.length) + ' more</div>' : '')
   }
 
   const updateToolbar = () => {
@@ -148,12 +252,15 @@ const overlayInitScript = `
     const lists = document.querySelectorAll('[data-list]').length
     const overlay = document.documentElement.getAttribute('data-parity-overlay') === 'on' ? 'on' : 'off'
     const labels = document.documentElement.getAttribute('data-parity-labels') === 'on' ? 'on' : 'off'
+    const pageDiff = diffForCurrentPage()
+    const problems = pageDiff?.problems?.length || 0
 
     toolbar.innerHTML =
       '<strong>parity tags</strong>' +
       '<span>' + tagged + ' tagged</span>' +
       '<span>' + dataPoints + ' data</span>' +
       '<span>' + lists + ' lists</span>' +
+      (pageDiff ? '<span>' + problems + ' diffs</span>' : '') +
       '<span>Alt+P ' + overlay + '</span>' +
       '<span>Alt+L labels ' + labels + '</span>'
   }
@@ -171,6 +278,7 @@ const overlayInitScript = `
     }
 
     applyMetadata()
+    updateDiffPanel()
     updateToolbar()
   }
 
@@ -228,7 +336,7 @@ const overlayInitScript = `
     childList: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ['data-id', 'data-list', 'data-field', 'data-value'],
+    attributeFilter: ['data-id', 'data-list', 'data-key', 'data-field', 'data-value'],
   })
 
   if (document.readyState === 'loading') {
@@ -239,9 +347,9 @@ const overlayInitScript = `
 })()
 `
 
-const args = process.argv.slice(2)
+const args = parseArgs(process.argv.slice(2))
 
-if (args.includes('--help') || args.includes('-h')) {
+if (args.flags.help || args.flags.h) {
   printHelp()
   process.exit(0)
 }
@@ -252,8 +360,11 @@ void main().catch((error) => {
 })
 
 async function main() {
-  const positional = args.find(arg => !arg.startsWith('-'))
+  const positional = args.positionals[0]
   const target = await resolveTarget(positional)
+  const diffPath = valueOf('diff') || process.env.PARITY_DIFF
+  const diffSide = valueOf('side') || process.env.PARITY_DIFF_SIDE || 'candidate'
+  const diffPayload = diffPath ? await loadOverlayDiff(diffPath, diffSide) : null
   const state = {
     browser: null,
   }
@@ -292,11 +403,17 @@ async function main() {
     },
   })
 
+  if (diffPayload) {
+    await context.addInitScript({ content: 'window.__PARITY_DIFF__ = ' + JSON.stringify(diffPayload) })
+  }
   await context.addInitScript({ content: overlayInitScript })
 
   const page = await context.newPage()
   console.log('[parity-overlay] Opening ' + target.url.href)
   console.log('[parity-overlay] Shortcuts: Alt+P toggles borders, Alt+L toggles labels. Close the browser or press Ctrl+C to stop.')
+  if (diffPayload) {
+    console.log('[parity-overlay] Loaded diff for ' + diffSide + ' side from ' + diffPath)
+  }
 
   await page.goto(target.url.href, { waitUntil: 'domcontentloaded' })
   await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {})
@@ -319,6 +436,85 @@ async function main() {
   )
 
   await new Promise(() => {})
+}
+
+async function loadOverlayDiff(filePath, side) {
+  const raw = JSON.parse(await fs.readFile(filePath, 'utf8'))
+  const diff = raw.diff ? JSON.parse(await fs.readFile(raw.diff, 'utf8')) : raw
+  const pages = {}
+
+  for (const page of diff.pages || []) {
+    const pageUrl = new URL(side === 'baseline' ? page.baselineUrl : page.candidateUrl)
+    const pageKey = pageUrl.pathname + pageUrl.search
+    const statuses = {}
+    const problems = []
+
+    for (const item of page.elementDiffs || []) {
+      statuses[item.key] = item.status
+
+      if (item.status !== 'match') {
+        const source = side === 'baseline' ? item.baseline : item.candidate
+        problems.push({
+          key: item.key,
+          status: item.status,
+          id: source?.id || item.baseline?.id || item.candidate?.id || '',
+          field: source?.field || item.baseline?.field || item.candidate?.field || '',
+          list: source?.list || item.baseline?.list || item.candidate?.list || '',
+          itemKey: source?.itemKey || item.baseline?.itemKey || item.candidate?.itemKey || '',
+        })
+      }
+    }
+
+    for (const listDiff of page.listDiffs || []) {
+      if (listDiff.status === 'match') continue
+      problems.push({
+        key: 'list:' + listDiff.list,
+        status: listDiff.status,
+        id: 'list',
+        field: listDiff.list,
+        list: listDiff.list,
+        itemKey: '',
+      })
+    }
+
+    for (const captureError of page.captureErrors || []) {
+      problems.push({
+        key: 'capture-error:' + captureError.side,
+        status: 'capture-error',
+        id: 'page',
+        field: captureError.side,
+        list: '',
+        itemKey: '',
+      })
+    }
+
+    for (const consoleError of page.consoleErrors || []) {
+      problems.push({
+        key: 'console-error:' + consoleError.side,
+        status: 'console-error',
+        id: 'page',
+        field: consoleError.side,
+        list: '',
+        itemKey: '',
+      })
+    }
+
+    pages[pageKey] = {
+      pageId: page.pageId,
+      status: page.status,
+      summary: page.summary,
+      baselineUrl: page.baselineUrl,
+      candidateUrl: page.candidateUrl,
+      statuses,
+      problems,
+    }
+  }
+
+  return {
+    side,
+    runId: diff.runId,
+    pages,
+  }
 }
 
 async function resolveTarget(positional) {
@@ -488,11 +684,16 @@ Usage:
   npm run parity:overlay
   npm run parity:overlay -- /earn
   PARITY_URL=http://127.0.0.1:3000 npm run parity:overlay
+  PARITY_DIFF=artifacts/parity/latest-run.json npm run parity:overlay -- /lend?network=1
 
 Options and environment:
   First arg                  Route path or full URL to open.
+  --diff <file>              Load diff.json or latest-run.json and highlight parity status.
+  --side <side>              Diff side to render: candidate or baseline. Default: candidate.
   PARITY_URL                 Attach to an existing app URL instead of starting dev.
   PARITY_PATH                Route path when no first arg is provided.
+  PARITY_DIFF                Same as --diff.
+  PARITY_DIFF_SIDE           Same as --side.
   PARITY_HOST                Dev server host. Default: ${DEFAULT_HOST}
   PARITY_PORT                First dev server port to try. Default: ${DEFAULT_PORT}
   PARITY_BROWSER_CHANNEL     Browser channel. Default: chrome. Use "none" for bundled Chromium.
@@ -504,4 +705,40 @@ In the browser:
   Alt+P toggles tag borders.
   Alt+L toggles tag labels.
 `)
+}
+
+function parseArgs(argv) {
+  const flags = {}
+  const positionals = []
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]
+
+    if (!arg.startsWith('-')) {
+      positionals.push(arg)
+      continue
+    }
+
+    const trimmed = arg.replace(/^--?/, '')
+    const [key, inlineValue] = trimmed.split('=', 2)
+    const next = argv[index + 1]
+
+    if (inlineValue !== undefined) {
+      flags[key] = inlineValue
+    }
+    else if (next && !next.startsWith('-')) {
+      flags[key] = next
+      index += 1
+    }
+    else {
+      flags[key] = true
+    }
+  }
+
+  return { flags, positionals }
+}
+
+function valueOf(name) {
+  const value = args.flags[name]
+  return typeof value === 'string' ? value : null
 }

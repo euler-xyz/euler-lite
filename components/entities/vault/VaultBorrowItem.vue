@@ -184,7 +184,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
   event.preventDefault()
   event.stopPropagation()
   const baseSupply = 'interestRateInfo' in pair.collateral
-    ? nanoToValue(pair.collateral.interestRateInfo.supplyAPY, 25)
+    ? getVaultSupplyApy(pair.collateral as EVault)
     : 0
   modal.open(VaultSupplyApyModal, {
     props: {

@@ -332,8 +332,8 @@ const onRoeClick = () => {
     data-list="borrow"
     :data-key="positionKey"
     :data-sub-account="position.subAccount.toLowerCase()"
-    :data-collateral-address="position.collateral.address.toLowerCase()"
-    :data-borrow-address="position.borrow.address.toLowerCase()"
+    :data-collateral-address="primaryCollateralAddress.toLowerCase()"
+    :data-borrow-address="borrowAddress.toLowerCase()"
   >
     <div class="flex py-16 px-16 pb-12 border-b border-line-default">
       <div
@@ -558,7 +558,7 @@ const onRoeClick = () => {
             data-id="data-point"
             :data-key="positionKey"
             data-field="health-score"
-            :data-value="hasQueryFailure ? 'Unknown' : nanoToValue(position.health, 18)"
+            :data-value="hasQueryFailure || health === undefined ? 'Unknown' : nanoToValue(health, 18)"
           >
             <span
               v-if="hasQueryFailure || health === undefined"

@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "defaults": {
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "localStorage": {
+      "is-onboarding-completed": "true",
+      "migration-announcement-seen": "true"
+    },
+    "waitFor": [
+      "[data-id]"
+    ],
+    "settleMs": 1000
+  },
+  "scenarios": [
+    {
+      "id": "lend-list-mainnet",
+      "label": "Mainnet lend list and vault detail pages",
+      "path": "/lend?network=1",
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"lend\"]"
+      ],
+      "follow": [
+        {
+          "id": "lend-vault-detail",
+          "label": "Lend vault details",
+          "selector": "[data-id=\"vault-list-item\"][data-list=\"lend\"]",
+          "waitFor": [
+            "[data-id=\"vault-header\"]",
+            "[data-id=\"data-point\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "earn-list-mainnet",
+      "label": "Mainnet earn list and vault detail pages",
+      "path": "/earn?network=1",
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"earn\"]"
+      ],
+      "follow": [
+        {
+          "id": "earn-vault-detail",
+          "label": "Earn vault details",
+          "selector": "[data-id=\"vault-list-item\"][data-list=\"earn\"]",
+          "waitFor": [
+            "[data-id=\"vault-header\"]",
+            "[data-id=\"data-point\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "borrow-list-mainnet",
+      "label": "Mainnet borrow pair list and detail pages",
+      "path": "/borrow?network=1",
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"borrow-pair\"]"
+      ],
+      "follow": [
+        {
+          "id": "borrow-pair-detail",
+          "label": "Borrow pair details",
+          "selector": "[data-id=\"vault-list-item\"][data-list=\"borrow-pair\"]",
+          "waitFor": [
+            "[data-id=\"vault-header\"]",
+            "[data-id=\"data-point\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "explore-list-mainnet",
+      "label": "Mainnet explore markets",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ]
+    },
+    {
+      "id": "portfolio-spy-mainnet",
+      "label": "Mainnet portfolio spy overview",
+      "path": "/portfolio?network=1&spy=${PARITY_SPY_ADDRESS}",
+      "skipUnlessEnv": "PARITY_SPY_ADDRESS",
+      "waitFor": [
+        "[data-id=\"portfolio-list\"]",
+        "[data-id=\"data-point\"]"
+      ]
+    },
+    {
+      "id": "portfolio-spy-rewards-mainnet",
+      "label": "Mainnet portfolio spy rewards",
+      "path": "/portfolio/rewards?network=1&spy=${PARITY_SPY_ADDRESS}",
+      "skipUnlessEnv": "PARITY_SPY_ADDRESS",
+      "waitFor": [
+        "[data-id]"
+      ]
+    }
+  ]
+}

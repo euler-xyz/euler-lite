@@ -14,7 +14,6 @@ import { roundAndCompactTokens } from '~/utils/crypto-utils'
 
 const { position } = defineProps<{ position: PortfolioSavingsPosition<VaultEntity> }>()
 const modal = useModal()
-const positionKey = computed(() => `${position.subAccount.toLowerCase()}:${position.vault.address.toLowerCase()}`)
 
 const { address } = useAccount()
 const { portfolioAddress } = useEulerAccount()
@@ -28,6 +27,7 @@ const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRe
 const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 
 const vault = computed(() => position.vault as EulerEarn)
+const positionKey = computed(() => `${position.subAccount.toLowerCase()}:${vault.value.address.toLowerCase()}`)
 const rewardsExist = computed(() => hasSupplyRewards(vault.value.address))
 const { isVerifiedVault } = useVaultRegistry()
 
