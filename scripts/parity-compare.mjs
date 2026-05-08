@@ -66,31 +66,58 @@ async function main() {
       scenarioFilter: config.scenarioFilter,
     })
 
-    state.apps = await Promise.all([
-      startOrAttach(run.baseline, config),
-      startOrAttach(run.candidate, config),
-    ])
-
     state.browser = await launchBrowser(config.headless)
-
     const scenarios = await loadScenarios(config)
-    const baselineSnapshots = []
-    const candidateSnapshots = []
-    const pageDiffs = []
+    let baselineSnapshots = []
+    let candidateSnapshots = []
+    let pageDiffs = []
 
-    for (const scenario of scenarios) {
-      console.log('[parity-compare] Running ' + scenario.id)
-      const result = await runScenario({
-        scenario,
+    if (config.sequential) {
+      const baselineApp = await startOrAttach(run.baseline, config)
+      state.apps = [baselineApp]
+      const baselineResult = await captureBaselinePlans({
+        scenarios,
         config,
         browser: state.browser,
-        baseline: state.apps[0],
-        candidate: state.apps[1],
+        app: baselineApp,
+      })
+      baselineSnapshots = baselineResult.snapshots
+
+      await stopServer(baselineApp.serverProcess)
+      state.apps = []
+
+      const candidateApp = await startOrAttach(run.candidate, config)
+      state.apps = [candidateApp]
+      candidateSnapshots = await capturePlans({
+        plans: baselineResult.plans,
+        config,
+        browser: state.browser,
+        app: candidateApp,
       })
 
-      baselineSnapshots.push(...result.baseline)
-      candidateSnapshots.push(...result.candidate)
-      pageDiffs.push(...result.diffs)
+      const candidateByPageId = new Map(candidateSnapshots.map(snapshot => [snapshot.pageId, snapshot]))
+      pageDiffs = baselineSnapshots.map(snapshot => compareSnapshots(snapshot, candidateByPageId.get(snapshot.pageId)))
+    }
+    else {
+      state.apps = await Promise.all([
+        startOrAttach(run.baseline, config),
+        startOrAttach(run.candidate, config),
+      ])
+
+      for (const scenario of scenarios) {
+        console.log('[parity-compare] Running ' + scenario.id)
+        const result = await runScenario({
+          scenario,
+          config,
+          browser: state.browser,
+          baseline: state.apps[0],
+          candidate: state.apps[1],
+        })
+
+        baselineSnapshots.push(...result.baseline)
+        candidateSnapshots.push(...result.candidate)
+        pageDiffs.push(...result.diffs)
+      }
     }
 
     const diff = buildDiff({
@@ -150,6 +177,7 @@ async function buildConfig() {
     skipInstall: Boolean(args.flags.skipInstall || args.flags['skip-install'] || process.env.PARITY_SKIP_INSTALL === '1'),
     maxFollowItems: numberOrNull(valueOf('max-follow-items') || process.env.PARITY_MAX_FOLLOW_ITEMS),
     waitTimeoutMs: Number(valueOf('wait-timeout-ms') || process.env.PARITY_WAIT_TIMEOUT_MS || 45_000),
+    sequential: Boolean(args.flags.sequential || process.env.PARITY_SEQUENTIAL === '1'),
   }
 }
 
@@ -332,6 +360,105 @@ async function runScenario({ scenario, config, browser, baseline, candidate }) {
     candidate: candidateSnapshots,
     diffs,
   }
+}
+
+async function captureBaselinePlans({ scenarios, config, browser, app }) {
+  const snapshots = []
+  const plans = []
+
+  for (const scenario of scenarios) {
+    console.log('[parity-compare] Recording baseline ' + scenario.id)
+    const context = await createContext(browser, scenario)
+    let pageResult = null
+
+    try {
+      pageResult = await openAndCapture({
+        app,
+        context,
+        scenario,
+        pageId: scenario.id,
+        pathName: scenario.path,
+        waitFor: scenario.waitFor,
+        waitTimeoutMs: config.waitTimeoutMs,
+        keepPage: true,
+      })
+
+      snapshots.push(pageResult.snapshot)
+      plans.push({
+        pageId: scenario.id,
+        scenario,
+        pathName: scenario.path,
+        waitFor: scenario.waitFor,
+      })
+
+      for (const follow of scenario.follow || []) {
+        const links = await extractFollowLinks(pageResult.page, follow.selector)
+        const limited = limitFollowLinks(links, follow, config)
+
+        console.log('[parity-compare] ' + scenario.id + ' follow ' + follow.id + ': ' + limited.length + ' pages')
+
+        for (let index = 0; index < limited.length; index += 1) {
+          const link = limited[index]
+          const detailPath = pathFromUrl(link.href)
+          const pageId = scenario.id + '/' + follow.id + '/' + String(index + 1).padStart(4, '0') + '-' + sanitizeFilePart(link.key || 'item')
+          const label = (follow.label || follow.id) + ' ' + (link.key || index + 1)
+          const detailScenario = { ...scenario, label }
+
+          const detail = await openAndCapture({
+            app,
+            context,
+            scenario: detailScenario,
+            pageId,
+            pathName: detailPath,
+            waitFor: follow.waitFor || scenario.waitFor,
+            waitTimeoutMs: config.waitTimeoutMs,
+          })
+
+          snapshots.push(detail.snapshot)
+          plans.push({
+            pageId,
+            scenario: detailScenario,
+            pathName: detailPath,
+            waitFor: follow.waitFor || scenario.waitFor,
+          })
+        }
+      }
+    }
+    finally {
+      await pageResult?.page?.close().catch(() => {})
+      await context.close()
+    }
+  }
+
+  return { snapshots, plans }
+}
+
+async function capturePlans({ plans, config, browser, app }) {
+  const snapshots = []
+
+  for (const plan of plans) {
+    console.log('[parity-compare] Capturing ' + app.name + ' ' + plan.pageId)
+    const context = await createContext(browser, plan.scenario)
+
+    try {
+      const result = await openAndCapture({
+        app,
+        context,
+        scenario: plan.scenario,
+        pageId: plan.pageId,
+        pathName: plan.pathName,
+        waitFor: plan.waitFor,
+        waitTimeoutMs: config.waitTimeoutMs,
+      })
+
+      snapshots.push(result.snapshot)
+    }
+    finally {
+      await context.close()
+    }
+  }
+
+  return snapshots
 }
 
 async function createContext(browser, scenario) {
@@ -544,6 +671,38 @@ function scrapePage(meta) {
 }
 
 function compareSnapshots(baseline, candidate) {
+  if (!candidate) {
+    return {
+      pageId: baseline.pageId,
+      scenarioId: baseline.scenarioId,
+      label: baseline.label,
+      path: baseline.path,
+      baselineUrl: baseline.url,
+      candidateUrl: '',
+      status: 'fail',
+      summary: {
+        baselineTagged: baseline.counts.tagged,
+        candidateTagged: 0,
+        elementDiffs: baseline.elements.length,
+        listDiffs: Object.keys(baseline.lists || {}).length,
+        captureErrors: 1,
+        consoleErrors: 0,
+        missingInCandidate: baseline.elements.length,
+        extraInCandidate: 0,
+        valueMismatches: 0,
+      },
+      captureErrors: [{ side: 'candidate', message: 'Candidate snapshot missing for page plan.' }],
+      consoleErrors: [],
+      listDiffs: [],
+      elementDiffs: baseline.elements.map(element => ({
+        key: element.key,
+        baseKey: element.baseKey,
+        status: 'missing-in-candidate',
+        baseline: summarizeElement(element),
+      })),
+    }
+  }
+
   const listDiffs = compareLists(baseline, candidate)
   const elementDiffs = compareElements(baseline, candidate)
   const failedElements = elementDiffs.filter(diff => diff.status !== 'match')
@@ -1049,6 +1208,7 @@ Options:
   --output-dir <dir>          Artifact directory. Default: artifacts/parity/<timestamp>
   --max-follow-items <n>      Limit list item detail pages. Default: all.
   --wait-timeout-ms <n>       Per-selector wait timeout. Default: 45000.
+  --sequential                Capture baseline first, then candidate, to avoid two dev watchers.
   --headed                    Show browser.
   --no-fail                   Exit 0 even when diffs are found.
   --skip-install              Do not run npm ci in missing-node_modules worktrees.
