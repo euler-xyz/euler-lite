@@ -4,7 +4,7 @@ import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { getVaultUtilization, isSecuritizeBorrowPair, type AnyBorrowVaultPair, type BorrowVaultPair } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultRecentlyAdded, isVaultDeprecated, isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
@@ -307,13 +307,13 @@ const filteredBorrowList = computed(() => {
     .filter(matchesCustomFilters)
 })
 
-const isPairFeatured = (pair: AnyBorrowVaultPair) =>
-  isVaultFeatured(pair.collateral.address) || isVaultFeatured(pair.borrow.address)
+const isPairRecentlyAdded = (pair: AnyBorrowVaultPair) =>
+  isVaultRecentlyAdded(pair.collateral.address) || isVaultRecentlyAdded(pair.borrow.address)
 
-const applyFeaturedPairSort = (sorted: AnyBorrowVaultPair[]): AnyBorrowVaultPair[] => {
+const applyRecentlyAddedPairSort = (sorted: AnyBorrowVaultPair[]): AnyBorrowVaultPair[] => {
   return [...sorted].sort((a, b) => {
-    const af = isPairFeatured(a) ? 1 : 0
-    const bf = isPairFeatured(b) ? 1 : 0
+    const af = isPairRecentlyAdded(a) ? 1 : 0
+    const bf = isPairRecentlyAdded(b) ? 1 : 0
     return bf - af
   })
 }
@@ -355,49 +355,49 @@ const sortedBorrowList = computed(() => {
       })
 
       // Recommended sort ignores direction toggle
-      return applyDeprecatedPairSort(applyFeaturedPairSort(scored.map(s => s.pair)))
+      return applyDeprecatedPairSort(applyRecentlyAddedPairSort(scored.map(s => s.pair)))
     }
     case 'Liquidity':
-      sorted = applyFeaturedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
+      sorted = applyRecentlyAddedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
         const aValue = pairLiquidityUsd.value.get(getPairKey(a)) ?? 0
         const bValue = pairLiquidityUsd.value.get(getPairKey(b)) ?? 0
         return bValue - aValue
       }))
       break
     case 'Borrow APY':
-      sorted = applyFeaturedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
+      sorted = applyRecentlyAddedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
         return Number(a.borrow.interestRateInfo.borrowAPY) - Number(b.borrow.interestRateInfo.borrowAPY)
       }))
       break
     case 'Supply APY':
-      sorted = applyFeaturedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
+      sorted = applyRecentlyAddedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
         return getPairSupplyApy(b) - getPairSupplyApy(a)
       }))
       break
     case 'Utilization':
-      sorted = applyFeaturedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
+      sorted = applyRecentlyAddedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
         return getVaultUtilization(b.borrow) - getVaultUtilization(a.borrow)
       }))
       break
     case 'Total Borrowed':
-      sorted = applyFeaturedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
+      sorted = applyRecentlyAddedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
         const aValue = pairBorrowedUsd.value.get(getPairKey(a)) ?? 0
         const bValue = pairBorrowedUsd.value.get(getPairKey(b)) ?? 0
         return bValue - aValue
       }))
       break
     case 'Max ROE':
-      sorted = applyFeaturedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
+      sorted = applyRecentlyAddedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
         return getSortMaxRoe(b as BorrowVaultPair) - getSortMaxRoe(a as BorrowVaultPair)
       }))
       break
     case 'Net APY':
-      sorted = applyFeaturedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
+      sorted = applyRecentlyAddedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
         return getNetApy(b as BorrowVaultPair) - getNetApy(a as BorrowVaultPair)
       }))
       break
     default:
-      sorted = applyFeaturedPairSort([...filteredBorrowList.value])
+      sorted = applyRecentlyAddedPairSort([...filteredBorrowList.value])
   }
   const directed = sortDir.value === 'asc' ? [...sorted].reverse() : sorted
   return applyDeprecatedPairSort(directed)

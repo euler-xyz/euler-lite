@@ -5,7 +5,7 @@ import { getVaultUtilization, getCurrentLiquidationLTV, isCyclicalNoteVault, typ
 import { getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
-import { isVaultFeatured, isVaultKeyring } from '~/utils/eulerLabelsUtils'
+import { isVaultRecentlyAdded, isVaultKeyring } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
@@ -84,7 +84,7 @@ const supplyApyWithRewards = computed(
 )
 const utilization = computed(() => getVaultUtilization(vault))
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
-const isFeatured = computed(() => isVaultFeatured(vault.address))
+const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address))
 const isKeyring = computed(() => isVaultKeyring(vault.address))
 const isCyclicalNote = computed(() => isCyclicalNoteVault(vault))
 const utilisationWarning = computed(() => getUtilisationWarning(vault, 'lend'))
@@ -173,15 +173,15 @@ watchEffect(async () => {
             :is-unverified="isUnverified"
           />
           <span
-            v-if="isFeatured"
+            v-if="isRecentlyAdded"
             class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5"
-            title="Featured Vault"
+            title="Recently added vault"
           >
             <SvgIcon
               name="star"
               class="!w-14 !h-14"
             />
-            Featured
+            Recently added
           </span>
           <KeyringBadge v-if="isKeyring" />
           <GovernanceLimitedBadge v-if="isGovernanceLimited" />

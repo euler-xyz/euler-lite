@@ -180,10 +180,10 @@ const filteredMarkets = computed(() => {
     .filter(matchesCustomFilters)
 })
 
-const applyFeaturedSort = (sorted: MarketGroup[]): MarketGroup[] => {
+const applyRecentlyAddedSort = (sorted: MarketGroup[]): MarketGroup[] => {
   return [...sorted].sort((a, b) => {
-    const af = a.metrics.hasFeatured ? 1 : 0
-    const bf = b.metrics.hasFeatured ? 1 : 0
+    const af = a.metrics.hasRecentlyAdded ? 1 : 0
+    const bf = b.metrics.hasRecentlyAdded ? 1 : 0
     return bf - af
   })
 }
@@ -232,30 +232,30 @@ const sortedMarkets = computed(() => {
       })
 
       scored.sort((a, b) => b.compositeScore - a.compositeScore)
-      return applyDeprecatedGroupSort(applyFeaturedSort(scored.map(s => s.group)))
+      return applyDeprecatedGroupSort(applyRecentlyAddedSort(scored.map(s => s.group)))
     }
     case 'Best Max ROE':
-      sorted = applyFeaturedSort([...filteredMarkets.value].sort((a, b) =>
+      sorted = applyRecentlyAddedSort([...filteredMarkets.value].sort((a, b) =>
         getBestMaxROE(b.id).value - getBestMaxROE(a.id).value,
       ))
       break
     case 'Total Supply':
-      sorted = applyFeaturedSort([...filteredMarkets.value].sort((a, b) =>
+      sorted = applyRecentlyAddedSort([...filteredMarkets.value].sort((a, b) =>
         b.metrics.totalTVL - a.metrics.totalTVL,
       ))
       break
     case 'Total Borrowed':
-      sorted = applyFeaturedSort([...filteredMarkets.value].sort((a, b) =>
+      sorted = applyRecentlyAddedSort([...filteredMarkets.value].sort((a, b) =>
         b.metrics.totalBorrowed - a.metrics.totalBorrowed,
       ))
       break
     case 'Available Liquidity':
-      sorted = applyFeaturedSort([...filteredMarkets.value].sort((a, b) =>
+      sorted = applyRecentlyAddedSort([...filteredMarkets.value].sort((a, b) =>
         b.metrics.totalAvailableLiquidity - a.metrics.totalAvailableLiquidity,
       ))
       break
     default:
-      sorted = applyFeaturedSort([...filteredMarkets.value])
+      sorted = applyRecentlyAddedSort([...filteredMarkets.value])
   }
   const directed = sortDir.value === 'asc' ? [...sorted].reverse() : sorted
   return applyDeprecatedGroupSort(directed)
