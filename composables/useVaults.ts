@@ -871,6 +871,7 @@ const getBorrowVaultPair = async (
   if (!borrowVault) {
     throw '[getBorrowVaultPair]: Borrow vault not found'
   }
+  registrySet(borrowAddr, borrowVault, 'evk')
 
   const collateralLTV = borrowVault.collateralLTVs.find(c => c.collateral === collateralAddr)
   if (!collateralLTV) {
@@ -890,11 +891,13 @@ const getBorrowVaultPair = async (
   else {
     try {
       collateralVault = await fetchVault(collateralAddr, ctx)
+      registrySet(collateralAddr, collateralVault, 'evk')
     }
     catch {
       // Try escrow vault first
       try {
         collateralVault = await fetchEscrowVault(collateralAddr, ctx)
+        registrySet(collateralAddr, collateralVault, 'evk')
       }
       catch {
         // Check if it's a securitize vault
@@ -910,6 +913,14 @@ const getBorrowVaultPair = async (
       }
     }
   }
+
+  // Fire the off-label sweep so the freshly registered borrow / collateral
+  // vault's own collateralLTVs[] get resolved into the registry — without
+  // this, deep-linked unverified pairs render with empty Collateral exposure
+  // blocks because referenced vaults were never loaded by the bulk pipeline.
+  // Fire-and-forget: the pair render shouldn't wait on additional lens reads,
+  // and resolveUnresolvedCollaterals updates the reactive registry as it goes.
+  void resolveUnresolvedCollaterals(loadGeneration.value)
 
   return {
     borrow: borrowVault,

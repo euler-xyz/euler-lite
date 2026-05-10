@@ -278,6 +278,17 @@ const backendPriceToPriceResult = (data: BackendPriceData): PriceResult | undefi
 }
 
 /**
+ * Scale factor for the vault's unit of account. The on-chain VaultLens
+ * returns liability/collateral prices in the UoA token's native decimals;
+ * dividing by this scale (rather than ONE_18) yields a USD price in
+ * 18-decimal fixed-point regardless of UoA decimals.
+ */
+const getUoaScale = (vault: Vault | null | undefined): bigint => {
+  const decimals = vault?.unitOfAccountDecimals
+  return decimals !== undefined ? 10n ** BigInt(decimals) : ONE_18
+}
+
+/**
  * Get asset price in USD using on-chain oracle + UoA conversion.
  * UoA rate can still come from backend if source is 'off-chain'.
  */
@@ -305,10 +316,12 @@ const getAssetUsdPriceFromOracle = async (
   const uoaRate = await getUnitOfAccountUsdRate(vault as Vault)
   if (!uoaRate) return undefined
 
+  const uoaScale = getUoaScale(vault as Vault)
+
   return {
-    amountOutMid: (oraclePrice.amountOutMid * uoaRate) / ONE_18,
-    amountOutAsk: (oraclePrice.amountOutAsk * uoaRate) / ONE_18,
-    amountOutBid: (oraclePrice.amountOutBid * uoaRate) / ONE_18,
+    amountOutMid: (oraclePrice.amountOutMid * uoaRate) / uoaScale,
+    amountOutAsk: (oraclePrice.amountOutAsk * uoaRate) / uoaScale,
+    amountOutBid: (oraclePrice.amountOutBid * uoaRate) / uoaScale,
   }
 }
 
@@ -332,10 +345,12 @@ const getCollateralUsdPriceFromOracle = async (
   const uoaRate = await getUnitOfAccountUsdRate(liabilityVault)
   if (!uoaRate) return undefined
 
+  const uoaScale = getUoaScale(liabilityVault)
+
   return {
-    amountOutMid: (oraclePrice.amountOutMid * uoaRate) / ONE_18,
-    amountOutAsk: (oraclePrice.amountOutAsk * uoaRate) / ONE_18,
-    amountOutBid: (oraclePrice.amountOutBid * uoaRate) / ONE_18,
+    amountOutMid: (oraclePrice.amountOutMid * uoaRate) / uoaScale,
+    amountOutAsk: (oraclePrice.amountOutAsk * uoaRate) / uoaScale,
+    amountOutBid: (oraclePrice.amountOutBid * uoaRate) / uoaScale,
   }
 }
 
