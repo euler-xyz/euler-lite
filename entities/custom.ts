@@ -89,6 +89,7 @@ export const intrinsicApySources: readonly IntrinsicApySourceConfig[] = [
 
   // Accountable loans — Monad (143)
   { provider: 'accountable', chainId: 143, address: '0x8d3F9f9Eb2f5E8B48EFBB4074440D1E2A34Bc365', loanAddress: '0x8dCE15fc6a98484C995Fc702cBfBdA14A30454af' },
+  { provider: 'accountable', chainId: 143, address: '0xC6De1DC0B59682bE906E5BcA14E385E74EE88168', loanAddress: '0x2653137fd4118AD25BCEFb31Ca748957b8528B01' },
 
   // DefiLlama pools — Sonic (146)
   { provider: 'defillama', chainId: 146, address: '0x16af6b1315471Dc306D47e9CcEfEd6e5996285B6', poolId: '24b3096a-488d-4a61-afa6-e5e9be2ce4bf' },
