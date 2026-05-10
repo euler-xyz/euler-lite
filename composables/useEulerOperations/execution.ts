@@ -7,7 +7,10 @@ import { isNonBlockingSimulationError } from '~/utils/tx-errors'
 import { applyOperationGuards } from '~/utils/operationGuardRegistry'
 import { waitForSubgraphBlock } from '~/utils/subgraph'
 
-const OKX_POST_APPROVE_DELAY_MS = 3000
+const OKX_POST_APPROVE_CONFIRMATION_BLOCKS = 2n
+const OKX_POST_APPROVE_MIN_DELAY_MS = 5000
+const OKX_POST_APPROVE_BLOCK_TIMEOUT_MS = 15000
+const OKX_POST_APPROVE_BLOCK_POLL_MS = 1000
 
 const isOkxWallet = async (connector?: { id?: string, name?: string, getProvider?: () => Promise<unknown> }) => {
   if (!connector) return false
@@ -34,6 +37,8 @@ const isOkxWallet = async (connector?: { id?: string, name?: string, getProvider
 export const createExecutionHelpers = (ctx: OperationsContext, allowanceHelpers: AllowanceHelpers) => {
   const { triggerPortfolioRefresh } = usePortfolioRefresh()
 
+  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
   const waitForTxReceipt = async (txHash?: Hash): Promise<TransactionReceipt | undefined> => {
     if (!txHash) {
       return undefined
@@ -44,6 +49,31 @@ export const createExecutionHelpers = (ctx: OperationsContext, allowanceHelpers:
       throw new Error('Transaction reverted')
     }
     return receipt
+  }
+
+  const waitForPostApprovalConfirmations = async (receipt: TransactionReceipt) => {
+    const targetBlock = receipt.blockNumber + OKX_POST_APPROVE_CONFIRMATION_BLOCKS
+    const deadline = Date.now() + OKX_POST_APPROVE_BLOCK_TIMEOUT_MS
+
+    while (Date.now() < deadline) {
+      try {
+        const currentBlock = await ctx.rpcProvider.getBlockNumber()
+        if (currentBlock >= targetBlock) {
+          return
+        }
+      }
+      catch (err) {
+        logWarn('execution/okxPostApproveBlockWait', err)
+      }
+      await sleep(OKX_POST_APPROVE_BLOCK_POLL_MS)
+    }
+
+    logWarn('execution/okxPostApproveBlockWait', 'timed out waiting for post-approval block', {
+      data: {
+        approvalBlock: receipt.blockNumber.toString(),
+        targetBlock: targetBlock.toString(),
+      },
+    })
   }
 
   const executeTxPlan = async (plan: TxPlan) => {
@@ -57,6 +87,7 @@ export const createExecutionHelpers = (ctx: OperationsContext, allowanceHelpers:
     }
 
     const guardedPlan = applyOperationGuards(plan)
+    const usesOkxWallet = await isOkxWallet(getAccount(ctx.config).connector)
     let lastHash: Hex | undefined
     let lastReceipt: TransactionReceipt | undefined
 
@@ -75,10 +106,14 @@ export const createExecutionHelpers = (ctx: OperationsContext, allowanceHelpers:
       lastReceipt = await waitForTxReceipt(txHash)
 
       // OKX wallet's simulation backend lags behind on-chain state after approvals.
-      // Without a delay, the next step's preview shows "unable to decode asset changes".
+      // Give it a couple of blocks plus a small wall-clock floor before prompting
+      // the next tx so OKX can validate the allowance in its asset-change preview.
       const isApproveStep = step.type === 'approve' || step.type === 'permit2-approve'
-      if (isApproveStep && await isOkxWallet(getAccount(ctx.config).connector)) {
-        await new Promise(resolve => setTimeout(resolve, OKX_POST_APPROVE_DELAY_MS))
+      if (isApproveStep && usesOkxWallet && lastReceipt) {
+        await Promise.all([
+          sleep(OKX_POST_APPROVE_MIN_DELAY_MS),
+          waitForPostApprovalConfirmations(lastReceipt),
+        ])
       }
     }
 
