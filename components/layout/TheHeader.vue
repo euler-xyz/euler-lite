@@ -9,6 +9,7 @@ import {
 } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { type MenuItem, getMenuItems } from '~/entities/menu'
+import { getChainLogoUrl } from '~/utils/chain-logo'
 
 // Wallet connect modal (lazy-initializes AppKit on first call)
 const { connect } = useWagmi()
@@ -16,6 +17,7 @@ const { connect } = useWagmi()
 // Wagmi account info
 const { address, isConnected } = useAccount()
 const { chainId, allowedChainIds } = useEulerAddresses()
+const chainLogoSrc = computed(() => getChainLogoUrl(chainId.value))
 const { isSpyMode, spyShortAddress } = useSpyMode()
 const modal = useModal()
 const route = useRoute()
@@ -249,7 +251,7 @@ onClickOutside(wrapperRef, () => {
         @click="onChainButtonClick"
       >
         <BaseAvatar
-          :src="`/chains/${chainId}.webp`"
+          :src="chainLogoSrc"
           :label="String(chainId)"
         />
       </UiButton>
@@ -260,7 +262,7 @@ onClickOutside(wrapperRef, () => {
       >
         <div class="ui-button__wrap">
           <BaseAvatar
-            :src="`/chains/${chainId}.webp`"
+            :src="chainLogoSrc"
             :label="String(chainId)"
           />
         </div>

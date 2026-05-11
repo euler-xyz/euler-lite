@@ -7,6 +7,7 @@ import { stringToColor } from '~/utils/string-utils'
 
 const loadedImages = new Set<string>()
 const fallbackRedirects = reactive(new Map<string, string>())
+const isInlineImage = (src: string) => src.startsWith('data:image/')
 
 defineOptions({
   inheritAttrs: false,
@@ -20,7 +21,7 @@ const images = computed(() => {
     const fb = fallbacks[index] || ''
     const effectiveSrc = (fb && fallbackRedirects.get(s) === fb) ? fb : s
 
-    if (effectiveSrc && loadedImages.has(effectiveSrc)) {
+    if (effectiveSrc && (isInlineImage(effectiveSrc) || loadedImages.has(effectiveSrc))) {
       return { label: labels[index], src: effectiveSrc, state: { isReady: true } }
     }
 
