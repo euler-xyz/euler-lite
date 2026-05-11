@@ -12,7 +12,7 @@ export const BATCH_SIZE_VAULT_FETCH = 25
 export const BATCH_SIZE_PARALLEL_ROUNDS = 5
 
 // ── Request Batching Delays ───────────────────────────────
-export const BATCH_DELAY_COLLECT_MS = 50
+export const BATCH_DELAY_COLLECT_MS = 100
 
 // ── Request Timeouts ────────────────────────────────────
 /** Subgraph query timeout (client-side). Longer than server-side subgraph

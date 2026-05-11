@@ -4,7 +4,7 @@ import type { BackendConfig } from '~/services/pricing'
 /**
  * Composable for accessing price backend configuration.
  *
- * The backend URL is configured via PRICE_API_URL environment variable.
+ * Uses EULER_API_URL for off-chain prices (same backend as token list).
  * When empty, the system uses on-chain prices only.
  *
  * Usage:
@@ -20,7 +20,7 @@ export const usePriceBackend = () => {
   const config = useEulerConfig()
   const { chainId } = useEulerAddresses()
 
-  const backendUrl = (config as { PRICE_API_URL?: string }).PRICE_API_URL || ''
+  const backendUrl = config.EULER_API_URL || ''
 
   // Initial configuration
   configureBackend(backendUrl || undefined, chainId.value)

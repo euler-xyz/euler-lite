@@ -1,24 +1,9 @@
 import { parseChainId } from '~/entities/chainRegistry'
+import { omitQueryKeys, rewriteLegacyPath } from '~/utils/legacy-route-rewrites'
 
 const rawNetworkParam = (value: unknown): string | null => {
   const normalized = Array.isArray(value) ? value[0] : value
   return typeof normalized === 'string' ? normalized : null
-}
-
-// Legacy path rewrites from the pre-lite app. Preserves any trailing segments
-// (e.g. vault/collateral addresses) after the renamed prefix.
-const LEGACY_PATH_REWRITES: ReadonlyArray<{ from: RegExp, to: string }> = [
-  { from: /^\/vault(\/.*)?$/, to: '/lend' },
-  { from: /^\/positions(\/.*)?$/, to: '/borrow' },
-  { from: /^\/account(\/.*)?$/, to: '/position' },
-]
-
-const rewriteLegacyPath = (path: string): string | null => {
-  for (const { from, to } of LEGACY_PATH_REWRITES) {
-    const match = path.match(from)
-    if (match) return to + (match[1] ?? '')
-  }
-  return null
 }
 
 export default defineNuxtRouteMiddleware((to) => {
@@ -36,7 +21,7 @@ export default defineNuxtRouteMiddleware((to) => {
   const rawNetwork = rawNetworkParam(rawChainParam)
   const needsNormalization = queryChainId != null && rawNetwork !== String(queryChainId)
   const hasLegacyChainIdParam = to.query.chainId != null
-  const rewrittenPath = rewriteLegacyPath(to.path)
+  const legacyPathRewrite = rewriteLegacyPath(to.path)
 
   // Sync state chainId to the URL's chainId before downstream middleware
   // (e.g. ensure-vault) runs chain-scoped lookups. Without this, a legacy URL
@@ -51,12 +36,13 @@ export default defineNuxtRouteMiddleware((to) => {
     localStorage.setItem('chainId', String(fallbackChainId))
   }
 
-  if (rewrittenPath || !queryChainId || queryChainId !== fallbackChainId || needsNormalization || hasLegacyChainIdParam) {
+  if (legacyPathRewrite || !queryChainId || queryChainId !== fallbackChainId || needsNormalization || hasLegacyChainIdParam) {
     const { chainId: _legacyChainId, ...restQuery } = to.query
+    const sanitizedQuery = omitQueryKeys(restQuery, legacyPathRewrite?.dropQueryKeys ?? [])
     return navigateTo({
-      path: rewrittenPath ?? to.path,
+      path: legacyPathRewrite?.path ?? to.path,
       query: {
-        ...restQuery,
+        ...sanitizedQuery,
         network: fallbackChainId,
       },
       hash: to.hash,

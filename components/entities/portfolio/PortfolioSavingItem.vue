@@ -5,7 +5,7 @@ import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { getAssetUsdValue, formatAssetValue } from '~/services/pricing/priceProvider'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated, getVaultNotice } from '~/utils/eulerLabelsUtils'
-import { formatNumber, compactNumber, formatCompactUsdValue, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
+import { formatNumber, formatCompactUsdValue, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { type AccountDepositPosition, getSubAccountIndex } from '~/entities/account'
 import { VaultOverviewModal, VaultSupplyApyModal } from '#components'
@@ -74,22 +74,6 @@ const updateHasPrice = async () => {
 
 watchEffect(() => {
   updateHasPrice()
-})
-
-const projectedEarningsPerMonth = ref('—')
-
-const updateProjectedEarningsPerMonth = async () => {
-  const price = await getAssetUsdValue(position.assets, vault.value, 'off-chain')
-  if (price === undefined || price === 0) {
-    projectedEarningsPerMonth.value = '—'
-    return
-  }
-  // Monthly earnings = (value * APY%) / 12
-  projectedEarningsPerMonth.value = compactNumber((price * supplyApyWithRewards.value) / 12 / 100)
-}
-
-watchEffect(() => {
-  updateProjectedEarningsPerMonth()
 })
 
 // Securitize-specific computed properties
@@ -318,19 +302,6 @@ const onClick = () => {
               ~ {{ roundAndCompactTokens(position.assets, vault.decimals) }}
               {{ vault.asset.symbol }}
             </UiExactAmount>
-          </div>
-        </div>
-        <div
-          v-if="hasPrice"
-          class="flex justify-between"
-        >
-          <div class="text-content-tertiary text-p3">
-            Projected earnings per month
-          </div>
-          <div class="flex justify-between gap-8 text-right">
-            <div class="text-content-primary text-p3">
-              ${{ projectedEarningsPerMonth }}
-            </div>
           </div>
         </div>
         <div

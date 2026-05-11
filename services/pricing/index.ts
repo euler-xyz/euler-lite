@@ -42,5 +42,4 @@ export {
   fetchBackendPrices,
   backendPriceToBigInt,
   type BackendPriceData,
-  type BackendPriceResponse,
 } from './backendClient'
