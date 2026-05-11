@@ -27,6 +27,7 @@ const setCountry = (code: string | null | undefined) => {
 }
 
 const resetState = () => {
+  setCountry(undefined)
   for (const k of Object.keys(assetRestrictions)) Reflect.deleteProperty(assetRestrictions, k)
   for (const k of Object.keys(wrapPairs)) Reflect.deleteProperty(wrapPairs, k)
   clearAssetGeoCache()

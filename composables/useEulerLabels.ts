@@ -44,7 +44,6 @@ import {
   getEntitiesByEarnVault,
   getPointsByVault,
   applyVaultOverrides,
-  assetMatchesAnyRestrictRule,
 } from '~/utils/eulerLabelsUtils'
 import { evcBatchCall, buildBatchItem } from '~/utils/multicall'
 import { encodeFunctionData, decodeFunctionResult, parseAbi, type Hex } from 'viem'
@@ -325,6 +324,17 @@ export const useEulerLabels = () => {
 
       loadState.chainId = chainId
       loadState.timestamp = Date.now()
+      // Wrap-pair discovery: probes every vault asset for an ERC-4626
+      // underlying. Deferred until the vault registry is populated (loadVaults
+      // runs after loadLabels per the chain in app.vue) so the asset
+      // enumeration is complete. Fire-and-forget — does not block isReady.
+      // Reverts and non-ERC-4626 contracts yield no entry, in which case the
+      // bypass in isAssetRestrictedByCountry is a no-op for them.
+      //
+      // Placed inside the try-success path so cache-hit `loadLabels()` calls
+      // don't re-trigger the probe — `wrapPairs` is only cleared above when
+      // the main load actually runs, so a cache hit keeps the prior map.
+      void probeWrapPairs(chainId)
     }
     catch (e) {
       logWarn('labels/load', e)
@@ -332,13 +342,6 @@ export const useEulerLabels = () => {
     finally {
       isLoading.value = false
       isReady.value = true
-      // Wrap-pair discovery: probes every soft-restricted vault asset for an
-      // ERC-4626 underlying. Deferred until the vault registry is populated
-      // (loadVaults runs after loadLabels per the chain in app.vue) so the
-      // asset enumeration is complete. Fire-and-forget — does not block
-      // isReady. Reverts and non-ERC-4626 contracts yield no entry, in which
-      // case the bypass in isAssetRestrictedByCountry is a no-op for them.
-      void probeWrapPairs()
     }
   }
 
@@ -360,15 +363,27 @@ export const useEulerLabels = () => {
 
 const ERC4626_ASSET_ABI = parseAbi(['function asset() view returns (address)'])
 
-const probeWrapPairs = async () => {
+// Probes every unique vault asset for an ERC-4626 `asset()` underlying. We
+// intentionally do not filter by "asset matches a restrict rule" — restricting
+// only one side of the pair (just the underlying, or just the wrapper) is a
+// legitimate label-author choice and `isWrapPair` is symmetric, so populating
+// the map from any direction makes the bypass work both ways. Reverts on
+// non-ERC-4626 contracts are silently dropped.
+//
+// `startChainId` is the chain the calling `loadLabels` was bound to. Captured
+// at the call site (not re-read from current config) so a chain switch during
+// the async wait/probe cannot land stale results in `wrapPairs` for the new
+// chain.
+const probeWrapPairs = async (startChainId: number) => {
   try {
     const { getCurrentChainConfig } = useEulerAddresses()
     const config = getCurrentChainConfig.value
-    if (!config) return
+    if (!config || config.chainId !== startChainId) return
 
     // Wait for vaults so vault.asset metadata is populated.
     const { isReady: isVaultsReady } = useVaults()
     if (!isVaultsReady.value) await until(isVaultsReady).toBe(true)
+    if (loadState.chainId !== startChainId) return // chain switched during wait
 
     const { getEvkVaults, getEarnVaults, getSecuritizeVaults } = useVaultRegistry()
     const seen = new Set<string>()
@@ -379,16 +394,17 @@ const probeWrapPairs = async () => {
       const checksummed = normalizeAddress(asset.address)
       if (seen.has(checksummed)) continue
       seen.add(checksummed)
-      if (assetMatchesAnyRestrictRule(asset)) candidates.push(checksummed)
+      candidates.push(checksummed)
     }
     if (candidates.length === 0) return
 
     const evcAddress = config.addresses.coreAddrs.evc
     const rpcUrl = import.meta.server
-      ? `${useRequestURL().origin}/api/rpc/${config.chainId}`
-      : `/api/rpc/${config.chainId}`
+      ? `${useRequestURL().origin}/api/rpc/${startChainId}`
+      : `/api/rpc/${startChainId}`
     const callData = encodeFunctionData({ abi: ERC4626_ASSET_ABI, functionName: 'asset' })
     const results = await evcBatchCall(evcAddress, candidates.map(addr => buildBatchItem(addr, callData)), rpcUrl)
+    if (loadState.chainId !== startChainId) return // chain switched during RPC
 
     for (let i = 0; i < results.length; i++) {
       const res = results[i]

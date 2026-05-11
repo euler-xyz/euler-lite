@@ -20,7 +20,6 @@ import {
   notExplorableEarnVaults,
   assetBlocks,
   assetRestrictions,
-  assetPatternRules,
   wrapPairs,
   type CompiledPatternRule,
 } from '~/utils/eulerLabelsState'
@@ -33,8 +32,7 @@ const MAX_REGEX_INPUT_LEN = 128
 
 /**
  * Test whether an asset-pattern rule matches the given lowercased symbol/name.
- * OR across populated fields — any match wins. Shared by the country-resolution
- * helpers in `useGeoBlock` and the wrap-pair discovery step in `useEulerLabels`.
+ * OR across populated fields — any match wins.
  */
 export const patternRuleMatches = (
   rule: CompiledPatternRule,
@@ -45,27 +43,6 @@ export const patternRuleMatches = (
   if (rule.symbolRegex && symbolLower && symbolLower.length <= MAX_REGEX_INPUT_LEN && rule.symbolRegex.test(symbolLower)) return true
   if (rule.namesLower && nameLower && rule.namesLower.has(nameLower)) return true
   if (rule.nameRegex && nameLower && nameLower.length <= MAX_REGEX_INPUT_LEN && rule.nameRegex.test(nameLower)) return true
-  return false
-}
-
-/**
- * True when the asset matches any active soft-restrict rule (address-based or
- * pattern-based). Used by the wrap-pair discovery step to scope its multicall
- * to only the assets whose output side could be soft-restricted in some
- * region — for which a wrap-pair bypass might apply.
- */
-export const assetMatchesAnyRestrictRule = (
-  asset: { address: string, symbol?: string, name?: string },
-): boolean => {
-  const addrLower = asset.address.toLowerCase()
-  if (assetRestrictions[addrLower]?.length) return true
-  const symbolLower = asset.symbol?.toLowerCase()
-  const nameLower = asset.name?.toLowerCase()
-  if (!symbolLower && !nameLower) return false
-  for (const rule of assetPatternRules) {
-    if (!rule.restricted?.length) continue
-    if (patternRuleMatches(rule, symbolLower, nameLower)) return true
-  }
   return false
 }
 
