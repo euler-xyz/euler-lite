@@ -3,7 +3,6 @@ import { getTxErrorMessage } from '~/utils/tx-errors'
 
 export const useTxPlanSimulation = () => {
   const { simulateTxPlan } = useEulerOperations()
-  const { isSpyMode } = useSpyMode()
   const simulationError = ref('')
   const isSimulating = ref(false)
 
@@ -13,10 +12,6 @@ export const useTxPlanSimulation = () => {
 
   const runSimulation = async (plan: TxPlan) => {
     clearSimulationError()
-    // Spy mode is preview-only — skip on-chain simulation so the review modal
-    // always opens with the real steps even when the spy account's current
-    // state would make a real transaction revert.
-    if (isSpyMode.value) return true
     isSimulating.value = true
     try {
       await simulateTxPlan(plan)
