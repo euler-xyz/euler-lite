@@ -30,6 +30,7 @@ import {
   assetBlocks,
   assetRestrictions,
   assetPatternRules,
+  wrapPairs,
   type CompiledPatternRule,
   bulkLoadedAdapterChains,
   pendingBulkAdapterLoads,
@@ -43,7 +44,24 @@ import {
   getEntitiesByEarnVault,
   getPointsByVault,
   applyVaultOverrides,
+  assetMatchesAnyRestrictRule,
 } from '~/utils/eulerLabelsUtils'
+import { evcBatchCall, buildBatchItem } from '~/utils/multicall'
+import { encodeFunctionData, decodeFunctionResult, type Hex } from 'viem'
+
+// Minimal ERC-4626 fragment for the asset() getter. Used by discoverWrapPairs
+// to find the underlying for every restricted vault asset that happens to be
+// a wrapper. Non-wrappers (and non-ERC-4626 contracts) revert here; reverts
+// just yield "no entry" — no wrap-pair bypass for that asset.
+const ERC4626_ASSET_ABI = [
+  {
+    type: 'function',
+    name: 'asset',
+    inputs: [],
+    outputs: [{ type: 'address' }],
+    stateMutability: 'view',
+  },
+] as const
 
 const loadOracleAdapter = async (chainId: number, oracleAddress: string) => {
   const checksummed = getAddress(oracleAddress)
@@ -155,6 +173,7 @@ export const useEulerLabels = () => {
       clearAssetGeoCache()
       featuredEarnVaults.clear()
       notExplorableEarnVaults.clear()
+      Object.keys(wrapPairs).forEach(key => delete wrapPairs[key])
       earnVaults.value = []
       verifiedVaultAddresses.value = []
 
@@ -330,6 +349,90 @@ export const useEulerLabels = () => {
     }
   }
 
+  /**
+   * After labels and vaults are loaded, probe every vault asset that could be
+   * soft-restricted in some region for an ERC-4626 `asset()` underlying.
+   * Successful results are stored in `wrapPairs` (lowercased addresses) and
+   * later consulted by `isWrapPair` to bypass the soft-restrict gate when an
+   * operation is a technical wrap (e.g. SPYx -> wSPYx) rather than a net-new
+   * acquisition of restricted exposure.
+   *
+   * Scoped to soft-restrict-eligible assets so we only spend RPC on the set
+   * where the bypass could actually fire. Reverts and zero-address results
+   * are silently dropped — non-wrappers simply don't get a pair entry, and
+   * the bypass becomes a no-op for them.
+   *
+   * Lifetime: the map is cleared in `loadLabels` and repopulated each time
+   * this function runs, so it tracks the labels reload cycle (~5 min TTL).
+   */
+  const discoverWrapPairs = async () => {
+    try {
+      const { getCurrentChainConfig } = useEulerAddresses()
+      const config = getCurrentChainConfig.value
+      if (!config) return
+
+      const evcAddress = config.addresses.coreAddrs.evc
+      const chainId = config.chainId
+      const rpcUrl = import.meta.server
+        ? `${useRequestURL().origin}/api/rpc/${chainId}`
+        : `/api/rpc/${chainId}`
+
+      const { getEvkVaults, getEarnVaults, getSecuritizeVaults } = useVaultRegistry()
+      const allVaults = [...getEvkVaults(), ...getEarnVaults(), ...getSecuritizeVaults()]
+
+      // Dedupe by checksummed asset address. We probe the asset contract
+      // itself, not the vault — many vaults can share one asset.
+      const seen = new Set<string>()
+      type Candidate = { address: string, symbol: string, name: string }
+      const candidates: Candidate[] = []
+      for (const vault of allVaults) {
+        const asset = vault.asset
+        if (!asset?.address) continue
+        const checksummed = normalizeAddress(asset.address)
+        if (seen.has(checksummed)) continue
+        seen.add(checksummed)
+        if (!assetMatchesAnyRestrictRule(asset)) continue
+        candidates.push({ address: checksummed, symbol: asset.symbol, name: asset.name })
+      }
+
+      if (candidates.length === 0) return
+
+      const callData = encodeFunctionData({ abi: ERC4626_ASSET_ABI, functionName: 'asset' })
+      const items = candidates.map(c => buildBatchItem(c.address, callData))
+
+      let results
+      try {
+        results = await evcBatchCall(evcAddress, items, rpcUrl)
+      }
+      catch (err) {
+        logWarn('labels/wrap-pairs', err)
+        return
+      }
+
+      for (let i = 0; i < results.length; i++) {
+        const res = results[i]
+        if (!res.success || !res.result || res.result === '0x') continue
+        let decoded: string
+        try {
+          decoded = decodeFunctionResult({
+            abi: ERC4626_ASSET_ABI,
+            functionName: 'asset',
+            data: res.result as Hex,
+          }) as string
+        }
+        catch {
+          continue
+        }
+        const underlying = decoded.toLowerCase()
+        if (!underlying || underlying === '0x' || underlying === '0x0000000000000000000000000000000000000000') continue
+        wrapPairs[candidates[i].address.toLowerCase()] = underlying
+      }
+    }
+    catch (e) {
+      logWarn('labels/wrap-pairs', e)
+    }
+  }
+
   return {
     isLoading,
     isReady,
@@ -340,6 +443,7 @@ export const useEulerLabels = () => {
     oracleAdapters,
     earnVaults,
     loadLabels,
+    discoverWrapPairs,
     loadOracleAdapter,
     loadOracleAdapters,
     loadAllOracleAdapters,

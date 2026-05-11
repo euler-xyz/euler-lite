@@ -30,6 +30,7 @@ import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { isOpDisabled, OP_REDEEM, OP_WITHDRAW } from '~/utils/vault-hooks'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
+import { isWrapPair } from '~/utils/eulerLabelsUtils'
 
 const router = useRouter()
 const route = useRoute()
@@ -127,9 +128,14 @@ const effectiveWithdrawOp = computed(() => {
 const isOutputAssetBlocked = computed(() =>
   needsSwap.value && isAssetBlockedByCountry(selectedOutputAsset.value),
 )
-const isOutputAssetRestricted = computed(() =>
-  needsSwap.value && isAssetRestrictedByCountry(selectedOutputAsset.value),
-)
+const isOutputAssetRestricted = computed(() => {
+  if (!needsSwap.value) return false
+  if (!isAssetRestrictedByCountry(selectedOutputAsset.value)) return false
+  // Bypass soft-restrict when the picker option is the ERC-4626 wrap pair
+  // of the source vault's underlying — e.g. unwrapping wSPYx back to SPYx.
+  if (asset.value && selectedOutputAsset.value && isWrapPair(asset.value.address, selectedOutputAsset.value.address)) return false
+  return true
+})
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value) return false
   if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return true
@@ -276,6 +282,9 @@ const openSwapTokenSelector = () => {
       currentAssetAddress: selectedOutputAsset.value?.address || asset.value?.address,
       onSelect: onSelectOutputAsset,
       mode: 'output' as const,
+      // Counterpart of the withdraw-swap is the vault's underlying — picking
+      // its ERC-4626 wrap pair is a technical unwrap, not new exposure.
+      pairedAsset: asset.value,
     },
   })
 }

@@ -7,8 +7,9 @@ import {
   getAssetBlock,
   getAssetRestricted,
   isVaultDeprecated,
+  patternRuleMatches,
 } from '~/utils/eulerLabelsUtils'
-import { assetPatternRules, type CompiledPatternRule } from '~/utils/eulerLabelsState'
+import { assetPatternRules } from '~/utils/eulerLabelsState'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { SANCTIONED_COUNTRIES, COUNTRY_GROUPS } from '~/entities/constants'
 
@@ -65,12 +66,6 @@ const toAssetFields = (asset: AssetLike): { address?: string, symbol?: string, n
   }
 }
 
-// Cap inputs passed to regex .test() to protect against catastrophic
-// backtracking if a curator ships a poorly-formed pattern and an on-chain
-// token returns an attacker-chosen long symbol/name. Real ERC-20 symbols are
-// typically <=12 chars and names <=64; 128 is well above any legitimate value.
-const MAX_REGEX_INPUT_LEN = 128
-
 // Per-country cache for asset-level block / restricted resolution. Browse
 // pages call these helpers per-row for potentially hundreds of rows on each
 // render; the pattern-rule scan is O(rules) which adds up. Cache key
@@ -95,16 +90,6 @@ const cacheSet = (cache: Map<string, boolean>, key: string, value: boolean): boo
 export const clearAssetGeoCache = (): void => {
   assetBlockCache.clear()
   assetRestrictedCache.clear()
-}
-
-// Test whether a pattern rule matches the given symbol/name (lowercase inputs).
-// OR across populated fields — any match wins.
-const patternRuleMatches = (rule: CompiledPatternRule, symbolLower: string | undefined, nameLower: string | undefined): boolean => {
-  if (rule.symbolsLower && symbolLower && rule.symbolsLower.has(symbolLower)) return true
-  if (rule.symbolRegex && symbolLower && symbolLower.length <= MAX_REGEX_INPUT_LEN && rule.symbolRegex.test(symbolLower)) return true
-  if (rule.namesLower && nameLower && rule.namesLower.has(nameLower)) return true
-  if (rule.nameRegex && nameLower && nameLower.length <= MAX_REGEX_INPUT_LEN && rule.nameRegex.test(nameLower)) return true
-  return false
 }
 
 // Resolve the underlying asset for a vault via the registry.

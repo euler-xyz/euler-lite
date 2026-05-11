@@ -451,6 +451,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         currentAssetAddress: borrowSelectedAsset.value?.address || collateralVault.value?.asset.address,
         onSelect: onSelectBorrowSwapAsset,
         allowNativeCurrency: true,
+        // Counterpart of the swap is the collateral asset — picking the
+        // collateral's ERC-4626 underlying (or wrapper) is a technical
+        // conversion and may bypass soft-restrict.
+        pairedAsset: collateralVault.value?.asset,
       },
     })
   }

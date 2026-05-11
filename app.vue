@@ -12,7 +12,7 @@ const modal = useModal()
 const { loadEulerConfig, chainId } = useEulerAddresses()
 const { loadVaults, isReady: isVaultsReady, resetVaultsState, refreshVaults, setShowAllLabelEntries } = useVaults()
 const { loadTokenList, isLoaded: isTokenListLoaded } = useTokenList()
-const { loadLabels } = useEulerLabels()
+const { loadLabels, discoverWrapPairs } = useEulerLabels()
 const { loadCountry } = useGeoBlock()
 const { updateBalances, resetBalances } = useWallets()
 const { isConnected, address } = useWagmi()
@@ -127,10 +127,15 @@ watch([chainId, showAllLabelEntries], () => {
   const labelsPromise = loadLabels()
   void loadTokenList()
   void loadCountry()
-  void labelsPromise.then(() => {
+  void labelsPromise.then(async () => {
     if (chainId.value !== targetChainId) return
     if (showAllLabelEntries.value !== targetShowAll) return
-    void loadVaults()
+    await loadVaults()
+    if (chainId.value !== targetChainId) return
+    if (showAllLabelEntries.value !== targetShowAll) return
+    // Populate the wrap-pair map for the soft-restricted-asset bypass.
+    // Runs once per labels/vaults cycle; cleared on next loadLabels.
+    void discoverWrapPairs()
   })
 }, { immediate: true })
 

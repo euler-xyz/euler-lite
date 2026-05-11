@@ -20,7 +20,68 @@ import {
   notExplorableEarnVaults,
   assetBlocks,
   assetRestrictions,
+  assetPatternRules,
+  wrapPairs,
+  type CompiledPatternRule,
 } from '~/utils/eulerLabelsState'
+
+// Cap inputs passed to regex .test() to protect against catastrophic
+// backtracking if a curator ships a poorly-formed pattern and an on-chain
+// token returns an attacker-chosen long symbol/name. Real ERC-20 symbols are
+// typically <=12 chars and names <=64; 128 is well above any legitimate value.
+const MAX_REGEX_INPUT_LEN = 128
+
+/**
+ * Test whether an asset-pattern rule matches the given lowercased symbol/name.
+ * OR across populated fields — any match wins. Shared by the country-resolution
+ * helpers in `useGeoBlock` and the wrap-pair discovery step in `useEulerLabels`.
+ */
+export const patternRuleMatches = (
+  rule: CompiledPatternRule,
+  symbolLower: string | undefined,
+  nameLower: string | undefined,
+): boolean => {
+  if (rule.symbolsLower && symbolLower && rule.symbolsLower.has(symbolLower)) return true
+  if (rule.symbolRegex && symbolLower && symbolLower.length <= MAX_REGEX_INPUT_LEN && rule.symbolRegex.test(symbolLower)) return true
+  if (rule.namesLower && nameLower && rule.namesLower.has(nameLower)) return true
+  if (rule.nameRegex && nameLower && nameLower.length <= MAX_REGEX_INPUT_LEN && rule.nameRegex.test(nameLower)) return true
+  return false
+}
+
+/**
+ * True when the asset matches any active soft-restrict rule (address-based or
+ * pattern-based). Used by the wrap-pair discovery step to scope its multicall
+ * to only the assets whose output side could be soft-restricted in some
+ * region — for which a wrap-pair bypass might apply.
+ */
+export const assetMatchesAnyRestrictRule = (
+  asset: { address: string, symbol?: string, name?: string },
+): boolean => {
+  const addrLower = asset.address.toLowerCase()
+  if (assetRestrictions[addrLower]?.length) return true
+  const symbolLower = asset.symbol?.toLowerCase()
+  const nameLower = asset.name?.toLowerCase()
+  if (!symbolLower && !nameLower) return false
+  for (const rule of assetPatternRules) {
+    if (!rule.restricted?.length) continue
+    if (patternRuleMatches(rule, symbolLower, nameLower)) return true
+  }
+  return false
+}
+
+/**
+ * True when `a` and `b` are an ERC-4626 wrap pair in either direction — i.e.
+ * one's address is the other's `asset()` underlying, per the map populated by
+ * `useEulerLabels.discoverWrapPairs()`. Used to bypass soft-restrict on the
+ * output side of a flow when the counterpart is the underlying — wrapping
+ * existing exposure is a technical conversion, not a new acquisition.
+ */
+export const isWrapPair = (a: string | undefined, b: string | undefined): boolean => {
+  if (!a || !b) return false
+  const al = a.toLowerCase()
+  const bl = b.toLowerCase()
+  return wrapPairs[al] === bl || wrapPairs[bl] === al
+}
 
 // ── Internal helpers ─────────────────────────────────────────
 
