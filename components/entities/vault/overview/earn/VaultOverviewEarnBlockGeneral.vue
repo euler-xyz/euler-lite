@@ -87,7 +87,7 @@ const feeDisplay = computed(() => {
         />
         <VaultOverviewLabelValue
           v-if="enableEntityBrandingDisplay"
-          label="Capital allocator"
+          label="Curator"
         >
           <div
             v-if="entities.length && isOwnerVerified"

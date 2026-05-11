@@ -9,6 +9,7 @@ import {
 } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { type MenuItem, getMenuItems } from '~/entities/menu'
+import { getChainLogoUrl } from '~/utils/chain-logo'
 
 // Wallet connect modal (lazy-initializes AppKit on first call)
 const { connect } = useWagmi()
@@ -16,6 +17,7 @@ const { connect } = useWagmi()
 // Wagmi account info
 const { address, isConnected } = useAccount()
 const { chainId, allowedChainIds } = useEulerAddresses()
+const chainLogoSrc = computed(() => getChainLogoUrl(chainId.value))
 const { isSpyMode, spyShortAddress } = useSpyMode()
 const modal = useModal()
 const route = useRoute()
@@ -106,7 +108,7 @@ onClickOutside(wrapperRef, () => {
 
 <template>
   <header
-    class="relative sticky top-0 right-0 left-0 z-[101] min-h-[72px] border-b border-line-default py-16 px-24 mobile:min-h-[56px] mobile:border-b-0 mobile:p-16 flex items-center justify-between bg-header backdrop-blur-[20px]"
+    class="relative sticky top-0 right-0 left-0 z-[101] min-h-[72px] border-b border-line-default py-16 px-24 mobile:min-h-[56px] mobile:border-b-0 mobile:p-16 flex items-center gap-16 bg-header backdrop-blur-[20px]"
   >
     <!-- Left: Logo -->
     <div
@@ -202,14 +204,14 @@ onClickOutside(wrapperRef, () => {
       </Transition>
     </div>
 
-    <!-- Center: Navigation -->
-    <div class="absolute left-1/2 -translate-x-1/2 pointer-events-none mobile:!hidden">
-      <div class="flex pointer-events-auto">
+    <!-- Navigation -->
+    <div class="hidden laptop:block min-w-0 tablet:absolute tablet:left-1/2 tablet:-translate-x-1/2">
+      <div class="flex gap-4 tablet:gap-0">
         <NuxtLink
           v-for="item in menuItems"
           :key="item.name"
           :to="'/' + item.name"
-          class="flex gap-8 text-[13px] font-medium no-underline py-6 px-16 rounded-8 text-content-secondary items-center justify-center hover:text-content-primary hover:bg-surface-secondary transition-all"
+          class="flex gap-8 text-[13px] font-medium no-underline py-6 px-12 tablet:px-16 rounded-8 text-content-secondary items-center justify-center hover:text-content-primary hover:bg-surface-secondary transition-all"
           :class="[
             getIsMenuItemActive(item)
               ? 'bg-surface-secondary text-content-primary'
@@ -238,7 +240,7 @@ onClickOutside(wrapperRef, () => {
     </div>
 
     <!-- Right: Wallet -->
-    <div class="flex flex-nowrap gap-8 min-w-0">
+    <div class="ml-auto flex flex-nowrap gap-8 min-w-0">
       <UiButton
         v-if="canSwitchChains"
         class="py-6 px-12"
@@ -249,7 +251,7 @@ onClickOutside(wrapperRef, () => {
         @click="onChainButtonClick"
       >
         <BaseAvatar
-          :src="`/chains/${chainId}.webp`"
+          :src="chainLogoSrc"
           :label="String(chainId)"
         />
       </UiButton>
@@ -260,7 +262,7 @@ onClickOutside(wrapperRef, () => {
       >
         <div class="ui-button__wrap">
           <BaseAvatar
-            :src="`/chains/${chainId}.webp`"
+            :src="chainLogoSrc"
             :label="String(chainId)"
           />
         </div>

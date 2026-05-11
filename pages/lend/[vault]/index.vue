@@ -9,7 +9,6 @@ import { getProjectedRates, getCurrentLiquidationLTV, type SecuritizeVault, type
 import { isSecuritizeVault } from '~/entities/vault/factory'
 import { getHookDisabledWarning, getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { collectPythFeedIds } from '~/entities/oracle'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import { fetchBackendPrice } from '~/services/pricing/backendClient'
 import type { TxPlan } from '~/entities/txPlan'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
@@ -21,7 +20,7 @@ import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
 import SecuritizeVaultOverview from '~/components/entities/vault/overview/SecuritizeVaultOverview.vue'
-import { formatNumber, compactNumber, formatSmartAmount } from '~/utils/string-utils'
+import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
@@ -73,6 +72,13 @@ const { isReady: isLabelsReady } = useEulerLabels()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
 const { isConnected, address } = useAccount()
 const { chainId } = useEulerAddresses()
+const shareLinkQuery = computed(() => {
+  const network = route.query.network
+
+  return {
+    network: Array.isArray(network) ? network[0] ?? chainId.value : network ?? chainId.value,
+  }
+})
 const { fetchSingleBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
 const vaultAddress = route.params.vault as string
@@ -89,8 +95,6 @@ const isEstimatesLoading = ref(false)
 const amount = ref('')
 const plan = ref<TxPlan | null>(null)
 const estimateSupplyAPY = ref(0n)
-const monthlyEarnings = ref(0)
-const monthlyEarningsUsd = ref(0)
 
 // Swap & deposit state
 const selectedAsset = ref<VaultAsset | undefined>()
@@ -543,20 +547,9 @@ const updateEstimates = useDebounceFn(async () => {
         const rawAPY = projected?.supplyAPY ?? evkVault.value.interestRateInfo.supplyAPY
         estimateSupplyAPY.value = rawAPY + valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
       }
-
-      const supplyAmount = needsSwap.value
-        ? nanoToValue(BigInt(swapEffectiveQuote.value?.amountOut || 0), Number(evkVault.value.decimals))
-        : +(amount.value || 0)
-      monthlyEarnings.value = supplyAmount <= 0
-        ? 0
-        : supplyAmount * (nanoToValue(estimateSupplyAPY.value, 27) / 12)
     }
     else {
       estimateSupplyAPY.value = valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
-      const supplyAmount = +(amount.value || 0)
-      monthlyEarnings.value = supplyAmount <= 0
-        ? 0
-        : supplyAmount * (nanoToValue(estimateSupplyAPY.value, 27) / 12)
     }
   }
   catch (e) {
@@ -748,15 +741,6 @@ watch(swapEffectiveQuote, () => {
   }
 })
 
-// Update USD value when monthlyEarnings or vault changes
-watchEffect(async () => {
-  if (!vault.value || !monthlyEarnings.value) {
-    monthlyEarningsUsd.value = 0
-    return
-  }
-  monthlyEarningsUsd.value = await getAssetUsdValueOrZero(monthlyEarnings.value, vault.value, 'off-chain')
-})
-
 watch(amount, async () => {
   clearSimulationError()
   if (!isVaultLoaded.value) {
@@ -788,15 +772,26 @@ watch(address, () => {
         fallback="/lend"
       />
       <!-- Vault header -->
-      <VaultLabelsAndAssets
+      <div
         v-if="asset && (vault || securitizeVault)"
-        back
-        back-fallback="/lend"
         class="mb-24"
-        :vault="(vault || securitizeVault)!"
-        :assets="assets"
-        size="large"
-      />
+      >
+        <VaultLabelsAndAssets
+          back
+          back-fallback="/lend"
+          :vault="(vault || securitizeVault)!"
+          :assets="assets"
+          size="large"
+        >
+          <UiShareLinkButton
+            class="-ml-4 !w-24 !h-24"
+            :path="`/lend/${(vault || securitizeVault)!.address}`"
+            :query="shareLinkQuery"
+            label="Copy vault link"
+            variant="ghost"
+          />
+        </VaultLabelsAndAssets>
+      </div>
 
       <div class="flex gap-32">
         <div class="hidden laptop:!block laptop:flex-[55] min-w-0">
@@ -969,20 +964,6 @@ watch(address, () => {
               :loading="isEstimatesLoading"
               variant="card"
             >
-              <SummaryRow
-                label="Projected earnings per month"
-                align-top
-              >
-                <p class="text-content-tertiary">
-                  <span class="text-content-primary text-p2">{{ compactNumber(monthlyEarnings, 4) }}</span> {{
-                    asset.symbol
-                  }}
-                  <template v-if="features.hasPriceInfo && vault">
-                    ≈ ${{ compactNumber(monthlyEarningsUsd) }}
-                  </template>
-                </p>
-              </SummaryRow>
-
               <SummaryRow label="Supply APY">
                 <SummaryValue
                   :after="estimateSupplyAPYDisplay"
