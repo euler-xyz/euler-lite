@@ -134,12 +134,9 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
         <slot />
       </div>
 
-      <div class="flex items-center gap-8">
-        <p class="text-p2 font-semibold text-content-primary">
-          {{ displayAssetsLabel }}
-        </p>
-        <slot name="asset-actions" />
-      </div>
+      <p class="text-p2 font-semibold text-content-primary">
+        {{ displayAssetsLabel }}
+      </p>
     </div>
   </div>
 </template>

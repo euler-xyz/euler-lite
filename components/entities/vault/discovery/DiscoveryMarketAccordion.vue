@@ -28,6 +28,12 @@ const props = defineProps<{
   initialExpanded?: string[]
 }>()
 
+const route = useRoute()
+const { chainId } = useEulerAddresses()
+const shareLinkQuery = computed(() => ({
+  network: route.query.network ?? chainId.value,
+}))
+
 // -- Accordion expand state --
 
 const expandedMarkets = ref<Set<string>>(new Set(props.initialExpanded ?? []))
@@ -508,6 +514,14 @@ onMounted(() => {
                   </button>
                 </div>
               </div>
+
+              <UiShareLinkButton
+                class="ml-auto !w-28 !h-28"
+                :path="`/explore/${market.id}`"
+                :query="shareLinkQuery"
+                label="Copy market link"
+                variant="ghost"
+              />
             </div>
 
             <!-- Graph View -->

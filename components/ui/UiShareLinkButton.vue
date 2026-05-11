@@ -10,10 +10,12 @@ const props = withDefaults(defineProps<{
   label?: string
   tag?: 'button' | 'span'
   stopPropagation?: boolean
+  variant?: 'default' | 'ghost'
 }>(), {
   label: 'Copy link',
   tag: 'button',
   stopPropagation: false,
+  variant: 'default',
 })
 
 const toast = useToast()
@@ -92,6 +94,7 @@ onBeforeUnmount(() => {
   <component
     :is="tag"
     class="ui-share-link-button"
+    :class="{ 'ui-share-link-button--ghost': variant === 'ghost' }"
     :type="tag === 'button' ? 'button' : undefined"
     :role="tag === 'span' ? 'button' : undefined"
     :tabindex="tag === 'span' ? 0 : undefined"
@@ -138,6 +141,18 @@ onBeforeUnmount(() => {
 
   &:active {
     color: var(--text-secondary);
+  }
+
+  &--ghost {
+    border-color: transparent;
+    background: transparent;
+    color: var(--text-muted);
+
+    &:hover {
+      border-color: transparent;
+      background: var(--bg-surface-secondary);
+      color: var(--text-secondary);
+    }
   }
 
   &:focus-visible {

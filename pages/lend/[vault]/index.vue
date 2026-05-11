@@ -801,14 +801,13 @@ watch(address, () => {
           :assets="assets"
           size="large"
         >
-          <template #asset-actions>
-            <UiShareLinkButton
-              class="!w-28 !h-28"
-              :path="`/lend/${(vault || securitizeVault)!.address}`"
-              :query="shareLinkQuery"
-              label="Copy vault link"
-            />
-          </template>
+          <UiShareLinkButton
+            class="-ml-4 !w-24 !h-24"
+            :path="`/lend/${(vault || securitizeVault)!.address}`"
+            :query="shareLinkQuery"
+            label="Copy vault link"
+            variant="ghost"
+          />
         </VaultLabelsAndAssets>
       </div>
 

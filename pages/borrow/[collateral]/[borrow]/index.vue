@@ -423,14 +423,13 @@ watch(formTab, () => {
           :assets="pairAssets as VaultAsset[]"
           size="large"
         >
-          <template #asset-actions>
-            <UiShareLinkButton
-              class="!w-28 !h-28"
-              :path="`/borrow/${collateralVault.address}/${borrowVault.address}`"
-              :query="shareLinkQuery"
-              label="Copy pair link"
-            />
-          </template>
+          <UiShareLinkButton
+            class="-ml-4 !w-24 !h-24"
+            :path="`/borrow/${collateralVault.address}/${borrowVault.address}`"
+            :query="shareLinkQuery"
+            label="Copy pair link"
+            variant="ghost"
+          />
         </VaultLabelsAndAssets>
       </div>
 

@@ -101,7 +101,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
         :asset="vault.asset"
         size="40"
       />
-      <div class="flex-grow min-w-0 ml-12">
+      <div class="flex-grow ml-12">
         <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-8">
           <VaultDisplayName
             :name="displayName"
@@ -120,18 +120,8 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
           </span>
           <RestrictedBadge v-if="isGeoBlocked" />
         </div>
-        <div class="flex items-center gap-8 min-w-0">
-          <div class="text-h5 text-content-primary min-w-0">
-            {{ vault.asset.symbol }}
-          </div>
-          <UiShareLinkButton
-            tag="span"
-            stop-propagation
-            class="!w-28 !h-28"
-            :path="`/earn/${vault.address}`"
-            :query="{ network: $route.query.network }"
-            label="Copy vault link"
-          />
+        <div class="text-h5 text-content-primary">
+          {{ vault.asset.symbol }}
         </div>
         <div
           v-if="description"
