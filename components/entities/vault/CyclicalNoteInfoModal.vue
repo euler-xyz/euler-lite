@@ -22,7 +22,7 @@ defineEmits<{ close: [] }>()
           Fixed rates with recurring cycles
         </p>
         <p class="text-p3 text-content-secondary text-center">
-          Cyclical Notes offer borrowers a fixed interest rate for most of the cycle, followed by a short repayment window with a sharply higher rate to incentivise repayment. Lenders earn an elevated, predictable yield in exchange for reduced withdrawal flexibility.
+          Cyclical Notes offer borrowers a fixed interest rate for most of the cycle, followed by a short repayment window with a sharply higher rate to incentivise repayment. For lenders, withdrawals may be limited during the cycle.
         </p>
       </div>
 
