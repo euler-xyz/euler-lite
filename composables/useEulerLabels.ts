@@ -384,7 +384,16 @@ const probeWrapPairs = async (startChainId: number) => {
     const config = getCurrentChainConfig.value
     if (!config || config.chainId !== startChainId) return
 
-    // Wait for vaults so vault.asset metadata is populated.
+    // Wait for vaults so vault.asset metadata is populated. Loaded via
+    // dynamic import to break the auto-import cycle: `useVaults` references
+    // `useEulerLabels`, so referencing `useVaults` from this module via
+    // unimport's hoisted import closes the cycle and produces a TDZ on
+    // `_$__useVaults` under Vite's dev module loader. Same applies to
+    // `useVaultRegistry`, which transitively imports `useEulerLabels` via
+    // `buildFetchContext` in `useFetchContext`. Matches the pattern used in
+    // `entities/vault/factory.ts` for the same reason.
+    const { useVaults } = await import('~/composables/useVaults')
+    const { useVaultRegistry } = await import('~/composables/useVaultRegistry')
     const { isReady: isVaultsReady } = useVaults()
     if (!isVaultsReady.value) await until(isVaultsReady).toBe(true)
     if (loadState.chainId !== startChainId) return // chain switched during wait
