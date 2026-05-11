@@ -1,18 +1,18 @@
 <script setup lang="ts">
 defineEmits(['close'])
-const { modalTitle, text, sections } = defineProps<{
-  modalTitle: string
-  text: string
-  sections?: { title: string, text: string }[]
-}>()
+type Section = { title: string, text: string }
+type UiFootnoteModalProps
+  = | { modalTitle: string, text: string, sections?: never }
+    | { sections: Section[], modalTitle?: never, text?: never }
+const { modalTitle, text, sections } = defineProps<UiFootnoteModalProps>()
 </script>
 
 <template>
   <BaseModalWrapper
-    :title="sections && sections.length > 1 ? 'Details' : modalTitle"
+    :title="sections ? 'Details' : modalTitle"
     @close="$emit('close')"
   >
-    <template v-if="sections && sections.length > 1">
+    <template v-if="sections">
       <div class="flex flex-col gap-12">
         <div
           v-for="(section, idx) in sections"

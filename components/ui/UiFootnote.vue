@@ -4,16 +4,19 @@ import { flip, offset, shift, useFloating, type AlignedPlacement } from '@floati
 import { useModal } from '~/components/ui/composables/useModal'
 import { UiFootnoteModal } from '#components'
 
-const { title, text, sections, tooltipPlacement = 'top-start', customModal, icon = 'info-circle' } = defineProps<{
-  title?: string
-  text?: string
-  sections?: { title: string, text: string }[]
+type Section = { title: string, text: string }
+type FootnoteCommonProps = {
   tooltipPlacement?: AlignedPlacement
   customModal?: Component
   icon?: string
-}>()
+}
+type FootnoteProps
+  = | (FootnoteCommonProps & { title: string, text: string, sections?: never })
+    | (FootnoteCommonProps & { sections: Section[], title?: never, text?: never })
 
-const resolvedSections = computed<{ title: string, text: string }[]>(() => {
+const { title, text, sections, tooltipPlacement = 'top-start', customModal, icon = 'info-circle' } = defineProps<FootnoteProps>()
+
+const resolvedSections = computed<Section[]>(() => {
   if (sections && sections.length > 0) return sections
   if (title !== undefined && text !== undefined) return [{ title, text }]
   return []
@@ -36,17 +39,14 @@ const { floatingStyles, update } = useFloating(reference, floating, {
 const canHover = typeof window !== 'undefined' && window.matchMedia('(hover: hover)').matches
 
 const onClick = () => {
-  if (!canHover) {
-    const first = resolvedSections.value[0]
-    if (!first) return
-    modal.open(customModal || UiFootnoteModal, {
-      props: {
-        modalTitle: first.title,
-        text: first.text,
-        sections: resolvedSections.value.length > 1 ? resolvedSections.value : undefined,
-      },
-    })
-  }
+  if (canHover) return
+  const all = resolvedSections.value
+  if (all.length === 0) return
+  modal.open(customModal || UiFootnoteModal, {
+    props: all.length > 1
+      ? { sections: all }
+      : { modalTitle: all[0].title, text: all[0].text },
+  })
 }
 
 const onMouseEnter = () => {
@@ -151,7 +151,8 @@ onClickOutside(reference, () => {
     font-weight: 600;
     font-size: 14px;
     line-height: 20px;
-    white-space: nowrap;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
   }
 
   &__floating-text {

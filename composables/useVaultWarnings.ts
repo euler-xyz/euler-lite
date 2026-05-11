@@ -103,40 +103,35 @@ export const getUtilisationWarning = (
   return { level, title, message }
 }
 
-export const getSupplyCapWarning = (vault: Vault): VaultWarning | null => {
-  const percentage = getSupplyCapPercentage(vault)
+// Cap level only determines the message text, not the visual severity.
+// Reaching a cap means the vault is popular, not that something is wrong.
+const buildSupplyCapWarning = (noun: string, percentage: number): VaultWarning | null => {
   const level = getCapLevel(percentage)
   if (!level) return null
 
+  const Noun = noun[0].toUpperCase() + noun.slice(1)
   const title = percentage >= 100
-    ? 'Supply cap reached'
+    ? `${Noun} reached`
     : percentage >= CAP_CRITICAL
-      ? 'Supply cap nearly reached'
-      : 'Supply cap approaching limit'
+      ? `${Noun} nearly reached`
+      : `${Noun} approaching limit`
   const message = percentage >= 100
-    ? 'The supply cap has been reached. New deposits will fail.'
+    ? `The ${noun} has been reached. New deposits will fail.`
     : percentage >= CAP_CRITICAL
-      ? 'The supply cap is nearly reached. New deposits may be limited or fail.'
-      : 'The supply cap is approaching its limit. Available capacity for new deposits is limited.'
+      ? `The ${noun} is nearly reached. New deposits may be limited or fail.`
+      : `The ${noun} is approaching its limit. Available capacity for new deposits is limited.`
 
-  // Cap level only determines the message text, not the visual severity.
-  // Reaching a cap means the vault is popular, not that something is wrong.
   return { level: 'info', title, message }
 }
+
+export const getSupplyCapWarning = (vault: Vault): VaultWarning | null =>
+  buildSupplyCapWarning('supply cap', getSupplyCapPercentage(vault))
 
 export const getCollateralSupplyCapWarning = (
   vault: Vault | SecuritizeVault,
 ): VaultWarning | null => {
   if (!isEVKVault(vault)) return null
-
-  const warning = getSupplyCapWarning(vault)
-  if (!warning) return null
-
-  return {
-    ...warning,
-    title: warning.title.replace('Supply cap', 'Collateral supply cap'),
-    message: warning.message.replace('The supply cap', 'The collateral supply cap'),
-  }
+  return buildSupplyCapWarning('collateral supply cap', getSupplyCapPercentage(vault))
 }
 
 export const getIsSupplyCapReached = (vault: Vault): boolean => {
