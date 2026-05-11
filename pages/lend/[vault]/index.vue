@@ -72,6 +72,13 @@ const { isReady: isLabelsReady } = useEulerLabels()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
 const { isConnected, address } = useAccount()
 const { chainId } = useEulerAddresses()
+const shareLinkQuery = computed(() => {
+  const network = route.query.network
+
+  return {
+    network: Array.isArray(network) ? network[0] ?? chainId.value : network ?? chainId.value,
+  }
+})
 const { fetchSingleBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
 const vaultAddress = route.params.vault as string
@@ -764,15 +771,26 @@ watch(address, () => {
         fallback="/lend"
       />
       <!-- Vault header -->
-      <VaultLabelsAndAssets
+      <div
         v-if="asset && (vault || securitizeVault)"
-        back
-        back-fallback="/lend"
         class="mb-24"
-        :vault="(vault || securitizeVault)!"
-        :assets="assets"
-        size="large"
-      />
+      >
+        <VaultLabelsAndAssets
+          back
+          back-fallback="/lend"
+          :vault="(vault || securitizeVault)!"
+          :assets="assets"
+          size="large"
+        >
+          <UiShareLinkButton
+            class="-ml-4 !w-24 !h-24"
+            :path="`/lend/${(vault || securitizeVault)!.address}`"
+            :query="shareLinkQuery"
+            label="Copy vault link"
+            variant="ghost"
+          />
+        </VaultLabelsAndAssets>
+      </div>
 
       <div class="flex gap-32">
         <div class="hidden laptop:!block laptop:flex-[55] min-w-0">
