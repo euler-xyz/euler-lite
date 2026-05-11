@@ -7,6 +7,7 @@ import type { Vault } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useReactiveMap } from '~/composables/useReactiveMap'
+import { computeSupplyApy } from '~/utils/collateralOptions'
 
 /**
  * Provides eligible savings positions that can be used to repay debt.
@@ -39,12 +40,11 @@ export const useRepaySavingsOptions = () => {
     savingsPositions,
     [rewardsVersion, intrinsicVersion],
     async (position) => {
-      const vault = position.vault
+      const vault = position.vault as Vault
       const amount = nanoToValue(position.assets, vault.asset.decimals)
-      const baseApy = nanoToValue(vault.interestRateInfo.supplyAPY || 0n, 25)
-      const apy = withIntrinsicSupplyApy(baseApy, vault.asset.address) + getSupplyRewardApy(vault.address)
+      const apy = computeSupplyApy(vault, withIntrinsicSupplyApy, getSupplyRewardApy)
       return {
-        type: 'vault' as const,
+        type: 'saving' as const,
         amount,
         price: await getAssetUsdValueOrZero(amount, vault, 'off-chain'),
         apy,

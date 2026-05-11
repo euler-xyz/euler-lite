@@ -223,13 +223,13 @@ const openChooseCollateralModal = () => {
             v-if="selectedSource === 'wallet' && (collateralOptions?.length ?? 0) > 1"
             class="text-[10px] leading-[12px] text-accent-600"
           >
-            Wallet
+            Wallet balance
           </span>
           <span
             v-else-if="selectedSource === 'saving' && (collateralOptions?.length ?? 0) > 1"
             class="text-[10px] leading-[12px] text-yellow-600"
           >
-            Savings
+            Savings balance
           </span>
         </div>
       </div>

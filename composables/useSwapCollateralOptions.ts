@@ -72,7 +72,7 @@ export const useSwapCollateralOptions = ({
       const amount = nanoToValue(balance, vault.asset.decimals)
       const apy = computeSupplyApy(vault, withIntrinsicSupplyApy, getSupplyRewardApy)
       const type = vault.vaultCategory === 'escrow' ? 'escrow' : 'vault'
-      return buildCollateralOption({ vault, type, amount, priceAmount: amount, apy, tagContext })
+      return buildCollateralOption({ vault, type, amount, priceAmount: amount, apy, tagContext, showBalance: false })
     },
   )
 
