@@ -49,6 +49,8 @@ import { evcBatchCall, buildBatchItem } from '~/utils/multicall'
 import { encodeFunctionData, decodeFunctionResult, type Hex } from 'viem'
 import { erc4626AssetAbi } from '~/abis/erc4626'
 
+let wrapPairProbeGeneration = 0
+
 const loadOracleAdapter = async (chainId: number, oracleAddress: string) => {
   const checksummed = getAddress(oracleAddress)
   const key = checksummed.toLowerCase()
@@ -139,6 +141,7 @@ export const useEulerLabels = () => {
 
       isReady.value = false
       isLoading.value = true
+      const probeGeneration = ++wrapPairProbeGeneration
 
       Object.keys(products).forEach(key => delete products[key])
       Object.keys(entities).forEach(key => delete entities[key])
@@ -335,7 +338,7 @@ export const useEulerLabels = () => {
       // Placed inside the try-success path so cache-hit `loadLabels()` calls
       // don't re-trigger the probe — `wrapPairs` is only cleared above when
       // the main load actually runs, so a cache hit keeps the prior map.
-      void probeWrapPairs(chainId)
+      void probeWrapPairs(chainId, probeGeneration)
     }
     catch (e) {
       logWarn('labels/load', e)
@@ -378,11 +381,18 @@ const WRAP_PAIR_PROBE_BATCH_SIZE = 25
 // at the call site (not re-read from current config) so a chain switch during
 // the async wait/probe cannot land stale results in `wrapPairs` for the new
 // chain.
-const probeWrapPairs = async (startChainId: number) => {
+const probeWrapPairs = async (startChainId: number, generation: number) => {
+  const isCurrentProbe = () =>
+    generation === wrapPairProbeGeneration && loadState.chainId === startChainId
+
   try {
     const { getCurrentChainConfig } = useEulerAddresses()
     const config = getCurrentChainConfig.value
-    if (!config || config.chainId !== startChainId) return
+    if (!config || config.chainId !== startChainId || generation !== wrapPairProbeGeneration) return
+
+    const evcAddress = config.addresses.coreAddrs.evc
+    const { rpcUrl } = useRpcClient()
+    const startRpcUrl = rpcUrl.value
 
     // Wait for vaults so vault.asset metadata is populated. Loaded via
     // dynamic import to break the auto-import cycle: `useVaults` references
@@ -396,7 +406,7 @@ const probeWrapPairs = async (startChainId: number) => {
     const { useVaultRegistry } = await import('~/composables/useVaultRegistry')
     const { isReady: isVaultsReady } = useVaults()
     if (!isVaultsReady.value) await until(isVaultsReady).toBe(true)
-    if (loadState.chainId !== startChainId) return // chain switched during wait
+    if (!isCurrentProbe()) return // chain switched or labels reloaded during wait
 
     const { getEvkVaults, getEarnVaults, getSecuritizeVaults } = useVaultRegistry()
     const seen = new Set<string>()
@@ -411,15 +421,13 @@ const probeWrapPairs = async (startChainId: number) => {
     }
     if (candidates.length === 0) return
 
-    const evcAddress = config.addresses.coreAddrs.evc
-    const { rpcUrl } = useRpcClient()
     const callData = encodeFunctionData({ abi: erc4626AssetAbi, functionName: 'asset' })
 
     for (let offset = 0; offset < candidates.length; offset += WRAP_PAIR_PROBE_BATCH_SIZE) {
       const chunk = candidates.slice(offset, offset + WRAP_PAIR_PROBE_BATCH_SIZE)
       let chunkResults
       try {
-        chunkResults = await evcBatchCall(evcAddress, chunk.map(addr => buildBatchItem(addr, callData)), rpcUrl.value)
+        chunkResults = await evcBatchCall(evcAddress, chunk.map(addr => buildBatchItem(addr, callData)), startRpcUrl)
       }
       catch (err) {
         // Transport-level failure on this chunk — log and stop; the next
@@ -427,9 +435,10 @@ const probeWrapPairs = async (startChainId: number) => {
         logWarn('labels/wrap-pairs', err)
         return
       }
-      if (loadState.chainId !== startChainId) return // chain switched mid-chunks
+      if (!isCurrentProbe()) return // chain switched or labels reloaded mid-chunks
 
       for (let i = 0; i < chunkResults.length; i++) {
+        if (!isCurrentProbe()) return // prevent stale per-item writes
         const res = chunkResults[i]
         if (!res.success || !res.result || res.result === '0x') continue
         try {
