@@ -21,9 +21,13 @@ const { error } = useToast()
 const { buildSupplyPlan, executeTxPlan } = useEulerOperations()
 const { getEarnVault, updateEarnVault } = useVaults()
 const { chainId } = useEulerAddresses()
-const shareLinkQuery = computed(() => ({
-  network: route.query.network ?? chainId.value,
-}))
+const shareLinkQuery = computed(() => {
+  const network = route.query.network
+
+  return {
+    network: Array.isArray(network) ? network[0] ?? chainId.value : network ?? chainId.value,
+  }
+})
 const { isReady: isLabelsReady } = useEulerLabels()
 const { isConnected, address } = useAccount()
 const { fetchSingleBalance } = useWallets()

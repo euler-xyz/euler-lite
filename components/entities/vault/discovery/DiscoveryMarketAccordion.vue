@@ -30,9 +30,13 @@ const props = defineProps<{
 
 const route = useRoute()
 const { chainId } = useEulerAddresses()
-const shareLinkQuery = computed(() => ({
-  network: route.query.network ?? chainId.value,
-}))
+const shareLinkQuery = computed(() => {
+  const network = route.query.network
+
+  return {
+    network: Array.isArray(network) ? network[0] ?? chainId.value : network ?? chainId.value,
+  }
+})
 
 // -- Accordion expand state --
 
