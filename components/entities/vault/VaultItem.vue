@@ -66,6 +66,7 @@ const collateralAssets = computed(() => {
 })
 const collateralDisplayAssets = computed(() => collateralAssets.value.slice(0, 5))
 const collateralOverflowCount = computed(() => Math.max(0, collateralAssets.value.length - 5))
+const collateralExposureListId = computed(() => `collateral-exposure:${vault.address.toLowerCase()}`)
 
 const balance = computed(() =>
   getBalance(vault.asset.address as `0x${string}`),
@@ -373,10 +374,24 @@ watchEffect(async () => {
           class="flex items-center gap-4 cursor-pointer"
           @click="onCollateralInfoClick"
         >
-          <AssetAvatar
-            :asset="collateralDisplayAssets"
-            size="20"
-          />
+          <div class="flex items-center">
+            <div
+              v-for="(asset, index) in collateralDisplayAssets"
+              :key="asset.address"
+              class="flex items-center"
+              :class="index > 0 ? '-ml-8' : ''"
+              data-id="data-point"
+              :data-list="collateralExposureListId"
+              :data-key="asset.address.toLowerCase()"
+              data-field="collateral-exposure-asset"
+              :data-value="asset.symbol"
+            >
+              <AssetAvatar
+                :asset="asset"
+                size="20"
+              />
+            </div>
+          </div>
           <span
             v-if="collateralOverflowCount > 0"
             class="text-p3 text-content-tertiary whitespace-nowrap"
