@@ -41,7 +41,7 @@
     "chartjs-plugin-annotation": "3.1.0",
     "luxon": "3.7.2",
     "modern-normalize": "3.0.1",
-    "nuxt": "3.21.4",
+    "nuxt": "3.21.2",
     "pino": "10.3.1",
     "viem": "2.48.8",
     "vue": "3.5.33",
