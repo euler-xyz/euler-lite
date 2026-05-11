@@ -30,7 +30,7 @@ export type CompiledPatternRule = {
   restricted?: string[]
 }
 export const assetPatternRules = shallowReactive<CompiledPatternRule[]>([])
-export const featuredEarnVaults: Set<string> = shallowReactive(new Set())
+export const recentlyAddedEarnVaults: Set<string> = shallowReactive(new Set())
 export const deprecatedEarnVaults = shallowReactive<Record<string, string>>({}) // address (lowercase) -> deprecation reason
 export const earnVaultDescriptions = shallowReactive<Record<string, string>>({}) // address (lowercase) -> description
 export const earnVaultNotices = shallowReactive<Record<string, string>>({}) // address (lowercase) -> notice

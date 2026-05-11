@@ -3,6 +3,7 @@ import { USD_ADDRESS } from '~/entities/constants'
 import { eulerUtilsLensABI } from '~/entities/euler/abis'
 import { logger } from '~/utils/logger'
 import { getPublicClient } from '~/utils/public-client'
+import { summarizeViemError } from '~/utils/viem-errors'
 
 export interface FullAssetPriceInfo {
   amountIn: bigint
@@ -86,7 +87,11 @@ const resolveAndCacheAssetPrice = (
         { ctx: 'pricing/resolveAssetPrice', asset: assetAddress, err: e },
         `error fetching price for asset ${assetAddress}`,
       )
-      if (cacheGeneration === gen) {
+      // Negatively cache only contract-level failures. Transport errors
+      // (RPC down, rate limit, timeout) are transient — caching null here
+      // would poison this asset's price for the rest of the process lifetime,
+      // since clearPriceCaches() only fires on chain switch.
+      if (cacheGeneration === gen && !summarizeViemError(e).isTransport) {
         assetPriceCache.set(key, null)
       }
       return undefined
@@ -147,8 +152,11 @@ export const resolveUnitOfAccountPriceInfo = async (
     return undefined
   }
 
+  const gen = cacheGeneration
   const priceInfo = await resolveAssetPriceInfo(rpcUrl, utilsLensAddress, unitOfAccount)
-  unitOfAccountPriceCache.set(normalized, priceInfo || null)
+  if (cacheGeneration === gen && (priceInfo || assetPriceCache.has(normalized))) {
+    unitOfAccountPriceCache.set(normalized, priceInfo || null)
+  }
   return priceInfo
 }
 

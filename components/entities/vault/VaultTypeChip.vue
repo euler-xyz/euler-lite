@@ -47,25 +47,7 @@ const icon = computed(() => {
 })
 
 const label = computed(() => {
-  if (!isVerified.value) {
-    return 'Unknown'
-  }
-  switch (type) {
-    case 'governed':
-      return 'Governed'
-    case 'managed':
-      return 'Managed'
-    case 'escrow':
-      return 'Escrowed collateral'
-    case 'securitize':
-      return 'Securitize Digital Security'
-    case 'ungoverned':
-      return 'Ungoverned'
-    case 'unknown':
-      return 'Unknown'
-  }
-
-  return 'Unknown'
+  return getVaultTypeLabel(type, isVerified.value)
 })
 
 const effectiveType = computed(() => isVerified.value ? type : 'unknown')

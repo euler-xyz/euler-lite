@@ -34,7 +34,6 @@ export const useEulerConfig = () => {
     // Runtime app config APIs
     EULER_API_URL: envConfig.eulerApiUrl,
     SWAP_API_URL: envConfig.swapApiUrl,
-    PRICE_API_URL: envConfig.priceApiUrl,
     PYTH_HERMES_URL: envConfig.pythHermesUrl,
 
     // Chain-specific (computed)

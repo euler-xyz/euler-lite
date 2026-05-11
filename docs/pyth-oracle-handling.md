@@ -77,7 +77,7 @@ Returns binary update payloads that can be passed to the on-chain `updatePriceFe
 
 ### Request Batching
 
-`fetchPythUpdateData()` collects all requests within a **50ms window** and combines them into a single call to the `/api/pyth/updates` server proxy. Multiple vaults requesting different feeds in quick succession result in one network request instead of many.
+`fetchPythUpdateData()` collects all requests within a **100ms window** and combines them into a single call to the `/api/pyth/updates` server proxy. Multiple vaults requesting different feeds in quick succession result in one network request instead of many.
 
 ### Update Data Cache
 

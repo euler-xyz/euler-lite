@@ -88,7 +88,7 @@ All endpoints use rate limiting and return stale cached data when upstream is un
 
 The `/api/token-list` endpoint aggregates three token sources, all fetched in parallel with stale-fallback resilience:
 
-1. **Euler API** (`EULER_API_URL/v1/tokens`) — vault-relevant tokens with logos
+1. **Euler API** (`EULER_API_URL/v3/tokens`) — vault-relevant tokens with logos
 2. **DefiLlama** (`NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL`) — broad token coverage
 3. **Uniswap** (`NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL`) — baseline token list
 

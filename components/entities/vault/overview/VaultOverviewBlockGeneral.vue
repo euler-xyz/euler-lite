@@ -12,7 +12,8 @@ const { vault } = defineProps<{ vault: Vault }>()
 const route = useRoute()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
-const { borrowList, isVaultGovernorVerified } = useVaults()
+const { isVaultGovernorVerified } = useVaults()
+const { getEvkVaults } = useVaultRegistry()
 
 const vaultAddress = computed(() => getAddress(vault.address))
 const product = useEulerProductOfVault(vaultAddress)
@@ -30,9 +31,16 @@ const isRestricted = computed(() => isVaultBlockedByCountry(vault.address))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
 const isGovernanceLimited = computed(() => product.isGovernanceLimited && isGovernorVerified.value)
 
-// Count how many borrow pairs have this vault as collateral
+// Count how many EVK vaults reference this vault as a borrowable collateral.
+// Sources from the registry directly (not `borrowList`) so deep-linked
+// unverified pairs still report "Yes in N markets" — `borrowList` is filtered
+// to verified vaults for discovery views and would otherwise hide the
+// relationship even though we're literally rendering it. Mirrors the pattern
+// in SecuritizeVaultOverview.vue.
 const collateralCount = computed(() => {
-  return borrowList.value.filter(pair => pair.collateral.address === vault.address).length
+  return getEvkVaults().filter(v => v.collateralLTVs.some(
+    ltv => ltv.collateral === vault.address && ltv.borrowLTV > 0n,
+  )).length
 })
 
 // Count how many borrow pairs have this vault as the liability (borrow) side
@@ -141,7 +149,7 @@ watchEffect(async () => {
           v-if="enableVaultTypeDisplay"
           label="Vault type"
         >
-          <VaultTypeBadges :vault-address="vault.address" />
+          <VaultTypeBadges :vault="vault" />
         </VaultOverviewLabelValue>
         <VaultOverviewLabelValue label="Can be borrowed">
           <div class="flex items-center gap-8">

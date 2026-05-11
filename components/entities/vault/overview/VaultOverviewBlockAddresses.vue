@@ -5,14 +5,15 @@ import { getSpecialAddressLabel } from '~/utils/special-addresses'
 
 const { vault } = defineProps<{ vault: Vault }>()
 
-const { borrowList } = useVaults()
 const { chainId } = useEulerAddresses()
 
-const borrowCount = computed(() => {
-  return borrowList.value.filter(pair => pair.borrow.address === vault.address).length
-})
-
-const isBorrowable = computed(() => borrowCount.value > 0)
+// "Borrowable" = the vault has at least one collateral configured to allow
+// borrowing. Read from the vault's own LTV table rather than `borrowList`
+// membership so unverified (off-label) borrow vaults still surface their
+// debt-token / fee-receiver / oracle addresses.
+const isBorrowable = computed(() =>
+  vault.collateralLTVs.some(ltv => ltv.borrowLTV > 0n),
+)
 
 const vaultAddresesInfo = computed(() => {
   const baseAddresses = [

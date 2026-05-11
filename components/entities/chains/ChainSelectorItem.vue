@@ -1,9 +1,13 @@
 <script setup lang="ts">
+import { getChainLogoUrl } from '~/utils/chain-logo'
+
 const props = defineProps<{
   chainId: number
   name: string
   deprecated?: boolean
 }>()
+
+const logoSrc = computed(() => getChainLogoUrl(props.chainId))
 </script>
 
 <template>
@@ -15,7 +19,7 @@ const props = defineProps<{
     <BaseAvatar
       class="mr-8 w-32 h-32 shadow-[inset_0_0_0_1px_var(--border-subtle)] rounded-full"
       :class="props.deprecated ? 'opacity-40' : ''"
-      :src="`/chains/${props.chainId}.webp`"
+      :src="logoSrc"
       :label="props.name"
     />
     {{ props.name }}

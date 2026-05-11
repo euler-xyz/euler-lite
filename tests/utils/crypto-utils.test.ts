@@ -70,6 +70,34 @@ describe('valueToNano', () => {
   it('handles negative number input', () => {
     expect(valueToNano(-1.5, 6)).toBe(-1_500_000n)
   })
+
+  it('handles small number input stringified as scientific notation', () => {
+    expect(valueToNano(2.8478322e-7, 25)).toBe(2_847_832_200_000_000_000n)
+  })
+
+  it('preserves precision from scientific notation number strings', () => {
+    expect(valueToNano(2.5345658399999994e-7, 25)).toBe(2_534_565_839_999_999_400n)
+  })
+
+  it('handles negative scientific notation input', () => {
+    expect(valueToNano('-1.5e-3', 6)).toBe(-1_500n)
+  })
+
+  it('matches equivalent plain decimal strings for scientific notation inputs', () => {
+    expect(valueToNano(1.2530461679999999e-6, 25)).toBe(valueToNano('0.0000012530461679999999', 25))
+  })
+
+  it('truncates expanded scientific notation to the requested decimals', () => {
+    expect(valueToNano('1.23456789e-3', 6)).toBe(1_234n)
+  })
+
+  it('handles positive scientific notation exponents', () => {
+    expect(valueToNano('1.23e+3', 6)).toBe(1_230_000_000n)
+  })
+
+  it('truncates scientific notation values smaller than the target precision to zero', () => {
+    expect(valueToNano(1e-30, 25)).toBe(0n)
+  })
 })
 
 describe('formatTtl', () => {

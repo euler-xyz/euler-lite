@@ -20,7 +20,6 @@ interface EnvConfig {
   appUrl: string
   eulerApiUrl: string
   swapApiUrl: string
-  priceApiUrl: string
 }
 
 const DEFAULTS: EnvConfig = {
@@ -33,7 +32,6 @@ const DEFAULTS: EnvConfig = {
   appUrl: '',
   eulerApiUrl: '',
   swapApiUrl: '',
-  priceApiUrl: '',
 }
 
 let cached: EnvConfig | null = null
@@ -56,7 +54,6 @@ function scanEnv(): EnvConfig {
     appUrl: env('NUXT_PUBLIC_APP_URL') || DEFAULTS.appUrl,
     eulerApiUrl: env('EULER_API_URL', 'NUXT_PUBLIC_EULER_API_URL') || DEFAULTS.eulerApiUrl,
     swapApiUrl: env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL') || DEFAULTS.swapApiUrl,
-    priceApiUrl: env('PRICE_API_URL', 'NUXT_PUBLIC_PRICE_API_URL') || DEFAULTS.priceApiUrl,
   }
 }
 
@@ -74,7 +71,6 @@ function fromRuntimeConfig(): EnvConfig {
     appUrl: str(rc.appUrl) || DEFAULTS.appUrl,
     eulerApiUrl: str(rc.eulerApiUrl) || DEFAULTS.eulerApiUrl,
     swapApiUrl: str(rc.swapApiUrl) || DEFAULTS.swapApiUrl,
-    priceApiUrl: str(rc.priceApiUrl) || DEFAULTS.priceApiUrl,
   }
 }
 

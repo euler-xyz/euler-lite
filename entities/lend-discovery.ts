@@ -55,8 +55,8 @@ export interface MarketGroupMetrics {
   averageUtilization: number
   /** Unique asset symbols in this market */
   assetSymbols: string[]
-  /** Whether the group contains any featured vaults */
-  hasFeatured: boolean
+  /** Whether the group contains any recently added vaults */
+  hasRecentlyAdded: boolean
 }
 
 // -- Curator Grouping (for Heatmap/Treemap views) --
