@@ -3,12 +3,7 @@ import { useAccount } from '@wagmi/vue'
 import { erc20Abi, getAddress, maxUint256, zeroAddress, type Address, type Abi } from 'viem'
 import type { AccountBorrowPosition } from '~/entities/account'
 import { eulerAccountLensABI } from '~/entities/euler/abis'
-import {
-  previewWithdraw,
-  type Vault,
-  type SecuritizeVault,
-  type VaultAsset,
-} from '~/entities/vault'
+import type { Vault, SecuritizeVault, VaultAsset } from '~/entities/vault'
 import {
   getAssetUsdValue,
   getAssetOraclePrice,
@@ -29,7 +24,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { COWSWAP_ORDER_DEADLINE_SECONDS, COWSWAP_PROVIDER_EXTRA_DATA, type CowSwapCollateralSwapExecuteParams, getCowSwapChainConfig, isCowProvider } from '~/entities/cowswap'
+import { COWSWAP_ORDER_DEADLINE_SECONDS, COWSWAP_PROVIDER_EXTRA_DATA, type CowSwapCollateralSwapExecuteParams, getCowSwapChainConfig, getCowSwapQuoteOrderAmounts, isCowProvider } from '~/entities/cowswap'
 import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus, openCowSwapReviewModal, buildApprovalSignSteps } from '~/composables/cowswap'
 
 const route = useRoute()
@@ -101,6 +96,19 @@ const isMaxSwap = computed(() => {
   catch { return false }
 })
 
+const ceilDiv = (numerator: bigint, denominator: bigint): bigint =>
+  denominator > 0n ? (numerator + denominator - 1n) / denominator : 0n
+
+const getSwapCollateralSharesAmountIn = (assetAmount: bigint): bigint => {
+  if (assetAmount <= 0n) return 0n
+  const shares = selectedCollateralShares.value
+  const assets = selectedCollateralAssets.value
+  if (isMaxSwap.value && shares > 0n) return shares
+  if (shares <= 0n || assets <= 0n) return 0n
+  if (assetAmount >= assets) return shares
+  return ceilDiv(assetAmount * shares, assets)
+}
+
 // ── Shared swap logic (must be before any code that uses its outputs) ────
 const { chainId: currentChainId } = useEulerAddresses()
 const cowModal = useModal()
@@ -131,6 +139,8 @@ const swap = useSwapPageLogic({
   buildQuoteRequest(amount) {
     if (!fromVault.value || !toVault.value || !position.value) return null
     const account = (position.value.subAccount || address.value || zeroAddress) as Address
+    const swapCollateralSharesAmountIn = getSwapCollateralSharesAmountIn(amount)
+    if (swapCollateralSharesAmountIn <= 0n) return null
     return {
       params: {
         tokenIn: fromVault.value.asset.address as Address,
@@ -145,7 +155,7 @@ const swap = useSwapPageLogic({
         isRepay: false,
         targetDebt: 0n,
         currentDebt: 0n,
-        providerExtraData: COWSWAP_PROVIDER_EXTRA_DATA.collateralSwap,
+        providerExtraData: COWSWAP_PROVIDER_EXTRA_DATA.collateralSwap(swapCollateralSharesAmountIn),
       },
     }
   },
@@ -237,6 +247,10 @@ const cowSwapErrorText = computed(() => {
   const inputNano = valueToNano(fromAmount.value || '0', fromVault.value.asset.decimals)
   if (inputNano > balance.value) return 'Sell amount exceeds collateral balance'
 
+  if (!getCowSwapQuoteOrderAmounts(selectedQuote.value, { slippage: slippage.value, slippageTarget: 'buyAmount' })) {
+    return 'Invalid CoW quote: missing order amounts'
+  }
+
   // Destination vault supply cap
   const toV = toVault.value
   if (toV.supplyCap < maxUint256 && toV.supplyCap > 0n) {
@@ -266,22 +280,15 @@ const submitCowSwapCollateralSwap = async () => {
 
   const validTo = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
 
-  // Quote amounts are in underlying tokens so the UI can display asset amounts.
-  // CoW orders use vault shares as sell/buy tokens, so convert assets -> shares
-  // before signing and submitting the order.
-  const underlyingSellAmount = BigInt(selectedQuote.value.amountIn)
-  const underlyingBuyAmount = BigInt(selectedQuote.value.amountOutMin || selectedQuote.value.amountOut || '1')
-
-  const quotedSellAmount = await previewWithdraw(fromVault.value.address, underlyingSellAmount)
-  const sellAmount = isMaxSwap.value && selectedCollateralShares.value > 0n
-    ? selectedCollateralShares.value
-    : quotedSellAmount
-
-  const buyAmount = await previewWithdraw(toVault.value.address, underlyingBuyAmount)
-  if (!sellAmount || sellAmount <= 0n || !buyAmount || buyAmount <= 0n) {
-    logWarn('collateralSwap/cowswap/convertAmounts', new Error('Unable to convert quote asset amounts to vault shares'))
+  const orderAmounts = getCowSwapQuoteOrderAmounts(selectedQuote.value, {
+    slippage: slippage.value,
+    slippageTarget: 'buyAmount',
+  })
+  if (!orderAmounts) {
+    logWarn('collateralSwap/cowswap/orderAmounts', new Error('Invalid CoW quote: missing order amounts'))
     return
   }
+  const { sellAmount, buyAmount } = orderAmounts
 
   const cowParams: CowSwapCollateralSwapExecuteParams = {
     chainId,

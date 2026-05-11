@@ -1,15 +1,18 @@
 import type { Address } from 'viem'
-import type { SwapApiQuote } from '~/entities/swap'
+import type { SwapApiProviderExtraData, SwapApiQuote } from '~/entities/swap'
 
 export const COWSWAP_PROVIDER_NAME = 'cow'
 
 export const COWSWAP_PROVIDER_EXTRA_DATA = {
-  openPosition: 'openPosition',
-  closePosition: 'closePosition',
-  collateralSwap: 'collateralSwap',
+  openPosition: { type: 'openPosition' },
+  closePosition: { type: 'closePosition' },
+  collateralSwap: (swapCollateralSharesAmountIn: bigint): SwapApiProviderExtraData => ({
+    type: 'collateralSwap',
+    swapCollateralSharesAmountIn,
+  }),
 } as const
 
-export type CowSwapProviderExtraData = typeof COWSWAP_PROVIDER_EXTRA_DATA[keyof typeof COWSWAP_PROVIDER_EXTRA_DATA]
+export type CowSwapProviderExtraData = SwapApiProviderExtraData
 
 export const isCowProvider = (provider: string | null | undefined): boolean =>
   !!provider && provider.toLowerCase() === COWSWAP_PROVIDER_NAME

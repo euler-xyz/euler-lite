@@ -1,5 +1,5 @@
 import type { Address, PublicClient } from 'viem'
-import type { SwapApiQuote } from '~/entities/swap'
+import type { SwapApiProviderExtraData, SwapApiQuote } from '~/entities/swap'
 import type { SwapApiRequestInput } from '~/composables/useSwapApi'
 import type { TxPlan } from '~/entities/txPlan'
 import {
@@ -30,7 +30,7 @@ type SwapQuotesParallelOptions = {
 type SwapQuotesRequestOptions = {
   providers?: string[]
   errorMessage?: string
-  providerExtraData?: Partial<Record<string, string>>
+  providerExtraData?: Partial<Record<string, SwapApiProviderExtraData>>
 }
 
 export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {

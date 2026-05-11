@@ -7,8 +7,8 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
 import { CLOSE_POSITION_WRAPPER_ABI } from '~/abis/cowswap-wrapper'
-import { getCashLimitedWithdrawAmount, isEVKVault, previewWithdraw, type Vault } from '~/entities/vault'
-import { COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapClosePositionExecuteParams, getCowSwapChainConfig, isCowProvider } from '~/entities/cowswap'
+import { getCashLimitedWithdrawAmount, isEVKVault, type Vault } from '~/entities/vault'
+import { COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapClosePositionExecuteParams, getCowSwapChainConfig, getCowSwapQuoteOrderAmounts, isCowProvider } from '~/entities/cowswap'
 import { useCowSwapClosePositionExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
 import { getAssetUsdValue, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
@@ -469,21 +469,16 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     // and the wrapper returns any unused collateral to the subaccount.
     const orderKind: 'buy' | 'sell' = isTargetDebt ? 'buy' : 'sell'
 
-    // Quote amountIn/amountInMax is in underlying tokens for UI display.
-    // CoW sellToken is the collateral vault, so convert the asset cap back to
-    // vault shares before signing and submitting the order.
-    const underlyingSellAmount = isTargetDebt
-      ? BigInt(core.quotes.selectedQuote.value.amountInMax || core.quotes.selectedQuote.value.amountIn)
-      : BigInt(core.quotes.selectedQuote.value.amountIn)
-    const sellAmount = await previewWithdraw(sourceVault.value.address, underlyingSellAmount)
-    if (!sellAmount || sellAmount <= 0n) {
-      error('Invalid quote: unable to convert sell amount')
+    const quote = core.quotes.selectedQuote.value
+    const orderAmounts = getCowSwapQuoteOrderAmounts(quote, {
+      slippage: slippage.value,
+      slippageTarget: 'sellAmount',
+    })
+    if (!orderAmounts) {
+      error('Invalid quote: missing CoW order amounts')
       return
     }
-
-    // buyToken = borrowVault.asset() (underlying) — no conversion needed.
-    // Target-debt BUY quotes already include any full-repay interest buffer.
-    const buyAmount = BigInt(core.quotes.selectedQuote.value.amountOutMin || core.quotes.selectedQuote.value.amountOut || '1')
+    const { sellAmount, buyAmount } = orderAmounts
 
     const cowParams: CowSwapClosePositionExecuteParams = {
       chainId,
@@ -491,7 +486,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       buyToken: borrowVault.value.asset.address as Address,
       sellAmount,
       buyAmount,
-      quoteId: core.quotes.selectedQuote.value.providerData?.quoteId,
+      quoteId: quote.providerData?.quoteId,
       slippageBips: Math.round(slippage.value * 100),
       validTo,
       orderKind,
@@ -507,7 +502,10 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
     const sourceAsset = sourceVault.value.asset
     const borrowAsset = borrowVault.value.asset
-    const transferredAssetAmount = nanoToValue(underlyingSellAmount, sourceAsset.decimals)
+    const displayedSellAmount = isTargetDebt
+      ? BigInt(quote.amountInMax || quote.amountIn)
+      : BigInt(quote.amountIn)
+    const transferredAssetAmount = nanoToValue(displayedSellAmount, sourceAsset.decimals)
     const transferLabelSuffix = `(Selling max ${formatNumber(transferredAssetAmount, 8, 0)} ${sourceAsset.symbol})`
 
     const signSteps: DisplayStep[] = []

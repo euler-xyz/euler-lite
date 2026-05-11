@@ -3,11 +3,12 @@ import { useAccount } from '@wagmi/vue'
 import { erc20Abi, formatUnits, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import type { DisplayStep } from '~/utils/stepDecoding'
-import { previewWithdraw, type Vault } from '~/entities/vault'
+import type { Vault } from '~/entities/vault'
 import type { SwapApiQuote } from '~/entities/swap'
 import {
   COWSWAP_ORDER_DEADLINE_SECONDS,
   type CowSwapOpenPositionExecuteParams,
+  getCowSwapQuoteOrderAmounts,
   getCowSwapChainConfig,
   isCowProvider,
   isCowQuote,
@@ -18,6 +19,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { trimTrailingZeros } from '~/utils/string-utils'
 import { getNewSubAccount } from '~/entities/account'
+import type { EulerLensAddresses } from '~/composables/useEulerAddresses'
 
 interface UseMultiplyCowSwapOptions {
   multiplySelectedProvider: ComputedRef<string | null>
@@ -36,8 +38,8 @@ interface UseMultiplyCowSwapOptions {
   multiplyDebtAmountNano: ComputedRef<bigint>
   multiplyErrorText: ComputedRef<string | null>
   resolvePendingSubAccount: () => Promise<string>
-  refreshAllPositions: (lensAddresses: any, address: string) => void
-  eulerLensAddresses: Ref<any>
+  refreshAllPositions: (lensAddresses: EulerLensAddresses, address: string) => void | Promise<void>
+  eulerLensAddresses: Ref<EulerLensAddresses>
 }
 
 export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
@@ -117,25 +119,23 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     }
 
     const supplyAmountNano = valueToNano(options.multiplyInputAmount.value || '0', supplyVault.asset.decimals)
-    const debtAmount = options.multiplyDebtAmountNano.value
     const validTo = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
 
-    const underlyingBuyAmount = BigInt(quote.amountOutMin) // CoW expects min amount after slippage
-    if (!underlyingBuyAmount || underlyingBuyAmount <= 0n) {
-      error('Invalid quote: no minimum buy amount')
+    const orderAmounts = getCowSwapQuoteOrderAmounts(quote, {
+      slippage: options.multiplySlippage.value,
+      slippageTarget: 'buyAmount',
+    })
+    if (!orderAmounts) {
+      error('Invalid quote: missing CoW order amounts')
       return
     }
-    const buyAmount = await previewWithdraw(longVault.address, underlyingBuyAmount)
-    if (!buyAmount || buyAmount <= 0n) {
-      error('Invalid quote: unable to convert buy amount')
-      return
-    }
+    const { sellAmount, buyAmount } = orderAmounts
 
     const cowParams: CowSwapOpenPositionExecuteParams = {
       chainId,
       sellToken: shortVault.asset.address as Address,
       buyToken: longVault.address as Address,
-      sellAmount: debtAmount,
+      sellAmount,
       buyAmount,
       quoteId: quote.providerData?.quoteId,
       slippageBips: Math.round(options.multiplySlippage.value * 100),
@@ -148,7 +148,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
         collateralVault: supplyVault.address as Address,
         borrowVault: shortVault.address as Address,
         collateralAmount: supplyAmountNano,
-        borrowAmount: debtAmount,
+        borrowAmount: sellAmount,
       },
     }
 
@@ -181,7 +181,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
 
     const collateralAsset = supplyVault.asset
     const borrowAsset = shortVault.asset
-    const borrowAmountStr = options.multiplyShortAmount.value || formatUnits(debtAmount, Number(borrowAsset.decimals))
+    const borrowAmountStr = trimTrailingZeros(formatUnits(sellAmount, Number(borrowAsset.decimals)))
     const swapOutMinAmount = quote.amountOutMin
       ? trimTrailingZeros(formatUnits(BigInt(quote.amountOutMin), Number(longVault.asset.decimals)))
       : options.multiplyLongAmount.value
@@ -202,7 +202,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     const sellTokenApproval = buildApprovalSignSteps({
       tokenAddress: shortVault.asset.address,
       currentAllowance: sellTokenAllowance,
-      requiredAmount: debtAmount,
+      requiredAmount: sellAmount,
       label: 'Approve for swap',
       assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: borrowAmountStr },
       startIndex: idx,

@@ -51,6 +51,16 @@ export interface SwapApiRouteItem {
 
 export interface SwapApiProviderData {
   quoteId?: number
+  sellAmount?: string
+  buyAmount?: string
+  feeAmount?: string
+}
+
+export type SwapApiProviderExtraDataType = 'openPosition' | 'closePosition' | 'collateralSwap'
+
+export interface SwapApiProviderExtraData {
+  type: SwapApiProviderExtraDataType
+  swapCollateralSharesAmountIn?: bigint
 }
 
 export interface SwapApiQuote {
@@ -109,5 +119,5 @@ export interface SwapApiRequest {
   dustAccount?: Address
   routingOverride?: RoutingConfig
   provider?: string
-  providerExtraData?: string
+  providerExtraData?: SwapApiProviderExtraData
 }

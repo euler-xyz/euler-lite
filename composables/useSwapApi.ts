@@ -3,6 +3,7 @@ import { zeroAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import {
   type RoutingConfig,
+  type SwapApiProviderExtraData,
   type SwapApiQuote,
   type SwapApiResponse,
   SwapperMode,
@@ -31,7 +32,14 @@ export interface SwapApiRequestInput {
   transferOutputToReceiver?: boolean
   routingOverride?: RoutingConfig
   provider?: string
-  providerExtraData?: string
+  providerExtraData?: SwapApiProviderExtraData
+}
+
+const serializeProviderExtraData = (providerExtraData?: SwapApiProviderExtraData): string | undefined => {
+  if (!providerExtraData) return undefined
+  return JSON.stringify(providerExtraData, (_key, value) =>
+    typeof value === 'bigint' ? value.toString() : value,
+  )
 }
 
 const buildRequestParams = (
@@ -61,7 +69,7 @@ const buildRequestParams = (
     transferOutputToReceiver: params.transferOutputToReceiver != null ? String(params.transferOutputToReceiver) : undefined,
     routingOverride: params.routingOverride ? JSON.stringify(params.routingOverride) : undefined,
     provider: params.provider,
-    providerExtraData: params.providerExtraData,
+    providerExtraData: serializeProviderExtraData(params.providerExtraData),
   }
 
   return Object.fromEntries(
