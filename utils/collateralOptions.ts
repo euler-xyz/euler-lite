@@ -29,10 +29,9 @@ export async function buildCollateralOption(params: {
   priceAmount: number
   apy: number
   tagContext: VaultTagContext
-  balanceLabel?: string
   showBalance?: boolean
 }): Promise<CollateralOption> {
-  const { vault, type, amount, priceAmount, apy, tagContext, balanceLabel, showBalance } = params
+  const { vault, type, amount, priceAmount, apy, tagContext, showBalance } = params
   const { tags, disabled } = getVaultTags(vault.address, tagContext)
 
   return {
@@ -40,7 +39,6 @@ export async function buildCollateralOption(params: {
     amount,
     price: await getAssetUsdValueOrZero(priceAmount, vault, 'off-chain'),
     apy,
-    balanceLabel,
     showBalance,
     symbol: vault.asset.symbol,
     assetAddress: vault.asset.address,

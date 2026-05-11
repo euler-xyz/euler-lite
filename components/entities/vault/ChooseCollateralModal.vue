@@ -33,13 +33,6 @@ const getOptionType = (option: CollateralOption) => {
   if (option.vaultAddress && isEscrowVault(option.vaultAddress)) return 'escrow'
   return option.type
 }
-const getBalanceLabel = (option: CollateralOption) => {
-  if (option.balanceLabel) return option.balanceLabel
-  const type = getOptionType(option)
-  if (type === 'wallet') return 'Wallet balance'
-  if (type === 'saving') return 'Savings balance'
-  return 'Available'
-}
 const getApyLabel = (option: CollateralOption) => {
   return option.type === 'wallet' ? 'If supplied: APY' : apyLabel
 }
@@ -136,7 +129,7 @@ const handleClose = () => {
               class="flex flex-col items-end"
             >
               <div class="text-content-primary mb-2">
-                {{ getBalanceLabel(option) }}
+                Balance
               </div>
               <div class="text-h5">
                 {{ getFormattedAmount(option) }}
