@@ -8,6 +8,7 @@ import {
   getAssetRestricted,
   isVaultDeprecated,
   patternRuleMatches,
+  isWrapPair,
 } from '~/utils/eulerLabelsUtils'
 import { assetPatternRules } from '~/utils/eulerLabelsState'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -150,7 +151,20 @@ export const isAssetBlockedByCountry = (asset: AssetLike): boolean => {
   return cacheSet(assetBlockCache, cacheKey, false)
 }
 
-export const isAssetRestrictedByCountry = (asset: AssetLike): boolean => {
+/**
+ * Determine whether `asset` is soft-restricted in the detected country.
+ *
+ * `opts.counterpart` lets the caller pass the asset on the other side of the
+ * flow (e.g. the input asset of a swap when checking the output). When the
+ * two form an ERC-4626 wrap pair, the restriction is bypassed: wrapping or
+ * unwrapping existing exposure is a technical conversion, not a new
+ * acquisition. Hard-block (`isAssetBlockedByCountry`) is never bypassed and
+ * remains the unconditional gate.
+ */
+export const isAssetRestrictedByCountry = (
+  asset: AssetLike,
+  opts?: { counterpart?: AssetLike },
+): boolean => {
   const fields = toAssetFields(asset)
   if (!fields) return false
   if (country.value === undefined) return false // still loading
@@ -158,8 +172,25 @@ export const isAssetRestrictedByCountry = (asset: AssetLike): boolean => {
 
   const cacheKey = makeAssetCacheKey(fields)
   const cached = assetRestrictedCache.get(cacheKey)
-  if (cached !== undefined) return cached
+  const restricted = cached !== undefined ? cached : computeAssetRestricted(fields, cacheKey)
+  if (!restricted) return false
 
+  // Wrap-pair bypass: cached against the asset alone so the counterpart check
+  // sits outside the cache. The map of wrap relationships is populated by the
+  // labels loader once per labels reload cycle.
+  if (opts?.counterpart) {
+    const counterFields = toAssetFields(opts.counterpart)
+    if (counterFields?.address && fields.address && isWrapPair(fields.address, counterFields.address)) {
+      return false
+    }
+  }
+  return true
+}
+
+const computeAssetRestricted = (
+  fields: { address?: string, symbol?: string, name?: string },
+  cacheKey: string,
+): boolean => {
   if (fields.address) {
     const assetRestricted = getAssetRestricted(fields.address)
     if (assetRestricted?.length && isCountryInList(expandBlockList(assetRestricted))) {

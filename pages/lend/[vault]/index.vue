@@ -678,7 +678,6 @@ const openSwapTokenSelector = () => {
       currentAssetAddress: selectedAsset.value?.address || asset.value?.address,
       onSelect: onSelectSwapAsset,
       allowNativeCurrency: true,
-      // Counterpart of the supply-swap is the lend vault's underlying.
       pairedAsset: asset.value,
     },
   })

@@ -23,7 +23,6 @@ import {
 } from '~/services/pricing/priceProvider'
 import type { TxPlan } from '~/entities/txPlan'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
-import { isWrapPair } from '~/utils/eulerLabelsUtils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
@@ -389,9 +388,6 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
         onSelect: onSelect || (() => {}),
         mode: options.mode === 'withdraw' ? 'output' : 'input',
         allowNativeCurrency: options.mode === 'supply',
-        // Counterpart of the swap is the collateral vault's underlying.
-        // Soft-restrict bypass fires when the picker option is its ERC-4626
-        // wrap pair — a technical conversion, not new exposure.
         pairedAsset: collateralVault.value?.asset,
       },
     })
@@ -437,17 +433,10 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const isOutputAssetBlocked = computed(() =>
     options.needsSwap.value && isAssetBlockedByCountry(options.getSwapOutputAsset()),
   )
-  const isOutputAssetRestricted = computed(() => {
-    if (!options.needsSwap.value) return false
-    const output = options.getSwapOutputAsset()
-    if (!isAssetRestrictedByCountry(output)) return false
-    // Bypass soft-restrict on the output side when input and output are an
-    // ERC-4626 wrap pair (e.g. SPYx -> wSPYx). Wrapping existing exposure is
-    // not a new acquisition of the restricted asset.
-    const input = options.effectiveAsset.value
-    if (input && output && isWrapPair(input.address, output.address)) return false
-    return true
-  })
+  const isOutputAssetRestricted = computed(() =>
+    options.needsSwap.value
+    && isAssetRestrictedByCountry(options.getSwapOutputAsset(), { counterpart: options.effectiveAsset.value }),
+  )
 
   const collateralOp = computed(() => options.mode === 'supply' ? OP_DEPOSIT : OP_WITHDRAW)
 

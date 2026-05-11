@@ -306,7 +306,6 @@ const openWalletSwapTokenSelector = () => {
       currentAssetAddress: walletSwap.selectedAsset.value?.address || borrowVault.value?.asset.address,
       onSelect: walletSwap.onSelectSwapAsset,
       allowNativeCurrency: true,
-      // Counterpart of the repay-swap is the borrow vault's underlying.
       pairedAsset: borrowVault.value?.asset,
     },
   })

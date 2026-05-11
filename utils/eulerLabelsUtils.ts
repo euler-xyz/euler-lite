@@ -72,9 +72,8 @@ export const assetMatchesAnyRestrictRule = (
 /**
  * True when `a` and `b` are an ERC-4626 wrap pair in either direction — i.e.
  * one's address is the other's `asset()` underlying, per the map populated by
- * `useEulerLabels.discoverWrapPairs()`. Used to bypass soft-restrict on the
- * output side of a flow when the counterpart is the underlying — wrapping
- * existing exposure is a technical conversion, not a new acquisition.
+ * the labels loader. Consulted by `isAssetRestrictedByCountry` to bypass the
+ * soft-restrict gate when an operation is a technical wrap/unwrap.
  */
 export const isWrapPair = (a: string | undefined, b: string | undefined): boolean => {
   if (!a || !b) return false

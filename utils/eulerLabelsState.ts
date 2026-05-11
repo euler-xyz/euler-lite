@@ -49,10 +49,9 @@ export const bulkLoadedAdapterChains = new Map<number, number>()
 export const pendingBulkAdapterLoads = new Map<number, Promise<void>>()
 
 // Wrapper-asset address (lowercase) -> underlying ERC-4626 asset() address (lowercase).
-// Populated after labels finish loading by probing soft-restricted vault assets
-// via a single multicall. Lifetime is tied to the labels reload cycle: cleared
-// on labels reload and repopulated when vaults are ready. Used by `isWrapPair`
-// to bypass soft-restrict on the output side of a flow when the counterpart
-// is the underlying — wrapping existing exposure is a technical conversion,
-// not a new acquisition.
+// Populated by the labels loader once per reload cycle by probing every
+// soft-restricted vault asset for an ERC-4626 underlying. Used by
+// `isAssetRestrictedByCountry`'s counterpart bypass: a soft-restricted output
+// is allowed when the operation is a technical wrap/unwrap rather than a new
+// acquisition of the restricted asset.
 export const wrapPairs = shallowReactive<Record<string, string>>({})
