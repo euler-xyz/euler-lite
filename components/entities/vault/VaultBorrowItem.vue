@@ -7,7 +7,7 @@ import { getUtilisationWarning, getBorrowCapWarning, getCollateralSupplyCapWarni
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isVaultFeatured, isVaultKeyring, getEntitiesByVault } from '~/utils/eulerLabelsUtils'
+import { isVaultRecentlyAdded, isVaultKeyring, getEntitiesByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -92,7 +92,7 @@ const isPairEffectivelyBlocked = computed(() => {
     && isVaultRestrictedByCountry(pair.collateral.address)
 })
 
-const isFeatured = computed(() => isVaultFeatured(pair.collateral.address) || isVaultFeatured(pair.borrow.address))
+const isRecentlyAdded = computed(() => isVaultRecentlyAdded(pair.collateral.address) || isVaultRecentlyAdded(pair.borrow.address))
 const isKeyring = computed(() => isVaultKeyring(pair.collateral.address) || isVaultKeyring(pair.borrow.address))
 const isCyclicalNote = computed(() => isCyclicalNoteVault(pair.borrow))
 
@@ -277,15 +277,15 @@ const linkPath = computed(() => ({
               :is-unverified="isAnyUnverified"
             />
             <span
-              v-if="isFeatured"
+              v-if="isRecentlyAdded"
               class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5"
-              title="Featured Vault"
+              title="Recently added vault"
             >
               <SvgIcon
                 name="star"
                 class="!w-14 !h-14"
               />
-              Featured
+              Recently added
             </span>
             <KeyringBadge v-if="isKeyring" />
             <GovernanceLimitedBadge v-if="isAnyGovernanceLimited" />

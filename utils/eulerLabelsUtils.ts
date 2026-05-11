@@ -13,7 +13,7 @@ import {
   points,
   earnVaultBlocks,
   earnVaultRestrictions,
-  featuredEarnVaults,
+  recentlyAddedEarnVaults,
   deprecatedEarnVaults,
   earnVaultDescriptions,
   earnVaultNotices,
@@ -70,12 +70,14 @@ export const normalizeProducts = (data: Record<string, EulerLabelProduct>): { pr
   Object.entries(data).forEach(([key, product]) => {
     const normalizedVaults = product.vaults.map(normalizeAddress)
     const normalizedDeprecated = (product.deprecatedVaults || []).map(normalizeAddress)
+    const normalizedRecentlyAdded = (product.recentlyAddedVaults || []).map(normalizeAddress)
     const fallbackReason = (product as { deprecateReason?: string }).deprecateReason
     const vaultOverrides = extractVaultOverrides(product as unknown as Record<string, unknown>)
     normalized[key] = {
       ...product,
       vaults: normalizedVaults,
       deprecatedVaults: normalizedDeprecated,
+      recentlyAddedVaults: normalizedRecentlyAdded,
       deprecationReason: product.deprecationReason || fallbackReason,
       vaultOverrides,
     }
@@ -198,13 +200,13 @@ export const getAssetRestricted = (assetAddress: string): string[] | undefined =
   return assetRestrictions[normalized]
 }
 
-export const isVaultFeatured = (vaultAddress: string): boolean => {
+export const isVaultRecentlyAdded = (vaultAddress: string): boolean => {
   const normalized = normalizeAddress(vaultAddress)
-  const inFeaturedProduct = Object.values(products).some(product =>
-    product.featuredVaults?.includes(normalized) ?? false,
+  const inRecentlyAddedProduct = Object.values(products).some(product =>
+    product.recentlyAddedVaults?.includes(normalized) ?? false,
   )
-  if (inFeaturedProduct) return true
-  return featuredEarnVaults.has(normalized)
+  if (inRecentlyAddedProduct) return true
+  return recentlyAddedEarnVaults.has(normalized)
 }
 
 export const isEarnVaultDeprecated = (vaultAddress: string): boolean => {

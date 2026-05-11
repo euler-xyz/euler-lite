@@ -19,7 +19,7 @@ import {
   earnVaults,
   earnVaultBlocks,
   earnVaultRestrictions,
-  featuredEarnVaults,
+  recentlyAddedEarnVaults,
   deprecatedEarnVaults,
   earnVaultDescriptions,
   earnVaultNotices,
@@ -153,7 +153,7 @@ export const useEulerLabels = () => {
       // the now-cleared pattern rules and address maps; drop it so the next
       // lookup recomputes against the freshly-loaded labels.
       clearAssetGeoCache()
-      featuredEarnVaults.clear()
+      recentlyAddedEarnVaults.clear()
       notExplorableEarnVaults.clear()
       earnVaults.value = []
       verifiedVaultAddresses.value = []
@@ -192,8 +192,8 @@ export const useEulerLabels = () => {
         if (entry.restricted?.length) {
           earnVaultRestrictions[addr.toLowerCase()] = entry.restricted
         }
-        if (entry.featured) {
-          featuredEarnVaults.add(addr)
+        if (entry.recentlyAdded) {
+          recentlyAddedEarnVaults.add(addr)
         }
         if (entry.deprecated) {
           deprecatedEarnVaults[addr.toLowerCase()] = entry.deprecationReason ?? ''
