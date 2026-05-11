@@ -19,9 +19,11 @@ export type IntrinsicApySourceConfig
     | { provider: 'avant', address: string, chainId: number }
     | { provider: 'infinifi', address: string, chainId: number, infinifiVariant: 'locked' | 'staked', infinifiLockedKey?: string }
     | { provider: 'accountable', address: string, chainId: number, loanAddress: string }
+    | { provider: 'coinshift', address: string, chainId: number, period: '7d' | '30d' | '90d' }
 
 export const intrinsicApySources: readonly IntrinsicApySourceConfig[] = [
   // DefiLlama pools — Ethereum (1)
+  { provider: 'coinshift', chainId: 1, address: '0xbF4e3fbE8B60062A00C7a6B1D97d0d49c2971A19', period: '7d' },
   { provider: 'defillama', chainId: 1, address: '0x0655977FEb2f289A4aB78af67BAB0d17aAb84367', poolId: '5fd328af-4203-471b-bd16-1705c726d926' },
   { provider: 'defillama', chainId: 1, address: '0x09db87A538BD693E9d08544577d5cCfAA6373A48', poolId: '44dd4153-aa9f-4616-9a88-e6803c86b995' },
   { provider: 'defillama', chainId: 1, address: '0x0d86883FAf4FfD7aEb116390af37746F45b6f378', poolId: '9c4e675e-7615-4d60-90ef-03d58c66b476' },

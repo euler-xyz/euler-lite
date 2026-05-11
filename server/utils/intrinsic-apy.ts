@@ -39,6 +39,7 @@ const UPSTREAM_URLS = {
   stablewatch: 'https://api.stablewatch.io/api/pools',
   infinifi: 'https://eth-api.infinifi.xyz/api/protocol/data',
   accountable: 'https://yield.accountable.capital/api/loan/address',
+  coinshift: 'https://uspc-nav.coinshift.xyz/api/nav/returns',
 } as const
 
 const PENDLE_API_BASE = 'https://api-v2.pendle.finance/core/v2'
@@ -349,6 +350,28 @@ async function extractAccountable(sources: AccountableSource[]): Promise<Array<[
   return out
 }
 
+type CoinshiftSource = Extract<IntrinsicApySourceConfig, { provider: 'coinshift' }>
+type CoinshiftReturnsResponse = {
+  data?: {
+    returns?: Partial<Record<CoinshiftSource['period'], { apy?: number | null } | null>>
+  }
+}
+
+async function extractCoinshift(sources: CoinshiftSource[]): Promise<Array<[string, IntrinsicApyInfo]>> {
+  const data = await fetchUpstream<CoinshiftReturnsResponse>('coinshift', UPSTREAM_URLS.coinshift)
+  const out: Array<[string, IntrinsicApyInfo]> = []
+  for (const s of sources) {
+    const apy = Number(data?.data?.returns?.[s.period]?.apy)
+    if (!Number.isFinite(apy)) continue
+    out.push([normalize(s.address), {
+      apy,
+      provider: 'Coinshift',
+      source: UPSTREAM_URLS.coinshift,
+    }])
+  }
+  return out
+}
+
 type YoSource = Extract<IntrinsicApySourceConfig, { provider: 'yo' }>
 
 async function extractYo(sources: YoSource[]): Promise<Array<[string, IntrinsicApyInfo]>> {
@@ -403,7 +426,7 @@ async function extractSimple<S extends IntrinsicApySourceConfig, T>(
 }
 
 // Providers with dedicated extractors in the switch below.
-type ExplicitProvider = 'defillama' | 'pendle' | 'securitize' | 'stablewatch' | 'renzo' | 'midas' | 'yo' | 'infinifi' | 'accountable'
+type ExplicitProvider = 'defillama' | 'pendle' | 'securitize' | 'stablewatch' | 'renzo' | 'midas' | 'yo' | 'infinifi' | 'accountable' | 'coinshift'
 // Every remaining provider must have an entry in SIMPLE_SPECS — enforced at the type level.
 type SimpleProvider = Exclude<IntrinsicApySourceConfig['provider'], ExplicitProvider>
 
@@ -470,6 +493,7 @@ async function extractForProvider(
     case 'yo': return extractYo(sources as YoSource[])
     case 'infinifi': return extractInfinifi(sources as InfinifiSource[])
     case 'accountable': return extractAccountable(sources as AccountableSource[])
+    case 'coinshift': return extractCoinshift(sources as CoinshiftSource[])
     default: {
       const simpleProvider: SimpleProvider = provider
       const spec = SIMPLE_SPECS[simpleProvider]
