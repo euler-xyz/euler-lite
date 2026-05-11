@@ -33,6 +33,12 @@ const MAX_REGEX_INPUT_LEN = 128
 /**
  * Test whether an asset-pattern rule matches the given lowercased symbol/name.
  * OR across populated fields — any match wins.
+ *
+ * Fail-closed on overlength inputs: a regex-only rule paired with an attacker-
+ * chosen long symbol/name treats the input as a match rather than skipping the
+ * regex. The ReDoS guard still prevents `.test()` from running on those inputs,
+ * but an oversize symbol/name is treated as restricted instead of silently
+ * bypassing the rule.
  */
 export const patternRuleMatches = (
   rule: CompiledPatternRule,
@@ -40,9 +46,15 @@ export const patternRuleMatches = (
   nameLower: string | undefined,
 ): boolean => {
   if (rule.symbolsLower && symbolLower && rule.symbolsLower.has(symbolLower)) return true
-  if (rule.symbolRegex && symbolLower && symbolLower.length <= MAX_REGEX_INPUT_LEN && rule.symbolRegex.test(symbolLower)) return true
+  if (rule.symbolRegex && symbolLower) {
+    if (symbolLower.length > MAX_REGEX_INPUT_LEN) return true
+    if (rule.symbolRegex.test(symbolLower)) return true
+  }
   if (rule.namesLower && nameLower && rule.namesLower.has(nameLower)) return true
-  if (rule.nameRegex && nameLower && nameLower.length <= MAX_REGEX_INPUT_LEN && rule.nameRegex.test(nameLower)) return true
+  if (rule.nameRegex && nameLower) {
+    if (nameLower.length > MAX_REGEX_INPUT_LEN) return true
+    if (rule.nameRegex.test(nameLower)) return true
+  }
   return false
 }
 

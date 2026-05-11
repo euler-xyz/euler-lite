@@ -215,20 +215,23 @@ describe('isAssetBlockedByCountry — pattern rules (symbols / names)', () => {
     expect(isAssetBlockedByCountry(USDC)).toBe(false)
   })
 
-  it('skips pattern .test() on inputs longer than 128 chars (ReDoS guard)', () => {
+  it('treats inputs longer than 128 chars as a regex match (fail-closed ReDoS guard)', () => {
     // A curator-typo regex must never run .test() against an attacker-chosen
-    // long on-chain symbol/name. Real symbols are <=12 chars; names <=64.
+    // long on-chain symbol/name (real symbols are <=12 chars; names <=64). The
+    // ReDoS guard still prevents .test() from running, but we fail closed:
+    // an oversize input is treated as if it matched the regex, so an attacker
+    // cannot bypass a geo rule by padding their token's symbol/name.
     setCountry('DE')
     assetPatternRules.push({
-      symbolRegex: /^.*A$/i, // would otherwise match the oversize input
+      symbolRegex: /^xx_no_match_xx$/i, // would NOT match the oversize input
       block: ['DE'],
     })
-    const oversize = 'B'.repeat(128) + 'A' // 129 chars → exceeds cap
-    expect(isAssetBlockedByCountry({ symbol: oversize })).toBe(false)
+    const oversize = 'B'.repeat(129) // 129 chars → exceeds cap → counted as a match
+    expect(isAssetBlockedByCountry({ symbol: oversize })).toBe(true)
 
     // A 128-char input (exactly at the cap) still runs through .test().
-    const atLimit = 'B'.repeat(127) + 'A' // 128 chars
-    expect(isAssetBlockedByCountry({ symbol: atLimit })).toBe(true)
+    const atLimit = 'B'.repeat(128) // 128 chars → does NOT match the regex
+    expect(isAssetBlockedByCountry({ symbol: atLimit })).toBe(false)
   })
 
   it('ignores a pattern rule whose block list is empty', () => {
