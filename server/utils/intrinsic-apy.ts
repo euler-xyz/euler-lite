@@ -120,6 +120,73 @@ async function mapWithConcurrency<T, R>(
 const PENDLE_CONCURRENCY = 10
 
 const normalize = (v?: string) => v?.toLowerCase() || ''
+const V3_INTRINSIC_APY_PAGE_LIMIT = 100
+
+type V3IntrinsicApyEntry = {
+  chainId?: number
+  address?: string
+  apy?: number
+  provider?: string
+  source?: string
+}
+
+type V3IntrinsicApyResponse = {
+  data?: V3IntrinsicApyEntry[]
+  meta?: {
+    total?: number
+    hasMore?: boolean
+  }
+}
+
+const getEulerApiBaseUrl = (): string => {
+  const raw = process.env.EULER_API_URL || process.env.NUXT_PUBLIC_EULER_API_URL || ''
+  return raw.trim().replace(/\/+$/, '')
+}
+
+async function extractV3IntrinsicApy(chainId: number): Promise<Record<string, IntrinsicApyInfo> | undefined> {
+  const baseUrl = getEulerApiBaseUrl()
+  if (!baseUrl) return undefined
+
+  const out: Record<string, IntrinsicApyInfo> = Object.create(null) as Record<string, IntrinsicApyInfo>
+  let offset = 0
+
+  for (let page = 0; page < 100; page++) {
+    const url = new URL('/v3/apys/intrinsic', baseUrl)
+    url.searchParams.set('chainId', String(chainId))
+    url.searchParams.set('limit', String(V3_INTRINSIC_APY_PAGE_LIMIT))
+    url.searchParams.set('offset', String(offset))
+
+    const resp = await fetchWithTimeout(url.toString())
+    if (resp.status === 404) {
+      reportStatus('intrinsic-apy', `v3:${chainId}`, 'unsupported',
+        `v3 intrinsic APY unsupported for chain ${chainId}; falling back to local sources`)
+      return out
+    }
+    if (!resp.ok) throw new Error(`Euler API intrinsic APY returned ${resp.status}`)
+
+    const body = await resp.json() as V3IntrinsicApyResponse
+    const entries = Array.isArray(body.data) ? body.data : []
+    for (const entry of entries) {
+      const address = normalize(entry.address)
+      const apy = Number(entry.apy)
+      if (!address || !Number.isFinite(apy)) continue
+      const info: IntrinsicApyInfo = {
+        apy,
+        provider: entry.provider || 'Euler API',
+      }
+      if (entry.source) out[address] = { ...info, source: entry.source }
+      else out[address] = info
+    }
+
+    offset += V3_INTRINSIC_APY_PAGE_LIMIT
+    if (entries.length < V3_INTRINSIC_APY_PAGE_LIMIT) break
+    if (body.meta?.hasMore === false) break
+    if (typeof body.meta?.total === 'number' && offset >= body.meta.total) break
+  }
+
+  reportStatus('intrinsic-apy', `v3:${chainId}`, 'ok')
+  return out
+}
 
 // ── Per-provider extractors ──────────────────────────────────────────────
 // Each takes the sources for this chain + this provider and returns
@@ -495,10 +562,26 @@ const mergedInFlight = createInFlightDedup<number, Record<string, IntrinsicApyIn
 const orchestrate = (chainId: number): Promise<Record<string, IntrinsicApyInfo>> =>
   mergedInFlight.run(chainId, async () => {
     const chainSources = intrinsicApySources.filter(s => s.chainId === chainId)
-    if (chainSources.length === 0) return {}
+    const v3Result = await extractV3IntrinsicApy(chainId)
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err)
+        reportStatus('intrinsic-apy', `v3:${chainId}`, `failed:${msg}`,
+          `v3 intrinsic APY failed for chain ${chainId}: ${msg}; falling back to local sources`)
+        return undefined
+      })
+    if (chainSources.length === 0) return v3Result ?? {}
+
+    const v3Addresses = new Set(Object.keys(v3Result ?? {}))
+    const fallbackSources = v3Result
+      ? chainSources.filter(s => !v3Addresses.has(normalize(s.address)))
+      : chainSources
+    if (fallbackSources.length === 0) {
+      mergedCache.set(String(chainId), v3Result ?? {})
+      return v3Result ?? {}
+    }
 
     const byProvider = new Map<IntrinsicApySourceConfig['provider'], IntrinsicApySourceConfig[]>()
-    for (const s of chainSources) {
+    for (const s of fallbackSources) {
       const existing = byProvider.get(s.provider) ?? []
       byProvider.set(s.provider, [...existing, s])
     }
@@ -511,7 +594,10 @@ const orchestrate = (chainId: number): Promise<Record<string, IntrinsicApyInfo>>
     // `merged` uses a null-prototype bag so nothing we write — even the
     // unlikely `token_address: "__proto__"` from a compromised upstream —
     // can mutate Object.prototype.
-    const merged: Record<string, IntrinsicApyInfo> = Object.create(null) as Record<string, IntrinsicApyInfo>
+    const merged: Record<string, IntrinsicApyInfo> = Object.assign(
+      Object.create(null) as Record<string, IntrinsicApyInfo>,
+      v3Result ?? {},
+    )
     settled.forEach((r, i) => {
       const [provider] = providerEntries[i]
       if (r.status !== 'fulfilled') {
