@@ -3,7 +3,7 @@ import { getAddress } from 'viem'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { type AnyBorrowVaultPair, type Vault, getVaultUtilization, isCyclicalNoteVault } from '~/entities/vault'
-import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
+import { getUtilisationWarning, getBorrowCapWarning, getCollateralSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
@@ -164,6 +164,7 @@ const maxLTV = computed(() => formatNumber(nanoToValue(pair.borrowLTV, 2), 2))
 const utilization = computed(() => getVaultUtilization(pair.borrow))
 const utilisationWarning = computed(() => getUtilisationWarning(pair.borrow, 'borrow'))
 const borrowCapInfo = computed(() => getBorrowCapWarning(pair.borrow))
+const supplyCapInfo = computed(() => getCollateralSupplyCapWarning(pair.collateral))
 
 const liquidityDisplay = ref('-')
 
@@ -418,7 +419,7 @@ const linkPath = computed(() => ({
         <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
           Available liquidity
           <VaultWarningIcon
-            :warning="borrowCapInfo"
+            :warning="[borrowCapInfo, supplyCapInfo]"
             tooltip-placement="top-start"
           />
         </div>
