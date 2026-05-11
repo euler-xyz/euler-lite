@@ -46,7 +46,8 @@ import {
   applyVaultOverrides,
 } from '~/utils/eulerLabelsUtils'
 import { evcBatchCall, buildBatchItem } from '~/utils/multicall'
-import { encodeFunctionData, decodeFunctionResult, parseAbi, type Hex } from 'viem'
+import { encodeFunctionData, decodeFunctionResult, type Hex } from 'viem'
+import { erc4626AssetAbi } from '~/abis/erc4626'
 
 const loadOracleAdapter = async (chainId: number, oracleAddress: string) => {
   const checksummed = getAddress(oracleAddress)
@@ -361,7 +362,10 @@ export const useEulerLabels = () => {
   }
 }
 
-const ERC4626_ASSET_ABI = parseAbi(['function asset() view returns (address)'])
+// Matches the chunk size used by `batchLensCalls` so per-call gas in the EVC
+// batchSimulation stays well within block limits even on chains with many
+// vaults.
+const WRAP_PAIR_PROBE_BATCH_SIZE = 25
 
 // Probes every unique vault asset for an ERC-4626 `asset()` underlying. We
 // intentionally do not filter by "asset matches a restrict rule" — restricting
@@ -399,23 +403,34 @@ const probeWrapPairs = async (startChainId: number) => {
     if (candidates.length === 0) return
 
     const evcAddress = config.addresses.coreAddrs.evc
-    const rpcUrl = import.meta.server
-      ? `${useRequestURL().origin}/api/rpc/${startChainId}`
-      : `/api/rpc/${startChainId}`
-    const callData = encodeFunctionData({ abi: ERC4626_ASSET_ABI, functionName: 'asset' })
-    const results = await evcBatchCall(evcAddress, candidates.map(addr => buildBatchItem(addr, callData)), rpcUrl)
-    if (loadState.chainId !== startChainId) return // chain switched during RPC
+    const { rpcUrl } = useRpcClient()
+    const callData = encodeFunctionData({ abi: erc4626AssetAbi, functionName: 'asset' })
 
-    for (let i = 0; i < results.length; i++) {
-      const res = results[i]
-      if (!res.success || !res.result || res.result === '0x') continue
+    for (let offset = 0; offset < candidates.length; offset += WRAP_PAIR_PROBE_BATCH_SIZE) {
+      const chunk = candidates.slice(offset, offset + WRAP_PAIR_PROBE_BATCH_SIZE)
+      let chunkResults
       try {
-        const decoded = decodeFunctionResult({ abi: ERC4626_ASSET_ABI, functionName: 'asset', data: res.result as Hex }) as string
-        const underlying = decoded.toLowerCase()
-        if (underlying === '0x0000000000000000000000000000000000000000') continue
-        wrapPairs[candidates[i].toLowerCase()] = underlying
+        chunkResults = await evcBatchCall(evcAddress, chunk.map(addr => buildBatchItem(addr, callData)), rpcUrl.value)
       }
-      catch { /* non-conforming asset() — skip */ }
+      catch (err) {
+        // Transport-level failure on this chunk — log and stop; the next
+        // labels reload (~5 min) will retry the whole probe.
+        logWarn('labels/wrap-pairs', err)
+        return
+      }
+      if (loadState.chainId !== startChainId) return // chain switched mid-chunks
+
+      for (let i = 0; i < chunkResults.length; i++) {
+        const res = chunkResults[i]
+        if (!res.success || !res.result || res.result === '0x') continue
+        try {
+          const decoded = decodeFunctionResult({ abi: erc4626AssetAbi, functionName: 'asset', data: res.result as Hex }) as string
+          const underlying = decoded.toLowerCase()
+          if (underlying === '0x0000000000000000000000000000000000000000') continue
+          wrapPairs[chunk[i].toLowerCase()] = underlying
+        }
+        catch { /* non-conforming asset() — skip */ }
+      }
     }
   }
   catch (e) {
