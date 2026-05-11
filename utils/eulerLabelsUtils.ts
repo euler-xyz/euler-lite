@@ -70,12 +70,14 @@ export const normalizeProducts = (data: Record<string, EulerLabelProduct>): { pr
   Object.entries(data).forEach(([key, product]) => {
     const normalizedVaults = product.vaults.map(normalizeAddress)
     const normalizedDeprecated = (product.deprecatedVaults || []).map(normalizeAddress)
+    const normalizedRecentlyAdded = (product.recentlyAddedVaults || []).map(normalizeAddress)
     const fallbackReason = (product as { deprecateReason?: string }).deprecateReason
     const vaultOverrides = extractVaultOverrides(product as unknown as Record<string, unknown>)
     normalized[key] = {
       ...product,
       vaults: normalizedVaults,
       deprecatedVaults: normalizedDeprecated,
+      recentlyAddedVaults: normalizedRecentlyAdded,
       deprecationReason: product.deprecationReason || fallbackReason,
       vaultOverrides,
     }
