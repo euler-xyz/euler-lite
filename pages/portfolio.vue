@@ -27,6 +27,7 @@ const { isLoaded: isBalancesLoaded, updateBalances } = useWallets()
 const { eulerLensAddresses } = useEulerAddresses()
 const { portfolioRefreshCounter } = usePortfolioRefresh()
 const { isSpyMode, spyAddress } = useSpyMode()
+const showAllLabelEntries = useShowAllLabelEntries()
 
 const interval: Ref<NodeJS.Timeout | null> = ref(null)
 
@@ -64,6 +65,33 @@ const tabs = computed(() => [
   },
 ])
 
+const portfolioNetApyDisplay = computed(() =>
+  Number.isFinite(portfolioNetApy.value) ? `${formatNumber(portfolioNetApy.value)}%` : '-',
+)
+const portfolioRoeDisplay = computed(() =>
+  Number.isFinite(portfolioRoe.value) ? `${formatNumber(portfolioRoe.value)}%` : '-',
+)
+const totalSuppliedDisplay = computed(() => {
+  const { total, hasMissingPrices } = totalSuppliedValueInfo.value
+  if (total === 0 && hasMissingPrices) return '—'
+  return formatCompactUsdValue(total)
+})
+const totalBorrowedDisplay = computed(() => {
+  const { total, hasMissingPrices } = totalBorrowedValueInfo.value
+  if (total === 0 && hasMissingPrices) return '—'
+  return formatCompactUsdValue(total)
+})
+const netAssetValueInfo = computed(() => {
+  const total = totalSuppliedValueInfo.value.total - totalBorrowedValueInfo.value.total
+  const hasMissingPrices = totalSuppliedValueInfo.value.hasMissingPrices || totalBorrowedValueInfo.value.hasMissingPrices
+  return { total, hasMissingPrices }
+})
+const netAssetValueDisplay = computed(() => {
+  const { total, hasMissingPrices } = netAssetValueInfo.value
+  if (total === 0 && hasMissingPrices) return '—'
+  return formatCompactUsdValue(total)
+})
+
 const updatePositions = async () => {
   const targetAddress = isSpyMode.value ? spyAddress.value : address.value
   if (!targetAddress) return
@@ -86,6 +114,9 @@ onDeactivated(() => {
 watch(portfolioRefreshCounter, () => {
   updatePositions()
 })
+watch(showAllLabelEntries, (showAll) => {
+  isShowAllPositions.value = showAll
+}, { immediate: true })
 </script>
 
 <template>
@@ -130,8 +161,12 @@ watch(portfolioRefreshCounter, () => {
             <div
               class="text-h5"
               :class="[portfolioNetApy >= 0 ? 'text-accent-600' : 'text-error-500']"
+              data-id="data-point"
+              :data-key="spyAddress || address"
+              data-field="portfolio-net-apy"
+              :data-value="Number.isFinite(portfolioNetApy) ? portfolioNetApy : '-'"
             >
-              {{ Number.isFinite(portfolioNetApy) ? `${formatNumber(portfolioNetApy)}%` : '-' }}
+              {{ portfolioNetApyDisplay }}
             </div>
           </BaseLoadableContent>
         </div>
@@ -149,8 +184,12 @@ watch(portfolioRefreshCounter, () => {
             <div
               class="text-h5"
               :class="[portfolioRoe >= 0 ? 'text-accent-600' : 'text-error-500']"
+              data-id="data-point"
+              :data-key="spyAddress || address"
+              data-field="portfolio-roe"
+              :data-value="Number.isFinite(portfolioRoe) ? portfolioRoe : '-'"
             >
-              {{ Number.isFinite(portfolioRoe) ? `${formatNumber(portfolioRoe)}%` : '-' }}
+              {{ portfolioRoeDisplay }}
             </div>
           </BaseLoadableContent>
         </div>
@@ -171,12 +210,14 @@ watch(portfolioRefreshCounter, () => {
             />
           </div>
           <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
-            <div class="text-h5 text-content-primary">
-              {{ (() => {
-                const { total, hasMissingPrices } = totalSuppliedValueInfo
-                if (total === 0 && hasMissingPrices) return '—'
-                return formatCompactUsdValue(total)
-              })() }}
+            <div
+              class="text-h5 text-content-primary"
+              data-id="data-point"
+              :data-key="spyAddress || address"
+              data-field="portfolio-total-supplied"
+              :data-value="totalSuppliedValueInfo.hasMissingPrices ? totalSuppliedDisplay : totalSuppliedValueInfo.total"
+            >
+              {{ totalSuppliedDisplay }}
             </div>
           </BaseLoadableContent>
         </div>
@@ -192,12 +233,14 @@ watch(portfolioRefreshCounter, () => {
             />
           </div>
           <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
-            <div class="text-h5 text-content-primary">
-              {{ (() => {
-                const { total, hasMissingPrices } = totalBorrowedValueInfo
-                if (total === 0 && hasMissingPrices) return '—'
-                return formatCompactUsdValue(total)
-              })() }}
+            <div
+              class="text-h5 text-content-primary"
+              data-id="data-point"
+              :data-key="spyAddress || address"
+              data-field="portfolio-total-borrowed"
+              :data-value="totalBorrowedValueInfo.hasMissingPrices ? totalBorrowedDisplay : totalBorrowedValueInfo.total"
+            >
+              {{ totalBorrowedDisplay }}
             </div>
           </BaseLoadableContent>
         </div>
@@ -213,13 +256,14 @@ watch(portfolioRefreshCounter, () => {
             />
           </div>
           <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
-            <div class="text-h5 text-content-primary">
-              {{ (() => {
-                const netValue = totalSuppliedValueInfo.total - totalBorrowedValueInfo.total
-                const hasMissing = totalSuppliedValueInfo.hasMissingPrices || totalBorrowedValueInfo.hasMissingPrices
-                if (netValue === 0 && hasMissing) return '—'
-                return formatCompactUsdValue(netValue)
-              })() }}
+            <div
+              class="text-h5 text-content-primary"
+              data-id="data-point"
+              :data-key="spyAddress || address"
+              data-field="portfolio-net-asset-value"
+              :data-value="netAssetValueInfo.hasMissingPrices ? netAssetValueDisplay : netAssetValueInfo.total"
+            >
+              {{ netAssetValueDisplay }}
             </div>
           </BaseLoadableContent>
         </div>
