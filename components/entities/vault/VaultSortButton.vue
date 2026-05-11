@@ -4,8 +4,11 @@ import { VaultSortTypeModal } from '#components'
 
 const model = defineModel<string>({ required: true })
 const dir = defineModel<'desc' | 'asc'>('dir', { default: 'desc' })
+
+type SortOption = { label: string, icon?: string }
+
 const props = defineProps<{
-  options: { label: string, icon?: string }[]
+  options: SortOption[]
   placeholder?: string
   title?: string
   disableDir?: boolean

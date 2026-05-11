@@ -230,7 +230,7 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
           <div class="flex-1 min-w-0">
             <template v-if="bestRoe.value > 0">
               <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-                Best max ROE
+                Max ROE
                 <SvgIcon
                   class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                   name="info-circle"
@@ -364,7 +364,7 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
           class="flex w-full justify-between"
         >
           <div class="text-content-tertiary text-p3 flex items-center gap-4 whitespace-nowrap">
-            Best max ROE
+            Max ROE
             <SvgIcon
               class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
               name="info-circle"

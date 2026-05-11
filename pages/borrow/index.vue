@@ -85,12 +85,12 @@ const selectedCollateral = ref<string[]>([])
 const selectedDebt = ref<string[]>([])
 const selectedMarkets = ref<string[]>([])
 const selectedRiskManagers = ref<string[]>([])
-const sortBy = ref<string>('Recommended')
+const sortBy = ref<string>('Active')
 const sortDir = ref<'desc' | 'asc'>('desc')
 
 useUrlQuerySync([
   { ref: searchQuery, default: '', queryKey: 'search' },
-  { ref: sortBy, default: 'Recommended', queryKey: 'sort' },
+  { ref: sortBy, default: 'Active', queryKey: 'sort' },
   { ref: sortDir, default: 'desc', queryKey: 'dir' },
   { ref: selectedCollateral, default: [], queryKey: 'collateral' },
   { ref: selectedDebt, default: [], queryKey: 'debt' },
@@ -99,7 +99,7 @@ useUrlQuerySync([
 ])
 
 watch(sortBy, (newSortBy) => {
-  if (newSortBy === 'Recommended') {
+  if (newSortBy === 'Active') {
     sortDir.value = 'desc'
   }
 })
@@ -329,7 +329,7 @@ const applyDeprecatedPairSort = (sorted: AnyBorrowVaultPair[]): AnyBorrowVaultPa
 const sortedBorrowList = computed(() => {
   let sorted: AnyBorrowVaultPair[]
   switch (sortBy.value) {
-    case 'Recommended': {
+    case 'Active': {
       const list = [...filteredBorrowList.value]
 
       const scores = list.map((pair) => {
@@ -354,7 +354,7 @@ const sortedBorrowList = computed(() => {
         return b.compositeScore - a.compositeScore
       })
 
-      // Recommended sort ignores direction toggle
+      // Active sort ignores direction toggle
       return applyDeprecatedPairSort(applyFeaturedPairSort(scored.map(s => s.pair)))
     }
     case 'Liquidity':
@@ -427,7 +427,7 @@ const sortedBorrowList = computed(() => {
           v-model:dir="sortDir"
           class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
           :options="[
-            { label: 'Recommended', icon: 'sparks' },
+            { label: 'Active', icon: 'sparks' },
             { label: 'Liquidity', icon: 'wallet' },
             { label: 'Total Borrowed', icon: 'borrow-outline' },
             { label: 'Utilization', icon: 'pulse' },
@@ -436,7 +436,7 @@ const sortedBorrowList = computed(() => {
             { label: 'Net APY', icon: 'percent' },
             { label: 'Max ROE', icon: 'percent' },
           ]"
-          :disable-dir="sortBy === 'Recommended'"
+          :disable-dir="sortBy === 'Active'"
           title="Sorting type"
         />
         <UiSelect
