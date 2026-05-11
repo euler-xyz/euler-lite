@@ -411,7 +411,10 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   })
 
   const isSwapRestricted = computed(() =>
-    options.needsSwap.value && isVaultRestrictedByCountry(collateralVault.value?.address || ''),
+    options.needsSwap.value && isVaultRestrictedByCountry(
+      collateralVault.value?.address || '',
+      { counterpart: options.effectiveAsset.value },
+    ),
   )
 
   // Asset-level geo checks for swap flows. The user-selected swap input (pay-with)

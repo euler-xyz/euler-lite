@@ -163,7 +163,10 @@ const { guardWithPriceImpact: guardWithWalletSwapPriceImpact } = usePriceImpactG
 })
 
 const isWalletSwapRestricted = computed(() =>
-  walletSwap.needsSwap.value && isVaultRestrictedByCountry(borrowVault.value?.address || ''),
+  walletSwap.needsSwap.value && isVaultRestrictedByCountry(
+    borrowVault.value?.address || '',
+    { counterpart: walletSwap.selectedAsset.value },
+  ),
 )
 
 // Pay-with asset can be an arbitrary ERC-20 not tied to any vault, so the

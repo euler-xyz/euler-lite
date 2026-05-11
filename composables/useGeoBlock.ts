@@ -237,7 +237,10 @@ export const isAnyVaultBlockedByCountry = (...addresses: string[]): boolean => {
   return addresses.some(addr => isVaultBlockedByCountry(addr))
 }
 
-export const isVaultRestrictedByCountry = (vaultAddress: string): boolean => {
+export const isVaultRestrictedByCountry = (
+  vaultAddress: string,
+  opts?: { counterpart?: AssetLike },
+): boolean => {
   if (country.value === undefined) return false // still loading
   if (country.value === null) return true // loaded, country unknown
 
@@ -247,8 +250,12 @@ export const isVaultRestrictedByCountry = (vaultAddress: string): boolean => {
   const earnRestricted = getEarnVaultRestricted(vaultAddress)
   if (earnRestricted?.length && isCountryInList(expandBlockList(earnRestricted))) return true
 
-  // Asset-level restriction: a vault is restricted whenever its underlying asset is restricted.
-  if (isAssetRestrictedByCountry(getVaultUnderlyingAsset(vaultAddress))) return true
+  // Asset-level restriction: a vault is restricted whenever its underlying asset is
+  // restricted. Forward `counterpart` so swap flows depositing into the vault can
+  // bypass soft-restrict when input and underlying are an ERC-4626 wrap pair —
+  // mirrors the asset-level bypass in `isAssetRestrictedByCountry`. Vault-level
+  // restrictions above (product/earn) are unconditional and not bypassable.
+  if (isAssetRestrictedByCountry(getVaultUnderlyingAsset(vaultAddress), opts)) return true
 
   return false
 }
