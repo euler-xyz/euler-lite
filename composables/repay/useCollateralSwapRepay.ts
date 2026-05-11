@@ -1,6 +1,6 @@
 import type { Ref, ComputedRef } from 'vue'
 import { useAccount } from '@wagmi/vue'
-import { zeroAddress, type Address, type Abi } from 'viem'
+import { formatUnits, zeroAddress, type Address, type Abi } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import type { DisplayStep } from '~/utils/stepDecoding'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -28,7 +28,7 @@ import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createRaceGuard } from '~/utils/race-guard'
 import { findBlockingDisabledOp, OP_REPAY, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning, getUtilisationWarning, type VaultWarning } from '~/composables/useVaultWarnings'
-import { formatNumber } from '~/utils/string-utils'
+import { formatNumber, trimTrailingZeros } from '~/utils/string-utils'
 
 interface UseCollateralSwapRepayOptions {
   position: Ref<AccountBorrowPosition | undefined>
@@ -500,12 +500,14 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       },
     }
 
-    const sourceAsset = sourceVault.value.asset
+    const source = sourceVault.value
+    const sourceAsset = source.asset
     const borrowAsset = borrowVault.value.asset
-    const displayedSellAmount = isTargetDebt
-      ? BigInt(quote.amountInMax || quote.amountIn)
-      : BigInt(quote.amountIn)
-    const transferredAssetAmount = nanoToValue(displayedSellAmount, sourceAsset.decimals)
+    const transferredShareAmount = trimTrailingZeros(formatUnits(sellAmount, Number(source.decimals)))
+    const transferredAssets = source.totalShares > 0n
+      ? (sellAmount * source.totalAssets) / source.totalShares
+      : sellAmount
+    const transferredAssetAmount = nanoToValue(transferredAssets, sourceAsset.decimals)
     const transferLabelSuffix = `(Selling max ${formatNumber(transferredAssetAmount, 8, 0)} ${sourceAsset.symbol})`
 
     const signSteps: DisplayStep[] = []
@@ -525,9 +527,10 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
         labelSuffix: transferLabelSuffix,
         isSeparateTx: false,
         assetInfo: {
-          symbol: sourceVault.value.symbol || sourceAsset.symbol,
-          address: sourceAsset.address,
-          amount: core.amount.value,
+          symbol: source.symbol || sourceAsset.symbol,
+          address: source.address,
+          iconAddress: sourceAsset.address,
+          amount: transferredShareAmount,
         },
       },
       { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: sourceAsset.symbol, address: sourceAsset.address, amount: core.amount.value }, toAssetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: core.debtAmount.value || '?' } },
@@ -535,7 +538,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     ]
 
     const walletWarningsDescription
-      = 'The CoW order operates on vault shares. The amounts shown above are in underlying assets. '
+      = 'The CoW order and Inbox transfer use vault-share amounts. Swap and repay amounts are shown in underlying assets. '
         + 'The CoW order receiver is a temporary Inbox contract — your wallet will flag this as an unfamiliar address. '
         + 'The Inbox holds funds only during settlement and returns them to your position.'
 

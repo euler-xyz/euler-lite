@@ -25,7 +25,7 @@ const getFullAmountText = (assetInfo?: DisplayStep['assetInfo']) => {
       </p>
       <template v-if="step.assetInfo">
         <AssetAvatar
-          :asset="{ address: step.assetInfo.address || '', symbol: step.assetInfo.symbol }"
+          :asset="{ address: step.assetInfo.iconAddress || step.assetInfo.address || '', symbol: step.assetInfo.symbol }"
           :icon-url="step.assetInfo.iconUrl"
           size="16"
         />
@@ -63,7 +63,8 @@ const getFullAmountText = (assetInfo?: DisplayStep['assetInfo']) => {
           &rarr;
         </p>
         <AssetAvatar
-          :asset="{ address: step.toAssetInfo.address || '', symbol: step.toAssetInfo.symbol }"
+          :asset="{ address: step.toAssetInfo.iconAddress || step.toAssetInfo.address || '', symbol: step.toAssetInfo.symbol }"
+          :icon-url="step.toAssetInfo.iconUrl"
           size="16"
         />
         <p

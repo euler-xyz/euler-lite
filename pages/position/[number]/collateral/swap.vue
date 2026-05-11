@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useAccount } from '@wagmi/vue'
-import { erc20Abi, getAddress, maxUint256, zeroAddress, type Address, type Abi } from 'viem'
+import { erc20Abi, formatUnits, getAddress, maxUint256, zeroAddress, type Address, type Abi } from 'viem'
 import type { AccountBorrowPosition } from '~/entities/account'
 import { eulerAccountLensABI } from '~/entities/euler/abis'
 import type { Vault, SecuritizeVault, VaultAsset } from '~/entities/vault'
@@ -18,7 +18,7 @@ import type { TxPlan } from '~/entities/txPlan'
 import type { DisplayStep } from '~/utils/stepDecoding'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
+import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -98,6 +98,12 @@ const isMaxSwap = computed(() => {
 
 const ceilDiv = (numerator: bigint, denominator: bigint): bigint =>
   denominator > 0n ? (numerator + denominator - 1n) / denominator : 0n
+
+const convertVaultSharesToAssets = (vault: Vault | SecuritizeVault, sharesAmount: bigint): bigint => {
+  if (sharesAmount <= 0n) return 0n
+  if (vault.totalShares <= 0n) return sharesAmount
+  return (sharesAmount * vault.totalAssets) / vault.totalShares
+}
 
 const getSwapCollateralSharesAmountIn = (assetAmount: bigint): bigint => {
   if (assetAmount <= 0n) return 0n
@@ -329,7 +335,9 @@ const submitCowSwapCollateralSwap = async () => {
 
   const fromAsset = fromVault.value.asset
   const toAsset = toVault.value.asset
-  const fromAmountStr = fromAmount.value
+  const fromShareAmount = trimTrailingZeros(formatUnits(sellAmount, Number(fromVault.value.decimals)))
+  const fromAssetAmount = trimTrailingZeros(formatUnits(convertVaultSharesToAssets(fromVault.value, sellAmount), Number(fromAsset.decimals)))
+  const toAssetAmount = trimTrailingZeros(formatUnits(convertVaultSharesToAssets(toVault.value, buyAmount), Number(toAsset.decimals)))
 
   const signSteps: DisplayStep[] = []
   let idx = 1
@@ -338,7 +346,7 @@ const submitCowSwapCollateralSwap = async () => {
     currentAllowance,
     requiredAmount: sellAmount,
     label: 'Approve for swap',
-    assetInfo: { symbol: fromVault.value.symbol || fromAsset.symbol, address: fromAsset.address, amount: fromAmountStr },
+    assetInfo: { symbol: fromVault.value.symbol || fromAsset.symbol, address: fromVault.value.address, iconAddress: fromAsset.address, amount: fromShareAmount },
     startIndex: idx,
   })
   signSteps.push(...approval.steps)
@@ -350,13 +358,13 @@ const submitCowSwapCollateralSwap = async () => {
   const wrapperSteps: DisplayStep[] = [
     { index: wIdx++, label: 'Enable collateral', labelSuffix: toAsset.symbol, isSeparateTx: false },
     ...(isMaxSwap.value ? [{ index: wIdx++, label: 'Disable source collateral', labelSuffix: fromAsset.symbol, isSeparateTx: false }] : []),
-    { index: wIdx++, label: 'Transfer to wallet', isSeparateTx: false, assetInfo: { symbol: fromVault.value.symbol || fromAsset.symbol, address: fromAsset.address, amount: fromAmountStr } },
-    { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: fromAsset.symbol, address: fromAsset.address, amount: fromAmountStr }, toAssetInfo: { symbol: toAsset.symbol, address: toAsset.address, amount: toAmount.value } },
-    { index: wIdx++, label: 'Verify min received', isSeparateTx: false, assetInfo: { symbol: toAsset.symbol, address: toAsset.address, amount: toAmount.value } },
+    { index: wIdx++, label: 'Transfer to wallet', isSeparateTx: false, assetInfo: { symbol: fromVault.value.symbol || fromAsset.symbol, address: fromVault.value.address, iconAddress: fromAsset.address, amount: fromShareAmount } },
+    { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: fromAsset.symbol, address: fromAsset.address, amount: fromAssetAmount }, toAssetInfo: { symbol: toAsset.symbol, address: toAsset.address, amount: toAssetAmount } },
+    { index: wIdx++, label: 'Verify min received', isSeparateTx: false, assetInfo: { symbol: toAsset.symbol, address: toAsset.address, amount: toAssetAmount } },
   ]
 
   const walletWarningsDescription
-    = 'The CoW order operates on vault shares. The amounts shown above are in underlying assets. '
+    = 'The CoW order and transfer steps use vault-share amounts. Swap and received amounts are shown in underlying assets. '
       + 'The CoW order receiver is your sub-account, not your main wallet — your wallet may flag this as a mismatch. '
       + 'You can verify the first 19 bytes (38 hex chars after "0x") of the receiver match your wallet address.'
 

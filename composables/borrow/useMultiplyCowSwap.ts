@@ -21,6 +21,12 @@ import { trimTrailingZeros } from '~/utils/string-utils'
 import { getNewSubAccount } from '~/entities/account'
 import type { EulerLensAddresses } from '~/composables/useEulerAddresses'
 
+const convertVaultSharesToAssets = (vault: Vault, sharesAmount: bigint): bigint => {
+  if (sharesAmount <= 0n) return 0n
+  if (vault.totalShares <= 0n) return sharesAmount
+  return (sharesAmount * vault.totalAssets) / vault.totalShares
+}
+
 interface UseMultiplyCowSwapOptions {
   multiplySelectedProvider: ComputedRef<string | null>
   multiplyEffectiveQuote: ComputedRef<SwapApiQuote | null>
@@ -182,9 +188,9 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     const collateralAsset = supplyVault.asset
     const borrowAsset = shortVault.asset
     const borrowAmountStr = trimTrailingZeros(formatUnits(sellAmount, Number(borrowAsset.decimals)))
-    const swapOutMinAmount = quote.amountOutMin
-      ? trimTrailingZeros(formatUnits(BigInt(quote.amountOutMin), Number(longVault.asset.decimals)))
-      : options.multiplyLongAmount.value
+    const swapOutMinAmount = trimTrailingZeros(
+      formatUnits(convertVaultSharesToAssets(longVault, buyAmount), Number(longVault.asset.decimals)),
+    )
 
     const signSteps: DisplayStep[] = []
     let idx = 1
