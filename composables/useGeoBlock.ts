@@ -7,8 +7,10 @@ import {
   getAssetBlock,
   getAssetRestricted,
   isVaultDeprecated,
+  patternRuleMatches,
+  isWrapPair,
 } from '~/utils/eulerLabelsUtils'
-import { assetPatternRules, type CompiledPatternRule } from '~/utils/eulerLabelsState'
+import { assetPatternRules } from '~/utils/eulerLabelsState'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { SANCTIONED_COUNTRIES, COUNTRY_GROUPS } from '~/entities/constants'
 
@@ -65,12 +67,6 @@ const toAssetFields = (asset: AssetLike): { address?: string, symbol?: string, n
   }
 }
 
-// Cap inputs passed to regex .test() to protect against catastrophic
-// backtracking if a curator ships a poorly-formed pattern and an on-chain
-// token returns an attacker-chosen long symbol/name. Real ERC-20 symbols are
-// typically <=12 chars and names <=64; 128 is well above any legitimate value.
-const MAX_REGEX_INPUT_LEN = 128
-
 // Per-country cache for asset-level block / restricted resolution. Browse
 // pages call these helpers per-row for potentially hundreds of rows on each
 // render; the pattern-rule scan is O(rules) which adds up. Cache key
@@ -95,16 +91,6 @@ const cacheSet = (cache: Map<string, boolean>, key: string, value: boolean): boo
 export const clearAssetGeoCache = (): void => {
   assetBlockCache.clear()
   assetRestrictedCache.clear()
-}
-
-// Test whether a pattern rule matches the given symbol/name (lowercase inputs).
-// OR across populated fields — any match wins.
-const patternRuleMatches = (rule: CompiledPatternRule, symbolLower: string | undefined, nameLower: string | undefined): boolean => {
-  if (rule.symbolsLower && symbolLower && rule.symbolsLower.has(symbolLower)) return true
-  if (rule.symbolRegex && symbolLower && symbolLower.length <= MAX_REGEX_INPUT_LEN && rule.symbolRegex.test(symbolLower)) return true
-  if (rule.namesLower && nameLower && rule.namesLower.has(nameLower)) return true
-  if (rule.nameRegex && nameLower && nameLower.length <= MAX_REGEX_INPUT_LEN && rule.nameRegex.test(nameLower)) return true
-  return false
 }
 
 // Resolve the underlying asset for a vault via the registry.
@@ -165,7 +151,20 @@ export const isAssetBlockedByCountry = (asset: AssetLike): boolean => {
   return cacheSet(assetBlockCache, cacheKey, false)
 }
 
-export const isAssetRestrictedByCountry = (asset: AssetLike): boolean => {
+/**
+ * Determine whether `asset` is soft-restricted in the detected country.
+ *
+ * `opts.counterpart` lets the caller pass the asset on the other side of the
+ * flow (e.g. the input asset of a swap when checking the output). When the
+ * two form an ERC-4626 wrap pair, the restriction is bypassed: wrapping or
+ * unwrapping existing exposure is a technical conversion, not a new
+ * acquisition. Hard-block (`isAssetBlockedByCountry`) is never bypassed and
+ * remains the unconditional gate.
+ */
+export const isAssetRestrictedByCountry = (
+  asset: AssetLike,
+  opts?: { counterpart?: AssetLike },
+): boolean => {
   const fields = toAssetFields(asset)
   if (!fields) return false
   if (country.value === undefined) return false // still loading
@@ -173,8 +172,32 @@ export const isAssetRestrictedByCountry = (asset: AssetLike): boolean => {
 
   const cacheKey = makeAssetCacheKey(fields)
   const cached = assetRestrictedCache.get(cacheKey)
-  if (cached !== undefined) return cached
+  const restricted = cached !== undefined ? cached : computeAssetRestricted(fields, cacheKey)
+  if (!restricted) return false
 
+  // Counterpart bypass: cached against the asset alone so the counterpart check
+  // sits outside the cache. Two cases bypass the soft-restrict — both reflect
+  // "already-held exposure, not a new acquisition":
+  // 1. Identity: candidate and counterpart are the same on-chain asset (e.g.
+  //    receiving the vault's underlying back during withdraw, no swap involved).
+  // 2. Wrap pair: candidate and counterpart form an ERC-4626 wrap pair per the
+  //    map populated by the labels loader once per reload cycle.
+  if (opts?.counterpart) {
+    const counterFields = toAssetFields(opts.counterpart)
+    if (counterFields?.address && fields.address) {
+      const aLower = fields.address.toLowerCase()
+      const cLower = counterFields.address.toLowerCase()
+      if (aLower === cLower) return false
+      if (isWrapPair(aLower, cLower)) return false
+    }
+  }
+  return true
+}
+
+const computeAssetRestricted = (
+  fields: { address?: string, symbol?: string, name?: string },
+  cacheKey: string,
+): boolean => {
   if (fields.address) {
     const assetRestricted = getAssetRestricted(fields.address)
     if (assetRestricted?.length && isCountryInList(expandBlockList(assetRestricted))) {
@@ -221,7 +244,10 @@ export const isAnyVaultBlockedByCountry = (...addresses: string[]): boolean => {
   return addresses.some(addr => isVaultBlockedByCountry(addr))
 }
 
-export const isVaultRestrictedByCountry = (vaultAddress: string): boolean => {
+export const isVaultRestrictedByCountry = (
+  vaultAddress: string,
+  opts?: { counterpart?: AssetLike },
+): boolean => {
   if (country.value === undefined) return false // still loading
   if (country.value === null) return true // loaded, country unknown
 
@@ -231,8 +257,12 @@ export const isVaultRestrictedByCountry = (vaultAddress: string): boolean => {
   const earnRestricted = getEarnVaultRestricted(vaultAddress)
   if (earnRestricted?.length && isCountryInList(expandBlockList(earnRestricted))) return true
 
-  // Asset-level restriction: a vault is restricted whenever its underlying asset is restricted.
-  if (isAssetRestrictedByCountry(getVaultUnderlyingAsset(vaultAddress))) return true
+  // Asset-level restriction: a vault is restricted whenever its underlying asset is
+  // restricted. Forward `counterpart` so swap flows depositing into the vault can
+  // bypass soft-restrict when input and underlying are an ERC-4626 wrap pair —
+  // mirrors the asset-level bypass in `isAssetRestrictedByCountry`. Vault-level
+  // restrictions above (product/earn) are unconditional and not bypassable.
+  if (isAssetRestrictedByCountry(getVaultUnderlyingAsset(vaultAddress), opts)) return true
 
   return false
 }

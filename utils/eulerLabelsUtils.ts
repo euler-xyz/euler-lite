@@ -20,7 +20,56 @@ import {
   notExplorableEarnVaults,
   assetBlocks,
   assetRestrictions,
+  wrapPairs,
+  type CompiledPatternRule,
 } from '~/utils/eulerLabelsState'
+
+// Cap inputs passed to regex .test() to protect against catastrophic
+// backtracking if a curator ships a poorly-formed pattern and an on-chain
+// token returns an attacker-chosen long symbol/name. Real ERC-20 symbols are
+// typically <=12 chars and names <=64; 128 is well above any legitimate value.
+const MAX_REGEX_INPUT_LEN = 128
+
+/**
+ * Test whether an asset-pattern rule matches the given lowercased symbol/name.
+ * OR across populated fields — any match wins.
+ *
+ * Fail-closed on overlength inputs: a regex-only rule paired with an attacker-
+ * chosen long symbol/name treats the input as a match rather than skipping the
+ * regex. The ReDoS guard still prevents `.test()` from running on those inputs,
+ * but an oversize symbol/name is treated as restricted instead of silently
+ * bypassing the rule.
+ */
+export const patternRuleMatches = (
+  rule: CompiledPatternRule,
+  symbolLower: string | undefined,
+  nameLower: string | undefined,
+): boolean => {
+  if (rule.symbolsLower && symbolLower && rule.symbolsLower.has(symbolLower)) return true
+  if (rule.symbolRegex && symbolLower) {
+    if (symbolLower.length > MAX_REGEX_INPUT_LEN) return true
+    if (rule.symbolRegex.test(symbolLower)) return true
+  }
+  if (rule.namesLower && nameLower && rule.namesLower.has(nameLower)) return true
+  if (rule.nameRegex && nameLower) {
+    if (nameLower.length > MAX_REGEX_INPUT_LEN) return true
+    if (rule.nameRegex.test(nameLower)) return true
+  }
+  return false
+}
+
+/**
+ * True when `a` and `b` are an ERC-4626 wrap pair in either direction — i.e.
+ * one's address is the other's `asset()` underlying, per the map populated by
+ * the labels loader. Consulted by `isAssetRestrictedByCountry` to bypass the
+ * soft-restrict gate when an operation is a technical wrap/unwrap.
+ */
+export const isWrapPair = (a: string | undefined, b: string | undefined): boolean => {
+  if (!a || !b) return false
+  const al = a.toLowerCase()
+  const bl = b.toLowerCase()
+  return wrapPairs[al] === bl || wrapPairs[bl] === al
+}
 
 // ── Internal helpers ─────────────────────────────────────────
 

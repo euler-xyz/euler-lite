@@ -324,7 +324,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   // --- Computed: validation ---
   const isBorrowSwapRestricted = computed(() =>
-    borrowNeedsSwap.value && isVaultRestrictedByCountry(collateralAddress),
+    borrowNeedsSwap.value && isVaultRestrictedByCountry(
+      collateralAddress,
+      { counterpart: borrowSelectedAsset.value },
+    ),
   )
 
   // Pay-with asset can be any ERC-20 not tied to any vault, so the
@@ -451,6 +454,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         currentAssetAddress: borrowSelectedAsset.value?.address || collateralVault.value?.asset.address,
         onSelect: onSelectBorrowSwapAsset,
         allowNativeCurrency: true,
+        pairedAsset: collateralVault.value?.asset,
       },
     })
   }
