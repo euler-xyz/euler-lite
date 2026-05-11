@@ -1,7 +1,10 @@
 <script setup lang="ts">
 const emits = defineEmits(['close'])
+
+type SortOption = { label: string, icon?: string }
+
 const { options, selected, onSave } = defineProps<{
-  options: { label: string, icon?: string }[]
+  options: SortOption[]
   selected?: string
   title?: string
   onSave: (selected: string) => void

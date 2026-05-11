@@ -6,13 +6,31 @@ export const nanoToValue = (src: bigint | number | string, decimals: number | bi
   return +formatUnits(BigInt(src), Number(decimals))
 }
 
+const expandScientificNotation = (src: string): string => {
+  const match = src.match(/^([+-]?)(\d+)(?:\.(\d*))?[eE]([+-]?\d+)$/)
+  if (!match) return src
+
+  const [, sign, intPart, fracPart = '', exponentRaw] = match
+  const digits = `${intPart}${fracPart}`
+  const decimalIndex = intPart.length + Number(exponentRaw)
+
+  if (decimalIndex <= 0) {
+    return `${sign}0.${'0'.repeat(-decimalIndex)}${digits}`
+  }
+  if (decimalIndex >= digits.length) {
+    return `${sign}${digits}${'0'.repeat(decimalIndex - digits.length)}`
+  }
+  return `${sign}${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`
+}
+
 export const valueToNano = (src: number | string, decimals: number | bigint = 9) => {
   if (!src) {
     return 0n
   }
-  const parts = String(src).split('.')
-  const value = parts[0] + '.' + (parts[1] || '').substring(0, Number(decimals))
-  return parseUnits(value, Number(decimals))
+  const decimalsNumber = Number(decimals)
+  const parts = expandScientificNotation(String(src).trim()).split('.')
+  const value = parts[0] + '.' + (parts[1] || '').substring(0, decimalsNumber)
+  return parseUnits(value, decimalsNumber)
 }
 
 export interface FormatTtlResult {

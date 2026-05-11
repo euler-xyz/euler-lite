@@ -160,7 +160,6 @@ export default defineNuxtConfig({
       pythHermesUrl: '',
       eulerApiUrl: '',
       swapApiUrl: '',
-      priceApiUrl: '',
       sentryDsn: '', // set via NUXT_PUBLIC_SENTRY_DSN
     },
   },

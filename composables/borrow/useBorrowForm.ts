@@ -853,7 +853,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         ? resolveWrappedNativeAddress(chainId.value!) || borrowSelectedAsset.value.address
         : borrowSelectedAsset.value.address
       const priceData = await fetchBackendPrice(priceAddr as Address)
-      borrowSwapAssetUsdPrice.value = priceData?.price
+      borrowSwapAssetUsdPrice.value = priceData?.priceUsd
     }
     else {
       borrowSwapAssetUsdPrice.value = undefined

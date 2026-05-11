@@ -16,7 +16,6 @@ interface EulerApiToken {
   symbol: string
   decimals: number
   logoURI: string
-  metadata?: { provider: string }
 }
 
 interface TokenEntry {
@@ -55,31 +54,57 @@ const mergedInFlight = createInFlightDedup<string, TokenEntry[]>()
 
 function refreshEulerApi(chainId: number): Promise<TokenEntry[]> {
   const key = String(chainId)
-  const url = process.env.EULER_API_URL || process.env.NUXT_PUBLIC_EULER_API_URL
-  if (!url) return Promise.resolve([])
+  const baseUrl = process.env.EULER_API_URL || process.env.NUXT_PUBLIC_EULER_API_URL
+  if (!baseUrl) return Promise.resolve([])
 
-  return eulerInFlight.run(key, () => fetchWithTimeout(`${url}/v1/tokens?chainId=${chainId}`)
-    .then(async (resp) => {
+  const PAGE_LIMIT = 100
+  // Hard cap on iterations: 100 pages × 100 tokens = 10k tokens. Far above any
+  // realistic chain's token count, so hitting this cap means upstream metadata
+  // is broken (e.g. meta.hasMore stuck at true with empty data).
+  const MAX_PAGES = 100
+
+  return eulerInFlight.run(key, async () => {
+    const allTokens: EulerApiToken[] = []
+    let offset = 0
+
+    for (let pageNum = 0; pageNum < MAX_PAGES; pageNum++) {
+      const resp = await fetchWithTimeout(
+        `${baseUrl}/v3/tokens?chainId=${chainId}&limit=${PAGE_LIMIT}&offset=${offset}`,
+      )
       if (!resp.ok) throw new Error(`Euler API returned ${resp.status}`)
-      const data = (await resp.json()) as EulerApiToken[]
-      const tokens: TokenEntry[] = data.map(t => ({
-        chainId: t.chainId,
-        address: t.address,
-        name: t.name,
-        symbol: t.symbol,
-        decimals: t.decimals,
-        logoURI: t.logoURI || undefined,
-      }))
-      eulerApiCache.set(key, tokens)
-      reportStatus('token-list', `euler-api:${chainId}`, 'ok')
-      return tokens
-    })
+
+      const body = await resp.json()
+      const page: EulerApiToken[] = Array.isArray(body.data) ? body.data : []
+      allTokens.push(...page)
+      offset += PAGE_LIMIT
+
+      // Stop on empty or short page: backend always returns up to PAGE_LIMIT
+      // when more data exists, so a short page is authoritatively the last one.
+      if (page.length < PAGE_LIMIT) break
+
+      const total = typeof body.meta?.total === 'number' ? body.meta.total : undefined
+      if (total != null && offset >= total) break
+      if (body.meta?.hasMore === false) break
+    }
+
+    const tokens: TokenEntry[] = allTokens.map(t => ({
+      chainId: t.chainId,
+      address: t.address,
+      name: t.name,
+      symbol: t.symbol,
+      decimals: t.decimals,
+      logoURI: t.logoURI || undefined,
+    }))
+    eulerApiCache.set(key, tokens)
+    reportStatus('token-list', `euler-api:${chainId}`, 'ok')
+    return tokens
+  })
     .catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err)
       reportStatus('token-list', `euler-api:${chainId}`, `failed:${msg}`,
         `Euler API fetch failed for chain ${chainId}: ${msg}`)
       return eulerApiCache.getStale(key) || []
-    }))
+    })
 }
 
 function fetchEulerApi(chainId: number): Promise<TokenEntry[]> {

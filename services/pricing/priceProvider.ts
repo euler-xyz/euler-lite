@@ -222,7 +222,7 @@ export const getUnitOfAccountUsdRate = async (
         vault.unitOfAccount as `0x${string}`,
       )
       if (backendPrice) {
-        const rate = backendPriceToBigInt(backendPrice.price)
+        const rate = backendPriceToBigInt(backendPrice.priceUsd)
         if (rate > 0n) return rate
       }
     }
@@ -272,7 +272,7 @@ const usesUtilsLensPricing = (vault: AnyVault | null | undefined): boolean => {
  * Convert backend price data to PriceResult format.
  */
 const backendPriceToPriceResult = (data: BackendPriceData): PriceResult | undefined => {
-  const mid = backendPriceToBigInt(data.price)
+  const mid = backendPriceToBigInt(data.priceUsd)
   if (mid <= 0n) return undefined
   return { amountOutMid: mid, amountOutAsk: mid, amountOutBid: mid }
 }
@@ -414,7 +414,7 @@ export const getCollateralUsdPrice = async (
 
   // Try backend first if configured and source is 'off-chain'
   // Use fetchBackendPrice directly with the collateral asset address
-  // (the /v1/prices endpoint returns asset prices without needing liability context)
+  // (the /v3/prices endpoint returns asset prices without needing liability context)
   if (source === 'off-chain' && isBackendConfigured()) {
     try {
       const backendPrice = await fetchBackendPrice(
@@ -521,9 +521,9 @@ export const getTokenUsdValue = async (
     return getAssetUsdValue(amount, vault, 'off-chain')
   }
   const priceData = await fetchBackendPrice(tokenAddress as `0x${string}`)
-  if (!priceData?.price) return undefined
+  if (!priceData?.priceUsd) return undefined
   const tokenAmount = nanoToValue(amount, decimals)
-  return tokenAmount * priceData.price
+  return tokenAmount * priceData.priceUsd
 }
 
 /**
