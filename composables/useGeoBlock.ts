@@ -175,13 +175,20 @@ export const isAssetRestrictedByCountry = (
   const restricted = cached !== undefined ? cached : computeAssetRestricted(fields, cacheKey)
   if (!restricted) return false
 
-  // Wrap-pair bypass: cached against the asset alone so the counterpart check
-  // sits outside the cache. The map of wrap relationships is populated by the
-  // labels loader once per labels reload cycle.
+  // Counterpart bypass: cached against the asset alone so the counterpart check
+  // sits outside the cache. Two cases bypass the soft-restrict — both reflect
+  // "already-held exposure, not a new acquisition":
+  // 1. Identity: candidate and counterpart are the same on-chain asset (e.g.
+  //    receiving the vault's underlying back during withdraw, no swap involved).
+  // 2. Wrap pair: candidate and counterpart form an ERC-4626 wrap pair per the
+  //    map populated by the labels loader once per reload cycle.
   if (opts?.counterpart) {
     const counterFields = toAssetFields(opts.counterpart)
-    if (counterFields?.address && fields.address && isWrapPair(fields.address, counterFields.address)) {
-      return false
+    if (counterFields?.address && fields.address) {
+      const aLower = fields.address.toLowerCase()
+      const cLower = counterFields.address.toLowerCase()
+      if (aLower === cLower) return false
+      if (isWrapPair(aLower, cLower)) return false
     }
   }
   return true

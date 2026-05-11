@@ -107,4 +107,20 @@ describe('isAssetRestrictedByCountry — counterpart bypass', () => {
     wrapPairs[WRAPPER.toLowerCase()] = UNDERLYING.toLowerCase()
     expect(isAssetRestrictedByCountry(WRAPPER, { counterpart: UNDERLYING })).toBe(false)
   })
+
+  it('releases when counterpart is the asset itself (identity — no swap)', () => {
+    // Receiving the same asset you already hold (e.g. plain withdraw of a
+    // vault's underlying) is not a new acquisition, identical reasoning to
+    // the wrap-pair bypass. The wrapPairs map is left empty here to ensure
+    // the release path is identity, not wrap-pair.
+    setCountry('DE')
+    assetRestrictions[WRAPPER.toLowerCase()] = ['DE']
+    expect(isAssetRestrictedByCountry(WRAPPER, { counterpart: WRAPPER })).toBe(false)
+  })
+
+  it('identity bypass is case-insensitive', () => {
+    setCountry('DE')
+    assetRestrictions[WRAPPER.toLowerCase()] = ['DE']
+    expect(isAssetRestrictedByCountry(WRAPPER.toLowerCase(), { counterpart: WRAPPER.toUpperCase() })).toBe(false)
+  })
 })
