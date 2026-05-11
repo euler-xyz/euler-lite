@@ -93,7 +93,6 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const router = useRouter()
   const route = useRoute()
   const { isConnected } = useAccount()
-  const { isSpyMode } = useSpyMode()
   const { executeTxPlan } = useEulerOperations()
   const modal = useModal()
   const { error: showError } = useToast()
@@ -453,11 +452,9 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
         }
         catch (e) {
           logWarn('swap/buildPlan', e)
+          showError('Failed to build transaction')
           plan.value = null
-          if (!isSpyMode.value) {
-            showError('Failed to build transaction')
-            return
-          }
+          return
         }
 
         if (plan.value) {

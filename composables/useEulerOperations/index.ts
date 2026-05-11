@@ -1,4 +1,5 @@
 import { useConfig, useSignTypedData, useWriteContract } from '@wagmi/vue'
+import type { Address } from 'viem'
 import type { OperationsContext } from './types'
 import { createPermit2Helpers } from './permit2'
 import { createAllowanceHelpers } from './allowance'
@@ -10,7 +11,8 @@ import { createSwapBuilders } from './swaps'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 
 export const useEulerOperations = () => {
-  const { address, chainId } = useWagmi()
+  const { address: walletAddress, chainId } = useWagmi()
+  const { isSpyMode, spyAddress } = useSpyMode()
   const { writeContractAsync } = useWriteContract()
   const { signTypedDataAsync } = useSignTypedData()
   const config = useConfig()
@@ -19,6 +21,11 @@ export const useEulerOperations = () => {
   const { rpcUrl, client: rpcClient } = useRpcClient()
   const { get: registryGet, getVault: registryGetVault } = useVaultRegistry()
   const { permit2Enabled } = usePermit2Preference()
+
+  // In spy mode, builders use the spy address as the on-behalf-of account so the
+  // review modal can render real steps. Actual transaction execution is still
+  // blocked in executeTxPlan.
+  const address = computed(() => (isSpyMode.value ? (spyAddress.value as Address | undefined) : walletAddress.value))
 
   const ctx: OperationsContext = {
     address,
