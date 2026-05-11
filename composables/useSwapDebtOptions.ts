@@ -49,7 +49,7 @@ export const useSwapDebtOptions = ({
     [rewardsVersion, intrinsicVersion],
     async (vault) => {
       const apy = computeBorrowApy(vault, withIntrinsicBorrowApy, getBorrowRewardApy, collateralVault?.value?.address)
-      return buildCollateralOption({ vault, type: 'vault', amount: 0, priceAmount: 1, apy, tagContext: 'swap-target', showBalance: false })
+      return buildCollateralOption({ vault, type: 'vault', amount: 0, priceAmount: 0, apy, tagContext: 'swap-target', showBalance: false })
     },
   )
 

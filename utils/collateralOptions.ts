@@ -1,6 +1,6 @@
 import { getVaultProductName } from '~/utils/eulerLabelsUtils'
 import { getVaultTags, type VaultTagContext } from '~/composables/useGeoBlock'
-import type { CollateralOption, Vault } from '~/entities/vault'
+import type { CollateralOption, CollateralOptionType, Vault } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 
 export function computeSupplyApy(
@@ -24,7 +24,7 @@ export function computeBorrowApy(
 
 export async function buildCollateralOption(params: {
   vault: Vault
-  type: string
+  type: CollateralOptionType
   amount: number
   priceAmount: number
   apy: number

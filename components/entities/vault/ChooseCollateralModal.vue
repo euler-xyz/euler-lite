@@ -36,9 +36,12 @@ const getOptionType = (option: CollateralOption) => {
 const getBalanceLabel = (option: CollateralOption) => {
   if (option.balanceLabel) return option.balanceLabel
   const type = getOptionType(option)
-  if (type === 'wallet') return 'Wallet'
-  if (type === 'saving') return 'Savings'
+  if (type === 'wallet') return 'Wallet balance'
+  if (type === 'saving') return 'Savings balance'
   return 'Available'
+}
+const getApyLabel = (option: CollateralOption) => {
+  return option.type === 'wallet' ? 'If supplied: APY' : apyLabel
 }
 const showBalanceMetric = (option: CollateralOption) => option.showBalance !== false
 const getFormattedAmount = (option: CollateralOption) => {
@@ -103,13 +106,13 @@ const handleClose = () => {
                 v-if="getOptionType(option) === 'wallet'"
                 class="ml-6 text-[12px] leading-[16px] py-4 px-8 rounded-8 bg-accent-600/10 text-accent-600"
               >
-                Wallet
+                Wallet balance
               </div>
               <div
                 v-else-if="getOptionType(option) === 'saving'"
                 class="ml-6 text-[12px] leading-[16px] py-4 px-8 rounded-8 bg-[#CBC0951A] text-yellow-600"
               >
-                Savings
+                Savings balance
               </div>
               <span
                 v-for="tag in (option.tags || [])"
@@ -141,7 +144,7 @@ const handleClose = () => {
             </div>
             <div class="flex flex-col items-end">
               <div class="text-content-primary mb-2">
-                {{ apyLabel }}
+                {{ getApyLabel(option) }}
               </div>
               <div class="text-h5">
                 {{ option.apy !== undefined ? `${formatNumber(option.apy)}%` : '-' }}

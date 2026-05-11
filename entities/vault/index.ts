@@ -20,6 +20,7 @@ export type {
   EarnVaultStrategyInfo,
   EarnVault,
   CollateralOption,
+  CollateralOptionType,
 } from './types'
 export { isSecuritizeBorrowPair, isEVKVault } from './types'
 
