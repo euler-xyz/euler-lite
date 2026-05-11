@@ -276,10 +276,6 @@ const linkPath = computed(() => ({
               :name="pairName"
               :is-unverified="isAnyUnverified"
             />
-            <VaultWarningIcon
-              :warning="supplyCapInfo"
-              tooltip-placement="top-start"
-            />
             <span
               v-if="isFeatured"
               class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5"
@@ -423,7 +419,7 @@ const linkPath = computed(() => ({
         <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
           Available liquidity
           <VaultWarningIcon
-            :warning="borrowCapInfo"
+            :warning="[borrowCapInfo, supplyCapInfo]"
             tooltip-placement="top-start"
           />
         </div>

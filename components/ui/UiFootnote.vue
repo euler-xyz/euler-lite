@@ -4,13 +4,20 @@ import { flip, offset, shift, useFloating, type AlignedPlacement } from '@floati
 import { useModal } from '~/components/ui/composables/useModal'
 import { UiFootnoteModal } from '#components'
 
-const { title, text, tooltipPlacement = 'top-start', customModal, icon = 'info-circle' } = defineProps<{
-  title: string
-  text: string
+const { title, text, sections, tooltipPlacement = 'top-start', customModal, icon = 'info-circle' } = defineProps<{
+  title?: string
+  text?: string
+  sections?: { title: string, text: string }[]
   tooltipPlacement?: AlignedPlacement
   customModal?: Component
   icon?: string
 }>()
+
+const resolvedSections = computed<{ title: string, text: string }[]>(() => {
+  if (sections && sections.length > 0) return sections
+  if (title !== undefined && text !== undefined) return [{ title, text }]
+  return []
+})
 
 const reference = ref(null)
 const floating = ref(null)
@@ -30,10 +37,13 @@ const canHover = typeof window !== 'undefined' && window.matchMedia('(hover: hov
 
 const onClick = () => {
   if (!canHover) {
+    const first = resolvedSections.value[0]
+    if (!first) return
     modal.open(customModal || UiFootnoteModal, {
       props: {
-        modalTitle: title,
-        text,
+        modalTitle: first.title,
+        text: first.text,
+        sections: resolvedSections.value.length > 1 ? resolvedSections.value : undefined,
       },
     })
   }
@@ -82,12 +92,21 @@ onClickOutside(reference, () => {
         @click.stop
       >
         <div class="ui-footnote__floating-content">
-          <div class="ui-footnote__floating-title">
-            {{ title }}
-          </div>
-          <div class="ui-footnote__floating-text">
-            {{ text }}
-          </div>
+          <template
+            v-for="(section, idx) in resolvedSections"
+            :key="idx"
+          >
+            <div
+              v-if="idx > 0"
+              class="ui-footnote__floating-divider"
+            />
+            <div class="ui-footnote__floating-title">
+              {{ section.title }}
+            </div>
+            <div class="ui-footnote__floating-text">
+              {{ section.text }}
+            </div>
+          </template>
         </div>
       </div>
     </Transition>
@@ -142,6 +161,12 @@ onClickOutside(reference, () => {
     word-wrap: break-word;
     overflow-wrap: break-word;
     hyphens: auto;
+  }
+
+  &__floating-divider {
+    height: 1px;
+    background-color: var(--line-subtle);
+    margin: 8px 0;
   }
 
 }
