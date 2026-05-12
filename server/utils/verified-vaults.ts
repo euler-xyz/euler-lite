@@ -101,11 +101,15 @@ async function buildVerifiedSet(chainId: number): Promise<Set<string>> {
   return result
 }
 
-export async function getVerifiedAddressSet(chainId: number): Promise<Set<string>> {
+/**
+ * Force-rebuild path used by the warm-cache plugin. Always rebuilds —
+ * bypasses the fresh-cache short-circuit so the warmer can keep the cache
+ * continuously fresh on its own schedule rather than waiting for a TTL
+ * expiry. Falls back to stale data and re-throws on a hard rebuild failure,
+ * matching the read path so a failed warm doesn't poison the cache.
+ */
+export async function refreshVerifiedAddressSet(chainId: number): Promise<Set<string>> {
   const key = String(chainId)
-  const fresh = cache.get(key)
-  if (fresh) return fresh
-
   const pending = inflight.get(chainId)
   if (pending) return pending
 
@@ -128,4 +132,10 @@ export async function getVerifiedAddressSet(chainId: number): Promise<Set<string
 
   inflight.set(chainId, task)
   return task
+}
+
+export async function getVerifiedAddressSet(chainId: number): Promise<Set<string>> {
+  const fresh = cache.get(String(chainId))
+  if (fresh) return fresh
+  return refreshVerifiedAddressSet(chainId)
 }

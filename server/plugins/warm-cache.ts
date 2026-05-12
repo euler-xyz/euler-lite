@@ -52,6 +52,8 @@ import { logger } from '~/server/utils/logger'
 import { refreshChainVaults } from '../utils/vaults-cache'
 import { refreshVaultCategories } from '../utils/vault-categories-store'
 import { refreshIntrinsicApyForChain } from '../utils/intrinsic-apy'
+import { refreshVerifiedAddressSet } from '../utils/verified-vaults'
+import { refreshChainVaultMetadata } from '../utils/vault-metadata'
 import {
   type FuulProtocol,
   type MerklOpportunityType,
@@ -145,6 +147,20 @@ const warmVaultCategories = (chainId: number) =>
 const warmChainVaults = (chainId: number) =>
   reportWarm(`vaults chain=${chainId}`, refreshChainVaults(chainId))
 
+// Public /api/public/is-known reads from this. Force-rebuilds the verified
+// set every cycle (5 min); without this warm, the bridge cache drifts on its
+// own 5-min clock and propagation lag can stretch to ~10 min in the worst
+// case. Its internal $fetches to /api/labels/* and call to refreshChainVaults
+// collapse onto the parallel warms via in-flight dedup.
+const warmVerifiedAddresses = (chainId: number) =>
+  reportWarm(`verified-vaults chain=${chainId}`, refreshVerifiedAddressSet(chainId))
+
+// Public /api/public/metadata reads from this. Same rationale as
+// verified-vaults — keeps the bridge cache continuously fresh so propagation
+// of label / on-chain changes stays at ~5 min.
+const warmVaultMetadata = (chainId: number) =>
+  reportWarm(`vault-metadata chain=${chainId}`, refreshChainVaultMetadata(chainId))
+
 const warmChainTasks = (chainId: number): Promise<unknown>[] => [
   ...warmLabels(chainId),
   warmTokenList(chainId),
@@ -152,6 +168,8 @@ const warmChainTasks = (chainId: number): Promise<unknown>[] => [
   warmVaultCategories(chainId),
   ...warmRewardCampaigns(chainId),
   warmChainVaults(chainId),
+  warmVerifiedAddresses(chainId),
+  warmVaultMetadata(chainId),
 ]
 
 // --- Orchestration ---

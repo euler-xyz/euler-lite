@@ -19,7 +19,8 @@ export interface VerificationLabels {
   /**
    * Resolves the entity keys declared for the product that owns this vault.
    * - `undefined`: vault is not in any product
-   * - `[]`: product exists but declares no entities (treated as match-all)
+   * - `[]`: product exists but declares no entities — treated as unverified
+   *   (a product without a declared entity has no on-chain authority to claim)
    * - `[...]`: product declares these entity keys
    */
   getDeclaredEntityKeys: (vaultAddress: string) => string[] | undefined
@@ -50,8 +51,10 @@ export const isVaultGovernorVerified = (
   if (!vault.verified) return false
 
   const declaredKeys = labels.getDeclaredEntityKeys(vault.address)
-  if (declaredKeys === undefined) return false
-  if (declaredKeys.length === 0) return true
+  // No product, or a product with no declared entity, both fail verification.
+  // A product without a declared entity has no on-chain authority to claim
+  // the vault — treat it the same as a vault outside any product.
+  if (!declaredKeys || declaredKeys.length === 0) return false
 
   if (!findDeclaredEntityFor(getAddress(vault.governorAdmin), declaredKeys, labels)) {
     return false
@@ -76,11 +79,13 @@ export const isEarnVaultOwnerVerified = (
   if (!earnVault.verified) return false
 
   const declaredKeys = labels.getDeclaredEntityKeys(earnVault.address)
-  // Earn vaults without a product entry are trusted on the strength of being
-  // in earn-vaults.json alone — earn curation lives in that file, not in
+  // Earn vaults outside any product are trusted on the strength of being in
+  // earn-vaults.json alone — earn curation lives in that file, not in
   // products.json. Differs from EVK behaviour.
   if (declaredKeys === undefined) return true
-  if (declaredKeys.length === 0) return true
+  // But if the earn vault IS in a product whose entity is empty/undefined,
+  // the product has no on-chain authority to claim it — treat as unverified.
+  if (declaredKeys.length === 0) return false
 
   return findDeclaredEntityFor(getAddress(earnVault.owner), declaredKeys, labels) !== null
 }

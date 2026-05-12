@@ -1,4 +1,4 @@
-import { createError, getQuery } from 'h3'
+import { createError, getQuery, setResponseHeader } from 'h3'
 import { getAddress, isAddress } from 'viem'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { resolveRpcUrl } from '~/server/utils/rpc'
@@ -65,6 +65,12 @@ export default defineEventHandler(async (event) => {
     logger.warn({ ctx: 'public-metadata', chainId, err }, 'metadata lookup failed')
     throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
   }
+
+  // Matches other public endpoints (/api/vaults, /api/labels/*). CDN /
+  // browser can absorb short-burst traffic; the warm-cache plugin keeps
+  // the upstream metadata map continuously fresh so a stale CDN entry is
+  // never more than ~30s behind the server cache.
+  setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
 
   const matchesProduct = (m: VaultMetadata): boolean =>
     productId === null || m.productId === productId

@@ -495,11 +495,15 @@ async function buildChainMetadata(chainId: number): Promise<Map<string, VaultMet
   return result
 }
 
-export async function getChainVaultMetadata(chainId: number): Promise<Map<string, VaultMetadata>> {
+/**
+ * Force-rebuild path used by the warm-cache plugin. Always rebuilds —
+ * bypasses the fresh-cache short-circuit so the warmer can keep the cache
+ * continuously fresh on its own schedule rather than waiting for a TTL
+ * expiry. Falls back to stale data and re-throws on a hard rebuild failure,
+ * matching the read path so a failed warm doesn't poison the cache.
+ */
+export async function refreshChainVaultMetadata(chainId: number): Promise<Map<string, VaultMetadata>> {
   const key = String(chainId)
-  const fresh = cache.get(key)
-  if (fresh) return fresh
-
   const pending = inflight.get(chainId)
   if (pending) return pending
 
@@ -522,4 +526,10 @@ export async function getChainVaultMetadata(chainId: number): Promise<Map<string
 
   inflight.set(chainId, task)
   return task
+}
+
+export async function getChainVaultMetadata(chainId: number): Promise<Map<string, VaultMetadata>> {
+  const fresh = cache.get(String(chainId))
+  if (fresh) return fresh
+  return refreshChainVaultMetadata(chainId)
 }

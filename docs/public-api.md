@@ -18,9 +18,10 @@ A vault is **verified** when ALL of the following hold:
   - `products.json` labels under any product's `vaults[]` or `deprecatedVaults[]` (covers both EVK and Securitize vaults).
   - `earn-vaults.json` labels (active or deprecated entry).
   - The on-chain set returned by `escrowedCollateralPerspective.verifiedArray()` for the chain (escrow vaults are trusted unconditionally — no governor check applies).
-- AND its on-chain governor matches the product's declared entity:
+- AND the product declares at least one `entity` key, AND the vault's on-chain governor matches one of those entities:
   - For EVK / Securitize vaults: `vault.governorAdmin` must be in the `addresses` map of one of the product's declared entities. If the vault's oracle router has a non-zero governor, that governor must also match.
   - For Earn vaults that ALSO appear under a product: `vault.owner` must match a declared entity address. Earn vaults that only appear in `earn-vaults.json` (no product) are trusted on the strength of the labels alone.
+  - A product whose `entity` field is empty or omitted is treated as having no on-chain authority to claim the vault — every vault under such a product is unverified, regardless of its `governorAdmin`.
 
 The same governor check applies to active and deprecated vaults — deprecation does not change the verification rule. The `notExplorable` flag does **not** change verification either: vaults hidden from Explore are still verified.
 
@@ -75,9 +76,13 @@ Addresses are validated via viem's `isAddress` (strict EIP-55 checks) and normal
 | `429`  | Rate limit exceeded for this client IP.                                  |
 | `502`  | All upstream sources (labels endpoint, chains config, RPC proxy) failed and no stale cache is available. |
 
-### Caching
+### Caching and propagation
 
-The server maintains a per-chain in-memory verified set with a 5-minute TTL and stale-while-revalidate fallback. Back-to-back lookups for the same chain are served from memory. Upstream refreshes happen at most once every 5 minutes per chain.
+- **Response header**: `Cache-Control: public, max-age=30, stale-while-revalidate=30`. CDNs and browsers can cache for 30 s and serve stale for another 30 s while revalidating.
+- **Server-side cache**: per-chain in-memory verified set with a 5-minute TTL. A warm-cache process rebuilds every cache entry every 5 minutes on its own schedule (force-refresh, ignores fresh entries), so the cache is always continuously fresh in steady state.
+- **In-flight dedup**: concurrent cold requests for the same chain collapse onto a single upstream pass.
+- **Propagation**: on-chain governor changes and `products.json` / `entities.json` edits typically propagate within **~5 minutes**. The labels / vault snapshot and the verified-set cache are warmed on the same 5-minute cycle, so a label edit picked up by the labels cache flows into the next bridge rebuild within the same cycle.
+- **Stale-while-revalidate fallback**: during prolonged upstream outages (labels endpoint, vault snapshot, or RPC failing), the bridge serves the last-known-good verified set for up to 30 minutes past TTL before returning a hard error. The hard 30-minute ceiling bounds how far stale data can drift.
 
 ### Rate limit
 
@@ -180,17 +185,21 @@ interface VaultMetadata {
 
 Label-derived display fields (`name`, `description`, `portfolioNotice`, `deprecationReason`, `productId`) are sourced from labels regardless of verification state — they are authoritative content set by the team that listed the vault. Per-vault `vaultOverrides` take precedence over product- or earn-entry-level values. The on-chain ERC-20 `name` is only a fallback when no label name is defined.
 
-`entities` is the only field gated by the `is-known` verdict. It identifies every declared product entity whose `addresses` contain the vault's `governorAdmin` (or `owner` for Earn). A product can declare multiple entity keys, and more than one of those can match — the array preserves the declared-key order. The array is empty when the vault would not be `is-known: true`:
+`entities` identifies every declared product entity whose `addresses` contain the vault's `governorAdmin` (or `owner` for Earn). A product can declare multiple entity keys, and more than one of those can match — the array preserves the declared-key order. Resolution depends on the vault's verification state:
 
 - **Verified non-escrow vault** (governor match against at least one declared entity): `entities` contains every matching entity from `entities.json`, with `logo` composed as a full URL. Usually 1 entry, but can be N.
-- **Unverified vault** (in labels but governor mismatch, active or deprecated): `entities` is `[]`. Other label fields (`name`, `description`, `portfolioNotice`, `deprecationReason`, `productId`, `deprecated`) are still populated. `asset` and `type` are also populated.
+- **Unverified vault** (in labels but governor mismatch, or in a product that declares no entity): `entities` is `[]`. Other label fields (`name`, `description`, `portfolioNotice`, `deprecationReason`, `productId`, `deprecated`) are still populated. `asset` and `type` are also populated.
 - **Escrow vault** (`escrowedCollateralPerspective.verifiedArray()`): `name` is the constant `"Escrowed collateral"`; all label-derived fields and `productId` are `null`; `entities` is `[]`; `deprecated: false`; `asset` comes from the snapshot when the address is in the referenced subset, otherwise `null`.
 
 The `deprecated` boolean distinguishes deprecated-but-otherwise-fine vaults from genuinely unverified ones. The same governor check applies to deprecated and active vaults — deprecation only sets the `deprecated` flag and (typically) populates `deprecationReason`.
 
-Earn vaults that are in `earn-vaults.json` but not in any product entry resolve with `description` / `portfolioNotice` / `deprecationReason` from the earn entry; `productId` is `null` and `entities` is `[]` because there is no declared product.
+Earn vaults that are in `earn-vaults.json` but not in any product entry resolve with `description` / `portfolioNotice` / `deprecationReason` from the earn entry; `productId` is `null` and `entities` is `[]` because there is no declared product. Earn vaults that ARE in a product follow the same rule as EVK / Securitize (`owner` must match a declared entity; a product that declares no entity makes the vault unverified).
 
-When a product declares multiple entities and more than one matches the on-chain governor (`governorAdmin` for EVK/Securitize, `owner` for Earn), the first match in declared-key order wins.
+#### `entities` is not equivalent to `is-known`
+
+`entities` answers "who manages this vault"; it is independent of `is-known`. An empty `entities` array does **not** mean the vault is unknown — escrow vaults, earn vaults listed without a product, and (legacy data only) products with no declared entity all return `entities: []` while still being `is-known: true`. Use the non-`null` / `null` distinction on the `/metadata` response, or the `/is-known` endpoint, to determine recognition. The two endpoints agree on recognition by construction:
+
+> `/api/public/is-known` returns `true` ⇔ `/api/public/metadata` returns a non-`null` entry for that address.
 
 ### Errors
 
@@ -200,9 +209,16 @@ When a product declares multiple entities and more than one matches the on-chain
 | `429`  | Rate limit exceeded for this client IP.                                  |
 | `502`  | Required upstream sources (`products.json`, `entities.json`, vault snapshot) failed and no stale cache is available. |
 
-### Caching
+### Caching and propagation
 
-Per-chain in-memory map with a 5-minute TTL, in-flight de-dup, and stale-while-revalidate fallback. The underlying vault snapshot is warm-refreshed every 5 minutes by the app's warm-cache plugin, so steady-state requests are served from memory.
+Same shape as [`/is-known` caching](#caching-and-propagation):
+
+- **Response header**: `Cache-Control: public, max-age=30, stale-while-revalidate=30`.
+- **Server-side cache**: per-chain in-memory metadata map, 5-minute TTL.
+- **Warm cycle**: the warm-cache plugin force-rebuilds the metadata map every 5 minutes on its own schedule, so a fresh entry is always available.
+- **In-flight dedup**: concurrent cold requests for the same chain collapse onto a single upstream pass.
+- **Propagation**: on-chain changes and label edits propagate within **~5 minutes**.
+- **Stale-while-revalidate fallback**: serves last-known-good data for up to 30 minutes past TTL during prolonged upstream outages.
 
 ### Rate limit
 

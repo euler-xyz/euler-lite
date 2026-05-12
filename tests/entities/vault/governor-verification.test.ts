@@ -107,12 +107,12 @@ describe('isVaultGovernorVerified', () => {
     expect(isVaultGovernorVerified(vault, labels)).toBe(false)
   })
 
-  it('returns true for product that declares no entities (match-all)', () => {
+  it('returns false when product declares no entities (no authority to claim)', () => {
     const vault = makeVault()
     const labels = buildLabels({
       declaredKeys: { [VAULT_ADDR]: [] },
     })
-    expect(isVaultGovernorVerified(vault, labels)).toBe(true)
+    expect(isVaultGovernorVerified(vault, labels)).toBe(false)
   })
 
   it('returns true when governor matches one of the declared entities', () => {
@@ -204,12 +204,12 @@ describe('isEarnVaultOwnerVerified', () => {
     expect(isEarnVaultOwnerVerified(earn, labels)).toBe(true)
   })
 
-  it('treats empty declared entities as match-all', () => {
-    const earn = makeEarn({ owner: OTHER_GOV })
+  it('returns false when earn vault is in a product whose entity is empty (no authority to claim)', () => {
+    const earn = makeEarn({ owner: GOV_A })
     const labels = buildLabels({
       declaredKeys: { [VAULT_ADDR]: [] },
     })
-    expect(isEarnVaultOwnerVerified(earn, labels)).toBe(true)
+    expect(isEarnVaultOwnerVerified(earn, labels)).toBe(false)
   })
 
   it('requires owner to match a declared entity', () => {
@@ -261,7 +261,7 @@ describe('resolveGoverningEntityKeys', () => {
     expect(resolveGoverningEntityKeys(vault, buildLabels())).toEqual([])
   })
 
-  it('returns [] when product declares no entities (match-all has no identity)', () => {
+  it('returns [] when product declares no entities (no authority, no identity)', () => {
     const vault = makeVault()
     const labels = buildLabels({ declaredKeys: { [VAULT_ADDR]: [] } })
     expect(resolveGoverningEntityKeys(vault, labels)).toEqual([])
