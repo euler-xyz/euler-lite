@@ -18,6 +18,8 @@ const {
   supplyCampaigns,
   borrowCampaigns,
   loopingCampaigns,
+  inline = false,
+  close = true,
 } = defineProps<{
   roe: number
   multiplier: number
@@ -31,6 +33,8 @@ const {
   supplyCampaigns?: RewardCampaign[]
   borrowCampaigns?: RewardCampaign[]
   loopingCampaigns?: RewardCampaign[]
+  inline?: boolean
+  close?: boolean
 }>()
 
 const hasSupplyRewards = computed(() => (supplyRewardAPY || 0) > 0)
@@ -68,6 +72,8 @@ const handleClose = () => {
 <template>
   <BaseModalWrapper
     title="ROE"
+    :inline="inline"
+    :close="close"
     @close="handleClose"
   >
     <p class="text-content-primary text-p3 mb-16">

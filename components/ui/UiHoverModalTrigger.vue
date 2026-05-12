@@ -1,33 +1,47 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
+import { autoUpdate, flip, offset, shift, useFloating, type Placement } from '@floating-ui/vue'
 import { type ModalData, useModal } from '~/components/ui/composables/useModal'
 
 const {
   component,
   modalData,
-  openDelay = 250,
-  closeDelay = 500,
+  openDelay = 200,
+  closeDelay = 150,
   ariaLabel = 'Show details',
+  placement = 'top',
 } = defineProps<{
   component: Component
   modalData?: ModalData | (() => ModalData)
   openDelay?: number
   closeDelay?: number
   ariaLabel?: string
+  placement?: Placement
 }>()
 
 const modal = useModal()
 const trigger = ref<HTMLElement>()
+const floating = ref<HTMLElement>()
 const canHover = ref(false)
-const isOpen = ref(false)
-const openedByHover = ref(false)
+const isVisible = ref(false)
 const isPointerInTrigger = ref(false)
-const isPointerInModal = ref(false)
+const isPointerInPopover = ref(false)
 
 let mediaQuery: MediaQueryList | undefined
-let modalId: number | undefined
 let openTimer: number | undefined
 let closeTimer: number | undefined
+let isDocumentKeydownListening = false
+
+const { floatingStyles, update } = useFloating(trigger, floating, {
+  placement,
+  strategy: 'fixed',
+  middleware: [
+    offset(8),
+    flip({ padding: 8 }),
+    shift({ padding: 8 }),
+  ],
+  whileElementsMounted: autoUpdate,
+})
 
 const clearOpenTimer = () => {
   if (openTimer !== undefined) {
@@ -43,34 +57,6 @@ const clearCloseTimer = () => {
   }
 }
 
-const closeModal = (animate = true) => {
-  clearOpenTimer()
-  clearCloseTimer()
-  removeDocumentListeners()
-
-  if (modalId !== undefined) {
-    if (animate && modal.requestClose(modalId)) {
-      return
-    }
-
-    modal.close(modalId)
-  }
-
-  resetOpenState()
-}
-
-const resetOpenState = () => {
-  modalId = undefined
-  isOpen.value = false
-  openedByHover.value = false
-  isPointerInModal.value = false
-}
-
-const removeDocumentListeners = () => {
-  document.removeEventListener('mousemove', onDocumentMouseMove)
-  document.removeEventListener('click', onDocumentClick, true)
-}
-
 const getModalData = (): ModalData => {
   const data = typeof modalData === 'function' ? modalData() : modalData
   return {
@@ -79,80 +65,46 @@ const getModalData = (): ModalData => {
   }
 }
 
-const buildModalData = (source: 'click' | 'hover'): ModalData => {
+const popoverData = computed(() => {
   const data = getModalData()
-  const previousBeforeComponentLeave = data.beforeComponentLeave
-
-  data.beforeComponentLeave = () => {
-    previousBeforeComponentLeave?.()
-    removeDocumentListeners()
-    const shouldReopenOnHover = canHover.value && isPointerInTrigger.value
-    resetOpenState()
-    if (shouldReopenOnHover) {
-      scheduleOpen()
-    }
+  return {
+    ...data,
+    props: {
+      ...(data.props || {}),
+      inline: true,
+      close: false,
+    },
   }
+})
 
-  if (source === 'hover') {
-    const previousMouseEnter = data.onMouseEnter
-    const previousMouseLeave = data.onMouseLeave
-
-    data.skipHistory ??= true
-    data.noLock ??= true
-    data.pointerThrough ??= true
-    data.onMouseEnter = () => {
-      previousMouseEnter?.()
-      isPointerInModal.value = true
-      clearCloseTimer()
-    }
-    data.onMouseLeave = () => {
-      previousMouseLeave?.()
-      isPointerInModal.value = false
-      scheduleClose()
-    }
-  }
-
-  return data
-}
-
-const openModal = (source: 'click' | 'hover') => {
+const showPopover = () => {
+  if (!canHover.value) return
   clearOpenTimer()
   clearCloseTimer()
-
-  if (isOpen.value) {
-    if (source !== 'click' || !openedByHover.value) {
-      openedByHover.value = source === 'hover'
-      return
-    }
-
-    closeModal(false)
-  }
-
-  openedByHover.value = source === 'hover'
-  modalId = modal.open(component, buildModalData(source))
-  isOpen.value = true
-
-  if (source === 'hover') {
-    document.addEventListener('mousemove', onDocumentMouseMove)
-    document.addEventListener('click', onDocumentClick, true)
-  }
+  isVisible.value = true
+  nextTick(update)
 }
 
-const scheduleClose = () => {
-  if (!openedByHover.value) return
-
+const hidePopover = () => {
+  clearOpenTimer()
   clearCloseTimer()
-  closeTimer = window.setTimeout(() => {
-    closeModal()
-  }, closeDelay)
+  isVisible.value = false
+  isPointerInPopover.value = false
 }
 
 const scheduleOpen = () => {
   clearCloseTimer()
   clearOpenTimer()
-  openTimer = window.setTimeout(() => {
-    openModal('hover')
-  }, openDelay)
+  openTimer = window.setTimeout(showPopover, openDelay)
+}
+
+const scheduleClose = () => {
+  clearCloseTimer()
+  closeTimer = window.setTimeout(() => {
+    if (!isPointerInTrigger.value && !isPointerInPopover.value) {
+      hidePopover()
+    }
+  }, closeDelay)
 }
 
 const onMouseEnter = () => {
@@ -170,31 +122,14 @@ const onMouseLeave = () => {
   scheduleClose()
 }
 
-const onDocumentMouseMove = (event: MouseEvent) => {
-  if (!canHover.value || !openedByHover.value) return
+const onPopoverMouseEnter = () => {
+  isPointerInPopover.value = true
+  clearCloseTimer()
+}
 
-  const target = event.target
-  isPointerInTrigger.value = isEventInTrigger(target)
-  if (isPointerInTrigger.value || isPointerInModal.value) {
-    clearCloseTimer()
-    return
-  }
-
+const onPopoverMouseLeave = () => {
+  isPointerInPopover.value = false
   scheduleClose()
-}
-
-const isEventInTrigger = (target: EventTarget | null) => {
-  return target instanceof Node && Boolean(trigger.value?.contains(target))
-}
-
-const onDocumentClick = (event: MouseEvent) => {
-  if (!openedByHover.value || isEventInTrigger(event.target) || isPointerInModal.value) {
-    return
-  }
-
-  event.preventDefault()
-  event.stopPropagation()
-  closeModal()
 }
 
 const stopNavigation = (event: Event) => {
@@ -208,12 +143,43 @@ const stopPointerPropagation = (event: Event) => {
 
 const onClick = (event: Event) => {
   stopNavigation(event)
-  openModal('click')
+  hidePopover()
+  modal.open(component, getModalData())
+}
+
+const onDocumentKeydown = (event: KeyboardEvent) => {
+  if (event.key === 'Escape') {
+    hidePopover()
+  }
+}
+
+const addDocumentKeydownListener = () => {
+  if (isDocumentKeydownListening) return
+  document.addEventListener('keydown', onDocumentKeydown)
+  isDocumentKeydownListening = true
+}
+
+const removeDocumentKeydownListener = () => {
+  if (!isDocumentKeydownListening) return
+  document.removeEventListener('keydown', onDocumentKeydown)
+  isDocumentKeydownListening = false
 }
 
 const updateHoverCapability = () => {
   canHover.value = Boolean(mediaQuery?.matches)
+  if (!canHover.value) {
+    hidePopover()
+  }
 }
+
+watch(isVisible, (visible) => {
+  if (visible) {
+    addDocumentKeydownListener()
+  }
+  else {
+    removeDocumentKeydownListener()
+  }
+})
 
 onMounted(() => {
   mediaQuery = window.matchMedia('(hover: hover)')
@@ -223,7 +189,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   mediaQuery?.removeEventListener('change', updateHoverCapability)
-  closeModal(false)
+  removeDocumentKeydownListener()
+  hidePopover()
 })
 </script>
 
@@ -231,20 +198,39 @@ onBeforeUnmount(() => {
   <span
     ref="trigger"
     class="ui-hover-modal-trigger"
-    role="button"
-    tabindex="0"
-    :aria-label="ariaLabel"
-    aria-haspopup="dialog"
+    :title="ariaLabel"
     @pointerdown="stopPointerPropagation"
     @pointerup="stopPointerPropagation"
     @click.capture="onClick"
-    @keydown.enter="onClick"
-    @keydown.space="onClick"
     @mouseenter="onMouseEnter"
     @mouseleave="onMouseLeave"
   >
     <slot />
   </span>
+
+  <Teleport to="body">
+    <Transition
+      name="tooltip"
+      @enter="update"
+      @after-enter="update"
+    >
+      <div
+        v-if="isVisible"
+        ref="floating"
+        class="ui-hover-modal-trigger__popover"
+        :style="floatingStyles"
+        @click.stop
+        @mouseenter="onPopoverMouseEnter"
+        @mouseleave="onPopoverMouseLeave"
+      >
+        <component
+          :is="component"
+          v-bind="popoverData.props"
+          @close="hidePopover"
+        />
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <style lang="scss">
@@ -254,5 +240,11 @@ onBeforeUnmount(() => {
   justify-content: center;
   width: fit-content;
   height: fit-content;
+
+  &__popover {
+    z-index: 3100;
+    width: min(420px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
+  }
 }
 </style>
