@@ -30,7 +30,7 @@ export async function fetchEscrowPerspectiveAddresses(chainId: number): Promise<
   if (!rpcUrl) return []
 
   const chains = await fetchEulerChains()
-  const config = chains.find(c => c.chainId === chainId)
+  const config = chains.find(c => Number(c.chainId) === chainId)
   const perspective = config?.addresses?.peripheryAddrs?.escrowedCollateralPerspective
   if (typeof perspective !== 'string' || !perspective.startsWith('0x')) return []
 

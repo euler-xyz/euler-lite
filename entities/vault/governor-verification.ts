@@ -51,14 +51,14 @@ export const isVaultGovernorVerified = (
   if (declaredKeys === undefined) return false
   if (declaredKeys.length === 0) return true
 
-  if (!matchesAnyDeclaredEntity(vault.governorAdmin, declaredKeys, labels.entitiesByKey)) {
+  if (!matchesAnyDeclaredEntity(getAddress(vault.governorAdmin), declaredKeys, labels.entitiesByKey)) {
     return false
   }
 
   if ('oracleDetailedInfo' in vault) {
     const routerGovernor = getEulerRouterGovernor(vault.oracleDetailedInfo)
     if (routerGovernor && routerGovernor !== zeroAddress) {
-      if (!matchesAnyDeclaredEntity(routerGovernor, declaredKeys, labels.entitiesByKey)) {
+      if (!matchesAnyDeclaredEntity(getAddress(routerGovernor), declaredKeys, labels.entitiesByKey)) {
         return false
       }
     }
@@ -99,7 +99,7 @@ export const resolveGoverningEntityKey = (
   if (!vault.verified) return null
   const declaredKeys = labels.getDeclaredEntityKeys(vault.address)
   if (!declaredKeys || declaredKeys.length === 0) return null
-  return findDeclaredEntityFor(vault.governorAdmin, declaredKeys, labels.entitiesByKey)
+  return findDeclaredEntityFor(getAddress(vault.governorAdmin), declaredKeys, labels.entitiesByKey)
 }
 
 export const resolveEarnGoverningEntityKey = (
