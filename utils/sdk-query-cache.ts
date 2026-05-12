@@ -49,7 +49,7 @@ export const sdkBuildQuery: BuildQueryFn = (
   const wrapped = (async (...args: Parameters<typeof fn>) => {
     const serializedArgs = serializeQueryArgs(args)
     if (serializedArgs === null) {
-      return fn(...args)
+      throw new TypeError(`SDK query arguments for ${queryName} are not serializable`)
     }
 
     const result = await sdkQueryClient.fetchQuery({
