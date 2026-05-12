@@ -1,8 +1,6 @@
-import type { Address } from 'viem'
 import { createTtlCache } from './cache'
 import { fetchEscrowPerspectiveAddresses } from './escrow-perspective'
 import {
-  buildDeprecatedEarnSet,
   buildEntityAddressSets,
   buildProductMaps,
   fetchLabels,
@@ -32,10 +30,9 @@ async function loadSnapshot(chainId: number): Promise<ChainVaultsSnapshot> {
 }
 
 async function buildVerifiedSet(chainId: number): Promise<Set<string>> {
-  const [products, entities, earn, escrow, snapshot] = await Promise.allSettled([
+  const [products, entities, escrow, snapshot] = await Promise.allSettled([
     fetchLabels<Record<string, ProductEntry>>(chainId, 'products.json'),
     fetchLabels<Record<string, EntityEntry>>(chainId, 'entities.json'),
-    fetchLabels<unknown[]>(chainId, 'earn-vaults.json'),
     fetchEscrowPerspectiveAddresses(chainId),
     loadSnapshot(chainId),
   ])
@@ -53,15 +50,8 @@ async function buildVerifiedSet(chainId: number): Promise<Set<string>> {
     throw new Error(`vault snapshot fetch failed: ${reason}`)
   }
 
-  const { declaredKeysByVault, deprecatedSet } = buildProductMaps(products.value ?? {})
+  const { declaredKeysByVault } = buildProductMaps(products.value ?? {})
   const entityAddresses = buildEntityAddressSets(entities.value ?? {})
-
-  const deprecatedEarnSet = earn.status === 'fulfilled' && Array.isArray(earn.value)
-    ? buildDeprecatedEarnSet(earn.value)
-    : new Set<Address>()
-  if (earn.status === 'rejected') {
-    logger.warn({ ctx: 'verified-vaults', chainId, err: earn.reason }, 'earn-vaults fetch failed')
-  }
 
   const labels: VerificationLabels = {
     getDeclaredEntityKeys: (addr) => {
@@ -107,12 +97,6 @@ async function buildVerifiedSet(chainId: number): Promise<Set<string>> {
       if (addr) result.add(addr)
     }
   }
-
-  // Last step (server-only): deprecated vaults are treated as unknown,
-  // overriding any verification that might otherwise have passed (e.g.
-  // when on-chain governor still matches the entity).
-  for (const addr of deprecatedSet) result.delete(addr)
-  for (const addr of deprecatedEarnSet) result.delete(addr)
 
   return result
 }

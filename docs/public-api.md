@@ -15,15 +15,14 @@ Answers whether a given vault address is considered verified by this app — the
 A vault is **verified** when ALL of the following hold:
 
 - It appears in one of the trust anchors:
-  - `products.json` labels under any product's active `vaults[]` (covers both EVK and Securitize vaults, since Securitize vaults are tracked alongside EVK in the same file).
-  - `earn-vaults.json` labels (any non-deprecated entry).
+  - `products.json` labels under any product's `vaults[]` or `deprecatedVaults[]` (covers both EVK and Securitize vaults).
+  - `earn-vaults.json` labels (active or deprecated entry).
   - The on-chain set returned by `escrowedCollateralPerspective.verifiedArray()` for the chain (escrow vaults are trusted unconditionally — no governor check applies).
 - AND its on-chain governor matches the product's declared entity:
   - For EVK / Securitize vaults: `vault.governorAdmin` must be in the `addresses` map of one of the product's declared entities. If the vault's oracle router has a non-zero governor, that governor must also match.
   - For Earn vaults that ALSO appear under a product: `vault.owner` must match a declared entity address. Earn vaults that only appear in `earn-vaults.json` (no product) are trusted on the strength of the labels alone.
-- AND the vault is not deprecated. Entries in any product's `deprecatedVaults[]` or earn entries with `deprecated: true` are treated as **not verified**.
 
-The `notExplorable` flag does **not** change verification — vaults hidden from Explore are still verified.
+The same governor check applies to active and deprecated vaults — deprecation does not change the verification rule. The `notExplorable` flag does **not** change verification either: vaults hidden from Explore are still verified.
 
 See [vault-labels-and-verification.md](./vault-labels-and-verification.md) for how the label sources themselves are structured.
 
@@ -127,6 +126,7 @@ This endpoint answers "what is this vault?" — the trust verdict (`is-known`) i
 |-------------|----------|----------|-----------------------------------------------------------------------------|
 | `chainId`   | integer  | yes      | EVM chain ID (e.g. `1` for mainnet).                                        |
 | `addresses` | string   | no       | Comma-separated list of vault addresses. Max 100. Same casing rules as `/is-known`. Omit to return every known vault on the chain ("list mode"). |
+| `productId` | string   | no       | Product slug from `products.json` (e.g. `euler-prime`). When set, only entries whose `productId` equals this value are returned. Combines with `addresses`: an address that resolves but belongs to a different product returns `null`. `[a-zA-Z0-9_-]+`, max 100 chars. |
 
 ### Response
 
@@ -143,11 +143,12 @@ interface VaultMetadata {
   chainId: number
   address: string                            // checksummed
   type: 'evk' | 'securitize' | 'earn'        // escrow is a special-case EVK; see name override
-  name: string                               // never null — falls back to on-chain ERC-20 name
+  name: string                               // never null — falls back to on-chain ERC-20 name only when labels carry no name
   description: string | null
   portfolioNotice: string | null
   deprecationReason: string | null
   deprecated: boolean                        // true if listed under any product's deprecatedVaults or earn entry has deprecated: true
+  productId: string | null                   // product slug from products.json that owns this vault; null for escrow and for vaults with no product entry
   asset: {
     address: string                          // checksummed
     symbol: string
@@ -165,16 +166,17 @@ interface VaultMetadata {
 
 ### Resolution rules
 
-The endpoint internally classifies each vault as **verified** using the same rule `/is-known` applies (governor matches a declared product entity; deprecated entries are treated as not verified). The flag is not exposed — it gates resolution as follows:
+Label-derived display fields (`name`, `description`, `portfolioNotice`, `deprecationReason`, `productId`) are sourced from labels regardless of verification state — they are authoritative content set by the team that listed the vault. Per-vault `vaultOverrides` take precedence over product- or earn-entry-level values. The on-chain ERC-20 `name` is only a fallback when no label name is defined.
 
-- **Verified non-escrow vault**: `name`, `description`, `portfolioNotice` are resolved with per-vault `vaultOverrides` taking precedence over product- or earn-entry-level values; `entity` is the matched declared entity from `entities.json`, with `logo` composed as a full URL.
-- **Unverified vault** (in labels but governor mismatch): degraded — `name` is the on-chain ERC-20 name, `description` / `portfolioNotice` / `entity` are `null`. `asset` and `type` are still populated.
-- **Deprecated vault** (in any product's `deprecatedVaults[]` or earn entry with `deprecated: true`): `deprecated: true` and `deprecationReason` are surfaced regardless of the verified flag — the deprecation status is authoritative label content. Other label-derived fields (`name`, `description`, `portfolioNotice`, `entity`) still follow the verified-vs-unverified rules above.
-- **Escrow vault** (`escrowedCollateralPerspective.verifiedArray()`): `name` is the constant `"Escrowed collateral"`; all label-derived fields and `entity` are `null`; `deprecated: false`; `asset` comes from the snapshot when the address is in the referenced subset, otherwise `null`.
+`entity` is the only field gated by the `is-known` verdict. It identifies the declared product entity whose `addresses` contain the vault's `governorAdmin` (or `owner` for Earn). It is `null` when the vault would not be `is-known: true`:
 
-`deprecationReason` is surfaced for any vault that is deprecated, regardless of verification status — it is authoritative content about the vault's lifecycle, not a risk-management signal. Use the `deprecated` boolean to distinguish the two `verified=false` cases (governor mismatch vs deprecated label).
+- **Verified non-escrow vault** (governor match against a declared entity): `entity` is populated with the matched entity from `entities.json`, with `logo` composed as a full URL.
+- **Unverified vault** (in labels but governor mismatch, active or deprecated): `entity` is `null`. Other label fields (`name`, `description`, `portfolioNotice`, `deprecationReason`, `productId`, `deprecated`) are still populated. `asset` and `type` are also populated.
+- **Escrow vault** (`escrowedCollateralPerspective.verifiedArray()`): `name` is the constant `"Escrowed collateral"`; all label-derived fields, `productId`, and `entity` are `null`; `deprecated: false`; `asset` comes from the snapshot when the address is in the referenced subset, otherwise `null`.
 
-Earn vaults that are in `earn-vaults.json` but not in any product entry resolve with description / portfolioNotice / deprecationReason from the earn entry; `entity` is `null` because there are no declared entities to match.
+The `deprecated` boolean distinguishes deprecated-but-otherwise-fine vaults from genuinely unverified ones. The same governor check applies to deprecated and active vaults — deprecation only sets the `deprecated` flag and (typically) populates `deprecationReason`.
+
+Earn vaults that are in `earn-vaults.json` but not in any product entry resolve with `description` / `portfolioNotice` / `deprecationReason` from the earn entry; `productId` and `entity` are `null` because there is no declared product.
 
 When a product declares multiple entities and more than one matches the on-chain governor (`governorAdmin` for EVK/Securitize, `owner` for Earn), the first match in declared-key order wins.
 
@@ -217,6 +219,7 @@ curl 'https://<host>/api/public/metadata?chainId=1&addresses=0xD8b27CF359b7D1571
     "portfolioNotice": null,
     "deprecationReason": null,
     "deprecated": false,
+    "productId": "euler-prime",
     "asset": {
       "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
       "symbol": "WETH",

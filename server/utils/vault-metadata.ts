@@ -53,6 +53,8 @@ export interface VaultMetadata {
   deprecationReason: string | null
   /** True if the vault is listed under any product's `deprecatedVaults` (or earn-vaults `deprecated: true`). */
   deprecated: boolean
+  /** The owning product slug from products.json (e.g. "euler-prime"), or null for vaults outside any product (escrow, earn-only entries, governor mismatch with no product). */
+  productId: string | null
   asset: AssetInfo | null
   entity: EntityInfo | null
 }
@@ -99,6 +101,7 @@ interface TokenListEntry {
 }
 
 interface ProductDescriptor {
+  slug: string
   name: string
   description: string | null
   portfolioNotice: string | null
@@ -165,7 +168,7 @@ function buildProductDescriptors(products: Record<string, ProductEntryFull>): {
 } {
   const productByVault = new Map<Address, ProductDescriptor>()
   const deprecatedSet = new Set<Address>()
-  for (const product of Object.values(products)) {
+  for (const [slug, product] of Object.entries(products)) {
     const overrides: Record<string, VaultOverride> = {}
     if (product.vaultOverrides && typeof product.vaultOverrides === 'object') {
       for (const [k, v] of Object.entries(product.vaultOverrides as Record<string, unknown>)) {
@@ -176,6 +179,7 @@ function buildProductDescriptors(products: Record<string, ProductEntryFull>): {
       }
     }
     const desc: ProductDescriptor = {
+      slug,
       name: strOrEmpty(product.name),
       description: strOrNull(product.description),
       portfolioNotice: strOrNull(product.portfolioNotice),
@@ -280,14 +284,16 @@ function buildEvkMetadata(
   const product = ctx.productByVault.get(addr)
   const override = product?.vaultOverrides[addr]
 
-  // `deprecationReason` is sourced from labels regardless of verified status:
-  // a deprecated entry is authoritative content (it tells callers why the
-  // vault was retired), and there is no risk-management implication to expose.
+  // Label-derived display fields (name, description, portfolioNotice,
+  // deprecationReason) are sourced from labels regardless of verified
+  // status — they are authoritative content set by the team that listed
+  // the vault. On-chain ERC-20 name is only a fallback when labels carry
+  // no name. Verification (governor match) only gates `entity` resolution
+  // below, which is the security-sensitive "who manages this vault" claim.
+  const labelName = strOrNull(override?.name) ?? (product?.name || null)
+  const description = strOrNull(override?.description) ?? product?.description ?? null
+  const portfolioNotice = strOrNull(override?.portfolioNotice) ?? product?.portfolioNotice ?? null
   const deprecationReason = strOrNull(override?.deprecationReason) ?? product?.deprecationReason ?? null
-
-  const labelName = verified ? (strOrNull(override?.name) ?? (product?.name || null)) : null
-  const description = verified ? (strOrNull(override?.description) ?? product?.description ?? null) : null
-  const portfolioNotice = verified ? (strOrNull(override?.portfolioNotice) ?? product?.portfolioNotice ?? null) : null
 
   const entityKey = verified ? resolveGoverningEntityKey(vault, ctx.labels) : null
   const entity = entityKey ? buildEntityInfo(entityKey, ctx.entities) : null
@@ -301,6 +307,7 @@ function buildEvkMetadata(
     portfolioNotice,
     deprecationReason,
     deprecated,
+    productId: product?.slug ?? null,
     asset: buildAsset(vault.asset, ctx.tokenLogos),
     entity,
   }
@@ -315,11 +322,12 @@ function buildEarnMetadata(vault: EarnVault, ctx: BuildContext): VaultMetadata |
   const earnEntry = ctx.earnByAddr.get(addr)
   const product = ctx.productByVault.get(addr)
 
+  // Same rationale as buildEvkMetadata: label fields are authoritative
+  // content. `verified` only gates `entity` resolution.
+  const labelName = product?.name || null
+  const description = strOrNull(earnEntry?.description) ?? product?.description ?? null
+  const portfolioNotice = strOrNull(earnEntry?.portfolioNotice) ?? product?.portfolioNotice ?? null
   const deprecationReason = strOrNull(earnEntry?.deprecationReason) ?? product?.deprecationReason ?? null
-
-  const labelName = verified ? (product?.name || null) : null
-  const description = verified ? (strOrNull(earnEntry?.description) ?? product?.description ?? null) : null
-  const portfolioNotice = verified ? (strOrNull(earnEntry?.portfolioNotice) ?? product?.portfolioNotice ?? null) : null
 
   const entityKey = verified ? resolveEarnGoverningEntityKey(vault, ctx.labels) : null
   const entity = entityKey ? buildEntityInfo(entityKey, ctx.entities) : null
@@ -333,6 +341,7 @@ function buildEarnMetadata(vault: EarnVault, ctx: BuildContext): VaultMetadata |
     portfolioNotice,
     deprecationReason,
     deprecated,
+    productId: product?.slug ?? null,
     asset: buildAsset(vault.asset, ctx.tokenLogos),
     entity,
   }
@@ -352,6 +361,7 @@ function buildEscrowMetadata(
     portfolioNotice: null,
     deprecationReason: null,
     deprecated: false,
+    productId: null,
     asset: vault ? buildAsset(vault.asset, ctx.tokenLogos) : null,
     entity: null,
   }
