@@ -21,7 +21,7 @@ import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
 import { getRepaySwapReviewInputAmount } from '~/composables/repay/reviewAmount'
-import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
+import { getSwapInputAmount, validateWalletSwapRepayQuote } from '~/composables/useEulerOperations/swaps/verify'
 import { findBlockingDisabledOp, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 
@@ -67,7 +67,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const { buildSwapAndRepayPlan, executeTxPlan } = useEulerOperations()
-  const { chainId } = useEulerAddresses()
+  const { chainId, eulerPeripheryAddresses } = useEulerAddresses()
   const { isConnected, address } = useAccount()
   const { fetchSingleBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
@@ -664,21 +664,41 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       targetDebt = debtAmountNano >= currentDebt ? 0n : currentDebt - debtAmountNano
     }
 
-    const inputAmount = getSwapInputAmount(quotes.selectedQuote.value, swapMode)
-
     const isNative = isNativeCurrencyAddress(selectedAsset.value.address)
     const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
     if (isNative && !wrappedAddress) {
       throw new Error('Wrapped native token not found')
     }
+    const inputTokenAddress = (wrappedAddress || selectedAsset.value.address) as Address
+    const subAccount = (position.value.subAccount || address.value || zeroAddress) as Address
+    const quote = quotes.selectedQuote.value
+    const expectedInputAmount = swapMode === SwapperMode.EXACT_IN
+      ? valueToNano(amount.value, selectedAsset.value.decimals)
+      : undefined
+
+    validateWalletSwapRepayQuote(quote, {
+      expectedTokenIn: inputTokenAddress,
+      expectedTokenOut: borrowVault.value.asset.address as Address,
+      expectedAccountOut: subAccount,
+      expectedReceiver: borrowVault.value.address as Address,
+      expectedSwapperAddress: eulerPeripheryAddresses.value?.swapper as Address | undefined,
+      expectedVerifierAddress: eulerPeripheryAddresses.value?.swapVerifier as Address | undefined,
+      expectedInputAmount,
+      requestedSlippage: slippage.value,
+      swapperMode: swapMode,
+      targetDebt,
+      currentDebt,
+    })
+
+    const inputAmount = getSwapInputAmount(quote, swapMode)
 
     return buildSwapAndRepayPlan({
-      inputTokenAddress: (wrappedAddress || selectedAsset.value.address) as Address,
+      inputTokenAddress,
       inputAmount,
-      quote: quotes.selectedQuote.value,
+      quote,
       requestedSlippage: slippage.value,
       borrowVaultAddress: borrowVault.value.address as Address,
-      subAccount: (position.value.subAccount || address.value || zeroAddress) as Address,
+      subAccount,
       enabledCollaterals: position.value.collaterals ?? [collateralVault.value.address],
       isFullRepay: isFullRepay.value,
       swapperMode: swapMode,
