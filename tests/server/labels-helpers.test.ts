@@ -1,9 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { getAddress } from 'viem'
 import {
-  buildDeprecatedEarnSet,
   buildEntityAddressSets,
-  buildProductMaps,
   declaredKeysOf,
   tryChecksum,
 } from '~/server/utils/labels-helpers'
@@ -41,52 +39,6 @@ describe('declaredKeysOf', () => {
   it('returns empty array for unsupported values', () => {
     expect(declaredKeysOf(undefined)).toEqual([])
     expect(declaredKeysOf({})).toEqual([])
-  })
-})
-
-describe('buildProductMaps', () => {
-  it('builds declared keys map for active vaults and deprecated vaults', () => {
-    const products = {
-      prime: { entity: 'euler', vaults: [A, B], deprecatedVaults: [C] },
-    }
-    const { declaredKeysByVault, deprecatedSet } = buildProductMaps(products)
-    expect(declaredKeysByVault.get(A)).toEqual(['euler'])
-    expect(declaredKeysByVault.get(B)).toEqual(['euler'])
-    expect(declaredKeysByVault.get(C)).toEqual(['euler'])
-    expect([...deprecatedSet]).toEqual([C])
-  })
-
-  it('normalizes lowercase input to checksum', () => {
-    const products = {
-      prime: { entity: ['e1', 'e2'], vaults: [A.toLowerCase()] },
-    }
-    const { declaredKeysByVault } = buildProductMaps(products)
-    expect(declaredKeysByVault.get(A)).toEqual(['e1', 'e2'])
-  })
-
-  it('skips malformed addresses', () => {
-    const products = {
-      prime: { entity: 'euler', vaults: ['not an address', A] },
-    }
-    const { declaredKeysByVault } = buildProductMaps(products)
-    expect(declaredKeysByVault.size).toBe(1)
-    expect(declaredKeysByVault.get(A)).toEqual(['euler'])
-  })
-})
-
-describe('buildDeprecatedEarnSet', () => {
-  it('captures entries flagged deprecated: true', () => {
-    const set = buildDeprecatedEarnSet([
-      { address: A, deprecated: true },
-      { address: B, deprecated: false },
-      { address: C },
-    ])
-    expect([...set]).toEqual([A])
-  })
-
-  it('handles bare-string entries gracefully (legacy shape)', () => {
-    const set = buildDeprecatedEarnSet([A, { address: B, deprecated: true }])
-    expect([...set]).toEqual([B])
   })
 })
 
