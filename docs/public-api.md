@@ -24,6 +24,16 @@ A vault is **verified** when ALL of the following hold:
 
 The same governor check applies to active and deprecated vaults — deprecation does not change the verification rule. The `notExplorable` flag does **not** change verification either: vaults hidden from Explore are still verified.
 
+### Scope of `is-known`
+
+`is-known` reflects **label / governance consistency only** — that the vault's on-chain governor (or owner, for Earn) still matches the entity declared by its label, or that the vault is in the on-chain escrow perspective. It does **not** assert:
+
+- smart-contract configuration safety (LTVs, oracle setup, IRM, hooks)
+- absence of risk signals (oracle staleness, asset health, liquidity, market conditions)
+- visibility decisions (whether the vault is shown on lend / borrow / explore pages)
+
+The successor backend currently under development will expose these as separate fields (a configuration-safety layer and a risk-context layer). This endpoint deliberately does not encode them, and never will — when the migration happens, `is-known` will continue to mean exactly what it means today. Integrators that need additional signals should consume them from the dedicated endpoints once available.
+
 See [vault-labels-and-verification.md](./vault-labels-and-verification.md) for how the label sources themselves are structured.
 
 ### Request
@@ -148,6 +158,7 @@ interface VaultMetadata {
   portfolioNotice: string | null
   deprecationReason: string | null
   deprecated: boolean                        // true if listed under any product's deprecatedVaults or earn entry has deprecated: true
+  governanceLimited: boolean                 // true when the owning product has isGovernanceLimited: true (governor exists but no active risk management). False for vaults without a product.
   productId: string | null                   // product slug from products.json that owns this vault; null for escrow and for vaults with no product entry
   asset: {
     address: string                          // checksummed
@@ -156,11 +167,12 @@ interface VaultMetadata {
     decimals: number
     url: string | null                       // same logoURI /api/token-list serves; null when no source carries it
   } | null
-  entity: {
+  entities: Array<{
     name: string
     logo: string                             // full URL composed from the labels CDN config
     description: string | null
-  } | null
+    url: string | null                       // entity website; only set when http(s) URL
+  }>                                         // empty array when no entity matches (escrow, unverified, or no product); usually 0 or 1 entry, but can be N when a product declares multiple entities that all match the on-chain governor
 }
 ```
 
@@ -168,15 +180,15 @@ interface VaultMetadata {
 
 Label-derived display fields (`name`, `description`, `portfolioNotice`, `deprecationReason`, `productId`) are sourced from labels regardless of verification state — they are authoritative content set by the team that listed the vault. Per-vault `vaultOverrides` take precedence over product- or earn-entry-level values. The on-chain ERC-20 `name` is only a fallback when no label name is defined.
 
-`entity` is the only field gated by the `is-known` verdict. It identifies the declared product entity whose `addresses` contain the vault's `governorAdmin` (or `owner` for Earn). It is `null` when the vault would not be `is-known: true`:
+`entities` is the only field gated by the `is-known` verdict. It identifies every declared product entity whose `addresses` contain the vault's `governorAdmin` (or `owner` for Earn). A product can declare multiple entity keys, and more than one of those can match — the array preserves the declared-key order. The array is empty when the vault would not be `is-known: true`:
 
-- **Verified non-escrow vault** (governor match against a declared entity): `entity` is populated with the matched entity from `entities.json`, with `logo` composed as a full URL.
-- **Unverified vault** (in labels but governor mismatch, active or deprecated): `entity` is `null`. Other label fields (`name`, `description`, `portfolioNotice`, `deprecationReason`, `productId`, `deprecated`) are still populated. `asset` and `type` are also populated.
-- **Escrow vault** (`escrowedCollateralPerspective.verifiedArray()`): `name` is the constant `"Escrowed collateral"`; all label-derived fields, `productId`, and `entity` are `null`; `deprecated: false`; `asset` comes from the snapshot when the address is in the referenced subset, otherwise `null`.
+- **Verified non-escrow vault** (governor match against at least one declared entity): `entities` contains every matching entity from `entities.json`, with `logo` composed as a full URL. Usually 1 entry, but can be N.
+- **Unverified vault** (in labels but governor mismatch, active or deprecated): `entities` is `[]`. Other label fields (`name`, `description`, `portfolioNotice`, `deprecationReason`, `productId`, `deprecated`) are still populated. `asset` and `type` are also populated.
+- **Escrow vault** (`escrowedCollateralPerspective.verifiedArray()`): `name` is the constant `"Escrowed collateral"`; all label-derived fields and `productId` are `null`; `entities` is `[]`; `deprecated: false`; `asset` comes from the snapshot when the address is in the referenced subset, otherwise `null`.
 
 The `deprecated` boolean distinguishes deprecated-but-otherwise-fine vaults from genuinely unverified ones. The same governor check applies to deprecated and active vaults — deprecation only sets the `deprecated` flag and (typically) populates `deprecationReason`.
 
-Earn vaults that are in `earn-vaults.json` but not in any product entry resolve with `description` / `portfolioNotice` / `deprecationReason` from the earn entry; `productId` and `entity` are `null` because there is no declared product.
+Earn vaults that are in `earn-vaults.json` but not in any product entry resolve with `description` / `portfolioNotice` / `deprecationReason` from the earn entry; `productId` is `null` and `entities` is `[]` because there is no declared product.
 
 When a product declares multiple entities and more than one matches the on-chain governor (`governorAdmin` for EVK/Securitize, `owner` for Earn), the first match in declared-key order wins.
 
@@ -219,6 +231,7 @@ curl 'https://<host>/api/public/metadata?chainId=1&addresses=0xD8b27CF359b7D1571
     "portfolioNotice": null,
     "deprecationReason": null,
     "deprecated": false,
+    "governanceLimited": false,
     "productId": "euler-prime",
     "asset": {
       "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
@@ -227,11 +240,14 @@ curl 'https://<host>/api/public/metadata?chainId=1&addresses=0xD8b27CF359b7D1571
       "decimals": 18,
       "url": "https://token-icons.llamao.fi/icons/tokens/1/0xc02…?h=48&w=48"
     },
-    "entity": {
-      "name": "Euler DAO",
-      "logo": "https://raw.githubusercontent.com/euler-xyz/euler-labels/refs/heads/master/logo/euler.svg",
-      "description": "Euler DAO is responsible for the governance of the Euler protocol."
-    }
+    "entities": [
+      {
+        "name": "Euler DAO",
+        "logo": "https://raw.githubusercontent.com/euler-xyz/euler-labels/refs/heads/master/logo/euler.svg",
+        "description": "Euler DAO is responsible for the governance of the Euler protocol.",
+        "url": "https://euler.finance"
+      }
+    ]
   }
 }
 ```

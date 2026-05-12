@@ -3,8 +3,8 @@ import { getAddress, type Address } from 'viem'
 import {
   isVaultGovernorVerified,
   isEarnVaultOwnerVerified,
-  resolveGoverningEntityKey,
-  resolveEarnGoverningEntityKey,
+  resolveGoverningEntityKeys,
+  resolveEarnGoverningEntityKeys,
   type VerificationLabels,
 } from '~/entities/vault/governor-verification'
 import type { EarnVault, SecuritizeVault, Vault } from '~/entities/vault/types'
@@ -165,6 +165,30 @@ describe('isVaultGovernorVerified', () => {
     })
     expect(isVaultGovernorVerified(vault, labels)).toBe(true)
   })
+
+  // Forward-compatibility with the new backend: ungoverned vaults
+  // (governorAdmin = address(0)) are supported via an artificial entity
+  // whose addresses include the zero address. No special rule code
+  // — the same governor-match path applies.
+  it('accepts ungoverned vault when declared product entity contains address(0)', () => {
+    const ZERO = getAddress('0x0000000000000000000000000000000000000000') as Address
+    const vault = makeVault({ governorAdmin: ZERO })
+    const labels = buildLabels({
+      declaredKeys: { [VAULT_ADDR]: ['ungoverned'] },
+      entityAddresses: { ungoverned: [ZERO] },
+    })
+    expect(isVaultGovernorVerified(vault, labels)).toBe(true)
+  })
+
+  it('rejects ungoverned vault when no ungoverned entity is declared', () => {
+    const ZERO = getAddress('0x0000000000000000000000000000000000000000') as Address
+    const vault = makeVault({ governorAdmin: ZERO })
+    const labels = buildLabels({
+      declaredKeys: { [VAULT_ADDR]: ['euler'] },
+      entityAddresses: { euler: [GOV_A] },
+    })
+    expect(isVaultGovernorVerified(vault, labels)).toBe(false)
+  })
 })
 
 describe('isEarnVaultOwnerVerified', () => {
@@ -216,69 +240,87 @@ describe('isEarnVaultOwnerVerified', () => {
   })
 })
 
-describe('resolveGoverningEntityKey', () => {
-  it('returns null for escrow vaults', () => {
+describe('resolveGoverningEntityKeys', () => {
+  it('returns [] for escrow vaults', () => {
     const vault = makeVault()
     Object.assign(vault, { vaultCategory: 'escrow' })
-    expect(resolveGoverningEntityKey(vault, buildLabels())).toBe(null)
+    expect(resolveGoverningEntityKeys(vault, buildLabels())).toEqual([])
   })
 
-  it('returns null when vault is not verified', () => {
+  it('returns [] when vault is not verified', () => {
     const vault = makeVault({ verified: false })
     const labels = buildLabels({
       declaredKeys: { [VAULT_ADDR]: ['euler'] },
       entityAddresses: { euler: [GOV_A] },
     })
-    expect(resolveGoverningEntityKey(vault, labels)).toBe(null)
+    expect(resolveGoverningEntityKeys(vault, labels)).toEqual([])
   })
 
-  it('returns null when no product is declared', () => {
+  it('returns [] when no product is declared', () => {
     const vault = makeVault()
-    expect(resolveGoverningEntityKey(vault, buildLabels())).toBe(null)
+    expect(resolveGoverningEntityKeys(vault, buildLabels())).toEqual([])
   })
 
-  it('returns null when product declares no entities (match-all has no identity)', () => {
+  it('returns [] when product declares no entities (match-all has no identity)', () => {
     const vault = makeVault()
     const labels = buildLabels({ declaredKeys: { [VAULT_ADDR]: [] } })
-    expect(resolveGoverningEntityKey(vault, labels)).toBe(null)
+    expect(resolveGoverningEntityKeys(vault, labels)).toEqual([])
   })
 
-  it('returns the first declared entity whose addresses include the governor', () => {
+  it('returns the matching entity when only one of the declared entities matches', () => {
     const vault = makeVault({ governorAdmin: GOV_A })
     const labels = buildLabels({
       declaredKeys: { [VAULT_ADDR]: ['euler', 'dao'] },
       entityAddresses: { euler: [GOV_B], dao: [GOV_A] },
     })
-    expect(resolveGoverningEntityKey(vault, labels)).toBe('dao')
+    expect(resolveGoverningEntityKeys(vault, labels)).toEqual(['dao'])
   })
 
-  it('returns null when no declared entity matches', () => {
+  it('returns every matching entity in declared-key order', () => {
+    const vault = makeVault({ governorAdmin: GOV_A })
+    const labels = buildLabels({
+      declaredKeys: { [VAULT_ADDR]: ['euler', 'dao'] },
+      entityAddresses: { euler: [GOV_A], dao: [GOV_A] },
+    })
+    expect(resolveGoverningEntityKeys(vault, labels)).toEqual(['euler', 'dao'])
+  })
+
+  it('returns [] when no declared entity matches', () => {
     const vault = makeVault({ governorAdmin: OTHER_GOV })
     const labels = buildLabels({
       declaredKeys: { [VAULT_ADDR]: ['euler'] },
       entityAddresses: { euler: [GOV_A] },
     })
-    expect(resolveGoverningEntityKey(vault, labels)).toBe(null)
+    expect(resolveGoverningEntityKeys(vault, labels)).toEqual([])
   })
 })
 
-describe('resolveEarnGoverningEntityKey', () => {
-  it('returns null when not verified', () => {
+describe('resolveEarnGoverningEntityKeys', () => {
+  it('returns [] when not verified', () => {
     const earn = makeEarn({ verified: false })
-    expect(resolveEarnGoverningEntityKey(earn, buildLabels())).toBe(null)
+    expect(resolveEarnGoverningEntityKeys(earn, buildLabels())).toEqual([])
   })
 
-  it('returns null when no product entry exists', () => {
+  it('returns [] when no product entry exists', () => {
     const earn = makeEarn()
-    expect(resolveEarnGoverningEntityKey(earn, buildLabels())).toBe(null)
+    expect(resolveEarnGoverningEntityKeys(earn, buildLabels())).toEqual([])
   })
 
-  it('returns the matching declared entity key', () => {
+  it('returns the matching entity when only one declared entity matches', () => {
     const earn = makeEarn({ owner: GOV_A })
     const labels = buildLabels({
       declaredKeys: { [VAULT_ADDR]: ['euler', 'dao'] },
       entityAddresses: { euler: [GOV_B], dao: [GOV_A] },
     })
-    expect(resolveEarnGoverningEntityKey(earn, labels)).toBe('dao')
+    expect(resolveEarnGoverningEntityKeys(earn, labels)).toEqual(['dao'])
+  })
+
+  it('returns every matching entity in declared-key order', () => {
+    const earn = makeEarn({ owner: GOV_A })
+    const labels = buildLabels({
+      declaredKeys: { [VAULT_ADDR]: ['euler', 'dao'] },
+      entityAddresses: { euler: [GOV_A], dao: [GOV_A] },
+    })
+    expect(resolveEarnGoverningEntityKeys(earn, labels)).toEqual(['euler', 'dao'])
   })
 })

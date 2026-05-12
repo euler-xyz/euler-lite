@@ -33,6 +33,12 @@ const findDeclaredEntityFor = (
   labels: VerificationLabels,
 ): string | null => declaredKeys.find(key => labels.hasEntityAddress(key, address)) ?? null
 
+const findAllDeclaredEntitiesFor = (
+  address: Address,
+  declaredKeys: string[],
+  labels: VerificationLabels,
+): string[] => declaredKeys.filter(key => labels.hasEntityAddress(key, address))
+
 export const isVaultGovernorVerified = (
   vault: Vault | SecuritizeVault,
   labels: VerificationLabels,
@@ -80,30 +86,33 @@ export const isEarnVaultOwnerVerified = (
 }
 
 /**
- * Returns the declared entity key whose addresses contain the vault's
- * governorAdmin. Companion to `isVaultGovernorVerified` — answers "which
- * entity is the risk manager?" rather than "is the vault verified?". The
- * router-governor gate is NOT consulted here (it's a verification rule, not
- * an entity-identity question), so callers needing the full verdict should
- * compose with `isVaultGovernorVerified` / `getVerifiedAddressSet`.
+ * Returns every declared entity key whose addresses contain the vault's
+ * governorAdmin, in declared-key order. Companion to `isVaultGovernorVerified`
+ * — answers "which entities are the risk managers?" rather than "is the vault
+ * verified?". A product may declare multiple entities and more than one can
+ * match; the empty array is returned when none match (or the vault is escrow,
+ * unverified, or not in any product). The router-governor gate is NOT consulted
+ * here (it's a verification rule, not an entity-identity question), so callers
+ * needing the full verdict should compose with `isVaultGovernorVerified` /
+ * `getVerifiedAddressSet`.
  */
-export const resolveGoverningEntityKey = (
+export const resolveGoverningEntityKeys = (
   vault: Vault | SecuritizeVault,
   labels: VerificationLabels,
-): string | null => {
-  if ('vaultCategory' in vault && vault.vaultCategory === 'escrow') return null
-  if (!vault.verified) return null
+): string[] => {
+  if ('vaultCategory' in vault && vault.vaultCategory === 'escrow') return []
+  if (!vault.verified) return []
   const declaredKeys = labels.getDeclaredEntityKeys(vault.address)
-  if (!declaredKeys || declaredKeys.length === 0) return null
-  return findDeclaredEntityFor(getAddress(vault.governorAdmin), declaredKeys, labels)
+  if (!declaredKeys || declaredKeys.length === 0) return []
+  return findAllDeclaredEntitiesFor(getAddress(vault.governorAdmin), declaredKeys, labels)
 }
 
-export const resolveEarnGoverningEntityKey = (
+export const resolveEarnGoverningEntityKeys = (
   earnVault: EarnVault,
   labels: VerificationLabels,
-): string | null => {
-  if (!earnVault.verified) return null
+): string[] => {
+  if (!earnVault.verified) return []
   const declaredKeys = labels.getDeclaredEntityKeys(earnVault.address)
-  if (!declaredKeys || declaredKeys.length === 0) return null
-  return findDeclaredEntityFor(getAddress(earnVault.owner), declaredKeys, labels)
+  if (!declaredKeys || declaredKeys.length === 0) return []
+  return findAllDeclaredEntitiesFor(getAddress(earnVault.owner), declaredKeys, labels)
 }

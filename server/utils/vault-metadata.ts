@@ -14,8 +14,8 @@ import { refreshChainVaults, vaultsCache } from './vaults-cache'
 import { getVerifiedAddressSet } from './verified-vaults'
 import {
   deserialiseSnapshot,
-  resolveEarnGoverningEntityKey,
-  resolveGoverningEntityKey,
+  resolveEarnGoverningEntityKeys,
+  resolveGoverningEntityKeys,
 } from '~/entities/vault'
 import type {
   ChainVaultsSnapshot,
@@ -41,6 +41,7 @@ export interface EntityInfo {
   name: string
   logo: string
   description: string | null
+  url: string | null
 }
 
 export interface VaultMetadata {
@@ -53,10 +54,13 @@ export interface VaultMetadata {
   deprecationReason: string | null
   /** True if the vault is listed under any product's `deprecatedVaults` (or earn-vaults `deprecated: true`). */
   deprecated: boolean
+  /** True when the owning product has `isGovernanceLimited: true` (governor exists but no active risk management). False for vaults without a product. */
+  governanceLimited: boolean
   /** The owning product slug from products.json (e.g. "euler-prime"), or null for vaults outside any product (escrow, earn-only entries, governor mismatch with no product). */
   productId: string | null
   asset: AssetInfo | null
-  entity: EntityInfo | null
+  /** All declared product entities whose `addresses` contain the vault's on-chain governor (or owner, for Earn). Empty when no entity matches, the vault is escrow, or the vault is unverified. Multiple entries can occur when a product declares multiple entities and more than one matches. */
+  entities: EntityInfo[]
 }
 
 interface ProductEntryFull {
@@ -68,6 +72,7 @@ interface ProductEntryFull {
   vaults?: unknown
   deprecatedVaults?: unknown
   vaultOverrides?: unknown
+  isGovernanceLimited?: unknown
 }
 
 interface VaultOverride {
@@ -81,6 +86,7 @@ interface EntityEntryFull extends EntityEntry {
   name?: unknown
   logo?: unknown
   description?: unknown
+  url?: unknown
 }
 
 interface EarnVaultEntry {
@@ -106,6 +112,7 @@ interface ProductDescriptor {
   description: string | null
   portfolioNotice: string | null
   deprecationReason: string | null
+  isGovernanceLimited: boolean
   entityKeys: string[]
   vaultOverrides: Record<string, VaultOverride>
 }
@@ -184,6 +191,7 @@ function buildProductDescriptors(products: Record<string, ProductEntryFull>): {
       description: strOrNull(product.description),
       portfolioNotice: strOrNull(product.portfolioNotice),
       deprecationReason: strOrNull(product.deprecationReason),
+      isGovernanceLimited: product.isGovernanceLimited === true,
       entityKeys: declaredKeysOf(product.entity),
       vaultOverrides: overrides,
     }
@@ -256,10 +264,12 @@ function buildEntityInfo(entityKey: string, entities: Record<string, EntityEntry
   const name = strOrEmpty(entity.name)
   const logoFile = strOrEmpty(entity.logo)
   if (!name && !logoFile) return null
+  const url = strOrNull(entity.url)
   return {
     name,
     logo: logoFile ? entityLogoUrl(logoFile) : '',
     description: strOrNull(entity.description),
+    url: url && /^https?:\/\//i.test(url) ? url : null,
   }
 }
 
@@ -295,8 +305,10 @@ function buildEvkMetadata(
   const portfolioNotice = strOrNull(override?.portfolioNotice) ?? product?.portfolioNotice ?? null
   const deprecationReason = strOrNull(override?.deprecationReason) ?? product?.deprecationReason ?? null
 
-  const entityKey = verified ? resolveGoverningEntityKey(vault, ctx.labels) : null
-  const entity = entityKey ? buildEntityInfo(entityKey, ctx.entities) : null
+  const entityKeys = verified ? resolveGoverningEntityKeys(vault, ctx.labels) : []
+  const entities = entityKeys
+    .map(key => buildEntityInfo(key, ctx.entities))
+    .filter((e): e is EntityInfo => e !== null)
 
   return {
     chainId: ctx.chainId,
@@ -307,9 +319,10 @@ function buildEvkMetadata(
     portfolioNotice,
     deprecationReason,
     deprecated,
+    governanceLimited: product?.isGovernanceLimited === true,
     productId: product?.slug ?? null,
     asset: buildAsset(vault.asset, ctx.tokenLogos),
-    entity,
+    entities,
   }
 }
 
@@ -329,8 +342,10 @@ function buildEarnMetadata(vault: EarnVault, ctx: BuildContext): VaultMetadata |
   const portfolioNotice = strOrNull(earnEntry?.portfolioNotice) ?? product?.portfolioNotice ?? null
   const deprecationReason = strOrNull(earnEntry?.deprecationReason) ?? product?.deprecationReason ?? null
 
-  const entityKey = verified ? resolveEarnGoverningEntityKey(vault, ctx.labels) : null
-  const entity = entityKey ? buildEntityInfo(entityKey, ctx.entities) : null
+  const entityKeys = verified ? resolveEarnGoverningEntityKeys(vault, ctx.labels) : []
+  const entities = entityKeys
+    .map(key => buildEntityInfo(key, ctx.entities))
+    .filter((e): e is EntityInfo => e !== null)
 
   return {
     chainId: ctx.chainId,
@@ -341,9 +356,10 @@ function buildEarnMetadata(vault: EarnVault, ctx: BuildContext): VaultMetadata |
     portfolioNotice,
     deprecationReason,
     deprecated,
+    governanceLimited: product?.isGovernanceLimited === true,
     productId: product?.slug ?? null,
     asset: buildAsset(vault.asset, ctx.tokenLogos),
-    entity,
+    entities,
   }
 }
 
@@ -361,9 +377,10 @@ function buildEscrowMetadata(
     portfolioNotice: null,
     deprecationReason: null,
     deprecated: false,
+    governanceLimited: false,
     productId: null,
     asset: vault ? buildAsset(vault.asset, ctx.tokenLogos) : null,
-    entity: null,
+    entities: [],
   }
 }
 

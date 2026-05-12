@@ -246,6 +246,12 @@ The `useEulerLabels` composable builds a set of verified vault addresses from th
 
 The full "is this vault verified?" verdict (used by the UI to render markets, and by the `/api/public/is-known` endpoint) additionally requires the on-chain governor to match a declared entity address. See `entities/vault/governor-verification.ts` for the shared rule, and the "Programmatic verification lookup" section below for the public endpoint.
 
+### Ungoverned vaults
+
+Vaults with `governorAdmin = address(0)` are supported via an **artificial entity** convention: declare an `ungoverned` entity in `entities.json` whose `addresses` map contains the zero address, then list ungoverned vaults under a product that declares `entity: ["ungoverned"]`. The shared governor rule then matches the vault's zero `governorAdmin` against the artificial entity, no special-case code path needed. The UI shows the "Ungoverned" governance type chip independently of entity matching (driven by `governorAdmin === zeroAddress` directly).
+
+This keeps the bridge endpoints forward-compatible with the successor backend, which treats ungoverned vaults the same way for verification purposes while sourcing the "ungoverned" presentation signal from the on-chain governor value.
+
 ### How `vault.verified` Is Set
 
 | Vault Source | Verification Method |
