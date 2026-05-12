@@ -1,6 +1,9 @@
 import type { H3Event } from 'h3'
 import { createError } from 'h3'
+import { isProductionRuntime } from '~/server/utils/deploy-env'
+import { isInternalRequest } from '~/server/utils/internal-headers'
 import { logger } from '~/server/utils/logger'
+import { isTrustedIngressRequest } from '~/server/utils/trusted-ingress'
 
 interface RateLimitEntry {
   consumed: number
@@ -18,14 +21,13 @@ interface RateLimiterConfig {
 
 // NOTE: This rate limiter relies on Cloudflare being in the request path for
 // production (DOPPLER_ENVIRONMENT=prd). CF-Connecting-IP is set by Cloudflare's
-// edge and cannot be spoofed by clients going through Cloudflare. In production,
-// requests arriving without this header are rejected fail-closed, which closes
-// the X-Forwarded-For rotation attack that was possible via the old fallback path.
+// edge and cannot be spoofed by clients going through Cloudflare. The trusted
+// ingress also adds x-euler-edge-origin-secret and strips/overwrites incoming
+// CF-* forwarding headers before the request reaches the origin.
 //
-// Residual limitation: an attacker who knows the origin IP and bypasses Cloudflare
-// can still manually set CF-Connecting-IP with rotating values. Closing that fully
-// requires network-level enforcement (allowlisting Cloudflare's IP ranges at the
-// origin firewall).
+// In production, requests missing either CF-Connecting-IP or the trusted ingress
+// secret are rejected fail-closed. This keeps CF-Connecting-IP usable as the
+// per-client identity only after the immediate edge/origin path is verified.
 //
 // In dev and stg, Cloudflare is not always in the request path, so the CF
 // requirement is not enforced and X-Forwarded-For / socket is used instead.
@@ -33,6 +35,20 @@ interface RateLimiterConfig {
 // Remaining known limitation:
 // - In-memory state is per-process. If Nitro runs multiple workers the
 //   effective limit is multiplied by the worker count.
+
+function assertProductionIngressTrusted(event: H3Event): void {
+  const cfIp = event.node.req.headers['cf-connecting-ip']
+  const hasCfIp = typeof cfIp === 'string' && !!cfIp.trim()
+  if (!hasCfIp) {
+    logger.warn({ ctx: 'rate-limit' }, 'blocked: CF-Connecting-IP absent, request bypassed Cloudflare')
+    throw createError({ statusCode: 403, statusMessage: 'Forbidden' })
+  }
+
+  if (!isTrustedIngressRequest(event)) {
+    logger.warn({ ctx: 'rate-limit' }, 'blocked: trusted ingress secret absent or invalid')
+    throw createError({ statusCode: 403, statusMessage: 'Forbidden' })
+  }
+}
 
 /**
  * Extract the client IP from an H3 event.
@@ -77,20 +93,15 @@ export function createRateLimiter(config: RateLimiterConfig) {
     /**
      * Consume `cost` units from the client's rate-limit budget.
      * Throws a 429 error when the budget is exceeded.
-     * In production, throws 403 if the request did not arrive via Cloudflare.
+     * In production, throws 403 if the request did not arrive via trusted ingress.
      */
     consume(event: H3Event, cost = 1): void {
-      // In production, CF-Connecting-IP must be present. Requests that arrive
-      // without it bypassed Cloudflare entirely — reject them fail-closed.
-      // Outside production (stg, preview, dev) Cloudflare may not be in the
-      // path, so the check is skipped.
-      const cfIp = event.node.req.headers['cf-connecting-ip']
-      // Fail-closed in production when CF-Connecting-IP is absent.
-      // stg and dev are exempt: they don't always run behind Cloudflare.
-      const hasCfIp = typeof cfIp === 'string' && !!cfIp.trim()
-      if (!hasCfIp && process.env.DOPPLER_ENVIRONMENT === 'prd') {
-        logger.warn({ ctx: 'rate-limit' }, 'blocked: CF-Connecting-IP absent, request bypassed Cloudflare')
-        throw createError({ statusCode: 403, statusMessage: 'Forbidden' })
+      if (isInternalRequest(event)) {
+        return
+      }
+
+      if (isProductionRuntime()) {
+        assertProductionIngressTrusted(event)
       }
 
       const ip = getClientIp(event)

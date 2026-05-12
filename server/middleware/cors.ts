@@ -1,12 +1,15 @@
 import { createError, getRequestURL, setResponseHeader, sendNoContent } from 'h3'
+import { isDevelopmentRuntime, isProductionRuntime } from '~/server/utils/deploy-env'
+import { isInternalRequest } from '~/server/utils/internal-headers'
 import { logger } from '~/server/utils/logger'
+import { isTrustedIngressRequest } from '~/server/utils/trusted-ingress'
 
 function parseAllowedOrigins(): Set<string> {
   // CORS_ALLOWED_ORIGINS is the dedicated CORS var (comma-separated).
   // Falls back to NUXT_PUBLIC_APP_URL (single origin used by Reown/AppKit).
   const corsOrigins = process.env.CORS_ALLOWED_ORIGINS?.trim()
   const appUrl = process.env.NUXT_PUBLIC_APP_URL?.trim()
-  const isDev = process.env.DOPPLER_ENVIRONMENT === 'dev'
+  const isDev = isDevelopmentRuntime()
 
   const origins = new Set<string>()
 
@@ -48,13 +51,18 @@ export default defineEventHandler((event) => {
   // set by their edge network and cannot be modified by clients.
   delete event.node.req.headers['x-country-code']
 
-  const cfCountry = (event.node.req.headers['cf-ipcountry'] as string | undefined)?.toUpperCase()
+  const isProduction = isProductionRuntime()
+  const isInternal = isInternalRequest(event)
+  const canTrustCfHeaders = !isProduction || isTrustedIngressRequest(event)
+  const cfCountry = canTrustCfHeaders
+    ? (event.node.req.headers['cf-ipcountry'] as string | undefined)?.toUpperCase()
+    : undefined
   let country = (cfCountry && /^[A-Z]{2}$/.test(cfCountry) && cfCountry !== 'XX') ? cfCountry : undefined
 
   // When Cloudflare is not in the request path (local dev, PR previews, etc.)
-  // cf-ipcountry is never set. Mirror geo-gate.ts: use DEV_GEO_COUNTRY as a
-  // fallback regardless of environment so x-country-code is set in the response.
-  if (!country) {
+  // cf-ipcountry is never set. Mirror geo-gate.ts: use DEV_GEO_COUNTRY outside
+  // production so x-country-code is set in the response.
+  if (!country && !isProduction) {
     const devCountry = process.env.DEV_GEO_COUNTRY?.toUpperCase()
     if (devCountry && /^[A-Z]{2}$/.test(devCountry) && devCountry !== 'XX') {
       country = devCountry
@@ -64,7 +72,7 @@ export default defineEventHandler((event) => {
   if (country) {
     setResponseHeader(event, 'x-country-code', country)
   }
-  else if (process.env.DOPPLER_ENVIRONMENT === 'dev') {
+  else if (isDevelopmentRuntime()) {
     // No DEV_GEO_COUNTRY set — send a placeholder so the client doesn't fail-closed.
     // '--' is not a real country code so no geo-blocks will trigger.
     setResponseHeader(event, 'x-country-code', '--')
@@ -79,6 +87,14 @@ export default defineEventHandler((event) => {
   // Always set Vary: Origin so CDNs/proxies don't serve a cached
   // response (including preflights) for one origin to another.
   setResponseHeader(event, 'Vary', 'Origin')
+
+  if (isProduction && !isInternal && !isTrustedIngressRequest(event)) {
+    logger.warn(
+      { ctx: 'cors', path: url.pathname },
+      'blocked: trusted ingress secret absent or invalid',
+    )
+    throw createError({ statusCode: 403, statusMessage: 'Forbidden' })
+  }
 
   // Endpoints under /api/public/ are intentionally public.
   if (url.pathname.startsWith('/api/public/')) {
@@ -97,7 +113,7 @@ export default defineEventHandler((event) => {
   if (origin && allowedOrigins.has(origin)) {
     setResponseHeader(event, 'Access-Control-Allow-Origin', origin)
   }
-  else if (origin && process.env.DOPPLER_ENVIRONMENT !== 'dev') {
+  else if (origin && !isDevelopmentRuntime()) {
     if (allowedOrigins.size > 0) {
       logger.warn({ ctx: 'cors', origin }, 'rejected origin not in allow list')
     }

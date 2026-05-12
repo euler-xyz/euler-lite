@@ -327,7 +327,7 @@ The Nuxt server layer (`server/api/`) proxies requests to external services (RPC
 | **Body size limits** (`server/middleware/body-limit.ts`) | Caps request payloads (1 MB RPC, 2 MB Tenderly) |
 | **Geo-blocking** (`server/middleware/geo-gate.ts`) | Blocks sanctioned countries via Cloudflare `CF-IPCountry`; fails closed (HTTP 451) if country is undetermined in prod |
 | **RPC method whitelist** (`server/api/rpc/[chainId].ts`) | Only 15 safe read-only methods are proxied |
-| **Rate limiting** (`server/utils/rate-limit.ts`) | Per-IP cost-based budgets (see below); fails closed (HTTP 403) if `CF-Connecting-IP` is absent in prod |
+| **Rate limiting** (`server/utils/rate-limit.ts`) | Per-IP cost-based budgets (see below); fails closed (HTTP 403) if `CF-Connecting-IP` or the trusted-ingress marker is absent in prod |
 | **Swap verifier validation** (`utils/swap-validation.ts`) | Validates swap verifier addresses against known config |
 
 #### Rate Limiting
@@ -349,14 +349,19 @@ The app includes a built-in per-IP rate limiter as a defense-in-depth measure. D
 
 **Production deployments must be behind Cloudflare.** This is a hard requirement, not a recommendation — two independent server features depend on it:
 
-1. **Geo-gate** (`server/middleware/geo-gate.ts`) reads `CF-IPCountry` to enforce sanctioned-country blocks. Without Cloudflare, the country cannot be determined and all API requests are rejected with HTTP 451.
-2. **Rate limiter** (`server/utils/rate-limit.ts`) uses `CF-Connecting-IP` as the trusted client IP. Without Cloudflare, `CF-Connecting-IP` is absent and all API requests are rejected with HTTP 403.
+1. **Trusted ingress marker** (`server/utils/trusted-ingress.ts`) verifies that traffic reached the origin through the expected edge path before Cloudflare forwarding headers are trusted.
+2. **Geo-gate** (`server/middleware/geo-gate.ts`) reads `CF-IPCountry` to enforce sanctioned-country blocks. Without Cloudflare, the country cannot be determined and all API requests are rejected with HTTP 451.
+3. **Rate limiter** (`server/utils/rate-limit.ts`) uses `CF-Connecting-IP` as the trusted client IP. Without Cloudflare, `CF-Connecting-IP` is absent and all API requests are rejected with HTTP 403.
+
+The trusted ingress must add `x-euler-edge-origin-secret` with `EDGE_ORIGIN_SECRET`, and strip or overwrite client-supplied `CF-*` forwarding headers plus `x-euler-internal-request`.
+
+Production health checks that hit `/api/*` must use the same trusted path. If a platform health check calls an API route such as `/api/tenderly/status` directly at origin, it must either pass through trusted ingress or include the trusted ingress marker; otherwise it fails closed with HTTP 403.
 
 Bypass behaviour per environment:
 
 | Environment | Geo-gate | Rate limiter |
 |---|---|---|
-| `prd` | CF required; fail-closed (HTTP 451) if absent. `DEV_GEO_COUNTRY` bypasses fail-closed if set. | CF required; fail-closed (HTTP 403) if absent. |
+| `prd` | Trusted ingress and CF required; fail-closed (HTTP 403/451) if absent. `DEV_GEO_COUNTRY` is ignored. | Trusted ingress and CF required; fail-closed (HTTP 403) if absent. |
 | `stg` | CF required; fail-closed (HTTP 451) if absent. `DEV_GEO_COUNTRY` bypasses fail-closed if set. | CF **not** required; falls back to `X-Forwarded-For`. |
 | `dev` | CF not required; falls back to `DEV_GEO_COUNTRY`, then allows through if unset. | CF not required; falls back to `X-Forwarded-For`. |
 
