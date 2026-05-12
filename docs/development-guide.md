@@ -54,7 +54,7 @@ npm run typecheck     # Type-check the project
 
 Configuration is split into two mechanisms:
 
-1. **`useEnvConfig()`** (`composables/useEnvConfig.ts`) — API URLs, Pyth, Reown, wallet screening. Injected at runtime via `server/plugins/app-config.ts` into `window.__APP_CONFIG__`. Accepts both plain names (`EULER_API_URL`) and Doppler-prefixed names (`NUXT_PUBLIC_EULER_API_URL`).
+1. **`useEnvConfig()`** (`composables/useEnvConfig.ts`) — API URLs, Pyth, Reown, wallet screening. Injected at runtime via `server/plugins/app-config.ts` into `window.__APP_CONFIG__`. Accepts both plain names (`V3_API_URL`, `EULER_API_URL`) and Doppler-prefixed names (`NUXT_PUBLIC_V3_API_URL`, `NUXT_PUBLIC_EULER_API_URL`).
 
 2. **Nuxt `runtimeConfig`** (`useDeployConfig()`) — branding, social links, feature flags. Set via `NUXT_PUBLIC_CONFIG_*` env vars. Includes `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL`, `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL`, and `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` for configuring upstream data sources (GitHub or S3/CDN). All three are fetched through server-side proxy endpoints with 5-minute caching — see [Server-Side Data Proxies](#server-side-data-proxies) below.
 
@@ -73,7 +73,7 @@ External metadata (contract addresses, labels, oracle checks) is fetched through
 | `GET /api/euler-chains` | `EulerChains.json` from euler-interfaces | 5 min | `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` |
 | `GET /api/labels/:file?chainId=X` | `{chainId}/{file}` from euler-labels | 5 min | `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` |
 | `GET /api/oracle-adapter?chainId=X&address=0x...` | Per-adapter JSON from oracle-checks | 5 min | `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` |
-| `GET /api/token-list?chainId=X` | Euler API + Uniswap + DefiLlama + Merkl reward-tokens | 5 min | `EULER_API_URL`, `NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL`, `NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL` |
+| `GET /api/token-list?chainId=X` | Euler API + Uniswap + DefiLlama + Merkl reward-tokens | 5 min | `V3_API_URL`, `EULER_API_URL`, `NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL`, `NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL` |
 | `GET /api/intrinsic-apy?chainId=X` | Every intrinsic-APY source for chain as `{ [addr]: info }` | 5 min (per upstream) | Provider-specific upstreams (DefiLlama, Pendle, Securitize, etc.) |
 | `GET /api/vaults?chainId=X` | Pre-computed chain vault snapshot | 10 min (safety floor) | — |
 | `GET /api/pyth/updates?ids[]=...` | Pyth Hermes (`/v2/updates/price/latest`) | No cache | `PYTH_HERMES_URL` (server-only) |

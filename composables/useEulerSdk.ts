@@ -23,11 +23,14 @@ const cleanUrl = (value: string | undefined) => {
 
 const buildSdkStaticConfig = () => {
   const rc = getPublicRuntimeConfig()
+  const envConfig = useEnvConfig()
   const { enableMerkl, enableIncentra, enableFuul } = useDeployConfig()
   const deploymentsUrl = cleanUrl(rc.configEulerChainsUrl)
   const labelsBaseUrl = cleanUrl(rc.configLabelsBaseUrl)
   const oracleChecksBaseUrl = cleanUrl(rc.configOracleChecksBaseUrl)
+  const v3ApiUrl = cleanUrl(envConfig.v3ApiUrl)
   const config: EulerSDKConfig = {
+    ...(v3ApiUrl ? { v3ApiUrl, tokenlistApiBaseUrl: v3ApiUrl } : {}),
     ...(deploymentsUrl ? { deploymentsUrl } : {}),
     ...(labelsBaseUrl ? { eulerLabelsBaseUrl: labelsBaseUrl } : {}),
     ...(oracleChecksBaseUrl ? { oracleAdaptersBaseUrl: oracleChecksBaseUrl } : {}),

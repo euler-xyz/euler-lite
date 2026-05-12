@@ -40,6 +40,7 @@ function readAppConfig() {
     appKitProjectId: env('APPKIT_PROJECT_ID', 'NUXT_PUBLIC_APP_KIT_PROJECT_ID'),
     appUrl: env('NUXT_PUBLIC_APP_URL'),
     eulerApiUrl: env('EULER_API_URL', 'NUXT_PUBLIC_EULER_API_URL'),
+    v3ApiUrl: env('V3_API_URL', 'EULER_SDK_V3_API_URL', 'NUXT_PUBLIC_V3_API_URL', 'EULER_API_URL', 'NUXT_PUBLIC_EULER_API_URL'),
     swapApiUrl: env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL'),
   }
 }

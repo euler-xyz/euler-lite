@@ -9,7 +9,7 @@ import { formatUnits, getAddress } from 'viem'
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..')
 const DEFAULT_DIFF = 'artifacts/parity/2026-05-11T12-37-06-444Z/diff.json'
-const DEFAULT_V3_ENDPOINT = 'https://v3.eul.dev'
+const DEFAULT_V3_ENDPOINT = 'https://v3.euler.finance'
 const DEFAULT_RPC_URLS = {
   1: 'https://ethereum-rpc.publicnode.com',
 }
