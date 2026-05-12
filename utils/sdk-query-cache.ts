@@ -45,9 +45,10 @@ export const sdkBuildQuery: BuildQueryFn = (
   queryName: string,
   fn,
   _target: object,
+  context,
 ) => {
   const wrapped = (async (...args: Parameters<typeof fn>) => {
-    const serializedArgs = serializeQueryArgs(args)
+    const serializedArgs = context?.getCacheKey(args) ?? serializeQueryArgs(args)
     if (serializedArgs === null) {
       throw new TypeError(`SDK query arguments for ${queryName} are not serializable`)
     }
