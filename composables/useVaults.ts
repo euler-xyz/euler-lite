@@ -936,27 +936,29 @@ const getBorrowVaultPair = async (
 }
 
 export const useVaults = () => {
-  // Build the shared `VerificationLabels` shape from the reactive labels
-  // state. Constructed per call so it always reflects the latest entities
-  // map; both isVaultGovernorVerified and isEarnVaultOwnerVerified delegate
-  // to the rule in entities/vault/governor-verification.ts.
-  const buildVerificationLabels = (): VerificationLabels => {
-    const { entities } = useEulerLabels()
-    return {
-      entitiesByKey: entities,
-      getDeclaredEntityKeys: (addr) => {
-        const product = getProductByVault(addr)
-        if (!product.name) return undefined
-        return Array.isArray(product.entity) ? product.entity : [product.entity].filter(Boolean)
-      },
-    }
+  // Build the shared `VerificationLabels` shape once per useVaults() call.
+  // The closures read live from the reactive labels store, so the rule
+  // always sees current entities/products without rebuilding the shape on
+  // every call. Both isVaultGovernorVerified and isEarnVaultOwnerVerified
+  // delegate to entities/vault/governor-verification.ts.
+  const { entities } = useEulerLabels()
+  const verificationLabels: VerificationLabels = {
+    getDeclaredEntityKeys: (addr) => {
+      const product = getProductByVault(addr)
+      if (!product.name) return undefined
+      return Array.isArray(product.entity) ? product.entity : [product.entity].filter(Boolean)
+    },
+    hasEntityAddress: (key, address) => {
+      const entity = entities[key]
+      return !!entity && address in entity.addresses
+    },
   }
 
   const isVaultGovernorVerified = (vault: Vault | SecuritizeVault): boolean =>
-    ruleIsVaultGovernorVerified(vault, buildVerificationLabels())
+    ruleIsVaultGovernorVerified(vault, verificationLabels)
 
   const isEarnVaultOwnerVerified = (earnVault: EarnVault): boolean =>
-    ruleIsEarnVaultOwnerVerified(earnVault, buildVerificationLabels())
+    ruleIsEarnVaultOwnerVerified(earnVault, verificationLabels)
 
   return {
     // State

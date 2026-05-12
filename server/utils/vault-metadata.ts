@@ -1,7 +1,14 @@
-import { getAddress, type Address } from 'viem'
+import type { Address } from 'viem'
 import { createTtlCache } from './cache'
 import { fetchEscrowPerspectiveAddresses } from './escrow-perspective'
 import { INTERNAL_FETCH_HEADERS } from './internal-headers'
+import {
+  buildEntityAddressSets,
+  declaredKeysOf,
+  fetchLabels,
+  tryChecksum,
+  type EntityEntry,
+} from './labels-helpers'
 import { logger } from './logger'
 import { refreshChainVaults, vaultsCache } from './vaults-cache'
 import { getVerifiedAddressSet } from './verified-vaults'
@@ -44,11 +51,13 @@ export interface VaultMetadata {
   description: string | null
   portfolioNotice: string | null
   deprecationReason: string | null
+  /** True if the vault is listed under any product's `deprecatedVaults` (or earn-vaults `deprecated: true`). */
+  deprecated: boolean
   asset: AssetInfo | null
   entity: EntityInfo | null
 }
 
-interface ProductEntry {
+interface ProductEntryFull {
   name?: unknown
   description?: unknown
   portfolioNotice?: unknown
@@ -66,11 +75,10 @@ interface VaultOverride {
   deprecationReason?: unknown
 }
 
-interface EntityEntry {
+interface EntityEntryFull extends EntityEntry {
   name?: unknown
   logo?: unknown
   description?: unknown
-  addresses?: unknown
 }
 
 interface EarnVaultEntry {
@@ -78,6 +86,7 @@ interface EarnVaultEntry {
   description?: unknown
   portfolioNotice?: unknown
   deprecationReason?: unknown
+  deprecated?: unknown
 }
 
 interface TokenListResponse {
@@ -102,24 +111,17 @@ interface BuildContext {
   chainId: number
   verifiedSet: Set<string>
   productByVault: Map<Address, ProductDescriptor>
+  deprecatedSet: Set<Address>
   earnByAddr: Map<Address, EarnVaultEntry>
-  entities: Record<string, EntityEntry>
+  deprecatedEarnSet: Set<Address>
+  escrowAddresses: Set<Address>
+  entities: Record<string, EntityEntryFull>
   labels: VerificationLabels
   tokenLogos: Map<string, string>
 }
 
 const cache = createTtlCache<Map<string, VaultMetadata>>({ ttlMs: CACHE_TTL_MS, maxEntries: 64 })
 const inflight = new Map<number, Promise<Map<string, VaultMetadata>>>()
-
-function tryChecksum(value: unknown): Address | null {
-  if (typeof value !== 'string') return null
-  try {
-    return getAddress(value)
-  }
-  catch {
-    return null
-  }
-}
 
 function strOrNull(value: unknown): string | null {
   if (typeof value !== 'string') return null
@@ -130,37 +132,16 @@ function strOrEmpty(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
-function declaredKeysOf(rawEntity: unknown): string[] {
-  if (Array.isArray(rawEntity)) {
-    return rawEntity.filter((v): v is string => typeof v === 'string')
-  }
-  return typeof rawEntity === 'string' ? [rawEntity] : []
-}
-
-// Module-scope memo: the labels CDN base URL doesn't change at runtime.
-let cachedLabelsBaseUrl: string | null = null
 function resolveLabelsBaseUrl(): string {
-  if (cachedLabelsBaseUrl !== null) return cachedLabelsBaseUrl
   const explicit = (process.env.NUXT_PUBLIC_CONFIG_LABELS_BASE_URL || '').trim().replace(/\/+$/, '')
-  if (explicit) {
-    cachedLabelsBaseUrl = explicit
-    return cachedLabelsBaseUrl
-  }
+  if (explicit) return explicit
   const repo = process.env.NUXT_PUBLIC_CONFIG_LABELS_REPO || 'euler-xyz/euler-labels'
   const branch = process.env.NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH || 'master'
-  cachedLabelsBaseUrl = `https://raw.githubusercontent.com/${repo}/refs/heads/${branch}`
-  return cachedLabelsBaseUrl
+  return `https://raw.githubusercontent.com/${repo}/refs/heads/${branch}`
 }
 
 function entityLogoUrl(fileName: string): string {
   return `${resolveLabelsBaseUrl()}/logo/${fileName}`
-}
-
-async function fetchLabels<T>(
-  chainId: number,
-  file: 'products.json' | 'entities.json' | 'earn-vaults.json',
-): Promise<T> {
-  return await $fetch<T>(`/api/labels/${file}`, { query: { chainId }, headers: INTERNAL_FETCH_HEADERS })
 }
 
 async function fetchTokenList(chainId: number): Promise<TokenListEntry[]> {
@@ -178,8 +159,12 @@ async function loadSnapshot(chainId: number): Promise<ChainVaultsSnapshot> {
   return deserialiseSnapshot(serialised)
 }
 
-function buildProductMap(products: Record<string, ProductEntry>): Map<Address, ProductDescriptor> {
+function buildProductDescriptors(products: Record<string, ProductEntryFull>): {
+  productByVault: Map<Address, ProductDescriptor>
+  deprecatedSet: Set<Address>
+} {
   const productByVault = new Map<Address, ProductDescriptor>()
+  const deprecatedSet = new Set<Address>()
   for (const product of Object.values(products)) {
     const overrides: Record<string, VaultOverride> = {}
     if (product.vaultOverrides && typeof product.vaultOverrides === 'object') {
@@ -209,41 +194,32 @@ function buildProductMap(products: Record<string, ProductEntry>): Map<Address, P
     if (Array.isArray(product.deprecatedVaults)) {
       for (const v of product.deprecatedVaults) {
         const addr = tryChecksum(v)
-        if (addr) productByVault.set(addr, desc)
+        if (addr) {
+          productByVault.set(addr, desc)
+          deprecatedSet.add(addr)
+        }
       }
     }
   }
-  return productByVault
+  return { productByVault, deprecatedSet }
 }
 
-function buildEarnEntryMap(entries: unknown[]): Map<Address, EarnVaultEntry> {
-  const map = new Map<Address, EarnVaultEntry>()
+function buildEarnEntryMap(entries: unknown[]): {
+  earnByAddr: Map<Address, EarnVaultEntry>
+  deprecatedEarnSet: Set<Address>
+} {
+  const earnByAddr = new Map<Address, EarnVaultEntry>()
+  const deprecatedEarnSet = new Set<Address>()
   for (const entry of entries) {
     if (entry && typeof entry === 'object') {
       const obj = entry as EarnVaultEntry
       const addr = tryChecksum(obj.address)
-      if (addr) map.set(addr, obj)
+      if (!addr) continue
+      earnByAddr.set(addr, obj)
+      if (obj.deprecated === true) deprecatedEarnSet.add(addr)
     }
   }
-  return map
-}
-
-function buildEntityAddressMap(
-  entities: Record<string, EntityEntry>,
-): Record<string, { addresses: Record<string, unknown> }> {
-  const result: Record<string, { addresses: Record<string, unknown> }> = {}
-  for (const [key, entity] of Object.entries(entities)) {
-    const raw = entity.addresses
-    const addresses: Record<string, unknown> = {}
-    if (raw && typeof raw === 'object') {
-      for (const [addr, label] of Object.entries(raw as Record<string, unknown>)) {
-        const checksum = tryChecksum(addr)
-        if (checksum) addresses[checksum] = label
-      }
-    }
-    result[key] = { addresses }
-  }
-  return result
+  return { earnByAddr, deprecatedEarnSet }
 }
 
 function buildTokenLogoMap(tokens: TokenListEntry[]): Map<string, string> {
@@ -270,7 +246,7 @@ function buildAsset(asset: VaultAsset | undefined, tokenLogos: Map<string, strin
   }
 }
 
-function buildEntityInfo(entityKey: string, entities: Record<string, EntityEntry>): EntityInfo | null {
+function buildEntityInfo(entityKey: string, entities: Record<string, EntityEntryFull>): EntityInfo | null {
   const entity = entities[entityKey]
   if (!entity) return null
   const name = strOrEmpty(entity.name)
@@ -291,14 +267,27 @@ function buildEvkMetadata(
   const addr = tryChecksum(vault.address)
   if (!addr) return null
 
+  // Defensive escrow short-circuit: if an escrow address slips into the EVK
+  // list (the loader puts them in `escrowVaults`, but a future reshuffle of
+  // the snapshot could leak one), render it the same way buildEscrowMetadata
+  // would. Mirrors isVaultGovernorVerified's `vaultCategory === 'escrow'` guard.
+  if (ctx.escrowAddresses.has(addr) || ('vaultCategory' in vault && vault.vaultCategory === 'escrow')) {
+    return buildEscrowMetadata(addr, vault as Vault, ctx)
+  }
+
   const verified = ctx.verifiedSet.has(addr)
+  const deprecated = ctx.deprecatedSet.has(addr)
   const product = ctx.productByVault.get(addr)
   const override = product?.vaultOverrides[addr]
+
+  // `deprecationReason` is sourced from labels regardless of verified status:
+  // a deprecated entry is authoritative content (it tells callers why the
+  // vault was retired), and there is no risk-management implication to expose.
+  const deprecationReason = strOrNull(override?.deprecationReason) ?? product?.deprecationReason ?? null
 
   const labelName = verified ? (strOrNull(override?.name) ?? (product?.name || null)) : null
   const description = verified ? (strOrNull(override?.description) ?? product?.description ?? null) : null
   const portfolioNotice = verified ? (strOrNull(override?.portfolioNotice) ?? product?.portfolioNotice ?? null) : null
-  const deprecationReason = verified ? (strOrNull(override?.deprecationReason) ?? product?.deprecationReason ?? null) : null
 
   const entityKey = verified ? resolveGoverningEntityKey(vault, ctx.labels) : null
   const entity = entityKey ? buildEntityInfo(entityKey, ctx.entities) : null
@@ -311,6 +300,7 @@ function buildEvkMetadata(
     description,
     portfolioNotice,
     deprecationReason,
+    deprecated,
     asset: buildAsset(vault.asset, ctx.tokenLogos),
     entity,
   }
@@ -321,13 +311,15 @@ function buildEarnMetadata(vault: EarnVault, ctx: BuildContext): VaultMetadata |
   if (!addr) return null
 
   const verified = ctx.verifiedSet.has(addr)
+  const deprecated = ctx.deprecatedSet.has(addr) || ctx.deprecatedEarnSet.has(addr)
   const earnEntry = ctx.earnByAddr.get(addr)
   const product = ctx.productByVault.get(addr)
+
+  const deprecationReason = strOrNull(earnEntry?.deprecationReason) ?? product?.deprecationReason ?? null
 
   const labelName = verified ? (product?.name || null) : null
   const description = verified ? (strOrNull(earnEntry?.description) ?? product?.description ?? null) : null
   const portfolioNotice = verified ? (strOrNull(earnEntry?.portfolioNotice) ?? product?.portfolioNotice ?? null) : null
-  const deprecationReason = verified ? (strOrNull(earnEntry?.deprecationReason) ?? product?.deprecationReason ?? null) : null
 
   const entityKey = verified ? resolveEarnGoverningEntityKey(vault, ctx.labels) : null
   const entity = entityKey ? buildEntityInfo(entityKey, ctx.entities) : null
@@ -340,6 +332,7 @@ function buildEarnMetadata(vault: EarnVault, ctx: BuildContext): VaultMetadata |
     description,
     portfolioNotice,
     deprecationReason,
+    deprecated,
     asset: buildAsset(vault.asset, ctx.tokenLogos),
     entity,
   }
@@ -358,6 +351,7 @@ function buildEscrowMetadata(
     description: null,
     portfolioNotice: null,
     deprecationReason: null,
+    deprecated: false,
     asset: vault ? buildAsset(vault.asset, ctx.tokenLogos) : null,
     entity: null,
   }
@@ -365,8 +359,8 @@ function buildEscrowMetadata(
 
 async function buildChainMetadata(chainId: number): Promise<Map<string, VaultMetadata>> {
   const [products, entities, earn, escrow, snapshot, tokens] = await Promise.allSettled([
-    fetchLabels<Record<string, ProductEntry>>(chainId, 'products.json'),
-    fetchLabels<Record<string, EntityEntry>>(chainId, 'entities.json'),
+    fetchLabels<Record<string, ProductEntryFull>>(chainId, 'products.json'),
+    fetchLabels<Record<string, EntityEntryFull>>(chainId, 'entities.json'),
     fetchLabels<unknown[]>(chainId, 'earn-vaults.json'),
     fetchEscrowPerspectiveAddresses(chainId),
     loadSnapshot(chainId),
@@ -386,10 +380,10 @@ async function buildChainMetadata(chainId: number): Promise<Map<string, VaultMet
     throw new Error(`vault snapshot fetch failed: ${reason}`)
   }
 
-  const productByVault = buildProductMap(products.value ?? {})
-  const earnByAddr = earn.status === 'fulfilled' && Array.isArray(earn.value)
+  const { productByVault, deprecatedSet } = buildProductDescriptors(products.value ?? {})
+  const { earnByAddr, deprecatedEarnSet } = earn.status === 'fulfilled' && Array.isArray(earn.value)
     ? buildEarnEntryMap(earn.value)
-    : new Map<Address, EarnVaultEntry>()
+    : { earnByAddr: new Map<Address, EarnVaultEntry>(), deprecatedEarnSet: new Set<Address>() }
   if (earn.status === 'rejected') {
     logger.warn({ ctx: 'vault-metadata', chainId, err: earn.reason }, 'earn-vaults fetch failed')
   }
@@ -413,15 +407,15 @@ async function buildChainMetadata(chainId: number): Promise<Map<string, VaultMet
   }
 
   const entitiesValue = entities.value ?? {}
-  const entitiesByKey = buildEntityAddressMap(entitiesValue)
+  const entityAddresses = buildEntityAddressSets(entitiesValue)
 
   const verificationLabels: VerificationLabels = {
-    entitiesByKey,
     getDeclaredEntityKeys: (addr) => {
       const checksum = tryChecksum(addr)
       if (!checksum) return undefined
       return productByVault.get(checksum)?.entityKeys
     },
+    hasEntityAddress: (key, addr) => entityAddresses.get(key)?.has(addr) ?? false,
   }
 
   const verifiedSet = await getVerifiedAddressSet(chainId)
@@ -430,7 +424,10 @@ async function buildChainMetadata(chainId: number): Promise<Map<string, VaultMet
     chainId,
     verifiedSet,
     productByVault,
+    deprecatedSet,
     earnByAddr,
+    deprecatedEarnSet,
+    escrowAddresses,
     entities: entitiesValue,
     labels: verificationLabels,
     tokenLogos,

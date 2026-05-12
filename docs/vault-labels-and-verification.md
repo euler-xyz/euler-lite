@@ -242,7 +242,9 @@ Oracle adapter metadata is loaded lazily from the [oracle-checks](https://github
 
 ### Building the Verified Set
 
-The `useEulerLabels` composable builds a set of verified vault addresses from the labels data. A vault is considered verified if it appears in any product's `vaults` or `deprecatedVaults` array.
+The `useEulerLabels` composable builds a set of verified vault addresses from the labels data: a vault address is added if it appears in any product's `vaults` or `deprecatedVaults` array. This drives the `vault.verified` flag — a precondition for governor verification, but not the full verdict.
+
+The full "is this vault verified?" verdict (used by the UI to render markets, and by the `/api/public/is-known` endpoint) additionally requires the on-chain governor to match a declared entity address. See `entities/vault/governor-verification.ts` for the shared rule, and the "Programmatic verification lookup" section below for the public endpoint.
 
 ### How `vault.verified` Is Set
 
@@ -380,6 +382,6 @@ These labels appear in address fields across all vault overview types (EVK, Earn
 
 ## Programmatic verification lookup
 
-External consumers that only need a yes/no answer for a vault address can call the public [`GET /api/public/is-known`](./public-api.md#get-apipublicis-known) endpoint instead of loading the full label set. The endpoint merges `products.json`, `earn-vaults.json`, and the on-chain `escrowedCollateralPerspective` into a single per-chain verified set, excludes deprecated entries, and answers batches of up to 100 addresses per request.
+External consumers that only need a yes/no answer for a vault address can call the public [`GET /api/public/is-known`](./public-api.md#get-apipublicis-known) endpoint instead of loading the full label set. The endpoint merges `products.json`, `earn-vaults.json`, and the on-chain `escrowedCollateralPerspective` into a single per-chain verified set, applies the same governor / router-governor / owner verification that the client UI uses (an EVK or Securitize vault must have `governorAdmin` — and a non-zero oracle-router governor, if present — match one of its product's declared entity addresses; an Earn vault listed under a product must have `owner` match), excludes deprecated entries, and answers batches of up to 100 addresses per request. Escrow vaults from the on-chain perspective and earn entries with no product entry are trusted unconditionally.
 
 Consumers that need display metadata (resolved name, description, governing entity, asset) on top of the verification verdict can call [`GET /api/public/metadata`](./public-api.md#get-apipublicmetadata), which applies the same labels / override / verification rules the client UI uses and returns a uniform shape across EVK, Securitize, and Earn vaults.

@@ -1,4 +1,4 @@
-import { getAddress, zeroAddress } from 'viem'
+import { getAddress, zeroAddress, type Address } from 'viem'
 import { getEulerRouterGovernor } from '~/entities/oracle'
 import type { EarnVault, SecuritizeVault, Vault } from './types'
 
@@ -9,10 +9,13 @@ import type { EarnVault, SecuritizeVault, Vault } from './types'
  * (composables/useVaults.ts) and the public is-known proxy
  * (server/utils/verified-vaults.ts) drive the same rule through this shape
  * so the two paths cannot drift.
+ *
+ * Callbacks let each side back the rule with whatever data structure it
+ * already has (the client reads off the reactive labels store; the server
+ * builds Sets at cache-construction time). Addresses passed to
+ * `hasEntityAddress` are always checksummed by the rule.
  */
 export interface VerificationLabels {
-  /** entityKey → entity; lookup uses checksummed addresses on both sides. */
-  entitiesByKey: Record<string, { addresses: Record<string, unknown> }>
   /**
    * Resolves the entity keys declared for the product that owns this vault.
    * - `undefined`: vault is not in any product
@@ -20,22 +23,15 @@ export interface VerificationLabels {
    * - `[...]`: product declares these entity keys
    */
   getDeclaredEntityKeys: (vaultAddress: string) => string[] | undefined
+  /** Returns true if `address` (checksummed) is one of `entityKey`'s declared addresses. */
+  hasEntityAddress: (entityKey: string, address: Address) => boolean
 }
 
-const matchesAnyDeclaredEntity = (
-  address: string,
-  declaredKeys: string[],
-  entitiesByKey: VerificationLabels['entitiesByKey'],
-): boolean => findDeclaredEntityFor(address, declaredKeys, entitiesByKey) !== null
-
 const findDeclaredEntityFor = (
-  address: string,
+  address: Address,
   declaredKeys: string[],
-  entitiesByKey: VerificationLabels['entitiesByKey'],
-): string | null => declaredKeys.find((key) => {
-  const entity = entitiesByKey[key]
-  return !!entity && Object.keys(entity.addresses).includes(address)
-}) ?? null
+  labels: VerificationLabels,
+): string | null => declaredKeys.find(key => labels.hasEntityAddress(key, address)) ?? null
 
 export const isVaultGovernorVerified = (
   vault: Vault | SecuritizeVault,
@@ -51,14 +47,14 @@ export const isVaultGovernorVerified = (
   if (declaredKeys === undefined) return false
   if (declaredKeys.length === 0) return true
 
-  if (!matchesAnyDeclaredEntity(getAddress(vault.governorAdmin), declaredKeys, labels.entitiesByKey)) {
+  if (!findDeclaredEntityFor(getAddress(vault.governorAdmin), declaredKeys, labels)) {
     return false
   }
 
   if ('oracleDetailedInfo' in vault) {
     const routerGovernor = getEulerRouterGovernor(vault.oracleDetailedInfo)
     if (routerGovernor && routerGovernor !== zeroAddress) {
-      if (!matchesAnyDeclaredEntity(getAddress(routerGovernor), declaredKeys, labels.entitiesByKey)) {
+      if (!findDeclaredEntityFor(getAddress(routerGovernor), declaredKeys, labels)) {
         return false
       }
     }
@@ -80,7 +76,7 @@ export const isEarnVaultOwnerVerified = (
   if (declaredKeys === undefined) return true
   if (declaredKeys.length === 0) return true
 
-  return matchesAnyDeclaredEntity(getAddress(earnVault.owner), declaredKeys, labels.entitiesByKey)
+  return findDeclaredEntityFor(getAddress(earnVault.owner), declaredKeys, labels) !== null
 }
 
 /**
@@ -99,7 +95,7 @@ export const resolveGoverningEntityKey = (
   if (!vault.verified) return null
   const declaredKeys = labels.getDeclaredEntityKeys(vault.address)
   if (!declaredKeys || declaredKeys.length === 0) return null
-  return findDeclaredEntityFor(getAddress(vault.governorAdmin), declaredKeys, labels.entitiesByKey)
+  return findDeclaredEntityFor(getAddress(vault.governorAdmin), declaredKeys, labels)
 }
 
 export const resolveEarnGoverningEntityKey = (
@@ -109,5 +105,5 @@ export const resolveEarnGoverningEntityKey = (
   if (!earnVault.verified) return null
   const declaredKeys = labels.getDeclaredEntityKeys(earnVault.address)
   if (!declaredKeys || declaredKeys.length === 0) return null
-  return findDeclaredEntityFor(getAddress(earnVault.owner), declaredKeys, labels.entitiesByKey)
+  return findDeclaredEntityFor(getAddress(earnVault.owner), declaredKeys, labels)
 }

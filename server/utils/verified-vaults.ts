@@ -1,7 +1,15 @@
-import { getAddress, type Address } from 'viem'
+import type { Address } from 'viem'
 import { createTtlCache } from './cache'
 import { fetchEscrowPerspectiveAddresses } from './escrow-perspective'
-import { INTERNAL_FETCH_HEADERS } from './internal-headers'
+import {
+  buildDeprecatedEarnSet,
+  buildEntityAddressSets,
+  buildProductMaps,
+  fetchLabels,
+  tryChecksum,
+  type EntityEntry,
+  type ProductEntry,
+} from './labels-helpers'
 import { logger } from '~/server/utils/logger'
 import { refreshChainVaults, vaultsCache } from './vaults-cache'
 import {
@@ -13,123 +21,14 @@ import type { ChainVaultsSnapshot, VerificationLabels } from '~/entities/vault'
 
 const CACHE_TTL_MS = 300_000
 
-interface ProductEntry {
-  vaults?: unknown
-  deprecatedVaults?: unknown
-  entity?: unknown
-}
-
-interface EntityEntry {
-  addresses?: unknown
-}
-
-interface EarnVaultEntryObject {
-  address?: unknown
-  deprecated?: unknown
-}
-
 const cache = createTtlCache<Set<string>>({ ttlMs: CACHE_TTL_MS, maxEntries: 64 })
 const inflight = new Map<number, Promise<Set<string>>>()
-
-function tryChecksum(value: unknown): Address | null {
-  if (typeof value !== 'string') return null
-  try {
-    return getAddress(value)
-  }
-  catch {
-    return null
-  }
-}
-
-async function fetchLabels<T>(
-  chainId: number,
-  file: 'products.json' | 'entities.json' | 'earn-vaults.json',
-): Promise<T> {
-  return await $fetch<T>(`/api/labels/${file}`, { query: { chainId }, headers: INTERNAL_FETCH_HEADERS })
-}
 
 async function loadSnapshot(chainId: number): Promise<ChainVaultsSnapshot> {
   const key = String(chainId)
   const cached = vaultsCache.get(key) ?? vaultsCache.getStale(key)
   const serialised = cached ?? await refreshChainVaults(chainId)
   return deserialiseSnapshot(serialised)
-}
-
-interface ProductMaps {
-  /** address → declared entity keys for the product owning that address. Includes deprecated vaults to mirror client's `getProductByVault`. */
-  declaredKeysByVault: Map<Address, string[]>
-  /** Addresses listed under any product's `deprecatedVaults`. Used for the server's last-step deprecated-as-unknown filter. */
-  deprecatedSet: Set<Address>
-}
-
-function declaredKeysOf(rawEntity: unknown): string[] {
-  if (Array.isArray(rawEntity)) {
-    return rawEntity.filter((v): v is string => typeof v === 'string')
-  }
-  return typeof rawEntity === 'string' ? [rawEntity] : []
-}
-
-// Builds the map used by `getDeclaredEntityKeys`, plus the set of deprecated
-// addresses. Including deprecated vaults in the map mirrors the client's
-// `getProductByVault` (which checks both `vaults` and `deprecatedVaults`) so
-// the shared verification function sees identical inputs across both call
-// sites; the deprecated set is applied as a separate, server-only last step.
-function buildProductMaps(products: Record<string, ProductEntry>): ProductMaps {
-  const declaredKeysByVault = new Map<Address, string[]>()
-  const deprecatedSet = new Set<Address>()
-
-  for (const product of Object.values(products)) {
-    const keys = declaredKeysOf(product.entity)
-
-    if (Array.isArray(product.vaults)) {
-      for (const v of product.vaults) {
-        const addr = tryChecksum(v)
-        if (addr) declaredKeysByVault.set(addr, keys)
-      }
-    }
-    if (Array.isArray(product.deprecatedVaults)) {
-      for (const v of product.deprecatedVaults) {
-        const addr = tryChecksum(v)
-        if (addr) {
-          declaredKeysByVault.set(addr, keys)
-          deprecatedSet.add(addr)
-        }
-      }
-    }
-  }
-
-  return { declaredKeysByVault, deprecatedSet }
-}
-
-function buildDeprecatedEarnSet(entries: unknown[]): Set<Address> {
-  const set = new Set<Address>()
-  for (const entry of entries) {
-    if (entry && typeof entry === 'object') {
-      const obj = entry as EarnVaultEntryObject
-      if (obj.deprecated !== true) continue
-      const addr = tryChecksum(obj.address)
-      if (addr) set.add(addr)
-    }
-  }
-  return set
-}
-
-function buildEntityAddressMap(
-  entities: Record<string, EntityEntry>,
-): Record<string, { addresses: Record<string, unknown> }> {
-  const result: Record<string, { addresses: Record<string, unknown> }> = {}
-  for (const [key, entity] of Object.entries(entities)) {
-    const raw = entity.addresses
-    const addresses: Record<string, unknown> = {}
-    if (raw && typeof raw === 'object') {
-      for (const [addr, label] of Object.entries(raw)) {
-        const checksum = tryChecksum(addr)
-        if (checksum) addresses[checksum] = label
-      }
-    }
-    result[key] = { addresses }
-  }
-  return result
 }
 
 async function buildVerifiedSet(chainId: number): Promise<Set<string>> {
@@ -155,7 +54,7 @@ async function buildVerifiedSet(chainId: number): Promise<Set<string>> {
   }
 
   const { declaredKeysByVault, deprecatedSet } = buildProductMaps(products.value ?? {})
-  const entitiesByKey = buildEntityAddressMap(entities.value ?? {})
+  const entityAddresses = buildEntityAddressSets(entities.value ?? {})
 
   const deprecatedEarnSet = earn.status === 'fulfilled' && Array.isArray(earn.value)
     ? buildDeprecatedEarnSet(earn.value)
@@ -165,12 +64,12 @@ async function buildVerifiedSet(chainId: number): Promise<Set<string>> {
   }
 
   const labels: VerificationLabels = {
-    entitiesByKey,
     getDeclaredEntityKeys: (addr) => {
       const checksum = tryChecksum(addr)
       if (!checksum) return undefined
       return declaredKeysByVault.get(checksum)
     },
+    hasEntityAddress: (key, addr) => entityAddresses.get(key)?.has(addr) ?? false,
   }
 
   const result = new Set<string>()
