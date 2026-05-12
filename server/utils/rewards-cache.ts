@@ -27,6 +27,7 @@ import {
   FUUL_API_BASE_URL,
   MERKL_API_BASE_URL,
 } from '~/entities/constants'
+import type { MerklOpportunityType } from '~/entities/merkl'
 
 const CACHE_TTL_MS = 5 * 60_000
 /** Wall-clock budget for a full paginated Merkl request (all pages combined). */
@@ -38,13 +39,10 @@ const MERKL_PAGE_SIZE = 100
 // silent truncation.
 const MAX_MERKL_PAGES = 10
 
-export type MerklOpportunityType
-  = | 'EULER'
-    | 'MULTILENDBORROW'
-    | 'ERC20LOGPROCESSOR'
-    | 'EULER_BORROW_FROM_COLLATERAL'
-    | 'EULER_MULTI_BORROW_FROM_COLLATERAL'
 export type FuulProtocol = 'euler' | 'euler-looping'
+
+// Re-export so other server modules can keep importing from this file.
+export type { MerklOpportunityType }
 
 // Upstream response is unknown — server never interprets shape.
 const rewardsCache = createTtlCache<unknown>({ ttlMs: CACHE_TTL_MS, maxEntries: 500 })

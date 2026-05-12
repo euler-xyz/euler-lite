@@ -54,21 +54,14 @@ import { refreshVaultCategories } from '../utils/vault-categories-store'
 import { refreshIntrinsicApyForChain } from '../utils/intrinsic-apy'
 import {
   type FuulProtocol,
-  type MerklOpportunityType,
   refreshBrevisCampaigns,
   refreshFuulProtocol,
   refreshMerklType,
 } from '../utils/rewards-cache'
+import { MERKL_TYPES } from '~/entities/merkl'
 
 const REWARM_INTERVAL_MS = 5 * 60_000
 
-const MERKL_TYPES: MerklOpportunityType[] = [
-  'EULER',
-  'MULTILENDBORROW',
-  'ERC20LOGPROCESSOR',
-  'EULER_BORROW_FROM_COLLATERAL',
-  'EULER_MULTI_BORROW_FROM_COLLATERAL',
-]
 const FUUL_PROTOCOLS: FuulProtocol[] = ['euler', 'euler-looping']
 
 // Nitro dev mode re-imports server plugins across its double-init (Vite

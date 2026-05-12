@@ -27,25 +27,21 @@ import { reportStatus } from '~/server/utils/log'
 import { resolveChainId } from '~/server/utils/resolve-chain-id'
 import {
   type CachedEntry,
-  type MerklOpportunityType,
   readMerklType,
   refreshMerklType,
   scheduleRevalidation,
 } from '~/server/utils/rewards-cache'
+import {
+  MERKL_TYPES,
+  type MerklOpportunityType,
+  type MerklResponseKey,
+} from '~/entities/merkl'
 
 const rateLimiter = createRateLimiter({
   max: 1000,
   windowMs: 60_000,
   label: 'rewards-merkl-proxy',
 })
-
-const MERKL_TYPES: MerklOpportunityType[] = [
-  'EULER',
-  'MULTILENDBORROW',
-  'ERC20LOGPROCESSOR',
-  'EULER_BORROW_FROM_COLLATERAL',
-  'EULER_MULTI_BORROW_FROM_COLLATERAL',
-]
 
 const resolveOpportunity = async (
   chainId: number,
@@ -69,15 +65,16 @@ export default defineEventHandler(async (event) => {
     MERKL_TYPES.map(type => resolveOpportunity(chainId, type)),
   )
 
-  const euler = results[0].status === 'fulfilled' ? results[0].value : []
-  const multi = results[1].status === 'fulfilled' ? results[1].value : []
-  const erc20 = results[2].status === 'fulfilled' ? results[2].value : []
-  const borrowFromCollateral = results[3].status === 'fulfilled' ? results[3].value : []
-  const multiBorrowFromCollateral = results[4].status === 'fulfilled' ? results[4].value : []
-
-  // Log individual failures on state transition but don't fail the whole response
+  // Build the response by iterating MERKL_TYPES — the response key is derived
+  // from each type (`.toLowerCase()`), so reordering MERKL_TYPES cannot
+  // silently mis-assign payloads to keys.
+  const opportunities = {} as Record<MerklResponseKey, unknown[]>
   for (const [i, type] of MERKL_TYPES.entries()) {
     const result = results[i]
+    const key = type.toLowerCase() as MerklResponseKey
+    opportunities[key] = result.status === 'fulfilled' ? result.value : []
+
+    // Log individual failures on state transition but don't fail the whole response
     if (result.status === 'rejected') {
       const msg = result.reason instanceof Error ? result.reason.message : String(result.reason)
       reportStatus('rewards-merkl', `cold-path:${type}:${chainId}`, `failed:${msg}`,
@@ -97,18 +94,7 @@ export default defineEventHandler(async (event) => {
   // polls between warm cycles skips Nitro entirely for most hits.
   setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
 
-  return {
-    opportunities: {
-      euler,
-      multilendborrow: multi,
-      erc20logprocessor: erc20,
-      euler_borrow_from_collateral: borrowFromCollateral,
-      euler_multi_borrow_from_collateral: multiBorrowFromCollateral,
-    },
-  }
+  return { opportunities }
 })
 
-// Referenced so the warm-cache plugin can pre-populate each type without
-// re-declaring the list.
-export { MERKL_TYPES }
 export type { CachedEntry }

@@ -3,7 +3,13 @@ import type { Address } from 'viem'
 import axios from 'axios'
 
 import { merklDistributorABI } from '~/abis/merkl'
-import type { Opportunity, Reward, RewardsResponseItem } from '~/entities/merkl'
+import type {
+  MerklOpportunityType,
+  MerklResponseKey,
+  Opportunity,
+  Reward,
+  RewardsResponseItem,
+} from '~/entities/merkl'
 import type { RewardCampaign, RewardCampaignType } from '~/entities/reward-campaign'
 import { mapMerklSubType } from '~/entities/reward-campaign'
 import type { TxPlan } from '~/entities/txPlan'
@@ -54,27 +60,14 @@ let latestOpportunitiesRequestId = 0
 let latestRewardsRequestId = 0
 
 interface MerklProxyResponse {
-  opportunities: {
-    euler: Opportunity[]
-    multilendborrow: Opportunity[]
-    erc20logprocessor: Opportunity[]
-    euler_borrow_from_collateral: Opportunity[]
-    euler_multi_borrow_from_collateral: Opportunity[]
-  }
+  opportunities: Record<MerklResponseKey, Opportunity[]>
 }
 
 const MERKL_EULER_SOURCE_URL = 'https://app.merkl.xyz/?protocol=euler'
 
-type MerklOpportunityKind
-  = | 'EULER'
-    | 'ERC20LOGPROCESSOR'
-    | 'MULTILENDBORROW'
-    | 'EULER_BORROW_FROM_COLLATERAL'
-    | 'EULER_MULTI_BORROW_FROM_COLLATERAL'
-
 const merklOpportunityUrl = (
   opportunity: Opportunity,
-  type: MerklOpportunityKind,
+  type: MerklOpportunityType,
 ): string => {
   if (!opportunity.identifier) return MERKL_EULER_SOURCE_URL
 
