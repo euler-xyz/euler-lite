@@ -54,6 +54,14 @@ export type { ChainVaultsSnapshot, LoadSnapshotInput } from './loader'
 export { serialiseSnapshot, deserialiseSnapshot } from './loader-serde'
 export type { SerialisedSnapshot } from './loader-serde'
 
+// Shared governor / owner verification rule. Used by client `useVaults` and
+// the server `is-known` proxy to keep verdicts in lockstep.
+export {
+  isVaultGovernorVerified,
+  isEarnVaultOwnerVerified,
+} from './governor-verification'
+export type { VerificationLabels } from './governor-verification'
+
 // LTV ramp calculations
 export {
   getCurrentLiquidationLTV,
