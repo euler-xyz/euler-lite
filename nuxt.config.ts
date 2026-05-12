@@ -53,6 +53,10 @@ export default defineNuxtConfig({
           content: 'width=device-width, initial-scale=1, user-scalable=no',
         },
         {
+          name: 'base:app_id',
+          content: '6a032ec8f8601f8d21fe6b80',
+        },
+        {
           property: 'og:title',
           content: 'Euler Lite',
         },
