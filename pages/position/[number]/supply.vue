@@ -96,8 +96,8 @@ const form = useCollateralForm({
     })
   },
 
-  buildSwapPlan: async (quote: SwapApiQuote, { slippage, includePermit2Call }) => {
-    if (!selectedAsset.value || !form.collateralVault.value) {
+  buildSwapPlan: async (quote: SwapApiQuote, { vaultAddress, slippage, subAccount, includePermit2Call }) => {
+    if (!selectedAsset.value || !form.asset.value || !form.collateralVault.value) {
       throw new Error('No selected asset or vault')
     }
     const isNative = isNativeCurrencyAddress(selectedAsset.value.address)
@@ -109,6 +109,9 @@ const form = useCollateralForm({
     return buildSwapAndSupplyPlan({
       inputTokenAddress: (wrappedAddress || selectedAsset.value.address) as Address,
       inputAmount,
+      outputVaultAddress: vaultAddress as Address,
+      outputTokenAddress: form.asset.value.address as Address,
+      accountOut: subAccount ? (subAccount as Address) : undefined,
       quote,
       requestedSlippage: slippage,
       includePermit2Call,

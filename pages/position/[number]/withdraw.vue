@@ -95,10 +95,14 @@ const form = useCollateralForm({
   },
 
   buildSwapPlan: async (quote: SwapApiQuote, { vaultAddress, amountNano, slippage, subAccount }) => {
+    if (!selectedOutputAsset.value) {
+      throw new Error('No selected output asset')
+    }
     const hasBorrows = (form.position.value?.borrowed || 0n) > 0n
     return buildWithdrawAndSwapPlan({
       vaultAddress: vaultAddress as Address,
       assetsAmount: amountNano,
+      outputTokenAddress: selectedOutputAsset.value.address as Address,
       quote,
       requestedSlippage: slippage,
       subAccount,

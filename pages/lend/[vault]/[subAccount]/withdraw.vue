@@ -357,6 +357,8 @@ const submit = async () => {
             plan.value = await buildRedeemAndSwapPlan({
               vaultAddress: vaultAddress as Address,
               sharesAmount: sharesBalance.value,
+              assetsAmount: assetsBalance.value,
+              outputTokenAddress: selectedOutputAsset.value!.address as Address,
               quote: swapSelectedQuote.value,
               requestedSlippage: swapSlippage.value,
               subAccount: subAccount.value,
@@ -366,6 +368,7 @@ const submit = async () => {
             plan.value = await buildWithdrawAndSwapPlan({
               vaultAddress: vaultAddress as Address,
               assetsAmount: amountFixed.value.value,
+              outputTokenAddress: selectedOutputAsset.value!.address as Address,
               quote: swapSelectedQuote.value,
               requestedSlippage: swapSlippage.value,
               subAccount: subAccount.value,
@@ -428,6 +431,8 @@ const send = async () => {
         txPlan = await buildRedeemAndSwapPlan({
           vaultAddress: vaultAddress as Address,
           sharesAmount: sharesBalance.value,
+          assetsAmount: assetsBalance.value,
+          outputTokenAddress: selectedOutputAsset.value!.address as Address,
           quote,
           requestedSlippage: swapSlippage.value,
           subAccount: subAccount.value,
@@ -437,6 +442,7 @@ const send = async () => {
         txPlan = await buildWithdrawAndSwapPlan({
           vaultAddress: vaultAddress as Address,
           assetsAmount: amountFixed.value.value,
+          outputTokenAddress: selectedOutputAsset.value!.address as Address,
           quote,
           requestedSlippage: swapSlippage.value,
           subAccount: subAccount.value,

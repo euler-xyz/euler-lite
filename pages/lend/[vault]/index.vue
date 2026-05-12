@@ -387,7 +387,7 @@ const load = async () => {
 }
 
 const buildSwapSupplyPlanFromQuote = async (quote: SwapApiQuote, options: { includePermit2Call?: boolean } = {}): Promise<TxPlan> => {
-  if (!selectedAsset.value) {
+  if (!selectedAsset.value || !asset.value) {
     throw new Error('No selected asset')
   }
   const isNative = isNativeCurrencyAddress(selectedAsset.value.address)
@@ -399,6 +399,8 @@ const buildSwapSupplyPlanFromQuote = async (quote: SwapApiQuote, options: { incl
   return buildSwapAndSupplyPlan({
     inputTokenAddress: (wrappedAddress || selectedAsset.value.address) as Address,
     inputAmount,
+    outputVaultAddress: vaultAddress as Address,
+    outputTokenAddress: asset.value.address as Address,
     quote,
     requestedSlippage: swapSlippage.value,
     includePermit2Call: options.includePermit2Call,
