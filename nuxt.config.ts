@@ -168,14 +168,6 @@ export default defineNuxtConfig({
       sentryDsn: '', // set via NUXT_PUBLIC_SENTRY_DSN
     },
   },
-  ignore: [
-    '**/.parity/**',
-    '**/artifacts/**',
-    '**/.playwright-mcp/**',
-    '**/.nuxt/**',
-    '**/.output/**',
-  ],
-
   sourcemap: {
     server: false,
     client: process.env.SENTRY_AUTH_TOKEN ? 'hidden' : false,
