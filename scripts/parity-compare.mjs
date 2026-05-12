@@ -14,6 +14,8 @@ const DEFAULT_SCENARIOS = path.join(ROOT_DIR, 'tests/parity/scenarios.json')
 const DEFAULT_BASELINE_BRANCH = 'feature/parity-data-tags'
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_READY_TIMEOUT_MS = 120_000
+const DEFAULT_NETWORK_IDLE_TIMEOUT_MS = 1_000
+const DEFAULT_WORK_DIR = path.join('/tmp', 'euler-lite-parity', sanitizeFilePart(ROOT_DIR))
 
 const args = parseArgs(process.argv.slice(2))
 
@@ -69,7 +71,10 @@ async function main() {
       rateLimitRetries: config.rateLimitRetries,
       navigationRetries: config.navigationRetries,
       navigationTimeoutMs: config.navigationTimeoutMs,
+      networkIdleTimeoutMs: config.networkIdleTimeoutMs,
       scenarioFilter: config.scenarioFilter,
+      appPhased: config.appPhased,
+      workDir: config.workDir,
     })
 
     state.browser = await launchBrowser(config.headless)
@@ -78,7 +83,20 @@ async function main() {
     let candidateSnapshots = []
     let pageDiffs = []
 
-    if (config.sequential) {
+    if (config.appPhased) {
+      const result = await runScenariosAppPhased({
+        scenarios,
+        config,
+        browser: state.browser,
+        baseline: run.baseline,
+        candidate: run.candidate,
+        state,
+      })
+      baselineSnapshots = result.baseline
+      candidateSnapshots = result.candidate
+      pageDiffs = result.diffs
+    }
+    else if (config.sequential) {
       const result = await runScenariosSequentialByPage({
         scenarios,
         config,
@@ -172,11 +190,15 @@ async function buildConfig() {
     maxFollowItems: numberOrNull(valueOf('max-follow-items') || process.env.PARITY_MAX_FOLLOW_ITEMS),
     readyTimeoutMs: Number(valueOf('ready-timeout-ms') || process.env.PARITY_READY_TIMEOUT_MS || DEFAULT_READY_TIMEOUT_MS),
     waitTimeoutMs: Number(valueOf('wait-timeout-ms') || process.env.PARITY_WAIT_TIMEOUT_MS || 45_000),
+    networkIdleTimeoutMs: Number(valueOf('network-idle-timeout-ms') || process.env.PARITY_NETWORK_IDLE_TIMEOUT_MS || DEFAULT_NETWORK_IDLE_TIMEOUT_MS),
     navigationTimeoutMs: Number(valueOf('navigation-timeout-ms') || process.env.PARITY_NAVIGATION_TIMEOUT_MS || 45_000),
     navigationRetries: Number(valueOf('navigation-retries') || process.env.PARITY_NAVIGATION_RETRIES || 3),
     numericTolerance: parseNumericTolerance(valueOf('numeric-tolerance') || process.env.PARITY_NUMERIC_TOLERANCE || '1%'),
     rateLimitRetries: Number(valueOf('rate-limit-retries') || process.env.PARITY_RATE_LIMIT_RETRIES || 3),
     sequential: Boolean(args.flags.sequential || process.env.PARITY_SEQUENTIAL === '1'),
+    appPhased: Boolean(args.flags.appPhased || args.flags['app-phased'] || process.env.PARITY_APP_PHASED === '1'),
+    skipBuild: Boolean(args.flags.skipBuild || args.flags['skip-build'] || process.env.PARITY_SKIP_BUILD === '1'),
+    workDir: path.resolve(valueOf('work-dir') || process.env.PARITY_WORK_DIR || DEFAULT_WORK_DIR),
   }
 }
 
@@ -275,7 +297,7 @@ async function resolveApp(name, config) {
 
   if (!dir && name === 'baseline') {
     branch = valueOf('baseline-branch') || process.env.PARITY_BASELINE_BRANCH || DEFAULT_BASELINE_BRANCH
-    dir = await ensureBranchWorktree(branch)
+    dir = await ensureBranchWorktree(branch, config)
   }
 
   if (!dir && name === 'candidate') {
@@ -288,6 +310,7 @@ async function resolveApp(name, config) {
 
   const resolvedDir = path.resolve(dir)
   await ensureDependencies(resolvedDir, config)
+  await ensureProductionBuild(resolvedDir, config)
 
   return {
     name,
@@ -297,8 +320,21 @@ async function resolveApp(name, config) {
   }
 }
 
-async function ensureBranchWorktree(branch) {
-  const worktreeDir = path.join(ROOT_DIR, '.parity/worktrees', sanitizeFilePart(branch))
+async function ensureProductionBuild(dir, config) {
+  if (config.skipBuild) {
+    const outputServer = path.join(dir, '.output/server/index.mjs')
+    if (!existsSync(outputServer)) {
+      throw new Error('Missing production output in ' + dir + '. Run npm run build there or omit --skip-build.')
+    }
+    return
+  }
+
+  console.log('[parity-compare] Building production app in ' + dir)
+  await runCommand(npmCommand(), ['run', 'build'], { cwd: dir })
+}
+
+async function ensureBranchWorktree(branch, config) {
+  const worktreeDir = path.join(config.workDir, 'worktrees', sanitizeFilePart(branch))
   await fs.mkdir(path.dirname(worktreeDir), { recursive: true })
 
   if (!existsSync(worktreeDir)) {
@@ -341,8 +377,8 @@ async function startOrAttach(app, config) {
   const port = await findFreePort(config.host, startPort)
   const baseUrl = 'http://' + config.host + ':' + port
 
-  console.log('[parity-compare] Starting ' + app.name + ' app in ' + app.dir + ' on ' + baseUrl)
-  const serverProcess = startDevServer(app.dir, config.host, port)
+  console.log('[parity-compare] Starting ' + app.name + ' production app in ' + app.dir + ' on ' + baseUrl)
+  const serverProcess = startProductionServer(app.dir, config.host, port)
   await waitForHttp(baseUrl, config.readyTimeoutMs, serverProcess)
 
   return {
@@ -369,6 +405,7 @@ async function runScenario({ scenario, config, browser, baseline, candidate }) {
       pathName: scenario.path,
       waitFor: scenario.waitFor,
       waitTimeoutMs: config.waitTimeoutMs,
+      networkIdleTimeoutMs: config.networkIdleTimeoutMs,
       keepPage: true,
     })
     const candidatePageResult = await openAndCapture({
@@ -379,6 +416,7 @@ async function runScenario({ scenario, config, browser, baseline, candidate }) {
       pathName: scenario.path,
       waitFor: scenario.waitFor,
       waitTimeoutMs: config.waitTimeoutMs,
+      networkIdleTimeoutMs: config.networkIdleTimeoutMs,
       keepPage: true,
     })
 
@@ -406,6 +444,7 @@ async function runScenario({ scenario, config, browser, baseline, candidate }) {
           pathName: detailPath,
           waitFor: follow.waitFor || scenario.waitFor,
           waitTimeoutMs: config.waitTimeoutMs,
+          networkIdleTimeoutMs: config.networkIdleTimeoutMs,
         })
         const candidateDetail = await openAndCapture({
           app: candidate,
@@ -415,6 +454,7 @@ async function runScenario({ scenario, config, browser, baseline, candidate }) {
           pathName: detailPath,
           waitFor: follow.waitFor || scenario.waitFor,
           waitTimeoutMs: config.waitTimeoutMs,
+          networkIdleTimeoutMs: config.networkIdleTimeoutMs,
         })
 
         baselineSnapshots.push(baseDetail.snapshot)
@@ -547,23 +587,190 @@ async function runScenariosSequentialByPage({ scenarios, config, browser, baseli
   }
 }
 
-async function capturePlanAndFollowPlans({ appDefinition, app: startedApp = null, config, browser, plan, follows, state }) {
+async function runScenariosAppPhased({ scenarios, config, browser, baseline, candidate, state }) {
+  const baselineSnapshots = []
+  const candidateSnapshots = []
+  const diffs = []
+  const candidateQueue = []
+
+  const baselineApp = await startOrAttach(baseline, config)
+  state.apps = [baselineApp]
+  const baselineRuntime = await createAppPhaseRuntime(browser, scenarios[0])
+
+  try {
+    for (const scenario of scenarios) {
+      console.log('[parity-compare] Running ' + scenario.id + ' baseline phase')
+      const mainPlan = {
+        pageId: scenario.id,
+        scenario,
+        pathName: scenario.path,
+        waitFor: scenario.waitFor,
+      }
+      const baselineResult = await capturePlanAndFollowPlans({
+        appDefinition: baseline,
+        app: baselineApp,
+        config,
+        browser,
+        runtime: baselineRuntime,
+        plan: mainPlan,
+        follows: scenario.follow || [],
+        state,
+      })
+
+      baselineSnapshots.push(baselineResult.snapshot)
+      candidateQueue.push({
+        type: 'page',
+        plan: mainPlan,
+        baselineSnapshot: baselineResult.snapshot,
+      })
+
+      for (const baselineModal of baselineResult.modalPlans) {
+        baselineSnapshots.push(baselineModal.snapshot)
+        candidateQueue.push({
+          type: 'modal',
+          plan: baselineModal,
+          baselineSnapshot: baselineModal.snapshot,
+        })
+      }
+
+      for (const followPlan of baselineResult.followPlans) {
+        const baselineDetail = await capturePlanWithModalsSequential({
+          appDefinition: baseline,
+          app: baselineApp,
+          config,
+          browser,
+          runtime: baselineRuntime,
+          plan: followPlan,
+          state,
+        })
+
+        baselineSnapshots.push(baselineDetail.snapshot)
+        candidateQueue.push({
+          type: 'page',
+          plan: followPlan,
+          baselineSnapshot: baselineDetail.snapshot,
+        })
+
+        for (const baselineModal of baselineDetail.modalPlans) {
+          baselineSnapshots.push(baselineModal.snapshot)
+          candidateQueue.push({
+            type: 'modal',
+            plan: baselineModal,
+            baselineSnapshot: baselineModal.snapshot,
+          })
+        }
+      }
+    }
+  }
+  finally {
+    await closeAppPhaseRuntime(baselineRuntime)
+    await stopServer(baselineApp.serverProcess)
+    state.apps = []
+  }
+
+  const candidateApp = await startOrAttach(candidate, config)
+  state.apps = [candidateApp]
+  const candidateRuntime = await createAppPhaseRuntime(browser, candidateQueue[0]?.plan?.scenario || scenarios[0])
+
+  try {
+    console.log('[parity-compare] Running candidate phase: ' + candidateQueue.length + ' page/modal captures')
+    for (const item of candidateQueue) {
+      const candidateSnapshot = item.type === 'modal'
+        ? await captureModalPlanSequential({
+            appDefinition: candidate,
+            app: candidateApp,
+            config,
+            browser,
+            runtime: candidateRuntime,
+            plan: item.plan,
+            state,
+          })
+        : await capturePlanSequential({
+            appDefinition: candidate,
+            app: candidateApp,
+            config,
+            browser,
+            runtime: candidateRuntime,
+            plan: item.plan,
+            state,
+          })
+
+      candidateSnapshots.push(candidateSnapshot)
+      diffs.push(compareSnapshots(item.baselineSnapshot, candidateSnapshot, config))
+    }
+  }
+  finally {
+    await closeAppPhaseRuntime(candidateRuntime)
+    await stopServer(candidateApp.serverProcess)
+    state.apps = []
+  }
+
+  return {
+    baseline: baselineSnapshots,
+    candidate: candidateSnapshots,
+    diffs,
+  }
+}
+
+async function createAppPhaseRuntime(browser, scenario) {
+  const context = await createContext(browser, scenario || {})
+  return {
+    context,
+    page: await context.newPage(),
+    localStorageKeys: new Set(Object.keys(scenarioLocalStorage(scenario || {}))),
+  }
+}
+
+async function closeAppPhaseRuntime(runtime) {
+  await runtime?.page?.close().catch(() => {})
+  await runtime?.context?.close().catch(() => {})
+}
+
+async function prepareRuntimeForScenario(runtime, scenario) {
+  if (!runtime?.page) return
+
+  const nextStorage = scenarioLocalStorage(scenario)
+  const nextKeys = new Set(Object.keys(nextStorage))
+  const keysToRemove = [...runtime.localStorageKeys].filter(key => !nextKeys.has(key))
+
+  if (keysToRemove.length || nextKeys.size) {
+    await runtime.page.evaluate(
+      ({ remove, set }) => {
+        for (const key of remove) window.localStorage.removeItem(key)
+        for (const [key, value] of Object.entries(set)) window.localStorage.setItem(key, String(value))
+      },
+      { remove: keysToRemove, set: nextStorage },
+    ).catch(() => {})
+  }
+
+  runtime.localStorageKeys = nextKeys
+}
+
+function scenarioLocalStorage(scenario) {
+  return scenario?.localStorage || scenario?.defaults?.localStorage || {}
+}
+
+async function capturePlanAndFollowPlans({ appDefinition, app: startedApp = null, config, browser, runtime = null, plan, follows, state }) {
   const ownsApp = !startedApp
   const app = startedApp || await startOrAttach(appDefinition, config)
   if (ownsApp) state.apps = [app]
-  const context = await createContext(browser, plan.scenario)
+  const ownsRuntime = !runtime
+  const activeRuntime = runtime || await createAppPhaseRuntime(browser, plan.scenario)
   let pageResult = null
 
   try {
+    await prepareRuntimeForScenario(activeRuntime, plan.scenario)
     console.log('[parity-compare] Capturing ' + app.name + ' ' + plan.pageId)
     pageResult = await openAndCapture({
       app,
-      context,
+      context: activeRuntime.context,
+      page: activeRuntime.page,
       scenario: plan.scenario,
       pageId: plan.pageId,
       pathName: plan.pathName,
       waitFor: plan.waitFor,
       waitTimeoutMs: config.waitTimeoutMs,
+      networkIdleTimeoutMs: config.networkIdleTimeoutMs,
       keepPage: true,
     })
 
@@ -596,6 +803,7 @@ async function capturePlanAndFollowPlans({ appDefinition, app: startedApp = null
       pathName: plan.pathName,
       appName: app.name,
       waitTimeoutMs: config.waitTimeoutMs,
+      networkIdleTimeoutMs: config.networkIdleTimeoutMs,
     })
 
     return {
@@ -605,8 +813,7 @@ async function capturePlanAndFollowPlans({ appDefinition, app: startedApp = null
     }
   }
   finally {
-    await pageResult?.page?.close().catch(() => {})
-    await context.close()
+    if (ownsRuntime) await closeAppPhaseRuntime(activeRuntime)
     if (ownsApp) {
       await stopServer(app.serverProcess)
       state.apps = []
@@ -614,23 +821,27 @@ async function capturePlanAndFollowPlans({ appDefinition, app: startedApp = null
   }
 }
 
-async function capturePlanWithModalsSequential({ appDefinition, app: startedApp = null, config, browser, plan, state }) {
+async function capturePlanWithModalsSequential({ appDefinition, app: startedApp = null, config, browser, runtime = null, plan, state }) {
   const ownsApp = !startedApp
   const app = startedApp || await startOrAttach(appDefinition, config)
   if (ownsApp) state.apps = [app]
-  const context = await createContext(browser, plan.scenario)
+  const ownsRuntime = !runtime
+  const activeRuntime = runtime || await createAppPhaseRuntime(browser, plan.scenario)
   let pageResult = null
 
   try {
+    await prepareRuntimeForScenario(activeRuntime, plan.scenario)
     console.log('[parity-compare] Capturing ' + app.name + ' ' + plan.pageId)
     pageResult = await openAndCapture({
       app,
-      context,
+      context: activeRuntime.context,
+      page: activeRuntime.page,
       scenario: plan.scenario,
       pageId: plan.pageId,
       pathName: plan.pathName,
       waitFor: plan.waitFor,
       waitTimeoutMs: config.waitTimeoutMs,
+      networkIdleTimeoutMs: config.networkIdleTimeoutMs,
       keepPage: true,
     })
 
@@ -643,12 +854,12 @@ async function capturePlanWithModalsSequential({ appDefinition, app: startedApp 
         pathName: plan.pathName,
         appName: app.name,
         waitTimeoutMs: config.waitTimeoutMs,
+        networkIdleTimeoutMs: config.networkIdleTimeoutMs,
       }),
     }
   }
   finally {
-    await pageResult?.page?.close().catch(() => {})
-    await context.close()
+    if (ownsRuntime) await closeAppPhaseRuntime(activeRuntime)
     if (ownsApp) {
       await stopServer(app.serverProcess)
       state.apps = []
@@ -656,28 +867,32 @@ async function capturePlanWithModalsSequential({ appDefinition, app: startedApp 
   }
 }
 
-async function capturePlanSequential({ appDefinition, app: startedApp = null, config, browser, plan, state }) {
+async function capturePlanSequential({ appDefinition, app: startedApp = null, config, browser, runtime = null, plan, state }) {
   const ownsApp = !startedApp
   const app = startedApp || await startOrAttach(appDefinition, config)
   if (ownsApp) state.apps = [app]
-  const context = await createContext(browser, plan.scenario)
+  const ownsRuntime = !runtime
+  const activeRuntime = runtime || await createAppPhaseRuntime(browser, plan.scenario)
 
   try {
+    await prepareRuntimeForScenario(activeRuntime, plan.scenario)
     console.log('[parity-compare] Capturing ' + app.name + ' ' + plan.pageId)
     const result = await openAndCapture({
       app,
-      context,
+      context: activeRuntime.context,
+      page: activeRuntime.page,
       scenario: plan.scenario,
       pageId: plan.pageId,
       pathName: plan.pathName,
       waitFor: plan.waitFor,
       waitTimeoutMs: config.waitTimeoutMs,
+      networkIdleTimeoutMs: config.networkIdleTimeoutMs,
     })
 
     return result.snapshot
   }
   finally {
-    await context.close()
+    if (ownsRuntime) await closeAppPhaseRuntime(activeRuntime)
     if (ownsApp) {
       await stopServer(app.serverProcess)
       state.apps = []
@@ -685,23 +900,27 @@ async function capturePlanSequential({ appDefinition, app: startedApp = null, co
   }
 }
 
-async function captureModalPlanSequential({ appDefinition, app: startedApp = null, config, browser, plan, state }) {
+async function captureModalPlanSequential({ appDefinition, app: startedApp = null, config, browser, runtime = null, plan, state }) {
   const ownsApp = !startedApp
   const app = startedApp || await startOrAttach(appDefinition, config)
   if (ownsApp) state.apps = [app]
-  const context = await createContext(browser, plan.scenario)
+  const ownsRuntime = !runtime
+  const activeRuntime = runtime || await createAppPhaseRuntime(browser, plan.scenario)
   let pageResult = null
 
   try {
+    await prepareRuntimeForScenario(activeRuntime, plan.scenario)
     console.log('[parity-compare] Capturing ' + app.name + ' ' + plan.pageId)
     pageResult = await openAndCapture({
       app,
-      context,
+      context: activeRuntime.context,
+      page: activeRuntime.page,
       scenario: plan.scenario,
       pageId: plan.parentPageId,
       pathName: plan.pathName,
       waitFor: plan.parentWaitFor,
       waitTimeoutMs: config.waitTimeoutMs,
+      networkIdleTimeoutMs: config.networkIdleTimeoutMs,
       keepPage: true,
     })
 
@@ -712,6 +931,7 @@ async function captureModalPlanSequential({ appDefinition, app: startedApp = nul
       pathName: plan.pathName,
       appName: app.name,
       waitTimeoutMs: config.waitTimeoutMs,
+      networkIdleTimeoutMs: config.networkIdleTimeoutMs,
       onlyModalId: plan.modalId,
     })
     return snapshots[0]?.snapshot || {
@@ -722,8 +942,7 @@ async function captureModalPlanSequential({ appDefinition, app: startedApp = nul
     }
   }
   finally {
-    await pageResult?.page?.close().catch(() => {})
-    await context.close()
+    if (ownsRuntime) await closeAppPhaseRuntime(activeRuntime)
     if (ownsApp) {
       await stopServer(app.serverProcess)
       state.apps = []
@@ -745,28 +964,43 @@ async function createContext(browser, scenario) {
   return context
 }
 
-async function openAndCapture({ app, context, scenario, pageId, pathName, waitFor, waitTimeoutMs, keepPage = false }) {
-  const page = await context.newPage()
+async function openAndCapture({
+  app,
+  context,
+  page: reusablePage = null,
+  scenario,
+  pageId,
+  pathName,
+  waitFor,
+  waitTimeoutMs,
+  networkIdleTimeoutMs = DEFAULT_NETWORK_IDLE_TIMEOUT_MS,
+  keepPage = false,
+}) {
+  const page = reusablePage || await context.newPage()
+  const ownsPage = !reusablePage
   const url = new URL(pathName, app.baseUrl)
   const consoleMessages = []
   const rateLimitResponses = []
 
-  page.on('console', (message) => {
+  const onConsole = (message) => {
     if (!['error', 'warning'].includes(message.type())) return
     consoleMessages.push({
       type: message.type(),
       text: message.text(),
       location: message.location(),
     })
-  })
+  }
 
-  page.on('response', (response) => {
+  const onResponse = (response) => {
     if (response.status() !== 429) return
     rateLimitResponses.push({
       url: response.url(),
       status: response.status(),
     })
-  })
+  }
+
+  page.on('console', onConsole)
+  page.on('response', onResponse)
 
   let waitError = null
   let navigationError = null
@@ -798,7 +1032,13 @@ async function openAndCapture({ app, context, scenario, pageId, pathName, waitFo
       }
     }
 
-    await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {})
+    const scenarioNetworkIdleTimeoutMs = scenario.networkIdleTimeoutMs ?? scenario.defaults?.networkIdleTimeoutMs
+    const effectiveNetworkIdleTimeoutMs = Number(
+      scenarioNetworkIdleTimeoutMs ?? networkIdleTimeoutMs ?? DEFAULT_NETWORK_IDLE_TIMEOUT_MS,
+    )
+    if (effectiveNetworkIdleTimeoutMs > 0) {
+      await page.waitForLoadState('networkidle', { timeout: effectiveNetworkIdleTimeoutMs }).catch(() => {})
+    }
     await page.waitForTimeout(scenario.settleMs ?? scenario.defaults?.settleMs ?? 0)
 
     if ((navigationError || rateLimitResponses.length) && attempt < maxAttempts) {
@@ -852,7 +1092,10 @@ async function openAndCapture({ app, context, scenario, pageId, pathName, waitFo
   snapshot.console = consoleMessages
   snapshot.rateLimitResponses = rateLimitResponses
 
-  if (keepPage) {
+  page.off('console', onConsole)
+  page.off('response', onResponse)
+
+  if (keepPage || !ownsPage) {
     return { page, snapshot }
   }
 
@@ -1605,13 +1848,19 @@ function parseNumericTolerance(value) {
   return parsed
 }
 
-function startDevServer(dir, host, port) {
-  const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-  const child = spawn(npmCommand, ['run', 'dev', '--', '--host', host, '--port', String(port)], {
+function npmCommand() {
+  return process.platform === 'win32' ? 'npm.cmd' : 'npm'
+}
+
+function startProductionServer(dir, host, port) {
+  const child = spawn(process.execPath, ['.output/server/index.mjs'], {
     cwd: dir,
     env: {
       ...process.env,
       BROWSER: 'none',
+      NODE_ENV: 'production',
+      NITRO_HOST: host,
+      NITRO_PORT: String(port),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -1663,7 +1912,7 @@ async function waitForHttp(url, timeoutMs, serverProcess) {
 
   while (Date.now() - startedAt < timeoutMs) {
     if (serverProcess && serverProcess.exitCode !== null) {
-      throw new Error('Dev server exited before becoming ready.')
+      throw new Error('Production server exited before becoming ready.')
     }
 
     try {
@@ -1768,24 +2017,28 @@ Usage:
 Options:
   --scenarios <file>          Scenario JSON file. Default: tests/parity/scenarios.json
   --scenario <id[,id]>        Only run selected scenarios.
-  --baseline-branch <branch>  Create/reuse .parity worktree for this branch. Default: ${DEFAULT_BASELINE_BRANCH}
+  --baseline-branch <branch>  Create/reuse a worktree for this branch. Default: ${DEFAULT_BASELINE_BRANCH}
   --baseline-dir <dir>        Start baseline app from this checkout.
   --candidate-dir <dir>       Start candidate app from this checkout. Default: current repo.
   --baseline-url <url>        Attach to a running baseline app.
   --candidate-url <url>       Attach to a running candidate app.
   --output-dir <dir>          Artifact directory. Default: artifacts/parity/<timestamp>
+  --work-dir <dir>            Worktree/scratch directory. Default: ${DEFAULT_WORK_DIR}
   --env-file <file[,file]>    Load app env from root-relative file(s). Default: .env. Use "none" to disable.
   --max-follow-items <n>      Limit list item detail pages. Default: all.
-  --ready-timeout-ms <n>      Dev server readiness timeout. Default: 120000.
+  --ready-timeout-ms <n>      Production server readiness timeout. Default: 120000.
   --wait-timeout-ms <n>       Per-selector wait timeout. Default: 45000.
+  --network-idle-timeout-ms <n> Network idle wait after selectors. Default: ${DEFAULT_NETWORK_IDLE_TIMEOUT_MS}. Use 0 to skip.
   --navigation-timeout-ms <n> Per-page navigation timeout. Default: 45000.
   --navigation-retries <n>    Retry page navigations before recording a capture error. Default: 3.
   --numeric-tolerance <n|%>   Relative tolerance for numeric values. Default: 1%.
   --rate-limit-retries <n>    Retry page captures that observe HTTP 429. Default: 3.
   --sequential                Capture baseline/candidate page-by-page to avoid two dev watchers.
+  --app-phased                Capture all baseline pages first, then all candidate pages.
   --headed                    Show browser.
   --no-fail                   Exit 0 even when diffs are found.
   --skip-install              Do not run npm ci in missing-node_modules worktrees.
+  --skip-build                Reuse existing .output production builds.
 
 Artifacts:
   baseline.json               Recorded data from baseline pages.
