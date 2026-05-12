@@ -1,10 +1,11 @@
 /**
  * Read-only proxy for Merkl opportunity (campaign) data.
  *
- * Consolidates the three opportunity types (EULER, MULTILENDBORROW,
- * ERC20LOGPROCESSOR) — each paginated internally up to 10x100 items —
- * into a single response so useMerkl() makes one proxy call per chain
- * instead of 3+ on every tick.
+ * Consolidates the Merkl opportunity types (EULER, MULTILENDBORROW,
+ * ERC20LOGPROCESSOR, EULER_BORROW_FROM_COLLATERAL,
+ * EULER_MULTI_BORROW_FROM_COLLATERAL) — each paginated internally up to
+ * 10x100 items — into a single response so useMerkl() makes one proxy
+ * call per chain instead of 5+ on every tick.
  *
  * Merkl's global `/tokens/reward` payload is NOT returned here. It's
  * a 4th source inside `/api/token-list` (see fetchMerkl there), covering
@@ -38,7 +39,13 @@ const rateLimiter = createRateLimiter({
   label: 'rewards-merkl-proxy',
 })
 
-const MERKL_TYPES: MerklOpportunityType[] = ['EULER', 'MULTILENDBORROW', 'ERC20LOGPROCESSOR']
+const MERKL_TYPES: MerklOpportunityType[] = [
+  'EULER',
+  'MULTILENDBORROW',
+  'ERC20LOGPROCESSOR',
+  'EULER_BORROW_FROM_COLLATERAL',
+  'EULER_MULTI_BORROW_FROM_COLLATERAL',
+]
 
 const resolveOpportunity = async (
   chainId: number,
@@ -58,15 +65,15 @@ export default defineEventHandler(async (event) => {
 
   const chainId = resolveChainId(event)
 
-  const results = await Promise.allSettled([
-    resolveOpportunity(chainId, 'EULER'),
-    resolveOpportunity(chainId, 'MULTILENDBORROW'),
-    resolveOpportunity(chainId, 'ERC20LOGPROCESSOR'),
-  ])
+  const results = await Promise.allSettled(
+    MERKL_TYPES.map(type => resolveOpportunity(chainId, type)),
+  )
 
   const euler = results[0].status === 'fulfilled' ? results[0].value : []
   const multi = results[1].status === 'fulfilled' ? results[1].value : []
   const erc20 = results[2].status === 'fulfilled' ? results[2].value : []
+  const borrowFromCollateral = results[3].status === 'fulfilled' ? results[3].value : []
+  const multiBorrowFromCollateral = results[4].status === 'fulfilled' ? results[4].value : []
 
   // Log individual failures on state transition but don't fail the whole response
   for (const [i, type] of MERKL_TYPES.entries()) {
@@ -81,7 +88,7 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  // Only fail if all three subtypes failed — partial data is better than none
+  // Only fail if every subtype failed — partial data is better than none
   if (results.every(r => r.status === 'rejected')) {
     throw createError({ statusCode: 502, statusMessage: 'Merkl upstream error' })
   }
@@ -95,6 +102,8 @@ export default defineEventHandler(async (event) => {
       euler,
       multilendborrow: multi,
       erc20logprocessor: erc20,
+      euler_borrow_from_collateral: borrowFromCollateral,
+      euler_multi_borrow_from_collateral: multiBorrowFromCollateral,
     },
   }
 })

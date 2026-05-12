@@ -127,6 +127,15 @@ export interface Opportunity {
           targetToken: string
         }
       }[]
+      // Used by EULER_BORROW_FROM_COLLATERAL (single entry) and
+      // EULER_MULTI_BORROW_FROM_COLLATERAL (multiple entries). Each vault
+      // pairs a borrow vault (evkAddress) with the list of collateral vaults
+      // eligible for the reward (collaterals[].tokenAddress is the EVK
+      // collateral vault address, not the underlying).
+      vaults?: {
+        evkAddress: string
+        collaterals?: { tokenAddress: string }[]
+      }[]
     }
     createdAt: string
   }[]

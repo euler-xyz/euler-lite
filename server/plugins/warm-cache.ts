@@ -17,7 +17,7 @@
  *   • Global (parallel with the chain loop): /api/euler-chains and
  *     cross-chain `all/assets.json`.
  *   • Per-chain (serialized one chain at a time): labels, token-list,
- *     intrinsic-apy, vault-categories, Merkl opportunities × 3,
+ *     intrinsic-apy, vault-categories, Merkl opportunities × 5,
  *     Brevis campaigns, Fuul × 2, refreshChainVaults(chainId). Tasks
  *     within a single chain still run in parallel.
  *
@@ -62,7 +62,13 @@ import {
 
 const REWARM_INTERVAL_MS = 5 * 60_000
 
-const MERKL_TYPES: MerklOpportunityType[] = ['EULER', 'MULTILENDBORROW', 'ERC20LOGPROCESSOR']
+const MERKL_TYPES: MerklOpportunityType[] = [
+  'EULER',
+  'MULTILENDBORROW',
+  'ERC20LOGPROCESSOR',
+  'EULER_BORROW_FROM_COLLATERAL',
+  'EULER_MULTI_BORROW_FROM_COLLATERAL',
+]
 const FUUL_PROTOCOLS: FuulProtocol[] = ['euler', 'euler-looping']
 
 // Nitro dev mode re-imports server plugins across its double-init (Vite

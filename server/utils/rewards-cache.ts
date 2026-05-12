@@ -38,7 +38,12 @@ const MERKL_PAGE_SIZE = 100
 // silent truncation.
 const MAX_MERKL_PAGES = 10
 
-export type MerklOpportunityType = 'EULER' | 'MULTILENDBORROW' | 'ERC20LOGPROCESSOR'
+export type MerklOpportunityType
+  = | 'EULER'
+    | 'MULTILENDBORROW'
+    | 'ERC20LOGPROCESSOR'
+    | 'EULER_BORROW_FROM_COLLATERAL'
+    | 'EULER_MULTI_BORROW_FROM_COLLATERAL'
 export type FuulProtocol = 'euler' | 'euler-looping'
 
 // Upstream response is unknown — server never interprets shape.
