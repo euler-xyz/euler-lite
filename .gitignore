@@ -26,5 +26,6 @@ artifacts/parity
 .env
 .env.*
 !.env.example
+.playwright-mcp
 
 *storybook.log
