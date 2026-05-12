@@ -1004,105 +1004,108 @@ async function openAndCapture({
   page.on('console', onConsole)
   page.on('response', onResponse)
 
-  let waitError = null
-  let navigationError = null
-  const navigationTimeoutMs = Number(scenario.navigationTimeoutMs || waitTimeoutMs || 45_000)
-  const maxAttempts = Math.max(
-    1,
-    Number(scenario.rateLimitRetries ?? 0) || 1,
-    Number(scenario.navigationRetries ?? 0) || 1,
-  )
+  try {
+    let waitError = null
+    let navigationError = null
+    const navigationTimeoutMs = Number(scenario.navigationTimeoutMs || waitTimeoutMs || 45_000)
+    const maxAttempts = Math.max(
+      1,
+      Number(scenario.rateLimitRetries ?? 0) || 1,
+      Number(scenario.navigationRetries ?? 0) || 1,
+    )
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    waitError = null
-    navigationError = null
-    rateLimitResponses.length = 0
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      waitError = null
+      navigationError = null
+      rateLimitResponses.length = 0
 
-    try {
-      await page.goto(url.href, { waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs })
-    }
-    catch (error) {
-      navigationError = error.message
-    }
-
-    if (!navigationError) {
       try {
-        await waitForSelectors(page, waitFor, waitTimeoutMs)
+        await page.goto(url.href, { waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs })
       }
       catch (error) {
-        waitError = error.message
+        navigationError = error.message
       }
+
+      if (!navigationError) {
+        try {
+          await waitForSelectors(page, waitFor, waitTimeoutMs)
+        }
+        catch (error) {
+          waitError = error.message
+        }
+      }
+
+      const scenarioNetworkIdleTimeoutMs = scenario.networkIdleTimeoutMs ?? scenario.defaults?.networkIdleTimeoutMs
+      const effectiveNetworkIdleTimeoutMs = Number(
+        scenarioNetworkIdleTimeoutMs ?? networkIdleTimeoutMs ?? DEFAULT_NETWORK_IDLE_TIMEOUT_MS,
+      )
+      if (effectiveNetworkIdleTimeoutMs > 0) {
+        await page.waitForLoadState('networkidle', { timeout: effectiveNetworkIdleTimeoutMs }).catch(() => {})
+      }
+      await page.waitForTimeout(scenario.settleMs ?? scenario.defaults?.settleMs ?? 0)
+
+      if ((navigationError || rateLimitResponses.length) && attempt < maxAttempts) {
+        const delay = Math.min(30_000, 1_000 * 2 ** (attempt - 1))
+        const reason = navigationError
+          ? 'navigation failed: ' + navigationError.split('\n')[0]
+          : 'HTTP 429 while capturing ' + pageId
+        console.warn('[parity-compare] ' + reason + '; backing off ' + delay + 'ms before retry ' + (attempt + 1) + '/' + maxAttempts)
+        await page.waitForTimeout(delay)
+        continue
+      }
+
+      break
     }
 
-    const scenarioNetworkIdleTimeoutMs = scenario.networkIdleTimeoutMs ?? scenario.defaults?.networkIdleTimeoutMs
-    const effectiveNetworkIdleTimeoutMs = Number(
-      scenarioNetworkIdleTimeoutMs ?? networkIdleTimeoutMs ?? DEFAULT_NETWORK_IDLE_TIMEOUT_MS,
-    )
-    if (effectiveNetworkIdleTimeoutMs > 0) {
-      await page.waitForLoadState('networkidle', { timeout: effectiveNetworkIdleTimeoutMs }).catch(() => {})
+    const missingSelectors = waitError && !navigationError
+      ? await missingWaitSelectors(page, waitFor)
+      : []
+
+    let snapshot = null
+    try {
+      snapshot = await page.evaluate(scrapePage, {
+        pageId,
+        scenarioId: scenario.id,
+        label: scenario.label || scenario.id,
+        appName: app.name,
+      })
     }
-    await page.waitForTimeout(scenario.settleMs ?? scenario.defaults?.settleMs ?? 0)
-
-    if ((navigationError || rateLimitResponses.length) && attempt < maxAttempts) {
-      const delay = Math.min(30_000, 1_000 * 2 ** (attempt - 1))
-      const reason = navigationError
-        ? 'navigation failed: ' + navigationError.split('\n')[0]
-        : 'HTTP 429 while capturing ' + pageId
-      console.warn('[parity-compare] ' + reason + '; backing off ' + delay + 'ms before retry ' + (attempt + 1) + '/' + maxAttempts)
-      await page.waitForTimeout(delay)
-      continue
+    catch (error) {
+      snapshot = createFailedSnapshot({
+        pageId,
+        scenarioId: scenario.id,
+        label: scenario.label || scenario.id,
+        appName: app.name,
+        url: page.url() || url.href,
+        pathName,
+        error: 'Scrape failed: ' + (error?.message || error),
+      })
     }
 
-    break
+    snapshot.requestedPath = pathName
+    snapshot.url = url.href
+    snapshot.path = url.pathname + url.search
+    snapshot.captureError = navigationError
+      ? 'Navigation failed after ' + maxAttempts + ' attempt(s): ' + navigationError
+      : missingSelectors.length
+        ? waitError + '\nMissing after final scrape: ' + missingSelectors.join(', ')
+        : rateLimitResponses.length
+          ? 'HTTP 429 responses observed: ' + rateLimitResponses.map(item => item.url).join(', ')
+          : snapshot.captureError || null
+    snapshot.console = consoleMessages
+    snapshot.rateLimitResponses = rateLimitResponses
+
+    if (keepPage || !ownsPage) {
+      return { page, snapshot }
+    }
+
+    await page.close()
+    return { page: null, snapshot }
   }
-
-  const missingSelectors = waitError && !navigationError
-    ? await missingWaitSelectors(page, waitFor)
-    : []
-
-  let snapshot = null
-  try {
-    snapshot = await page.evaluate(scrapePage, {
-      pageId,
-      scenarioId: scenario.id,
-      label: scenario.label || scenario.id,
-      appName: app.name,
-    })
+  finally {
+    page.off('console', onConsole)
+    page.off('response', onResponse)
   }
-  catch (error) {
-    snapshot = createFailedSnapshot({
-      pageId,
-      scenarioId: scenario.id,
-      label: scenario.label || scenario.id,
-      appName: app.name,
-      url: page.url() || url.href,
-      pathName,
-      error: 'Scrape failed: ' + (error?.message || error),
-    })
-  }
-
-  snapshot.requestedPath = pathName
-  snapshot.url = url.href
-  snapshot.path = url.pathname + url.search
-  snapshot.captureError = navigationError
-    ? 'Navigation failed after ' + maxAttempts + ' attempt(s): ' + navigationError
-    : missingSelectors.length
-      ? waitError + '\nMissing after final scrape: ' + missingSelectors.join(', ')
-      : rateLimitResponses.length
-        ? 'HTTP 429 responses observed: ' + rateLimitResponses.map(item => item.url).join(', ')
-        : snapshot.captureError || null
-  snapshot.console = consoleMessages
-  snapshot.rateLimitResponses = rateLimitResponses
-
-  page.off('console', onConsole)
-  page.off('response', onResponse)
-
-  if (keepPage || !ownsPage) {
-    return { page, snapshot }
-  }
-
-  await page.close()
-  return { page: null, snapshot }
 }
 
 function createFailedSnapshot({ pageId, scenarioId, label, appName, url, pathName, error }) {
@@ -1269,6 +1272,24 @@ function limitFollowLinks(links, follow, config) {
 
 function scrapePage(meta) {
   const normalize = value => String(value || '').replace(/\\s+/g, ' ').trim()
+  const comparableText = (element) => {
+    const ignoredNodes = Array
+      .from(element.querySelectorAll('[data-label], [data-parity-ignore], img, svg, .relative.flex.items-center.shrink-0'))
+      .map(node => ({ node, display: node.style.display }))
+
+    ignoredNodes.forEach(({ node }) => {
+      node.style.display = 'none'
+    })
+
+    try {
+      return normalize(element.innerText || element.textContent || '')
+    }
+    finally {
+      ignoredNodes.forEach(({ node, display }) => {
+        node.style.display = display
+      })
+    }
+  }
   const dataAttrs = (element) => {
     const attrs = {}
     for (const attr of Array.from(element.attributes)) {
@@ -1304,7 +1325,7 @@ function scrapePage(meta) {
       const baseKey = baseKeyFor(attrs)
       const occurrence = occurrenceByBaseKey.get(baseKey) || 0
       occurrenceByBaseKey.set(baseKey, occurrence + 1)
-      const text = normalize(element.innerText || element.textContent || '')
+      const text = comparableText(element)
       const rect = element.getBoundingClientRect()
       const hasDataValue = Object.prototype.hasOwnProperty.call(attrs, 'value')
 
@@ -2055,7 +2076,7 @@ Options:
   --navigation-retries <n>    Retry page navigations before recording a capture error. Default: 3.
   --numeric-tolerance <n|%>   Relative tolerance for numeric values. Default: 1%.
   --rate-limit-retries <n>    Retry page captures that observe HTTP 429. Default: 3.
-  --sequential                Capture baseline/candidate page-by-page to avoid two dev watchers.
+  --sequential                Capture baseline/candidate page-by-page instead of running both apps together.
   --app-phased                Capture all baseline pages first, then all candidate pages.
   --headed                    Show browser.
   --no-fail                   Exit 0 even when diffs are found.

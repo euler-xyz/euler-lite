@@ -57,6 +57,9 @@ const importUseEulerSdk = async (
     createPythPlugin: vi.fn(() => ({ name: 'pyth' })),
   }))
   vi.stubGlobal('useEulerAddresses', () => ({ allowedChainIds: chainIds }))
+  vi.stubGlobal('useEnvConfig', () => ({
+    v3ApiUrl: '',
+  }))
   vi.stubGlobal('useDeployConfig', () => ({
     enableMerkl: true,
     enableIncentra: true,
@@ -122,7 +125,7 @@ describe('useEulerSdk', () => {
         1: '/api/rpc/1',
         8453: '/api/rpc/8453',
       },
-      deploymentsUrl: 'https://example.test/EulerChains.json',
+      deploymentsUrl: '/api/euler-chains',
       eulerLabelsBaseUrl: 'https://labels.example.test',
       oracleAdaptersBaseUrl: 'https://oracles.example.test/data',
     })
@@ -152,6 +155,7 @@ describe('useEulerSdk', () => {
       rpcUrls: {
         1: '/api/rpc/1',
       },
+      deploymentsUrl: '/api/euler-chains',
     })
   })
 

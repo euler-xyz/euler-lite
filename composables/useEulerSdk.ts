@@ -21,17 +21,23 @@ const cleanUrl = (value: string | undefined) => {
   return trimmed || undefined
 }
 
+const buildAppApiPath = (path: string) => {
+  const requestUrl = import.meta.server && typeof useRequestURL === 'function'
+    ? useRequestURL()
+    : undefined
+  return `${requestUrl?.origin ?? ''}${path}`
+}
+
 const buildSdkStaticConfig = () => {
   const rc = getPublicRuntimeConfig()
   const envConfig = useEnvConfig()
   const { enableMerkl, enableIncentra, enableFuul } = useDeployConfig()
-  const deploymentsUrl = cleanUrl(rc.configEulerChainsUrl)
   const labelsBaseUrl = cleanUrl(rc.configLabelsBaseUrl)
   const oracleChecksBaseUrl = cleanUrl(rc.configOracleChecksBaseUrl)
   const v3ApiUrl = cleanUrl(envConfig.v3ApiUrl)
   const config: EulerSDKConfig = {
     ...(v3ApiUrl ? { v3ApiUrl, tokenlistApiBaseUrl: v3ApiUrl } : {}),
-    ...(deploymentsUrl ? { deploymentsUrl } : {}),
+    deploymentsUrl: buildAppApiPath('/api/euler-chains'),
     ...(labelsBaseUrl ? { eulerLabelsBaseUrl: labelsBaseUrl } : {}),
     ...(oracleChecksBaseUrl ? { oracleAdaptersBaseUrl: oracleChecksBaseUrl } : {}),
     ...(enableMerkl ? {} : { rewardsEnableMerkl: false }),
@@ -65,13 +71,6 @@ const getSdkKey = (rpcUrls: Record<number, string>, staticDataCacheKey: string) 
       .map(([chainId, rpcUrl]) => `${chainId}:${rpcUrl}`),
     staticDataCacheKey,
   ].join('|')
-
-const buildAppApiPath = (path: string) => {
-  const requestUrl = import.meta.server && typeof useRequestURL === 'function'
-    ? useRequestURL()
-    : undefined
-  return `${requestUrl?.origin ?? ''}${path}`
-}
 
 const configureAppProxies = (sdk: EulerSDK) => {
   const oracleAdapterService = sdk.oracleAdapterService as ConfigurableOracleAdapterService
