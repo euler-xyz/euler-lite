@@ -1,5 +1,5 @@
-import type { RewardCampaign } from '~/entities/reward-campaign'
-import type { RewardCampaign as SdkRewardCampaign, VaultRewardInfo } from '@eulerxyz/euler-v2-sdk'
+import type { RewardCampaign, VaultRewardInfo } from '@eulerxyz/euler-v2-sdk'
+import { rewardCampaignAprPercent } from '~/entities/reward-campaign'
 
 export const useRewardsApy = () => {
   const { settings } = useUserSettings()
@@ -23,52 +23,31 @@ export const useRewardsApy = () => {
     return vault?.rewards
   }
 
-  const isCampaignProviderEnabled = (campaign: SdkRewardCampaign): boolean => {
+  const isCampaignProviderEnabled = (campaign: RewardCampaign): boolean => {
     if (campaign.source === 'merkl') return enableMerkl
     if (campaign.source === 'brevis') return enableIncentra
     if (campaign.source === 'fuul') return enableFuul
     return false
   }
 
-  const normalizeEndTimestamp = (timestamp?: number): number => {
-    if (!timestamp) return 0
-    return timestamp > 1_000_000_000_000 ? Math.floor(timestamp / 1000) : timestamp
-  }
-
-  const toRewardCampaign = (vaultAddress: string, campaign: SdkRewardCampaign): RewardCampaign | null => {
-    if (!isCampaignProviderEnabled(campaign)) return null
-    const type = campaign.action === 'LEND'
-      ? 'euler_lend'
-      : campaign.action === 'BORROW'
-        ? 'euler_borrow'
-        : null
-    if (!type) return null
-
-    return {
-      vault: vaultAddress.toLowerCase(),
-      type,
-      apr: campaign.apr * 100,
-      provider: campaign.source,
-      endTimestamp: normalizeEndTimestamp(campaign.endTimestamp),
-      rewardToken: campaign.rewardTokenSymbol
-        ? { symbol: campaign.rewardTokenSymbol, icon: '' }
-        : undefined,
-    }
-  }
-
   const getCampaignsForVault = (vaultAddress: string): RewardCampaign[] => {
     if (!isEnabled.value) return []
     return (getVaultRewards(vaultAddress)?.campaigns ?? [])
-      .map(campaign => toRewardCampaign(vaultAddress, campaign))
-      .filter((campaign): campaign is RewardCampaign => campaign !== null)
+      .filter(isCampaignProviderEnabled)
   }
+
+  const isMatchingCollateral = (campaign: RewardCampaign, collateralAddress?: string): boolean =>
+    Boolean(
+      collateralAddress
+      && campaign.collateralAddress?.toLowerCase() === collateralAddress.toLowerCase(),
+    )
 
   const getSupplyRewardApy = (vaultAddress: string): number => {
     if (!isEnabled.value) return 0
     const campaigns = getCampaignsForVault(vaultAddress)
     return campaigns
-      .filter(c => c.type === 'euler_lend')
-      .reduce((sum, c) => sum + c.apr, 0)
+      .filter(c => c.action === 'LEND')
+      .reduce((sum, c) => sum + rewardCampaignAprPercent(c), 0)
   }
 
   const getBorrowRewardApy = (borrowVaultAddress: string, collateralAddress?: string): number => {
@@ -77,15 +56,14 @@ export const useRewardsApy = () => {
 
     let total = 0
     for (const c of campaigns) {
-      if (c.type === 'euler_borrow') {
-        total += c.apr
+      if (c.action === 'BORROW') {
+        total += rewardCampaignAprPercent(c)
       }
       else if (
-        c.type === 'euler_borrow_collateral'
-        && collateralAddress
-        && c.collateral === collateralAddress.toLowerCase()
+        c.action === 'BORROW_COLLATERAL'
+        && isMatchingCollateral(c, collateralAddress)
       ) {
-        total += c.apr
+        total += rewardCampaignAprPercent(c)
       }
     }
     return total
@@ -101,11 +79,10 @@ export const useRewardsApy = () => {
     let total = 0
     for (const c of campaigns) {
       if (
-        c.type === 'euler_looping'
-        && collateralAddress
-        && c.collateral === collateralAddress.toLowerCase()
+        c.action === 'LOOPING'
+        && isMatchingCollateral(c, collateralAddress)
       ) {
-        total += c.apr
+        total += rewardCampaignAprPercent(c)
       }
     }
     return total
@@ -137,17 +114,16 @@ export const useRewardsApy = () => {
 
   const getSupplyRewardCampaigns = (vaultAddress: string): RewardCampaign[] => {
     if (!isEnabled.value) return []
-    return getCampaignsForVault(vaultAddress).filter(c => c.type === 'euler_lend')
+    return getCampaignsForVault(vaultAddress).filter(c => c.action === 'LEND')
   }
 
   const getBorrowRewardCampaigns = (borrowVaultAddress: string, collateralAddress?: string): RewardCampaign[] => {
     if (!isEnabled.value) return []
     return getCampaignsForVault(borrowVaultAddress).filter((c) => {
-      if (c.type === 'euler_borrow') return true
+      if (c.action === 'BORROW') return true
       if (
-        c.type === 'euler_borrow_collateral'
-        && collateralAddress
-        && c.collateral === collateralAddress.toLowerCase()
+        c.action === 'BORROW_COLLATERAL'
+        && isMatchingCollateral(c, collateralAddress)
       ) return true
       return false
     })
@@ -156,9 +132,8 @@ export const useRewardsApy = () => {
   const getLoopingRewardCampaigns = (borrowVaultAddress: string, collateralAddress?: string): RewardCampaign[] => {
     if (!isEnabled.value) return []
     return getCampaignsForVault(borrowVaultAddress).filter(c =>
-      c.type === 'euler_looping'
-      && collateralAddress
-      && c.collateral === collateralAddress.toLowerCase(),
+      c.action === 'LOOPING'
+      && isMatchingCollateral(c, collateralAddress),
     )
   }
 

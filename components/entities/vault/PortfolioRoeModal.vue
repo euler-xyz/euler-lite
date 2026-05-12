@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { DateTime } from 'luxon'
 import { formatNumber } from '~/utils/string-utils'
 import type { RewardCampaign } from '~/entities/reward-campaign'
-import { PROVIDER_LABELS, PROVIDER_LOGOS } from '~/entities/reward-campaign'
+import { PROVIDER_LABELS, PROVIDER_LOGOS, rewardCampaignDisplays } from '~/entities/reward-campaign'
 
 const emits = defineEmits(['close'])
 const {
@@ -39,21 +38,7 @@ const hasLoopingCampaigns = computed(() => loopingRewardsInfo.value.length > 0)
 const hasLoopingAPY = computed(() => (loopingRewardAPY || 0) > 0)
 
 const mapCampaigns = (campaigns: RewardCampaign[] | undefined, side: string) => {
-  if (!campaigns) return []
-  const now = Math.floor(Date.now() / 1000)
-  return campaigns
-    .filter(c => c.endTimestamp > now || c.endTimestamp === 0)
-    .map(c => ({
-      id: `${side}-${c.vault}-${c.provider}-${c.type}-${c.endTimestamp}`,
-      apr: c.apr,
-      endDate: c.endTimestamp > 0 ? DateTime.fromSeconds(c.endTimestamp) : null,
-      rewardToken: c.rewardToken || { symbol: 'Unknown', icon: '' },
-      source: c.provider,
-      sourceUrl: c.sourceUrl,
-      minMultiplier: c.minMultiplier,
-      maxMultiplier: c.maxMultiplier,
-    }))
-    .sort((a, b) => a.rewardToken.symbol.localeCompare(b.rewardToken.symbol))
+  return rewardCampaignDisplays(campaigns, side)
 }
 
 const supplyRewardsInfo = computed(() => mapCampaigns(supplyCampaigns, 'supply'))

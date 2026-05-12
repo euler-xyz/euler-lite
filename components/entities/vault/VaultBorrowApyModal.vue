@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { DateTime } from 'luxon'
 import { formatNumber } from '~/utils/string-utils'
 import type { RewardCampaign } from '~/entities/reward-campaign'
-import { PROVIDER_LABELS, PROVIDER_LOGOS } from '~/entities/reward-campaign'
+import { PROVIDER_LABELS, PROVIDER_LOGOS, rewardCampaignAprPercent, rewardCampaignDisplays } from '~/entities/reward-campaign'
 import type { IntrinsicApyInfo } from '~/entities/intrinsic-apy'
 
 const emits = defineEmits(['close'])
@@ -15,7 +14,7 @@ const { borrowingAPY, intrinsicAPY, intrinsicApyInfo, campaigns } = defineProps<
 
 const rewardsTotalAPY = computed(() => {
   if (!campaigns || campaigns.length === 0) return null
-  const total = campaigns.reduce((sum, c) => sum + c.apr, 0)
+  const total = campaigns.reduce((sum, c) => sum + rewardCampaignAprPercent(c), 0)
   return total > 0 ? total : null
 })
 
@@ -24,19 +23,7 @@ const hasIntrinsicApy = computed(() => intrinsicApyValue.value > 0)
 const totalBorrowApy = computed(() => borrowingAPY + intrinsicApyValue.value - (rewardsTotalAPY.value || 0))
 
 const rewardsInfo = computed(() => {
-  if (!campaigns) return []
-  return campaigns
-    .filter(c => c.endTimestamp > Math.floor(Date.now() / 1000) || c.endTimestamp === 0)
-    .map(c => ({
-      id: `${c.vault}-${c.provider}-${c.type}-${c.endTimestamp}`,
-      apr: c.apr,
-      endDate: c.endTimestamp > 0 ? DateTime.fromSeconds(c.endTimestamp) : null,
-      rewardToken: c.rewardToken || { symbol: 'Unknown', icon: '' },
-      source: c.provider,
-      sourceUrl: c.sourceUrl,
-      isCollateralSpecific: c.type === 'euler_borrow_collateral',
-    }))
-    .sort((a, b) => a.rewardToken.symbol.localeCompare(b.rewardToken.symbol))
+  return rewardCampaignDisplays(campaigns, 'borrow')
 })
 
 const handleClose = () => {
