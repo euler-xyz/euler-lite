@@ -29,6 +29,7 @@ import {
 import { getOracleProviderLogo } from '~/entities/oracle-providers'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { truncate, formatNumber } from '~/utils/string-utils'
+import { shouldInvertOraclePrice } from '~/utils/oracle-label'
 import { useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
 
 const props = defineProps<{
@@ -54,6 +55,7 @@ const {
 } = useRewardsApy()
 const { oracleAdapters, loadAllOracleAdapters } = useEulerLabels()
 const { chainId } = useEulerAddresses()
+const { buildKnownSymbols, resolveSymbol: resolveTokenSymbol } = useTokenSymbolResolver()
 
 const hoveredCell = ref<{
   collateralAddr: string
@@ -365,7 +367,14 @@ const tooltipPriceText = computed((): string | null => {
   const key = `${ctx.view.oracle.toLowerCase()}:${ctx.view.base.toLowerCase()}:${ctx.view.quote.toLowerCase()}`
   const info = oraclePrices.value.get(key)
   if (!info?.success) return null
-  return formatNumber(info.rate, 4)
+  const symbols = buildKnownSymbols()
+  const invert = shouldInvertOraclePrice(
+    ctx.view.label?.primary,
+    resolveTokenSymbol(ctx.view.base, symbols),
+    resolveTokenSymbol(ctx.view.quote, symbols),
+  )
+  const rate = invert && info.rate > 0 ? 1 / info.rate : info.rate
+  return formatNumber(rate, 4)
 })
 
 const tooltipPriceLoading = computed(() => oraclePricesLoading.value && !oraclePrices.value.size)
