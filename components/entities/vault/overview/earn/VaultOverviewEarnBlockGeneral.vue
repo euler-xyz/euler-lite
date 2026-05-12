@@ -37,7 +37,11 @@ watchEffect(async () => {
 })
 
 const feeDisplay = computed(() => {
-  return `${compactNumber(nanoToValue(vault.performanceFee, 18) * 100, 2, 2)}%`
+  const performanceFee = Number(vault.performanceFee)
+
+  return Number.isFinite(performanceFee)
+    ? `${compactNumber(performanceFee * 100, 2, 2)}%`
+    : '-'
 })
 </script>
 
