@@ -111,7 +111,7 @@ const dragStyle = computed(() => ({
     class="flex flex-col bg-card"
     :class="[
       inline
-        ? 'relative w-full max-h-[min(70vh,560px)] rounded-8 border border-line-subtle shadow-card'
+        ? 'relative w-full max-h-[min(70vh,560px,var(--popover-available-height,100vh))] rounded-8 border border-line-subtle shadow-card'
         : 'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 min-w-[min(375px,100vw)] max-w-[600px] max-h-[85dvh] rounded-16 mobile:top-auto mobile:left-0 mobile:bottom-0 mobile:w-full mobile:min-w-full mobile:max-h-[95dvh] mobile:translate-x-0 mobile:translate-y-0 mobile:rounded-t-16 mobile:rounded-b-0',
       full && !inline ? 'min-h-[85dvh] mobile:min-h-[95dvh] min-w-[min(600px,100vw)]' : '',
     ]"
