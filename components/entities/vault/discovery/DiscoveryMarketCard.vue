@@ -150,14 +150,15 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
               Ungrouped
             </template>
             <span
-              v-if="market.metrics.hasFeatured"
+              v-if="market.metrics.hasRecentlyAdded"
               class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5"
+              title="Recently added vault"
             >
               <SvgIcon
                 name="star"
                 class="!w-14 !h-14"
               />
-              Featured
+              Recently added
             </span>
             <GovernanceLimitedBadge v-if="isGovernanceLimited" />
           </div>
@@ -230,7 +231,7 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
           <div class="flex-1 min-w-0">
             <template v-if="bestRoe.value > 0">
               <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-                Best max ROE
+                Max ROE
                 <SvgIcon
                   class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                   name="info-circle"
@@ -364,7 +365,7 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
           class="flex w-full justify-between"
         >
           <div class="text-content-tertiary text-p3 flex items-center gap-4 whitespace-nowrap">
-            Best max ROE
+            Max ROE
             <SvgIcon
               class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
               name="info-circle"

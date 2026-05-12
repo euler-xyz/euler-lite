@@ -18,6 +18,8 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 const route = useRoute()
 const { getVault } = useVaults()
 const { address } = useAccount()
+const { isSpyMode, spyAddress } = useSpyMode()
+const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const { depositPositions } = useEulerAccount()
 const { buildSwapPlan, buildSameAssetSwapPlan } = useEulerOperations()
 const { withIntrinsicSupplyApy } = useIntrinsicApy()
@@ -25,8 +27,9 @@ const { getSupplyRewardApy } = useRewardsApy()
 
 const subAccountIndex = Number(route.params.subAccount)
 const subAccount = computed(() => {
-  if (!address.value || isNaN(subAccountIndex)) return undefined
-  return getSubAccountAddress(address.value, subAccountIndex)
+  const addr = effectiveAddress.value
+  if (!addr || isNaN(subAccountIndex)) return undefined
+  return getSubAccountAddress(addr, subAccountIndex)
 })
 
 // ── Vaults ───────────────────────────────────────────────────────────────
@@ -92,12 +95,13 @@ const swap = useSwapPageLogic({
 
   buildQuoteRequest(amount) {
     if (!fromVault.value || !toVault.value) return null
+    const account = (subAccount.value || effectiveAddress.value || zeroAddress) as Address
     return {
       params: {
         tokenIn: fromVault.value.asset.address as Address,
         tokenOut: toVault.value.asset.address as Address,
-        accountIn: (address.value || zeroAddress) as Address,
-        accountOut: (address.value || zeroAddress) as Address,
+        accountIn: account,
+        accountOut: account,
         amount,
         vaultIn: fromVault.value.address as Address,
         receiver: toVault.value.address as Address,
@@ -121,6 +125,7 @@ const swap = useSwapPageLogic({
         amount,
         isMax,
         maxShares: isMax ? savingPosition.value?.shares : undefined,
+        subAccount: subAccount.value,
       })
     }
     if (!selectedQuote.value) throw new Error('No quote selected')

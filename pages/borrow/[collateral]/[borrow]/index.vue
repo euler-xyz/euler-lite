@@ -23,6 +23,14 @@ const reviewBorrowLabel = 'Review Borrow'
 const reviewMultiplyLabel = 'Review Multiply'
 const { getBorrowVaultPair, updateVault } = useVaults()
 const { address, isConnected } = useAccount()
+const { chainId } = useEulerAddresses()
+const shareLinkQuery = computed(() => {
+  const network = route.query.network
+
+  return {
+    network: Array.isArray(network) ? network[0] ?? chainId.value : network ?? chainId.value,
+  }
+})
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
 const { refreshAllPositions: _refreshAllPositions, depositPositions } = useEulerAccount()
@@ -407,16 +415,27 @@ watch(formTab, () => {
         class="hidden tablet:inline-flex tablet:absolute tablet:top-8 tablet:right-full tablet:mr-12"
         fallback="/borrow"
       />
-      <VaultLabelsAndAssets
+      <div
         v-if="collateralVault && borrowVault"
-        back
-        back-fallback="/borrow"
         class="mb-24"
-        :vault="collateralVault"
-        :pair-vault="borrowVault"
-        :assets="pairAssets as VaultAsset[]"
-        size="large"
-      />
+      >
+        <VaultLabelsAndAssets
+          back
+          back-fallback="/borrow"
+          :vault="collateralVault"
+          :pair-vault="borrowVault"
+          :assets="pairAssets as VaultAsset[]"
+          size="large"
+        >
+          <UiShareLinkButton
+            class="-ml-4 !w-24 !h-24"
+            :path="`/borrow/${collateralVault.address}/${borrowVault.address}`"
+            :query="shareLinkQuery"
+            label="Copy pair link"
+            variant="ghost"
+          />
+        </VaultLabelsAndAssets>
+      </div>
 
       <div class="flex gap-32">
         <div
@@ -866,6 +885,15 @@ watch(formTab, () => {
                       />
                     </VaultFormInfoBlock>
                   </div>
+                </div>
+              </template>
+
+              <template v-else-if="formTab === 'multiply'">
+                <div
+                  class="flex min-h-[624px] items-center justify-center rounded-16 bg-surface-secondary shadow-card"
+                  aria-busy="true"
+                >
+                  <UiLoader class="text-content-muted" />
                 </div>
               </template>
             </template>

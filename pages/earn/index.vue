@@ -5,7 +5,7 @@ import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import type { EarnVault } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import { getProductByVault, applyVaultOverrides, getEntitiesByEarnVault, isVaultFeatured, isVaultDeprecated, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getEntitiesByEarnVault, isVaultRecentlyAdded, isVaultDeprecated, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
@@ -51,7 +51,7 @@ useUrlQuerySync([
   { ref: sortBy, default: 'Total Supply', queryKey: 'sort' },
   { ref: sortDir, default: 'desc', queryKey: 'dir' },
   { ref: selectedCollateral, default: [], queryKey: 'vault' },
-  { ref: selectedCurators, default: [], queryKey: 'allocator' },
+  { ref: selectedCurators, default: [], queryKey: 'curator' },
 ])
 
 // Cache for USD values used in sorting (keyed by vault address)
@@ -160,10 +160,10 @@ const filteredList = computed(() => {
     .filter(matchesCustomFilters)
 })
 
-const applyFeaturedSort = <T extends { address: string }>(sorted: T[]): T[] => {
+const applyRecentlyAddedSort = <T extends { address: string }>(sorted: T[]): T[] => {
   return [...sorted].sort((a, b) => {
-    const af = isVaultFeatured(a.address) ? 1 : 0
-    const bf = isVaultFeatured(b.address) ? 1 : 0
+    const af = isVaultRecentlyAdded(a.address) ? 1 : 0
+    const bf = isVaultRecentlyAdded(b.address) ? 1 : 0
     return bf - af
   })
 }
@@ -180,26 +180,26 @@ const sortedList = computed(() => {
   let sorted: EarnVault[]
   switch (sortBy.value) {
     case 'Total Supply':
-      sorted = applyFeaturedSort([...filteredList.value].sort((a: EarnVault, b: EarnVault) => {
+      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EarnVault, b: EarnVault) => {
         const aValue = vaultTotalSupplyUsd.value.get(a.address) ?? 0
         const bValue = vaultTotalSupplyUsd.value.get(b.address) ?? 0
         return bValue - aValue
       }))
       break
     case 'Supply APY':
-      sorted = applyFeaturedSort([...filteredList.value].sort((a: EarnVault, b: EarnVault) => {
+      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EarnVault, b: EarnVault) => {
         return Number(b.interestRateInfo.supplyAPY) - Number(a.interestRateInfo.supplyAPY)
       }))
       break
     case 'Liquidity':
-      sorted = applyFeaturedSort([...filteredList.value].sort((a: EarnVault, b: EarnVault) => {
+      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EarnVault, b: EarnVault) => {
         const aValue = vaultLiquidityUsd.value.get(a.address) ?? 0
         const bValue = vaultLiquidityUsd.value.get(b.address) ?? 0
         return bValue - aValue
       }))
       break
     default:
-      sorted = applyFeaturedSort([...filteredList.value])
+      sorted = applyRecentlyAddedSort([...filteredList.value])
   }
   const directed = sortDir.value === 'asc' ? [...sorted].reverse() : sorted
   return applyDeprecatedSort(directed)
@@ -210,7 +210,7 @@ const sortedList = computed(() => {
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
     <BasePageHeader
       title="Earn"
-      description="One deposit, diversified yield. Curators allocate your capital across multiple lending strategies."
+      description="Explore curator-configured vaults that allocate supplied assets across multiple lending strategies."
       class="mb-16"
       arrow-right
     />
@@ -240,9 +240,9 @@ const sortedList = computed(() => {
           :key="`curators-${chainId}`"
           v-model="selectedCurators"
           :options="curatorOptions"
-          placeholder="Capital allocator"
-          title="Capital allocator"
-          modal-input-placeholder="Search allocator"
+          placeholder="Curator"
+          title="Curator"
+          modal-input-placeholder="Search curator"
           icon="search-user"
         />
         <UiSelect

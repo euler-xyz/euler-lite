@@ -68,8 +68,12 @@ function refreshEulerApi(chainId: number): Promise<TokenEntry[]> {
     let offset = 0
 
     for (let pageNum = 0; pageNum < MAX_PAGES; pageNum++) {
+      // type=base restores the v1-style catalog (vault underlying assets only).
+      // Without it the v3 API also returns eTokens (vault shares) and dTokens
+      // (debt tokens), which leak into the "pay with" picker and bloat the
+      // wallet-balance RPC fan-out by ~7x on mainnet.
       const resp = await fetchWithTimeout(
-        `${baseUrl}/v3/tokens?chainId=${chainId}&limit=${PAGE_LIMIT}&offset=${offset}`,
+        `${baseUrl}/v3/tokens?chainId=${chainId}&limit=${PAGE_LIMIT}&offset=${offset}&type=base`,
       )
       if (!resp.ok) throw new Error(`Euler API returned ${resp.status}`)
 

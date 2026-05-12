@@ -6,7 +6,7 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { getVaultUtilization } from '~/entities/vault'
 import type { Vault } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultRecentlyAdded, isVaultDeprecated, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
@@ -222,10 +222,10 @@ const filteredList = computed(() => {
     .filter(matchesCustomFilters)
 })
 
-const applyFeaturedSort = <T extends { address: string }>(sorted: T[]): T[] => {
+const applyRecentlyAddedSort = <T extends { address: string }>(sorted: T[]): T[] => {
   return [...sorted].sort((a, b) => {
-    const af = isVaultFeatured(a.address) ? 1 : 0
-    const bf = isVaultFeatured(b.address) ? 1 : 0
+    const af = isVaultRecentlyAdded(a.address) ? 1 : 0
+    const bf = isVaultRecentlyAdded(b.address) ? 1 : 0
     return bf - af
   })
 }
@@ -242,24 +242,24 @@ const sortedList = computed(() => {
   let sorted: Vault[]
   switch (sortBy.value) {
     case 'Total Supply':
-      sorted = applyFeaturedSort([...filteredList.value].sort((a: Vault, b: Vault) => {
+      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: Vault, b: Vault) => {
         const aValue = vaultUsdValues.value.get(a.address) ?? 0
         const bValue = vaultUsdValues.value.get(b.address) ?? 0
         return bValue - aValue
       }))
       break
     case 'Supply APY':
-      sorted = applyFeaturedSort([...filteredList.value].sort((a: Vault, b: Vault) => {
+      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: Vault, b: Vault) => {
         return Number(b.interestRateInfo.supplyAPY) - Number(a.interestRateInfo.supplyAPY)
       }))
       break
     case 'Utilization':
-      sorted = applyFeaturedSort([...filteredList.value].sort((a: Vault, b: Vault) => {
+      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: Vault, b: Vault) => {
         return getVaultUtilization(b) - getVaultUtilization(a)
       }))
       break
     default:
-      sorted = applyFeaturedSort([...filteredList.value])
+      sorted = applyRecentlyAddedSort([...filteredList.value])
   }
   const directed = sortDir.value === 'asc' ? [...sorted].reverse() : sorted
   return applyDeprecatedSort(directed)

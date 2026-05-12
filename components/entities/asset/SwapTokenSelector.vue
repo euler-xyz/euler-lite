@@ -13,12 +13,19 @@ const emits = defineEmits<{
   close: []
 }>()
 
-const { onSelect, currentAssetAddress, mode = 'input', allowNativeCurrency = false } = defineProps<{
+const { onSelect, currentAssetAddress, mode = 'input', allowNativeCurrency = false, pairedAsset } = defineProps<{
   onSelect: (asset: VaultAsset, meta?: SwapTokenSelectMeta) => void
   currentAssetAddress?: string
   mode?: 'input' | 'output'
   /** Show address-zero native currency entry. Only enable for flows that support wrapping. */
   allowNativeCurrency?: boolean
+  /**
+   * Counterpart asset already fixed by the surrounding flow (e.g. the vault's
+   * underlying asset when this picker chooses what to swap into/out of). Passed
+   * straight through to `isAssetRestrictedByCountry` so soft-restrict can be
+   * bypassed when option and counterpart form an ERC-4626 wrap pair.
+   */
+  pairedAsset?: { address: string }
 }>()
 
 const { getByType } = useVaultRegistry()
@@ -50,9 +57,8 @@ interface TokenOption {
 // Accepts the full asset so symbol/name pattern rules (assets.json + all/assets.json)
 // are consulted, not just the address map.
 const getAssetGeoState = (asset: VaultAsset, pickerMode: 'input' | 'output'): { disabled: boolean, showChip: boolean } => {
-  const blocked = isAssetBlockedByCountry(asset)
-  if (blocked) return { disabled: true, showChip: true }
-  if (pickerMode === 'output' && isAssetRestrictedByCountry(asset)) {
+  if (isAssetBlockedByCountry(asset)) return { disabled: true, showChip: true }
+  if (pickerMode === 'output' && isAssetRestrictedByCountry(asset, { counterpart: pairedAsset })) {
     return { disabled: true, showChip: true }
   }
   return { disabled: false, showChip: false }
