@@ -94,6 +94,7 @@ APPKIT_PROJECT_ID=your-project-id
 NUXT_PUBLIC_APP_URL=https://your-domain.com
 
 # API URLs
+V3_API_URL=https://v3.euler.finance
 EULER_API_URL=https://indexer.euler.finance
 SWAP_API_URL=https://swap.euler.finance
 

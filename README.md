@@ -45,13 +45,14 @@ cp .env.example .env
 
 #### API URLs
 
-| Variable          | Default                       | Description                           |
-| ----------------- | ----------------------------- | ------------------------------------- |
-| `EULER_API_URL`   | —                             | Euler indexer API (token data, logos) |
-| `SWAP_API_URL`    | —                             | Euler swap API                        |
+| Variable     | Default                       | Description                           |
+| ------------ | ----------------------------- | ------------------------------------- |
+| `V3_API_URL` | —                             | Euler V3 API used by SDK data services |
+| `EULER_API_URL` | —                          | Euler indexer API (token data, logos); also used as the V3 API fallback |
+| `SWAP_API_URL` | —                           | Euler swap API                        |
 | `PYTH_HERMES_URL` | `https://hermes.pyth.network` | Pyth oracle endpoint (server-only, proxied via `/api/pyth/updates`) |
 
-> **Doppler compatibility:** If your secret manager injects `NUXT_PUBLIC_*` prefixed names (e.g. `NUXT_PUBLIC_EULER_API_URL`), the app accepts both forms automatically.
+> **Doppler compatibility:** If your secret manager injects `NUXT_PUBLIC_*` prefixed names (e.g. `NUXT_PUBLIC_V3_API_URL` or `NUXT_PUBLIC_EULER_API_URL`), the app accepts both forms automatically.
 
 #### Branding & Feature Flags
 

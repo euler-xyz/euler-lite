@@ -46,8 +46,24 @@ const mergedInFlight = createInFlightDedup<string, TokenEntry[]>()
 
 let sdkPromise: Promise<EulerSDK> | undefined
 
+function env(key: string, ...fallbackKeys: string[]): string {
+  for (const k of [key, ...fallbackKeys]) {
+    if (process.env[k]) return process.env[k]!
+  }
+  return ''
+}
+
+function getV3ApiUrl(): string | undefined {
+  return env('V3_API_URL', 'EULER_SDK_V3_API_URL', 'NUXT_PUBLIC_V3_API_URL', 'EULER_API_URL', 'NUXT_PUBLIC_EULER_API_URL')
+    .trim()
+    .replace(/\/+$/, '') || undefined
+}
+
 const getSdk = () => {
-  sdkPromise ??= buildEulerSDK()
+  const v3ApiUrl = getV3ApiUrl()
+  sdkPromise ??= buildEulerSDK({
+    ...(v3ApiUrl ? { config: { v3ApiUrl, tokenlistApiBaseUrl: v3ApiUrl } } : {}),
+  })
   return sdkPromise
 }
 
