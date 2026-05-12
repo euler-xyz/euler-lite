@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { autoUpdate, flip, offset, shift, useFloating, type Placement } from '@floating-ui/vue'
+import { arrow as arrowMiddleware, autoPlacement, autoUpdate, offset, shift, size, useFloating, type Placement } from '@floating-ui/vue'
 import { type ModalData, useModal } from '~/components/ui/composables/useModal'
 
 const {
@@ -22,8 +22,10 @@ const {
 const modal = useModal()
 const trigger = ref<HTMLElement>()
 const floating = ref<HTMLElement>()
+const arrowRef = ref<HTMLElement>()
 const canHover = ref(false)
 const isVisible = ref(false)
+const isRendered = ref(false)
 const isPointerInTrigger = ref(false)
 const isPointerInPopover = ref(false)
 
@@ -32,16 +34,41 @@ let openTimer: number | undefined
 let closeTimer: number | undefined
 let isDocumentKeydownListening = false
 
-const { floatingStyles, update } = useFloating(trigger, floating, {
+const { floatingStyles, update, placement: resolvedPlacement, middlewareData } = useFloating(trigger, floating, {
   placement,
   strategy: 'fixed',
   middleware: [
-    offset(8),
-    flip({ padding: 8 }),
+    offset(12),
+    autoPlacement({ allowedPlacements: ['top', 'bottom'], padding: 8 }),
     shift({ padding: 8 }),
+    size({
+      padding: 8,
+      apply({ availableWidth, availableHeight, elements }) {
+        elements.floating.style.maxWidth = `${availableWidth}px`
+        elements.floating.style.setProperty('--popover-available-height', `${availableHeight}px`)
+      },
+    }),
+    arrowMiddleware({ element: arrowRef, padding: 12 }),
   ],
   whileElementsMounted: autoUpdate,
 })
+
+const arrowStyles = computed(() => {
+  const data = middlewareData.value.arrow
+  const side = resolvedPlacement.value.startsWith('bottom') ? 'top' : 'bottom'
+  return {
+    left: data?.x != null ? `${data.x}px` : '',
+    [side]: '-8px',
+  }
+})
+
+const arrowSide = computed(() =>
+  resolvedPlacement.value.startsWith('bottom') ? 'top' : 'bottom',
+)
+
+const slideDirection = computed(() =>
+  resolvedPlacement.value.startsWith('bottom') ? 'slide-down' : 'slide-up',
+)
 
 const clearOpenTimer = () => {
   if (openTimer !== undefined) {
@@ -81,8 +108,15 @@ const showPopover = () => {
   if (!canHover.value) return
   clearOpenTimer()
   clearCloseTimer()
-  isVisible.value = true
-  nextTick(update)
+  isRendered.value = true
+  nextTick(() => {
+    isVisible.value = true
+    nextTick(update)
+  })
+}
+
+const onAfterLeave = () => {
+  isRendered.value = false
 }
 
 const hidePopover = () => {
@@ -198,7 +232,7 @@ onBeforeUnmount(() => {
   <span
     ref="trigger"
     class="ui-hover-modal-trigger"
-    :title="ariaLabel"
+    :aria-label="ariaLabel"
     @pointerdown="stopPointerPropagation"
     @pointerup="stopPointerPropagation"
     @click.capture="onClick"
@@ -209,27 +243,39 @@ onBeforeUnmount(() => {
   </span>
 
   <Teleport to="body">
-    <Transition
-      name="tooltip"
-      @enter="update"
-      @after-enter="update"
+    <div
+      v-if="isRendered"
+      ref="floating"
+      class="ui-hover-modal-trigger__popover"
+      :style="floatingStyles"
+      @click.stop
+      @mouseenter="onPopoverMouseEnter"
+      @mouseleave="onPopoverMouseLeave"
     >
-      <div
-        v-if="isVisible"
-        ref="floating"
-        class="ui-hover-modal-trigger__popover"
-        :style="floatingStyles"
-        @click.stop
-        @mouseenter="onPopoverMouseEnter"
-        @mouseleave="onPopoverMouseLeave"
+      <Transition
+        :name="slideDirection"
+        @after-leave="onAfterLeave"
       >
-        <component
-          :is="component"
-          v-bind="popoverData.props"
-          @close="hidePopover"
-        />
-      </div>
-    </Transition>
+        <div
+          v-if="isVisible"
+          class="ui-hover-modal-trigger__popover-inner"
+        >
+          <div
+            ref="arrowRef"
+            class="ui-hover-modal-trigger__arrow"
+            :class="`ui-hover-modal-trigger__arrow--${arrowSide}`"
+            :style="arrowStyles"
+          />
+          <div class="ui-hover-modal-trigger__popover-content">
+            <component
+              :is="component"
+              v-bind="popoverData.props"
+              @close="hidePopover"
+            />
+          </div>
+        </div>
+      </Transition>
+    </div>
   </Teleport>
 </template>
 
@@ -243,8 +289,60 @@ onBeforeUnmount(() => {
 
   &__popover {
     z-index: 3100;
-    width: min(420px, calc(100vw - 24px));
+    position: relative;
+    width: min(480px, calc(100vw - 24px));
     max-width: calc(100vw - 24px);
+    height: fit-content;
   }
+
+  &__popover-inner {
+    position: relative;
+  }
+
+  &__popover-content {
+    position: relative;
+    z-index: 2;
+    overflow: hidden;
+  }
+
+  &__arrow {
+    position: absolute;
+    z-index: 3;
+    width: 16px;
+    height: 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    pointer-events: none;
+    transform: rotate(45deg);
+
+    &--bottom {
+      border-top: 0;
+      border-left: 0;
+    }
+
+    &--top {
+      border-right: 0;
+      border-bottom: 0;
+    }
+  }
+}
+
+.slide-up-enter-active,
+.slide-up-leave-active,
+.slide-down-enter-active,
+.slide-down-leave-active {
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+.slide-up-enter-from,
+.slide-up-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.slide-down-enter-from,
+.slide-down-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
 }
 </style>
