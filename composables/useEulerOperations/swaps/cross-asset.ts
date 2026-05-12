@@ -1,7 +1,7 @@
 import type { Address, Hash } from 'viem'
 import { encodeFunctionData } from 'viem'
 import type { OperationsContext, OperationHelpers } from '../types'
-import { buildSwapVerifierData, getSwapInputAmount } from './verify'
+import { buildSwapVerifierData, getSwapInputAmount, getSwapVerifierExpectedContext } from './verify'
 import { evcDisableCollateralAbi, evcDisableControllerAbi, evcEnableCollateralAbi, evcEnableControllerAbi } from '~/abis/evc'
 import { vaultBorrowAbi, vaultTransferFromMaxAbi, vaultWithdrawAbi } from '~/abis/vault'
 import { SaHooksBuilder } from '~/entities/saHooksSDK'
@@ -63,7 +63,15 @@ export const createCrossAssetSwapBuilders = (
       throw new Error('Swap amount is zero')
     }
 
-    const verifierData = buildSwapVerifierData({ quote, swapperMode, isRepay, requestedSlippage, targetDebt, currentDebt })
+    const verifierData = buildSwapVerifierData({
+      quote,
+      expectedContext: getSwapVerifierExpectedContext(quote),
+      swapperMode,
+      isRepay,
+      requestedSlippage,
+      targetDebt,
+      currentDebt,
+    })
 
     if (verifierData.toLowerCase() !== quote.verify.verifierData.toLowerCase()) {
       logWarn('swap', 'SwapVerifier data mismatch')

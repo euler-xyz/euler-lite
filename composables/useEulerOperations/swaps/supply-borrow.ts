@@ -1,7 +1,7 @@
 import type { Address, Hash } from 'viem'
 import { encodeFunctionData } from 'viem'
 import type { OperationsContext, OperationHelpers } from '../types'
-import { buildSwapVerifierData } from './verify'
+import { buildSwapVerifierData, getSwapVerifierExpectedContext } from './verify'
 import { evcDisableCollateralAbi, evcDisableControllerAbi, evcEnableCollateralAbi, evcEnableControllerAbi } from '~/abis/evc'
 import { vaultBorrowAbi, vaultRedeemAbi, vaultTransferFromMaxAbi, vaultWithdrawAbi } from '~/abis/vault'
 import { SaHooksBuilder } from '~/entities/saHooksSDK'
@@ -97,7 +97,13 @@ export const createSupplyBorrowSwapBuilders = (
       throw new Error('Swap verifier type mismatch')
     }
 
-    const verifierData = buildSwapVerifierData({ quote, swapperMode: SwapperMode.EXACT_IN, isRepay: false, requestedSlippage })
+    const verifierData = buildSwapVerifierData({
+      quote,
+      expectedContext: getSwapVerifierExpectedContext(quote),
+      swapperMode: SwapperMode.EXACT_IN,
+      isRepay: false,
+      requestedSlippage,
+    })
     if (verifierData.toLowerCase() !== quote.verify.verifierData.toLowerCase()) {
       logWarn('swap-supply', 'SwapVerifier data mismatch')
       throw new Error('SwapVerifier data mismatch')
@@ -213,7 +219,13 @@ export const createSupplyBorrowSwapBuilders = (
       throw new Error('Swap verifier type mismatch')
     }
 
-    const verifierData = buildSwapVerifierData({ quote: swapQuote, swapperMode: SwapperMode.EXACT_IN, isRepay: false, requestedSlippage })
+    const verifierData = buildSwapVerifierData({
+      quote: swapQuote,
+      expectedContext: getSwapVerifierExpectedContext(swapQuote),
+      swapperMode: SwapperMode.EXACT_IN,
+      isRepay: false,
+      requestedSlippage,
+    })
     if (verifierData.toLowerCase() !== swapQuote.verify.verifierData.toLowerCase()) {
       logWarn('swap-borrow', 'SwapVerifier data mismatch')
       throw new Error('SwapVerifier data mismatch')
@@ -337,7 +349,13 @@ export const createSupplyBorrowSwapBuilders = (
       throw new Error('Swap verifier type mismatch')
     }
 
-    const verifierData = buildSwapVerifierData({ quote, swapperMode: SwapperMode.EXACT_IN, isRepay: false, requestedSlippage })
+    const verifierData = buildSwapVerifierData({
+      quote,
+      expectedContext: getSwapVerifierExpectedContext(quote),
+      swapperMode: SwapperMode.EXACT_IN,
+      isRepay: false,
+      requestedSlippage,
+    })
     if (verifierData.toLowerCase() !== quote.verify.verifierData.toLowerCase()) {
       logWarn('swap-withdraw', 'SwapVerifier data mismatch')
       throw new Error('SwapVerifier data mismatch')
@@ -427,7 +445,13 @@ export const createSupplyBorrowSwapBuilders = (
       throw new Error('Swap verifier type mismatch')
     }
 
-    const redeemVerifierData = buildSwapVerifierData({ quote, swapperMode: SwapperMode.EXACT_IN, isRepay: false, requestedSlippage })
+    const redeemVerifierData = buildSwapVerifierData({
+      quote,
+      expectedContext: getSwapVerifierExpectedContext(quote),
+      swapperMode: SwapperMode.EXACT_IN,
+      isRepay: false,
+      requestedSlippage,
+    })
     if (redeemVerifierData.toLowerCase() !== quote.verify.verifierData.toLowerCase()) {
       logWarn('swap-redeem', 'SwapVerifier data mismatch')
       throw new Error('SwapVerifier data mismatch')
@@ -505,7 +529,15 @@ export const createSupplyBorrowSwapBuilders = (
       throw new Error('Swap verifier type mismatch')
     }
 
-    const verifierData = buildSwapVerifierData({ quote, swapperMode, isRepay: true, requestedSlippage, targetDebt, currentDebt })
+    const verifierData = buildSwapVerifierData({
+      quote,
+      expectedContext: getSwapVerifierExpectedContext(quote),
+      swapperMode,
+      isRepay: true,
+      requestedSlippage,
+      targetDebt,
+      currentDebt,
+    })
     if (verifierData.toLowerCase() !== quote.verify.verifierData.toLowerCase()) {
       logWarn('swap-repay', 'SwapVerifier data mismatch')
       throw new Error('SwapVerifier data mismatch')

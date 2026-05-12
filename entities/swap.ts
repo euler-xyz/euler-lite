@@ -45,6 +45,23 @@ export interface SwapApiVerify {
   deadline: number
 }
 
+export interface SwapApiQuoteRequestContext {
+  tokenIn: Address
+  tokenOut: Address
+  accountIn: Address
+  accountOut: Address
+  amount: bigint
+  vaultIn: Address
+  receiver: Address
+  swapperMode: SwapperMode
+  isRepay: boolean
+  targetDebt: bigint
+  currentDebt: bigint
+  deadline: number
+  verifierAddress: Address
+  swapperAddress: Address
+}
+
 export interface SwapApiRouteItem {
   providerName: string
 }
@@ -64,6 +81,7 @@ export interface SwapApiQuote {
   swap: SwapApiSwapBundle
   verify: SwapApiVerify
   route: SwapApiRouteItem[]
+  requestContext?: SwapApiQuoteRequestContext
 }
 
 export interface SwapApiResponse {

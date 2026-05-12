@@ -2,6 +2,7 @@ import axios from 'axios'
 import { zeroAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import {
+  type SwapApiQuoteRequestContext,
   type RoutingConfig,
   type SwapApiQuote,
   type SwapApiResponse,
@@ -86,9 +87,17 @@ const parseSwapProvidersResponse = (payload: { success?: boolean, data?: string[
   return []
 }
 
+const attachRequestContext = (
+  quote: SwapApiQuote,
+  context: SwapApiQuoteRequestContext,
+): SwapApiQuote => ({
+  ...quote,
+  requestContext: context,
+})
+
 export const useSwapApi = () => {
   const { SWAP_API_URL } = useEulerConfig()
-  const { chainId } = useEulerAddresses()
+  const { chainId, eulerPeripheryAddresses } = useEulerAddresses()
   const { address } = useWagmi()
 
   const baseUrl = SWAP_API_URL
@@ -103,7 +112,29 @@ export const useSwapApi = () => {
 
     const origin = params.origin || address.value || zeroAddress
     const deadline = params.deadline || (Math.floor(Date.now() / 1000) + SWAP_DEFAULT_DEADLINE_SECONDS)
+    const swapperAddress = eulerPeripheryAddresses.value?.swapper
+    const verifierAddress = eulerPeripheryAddresses.value?.swapVerifier
+    if (!swapperAddress || !verifierAddress) {
+      throw new Error('Swap periphery addresses not configured')
+    }
+
     const requestParams = buildRequestParams(chainId.value, origin, params, deadline)
+    const requestContext: SwapApiQuoteRequestContext = {
+      tokenIn: params.tokenIn,
+      tokenOut: params.tokenOut,
+      accountIn: params.accountIn,
+      accountOut: params.accountOut,
+      amount: params.amount,
+      vaultIn: params.vaultIn,
+      receiver: params.receiver,
+      swapperMode: params.swapperMode ?? SwapperMode.EXACT_IN,
+      isRepay: params.isRepay ?? false,
+      targetDebt: params.targetDebt ?? 0n,
+      currentDebt: params.currentDebt ?? 0n,
+      deadline,
+      verifierAddress: verifierAddress as Address,
+      swapperAddress: swapperAddress as Address,
+    }
 
     const response = await axios.get<SwapApiResponse>(
       `${baseUrl}/swaps`,
@@ -114,6 +145,7 @@ export const useSwapApi = () => {
     )
 
     return parseSwapApiResponse(response.data)
+      .map(quote => attachRequestContext(quote, requestContext))
   }
 
   const getSwapProviders = async (): Promise<string[]> => {

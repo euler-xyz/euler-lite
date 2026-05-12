@@ -1,8 +1,9 @@
+import type { Address } from 'viem'
 import { encodeFunctionData } from 'viem'
 import { adjustForInterest } from '../helpers'
 import { swapVerifierAbi } from '~/entities/euler/abis'
 import { MAX_SLIPPAGE } from '~/entities/constants'
-import { type SwapApiQuote, SwapperMode, SwapVerificationType } from '~/entities/swap'
+import { type SwapApiQuote, type SwapApiQuoteRequestContext, SwapperMode, SwapVerificationType } from '~/entities/swap'
 import { logWarn } from '~/utils/errorHandling'
 
 // Absolute extra slippage (in percentage points) the validator forgives to absorb
@@ -206,8 +207,110 @@ function shouldLogFullSwapQuote() {
   return localStorage.getItem('debug-swap-quotes') === 'true'
 }
 
+export function getSwapVerifierExpectedContext(quote: SwapApiQuote): SwapApiQuoteRequestContext {
+  if (!quote.requestContext) {
+    throw new Error('Swap quote request context missing')
+  }
+
+  return quote.requestContext
+}
+
+function getQuoteTokenAddress(quote: SwapApiQuote, field: 'tokenIn' | 'tokenOut'): Address {
+  const address = quote[field].address || quote[field].addressInfo
+  if (!address) {
+    throw new Error(`Swap quote ${field} address missing`)
+  }
+
+  return address
+}
+
+function assertSameAddress(field: string, actual: Address, expected: Address) {
+  if (actual.toLowerCase() !== expected.toLowerCase()) {
+    throw new Error(`Swap quote ${field} mismatch`)
+  }
+}
+
+function assertSameDeadline(actual: number, expected: number) {
+  if (actual !== expected) {
+    throw new Error('Swap quote deadline mismatch')
+  }
+}
+
+function validateSwapQuoteRequestIntent({
+  quote,
+  expectedContext,
+  swapperMode,
+  isRepay,
+  targetDebt,
+  currentDebt,
+}: {
+  quote: SwapApiQuote
+  expectedContext: SwapApiQuoteRequestContext
+  swapperMode: SwapperMode
+  isRepay: boolean
+  targetDebt: bigint
+  currentDebt: bigint
+}) {
+  if (swapperMode !== expectedContext.swapperMode) {
+    throw new Error('Swap quote mode mismatch')
+  }
+  if (isRepay !== expectedContext.isRepay) {
+    throw new Error('Swap quote repay intent mismatch')
+  }
+  if (targetDebt !== expectedContext.targetDebt) {
+    throw new Error('Swap quote target debt mismatch')
+  }
+  if (currentDebt !== expectedContext.currentDebt) {
+    throw new Error('Swap quote current debt mismatch')
+  }
+
+  if (expectedContext.swapperMode === SwapperMode.EXACT_IN) {
+    const amountIn = BigInt(quote.amountIn || 0)
+    if (amountIn !== expectedContext.amount) {
+      throw new Error('Swap quote amountIn mismatch')
+    }
+    return
+  }
+
+  const amountOut = BigInt(quote.amountOut || 0)
+  if (amountOut !== expectedContext.amount) {
+    throw new Error('Swap quote amountOut mismatch')
+  }
+}
+
+function validateSwapVerifierContext({
+  quote,
+  expectedContext,
+  amount,
+  validateVerifierAccount,
+}: {
+  quote: SwapApiQuote
+  expectedContext: SwapApiQuoteRequestContext
+  amount: bigint
+  validateVerifierAccount: boolean
+}) {
+  assertSameAddress('tokenIn', getQuoteTokenAddress(quote, 'tokenIn'), expectedContext.tokenIn)
+  assertSameAddress('tokenOut', getQuoteTokenAddress(quote, 'tokenOut'), expectedContext.tokenOut)
+  assertSameAddress('accountIn', quote.accountIn, expectedContext.accountIn)
+  assertSameAddress('accountOut', quote.accountOut, expectedContext.accountOut)
+  assertSameAddress('vaultIn', quote.vaultIn, expectedContext.vaultIn)
+  assertSameAddress('receiver', quote.receiver, expectedContext.receiver)
+  assertSameAddress('verifier', quote.verify.verifierAddress, expectedContext.verifierAddress)
+  assertSameAddress('swapper', quote.swap.swapperAddress, expectedContext.swapperAddress)
+  assertSameAddress('verify.vault', quote.verify.vault, expectedContext.receiver)
+  if (validateVerifierAccount) {
+    assertSameAddress('verify.account', quote.verify.account, expectedContext.accountOut)
+  }
+  assertSameDeadline(quote.verify.deadline, expectedContext.deadline)
+
+  if (BigInt(quote.verify.amount || 0) !== amount) {
+    throw new Error('Swap quote verify amount mismatch')
+  }
+}
+
 export const buildSwapVerifierData = ({
   quote,
+  expectedContext,
   swapperMode,
   isRepay,
   requestedSlippage,
@@ -215,12 +318,21 @@ export const buildSwapVerifierData = ({
   currentDebt = 0n,
 }: {
   quote: SwapApiQuote
+  expectedContext: SwapApiQuoteRequestContext
   swapperMode: SwapperMode
   isRepay: boolean
   requestedSlippage: number
   targetDebt?: bigint
   currentDebt?: bigint
 }) => {
+  validateSwapQuoteRequestIntent({
+    quote,
+    expectedContext,
+    swapperMode,
+    isRepay,
+    targetDebt,
+    currentDebt,
+  })
   validateSwapQuoteSlippageData({ slippage: requestedSlippage, swapperMode }, quote)
 
   let functionName: 'verifyAmountMinAndSkim' | 'verifyAmountMinAndTransfer' | 'verifyDebtMax'
@@ -240,13 +352,18 @@ export const buildSwapVerifierData = ({
   else if (quote.verify.type === SwapVerificationType.TransferMin) {
     functionName = 'verifyAmountMinAndTransfer'
     amount = BigInt(quote.amountOutMin || 0)
+    validateSwapVerifierContext({
+      quote,
+      expectedContext,
+      amount,
+      validateVerifierAccount: false,
+    })
 
     // verifyAmountMinAndTransfer(token, receiver, amountMin, deadline)
-    // token = output token address, receiver = verify.vault (destination for the transfer)
     return encodeFunctionData({
       abi: swapVerifierAbi,
       functionName,
-      args: [quote.tokenOut.address!, quote.verify.vault, amount, BigInt(quote.verify.deadline || 0)],
+      args: [expectedContext.tokenOut, expectedContext.receiver, amount, BigInt(expectedContext.deadline || 0)],
     })
   }
   else {
@@ -254,11 +371,18 @@ export const buildSwapVerifierData = ({
     amount = BigInt(quote.amountOutMin || 0)
   }
 
+  validateSwapVerifierContext({
+    quote,
+    expectedContext,
+    amount,
+    validateVerifierAccount: true,
+  })
+
   // SkimMin: verifyAmountMinAndSkim(vault, receiver, amountMin, deadline)
   // DebtMax: verifyDebtMax(vault, account, amountMax, deadline)
   return encodeFunctionData({
     abi: swapVerifierAbi,
     functionName,
-    args: [quote.verify.vault, quote.verify.account, amount, BigInt(quote.verify.deadline || 0)],
+    args: [expectedContext.receiver, expectedContext.accountOut, amount, BigInt(expectedContext.deadline || 0)],
   })
 }

@@ -1,6 +1,6 @@
 import type { Address, Hash } from 'viem'
 import { encodeFunctionData, getAddress } from 'viem'
-import { buildSwapVerifierData, getSwapInputAmount } from './swaps/verify'
+import { buildSwapVerifierData, getSwapInputAmount, getSwapVerifierExpectedContext } from './swaps/verify'
 import type { OperationsContext, OperationHelpers, Permit2Helpers, AllowanceHelpers } from './types'
 import { erc20ApproveAbi, erc20TransferAbi } from '~/abis/erc20'
 import { evcEnableCollateralAbi, evcEnableControllerAbi } from '~/abis/evc'
@@ -596,6 +596,7 @@ export const createVaultBuilders = (
 
       const verifierData = buildSwapVerifierData({
         quote,
+        expectedContext: getSwapVerifierExpectedContext(quote),
         swapperMode,
         isRepay: false,
         requestedSlippage,
