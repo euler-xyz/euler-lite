@@ -23,10 +23,22 @@ describe('sdkBuildQuery', () => {
     expect(query).toHaveBeenCalledTimes(1)
   })
 
+  it('uses SDK-provided cache keys when query metadata supplies one', async () => {
+    const query = vi.fn(async (_assets: string[]) => 'ok')
+    const wrapped = sdkBuildQuery('queryPythUpdateData', query, {}, {
+      getCacheKey: args => JSON.stringify([...(args[0] as string[])].sort()),
+    })
+
+    await expect(wrapped(['0x02', '0x01'])).resolves.toBe('ok')
+    await expect(wrapped(['0x01', '0x02'])).resolves.toBe('ok')
+
+    expect(query).toHaveBeenCalledTimes(1)
+  })
+
   it('throws instead of bypassing the cache for non-serializable arguments', async () => {
     const circular: Record<string, unknown> = {}
     circular.self = circular
-    const query = vi.fn(async () => 'ok')
+    const query = vi.fn(async (_arg: unknown) => 'ok')
     const wrapped = sdkBuildQuery('queryBatchSimulation', query, {})
 
     await expect(wrapped(circular)).rejects.toThrow(
