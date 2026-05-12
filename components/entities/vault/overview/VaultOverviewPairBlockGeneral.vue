@@ -219,6 +219,7 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
               <SvgIcon
                 class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
                 name="info-circle"
+                data-modal-trigger="supply-apy"
                 @click="onSupplyInfoIconClick"
               />
             </span>
@@ -228,6 +229,7 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
               v-if="hasSupplyRewards(collateralVault.address)"
               class="!w-20 !h-20 text-accent-500 cursor-pointer"
               name="sparks"
+              data-modal-trigger="supply-apy"
               @click="onSupplyInfoIconClick"
             />
             {{ formatNumber(supplyApyWithRewards) }}%
@@ -240,6 +242,7 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
               <SvgIcon
                 class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
                 name="info-circle"
+                data-modal-trigger="borrow-apy"
                 @click="onBorrowInfoIconClick"
               />
             </span>
@@ -249,6 +252,7 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
               v-if="hasBorrowRewards(borrowVault.address, collateralVault.address)"
               class="!w-20 !h-20 text-accent-500 cursor-pointer"
               name="sparks"
+              data-modal-trigger="borrow-apy"
               @click="onBorrowInfoIconClick"
             />
             {{ formatNumber(borrowApyWithRewards) }}%
@@ -261,6 +265,7 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
               <SvgIcon
                 class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
                 name="info-circle"
+                data-modal-trigger="net-apy"
                 @click="onNetApyInfoIconClick"
               />
             </span>
@@ -270,6 +275,7 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
               v-if="hasSupplyRewards(collateralVault.address) || hasBorrowRewards(borrowVault.address, collateralVault.address) || hasLoopingRewards(borrowVault.address, collateralVault.address)"
               class="!w-20 !h-20 text-accent-500 cursor-pointer"
               name="sparks"
+              data-modal-trigger="net-apy"
               @click="onNetApyInfoIconClick"
             />
             {{ formatNumber(netApy) }}%
@@ -282,6 +288,7 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
               <SvgIcon
                 class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
                 name="info-circle"
+                data-modal-trigger="max-roe"
                 @click="onMaxRoeInfoIconClick"
               />
             </span>
@@ -291,6 +298,7 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
               v-if="hasSupplyRewards(collateralVault.address) || hasBorrowRewards(borrowVault.address, collateralVault.address) || hasLoopingRewards(borrowVault.address, collateralVault.address)"
               class="!w-20 !h-20 text-accent-500 cursor-pointer"
               name="sparks"
+              data-modal-trigger="max-roe"
               @click="onMaxRoeInfoIconClick"
             />
             {{ formatNumber(maxRoe) }}%

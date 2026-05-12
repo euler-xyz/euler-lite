@@ -60,6 +60,9 @@ const handleClose = () => {
               <span
                 v-if="baseApyAverageLabel"
                 class="inline-flex items-center rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5"
+                data-id="data-point"
+                data-field="supply-apy-base-average-label"
+                :data-value="baseApyAverageLabel"
               >
                 {{ baseApyAverageLabel }}
               </span>
@@ -68,7 +71,12 @@ const handleClose = () => {
               Yield from lending on Euler
             </p>
           </div>
-          <div class="text-h5">
+          <div
+            class="text-h5"
+            data-id="data-point"
+            data-field="supply-apy-base"
+            :data-value="lendingAPY"
+          >
             {{ formatNumber(lendingAPY) }}%
           </div>
         </div>
@@ -78,7 +86,12 @@ const handleClose = () => {
         >
           <div>
             <p class="mb-4">
-              Intrinsic APY{{ intrinsicApyInfo?.provider ? ` (${intrinsicApyInfo.provider})` : '' }}
+              Intrinsic APY<span
+                v-if="intrinsicApyInfo?.provider"
+                data-id="data-point"
+                data-field="supply-apy-intrinsic-provider"
+                :data-value="intrinsicApyInfo.provider"
+              > ({{ intrinsicApyInfo.provider }})</span>
             </p>
             <p class="text-content-primary">
               Yield intrinsic to the supplied asset, such as staking yield or external rewards, might be compounded with lending yield
@@ -89,11 +102,19 @@ const handleClose = () => {
               target="_blank"
               rel="noopener noreferrer"
               class="text-sm text-content-primary underline mt-4 inline-block"
+              data-id="data-point"
+              data-field="supply-apy-intrinsic-source"
+              :data-value="intrinsicApyInfo.source"
             >
               Source
             </a>
           </div>
-          <div class="text-h5 shrink-0">
+          <div
+            class="text-h5 shrink-0"
+            data-id="data-point"
+            data-field="supply-apy-intrinsic"
+            :data-value="intrinsicApyValue"
+          >
             {{ formatNumber(intrinsicApyValue) }}%
           </div>
         </div>
@@ -114,56 +135,105 @@ const handleClose = () => {
             Yield from token rewards
           </p>
         </div>
-        <div class="text-h5">
+        <div
+          class="text-h5"
+          data-id="data-point"
+          data-field="supply-apy-rewards-total"
+          :data-value="rewardsTotalAPY"
+        >
           + {{ formatNumber(rewardsTotalAPY) }}%
         </div>
       </div>
       <div
-        v-for="reward in rewardsInfo"
-        :key="reward.id"
-        class="flex justify-between items-center mb-16"
+        v-if="rewardsInfo.length > 0"
+        data-id="supply-apy-reward-campaigns"
+        data-list="supply-apy-reward-campaigns"
+        :data-count="rewardsInfo.length"
+        :data-rendered-count="rewardsInfo.length"
       >
-        <div class="flex">
-          <img
-            v-if="reward.rewardToken.icon"
-            class="w-20 h-20 rounded-full"
-            :src="reward.rewardToken.icon"
-            alt="Reward token logo"
-          >
-          <p class="ml-12">
-            {{ reward.rewardToken.symbol }}
-          </p>
-          <p class="ml-4 text-content-primary">
-            (<a
-              v-if="reward.sourceUrl"
-              :href="reward.sourceUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="underline"
-              @click.stop
-            ><img
-              v-if="PROVIDER_LOGOS[reward.source]"
-              :src="PROVIDER_LOGOS[reward.source]"
-              class="w-14 h-14 inline-block align-middle mr-2 bg-white rounded-sm p-1"
-              :alt="PROVIDER_LABELS[reward.source]"
-            >{{ PROVIDER_LABELS[reward.source] || reward.source }}</a><template v-else>
-              <img
+        <div
+          v-for="reward in rewardsInfo"
+          :key="reward.id"
+          class="flex justify-between items-center mb-16"
+          data-id="supply-apy-reward-campaign"
+          data-list="supply-apy-reward-campaigns"
+          :data-key="reward.id"
+        >
+          <div class="flex">
+            <img
+              v-if="reward.rewardToken.icon"
+              class="w-20 h-20 rounded-full"
+              :src="reward.rewardToken.icon"
+              alt="Reward token logo"
+            >
+            <p
+              class="ml-12"
+              data-id="data-point"
+              :data-key="reward.id"
+              data-field="supply-apy-reward-token"
+              :data-value="reward.rewardToken.symbol"
+            >
+              {{ reward.rewardToken.symbol }}
+            </p>
+            <p class="ml-4 text-content-primary">
+              (<a
+                v-if="reward.sourceUrl"
+                :href="reward.sourceUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="underline"
+                data-id="data-point"
+                :data-key="reward.id"
+                data-field="supply-apy-reward-provider"
+                :data-value="PROVIDER_LABELS[reward.source] || reward.source"
+                @click.stop
+              ><img
                 v-if="PROVIDER_LOGOS[reward.source]"
                 :src="PROVIDER_LOGOS[reward.source]"
                 class="w-14 h-14 inline-block align-middle mr-2 bg-white rounded-sm p-1"
                 :alt="PROVIDER_LABELS[reward.source]"
-              >{{ PROVIDER_LABELS[reward.source] || reward.source }}
-            </template>{{ reward.endDate ? `, ends ${reward.endDate.toFormat('MMMM dd, yyyy')}` : '' }})
-          </p>
-        </div>
-        <div class="text-p2">
-          {{ formatNumber(reward.apr) }}%
+              >{{ PROVIDER_LABELS[reward.source] || reward.source }}</a><span
+                v-else
+                data-id="data-point"
+                :data-key="reward.id"
+                data-field="supply-apy-reward-provider"
+                :data-value="PROVIDER_LABELS[reward.source] || reward.source"
+              >
+                <img
+                  v-if="PROVIDER_LOGOS[reward.source]"
+                  :src="PROVIDER_LOGOS[reward.source]"
+                  class="w-14 h-14 inline-block align-middle mr-2 bg-white rounded-sm p-1"
+                  :alt="PROVIDER_LABELS[reward.source]"
+                >{{ PROVIDER_LABELS[reward.source] || reward.source }}
+              </span><span
+                v-if="reward.endDate"
+                data-id="data-point"
+                :data-key="reward.id"
+                data-field="supply-apy-reward-end-date"
+                :data-value="reward.endDate.toFormat('MMMM dd, yyyy')"
+              >, ends {{ reward.endDate.toFormat('MMMM dd, yyyy') }}</span>)
+            </p>
+          </div>
+          <div
+            class="text-p2"
+            data-id="data-point"
+            :data-key="reward.id"
+            data-field="supply-apy-reward-apr"
+            :data-value="reward.apr"
+          >
+            {{ formatNumber(reward.apr) }}%
+          </div>
         </div>
       </div>
     </div>
     <div class="bg-surface-secondary rounded-12 p-16 flex justify-between items-center">
       <p>Total supply APY</p>
-      <p class="text-h4">
+      <p
+        class="text-h4"
+        data-id="data-point"
+        data-field="supply-apy-total"
+        :data-value="totalSupplyApy"
+      >
         {{ formatNumber(totalSupplyApy) }}%
       </p>
     </div>

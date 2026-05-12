@@ -48,23 +48,50 @@ const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRe
 const modal = useModal()
 const collateralAssets = computed(() => {
   if (!isBorrowable.value) return []
-  const seen = new Set<string>()
-  const assets: { address: string, symbol: string }[] = []
+  const assetsByAddress = new Map<string, {
+    address: string
+    symbol: string
+    borrowLTV: number
+    liquidationLTV: number
+  }>()
+
   for (const ltv of vault.collaterals) {
     if (ltv.borrowLTV <= 0) continue
     if (ltv.currentLiquidationLTV <= 0) continue
     const entry = registryGet(ltv.address)
     if (entry) {
       const assetAddr = entry.vault.asset.address.toLowerCase()
-      if (seen.has(assetAddr)) continue
-      seen.add(assetAddr)
-      assets.push({ address: entry.vault.asset.address, symbol: entry.vault.asset.symbol })
+      const existing = assetsByAddress.get(assetAddr)
+      if (
+        existing
+        && (
+          existing.liquidationLTV > ltv.currentLiquidationLTV
+          || (
+            existing.liquidationLTV === ltv.currentLiquidationLTV
+            && existing.borrowLTV >= ltv.borrowLTV
+          )
+        )
+      ) {
+        continue
+      }
+      assetsByAddress.set(assetAddr, {
+        address: entry.vault.asset.address,
+        symbol: entry.vault.asset.symbol,
+        borrowLTV: ltv.borrowLTV,
+        liquidationLTV: ltv.currentLiquidationLTV,
+      })
     }
   }
-  return assets
+
+  return [...assetsByAddress.values()].sort((a, b) => {
+    if (b.liquidationLTV !== a.liquidationLTV) return b.liquidationLTV - a.liquidationLTV
+    if (b.borrowLTV !== a.borrowLTV) return b.borrowLTV - a.borrowLTV
+    return a.address.localeCompare(b.address)
+  })
 })
 const collateralDisplayAssets = computed(() => collateralAssets.value.slice(0, 5))
 const collateralOverflowCount = computed(() => Math.max(0, collateralAssets.value.length - 5))
+const collateralExposureListId = computed(() => `collateral-exposure:${vault.address.toLowerCase()}`)
 
 const balance = computed(() =>
   getBalance(vault.asset.address as `0x${string}`),
@@ -224,6 +251,7 @@ watchEffect(async () => {
           <SvgIcon
             class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
             name="info-circle"
+            data-modal-trigger="supply-apy"
             @click="onSupplyInfoIconClick"
           />
         </div>
@@ -242,6 +270,7 @@ watchEffect(async () => {
               v-if="hasRewards"
               class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
               name="sparks"
+              data-modal-trigger="supply-apy"
               @click="onSupplyInfoIconClick"
             />
             {{ formatNumber(supplyApyWithRewards) }}%
@@ -372,10 +401,24 @@ watchEffect(async () => {
           class="flex items-center gap-4 cursor-pointer"
           @click="onCollateralInfoClick"
         >
-          <AssetAvatar
-            :asset="collateralDisplayAssets"
-            size="20"
-          />
+          <div class="flex items-center">
+            <div
+              v-for="(asset, index) in collateralDisplayAssets"
+              :key="asset.address"
+              class="flex items-center"
+              :class="index > 0 ? '-ml-8' : ''"
+              data-id="data-point"
+              :data-list="collateralExposureListId"
+              :data-key="asset.address.toLowerCase()"
+              data-field="collateral-exposure-asset"
+              :data-value="asset.symbol"
+            >
+              <AssetAvatar
+                :asset="asset"
+                size="20"
+              />
+            </div>
+          </div>
           <span
             v-if="collateralOverflowCount > 0"
             class="text-p3 text-content-tertiary whitespace-nowrap"

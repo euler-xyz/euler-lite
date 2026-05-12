@@ -160,6 +160,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
           <SvgIcon
             class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
             name="info-circle"
+            data-modal-trigger="supply-apy"
             @click="onSupplyInfoIconClick"
           />
         </div>
@@ -177,6 +178,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
             v-if="hasRewards"
             class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
             name="sparks"
+            data-modal-trigger="supply-apy"
             @click="onSupplyInfoIconClick"
           />
           {{ formatNumber(getVaultSupplyApy(vault) + totalRewardsAPY) }}%

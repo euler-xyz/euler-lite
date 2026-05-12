@@ -1,0 +1,152 @@
+{
+  "version": 1,
+  "defaults": {
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "localStorage": {
+      "is-onboarding-completed": "true",
+      "migration-announcement-seen": "true"
+    },
+    "waitFor": [
+      "[data-id]"
+    ],
+    "settleMs": 1000,
+    "rateLimitRetries": 3
+  },
+  "scenarios": [
+    {
+      "id": "full-run-lend-mainnet",
+      "label": "Full run: Mainnet lend list, all vault details, and APY modals",
+      "path": "/lend?network=1&showAll=true",
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"lend\"]"
+      ],
+      "modals": [
+        {
+          "id": "supply-apy",
+          "label": "Supply APY modal",
+          "selector": "css=[data-modal-trigger=\"supply-apy\"], :is(div, span):has-text(\"Supply APY\") > svg",
+          "waitFor": [
+            "[data-field=\"supply-apy-total\"]"
+          ]
+        }
+      ],
+      "follow": [
+        {
+          "id": "lend-vault-detail",
+          "label": "Lend vault details",
+          "selector": "[data-id=\"vault-list-item\"][data-list=\"lend\"]",
+          "waitFor": [
+            "[data-id=\"vault-header\"]",
+            "[data-id=\"data-point\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-run-borrow-mainnet",
+      "label": "Full run: Mainnet borrow list, first 100 pair details, and APY modals",
+      "path": "/borrow?network=1&showAll=true",
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"borrow-pair\"]"
+      ],
+      "modals": [
+        {
+          "id": "borrow-apy",
+          "label": "Borrow APY modal",
+          "selector": "css=[data-modal-trigger=\"borrow-apy\"], :is(div, span):has-text(\"Borrow APY\") > svg",
+          "waitFor": [
+            "[data-field=\"borrow-apy-total\"]"
+          ]
+        },
+        {
+          "id": "supply-apy",
+          "label": "Supply APY modal",
+          "selector": "css=[data-modal-trigger=\"supply-apy\"], :is(div, span):has-text(\"Supply APY\") > svg",
+          "waitFor": [
+            "[data-field=\"supply-apy-total\"]"
+          ]
+        }
+      ],
+      "follow": [
+        {
+          "id": "borrow-pair-detail",
+          "label": "Borrow pair details",
+          "selector": "[data-id=\"vault-list-item\"][data-list=\"borrow-pair\"]",
+          "maxItems": 100,
+          "waitFor": [
+            "[data-id=\"vault-header\"]",
+            "[data-id=\"data-point\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-run-portfolio-spy-positions-mainnet",
+      "label": "Full run: Mainnet portfolio spy positions, show all, and position details",
+      "path": "/portfolio?network=1&showAll=true&spy=0x75cFE4ef963232ae8313aC33e21fC39241338618",
+      "waitFor": [
+        "[data-id=\"portfolio-list\"][data-list=\"borrow\"]",
+        "[data-id=\"data-point\"]"
+      ],
+      "modals": [
+        {
+          "id": "borrow-apy",
+          "label": "Borrow APY modal",
+          "selector": "css=[data-modal-trigger=\"borrow-apy\"], :is(div, span):has-text(\"Borrow APY\") > svg",
+          "waitFor": [
+            "[data-field=\"borrow-apy-total\"]"
+          ]
+        },
+        {
+          "id": "supply-apy",
+          "label": "Supply APY modal",
+          "selector": "css=[data-modal-trigger=\"supply-apy\"], :is(div, span):has-text(\"Supply APY\") > svg",
+          "waitFor": [
+            "[data-field=\"supply-apy-total\"]"
+          ]
+        }
+      ],
+      "follow": [
+        {
+          "id": "position-detail",
+          "label": "Portfolio position details",
+          "selector": "[data-id=\"portfolio-list-item\"][data-list=\"borrow\"]",
+          "waitFor": [
+            "[data-id=\"data-point\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-run-portfolio-spy-savings-mainnet",
+      "label": "Full run: Mainnet portfolio spy savings, show all",
+      "path": "/portfolio/saving?network=1&showAll=true&spy=0x75cFE4ef963232ae8313aC33e21fC39241338618",
+      "waitFor": [
+        "[data-id=\"portfolio-list\"]",
+        "[data-id=\"data-point\"]"
+      ],
+      "modals": [
+        {
+          "id": "supply-apy",
+          "label": "Supply APY modal",
+          "selector": "css=[data-modal-trigger=\"supply-apy\"], :is(div, span):has-text(\"Supply APY\") > svg",
+          "waitFor": [
+            "[data-field=\"supply-apy-total\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-run-portfolio-spy-rewards-mainnet",
+      "label": "Full run: Mainnet portfolio spy rewards, show all",
+      "path": "/portfolio/rewards?network=1&showAll=true&spy=0x75cFE4ef963232ae8313aC33e21fC39241338618",
+      "waitFor": [
+        "[data-id=\"portfolio-list\"]",
+        "[data-id=\"data-point\"]"
+      ]
+    }
+  ]
+}

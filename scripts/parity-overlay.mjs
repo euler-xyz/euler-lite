@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import net from 'node:net'
+import os from 'node:os'
+import path from 'node:path'
 import process from 'node:process'
 import { chromium } from 'playwright'
 
@@ -15,7 +17,10 @@ const overlayInitScript = `
   const STYLE_ID = '__parity_data_overlay_style__'
   const TOOLBAR_ID = '__parity_data_overlay_toolbar__'
   const DIFF_PANEL_ID = '__parity_data_overlay_diff_panel__'
+  const TOOLTIP_ID = '__parity_data_overlay_tooltip__'
   let scheduled = false
+  let activeTooltipTarget = null
+  let diffPanelExpanded = false
 
   const hashHue = (value) => {
     let hash = 0
@@ -57,6 +62,237 @@ const overlayInitScript = `
     element.getAttribute('data-field') || '',
   ].join('|')
 
+  const escapeHtml = (value) => String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+
+  const compact = (value, maxLength = 180) => {
+    const normalized = String(value ?? '').replace(/\\s+/g, ' ').trim()
+    if (!normalized) return '(empty)'
+    return normalized.length > maxLength
+      ? normalized.slice(0, maxLength - 1) + '...'
+      : normalized
+  }
+
+  const fullValue = (value) => {
+    const text = String(value ?? '')
+    return text.trim() ? text : '(empty)'
+  }
+
+  const formatNumber = (value) => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return ''
+    if (value === 0) return '0'
+    if (Math.abs(value) < 0.000001 || Math.abs(value) > 1_000_000) return value.toExponential(4)
+    return String(Number(value.toPrecision(8)))
+  }
+
+  const problemLabel = (problem) => [
+    problem.field || problem.id || problem.status || 'diff',
+    problem.itemKey ? compact(problem.itemKey, 28) : '',
+  ].filter(Boolean).join(' ')
+
+  const sourceValue = (source) => {
+    const value = [source?.value, source?.compareValue, source?.text]
+      .find(entry => entry !== undefined && entry !== null && String(entry).trim() !== '')
+    return value ?? ''
+  }
+
+  const shouldShowDataTooltip = (element) =>
+    element?.hasAttribute?.('data-field') || element?.getAttribute?.('data-id') === 'data-point'
+
+  const liveElementDetail = (element) => {
+    const closestLink = element.closest?.('a[href]')
+    const value = element.getAttribute('data-value') || ''
+    const text = (element.innerText || element.textContent || '').trim()
+
+    return {
+      key: element.getAttribute('data-parity-key') || '',
+      baseKey: baseParityKey(element),
+      status: 'tagged-data',
+      id: element.getAttribute('data-id') || '',
+      field: element.getAttribute('data-field') || '',
+      list: element.getAttribute('data-list') || '',
+      itemKey: element.getAttribute('data-key') || '',
+      current: {
+        id: element.getAttribute('data-id') || '',
+        list: element.getAttribute('data-list') || '',
+        itemKey: element.getAttribute('data-key') || '',
+        field: element.getAttribute('data-field') || '',
+        value,
+        compareValue: value,
+        text,
+        href: element.href || closestLink?.href || '',
+      },
+    }
+  }
+
+  const mismatchRows = (problem) => {
+    const rows = []
+    const mismatch = problem.mismatch || {}
+    const valueMismatch = mismatch.value
+    const textMismatch = mismatch.text
+    const baseline = problem.baseline
+    const candidate = problem.candidate
+    const current = problem.current
+
+    if (valueMismatch) {
+      rows.push({
+        label: 'value',
+        baseline: valueMismatch.baseline,
+        candidate: valueMismatch.candidate,
+        comparison: valueMismatch.comparison,
+      })
+    }
+
+    if (textMismatch) {
+      rows.push({
+        label: 'text',
+        baseline: textMismatch.baseline,
+        candidate: textMismatch.candidate,
+        comparison: textMismatch.comparison,
+      })
+    }
+
+    if (!rows.length && current) {
+      const value = current.value || current.compareValue
+      if (value) {
+        rows.push({
+          label: 'value',
+          current: value,
+          comparison: null,
+        })
+      }
+
+      if (current.text && current.text !== value) {
+        rows.push({
+          label: 'text',
+          current: current.text,
+          comparison: null,
+        })
+      }
+    }
+
+    if (!rows.length && (baseline || candidate)) {
+      rows.push({
+        label: 'display',
+        baseline: sourceValue(baseline),
+        candidate: sourceValue(candidate),
+        comparison: null,
+      })
+    }
+
+    return rows
+  }
+
+  const comparisonSummary = (comparison) => {
+    if (!comparison) return ''
+    const parts = []
+    if (comparison.mode) parts.push('mode=' + comparison.mode)
+    if (typeof comparison.tolerance === 'number') parts.push('tolerance=' + formatNumber(comparison.tolerance * 100) + '%')
+    if (typeof comparison.difference === 'number') parts.push('delta=' + formatNumber(comparison.difference))
+    if (typeof comparison.allowedDifference === 'number') parts.push('allowed=' + formatNumber(comparison.allowedDifference))
+    return parts.join(' | ')
+  }
+
+  const renderProblemTooltip = (problem) => {
+    const rows = mismatchRows(problem)
+    const body = rows.map((row) => {
+      const summary = comparisonSummary(row.comparison)
+      if (Object.hasOwn(row, 'current')) {
+        return [
+          '<div class="parity-tooltip-row">',
+          '<div><strong>' + escapeHtml(row.label) + '</strong></div>',
+          '<div><em>current</em><code>' + escapeHtml(compact(row.current)) + '</code></div>',
+          '</div>',
+        ].join('')
+      }
+
+      return [
+        '<div class="parity-tooltip-row">',
+        '<div><strong>' + escapeHtml(row.label) + '</strong>' + (summary ? '<span>' + escapeHtml(summary) + '</span>' : '') + '</div>',
+        '<div><em>baseline</em><code>' + escapeHtml(compact(row.baseline)) + '</code></div>',
+        '<div><em>candidate</em><code>' + escapeHtml(compact(row.candidate)) + '</code></div>',
+        '</div>',
+      ].join('')
+    }).join('')
+
+    return [
+      '<div class="parity-tooltip-title">',
+      '<code>' + escapeHtml(problem.status) + '</code>',
+      '<span>' + escapeHtml(problemLabel(problem)) + '</span>',
+      '</div>',
+      '<div class="parity-tooltip-meta">' + escapeHtml(problem.key || '') + '</div>',
+      body,
+    ].join('')
+  }
+
+  const renderProblemTitle = (problem) => [
+    problemLabel(problem),
+    ...mismatchRows(problem).map((row) => {
+      if (Object.hasOwn(row, 'current')) {
+        return row.label + ': current=' + compact(row.current)
+      }
+
+      return row.label + ': baseline=' + compact(row.baseline) + ' candidate=' + compact(row.candidate)
+    }),
+  ].join('\\n')
+
+  const renderProblemLine = (problem) => {
+    const row = mismatchRows(problem)[0]
+    const values = row
+      ? '<small>' + (
+          Object.hasOwn(row, 'current')
+            ? escapeHtml(compact(row.current, 112))
+            : escapeHtml(compact(row.baseline, 54)) + ' -> ' + escapeHtml(compact(row.candidate, 54))
+        ) + '</small>'
+      : ''
+
+    return [
+      '<div class="parity-diff-row">',
+      '<code>' + escapeHtml(problem.status) + '</code> ',
+      '<span>' + escapeHtml(problemLabel(problem)) + '</span>',
+      values,
+      '</div>',
+    ].join('')
+  }
+
+  const renderProblemFullLine = (problem) => {
+    const rows = mismatchRows(problem)
+    const body = rows.length
+      ? rows.map((row) => {
+          const summary = comparisonSummary(row.comparison)
+          if (Object.hasOwn(row, 'current')) {
+            return [
+              '<div class="parity-diff-detail">',
+              '<div><strong>' + escapeHtml(row.label) + '</strong></div>',
+              '<div><em>current</em><code>' + escapeHtml(fullValue(row.current)) + '</code></div>',
+              '</div>',
+            ].join('')
+          }
+
+          return [
+            '<div class="parity-diff-detail">',
+            '<div><strong>' + escapeHtml(row.label) + '</strong>' + (summary ? '<span>' + escapeHtml(summary) + '</span>' : '') + '</div>',
+            '<div><em>baseline</em><code>' + escapeHtml(fullValue(row.baseline)) + '</code></div>',
+            '<div><em>candidate</em><code>' + escapeHtml(fullValue(row.candidate)) + '</code></div>',
+            '</div>',
+          ].join('')
+        }).join('')
+      : '<div class="parity-diff-detail"><code>' + escapeHtml(JSON.stringify(problem, null, 2)) + '</code></div>'
+
+    return [
+      '<div class="parity-diff-row parity-diff-row-expanded">',
+      '<div><code>' + escapeHtml(problem.status) + '</code> ',
+      '<span>' + escapeHtml(problemLabel(problem)) + '</span></div>',
+      '<div class="parity-diff-key">' + escapeHtml(problem.key || '') + '</div>',
+      body,
+      '</div>',
+    ].join('')
+  }
+
   const ensureStyle = () => {
     if (document.getElementById(STYLE_ID)) return
 
@@ -64,6 +300,7 @@ const overlayInitScript = `
     style.id = STYLE_ID
     style.textContent = [
       'html[data-parity-overlay="off"] [data-id] { outline: none !important; box-shadow: none !important; }',
+      'html[data-parity-overlay="off"] #' + TOOLTIP_ID + ' { display: none !important; }',
       'html[data-parity-overlay="on"] :where([data-id]) {',
       '  --parity-hue: 205;',
       '  outline: 1.5px solid hsl(var(--parity-hue) 92% 48% / 0.92) !important;',
@@ -123,6 +360,12 @@ const overlayInitScript = `
       'html[data-parity-overlay="on"] :where([data-parity-status]:not([data-field]))::after {',
       '  content: attr(data-parity-status) " " attr(data-id);',
       '}',
+      'html[data-parity-overlay="on"] :where([data-parity-status="match"][data-field])::after {',
+      '  display: none !important;',
+      '}',
+      'html[data-parity-overlay="on"] :where([data-parity-status="match"]:not([data-field]))::after {',
+      '  display: none !important;',
+      '}',
       'html[data-parity-overlay="on"][data-parity-labels="off"] :where([data-id])::after {',
       '  display: none !important;',
       '}',
@@ -166,6 +409,79 @@ const overlayInitScript = `
       '#' + DIFF_PANEL_ID + ' strong { color: #fca5a5 !important; }',
       '#' + DIFF_PANEL_ID + ' div { margin-top: 4px !important; }',
       '#' + DIFF_PANEL_ID + ' code { color: #d1d5db !important; }',
+      '#' + DIFF_PANEL_ID + ' .parity-diff-header {',
+      '  display: flex !important;',
+      '  align-items: center !important;',
+      '  justify-content: space-between !important;',
+      '  gap: 12px !important;',
+      '  margin-top: 0 !important;',
+      '}',
+      '#' + DIFF_PANEL_ID + ' button {',
+      '  border: 1px solid rgb(255 255 255 / 0.22) !important;',
+      '  border-radius: 4px !important;',
+      '  background: rgb(255 255 255 / 0.08) !important;',
+      '  color: white !important;',
+      '  padding: 2px 7px !important;',
+      '  font: inherit !important;',
+      '  cursor: pointer !important;',
+      '}',
+      '#' + DIFF_PANEL_ID + ' button:hover { background: rgb(255 255 255 / 0.14) !important; }',
+      '#' + DIFF_PANEL_ID + '[data-expanded="true"] {',
+      '  max-width: min(960px, calc(100vw - 24px)) !important;',
+      '  max-height: min(78vh, calc(100vh - 24px)) !important;',
+      '}',
+      '#' + DIFF_PANEL_ID + ' .parity-diff-row small {',
+      '  display: block !important;',
+      '  margin-left: 0 !important;',
+      '  color: rgb(255 255 255 / 0.58) !important;',
+      '  white-space: nowrap !important;',
+      '  overflow: hidden !important;',
+      '  text-overflow: ellipsis !important;',
+      '}',
+      '#' + DIFF_PANEL_ID + ' .parity-diff-row-expanded {',
+      '  margin-top: 10px !important;',
+      '  padding-top: 10px !important;',
+      '  border-top: 1px solid rgb(255 255 255 / 0.12) !important;',
+      '}',
+      '#' + DIFF_PANEL_ID + ' .parity-diff-key {',
+      '  color: rgb(255 255 255 / 0.48) !important;',
+      '  overflow-wrap: anywhere !important;',
+      '}',
+      '#' + DIFF_PANEL_ID + ' .parity-diff-detail {',
+      '  margin-top: 8px !important;',
+      '}',
+      '#' + DIFF_PANEL_ID + ' .parity-diff-detail strong { color: #bfdbfe !important; }',
+      '#' + DIFF_PANEL_ID + ' .parity-diff-detail span { margin-left: 8px !important; color: rgb(255 255 255 / 0.5) !important; }',
+      '#' + DIFF_PANEL_ID + ' .parity-diff-detail div + div { margin-top: 4px !important; }',
+      '#' + DIFF_PANEL_ID + ' .parity-diff-detail em { display: inline-block !important; width: 72px !important; color: rgb(255 255 255 / 0.5) !important; font-style: normal !important; }',
+      '#' + DIFF_PANEL_ID + ' .parity-diff-detail code { color: #e5e7eb !important; white-space: pre-wrap !important; overflow-wrap: anywhere !important; }',
+      '#' + TOOLTIP_ID + ' {',
+      '  position: fixed !important;',
+      '  z-index: 2147483647 !important;',
+      '  display: none !important;',
+      '  width: min(520px, calc(100vw - 24px)) !important;',
+      '  max-height: min(420px, calc(100vh - 24px)) !important;',
+      '  overflow: auto !important;',
+      '  padding: 10px 12px !important;',
+      '  border: 1px solid rgb(255 255 255 / 0.2) !important;',
+      '  border-radius: 6px !important;',
+      '  background: rgb(12 18 28 / 0.96) !important;',
+      '  color: white !important;',
+      '  box-shadow: 0 12px 40px rgb(0 0 0 / 0.34) !important;',
+      '  font: 12px/16px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;',
+      '  letter-spacing: 0 !important;',
+      '  pointer-events: none !important;',
+      '}',
+      '#' + TOOLTIP_ID + ' .parity-tooltip-title { display: flex !important; gap: 8px !important; align-items: center !important; }',
+      '#' + TOOLTIP_ID + ' .parity-tooltip-title code { color: #fca5a5 !important; }',
+      '#' + TOOLTIP_ID + ' .parity-tooltip-title span { color: white !important; font-weight: 700 !important; }',
+      '#' + TOOLTIP_ID + ' .parity-tooltip-meta { margin-top: 4px !important; color: rgb(255 255 255 / 0.48) !important; overflow-wrap: anywhere !important; }',
+      '#' + TOOLTIP_ID + ' .parity-tooltip-row { margin-top: 8px !important; padding-top: 8px !important; border-top: 1px solid rgb(255 255 255 / 0.12) !important; }',
+      '#' + TOOLTIP_ID + ' .parity-tooltip-row strong { color: #bfdbfe !important; }',
+      '#' + TOOLTIP_ID + ' .parity-tooltip-row span { margin-left: 8px !important; color: rgb(255 255 255 / 0.5) !important; }',
+      '#' + TOOLTIP_ID + ' .parity-tooltip-row div + div { margin-top: 4px !important; }',
+      '#' + TOOLTIP_ID + ' .parity-tooltip-row em { display: inline-block !important; width: 72px !important; color: rgb(255 255 255 / 0.5) !important; font-style: normal !important; }',
+      '#' + TOOLTIP_ID + ' .parity-tooltip-row code { color: #e5e7eb !important; white-space: pre-wrap !important; overflow-wrap: anywhere !important; }',
     ].join('\\n')
 
     document.head.appendChild(style)
@@ -191,6 +507,63 @@ const overlayInitScript = `
     panel.setAttribute('aria-hidden', 'true')
     document.body.appendChild(panel)
     return panel
+  }
+
+  const ensureTooltip = () => {
+    let tooltip = document.getElementById(TOOLTIP_ID)
+    if (tooltip) return tooltip
+
+    tooltip = document.createElement('div')
+    tooltip.id = TOOLTIP_ID
+    tooltip.setAttribute('aria-hidden', 'true')
+    document.body.appendChild(tooltip)
+    return tooltip
+  }
+
+  const detailForElement = (element) => {
+    const key = element?.getAttribute?.('data-parity-key')
+    if (!key) return null
+    return diffForCurrentPage()?.detailsByKey?.[key] || null
+  }
+
+  const tooltipDetailForElement = (element) => {
+    const detail = detailForElement(element)
+    if (detail && (detail.status !== 'match' || shouldShowDataTooltip(element))) return detail
+    if (shouldShowDataTooltip(element)) return liveElementDetail(element)
+    return null
+  }
+
+  const positionTooltip = (tooltip, event) => {
+    const margin = 12
+    const gap = 14
+    const width = tooltip.offsetWidth || 520
+    const height = tooltip.offsetHeight || 180
+    let left = event.clientX + gap
+    let top = event.clientY + gap
+
+    if (left + width + margin > window.innerWidth) left = event.clientX - width - gap
+    if (top + height + margin > window.innerHeight) top = event.clientY - height - gap
+
+    tooltip.style.left = Math.max(margin, left) + 'px'
+    tooltip.style.top = Math.max(margin, top) + 'px'
+  }
+
+  const showTooltip = (target, event) => {
+    if (document.documentElement.getAttribute('data-parity-overlay') !== 'on') return
+    const problem = tooltipDetailForElement(target)
+    if (!problem) return
+
+    const tooltip = ensureTooltip()
+    tooltip.innerHTML = renderProblemTooltip(problem)
+    tooltip.style.display = 'block'
+    activeTooltipTarget = target
+    positionTooltip(tooltip, event)
+  }
+
+  const hideTooltip = () => {
+    activeTooltipTarget = null
+    const tooltip = document.getElementById(TOOLTIP_ID)
+    if (tooltip) tooltip.style.display = 'none'
   }
 
   const applyMetadata = () => {
@@ -221,6 +594,21 @@ const overlayInitScript = `
         element.removeAttribute('data-parity-status')
       }
 
+      const tooltipDetail = tooltipDetailForElement(element)
+      if (tooltipDetail) {
+        element.setAttribute('data-parity-tooltip', problemLabel(tooltipDetail))
+        element.setAttribute('title', renderProblemTitle(tooltipDetail))
+        if (tooltipDetail.status !== 'match' && tooltipDetail.status !== 'tagged-data') {
+          element.setAttribute('data-parity-diff', problemLabel(tooltipDetail))
+        } else {
+          element.removeAttribute('data-parity-diff')
+        }
+      } else {
+        element.removeAttribute('data-parity-tooltip')
+        element.removeAttribute('data-parity-diff')
+        element.removeAttribute('title')
+      }
+
       const description = describe(element)
       if (description) element.setAttribute('data-parity-label', description)
     })
@@ -236,13 +624,13 @@ const overlayInitScript = `
     }
 
     const panel = ensureDiffPanel()
-    const visibleProblems = pageDiff.problems.slice(0, 12)
+    panel.dataset.expanded = diffPanelExpanded ? 'true' : 'false'
+    const visibleProblems = diffPanelExpanded ? pageDiff.problems : pageDiff.problems.slice(0, 12)
     panel.innerHTML =
-      '<strong>' + pageDiff.problems.length + ' parity discrepancies</strong>' +
-      visibleProblems.map(problem =>
-        '<div><code>' + problem.status + '</code> ' + (problem.field || problem.id || problem.key) + '</div>',
-      ).join('') +
-      (pageDiff.problems.length > visibleProblems.length ? '<div>...and ' + (pageDiff.problems.length - visibleProblems.length) + ' more</div>' : '')
+      '<div class="parity-diff-header"><strong>' + pageDiff.problems.length + ' parity discrepancies</strong>' +
+      '<button type="button" data-parity-diff-toggle>' + (diffPanelExpanded ? 'collapse' : 'expand') + '</button></div>' +
+      visibleProblems.map(diffPanelExpanded ? renderProblemFullLine : renderProblemLine).join('') +
+      (!diffPanelExpanded && pageDiff.problems.length > visibleProblems.length ? '<div>...and ' + (pageDiff.problems.length - visibleProblems.length) + ' more</div>' : '')
   }
 
   const updateToolbar = () => {
@@ -331,6 +719,38 @@ const overlayInitScript = `
     }
   })
 
+  document.addEventListener('click', (event) => {
+    if (!event.target?.closest?.('[data-parity-diff-toggle]')) return
+    event.preventDefault()
+    diffPanelExpanded = !diffPanelExpanded
+    scheduleRefresh()
+  })
+
+  document.addEventListener('pointerover', (event) => {
+    const target = event.target?.closest?.('[data-parity-key]')
+    if (target) showTooltip(target, event)
+  })
+
+  document.addEventListener('pointermove', (event) => {
+    if (!activeTooltipTarget) return
+    const tooltip = document.getElementById(TOOLTIP_ID)
+    if (tooltip) positionTooltip(tooltip, event)
+  })
+
+  document.addEventListener('pointerout', (event) => {
+    if (!activeTooltipTarget) return
+    if (event.relatedTarget && activeTooltipTarget.contains(event.relatedTarget)) return
+    hideTooltip()
+  })
+
+  document.addEventListener('focusin', (event) => {
+    const target = event.target?.closest?.('[data-parity-key]')
+    if (!target || !tooltipDetailForElement(target)) return
+    showTooltip(target, { clientX: window.innerWidth / 2, clientY: window.innerHeight / 2 })
+  })
+
+  document.addEventListener('focusout', hideTooltip)
+
   const observer = new MutationObserver(scheduleRefresh)
   observer.observe(document.documentElement, {
     childList: true,
@@ -361,10 +781,11 @@ void main().catch((error) => {
 
 async function main() {
   const positional = args.positionals[0]
-  const target = await resolveTarget(positional)
   const diffPath = valueOf('diff') || process.env.PARITY_DIFF
   const diffSide = valueOf('side') || process.env.PARITY_DIFF_SIDE || 'candidate'
   const diffPayload = diffPath ? await loadOverlayDiff(diffPath, diffSide) : null
+  const injectedOverlayScriptPath = await writeInjectedOverlayScript(diffPayload)
+  const target = await resolveTarget(positional, injectedOverlayScriptPath)
   const state = {
     browser: null,
   }
@@ -380,6 +801,7 @@ async function main() {
     }
 
     await stopServer(serverProcess)
+    await removeInjectedOverlayScript(injectedOverlayScriptPath)
     process.exit(exitCode)
   }
 
@@ -438,6 +860,38 @@ async function main() {
   await new Promise(() => {})
 }
 
+async function writeInjectedOverlayScript(diffPayload) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'euler-parity-overlay-'))
+  const filePath = path.join(dir, 'overlay.js')
+  const chunks = []
+
+  if (diffPayload) {
+    chunks.push('window.__PARITY_DIFF__ = ' + serializeForInlineScript(diffPayload))
+  }
+
+  chunks.push(overlayInitScript)
+  await fs.writeFile(filePath, chunks.join('\n;\n'), 'utf8')
+  return filePath
+}
+
+async function removeInjectedOverlayScript(filePath) {
+  if (!filePath) return
+  await fs.rm(path.dirname(filePath), { recursive: true, force: true }).catch(() => {})
+}
+
+function serializeForInlineScript(value) {
+  return JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, (character) => {
+    switch (character) {
+      case '<': return '\\u003c'
+      case '>': return '\\u003e'
+      case '&': return '\\u0026'
+      case '\u2028': return '\\u2028'
+      case '\u2029': return '\\u2029'
+      default: return character
+    }
+  })
+}
+
 async function loadOverlayDiff(filePath, side) {
   const raw = JSON.parse(await fs.readFile(filePath, 'utf8'))
   const diff = raw.diff ? JSON.parse(await fs.readFile(raw.diff, 'utf8')) : raw
@@ -447,21 +901,28 @@ async function loadOverlayDiff(filePath, side) {
     const pageUrl = new URL(side === 'baseline' ? page.baselineUrl : page.candidateUrl)
     const pageKey = pageUrl.pathname + pageUrl.search
     const statuses = {}
+    const detailsByKey = {}
     const problems = []
 
     for (const item of page.elementDiffs || []) {
       statuses[item.key] = item.status
+      const source = side === 'baseline' ? item.baseline : item.candidate
+      const detail = {
+        key: item.key,
+        baseKey: item.baseKey,
+        status: item.status,
+        id: source?.id || item.baseline?.id || item.candidate?.id || '',
+        field: source?.field || item.baseline?.field || item.candidate?.field || '',
+        list: source?.list || item.baseline?.list || item.candidate?.list || '',
+        itemKey: source?.itemKey || item.baseline?.itemKey || item.candidate?.itemKey || '',
+        baseline: item.baseline,
+        candidate: item.candidate,
+        mismatch: item.mismatch,
+      }
+      detailsByKey[item.key] = detail
 
       if (item.status !== 'match') {
-        const source = side === 'baseline' ? item.baseline : item.candidate
-        problems.push({
-          key: item.key,
-          status: item.status,
-          id: source?.id || item.baseline?.id || item.candidate?.id || '',
-          field: source?.field || item.baseline?.field || item.candidate?.field || '',
-          list: source?.list || item.baseline?.list || item.candidate?.list || '',
-          itemKey: source?.itemKey || item.baseline?.itemKey || item.candidate?.itemKey || '',
-        })
+        problems.push(detail)
       }
     }
 
@@ -506,6 +967,7 @@ async function loadOverlayDiff(filePath, side) {
       baselineUrl: page.baselineUrl,
       candidateUrl: page.candidateUrl,
       statuses,
+      detailsByKey,
       problems,
     }
   }
@@ -517,7 +979,7 @@ async function loadOverlayDiff(filePath, side) {
   }
 }
 
-async function resolveTarget(positional) {
+async function resolveTarget(positional, injectedOverlayScriptPath) {
   if (isHttpUrl(positional)) {
     return {
       url: new URL(positional),
@@ -544,16 +1006,18 @@ async function resolveTarget(positional) {
   return {
     url: new URL(normalizePath(path), baseUrl),
     baseUrl,
-    serverProcess: startDevServer(host, port),
+    serverProcess: startDevServer(host, port, injectedOverlayScriptPath),
   }
 }
 
-function startDevServer(host, port) {
+function startDevServer(host, port, injectedOverlayScriptPath) {
   const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
   const child = spawn(npmCommand, ['run', 'dev', '--', '--host', host, '--port', String(port)], {
     env: {
       ...process.env,
       BROWSER: 'none',
+      PARITY_OVERLAY_INJECT: '1',
+      PARITY_OVERLAY_SCRIPT_PATH: injectedOverlayScriptPath,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -700,6 +1164,10 @@ Options and environment:
   PARITY_HEADLESS=1          Run headless.
   PARITY_VIEWPORT_WIDTH      Browser viewport width. Default: 1440
   PARITY_VIEWPORT_HEIGHT     Browser viewport height. Default: 1000
+
+When the runner starts the app itself, it also injects the overlay into the
+served HTML. Opening the printed URL in another browser tab will show the same
+tag styling and diff panel.
 
 In the browser:
   Alt+P toggles tag borders.
