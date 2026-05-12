@@ -5,6 +5,7 @@ import type { REULLock } from '~/entities/reul'
 import type { TxPlan } from '~/entities/txPlan'
 import { logWarn } from '~/utils/errorHandling'
 import { BATCH_SIZE_RPC_CALLS, POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
+import { assertOperationNotBlocked } from '~/utils/operationGuardRegistry'
 
 const isLoaded = ref(false)
 const isLocksLoading = ref(true)
@@ -144,6 +145,8 @@ export const useREULLocks = () => {
     if (!reulTokenContractAddress.value) {
       throw new Error('REUL contract address not available')
     }
+
+    assertOperationNotBlocked()
 
     const hash = await writeContractAsync({
       address: reulTokenContractAddress.value as Address,

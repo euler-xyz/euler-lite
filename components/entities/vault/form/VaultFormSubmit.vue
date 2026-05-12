@@ -50,6 +50,7 @@ const needToSwitchChain = computed(() => {
 })
 const hasActiveSession = computed(() => isConnected.value || isSpyMode.value)
 const _disabled = computed(() => {
+  if (!hasActiveSession.value || needToSwitchChain.value) return false
   if (isOperationBlocked.value) return true
   return props.disabled && !needToSwitchChain.value
 })
@@ -101,7 +102,7 @@ const showKeyringFlow = computed(() =>
 )
 
 const showTosFlow = computed(() =>
-  !showKeyringFlow.value && tosGuard?.isTermsRequired === true && !tosGuard?.tosLoadFailed,
+  hasActiveSession.value && !showKeyringFlow.value && tosGuard?.isTermsRequired === true && !tosGuard?.tosLoadFailed,
 )
 
 const showUnverifiedVaultFlow = computed(() =>

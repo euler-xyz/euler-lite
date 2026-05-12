@@ -13,6 +13,8 @@ export interface TosGuardState {
 }
 
 export const useTosGuard = () => {
+  if (!import.meta.client) return
+
   const { address } = useWagmi()
   const { eulerPeripheryAddresses, isReady, loadEulerConfig, chainId } = useEulerAddresses()
   const { client: rpcClient } = useRpcClient()
@@ -22,6 +24,7 @@ export const useTosGuard = () => {
   const sessionAccepted = useState<boolean>('tosGuardSessionAccepted', () => false)
   const tosLoadFailed = useState<boolean>('tosGuardLoadFailed', () => false)
   const tosData = ref<TosData | null>(null)
+  let checkGeneration = 0
 
   const isTermsRequired = computed(() =>
     enableTosSignature && hasSigned.value === false && !sessionAccepted.value && !tosLoadFailed.value,
@@ -32,26 +35,38 @@ export const useTosGuard = () => {
   )
 
   const checkHasSigned = async () => {
+    const generation = ++checkGeneration
+    const checkedAddress = address.value
+    const checkedChainId = chainId.value
+
+    const isCurrentCheck = () =>
+      generation === checkGeneration
+      && address.value === checkedAddress
+      && chainId.value === checkedChainId
+
     if (!enableTosSignature) {
       hasSigned.value = true
       return
     }
     if (hasSigned.value === true) return
-    if (!address.value) {
+    if (!checkedAddress) {
       hasSigned.value = false
       return
     }
     if (!isReady.value) {
       await loadEulerConfig()
+      if (!isCurrentCheck()) return
     }
     if (!tosSignerAddress.value) {
-      hasSigned.value = false
+      tosLoadFailed.value = true
+      hasSigned.value = null
       return
     }
 
     let data: TosData
     try {
       data = await getTosData()
+      if (!isCurrentCheck()) return
       tosData.value = data
       tosLoadFailed.value = false
     }
@@ -68,8 +83,9 @@ export const useTosGuard = () => {
         address: tosSignerAddress.value,
         abi: tosSignerReadAbi,
         functionName: 'lastTermsOfUseSignatureTimestamp',
-        args: [address.value as Address, data.tosMessageHash],
+        args: [checkedAddress as Address, data.tosMessageHash],
       })
+      if (!isCurrentCheck()) return
       hasSigned.value = (lastSignTimestamp as bigint) > 0
     }
     catch (e) {
@@ -117,6 +133,9 @@ export const useTosGuard = () => {
     if (enableTosSignature && tosLoadFailed.value) {
       registerOperationBlocker('tos', 'Unable to load Terms of Use')
     }
+    else if (enableTosSignature && hasSigned.value === null) {
+      registerOperationBlocker('tos', 'Checking Terms of Use signature')
+    }
     else if (isTermsRequired.value) {
       registerOperationBlocker('tos', 'Terms of Use acceptance required')
     }
@@ -135,6 +154,7 @@ export const useTosGuard = () => {
   })
 
   watch(address, () => {
+    checkGeneration++
     hasSigned.value = null
     sessionAccepted.value = false
     unregisterOperationGuard('tos')
@@ -144,6 +164,7 @@ export const useTosGuard = () => {
   })
 
   watch(chainId, () => {
+    checkGeneration++
     hasSigned.value = null
     sessionAccepted.value = false
     unregisterOperationGuard('tos')

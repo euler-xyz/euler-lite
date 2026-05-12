@@ -10,6 +10,7 @@ import { CampaignAction } from '~/entities/brevis'
 import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 import { logWarn } from '~/utils/errorHandling'
 import { createInFlightDedup } from '~/utils/in-flight'
+import { assertOperationNotBlocked } from '~/utils/operationGuardRegistry'
 
 // Server proxy response shape for public campaigns (raw pass-through of the
 // Brevis POST response body).
@@ -274,6 +275,7 @@ export const useBrevis = () => {
     }
 
     const merkleData = rewardsBatch[0]
+    assertOperationNotBlocked()
 
     const hash = await writeContractAsync({
       address: merkleData.claimContractAddr as Address,

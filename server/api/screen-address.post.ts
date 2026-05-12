@@ -1,4 +1,4 @@
-import { createError, readBody } from 'h3'
+import { createError, readBody, type H3Event } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { UPSTREAM_FETCH_TIMEOUT_MS } from '~/server/utils/fetchWithTimeout'
 import { logger } from '~/server/utils/logger'
@@ -14,6 +14,40 @@ function isValidAddress(value: unknown): value is string {
   return typeof value === 'string' && /^0x[0-9a-fA-F]{40}$/.test(value)
 }
 
+function headerValue(value: string | string[] | undefined): string {
+  return (Array.isArray(value) ? value[0] : value ?? '').trim().toLowerCase()
+}
+
+function isTruthyHeader(value: string | string[] | undefined): boolean {
+  return ['1', 'true', 'yes'].includes(headerValue(value))
+}
+
+interface ScreeningPayload {
+  address: string
+  chain: 'all'
+  vpnIsUsed: string
+}
+
+export function getTrustedVpnIsUsed(event: H3Event): boolean {
+  const headers = event.node.req.headers
+  return isTruthyHeader(headers['x-is-vpn']) || isTruthyHeader(headers['x-is-proxy-or-vpn'])
+}
+
+export function buildScreeningPayload(address: string, event: H3Event): ScreeningPayload {
+  return {
+    address,
+    chain: 'all',
+    vpnIsUsed: String(getTrustedVpnIsUsed(event)),
+  }
+}
+
+export function isAddressSuspiciousResponse(data: unknown): boolean {
+  if (!data || typeof data !== 'object') {
+    return true
+  }
+  return (data as { addressIsSuspicious?: unknown }).addressIsSuspicious !== false
+}
+
 export default defineEventHandler(async (event) => {
   rateLimiter.consume(event)
 
@@ -24,7 +58,6 @@ export default defineEventHandler(async (event) => {
   }
 
   const address = body.address
-  const vpnIsUsed = String(body.vpnIsUsed ?? false)
 
   const screeningUri = process.env.WALLET_SCREENING_URI
 
@@ -40,7 +73,7 @@ export default defineEventHandler(async (event) => {
     const resp = await fetch(screeningUri, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ address, chain: 'all', vpnIsUsed }),
+      body: JSON.stringify(buildScreeningPayload(address, event)),
       signal: controller.signal,
     })
 
@@ -50,7 +83,7 @@ export default defineEventHandler(async (event) => {
     }
 
     const data = await resp.json()
-    const isSuspicious = Boolean(data?.addressIsSuspicious)
+    const isSuspicious = isAddressSuspiciousResponse(data)
 
     if (isSuspicious) {
       logger.warn({ ctx: 'screen-address', address }, 'flagged address')

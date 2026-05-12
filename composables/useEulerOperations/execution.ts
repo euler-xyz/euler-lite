@@ -4,7 +4,7 @@ import type { OperationsContext, AllowanceHelpers } from './types'
 import type { TxPlan } from '~/entities/txPlan'
 import { catchToFallback, logWarn } from '~/utils/errorHandling'
 import { isNonBlockingSimulationError } from '~/utils/tx-errors'
-import { applyOperationGuards } from '~/utils/operationGuardRegistry'
+import { applyOperationGuards, assertOperationNotBlocked } from '~/utils/operationGuardRegistry'
 import { waitForSubgraphBlock } from '~/utils/subgraph'
 
 const OKX_POST_APPROVE_DELAY_MS = 3000
@@ -56,11 +56,15 @@ export const createExecutionHelpers = (ctx: OperationsContext, allowanceHelpers:
       throw new Error('Wallet not connected')
     }
 
+    assertOperationNotBlocked()
+
     const guardedPlan = applyOperationGuards(plan)
     let lastHash: Hex | undefined
     let lastReceipt: TransactionReceipt | undefined
 
     for (const step of guardedPlan.steps) {
+      assertOperationNotBlocked()
+
       /* eslint-disable @typescript-eslint/no-explicit-any -- wagmi writeContractAsync requires ABI-specific generics */
       const txHash = await ctx.writeContractAsync({
         address: step.to,

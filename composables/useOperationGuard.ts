@@ -2,7 +2,6 @@ import { computed, isRef, watch, onUnmounted, provide, reactive, type Ref } from
 import { useAccount, useChainId } from '@wagmi/vue'
 import type { Address } from 'viem'
 import { useKeyring, KeyringFlowState } from '~/composables/useKeyring'
-import { useTosGuard } from '~/composables/guards/useTosGuard'
 import { useUnverifiedVaultGuard } from '~/composables/guards/useUnverifiedVaultGuard'
 import { registerOperationGuard, unregisterOperationGuard, registerOperationBlocker, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
 import { injectKeyringCredential } from '~/utils/keyring-injection'
@@ -16,9 +15,6 @@ export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | 
     const raw = isRef(vaultAddresses) ? vaultAddresses.value : vaultAddresses
     return raw.filter((addr): addr is string => Boolean(addr))
   })
-
-  // --- TOS guard (global, not vault-specific) ---
-  useTosGuard()
 
   // --- Unverified vault guard ---
   useUnverifiedVaultGuard(addresses)

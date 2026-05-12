@@ -1,6 +1,5 @@
 export async function screenAddress(
   address: string,
-  vpnIsUsed: boolean,
 ): Promise<boolean> {
   if (!address) return false
 
@@ -8,11 +7,15 @@ export async function screenAddress(
     const resp = await fetch('/api/screen-address', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ address, vpnIsUsed }),
+      body: JSON.stringify({ address }),
     })
 
+    if (!resp.ok) {
+      return true
+    }
+
     const data = await resp.json()
-    return Boolean(data?.addressIsSuspicious)
+    return data?.addressIsSuspicious !== false
   }
   catch {
     return true

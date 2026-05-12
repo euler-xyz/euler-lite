@@ -6,7 +6,7 @@ import type { VaultAsset } from '~/entities/vault'
 import type { TxPlan } from '~/entities/txPlan'
 import type { SwapperMode } from '~/entities/swap'
 import type { EVCCall } from '~/utils/evc-converter'
-import { applyOperationGuards } from '~/utils/operationGuardRegistry'
+import { applyOperationGuards, assertOperationNotBlocked, isOperationBlocked, operationBlockReason } from '~/utils/operationGuardRegistry'
 import { buildDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { logWarn } from '~/utils/errorHandling'
@@ -120,6 +120,7 @@ const internalSubmitting = ref(false)
 
 const handleConfirm = async () => {
   if (internalSubmitting.value) return
+  assertOperationNotBlocked()
   const result = onConfirm()
   // If onConfirm returns a promise, keep the modal open with a loading state
   // and let the caller close it via modal.close(). Otherwise close immediately
@@ -336,13 +337,20 @@ const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimite
         :description="permit2DisclaimerText"
         size="compact"
       />
+      <UiToast
+        v-if="operationBlockReason"
+        title="Action required"
+        variant="warning"
+        :description="operationBlockReason"
+        size="compact"
+      />
 
       <!-- Confirm button -->
       <UiButton
         variant="primary"
         size="xlarge"
         rounded
-        :disabled="isSpyMode || internalSubmitting"
+        :disabled="isSpyMode || internalSubmitting || isOperationBlocked"
         :loading="internalSubmitting"
         @click="handleConfirm"
       >

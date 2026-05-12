@@ -54,6 +54,13 @@ export const operationBlockReason = computed(() => {
   return first.done ? undefined : first.value
 })
 
+/** Throw when any operation blocker is active. Used by final execution paths. */
+export const assertOperationNotBlocked = (): void => {
+  if (isOperationBlocked.value) {
+    throw new Error(operationBlockReason.value ?? 'Operation blocked')
+  }
+}
+
 /** Reactive: true when a guard with the given key is registered */
 export const hasGuard = (key: string) => computed(() => guards.value.has(key))
 

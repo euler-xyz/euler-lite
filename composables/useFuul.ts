@@ -10,6 +10,7 @@ import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_60S_MS } from '~/entities/tuning-const
 import { logWarn } from '~/utils/errorHandling'
 import { createInFlightDedup } from '~/utils/in-flight'
 import { createRaceGuard } from '~/utils/race-guard'
+import { assertOperationNotBlocked } from '~/utils/operationGuardRegistry'
 
 const address = ref('')
 
@@ -239,6 +240,7 @@ export const useFuul = () => {
 
     const contractCheck = mapRewardToContractCheck(reward)
     const fee = await readClaimFee(reward.project_address)
+    assertOperationNotBlocked()
 
     const hash = await writeContractAsync({
       address: FUUL_MANAGER_ADDRESS as Address,

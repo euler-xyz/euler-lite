@@ -10,6 +10,7 @@ import type { TxPlan } from '~/entities/txPlan'
 import { CACHE_TTL_1MIN_MS, POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 import { logWarn } from '~/utils/errorHandling'
 import { createInFlightDedup } from '~/utils/in-flight'
+import { assertOperationNotBlocked } from '~/utils/operationGuardRegistry'
 
 // The per-user /users/{addr}/rewards endpoint stays direct (it carries the
 // wallet address, which we deliberately keep off the shared server cache).
@@ -358,6 +359,7 @@ export const useMerkl = () => {
     }
 
     await ensureWalletOnCurrentChain()
+    assertOperationNotBlocked()
 
     const hash = await writeContractAsync({
       address: MERKL_ADDRESS as Address,

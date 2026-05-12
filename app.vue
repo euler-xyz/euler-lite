@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 import { useModal } from '~/components/ui/composables/useModal'
+import { useComplianceBlockers } from '~/composables/guards/useComplianceBlockers'
+import { useTosGuard } from '~/composables/guards/useTosGuard'
 import { MigrationAnnouncementModal } from '#components'
 
 const route = useRoute()
@@ -17,6 +19,9 @@ const { loadCountry } = useGeoBlock()
 const { updateBalances, resetBalances } = useWallets()
 const { isConnected, address } = useWagmi()
 const showAllLabelEntries = useShowAllLabelEntries()
+
+useComplianceBlockers()
+useTosGuard()
 
 // Eagerly instantiate useEulerAccount at app root so its internal watchers
 // trigger updatePositions() as soon as balances + lens addresses are ready.

@@ -1,10 +1,17 @@
 import { useDisconnect } from '@wagmi/vue'
 import { useModal } from '~/components/ui/composables/useModal'
 import { BlockedAddressModal } from '#components'
-import { detectVpn, resetVpnCache } from '~/services/vpn'
 import { resetCountryCache } from '~/services/country'
 import { screenAddress } from '~/services/trm'
 import { getDefaultPageRoute } from '~/entities/menu'
+
+export type AddressScreeningStatus = 'idle' | 'pending' | 'allowed' | 'blocked'
+
+const blockedAddress = ref<string | null>(null)
+const screenedAddress = ref<string | null>(null)
+const screeningStatus = ref<AddressScreeningStatus>('idle')
+const isScreening = computed(() => screeningStatus.value === 'pending')
+let screeningGeneration = 0
 
 export const useAddressScreen = () => {
   const modal = useModal()
@@ -13,9 +20,6 @@ export const useAddressScreen = () => {
 
   const { enableEarnPage, enableLendPage, enableExplorePage } = useDeployConfig()
   const defaultPageRoute = getDefaultPageRoute(enableEarnPage, enableLendPage, enableExplorePage)
-  const blockedAddress = ref<string | null>(null)
-  const isScreening = ref(false)
-  let screeningGeneration = 0
 
   const showBlockedModal = (address: string) => {
     blockedAddress.value = address
@@ -37,35 +41,33 @@ export const useAddressScreen = () => {
     }
 
     const gen = ++screeningGeneration
-    isScreening.value = true
-    try {
-      const vpnIsUsed = await detectVpn()
-      if (gen !== screeningGeneration) return false
+    screenedAddress.value = address
+    screeningStatus.value = 'pending'
+    const isRestricted = await screenAddress(address)
+    if (gen !== screeningGeneration) return false
 
-      const isRestricted = await screenAddress(address, vpnIsUsed)
-      if (gen !== screeningGeneration) return false
-
-      if (isRestricted) {
-        await disconnect()
-        showBlockedModal(address)
-        return true
-      }
-      return false
+    if (isRestricted) {
+      screeningStatus.value = 'blocked'
+      await disconnect()
+      showBlockedModal(address)
+      return true
     }
-    finally {
-      if (gen === screeningGeneration) {
-        isScreening.value = false
-      }
-    }
+    screeningStatus.value = 'allowed'
+    return false
   }
 
   const resetScreeningCache = () => {
-    resetVpnCache()
+    screeningGeneration++
+    screenedAddress.value = null
+    blockedAddress.value = null
+    screeningStatus.value = 'idle'
     resetCountryCache()
   }
 
   return {
     isScreening,
+    screeningStatus,
+    screenedAddress,
     blockedAddress,
     screenConnectedAddress,
     resetScreeningCache,
