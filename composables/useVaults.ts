@@ -949,8 +949,12 @@ export const useVaults = () => {
       return Array.isArray(product.entity) ? product.entity : [product.entity].filter(Boolean)
     },
     hasEntityAddress: (key, address) => {
+      // Static type says addresses is non-null, but the label data flows
+      // through JSON from an external repo — a malformed entity entry can
+      // arrive without an `addresses` map, in which case `in` would throw
+      // and a single bad entry would break verification for every vault.
       const entity = entities[key]
-      return !!entity && address in entity.addresses
+      return !!entity?.addresses && address in entity.addresses
     },
   }
 

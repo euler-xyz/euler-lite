@@ -89,7 +89,13 @@ const getLabels = async (chainId: number) => {
     product.deprecatedVaults?.forEach(addr => verifiedSet.add(addr))
   }
 
-  const earnVaults: string[] = earn.map(entry => (typeof entry === 'string' ? entry : entry.address))
+  // Filter so downstream consumers (the loader, fetchEarnVaults) always get
+  // a string[] — a malformed entry whose `address` is missing or non-string
+  // would otherwise crash the lens batch.
+  const earnVaults: string[] = earn.flatMap((entry) => {
+    if (typeof entry === 'string') return [entry]
+    return typeof entry?.address === 'string' ? [entry.address] : []
+  })
 
   return {
     verifiedVaultAddresses: [...verifiedSet],

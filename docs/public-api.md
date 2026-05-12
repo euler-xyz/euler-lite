@@ -197,7 +197,7 @@ Earn vaults that are in `earn-vaults.json` but not in any product entry resolve 
 
 #### `entities` is not equivalent to `is-known`
 
-`entities` answers "who manages this vault"; it is independent of `is-known`. An empty `entities` array does **not** mean the vault is unknown — escrow vaults, earn vaults listed without a product, and (legacy data only) products with no declared entity all return `entities: []` while still being `is-known: true`. Use the non-`null` / `null` distinction on the `/metadata` response, or the `/is-known` endpoint, to determine recognition. The two endpoints agree on recognition by construction:
+`entities` answers "who manages this vault"; it is independent of `is-known`. An empty `entities` array does **not** mean the vault is unknown — escrow vaults and earn vaults listed without a product return `entities: []` while still being `is-known: true`. Use the non-`null` / `null` distinction on the `/metadata` response, or the `/is-known` endpoint, to determine recognition. The two endpoints agree on recognition by construction:
 
 > `/api/public/is-known` returns `true` ⇔ `/api/public/metadata` returns a non-`null` entry for that address.
 

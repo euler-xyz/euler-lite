@@ -142,7 +142,7 @@ describe('isVaultGovernorVerified', () => {
     expect(isVaultGovernorVerified(vault, labels)).toBe(true)
   })
 
-  it('returns false when oracle router governor does not match', () => {
+  it('skips the router governor check when oracleInfo cannot be decoded', () => {
     const vault = makeVault({
       governorAdmin: GOV_A,
       oracleDetailedInfo: makeRouterOracle(ROUTER_GOV_OTHER),
@@ -151,9 +151,12 @@ describe('isVaultGovernorVerified', () => {
       declaredKeys: { [VAULT_ADDR]: ['euler'] },
       entityAddresses: { euler: [GOV_A] },
     })
-    // The router governor is decoded from oracleInfo. Decoding will fail for
-    // our placeholder payload, so the rule's `routerGovernor` is null and the
-    // gate is a no-op — the vault stays verified. Mark expected accordingly.
+    // The router governor is decoded from oracleInfo via decodeEulerRouterInfo.
+    // Decoding fails on our placeholder payload (not a valid ABI-encoded
+    // EulerRouter tuple), so the rule's `routerGovernor` is null and the
+    // router-gate is a no-op — the vault stays verified on governorAdmin alone.
+    // A real "router mismatch" path needs an end-to-end test with a real
+    // encoded payload.
     expect(isVaultGovernorVerified(vault, labels)).toBe(true)
   })
 
