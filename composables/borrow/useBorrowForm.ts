@@ -589,27 +589,36 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   }, 500)
 
   // --- Actions: submit & send ---
-  const buildSwapBorrowPlanFromQuote = async (quote: SwapApiQuote, planOptions: { includePermit2Call?: boolean } = {}): Promise<TxPlan> => {
-    if (!borrowSelectedAsset.value || !collateralVault.value || !borrowVault.value) {
-      throw new Error('Missing vault or asset data')
-    }
-    const isNative = isNativeCurrencyAddress(borrowSelectedAsset.value.address)
-    const inputAmount = valueToNano(collateralAmount.value || '0', borrowSelectedAsset.value.decimals)
-    const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
+  const buildSwapBorrowPlanFromSnapshot = async (
+    snapshot: {
+      quote: SwapApiQuote
+      selectedAsset: VaultAsset
+      collateralVault: Vault
+      borrowVault: Vault
+      collateralAmount: string
+      borrowAmount: string
+      slippage: number
+      subAccount: string
+      chainId: number
+    },
+    planOptions: { includePermit2Call?: boolean } = {},
+  ): Promise<TxPlan> => {
+    const isNative = isNativeCurrencyAddress(snapshot.selectedAsset.address)
+    const inputAmount = valueToNano(snapshot.collateralAmount || '0', snapshot.selectedAsset.decimals)
+    const wrappedAddress = isNative ? resolveWrappedNativeAddress(snapshot.chainId) : null
     if (isNative && !wrappedAddress) {
       throw new Error('Wrapped native token not found')
     }
-    const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value.decimals)
-    const subAccount = await resolvePendingSubAccount()
+    const borrowAmountNano = valueToNano(snapshot.borrowAmount || '0', snapshot.borrowVault.decimals)
     return buildSwapAndBorrowPlan({
-      inputTokenAddress: (wrappedAddress || borrowSelectedAsset.value.address) as Address,
+      inputTokenAddress: (wrappedAddress || snapshot.selectedAsset.address) as Address,
       inputAmount,
-      collateralVaultAddress: collateralVault.value.address as Address,
-      borrowVaultAddress: borrowVault.value.address as Address,
+      collateralVaultAddress: snapshot.collateralVault.address as Address,
+      borrowVaultAddress: snapshot.borrowVault.address as Address,
       borrowAmount: borrowAmountNano,
-      swapQuote: quote,
-      requestedSlippage: borrowSwapSlippage.value,
-      subAccount,
+      swapQuote: snapshot.quote,
+      requestedSlippage: snapshot.slippage,
+      subAccount: snapshot.subAccount,
       includePermit2Call: planOptions.includePermit2Call,
       wrappedNativeInfo: isNative && wrappedAddress
         ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
@@ -633,19 +642,35 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
       // Swap & borrow path
       if (borrowNeedsSwap.value && borrowSwapEffectiveQuote.value) {
+        let reviewedSwapSnapshot: Parameters<typeof buildSwapBorrowPlanFromSnapshot>[0]
         try {
-          plan.value = await buildSwapBorrowPlanFromQuote(borrowSwapEffectiveQuote.value, { includePermit2Call: false })
+          if (!borrowSelectedAsset.value || !collateralVault.value || !borrowVault.value) {
+            throw new Error('Missing vault or asset data')
+          }
+          reviewedSwapSnapshot = {
+            quote: borrowSwapEffectiveQuote.value,
+            selectedAsset: borrowSelectedAsset.value,
+            collateralVault: collateralVault.value,
+            borrowVault: borrowVault.value,
+            collateralAmount: collateralAmount.value,
+            borrowAmount: borrowAmount.value,
+            slippage: borrowSwapSlippage.value,
+            subAccount: await resolvePendingSubAccount(),
+            chainId: chainId.value!,
+          }
+          plan.value = await buildSwapBorrowPlanFromSnapshot(reviewedSwapSnapshot, { includePermit2Call: false })
         }
         catch (e) {
           logWarn('borrow/buildSwapPlan', e)
+          error('Failed to build transaction')
           plan.value = null
+          return
         }
 
-        if (plan.value) {
-          const ok = await runBorrowSimulation(plan.value)
-          if (!ok) {
-            return
-          }
+        const reviewedPlan = plan.value
+        const ok = await runBorrowSimulation(reviewedPlan)
+        if (!ok) {
+          return
         }
 
         const isNativeSwap = borrowSelectedAsset.value && isNativeCurrencyAddress(borrowSelectedAsset.value.address)
@@ -657,12 +682,13 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             type: 'swap-borrow' as const,
             asset: reviewAsset,
             amount: collateralAmount.value,
-            plan: plan.value || undefined,
+            plan: reviewedPlan,
+            requirePlanForConfirm: true,
             swapToAsset: collateralVault.value.asset,
             swapToAmount: borrowSwapEstimatedCollateral.value,
             swapMode: SwapperMode.EXACT_IN,
             onConfirm: async () => {
-              await send()
+              await send(reviewedPlan, () => buildSwapBorrowPlanFromSnapshot(reviewedSwapSnapshot, { includePermit2Call: true }))
             },
             submittingLabel: 'Submitting...',
           },
@@ -674,8 +700,12 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       const collateralAmountNano = valueToNano(collateralAmount.value || '0', collateralVault.value?.decimals)
       const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value?.decimals)
       let collateralAmountForPlan = collateralAmountNano
+      const reviewedCollateralVault = collateralVault.value
+      const reviewedBorrowVault = borrowVault.value
+      const reviewedIsSavingCollateral = isSavingCollateral.value
+      const reviewedSavingSubAccount = savingCollateral.value?.subAccount
 
-      if (isSavingCollateral.value) {
+      if (reviewedIsSavingCollateral) {
         if (savingCollateral.value?.assets === collateralAmountNano) {
           collateralAmountForPlan = savingBalance.value
         }
@@ -683,43 +713,45 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
           collateralAmountForPlan = await convertAssetsToShares(collateralVault.value.address, collateralAmountNano)
         }
       }
+      const reviewedWrappedNativeInfo = isBorrowNativeWrap.value
+        ? { wrappedTokenAddress: resolveWrappedNativeAddress(chainId.value!)!, nativeAmount: collateralAmountForPlan }
+        : undefined
 
       try {
-        plan.value = isSavingCollateral.value
+        plan.value = reviewedIsSavingCollateral
           ? await buildBorrowBySavingPlan(
-              collateralVault.value.address,
+              reviewedCollateralVault.address,
               collateralAmountForPlan,
-              borrowVault.value.address,
+              reviewedBorrowVault.address,
               borrowAmountNano,
               undefined,
               undefined,
-              savingCollateral.value?.subAccount,
+              reviewedSavingSubAccount,
             )
           : await buildBorrowPlan(
-              collateralVault.value.address,
-              collateralVault.value.asset.address,
+              reviewedCollateralVault.address,
+              reviewedCollateralVault.asset.address,
               collateralAmountForPlan,
-              borrowVault.value.address,
+              reviewedBorrowVault.address,
               borrowAmountNano,
               undefined,
               {
                 includePermit2Call: false,
-                wrappedNativeInfo: isBorrowNativeWrap.value
-                  ? { wrappedTokenAddress: resolveWrappedNativeAddress(chainId.value!)!, nativeAmount: collateralAmountForPlan }
-                  : undefined,
+                wrappedNativeInfo: reviewedWrappedNativeInfo,
               },
             )
       }
       catch (e) {
         logWarn('borrow/buildPlan', e)
+        error('Failed to build transaction')
         plan.value = null
+        return
       }
 
-      if (plan.value) {
-        const ok = await runBorrowSimulation(plan.value)
-        if (!ok) {
-          return
-        }
+      const reviewedPlan = plan.value
+      const ok = await runBorrowSimulation(reviewedPlan)
+      if (!ok) {
+        return
       }
 
       modal.open(OperationReviewModal, {
@@ -727,11 +759,33 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
           type: 'borrow',
           asset: borrowVault.value?.asset,
           amount: borrowAmount.value,
-          plan: plan.value || undefined,
+          plan: reviewedPlan,
+          requirePlanForConfirm: true,
           supplyingAssetForBorrow: collateralVault.value?.asset,
           supplyingAmount: collateralAmount.value,
           onConfirm: async () => {
-            await send()
+            await send(reviewedPlan, () => reviewedIsSavingCollateral
+              ? buildBorrowBySavingPlan(
+                  reviewedCollateralVault.address,
+                  collateralAmountForPlan,
+                  reviewedBorrowVault.address,
+                  borrowAmountNano,
+                  undefined,
+                  undefined,
+                  reviewedSavingSubAccount,
+                )
+              : buildBorrowPlan(
+                  reviewedCollateralVault.address,
+                  reviewedCollateralVault.asset.address,
+                  collateralAmountForPlan,
+                  reviewedBorrowVault.address,
+                  borrowAmountNano,
+                  undefined,
+                  {
+                    includePermit2Call: true,
+                    wrappedNativeInfo: reviewedWrappedNativeInfo,
+                  },
+                ))
           },
           submittingLabel: 'Submitting...',
         },
@@ -742,60 +796,17 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     }
   }
 
-  const send = async () => {
+  const send = async (reviewedPlan?: TxPlan | null, buildReviewedExecutionPlan?: () => Promise<TxPlan>) => {
     try {
       isSubmitting.value = true
-      if (!collateralVault.value || !borrowVault.value) {
+      if (!reviewedPlan || plan.value !== reviewedPlan || !buildReviewedExecutionPlan) {
+        error('Transaction review expired')
         return
       }
-
-      let txPlan: TxPlan
-
-      // Swap & borrow path
-      if (borrowNeedsSwap.value) {
-        const quote = borrowSwapSelectedQuote.value || borrowSwapEffectiveQuote.value
-        if (!quote) {
-          error('No swap quote available')
-          return
-        }
-        txPlan = await buildSwapBorrowPlanFromQuote(quote)
-      }
-      else {
-        // Standard borrow path
-        let collateralAmountForPlan = collateralAmountFixed.value.toFormat({ decimals: Number(collateralVault.value.decimals) }).value
-        if (isSavingCollateral.value) {
-          if (savingCollateral.value?.assets === collateralAmountForPlan) {
-            collateralAmountForPlan = savingBalance.value
-          }
-          else {
-            collateralAmountForPlan = await convertAssetsToShares(collateralVault.value.address, collateralAmountForPlan)
-          }
-        }
-        const borrowAmountNano = borrowAmountFixed.value.toFormat({ decimals: Number(borrowVault.value.decimals) }).value
-        txPlan = isSavingCollateral.value
-          ? await buildBorrowBySavingPlan(
-              collateralVault.value.address,
-              collateralAmountForPlan,
-              borrowVault.value.address,
-              borrowAmountNano,
-              undefined,
-              undefined,
-              savingCollateral.value?.subAccount,
-            )
-          : await buildBorrowPlan(
-              collateralVault.value.address,
-              collateralVault.value.asset.address,
-              collateralAmountForPlan,
-              borrowVault.value.address,
-              borrowAmountNano,
-              undefined,
-              {
-                includePermit2Call: true,
-                wrappedNativeInfo: isBorrowNativeWrap.value
-                  ? { wrappedTokenAddress: resolveWrappedNativeAddress(chainId.value!)!, nativeAmount: collateralAmountForPlan }
-                  : undefined,
-              },
-            )
+      const txPlan = await buildReviewedExecutionPlan()
+      const ok = await runBorrowSimulation(txPlan)
+      if (!ok) {
+        return
       }
       await executeTxPlan(txPlan)
       await finalizeTxAndRedirect()

@@ -22,12 +22,13 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, amount, onConfirm, plan, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel } = defineProps<{
+const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, amount, onConfirm, plan, requirePlanForConfirm, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel } = defineProps<{
   type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
   amount: number | string
   plan?: TxPlan
+  requirePlanForConfirm?: boolean
   supplyingAssetForBorrow?: VaultAsset
   supplyingAmount?: number | string
   swapToAsset?: VaultAsset
@@ -120,6 +121,7 @@ const internalSubmitting = ref(false)
 
 const handleConfirm = async () => {
   if (internalSubmitting.value) return
+  if (requirePlanForConfirm && !plan?.steps?.length) return
   const result = onConfirm()
   // If onConfirm returns a promise, keep the modal open with a loading state
   // and let the caller close it via modal.close(). Otherwise close immediately
@@ -342,7 +344,7 @@ const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimite
         variant="primary"
         size="xlarge"
         rounded
-        :disabled="isSpyMode || internalSubmitting"
+        :disabled="isSpyMode || internalSubmitting || (requirePlanForConfirm && !plan?.steps?.length)"
         :loading="internalSubmitting"
         @click="handleConfirm"
       >
