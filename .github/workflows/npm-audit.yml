@@ -10,27 +10,77 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      issues: write
+    outputs:
+      exit_code: ${{ steps.audit.outputs.exit_code }}
+      result: ${{ steps.audit.outputs.result }}
+      output: ${{ steps.audit.outputs.output }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: npm
 
       - run: npm install -g npm@11.10.0
 
-      - run: npm ci
+      - run: npm ci --ignore-scripts
 
       - name: Run audit
         id: audit
         run: |
           set +e
-          OUTPUT=$(npm audit --omit=dev --audit-level=moderate 2>&1)
+          npm audit --json --omit=dev --audit-level=moderate > audit-output.json 2> audit-error.txt
           EXIT_CODE=$?
-          echo "$OUTPUT"
-          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          set -e
+
+          cat audit-output.json
+          cat audit-error.txt >&2
+
+          export EXIT_CODE
+          RESULT=$(node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+
+          const exitCode = Number(process.env.EXIT_CODE || '0');
+          const stdout = fs.readFileSync('audit-output.json', 'utf8').trim();
+
+          let report;
+          try {
+            report = stdout ? JSON.parse(stdout) : null;
+          } catch {
+            console.log(exitCode === 0 ? 'clean' : 'audit_error');
+            process.exit(0);
+          }
+
+          const vulnerabilities = report?.metadata?.vulnerabilities;
+          const hasVulnerabilitySummary = vulnerabilities && typeof vulnerabilities === 'object';
+
+          if (!hasVulnerabilitySummary) {
+            console.log(exitCode === 0 ? 'clean' : 'audit_error');
+            process.exit(0);
+          }
+
+          const failingSeverityCount =
+            Number(vulnerabilities.moderate || 0) +
+            Number(vulnerabilities.high || 0) +
+            Number(vulnerabilities.critical || 0);
+
+          if (failingSeverityCount > 0) {
+            console.log('vulnerabilities');
+          } else if (exitCode === 0) {
+            console.log('clean');
+          } else {
+            console.log('audit_error');
+          }
+          NODE
+          )
+
+          OUTPUT=$(printf '%s\n%s' "$(cat audit-output.json)" "$(cat audit-error.txt)")
+
+          printf 'exit_code=%s\n' "$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          printf 'result=%s\n' "$RESULT" >> "$GITHUB_OUTPUT"
 
           MAX_CHARS=60000
           if [ ${#OUTPUT} -gt $MAX_CHARS ]; then
@@ -42,26 +92,29 @@ jobs:
           echo "$OUTPUT" >> "$GITHUB_OUTPUT"
           echo "$EOF" >> "$GITHUB_OUTPUT"
 
+  report:
+    runs-on: ubuntu-latest
+    needs: audit
+    if: needs.audit.outputs.result == 'vulnerabilities'
+    permissions:
+      issues: write
+    steps:
       - name: Create issue if vulnerabilities found
-        if: steps.audit.outputs.exit_code != '0'
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const title = `Dependency audit: vulnerabilities found (${new Date().toISOString().slice(0, 10)})`;
 
-            const existing = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              labels: 'dependencies,security',
+            const existing = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${context.repo.owner}/${context.repo.repo} is:issue is:open in:title "Dependency audit: vulnerabilities found"`,
               per_page: 1,
             });
 
-            if (existing.data.length > 0) {
+            if (existing.data.items.length > 0) {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: existing.data[0].number,
+                issue_number: existing.data.items[0].number,
                 body: `## Updated audit results\n\n\`\`\`\n${process.env.AUDIT_OUTPUT}\n\`\`\``,
               });
             } else {
@@ -74,4 +127,44 @@ jobs:
               });
             }
         env:
-          AUDIT_OUTPUT: ${{ steps.audit.outputs.output }}
+          AUDIT_OUTPUT: ${{ needs.audit.outputs.output }}
+
+  report-audit-error:
+    runs-on: ubuntu-latest
+    needs: audit
+    if: needs.audit.outputs.result == 'audit_error'
+    permissions:
+      issues: write
+    steps:
+      - name: Create issue if audit failed
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const title = `Dependency audit failed (${new Date().toISOString().slice(0, 10)})`;
+
+            const existing = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${context.repo.owner}/${context.repo.repo} is:issue is:open in:title "Dependency audit failed"`,
+              per_page: 1,
+            });
+
+            const body = `## npm audit failed\n\nThe scheduled dependency audit could not produce a valid vulnerability report. This usually indicates a registry, network, lockfile, or npm audit service issue rather than confirmed vulnerabilities.\n\n**Exit code:** ${process.env.AUDIT_EXIT_CODE}\n\n\`\`\`\n${process.env.AUDIT_OUTPUT}\n\`\`\``;
+
+            if (existing.data.items.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.data.items[0].number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['dependencies', 'security'],
+              });
+            }
+        env:
+          AUDIT_EXIT_CODE: ${{ needs.audit.outputs.exit_code }}
+          AUDIT_OUTPUT: ${{ needs.audit.outputs.output }}

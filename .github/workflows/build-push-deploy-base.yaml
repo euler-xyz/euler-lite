@@ -3,9 +3,8 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'ECR image tag to deploy (defaults to "latest")'
-        required: false
-        default: 'latest'
+        description: 'Generated base ECR image tag to deploy'
+        required: true
   push:
     tags:
       - 'v*'
@@ -20,8 +19,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  approve-manual-deploy:
+    name: Approve Manual Deploy
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: base
+    permissions: {}
+    steps:
+      - run: true
+
   build-push-deploy:
     name: Build, Push & Deploy
+    needs: approve-manual-deploy
+    if: always() && (github.event_name == 'push' || needs.approve-manual-deploy.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -50,20 +60,8 @@ jobs:
           TIMESTAMP=$(date -u +'%H%M_%d%m%Y')
           SHORT_SHA=$(git rev-parse --short=12 HEAD)
           IMAGE_TAG="base_${TIMESTAMP}_${SHORT_SHA}"
-          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          printf 'image_tag=%s\n' "$IMAGE_TAG" >> "$GITHUB_OUTPUT"
           echo "Generated image tag: ${IMAGE_TAG}"
-
-      - name: Configure AWS credentials (ECR push)
-        if: github.event_name == 'push'
-        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN_PUSH_IMAGE }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        if: github.event_name == 'push'
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@f2e9fc6c2b355c1890b65e6f6f0e2ac3e6e22f78 # v2.1.2
 
       - name: Set up Docker Buildx
         if: github.event_name == 'push'
@@ -78,9 +76,11 @@ jobs:
           load: true
           tags: euler-lite
           build-args: |
-            SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            BUILD_RUN_ID=${{ github.run_id }}
+          secrets: |
+            sentry_auth_token=${{ secrets.SENTRY_AUTH_TOKEN }}
+          cache-from: type=gha,scope=euler-lite-base-build
+          cache-to: type=gha,scope=euler-lite-base-build,mode=max
 
       - name: Extract static assets from image
         if: github.event_name == 'push'
@@ -117,6 +117,18 @@ jobs:
               --cache-control "public,max-age=31536000,immutable"
           fi
 
+      - name: Configure AWS credentials (ECR push)
+        if: github.event_name == 'push'
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_PUSH_IMAGE }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        if: github.event_name == 'push'
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@f2e9fc6c2b355c1890b65e6f6f0e2ac3e6e22f78 # v2.1.2
+
       - name: Tag and push docker image to Amazon ECR
         if: github.event_name == 'push'
         env:
@@ -125,11 +137,8 @@ jobs:
           ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
         run: |
           FULL_IMAGE="$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-          LATEST_IMAGE="$REGISTRY/$ECR_REPOSITORY:latest"
           docker tag euler-lite "$FULL_IMAGE"
-          docker tag euler-lite "$LATEST_IMAGE"
           docker push "$FULL_IMAGE"
-          docker push "$LATEST_IMAGE"
 
       # ── Deploy ──
       - name: Verify dispatch is from master
@@ -151,11 +160,11 @@ jobs:
           else
             TAG="$BUILD_TAG"
           fi
-          if ! echo "$TAG" | grep -qE '^[a-zA-Z0-9_.-]+$'; then
-            echo "::error::Invalid image tag: must match [a-zA-Z0-9_.-]+"
+          if [[ ! "$TAG" =~ ^base_[0-9]{4}_[0-9]{8}_[0-9a-f]{12}$ ]]; then
+            echo "::error::Invalid image tag: must be a generated base image tag."
             exit 1
           fi
-          echo "image_tag=$TAG" >> $GITHUB_OUTPUT
+          printf 'image_tag=%s\n' "$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Notify Slack deployment started
         env:

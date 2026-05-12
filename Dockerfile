@@ -1,5 +1,6 @@
-# ── Build stage 
-FROM node:24.14.1 AS builder
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+# ── Build stage
+FROM node:24.14.1@sha256:80fc934952c8f1b2b4d39907af7211f8a9fff1a4c2cf673fb49099292c251cec AS builder
 
 WORKDIR /usr/src/app
 COPY package.json package-lock.json ./
@@ -8,16 +9,27 @@ COPY . .
 
 ENV NODE_OPTIONS=--max-old-space-size=4096
 
-# Sentry source-map upload (build-time only; token never reaches production stage)
-ARG SENTRY_AUTH_TOKEN
+# Sentry source-map upload (build-time only; token is mounted as a BuildKit secret)
+ARG BUILD_RUN_ID=local
+RUN --mount=type=secret,id=sentry_auth_token \
+  echo "Build run: ${BUILD_RUN_ID}" >/dev/null; \
+  if [ -f /run/secrets/sentry_auth_token ]; then \
+    export SENTRY_AUTH_TOKEN="$(cat /run/secrets/sentry_auth_token)"; \
+  fi; \
+  npm run build
 
-RUN npm run build
-
-# Download Doppler CLI (binary only, no package manager install)
-RUN (curl -Ls --tlsv1.2 --proto "=https" --retry 3 https://cli.doppler.com/install.sh || wget -t 3 -qO- https://cli.doppler.com/install.sh) | sh -s -- --no-package-manager --no-install
+# Download a pinned Doppler CLI release (binary only, no package manager install)
+ARG DOPPLER_CLI_VERSION=3.75.1
+ARG DOPPLER_CLI_SHA256=0b858232daa9a3fd06d1c3f1b9a370c68cfe3f9680ec1a60d540199cd859bea0
+RUN set -eu; \
+  curl -fsSLo /tmp/doppler.tar.gz --tlsv1.2 --proto "=https" --retry 3 \
+    "https://github.com/DopplerHQ/cli/releases/download/${DOPPLER_CLI_VERSION}/doppler_${DOPPLER_CLI_VERSION}_linux_amd64.tar.gz"; \
+  echo "${DOPPLER_CLI_SHA256}  /tmp/doppler.tar.gz" | sha256sum -c -; \
+  tar -xzf /tmp/doppler.tar.gz -C /usr/src/app doppler; \
+  rm /tmp/doppler.tar.gz
 
 # ── Production stage (distroless: no shell, no tools, non-root) ──
-FROM gcr.io/distroless/nodejs24-debian12:nonroot AS production
+FROM gcr.io/distroless/nodejs24-debian12:nonroot@sha256:14d42e2511532589a7c7e01a753667a74fcc96266e137e8125006b87b0c32d0a AS production
 
 ENV MODE=production
 ENV NODE_ENV=production
