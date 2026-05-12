@@ -91,7 +91,7 @@ const handleClose = () => {
 
 <template>
   <BaseModalWrapper
-    :title="isBestInMarket ? 'Best Max ROE' : 'Max ROE'"
+    title="Max ROE"
     :inline="inline"
     :close="close"
     @close="handleClose"
@@ -99,7 +99,7 @@ const handleClose = () => {
     <p class="text-content-primary text-p3 mb-16">
       ROE (Return on Equity) estimates the annualized return on your own capital in a multiplied position. A positive ROE means the supply yield exceeds borrowing costs at the given multiplier. A negative ROE means the position is gradually losing value to interest costs.
       <template v-if="isBestInMarket">
-        The value shown is the best max ROE out of all possible collateral/borrow pairs in this market.
+        The value shown is the max modelled ROE across possible collateral/borrow pairs in this market. Not guaranteed. Borrowing and multiplied positions involve changing rates, liquidity constraints, and liquidation risk.
       </template>
     </p>
     <div class="mb-24">

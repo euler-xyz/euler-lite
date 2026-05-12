@@ -148,14 +148,26 @@ const dragStyle = computed(() => ({
           />
           {{ title }}
         </p>
-        <UiButton
+        <button
           v-if="close"
-          variant="primary-stroke"
-          icon="close"
+          type="button"
+          class="ui-button ui-button--medium ui-button--primary-stroke is-icon-only"
           name="cross"
-          icon-only
-          @click="$emit('close')"
-        />
+          aria-label="Close modal"
+          @click="emit('close')"
+        >
+          <div class="ui-button__wrap">
+            <div
+              class="ui-button__icon"
+              aria-hidden="true"
+            >
+              <SvgIcon
+                class="ui-button__icon-svg"
+                name="close"
+              />
+            </div>
+          </div>
+        </button>
       </div>
     </div>
 

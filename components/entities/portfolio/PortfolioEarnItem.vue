@@ -7,7 +7,7 @@ import { type AccountDepositPosition, getSubAccountIndex } from '~/entities/acco
 import type { EarnVault } from '~/entities/vault'
 import { VaultOverviewModal, VaultSupplyApyModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
-import { formatNumber, formatCompactUsdValue, compactNumber, formatExactAmount } from '~/utils/string-utils'
+import { formatNumber, compactNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 
 const { position } = defineProps<{ position: AccountDepositPosition }>()
@@ -196,19 +196,6 @@ const onClick = () => {
             >
               ~ {{ roundAndCompactTokens(position.assets, vault.asset.decimals) }} {{ vault.asset.symbol }}
             </UiExactAmount>
-          </div>
-        </div>
-        <div
-          v-if="hasPrice"
-          class="flex justify-between"
-        >
-          <div class="text-content-tertiary text-p3">
-            Projected earnings per month
-          </div>
-          <div class="flex justify-between gap-8 text-right">
-            <div class="text-content-primary text-p3">
-              ${{ projectedEarningsPerMonth }}
-            </div>
           </div>
         </div>
         <div

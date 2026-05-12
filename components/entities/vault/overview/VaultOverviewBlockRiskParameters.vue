@@ -20,18 +20,20 @@ const { vault } = defineProps<{ vault: Vault }>()
 const modal = useModal()
 
 const { client: rpcClient } = useRpcClient()
-const { borrowList } = useVaults()
 
 const shareTokenExchangeRate: Ref<bigint | undefined> = ref()
 
-const borrowCount = computed(() => {
-  return borrowList.value.filter(pair => pair.borrow.address === vault.address).length
-})
-
-const isBorrowable = computed(() => borrowCount.value > 0)
+// "Borrowable" = the vault has at least one collateral configured to allow
+// borrowing. Read from the vault's own LTV table rather than `borrowList`
+// membership so unverified (off-label) borrow vaults still expose their
+// borrow-side risk parameters.
+const isBorrowable = computed(() =>
+  vault.collateralLTVs.some(ltv => ltv.borrowLTV > 0n),
+)
 
 const supplyCapPercentageDisplay = computed(() => getSupplyCapPercentage(vault))
 const borrowCapPercentageDisplay = computed(() => getBorrowCapPercentage(vault))
+const showShareTokenExchangeRate = computed(() => vault.vaultCategory !== 'escrow' && (vault.borrowCap !== 0n || vault.borrow > 0n))
 
 const supplyCapDisplay = ref('-')
 const borrowCapDisplay = ref('-')
@@ -63,6 +65,8 @@ watchEffect(async () => {
 })
 
 const load = async () => {
+  if (!showShareTokenExchangeRate.value) return
+
   const client = rpcClient.value!
   shareTokenExchangeRate.value = await client.readContract({
     address: vault.address as Address,
@@ -151,6 +155,7 @@ const openHooksModal = () => {
         </div>
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue
+        v-if="showShareTokenExchangeRate"
         label="Share token exchange rate"
         orientation="horizontal"
       >

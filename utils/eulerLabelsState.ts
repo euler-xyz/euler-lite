@@ -30,7 +30,7 @@ export type CompiledPatternRule = {
   restricted?: string[]
 }
 export const assetPatternRules = shallowReactive<CompiledPatternRule[]>([])
-export const featuredEarnVaults: Set<string> = shallowReactive(new Set())
+export const recentlyAddedEarnVaults: Set<string> = shallowReactive(new Set())
 export const deprecatedEarnVaults = shallowReactive<Record<string, string>>({}) // address (lowercase) -> deprecation reason
 export const earnVaultDescriptions = shallowReactive<Record<string, string>>({}) // address (lowercase) -> description
 export const earnVaultNotices = shallowReactive<Record<string, string>>({}) // address (lowercase) -> notice
@@ -47,3 +47,11 @@ export const loadingAdapters = new Set<string>()
 // concurrent callers share a request.
 export const bulkLoadedAdapterChains = new Map<number, number>()
 export const pendingBulkAdapterLoads = new Map<number, Promise<void>>()
+
+// Wrapper-asset address (lowercase) -> underlying ERC-4626 asset() address (lowercase).
+// Populated by the labels loader once per reload cycle by probing every
+// soft-restricted vault asset for an ERC-4626 underlying. Used by
+// `isAssetRestrictedByCountry`'s counterpart bypass: a soft-restricted output
+// is allowed when the operation is a technical wrap/unwrap rather than a new
+// acquisition of the restricted asset.
+export const wrapPairs = shallowReactive<Record<string, string>>({})

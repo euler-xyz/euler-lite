@@ -56,7 +56,7 @@ Structure: `Record<string, Product>` — keys are product identifiers (e.g. `"eu
     "notExplorable": true,                       // If true, hides ALL product vaults from lend/borrow/explore pages
     "block": ["US", "EU"],                       // Country codes/groups to hard-block (see geo-blocking.md)
     "keyring": true,                               // All vaults require Keyring verification (see keyring-hooks.md)
-    "featuredVaults": ["0x1234...abcd"],         // Vault addresses to sort to top in discovery tables
+    "recentlyAddedVaults": ["0x1234...abcd"],    // Vault addresses to sort to top in discovery tables
     "vaultOverrides": {                          // Per-vault customizations (see below)
       "0x5678...ef01": {
         "description": "Custom description for this vault",
@@ -87,7 +87,7 @@ Structure: `Record<string, Product>` — keys are product identifiers (e.g. `"eu
 | `isGovernanceLimited` | `boolean` | No | If `true`, shows "Limited risk management" text under the Risk Manager section on vault overview. The risk manager entity display is also faded to 20% opacity across all UI components (browse lists, vault overview, explore market cards) to visually convey limited active risk management. |
 | `notExplorable` | `boolean` | No | If `true`, hides **all** vaults in this product from lend, borrow, and explore discovery pages. Takes precedence over per-vault `notExplorableLend`/`notExplorableBorrow`. Vaults remain accessible via direct URL. |
 | `block` | `string[]` | No | Country codes or group aliases (`EU`, `EEA`, `EFTA`) for hard geo-blocking. See [geo-blocking.md](./geo-blocking.md). |
-| `featuredVaults` | `string[]` | No | Subset of `vaults` to sort to the top in discovery tables. |
+| `recentlyAddedVaults` | `string[]` | No | Subset of `vaults` to sort to the top in discovery tables. |
 | `keyring` | `boolean` | No | If `true`, all vaults in this product require Keyring identity verification. See [keyring-hooks.md](./keyring-hooks.md). |
 | `vaultOverrides` | `Record<string, VaultOverride>` | No | Per-vault customizations keyed by checksummed address. See next section. |
 
@@ -195,7 +195,7 @@ Structure: `Array<string | EarnVaultEntry>` — each entry is either a plain add
     "address": "0xDetailedEarnVault...",          // Vault address (required)
     "block": ["US", "EU"],                        // Hard geo-blocking (country codes/groups)
     "restricted": ["JP"],                         // Soft geo-restriction
-    "featured": true,                             // Sort to top in earn discovery table
+    "recentlyAdded": true,                        // Sort to top in earn discovery table
     "deprecated": true,                           // Mark as deprecated
     "deprecationReason": "Migrated to new vault", // Deprecation explanation
     "description": "Custom description",          // Vault description
@@ -211,7 +211,7 @@ Structure: `Array<string | EarnVaultEntry>` — each entry is either a plain add
 | `address` | `string` | Yes | Checksummed vault address |
 | `block` | `string[]` | No | Country codes/groups for hard geo-blocking (same syntax as products.json `block`) |
 | `restricted` | `string[]` | No | Country codes/groups for soft geo-restriction |
-| `featured` | `boolean` | No | If `true`, sorts vault to top in earn discovery table |
+| `recentlyAdded` | `boolean` | No | If `true`, sorts vault to top in earn discovery table |
 | `deprecated` | `boolean` | No | If `true`, marks vault as deprecated (hidden from discovery, warning banner shown) |
 | `deprecationReason` | `string` | No | Explanation shown in deprecation warning banner |
 | `description` | `string` | No | Custom description displayed on earn vault items and overview pages |
@@ -313,7 +313,7 @@ Labels control which vaults appear on each discovery page:
 | Override `notExplorableLend: true` | Hidden | Visible | Visible |
 | Override `notExplorableBorrow: true` | Visible | Hidden (both sides) | Visible |
 | `deprecatedVaults` | Hidden | Hidden | Visible (dimmed) |
-| `featuredVaults` / `featured` | Sorted to top | Sorted to top | Sorted to top |
+| `recentlyAddedVaults` / `recentlyAdded` | Sorted to top | Sorted to top | Sorted to top |
 
 Product-level `notExplorable` always takes precedence over per-vault overrides. Vaults hidden from discovery are still accessible via direct URL and remain visible in the user's portfolio.
 

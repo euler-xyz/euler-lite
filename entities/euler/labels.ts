@@ -36,7 +36,7 @@ export type EulerLabelProduct = {
   isGovernanceLimited?: boolean
   notExplorable?: boolean
   block?: string[]
-  featuredVaults?: string[]
+  recentlyAddedVaults?: string[]
   vaultOverrides?: Record<string, EulerLabelVaultOverride>
   keyring?: boolean
 }
@@ -45,7 +45,7 @@ export type EulerLabelEarnVaultEntry = {
   address: string
   block?: string[]
   restricted?: string[]
-  featured?: boolean
+  recentlyAdded?: boolean
   deprecated?: boolean
   deprecationReason?: string
   description?: string

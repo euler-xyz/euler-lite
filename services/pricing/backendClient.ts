@@ -7,26 +7,19 @@ import { logger } from '~/utils/logger'
 // -------------------------------------------
 
 /**
- * Response shape from the price backend (indexer /v1/prices endpoint).
+ * Price entry from the v3 /prices endpoint.
  */
 export type BackendPriceData = {
-  /** Asset address */
+  chainId: number
   address: string
-  /** Price in USD as number */
-  price: number
-  /** Price source (e.g., "pyth", "defillama") */
-  source: string
-  /** Asset symbol */
   symbol: string
-  /** Unix timestamp when this price was recorded */
-  timestamp: number
+  priceUsd: number
+  source: string
+  timestamp: string // ISO-8601
 }
 
-/**
- * Response from /v1/prices endpoint.
- * Flat object keyed by lowercase address.
- */
-export type BackendPriceResponse = Record<string, BackendPriceData>
+/** Max addresses per v3 /prices request. */
+const V3_MAX_ADDRESSES = 100
 
 // -------------------------------------------
 // Configuration
@@ -84,6 +77,7 @@ export const clearStaleBackendCache = () => {
  */
 export const clearBackendCache = () => {
   priceCache.clear()
+  inFlight.clear()
 
   // Cancel pending batch: resolve all with undefined so callers get no data
   // rather than stale cross-chain prices
@@ -113,6 +107,12 @@ let pendingRequests: PendingRequest[] = []
 let batchTimeout: ReturnType<typeof setTimeout> | null = null
 
 /**
+ * In-flight fetch promises keyed by `chainId:address` (lowercase).
+ * Prevents duplicate network requests for addresses already being fetched.
+ */
+const inFlight = new Map<string, Promise<BackendPriceData | undefined>>()
+
+/**
  * Execute all pending requests as a batched call.
  */
 const executeBatch = async () => {
@@ -132,19 +132,42 @@ const executeBatch = async () => {
 
   // Execute batched requests for each chain
   for (const [chainId, chainRequests] of byChain.entries()) {
-    const addresses = [...new Set(chainRequests.map(r => r.address))]
+    // Split: piggyback on in-flight vs need new fetch
+    const needFetch: PendingRequest[] = []
+    for (const req of chainRequests) {
+      const flightKey = getCacheKey(req.address, chainId)
+      const existing = inFlight.get(flightKey)
+      if (existing) {
+        existing.then(data => req.resolve(data), err => req.reject(err))
+      }
+      else {
+        needFetch.push(req)
+      }
+    }
+
+    if (needFetch.length === 0) continue
+
+    const addresses = [...new Set(needFetch.map(r => r.address))]
+
+    // Register in-flight promises so later batches piggyback
+    const fetchPromise = fetchBackendPricesBatch(addresses, chainId)
+    for (const addr of addresses) {
+      const flightKey = getCacheKey(addr, chainId)
+      const addrPromise = fetchPromise.then(results => results?.get(addr.toLowerCase()))
+      inFlight.set(flightKey, addrPromise)
+      addrPromise.finally(() => inFlight.delete(flightKey))
+    }
 
     try {
-      const results = await fetchBackendPricesBatch(addresses, chainId)
+      const results = await fetchPromise
 
-      // Resolve each pending request
-      for (const req of chainRequests) {
+      for (const req of needFetch) {
         const data = results?.get(req.address.toLowerCase())
         req.resolve(data)
       }
     }
     catch (err) {
-      for (const req of chainRequests) {
+      for (const req of needFetch) {
         req.reject(err)
       }
     }
@@ -190,43 +213,48 @@ const fetchBackendPricesBatch = async (
   }
 
   try {
-    // Build request URL
-    const url = new URL('/v1/prices', backendEndpoint)
-    url.searchParams.set('chainId', String(effectiveChainId))
-    url.searchParams.set('assets', missingAddresses.join(','))
-
-    const response = await fetch(url.toString(), {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-      },
-    })
-
-    if (!response.ok) {
-      return results.size > 0 ? results : undefined
+    // v3 API caps at 100 addresses per request — chunk and fetch in parallel
+    const chunks: Address[][] = []
+    for (let i = 0; i < missingAddresses.length; i += V3_MAX_ADDRESSES) {
+      chunks.push(missingAddresses.slice(i, i + V3_MAX_ADDRESSES))
     }
 
-    const data: BackendPriceResponse = await response.json()
+    const fetchChunk = async (chunk: Address[]) => {
+      const url = new URL('/v3/prices', backendEndpoint)
+      url.searchParams.set('chainId', String(effectiveChainId))
+      url.searchParams.set('addresses', chunk.join(','))
 
-    // Map response to results and update cache
-    // Response is a flat object keyed by address
-    for (const [address, priceData] of Object.entries(data)) {
-      const normalizedAddr = address.toLowerCase()
-      results.set(normalizedAddr, priceData)
-
-      // Update cache
-      const key = getCacheKey(address, effectiveChainId)
-      priceCache.set(key, {
-        data: priceData,
-        fetchedAt: now,
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
       })
+
+      if (!response.ok) {
+        logger.warn(
+          { ctx: 'backendClient/fetchChunk', status: response.status, chainId: effectiveChainId, count: chunk.length },
+          'backend price chunk returned non-2xx',
+        )
+        return
+      }
+
+      const body = await response.json()
+      const prices: BackendPriceData[] = body.data || []
+
+      for (const priceData of prices) {
+        const normalizedAddr = priceData.address.toLowerCase()
+        results.set(normalizedAddr, priceData)
+
+        const key = getCacheKey(priceData.address, effectiveChainId)
+        priceCache.set(key, { data: priceData, fetchedAt: now })
+      }
     }
 
-    return results
+    await Promise.allSettled(chunks.map(fetchChunk))
+
+    return results.size > 0 ? results : undefined
   }
   catch (err) {
     logger.warn({ ctx: 'backendClient/fetchPrices', err }, 'backend price fetch failed')
-    // Return cached results if we have any
     return results.size > 0 ? results : undefined
   }
 }
@@ -247,7 +275,7 @@ export const fetchBackendPrices = async (
 
 /**
  * Fetch a single asset price from backend.
- * Requests are automatically batched - multiple calls within 50ms
+ * Requests are automatically batched - multiple calls within 100ms
  * are combined into a single network request.
  */
 export const fetchBackendPrice = async (
@@ -290,9 +318,8 @@ export const fetchBackendPrice = async (
 const _ONE_18 = 10n ** 18n
 
 /**
- * Convert backend price to bigint (18 decimals).
- * Accepts both string (legacy) and number (current API) formats.
- * Use this to convert backend prices to the same format as on-chain prices.
+ * Convert a USD price to bigint (18 decimals).
+ * Accepts both string and number formats.
  */
 export const backendPriceToBigInt = (price: string | number): bigint => {
   try {

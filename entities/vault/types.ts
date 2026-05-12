@@ -244,11 +244,14 @@ export interface EarnVault {
   }
 }
 
+export type CollateralOptionType = 'wallet' | 'saving' | 'vault' | 'escrow'
+
 export interface CollateralOption {
-  type: string
+  type: CollateralOptionType
   amount: number
   price: number
   apy?: number
+  showBalance?: boolean
   label?: string
   symbol?: string
   assetAddress?: string
