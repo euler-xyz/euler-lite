@@ -59,6 +59,8 @@ export type { SerialisedSnapshot } from './loader-serde'
 export {
   isVaultGovernorVerified,
   isEarnVaultOwnerVerified,
+  resolveGoverningEntityKey,
+  resolveEarnGoverningEntityKey,
 } from './governor-verification'
 export type { VerificationLabels } from './governor-verification'
 

@@ -1,9 +1,8 @@
-import { decodeFunctionResult, encodeFunctionData, getAddress, type Address } from 'viem'
+import { getAddress, type Address } from 'viem'
 import { createTtlCache } from './cache'
-import { fetchWithTimeout } from './fetchWithTimeout'
+import { fetchEscrowPerspectiveAddresses } from './escrow-perspective'
 import { INTERNAL_FETCH_HEADERS } from './internal-headers'
 import { logger } from '~/server/utils/logger'
-import { resolveRpcUrl } from './rpc'
 import { refreshChainVaults, vaultsCache } from './vaults-cache'
 import {
   deserialiseSnapshot,
@@ -13,14 +12,6 @@ import {
 import type { ChainVaultsSnapshot, VerificationLabels } from '~/entities/vault'
 
 const CACHE_TTL_MS = 300_000
-
-const VERIFIED_ARRAY_ABI = [{
-  type: 'function',
-  name: 'verifiedArray',
-  stateMutability: 'view',
-  inputs: [],
-  outputs: [{ type: 'address[]' }],
-}] as const
 
 interface ProductEntry {
   vaults?: unknown
@@ -35,15 +26,6 @@ interface EntityEntry {
 interface EarnVaultEntryObject {
   address?: unknown
   deprecated?: unknown
-}
-
-interface EulerChainConfig {
-  chainId?: unknown
-  addresses?: {
-    peripheryAddrs?: {
-      escrowedCollateralPerspective?: unknown
-    }
-  }
 }
 
 const cache = createTtlCache<Set<string>>({ ttlMs: CACHE_TTL_MS, maxEntries: 64 })
@@ -64,49 +46,6 @@ async function fetchLabels<T>(
   file: 'products.json' | 'entities.json' | 'earn-vaults.json',
 ): Promise<T> {
   return await $fetch<T>(`/api/labels/${file}`, { query: { chainId }, headers: INTERNAL_FETCH_HEADERS })
-}
-
-async function fetchEulerChains(): Promise<EulerChainConfig[]> {
-  const data = await $fetch<unknown>('/api/euler-chains', { headers: INTERNAL_FETCH_HEADERS })
-  return Array.isArray(data) ? data as EulerChainConfig[] : []
-}
-
-async function fetchEscrowAddresses(chainId: number): Promise<string[]> {
-  const rpcUrl = resolveRpcUrl(chainId)
-  if (!rpcUrl) return []
-
-  const chains = await fetchEulerChains()
-  const config = chains.find(c => c.chainId === chainId)
-  const perspective = config?.addresses?.peripheryAddrs?.escrowedCollateralPerspective
-  if (typeof perspective !== 'string' || !perspective.startsWith('0x')) return []
-
-  const callData = encodeFunctionData({ abi: VERIFIED_ARRAY_ABI, functionName: 'verifiedArray' })
-  const payload = JSON.stringify({
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'eth_call',
-    params: [{ to: perspective, data: callData }, 'latest'],
-  })
-
-  const response = await fetchWithTimeout(rpcUrl, 10_000, {
-    method: 'POST',
-    body: payload,
-    headers: { 'content-type': 'application/json' },
-  })
-
-  if (!response.ok) throw new Error(`Upstream RPC returned ${response.status}`)
-
-  const parsed = await response.json() as { result?: unknown, error?: unknown }
-  if (parsed.error) throw new Error(`Upstream RPC error: ${JSON.stringify(parsed.error)}`)
-  const result = parsed.result
-  if (typeof result !== 'string' || !result.startsWith('0x')) return []
-
-  const decoded = decodeFunctionResult({
-    abi: VERIFIED_ARRAY_ABI,
-    functionName: 'verifiedArray',
-    data: result as `0x${string}`,
-  })
-  return [...decoded]
 }
 
 async function loadSnapshot(chainId: number): Promise<ChainVaultsSnapshot> {
@@ -198,7 +137,7 @@ async function buildVerifiedSet(chainId: number): Promise<Set<string>> {
     fetchLabels<Record<string, ProductEntry>>(chainId, 'products.json'),
     fetchLabels<Record<string, EntityEntry>>(chainId, 'entities.json'),
     fetchLabels<unknown[]>(chainId, 'earn-vaults.json'),
-    fetchEscrowAddresses(chainId),
+    fetchEscrowPerspectiveAddresses(chainId),
     loadSnapshot(chainId),
   ])
 

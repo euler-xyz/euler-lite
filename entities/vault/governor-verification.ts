@@ -26,10 +26,16 @@ const matchesAnyDeclaredEntity = (
   address: string,
   declaredKeys: string[],
   entitiesByKey: VerificationLabels['entitiesByKey'],
-): boolean => declaredKeys.some((key) => {
+): boolean => findDeclaredEntityFor(address, declaredKeys, entitiesByKey) !== null
+
+const findDeclaredEntityFor = (
+  address: string,
+  declaredKeys: string[],
+  entitiesByKey: VerificationLabels['entitiesByKey'],
+): string | null => declaredKeys.find((key) => {
   const entity = entitiesByKey[key]
   return !!entity && Object.keys(entity.addresses).includes(address)
-})
+}) ?? null
 
 export const isVaultGovernorVerified = (
   vault: Vault | SecuritizeVault,
@@ -75,4 +81,33 @@ export const isEarnVaultOwnerVerified = (
   if (declaredKeys.length === 0) return true
 
   return matchesAnyDeclaredEntity(getAddress(earnVault.owner), declaredKeys, labels.entitiesByKey)
+}
+
+/**
+ * Returns the declared entity key whose addresses contain the vault's
+ * governorAdmin. Companion to `isVaultGovernorVerified` — answers "which
+ * entity is the risk manager?" rather than "is the vault verified?". The
+ * router-governor gate is NOT consulted here (it's a verification rule, not
+ * an entity-identity question), so callers needing the full verdict should
+ * compose with `isVaultGovernorVerified` / `getVerifiedAddressSet`.
+ */
+export const resolveGoverningEntityKey = (
+  vault: Vault | SecuritizeVault,
+  labels: VerificationLabels,
+): string | null => {
+  if ('vaultCategory' in vault && vault.vaultCategory === 'escrow') return null
+  if (!vault.verified) return null
+  const declaredKeys = labels.getDeclaredEntityKeys(vault.address)
+  if (!declaredKeys || declaredKeys.length === 0) return null
+  return findDeclaredEntityFor(vault.governorAdmin, declaredKeys, labels.entitiesByKey)
+}
+
+export const resolveEarnGoverningEntityKey = (
+  earnVault: EarnVault,
+  labels: VerificationLabels,
+): string | null => {
+  if (!earnVault.verified) return null
+  const declaredKeys = labels.getDeclaredEntityKeys(earnVault.address)
+  if (!declaredKeys || declaredKeys.length === 0) return null
+  return findDeclaredEntityFor(getAddress(earnVault.owner), declaredKeys, labels.entitiesByKey)
 }
