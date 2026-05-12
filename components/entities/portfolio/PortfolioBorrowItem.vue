@@ -405,6 +405,7 @@ const onRoeClick = () => {
                 <SvgIcon
                   class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
                   name="info-circle"
+                  data-modal-trigger="net-apy"
                   @click.prevent="onNetApyClick"
                 />
               </div>
@@ -420,6 +421,7 @@ const onRoeClick = () => {
                   v-if="hasRewards"
                   class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
                   name="sparks"
+                  data-modal-trigger="net-apy"
                   @click.prevent="onNetApyClick"
                 />
                 {{ Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
@@ -431,6 +433,7 @@ const onRoeClick = () => {
                 <SvgIcon
                   class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
                   name="info-circle"
+                  data-modal-trigger="roe"
                   @click.prevent="onRoeClick"
                 />
               </div>
@@ -446,6 +449,7 @@ const onRoeClick = () => {
                   v-if="hasRewards"
                   class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
                   name="sparks"
+                  data-modal-trigger="roe"
                   @click.prevent="onRoeClick"
                 />
                 {{ Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}

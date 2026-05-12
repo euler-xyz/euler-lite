@@ -302,6 +302,7 @@ const supplyCapPercentageDisplay = computed(() => {
               v-if="hasSupplyRewards(vault.address)"
               class="!w-20 !h-20 text-accent-500 cursor-pointer"
               name="sparks"
+              data-modal-trigger="supply-apy"
               @click="onSupplyInfoIconClick"
             />
             {{ formatNumber(supplyApyWithRewards) }}%

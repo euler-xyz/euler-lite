@@ -142,6 +142,7 @@ watchEffect(async () => {
           <SvgIcon
             class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
             name="info-circle"
+            data-modal-trigger="supply-apy"
             @click="onSupplyInfoIconClick"
           />
         </div>
@@ -157,6 +158,7 @@ watchEffect(async () => {
               v-if="hasRewards"
               class="!w-20 !h-20 text-accent-500 mr-4"
               name="sparks"
+              data-modal-trigger="supply-apy"
             />
             {{ formatNumber(supplyApyWithRewards) }}%
           </div>

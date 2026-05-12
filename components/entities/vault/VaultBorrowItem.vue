@@ -330,6 +330,7 @@ const linkPath = computed(() => ({
           <SvgIcon
             class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
             name="info-circle"
+            data-modal-trigger="borrow-apy"
             @click="onBorrowInfoIconClick"
           />
         </div>
@@ -344,6 +345,7 @@ const linkPath = computed(() => ({
             v-if="hasBorrowApyRewards"
             class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
             name="sparks"
+            data-modal-trigger="borrow-apy"
             @click="onBorrowInfoIconClick"
           />
           {{ formatNumber(borrowApyWithRewards) }}%
@@ -354,6 +356,7 @@ const linkPath = computed(() => ({
             <SvgIcon
               class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
               name="info-circle"
+              data-modal-trigger="max-roe"
               @click="onMaxRoeInfoIconClick"
             />
           </div>
@@ -368,6 +371,7 @@ const linkPath = computed(() => ({
               v-if="hasAnyRewards"
               class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
               name="sparks"
+              data-modal-trigger="max-roe"
               @click="onMaxRoeInfoIconClick"
             />
             {{ formatNumber(maxRoe, 2, 2) }}%
@@ -380,6 +384,7 @@ const linkPath = computed(() => ({
           <SvgIcon
             class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
             name="info-circle"
+            data-modal-trigger="max-roe"
             @click="onMaxRoeInfoIconClick"
           />
         </div>
@@ -394,6 +399,7 @@ const linkPath = computed(() => ({
             v-if="hasAnyRewards"
             class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
             name="sparks"
+            data-modal-trigger="max-roe"
             @click="onMaxRoeInfoIconClick"
           />
           {{ formatNumber(maxRoe, 2, 2) }}%
@@ -471,6 +477,7 @@ const linkPath = computed(() => ({
           <SvgIcon
             class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
             name="info-circle"
+            data-modal-trigger="supply-apy"
             @click="onSupplyInfoIconClick"
           />
         </div>
@@ -485,6 +492,7 @@ const linkPath = computed(() => ({
             v-if="hasSupplyRewards(pair.collateral.address)"
             class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
             name="sparks"
+            data-modal-trigger="supply-apy"
             @click="onSupplyInfoIconClick"
           />
           {{ formatNumber(supplyApyWithRewards, 2, 2) }}%
@@ -496,6 +504,7 @@ const linkPath = computed(() => ({
           <SvgIcon
             class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
             name="info-circle"
+            data-modal-trigger="net-apy"
             @click="onNetApyInfoIconClick"
           />
         </div>
@@ -510,6 +519,7 @@ const linkPath = computed(() => ({
             v-if="hasAnyRewards"
             class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
             name="sparks"
+            data-modal-trigger="net-apy"
             @click="onNetApyInfoIconClick"
           />
           {{ formatNumber(netApy, 2, 2) }}%
@@ -617,6 +627,7 @@ const linkPath = computed(() => ({
             <SvgIcon
               class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
               name="info-circle"
+              data-modal-trigger="supply-apy"
               @click="onSupplyInfoIconClick"
             />
           </div>
@@ -626,6 +637,7 @@ const linkPath = computed(() => ({
             v-if="hasSupplyRewards(pair.collateral.address)"
             class="!w-20 !h-20 text-accent-500 cursor-pointer"
             name="sparks"
+            data-modal-trigger="supply-apy"
             @click="onSupplyInfoIconClick"
           />
           <div class="text-p2 text-content-primary">
@@ -640,6 +652,7 @@ const linkPath = computed(() => ({
             <SvgIcon
               class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
               name="info-circle"
+              data-modal-trigger="net-apy"
               @click="onNetApyInfoIconClick"
             />
           </div>
@@ -649,6 +662,7 @@ const linkPath = computed(() => ({
             v-if="hasAnyRewards"
             class="!w-20 !h-20 text-accent-500 cursor-pointer"
             name="sparks"
+            data-modal-trigger="net-apy"
             @click="onNetApyInfoIconClick"
           />
           <div class="text-p2 text-content-primary">

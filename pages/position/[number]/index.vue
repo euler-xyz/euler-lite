@@ -735,17 +735,23 @@ watch([isConnected, isSpyMode, address], () => {
               <SvgIcon
                 class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
                 name="info-circle"
+                data-modal-trigger="position-net-apy"
                 @click="onNetApyInfoClick"
               />
             </div>
             <div
               class="text-h5 flex items-center gap-4"
               :class="[netAPY >= 0 ? 'text-accent-600' : 'text-error-500']"
+              data-id="data-point"
+              :data-key="String(positionIndex)"
+              data-field="position-net-apy"
+              :data-value="Number.isFinite(netAPY) ? netAPY : '-'"
             >
               <SvgIcon
                 v-if="hasSupplyRewards(collateralVault?.address || '') || hasBorrowRewards(borrowVault?.address || '', collateralVault?.address || '')"
                 class="!w-20 !h-20 text-accent-500 cursor-pointer"
                 name="sparks"
+                data-modal-trigger="position-net-apy"
                 @click="onNetApyInfoClick"
               />
               {{ Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
@@ -757,17 +763,23 @@ watch([isConnected, isSpyMode, address], () => {
               <SvgIcon
                 class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
                 name="info-circle"
+                data-modal-trigger="position-roe"
                 @click="onRoeInfoClick"
               />
             </div>
             <div
               class="text-h5 flex items-center gap-4"
               :class="[roe >= 0 ? 'text-accent-600' : 'text-error-500']"
+              data-id="data-point"
+              :data-key="String(positionIndex)"
+              data-field="position-roe"
+              :data-value="Number.isFinite(roe) ? roe : '-'"
             >
               <SvgIcon
                 v-if="hasSupplyRewards(collateralVault?.address || '') || hasBorrowRewards(borrowVault?.address || '', collateralVault?.address || '')"
                 class="!w-20 !h-20 text-accent-500 cursor-pointer"
                 name="sparks"
+                data-modal-trigger="position-roe"
                 @click="onRoeInfoClick"
               />
               {{ Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}
@@ -777,7 +789,13 @@ watch([isConnected, isSpyMode, address], () => {
             <div class="text-p2 text-content-secondary">
               Net asset value
             </div>
-            <div class="text-h5 text-content-primary">
+            <div
+              class="text-h5 text-content-primary"
+              data-id="data-point"
+              :data-key="String(positionIndex)"
+              data-field="position-net-asset-value"
+              :data-value="!isCollateralsLoading && netAssetValue.hasPrice ? netAssetValue.usd : '-'"
+            >
               {{ isCollateralsLoading ? '-' : netAssetValue.hasPrice ? formatCompactUsdValue(netAssetValue.usd) : '-' }}
             </div>
           </div>
@@ -857,14 +875,22 @@ watch([isConnected, isSpyMode, address], () => {
                 <SvgIcon
                   class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                   name="info-circle"
+                  data-modal-trigger="borrow-apy"
                   @click.stop="onBorrowInfoIconClick"
                 />
               </div>
-              <div class="text-p2 flex items-center text-accent-600 font-semibold">
+              <div
+                class="text-p2 flex items-center text-accent-600 font-semibold"
+                data-id="data-point"
+                :data-key="borrowVault?.address.toLowerCase()"
+                data-field="borrow-apy"
+                :data-value="borrowApyWithRewards"
+              >
                 <SvgIcon
                   v-if="hasBorrowRewards(borrowVault?.address || '', collateralVault?.address || '')"
                   class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
                   name="sparks"
+                  data-modal-trigger="borrow-apy"
                   @click.stop="onBorrowInfoIconClick"
                 />
                 {{ formatNumber(borrowApyWithRewards) }}%
@@ -882,7 +908,13 @@ watch([isConnected, isSpyMode, address], () => {
                 Market value
               </div>
               <div class="flex justify-between gap-8 justify-self-end">
-                <div class="text-neutral-800 text-p3">
+                <div
+                  class="text-neutral-800 text-p3"
+                  data-id="data-point"
+                  :data-key="borrowVault?.address.toLowerCase()"
+                  data-field="borrow-market-value"
+                  :data-value="borrowMarketValue.hasPrice ? borrowMarketValue.usd : formatExactAmount(position.borrowed, borrowVault?.asset.decimals ?? 0, borrowVault?.asset?.symbol)"
+                >
                   <template v-if="borrowMarketValue.hasPrice">
                     {{ formatCompactUsdValue(borrowMarketValue.usd) }}
                   </template>
@@ -897,6 +929,10 @@ watch([isConnected, isSpyMode, address], () => {
                   v-if="borrowMarketValue.hasPrice"
                   class="text-neutral-500 text-p3"
                   :exact="formatExactAmount(position.borrowed, borrowVault?.asset.decimals ?? 0, borrowVault?.asset?.symbol)"
+                  data-id="data-point"
+                  :data-key="borrowVault?.address.toLowerCase()"
+                  data-field="borrow-token-amount"
+                  :data-value="formatExactAmount(position.borrowed, borrowVault?.asset.decimals ?? 0, borrowVault?.asset?.symbol)"
                 >
                   ~ {{ roundAndCompactTokens(position.borrowed, borrowVault?.asset.decimals ?? 0) }} {{ borrowVault?.asset?.symbol }}
                 </UiExactAmount>
@@ -906,7 +942,13 @@ watch([isConnected, isSpyMode, address], () => {
               <div class="text-neutral-500 text-p3">
                 Current price
               </div>
-              <div class="text-neutral-800 text-p3">
+              <div
+                class="text-neutral-800 text-p3"
+                data-id="data-point"
+                :data-key="borrowVault?.address.toLowerCase()"
+                data-field="borrow-current-price"
+                :data-value="borrowUnitPrice.hasPrice ? borrowUnitPrice.usd : '-'"
+              >
                 {{ borrowUnitPrice.hasPrice ? formatUsdValue(borrowUnitPrice.usd) : '-' }}
               </div>
             </div>
@@ -914,7 +956,13 @@ watch([isConnected, isSpyMode, address], () => {
               <div class="text-neutral-500 text-p3">
                 Oracle price
               </div>
-              <div class="text-neutral-800 text-p3">
+              <div
+                class="text-neutral-800 text-p3"
+                data-id="data-point"
+                :data-key="borrowVault?.address.toLowerCase()"
+                data-field="borrow-oracle-price"
+                :data-value="borrowOraclePrice || '-'"
+              >
                 {{
                   borrowOraclePrice
                     ? formatUsdValue(borrowOraclePrice)
@@ -926,7 +974,13 @@ watch([isConnected, isSpyMode, address], () => {
               <div class="text-neutral-500 text-p3">
                 Liq. price
               </div>
-              <div class="text-neutral-800 text-p3">
+              <div
+                class="text-neutral-800 text-p3"
+                data-id="data-point"
+                :data-key="borrowVault?.address.toLowerCase()"
+                data-field="borrow-liquidation-price"
+                :data-value="borrowLiquidationPrice || '-'"
+              >
                 {{ borrowLiquidationPrice ? `$${formatNumber(borrowLiquidationPrice)}` : '-' }}
               </div>
             </div>
@@ -1028,14 +1082,22 @@ watch([isConnected, isSpyMode, address], () => {
                   <SvgIcon
                     class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                     name="info-circle"
+                    data-modal-trigger="supply-apy"
                     @click.stop="(e: MouseEvent) => onSupplyInfoIconClick(e, asPositionCollateralVault(collateral.vault))"
                   />
                 </div>
-                <div class="text-p2 flex items-center text-accent-600 font-semibold">
+                <div
+                  class="text-p2 flex items-center text-accent-600 font-semibold"
+                  data-id="data-point"
+                  :data-key="collateral.vault.address.toLowerCase()"
+                  data-field="supply-apy"
+                  :data-value="collateral.supplyApyWithRewards"
+                >
                   <SvgIcon
                     v-if="hasSupplyRewards(collateral.vault.address)"
                     class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
                     name="sparks"
+                    data-modal-trigger="supply-apy"
                     @click.stop="(e: MouseEvent) => onSupplyInfoIconClick(e, asPositionCollateralVault(collateral.vault))"
                   />
                   {{ formatNumber(collateral.supplyApyWithRewards) }}%
@@ -1053,7 +1115,13 @@ watch([isConnected, isSpyMode, address], () => {
                   {{ !hasNoBorrow ? 'Market value' : 'Supply value' }}
                 </div>
                 <div class="flex justify-between gap-8 justify-self-end">
-                  <div class="text-content-primary text-p3">
+                  <div
+                    class="text-content-primary text-p3"
+                    data-id="data-point"
+                    :data-key="collateral.vault.address.toLowerCase()"
+                    :data-field="!hasNoBorrow ? 'collateral-market-value' : 'collateral-supply-value'"
+                    :data-value="collateral.value.hasPrice ? collateral.value.usd : formatExactAmount(collateral.assets, collateral.vault.asset.decimals, collateral.vault.asset.symbol)"
+                  >
                     <template v-if="collateral.value.hasPrice">
                       {{ formatCompactUsdValue(collateral.value.usd) }}
                     </template>
@@ -1068,6 +1136,10 @@ watch([isConnected, isSpyMode, address], () => {
                     v-if="collateral.value.hasPrice"
                     class="text-content-tertiary text-p3"
                     :exact="formatExactAmount(collateral.assets, collateral.vault.asset.decimals, collateral.vault.asset.symbol)"
+                    data-id="data-point"
+                    :data-key="collateral.vault.address.toLowerCase()"
+                    data-field="collateral-token-amount"
+                    :data-value="formatExactAmount(collateral.assets, collateral.vault.asset.decimals, collateral.vault.asset.symbol)"
                   >
                     ~ {{ roundAndCompactTokens(collateral.assets, collateral.vault.asset.decimals) }}
                     {{ collateral.vault.asset.symbol }}
@@ -1078,7 +1150,13 @@ watch([isConnected, isSpyMode, address], () => {
                 <div class="text-neutral-500 text-p3">
                   Current price
                 </div>
-                <div class="text-neutral-800 text-p3">
+                <div
+                  class="text-neutral-800 text-p3"
+                  data-id="data-point"
+                  :data-key="collateral.vault.address.toLowerCase()"
+                  data-field="collateral-current-price"
+                  :data-value="collateral.unitPriceUsd > 0 ? collateral.unitPriceUsd : '-'"
+                >
                   {{ collateral.unitPriceUsd > 0 ? formatUsdValue(collateral.unitPriceUsd) : '-' }}
                 </div>
               </div>
@@ -1086,7 +1164,13 @@ watch([isConnected, isSpyMode, address], () => {
                 <div class="text-neutral-500 text-p3">
                   Oracle price
                 </div>
-                <div class="text-neutral-800 text-p3">
+                <div
+                  class="text-neutral-800 text-p3"
+                  data-id="data-point"
+                  :data-key="collateral.vault.address.toLowerCase()"
+                  data-field="collateral-oracle-price"
+                  :data-value="collateral.oraclePriceUsd > 0 ? collateral.oraclePriceUsd : '-'"
+                >
                   {{ collateral.oraclePriceUsd > 0
                     ? formatUsdValue(collateral.oraclePriceUsd)
                     : '-' }}
@@ -1099,7 +1183,13 @@ watch([isConnected, isSpyMode, address], () => {
                 <div class="text-neutral-500 text-p3">
                   Liq. price
                 </div>
-                <div class="text-neutral-800 text-p3">
+                <div
+                  class="text-neutral-800 text-p3"
+                  data-id="data-point"
+                  :data-key="collateral.vault.address.toLowerCase()"
+                  data-field="collateral-liquidation-price"
+                  :data-value="liquidationPrice || '-'"
+                >
                   {{ liquidationPrice ? `$${formatNumber(liquidationPrice)}` : '-' }}
                 </div>
               </div>

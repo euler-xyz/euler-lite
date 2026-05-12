@@ -104,6 +104,7 @@ watchEffect(async () => {
             <SvgIcon
               class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
               name="info-circle"
+              data-modal-trigger="supply-apy"
               @click="onSupplyInfoIconClick"
             />
           </span>
@@ -113,6 +114,7 @@ watchEffect(async () => {
             v-if="hasSupplyRewards(vault.address)"
             class="!w-20 !h-20 text-accent-500 cursor-pointer"
             name="sparks"
+            data-modal-trigger="supply-apy"
             @click="onSupplyInfoIconClick"
           />
           {{ formatNumber(supplyApyWithRewards) }}%
@@ -128,6 +130,7 @@ watchEffect(async () => {
             <SvgIcon
               class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
               name="info-circle"
+              data-modal-trigger="borrow-apy"
               @click="onBorrowInfoIconClick"
             />
           </span>
@@ -137,6 +140,7 @@ watchEffect(async () => {
             v-if="hasBorrowRewards(vault.address)"
             class="!w-20 !h-20 text-accent-500 cursor-pointer"
             name="sparks"
+            data-modal-trigger="borrow-apy"
             @click="onBorrowInfoIconClick"
           />
           {{ formatNumber(borrowApyWithRewards) }}%
