@@ -109,6 +109,7 @@ const supplyApyWithRewards = computed(
   () => supplyApy.value + totalRewardsAPY.value,
 )
 const utilization = computed(() => vault.utilization)
+const utilizationDisplay = computed(() => compactNumber(utilization.value, 2, 2))
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
 const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address))
 const isKeyring = computed(() => isVaultKeyring(vault.address))
@@ -376,9 +377,9 @@ watchEffect(async () => {
             data-id="data-point"
             :data-key="vault.address.toLowerCase()"
             data-field="utilization"
-            :data-value="utilization"
+            :data-value="utilizationDisplay"
           >
-            {{ compactNumber(utilization, 2, 2) }}%
+            {{ utilizationDisplay }}%
           </div>
         </div>
       </div>
@@ -503,7 +504,7 @@ watchEffect(async () => {
             :max="100"
           />
           <div class="text-p2 text-content-primary">
-            {{ compactNumber(utilization, 2, 2) }}%
+            {{ utilizationDisplay }}%
           </div>
         </div>
       </div>
