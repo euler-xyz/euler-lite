@@ -10,7 +10,7 @@ const MAX_ADDRESSES = 100
 const rateLimiter = createRateLimiter({
   max: 100,
   windowMs: 60_000,
-  label: 'public-vault-metadata',
+  label: 'public-metadata',
 })
 
 export default defineEventHandler(async (event) => {
@@ -48,7 +48,7 @@ export default defineEventHandler(async (event) => {
     metadataMap = await getChainVaultMetadata(chainId)
   }
   catch (err) {
-    logger.warn({ ctx: 'public-vault-metadata', chainId, err }, 'metadata lookup failed')
+    logger.warn({ ctx: 'public-metadata', chainId, err }, 'metadata lookup failed')
     throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
   }
 

@@ -381,3 +381,5 @@ These labels appear in address fields across all vault overview types (EVK, Earn
 ## Programmatic verification lookup
 
 External consumers that only need a yes/no answer for a vault address can call the public [`GET /api/public/is-known`](./public-api.md#get-apipublicis-known) endpoint instead of loading the full label set. The endpoint merges `products.json`, `earn-vaults.json`, and the on-chain `escrowedCollateralPerspective` into a single per-chain verified set, excludes deprecated entries, and answers batches of up to 100 addresses per request.
+
+Consumers that need display metadata (resolved name, description, governing entity, asset) on top of the verification verdict can call [`GET /api/public/metadata`](./public-api.md#get-apipublicmetadata), which applies the same labels / override / verification rules the client UI uses and returns a uniform shape across EVK, Securitize, and Earn vaults.
