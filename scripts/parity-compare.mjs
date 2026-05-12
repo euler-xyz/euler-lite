@@ -425,6 +425,7 @@ async function runScenario({ scenario, config, browser, baseline, candidate }) {
     diffs.push(compareSnapshots(basePageResult.snapshot, candidatePageResult.snapshot, config))
 
     for (const follow of scenario.follow || []) {
+      await waitForFollowLinks(basePageResult.page, follow.selector, follow.waitTimeoutMs || config.waitTimeoutMs)
       const links = await extractFollowLinks(basePageResult.page, follow.selector)
       const limited = limitFollowLinks(links, follow, config)
 
@@ -776,6 +777,7 @@ async function capturePlanAndFollowPlans({ appDefinition, app: startedApp = null
 
     const followPlans = []
     for (const follow of follows) {
+      await waitForFollowLinks(pageResult.page, follow.selector, follow.waitTimeoutMs || config.waitTimeoutMs)
       const links = await extractFollowLinks(pageResult.page, follow.selector)
       const limited = limitFollowLinks(links, follow, config)
 
@@ -1134,6 +1136,26 @@ async function missingWaitSelectors(page, selectors = []) {
   return page.evaluate((items) => {
     return (items || []).filter(selector => !document.querySelector(selector))
   }, selectors || [])
+}
+
+async function waitForFollowLinks(page, selector, timeout = 45_000) {
+  if (!selector) return
+
+  await page.waitForFunction((itemSelector) => {
+    const isVisible = (element) => {
+      const style = window.getComputedStyle(element)
+      if (style.display === 'none' || style.visibility === 'hidden') return false
+      const rect = element.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0
+    }
+
+    return Array.from(document.querySelectorAll(itemSelector))
+      .some((element) => {
+        if (!isVisible(element)) return false
+        const anchor = element.closest('a') || (element.tagName === 'A' ? element : null)
+        return !!anchor?.href
+      })
+  }, selector, { timeout }).catch(() => {})
 }
 
 async function captureModalPlansOnPage({
