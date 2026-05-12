@@ -1,5 +1,7 @@
 - create robust query keys for query - so that the arguments may differ in unimportant details, see app v3
 - cache on server - scripts can reuse?
+- tokenlist app server merge??
+- review what gets cached where
 - port swap service
 - port execution service
 - intrinsic apy - what to do about it?
