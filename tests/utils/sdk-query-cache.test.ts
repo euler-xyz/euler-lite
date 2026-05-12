@@ -22,4 +22,16 @@ describe('sdkBuildQuery', () => {
 
     expect(query).toHaveBeenCalledTimes(1)
   })
+
+  it('throws instead of bypassing the cache for non-serializable arguments', async () => {
+    const circular: Record<string, unknown> = {}
+    circular.self = circular
+    const query = vi.fn(async () => 'ok')
+    const wrapped = sdkBuildQuery('queryBatchSimulation', query, {})
+
+    await expect(wrapped(circular)).rejects.toThrow(
+      'SDK query arguments for queryBatchSimulation are not serializable',
+    )
+    expect(query).not.toHaveBeenCalled()
+  })
 })
