@@ -1850,6 +1850,30 @@ function limitFollowLinks(links, follow, config) {
 
 function scrapePage(meta) {
   const normalize = value => String(value || '').replace(/\\s+/g, ' ').trim()
+  const structuralContainerIds = new Set([
+    'discovery-market-list',
+    'discovery-market-list-item',
+    'discovery-market-card',
+    'discovery-market-expanded',
+    'discovery-matrix-view-select',
+    'discovery-graph',
+    'attribute-matrix',
+    'collateral-matrix',
+  ])
+  const listContainerOnlyIds = new Set([
+    'discovery-market-expanded',
+    'discovery-matrix-view-select',
+    'attribute-matrix',
+    'collateral-matrix',
+  ])
+  const keylessContainerIds = new Set([
+    'discovery-market-expanded',
+    'discovery-matrix-view-select',
+    'attribute-matrix',
+    'collateral-matrix',
+  ])
+  const isStructuralContainer = attrs => structuralContainerIds.has(attrs.id || '')
+  const isListContainerOnly = element => listContainerOnlyIds.has(element.id || '')
   const comparableText = (element) => {
     const ignoredNodes = Array
       .from(element.querySelectorAll('[data-label], [data-parity-ignore], img, svg, .relative.flex.items-center.shrink-0'))
@@ -1888,11 +1912,31 @@ function scrapePage(meta) {
     const anchor = element.closest('a') || (element.tagName === 'A' ? element : null)
     return anchor?.href || ''
   }
+  const inferredListFor = (attrs) => {
+    if (attrs.list) return attrs.list
+    const id = attrs.id || ''
+    if (id === 'discovery-market-list' || id === 'discovery-market-list-item') return 'discovery-market'
+    if (id === 'discovery-market-expanded') return 'discovery-market-expanded'
+    if (id === 'discovery-matrix-view-select') return 'discovery-matrix-view-select'
+    if (id === 'discovery-view-toggle') return 'discovery-view-toggle'
+    if (id === 'discovery-graph' || id === 'discovery-graph-node' || id === 'discovery-graph-edge') return id
+    if (id === 'attribute-matrix'
+      || id === 'attribute-matrix-column'
+      || id === 'attribute-matrix-row'
+      || id === 'attribute-matrix-row-header'
+      || id === 'attribute-matrix-cell') return id
+    if (id === 'collateral-matrix'
+      || id === 'collateral-matrix-column'
+      || id === 'collateral-matrix-row'
+      || id === 'collateral-matrix-row-header'
+      || id === 'collateral-matrix-cell') return id
+    return ''
+  }
   const baseKeyFor = attrs => [
     attrs.id || '',
     attrs.list || '',
-    attrs.key || '',
-    attrs.field || '',
+    keylessContainerIds.has(attrs.id || '') ? '' : (attrs.key || ''),
+    keylessContainerIds.has(attrs.id || '') ? '' : (attrs.field || ''),
   ].join('|')
   const occurrenceByBaseKey = new Map()
 
@@ -1900,12 +1944,19 @@ function scrapePage(meta) {
     .filter(isVisible)
     .map((element, index) => {
       const attrs = dataAttrs(element)
+      const inferredList = inferredListFor(attrs)
+      if (inferredList) attrs.list = inferredList
       const baseKey = baseKeyFor(attrs)
       const occurrence = occurrenceByBaseKey.get(baseKey) || 0
       occurrenceByBaseKey.set(baseKey, occurrence + 1)
       const text = comparableText(element)
       const rect = element.getBoundingClientRect()
       const hasDataValue = Object.prototype.hasOwnProperty.call(attrs, 'value')
+      const compareValue = hasDataValue
+        ? attrs.value
+        : isStructuralContainer(attrs)
+          ? ''
+          : text
 
       return {
         key: baseKey + '#' + occurrence,
@@ -1918,7 +1969,7 @@ function scrapePage(meta) {
         itemKey: attrs.key || '',
         field: attrs.field || '',
         value: hasDataValue ? attrs.value : '',
-        compareValue: hasDataValue ? attrs.value : text,
+        compareValue,
         text,
         href: hrefFor(element),
         attrs,
@@ -1931,7 +1982,7 @@ function scrapePage(meta) {
       }
     })
 
-  const listItems = elements.filter(element => element.list && element.itemKey)
+  const listItems = elements.filter(element => element.list && element.itemKey && !isListContainerOnly(element))
   const lists = {}
 
   for (const item of listItems) {
@@ -1945,7 +1996,7 @@ function scrapePage(meta) {
     lists[item.list].count += 1
   }
 
-  for (const element of elements.filter(item => item.list && !item.itemKey)) {
+  for (const element of elements.filter(item => item.list && (!item.itemKey || isListContainerOnly(item)))) {
     lists[element.list] ||= {
       list: element.list,
       keys: [],
@@ -2084,11 +2135,13 @@ function compareLists(baseline, candidate) {
     const extraKeys = cand.keys.filter(key => !base.keys.includes(key))
     const orderMismatch = !sameArray(base.keys, cand.keys)
     const containerMismatch = JSON.stringify(base.containers) !== JSON.stringify(cand.containers)
-    const status = missingKeys.length || extraKeys.length || orderMismatch || containerMismatch ? 'list-mismatch' : 'match'
+    const instrumentationOnly = isCandidateOnlyExploreInstrumentationList(list, base, cand, baseline.elements || [])
+    const status = instrumentationOnly || !(missingKeys.length || extraKeys.length || orderMismatch || containerMismatch) ? 'match' : 'list-mismatch'
 
     return {
       list,
       status,
+      instrumentationOnly,
       baselineCount: base.count,
       candidateCount: cand.count,
       baselineKeys: base.keys,
@@ -2115,6 +2168,15 @@ function compareElements(baseline, candidate, config = {}) {
     const cand = candidateMap.get(key)
 
     if (!base) {
+      if (isCandidateOnlyExploreInstrumentationElement(cand, baselineElements)) {
+        return {
+          key,
+          baseKey: cand.baseKey,
+          status: 'match',
+          candidate: summarizeElement(cand),
+          instrumentationOnly: true,
+        }
+      }
       return {
         key,
         baseKey: cand.baseKey,
@@ -2124,6 +2186,15 @@ function compareElements(baseline, candidate, config = {}) {
     }
 
     if (!cand) {
+      if (isBaselineOnlyExploreInstrumentationElement(base, candidateElements)) {
+        return {
+          key,
+          baseKey: base.baseKey,
+          status: 'match',
+          baseline: summarizeElement(base),
+          instrumentationOnly: true,
+        }
+      }
       return {
         key,
         baseKey: base.baseKey,
@@ -2133,6 +2204,17 @@ function compareElements(baseline, candidate, config = {}) {
     }
 
     if (isStructuralListElement(base) && isStructuralListElement(cand)) {
+      return {
+        key,
+        baseKey: base.baseKey,
+        status: 'match',
+        baseline: summarizeElement(base),
+        candidate: summarizeElement(cand),
+        mismatch: null,
+      }
+    }
+
+    if (isStructuralContainerElement(base) && isStructuralContainerElement(cand)) {
       return {
         key,
         baseKey: base.baseKey,
@@ -2162,6 +2244,24 @@ function compareElements(baseline, candidate, config = {}) {
       mismatch,
     }
   })
+}
+
+const STRUCTURAL_CONTAINER_COMPARE_IDS = new Set([
+  'discovery-market-list',
+  'discovery-market-list-item',
+  'discovery-market-card',
+  'discovery-market-expanded',
+  'discovery-matrix-view-select',
+  'discovery-graph',
+  'attribute-matrix',
+  'collateral-matrix',
+])
+
+function isStructuralContainerElement(element) {
+  return Boolean(
+    STRUCTURAL_CONTAINER_COMPARE_IDS.has(element?.id)
+    && !Object.prototype.hasOwnProperty.call(element.attrs || {}, 'value'),
+  )
 }
 
 function elementsForComparison(elements = []) {
@@ -2255,6 +2355,42 @@ function isStructuralListElement(element) {
     && !element.field
     && !Object.prototype.hasOwnProperty.call(element.attrs || {}, 'value'),
   )
+}
+
+const EXPLORE_INSTRUMENTATION_LISTS = new Set([
+  'discovery-graph',
+  'discovery-graph-node',
+  'discovery-graph-edge',
+  'discovery-view-toggle',
+  'discovery-market-expanded',
+  'discovery-matrix-view-select',
+  'attribute-matrix',
+  'attribute-matrix-column',
+  'attribute-matrix-row',
+  'attribute-matrix-row-header',
+  'attribute-matrix-cell',
+  'collateral-matrix',
+  'collateral-matrix-column',
+  'collateral-matrix-row',
+  'collateral-matrix-row-header',
+  'collateral-matrix-cell',
+])
+
+function isCandidateOnlyExploreInstrumentationList(list, base, cand, baselineElements) {
+  if (!EXPLORE_INSTRUMENTATION_LISTS.has(list)) return false
+  if (base.count || base.keys.length || base.containers.length) return false
+  if (!cand.count && !cand.keys.length && !cand.containers.length) return false
+  return !baselineElements.some(element => element.list === list || element.id === list)
+}
+
+function isCandidateOnlyExploreInstrumentationElement(candidate, baselineElements) {
+  if (!EXPLORE_INSTRUMENTATION_LISTS.has(candidate?.list)) return false
+  return !baselineElements.some(element => element.list === candidate.list || element.id === candidate.id)
+}
+
+function isBaselineOnlyExploreInstrumentationElement(baseline, candidateElements) {
+  if (!EXPLORE_INSTRUMENTATION_LISTS.has(baseline?.list)) return false
+  return !candidateElements.some(element => element.list === baseline.list || element.id === baseline.id)
 }
 
 function buildMismatchEntry(comparison, baseline, candidate) {
