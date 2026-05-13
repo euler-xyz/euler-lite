@@ -361,10 +361,14 @@ const fetchUnresolvedCollaterals = async (addresses: string[], generation: numbe
 
 const resolveUnresolvedCollaterals = async (generation: number): Promise<void> => {
   const { getEVaults, has: registryHas } = useVaultRegistry()
+  // Do not apply the explorable-product filter here. The matrix/group builders
+  // still exclude non-explorable vaults as market members, but they need live
+  // collateral references loaded in the registry so those vaults can render as
+  // external collateral rows.
   const unresolvedAddresses = extractUnresolvedCollateralAddresses(
     getEVaults(),
     registryHas,
-  ).filter(addr => showAllLabelEntries.value || !isVaultNotExplorable(addr))
+  )
 
   await fetchUnresolvedCollaterals(unresolvedAddresses, generation)
 }
