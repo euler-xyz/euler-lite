@@ -1,4 +1,4 @@
-import type { EulerEarn, SecuritizeCollateralVault, EVault } from '@eulerxyz/euler-v2-sdk'
+import { StandardEVaultPerspectives, type EulerEarn, type SecuritizeCollateralVault, type EVault } from '@eulerxyz/euler-v2-sdk'
 import { extractUnresolvedCollateralAddresses } from '~/utils/vault/collateral-discovery'
 import { isLiveCollateralEdge } from '~/utils/vault/ltv'
 import { fetchChainVaultCategories, fetchVaultCategory, isSecuritizeVault, resetVaultCategoryCache } from '~/utils/vault/categories'
@@ -48,7 +48,7 @@ const sdkVaultFetchOptions = {
 }
 
 interface UpdateEVaultsOptions {
-  verified?: boolean
+  verifiedAddresses?: ReadonlySet<string>
 }
 
 const getSdkVaults = async () => {
@@ -164,7 +164,7 @@ const updateEVaults = async (vaultAddresses: string[], generation?: number, sile
     registrySetMany((result.result.filter(Boolean) as EVault[]).map((vault) => {
       const existing = registryGet(vault.address)
       const vaultCategory = existing?.vaultCategory ?? (isKnownEscrowAddress(vault.address) ? 'escrow' : undefined)
-      const verified = vaultCategory === 'escrow' || existing?.verified === true || options.verified === true
+      const verified = vaultCategory === 'escrow' || existing?.verified === true || options.verifiedAddresses?.has(vault.address.toLowerCase()) === true
       return {
         address: vault.address,
         vault,
@@ -354,7 +354,7 @@ const fetchUnresolvedCollaterals = async (addresses: string[], generation: numbe
 
   // Bulk loaders short-circuit on empty input, so call unconditionally.
   await Promise.all([
-    updateEVaults(eVaultAddrs, generation, true, { verified: false }),
+    updateEVaults(eVaultAddrs, generation, true),
     updateEarnVaults(earnAddrs, generation, true),
     updateSecuritizeVaults(securitizeAddrs, generation, true),
     fetchNeededEscrowVaults(escrowAddrs, generation),
@@ -445,7 +445,12 @@ const loadVaults = async () => {
     // Phase 1: Fetch chain-wide vault categorization from SDK metadata.
     // Addresses missing from the categorization default to EVault — the SDK
     // EVault service handles any ERC-4626 + EVault-compatible vault.
-    const categories = await fetchChainVaultCategories()
+    const sdk = await getSdkVaults()
+    const [categories, governedEVaultAddressList] = await Promise.all([
+      fetchChainVaultCategories(),
+      sdk.eVaultService.fetchVerifiedVaultAddresses(chainId.value, [StandardEVaultPerspectives.GOVERNED]),
+    ])
+    const governedEVaultAddresses = new Set(governedEVaultAddressList.map(addr => addr.toLowerCase()))
 
     if (loadGeneration.value !== generation) return
 
@@ -486,7 +491,7 @@ const loadVaults = async () => {
         earnResolve()
       })(),
       (async () => {
-        await updateEVaults(eVaultAddresses, generation, silent, { verified: true })
+        await updateEVaults(eVaultAddresses, generation, silent, { verifiedAddresses: governedEVaultAddresses })
         eVaultResolve()
       })(),
       updateSecuritizeVaults(securitizeAddresses, generation, silent),
