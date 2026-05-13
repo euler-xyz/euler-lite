@@ -39,6 +39,8 @@ WORKDIR /usr/src/app
 COPY --from=builder /usr/src/app/.output .output
 COPY --from=builder /usr/src/app/doppler ./doppler
 
+USER 65532:65532
+
 EXPOSE ${APP_PORT}
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
