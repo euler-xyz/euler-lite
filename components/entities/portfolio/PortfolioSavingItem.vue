@@ -148,7 +148,7 @@ const onClick = () => {
         <div class="flex flex-col items-end">
           <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
             Supply APY
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               :component="VaultSupplyApyModal"
               :modal-data="supplyApyModalData"
               aria-label="Show supply APY breakdown"
@@ -157,10 +157,10 @@ const onClick = () => {
                 class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                 name="info-circle"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
           </div>
           <div class="text-p2 flex text-accent-600">
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               v-if="rewardsExist"
               :component="VaultSupplyApyModal"
               :modal-data="supplyApyModalData"
@@ -170,7 +170,7 @@ const onClick = () => {
                 name="sparks"
                 class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
             {{ formatNumber(supplyApyWithRewards) }}%
           </div>
         </div>
@@ -270,7 +270,7 @@ const onClick = () => {
         <div class="flex flex-col items-end">
           <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
             Supply APY
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               :component="VaultSupplyApyModal"
               :modal-data="supplyApyModalData"
               aria-label="Show supply APY breakdown"
@@ -279,10 +279,10 @@ const onClick = () => {
                 class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                 name="info-circle"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
           </div>
           <div class="text-p2 flex text-accent-600">
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               v-if="rewardsExist"
               :component="VaultSupplyApyModal"
               :modal-data="supplyApyModalData"
@@ -292,7 +292,7 @@ const onClick = () => {
                 name="sparks"
                 class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
             {{ formatNumber(supplyApyWithRewards) }}%
           </div>
         </div>

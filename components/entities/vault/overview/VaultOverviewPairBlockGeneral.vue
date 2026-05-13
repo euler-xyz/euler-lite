@@ -195,7 +195,7 @@ const rampDownModalData = computed(() => ({
           <template #label>
             <span class="flex items-center gap-4">
               Supply APY
-              <UiHoverModalTrigger
+              <UiModalPreviewTrigger
                 :component="VaultSupplyApyModal"
                 :modal-data="supplyApyModalData"
                 aria-label="Show supply APY breakdown"
@@ -204,11 +204,11 @@ const rampDownModalData = computed(() => ({
                   class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
                   name="info-circle"
                 />
-              </UiHoverModalTrigger>
+              </UiModalPreviewTrigger>
             </span>
           </template>
           <span class="flex items-center gap-4">
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               v-if="hasSupplyRewards(pair.collateral.address)"
               :component="VaultSupplyApyModal"
               :modal-data="supplyApyModalData"
@@ -218,7 +218,7 @@ const rampDownModalData = computed(() => ({
                 class="!w-20 !h-20 text-accent-500 cursor-pointer"
                 name="sparks"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
             {{ formatNumber(supplyApyWithRewards) }}%
           </span>
         </VaultOverviewLabelValue>
@@ -226,7 +226,7 @@ const rampDownModalData = computed(() => ({
           <template #label>
             <span class="flex items-center gap-4">
               Borrow APY
-              <UiHoverModalTrigger
+              <UiModalPreviewTrigger
                 :component="VaultBorrowApyModal"
                 :modal-data="borrowApyModalData"
                 aria-label="Show borrow APY breakdown"
@@ -235,11 +235,11 @@ const rampDownModalData = computed(() => ({
                   class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
                   name="info-circle"
                 />
-              </UiHoverModalTrigger>
+              </UiModalPreviewTrigger>
             </span>
           </template>
           <span class="flex items-center gap-4">
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               v-if="hasBorrowRewards(pair.borrow.address, pair.collateral.address)"
               :component="VaultBorrowApyModal"
               :modal-data="borrowApyModalData"
@@ -249,7 +249,7 @@ const rampDownModalData = computed(() => ({
                 class="!w-20 !h-20 text-accent-500 cursor-pointer"
                 name="sparks"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
             {{ formatNumber(borrowApyWithRewards) }}%
           </span>
         </VaultOverviewLabelValue>
@@ -257,7 +257,7 @@ const rampDownModalData = computed(() => ({
           <template #label>
             <span class="flex items-center gap-4">
               Net APY
-              <UiHoverModalTrigger
+              <UiModalPreviewTrigger
                 :component="VaultNetApyPairModal"
                 :modal-data="netApyModalData"
                 aria-label="Show net APY breakdown"
@@ -266,11 +266,11 @@ const rampDownModalData = computed(() => ({
                   class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
                   name="info-circle"
                 />
-              </UiHoverModalTrigger>
+              </UiModalPreviewTrigger>
             </span>
           </template>
           <span class="flex items-center gap-4">
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               v-if="hasSupplyRewards(pair.collateral.address) || hasBorrowRewards(pair.borrow.address, pair.collateral.address) || hasLoopingRewards(pair.borrow.address, pair.collateral.address)"
               :component="VaultNetApyPairModal"
               :modal-data="netApyModalData"
@@ -280,7 +280,7 @@ const rampDownModalData = computed(() => ({
                 class="!w-20 !h-20 text-accent-500 cursor-pointer"
                 name="sparks"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
             {{ formatNumber(netApy) }}%
           </span>
         </VaultOverviewLabelValue>
@@ -288,7 +288,7 @@ const rampDownModalData = computed(() => ({
           <template #label>
             <span class="flex items-center gap-4">
               Max ROE
-              <UiHoverModalTrigger
+              <UiModalPreviewTrigger
                 :component="VaultMaxRoeModal"
                 :modal-data="maxRoeModalData"
                 aria-label="Show max ROE breakdown"
@@ -297,11 +297,11 @@ const rampDownModalData = computed(() => ({
                   class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
                   name="info-circle"
                 />
-              </UiHoverModalTrigger>
+              </UiModalPreviewTrigger>
             </span>
           </template>
           <span class="flex items-center gap-4">
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               v-if="hasSupplyRewards(pair.collateral.address) || hasBorrowRewards(pair.borrow.address, pair.collateral.address) || hasLoopingRewards(pair.borrow.address, pair.collateral.address)"
               :component="VaultMaxRoeModal"
               :modal-data="maxRoeModalData"
@@ -311,7 +311,7 @@ const rampDownModalData = computed(() => ({
                 class="!w-20 !h-20 text-accent-500 cursor-pointer"
                 name="sparks"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
             {{ formatNumber(maxRoe) }}%
           </span>
         </VaultOverviewLabelValue>
@@ -323,7 +323,7 @@ const rampDownModalData = computed(() => ({
           <template #label>
             <span class="flex items-center gap-4">
               Liquidation LTV
-              <UiHoverModalTrigger
+              <UiModalPreviewTrigger
                 v-if="isRamping"
                 :component="VaultRampDownModal"
                 :modal-data="rampDownModalData"
@@ -333,11 +333,11 @@ const rampDownModalData = computed(() => ({
                   class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
                   name="info-circle"
                 />
-              </UiHoverModalTrigger>
+              </UiModalPreviewTrigger>
             </span>
           </template>
           <span class="flex items-center gap-4">
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               v-if="isRamping"
               :component="VaultRampDownModal"
               :modal-data="rampDownModalData"
@@ -347,7 +347,7 @@ const rampDownModalData = computed(() => ({
                 name="arrow-top-right"
                 class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
             {{ `${formatNumber(nanoToValue(currentLiquidationLTV, 2), 2)}%` }}
           </span>
         </VaultOverviewLabelValue>

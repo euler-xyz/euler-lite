@@ -65,7 +65,7 @@ const supplyApyModalData = computed(() => ({
           </span>
         </template>
         <span class="flex items-center gap-4">
-          <UiHoverModalTrigger
+          <UiModalPreviewTrigger
             v-if="hasSupplyRewards(vault.address)"
             :component="VaultSupplyApyModal"
             :modal-data="supplyApyModalData"
@@ -75,7 +75,7 @@ const supplyApyModalData = computed(() => ({
               class="!w-20 !h-20 text-accent-500 cursor-pointer"
               name="sparks"
             />
-          </UiHoverModalTrigger>
+          </UiModalPreviewTrigger>
           {{ formatNumber(nanoToValue(vault.interestRateInfo.supplyAPY, 25) + rewardSupplyAPY) }}%
         </span>
       </VaultOverviewLabelValue>

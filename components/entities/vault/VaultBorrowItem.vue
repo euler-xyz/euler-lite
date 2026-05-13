@@ -307,7 +307,7 @@ const linkPath = computed(() => ({
       <div class="flex flex-col items-center justify-end py-16 pb-12 mobile:!flex mobile:items-end">
         <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
           Borrow APY
-          <UiHoverModalTrigger
+          <UiModalPreviewTrigger
             :component="VaultBorrowApyModal"
             :modal-data="borrowApyModalData"
             aria-label="Show borrow APY breakdown"
@@ -316,10 +316,10 @@ const linkPath = computed(() => ({
               class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
               name="info-circle"
             />
-          </UiHoverModalTrigger>
+          </UiModalPreviewTrigger>
         </div>
         <div class="text-p2 flex items-center text-accent-600 font-semibold">
-          <UiHoverModalTrigger
+          <UiModalPreviewTrigger
             v-if="hasBorrowApyRewards"
             :component="VaultBorrowApyModal"
             :modal-data="borrowApyModalData"
@@ -329,13 +329,13 @@ const linkPath = computed(() => ({
               class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
               name="sparks"
             />
-          </UiHoverModalTrigger>
+          </UiModalPreviewTrigger>
           {{ formatNumber(borrowApyWithRewards) }}%
         </div>
         <div class="hidden mobile:!flex mobile:flex-col mobile:items-end mobile:mt-8">
           <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
             Max ROE
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               :component="VaultMaxRoeModal"
               :modal-data="maxRoeModalData"
               aria-label="Show max ROE breakdown"
@@ -344,10 +344,10 @@ const linkPath = computed(() => ({
                 class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                 name="info-circle"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
           </div>
           <div class="text-p2 text-accent-600 font-semibold flex items-center">
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               v-if="hasAnyRewards"
               :component="VaultMaxRoeModal"
               :modal-data="maxRoeModalData"
@@ -357,7 +357,7 @@ const linkPath = computed(() => ({
                 class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
                 name="sparks"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
             {{ formatNumber(maxRoe, 2, 2) }}%
           </div>
         </div>
@@ -365,7 +365,7 @@ const linkPath = computed(() => ({
       <div class="flex flex-col items-end pr-16 py-16 pb-12 mobile:!hidden">
         <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
           Max ROE
-          <UiHoverModalTrigger
+          <UiModalPreviewTrigger
             :component="VaultMaxRoeModal"
             :modal-data="maxRoeModalData"
             aria-label="Show max ROE breakdown"
@@ -374,10 +374,10 @@ const linkPath = computed(() => ({
               class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
               name="info-circle"
             />
-          </UiHoverModalTrigger>
+          </UiModalPreviewTrigger>
         </div>
         <div class="text-p2 text-accent-600 font-semibold flex items-center">
-          <UiHoverModalTrigger
+          <UiModalPreviewTrigger
             v-if="hasAnyRewards"
             :component="VaultMaxRoeModal"
             :modal-data="maxRoeModalData"
@@ -387,7 +387,7 @@ const linkPath = computed(() => ({
               class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
               name="sparks"
             />
-          </UiHoverModalTrigger>
+          </UiModalPreviewTrigger>
           {{ formatNumber(maxRoe, 2, 2) }}%
         </div>
       </div>
@@ -448,7 +448,7 @@ const linkPath = computed(() => ({
       <div class="py-12 pb-12 text-center mobile:!hidden">
         <div class="text-content-tertiary text-p3 mb-4 flex items-center justify-center gap-4">
           Supply APY
-          <UiHoverModalTrigger
+          <UiModalPreviewTrigger
             :component="VaultSupplyApyModal"
             :modal-data="supplyApyModalData"
             aria-label="Show supply APY breakdown"
@@ -457,10 +457,10 @@ const linkPath = computed(() => ({
               class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
               name="info-circle"
             />
-          </UiHoverModalTrigger>
+          </UiModalPreviewTrigger>
         </div>
         <div class="text-p2 text-content-primary flex items-center justify-center">
-          <UiHoverModalTrigger
+          <UiModalPreviewTrigger
             v-if="hasSupplyRewards(pair.collateral.address)"
             :component="VaultSupplyApyModal"
             :modal-data="supplyApyModalData"
@@ -470,14 +470,14 @@ const linkPath = computed(() => ({
               class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
               name="sparks"
             />
-          </UiHoverModalTrigger>
+          </UiModalPreviewTrigger>
           {{ formatNumber(supplyApyWithRewards, 2, 2) }}%
         </div>
       </div>
       <div class="py-12 pb-12 text-center mobile:!p-0">
         <div class="text-content-tertiary text-p3 mb-4 flex items-center justify-center gap-4">
           Net APY
-          <UiHoverModalTrigger
+          <UiModalPreviewTrigger
             :component="VaultNetApyPairModal"
             :modal-data="netApyModalData"
             aria-label="Show net APY breakdown"
@@ -486,10 +486,10 @@ const linkPath = computed(() => ({
               class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
               name="info-circle"
             />
-          </UiHoverModalTrigger>
+          </UiModalPreviewTrigger>
         </div>
         <div class="text-p2 text-content-primary flex items-center justify-center">
-          <UiHoverModalTrigger
+          <UiModalPreviewTrigger
             v-if="hasAnyRewards"
             :component="VaultNetApyPairModal"
             :modal-data="netApyModalData"
@@ -499,7 +499,7 @@ const linkPath = computed(() => ({
               class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
               name="sparks"
             />
-          </UiHoverModalTrigger>
+          </UiModalPreviewTrigger>
           {{ formatNumber(netApy, 2, 2) }}%
         </div>
       </div>
@@ -584,7 +584,7 @@ const linkPath = computed(() => ({
         <div class="flex-1">
           <div class="text-content-tertiary text-p3 flex items-center gap-4">
             Supply APY
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               :component="VaultSupplyApyModal"
               :modal-data="supplyApyModalData"
               aria-label="Show supply APY breakdown"
@@ -593,11 +593,11 @@ const linkPath = computed(() => ({
                 class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                 name="info-circle"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
           </div>
         </div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
-          <UiHoverModalTrigger
+          <UiModalPreviewTrigger
             v-if="hasSupplyRewards(pair.collateral.address)"
             :component="VaultSupplyApyModal"
             :modal-data="supplyApyModalData"
@@ -607,7 +607,7 @@ const linkPath = computed(() => ({
               class="!w-20 !h-20 text-accent-500 cursor-pointer"
               name="sparks"
             />
-          </UiHoverModalTrigger>
+          </UiModalPreviewTrigger>
           <div class="text-p2 text-content-primary">
             {{ formatNumber(supplyApyWithRewards, 2, 2) }}%
           </div>
@@ -617,7 +617,7 @@ const linkPath = computed(() => ({
         <div class="flex-1">
           <div class="text-content-tertiary text-p3 flex items-center gap-4">
             Net APY
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               :component="VaultNetApyPairModal"
               :modal-data="netApyModalData"
               aria-label="Show net APY breakdown"
@@ -626,11 +626,11 @@ const linkPath = computed(() => ({
                 class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                 name="info-circle"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
           </div>
         </div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
-          <UiHoverModalTrigger
+          <UiModalPreviewTrigger
             v-if="hasAnyRewards"
             :component="VaultNetApyPairModal"
             :modal-data="netApyModalData"
@@ -640,7 +640,7 @@ const linkPath = computed(() => ({
               class="!w-20 !h-20 text-accent-500 cursor-pointer"
               name="sparks"
             />
-          </UiHoverModalTrigger>
+          </UiModalPreviewTrigger>
           <div class="text-p2 text-content-primary">
             {{ formatNumber(netApy, 2, 2) }}%
           </div>

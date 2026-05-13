@@ -226,7 +226,7 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
             <template v-if="bestRoe.value > 0">
               <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                 Max ROE
-                <UiHoverModalTrigger
+                <UiModalPreviewTrigger
                   :component="VaultMaxRoeModal"
                   :modal-data="() => getMaxRoeModalData(bestRoe)"
                   aria-label="Show max ROE breakdown"
@@ -235,10 +235,10 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
                     class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                     name="info-circle"
                   />
-                </UiHoverModalTrigger>
+                </UiModalPreviewTrigger>
               </div>
               <div class="text-p2 text-content-primary flex items-center gap-4 min-w-0">
-                <UiHoverModalTrigger
+                <UiModalPreviewTrigger
                   v-if="bestRoe.hasRewards"
                   :component="VaultMaxRoeModal"
                   :modal-data="() => getMaxRoeModalData(bestRoe)"
@@ -248,7 +248,7 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
                     name="sparks"
                     class="!w-20 !h-20 text-accent-500 shrink-0 cursor-pointer hover:text-accent-400 transition-colors"
                   />
-                </UiHoverModalTrigger>
+                </UiModalPreviewTrigger>
                 <span class="shrink-0">{{ formatNumber(bestRoe.value, 2, 2) }}%</span>
                 <span
                   v-if="bestRoe.pair"
@@ -370,7 +370,7 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
         >
           <div class="text-content-tertiary text-p3 flex items-center gap-4 whitespace-nowrap">
             Max ROE
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               :component="VaultMaxRoeModal"
               :modal-data="() => getMaxRoeModalData(bestRoe)"
               aria-label="Show max ROE breakdown"
@@ -379,11 +379,11 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
                 class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                 name="info-circle"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
           </div>
           <div class="text-p2 text-content-primary flex flex-wrap items-center justify-end gap-x-4">
             <span class="flex items-center gap-4 shrink-0">
-              <UiHoverModalTrigger
+              <UiModalPreviewTrigger
                 v-if="bestRoe.hasRewards"
                 :component="VaultMaxRoeModal"
                 :modal-data="() => getMaxRoeModalData(bestRoe)"
@@ -393,7 +393,7 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
                   name="sparks"
                   class="!w-20 !h-20 text-accent-500 shrink-0 cursor-pointer hover:text-accent-400 transition-colors"
                 />
-              </UiHoverModalTrigger>
+              </UiModalPreviewTrigger>
               {{ formatNumber(bestRoe.value, 2, 2) }}%
             </span>
             <span

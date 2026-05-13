@@ -117,7 +117,7 @@ watchEffect(async () => {
       <div class="flex flex-col items-end">
         <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
           Supply APY
-          <UiHoverModalTrigger
+          <UiModalPreviewTrigger
             :component="VaultSupplyApyModal"
             :modal-data="supplyApyModalData"
             aria-label="Show supply APY breakdown"
@@ -126,11 +126,11 @@ watchEffect(async () => {
               class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
               name="info-circle"
             />
-          </UiHoverModalTrigger>
+          </UiModalPreviewTrigger>
         </div>
         <div class="flex items-center">
           <div class="text-p2 flex items-center text-accent-600 font-semibold">
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               v-if="hasRewards"
               :component="VaultSupplyApyModal"
               :modal-data="supplyApyModalData"
@@ -140,7 +140,7 @@ watchEffect(async () => {
                 class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
                 name="sparks"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
             {{ formatNumber(supplyApyWithRewards) }}%
           </div>
         </div>

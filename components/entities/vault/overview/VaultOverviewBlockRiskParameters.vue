@@ -187,7 +187,7 @@ const hooksModalData = computed(() => ({
         <template #label>
           <span class="flex items-center gap-4">
             {{ hooksRowLabel }}
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               v-if="showHooksInfoIcon"
               :component="VaultHooksInfoModal"
               :modal-data="hooksModalData"
@@ -197,7 +197,7 @@ const hooksModalData = computed(() => ({
                 class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                 name="info-circle"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
           </span>
         </template>
         {{ hooksRowValue }}

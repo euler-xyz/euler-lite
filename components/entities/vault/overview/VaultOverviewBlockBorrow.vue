@@ -96,7 +96,7 @@ const allCollateralPairs = computed(() =>
             <template #label>
               <span class="flex items-center gap-4">
                 Liquidation LTV
-                <UiHoverModalTrigger
+                <UiModalPreviewTrigger
                   v-if="isLiquidationLTVRamping(pair)"
                   :component="VaultRampDownModal"
                   :modal-data="() => getRampDownModalData(pair)"
@@ -106,11 +106,11 @@ const allCollateralPairs = computed(() =>
                     class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
                     name="info-circle"
                   />
-                </UiHoverModalTrigger>
+                </UiModalPreviewTrigger>
               </span>
             </template>
             <span class="flex items-center gap-4">
-              <UiHoverModalTrigger
+              <UiModalPreviewTrigger
                 v-if="isLiquidationLTVRamping(pair)"
                 :component="VaultRampDownModal"
                 :modal-data="() => getRampDownModalData(pair)"
@@ -120,7 +120,7 @@ const allCollateralPairs = computed(() =>
                   name="arrow-top-right"
                   class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
                 />
-              </UiHoverModalTrigger>
+              </UiModalPreviewTrigger>
               {{ `${formatNumber(nanoToValue(getCurrentLiquidationLTV(pair), 2), 2)}%` }}
             </span>
           </VaultOverviewLabelValue>

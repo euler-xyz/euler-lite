@@ -731,7 +731,7 @@ watch([isConnected, isSpyMode, address], () => {
           <div class="flex justify-between items-center">
             <div class="flex items-center gap-4 text-p2 text-content-secondary">
               Net APY
-              <UiHoverModalTrigger
+              <UiModalPreviewTrigger
                 :component="VaultNetApyModal"
                 :modal-data="netApyModalData"
                 aria-label="Show net APY breakdown"
@@ -740,13 +740,13 @@ watch([isConnected, isSpyMode, address], () => {
                   class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
                   name="info-circle"
                 />
-              </UiHoverModalTrigger>
+              </UiModalPreviewTrigger>
             </div>
             <div
               class="text-h5 flex items-center gap-4"
               :class="[netAPY >= 0 ? 'text-accent-600' : 'text-error-500']"
             >
-              <UiHoverModalTrigger
+              <UiModalPreviewTrigger
                 v-if="hasSupplyRewards(collateralVault?.address || '') || hasBorrowRewards(borrowVault?.address || '', collateralVault?.address || '')"
                 :component="VaultNetApyModal"
                 :modal-data="netApyModalData"
@@ -756,14 +756,14 @@ watch([isConnected, isSpyMode, address], () => {
                   class="!w-20 !h-20 text-accent-500 cursor-pointer"
                   name="sparks"
                 />
-              </UiHoverModalTrigger>
+              </UiModalPreviewTrigger>
               {{ Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
             </div>
           </div>
           <div class="flex justify-between items-center">
             <div class="flex items-center gap-4 text-p2 text-content-secondary">
               ROE
-              <UiHoverModalTrigger
+              <UiModalPreviewTrigger
                 :component="PortfolioRoeModal"
                 :modal-data="roeModalData"
                 aria-label="Show ROE breakdown"
@@ -772,13 +772,13 @@ watch([isConnected, isSpyMode, address], () => {
                   class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
                   name="info-circle"
                 />
-              </UiHoverModalTrigger>
+              </UiModalPreviewTrigger>
             </div>
             <div
               class="text-h5 flex items-center gap-4"
               :class="[roe >= 0 ? 'text-accent-600' : 'text-error-500']"
             >
-              <UiHoverModalTrigger
+              <UiModalPreviewTrigger
                 v-if="hasSupplyRewards(collateralVault?.address || '') || hasBorrowRewards(borrowVault?.address || '', collateralVault?.address || '')"
                 :component="PortfolioRoeModal"
                 :modal-data="roeModalData"
@@ -788,7 +788,7 @@ watch([isConnected, isSpyMode, address], () => {
                   class="!w-20 !h-20 text-accent-500 cursor-pointer"
                   name="sparks"
                 />
-              </UiHoverModalTrigger>
+              </UiModalPreviewTrigger>
               {{ Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}
             </div>
           </div>
@@ -873,7 +873,7 @@ watch([isConnected, isSpyMode, address], () => {
             <div class="flex flex-col items-end">
               <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                 Borrow APY
-                <UiHoverModalTrigger
+                <UiModalPreviewTrigger
                   :component="VaultBorrowApyModal"
                   :modal-data="borrowApyModalData"
                   aria-label="Show borrow APY breakdown"
@@ -882,10 +882,10 @@ watch([isConnected, isSpyMode, address], () => {
                     class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                     name="info-circle"
                   />
-                </UiHoverModalTrigger>
+                </UiModalPreviewTrigger>
               </div>
               <div class="text-p2 flex items-center text-accent-600 font-semibold">
-                <UiHoverModalTrigger
+                <UiModalPreviewTrigger
                   v-if="hasBorrowRewards(borrowVault?.address || '', collateralVault?.address || '')"
                   :component="VaultBorrowApyModal"
                   :modal-data="borrowApyModalData"
@@ -895,7 +895,7 @@ watch([isConnected, isSpyMode, address], () => {
                     class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
                     name="sparks"
                   />
-                </UiHoverModalTrigger>
+                </UiModalPreviewTrigger>
                 {{ formatNumber(borrowApyWithRewards) }}%
               </div>
             </div>
@@ -1054,7 +1054,7 @@ watch([isConnected, isSpyMode, address], () => {
               <div class="flex flex-col items-end">
                 <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                   Supply APY
-                  <UiHoverModalTrigger
+                  <UiModalPreviewTrigger
                     :component="VaultSupplyApyModal"
                     :modal-data="() => getSupplyApyModalData(collateral.vault)"
                     aria-label="Show supply APY breakdown"
@@ -1063,10 +1063,10 @@ watch([isConnected, isSpyMode, address], () => {
                       class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                       name="info-circle"
                     />
-                  </UiHoverModalTrigger>
+                  </UiModalPreviewTrigger>
                 </div>
                 <div class="text-p2 flex items-center text-accent-600 font-semibold">
-                  <UiHoverModalTrigger
+                  <UiModalPreviewTrigger
                     v-if="hasSupplyRewards(collateral.vault.address)"
                     :component="VaultSupplyApyModal"
                     :modal-data="() => getSupplyApyModalData(collateral.vault)"
@@ -1076,7 +1076,7 @@ watch([isConnected, isSpyMode, address], () => {
                       class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
                       name="sparks"
                     />
-                  </UiHoverModalTrigger>
+                  </UiModalPreviewTrigger>
                   {{ formatNumber(collateral.supplyApyWithRewards) }}%
                 </div>
               </div>

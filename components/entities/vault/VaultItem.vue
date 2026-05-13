@@ -198,7 +198,7 @@ watchEffect(async () => {
       <div class="flex flex-col items-end">
         <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
           Supply APY
-          <UiHoverModalTrigger
+          <UiModalPreviewTrigger
             :component="VaultSupplyApyModal"
             :modal-data="supplyApyModalData"
             aria-label="Show supply APY breakdown"
@@ -207,14 +207,14 @@ watchEffect(async () => {
               class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
               name="info-circle"
             />
-          </UiHoverModalTrigger>
+          </UiModalPreviewTrigger>
         </div>
         <div class="flex items-center">
           <div class="mr-6">
             <VaultPoints :vault="vault" />
           </div>
           <div class="text-p2 flex items-center text-accent-600 font-semibold">
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               v-if="hasRewards"
               :component="VaultSupplyApyModal"
               :modal-data="supplyApyModalData"
@@ -224,7 +224,7 @@ watchEffect(async () => {
                 class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
                 name="sparks"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
             {{ formatNumber(supplyApyWithRewards) }}%
           </div>
         </div>
@@ -317,7 +317,7 @@ watchEffect(async () => {
       >
         <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
           Collateral exposure
-          <UiHoverModalTrigger
+          <UiModalPreviewTrigger
             v-if="collateralAssets.length > 0"
             :component="VaultCollateralExposureModal"
             :modal-data="collateralExposureModalData"
@@ -327,9 +327,9 @@ watchEffect(async () => {
               class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
               name="info-circle"
             />
-          </UiHoverModalTrigger>
+          </UiModalPreviewTrigger>
         </div>
-        <UiHoverModalTrigger
+        <UiModalPreviewTrigger
           v-if="collateralAssets.length > 0"
           :component="VaultCollateralExposureModal"
           :modal-data="collateralExposureModalData"
@@ -347,7 +347,7 @@ watchEffect(async () => {
               & {{ collateralOverflowCount }} more
             </span>
           </div>
-        </UiHoverModalTrigger>
+        </UiModalPreviewTrigger>
         <div
           v-else
           class="text-p2 text-content-primary"
@@ -432,7 +432,7 @@ watchEffect(async () => {
         <div class="flex-1">
           <div class="text-content-tertiary text-p3 flex items-center gap-4">
             Collateral exposure
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               v-if="collateralAssets.length > 0"
               :component="VaultCollateralExposureModal"
               :modal-data="collateralExposureModalData"
@@ -442,11 +442,11 @@ watchEffect(async () => {
                 class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                 name="info-circle"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
           </div>
         </div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
-          <UiHoverModalTrigger
+          <UiModalPreviewTrigger
             v-if="collateralAssets.length > 0"
             :component="VaultCollateralExposureModal"
             :modal-data="collateralExposureModalData"
@@ -464,7 +464,7 @@ watchEffect(async () => {
                 & {{ collateralOverflowCount }} more
               </span>
             </div>
-          </UiHoverModalTrigger>
+          </UiModalPreviewTrigger>
           <div
             v-else
             class="text-p2 text-content-primary"

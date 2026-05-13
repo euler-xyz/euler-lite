@@ -277,7 +277,7 @@ onBeforeUnmount(() => {
 <template>
   <span
     ref="trigger"
-    class="ui-hover-modal-trigger"
+    class="ui-modal-preview-trigger"
     :aria-label="ariaLabel"
     @pointerdown="stopPointerPropagation"
     @pointerup="stopPointerPropagation"
@@ -292,7 +292,7 @@ onBeforeUnmount(() => {
     <div
       v-if="isRendered"
       ref="floating"
-      class="ui-hover-modal-trigger__popover"
+      class="ui-modal-preview-trigger__popover"
       :style="floatingStyles"
       @click.stop
       @mouseenter="onPopoverMouseEnter"
@@ -304,15 +304,15 @@ onBeforeUnmount(() => {
       >
         <div
           v-if="isVisible"
-          class="ui-hover-modal-trigger__popover-inner"
+          class="ui-modal-preview-trigger__popover-inner"
         >
           <div
             ref="arrowRef"
-            class="ui-hover-modal-trigger__arrow"
-            :class="`ui-hover-modal-trigger__arrow--${arrowSide}`"
+            class="ui-modal-preview-trigger__arrow"
+            :class="`ui-modal-preview-trigger__arrow--${arrowSide}`"
             :style="arrowStyles"
           />
-          <div class="ui-hover-modal-trigger__popover-content">
+          <div class="ui-modal-preview-trigger__popover-content">
             <component
               :is="component"
               v-bind="popoverData.props"
@@ -326,7 +326,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style lang="scss">
-.ui-hover-modal-trigger {
+.ui-modal-preview-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;

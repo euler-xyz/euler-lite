@@ -438,7 +438,7 @@ onMounted(() => {
             <div class="flex flex-col items-end">
               <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                 Net APY
-                <UiHoverModalTrigger
+                <UiModalPreviewTrigger
                   :component="VaultNetApyModal"
                   :modal-data="netApyModalData"
                   aria-label="Show net APY breakdown"
@@ -447,13 +447,13 @@ onMounted(() => {
                     class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
                     name="info-circle"
                   />
-                </UiHoverModalTrigger>
+                </UiModalPreviewTrigger>
               </div>
               <div
                 class="text-p2 flex items-center"
                 :class="[netAPY >= 0 ? 'text-accent-600' : 'text-error-500']"
               >
-                <UiHoverModalTrigger
+                <UiModalPreviewTrigger
                   v-if="hasRewards"
                   :component="VaultNetApyModal"
                   :modal-data="netApyModalData"
@@ -463,14 +463,14 @@ onMounted(() => {
                     class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
                     name="sparks"
                   />
-                </UiHoverModalTrigger>
+                </UiModalPreviewTrigger>
                 {{ Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
               </div>
             </div>
             <div class="flex flex-col items-end">
               <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                 ROE
-                <UiHoverModalTrigger
+                <UiModalPreviewTrigger
                   :component="PortfolioRoeModal"
                   :modal-data="roeModalData"
                   aria-label="Show ROE breakdown"
@@ -479,13 +479,13 @@ onMounted(() => {
                     class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
                     name="info-circle"
                   />
-                </UiHoverModalTrigger>
+                </UiModalPreviewTrigger>
               </div>
               <div
                 class="text-p2 flex items-center"
                 :class="[roe >= 0 ? 'text-accent-600' : 'text-error-500']"
               >
-                <UiHoverModalTrigger
+                <UiModalPreviewTrigger
                   v-if="hasRewards"
                   :component="PortfolioRoeModal"
                   :modal-data="roeModalData"
@@ -495,7 +495,7 @@ onMounted(() => {
                     class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
                     name="sparks"
                   />
-                </UiHoverModalTrigger>
+                </UiModalPreviewTrigger>
                 {{ Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}
               </div>
             </div>
