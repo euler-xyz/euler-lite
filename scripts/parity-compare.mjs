@@ -2103,8 +2103,10 @@ function compareLists(baseline, candidate) {
 }
 
 function compareElements(baseline, candidate, config = {}) {
-  const baselineMap = new Map(baseline.elements.map(element => [element.key, element]))
-  const candidateMap = new Map(candidate.elements.map(element => [element.key, element]))
+  const baselineElements = elementsForComparison(baseline.elements)
+  const candidateElements = elementsForComparison(candidate.elements)
+  const baselineMap = new Map(baselineElements.map(element => [element.key, element]))
+  const candidateMap = new Map(candidateElements.map(element => [element.key, element]))
   const keys = Array.from(new Set([...baselineMap.keys(), ...candidateMap.keys()])).sort()
   const numericTolerance = config.numericTolerance ?? 0.01
 
@@ -2160,6 +2162,90 @@ function compareElements(baseline, candidate, config = {}) {
       mismatch,
     }
   })
+}
+
+function elementsForComparison(elements = []) {
+  const headers = elements
+    .filter(element => element.id === 'vault-header' && element.itemKey && element.rect)
+    .slice()
+    .sort(compareElementPosition)
+
+  if (!headers.length) return elements
+
+  const occurrenceByBaseKey = new Map()
+
+  return elements.map((element) => {
+    const contextualBaseKey = contextualDataPointBaseKey(element, headers)
+    if (!contextualBaseKey) return element
+
+    const occurrence = occurrenceByBaseKey.get(contextualBaseKey) || 0
+    occurrenceByBaseKey.set(contextualBaseKey, occurrence + 1)
+
+    return {
+      ...element,
+      key: contextualBaseKey + '#' + occurrence,
+      baseKey: contextualBaseKey,
+      occurrence,
+      attrs: {
+        ...element.attrs,
+        'parity-context': 'vault-header',
+      },
+    }
+  })
+}
+
+function contextualDataPointBaseKey(element, headers) {
+  if (element.id !== 'data-point') return ''
+  if (element.list || element.itemKey) return ''
+  if (!element.rect) return ''
+
+  const header = nearestPrecedingVaultHeader(element, headers)
+  if (!header) return ''
+
+  const field = contextualDataPointField(element)
+  if (!field) return ''
+
+  return [
+    element.id || '',
+    'vault-header-context',
+    header.itemKey || '',
+    field,
+  ].join('|')
+}
+
+function nearestPrecedingVaultHeader(element, headers) {
+  let candidate
+  for (const header of headers) {
+    if (compareElementPosition(header, element) > 0) break
+    candidate = header
+  }
+  return candidate
+}
+
+function contextualDataPointField(element) {
+  if (element.field) return element.field
+
+  const text = String(element.text || '')
+  const firstLine = text
+    .split(/\n+/)
+    .map(item => item.trim())
+    .find(Boolean)
+  if (firstLine) return firstLine
+
+  const compact = text.replace(/\s+/g, ' ').trim()
+  return compact.split(/\s{2,}/)[0] || ''
+}
+
+function compareElementPosition(a, b) {
+  const ay = Number(a?.rect?.y ?? a?.index ?? 0)
+  const by = Number(b?.rect?.y ?? b?.index ?? 0)
+  if (ay !== by) return ay - by
+
+  const ax = Number(a?.rect?.x ?? 0)
+  const bx = Number(b?.rect?.x ?? 0)
+  if (ax !== bx) return ax - bx
+
+  return Number(a?.index ?? 0) - Number(b?.index ?? 0)
 }
 
 function isStructuralListElement(element) {
