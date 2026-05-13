@@ -303,7 +303,7 @@ const isSubmitDisabled = computed(() => {
   return false
 })
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vaultAddress))
-const isSwapRestricted = computed(() => needsSwap.value && isVaultRestrictedByCountry(vaultAddress))
+const isSwapRestricted = computed(() => needsSwap.value && isVaultRestrictedByCountry(vaultAddress, { counterpart: selectedAsset.value }))
 // Swap-deposit source: user is giving up the selected asset (reducing exposure),
 // so only hard-block applies. Soft-restrict intentionally does not apply here.
 // Pass the asset object so symbol/name pattern rules also apply.
@@ -691,6 +691,7 @@ const openSwapTokenSelector = () => {
       currentAssetAddress: selectedAsset.value?.address || asset.value?.address,
       onSelect: onSelectSwapAsset,
       allowNativeCurrency: true,
+      pairedAsset: asset.value,
     },
   })
 }

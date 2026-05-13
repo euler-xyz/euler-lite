@@ -133,7 +133,7 @@ const isOutputAssetBlocked = computed(() =>
   needsSwap.value && isAssetBlockedByCountry(selectedOutputAsset.value),
 )
 const isOutputAssetRestricted = computed(() =>
-  needsSwap.value && isAssetRestrictedByCountry(selectedOutputAsset.value),
+  needsSwap.value && isAssetRestrictedByCountry(selectedOutputAsset.value, { counterpart: asset.value }),
 )
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value) return false
@@ -314,6 +314,7 @@ const openSwapTokenSelector = () => {
       currentAssetAddress: selectedOutputAsset.value?.address || asset.value?.address,
       onSelect: onSelectOutputAsset,
       mode: 'output' as const,
+      pairedAsset: asset.value,
     },
   })
 }
