@@ -2156,8 +2156,14 @@ function compareLists(baseline, candidate) {
 }
 
 function compareElements(baseline, candidate, config = {}) {
-  const baselineElements = elementsForComparison(baseline.elements)
-  const candidateElements = elementsForComparison(candidate.elements)
+  const baselineElements = elementsForComparison(
+    baseline.elements,
+    routeVaultContextKey(baseline.path || baseline.requestedPath || ''),
+  )
+  const candidateElements = elementsForComparison(
+    candidate.elements,
+    routeVaultContextKey(candidate.path || candidate.requestedPath || ''),
+  )
   const baselineMap = new Map(baselineElements.map(element => [element.key, element]))
   const candidateMap = new Map(candidateElements.map(element => [element.key, element]))
   const keys = Array.from(new Set([...baselineMap.keys(), ...candidateMap.keys()])).sort()
@@ -2264,7 +2270,7 @@ function isStructuralContainerElement(element) {
   )
 }
 
-function elementsForComparison(elements = []) {
+function elementsForComparison(elements = [], routeContextKey = '') {
   const headers = elements
     .filter(element => element.id === 'vault-header' && element.itemKey && element.rect)
     .slice()
@@ -2275,7 +2281,7 @@ function elementsForComparison(elements = []) {
   const occurrenceByBaseKey = new Map()
 
   return elements.map((element) => {
-    const contextualBaseKey = contextualDataPointBaseKey(element, headers)
+    const contextualBaseKey = contextualDataPointBaseKey(element, headers, routeContextKey)
     if (!contextualBaseKey) return element
 
     const occurrence = occurrenceByBaseKey.get(contextualBaseKey) || 0
@@ -2294,23 +2300,95 @@ function elementsForComparison(elements = []) {
   })
 }
 
-function contextualDataPointBaseKey(element, headers) {
+const ROUTE_VAULT_CONTEXT_FIELDS = new Set([
+  'Available liquidity',
+  'Bad debt socialisation',
+  'Base rate',
+  'Borrow APY',
+  'Borrow cap',
+  'Can be borrowed',
+  'Can be used as collateral',
+  'Cycle length',
+  'Disabled operations',
+  'Fee receiver',
+  'Fixed APY',
+  'Fixed rate cycle',
+  'Hook target',
+  'Hooked operations',
+  'Interest fee',
+  'Interest rate model',
+  'Kink',
+  'Liquidation bonus',
+  'Market',
+  'Max rate',
+  'Oracle router',
+  'Price',
+  'Projected earnings per month',
+  'Rate at kink',
+  'Repayment APY',
+  'Repayment window',
+  'Risk manager',
+  'Share token exchange rate',
+  'Supply APY',
+  'Supply cap',
+  'Total borrowed',
+  'Total supply',
+  'Unit of account',
+  'Utilization',
+  'Vault type',
+  'borrow-apy-base',
+  'borrow-apy-intrinsic',
+  'borrow-apy-intrinsic-provider',
+  'borrow-apy-intrinsic-source',
+  'borrow-apy-rewards-total',
+  'borrow-apy-total',
+  'supply-apy-base',
+  'supply-apy-base-average-label',
+  'supply-apy-intrinsic',
+  'supply-apy-intrinsic-provider',
+  'supply-apy-intrinsic-source',
+  'supply-apy-rewards-total',
+  'supply-apy-total',
+])
+
+function contextualDataPointBaseKey(element, headers, routeContextKey = '') {
   if (element.id !== 'data-point') return ''
   if (element.list || element.itemKey) return ''
   if (!element.rect) return ''
 
-  const header = nearestPrecedingVaultHeader(element, headers)
-  if (!header) return ''
-
   const field = contextualDataPointField(element)
   if (!field) return ''
+
+  const contextKey = shouldUseRouteVaultContext(field, routeContextKey)
+    ? routeContextKey
+    : nearestPrecedingVaultHeader(element, headers)?.itemKey
+  if (!contextKey) return ''
 
   return [
     element.id || '',
     'vault-header-context',
-    header.itemKey || '',
+    contextKey,
     field,
   ].join('|')
+}
+
+function routeVaultContextKey(pathValue) {
+  const path = String(pathValue || '').split('?')[0]
+  const addressPattern = '0x[0-9a-fA-F]{40}'
+  const lendOrEarn = path.match(new RegExp('^/(?:lend|earn)/(' + addressPattern + ')(?:/|$)'))
+  if (lendOrEarn) return lendOrEarn[1].toLowerCase()
+
+  const borrow = path.match(new RegExp('^/borrow/(' + addressPattern + ')/(' + addressPattern + ')(?:/|$)'))
+  if (borrow) return borrow[1].toLowerCase() + ':' + borrow[2].toLowerCase()
+
+  return ''
+}
+
+function shouldUseRouteVaultContext(field, routeContextKey) {
+  if (!routeContextKey) return false
+  if (ROUTE_VAULT_CONTEXT_FIELDS.has(field)) return true
+  if (/^[A-Za-z0-9.+-]+ (?:debt|token|vault)$/.test(field)) return true
+  return false
 }
 
 function nearestPrecedingVaultHeader(element, headers) {
