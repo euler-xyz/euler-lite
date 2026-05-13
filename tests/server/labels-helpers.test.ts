@@ -68,4 +68,16 @@ describe('buildEntityAddressSets', () => {
     const map = buildEntityAddressSets({ euler: {} })
     expect(map.get('euler')?.size).toBe(0)
   })
+
+  it('returns empty Sets for malformed entity values', () => {
+    const map = buildEntityAddressSets({
+      nil: null,
+      text: 'not-an-entity',
+      numeric: 123,
+    } as unknown as Parameters<typeof buildEntityAddressSets>[0])
+
+    expect(map.get('nil')?.size).toBe(0)
+    expect(map.get('text')?.size).toBe(0)
+    expect(map.get('numeric')?.size).toBe(0)
+  })
 })

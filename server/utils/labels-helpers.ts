@@ -27,8 +27,8 @@ export function buildEntityAddressSets(
 ): Map<string, Set<Address>> {
   const map = new Map<string, Set<Address>>()
   for (const [key, entity] of Object.entries(entities)) {
-    const raw = entity.addresses
     const addresses = new Set<Address>()
+    const raw = entity && typeof entity === 'object' ? entity.addresses : undefined
     if (raw && typeof raw === 'object') {
       for (const addr of Object.keys(raw)) {
         const checksum = tryChecksum(addr)
