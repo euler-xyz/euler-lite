@@ -68,6 +68,17 @@ export const buildApprovalSignSteps = (params: {
   return { steps, nextIndex: idx }
 }
 
+const playMooolerSound = () => {
+  if (typeof window === 'undefined') return
+  try {
+    const audio = new Audio('/sounds/moooler.wav')
+    void audio.play().catch(() => {})
+  }
+  catch {
+    // ignore — audio playback is non-essential
+  }
+}
+
 export const openCowSwapReviewModal = <TExecuteParams>(
   modal: { open: (component: Component, options?: ModalData) => void },
   options: {
@@ -81,6 +92,7 @@ export const openCowSwapReviewModal = <TExecuteParams>(
     logPrefix: string
   },
 ) => {
+  playMooolerSound()
   modal.open(CowSwapReviewModal, {
     isNotClosable: true,
     closeOnBackdropWhenAllowed: true,
