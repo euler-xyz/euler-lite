@@ -55,6 +55,7 @@ const {
 } = useRewardsApy()
 const { oracleAdapters, loadAllOracleAdapters } = useEulerLabels()
 const { chainId } = useEulerAddresses()
+
 const hoveredCell = ref<{
   collateralAddr: string
   liabilityAddr: string
@@ -369,12 +370,12 @@ const tooltipPriceText = computed((): string | null => {
   const key = `${ctx.view.oracle.toLowerCase()}:${ctx.view.base.toLowerCase()}:${ctx.view.quote.toLowerCase()}`
   const info = oraclePrices.value.get(key)
   if (!info?.success) return null
-  const invert = shouldInvertOraclePrice(
-    ctx.view.metaBase,
-    ctx.view.metaQuote,
-    ctx.view.base,
-    ctx.view.quote,
-  )
+  const invert = shouldInvertOraclePrice({
+    metaBase: ctx.view.metaBase,
+    metaQuote: ctx.view.metaQuote,
+    callerBase: ctx.view.base,
+    callerQuote: ctx.view.quote,
+  })
   const rate = invert && info.rate > 0 ? 1 / info.rate : info.rate
   return formatNumber(rate, 4)
 })

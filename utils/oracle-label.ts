@@ -1,23 +1,31 @@
 import type { Address } from 'viem'
 
-export const parseOracleLabelPair = (labelPrimary: string | undefined): [string, string] | null => {
-  if (!labelPrimary) return null
-  const parts = labelPrimary.split('/').map(s => s.trim()).filter(Boolean)
-  if (parts.length !== 2) return null
-  return [parts[0], parts[1]]
+// Each oracle adapter has its own on-chain (base, quote) wiring (recorded in
+// the oracle-checks metadata as `meta.base` / `meta.quote`). Its
+// `getQuote(amount, base, quote)` returns the natural feed direction when
+// called in the wired order; the args swapped returns the inverse.
+//
+// The EulerRouter resolves vault assets through ERC-4626 unwraps and cross
+// adapters and ends up calling each leaf adapter in the direction the router
+// needs. That direction may match the adapter's wiring or be flipped — when
+// it's flipped, the displayed rate is the inverse of the feed's natural
+// number and we want to invert it so the price reads in the direction the
+// label implies.
+//
+// We compare addresses (not symbols) because that is unambiguous; this also
+// avoids depending on async ERC20 symbol() resolution for assets that aren't
+// registered vault assets (e.g. STRCx underlying a wSTRCx vault).
+type InvertArgs = {
+  /** Adapter's on-chain base (from oracle-checks `meta.base`). */
+  metaBase: Address | string | undefined
+  /** Adapter's on-chain quote (from oracle-checks `meta.quote`). */
+  metaQuote: Address | string | undefined
+  /** Direction the router actually calls the adapter with (`OracleAdapterEntry.base`). */
+  callerBase: Address | string
+  /** Direction the router actually calls the adapter with (`OracleAdapterEntry.quote`). */
+  callerQuote: Address | string
 }
 
-// Each oracle adapter has its own on-chain (base, quote) wiring (from the
-// oracle-checks metadata). Its `getQuote(amount, base, quote)` returns the
-// natural feed direction when called in that wired order; calling it with the
-// arguments swapped returns the inverse.
-//
-// The router resolves vault assets through ERC4626 unwraps, cross adapters,
-// etc., and ends up calling each leaf adapter with the (base, quote) pair the
-// router wants. That pair may match the adapter's wiring or be flipped — when
-// it's flipped, the displayed rate is the inverse of the feed's natural number
-// and we need to invert it back so the displayed price reads in the direction
-// the label implies.
 const sameDirection = (
   a: Address | string,
   b: Address | string,
@@ -25,14 +33,16 @@ const sameDirection = (
   d: Address | string,
 ): boolean => a.toLowerCase() === c.toLowerCase() && b.toLowerCase() === d.toLowerCase()
 
-export const shouldInvertOraclePrice = (
-  metaBase: Address | string | undefined,
-  metaQuote: Address | string | undefined,
-  callerBase: Address | string,
-  callerQuote: Address | string,
-): boolean => {
+export const shouldInvertOraclePrice = ({
+  metaBase,
+  metaQuote,
+  callerBase,
+  callerQuote,
+}: InvertArgs): boolean => {
   if (!metaBase || !metaQuote) return false
   if (sameDirection(callerBase, callerQuote, metaBase, metaQuote)) return false
   if (sameDirection(callerBase, callerQuote, metaQuote, metaBase)) return true
+  // Caller pair doesn't line up with the wiring in either direction —
+  // unexpected (no-match fallback). Don't flip.
   return false
 }

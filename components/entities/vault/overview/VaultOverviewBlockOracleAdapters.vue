@@ -94,13 +94,12 @@ const adapterViews = computed(() => adapters.value.map((adapter) => {
   const provider = meta?.provider || adapter.name
   const name = meta?.name || adapter.name
   const checks = meta?.checks
-  const labelPrimary = meta?.label?.split('(')[0].trimEnd()
-  const invertPrice = shouldInvertOraclePrice(
-    meta?.base,
-    meta?.quote,
-    adapter.base,
-    adapter.quote,
-  )
+  const invertPrice = shouldInvertOraclePrice({
+    metaBase: meta?.base,
+    metaQuote: meta?.quote,
+    callerBase: adapter.base,
+    callerQuote: adapter.quote,
+  })
 
   return {
     ...adapter,
@@ -109,7 +108,10 @@ const adapterViews = computed(() => adapters.value.map((adapter) => {
     methodology: meta?.methodology || (isERC4626 ? 'Exchange Rate' : undefined),
     logo: getOracleProviderLogo(provider, name),
     label: meta?.label
-      ? { primary: labelPrimary ?? '', suffix: meta.label.includes('(') ? meta.label.slice(meta.label.indexOf('(')).trim() : undefined }
+      ? {
+          primary: meta.label.split('(')[0].trimEnd(),
+          suffix: meta.label.includes('(') ? meta.label.slice(meta.label.indexOf('(')).trim() : undefined,
+        }
       : undefined,
     invertPrice,
     checks,
@@ -153,7 +155,7 @@ const isAdapterPriceFailed = (adapter: OracleAdapterEntry) => {
   return !info?.success
 }
 
-const formatAdapterPrice = (adapter: OracleAdapterEntry & { invertPrice?: boolean }) => {
+const formatAdapterPrice = (adapter: OracleAdapterEntry & { invertPrice: boolean }) => {
   const key = getAdapterKey(adapter)
   const info = adapterPrices.value.get(key)
   if (!info?.success) return '-'
