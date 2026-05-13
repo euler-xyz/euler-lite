@@ -2,15 +2,16 @@ import { createError, getQuery, setResponseHeader } from 'h3'
 import { getAddress, isAddress } from 'viem'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { resolveRpcUrl } from '~/server/utils/rpc'
-import { getVerifiedAddressSet } from '~/server/utils/verified-vaults'
+import { getChainVaultMetadata, type VaultMetadata } from '~/server/utils/vault-metadata'
 import { logger } from '~/server/utils/logger'
+import { parsePublicMetadataProductId } from '~/server/utils/public-metadata-query'
 
 const MAX_ADDRESSES = 100
 
 const rateLimiter = createRateLimiter({
   max: 100,
   windowMs: 60_000,
-  label: 'public-is-known',
+  label: 'public-metadata',
 })
 
 export default defineEventHandler(async (event) => {
@@ -43,33 +44,44 @@ export default defineEventHandler(async (event) => {
     checksumed.push(getAddress(addr))
   }
 
-  let verifiedSet: Set<string>
+  // Optional product filter. When present, only entries whose `productId`
+  // equals this value are returned. Combines with `addresses` lookup mode:
+  // an address that matches by lookup but belongs to a different product
+  // returns `null`, matching the contract for unknown addresses.
+  const productId = parsePublicMetadataProductId(query.productId)
+
+  let metadataMap: Map<string, VaultMetadata>
   try {
-    verifiedSet = await getVerifiedAddressSet(chainId)
+    metadataMap = await getChainVaultMetadata(chainId)
   }
   catch (err) {
-    logger.warn({ ctx: 'public-is-known', chainId, err }, 'verified-address lookup failed')
+    logger.warn({ ctx: 'public-metadata', chainId, err }, 'metadata lookup failed')
     throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
   }
 
   // Matches other public endpoints (/api/vaults, /api/labels/*). CDN /
   // browser can absorb short-burst traffic; the warm-cache plugin keeps
-  // the upstream verified-set continuously fresh so a stale CDN entry is
+  // the upstream metadata map continuously fresh so a stale CDN entry is
   // never more than ~30s behind the server cache.
   setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
 
-  const response: Record<string, boolean> = {}
+  const matchesProduct = (m: VaultMetadata): boolean =>
+    productId === null || m.productId === productId
 
-  // No addresses supplied → list mode: emit the full known set as an object
-  // with `true` values, preserving the lookup-mode response shape so callers
-  // don't need to branch on input.
+  // No addresses supplied → list mode: emit every known vault (optionally
+  // filtered by productId).
   if (checksumed.length === 0) {
-    for (const addr of verifiedSet) response[addr] = true
-    return response
+    const out: Record<string, VaultMetadata> = {}
+    for (const [addr, m] of metadataMap) {
+      if (matchesProduct(m)) out[addr] = m
+    }
+    return out
   }
 
+  const response: Record<string, VaultMetadata | null> = {}
   for (const addr of checksumed) {
-    response[addr] = verifiedSet.has(addr)
+    const m = metadataMap.get(addr)
+    response[addr] = m && matchesProduct(m) ? m : null
   }
   return response
 })
