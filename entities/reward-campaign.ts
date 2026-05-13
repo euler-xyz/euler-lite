@@ -5,6 +5,7 @@ export type { RewardAction, RewardCampaign, RewardSource } from '@eulerxyz/euler
 
 export interface RewardCampaignDisplay {
   id: string
+  parityKey: string
   apr: number
   endDate: DateTime | null
   rewardToken: {
@@ -64,13 +65,24 @@ export const rewardCampaignKey = (campaign: RewardCampaign, prefix?: string): st
   return parts.filter(Boolean).join('-')
 }
 
+export const rewardCampaignParityKey = (campaign: RewardCampaign, vaultAddress?: string): string => {
+  if (!vaultAddress) return rewardCampaignKey(campaign)
+  return [
+    vaultAddress.toLowerCase(),
+    campaign.source,
+    normalizeRewardEndTimestamp(campaign.endTimestamp),
+  ].join('-')
+}
+
 export const rewardCampaignDisplay = (
   campaign: RewardCampaign,
   prefix?: string,
+  vaultAddress?: string,
 ): RewardCampaignDisplay => {
   const endTimestamp = normalizeRewardEndTimestamp(campaign.endTimestamp)
   return {
     id: rewardCampaignKey(campaign, prefix),
+    parityKey: rewardCampaignParityKey(campaign, vaultAddress),
     apr: rewardCampaignAprPercent(campaign),
     endDate: endTimestamp > 0 ? DateTime.fromSeconds(endTimestamp) : null,
     rewardToken: rewardCampaignToken(campaign),
@@ -85,10 +97,11 @@ export const rewardCampaignDisplay = (
 export const rewardCampaignDisplays = (
   campaigns: RewardCampaign[] | undefined,
   prefix?: string,
+  vaultAddress?: string,
 ): RewardCampaignDisplay[] => {
   if (!campaigns) return []
   return campaigns
     .filter(campaign => isRewardCampaignActive(campaign))
-    .map(campaign => rewardCampaignDisplay(campaign, prefix))
+    .map(campaign => rewardCampaignDisplay(campaign, prefix, vaultAddress))
     .sort((a, b) => a.rewardToken.symbol.localeCompare(b.rewardToken.symbol))
 }

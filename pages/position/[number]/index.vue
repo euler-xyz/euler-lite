@@ -647,6 +647,7 @@ const onBorrowInfoIconClick = (event: MouseEvent) => {
       intrinsicAPY: intrinsicBorrowAPY.value,
       intrinsicApyInfo: getIntrinsicApyInfo(borrowVault.value.asset.address),
       campaigns: getBorrowRewardCampaigns(borrowVault.value.address, collateralVault.value?.address),
+      rewardVaultAddress: borrowVault.value.address,
     },
   })
 }
@@ -660,6 +661,7 @@ const onSupplyInfoIconClick = (event: MouseEvent, vault: EVault | SecuritizeColl
       intrinsicAPY: getIntrinsicApy(vault.asset.address),
       intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
       campaigns: getSupplyRewardCampaigns(vault.address),
+      rewardVaultAddress: vault.address,
     },
   })
 }

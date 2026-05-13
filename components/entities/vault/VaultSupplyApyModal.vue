@@ -5,12 +5,13 @@ import { PROVIDER_LABELS, PROVIDER_LOGOS, rewardCampaignAprPercent, rewardCampai
 import type { IntrinsicApyInfo } from '~/entities/intrinsic-apy'
 
 const emits = defineEmits(['close'])
-const { lendingAPY, intrinsicAPY, intrinsicApyInfo, campaigns, baseApyAverageLabel } = defineProps<{
+const { lendingAPY, intrinsicAPY, intrinsicApyInfo, campaigns, baseApyAverageLabel, rewardVaultAddress } = defineProps<{
   lendingAPY: number
   intrinsicAPY?: number
   intrinsicApyInfo?: IntrinsicApyInfo
   campaigns?: RewardCampaign[]
   baseApyAverageLabel?: string
+  rewardVaultAddress?: string
 }>()
 
 const rewardsTotalAPY = computed(() => {
@@ -24,7 +25,7 @@ const hasIntrinsicApy = computed(() => intrinsicApyValue.value > 0)
 const totalSupplyApy = computed(() => lendingAPY + intrinsicApyValue.value + (rewardsTotalAPY.value || 0))
 
 const rewardsInfo = computed(() => {
-  return rewardCampaignDisplays(campaigns, 'supply')
+  return rewardCampaignDisplays(campaigns, 'supply', rewardVaultAddress)
 })
 
 const handleClose = () => {
@@ -145,7 +146,7 @@ const handleClose = () => {
           class="flex justify-between items-center mb-16"
           data-id="supply-apy-reward-campaign"
           data-list="supply-apy-reward-campaigns"
-          :data-key="reward.id"
+          :data-key="reward.parityKey"
         >
           <div class="flex">
             <img
@@ -157,7 +158,7 @@ const handleClose = () => {
             <p
               class="ml-12"
               data-id="data-point"
-              :data-key="reward.id"
+              :data-key="reward.parityKey"
               data-field="supply-apy-reward-token"
               :data-value="reward.rewardToken.symbol"
             >
@@ -171,7 +172,7 @@ const handleClose = () => {
                 rel="noopener noreferrer"
                 class="underline"
                 data-id="data-point"
-                :data-key="reward.id"
+                :data-key="reward.parityKey"
                 data-field="supply-apy-reward-provider"
                 :data-value="PROVIDER_LABELS[reward.source] || reward.source"
                 @click.stop
@@ -183,7 +184,7 @@ const handleClose = () => {
               >{{ PROVIDER_LABELS[reward.source] || reward.source }}</a><span
                 v-else
                 data-id="data-point"
-                :data-key="reward.id"
+                :data-key="reward.parityKey"
                 data-field="supply-apy-reward-provider"
                 :data-value="PROVIDER_LABELS[reward.source] || reward.source"
               >
@@ -196,7 +197,7 @@ const handleClose = () => {
               </span><span
                 v-if="reward.endDate"
                 data-id="data-point"
-                :data-key="reward.id"
+                :data-key="reward.parityKey"
                 data-field="supply-apy-reward-end-date"
                 :data-value="reward.endDate.toFormat('MMMM dd, yyyy')"
               >, ends {{ reward.endDate.toFormat('MMMM dd, yyyy') }}</span>)
@@ -205,7 +206,7 @@ const handleClose = () => {
           <div
             class="text-p2"
             data-id="data-point"
-            :data-key="reward.id"
+            :data-key="reward.parityKey"
             data-field="supply-apy-reward-apr"
             :data-value="reward.apr"
           >
