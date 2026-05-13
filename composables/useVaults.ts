@@ -2,7 +2,7 @@ import type { EulerEarn, SecuritizeCollateralVault, EVault } from '@eulerxyz/eul
 import { extractUnresolvedCollateralAddresses } from '~/utils/vault/collateral-discovery'
 import { isLiveCollateralEdge } from '~/utils/vault/ltv'
 import { fetchChainVaultCategories, fetchVaultCategory, isSecuritizeVault, resetVaultCategoryCache } from '~/utils/vault/categories'
-import { getActiveProductVaultAddresses, getProductByVault, isVaultNotExplorable, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, isVaultNotExplorable, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { getAddress, type Address } from 'viem'
 import { useVaultRegistry } from './useVaultRegistry'
@@ -452,13 +452,6 @@ const loadVaults = async () => {
     const securitizeSet = new Set(categories.securitize.map(a => a.toLowerCase()))
     const eVaultAddresses: string[] = []
     const securitizeAddresses: string[] = []
-    // verifiedVaultAddresses intentionally includes deprecated label entries so
-    // they can be loaded for context. Only active product vaults should enter
-    // display-verified EVault lists.
-    const activeProductEVaultAddresses = new Set(
-      getActiveProductVaultAddresses().map(addr => addr.toLowerCase()),
-    )
-
     explorableVaultAddresses.forEach((addr) => {
       if (securitizeSet.has(addr.toLowerCase())) {
         securitizeAddresses.push(addr)
@@ -494,9 +487,7 @@ const loadVaults = async () => {
       (async () => {
         await updateEVaults(eVaultAddresses, generation, silent, {
           verifiedAddresses: new Set(
-            eVaultAddresses
-              .filter(addr => activeProductEVaultAddresses.has(addr.toLowerCase()))
-              .map(addr => addr.toLowerCase()),
+            eVaultAddresses.map(addr => addr.toLowerCase()),
           ),
         })
         eVaultResolve()
