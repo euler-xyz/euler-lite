@@ -13,9 +13,9 @@ ENV NODE_OPTIONS=--max-old-space-size=4096
 RUN npm run build
 
 # Download a pinned Doppler CLI release (binary only, no package manager install)
-ARG DOPPLER_CLI_VERSION=3.75.1
-ARG DOPPLER_CLI_SHA256=0b858232daa9a3fd06d1c3f1b9a370c68cfe3f9680ec1a60d540199cd859bea0
 RUN set -eu; \
+  DOPPLER_CLI_VERSION='3.75.1'; \
+  DOPPLER_CLI_SHA256='0b858232daa9a3fd06d1c3f1b9a370c68cfe3f9680ec1a60d540199cd859bea0'; \
   curl -fsSLo /tmp/doppler.tar.gz --tlsv1.2 --proto "=https" --retry 3 \
     "https://github.com/DopplerHQ/cli/releases/download/${DOPPLER_CLI_VERSION}/doppler_${DOPPLER_CLI_VERSION}_linux_amd64.tar.gz"; \
   echo "${DOPPLER_CLI_SHA256}  /tmp/doppler.tar.gz" | sha256sum -c -; \
