@@ -111,6 +111,16 @@ function strOrEmpty(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
+function isHttpUrl(value: string): boolean {
+  try {
+    const { protocol } = new URL(value)
+    return protocol === 'http:' || protocol === 'https:'
+  }
+  catch {
+    return false
+  }
+}
+
 async function fetchTokenList(chainId: number): Promise<TokenListEntry[]> {
   const data = await $fetch<TokenListResponse>('/api/token-list', {
     query: { chainId },
@@ -191,11 +201,12 @@ function buildEarnEntryMap(entries: unknown[]): {
   return { earnByAddr, deprecatedEarnSet }
 }
 
-function buildTokenLogoMap(tokens: TokenListEntry[]): Map<string, string> {
+export function buildTokenLogoMap(tokens: TokenListEntry[]): Map<string, string> {
   const map = new Map<string, string>()
   for (const t of tokens) {
     if (typeof t?.address !== 'string') continue
     if (typeof t.logoURI !== 'string' || t.logoURI.length === 0) continue
+    if (!isHttpUrl(t.logoURI)) continue
     const lower = t.address.toLowerCase()
     if (!map.has(lower)) map.set(lower, t.logoURI)
   }
