@@ -4,7 +4,7 @@ import { collectPythFeedsFromAdapters } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { isSecuritizeVault } from '~/utils/vault/categories'
 import { getHookDisabledWarning, getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
-import { getAssetOraclePrice, getAssetUsdValueOrZero, getTokenUsdPrice } from '~/utils/sdk-prices'
+import { getAssetOraclePrice, getTokenUsdPrice } from '~/utils/sdk-prices'
 import type { TxPlan } from '~/entities/txPlan'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
@@ -15,7 +15,7 @@ import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
 import SecuritizeVaultOverview from '~/components/entities/vault/overview/SecuritizeVaultOverview.vue'
-import { formatNumber, compactNumber, formatSmartAmount } from '~/utils/string-utils'
+import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
@@ -90,8 +90,6 @@ const isEstimatesLoading = ref(false)
 const amount = ref('')
 const plan = ref<TxPlan | null>(null)
 const estimateSupplyAPY = ref(0)
-const monthlyEarnings = ref(0)
-const monthlyEarningsUsd = ref(0)
 
 // Swap & deposit state
 const selectedAsset = ref<VaultAsset | undefined>()
@@ -545,20 +543,9 @@ const updateEstimates = useDebounceFn(async () => {
         const rawAPY = projected ? nanoToValue(projected.supplyAPY, 25) : getVaultSupplyApy(eVault.value)
         estimateSupplyAPY.value = rawAPY + totalRewardsAPY.value + intrinsicApy.value
       }
-
-      const supplyAmount = needsSwap.value
-        ? nanoToValue(BigInt(swapEffectiveQuote.value?.amountOut || 0), Number(eVault.value.shares.decimals))
-        : +(amount.value || 0)
-      monthlyEarnings.value = supplyAmount <= 0
-        ? 0
-        : supplyAmount * (estimateSupplyAPY.value / 100 / 12)
     }
     else {
       estimateSupplyAPY.value = totalRewardsAPY.value + intrinsicApy.value
-      const supplyAmount = +(amount.value || 0)
-      monthlyEarnings.value = supplyAmount <= 0
-        ? 0
-        : supplyAmount * (estimateSupplyAPY.value / 100 / 12)
     }
   }
   catch (e) {
@@ -746,15 +733,6 @@ watch(swapEffectiveQuote, () => {
     isEstimatesLoading.value = true
     updateEstimates()
   }
-})
-
-// Update USD value when monthlyEarnings or vault changes
-watchEffect(async () => {
-  if (!vault.value || !monthlyEarnings.value) {
-    monthlyEarningsUsd.value = 0
-    return
-  }
-  monthlyEarningsUsd.value = await getAssetUsdValueOrZero(monthlyEarnings.value, vault.value, 'off-chain')
 })
 
 watch(amount, async () => {
@@ -969,20 +947,6 @@ watch(address, () => {
               :loading="isEstimatesLoading"
               variant="card"
             >
-              <SummaryRow
-                label="Projected earnings per month"
-                align-top
-              >
-                <p class="text-content-tertiary">
-                  <span class="text-content-primary text-p2">{{ compactNumber(monthlyEarnings, 4) }}</span> {{
-                    asset.symbol
-                  }}
-                  <template v-if="features.hasPriceInfo && vault">
-                    ≈ ${{ compactNumber(monthlyEarningsUsd) }}
-                  </template>
-                </p>
-              </SummaryRow>
-
               <SummaryRow label="Supply APY">
                 <SummaryValue
                   :after="estimateSupplyAPYDisplay"

@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
-import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import type { TxPlan } from '~/entities/txPlan'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
-import { formatNumber, compactNumber } from '~/utils/string-utils'
+import { formatNumber } from '~/utils/string-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -40,8 +39,6 @@ const plan = ref<TxPlan | null>(null)
 const vault: Ref<EulerEarn | undefined> = ref(undefined)
 const asset: Ref<VaultAsset | undefined> = ref(undefined)
 const estimateSupplyAPY = ref(0)
-const monthlyEarnings = ref(0)
-const monthlyEarningsUsd = ref(0)
 const balance = ref(0n)
 
 const fetchBalance = async () => {
@@ -188,9 +185,6 @@ const updateEstimates = async () => {
     await updateEarnVault(vault.value.address)
     if (!asset.value?.address) return
     estimateSupplyAPY.value = getVaultSupplyApy(vault.value) + totalRewardsAPY.value
-    monthlyEarnings.value = !amount.value
-      ? 0
-      : +(amount.value || 0) * (estimateSupplyAPY.value / 12 / 100)
   }
   catch (e) {
     logWarn('earn-supply/estimates', e)
@@ -213,15 +207,6 @@ const onSupplyInfoIconClick = () => {
 
 // Initialize estimateSupplyAPY after vault is loaded
 estimateSupplyAPY.value = getVaultSupplyApy(vault.value) + totalRewardsAPY.value
-
-// Update USD value when monthlyEarnings or vault changes
-watchEffect(async () => {
-  if (!vault.value || !monthlyEarnings.value) {
-    monthlyEarningsUsd.value = 0
-    return
-  }
-  monthlyEarningsUsd.value = await getAssetUsdValueOrZero(monthlyEarnings.value, vault.value, 'off-chain')
-})
 
 watch(amount, () => {
   clearSimulationError()
@@ -340,18 +325,6 @@ watch(address, () => {
               :loading="isEstimatesLoading"
               variant="card"
             >
-              <SummaryRow
-                label="Projected earnings per month"
-                align-top
-              >
-                <p class="text-content-tertiary">
-                  <span class="text-content-primary text-p2">{{ compactNumber(monthlyEarnings, 4) }}</span> {{
-                    asset.symbol
-                  }}
-                  ≈ ${{ compactNumber(monthlyEarningsUsd) }}
-                </p>
-              </SummaryRow>
-
               <SummaryRow label="Supply APY">
                 <SummaryValue
                   :after="estimateSupplyAPYDisplay"
