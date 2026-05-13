@@ -47,12 +47,11 @@ cp .env.example .env
 
 | Variable     | Default                       | Description                           |
 | ------------ | ----------------------------- | ------------------------------------- |
-| `V3_API_URL` | —                             | Euler V3 API used by SDK data services |
-| `EULER_API_URL` | —                          | Euler indexer API (token data, logos); also used as the V3 API fallback |
+| `V3_API_URL` | SDK default                   | Euler V3 API used by SDK data services |
 | `SWAP_API_URL` | —                           | Euler swap API                        |
 | `PYTH_HERMES_URL` | `https://hermes.pyth.network` | Pyth oracle endpoint (server-only, proxied via `/api/pyth/updates`) |
 
-> **Doppler compatibility:** If your secret manager injects `NUXT_PUBLIC_*` prefixed names (e.g. `NUXT_PUBLIC_V3_API_URL` or `NUXT_PUBLIC_EULER_API_URL`), the app accepts both forms automatically.
+> **Doppler compatibility:** If your secret manager injects `NUXT_PUBLIC_*` prefixed names (e.g. `NUXT_PUBLIC_V3_API_URL`), the app accepts those forms automatically.
 
 #### Branding & Feature Flags
 
@@ -185,7 +184,7 @@ Replace the favicon files in `public/favicons/`:
 
 #### Token Icons
 
-Token icons are resolved from a unified server-side token list that aggregates three sources: Euler API, Uniswap, and DefiLlama. All sources are fetched in parallel with 5-minute caching and stale-fallback resilience. Euler API entries take priority for vault assets.
+Token icons are resolved from a unified server-side token list that aggregates the Euler SDK token list, DefiLlama, Uniswap, and Merkl. All sources are fetched in parallel with 5-minute caching and stale-fallback resilience. Euler SDK entries take priority for vault assets.
 
 To override an icon for a specific token, add a file to `assets/tokens/`:
 
@@ -198,7 +197,7 @@ assets/tokens/
 The resolution order in `getAssetLogoUrl(address, symbol)`:
 
 1. Local override in `assets/tokens/<symbol>.png`
-2. `logoURI` from the unified token list (Euler API > DefiLlama > Uniswap)
+2. `logoURI` from the unified token list (Euler SDK token list > DefiLlama > Uniswap)
 3. Empty string (component shows initials fallback)
 
 #### EulerEarn Vaults
@@ -260,7 +259,7 @@ To run without Doppler, override the `CMD` and pass env vars directly:
 
 ```bash
 docker run -p 3000:3000 \
-  -e EULER_API_URL=https://indexer.euler.finance \
+  -e V3_API_URL=https://v3.euler.finance \
   -e SWAP_API_URL=https://swap.euler.finance \
   -e APPKIT_PROJECT_ID=your-project-id \
   -e RPC_URL_1=https://your-rpc.com \
@@ -321,7 +320,7 @@ Before deploying:
 
 - [ ] Copied `.env.example` to `.env` and filled in values
 - [ ] Set `APPKIT_PROJECT_ID` and `NUXT_PUBLIC_APP_URL`
-- [ ] Set `EULER_API_URL`, `SWAP_API_URL`
+- [ ] Set `V3_API_URL`, `SWAP_API_URL`
 - [ ] Added at least one `RPC_URL_<chainId>` with matching `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`
 - [ ] Configured branding via `NUXT_PUBLIC_CONFIG_*` env vars (title, description, logo, social links, social share image)
 - [ ] Customized theme colors in `assets/styles/variables.scss` (THEME CONFIGURATION section)
@@ -332,8 +331,8 @@ Before deploying:
 
 ### Token logos not loading
 
-- Verify `EULER_API_URL` is set correctly. If using Doppler, ensure the env var name matches (`EULER_API_URL` or `NUXT_PUBLIC_EULER_API_URL`).
-- Token data is fetched server-side via `/api/token-list` which aggregates Euler API, DefiLlama, and Uniswap sources with fallback. Check server logs for upstream failures.
+- Verify `V3_API_URL` is set correctly. If using Doppler, ensure the env var name matches (`V3_API_URL`, `EULER_SDK_V3_API_URL`, or `NUXT_PUBLIC_V3_API_URL`).
+- Token data is fetched server-side via `/api/token-list` which aggregates Euler V3, DefiLlama, Uniswap, and Merkl sources with fallback. Check server logs for upstream failures.
 
 ### Build Errors
 

@@ -10,6 +10,8 @@
  * (2) covers static / CDN deployments where the Nitro render hook never fires.
  */
 
+import { readV3ApiUrl } from '~/utils/api-url-env'
+
 interface EnvConfig {
   appTitle: string
   appDescription: string
@@ -18,7 +20,6 @@ interface EnvConfig {
   pythHermesUrl: string
   appKitProjectId: string
   appUrl: string
-  eulerApiUrl: string
   v3ApiUrl: string
   swapApiUrl: string
 }
@@ -31,7 +32,6 @@ const DEFAULTS: EnvConfig = {
   pythHermesUrl: '',
   appKitProjectId: '',
   appUrl: '',
-  eulerApiUrl: '',
   v3ApiUrl: '',
   swapApiUrl: '',
 }
@@ -54,8 +54,7 @@ function scanEnv(): EnvConfig {
     pythHermesUrl: env('PYTH_HERMES_URL', 'NUXT_PUBLIC_PYTH_HERMES_URL') || '',
     appKitProjectId: env('APPKIT_PROJECT_ID', 'NUXT_PUBLIC_APP_KIT_PROJECT_ID') || DEFAULTS.appKitProjectId,
     appUrl: env('NUXT_PUBLIC_APP_URL') || DEFAULTS.appUrl,
-    eulerApiUrl: env('EULER_API_URL', 'NUXT_PUBLIC_EULER_API_URL') || DEFAULTS.eulerApiUrl,
-    v3ApiUrl: env('V3_API_URL', 'EULER_SDK_V3_API_URL', 'NUXT_PUBLIC_V3_API_URL', 'EULER_API_URL', 'NUXT_PUBLIC_EULER_API_URL') || DEFAULTS.v3ApiUrl,
+    v3ApiUrl: readV3ApiUrl() || DEFAULTS.v3ApiUrl,
     swapApiUrl: env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL') || DEFAULTS.swapApiUrl,
   }
 }
@@ -72,8 +71,7 @@ function fromRuntimeConfig(): EnvConfig {
     pythHermesUrl: str(rc.pythHermesUrl) ? 'proxy' : '',
     appKitProjectId: str(rc.appKitProjectId) || DEFAULTS.appKitProjectId,
     appUrl: str(rc.appUrl) || DEFAULTS.appUrl,
-    eulerApiUrl: str(rc.eulerApiUrl) || DEFAULTS.eulerApiUrl,
-    v3ApiUrl: str(rc.v3ApiUrl) || str(rc.eulerApiUrl) || DEFAULTS.v3ApiUrl,
+    v3ApiUrl: str(rc.v3ApiUrl) || DEFAULTS.v3ApiUrl,
     swapApiUrl: str(rc.swapApiUrl) || DEFAULTS.swapApiUrl,
   }
 }

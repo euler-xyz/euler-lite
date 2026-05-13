@@ -23,7 +23,6 @@ export const useEulerConfig = () => {
     EULER_LABELS_ENTITY_LOGO_URL: `${resolvedLabelsBaseUrl}/logo`,
 
     // Runtime app config APIs
-    EULER_API_URL: envConfig.eulerApiUrl,
     SWAP_API_URL: envConfig.swapApiUrl,
     PYTH_HERMES_URL: envConfig.pythHermesUrl,
 
