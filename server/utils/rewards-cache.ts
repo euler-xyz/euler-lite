@@ -83,8 +83,10 @@ const filterErc20LogProcessor = (
 }
 
 const fetchMerklType = async (chainId: number, type: MerklOpportunityType): Promise<unknown[]> => {
-  // Production Merkl URL — no `&test=true` debug flag.
-  const baseUrl = `${MERKL_API_BASE_URL}/opportunities/?chainId=${chainId}&type=${type}&campaigns=true`
+  // `&test=true` surfaces Merkl's dry-run campaigns alongside real ones.
+  // Temporary while the new opportunity types are being rolled out — REMOVE
+  // BEFORE PRODUCTION RELEASE.
+  const baseUrl = `${MERKL_API_BASE_URL}/opportunities/?chainId=${chainId}&type=${type}&campaigns=true&test=true`
   const collected: unknown[] = []
 
   for (let page = 0; page < MAX_MERKL_PAGES; page++) {
