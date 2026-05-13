@@ -2,12 +2,11 @@
 import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { useModal } from '~/components/ui/composables/useModal'
+import { nanoToValue } from '~/utils/crypto-utils'
 import { VaultSupplyApyModal } from '#components'
 
 const { vault } = defineProps<{ vault: EulerEarn }>()
 
-const modal = useModal()
 const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
 
@@ -27,18 +26,15 @@ watchEffect(async () => {
   availableLiquidityDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
 })
 
-const onSupplyInfoIconClick = () => {
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY: getVaultSupplyApy(vault),
-      intrinsicAPY: getIntrinsicApy(vault.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
-      campaigns: getSupplyRewardCampaigns(vault.address),
-      rewardVaultAddress: vault.address,
-      baseApyAverageLabel: '1h',
-    },
-  })
-}
+const supplyApyModalData = computed(() => ({
+  props: {
+    lendingAPY: nanoToValue(vault.interestRateInfo.supplyAPY, 25),
+    intrinsicAPY: getIntrinsicApy(vault.asset.address),
+    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    campaigns: getSupplyRewardCampaigns(vault.address),
+    baseApyAverageLabel: '1h',
+  },
+}))
 </script>
 
 <template>
@@ -69,14 +65,18 @@ const onSupplyInfoIconClick = () => {
           </span>
         </template>
         <span class="flex items-center gap-4">
-          <SvgIcon
+          <UiHoverModalTrigger
             v-if="hasSupplyRewards(vault.address)"
-            class="!w-20 !h-20 text-accent-500 cursor-pointer"
-            name="sparks"
-            data-modal-trigger="supply-apy"
-            @click="onSupplyInfoIconClick"
-          />
-          {{ formatNumber(getVaultSupplyApy(vault) + rewardSupplyAPY) }}%
+            :component="VaultSupplyApyModal"
+            :modal-data="supplyApyModalData"
+            aria-label="Show supply APY rewards breakdown"
+          >
+            <SvgIcon
+              class="!w-20 !h-20 text-accent-500 cursor-pointer"
+              name="sparks"
+            />
+          </UiHoverModalTrigger>
+          {{ formatNumber(nanoToValue(vault.interestRateInfo.supplyAPY, 25) + rewardSupplyAPY) }}%
         </span>
       </VaultOverviewLabelValue>
     </div>

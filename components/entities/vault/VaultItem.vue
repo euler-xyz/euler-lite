@@ -8,7 +8,6 @@ import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
-import { useModal } from '~/components/ui/composables/useModal'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { VaultSupplyApyModal, VaultCollateralExposureModal } from '#components'
 import { useAccount } from '@wagmi/vue'
@@ -45,7 +44,8 @@ const displayName = computed(() => {
 const { getBalance, isLoading: isBalancesLoading } = useWallets()
 const { withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
-const modal = useModal()
+const { get: registryGet } = useVaultRegistry()
+
 const collateralAssets = computed(() => {
   if (!isBorrowable.value) return []
   const assetsByAddress = new Map<string, {
@@ -150,11 +150,9 @@ const supplyApyModalData = computed(() => ({
   },
 }))
 
-const onCollateralInfoClick = (event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(VaultCollateralExposureModal, { props: { vault } })
-}
+const collateralExposureModalData = computed(() => ({
+  props: { vault },
+}))
 
 const prices = ref<{ totalSupply: string, liquidity: string, walletBalance: string }>({
   totalSupply: '-',
@@ -388,47 +386,37 @@ watchEffect(async () => {
       >
         <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
           Collateral exposure
-          <SvgIcon
+          <UiHoverModalTrigger
             v-if="collateralAssets.length > 0"
-            class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-            name="info-circle"
-            @click="onCollateralInfoClick"
-          />
-        </div>
-        <div
-          v-if="collateralAssets.length > 0"
-          class="flex items-center gap-4 cursor-pointer"
-          @click="onCollateralInfoClick"
-        >
-          <div class="flex items-center">
-            <div
-              v-for="(asset, index) in collateralDisplayAssets"
-              :key="asset.address"
-              class="flex items-center"
-              :class="index > 0 ? '-ml-8' : ''"
-              data-id="data-point"
-              :data-list="collateralExposureListId"
-              :data-key="asset.address.toLowerCase()"
-              data-field="collateral-exposure-asset"
-              :data-value="asset.symbol"
-            >
-              <AssetAvatar
-                :asset="asset"
-                size="20"
-              />
-            </div>
-          </div>
-          <span
-            v-if="collateralOverflowCount > 0"
-            class="text-p3 text-content-tertiary whitespace-nowrap"
-            data-id="data-point"
-            :data-key="vault.address.toLowerCase()"
-            data-field="collateral-exposure-overflow"
-            :data-value="collateralOverflowCount"
+            :component="VaultCollateralExposureModal"
+            :modal-data="collateralExposureModalData"
+            aria-label="Show collateral exposure details"
           >
-            & {{ collateralOverflowCount }} more
-          </span>
+            <SvgIcon
+              class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+              name="info-circle"
+            />
+          </UiHoverModalTrigger>
         </div>
+        <UiHoverModalTrigger
+          v-if="collateralAssets.length > 0"
+          :component="VaultCollateralExposureModal"
+          :modal-data="collateralExposureModalData"
+          aria-label="Show collateral exposure details"
+        >
+          <div class="flex items-center gap-4 cursor-pointer">
+            <AssetAvatar
+              :asset="collateralDisplayAssets"
+              size="20"
+            />
+            <span
+              v-if="collateralOverflowCount > 0"
+              class="text-p3 text-content-tertiary whitespace-nowrap"
+            >
+              & {{ collateralOverflowCount }} more
+            </span>
+          </div>
+        </UiHoverModalTrigger>
         <div
           v-else
           class="text-p2 text-content-primary"
@@ -513,31 +501,39 @@ watchEffect(async () => {
         <div class="flex-1">
           <div class="text-content-tertiary text-p3 flex items-center gap-4">
             Collateral exposure
-            <SvgIcon
+            <UiHoverModalTrigger
               v-if="collateralAssets.length > 0"
-              class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-              name="info-circle"
-              @click="onCollateralInfoClick"
-            />
+              :component="VaultCollateralExposureModal"
+              :modal-data="collateralExposureModalData"
+              aria-label="Show collateral exposure details"
+            >
+              <SvgIcon
+                class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+                name="info-circle"
+              />
+            </UiHoverModalTrigger>
           </div>
         </div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
-          <div
+          <UiHoverModalTrigger
             v-if="collateralAssets.length > 0"
-            class="flex items-center gap-8 cursor-pointer"
-            @click="onCollateralInfoClick"
+            :component="VaultCollateralExposureModal"
+            :modal-data="collateralExposureModalData"
+            aria-label="Show collateral exposure details"
           >
-            <AssetAvatar
-              :asset="collateralDisplayAssets"
-              size="20"
-            />
-            <span
-              v-if="collateralOverflowCount > 0"
-              class="text-p3 text-content-tertiary whitespace-nowrap"
-            >
-              & {{ collateralOverflowCount }} more
-            </span>
-          </div>
+            <div class="flex items-center gap-8 cursor-pointer">
+              <AssetAvatar
+                :asset="collateralDisplayAssets"
+                size="20"
+              />
+              <span
+                v-if="collateralOverflowCount > 0"
+                class="text-p3 text-content-tertiary whitespace-nowrap"
+              >
+                & {{ collateralOverflowCount }} more
+              </span>
+            </div>
+          </UiHoverModalTrigger>
           <div
             v-else
             class="text-p2 text-content-primary"

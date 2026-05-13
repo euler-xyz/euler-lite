@@ -4,15 +4,19 @@ import { maxUint256, type Address } from 'viem'
 import { vaultConvertToAssetsAbi } from '~/abis/vault'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
-
-import { formatAssetValue } from '~/utils/sdk-prices'
-import { formatHookedOpsSummary, getHookedOperationMetas, getVaultHookedOperations, hasAnyHookedOperation, isHookDisabling, isVaultEffectivelyPaused } from '~/utils/vault-hooks'
-import { useModal } from '~/components/ui/composables/useModal'
+import { vaultConvertToAssetsAbi } from '~/abis/vault'
+import { type Vault, getSupplyCapPercentage, getBorrowCapPercentage } from '~/entities/vault'
+import { CFG_DONT_SOCIALIZE_DEBT } from '~/entities/constants'
+import { formatAssetValue } from '~/services/pricing/priceProvider'
+import {
+  decodeHookedOps,
+  formatHookedOpsSummary,
+  isHookDisabling,
+  isVaultEffectivelyPaused,
+} from '~/utils/vault-hooks'
 import { VaultHooksInfoModal } from '#components'
 
 const { vault } = defineProps<{ vault: EVault }>()
-
-const modal = useModal()
 
 const { client: rpcClient } = useRpcClient()
 const { getVaultCategory } = useVaultRegistry()
@@ -89,11 +93,9 @@ const hooksRowValue = computed(() => {
 
 const showHooksInfoIcon = computed(() => hasAnyHookedOperation(hookedOperations.value))
 
-const openHooksModal = () => {
-  modal.open(VaultHooksInfoModal, {
-    props: { vault },
-  })
-}
+const hooksModalData = computed(() => ({
+  props: { vault },
+}))
 </script>
 
 <template>
@@ -189,18 +191,17 @@ const openHooksModal = () => {
         <template #label>
           <span class="flex items-center gap-4">
             {{ hooksRowLabel }}
-            <button
+            <UiHoverModalTrigger
               v-if="showHooksInfoIcon"
-              type="button"
+              :component="VaultHooksInfoModal"
+              :modal-data="hooksModalData"
               :aria-label="`${hooksRowLabel} details`"
-              class="inline-flex shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 focus-visible:rounded"
-              @click="openHooksModal"
             >
               <SvgIcon
-                class="!w-16 !h-16"
+                class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                 name="info-circle"
               />
-            </button>
+            </UiHoverModalTrigger>
           </span>
         </template>
         {{ hooksRowValue }}

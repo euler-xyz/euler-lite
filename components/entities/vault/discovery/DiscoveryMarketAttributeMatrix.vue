@@ -13,7 +13,6 @@ import {
 } from '~/utils/discoveryCalculations'
 import { getEntitiesByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
-import { useModal } from '~/components/ui/composables/useModal'
 import { VaultHooksInfoModal } from '#components'
 
 const props = defineProps<{
@@ -28,7 +27,6 @@ defineEmits<{
   selectHeader: [address: string, axis: 'row' | 'column']
 }>()
 
-const modal = useModal()
 const { isVaultGovernorVerified } = useVaults()
 
 // Each AttributeRow renders as a *table column*; each vault renders as a *table row*.
@@ -44,10 +42,14 @@ const attributeColumns = computed<AttributeColumn[]>(() =>
   })),
 )
 
-const onHooksClick = (vault: AttributeMatrixColumn) => {
-  if (!isEVault(vault.vault)) return
-  modal.open(VaultHooksInfoModal, { props: { vault: vault.vault } })
-}
+const getHooksModalData = (vault: AttributeMatrixColumn) => ({
+  props: {
+    vault: vault.vault,
+  },
+})
+
+const canShowHooksModal = (vault: AttributeMatrixColumn, cell: AttributeCell) =>
+  cell.hookable && isVaultType(vault.vault)
 
 const entitiesFor = (vault: AttributeMatrixColumn) => getEntitiesByVault(vault.vault)
 
@@ -205,18 +207,20 @@ const cellDataValue = (cell: AttributeCell): string | number =>
 
               <!-- hooks: text + optional clickable info icon -->
               <template v-else-if="col.cells[vaultIdx].kind === 'hooks'">
-                <button
-                  v-if="col.cells[vaultIdx].hookable"
-                  type="button"
-                  class="inline-flex items-center justify-center gap-4 text-p5 text-content-primary hover:text-accent-500 cursor-pointer transition-colors"
-                  @click.stop="onHooksClick(vault)"
+                <UiHoverModalTrigger
+                  v-if="canShowHooksModal(vault, col.cells[vaultIdx])"
+                  :component="VaultHooksInfoModal"
+                  :modal-data="() => getHooksModalData(vault)"
+                  aria-label="Show hooked operations details"
                 >
-                  <span>{{ col.cells[vaultIdx].display }}</span>
-                  <SvgIcon
-                    name="info-circle"
-                    class="!w-12 !h-12 shrink-0"
-                  />
-                </button>
+                  <span class="inline-flex items-center justify-center gap-4 text-p5 text-content-primary hover:text-accent-500 cursor-pointer transition-colors">
+                    <span>{{ col.cells[vaultIdx].display }}</span>
+                    <SvgIcon
+                      name="info-circle"
+                      class="!w-12 !h-12 shrink-0"
+                    />
+                  </span>
+                </UiHoverModalTrigger>
                 <span
                   v-else
                   class="text-p5 text-content-secondary"

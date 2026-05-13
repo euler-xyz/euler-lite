@@ -368,39 +368,35 @@ const positionMultiplier = computed(() => {
   return collateralValue.value.usd / equity
 })
 
-const onNetApyInfoClick = () => {
-  modal.open(VaultNetApyModal, {
-    props: {
-      supplyUSD: collateralValue.value.usd,
-      borrowUSD: borrowMarketValue.value.usd,
-      baseSupplyAPY: baseSupplyAPY.value,
-      baseBorrowAPY: baseBorrowAPY.value,
-      intrinsicSupplyAPY: _intrinsicSupplyAPY.value,
-      intrinsicBorrowAPY: intrinsicBorrowAPY.value,
-      supplyRewardAPY: supplyRewardAPY.value || null,
-      borrowRewardAPY: borrowRewardAPY.value || null,
-      netAPY: netAPY.value,
-      supplyCampaigns: supplyCampaignsForModal.value,
-      borrowCampaigns: borrowCampaignsForModal.value,
-    },
-  })
-}
+const netApyModalData = computed(() => ({
+  props: {
+    supplyUSD: collateralValue.value.usd,
+    borrowUSD: borrowMarketValue.value.usd,
+    baseSupplyAPY: baseSupplyAPY.value,
+    baseBorrowAPY: baseBorrowAPY.value,
+    intrinsicSupplyAPY: _intrinsicSupplyAPY.value,
+    intrinsicBorrowAPY: intrinsicBorrowAPY.value,
+    supplyRewardAPY: supplyRewardAPY.value || null,
+    borrowRewardAPY: borrowRewardAPY.value || null,
+    netAPY: netAPY.value,
+    supplyCampaigns: supplyCampaignsForModal.value,
+    borrowCampaigns: borrowCampaignsForModal.value,
+  },
+}))
 
-const onRoeInfoClick = () => {
-  modal.open(PortfolioRoeModal, {
-    props: {
-      roe: roe.value,
-      multiplier: Number.isFinite(positionMultiplier.value) ? positionMultiplier.value : 0,
-      supplyAPY: collateralSupplyApy.value,
-      borrowAPY: borrowApy.value,
-      supplyRewardAPY: supplyRewardAPY.value || null,
-      borrowRewardAPY: borrowRewardAPY.value || null,
-      userLTV: positionLTVPercent.value ?? 0,
-      supplyCampaigns: supplyCampaignsForModal.value,
-      borrowCampaigns: borrowCampaignsForModal.value,
-    },
-  })
-}
+const roeModalData = computed(() => ({
+  props: {
+    roe: roe.value,
+    multiplier: Number.isFinite(positionMultiplier.value) ? positionMultiplier.value : 0,
+    supplyAPY: collateralSupplyApy.value,
+    borrowAPY: borrowApy.value,
+    supplyRewardAPY: supplyRewardAPY.value || null,
+    borrowRewardAPY: borrowRewardAPY.value || null,
+    userLTV: position.value ? nanoToValue(position.value.userLTV, 18) : 0,
+    supplyCampaigns: supplyCampaignsForModal.value,
+    borrowCampaigns: borrowCampaignsForModal.value,
+  },
+}))
 
 const isPrimaryCollateral = (vault: EVault | SecuritizeCollateralVault) => {
   if (!primaryCollateralAddress.value) {
@@ -643,11 +639,9 @@ const load = async () => {
     console.warn(e)
   }
 }
-const onBorrowInfoIconClick = (event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  if (!borrowVault.value) return
-  modal.open(VaultBorrowApyModal, {
+const borrowApyModalData = computed(() => {
+  if (!borrowVault.value) return {}
+  return {
     props: {
       borrowingAPY: baseBorrowAPY.value,
       intrinsicAPY: intrinsicBorrowAPY.value,
@@ -655,22 +649,17 @@ const onBorrowInfoIconClick = (event: MouseEvent) => {
       campaigns: getBorrowRewardCampaigns(borrowVault.value.address, collateralVault.value?.address),
       rewardVaultAddress: borrowVault.value.address,
     },
-  })
-}
+  }
+})
 
-const onSupplyInfoIconClick = (event: MouseEvent, vault: EVault | SecuritizeCollateralVault) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY: getVaultSupplyApy(vault),
-      intrinsicAPY: getIntrinsicApy(vault.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
-      campaigns: getSupplyRewardCampaigns(vault.address),
-      rewardVaultAddress: vault.address,
-    },
-  })
-}
+const getSupplyApyModalData = (vault: Vault | SecuritizeVault) => ({
+  props: {
+    lendingAPY: nanoToValue(vault.interestRateInfo.supplyAPY, 25),
+    intrinsicAPY: getIntrinsicApy(vault.asset.address),
+    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    campaigns: getSupplyRewardCampaigns(vault.address),
+  },
+})
 
 const openCollateralInfoModal = (vault: EVault | SecuritizeCollateralVault) => {
   const isSecuritize = isSecuritizeCollateralVault(vault)
@@ -742,12 +731,16 @@ watch([isConnected, isSpyMode, address], () => {
           <div class="flex justify-between items-center">
             <div class="flex items-center gap-4 text-p2 text-content-secondary">
               Net APY
-              <SvgIcon
-                class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
-                name="info-circle"
-                data-modal-trigger="position-net-apy"
-                @click="onNetApyInfoClick"
-              />
+              <UiHoverModalTrigger
+                :component="VaultNetApyModal"
+                :modal-data="netApyModalData"
+                aria-label="Show net APY breakdown"
+              >
+                <SvgIcon
+                  class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
+                  name="info-circle"
+                />
+              </UiHoverModalTrigger>
             </div>
             <div
               class="text-h5 flex items-center gap-4"
@@ -757,25 +750,33 @@ watch([isConnected, isSpyMode, address], () => {
               data-field="position-net-apy"
               :data-value="Number.isFinite(netAPY) ? netAPY : '-'"
             >
-              <SvgIcon
+              <UiHoverModalTrigger
                 v-if="hasSupplyRewards(collateralVault?.address || '') || hasBorrowRewards(borrowVault?.address || '', collateralVault?.address || '')"
-                class="!w-20 !h-20 text-accent-500 cursor-pointer"
-                name="sparks"
-                data-modal-trigger="position-net-apy"
-                @click="onNetApyInfoClick"
-              />
+                :component="VaultNetApyModal"
+                :modal-data="netApyModalData"
+                aria-label="Show net APY rewards breakdown"
+              >
+                <SvgIcon
+                  class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                  name="sparks"
+                />
+              </UiHoverModalTrigger>
               {{ Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
             </div>
           </div>
           <div class="flex justify-between items-center">
             <div class="flex items-center gap-4 text-p2 text-content-secondary">
               ROE
-              <SvgIcon
-                class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
-                name="info-circle"
-                data-modal-trigger="position-roe"
-                @click="onRoeInfoClick"
-              />
+              <UiHoverModalTrigger
+                :component="PortfolioRoeModal"
+                :modal-data="roeModalData"
+                aria-label="Show ROE breakdown"
+              >
+                <SvgIcon
+                  class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
+                  name="info-circle"
+                />
+              </UiHoverModalTrigger>
             </div>
             <div
               class="text-h5 flex items-center gap-4"
@@ -785,13 +786,17 @@ watch([isConnected, isSpyMode, address], () => {
               data-field="position-roe"
               :data-value="Number.isFinite(roe) ? roe : '-'"
             >
-              <SvgIcon
+              <UiHoverModalTrigger
                 v-if="hasSupplyRewards(collateralVault?.address || '') || hasBorrowRewards(borrowVault?.address || '', collateralVault?.address || '')"
-                class="!w-20 !h-20 text-accent-500 cursor-pointer"
-                name="sparks"
-                data-modal-trigger="position-roe"
-                @click="onRoeInfoClick"
-              />
+                :component="PortfolioRoeModal"
+                :modal-data="roeModalData"
+                aria-label="Show ROE rewards breakdown"
+              >
+                <SvgIcon
+                  class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                  name="sparks"
+                />
+              </UiHoverModalTrigger>
               {{ Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}
             </div>
           </div>
@@ -882,27 +887,29 @@ watch([isConnected, isSpyMode, address], () => {
             <div class="flex flex-col items-end">
               <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                 Borrow APY
-                <SvgIcon
-                  class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-                  name="info-circle"
-                  data-modal-trigger="borrow-apy"
-                  @click.stop="onBorrowInfoIconClick"
-                />
+                <UiHoverModalTrigger
+                  :component="VaultBorrowApyModal"
+                  :modal-data="borrowApyModalData"
+                  aria-label="Show borrow APY breakdown"
+                >
+                  <SvgIcon
+                    class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+                    name="info-circle"
+                  />
+                </UiHoverModalTrigger>
               </div>
-              <div
-                class="text-p2 flex items-center text-accent-600 font-semibold"
-                data-id="data-point"
-                :data-key="borrowVault?.address.toLowerCase()"
-                data-field="borrow-apy"
-                :data-value="borrowApyWithRewards"
-              >
-                <SvgIcon
+              <div class="text-p2 flex items-center text-accent-600 font-semibold">
+                <UiHoverModalTrigger
                   v-if="hasBorrowRewards(borrowVault?.address || '', collateralVault?.address || '')"
-                  class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
-                  name="sparks"
-                  data-modal-trigger="borrow-apy"
-                  @click.stop="onBorrowInfoIconClick"
-                />
+                  :component="VaultBorrowApyModal"
+                  :modal-data="borrowApyModalData"
+                  aria-label="Show borrow APY rewards breakdown"
+                >
+                  <SvgIcon
+                    class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
+                    name="sparks"
+                  />
+                </UiHoverModalTrigger>
                 {{ formatNumber(borrowApyWithRewards) }}%
               </div>
             </div>
@@ -1089,27 +1096,29 @@ watch([isConnected, isSpyMode, address], () => {
               <div class="flex flex-col items-end">
                 <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                   Supply APY
-                  <SvgIcon
-                    class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-                    name="info-circle"
-                    data-modal-trigger="supply-apy"
-                    @click.stop="(e: MouseEvent) => onSupplyInfoIconClick(e, asPositionCollateralVault(collateral.vault))"
-                  />
+                  <UiHoverModalTrigger
+                    :component="VaultSupplyApyModal"
+                    :modal-data="() => getSupplyApyModalData(collateral.vault)"
+                    aria-label="Show supply APY breakdown"
+                  >
+                    <SvgIcon
+                      class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+                      name="info-circle"
+                    />
+                  </UiHoverModalTrigger>
                 </div>
-                <div
-                  class="text-p2 flex items-center text-accent-600 font-semibold"
-                  data-id="data-point"
-                  :data-key="collateral.vault.address.toLowerCase()"
-                  data-field="supply-apy"
-                  :data-value="collateral.supplyApyWithRewards"
-                >
-                  <SvgIcon
+                <div class="text-p2 flex items-center text-accent-600 font-semibold">
+                  <UiHoverModalTrigger
                     v-if="hasSupplyRewards(collateral.vault.address)"
-                    class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
-                    name="sparks"
-                    data-modal-trigger="supply-apy"
-                    @click.stop="(e: MouseEvent) => onSupplyInfoIconClick(e, asPositionCollateralVault(collateral.vault))"
-                  />
+                    :component="VaultSupplyApyModal"
+                    :modal-data="() => getSupplyApyModalData(collateral.vault)"
+                    aria-label="Show supply APY rewards breakdown"
+                  >
+                    <SvgIcon
+                      class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
+                      name="sparks"
+                    />
+                  </UiHoverModalTrigger>
                   {{ formatNumber(collateral.supplyApyWithRewards) }}%
                 </div>
               </div>
