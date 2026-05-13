@@ -81,23 +81,47 @@ export const shouldInvertOraclePrice = (
   const baseIsDesignator = isDesignator(baseAddress)
   const quoteIsDesignator = isDesignator(quoteAddress)
 
+  let result: boolean
+  let path: string
+
   if (baseIsDesignator !== quoteIsDesignator) {
-    return baseIsDesignator
+    result = baseIsDesignator
+    path = 'designator-anchor'
+  }
+  else {
+    const pair = parseOracleLabelPair(labelPrimary)
+    if (!pair) {
+      result = false
+      path = 'no-label-parse'
+    }
+    else {
+      const [left, right] = pair
+      const directLeft = symbolMatchScore(left, baseSymbol)
+      const directRight = symbolMatchScore(right, quoteSymbol)
+      const flippedLeft = symbolMatchScore(left, quoteSymbol)
+      const flippedRight = symbolMatchScore(right, baseSymbol)
+      const directScore = directLeft && directRight ? directLeft + directRight : 0
+      const flippedScore = flippedLeft && flippedRight ? flippedLeft + flippedRight : 0
+      result = flippedScore > directScore
+      path = `symbol-score direct=${directScore} flipped=${flippedScore}`
+    }
   }
 
-  const pair = parseOracleLabelPair(labelPrimary)
-  if (!pair) return false
-  const [left, right] = pair
+  if (typeof window !== 'undefined') {
+    // TEMP debug — remove after diagnosing the wSTRCx/STRC display.
+    // eslint-disable-next-line no-console
+    console.log('[shouldInvertOraclePrice]', {
+      labelPrimary,
+      baseAddress,
+      quoteAddress,
+      baseSymbol,
+      quoteSymbol,
+      baseIsDesignator,
+      quoteIsDesignator,
+      path,
+      result,
+    })
+  }
 
-  // A direction only counts when BOTH sides have a non-zero score —
-  // otherwise a single accidental exact match (e.g. only the quote side)
-  // would flip the price on weak evidence.
-  const directLeft = symbolMatchScore(left, baseSymbol)
-  const directRight = symbolMatchScore(right, quoteSymbol)
-  const flippedLeft = symbolMatchScore(left, quoteSymbol)
-  const flippedRight = symbolMatchScore(right, baseSymbol)
-  const directScore = directLeft && directRight ? directLeft + directRight : 0
-  const flippedScore = flippedLeft && flippedRight ? flippedLeft + flippedRight : 0
-
-  return flippedScore > directScore
+  return result
 }
