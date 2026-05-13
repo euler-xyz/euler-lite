@@ -2,12 +2,14 @@ import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
+import { __setEulerLabelsDataForTest, useEulerLabels } from '~/composables/useEulerLabels'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useVaults } from '~/composables/useVaults'
 
 const LABELED_EVAULT = '0x0000000000000000000000000000000000000101'
 const DYNAMIC_EVAULT = '0x0000000000000000000000000000000000000102'
 const ESCROW_EVAULT = '0x0000000000000000000000000000000000000103'
+const DEPRECATED_EVAULT = '0x0000000000000000000000000000000000000104'
 
 const makeVault = (address: string): EVault => ({
   address: getAddress(address),
@@ -15,6 +17,8 @@ const makeVault = (address: string): EVault => ({
 }) as unknown as EVault
 
 const fetchVaults = vi.fn()
+const fetchVerifiedVaultAddresses = vi.fn()
+const fetchVaultTypes = vi.fn()
 
 describe('useVaults EVault verification metadata', () => {
   beforeEach(() => {
@@ -22,17 +26,24 @@ describe('useVaults EVault verification metadata', () => {
       errors: [],
       result: addresses.map(address => makeVault(address)),
     }))
+    fetchVerifiedVaultAddresses.mockResolvedValue([])
+    fetchVaultTypes.mockResolvedValue({})
 
     vi.stubGlobal('useEulerAddresses', () => ({
       chainId: ref(1),
     }))
+    vi.stubGlobal('useEulerLabels', useEulerLabels)
     vi.stubGlobal('useEulerSdk', () => ({
       getEulerSdk: vi.fn(async () => ({
-        eVaultService: { fetchVaults },
+        eVaultService: { fetchVaults, fetchVerifiedVaultAddresses },
+        vaultMetaService: { fetchVaultTypes },
       })),
     }))
 
-    useVaults().resetVaultsState()
+    __setEulerLabelsDataForTest()
+    const vaults = useVaults()
+    vaults.setShowAllLabelEntries(false)
+    vaults.resetVaultsState()
   })
 
   afterEach(() => {
@@ -56,6 +67,22 @@ describe('useVaults EVault verification metadata', () => {
     const registry = useVaultRegistry()
     expect(registry.get(LABELED_EVAULT)?.verified).toBe(true)
     expect(registry.getVerifiedEVaults().map(vault => vault.address)).toEqual([getAddress(LABELED_EVAULT)])
+  })
+
+  it('marks all label-loaded EVaults verified, including deprecated label entries', async () => {
+    __setEulerLabelsDataForTest({
+      verifiedVaultAddresses: [getAddress(LABELED_EVAULT), getAddress(DEPRECATED_EVAULT)],
+    })
+
+    const vaults = useVaults()
+    vaults.setShowAllLabelEntries(true)
+    await vaults.loadVaults()
+
+    const registry = useVaultRegistry()
+    expect(registry.getVerifiedEVaults(true).map(vault => vault.address)).toEqual([
+      getAddress(LABELED_EVAULT),
+      getAddress(DEPRECATED_EVAULT),
+    ])
   })
 
   it('keeps dynamically resolved off-label EVaults out of verified EVault lists', async () => {
