@@ -1,12 +1,36 @@
-// Label symbols frequently drop a trailing wrapper marker (e.g. "STRC" for
-// ERC20 "STRCx"), so the resolved ERC20 symbol is allowed to be longer than
-// the label symbol — never the other way, to avoid false positives between
-// unrelated symbols that happen to share a prefix (e.g. "USDC" vs "USD").
+// Wrapped ERC20s usually keep the underlying asset's symbol as a contiguous
+// core, padded by a short prefix and/or suffix marker — e.g. "STRC" → "STRCx"
+// (suffix "x"), "STRC" → "wSTRCx" (prefix "w" + suffix "x"), "ETH" → "WETH"
+// (prefix "W"), "ETH" → "wstETH" (prefix "wst").
+//
+// Match if one symbol contains the other as such a core, but reject matches
+// where a 3-letter symbol bleeds into a longer one without a leading marker
+// — that's the "USD" ⊂ "USDC" / "BTC" ⊂ "BTCB" case, which should not match.
 const symbolsMatch = (labelSym: string, addressSym: string): boolean => {
   const a = labelSym.trim().toLowerCase()
   const b = addressSym.trim().toLowerCase()
   if (!a || !b) return false
-  return a === b || b.startsWith(a)
+  if (a === b) return true
+
+  const core = a.length <= b.length ? a : b
+  const wrapped = a.length <= b.length ? b : a
+  const idx = wrapped.indexOf(core)
+  if (idx === -1) return false
+
+  const prefixLen = idx
+  const suffixLen = wrapped.length - idx - core.length
+
+  // Cap the wrapping markers — without an upper bound, "ETH" would match
+  // anything that happens to contain it as a substring.
+  if (prefixLen > 3 || suffixLen > 3) return false
+
+  // Designator-like 3-letter symbols (USD, EUR, BTC, ETH, ...) need a real
+  // leading marker to disambiguate from longer tickers built on the same
+  // letters. "USDC" starts with "USD" with no marker → reject. "WETH" / "stETH"
+  // have a leading w/st marker → accept.
+  if (core.length < 4 && prefixLen === 0) return false
+
+  return true
 }
 
 export const parseOracleLabelPair = (labelPrimary: string | undefined): [string, string] | null => {
