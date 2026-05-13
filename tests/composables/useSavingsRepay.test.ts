@@ -1,4 +1,4 @@
-import { computed, ref, watch, watchEffect } from 'vue'
+import { computed, ref, shallowRef, watch, watchEffect } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EVault, PortfolioBorrowPosition, PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
@@ -134,7 +134,7 @@ const position = {
   collateralValueLiquidation: 0n,
   collateralVaults: [],
   liquidatable: false,
-} as PortfolioBorrowPosition<VaultEntity>
+} as unknown as PortfolioBorrowPosition<VaultEntity>
 
 describe('useSavingsRepay', () => {
   beforeEach(() => {
@@ -170,7 +170,7 @@ describe('useSavingsRepay', () => {
 
   it('skips the cash cap for same-vault savings repay max amount', () => {
     const repay = useSavingsRepay({
-      position: ref(position),
+      position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position),
       borrowVault: computed(() => sameVault),
       collateralVault: computed(() => sameVault),
       formTab: ref('savings'),

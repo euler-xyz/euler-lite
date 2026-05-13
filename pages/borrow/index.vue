@@ -176,9 +176,7 @@ const getPairBorrowApy = (pair: AnyBorrowVaultPair): number => {
 }
 
 const getPairSupplyApy = (pair: AnyBorrowVaultPair): number => {
-  const baseSupplyApy = 'interestRateInfo' in pair.collateral
-    ? nanoToValue(pair.collateral.interestRateInfo.supplyAPY, 25)
-    : 0
+  const baseSupplyApy = getVaultSupplyApy(pair.collateral)
   const supplyApy = withIntrinsicSupplyApy(baseSupplyApy, pair.collateral.asset.address)
   const supplyRewards = getSupplyRewardApy(pair.collateral.address)
   return supplyApy + supplyRewards

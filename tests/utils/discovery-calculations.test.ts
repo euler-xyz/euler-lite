@@ -280,7 +280,7 @@ describe('attribute stats matrix', () => {
         supplyAPY: 0n,
         borrowAPY: 0n,
       },
-    } as Vault
+    } as unknown as EVault
     const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, vault, isExternal: false }]
     const usdCache = new Map<string, VaultUsdCacheEntry>()
     const apyCache = new Map<string, VaultApyCacheEntry>([
@@ -338,7 +338,7 @@ describe('buildVaultApyCache', () => {
         supplyAPY: 4,
         borrowAPY: 6,
       },
-    } as Vault
+    } as unknown as EVault
     const market = makeMarket([vault])
 
     const cache = buildVaultApyCache(
@@ -365,7 +365,7 @@ describe('buildVaultApyCache', () => {
         supplyAPY: 3,
         borrowAPY: 5,
       },
-    } as Vault
+    } as unknown as EVault
     const market = makeMarket([], [externalVault])
 
     const cache = buildVaultApyCache(

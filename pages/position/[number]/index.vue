@@ -139,8 +139,8 @@ const getCollateralNotice = (vaultAddress: string): string => getVaultNotice(vau
 const asPositionCollateralVault = (vault: unknown): EVault | SecuritizeCollateralVault =>
   vault as EVault | SecuritizeCollateralVault
 
-const usdWadToAmount = (value: bigint | undefined): UsdAmount => ({
-  usd: value === undefined ? 0 : nanoToValue(value, 18),
+const usdWadToAmount = (value: bigint | number | undefined): UsdAmount => ({
+  usd: value === undefined ? 0 : (typeof value === 'bigint' ? nanoToValue(value, 18) : value),
   hasPrice: value !== undefined,
 })
 

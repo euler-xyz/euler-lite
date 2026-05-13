@@ -31,6 +31,7 @@ import {
 } from '@eulerxyz/euler-v2-sdk'
 import { eulerLabelProductEmpty, type EulerLabelProduct, type EulerLabelEntity, type EulerLabelPointReward } from '~/entities/euler/labels'
 import { getCurrentEulerLabelsData, getEulerLabelWrapPairs } from '~/composables/useEulerLabels'
+import { normalizeAddress } from '~/utils/normalizeAddress'
 
 const labels = () => getCurrentEulerLabelsData()
 
@@ -92,6 +93,38 @@ export const getAssetPatternRules = (): EulerLabelAssetPatternRule[] =>
 
 export const isVaultFeatured = (vaultAddress: string): boolean =>
   isEulerLabelVaultFeatured(labels(), vaultAddress)
+
+export const isVaultRecentlyAdded = (vaultAddress: string): boolean => {
+  const normalized = normalizeAddress(vaultAddress)
+  return Object.values(labels().products).some(product =>
+    ((product as EulerLabelProduct).recentlyAddedVaults ?? []).some(address => normalizeAddress(address) === normalized),
+  )
+}
+
+export const normalizeProducts = (data: Record<string, EulerLabelProduct>): { products: Record<string, EulerLabelProduct>, vaultAddresses: string[] } => {
+  const normalized: Record<string, EulerLabelProduct> = {}
+  const allVaults = new Set<string>()
+
+  Object.entries(data).forEach(([key, product]) => {
+    const normalizedVaults = product.vaults.map(normalizeAddress)
+    const normalizedDeprecated = (product.deprecatedVaults || []).map(normalizeAddress)
+    const normalizedRecentlyAdded = (product.recentlyAddedVaults || []).map(normalizeAddress)
+    const fallbackReason = (product as EulerLabelProduct & { deprecateReason?: string }).deprecateReason
+
+    normalized[key] = {
+      ...product,
+      vaults: normalizedVaults,
+      deprecatedVaults: normalizedDeprecated,
+      recentlyAddedVaults: normalizedRecentlyAdded,
+      deprecationReason: product.deprecationReason || fallbackReason,
+    }
+
+    normalizedVaults.forEach(v => allVaults.add(v))
+    normalizedDeprecated.forEach(v => allVaults.add(v))
+  })
+
+  return { products: normalized, vaultAddresses: [...allVaults] }
+}
 
 export const isEarnVaultDeprecated = (vaultAddress: string): boolean =>
   isEulerLabelEarnVaultDeprecated(labels(), vaultAddress)

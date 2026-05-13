@@ -34,8 +34,10 @@ const hiddenDepositCount = computed(() =>
 const positionGuard = createRaceGuard()
 const refreshCoordinator = createAddressRefreshCoordinator(() => positionGuard.next())
 
-const usdWadToNumber = (value: bigint | undefined): number =>
-  value === undefined ? 0 : Number(formatUnits(value, 18))
+const usdWadToNumber = (value: bigint | number | undefined): number => {
+  if (value === undefined) return 0
+  return typeof value === 'bigint' ? Number(formatUnits(value, 18)) : value
+}
 
 const buildVisiblePortfolioPositionFilter = (): PortfolioPositionFilter<VaultEntity> => {
   const { verifiedVaultAddresses, earnVaults } = useEulerLabels()

@@ -104,29 +104,29 @@ const loadLabels = async (forceRefresh = false) => {
   const promise = (async () => {
     const chainId = await resolveChainId()
 
-      if (!forceRefresh && labelsChainId.value === chainId && isReady.value) return
+    if (!forceRefresh && labelsChainId.value === chainId && isReady.value) return
 
-      try {
-        isReady.value = false
-        isLoading.value = true
-        const probeGeneration = ++wrapPairProbeGeneration
-        Object.keys(wrapPairs).forEach(key => delete wrapPairs[key])
+    try {
+      isReady.value = false
+      isLoading.value = true
+      const probeGeneration = ++wrapPairProbeGeneration
+      Object.keys(wrapPairs).forEach(key => Reflect.deleteProperty(wrapPairs, key))
 
-        if (labelsChainId.value !== chainId) {
-          setLabelsData(createEmptyEulerLabelsData(), chainId)
-        }
+      if (labelsChainId.value !== chainId) {
+        setLabelsData(createEmptyEulerLabelsData(), chainId)
+      }
 
       if (forceRefresh) {
         await invalidateSdkQueries([...LABEL_QUERY_NAMES])
       }
 
-        const sdk = await getEulerSdk()
-        setLabelsData(await sdk.eulerLabelsService.fetchEulerLabelsData(chainId), chainId)
-        void probeWrapPairs(chainId, probeGeneration)
-      }
-      catch (e) {
-        logWarn('labels/load', e)
-      }
+      const sdk = await getEulerSdk()
+      setLabelsData(await sdk.eulerLabelsService.fetchEulerLabelsData(chainId), chainId)
+      void probeWrapPairs(chainId, probeGeneration)
+    }
+    catch (e) {
+      logWarn('labels/load', e)
+    }
     finally {
       isLoading.value = false
       isReady.value = true
@@ -163,10 +163,10 @@ const probeWrapPairs = async (startChainId: number, generation: number) => {
     if (!isVaultsReady.value) await until(isVaultsReady).toBe(true)
     if (!isCurrentProbe()) return
 
-    const { getEvkVaults, getEarnVaults, getSecuritizeVaults } = useVaultRegistry()
+    const { getEVaults, getEarnVaults, getSecuritizeVaults } = useVaultRegistry()
     const seen = new Set<string>()
     const candidates: string[] = []
-    for (const vault of [...getEvkVaults(), ...getEarnVaults(), ...getSecuritizeVaults()]) {
+    for (const vault of [...getEVaults(), ...getEarnVaults(), ...getSecuritizeVaults()]) {
       const asset = vault.asset
       if (!asset?.address) continue
       const checksummed = normalizeAddress(asset.address)
