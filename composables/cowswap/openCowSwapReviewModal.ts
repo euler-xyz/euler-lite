@@ -68,14 +68,43 @@ export const buildApprovalSignSteps = (params: {
   return { steps, nextIndex: idx }
 }
 
-const playMooolerSound = () => {
-  if (typeof window === 'undefined') return
-  try {
-    const audio = new Audio('/sounds/moooler.wav')
-    void audio.play().catch(() => {})
+let mooolerAudio: HTMLAudioElement | null = null
+let mooolerUnlocked = false
+
+if (typeof window !== 'undefined') {
+  mooolerAudio = new Audio('/sounds/moooler.wav')
+  mooolerAudio.preload = 'auto'
+
+  const unlock = () => {
+    if (!mooolerAudio || mooolerUnlocked) return
+    const prevVolume = mooolerAudio.volume
+    mooolerAudio.volume = 0
+    mooolerAudio.play().then(() => {
+      mooolerAudio!.pause()
+      mooolerAudio!.currentTime = 0
+      mooolerAudio!.volume = prevVolume
+      mooolerUnlocked = true
+    }).catch(() => {
+      if (mooolerAudio) mooolerAudio.volume = prevVolume
+    })
   }
-  catch {
-    // ignore — audio playback is non-essential
+
+  const events: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'touchstart']
+  for (const ev of events) {
+    window.addEventListener(ev, unlock, { capture: true, passive: true })
+  }
+}
+
+const playMooolerSound = () => {
+  if (!mooolerAudio) return
+  try {
+    mooolerAudio.currentTime = 0
+    void mooolerAudio.play().catch((err) => {
+      logWarn('cowswap/moooler-play-blocked', err)
+    })
+  }
+  catch (err) {
+    logWarn('cowswap/moooler-play-throw', err)
   }
 }
 
