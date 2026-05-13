@@ -9,6 +9,7 @@ import {
   type CowSwapOrderStatus,
 } from '~/entities/cowswap'
 import { resolveCowSwapReviewState } from './cowSwapReviewState'
+import { playMooolerSound } from '~/utils/moooler-sound'
 
 const props = defineProps<{
   signSteps: DisplayStep[]
@@ -100,6 +101,10 @@ watch(
   value => emit('prevent-close', !value),
   { immediate: true },
 )
+
+watch(isSubmitted, (value, prev) => {
+  if (value && !prev) playMooolerSound()
+})
 
 const handleClose = () => {
   if (!canClose.value) return
