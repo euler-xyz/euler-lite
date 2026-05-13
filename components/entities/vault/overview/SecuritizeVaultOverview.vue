@@ -3,7 +3,7 @@ import { getAddress, maxUint256, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import type { SecuritizeVault, Vault, VaultCollateralLTV } from '~/entities/vault'
 import { useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
-import { getProductKeyByVault } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
@@ -36,6 +36,7 @@ const entities = useEulerEntitiesOfVault(vault as unknown as Vault)
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault as unknown as Vault))
 const isGovernanceLimited = computed(() => product.isGovernanceLimited && isGovernorVerified.value)
 const marketProductKey = computed(() => getProductKeyByVault(vault.address))
+const marketProductName = computed(() => getProductByVault(vault.address).name)
 
 const isDeprecated = computed(() => {
   return product.deprecatedVaults?.includes(vaultAddress.value) ?? false
@@ -206,10 +207,10 @@ const supplyCapPercentageDisplay = computed(() => {
             :to="{ name: 'explore-market', params: { market: marketProductKey }, query: { network: route.query.network } }"
             class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
           >
-            {{ product.name }}
+            {{ marketProductName }}
           </NuxtLink>
           <template v-else>
-            {{ product.name || '-' }}
+            {{ marketProductName || '-' }}
           </template>
         </VaultOverviewLabelValue>
         <VaultOverviewLabelValue
