@@ -4,6 +4,7 @@ import { isCyclicalNoteVault } from '~/utils/vault/classification'
 import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
+import { getVaultAvailableLiquidity, getVaultUtilization } from '~/utils/vault-display'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isVaultFeatured, isVaultKeyring, getEntitiesByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
@@ -155,15 +156,15 @@ const maxRoe = computed(() =>
   getMaxRoe(maxMultiplier.value, supplyApyWithRewards.value, borrowApyWithRewards.value, loopingRewardsAPY.value),
 )
 const maxLTV = computed(() => formatNumber(ltvToPercent(pair.ltv.borrowLTV), 2))
-const utilization = computed(() => pair.borrow.utilization)
+const utilization = computed(() => getVaultUtilization(pair.borrow))
 const utilisationWarning = computed(() => getUtilisationWarning(pair.borrow, 'borrow'))
 const borrowCapInfo = computed(() => getBorrowCapWarning(pair.borrow))
 
 const liquidityDisplay = ref('-')
 
 watchEffect(async () => {
-  const liquidity = pair.borrow.availableLiquidity
-  const price = await formatAssetValue(liquidity, pair.borrow, 'off-chain')
+  const liquidity = getVaultAvailableLiquidity(pair.borrow)
+  const price = await formatAssetValue(liquidity, pair.borrow, 'on-chain')
   liquidityDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
 })
 
