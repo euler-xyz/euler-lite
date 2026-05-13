@@ -1,16 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { getCollateralSupplyCapWarning } from '~/composables/useVaultWarnings'
-import type { SecuritizeVault, Vault } from '~/entities/vault'
+import type { EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 
-const makeVault = (supply: bigint, supplyCap: bigint): Vault =>
+const makeVault = (supplyCapUtilization: number): EVault =>
   ({
-    supply,
-    supplyCap,
-  }) as Vault
+    caps: {
+      supplyCapUtilization,
+    },
+  }) as EVault
 
 describe('getCollateralSupplyCapWarning', () => {
   it('returns collateral-specific copy when an EVK collateral supply cap is near its limit', () => {
-    const warning = getCollateralSupplyCapWarning(makeVault(95n, 100n))
+    const warning = getCollateralSupplyCapWarning(makeVault(95))
 
     expect(warning).toEqual({
       level: 'info',
@@ -20,7 +21,7 @@ describe('getCollateralSupplyCapWarning', () => {
   })
 
   it('returns collateral-specific copy when an EVK collateral supply cap is reached', () => {
-    const warning = getCollateralSupplyCapWarning(makeVault(100n, 100n))
+    const warning = getCollateralSupplyCapWarning(makeVault(100))
 
     expect(warning).toEqual({
       level: 'info',
@@ -30,15 +31,13 @@ describe('getCollateralSupplyCapWarning', () => {
   })
 
   it('does not warn for EVK collateral below the shared cap threshold', () => {
-    expect(getCollateralSupplyCapWarning(makeVault(94n, 100n))).toBeNull()
+    expect(getCollateralSupplyCapWarning(makeVault(94))).toBeNull()
   })
 
   it('does not warn for Securitize collateral', () => {
     const securitizeVault = {
       type: 'securitize',
-      supply: 100n,
-      supplyCap: 100n,
-    } as SecuritizeVault
+    } as SecuritizeCollateralVault
 
     expect(getCollateralSupplyCapWarning(securitizeVault)).toBeNull()
   })

@@ -1,4 +1,4 @@
-import type { EVault } from '@eulerxyz/euler-v2-sdk'
+import { isSecuritizeCollateralVault, type EVault, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import {
   findBlockingDisabledOp,
   getOpMeta,
@@ -118,6 +118,28 @@ export const getSupplyCapWarning = (vault: EVault): VaultWarning | null => {
 
   // Cap level only determines the message text, not the visual severity.
   // Reaching a cap means the vault is popular, not that something is wrong.
+  return { level: 'info', title, message }
+}
+
+export const getCollateralSupplyCapWarning = (vault: EVault | SecuritizeCollateralVault): VaultWarning | null => {
+  if (isSecuritizeCollateralVault(vault)) return null
+  if (!('caps' in vault) || !vault.caps) return null
+
+  const percentage = vault.caps.supplyCapUtilization
+  const level = getCapLevel(percentage)
+  if (!level) return null
+
+  const title = percentage >= 100
+    ? 'Collateral supply cap reached'
+    : percentage >= CAP_CRITICAL
+      ? 'Collateral supply cap nearly reached'
+      : 'Collateral supply cap approaching limit'
+  const message = percentage >= 100
+    ? 'The collateral supply cap has been reached. New deposits will fail.'
+    : percentage >= CAP_CRITICAL
+      ? 'The collateral supply cap is nearly reached. New deposits may be limited or fail.'
+      : 'The collateral supply cap is approaching its limit. Available capacity for new deposits is limited.'
+
   return { level: 'info', title, message }
 }
 

@@ -10,6 +10,7 @@ export interface CollateralOption {
   vaultAddress?: string
   tags?: string[]
   disabled?: boolean
+  showBalance?: boolean
   vault?: VaultEntity
   label?: string
 }
