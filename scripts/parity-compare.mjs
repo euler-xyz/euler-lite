@@ -21,6 +21,7 @@ const DEFAULT_PORTFOLIO_TIMEOUT_MS = 15_000
 const DEFAULT_PORTFOLIO_CAPTURE_BUDGET_MS = 15_000
 const DEFAULT_NETWORK_IDLE_TIMEOUT_MS = 0
 const DEFAULT_PERSISTENCE_RECHECK_MAX_RATIO = 0.1
+const DEFAULT_SCRAPE_FAILURE_LIMIT = 5
 const DEFAULT_WORK_DIR = path.join('/tmp', 'euler-lite-parity', sanitizeFilePart(ROOT_DIR))
 
 const args = parseArgs(process.argv.slice(2))
@@ -83,6 +84,7 @@ async function main() {
       dataReadyTimeoutMs: config.dataReadyTimeoutMs,
       networkIdleTimeoutMs: config.networkIdleTimeoutMs,
       persistenceRecheckMaxRatio: config.persistenceRecheckMaxRatio,
+      scrapeFailureLimit: config.scrapeFailureLimit,
       scenarioFilter: config.scenarioFilter,
       appPhased: config.appPhased,
       alternating: config.sequential,
@@ -95,15 +97,18 @@ async function main() {
     let baselineSnapshots = []
     let candidateSnapshots = []
     let pageDiffs = []
+    const scrapeFailureGuard = createScrapeFailureGuard(config)
 
     if (config.appPhased) {
       const result = await runScenariosAppPhased({
+        run,
         scenarios,
         config,
         browser: state.browser,
         baseline: run.baseline,
         candidate: run.candidate,
         state,
+        scrapeFailureGuard,
       })
       baselineSnapshots = result.baseline
       candidateSnapshots = result.candidate
@@ -113,12 +118,14 @@ async function main() {
       // Slow diagnostic mode: alternates baseline/candidate for every page and
       // modal. Keep this opt-in so normal runs reuse one session per app phase.
       const result = await runScenariosSequentialByPage({
+        run,
         scenarios,
         config,
         browser: state.browser,
         baseline: run.baseline,
         candidate: run.candidate,
         state,
+        scrapeFailureGuard,
       })
       baselineSnapshots = result.baseline
       candidateSnapshots = result.candidate
@@ -133,16 +140,19 @@ async function main() {
       for (const scenario of scenarios) {
         console.log('[parity-compare] Running ' + scenario.id)
         const result = await runScenario({
+          run,
           scenario,
           config,
           browser: state.browser,
           baseline: state.apps[0],
           candidate: state.apps[1],
+          scrapeFailureGuard,
         })
 
         baselineSnapshots.push(...result.baseline)
         candidateSnapshots.push(...result.candidate)
         pageDiffs.push(...result.diffs)
+        await writeIncrementalJsonArtifacts({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs })
       }
     }
 
@@ -236,6 +246,7 @@ async function buildConfig() {
     portfolioCaptureBudgetMs: Number(valueOf('portfolio-capture-budget-ms') || process.env.PARITY_PORTFOLIO_CAPTURE_BUDGET_MS || DEFAULT_PORTFOLIO_CAPTURE_BUDGET_MS),
     networkIdleTimeoutMs: Number(valueOf('network-idle-timeout-ms') || process.env.PARITY_NETWORK_IDLE_TIMEOUT_MS || DEFAULT_NETWORK_IDLE_TIMEOUT_MS),
     persistenceRecheckMaxRatio: Number(valueOf('persistence-recheck-max-ratio') || process.env.PARITY_PERSISTENCE_RECHECK_MAX_RATIO || DEFAULT_PERSISTENCE_RECHECK_MAX_RATIO),
+    scrapeFailureLimit: Number(valueOf('scrape-failure-limit') || process.env.PARITY_SCRAPE_FAILURE_LIMIT || DEFAULT_SCRAPE_FAILURE_LIMIT),
     navigationTimeoutMs: Number(valueOf('navigation-timeout-ms') || process.env.PARITY_NAVIGATION_TIMEOUT_MS || 45_000),
     navigationRetries: Number(valueOf('navigation-retries') || process.env.PARITY_NAVIGATION_RETRIES || 3),
     numericTolerance: parseNumericTolerance(valueOf('numeric-tolerance') || process.env.PARITY_NUMERIC_TOLERANCE || '1%'),
@@ -438,7 +449,7 @@ async function startOrAttach(app, config) {
   }
 }
 
-async function runScenario({ scenario, config, browser, baseline, candidate }) {
+async function runScenario({ run, scenario, config, browser, baseline, candidate, scrapeFailureGuard }) {
   const baselineContext = await createContext(browser, scenario)
   const candidateContext = await createContext(browser, scenario)
 
@@ -475,6 +486,9 @@ async function runScenario({ scenario, config, browser, baseline, candidate }) {
     baselineSnapshots.push(basePageResult.snapshot)
     candidateSnapshots.push(candidatePageResult.snapshot)
     diffs.push(compareSnapshots(basePageResult.snapshot, candidatePageResult.snapshot, config))
+    await writeIncrementalJsonArtifacts({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs: diffs })
+    scrapeFailureGuard.observe(basePageResult.snapshot)
+    scrapeFailureGuard.observe(candidatePageResult.snapshot)
 
     for (const follow of scenario.follow || []) {
       await waitForFollowLinks(basePageResult.page, follow.selector, follow.waitTimeoutMs || config.waitTimeoutMs)
@@ -515,6 +529,9 @@ async function runScenario({ scenario, config, browser, baseline, candidate }) {
         baselineSnapshots.push(baseDetail.snapshot)
         candidateSnapshots.push(candidateDetail.snapshot)
         diffs.push(compareSnapshots(baseDetail.snapshot, candidateDetail.snapshot, config))
+        await writeIncrementalJsonArtifacts({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs: diffs })
+        scrapeFailureGuard.observe(baseDetail.snapshot)
+        scrapeFailureGuard.observe(candidateDetail.snapshot)
       }
     }
 
@@ -533,7 +550,7 @@ async function runScenario({ scenario, config, browser, baseline, candidate }) {
   }
 }
 
-async function runScenariosSequentialByPage({ scenarios, config, browser, baseline, candidate, state }) {
+async function runScenariosSequentialByPage({ run, scenarios, config, browser, baseline, candidate, state, scrapeFailureGuard }) {
   const baselineSnapshots = []
   const candidateSnapshots = []
   const diffs = []
@@ -571,6 +588,9 @@ async function runScenariosSequentialByPage({ scenarios, config, browser, baseli
       baselineSnapshots.push(baselineResult.snapshot)
       candidateSnapshots.push(candidateDetail)
       diffs.push(compareSnapshots(baselineResult.snapshot, candidateDetail, config))
+      await writeIncrementalJsonArtifacts({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs: diffs })
+      scrapeFailureGuard.observe(baselineResult.snapshot)
+      scrapeFailureGuard.observe(candidateDetail)
 
       for (let index = 0; index < baselineResult.modalPlans.length; index += 1) {
         const baselineModal = baselineResult.modalPlans[index]
@@ -586,6 +606,9 @@ async function runScenariosSequentialByPage({ scenarios, config, browser, baseli
         baselineSnapshots.push(baselineModal.snapshot)
         candidateSnapshots.push(candidateModal)
         diffs.push(compareSnapshots(baselineModal.snapshot, candidateModal, config))
+        await writeIncrementalJsonArtifacts({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs: diffs })
+        scrapeFailureGuard.observe(baselineModal.snapshot)
+        scrapeFailureGuard.observe(candidateModal)
       }
 
       for (const followPlan of baselineResult.followPlans) {
@@ -609,6 +632,9 @@ async function runScenariosSequentialByPage({ scenarios, config, browser, baseli
         baselineSnapshots.push(baselineDetail.snapshot)
         candidateSnapshots.push(candidateDetail)
         diffs.push(compareSnapshots(baselineDetail.snapshot, candidateDetail, config))
+        await writeIncrementalJsonArtifacts({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs: diffs })
+        scrapeFailureGuard.observe(baselineDetail.snapshot)
+        scrapeFailureGuard.observe(candidateDetail)
 
         for (const baselineModal of baselineDetail.modalPlans) {
           const candidateModal = await captureModalPlanSequential({
@@ -623,6 +649,9 @@ async function runScenariosSequentialByPage({ scenarios, config, browser, baseli
           baselineSnapshots.push(baselineModal.snapshot)
           candidateSnapshots.push(candidateModal)
           diffs.push(compareSnapshots(baselineModal.snapshot, candidateModal, config))
+          await writeIncrementalJsonArtifacts({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs: diffs })
+          scrapeFailureGuard.observe(baselineModal.snapshot)
+          scrapeFailureGuard.observe(candidateModal)
         }
       }
     }
@@ -642,7 +671,7 @@ async function runScenariosSequentialByPage({ scenarios, config, browser, baseli
   }
 }
 
-async function runScenariosAppPhased({ scenarios, config, browser, baseline, candidate, state }) {
+async function runScenariosAppPhased({ run, scenarios, config, browser, baseline, candidate, state, scrapeFailureGuard }) {
   const baselineSnapshots = []
   const candidateSnapshots = []
   const diffs = []
@@ -681,6 +710,8 @@ async function runScenariosAppPhased({ scenarios, config, browser, baseline, can
         plan: mainPlan,
         baselineSnapshot: baselineResult.snapshot,
       })
+      await writeIncrementalJsonArtifacts({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs: diffs })
+      scrapeFailureGuard.observe(baselineResult.snapshot)
 
       for (const baselineModal of baselineResult.modalPlans) {
         baselineSnapshots.push(baselineModal.snapshot)
@@ -689,6 +720,8 @@ async function runScenariosAppPhased({ scenarios, config, browser, baseline, can
           plan: baselineModal,
           baselineSnapshot: baselineModal.snapshot,
         })
+        await writeIncrementalJsonArtifacts({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs: diffs })
+        scrapeFailureGuard.observe(baselineModal.snapshot)
       }
 
       for (const followPlan of baselineResult.followPlans) {
@@ -708,6 +741,8 @@ async function runScenariosAppPhased({ scenarios, config, browser, baseline, can
           plan: followPlan,
           baselineSnapshot: baselineDetail.snapshot,
         })
+        await writeIncrementalJsonArtifacts({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs: diffs })
+        scrapeFailureGuard.observe(baselineDetail.snapshot)
 
         for (const baselineModal of baselineDetail.modalPlans) {
           baselineSnapshots.push(baselineModal.snapshot)
@@ -716,6 +751,8 @@ async function runScenariosAppPhased({ scenarios, config, browser, baseline, can
             plan: baselineModal,
             baselineSnapshot: baselineModal.snapshot,
           })
+          await writeIncrementalJsonArtifacts({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs: diffs })
+          scrapeFailureGuard.observe(baselineModal.snapshot)
         }
       }
     }
@@ -784,6 +821,8 @@ async function runScenariosAppPhased({ scenarios, config, browser, baseline, can
 
       candidateSnapshots.push(candidateSnapshot)
       diffs.push(compareSnapshots(item.baselineSnapshot, candidateSnapshot, config))
+      await writeIncrementalJsonArtifacts({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs: diffs })
+      scrapeFailureGuard.observe(candidateSnapshot)
     }
   }
   finally {
@@ -2251,6 +2290,69 @@ function buildDiff({ run, config, outputDir, baselineSnapshots, candidateSnapsho
   return diff
 }
 
+async function writeIncrementalJsonArtifacts({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs }) {
+  const diff = buildDiff({
+    run,
+    config,
+    outputDir: config.outputDir,
+    baselineSnapshots,
+    candidateSnapshots,
+    pageDiffs,
+  })
+
+  await Promise.all([
+    writeJson(path.join(config.outputDir, 'baseline.json'), {
+      app: run.baseline,
+      snapshots: baselineSnapshots,
+    }),
+    writeJson(path.join(config.outputDir, 'candidate.json'), {
+      app: run.candidate,
+      snapshots: candidateSnapshots,
+    }),
+    writeJson(path.join(config.outputDir, 'diff.json'), diff),
+    fs.writeFile(path.join(ROOT_DIR, 'artifacts/parity/latest-run.json'), JSON.stringify({
+      runId: config.runId,
+      outputDir: config.outputDir,
+      diff: path.join(config.outputDir, 'diff.json'),
+      report: path.join(config.outputDir, 'report.html'),
+    }, null, 2) + '\n'),
+  ])
+}
+
+function createScrapeFailureGuard(config) {
+  return {
+    consecutive: 0,
+    observe(snapshot) {
+      const reason = scrapeFailureReason(snapshot)
+      if (!reason) {
+        this.consecutive = 0
+        return
+      }
+
+      this.consecutive += 1
+      const limit = Math.max(1, Number(config.scrapeFailureLimit || DEFAULT_SCRAPE_FAILURE_LIMIT))
+      console.warn('[parity-compare] Scrape failed '
+        + this.consecutive + '/' + limit
+        + ' for ' + (snapshot?.appName || 'unknown')
+        + ' ' + (snapshot?.pageId || 'unknown page')
+        + ': ' + reason)
+
+      if (this.consecutive >= limit) {
+        throw new Error('Stopping after ' + this.consecutive + ' consecutive scrape failures. Last failure: '
+          + (snapshot?.appName || 'unknown') + ' '
+          + (snapshot?.pageId || 'unknown page') + ': ' + reason)
+      }
+    },
+  }
+}
+
+function scrapeFailureReason(snapshot) {
+  if (!snapshot) return 'missing snapshot'
+  if (snapshot.captureError) return String(snapshot.captureError).split('\n')[0]
+  if (Number(snapshot.counts?.tagged || 0) === 0) return '0 tagged elements scraped'
+  return ''
+}
+
 function summarizeDiscrepantPages(pages) {
   return pages.map(page => ({
     pageId: page.pageId,
@@ -2660,6 +2762,7 @@ Options:
   --data-ready-timeout-ms <n> Wait for visible loading placeholders to clear. Default: ${DEFAULT_DATA_READY_TIMEOUT_MS}.
   --network-idle-timeout-ms <n> Network idle wait after selectors. Default: ${DEFAULT_NETWORK_IDLE_TIMEOUT_MS}.
   --persistence-recheck-max-ratio <n> Skip reload recheck above this discrepant capture ratio. Default: ${DEFAULT_PERSISTENCE_RECHECK_MAX_RATIO}.
+  --scrape-failure-limit <n> Stop after this many consecutive failed/empty scrapes. Default: ${DEFAULT_SCRAPE_FAILURE_LIMIT}.
   --navigation-timeout-ms <n> Per-page navigation timeout. Default: 45000.
   --navigation-retries <n>    Retry page navigations before recording a capture error. Default: 3.
   --numeric-tolerance <n|%>   Relative tolerance for numeric values. Default: 1%.
@@ -2687,6 +2790,7 @@ Environment:
   PARITY_RATE_LIMIT_RETRIES   Same as --rate-limit-retries.
   PARITY_DATA_READY_TIMEOUT_MS Same as --data-ready-timeout-ms.
   PARITY_PERSISTENCE_RECHECK_MAX_RATIO Same as --persistence-recheck-max-ratio.
+  PARITY_SCRAPE_FAILURE_LIMIT Same as --scrape-failure-limit.
   PARITY_NAVIGATION_TIMEOUT_MS Same as --navigation-timeout-ms.
   PARITY_NAVIGATION_RETRIES   Same as --navigation-retries.
   PARITY_ALTERNATING=1        Same as --alternating.
