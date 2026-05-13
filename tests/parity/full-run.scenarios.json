@@ -163,22 +163,22 @@
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-view-toggle\"][data-field=\"matrix\"]",
+          "selector": "css=button:has-text(\"Matrix\")",
           "waitFor": [
             "[data-id=\"attribute-matrix\"]"
           ]
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-matrix-view-select\"]",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
           "waitFor": [
-            "[data-id=\"discovery-matrix-view-option\"][data-field=\"stats\"]"
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"stats\"], button:has-text(\"Stats\")"
           ],
           "waitForData": false
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-matrix-view-option\"][data-field=\"stats\"]",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"stats\"], button:has-text(\"Stats\")",
           "waitFor": [
             "[data-id=\"attribute-matrix\"]"
           ]
@@ -203,22 +203,22 @@
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-view-toggle\"][data-field=\"matrix\"]",
+          "selector": "css=button:has-text(\"Matrix\")",
           "waitFor": [
             "[data-id=\"attribute-matrix\"]"
           ]
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-matrix-view-select\"]",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
           "waitFor": [
-            "[data-id=\"discovery-matrix-view-option\"][data-field=\"config\"]"
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"config\"], button:has-text(\"Configuration\")"
           ],
           "waitForData": false
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-matrix-view-option\"][data-field=\"config\"]",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"config\"], button:has-text(\"Configuration\")",
           "waitFor": [
             "[data-id=\"attribute-matrix\"]"
           ]
@@ -243,22 +243,22 @@
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-view-toggle\"][data-field=\"matrix\"]",
+          "selector": "css=button:has-text(\"Matrix\")",
           "waitFor": [
             "[data-id=\"attribute-matrix\"]"
           ]
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-matrix-view-select\"]",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
           "waitFor": [
-            "[data-id=\"discovery-matrix-view-option\"][data-field=\"oracle\"]"
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"oracle\"], button:has-text(\"Oracles\")"
           ],
           "waitForData": false
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-matrix-view-option\"][data-field=\"oracle\"]",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"oracle\"], button:has-text(\"Oracles\")",
           "waitFor": [
             "[data-id=\"collateral-matrix\"]"
           ]
@@ -283,22 +283,22 @@
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-view-toggle\"][data-field=\"matrix\"]",
+          "selector": "css=button:has-text(\"Matrix\")",
           "waitFor": [
             "[data-id=\"attribute-matrix\"]"
           ]
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-matrix-view-select\"]",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
           "waitFor": [
-            "[data-id=\"discovery-matrix-view-option\"][data-field=\"net-apy\"]"
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"net-apy\"], button:has-text(\"Net APY\")"
           ],
           "waitForData": false
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-matrix-view-option\"][data-field=\"net-apy\"]",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"net-apy\"], button:has-text(\"Net APY\")",
           "waitFor": [
             "[data-id=\"collateral-matrix\"]"
           ]
@@ -323,22 +323,22 @@
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-view-toggle\"][data-field=\"matrix\"]",
+          "selector": "css=button:has-text(\"Matrix\")",
           "waitFor": [
             "[data-id=\"attribute-matrix\"]"
           ]
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-matrix-view-select\"]",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
           "waitFor": [
-            "[data-id=\"discovery-matrix-view-option\"][data-field=\"roe\"]"
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"roe\"], button:has-text(\"Max ROE\")"
           ],
           "waitForData": false
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-matrix-view-option\"][data-field=\"roe\"]",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"roe\"], button:has-text(\"Max ROE\")",
           "waitFor": [
             "[data-id=\"collateral-matrix\"]"
           ]
@@ -363,22 +363,22 @@
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-view-toggle\"][data-field=\"matrix\"]",
+          "selector": "css=button:has-text(\"Matrix\")",
           "waitFor": [
             "[data-id=\"attribute-matrix\"]"
           ]
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-matrix-view-select\"]",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
           "waitFor": [
-            "[data-id=\"discovery-matrix-view-option\"][data-field=\"multiplier\"]"
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"multiplier\"], button:has-text(\"Multiplier\")"
           ],
           "waitForData": false
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-matrix-view-option\"][data-field=\"multiplier\"]",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"multiplier\"], button:has-text(\"Multiplier\")",
           "waitFor": [
             "[data-id=\"collateral-matrix\"]"
           ]
@@ -403,22 +403,22 @@
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-view-toggle\"][data-field=\"matrix\"]",
+          "selector": "css=button:has-text(\"Matrix\")",
           "waitFor": [
             "[data-id=\"attribute-matrix\"]"
           ]
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-matrix-view-select\"]",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
           "waitFor": [
-            "[data-id=\"discovery-matrix-view-option\"][data-field=\"bltv\"]"
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"bltv\"], button:has-text(\"Borrow LTV\")"
           ],
           "waitForData": false
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-matrix-view-option\"][data-field=\"bltv\"]",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"bltv\"], button:has-text(\"Borrow LTV\")",
           "waitFor": [
             "[data-id=\"collateral-matrix\"]"
           ]
@@ -443,22 +443,22 @@
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-view-toggle\"][data-field=\"matrix\"]",
+          "selector": "css=button:has-text(\"Matrix\")",
           "waitFor": [
             "[data-id=\"attribute-matrix\"]"
           ]
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-matrix-view-select\"]",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
           "waitFor": [
-            "[data-id=\"discovery-matrix-view-option\"][data-field=\"lltv\"]"
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"lltv\"], button:has-text(\"Liquidation LTV\")"
           ],
           "waitForData": false
         },
         {
           "type": "click",
-          "selector": "[data-id=\"discovery-matrix-view-option\"][data-field=\"lltv\"]",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"lltv\"], button:has-text(\"Liquidation LTV\")",
           "waitFor": [
             "[data-id=\"collateral-matrix\"]"
           ]
