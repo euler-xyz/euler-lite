@@ -207,7 +207,7 @@ const cellDataValue = (cell: AttributeCell): string | number =>
 
               <!-- hooks: text + optional clickable info icon -->
               <template v-else-if="col.cells[vaultIdx].kind === 'hooks'">
-                <UiHoverModalTrigger
+                <UiModalPreviewTrigger
                   v-if="canShowHooksModal(vault, col.cells[vaultIdx])"
                   :component="VaultHooksInfoModal"
                   :modal-data="() => getHooksModalData(vault)"
@@ -220,7 +220,7 @@ const cellDataValue = (cell: AttributeCell): string | number =>
                       class="!w-12 !h-12 shrink-0"
                     />
                   </span>
-                </UiHoverModalTrigger>
+                </UiModalPreviewTrigger>
                 <span
                   v-else
                   class="text-p5 text-content-secondary"

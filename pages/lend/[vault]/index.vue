@@ -794,7 +794,7 @@ watch(address, () => {
             >
               <p class="text-h3 text-content-tertiary flex items-center gap-4">
                 Supply APY
-                <UiHoverModalTrigger
+                <UiModalPreviewTrigger
                   :component="VaultSupplyApyModal"
                   :modal-data="supplyApyModalData"
                   aria-label="Show supply APY breakdown"
@@ -803,7 +803,7 @@ watch(address, () => {
                     class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
                     name="info-circle"
                   />
-                </UiHoverModalTrigger>
+                </UiModalPreviewTrigger>
               </p>
 
               <p class="flex items-center gap-4 text-h3">
@@ -812,7 +812,7 @@ watch(address, () => {
                   class="mr-4"
                   :vault="vault"
                 />
-                <UiHoverModalTrigger
+                <UiModalPreviewTrigger
                   v-if="hasRewards"
                   :component="VaultSupplyApyModal"
                   :modal-data="supplyApyModalData"
@@ -822,7 +822,7 @@ watch(address, () => {
                     class="!w-24 !h-24 text-accent-600 cursor-pointer"
                     name="sparks"
                   />
-                </UiHoverModalTrigger>
+                </UiModalPreviewTrigger>
                 <span>
                   {{ supplyAPYDisplay }}%
                 </span>

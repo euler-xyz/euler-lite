@@ -227,7 +227,7 @@ load()
           >
             <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
               Supply APY
-              <UiHoverModalTrigger
+              <UiModalPreviewTrigger
                 :component="VaultSupplyApyModal"
                 :modal-data="() => getStrategySupplyApyModalData(row.vault)"
                 aria-label="Show supply APY breakdown"
@@ -236,10 +236,10 @@ load()
                   class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                   name="info-circle"
                 />
-              </UiHoverModalTrigger>
+              </UiModalPreviewTrigger>
             </div>
             <div class="text-p2 flex items-center text-accent-600 font-semibold">
-              <UiHoverModalTrigger
+              <UiModalPreviewTrigger
                 v-if="hasSupplyRewards(row.vault.address)"
                 :component="VaultSupplyApyModal"
                 :modal-data="() => getStrategySupplyApyModalData(row.vault)"
@@ -249,7 +249,7 @@ load()
                   class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
                   name="sparks"
                 />
-              </UiHoverModalTrigger>
+              </UiModalPreviewTrigger>
               {{ formatNumber(getStrategySupplyApy(row.vault)) }}%
             </div>
           </div>

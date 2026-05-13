@@ -293,7 +293,7 @@ const supplyCapPercentageDisplay = computed(() => {
             Supply APY
           </template>
           <span class="flex items-center gap-4">
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               v-if="hasSupplyRewards(vault.address)"
               :component="VaultSupplyApyModal"
               :modal-data="supplyApyModalData"
@@ -303,7 +303,7 @@ const supplyCapPercentageDisplay = computed(() => {
                 class="!w-20 !h-20 text-accent-500 cursor-pointer"
                 name="sparks"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
             {{ formatNumber(supplyApyWithRewards) }}%
           </span>
         </VaultOverviewLabelValue>

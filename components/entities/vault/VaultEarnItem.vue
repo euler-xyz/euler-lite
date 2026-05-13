@@ -151,7 +151,7 @@ const supplyApyModalData = computed(() => ({
           <span class="inline-flex items-center rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5">
             1h
           </span>
-          <UiHoverModalTrigger
+          <UiModalPreviewTrigger
             :component="VaultSupplyApyModal"
             :modal-data="supplyApyModalData"
             aria-label="Show supply APY breakdown"
@@ -160,7 +160,7 @@ const supplyApyModalData = computed(() => ({
               class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
               name="info-circle"
             />
-          </UiHoverModalTrigger>
+          </UiModalPreviewTrigger>
         </div>
         <div
           class="text-p2 flex items-center text-accent-600"
@@ -172,7 +172,7 @@ const supplyApyModalData = computed(() => ({
           <div class="mr-6">
             <VaultPoints :vault="vault" />
           </div>
-          <UiHoverModalTrigger
+          <UiModalPreviewTrigger
             v-if="hasRewards"
             :component="VaultSupplyApyModal"
             :modal-data="supplyApyModalData"
@@ -182,7 +182,7 @@ const supplyApyModalData = computed(() => ({
               class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
               name="sparks"
             />
-          </UiHoverModalTrigger>
+          </UiModalPreviewTrigger>
           {{ formatNumber(nanoToValue(vault.interestRateInfo.supplyAPY, 25) + totalRewardsAPY) }}%
         </div>
       </div>

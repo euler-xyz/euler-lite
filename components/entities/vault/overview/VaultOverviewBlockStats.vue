@@ -96,7 +96,7 @@ watchEffect(async () => {
         <template #label>
           <span class="flex items-center gap-4">
             Supply APY
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               :component="VaultSupplyApyModal"
               :modal-data="supplyApyModalData"
               aria-label="Show supply APY breakdown"
@@ -105,11 +105,11 @@ watchEffect(async () => {
                 class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
                 name="info-circle"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
           </span>
         </template>
         <span class="flex items-center gap-4">
-          <UiHoverModalTrigger
+          <UiModalPreviewTrigger
             v-if="hasSupplyRewards(vault.address)"
             :component="VaultSupplyApyModal"
             :modal-data="supplyApyModalData"
@@ -119,7 +119,7 @@ watchEffect(async () => {
               class="!w-20 !h-20 text-accent-500 cursor-pointer"
               name="sparks"
             />
-          </UiHoverModalTrigger>
+          </UiModalPreviewTrigger>
           {{ formatNumber(supplyApyWithRewards) }}%
         </span>
       </VaultOverviewLabelValue>
@@ -130,7 +130,7 @@ watchEffect(async () => {
         <template #label>
           <span class="flex items-center gap-4">
             Borrow APY
-            <UiHoverModalTrigger
+            <UiModalPreviewTrigger
               :component="VaultBorrowApyModal"
               :modal-data="borrowApyModalData"
               aria-label="Show borrow APY breakdown"
@@ -139,11 +139,11 @@ watchEffect(async () => {
                 class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
                 name="info-circle"
               />
-            </UiHoverModalTrigger>
+            </UiModalPreviewTrigger>
           </span>
         </template>
         <span class="flex items-center gap-4">
-          <UiHoverModalTrigger
+          <UiModalPreviewTrigger
             v-if="hasBorrowRewards(vault.address)"
             :component="VaultBorrowApyModal"
             :modal-data="borrowApyModalData"
@@ -153,7 +153,7 @@ watchEffect(async () => {
               class="!w-20 !h-20 text-accent-500 cursor-pointer"
               name="sparks"
             />
-          </UiHoverModalTrigger>
+          </UiModalPreviewTrigger>
           {{ formatNumber(borrowApyWithRewards) }}%
         </span>
       </VaultOverviewLabelValue>
