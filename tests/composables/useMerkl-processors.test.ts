@@ -167,11 +167,7 @@ describe('processBorrowFromCollateralOpportunities', () => {
     expect(map.size).toBe(1)
   })
 
-  // TEMPORARY: while the upstream URL passes `&test=true`, the zero-APR
-  // skip is relaxed so SOON / test-only campaigns (apr=0 until real
-  // borrows accrue) still surface for wiring verification. Restore a
-  // skip-active-zero-APR test case when test=true is removed.
-  it('emits active campaigns with apr=0 (test-mode behaviour)', () => {
+  it('drops active campaigns with no APR', () => {
     const opportunity = makeOpportunity({
       aprRecord: { cumulated: 0, timestamp: '0', breakdowns: [] },
       campaigns: [makeCampaign({
@@ -180,8 +176,7 @@ describe('processBorrowFromCollateralOpportunities', () => {
       })],
     })
     const map = processBorrowFromCollateralOpportunities([opportunity], 'EULER_MULTI_BORROW_FROM_COLLATERAL')
-    expect(map.size).toBe(1)
-    expect(map.get('0xaaa')?.[0].apr).toBe(0)
+    expect(map.size).toBe(0)
   })
 
   it('prefers aprRecord breakdown over campaign.apr', () => {

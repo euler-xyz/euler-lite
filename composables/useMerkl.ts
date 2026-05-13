@@ -101,9 +101,7 @@ const processOpportunitiesToCampaigns = (
   opType: 'EULER' | 'ERC20LOGPROCESSOR',
 ): Map<string, RewardCampaign[]> => {
   const campaignMap = new Map<string, RewardCampaign[]>()
-  // TEMPORARY: `now` removed alongside the endTimestamp filter while
-  // test=true is active. Restore `const now = Math.floor(Date.now() / 1000)`
-  // when the zero-APR / status filters are re-introduced.
+  const now = Math.floor(Date.now() / 1000)
 
   for (const opportunity of opportunities) {
     // TEMPORARY: status check relaxed while the upstream URL passes
@@ -131,11 +129,8 @@ const processOpportunitiesToCampaigns = (
 
       const apr = aprs.get(campaign.campaignId) || 0
 
-      // TEMPORARY: zero-APR skip relaxed while test=true is active. Test
-      // campaigns frequently report apr=0 (no real liquidity has used them
-      // yet), but they still need to surface so we can verify the wiring.
-      // Restore `if (campaign.endTimestamp > now && !apr) continue` when
-      // test=true is removed.
+      // Skip active campaigns with no APR
+      if (campaign.endTimestamp > now && !apr) continue
 
       const vaultAddress = opType === 'ERC20LOGPROCESSOR'
         ? (campaign.params.targetToken).toLowerCase()
@@ -172,7 +167,7 @@ const processMultiLendBorrowOpportunities = (
   opportunities: Opportunity[],
 ): Map<string, RewardCampaign[]> => {
   const campaignMap = new Map<string, RewardCampaign[]>()
-  // TEMPORARY: see processOpportunitiesToCampaigns.
+  const now = Math.floor(Date.now() / 1000)
 
   for (const opportunity of opportunities) {
     // TEMPORARY: see processOpportunitiesToCampaigns for rationale.
@@ -200,8 +195,7 @@ const processMultiLendBorrowOpportunities = (
       // MULTILENDBORROW that breakdown can be absent/zero while the top-level
       // campaign.apr is populated, so fall back to it.
       const apr = aprs.get(campaign.campaignId) || campaign.apr || 0
-      // TEMPORARY: see processOpportunitiesToCampaigns — zero-APR skip
-      // relaxed while test=true is active.
+      if (campaign.endTimestamp > now && !apr) continue
 
       for (const market of markets) {
         const vaultAddress = (
@@ -249,7 +243,7 @@ export const processBorrowFromCollateralOpportunities = (
   opType: 'EULER_BORROW_FROM_COLLATERAL' | 'EULER_MULTI_BORROW_FROM_COLLATERAL',
 ): Map<string, RewardCampaign[]> => {
   const campaignMap = new Map<string, RewardCampaign[]>()
-  // TEMPORARY: see processOpportunitiesToCampaigns.
+  const now = Math.floor(Date.now() / 1000)
 
   for (const opportunity of opportunities) {
     // TEMPORARY: see processOpportunitiesToCampaigns for rationale.
@@ -266,8 +260,7 @@ export const processBorrowFromCollateralOpportunities = (
       // Mirror the MULTILENDBORROW fallback: breakdown can be absent or zero
       // while campaign.apr is populated.
       const apr = aprs.get(campaign.campaignId) || campaign.apr || 0
-      // TEMPORARY: see processOpportunitiesToCampaigns — zero-APR skip
-      // relaxed while test=true is active.
+      if (campaign.endTimestamp > now && !apr) continue
 
       const pairs: { vault: string, collateral: string }[] = []
 
