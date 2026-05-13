@@ -329,10 +329,11 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     ]
 
     for (const position of savingPositions.value) {
+      const amount = nanoToValue(position.assets, decimals)
       opts.push({
         type: 'saving',
-        amount: nanoToValue(position.assets, decimals),
-        price: savingCollateralPriceUsd.value,
+        amount,
+        price: collateralUnitPrice.value !== undefined ? amount * collateralUnitPrice.value : 0,
         apy: collateralSupplyApyWithRewards.value,
         assetAddress,
         subAccount: position.subAccount,

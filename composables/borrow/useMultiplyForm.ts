@@ -150,6 +150,9 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const multiplyShortProduct = useEulerProductOfVault(computed(() => multiplyShortVault.value?.address || ''))
 
   // --- Savings position ---
+  // When a sub-account is explicitly selected, require an exact match; falling
+  // back to the first matching vault could silently source from the wrong
+  // sub-account if the selected position disappears between refreshes.
   const multiplySavingPosition = computed(() => {
     if (!multiplySupplyVault.value) return null
     const vaultAddr = normalizeAddress(multiplySupplyVault.value.address)
@@ -158,8 +161,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       position => normalizeAddress(position.vault.address) === vaultAddr,
     )
     if (selectedSub) {
-      const exact = matches.find(p => normalizeAddress(p.subAccount) === normalizeAddress(selectedSub))
-      if (exact) return exact
+      return matches.find(p => normalizeAddress(p.subAccount) === normalizeAddress(selectedSub)) || null
     }
     return matches[0] || null
   })

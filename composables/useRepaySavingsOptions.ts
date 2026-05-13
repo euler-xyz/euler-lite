@@ -57,6 +57,9 @@ export const useRepaySavingsOptions = () => {
     },
   )
 
+  // When a sub-account is explicitly requested, require an exact match instead
+  // of falling back to the first matching vault — silently picking a different
+  // sub-account would route a repay against the wrong position.
   const getSavingsPosition = (vaultAddress: string, subAccount?: string): AccountDepositPosition | undefined => {
     const normalizedVault = getAddress(vaultAddress)
     const matches = savingsPositions.value.filter(
@@ -64,8 +67,7 @@ export const useRepaySavingsOptions = () => {
     )
     if (subAccount) {
       const normalizedSub = getAddress(subAccount)
-      const exact = matches.find(p => getAddress(p.subAccount) === normalizedSub)
-      if (exact) return exact
+      return matches.find(p => getAddress(p.subAccount) === normalizedSub)
     }
     return matches[0]
   }

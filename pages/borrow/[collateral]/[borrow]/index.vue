@@ -119,8 +119,9 @@ const isPairFullyRestricted = computed(() =>
 
 // --- Savings collateral ---
 const savingPositions = computed(() => {
+  const normalizedCollateral = normalizeAddress(collateralAddress)
   return depositPositions.value.filter(position =>
-    position.assets > 0n && position.vault.address === route.params.collateral,
+    position.assets > 0n && normalizeAddress(position.vault.address) === normalizedCollateral,
   )
 })
 
