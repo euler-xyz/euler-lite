@@ -11,7 +11,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "parity:compare": "node scripts/parity-compare.mjs",
-    "parity:full": "node scripts/parity-compare.mjs --scenarios tests/parity/full-run.scenarios.json --sequential --rate-limit-retries 3",
+    "parity:full": "node scripts/parity-compare.mjs --scenarios tests/parity/full-run.scenarios.json --rate-limit-retries 3",
     "parity:links": "node scripts/parity-links.mjs",
     "parity:sdk-diagnostics": "node scripts/parity-sdk-diagnostics.mjs",
     "parity:overlay": "node scripts/parity-overlay.mjs",
