@@ -7,6 +7,7 @@ import type { AnyVault } from '~/composables/useVaultRegistry'
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import { isVaultNotExplorable, isVaultFeatured, isVaultRecentlyAdded, isVaultDeprecated, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 import { isLiveCollateralEdge } from '~/utils/vault/ltv'
+import { liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
 
 // -- Helpers --
 
@@ -505,11 +506,7 @@ export const useMarketGroups = () => {
       const result = await sdk.eVaultService.fetchVaults(
         chainId.value,
         allAddresses.map(addr => getAddress(addr) as Address),
-        {
-          populateMarketPrices: true,
-          populateCollaterals: true,
-          populateRewards: true,
-        },
+        liteVaultFetchOptions,
       )
       result.errors.forEach(issue => logWarn('useMarketGroups/fetchMarketGroupOnDemand', issue))
       memberVaults.push(...(result.result.filter(Boolean) as EVault[]))

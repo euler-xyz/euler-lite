@@ -7,6 +7,7 @@ import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { getAddress, type Address } from 'viem'
 import { useVaultRegistry } from './useVaultRegistry'
 import { logWarn } from '~/utils/errorHandling'
+import { liteSecuritizeVaultFetchOptions, liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
 
 const isReady = ref(false)
 const isEVaultLoading = ref(false)
@@ -34,18 +35,6 @@ const isCollateralResolved = ref(false)
 // Incremented in resetVaultsState(); any async operation capturing an older generation
 // must stop registering vaults.
 const loadGeneration = ref(0)
-
-const sdkVaultFetchOptions = {
-  populateMarketPrices: true,
-  populateCollaterals: true,
-  populateStrategyVaults: true,
-  populateRewards: true,
-  eVaultFetchOptions: {
-    populateMarketPrices: true,
-    populateCollaterals: true,
-    populateRewards: true,
-  },
-}
 
 interface UpdateEVaultsOptions {
   verifiedAddresses?: ReadonlySet<string>
@@ -165,7 +154,7 @@ const updateEVaults = async (vaultAddresses: string[], generation?: number, sile
     const result = await sdk.eVaultService.fetchVaults(
       chainId.value,
       vaultAddresses.map(addr => getAddress(addr) as Address),
-      sdkVaultFetchOptions,
+      liteVaultFetchOptions,
     )
     if (loadGeneration.value !== gen) return
     result.errors.forEach(issue => logWarn('useVaults/updateEVaults', issue))
@@ -219,7 +208,7 @@ const updateEarnVaults = async (vaultAddresses: string[], generation?: number, s
     const result = await sdk.eulerEarnService.fetchVaults(
       chainId.value,
       vaultAddresses.map(addr => getAddress(addr) as Address),
-      sdkVaultFetchOptions,
+      liteVaultFetchOptions,
     )
     if (loadGeneration.value !== gen) return
     result.errors.forEach(issue => logWarn('useVaults/updateEarnVaults', issue))
@@ -292,7 +281,7 @@ const fetchNeededEscrowVaults = async (addresses: string[], generation: number):
   const result = await sdk.eVaultService.fetchVaults(
     chainId.value,
     addresses.map(addr => getAddress(addr) as Address),
-    sdkVaultFetchOptions,
+    liteVaultFetchOptions,
   )
 
   if (loadGeneration.value !== generation) return
@@ -398,7 +387,7 @@ const updateSecuritizeVaults = async (securitizeAddresses: string[], generation:
     const result = await sdk.securitizeVaultService.fetchVaults(
       chainId.value,
       securitizeAddresses.map(addr => getAddress(addr) as Address),
-      { populateMarketPrices: true },
+      liteSecuritizeVaultFetchOptions,
     )
 
     if (loadGeneration.value !== generation) return
