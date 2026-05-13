@@ -22,6 +22,7 @@ const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enab
 
 const { client: rpcClient } = useRpcClient()
 const { chainId } = useEulerAddresses()
+const { copyToClipboard, isCopied } = useClipboardCopy()
 const { isVaultGovernorVerified } = useVaults()
 const { getEvkVaults } = useVaultRegistry()
 const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
@@ -49,7 +50,7 @@ const shortenAddress = (address: string) => {
 }
 
 const onCopyClick = (address: string) => {
-  navigator.clipboard.writeText(address)
+  copyToClipboard(address)
 }
 
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
@@ -375,7 +376,7 @@ const supplyCapPercentageDisplay = computed(() => {
             >
               <SvgIcon
                 class="!w-18 !h-18"
-                name="copy"
+                :name="isCopied(vault.asset.address) ? 'check' : 'copy'"
               />
             </button>
           </div>
@@ -398,7 +399,7 @@ const supplyCapPercentageDisplay = computed(() => {
             >
               <SvgIcon
                 class="!w-18 !h-18"
-                name="copy"
+                :name="isCopied(vault.address) ? 'check' : 'copy'"
               />
             </button>
           </div>
@@ -422,7 +423,7 @@ const supplyCapPercentageDisplay = computed(() => {
             >
               <SvgIcon
                 class="!w-18 !h-18"
-                name="copy"
+                :name="isCopied(vault.governorAdmin) ? 'check' : 'copy'"
               />
             </button>
           </div>

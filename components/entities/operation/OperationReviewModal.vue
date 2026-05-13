@@ -62,8 +62,8 @@ const {
   fetchEnabled: fetchTenderlyEnabled,
 } = useTenderlySimulation()
 
-const copied = ref(false)
 const tenderlyEnabled = ref(false)
+const { copied, copyToClipboard } = useClipboardCopy()
 
 fetchTenderlyEnabled().then((enabled) => {
   tenderlyEnabled.value = enabled
@@ -164,11 +164,7 @@ const copyCalldata = () => {
       value: step.value?.toString() || '0',
     }))
 
-    navigator.clipboard.writeText(JSON.stringify(calldataEntries, null, 2))
-    copied.value = true
-    setTimeout(() => {
-      copied.value = false
-    }, 2000)
+    copyToClipboard(JSON.stringify(calldataEntries, null, 2), 'calldata')
   }
   catch (err) {
     logWarn('OperationReviewModal/calldataCopy', err)
@@ -257,7 +253,7 @@ const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimite
           @click="copyCalldata"
         >
           <SvgIcon
-            name="copy"
+            :name="copied ? 'check' : 'copy'"
             class="!w-16 !h-16"
           />
           {{ copied ? 'Copied!' : 'Copy calldata' }}

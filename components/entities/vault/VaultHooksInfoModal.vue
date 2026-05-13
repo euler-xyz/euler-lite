@@ -16,6 +16,7 @@ const emits = defineEmits<{ close: [] }>()
 const { vault } = defineProps<{ vault: Vault }>()
 
 const { chainId } = useEulerAddresses()
+const { copyToClipboard, isCopied } = useClipboardCopy()
 
 // 'full'         — all user-facing ops are explicitly in the bitmap
 // 'status-check' — only the vault-status check is disabled, which the EVC
@@ -60,7 +61,7 @@ const hookTargetLabel = computed(() => {
 })
 
 const onCopyClick = (address: string) => {
-  navigator.clipboard.writeText(address).catch(() => {})
+  copyToClipboard(address).catch(() => {})
 }
 
 const handleClose = () => {
@@ -101,7 +102,7 @@ const handleClose = () => {
         >
           <SvgIcon
             class="!w-18 !h-18"
-            name="copy"
+            :name="isCopied(vault.hookTarget) ? 'check' : 'copy'"
           />
         </button>
       </div>
