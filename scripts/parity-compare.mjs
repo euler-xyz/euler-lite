@@ -20,6 +20,7 @@ const DEFAULT_CAPTURE_BUDGET_MS = 6_000
 const DEFAULT_PORTFOLIO_TIMEOUT_MS = 15_000
 const DEFAULT_PORTFOLIO_CAPTURE_BUDGET_MS = 15_000
 const DEFAULT_NETWORK_IDLE_TIMEOUT_MS = 0
+const DEFAULT_PERSISTENCE_RECHECK_MAX_RATIO = 0.1
 const DEFAULT_WORK_DIR = path.join('/tmp', 'euler-lite-parity', sanitizeFilePart(ROOT_DIR))
 
 const args = parseArgs(process.argv.slice(2))
@@ -81,6 +82,7 @@ async function main() {
       portfolioCaptureBudgetMs: config.portfolioCaptureBudgetMs,
       dataReadyTimeoutMs: config.dataReadyTimeoutMs,
       networkIdleTimeoutMs: config.networkIdleTimeoutMs,
+      persistenceRecheckMaxRatio: config.persistenceRecheckMaxRatio,
       scenarioFilter: config.scenarioFilter,
       appPhased: config.appPhased,
       alternating: config.sequential,
@@ -233,6 +235,7 @@ async function buildConfig() {
     portfolioTimeoutMs: Number(valueOf('portfolio-timeout-ms') || process.env.PARITY_PORTFOLIO_TIMEOUT_MS || DEFAULT_PORTFOLIO_TIMEOUT_MS),
     portfolioCaptureBudgetMs: Number(valueOf('portfolio-capture-budget-ms') || process.env.PARITY_PORTFOLIO_CAPTURE_BUDGET_MS || DEFAULT_PORTFOLIO_CAPTURE_BUDGET_MS),
     networkIdleTimeoutMs: Number(valueOf('network-idle-timeout-ms') || process.env.PARITY_NETWORK_IDLE_TIMEOUT_MS || DEFAULT_NETWORK_IDLE_TIMEOUT_MS),
+    persistenceRecheckMaxRatio: Number(valueOf('persistence-recheck-max-ratio') || process.env.PARITY_PERSISTENCE_RECHECK_MAX_RATIO || DEFAULT_PERSISTENCE_RECHECK_MAX_RATIO),
     navigationTimeoutMs: Number(valueOf('navigation-timeout-ms') || process.env.PARITY_NAVIGATION_TIMEOUT_MS || 45_000),
     navigationRetries: Number(valueOf('navigation-retries') || process.env.PARITY_NAVIGATION_RETRIES || 3),
     numericTolerance: parseNumericTolerance(valueOf('numeric-tolerance') || process.env.PARITY_NUMERIC_TOLERANCE || '1%'),
@@ -814,7 +817,27 @@ async function closeAppPhaseRuntime(runtime) {
 async function verifyPersistentDiscrepancies({ diff, run, config, browser, scenarios, state }) {
   const failedPages = diff.pages.filter(page => page.status !== 'pass')
   if (!failedPages.length) {
-    diff.persistenceSummary = { checked: 0, persistent: 0, resolved: 0, failed: 0 }
+    diff.persistenceSummary = { checked: 0, persistent: 0, resolved: 0, failed: 0, skipped: 0 }
+    return
+  }
+
+  const failedRatio = failedPages.length / Math.max(diff.pages.length, 1)
+  if (failedRatio > config.persistenceRecheckMaxRatio) {
+    diff.persistenceSummary = {
+      checked: 0,
+      persistent: 0,
+      resolved: 0,
+      failed: 0,
+      skipped: failedPages.length,
+      reason: 'discrepancy-ratio-exceeded',
+      failedRatio,
+      maxRatio: config.persistenceRecheckMaxRatio,
+    }
+    console.log('[parity-compare] Skipping reload recheck: '
+      + failedPages.length + '/' + diff.pages.length
+      + ' discrepant captures exceeds '
+      + Math.round(config.persistenceRecheckMaxRatio * 100)
+      + '% threshold')
     return
   }
 
@@ -890,6 +913,7 @@ async function verifyPersistentDiscrepancies({ diff, run, config, browser, scena
     persistent: results.filter(result => result.status === 'persistent').length,
     resolved: results.filter(result => result.status === 'resolved-after-reload').length,
     failed: results.filter(result => result.status === 'verification-failed').length,
+    skipped: 0,
   }
   diff.pagesWithDiscrepancies = summarizeDiscrepantPages(diff.pages.filter(page => page.status !== 'pass'))
 }
@@ -2291,7 +2315,7 @@ function renderHtmlReport(diff) {
 <body>
   <h1>Parity report ${escapeHtml(diff.runId)}</h1>
   <p>${diff.summary.failedPages} failed pages out of ${diff.summary.pages}. Element diffs: ${diff.summary.elementDiffs}. List diffs: ${diff.summary.listDiffs}.</p>
-  <p>Reload recheck: ${diff.persistenceSummary?.checked ?? 0} checked, ${diff.persistenceSummary?.persistent ?? 0} persistent, ${diff.persistenceSummary?.resolved ?? 0} resolved, ${diff.persistenceSummary?.failed ?? 0} failed to verify.</p>
+  <p>Reload recheck: ${renderPersistenceSummary(diff.persistenceSummary)}</p>
   <h2>Discrepancy links</h2>
   <ul>${problemLinks || '<li>None</li>'}</ul>
   <h2>Pages</h2>
@@ -2327,11 +2351,7 @@ function printSummary(diff) {
   console.log('[parity-compare] failed pages: ' + diff.summary.failedPages + '/' + diff.summary.pages)
   console.log('[parity-compare] slow captures: ' + diff.summary.slowCaptures)
   if (diff.persistenceSummary) {
-    console.log('[parity-compare] reload recheck: '
-      + diff.persistenceSummary.checked + ' checked, '
-      + diff.persistenceSummary.persistent + ' persistent, '
-      + diff.persistenceSummary.resolved + ' resolved, '
-      + diff.persistenceSummary.failed + ' failed')
+    console.log('[parity-compare] reload recheck: ' + renderPersistenceSummary(diff.persistenceSummary))
   }
 
   if (diff.pagesWithDiscrepancies.length) {
@@ -2342,6 +2362,23 @@ function printSummary(diff) {
       console.log('    candidate: ' + page.candidateUrl)
     }
   }
+}
+
+function renderPersistenceSummary(summary) {
+  if (!summary) return '0 checked, 0 persistent, 0 resolved, 0 failed to verify'
+  const base = summary.checked + ' checked, '
+    + summary.persistent + ' persistent, '
+    + summary.resolved + ' resolved, '
+    + summary.failed + ' failed to verify'
+
+  if (!summary.skipped) return base
+
+  const maxPercent = Math.round(Number(summary.maxRatio || 0) * 100)
+  const failedPercent = Math.round(Number(summary.failedRatio || 0) * 100)
+  return base + ', ' + summary.skipped + ' skipped'
+    + (summary.reason === 'discrepancy-ratio-exceeded'
+      ? ' (' + failedPercent + '% discrepant captures exceeded ' + maxPercent + '% threshold)'
+      : '')
 }
 
 async function loadScenarios(config) {
@@ -2622,6 +2659,7 @@ Options:
   --wait-timeout-ms <n>       Per-selector and modal action timeout. Default: ${DEFAULT_WAIT_TIMEOUT_MS}.
   --data-ready-timeout-ms <n> Wait for visible loading placeholders to clear. Default: ${DEFAULT_DATA_READY_TIMEOUT_MS}.
   --network-idle-timeout-ms <n> Network idle wait after selectors. Default: ${DEFAULT_NETWORK_IDLE_TIMEOUT_MS}.
+  --persistence-recheck-max-ratio <n> Skip reload recheck above this discrepant capture ratio. Default: ${DEFAULT_PERSISTENCE_RECHECK_MAX_RATIO}.
   --navigation-timeout-ms <n> Per-page navigation timeout. Default: 45000.
   --navigation-retries <n>    Retry page navigations before recording a capture error. Default: 3.
   --numeric-tolerance <n|%>   Relative tolerance for numeric values. Default: 1%.
@@ -2648,6 +2686,7 @@ Environment:
   PARITY_NUMERIC_TOLERANCE    Same as --numeric-tolerance.
   PARITY_RATE_LIMIT_RETRIES   Same as --rate-limit-retries.
   PARITY_DATA_READY_TIMEOUT_MS Same as --data-ready-timeout-ms.
+  PARITY_PERSISTENCE_RECHECK_MAX_RATIO Same as --persistence-recheck-max-ratio.
   PARITY_NAVIGATION_TIMEOUT_MS Same as --navigation-timeout-ms.
   PARITY_NAVIGATION_RETRIES   Same as --navigation-retries.
   PARITY_ALTERNATING=1        Same as --alternating.
