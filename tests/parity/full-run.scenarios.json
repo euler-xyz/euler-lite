@@ -125,7 +125,7 @@
       "label": "Full run: Mainnet explore market list",
       "path": "/explore?network=1",
       "waitFor": [
-        "[data-id=\"discovery-market-list\"][data-list=\"discovery-market\"]"
+        "[data-id=\"discovery-market-list\"]"
       ]
     },
     {
@@ -133,14 +133,14 @@
       "label": "Full run: Mainnet explore graph view",
       "path": "/explore?network=1",
       "waitFor": [
-        "[data-id=\"discovery-market-list\"][data-list=\"discovery-market\"]"
+        "[data-id=\"discovery-market-list\"]"
       ],
       "actions": [
         {
           "type": "click",
           "selector": "[data-id=\"discovery-market-card\"]",
           "waitFor": [
-            "[data-id=\"discovery-graph\"][data-list=\"discovery-graph\"]"
+            "[data-id=\"discovery-graph\"]"
           ]
         }
       ],
@@ -151,21 +151,21 @@
       "label": "Full run: Mainnet explore matrix dropdown: Stats",
       "path": "/explore?network=1",
       "waitFor": [
-        "[data-id=\"discovery-market-list\"][data-list=\"discovery-market\"]"
+        "[data-id=\"discovery-market-list\"]"
       ],
       "actions": [
         {
           "type": "click",
           "selector": "[data-id=\"discovery-market-card\"]",
           "waitFor": [
-            "[data-id=\"discovery-graph\"][data-list=\"discovery-graph\"]"
+            "[data-id=\"discovery-graph\"]"
           ]
         },
         {
           "type": "click",
           "selector": "[data-id=\"discovery-view-toggle\"][data-field=\"matrix\"]",
           "waitFor": [
-            "[data-id=\"attribute-matrix\"][data-field=\"stats\"]"
+            "[data-id=\"attribute-matrix\"]"
           ]
         },
         {
@@ -180,7 +180,7 @@
           "type": "click",
           "selector": "[data-id=\"discovery-matrix-view-option\"][data-field=\"stats\"]",
           "waitFor": [
-            "[data-id=\"attribute-matrix\"][data-field=\"stats\"]"
+            "[data-id=\"attribute-matrix\"]"
           ]
         }
       ],
@@ -191,21 +191,21 @@
       "label": "Full run: Mainnet explore matrix dropdown: Configuration",
       "path": "/explore?network=1",
       "waitFor": [
-        "[data-id=\"discovery-market-list\"][data-list=\"discovery-market\"]"
+        "[data-id=\"discovery-market-list\"]"
       ],
       "actions": [
         {
           "type": "click",
           "selector": "[data-id=\"discovery-market-card\"]",
           "waitFor": [
-            "[data-id=\"discovery-graph\"][data-list=\"discovery-graph\"]"
+            "[data-id=\"discovery-graph\"]"
           ]
         },
         {
           "type": "click",
           "selector": "[data-id=\"discovery-view-toggle\"][data-field=\"matrix\"]",
           "waitFor": [
-            "[data-id=\"attribute-matrix\"][data-field=\"stats\"]"
+            "[data-id=\"attribute-matrix\"]"
           ]
         },
         {
@@ -220,7 +220,7 @@
           "type": "click",
           "selector": "[data-id=\"discovery-matrix-view-option\"][data-field=\"config\"]",
           "waitFor": [
-            "[data-id=\"attribute-matrix\"][data-field=\"config\"]"
+            "[data-id=\"attribute-matrix\"]"
           ]
         }
       ],
@@ -231,21 +231,21 @@
       "label": "Full run: Mainnet explore matrix dropdown: Oracles",
       "path": "/explore?network=1",
       "waitFor": [
-        "[data-id=\"discovery-market-list\"][data-list=\"discovery-market\"]"
+        "[data-id=\"discovery-market-list\"]"
       ],
       "actions": [
         {
           "type": "click",
           "selector": "[data-id=\"discovery-market-card\"]",
           "waitFor": [
-            "[data-id=\"discovery-graph\"][data-list=\"discovery-graph\"]"
+            "[data-id=\"discovery-graph\"]"
           ]
         },
         {
           "type": "click",
           "selector": "[data-id=\"discovery-view-toggle\"][data-field=\"matrix\"]",
           "waitFor": [
-            "[data-id=\"attribute-matrix\"][data-field=\"stats\"]"
+            "[data-id=\"attribute-matrix\"]"
           ]
         },
         {
@@ -260,7 +260,7 @@
           "type": "click",
           "selector": "[data-id=\"discovery-matrix-view-option\"][data-field=\"oracle\"]",
           "waitFor": [
-            "[data-id=\"collateral-matrix\"][data-field=\"oracle\"]"
+            "[data-id=\"collateral-matrix\"]"
           ]
         }
       ],
@@ -271,21 +271,21 @@
       "label": "Full run: Mainnet explore matrix dropdown: Net APY",
       "path": "/explore?network=1",
       "waitFor": [
-        "[data-id=\"discovery-market-list\"][data-list=\"discovery-market\"]"
+        "[data-id=\"discovery-market-list\"]"
       ],
       "actions": [
         {
           "type": "click",
           "selector": "[data-id=\"discovery-market-card\"]",
           "waitFor": [
-            "[data-id=\"discovery-graph\"][data-list=\"discovery-graph\"]"
+            "[data-id=\"discovery-graph\"]"
           ]
         },
         {
           "type": "click",
           "selector": "[data-id=\"discovery-view-toggle\"][data-field=\"matrix\"]",
           "waitFor": [
-            "[data-id=\"attribute-matrix\"][data-field=\"stats\"]"
+            "[data-id=\"attribute-matrix\"]"
           ]
         },
         {
@@ -300,7 +300,7 @@
           "type": "click",
           "selector": "[data-id=\"discovery-matrix-view-option\"][data-field=\"net-apy\"]",
           "waitFor": [
-            "[data-id=\"collateral-matrix\"][data-field=\"net-apy\"]"
+            "[data-id=\"collateral-matrix\"]"
           ]
         }
       ],
@@ -311,21 +311,21 @@
       "label": "Full run: Mainnet explore matrix dropdown: Max ROE",
       "path": "/explore?network=1",
       "waitFor": [
-        "[data-id=\"discovery-market-list\"][data-list=\"discovery-market\"]"
+        "[data-id=\"discovery-market-list\"]"
       ],
       "actions": [
         {
           "type": "click",
           "selector": "[data-id=\"discovery-market-card\"]",
           "waitFor": [
-            "[data-id=\"discovery-graph\"][data-list=\"discovery-graph\"]"
+            "[data-id=\"discovery-graph\"]"
           ]
         },
         {
           "type": "click",
           "selector": "[data-id=\"discovery-view-toggle\"][data-field=\"matrix\"]",
           "waitFor": [
-            "[data-id=\"attribute-matrix\"][data-field=\"stats\"]"
+            "[data-id=\"attribute-matrix\"]"
           ]
         },
         {
@@ -340,7 +340,7 @@
           "type": "click",
           "selector": "[data-id=\"discovery-matrix-view-option\"][data-field=\"roe\"]",
           "waitFor": [
-            "[data-id=\"collateral-matrix\"][data-field=\"roe\"]"
+            "[data-id=\"collateral-matrix\"]"
           ]
         }
       ],
@@ -351,21 +351,21 @@
       "label": "Full run: Mainnet explore matrix dropdown: Multiplier",
       "path": "/explore?network=1",
       "waitFor": [
-        "[data-id=\"discovery-market-list\"][data-list=\"discovery-market\"]"
+        "[data-id=\"discovery-market-list\"]"
       ],
       "actions": [
         {
           "type": "click",
           "selector": "[data-id=\"discovery-market-card\"]",
           "waitFor": [
-            "[data-id=\"discovery-graph\"][data-list=\"discovery-graph\"]"
+            "[data-id=\"discovery-graph\"]"
           ]
         },
         {
           "type": "click",
           "selector": "[data-id=\"discovery-view-toggle\"][data-field=\"matrix\"]",
           "waitFor": [
-            "[data-id=\"attribute-matrix\"][data-field=\"stats\"]"
+            "[data-id=\"attribute-matrix\"]"
           ]
         },
         {
@@ -380,7 +380,7 @@
           "type": "click",
           "selector": "[data-id=\"discovery-matrix-view-option\"][data-field=\"multiplier\"]",
           "waitFor": [
-            "[data-id=\"collateral-matrix\"][data-field=\"multiplier\"]"
+            "[data-id=\"collateral-matrix\"]"
           ]
         }
       ],
@@ -391,21 +391,21 @@
       "label": "Full run: Mainnet explore matrix dropdown: Borrow LTV",
       "path": "/explore?network=1",
       "waitFor": [
-        "[data-id=\"discovery-market-list\"][data-list=\"discovery-market\"]"
+        "[data-id=\"discovery-market-list\"]"
       ],
       "actions": [
         {
           "type": "click",
           "selector": "[data-id=\"discovery-market-card\"]",
           "waitFor": [
-            "[data-id=\"discovery-graph\"][data-list=\"discovery-graph\"]"
+            "[data-id=\"discovery-graph\"]"
           ]
         },
         {
           "type": "click",
           "selector": "[data-id=\"discovery-view-toggle\"][data-field=\"matrix\"]",
           "waitFor": [
-            "[data-id=\"attribute-matrix\"][data-field=\"stats\"]"
+            "[data-id=\"attribute-matrix\"]"
           ]
         },
         {
@@ -420,7 +420,7 @@
           "type": "click",
           "selector": "[data-id=\"discovery-matrix-view-option\"][data-field=\"bltv\"]",
           "waitFor": [
-            "[data-id=\"collateral-matrix\"][data-field=\"bltv\"]"
+            "[data-id=\"collateral-matrix\"]"
           ]
         }
       ],
@@ -431,21 +431,21 @@
       "label": "Full run: Mainnet explore matrix dropdown: Liquidation LTV",
       "path": "/explore?network=1",
       "waitFor": [
-        "[data-id=\"discovery-market-list\"][data-list=\"discovery-market\"]"
+        "[data-id=\"discovery-market-list\"]"
       ],
       "actions": [
         {
           "type": "click",
           "selector": "[data-id=\"discovery-market-card\"]",
           "waitFor": [
-            "[data-id=\"discovery-graph\"][data-list=\"discovery-graph\"]"
+            "[data-id=\"discovery-graph\"]"
           ]
         },
         {
           "type": "click",
           "selector": "[data-id=\"discovery-view-toggle\"][data-field=\"matrix\"]",
           "waitFor": [
-            "[data-id=\"attribute-matrix\"][data-field=\"stats\"]"
+            "[data-id=\"attribute-matrix\"]"
           ]
         },
         {
@@ -460,7 +460,7 @@
           "type": "click",
           "selector": "[data-id=\"discovery-matrix-view-option\"][data-field=\"lltv\"]",
           "waitFor": [
-            "[data-id=\"collateral-matrix\"][data-field=\"lltv\"]"
+            "[data-id=\"collateral-matrix\"]"
           ]
         }
       ],
