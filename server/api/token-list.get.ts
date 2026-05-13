@@ -6,6 +6,7 @@ import { createInFlightDedup } from '~/server/utils/in-flight'
 import { reportStatus } from '~/server/utils/log'
 import { MERKL_API_BASE_URL } from '~/entities/constants'
 import { buildEulerSDK, type EulerSDK, type TokenListItem } from '@eulerxyz/euler-v2-sdk'
+import { readV3ApiUrl } from '~/utils/api-url-env'
 
 const CACHE_TTL_MS = 300_000
 const DEFILLAMA_DEFAULT_URL = 'https://d3g10bzo9rdluh.cloudfront.net'
@@ -46,15 +47,8 @@ const mergedInFlight = createInFlightDedup<string, TokenEntry[]>()
 
 let sdkPromise: Promise<EulerSDK> | undefined
 
-function env(key: string, ...fallbackKeys: string[]): string {
-  for (const k of [key, ...fallbackKeys]) {
-    if (process.env[k]) return process.env[k]!
-  }
-  return ''
-}
-
 function getV3ApiUrl(): string | undefined {
-  return env('V3_API_URL', 'EULER_SDK_V3_API_URL', 'NUXT_PUBLIC_V3_API_URL', 'EULER_API_URL', 'NUXT_PUBLIC_EULER_API_URL')
+  return readV3ApiUrl()
     .trim()
     .replace(/\/+$/, '') || undefined
 }

@@ -162,7 +162,6 @@ export default defineNuxtConfig({
       appKitProjectId: '',
       appUrl: '',
       pythHermesUrl: '',
-      eulerApiUrl: '',
       v3ApiUrl: '',
       swapApiUrl: '',
       sentryDsn: '', // set via NUXT_PUBLIC_SENTRY_DSN
