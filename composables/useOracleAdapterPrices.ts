@@ -217,21 +217,6 @@ const decodePriceResults = (
       const quoteDecimals = decimals.get(adapter.quote.toLowerCase()) ?? 18
       const rate = nanoToValue(outAmount, quoteDecimals)
 
-      // TEMP debug — remove after diagnosing the STRC/USD price.
-      if (typeof window !== 'undefined') {
-        // eslint-disable-next-line no-console
-        console.log('[adapterPrice]', {
-          oracle: adapter.oracle,
-          name: adapter.name,
-          base: adapter.base,
-          quote: adapter.quote,
-          baseDecimals: decimals.get(adapter.base.toLowerCase()),
-          quoteDecimals,
-          outAmount: outAmount.toString(),
-          rate,
-        })
-      }
-
       prices.set(key, { rate, success: true })
     }
     catch {

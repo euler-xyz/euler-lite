@@ -96,11 +96,10 @@ const adapterViews = computed(() => adapters.value.map((adapter) => {
   const checks = meta?.checks
   const labelPrimary = meta?.label?.split('(')[0].trimEnd()
   const invertPrice = shouldInvertOraclePrice(
-    labelPrimary,
+    meta?.base,
+    meta?.quote,
     adapter.base,
     adapter.quote,
-    resolveSymbol(adapter.base),
-    resolveSymbol(adapter.quote),
   )
 
   return {

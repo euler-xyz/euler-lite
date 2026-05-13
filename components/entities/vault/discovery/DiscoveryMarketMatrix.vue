@@ -55,8 +55,6 @@ const {
 } = useRewardsApy()
 const { oracleAdapters, loadAllOracleAdapters } = useEulerLabels()
 const { chainId } = useEulerAddresses()
-const { buildKnownSymbols, resolveSymbol: resolveTokenSymbol } = useTokenSymbolResolver()
-
 const hoveredCell = ref<{
   collateralAddr: string
   liabilityAddr: string
@@ -241,6 +239,8 @@ interface AdapterView {
   name: string
   base: Address
   quote: Address
+  metaBase?: Address
+  metaQuote?: Address
   provider: string
   methodology?: string
   logo?: string
@@ -261,6 +261,8 @@ const enrichAdapter = (adapter: OracleAdapterEntry): AdapterView => {
     name,
     base: adapter.base,
     quote: adapter.quote,
+    metaBase: meta?.base,
+    metaQuote: meta?.quote,
     provider,
     methodology: meta?.methodology || (isERC4626 ? 'Exchange Rate' : undefined),
     logo: getOracleProviderLogo(provider, name),
@@ -367,13 +369,11 @@ const tooltipPriceText = computed((): string | null => {
   const key = `${ctx.view.oracle.toLowerCase()}:${ctx.view.base.toLowerCase()}:${ctx.view.quote.toLowerCase()}`
   const info = oraclePrices.value.get(key)
   if (!info?.success) return null
-  const symbols = buildKnownSymbols()
   const invert = shouldInvertOraclePrice(
-    ctx.view.label?.primary,
+    ctx.view.metaBase,
+    ctx.view.metaQuote,
     ctx.view.base,
     ctx.view.quote,
-    resolveTokenSymbol(ctx.view.base, symbols),
-    resolveTokenSymbol(ctx.view.quote, symbols),
   )
   const rate = invert && info.rate > 0 ? 1 / info.rate : info.rate
   return formatNumber(rate, 4)
