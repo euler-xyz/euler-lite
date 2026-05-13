@@ -24,7 +24,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { COWSWAP_ORDER_DEADLINE_SECONDS, COWSWAP_PROVIDER_EXTRA_DATA, type CowSwapCollateralSwapExecuteParams, getCowSwapChainConfig, getCowSwapQuoteOrderAmounts, isCowProvider } from '~/entities/cowswap'
+import { COWSWAP_ORDER_DEADLINE_SECONDS, COWSWAP_PROVIDER_EXTRA_DATA, buildCollateralSwapQuoteAppData, type CowSwapCollateralSwapExecuteParams, getCowSwapChainConfig, getCowSwapQuoteOrderAmounts, isCowProvider } from '~/entities/cowswap'
 import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus, openCowSwapReviewModal, buildApprovalSignSteps } from '~/composables/cowswap'
 
 const route = useRoute()
@@ -147,6 +147,24 @@ const swap = useSwapPageLogic({
     const account = (position.value.subAccount || address.value || zeroAddress) as Address
     const swapCollateralSharesAmountIn = getSwapCollateralSharesAmountIn(amount)
     if (swapCollateralSharesAmountIn <= 0n) return null
+    const quoteDeadline = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
+    const providerExtraData = COWSWAP_PROVIDER_EXTRA_DATA.collateralSwap(swapCollateralSharesAmountIn)
+    const chainConfig = getCowSwapChainConfig(currentChainId.value ?? 0)
+    if (chainConfig) {
+      providerExtraData.appData = buildCollateralSwapQuoteAppData(
+        {
+          owner: (address.value || zeroAddress) as Address,
+          account,
+          deadline: quoteDeadline,
+          fromVault: fromVault.value.address as Address,
+          toVault: toVault.value.address as Address,
+          fromAmount: swapCollateralSharesAmountIn,
+          disableSourceCollateral: isMaxSwap.value,
+        },
+        chainConfig.collateralSwapWrapper,
+        Math.round(slippage.value * 100),
+      )
+    }
     return {
       params: {
         tokenIn: fromVault.value.asset.address as Address,
@@ -161,7 +179,7 @@ const swap = useSwapPageLogic({
         isRepay: false,
         targetDebt: 0n,
         currentDebt: 0n,
-        providerExtraData: COWSWAP_PROVIDER_EXTRA_DATA.collateralSwap(swapCollateralSharesAmountIn),
+        providerExtraData,
       },
     }
   },

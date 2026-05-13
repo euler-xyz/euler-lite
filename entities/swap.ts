@@ -61,6 +61,7 @@ export type SwapApiProviderExtraDataType = 'openPosition' | 'closePosition' | 'c
 export interface SwapApiProviderExtraData {
   type: SwapApiProviderExtraDataType
   swapCollateralSharesAmountIn?: bigint
+  appData?: string
 }
 
 export interface SwapApiQuote {

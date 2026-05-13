@@ -1,10 +1,11 @@
 import type { Ref, ComputedRef } from 'vue'
-import { formatUnits, type Address } from 'viem'
+import { useAccount } from '@wagmi/vue'
+import { formatUnits, zeroAddress, type Address } from 'viem'
 import type { Vault, SecuritizeVault } from '~/entities/vault'
 import { getAssetUsdValue } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
-import { COWSWAP_PROVIDER_EXTRA_DATA } from '~/entities/cowswap'
+import { COWSWAP_ORDER_DEADLINE_SECONDS, COWSWAP_PROVIDER_EXTRA_DATA, buildClosePositionQuoteAppData, getCowSwapChainConfig } from '~/entities/cowswap'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
 import { valueToNano } from '~/utils/crypto-utils'
 import { trimTrailingZeros } from '~/utils/string-utils'
@@ -47,6 +48,8 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     getQuoteAccounts,
     onQuoteReceived,
   } = options
+  const { address } = useAccount()
+  const { chainId } = useEulerAddresses()
 
   // --- State ---
   const amount = ref('')
@@ -364,6 +367,26 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
       return
     }
     const targetDebt = parsedAmount >= currentDebt ? 0n : currentDebt - parsedAmount
+    const quoteDeadline = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
+    const cowProviderExtraData = { ...COWSWAP_PROVIDER_EXTRA_DATA.closePosition }
+    const chainConfig = getCowSwapChainConfig(chainId.value ?? 0)
+    if (chainConfig) {
+      const sourceSharesAmount = sourceVault.value.totalAssets > 0n
+        ? (sourceBalance.value * sourceVault.value.totalShares + sourceVault.value.totalAssets - 1n) / sourceVault.value.totalAssets
+        : sourceBalance.value
+      cowProviderExtraData.appData = buildClosePositionQuoteAppData(
+        {
+          owner: (address.value || zeroAddress) as Address,
+          account: accountIn,
+          deadline: quoteDeadline,
+          borrowVault: borrowVault.value.address as Address,
+          collateralVault: sourceVault.value.address as Address,
+          collateralAmount: sourceSharesAmount,
+        },
+        chainConfig.closePositionWrapper,
+        Math.round(slippage.value * 100),
+      )
+    }
     await quotes.targetDebtQuotes.requestQuotes({
       tokenIn: sourceVault.value.asset.address as Address,
       tokenOut: borrowVault.value.asset.address as Address,
@@ -377,7 +400,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
       isRepay: true,
       targetDebt,
       currentDebt,
-      providerExtraData: COWSWAP_PROVIDER_EXTRA_DATA.closePosition,
+      providerExtraData: cowProviderExtraData,
     })
   }, 500)
 

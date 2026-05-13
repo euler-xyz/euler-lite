@@ -1,6 +1,6 @@
 import type { Ref, ComputedRef } from 'vue'
 import { useAccount } from '@wagmi/vue'
-import { formatUnits, maxUint256, type Address } from 'viem'
+import { formatUnits, maxUint256, zeroAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { createRaceGuard } from '~/utils/race-guard'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
@@ -24,7 +24,12 @@ import {
 } from '~/services/pricing/priceProvider'
 import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { useMultiplyCowSwap } from '~/composables/borrow/useMultiplyCowSwap'
-import { COWSWAP_PROVIDER_EXTRA_DATA } from '~/entities/cowswap'
+import {
+  COWSWAP_ORDER_DEADLINE_SECONDS,
+  COWSWAP_PROVIDER_EXTRA_DATA,
+  buildOpenPositionQuoteAppData,
+  getCowSwapChainConfig,
+} from '~/entities/cowswap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
@@ -86,9 +91,9 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const { buildMultiplyPlan, executeTxPlan } = useEulerOperations()
-  const { isConnected } = useAccount()
+  const { isConnected, address } = useAccount()
   const { depositPositions, refreshAllPositions } = useEulerAccount()
-  const { eulerLensAddresses } = useEulerAddresses()
+  const { eulerLensAddresses, chainId } = useEulerAddresses()
   const { fetchSingleBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
@@ -686,6 +691,25 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       return
     }
 
+    const quoteDeadline = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
+    const cowProviderExtraData = { ...COWSWAP_PROVIDER_EXTRA_DATA.openPosition }
+    const chainConfig = getCowSwapChainConfig(chainId.value ?? 0)
+    if (chainConfig) {
+      cowProviderExtraData.appData = buildOpenPositionQuoteAppData(
+        {
+          owner: (address.value || zeroAddress) as Address,
+          account,
+          deadline: quoteDeadline,
+          collateralVault: multiplySupplyVault.value.address as Address,
+          borrowVault: multiplyShortVault.value.address as Address,
+          collateralAmount: valueToNano(multiplyInputAmount.value || '0', multiplySupplyVault.value.asset.decimals),
+          borrowAmount: debtAmount,
+        },
+        chainConfig.openPositionWrapper,
+        Math.round(multiplySlippage.value * 100),
+      )
+    }
+
     setMultiplyAmounts(null, null)
     const requestParams = {
       tokenIn: multiplyShortVault.value.asset.address as Address,
@@ -700,7 +724,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       isRepay: false,
       targetDebt: 0n,
       currentDebt: 0n,
-      providerExtraData: COWSWAP_PROVIDER_EXTRA_DATA.openPosition,
+      providerExtraData: cowProviderExtraData,
     }
     await requestMultiplyQuotes(requestParams, {
       errorMessage: 'Unable to fetch swap quote. Multiply feature is not available for this asset.',

@@ -10,6 +10,8 @@ import { OPEN_POSITION_PARAMS_COMPONENTS, COLLATERAL_SWAP_PARAMS_COMPONENTS, CLO
 import { COWSWAP_APPDATA_VERSION } from './constants'
 import type { CowSwapOpenPositionParams, CowSwapCollateralSwapParams, CowSwapClosePositionParams, CowSwapOrderPayload, CowSwapOrderSigningScheme } from './types'
 
+const OMITTED_PERMIT_SIGNATURE = '0x' as Hex
+
 const COW_ORDER_TYPES = {
   Order: [
     { name: 'sellToken', type: 'address' },
@@ -132,6 +134,38 @@ export const buildCowSwapAppData = (
 
   return { appDataString, appDataHash }
 }
+
+export const buildOpenPositionQuoteAppData = (
+  params: CowSwapOpenPositionParams,
+  wrapperAddress: Address,
+  slippageBips: number,
+): string => buildCowSwapAppData(
+  buildOpenPositionWrapperData(params, OMITTED_PERMIT_SIGNATURE),
+  wrapperAddress,
+  slippageBips,
+).appDataString
+
+export const buildCollateralSwapQuoteAppData = (
+  params: CowSwapCollateralSwapParams,
+  wrapperAddress: Address,
+  slippageBips: number,
+): string => buildCowSwapAppData(
+  buildCollateralSwapWrapperData(params, OMITTED_PERMIT_SIGNATURE),
+  wrapperAddress,
+  slippageBips,
+  'euler_position_collateral_swap',
+).appDataString
+
+export const buildClosePositionQuoteAppData = (
+  params: CowSwapClosePositionParams,
+  wrapperAddress: Address,
+  slippageBips: number,
+): string => buildCowSwapAppData(
+  buildClosePositionWrapperData(params, OMITTED_PERMIT_SIGNATURE),
+  wrapperAddress,
+  slippageBips,
+  'euler_position_close',
+).appDataString
 
 export type CowSwapOrderTypedDataParams = {
   chainId: number

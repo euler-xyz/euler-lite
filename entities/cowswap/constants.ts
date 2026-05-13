@@ -4,8 +4,8 @@ import type { SwapApiProviderExtraData, SwapApiQuote } from '~/entities/swap'
 export const COWSWAP_PROVIDER_NAME = 'cow'
 
 export const COWSWAP_PROVIDER_EXTRA_DATA = {
-  openPosition: { type: 'openPosition' },
-  closePosition: { type: 'closePosition' },
+  openPosition: { type: 'openPosition' } as SwapApiProviderExtraData,
+  closePosition: { type: 'closePosition' } as SwapApiProviderExtraData,
   collateralSwap: (swapCollateralSharesAmountIn: bigint): SwapApiProviderExtraData => ({
     type: 'collateralSwap',
     swapCollateralSharesAmountIn,
