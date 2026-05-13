@@ -17,9 +17,10 @@ const DEFAULT_READY_TIMEOUT_MS = 120_000
 const DEFAULT_WAIT_TIMEOUT_MS = 6_000
 const DEFAULT_DATA_READY_TIMEOUT_MS = 6_000
 const DEFAULT_CAPTURE_BUDGET_MS = 6_000
-const DEFAULT_PORTFOLIO_TIMEOUT_MS = 15_000
-const DEFAULT_PORTFOLIO_CAPTURE_BUDGET_MS = 15_000
+const DEFAULT_PORTFOLIO_TIMEOUT_MS = 25_000
+const DEFAULT_PORTFOLIO_CAPTURE_BUDGET_MS = 25_000
 const DEFAULT_NETWORK_IDLE_TIMEOUT_MS = 0
+const LIST_SHOW_ALL_MIN_CAPTURE_MS = 10_000
 const LIST_SHOW_ALL_HYDRATION_TIMEOUT_MS = 20_000
 const LIST_HYDRATION_SETTLE_ROUNDS = 2
 const LIST_HYDRATION_SCROLL_SEGMENTS = 10
@@ -1467,6 +1468,13 @@ async function openAndCapture({
 
       if (!navigationError && !waitError && !readinessError && !actionError) {
         try {
+          const list = listCaptureInfo(pathName)
+          if (list?.showAll) {
+            const remainingMinCaptureMs = LIST_SHOW_ALL_MIN_CAPTURE_MS - (Date.now() - captureStartedAt)
+            if (remainingMinCaptureMs > 0) {
+              await page.waitForTimeout(remainingMinCaptureMs)
+            }
+          }
           await hydrateListPageBeforeScrape(page, pathName)
         }
         catch (error) {
@@ -1498,6 +1506,7 @@ async function openAndCapture({
         scenarioId: scenario.id,
         label: scenario.label || scenario.id,
         appName: app.name,
+        compareOptions: scenarioCompareOptions(scenario),
       })
     }
     catch (error) {
@@ -1509,6 +1518,7 @@ async function openAndCapture({
         url: page.url() || url.href,
         pathName,
         error: 'Scrape failed: ' + (error?.message || error),
+        compareOptions: scenarioCompareOptions(scenario),
       })
     }
 
@@ -1640,12 +1650,19 @@ async function navigateForCapture(page, url, { timeout, forceDocumentNavigation 
   return 'document'
 }
 
-function createFailedSnapshot({ pageId, scenarioId, label, appName, url, pathName, error }) {
+function scenarioCompareOptions(scenario = {}) {
+  return {
+    ignoreListDataPointsOnListPage: scenario.ignoreListDataPointsOnListPage || [],
+  }
+}
+
+function createFailedSnapshot({ pageId, scenarioId, label, appName, url, pathName, error, compareOptions = {} }) {
   return {
     pageId,
     scenarioId,
     label,
     appName,
+    compareOptions,
     capturedAt: new Date().toISOString(),
     title: '',
     url,
@@ -2176,6 +2193,7 @@ function scrapePage(meta) {
     scenarioId: meta.scenarioId,
     label: meta.label,
     appName: meta.appName,
+    compareOptions: meta.compareOptions || {},
     capturedAt: new Date().toISOString(),
     title: document.title,
     url: window.location.href,
@@ -2288,41 +2306,45 @@ function compareLists(baseline, candidate) {
   const baselineLists = baseline.lists || {}
   const candidateLists = candidate.lists || {}
   const listNames = Array.from(new Set([...Object.keys(baselineLists), ...Object.keys(candidateLists)])).sort()
+  const ignoredLists = ignoredListDataPointsForSnapshot(baseline)
 
-  return listNames.map((list) => {
-    const base = baselineLists[list] || { keys: [], count: 0, containers: [] }
-    const cand = candidateLists[list] || { keys: [], count: 0, containers: [] }
-    const missingKeys = base.keys.filter(key => !cand.keys.includes(key))
-    const extraKeys = cand.keys.filter(key => !base.keys.includes(key))
-    const orderMismatch = !sameArray(base.keys, cand.keys)
-    const containerMismatch = JSON.stringify(base.containers) !== JSON.stringify(cand.containers)
-    const instrumentationOnly = isCandidateOnlyExploreInstrumentationList(list, base, cand, baseline.elements || [])
-    const status = instrumentationOnly || !(missingKeys.length || extraKeys.length || orderMismatch || containerMismatch) ? 'match' : 'list-mismatch'
+  return listNames
+    .filter(list => !isIgnoredListDataPoint(list, ignoredLists))
+    .map((list) => {
+      const base = baselineLists[list] || { keys: [], count: 0, containers: [] }
+      const cand = candidateLists[list] || { keys: [], count: 0, containers: [] }
+      const missingKeys = base.keys.filter(key => !cand.keys.includes(key))
+      const extraKeys = cand.keys.filter(key => !base.keys.includes(key))
+      const orderMismatch = !sameArray(base.keys, cand.keys)
+      const containerMismatch = JSON.stringify(base.containers) !== JSON.stringify(cand.containers)
+      const instrumentationOnly = isCandidateOnlyExploreInstrumentationList(list, base, cand, baseline.elements || [])
+      const status = instrumentationOnly || !(missingKeys.length || extraKeys.length || orderMismatch || containerMismatch) ? 'match' : 'list-mismatch'
 
-    return {
-      list,
-      status,
-      instrumentationOnly,
-      baselineCount: base.count,
-      candidateCount: cand.count,
-      baselineKeys: base.keys,
-      candidateKeys: cand.keys,
-      missingKeys,
-      extraKeys,
-      orderMismatch,
-      baselineContainers: base.containers,
-      candidateContainers: cand.containers,
-    }
-  })
+      return {
+        list,
+        status,
+        instrumentationOnly,
+        baselineCount: base.count,
+        candidateCount: cand.count,
+        baselineKeys: base.keys,
+        candidateKeys: cand.keys,
+        missingKeys,
+        extraKeys,
+        orderMismatch,
+        baselineContainers: base.containers,
+        candidateContainers: cand.containers,
+      }
+    })
 }
 
 function compareElements(baseline, candidate, config = {}) {
+  const ignoredLists = ignoredListDataPointsForSnapshot(baseline)
   const baselineElements = elementsForComparison(
-    baseline.elements,
+    filterIgnoredListDataPointElements(baseline.elements, ignoredLists),
     routeVaultContextKey(baseline.path || baseline.requestedPath || ''),
   )
   const candidateElements = elementsForComparison(
-    candidate.elements,
+    filterIgnoredListDataPointElements(candidate.elements, ignoredLists),
     routeVaultContextKey(candidate.path || candidate.requestedPath || ''),
   )
   const baselineMap = new Map(baselineElements.map(element => [element.key, element]))
@@ -2410,6 +2432,45 @@ function compareElements(baseline, candidate, config = {}) {
       candidate: summarizeElement(cand),
       mismatch,
     }
+  })
+}
+
+function ignoredListDataPointsForSnapshot(snapshot) {
+  if (!isScenarioListPageSnapshot(snapshot)) return []
+  return normalizeIgnoredListDataPoints(snapshot.compareOptions?.ignoreListDataPointsOnListPage)
+}
+
+function isScenarioListPageSnapshot(snapshot) {
+  return Boolean(snapshot?.pageId && snapshot.pageId === snapshot.scenarioId)
+}
+
+function normalizeIgnoredListDataPoints(value) {
+  if (!Array.isArray(value)) return []
+  return value
+    .map(item => typeof item === 'string' ? { listPrefix: item } : item)
+    .filter(Boolean)
+    .map(item => ({
+      listPrefix: String(item.listPrefix || item.list || '').replace(/\*$/, ''),
+      fields: Array.isArray(item.fields) ? item.fields.map(String) : [],
+    }))
+    .filter(item => item.listPrefix || item.fields.length)
+}
+
+function isIgnoredListDataPoint(list, ignoredLists) {
+  return ignoredLists.some(ignored => ignored.listPrefix && String(list || '').startsWith(ignored.listPrefix))
+}
+
+function filterIgnoredListDataPointElements(elements = [], ignoredLists = []) {
+  if (!ignoredLists.length) return elements || []
+  return (elements || []).filter(element => !isIgnoredListDataPointElement(element, ignoredLists))
+}
+
+function isIgnoredListDataPointElement(element, ignoredLists) {
+  if (element?.id !== 'data-point') return false
+  return ignoredLists.some((ignored) => {
+    const listMatches = ignored.listPrefix && String(element.list || '').startsWith(ignored.listPrefix)
+    const fieldMatches = ignored.fields.length && ignored.fields.includes(String(element.field || ''))
+    return listMatches && (!ignored.fields.length || fieldMatches)
   })
 }
 
