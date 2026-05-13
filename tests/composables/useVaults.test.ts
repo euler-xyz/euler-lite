@@ -40,7 +40,7 @@ describe('useVaults EVault verification metadata', () => {
     vi.unstubAllGlobals()
   })
 
-  it('keeps label-loaded EVault batches out of verified lists unless governed', async () => {
+  it('keeps EVault batches out of verified lists unless explicitly display-verified', async () => {
     await useVaults().updateEVaults([LABELED_EVAULT], undefined, true)
 
     const registry = useVaultRegistry()
@@ -48,7 +48,7 @@ describe('useVaults EVault verification metadata', () => {
     expect(registry.getVerifiedEVaults()).toEqual([])
   })
 
-  it('marks governed EVault batches verified', async () => {
+  it('marks display-verified EVault batches verified', async () => {
     await useVaults().updateEVaults([LABELED_EVAULT], undefined, true, {
       verifiedAddresses: new Set([getAddress(LABELED_EVAULT).toLowerCase()]),
     })
