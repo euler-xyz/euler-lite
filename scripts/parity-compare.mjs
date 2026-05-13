@@ -14,7 +14,12 @@ const DEFAULT_SCENARIOS = path.join(ROOT_DIR, 'tests/parity/scenarios.json')
 const DEFAULT_BASELINE_BRANCH = 'feature/parity-data-tags'
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_READY_TIMEOUT_MS = 120_000
-const DEFAULT_NETWORK_IDLE_TIMEOUT_MS = 1_000
+const DEFAULT_WAIT_TIMEOUT_MS = 6_000
+const DEFAULT_DATA_READY_TIMEOUT_MS = 6_000
+const DEFAULT_CAPTURE_BUDGET_MS = 6_000
+const DEFAULT_PORTFOLIO_TIMEOUT_MS = 15_000
+const DEFAULT_PORTFOLIO_CAPTURE_BUDGET_MS = 15_000
+const DEFAULT_NETWORK_IDLE_TIMEOUT_MS = 0
 const DEFAULT_WORK_DIR = path.join('/tmp', 'euler-lite-parity', sanitizeFilePart(ROOT_DIR))
 
 const args = parseArgs(process.argv.slice(2))
@@ -71,9 +76,15 @@ async function main() {
       rateLimitRetries: config.rateLimitRetries,
       navigationRetries: config.navigationRetries,
       navigationTimeoutMs: config.navigationTimeoutMs,
+      captureBudgetMs: config.captureBudgetMs,
+      portfolioTimeoutMs: config.portfolioTimeoutMs,
+      portfolioCaptureBudgetMs: config.portfolioCaptureBudgetMs,
+      dataReadyTimeoutMs: config.dataReadyTimeoutMs,
       networkIdleTimeoutMs: config.networkIdleTimeoutMs,
       scenarioFilter: config.scenarioFilter,
       appPhased: config.appPhased,
+      alternating: config.sequential,
+      parallel: config.parallel,
       workDir: config.workDir,
     })
 
@@ -97,6 +108,8 @@ async function main() {
       pageDiffs = result.diffs
     }
     else if (config.sequential) {
+      // Slow diagnostic mode: alternates baseline/candidate for every page and
+      // modal. Keep this opt-in so normal runs reuse one session per app phase.
       const result = await runScenariosSequentialByPage({
         scenarios,
         config,
@@ -139,6 +152,14 @@ async function main() {
       candidateSnapshots,
       pageDiffs,
     })
+    await verifyPersistentDiscrepancies({
+      diff,
+      run,
+      config,
+      browser: state.browser,
+      scenarios,
+      state,
+    })
 
     await writeJson(path.join(config.outputDir, 'baseline.json'), {
       app: run.baseline,
@@ -175,6 +196,23 @@ async function buildConfig() {
     || process.env.PARITY_OUTPUT_DIR
     || path.join(ROOT_DIR, 'artifacts/parity', runId),
   )
+  const alternating = Boolean(
+    args.flags.alternating
+    || args.flags.sequential
+    || process.env.PARITY_ALTERNATING === '1'
+    || process.env.PARITY_SEQUENTIAL === '1',
+  )
+  const parallel = Boolean(args.flags.parallel || process.env.PARITY_PARALLEL === '1')
+  const appPhased = Boolean(
+    args.flags.appPhased
+    || args.flags['app-phased']
+    || process.env.PARITY_APP_PHASED === '1'
+    || (!alternating && !parallel),
+  )
+
+  if ([alternating, parallel, appPhased].filter(Boolean).length > 1) {
+    throw new Error('Choose only one capture mode: default app-phased, --alternating, or --parallel')
+  }
 
   return {
     runId,
@@ -189,14 +227,19 @@ async function buildConfig() {
     skipInstall: Boolean(args.flags.skipInstall || args.flags['skip-install'] || process.env.PARITY_SKIP_INSTALL === '1'),
     maxFollowItems: numberOrNull(valueOf('max-follow-items') || process.env.PARITY_MAX_FOLLOW_ITEMS),
     readyTimeoutMs: Number(valueOf('ready-timeout-ms') || process.env.PARITY_READY_TIMEOUT_MS || DEFAULT_READY_TIMEOUT_MS),
-    waitTimeoutMs: Number(valueOf('wait-timeout-ms') || process.env.PARITY_WAIT_TIMEOUT_MS || 45_000),
+    waitTimeoutMs: Number(valueOf('wait-timeout-ms') || process.env.PARITY_WAIT_TIMEOUT_MS || DEFAULT_WAIT_TIMEOUT_MS),
+    dataReadyTimeoutMs: Number(valueOf('data-ready-timeout-ms') || process.env.PARITY_DATA_READY_TIMEOUT_MS || DEFAULT_DATA_READY_TIMEOUT_MS),
+    captureBudgetMs: Number(valueOf('capture-budget-ms') || process.env.PARITY_CAPTURE_BUDGET_MS || DEFAULT_CAPTURE_BUDGET_MS),
+    portfolioTimeoutMs: Number(valueOf('portfolio-timeout-ms') || process.env.PARITY_PORTFOLIO_TIMEOUT_MS || DEFAULT_PORTFOLIO_TIMEOUT_MS),
+    portfolioCaptureBudgetMs: Number(valueOf('portfolio-capture-budget-ms') || process.env.PARITY_PORTFOLIO_CAPTURE_BUDGET_MS || DEFAULT_PORTFOLIO_CAPTURE_BUDGET_MS),
     networkIdleTimeoutMs: Number(valueOf('network-idle-timeout-ms') || process.env.PARITY_NETWORK_IDLE_TIMEOUT_MS || DEFAULT_NETWORK_IDLE_TIMEOUT_MS),
     navigationTimeoutMs: Number(valueOf('navigation-timeout-ms') || process.env.PARITY_NAVIGATION_TIMEOUT_MS || 45_000),
     navigationRetries: Number(valueOf('navigation-retries') || process.env.PARITY_NAVIGATION_RETRIES || 3),
     numericTolerance: parseNumericTolerance(valueOf('numeric-tolerance') || process.env.PARITY_NUMERIC_TOLERANCE || '1%'),
     rateLimitRetries: Number(valueOf('rate-limit-retries') || process.env.PARITY_RATE_LIMIT_RETRIES || 3),
-    sequential: Boolean(args.flags.sequential || process.env.PARITY_SEQUENTIAL === '1'),
-    appPhased: Boolean(args.flags.appPhased || args.flags['app-phased'] || process.env.PARITY_APP_PHASED === '1'),
+    sequential: alternating,
+    appPhased,
+    parallel,
     skipBuild: Boolean(args.flags.skipBuild || args.flags['skip-build'] || process.env.PARITY_SKIP_BUILD === '1'),
     workDir: path.resolve(valueOf('work-dir') || process.env.PARITY_WORK_DIR || DEFAULT_WORK_DIR),
   }
@@ -330,6 +373,10 @@ async function ensureProductionBuild(dir, config) {
   }
 
   console.log('[parity-compare] Building production app in ' + dir)
+  // Nuxt can otherwise carry a stale dev client manifest from `.nuxt` into a
+  // production build, causing the server to emit `/_nuxt/@vite/client` links.
+  await fs.rm(path.join(dir, '.nuxt'), { recursive: true, force: true })
+  await fs.rm(path.join(dir, '.output'), { recursive: true, force: true })
   await runCommand(npmCommand(), ['run', 'build'], { cwd: dir })
 }
 
@@ -405,6 +452,7 @@ async function runScenario({ scenario, config, browser, baseline, candidate }) {
       pathName: scenario.path,
       waitFor: scenario.waitFor,
       waitTimeoutMs: config.waitTimeoutMs,
+      dataReadyTimeoutMs: config.dataReadyTimeoutMs,
       networkIdleTimeoutMs: config.networkIdleTimeoutMs,
       keepPage: true,
     })
@@ -416,6 +464,7 @@ async function runScenario({ scenario, config, browser, baseline, candidate }) {
       pathName: scenario.path,
       waitFor: scenario.waitFor,
       waitTimeoutMs: config.waitTimeoutMs,
+      dataReadyTimeoutMs: config.dataReadyTimeoutMs,
       networkIdleTimeoutMs: config.networkIdleTimeoutMs,
       keepPage: true,
     })
@@ -445,6 +494,7 @@ async function runScenario({ scenario, config, browser, baseline, candidate }) {
           pathName: detailPath,
           waitFor: follow.waitFor || scenario.waitFor,
           waitTimeoutMs: config.waitTimeoutMs,
+          dataReadyTimeoutMs: config.dataReadyTimeoutMs,
           networkIdleTimeoutMs: config.networkIdleTimeoutMs,
         })
         const candidateDetail = await openAndCapture({
@@ -455,6 +505,7 @@ async function runScenario({ scenario, config, browser, baseline, candidate }) {
           pathName: detailPath,
           waitFor: follow.waitFor || scenario.waitFor,
           waitTimeoutMs: config.waitTimeoutMs,
+          dataReadyTimeoutMs: config.dataReadyTimeoutMs,
           networkIdleTimeoutMs: config.networkIdleTimeoutMs,
         })
 
@@ -594,6 +645,9 @@ async function runScenariosAppPhased({ scenarios, config, browser, baseline, can
   const diffs = []
   const candidateQueue = []
 
+  // Default fast path: capture all baseline pages first, then all candidate
+  // pages, reusing one browser page/context per app. This avoids the expensive
+  // baseline/candidate/modal alternation used only by --alternating.
   const baselineApp = await startOrAttach(baseline, config)
   state.apps = [baselineApp]
   const baselineRuntime = await createAppPhaseRuntime(browser, scenarios[0])
@@ -672,29 +726,58 @@ async function runScenariosAppPhased({ scenarios, config, browser, baseline, can
   const candidateApp = await startOrAttach(candidate, config)
   state.apps = [candidateApp]
   const candidateRuntime = await createAppPhaseRuntime(browser, candidateQueue[0]?.plan?.scenario || scenarios[0])
+  let currentCandidatePage = null
 
   try {
     console.log('[parity-compare] Running candidate phase: ' + candidateQueue.length + ' page/modal captures')
     for (const item of candidateQueue) {
-      const candidateSnapshot = item.type === 'modal'
-        ? await captureModalPlanSequential({
-            appDefinition: candidate,
-            app: candidateApp,
-            config,
-            browser,
-            runtime: candidateRuntime,
-            plan: item.plan,
-            state,
-          })
-        : await capturePlanSequential({
-            appDefinition: candidate,
-            app: candidateApp,
-            config,
-            browser,
-            runtime: candidateRuntime,
-            plan: item.plan,
-            state,
-          })
+      let candidateSnapshot = null
+
+      if (
+        item.type === 'modal'
+        && currentCandidatePage
+        && currentCandidatePage.pageId === item.plan.parentPageId
+        && currentCandidatePage.pathName === item.plan.pathName
+      ) {
+        candidateSnapshot = await captureModalPlanOnCurrentPage({
+          app: candidateApp,
+          config,
+          runtime: candidateRuntime,
+          plan: item.plan,
+        })
+      }
+      else if (item.type === 'modal') {
+        candidateSnapshot = await captureModalPlanSequential({
+          appDefinition: candidate,
+          app: candidateApp,
+          config,
+          browser,
+          runtime: candidateRuntime,
+          plan: item.plan,
+          state,
+        })
+        currentCandidatePage = {
+          pageId: item.plan.parentPageId,
+          pathName: item.plan.pathName,
+        }
+      }
+      else {
+        const result = await capturePlanSequential({
+          appDefinition: candidate,
+          app: candidateApp,
+          config,
+          browser,
+          runtime: candidateRuntime,
+          plan: item.plan,
+          state,
+          returnResult: true,
+        })
+        candidateSnapshot = result.snapshot
+        currentCandidatePage = {
+          pageId: item.plan.pageId,
+          pathName: item.plan.pathName,
+        }
+      }
 
       candidateSnapshots.push(candidateSnapshot)
       diffs.push(compareSnapshots(item.baselineSnapshot, candidateSnapshot, config))
@@ -719,6 +802,7 @@ async function createAppPhaseRuntime(browser, scenario) {
     context,
     page: await context.newPage(),
     localStorageKeys: new Set(Object.keys(scenarioLocalStorage(scenario || {}))),
+    forceDocumentNavigation: false,
   }
 }
 
@@ -727,24 +811,211 @@ async function closeAppPhaseRuntime(runtime) {
   await runtime?.context?.close().catch(() => {})
 }
 
+async function verifyPersistentDiscrepancies({ diff, run, config, browser, scenarios, state }) {
+  const failedPages = diff.pages.filter(page => page.status !== 'pass')
+  if (!failedPages.length) {
+    diff.persistenceSummary = { checked: 0, persistent: 0, resolved: 0, failed: 0 }
+    return
+  }
+
+  console.log('[parity-compare] Rechecking ' + failedPages.length + ' discrepant page(s) after reload')
+  const scenarioById = new Map(scenarios.map(scenario => [scenario.id, scenario]))
+  const baselineApp = await startOrAttach(run.baseline, config)
+  const candidateApp = await startOrAttach(run.candidate, config)
+  state.apps = [baselineApp, candidateApp]
+
+  const baselineRuntime = await createAppPhaseRuntime(browser, scenarios[0])
+  const candidateRuntime = await createAppPhaseRuntime(browser, scenarios[0])
+
+  const groups = groupPersistenceRecheckPages(failedPages, scenarioById, scenarios[0])
+  const results = []
+  try {
+    for (const group of groups) {
+      console.log('[parity-compare] Rechecking ' + group.parentPageId + (group.pages.length > 1 ? ' (' + group.pages.length + ' discrepant captures)' : ''))
+
+      try {
+        const baselineSnapshots = await recaptureDiffGroup({
+          app: baselineApp,
+          runtime: baselineRuntime,
+          group,
+          config,
+        })
+        const candidateSnapshots = await recaptureDiffGroup({
+          app: candidateApp,
+          runtime: candidateRuntime,
+          group,
+          config,
+        })
+
+        for (const pageDiff of group.pages) {
+          const baselineSnapshot = baselineSnapshots.get(pageDiff.pageId)
+          const candidateSnapshot = candidateSnapshots.get(pageDiff.pageId)
+          const secondDiff = compareSnapshots(baselineSnapshot, candidateSnapshot, config)
+          const result = {
+            pageId: pageDiff.pageId,
+            status: secondDiff.status === 'pass' ? 'resolved-after-reload' : 'persistent',
+            summary: secondDiff.summary,
+            captureErrors: secondDiff.captureErrors,
+            consoleErrors: secondDiff.consoleErrors,
+          }
+          pageDiff.persistence = result
+          results.push(result)
+        }
+      }
+      catch (error) {
+        for (const pageDiff of group.pages) {
+          const result = {
+            pageId: pageDiff.pageId,
+            status: 'verification-failed',
+            error: error?.message || String(error),
+          }
+          pageDiff.persistence = result
+          results.push(result)
+        }
+      }
+    }
+  }
+  finally {
+    await Promise.all([
+      closeAppPhaseRuntime(baselineRuntime),
+      closeAppPhaseRuntime(candidateRuntime),
+      stopServer(baselineApp.serverProcess),
+      stopServer(candidateApp.serverProcess),
+    ])
+    state.apps = []
+  }
+
+  diff.persistenceSummary = {
+    checked: results.length,
+    persistent: results.filter(result => result.status === 'persistent').length,
+    resolved: results.filter(result => result.status === 'resolved-after-reload').length,
+    failed: results.filter(result => result.status === 'verification-failed').length,
+  }
+  diff.pagesWithDiscrepancies = summarizeDiscrepantPages(diff.pages.filter(page => page.status !== 'pass'))
+}
+
+function groupPersistenceRecheckPages(pageDiffs, scenarioById, fallbackScenario) {
+  const groups = new Map()
+
+  for (const pageDiff of pageDiffs) {
+    const scenario = scenarioById.get(pageDiff.scenarioId) || fallbackScenario
+    const isModal = isModalPageId(pageDiff.pageId)
+    const parentPageId = isModal ? parentPageIdForModal(pageDiff.pageId) : pageDiff.pageId
+    const pathName = pageDiff.requestedPath || pathFromUrl(pageDiff.baselineUrl || pageDiff.candidateUrl)
+    const parentWaitFor = pageDiff.parentWaitFor?.length
+      ? pageDiff.parentWaitFor
+      : (pageDiff.waitFor?.length ? pageDiff.waitFor : scenario.waitFor)
+    const key = [
+      scenario.id,
+      parentPageId,
+      pathName,
+    ].join('|')
+
+    if (!groups.has(key)) {
+      groups.set(key, {
+        scenario,
+        parentPageId,
+        pathName,
+        parentWaitFor,
+        pages: [],
+      })
+    }
+    const group = groups.get(key)
+    // Prefer the real parent page wait condition when both a parent and one or
+    // more modal captures are discrepant. Older modal snapshots may have stored
+    // the scenario list wait condition as parentWaitFor.
+    if (!isModal || !group.parentWaitFor?.length) group.parentWaitFor = parentWaitFor
+    group.pages.push(pageDiff)
+  }
+
+  return [...groups.values()]
+}
+
+function isModalPageId(pageId) {
+  return pageId.includes('/modal/')
+}
+
+function parentPageIdForModal(pageId) {
+  return pageId.split('/modal/')[0]
+}
+
+async function recaptureDiffGroup({ app, runtime, group, config }) {
+  await prepareRuntimeForScenario(runtime, group.scenario)
+  const snapshots = new Map()
+  const pageResult = await openAndCapture({
+    app,
+    context: runtime.context,
+    page: runtime.page,
+    scenario: group.scenario,
+    pageId: group.parentPageId,
+    pathName: group.pathName,
+    waitFor: group.parentWaitFor,
+    waitTimeoutMs: config.waitTimeoutMs,
+    dataReadyTimeoutMs: config.dataReadyTimeoutMs,
+    networkIdleTimeoutMs: config.networkIdleTimeoutMs,
+    keepPage: true,
+  })
+
+  for (const pageDiff of group.pages) {
+    if (!isModalPageId(pageDiff.pageId)) {
+      snapshots.set(pageDiff.pageId, pageResult.snapshot)
+      continue
+    }
+
+    const modalId = pageDiff.pageId.split('/modal/')[1]
+    const modalSnapshots = await captureModalPlansOnPage({
+      page: pageResult.page,
+      scenario: group.scenario,
+      pageId: group.parentPageId,
+      pathName: group.pathName,
+      appName: app.name,
+      waitTimeoutMs: effectiveWaitTimeout(group.scenario, group.pathName, config.waitTimeoutMs),
+      dataReadyTimeoutMs: effectiveDataReadyTimeout(group.scenario, group.pathName, config.dataReadyTimeoutMs),
+      networkIdleTimeoutMs: config.networkIdleTimeoutMs,
+      parentWaitFor: group.parentWaitFor,
+      onlyModalId: modalId,
+    })
+
+    snapshots.set(pageDiff.pageId, modalSnapshots[0]?.snapshot || {
+      ...pageResult.snapshot,
+      pageId: pageDiff.pageId,
+      captureError: 'Modal capture not found during persistence recheck for ' + modalId,
+    })
+  }
+
+  return snapshots
+}
+
 async function prepareRuntimeForScenario(runtime, scenario) {
   if (!runtime?.page) return
 
   const nextStorage = scenarioLocalStorage(scenario)
   const nextKeys = new Set(Object.keys(nextStorage))
   const keysToRemove = [...runtime.localStorageKeys].filter(key => !nextKeys.has(key))
+  let storageChanged = false
 
   if (keysToRemove.length || nextKeys.size) {
-    await runtime.page.evaluate(
+    storageChanged = await runtime.page.evaluate(
       ({ remove, set }) => {
+        let changed = false
         for (const key of remove) window.localStorage.removeItem(key)
-        for (const [key, value] of Object.entries(set)) window.localStorage.setItem(key, String(value))
+        if (remove.length) changed = true
+        for (const [key, value] of Object.entries(set)) {
+          const nextValue = String(value)
+          if (window.localStorage.getItem(key) !== nextValue) {
+            window.localStorage.setItem(key, nextValue)
+            changed = true
+          }
+        }
+        return changed
       },
       { remove: keysToRemove, set: nextStorage },
-    ).catch(() => {})
+    ).catch(() => true)
   }
 
   runtime.localStorageKeys = nextKeys
+  runtime.forceDocumentNavigation = runtime.forceDocumentNavigation || storageChanged
+  if (storageChanged) runtime.page._parityForceDocumentNavigation = true
 }
 
 function scenarioLocalStorage(scenario) {
@@ -771,6 +1042,7 @@ async function capturePlanAndFollowPlans({ appDefinition, app: startedApp = null
       pathName: plan.pathName,
       waitFor: plan.waitFor,
       waitTimeoutMs: config.waitTimeoutMs,
+      dataReadyTimeoutMs: config.dataReadyTimeoutMs,
       networkIdleTimeoutMs: config.networkIdleTimeoutMs,
       keepPage: true,
     })
@@ -805,7 +1077,9 @@ async function capturePlanAndFollowPlans({ appDefinition, app: startedApp = null
       pathName: plan.pathName,
       appName: app.name,
       waitTimeoutMs: config.waitTimeoutMs,
+      dataReadyTimeoutMs: config.dataReadyTimeoutMs,
       networkIdleTimeoutMs: config.networkIdleTimeoutMs,
+      parentWaitFor: plan.waitFor,
     })
 
     return {
@@ -843,6 +1117,7 @@ async function capturePlanWithModalsSequential({ appDefinition, app: startedApp 
       pathName: plan.pathName,
       waitFor: plan.waitFor,
       waitTimeoutMs: config.waitTimeoutMs,
+      dataReadyTimeoutMs: config.dataReadyTimeoutMs,
       networkIdleTimeoutMs: config.networkIdleTimeoutMs,
       keepPage: true,
     })
@@ -856,7 +1131,9 @@ async function capturePlanWithModalsSequential({ appDefinition, app: startedApp 
         pathName: plan.pathName,
         appName: app.name,
         waitTimeoutMs: config.waitTimeoutMs,
+        dataReadyTimeoutMs: config.dataReadyTimeoutMs,
         networkIdleTimeoutMs: config.networkIdleTimeoutMs,
+        parentWaitFor: plan.waitFor,
       }),
     }
   }
@@ -869,7 +1146,7 @@ async function capturePlanWithModalsSequential({ appDefinition, app: startedApp 
   }
 }
 
-async function capturePlanSequential({ appDefinition, app: startedApp = null, config, browser, runtime = null, plan, state }) {
+async function capturePlanSequential({ appDefinition, app: startedApp = null, config, browser, runtime = null, plan, state, returnResult = false }) {
   const ownsApp = !startedApp
   const app = startedApp || await startOrAttach(appDefinition, config)
   if (ownsApp) state.apps = [app]
@@ -888,10 +1165,11 @@ async function capturePlanSequential({ appDefinition, app: startedApp = null, co
       pathName: plan.pathName,
       waitFor: plan.waitFor,
       waitTimeoutMs: config.waitTimeoutMs,
+      dataReadyTimeoutMs: config.dataReadyTimeoutMs,
       networkIdleTimeoutMs: config.networkIdleTimeoutMs,
     })
 
-    return result.snapshot
+    return returnResult ? result : result.snapshot
   }
   finally {
     if (ownsRuntime) await closeAppPhaseRuntime(activeRuntime)
@@ -899,6 +1177,36 @@ async function capturePlanSequential({ appDefinition, app: startedApp = null, co
       await stopServer(app.serverProcess)
       state.apps = []
     }
+  }
+}
+
+async function captureModalPlanOnCurrentPage({ app, config, runtime, plan }) {
+  console.log('[parity-compare] Capturing ' + app.name + ' ' + plan.pageId)
+  const snapshots = await captureModalPlansOnPage({
+    page: runtime.page,
+    scenario: plan.scenario,
+    pageId: plan.parentPageId,
+    pathName: plan.pathName,
+    appName: app.name,
+    waitTimeoutMs: config.waitTimeoutMs,
+    dataReadyTimeoutMs: config.dataReadyTimeoutMs,
+    networkIdleTimeoutMs: config.networkIdleTimeoutMs,
+    parentWaitFor: plan.parentWaitFor,
+    onlyModalId: plan.modalId,
+  })
+  return snapshots[0]?.snapshot || {
+    pageId: plan.pageId,
+    scenarioId: plan.scenario.id,
+    label: plan.label,
+    appName: app.name,
+    capturedAt: new Date().toISOString(),
+    title: '',
+    url: runtime.page.url(),
+    path: pathFromUrl(runtime.page.url()),
+    counts: { tagged: 0, dataPoints: 0, lists: 0 },
+    lists: {},
+    elements: [],
+    captureError: 'Modal capture not found for ' + plan.modalId,
   }
 }
 
@@ -922,6 +1230,7 @@ async function captureModalPlanSequential({ appDefinition, app: startedApp = nul
       pathName: plan.pathName,
       waitFor: plan.parentWaitFor,
       waitTimeoutMs: config.waitTimeoutMs,
+      dataReadyTimeoutMs: config.dataReadyTimeoutMs,
       networkIdleTimeoutMs: config.networkIdleTimeoutMs,
       keepPage: true,
     })
@@ -933,7 +1242,9 @@ async function captureModalPlanSequential({ appDefinition, app: startedApp = nul
       pathName: plan.pathName,
       appName: app.name,
       waitTimeoutMs: config.waitTimeoutMs,
+      dataReadyTimeoutMs: config.dataReadyTimeoutMs,
       networkIdleTimeoutMs: config.networkIdleTimeoutMs,
+      parentWaitFor: plan.parentWaitFor,
       onlyModalId: plan.modalId,
     })
     return snapshots[0]?.snapshot || {
@@ -975,12 +1286,14 @@ async function openAndCapture({
   pathName,
   waitFor,
   waitTimeoutMs,
+  dataReadyTimeoutMs = DEFAULT_DATA_READY_TIMEOUT_MS,
   networkIdleTimeoutMs = DEFAULT_NETWORK_IDLE_TIMEOUT_MS,
   keepPage = false,
 }) {
   const page = reusablePage || await context.newPage()
   const ownsPage = !reusablePage
   const url = new URL(pathName, app.baseUrl)
+  const captureStartedAt = Date.now()
   const consoleMessages = []
   const rateLimitResponses = []
 
@@ -1005,9 +1318,16 @@ async function openAndCapture({
   page.on('response', onResponse)
 
   try {
+    const effectiveWaitTimeoutMs = effectiveWaitTimeout(scenario, pathName, waitTimeoutMs)
+    const effectiveDataReadyTimeoutMs = effectiveDataReadyTimeout(scenario, pathName, dataReadyTimeoutMs)
+    const captureBudgetMs = effectiveCaptureBudget(scenario, pathName)
     let waitError = null
+    let readinessError = null
+    let actionError = null
+    let pendingReadiness = []
     let navigationError = null
-    const navigationTimeoutMs = Number(scenario.navigationTimeoutMs || waitTimeoutMs || 45_000)
+    let navigationKind = null
+    const navigationTimeoutMs = Number(scenario.navigationTimeoutMs || effectiveWaitTimeoutMs || 45_000)
     const maxAttempts = Math.max(
       1,
       Number(scenario.rateLimitRetries ?? 0) || 1,
@@ -1016,11 +1336,21 @@ async function openAndCapture({
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       waitError = null
+      readinessError = null
+      actionError = null
+      pendingReadiness = []
       navigationError = null
+      navigationKind = null
       rateLimitResponses.length = 0
 
       try {
-        await page.goto(url.href, { waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs })
+        navigationKind = await navigateForCapture(page, url, {
+          timeout: navigationTimeoutMs,
+          forceDocumentNavigation: ownsPage || reusablePage?._parityForceDocumentNavigation || scenario.forceDocumentNavigation,
+        })
+        if (reusablePage?._parityForceDocumentNavigation) {
+          reusablePage._parityForceDocumentNavigation = false
+        }
       }
       catch (error) {
         navigationError = error.message
@@ -1028,10 +1358,32 @@ async function openAndCapture({
 
       if (!navigationError) {
         try {
-          await waitForSelectors(page, waitFor, waitTimeoutMs)
+          await waitForSelectors(page, waitFor, effectiveWaitTimeoutMs)
         }
         catch (error) {
           waitError = error.message
+        }
+      }
+
+      if (!navigationError && !waitError) {
+        try {
+          await waitForPageDataReady(page, scenario, effectiveDataReadyTimeoutMs)
+        }
+        catch (error) {
+          readinessError = error.message
+          pendingReadiness = await pendingReadinessMarkers(page).catch(() => [])
+        }
+      }
+
+      if (!navigationError && !waitError && !readinessError && scenario.actions?.length) {
+        try {
+          await performScenarioActions(page, scenario, {
+            waitTimeoutMs: effectiveWaitTimeoutMs,
+            dataReadyTimeoutMs: effectiveDataReadyTimeoutMs,
+          })
+        }
+        catch (error) {
+          actionError = error.message
         }
       }
 
@@ -1083,15 +1435,24 @@ async function openAndCapture({
     }
 
     snapshot.requestedPath = pathName
+    snapshot.waitFor = waitFor || []
+    snapshot.navigationKind = navigationKind
     snapshot.url = url.href
     snapshot.path = url.pathname + url.search
+    snapshot.captureDurationMs = Date.now() - captureStartedAt
+    snapshot.captureBudgetMs = captureBudgetMs
+    snapshot.slowCapture = snapshot.captureDurationMs > captureBudgetMs
     snapshot.captureError = navigationError
       ? 'Navigation failed after ' + maxAttempts + ' attempt(s): ' + navigationError
       : missingSelectors.length
         ? waitError + '\nMissing after final scrape: ' + missingSelectors.join(', ')
-        : rateLimitResponses.length
-          ? 'HTTP 429 responses observed: ' + rateLimitResponses.map(item => item.url).join(', ')
-          : snapshot.captureError || null
+        : readinessError
+          ? readinessError + (pendingReadiness.length ? '\nPending data readiness: ' + pendingReadiness.join(', ') : '')
+          : actionError
+            ? actionError
+            : rateLimitResponses.length
+              ? 'HTTP 429 responses observed: ' + rateLimitResponses.map(item => item.url).join(', ')
+              : snapshot.captureError || null
     snapshot.console = consoleMessages
     snapshot.rateLimitResponses = rateLimitResponses
 
@@ -1106,6 +1467,66 @@ async function openAndCapture({
     page.off('console', onConsole)
     page.off('response', onResponse)
   }
+}
+
+async function performScenarioActions(page, scenario, { waitTimeoutMs, dataReadyTimeoutMs }) {
+  for (const [index, action] of (scenario.actions || []).entries()) {
+    const actionLabel = action.label || action.type || ('action-' + (index + 1))
+    const timeout = Number(action.timeoutMs ?? waitTimeoutMs)
+
+    if (action.type === 'wait') {
+      await page.waitForTimeout(Number(action.ms ?? action.waitMs ?? 0))
+      continue
+    }
+
+    if (action.type === 'waitFor') {
+      await waitForSelectors(page, [action.selector], timeout)
+      continue
+    }
+
+    if (action.type === 'click') {
+      const locator = page.locator(action.selector)
+      await locator.nth(Number(action.index ?? 0)).click({ timeout })
+      if (action.waitFor?.length) {
+        await waitForSelectors(page, action.waitFor, timeout)
+      }
+      if (action.settleMs !== undefined) {
+        await page.waitForTimeout(Number(action.settleMs))
+      }
+      if (action.waitForData !== false) {
+        await waitForPageDataReady(page, scenario, Number(action.dataReadyTimeoutMs ?? dataReadyTimeoutMs))
+      }
+      continue
+    }
+
+    throw new Error('Unsupported scenario action "' + actionLabel + '"')
+  }
+}
+
+async function navigateForCapture(page, url, { timeout, forceDocumentNavigation = false } = {}) {
+  const targetPath = url.pathname + url.search + url.hash
+  const currentUrl = page.url()
+  const canUseSpaNavigation = !forceDocumentNavigation
+    && currentUrl
+    && currentUrl !== 'about:blank'
+    && originOf(currentUrl) === originOf(url.href)
+
+  if (canUseSpaNavigation) {
+    const result = await page.evaluate(async (pathName) => {
+      const nuxt = window.$nuxt || window.useNuxtApp?.()
+      const router = nuxt?.$router || nuxt?.vueApp?.config?.globalProperties?.$router
+      if (!router?.push) return { ok: false, reason: 'router-unavailable' }
+      await router.push(pathName)
+      await router.isReady?.()
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      return { ok: true }
+    }, targetPath).catch(error => ({ ok: false, reason: error?.message || String(error) }))
+
+    if (result?.ok) return 'spa'
+  }
+
+  await page.goto(url.href, { waitUntil: 'domcontentloaded', timeout })
+  return 'document'
 }
 
 function createFailedSnapshot({ pageId, scenarioId, label, appName, url, pathName, error }) {
@@ -1141,6 +1562,92 @@ async function missingWaitSelectors(page, selectors = []) {
   }, selectors || [])
 }
 
+async function waitForPageDataReady(page, scenario, timeout = DEFAULT_DATA_READY_TIMEOUT_MS) {
+  const effectiveTimeout = Number(timeout)
+  if (!Number.isFinite(effectiveTimeout) || effectiveTimeout <= 0) return
+
+  const deadline = Date.now() + effectiveTimeout
+  let pending = await pendingReadinessMarkersWithRetry(page, deadline)
+  while (pending.length && Date.now() < deadline) {
+    await page.waitForTimeout(100)
+    pending = await pendingReadinessMarkersWithRetry(page, deadline)
+  }
+  if (pending.length) {
+    throw new Error('Page data did not become ready within ' + effectiveTimeout + 'ms')
+  }
+}
+
+function effectiveWaitTimeout(scenario, pathName, fallback) {
+  return Number(scenario.waitTimeoutMs ?? scenario.defaults?.waitTimeoutMs ?? (isPortfolioCapture(scenario, pathName) ? DEFAULT_PORTFOLIO_TIMEOUT_MS : fallback))
+}
+
+function effectiveDataReadyTimeout(scenario, pathName, fallback) {
+  return Number(scenario.dataReadyTimeoutMs ?? scenario.defaults?.dataReadyTimeoutMs ?? (isPortfolioCapture(scenario, pathName) ? DEFAULT_PORTFOLIO_TIMEOUT_MS : fallback))
+}
+
+function effectiveCaptureBudget(scenario, pathName) {
+  return Number(scenario.captureBudgetMs ?? scenario.defaults?.captureBudgetMs ?? (isPortfolioCapture(scenario, pathName) ? DEFAULT_PORTFOLIO_CAPTURE_BUDGET_MS : DEFAULT_CAPTURE_BUDGET_MS))
+}
+
+function isPortfolioCapture(scenario, pathName = '') {
+  return String(scenario?.id || '').includes('portfolio') || String(pathName || '').includes('/portfolio')
+}
+
+async function pendingReadinessMarkers(page) {
+  return page.evaluate(pendingParityReadinessMarkers)
+}
+
+async function pendingReadinessMarkersWithRetry(page, deadline) {
+  while (true) {
+    try {
+      return await pendingReadinessMarkers(page)
+    }
+    catch (error) {
+      const message = error?.message || String(error)
+      if (!message.includes('Execution context was destroyed') || Date.now() >= deadline) throw error
+      await page.waitForTimeout(100)
+    }
+  }
+}
+
+function pendingParityReadinessMarkers() {
+  const isVisible = (element) => {
+    const style = window.getComputedStyle(element)
+    if (style.display === 'none' || style.visibility === 'hidden') return false
+    const rect = element.getBoundingClientRect()
+    return rect.width > 0 && rect.height > 0
+  }
+  const textOf = element => String(element.innerText || element.textContent || '').replace(/\s+/g, ' ').trim()
+  const markers = []
+
+  for (const element of Array.from(document.querySelectorAll('[aria-busy="true"], [data-loading="true"], [data-parity-loading]'))) {
+    if (isVisible(element)) markers.push(element.getAttribute('data-field') || element.getAttribute('data-id') || element.tagName.toLowerCase())
+  }
+
+  for (const element of Array.from(document.querySelectorAll('.animate-pulse'))) {
+    if (!isVisible(element)) continue
+    const text = textOf(element)
+    if (text === '...' || text.toLowerCase().includes('loading')) {
+      markers.push('loading-pulse:' + (element.closest('[data-field]')?.getAttribute('data-field') || text || element.tagName.toLowerCase()))
+    }
+  }
+
+  for (const element of Array.from(document.querySelectorAll('div'))) {
+    if (!isVisible(element)) continue
+    const classes = element.classList
+    if (
+      classes.contains('w-80')
+      && classes.contains('h-20')
+      && classes.contains('rounded-12')
+      && classes.contains('bg-neutral-300/10')
+    ) {
+      markers.push('loadable-content-skeleton')
+    }
+  }
+
+  return Array.from(new Set(markers)).slice(0, 20)
+}
+
 async function waitForFollowLinks(page, selector, timeout = 45_000) {
   if (!selector) return
 
@@ -1168,30 +1675,33 @@ async function captureModalPlansOnPage({
   pathName,
   appName,
   waitTimeoutMs,
+  dataReadyTimeoutMs = DEFAULT_DATA_READY_TIMEOUT_MS,
+  parentWaitFor = null,
   onlyModalId = null,
 }) {
   const modalCaptures = scenario.modals || []
   const snapshots = []
+  const effectiveModalWaitTimeoutMs = effectiveWaitTimeout(scenario, pathName, waitTimeoutMs)
 
   for (const modal of modalCaptures) {
     const locator = page.locator(modal.selector)
     const count = await locator.count().catch(() => 0)
     const maxItems = Math.min(count, modal.maxItems ?? 1)
-    if (maxItems > 0) {
-      console.log('[parity-compare] ' + pageId + ' modal ' + modal.id + ': ' + maxItems + ' capture(s)')
-    }
 
     for (let index = 0; index < maxItems; index += 1) {
       const modalId = modal.id + '-' + String(index + 1).padStart(2, '0')
       if (onlyModalId && modalId !== onlyModalId) continue
 
+      console.log('[parity-compare] ' + pageId + ' modal ' + modal.id + ': 1 capture(s)')
       const modalPageId = pageId + '/modal/' + sanitizeFilePart(modalId)
       const label = (modal.label || modal.id) + ' ' + (index + 1)
+      const captureStartedAt = Date.now()
       let captureError = null
 
       try {
-        await locator.nth(index).click({ timeout: waitTimeoutMs })
-        await waitForSelectors(page, modal.waitFor || ['[data-id="data-point"]'], waitTimeoutMs)
+        await locator.nth(index).click({ timeout: effectiveModalWaitTimeoutMs })
+        await waitForSelectors(page, modal.waitFor || ['[data-id="data-point"]'], effectiveModalWaitTimeoutMs)
+        await waitForPageDataReady(page, scenario, modal.dataReadyTimeoutMs ?? dataReadyTimeoutMs)
         await page.waitForTimeout(modal.settleMs ?? scenario.settleMs ?? 0)
       }
       catch (error) {
@@ -1205,7 +1715,12 @@ async function captureModalPlansOnPage({
         appName,
       })
       snapshot.requestedPath = pathName
+      snapshot.waitFor = parentWaitFor || scenario.waitFor || []
+      snapshot.parentWaitFor = parentWaitFor || scenario.waitFor || []
       snapshot.path = new URL(page.url()).pathname + new URL(page.url()).search
+      snapshot.captureDurationMs = Date.now() - captureStartedAt
+      snapshot.captureBudgetMs = effectiveCaptureBudget(scenario, pathName)
+      snapshot.slowCapture = snapshot.captureDurationMs > snapshot.captureBudgetMs
       snapshot.captureError = captureError
       snapshot.console = []
 
@@ -1214,7 +1729,7 @@ async function captureModalPlansOnPage({
         pageId: modalPageId,
         parentPageId: pageId,
         pathName,
-        parentWaitFor: scenario.waitFor,
+        parentWaitFor: parentWaitFor || scenario.waitFor,
         scenario: { ...scenario, label },
         label,
         snapshot,
@@ -1420,6 +1935,7 @@ function compareSnapshots(baseline, candidate, config = {}) {
         missingInCandidate: baseline.elements.length,
         extraInCandidate: 0,
         valueMismatches: 0,
+        slowCaptures: baseline.slowCapture ? 1 : 0,
       },
       captureErrors: [{ side: 'candidate', message: 'Candidate snapshot missing for page plan.' }],
       consoleErrors: [],
@@ -1457,6 +1973,15 @@ function compareSnapshots(baseline, candidate, config = {}) {
     path: baseline.path,
     baselineUrl: baseline.url,
     candidateUrl: candidate.url,
+    requestedPath: baseline.requestedPath || baseline.path,
+    waitFor: baseline.waitFor || [],
+    parentWaitFor: baseline.parentWaitFor || baseline.waitFor || [],
+    captureDurationsMs: {
+      baseline: baseline.captureDurationMs ?? null,
+      candidate: candidate.captureDurationMs ?? null,
+      baselineBudget: baseline.captureBudgetMs ?? null,
+      candidateBudget: candidate.captureBudgetMs ?? null,
+    },
     status: failedElements.length || failedLists.length || captureErrors.length || consoleErrors.length ? 'fail' : 'pass',
     summary: {
       baselineTagged: baseline.counts.tagged,
@@ -1468,6 +1993,7 @@ function compareSnapshots(baseline, candidate, config = {}) {
       missingInCandidate: elementDiffs.filter(diff => diff.status === 'missing-in-candidate').length,
       extraInCandidate: elementDiffs.filter(diff => diff.status === 'extra-in-candidate').length,
       valueMismatches: elementDiffs.filter(diff => diff.status === 'value-mismatch').length,
+      slowCaptures: [baseline, candidate].filter(snapshot => snapshot?.slowCapture).length,
     },
     captureErrors,
     consoleErrors,
@@ -1668,7 +2194,7 @@ function summarizeElement(element) {
 function buildDiff({ run, config, outputDir, baselineSnapshots, candidateSnapshots, pageDiffs }) {
   const failedPages = pageDiffs.filter(page => page.status !== 'pass')
 
-  return {
+  const diff = {
     runId: run.runId,
     generatedAt: new Date().toISOString(),
     outputDir,
@@ -1689,24 +2215,35 @@ function buildDiff({ run, config, outputDir, baselineSnapshots, candidateSnapsho
       listDiffs: pageDiffs.reduce((total, page) => total + page.summary.listDiffs, 0),
       captureErrors: pageDiffs.reduce((total, page) => total + page.summary.captureErrors, 0),
       consoleErrors: pageDiffs.reduce((total, page) => total + page.summary.consoleErrors, 0),
+      slowCaptures: pageDiffs.reduce((total, page) => total + (page.summary.slowCaptures || 0), 0),
       missingInCandidate: pageDiffs.reduce((total, page) => total + page.summary.missingInCandidate, 0),
       extraInCandidate: pageDiffs.reduce((total, page) => total + page.summary.extraInCandidate, 0),
       valueMismatches: pageDiffs.reduce((total, page) => total + page.summary.valueMismatches, 0),
       numericTolerance: config.numericTolerance,
     },
     pages: pageDiffs,
-    pagesWithDiscrepancies: failedPages.map(page => ({
-      pageId: page.pageId,
-      scenarioId: page.scenarioId,
-      label: page.label,
-      path: page.path,
-      baselineUrl: page.baselineUrl,
-      candidateUrl: page.candidateUrl,
-      summary: page.summary,
-      captureErrors: page.captureErrors,
-      consoleErrors: page.consoleErrors,
-    })),
+    pagesWithDiscrepancies: summarizeDiscrepantPages(failedPages),
   }
+  return diff
+}
+
+function summarizeDiscrepantPages(pages) {
+  return pages.map(page => ({
+    pageId: page.pageId,
+    scenarioId: page.scenarioId,
+    label: page.label,
+    path: page.path,
+    baselineUrl: page.baselineUrl,
+    candidateUrl: page.candidateUrl,
+    requestedPath: page.requestedPath,
+    waitFor: page.waitFor,
+    parentWaitFor: page.parentWaitFor,
+    persistence: page.persistence || null,
+    captureDurationsMs: page.captureDurationsMs,
+    summary: page.summary,
+    captureErrors: page.captureErrors,
+    consoleErrors: page.consoleErrors,
+  }))
 }
 
 function renderHtmlReport(diff) {
@@ -1721,6 +2258,7 @@ function renderHtmlReport(diff) {
       '<td>' + page.summary.elementDiffs + '</td>',
       '<td>' + page.summary.captureErrors + '</td>',
       '<td>' + page.summary.consoleErrors + '</td>',
+      '<td>' + (page.summary.slowCaptures || 0) + '</td>',
       '<td>' + page.summary.missingInCandidate + '</td>',
       '<td>' + page.summary.extraInCandidate + '</td>',
       '<td>' + page.summary.valueMismatches + '</td>',
@@ -1731,7 +2269,8 @@ function renderHtmlReport(diff) {
   const problemLinks = diff.pagesWithDiscrepancies.map(page =>
     '<li><code>' + escapeHtml(page.pageId) + '</code> '
     + '<a href="' + escapeAttr(page.baselineUrl) + '">baseline</a> '
-    + '<a href="' + escapeAttr(page.candidateUrl) + '">candidate</a></li>',
+    + '<a href="' + escapeAttr(page.candidateUrl) + '">candidate</a> '
+    + escapeHtml(page.persistence?.status ? '(' + page.persistence.status + ')' : '') + '</li>',
   ).join('\n')
 
   return `<!doctype html>
@@ -1752,6 +2291,7 @@ function renderHtmlReport(diff) {
 <body>
   <h1>Parity report ${escapeHtml(diff.runId)}</h1>
   <p>${diff.summary.failedPages} failed pages out of ${diff.summary.pages}. Element diffs: ${diff.summary.elementDiffs}. List diffs: ${diff.summary.listDiffs}.</p>
+  <p>Reload recheck: ${diff.persistenceSummary?.checked ?? 0} checked, ${diff.persistenceSummary?.persistent ?? 0} persistent, ${diff.persistenceSummary?.resolved ?? 0} resolved, ${diff.persistenceSummary?.failed ?? 0} failed to verify.</p>
   <h2>Discrepancy links</h2>
   <ul>${problemLinks || '<li>None</li>'}</ul>
   <h2>Pages</h2>
@@ -1765,6 +2305,7 @@ function renderHtmlReport(diff) {
         <th>Element diffs</th>
         <th>Capture errors</th>
         <th>Console errors</th>
+        <th>Slow captures</th>
         <th>Missing</th>
         <th>Extra</th>
         <th>Value</th>
@@ -1784,6 +2325,14 @@ function printSummary(diff) {
   console.log('[parity-compare] diff.json: ' + diff.artifacts.diff)
   console.log('[parity-compare] report.html: ' + diff.artifacts.report)
   console.log('[parity-compare] failed pages: ' + diff.summary.failedPages + '/' + diff.summary.pages)
+  console.log('[parity-compare] slow captures: ' + diff.summary.slowCaptures)
+  if (diff.persistenceSummary) {
+    console.log('[parity-compare] reload recheck: '
+      + diff.persistenceSummary.checked + ' checked, '
+      + diff.persistenceSummary.persistent + ' persistent, '
+      + diff.persistenceSummary.resolved + ' resolved, '
+      + diff.persistenceSummary.failed + ' failed')
+  }
 
   if (diff.pagesWithDiscrepancies.length) {
     console.log('[parity-compare] pages with discrepancies:')
@@ -2070,14 +2619,17 @@ Options:
   --env-file <file[,file]>    Load app env from root-relative file(s). Default: .env. Use "none" to disable.
   --max-follow-items <n>      Limit list item detail pages. Default: all.
   --ready-timeout-ms <n>      Production server readiness timeout. Default: 120000.
-  --wait-timeout-ms <n>       Per-selector wait timeout. Default: 45000.
-  --network-idle-timeout-ms <n> Network idle wait after selectors. Default: ${DEFAULT_NETWORK_IDLE_TIMEOUT_MS}. Use 0 to skip.
+  --wait-timeout-ms <n>       Per-selector and modal action timeout. Default: ${DEFAULT_WAIT_TIMEOUT_MS}.
+  --data-ready-timeout-ms <n> Wait for visible loading placeholders to clear. Default: ${DEFAULT_DATA_READY_TIMEOUT_MS}.
+  --network-idle-timeout-ms <n> Network idle wait after selectors. Default: ${DEFAULT_NETWORK_IDLE_TIMEOUT_MS}.
   --navigation-timeout-ms <n> Per-page navigation timeout. Default: 45000.
   --navigation-retries <n>    Retry page navigations before recording a capture error. Default: 3.
   --numeric-tolerance <n|%>   Relative tolerance for numeric values. Default: 1%.
   --rate-limit-retries <n>    Retry page captures that observe HTTP 429. Default: 3.
-  --sequential                Capture baseline/candidate page-by-page instead of running both apps together.
-  --app-phased                Capture all baseline pages first, then all candidate pages.
+  --app-phased                Capture all baseline pages first, then all candidate pages. Default.
+  --alternating               Slow diagnostic mode: alternate baseline/candidate page-by-page.
+  --sequential                Legacy alias for --alternating.
+  --parallel                  Run both apps together and compare each scenario before moving on.
   --headed                    Show browser.
   --no-fail                   Exit 0 even when diffs are found.
   --skip-install              Do not run npm ci in missing-node_modules worktrees.
@@ -2095,8 +2647,11 @@ Environment:
   PARITY_ENV_FILE             Same as --env-file.
   PARITY_NUMERIC_TOLERANCE    Same as --numeric-tolerance.
   PARITY_RATE_LIMIT_RETRIES   Same as --rate-limit-retries.
+  PARITY_DATA_READY_TIMEOUT_MS Same as --data-ready-timeout-ms.
   PARITY_NAVIGATION_TIMEOUT_MS Same as --navigation-timeout-ms.
   PARITY_NAVIGATION_RETRIES   Same as --navigation-retries.
+  PARITY_ALTERNATING=1        Same as --alternating.
+  PARITY_PARALLEL=1           Same as --parallel.
   PARITY_HEADED=1             Show browser.
 `)
 }
