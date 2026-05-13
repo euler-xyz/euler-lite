@@ -4,6 +4,7 @@ import { getAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { isVaultNotExplorable } from '~/utils/eulerLabelsUtils'
+import { liteSecuritizeVaultFetchOptions, liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
 
 // Vault type enum - 3 types (escrow is a category of evk, not a separate type)
 export type VaultType = 'evk' | 'earn' | 'securitize'
@@ -209,32 +210,20 @@ const fetchVaultByType = async (address: string, type: VaultType): Promise<Vault
   const { getEulerSdk } = useEulerSdk()
   const sdk = await getEulerSdk()
   const vaultAddress = getAddress(address) as Address
-  const options = {
-    populateMarketPrices: true,
-    populateCollaterals: true,
-    populateStrategyVaults: true,
-    eVaultFetchOptions: {
-      populateMarketPrices: true,
-      populateCollaterals: true,
-    },
-  }
-
   switch (type) {
     case 'earn': {
-      const { result } = await sdk.eulerEarnService.fetchVault(chainId.value, vaultAddress, options)
+      const { result } = await sdk.eulerEarnService.fetchVault(chainId.value, vaultAddress, liteVaultFetchOptions)
       if (!result) throw new Error(`Earn vault not found for ${address}`)
       return result
     }
     case 'securitize': {
-      const { result } = await sdk.securitizeVaultService.fetchVault(chainId.value, vaultAddress, {
-        populateMarketPrices: true,
-      })
+      const { result } = await sdk.securitizeVaultService.fetchVault(chainId.value, vaultAddress, liteSecuritizeVaultFetchOptions)
       if (!result) throw new Error(`Securitize vault not found for ${address}`)
       return result
     }
     case 'evk':
     default: {
-      const { result } = await sdk.eVaultService.fetchVault(chainId.value, vaultAddress, options)
+      const { result } = await sdk.eVaultService.fetchVault(chainId.value, vaultAddress, liteVaultFetchOptions)
       if (!result) throw new Error(`EVault not found for ${address}`)
       return result
     }
