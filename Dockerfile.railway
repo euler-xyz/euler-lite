@@ -1,0 +1,48 @@
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+# Railway preview builds use this Dockerfile. It avoids BuildKit secret mounts
+# because Railway Dockerfile builds only support cache mounts.
+FROM node:24.14.1@sha256:80fc934952c8f1b2b4d39907af7211f8a9fff1a4c2cf673fb49099292c251cec AS builder
+
+WORKDIR /usr/src/app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+
+ENV NODE_OPTIONS=--max-old-space-size=4096
+
+RUN npm run build
+
+# Download a pinned Doppler CLI release (binary only, no package manager install)
+ARG DOPPLER_CLI_VERSION=3.75.1
+ARG DOPPLER_CLI_SHA256=0b858232daa9a3fd06d1c3f1b9a370c68cfe3f9680ec1a60d540199cd859bea0
+RUN set -eu; \
+  curl -fsSLo /tmp/doppler.tar.gz --tlsv1.2 --proto "=https" --retry 3 \
+    "https://github.com/DopplerHQ/cli/releases/download/${DOPPLER_CLI_VERSION}/doppler_${DOPPLER_CLI_VERSION}_linux_amd64.tar.gz"; \
+  echo "${DOPPLER_CLI_SHA256}  /tmp/doppler.tar.gz" | sha256sum -c -; \
+  tar -xzf /tmp/doppler.tar.gz -C /usr/src/app doppler; \
+  rm /tmp/doppler.tar.gz
+
+FROM gcr.io/distroless/nodejs24-debian12:nonroot@sha256:14d42e2511532589a7c7e01a753667a74fcc96266e137e8125006b87b0c32d0a AS production
+
+ENV MODE=production
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+
+ARG APP_PORT=3000
+ENV PORT=${APP_PORT}
+
+ARG NETWORK=mainnet
+ENV NETWORK=${NETWORK}
+
+WORKDIR /usr/src/app
+
+COPY --from=builder /usr/src/app/.output .output
+COPY --from=builder /usr/src/app/doppler ./doppler
+
+EXPOSE ${APP_PORT}
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["/nodejs/bin/node", "-e", "fetch('http://localhost:'+process.env.PORT+'/api/tenderly/status').then(r=>{if(!r.ok)throw r.status}).catch(()=>process.exit(1))"]
+
+ENTRYPOINT []
+CMD ["./doppler", "run", "--", "/nodejs/bin/node", ".output/server/index.mjs"]
