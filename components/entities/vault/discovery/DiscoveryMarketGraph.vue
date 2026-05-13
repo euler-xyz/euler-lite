@@ -47,6 +47,7 @@ const isNodeCyclicalNote = (address: string): boolean => {
     <div
       class="px-16 pb-12 flex items-center justify-center"
       data-id="discovery-graph"
+      data-list="discovery-graph"
       :data-key="market.id"
       :data-node-count="enlarged.nodes.length"
       :data-edge-count="enlarged.edges.length"
@@ -70,6 +71,13 @@ const isNodeCyclicalNote = (address: string): boolean => {
             "
           >
             <line
+              data-id="discovery-graph-edge"
+              data-list="discovery-graph-edge"
+              :data-key="`${edge.from.address}:${edge.to.address}`"
+              :data-market-id="market.id"
+              :data-from-address="edge.from.address"
+              :data-to-address="edge.to.address"
+              :data-mutual="edge.mutual"
               :x1="edge.from.x"
               :y1="edge.from.y"
               :x2="
@@ -110,6 +118,13 @@ const isNodeCyclicalNote = (address: string): boolean => {
             />
             <template v-if="edge.mutual">
               <line
+                data-id="discovery-graph-edge"
+                data-list="discovery-graph-edge"
+                :data-key="`${edge.to.address}:${edge.from.address}`"
+                :data-market-id="market.id"
+                :data-from-address="edge.to.address"
+                :data-to-address="edge.from.address"
+                data-mutual="true"
                 :x1="edge.to.x"
                 :y1="edge.to.y"
                 :x2="
@@ -153,6 +168,13 @@ const isNodeCyclicalNote = (address: string): boolean => {
           <!-- Default state or dimmed -->
           <line
             v-else
+            data-id="discovery-graph-edge"
+            data-list="discovery-graph-edge"
+            :data-key="`${edge.from.address}:${edge.to.address}`"
+            :data-market-id="market.id"
+            :data-from-address="edge.from.address"
+            :data-to-address="edge.to.address"
+            :data-mutual="edge.mutual"
             :x1="edge.from.x"
             :y1="edge.from.y"
             :x2="edge.to.x"
@@ -173,7 +195,9 @@ const isNodeCyclicalNote = (address: string): boolean => {
           :key="node.address"
           :class="node.hasVaultData === false ? 'cursor-default' : 'cursor-pointer'"
           data-id="discovery-graph-node"
+          data-list="discovery-graph-node"
           :data-key="node.address"
+          :data-market-id="market.id"
           :data-vault-address="node.address"
           :data-asset-address="node.assetAddress"
           :data-symbol="node.assetSymbol"
