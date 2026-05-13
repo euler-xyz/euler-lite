@@ -52,15 +52,22 @@ export const useRepaySavingsOptions = () => {
         assetAddress: vault.asset.address,
         label: getVaultProductName(vault.address) || vault.name,
         vaultAddress: vault.address,
+        subAccount: position.subAccount,
       }
     },
   )
 
-  const getSavingsPosition = (vaultAddress: string): AccountDepositPosition | undefined => {
-    const normalized = getAddress(vaultAddress)
-    return savingsPositions.value.find(
-      position => getAddress(position.vault.address) === normalized,
+  const getSavingsPosition = (vaultAddress: string, subAccount?: string): AccountDepositPosition | undefined => {
+    const normalizedVault = getAddress(vaultAddress)
+    const matches = savingsPositions.value.filter(
+      position => getAddress(position.vault.address) === normalizedVault,
     )
+    if (subAccount) {
+      const normalizedSub = getAddress(subAccount)
+      const exact = matches.find(p => getAddress(p.subAccount) === normalizedSub)
+      if (exact) return exact
+    }
+    return matches[0]
   }
 
   return {

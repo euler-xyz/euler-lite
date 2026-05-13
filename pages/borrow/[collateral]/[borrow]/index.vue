@@ -49,7 +49,6 @@ useOperationGuard([collateralAddress, borrowAddress])
 // --- Shared state ---
 const balance = ref(0n)
 const savingBalance = ref(0n)
-const savingAssets = ref(0n)
 const tab = ref()
 const formTab = ref<'borrow' | 'multiply'>('borrow')
 const pendingSubAccount = ref<string | null>(null)
@@ -119,8 +118,10 @@ const isPairFullyRestricted = computed(() =>
   !isGeoBlocked.value && isVaultRestrictedByCountry(collateralAddress) && isVaultRestrictedByCountry(borrowAddress))
 
 // --- Savings collateral ---
-const savingCollateral = computed(() => {
-  return depositPositions.value.find(position => position.vault.address === route.params.collateral)
+const savingPositions = computed(() => {
+  return depositPositions.value.filter(position =>
+    position.assets > 0n && position.vault.address === route.params.collateral,
+  )
 })
 
 // --- Product labels ---
@@ -133,10 +134,9 @@ const borrow = useBorrowForm({
   borrowVault: borrowVault as ComputedRef<Vault | undefined>,
   collateralVault: collateralVault as ComputedRef<Vault | undefined>,
   formTab,
-  savingCollateral: savingCollateral as ComputedRef<{ assets: bigint, subAccount?: string, shares: bigint } | undefined>,
+  savingPositions,
   balance,
   savingBalance,
-  savingAssets,
   resolvePendingSubAccount,
   collateralSupplyApy,
   borrowApy,
@@ -263,7 +263,7 @@ const updateBalance = async () => {
   if (collateralVault.value?.address) {
     savingBalance.value = await fetchVaultShareBalance(
       collateralVault.value.address,
-      savingCollateral.value?.subAccount,
+      borrow.savingCollateral.value?.subAccount,
     )
   }
   else {
@@ -396,6 +396,14 @@ watch(address, () => {
   updateBalance()
 })
 
+watch(() => borrow.savingCollateral.value?.subAccount, async () => {
+  if (!collateralVault.value?.address) return
+  savingBalance.value = await fetchVaultShareBalance(
+    collateralVault.value.address,
+    borrow.savingCollateral.value?.subAccount,
+  )
+})
+
 watch(formTab, () => {
   borrow.resetOnTabSwitch()
   multiply.resetOnTabSwitch()
@@ -518,6 +526,7 @@ watch(formTab, () => {
                   :balance="borrow.borrowActiveBalance.value"
                   :collateral-options="borrow.borrowNeedsSwap.value ? undefined : (borrow.collateralOptions.value as CollateralOption[])"
                   :selected-source="borrow.isSavingCollateral.value ? 'saving' : 'wallet'"
+                  :selected-sub-account="borrow.selectedSavingSubAccount.value"
                   maxable
                   @input="borrow.onCollateralInput"
                   @change-collateral="borrow.onChangeCollateral"
@@ -727,6 +736,7 @@ watch(formTab, () => {
                       :balance="multiply.multiplyBalance.value"
                       :collateral-options="multiply.multiplyCollateralOptions.value"
                       :selected-source="multiply.isMultiplySavingCollateral.value ? 'saving' : 'wallet'"
+                      :selected-sub-account="multiply.multiplySavingSubAccount.value"
                       maxable
                       @input="multiply.onMultiplyInput"
                       @change-collateral="multiply.onMultiplyCollateralChange"

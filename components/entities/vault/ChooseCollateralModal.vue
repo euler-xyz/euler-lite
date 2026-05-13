@@ -99,13 +99,13 @@ const handleClose = () => {
                 v-if="getOptionType(option) === 'wallet'"
                 class="ml-6 text-[12px] leading-[16px] py-4 px-8 rounded-8 bg-accent-600/10 text-accent-600"
               >
-                Wallet balance
+                Wallet
               </div>
               <div
                 v-else-if="getOptionType(option) === 'saving'"
                 class="ml-6 text-[12px] leading-[16px] py-4 px-8 rounded-8 bg-[#CBC0951A] text-yellow-600"
               >
-                Savings balance
+                Savings
               </div>
               <span
                 v-for="tag in (option.tags || [])"
@@ -135,7 +135,7 @@ const handleClose = () => {
                 {{ getFormattedAmount(option) }}
               </div>
             </div>
-            <div class="flex flex-col items-end">
+            <div class="flex flex-col items-end min-w-[110px]">
               <div class="text-content-primary mb-2">
                 {{ getApyLabel(option) }}
               </div>
