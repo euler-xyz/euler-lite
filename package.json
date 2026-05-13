@@ -14,6 +14,7 @@
     "parity:full": "node scripts/parity-compare.mjs --scenarios tests/parity/full-run.scenarios.json --rate-limit-retries 3",
     "parity:links": "node scripts/parity-links.mjs",
     "parity:sdk-diagnostics": "node scripts/parity-sdk-diagnostics.mjs",
+    "parity:public-endpoints": "node scripts/public-endpoint-parity.mjs",
     "parity:overlay": "node scripts/parity-overlay.mjs",
     "test": "vitest",
     "test:run": "vitest run",

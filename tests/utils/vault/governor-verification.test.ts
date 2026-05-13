@@ -141,7 +141,7 @@ describe('isVaultGovernorVerified', () => {
   })
 
   it('normalizes mixed-case governorAdmin before comparison', () => {
-    const vault = makeVault({ governorAdmin: GOV_A.toLowerCase() })
+    const vault = makeVault({ governorAdmin: GOV_A.toLowerCase() as Address })
     const labels = buildLabels({
       declaredKeys: { [VAULT_ADDR]: ['euler'] },
       entityAddresses: { euler: [GOV_A] },
@@ -168,7 +168,7 @@ describe('isVaultGovernorVerified', () => {
   })
 
   it('works for SecuritizeVault (no oracleDetailedInfo branch)', () => {
-    const vault = makeSecuritize({ governorAdmin: GOV_A })
+    const vault = makeSecuritize({ governor: GOV_A })
     const labels = buildLabels({
       declaredKeys: { [VAULT_ADDR]: ['euler'] },
       entityAddresses: { euler: [GOV_A] },

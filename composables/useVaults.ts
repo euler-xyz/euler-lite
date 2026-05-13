@@ -2,11 +2,16 @@ import type { EulerEarn, SecuritizeCollateralVault, EVault } from '@eulerxyz/eul
 import { extractUnresolvedCollateralAddresses } from '~/utils/vault/collateral-discovery'
 import { isLiveCollateralEdge } from '~/utils/vault/ltv'
 import { fetchChainVaultCategories, fetchVaultCategory, isSecuritizeVault, resetVaultCategoryCache } from '~/utils/vault/categories'
-import { getProductByVault, isVaultNotExplorable, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, getProductKeyByVault, isVaultNotExplorable, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { getAddress, type Address } from 'viem'
 import { useVaultRegistry } from './useVaultRegistry'
 import { logWarn } from '~/utils/errorHandling'
+import {
+  isEarnVaultOwnerVerified as verifyEarnVaultOwner,
+  isVaultGovernorVerified as verifyVaultGovernor,
+  type VerificationLabels,
+} from '~/utils/vault/governor-verification'
 import { liteSecuritizeVaultFetchOptions, liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
 
 const isReady = ref(false)
@@ -834,74 +839,42 @@ const getBorrowVaultPair = async (
 }
 
 export const useVaults = () => {
+  const buildVerificationLabels = (): VerificationLabels => {
+    const { entities } = useEulerLabels()
+    return {
+      getDeclaredEntityKeys: (vaultAddress) => {
+        const productKey = getProductKeyByVault(vaultAddress)
+        if (!productKey) return undefined
+        const product = getProductByVault(vaultAddress)
+        return Array.isArray(product.entity) ? product.entity : [product.entity].filter(Boolean)
+      },
+      hasEntityAddress: (entityKey, address) => {
+        const entity = entities[entityKey]
+        return !!entity && Object.keys(entity.addresses ?? {}).includes(address)
+      },
+    }
+  }
+
   // Check if vault's on-chain governorAdmin matches any of the product's declared entities
   const isVaultGovernorVerified = (vault: EVault): boolean => {
-    const { entities } = useEulerLabels()
     const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
-
-    // Escrow vaults don't have a risk manager - show "-" not "Unknown"
-    if (getVaultCategory(vault.address) === 'escrow') {
-      return true
-    }
-
-    // Unverified vaults (not in products.json) show unknown risk manager
-    if (!isVerifiedVault(vault.address)) {
-      return false
-    }
-
-    const product = getProductByVault(vault.address)
-    if (!product.name) {
-      // Vault marked verified but not in products.json - shouldn't happen, but treat as unknown
-      return false
-    }
-
-    const declaredEntityKeys = Array.isArray(product.entity) ? product.entity : [product.entity].filter(Boolean)
-    if (declaredEntityKeys.length === 0) {
-      // No entities declared in product, nothing to verify against
-      return true
-    }
-
-    // Check if governorAdmin matches any address in any of the declared entities
-    const governorAdminVerified = declaredEntityKeys.some((entityKey) => {
-      const entity = entities[entityKey]
-      return entity && Object.keys(entity.addresses).includes(vault.governorAdmin)
-    })
-
-    if (!governorAdminVerified) {
-      return false
-    }
-
-    return true
+    const vaultCategory = getVaultCategory(vault.address)
+    return verifyVaultGovernor(
+      Object.assign(vault, {
+        verified: vaultCategory === 'escrow' || isVerifiedVault(vault.address),
+        vaultCategory,
+      }),
+      buildVerificationLabels(),
+    )
   }
 
   // Check if earn vault's on-chain owner matches any of the product's declared entities
   const isEarnVaultOwnerVerified = (earnVault: EulerEarn): boolean => {
-    const { entities } = useEulerLabels()
     const { isVerifiedVault } = useVaultRegistry()
-
-    if (!isVerifiedVault(earnVault.address)) {
-      return false
-    }
-
-    const product = getProductByVault(earnVault.address)
-    if (!product.name) {
-      return true
-    }
-
-    const declaredEntityKeys = Array.isArray(product.entity) ? product.entity : [product.entity].filter(Boolean)
-    if (declaredEntityKeys.length === 0) {
-      return true
-    }
-
-    const ownerAddress = getAddress(earnVault.governance.owner)
-    for (const entityKey of declaredEntityKeys) {
-      const entity = entities[entityKey]
-      if (entity && Object.keys(entity.addresses).includes(ownerAddress)) {
-        return true
-      }
-    }
-
-    return false
+    return verifyEarnVaultOwner(
+      Object.assign(earnVault, { verified: isVerifiedVault(earnVault.address) }),
+      buildVerificationLabels(),
+    )
   }
 
   return {

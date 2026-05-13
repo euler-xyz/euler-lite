@@ -1,8 +1,12 @@
 import { getAddress, zeroAddress, type Address } from 'viem'
 import { getEulerRouterGovernor } from '~/entities/oracle'
-import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import type { EulerEarn, OracleDetailedInfo } from '@eulerxyz/euler-v2-sdk'
 
-type VerifiableEVault = (EVault | SecuritizeCollateralVault) & {
+interface VerifiableVault {
+  address: string
+  governorAdmin?: string
+  governor?: string
+  oracleDetailedInfo?: OracleDetailedInfo | null
   verified?: boolean
   vaultCategory?: 'standard' | 'escrow'
 }
@@ -50,7 +54,7 @@ const findAllDeclaredEntitiesFor = (
 ): string[] => declaredKeys.filter(key => labels.hasEntityAddress(key, address))
 
 export const isVaultGovernorVerified = (
-  vault: VerifiableEVault,
+  vault: VerifiableVault,
   labels: VerificationLabels,
 ): boolean => {
   // Escrow vaults have no risk manager — labels treat them as a separate
@@ -65,7 +69,10 @@ export const isVaultGovernorVerified = (
   // the vault — treat it the same as a vault outside any product.
   if (!declaredKeys || declaredKeys.length === 0) return false
 
-  if (!findDeclaredEntityFor(getAddress(vault.governorAdmin), declaredKeys, labels)) {
+  const governor = vault.governorAdmin ?? vault.governor
+  if (!governor) return false
+
+  if (!findDeclaredEntityFor(getAddress(governor), declaredKeys, labels)) {
     return false
   }
 
@@ -111,14 +118,15 @@ export const isEarnVaultOwnerVerified = (
  * `getVerifiedAddressSet`.
  */
 export const resolveGoverningEntityKeys = (
-  vault: VerifiableEVault,
+  vault: VerifiableVault,
   labels: VerificationLabels,
 ): string[] => {
   if ('vaultCategory' in vault && vault.vaultCategory === 'escrow') return []
   if (!vault.verified) return []
   const declaredKeys = labels.getDeclaredEntityKeys(vault.address)
   if (!declaredKeys || declaredKeys.length === 0) return []
-  return findAllDeclaredEntitiesFor(getAddress(vault.governorAdmin), declaredKeys, labels)
+  const governor = vault.governorAdmin ?? vault.governor
+  return governor ? findAllDeclaredEntitiesFor(getAddress(governor), declaredKeys, labels) : []
 }
 
 export const resolveEarnGoverningEntityKeys = (
