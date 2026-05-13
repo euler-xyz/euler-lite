@@ -1,18 +1,31 @@
+import type { Address } from 'viem'
+import { USD_ADDRESS, EUR_ADDRESS, BTC_ADDRESS, ETH_ADDRESS } from '~/entities/constants'
+
+// Special designator addresses that stand for an FX-style denomination unit
+// (USD, EUR, BTC, ETH) rather than a real ERC20. When the adapter is wired
+// with one of these on one side, that side is the "currency" and the other
+// is the asset being priced — giving us an unambiguous direction without
+// having to parse symbols out of the label.
+const DESIGNATOR_ADDRESSES = new Set<string>([
+  USD_ADDRESS.toLowerCase(),
+  EUR_ADDRESS.toLowerCase(),
+  BTC_ADDRESS.toLowerCase(),
+  ETH_ADDRESS.toLowerCase(),
+])
+
+const isDesignator = (address: Address | string): boolean =>
+  DESIGNATOR_ADDRESSES.has(address.toLowerCase())
+
 // Symbol comparison scores (higher is more confident):
-//   2 = exact match (e.g. "USD" ↔ "USD")
+//   2 = exact match
 //   1 = loose match — one symbol is a wrapped variant of the other
-//       (e.g. "STRC" ↔ "STRCx", "ETH" ↔ "wstETH")
 //   0 = no match
 //
 // Wrapped ERC20s usually keep the underlying asset's symbol as a contiguous
 // core, padded by a short prefix and/or suffix marker — e.g. "STRC" → "STRCx",
-// "STRC" → "wSTRCx", "ETH" → "WETH", "ETH" → "wstETH".
-//
-// The score lets a caller choose between competing directions: when the
-// adapter's base and quote are aliases of each other (stETH vs ETH, wSTRCx vs
-// STRCx), both label sides can match both wirings loosely, and a boolean
-// "matches?" check would tie. Preferring the higher-score direction breaks
-// the tie correctly because exact matches outrank loose ones.
+// "STRC" → "wSTRCx", "ETH" → "WETH", "ETH" → "wstETH". The score lets a caller
+// break a tie when both label sides loosely match both wirings (stETH ↔ ETH,
+// wSTRCx ↔ STRCx) — exact matches outrank loose ones.
 const symbolMatchScore = (labelSym: string, addressSym: string): 0 | 1 | 2 => {
   const a = labelSym.trim().toLowerCase()
   const b = addressSym.trim().toLowerCase()
@@ -47,26 +60,37 @@ export const parseOracleLabelPair = (labelPrimary: string | undefined): [string,
   return [parts[0], parts[1]]
 }
 
-// The adapter's getQuote returns "quote per base" given the on-chain wiring,
-// but oracle-checks labels follow the "X / Y = Y per X" FX convention regardless
-// of which side was assigned as base. When the label flips the symbols relative
-// to the wiring, invert the rate so the displayed number matches the displayed name.
+// The adapter's getQuote returns "quote per base" for the wiring the UI calls.
+// We want the displayed price to read in the natural human direction (asset
+// priced in its denomination), so we may need to invert.
 //
-// Direction is decided by scoring both pairings of label symbols against adapter
-// (base, quote) symbols and picking the higher-scoring one. This handles cases
-// where each label side could loosely match either wiring side (e.g. "stETH /
-// ETH" with adapter base=ETH, quote=stETH) — the exact-match pairing wins.
+// Decision flow:
+//  1. If exactly one wiring side is an FX designator (USD/EUR/BTC/ETH), use it
+//     as an anchor — the designator is always the denomination. Invert when
+//     the denomination is on the BASE side. This requires no label parsing
+//     and works even if the ERC20 symbol hasn't been resolved yet.
+//  2. Otherwise (both designators or both ERC20s) fall back to scoring the
+//     label symbols against the resolved wiring symbols.
 export const shouldInvertOraclePrice = (
   labelPrimary: string | undefined,
+  baseAddress: Address | string,
+  quoteAddress: Address | string,
   baseSymbol: string,
   quoteSymbol: string,
 ): boolean => {
+  const baseIsDesignator = isDesignator(baseAddress)
+  const quoteIsDesignator = isDesignator(quoteAddress)
+
+  if (baseIsDesignator !== quoteIsDesignator) {
+    return baseIsDesignator
+  }
+
   const pair = parseOracleLabelPair(labelPrimary)
   if (!pair) return false
   const [left, right] = pair
 
   // A direction only counts when BOTH sides have a non-zero score —
-  // otherwise a single exact match (e.g. only the quote side matches)
+  // otherwise a single accidental exact match (e.g. only the quote side)
   // would flip the price on weak evidence.
   const directLeft = symbolMatchScore(left, baseSymbol)
   const directRight = symbolMatchScore(right, quoteSymbol)

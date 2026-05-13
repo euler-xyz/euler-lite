@@ -370,6 +370,8 @@ const tooltipPriceText = computed((): string | null => {
   const symbols = buildKnownSymbols()
   const invert = shouldInvertOraclePrice(
     ctx.view.label?.primary,
+    ctx.view.base,
+    ctx.view.quote,
     resolveTokenSymbol(ctx.view.base, symbols),
     resolveTokenSymbol(ctx.view.quote, symbols),
   )

@@ -1,5 +1,18 @@
 import { describe, it, expect } from 'vitest'
+import type { Address } from 'viem'
 import { parseOracleLabelPair, shouldInvertOraclePrice } from '~/utils/oracle-label'
+import { USD_ADDRESS, EUR_ADDRESS, BTC_ADDRESS, ETH_ADDRESS } from '~/entities/constants'
+
+// Arbitrary ERC20 addresses for testing — values are not checked, only whether
+// the helper treats them as designators (the designator set is hard-coded).
+const STRCx: Address = '0x1Aad217B8F78dbA5E6693460e8470F8b1A3977f3'
+const wSTRCx: Address = '0x0B2456017C5Df2dFc0289740C4b352049892780C'
+const WETH: Address = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
+const stETH: Address = '0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84'
+const wstETH: Address = '0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0'
+const USDC: Address = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
+const USDT: Address = '0xdAC17F958D2ee523a2206206994597C13D831ec7'
+const BTCB: Address = '0x0000000000000000000000000000000000BBccBB'
 
 describe('parseOracleLabelPair', () => {
   it('parses a slash-separated pair', () => {
@@ -24,101 +37,89 @@ describe('parseOracleLabelPair', () => {
 })
 
 describe('shouldInvertOraclePrice', () => {
-  describe('no label parses', () => {
-    it('returns false when label is undefined', () => {
-      expect(shouldInvertOraclePrice(undefined, 'USD', 'STRCx')).toBe(false)
+  describe('designator-address anchoring', () => {
+    it('inverts when adapter.base is a designator and quote is an ERC20', () => {
+      // STRC / USD adapter wired (USD, STRCx) on chain.
+      expect(shouldInvertOraclePrice('STRC / USD', USD_ADDRESS, STRCx, 'USD', 'STRCx')).toBe(true)
     })
 
-    it('returns false when label cannot be parsed', () => {
-      expect(shouldInvertOraclePrice('STRCUSD', 'USD', 'STRCx')).toBe(false)
-    })
-  })
-
-  describe('label aligned with adapter wiring', () => {
-    it('does not invert when label and wiring agree', () => {
-      // adapter.base=ETH-wrapper, adapter.quote=USD, label="ETH / USD"
-      // getQuote returns USD per ETH, label means USD per ETH — agree.
-      expect(shouldInvertOraclePrice('ETH / USD', 'WETH', 'USD')).toBe(false)
+    it('inverts when base is the USD designator regardless of label parseability', () => {
+      // Symbol hasn't resolved yet — quoteSymbol is the shortened address.
+      // The address anchor still tells us to invert.
+      expect(shouldInvertOraclePrice('STRC / USD', USD_ADDRESS, STRCx, 'USD', '0x1Aad…7f3')).toBe(true)
     })
 
-    it('does not invert when wrapped quote is on the right', () => {
-      // adapter.base=USDC, adapter.quote=USDC.e wrapper — extremely contrived,
-      // but it exercises the right-side wrapper match.
-      expect(shouldInvertOraclePrice('USDC / USDC.e', 'USDC', 'USDC.e')).toBe(false)
-    })
-  })
-
-  describe('label flipped relative to adapter wiring', () => {
-    it('inverts when STRCx is on the quote side', () => {
-      // The original failing case from the PR description.
-      expect(shouldInvertOraclePrice('STRC / USD', 'USD', 'STRCx')).toBe(true)
+    it('inverts when base is the USD designator even with an empty label', () => {
+      expect(shouldInvertOraclePrice(undefined, USD_ADDRESS, STRCx, 'USD', 'STRCx')).toBe(true)
     })
 
-    it('inverts when wSTRCx is on the quote side', () => {
-      // The case the previous fix missed — prefix wrapper marker.
-      expect(shouldInvertOraclePrice('STRC / USD', 'USD', 'wSTRCx')).toBe(true)
+    it('does not invert when adapter.quote is the designator', () => {
+      // Natural wiring: asset/fiat with quote = USD.
+      expect(shouldInvertOraclePrice('ETH / USD', WETH, USD_ADDRESS, 'WETH', 'USD')).toBe(false)
     })
 
-    it('inverts for wstETH wrapped around ETH', () => {
-      // Long leading marker "wst" on a 3-letter core.
-      expect(shouldInvertOraclePrice('ETH / USD', 'USD', 'wstETH')).toBe(true)
+    it('inverts for BTC designator on the base side', () => {
+      expect(shouldInvertOraclePrice('WBTC / BTC', BTC_ADDRESS, wSTRCx, 'BTC', 'WBTC')).toBe(true)
     })
 
-    it('inverts for WETH wrapped around ETH', () => {
-      expect(shouldInvertOraclePrice('ETH / USD', 'USD', 'WETH')).toBe(true)
+    it('does not invert for ETH designator on the quote side', () => {
+      // wstETH / ETH with adapter wired (wstETH, ETH) — natural direction.
+      expect(shouldInvertOraclePrice('wstETH / ETH', wstETH, ETH_ADDRESS, 'wstETH', 'ETH')).toBe(false)
     })
   })
 
-  describe('wrapper / core aliases on both sides', () => {
-    // Both label sides match both wiring sides loosely — exact matches must
-    // win the tie so the flipped direction is chosen.
-    it('inverts stETH / ETH when adapter wiring is (ETH, stETH)', () => {
-      expect(shouldInvertOraclePrice('stETH / ETH', 'ETH', 'stETH')).toBe(true)
+  describe('symbol-based fallback (no designator on either side)', () => {
+    it('returns false when neither side is a designator and the label cannot be parsed', () => {
+      expect(shouldInvertOraclePrice(undefined, WETH, USDC, 'WETH', 'USDC')).toBe(false)
     })
 
-    it('does not invert stETH / ETH when adapter wiring is (stETH, ETH)', () => {
-      expect(shouldInvertOraclePrice('stETH / ETH', 'stETH', 'ETH')).toBe(false)
+    it('handles ERC20-only pair via symbol scoring', () => {
+      // Hypothetical "WETH / USDC" wired as (USDC, WETH) — needs invert.
+      expect(shouldInvertOraclePrice('WETH / USDC', USDC, WETH, 'USDC', 'WETH')).toBe(true)
     })
 
-    it('inverts wstETH / stETH when adapter wiring is (stETH, wstETH)', () => {
-      expect(shouldInvertOraclePrice('wstETH / stETH', 'stETH', 'wstETH')).toBe(true)
+    it('does not invert an aligned ERC20-only pair', () => {
+      expect(shouldInvertOraclePrice('WETH / USDC', WETH, USDC, 'WETH', 'USDC')).toBe(false)
     })
 
-    it('does not invert wstETH / stETH when adapter wiring is (wstETH, stETH)', () => {
-      expect(shouldInvertOraclePrice('wstETH / stETH', 'wstETH', 'stETH')).toBe(false)
-    })
-
-    it('inverts wSTRCx / STRCx when adapter wiring is (STRCx, wSTRCx)', () => {
-      expect(shouldInvertOraclePrice('wSTRCx / STRCx', 'STRCx', 'wSTRCx')).toBe(true)
+    it('breaks alias ambiguity in favour of exact matches', () => {
+      // Both label sides loosely match both wirings (stETH ↔ ETH-string),
+      // but exact matches outscore loose ones — inversion is chosen.
+      expect(shouldInvertOraclePrice('wstETH / stETH', stETH, wstETH, 'stETH', 'wstETH')).toBe(true)
+      expect(shouldInvertOraclePrice('wstETH / stETH', wstETH, stETH, 'wstETH', 'stETH')).toBe(false)
     })
   })
 
   describe('false-positive guards', () => {
-    it('does not match USD against USDC', () => {
-      // "USDC / USD" with adapter base=USDC, quote=USD: aligned → no invert.
-      // Should not get confused by "USD" being a prefix of "USDC".
-      expect(shouldInvertOraclePrice('USDC / USD', 'USDC', 'USD')).toBe(false)
+    it('does not match USD substring inside USDC', () => {
+      // Both sides are ERC20 here, fallback path. "USD" inside "USDC" rejected.
+      expect(shouldInvertOraclePrice('USDC / USD', USDC, USDC, 'USDC', 'USD')).toBe(false)
     })
 
-    it('does not match BTC against BTCB without a leading marker', () => {
-      // BTCB (no leading marker) should NOT be treated as a BTC wrapper here.
-      // If both wirings fail to match, fall back to no inversion.
-      expect(shouldInvertOraclePrice('BTC / USD', 'USD', 'BTCB')).toBe(false)
+    it('does not match BTC inside BTCB without a leading marker', () => {
+      // BTCB is a real address; designator anchor (BTC) is on neither side
+      // since we pass BTCB and USDC, not BTC_ADDRESS.
+      expect(shouldInvertOraclePrice('BTC / USD', USDC, BTCB, 'USD', 'BTCB')).toBe(false)
     })
 
-    it('does not match unrelated symbols that happen to share a prefix', () => {
-      // "USDC" and "USDT" share a long prefix but are distinct assets.
-      expect(shouldInvertOraclePrice('USDC / USD', 'USD', 'USDT')).toBe(false)
+    it('does not invert two unrelated stablecoins that share a prefix', () => {
+      expect(shouldInvertOraclePrice('USDC / USD', USDC, USDT, 'USDC', 'USDT')).toBe(false)
     })
   })
 
   describe('case and whitespace tolerance', () => {
-    it('is case-insensitive', () => {
-      expect(shouldInvertOraclePrice('strc / usd', 'USD', 'STRCx')).toBe(true)
+    it('is case-insensitive for symbol fallback', () => {
+      expect(shouldInvertOraclePrice('strc / usd', USD_ADDRESS, STRCx, 'usd', 'strcx')).toBe(true)
     })
 
-    it('tolerates extra whitespace', () => {
-      expect(shouldInvertOraclePrice('  STRC  /  USD  ', 'USD', 'STRCx')).toBe(true)
+    it('tolerates extra whitespace in the label', () => {
+      expect(shouldInvertOraclePrice('  STRC  /  USD  ', USD_ADDRESS, STRCx, 'USD', 'STRCx')).toBe(true)
+    })
+  })
+
+  describe('uses EUR designator as well', () => {
+    it('inverts when EUR is on the base side', () => {
+      expect(shouldInvertOraclePrice('XAU / EUR', EUR_ADDRESS, STRCx, 'EUR', 'XAU')).toBe(true)
     })
   })
 })
