@@ -798,7 +798,7 @@ export const CONFIG_ROWS: AttributeRow[] = [
     label: 'Interest fee',
     getValue: (vault) => {
       if (!isEVault(vault) || isEscrow(vault)) return NA_CELL
-      const pct = vault.fees.interestFee
+      const pct = vault.fees.interestFee * 100
       return { display: `${formatNumber(pct)}%`, kind: 'text' }
     },
   },
@@ -807,7 +807,7 @@ export const CONFIG_ROWS: AttributeRow[] = [
     label: 'Max liquidation discount',
     getValue: (vault) => {
       if (!isEVault(vault) || isEscrow(vault)) return NA_CELL
-      const pct = vault.liquidation.maxLiquidationDiscount
+      const pct = vault.liquidation.maxLiquidationDiscount * 100
       return { display: `${pct}%`, kind: 'text' }
     },
   },

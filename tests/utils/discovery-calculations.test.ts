@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  CONFIG_ROWS,
   STATS_ROWS,
   buildAttributeRowCells,
   buildVaultApyCache,
   getActiveExternalCollateral,
-  getAttributeRowColor,
   getAttributeMatrixColumns,
   getCollateralMatrix,
   isNodeRampingDown,
@@ -50,6 +50,32 @@ const makeVault = (address: string, collaterals: EVaultCollateral[]): EVault =>
     address,
     collaterals,
     asset: { address, symbol: 'TST' },
+    totalAssets: 0n,
+    totalBorrowed: 0n,
+    caps: {
+      supplyCap: 0n,
+      borrowCap: 0n,
+      supplyCapUtilization: 0,
+      borrowCapUtilization: 0,
+    },
+    fees: {
+      interestFee: 0,
+    },
+    liquidation: {
+      maxLiquidationDiscount: 0,
+      socializeDebt: true,
+    },
+    hooks: {
+      hookedOperations: 0n,
+    },
+    interestRateModel: {
+      type: 0,
+      address: '0xIrm',
+    },
+    interestRates: {
+      supplyAPY: 0,
+      borrowAPY: 0,
+    },
   }) as unknown as EVault
 
 const makeSecuritizeVault = (address: string): SecuritizeCollateralVault =>
@@ -272,13 +298,45 @@ describe('attribute stats matrix', () => {
   })
 })
 
+describe('attribute config matrix', () => {
+  it('formats SDK fractional fee and liquidation discount values as percentages', () => {
+    const vault = {
+      ...makeVault('0xConfig', []),
+      caps: {
+        supplyCap: 1000n,
+        borrowCap: 1000n,
+      },
+      fees: {
+        interestFee: 0.1,
+      },
+      liquidation: {
+        maxLiquidationDiscount: 0.15,
+        socializeDebt: true,
+      },
+      interestRateModel: {
+        type: 0,
+        address: '0xIrm',
+      },
+    } as unknown as EVault
+    const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, vault, isExternal: false }]
+    const usdCache = new Map<string, VaultUsdCacheEntry>()
+    const byRow = new Map(CONFIG_ROWS.map(row => [
+      row.id,
+      buildAttributeRowCells(row, columns, usdCache)[0],
+    ]))
+
+    expect(byRow.get('interestFee')!.display).toBe('10.00%')
+    expect(byRow.get('maxLiqDiscount')!.display).toBe('15%')
+  })
+})
+
 describe('buildVaultApyCache', () => {
   it('folds intrinsic and reward APY into the per-vault entries', () => {
     const vault = {
       ...makeVault('0xPT', []),
-      interestRateInfo: {
-        supplyAPY: 4n * 10n ** 25n,
-        borrowAPY: 6n * 10n ** 25n,
+      interestRates: {
+        supplyAPY: 4,
+        borrowAPY: 6,
       },
     } as Vault
     const market = makeMarket([vault])
@@ -303,9 +361,9 @@ describe('buildVaultApyCache', () => {
     // Stats column would silently fall back to raw IRM for externals.
     const externalVault = {
       ...makeVault('0xExternalApy', []),
-      interestRateInfo: {
-        supplyAPY: 3n * 10n ** 25n,
-        borrowAPY: 5n * 10n ** 25n,
+      interestRates: {
+        supplyAPY: 3,
+        borrowAPY: 5,
       },
     } as Vault
     const market = makeMarket([], [externalVault])
