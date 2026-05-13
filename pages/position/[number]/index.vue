@@ -144,6 +144,9 @@ const usdWadToAmount = (value: bigint | number | undefined): UsdAmount => ({
   hasPrice: value !== undefined,
 })
 
+const usdWadToNumber = (value: bigint | number | undefined): number | undefined =>
+  value === undefined ? undefined : (typeof value === 'bigint' ? nanoToValue(value, 18) : value)
+
 const getBorrowLiquidityCollateral = (vaultAddress: string) => {
   const liquidityCollaterals = position.value?.borrow.liquidity?.collaterals ?? []
   try {
@@ -227,9 +230,8 @@ watchEffect(async () => {
       let oraclePriceUsd = 0
 
       const liquidityCollateral = getBorrowLiquidityCollateral(item.vault.address)
-      const valueRaw = liquidityCollateral?.valueUsd !== undefined
-        ? nanoToValue(liquidityCollateral.valueUsd, 18)
-        : await getCollateralUsdValue(item.assets, borrowVault.value!, item.vault as EVault, 'off-chain')
+      const valueRaw = usdWadToNumber(liquidityCollateral?.valueUsd)
+        ?? await getCollateralUsdValue(item.assets, borrowVault.value!, item.vault as EVault, 'off-chain')
       const priceInfo = await getCollateralUsdPrice(borrowVault.value!, item.vault as EVault, 'off-chain')
       if (priceInfo) {
         unitPriceUsd = nanoToValue(priceInfo.amountOutMid, 18)
@@ -312,17 +314,17 @@ const netAssetValue = computed<UsdAmount>(() => {
 const liquidationPrice = computed(() => {
   if (!position.value) return undefined
 
-  const price = position.value.primaryCollateralLiquidationPrice ?? 0n
+  const price = usdWadToNumber(position.value.primaryCollateralLiquidationPrice)
 
-  if (price <= 0n) {
+  if (price === undefined || price <= 0) {
     return undefined
   }
 
-  return nanoToValue(price, 18)
+  return price
 })
 const borrowLiquidationPrice = computed(() => {
   const price = position.value?.borrowLiquidationPriceUsd
-  return price === undefined ? undefined : nanoToValue(price, 18)
+  return usdWadToNumber(price)
 })
 const timeToLiquidationDisplay = computed(() => {
   if (!position.value) {
