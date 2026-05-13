@@ -221,10 +221,20 @@ const stopPointerPropagation = (event: Event) => {
   event.stopPropagation()
 }
 
-const onClick = (event: Event) => {
-  stopNavigation(event)
+const openModal = () => {
   hidePopover()
   modal.open(component, getModalData())
+}
+
+const onClick = (event: Event) => {
+  stopNavigation(event)
+  openModal()
+}
+
+const onKeydown = (event: KeyboardEvent) => {
+  if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return
+  stopNavigation(event)
+  openModal()
 }
 
 const onDocumentKeydown = (event: KeyboardEvent) => {
@@ -279,9 +289,12 @@ onBeforeUnmount(() => {
     ref="trigger"
     class="ui-modal-preview-trigger"
     :aria-label="ariaLabel"
+    role="button"
+    tabindex="0"
     @pointerdown="stopPointerPropagation"
     @pointerup="stopPointerPropagation"
     @click.capture="onClick"
+    @keydown="onKeydown"
     @mouseenter="onMouseEnter"
     @mouseleave="onMouseLeave"
   >
@@ -332,6 +345,13 @@ onBeforeUnmount(() => {
   justify-content: center;
   width: fit-content;
   height: fit-content;
+  border-radius: 4px;
+  outline: none;
+
+  &:focus-visible {
+    outline: 2px solid var(--accent-600);
+    outline-offset: 2px;
+  }
 
   &__popover {
     z-index: 3100;
