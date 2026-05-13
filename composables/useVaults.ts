@@ -1,4 +1,4 @@
-import { StandardEVaultPerspectives, type EulerEarn, type SecuritizeCollateralVault, type EVault } from '@eulerxyz/euler-v2-sdk'
+import type { EulerEarn, SecuritizeCollateralVault, EVault } from '@eulerxyz/euler-v2-sdk'
 import { extractUnresolvedCollateralAddresses } from '~/utils/vault/collateral-discovery'
 import { isLiveCollateralEdge } from '~/utils/vault/ltv'
 import { fetchChainVaultCategories, fetchVaultCategory, isSecuritizeVault, resetVaultCategoryCache } from '~/utils/vault/categories'
@@ -445,12 +445,7 @@ const loadVaults = async () => {
     // Phase 1: Fetch chain-wide vault categorization from SDK metadata.
     // Addresses missing from the categorization default to EVault — the SDK
     // EVault service handles any ERC-4626 + EVault-compatible vault.
-    const sdk = await getSdkVaults()
-    const [categories, governedEVaultAddressList] = await Promise.all([
-      fetchChainVaultCategories(),
-      sdk.eVaultService.fetchVerifiedVaultAddresses(chainId.value, [StandardEVaultPerspectives.GOVERNED]),
-    ])
-    const governedEVaultAddresses = new Set(governedEVaultAddressList.map(addr => addr.toLowerCase()))
+    const categories = await fetchChainVaultCategories()
 
     if (loadGeneration.value !== generation) return
 
@@ -491,7 +486,9 @@ const loadVaults = async () => {
         earnResolve()
       })(),
       (async () => {
-        await updateEVaults(eVaultAddresses, generation, silent, { verifiedAddresses: governedEVaultAddresses })
+        await updateEVaults(eVaultAddresses, generation, silent, {
+          verifiedAddresses: new Set(eVaultAddresses.map(addr => addr.toLowerCase())),
+        })
         eVaultResolve()
       })(),
       updateSecuritizeVaults(securitizeAddresses, generation, silent),

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
-import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorable, isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
@@ -56,8 +56,6 @@ const showAllLabelEntries = useShowAllLabelEntries()
 
 const activeBorrowList = computed(() =>
   borrowList.value.filter((pair) => {
-    if (isVaultNotExplorable(pair.borrow.address)) return false
-    if (isVaultNotExplorable(pair.collateral.address)) return false
     if (!showAllLabelEntries.value && isVaultNotExplorableBorrow(pair.borrow.address)) return false
     if (!showAllLabelEntries.value && isVaultNotExplorableBorrow(pair.collateral.address)) return false
     if (isOpDisabled(pair.borrow, OP_BORROW)) return false
