@@ -20,6 +20,10 @@ const DEFAULT_CAPTURE_BUDGET_MS = 6_000
 const DEFAULT_PORTFOLIO_TIMEOUT_MS = 15_000
 const DEFAULT_PORTFOLIO_CAPTURE_BUDGET_MS = 15_000
 const DEFAULT_NETWORK_IDLE_TIMEOUT_MS = 0
+const LIST_SHOW_ALL_HYDRATION_TIMEOUT_MS = 20_000
+const LIST_HYDRATION_SETTLE_ROUNDS = 2
+const LIST_HYDRATION_SCROLL_SEGMENTS = 10
+const LIST_HYDRATION_SCROLL_DELAY_MS = 75
 const DEFAULT_PERSISTENCE_RECHECK_MAX_RATIO = 0.1
 const DEFAULT_SCRAPE_FAILURE_LIMIT = 5
 const DEFAULT_WORK_DIR = path.join('/tmp', 'euler-lite-parity', sanitizeFilePart(ROOT_DIR))
@@ -1387,6 +1391,7 @@ async function openAndCapture({
     let waitError = null
     let readinessError = null
     let actionError = null
+    let listHydrationError = null
     let pendingReadiness = []
     let navigationError = null
     let navigationKind = null
@@ -1401,6 +1406,7 @@ async function openAndCapture({
       waitError = null
       readinessError = null
       actionError = null
+      listHydrationError = null
       pendingReadiness = []
       navigationError = null
       navigationKind = null
@@ -1459,6 +1465,15 @@ async function openAndCapture({
       }
       await page.waitForTimeout(scenario.settleMs ?? scenario.defaults?.settleMs ?? 0)
 
+      if (!navigationError && !waitError && !readinessError && !actionError) {
+        try {
+          await hydrateListPageBeforeScrape(page, pathName)
+        }
+        catch (error) {
+          listHydrationError = error.message || String(error)
+        }
+      }
+
       if ((navigationError || rateLimitResponses.length) && attempt < maxAttempts) {
         const delay = Math.min(30_000, 1_000 * 2 ** (attempt - 1))
         const reason = navigationError
@@ -1513,9 +1528,11 @@ async function openAndCapture({
           ? readinessError + (pendingReadiness.length ? '\nPending data readiness: ' + pendingReadiness.join(', ') : '')
           : actionError
             ? actionError
-            : rateLimitResponses.length
-              ? 'HTTP 429 responses observed: ' + rateLimitResponses.map(item => item.url).join(', ')
-              : snapshot.captureError || null
+            : listHydrationError
+              ? 'List hydration failed: ' + listHydrationError
+              : rateLimitResponses.length
+                ? 'HTTP 429 responses observed: ' + rateLimitResponses.map(item => item.url).join(', ')
+                : snapshot.captureError || null
     snapshot.console = consoleMessages
     snapshot.rateLimitResponses = rateLimitResponses
 
@@ -1549,7 +1566,38 @@ async function performScenarioActions(page, scenario, { waitTimeoutMs, dataReady
 
     if (action.type === 'click') {
       const locator = page.locator(action.selector)
-      await locator.nth(Number(action.index ?? 0)).click({ timeout })
+      const targetIndex = Number(action.index ?? 0)
+      if (action.skipIfPresent) {
+        const skipCount = await page.locator(action.skipIfPresent).count()
+        if (skipCount > 0) {
+          if (action.waitFor?.length) {
+            await waitForSelectors(page, action.waitFor, timeout)
+          }
+          if (action.settleMs !== undefined) {
+            await page.waitForTimeout(Number(action.settleMs))
+          }
+          if (action.waitForData !== false) {
+            await waitForPageDataReady(page, scenario, Number(action.dataReadyTimeoutMs ?? dataReadyTimeoutMs))
+          }
+          continue
+        }
+      }
+      if (action.optional) {
+        const count = await locator.count()
+        if (count <= targetIndex) {
+          if (action.waitFor?.length) {
+            await waitForSelectors(page, action.waitFor, timeout)
+          }
+          if (action.settleMs !== undefined) {
+            await page.waitForTimeout(Number(action.settleMs))
+          }
+          if (action.waitForData !== false) {
+            await waitForPageDataReady(page, scenario, Number(action.dataReadyTimeoutMs ?? dataReadyTimeoutMs))
+          }
+          continue
+        }
+      }
+      await locator.nth(targetIndex).click({ timeout })
       if (action.waitFor?.length) {
         await waitForSelectors(page, action.waitFor, timeout)
       }
@@ -1615,7 +1663,12 @@ function createFailedSnapshot({ pageId, scenarioId, label, appName, url, pathNam
 
 async function waitForSelectors(page, selectors = [], timeout = 45_000) {
   for (const selector of selectors || []) {
-    await page.waitForSelector(selector, { state: 'attached', timeout })
+    try {
+      await page.waitForSelector(selector, { state: 'attached', timeout })
+    }
+    catch (error) {
+      throw new Error('Timed out waiting for selector "' + selector + '": ' + (error?.message || String(error)))
+    }
   }
 }
 
@@ -1641,19 +1694,127 @@ async function waitForPageDataReady(page, scenario, timeout = DEFAULT_DATA_READY
 }
 
 function effectiveWaitTimeout(scenario, pathName, fallback) {
-  return Number(scenario.waitTimeoutMs ?? scenario.defaults?.waitTimeoutMs ?? (isPortfolioCapture(scenario, pathName) ? DEFAULT_PORTFOLIO_TIMEOUT_MS : fallback))
+  const baseTimeout = Number(scenario.waitTimeoutMs ?? scenario.defaults?.waitTimeoutMs ?? (isPortfolioCapture(scenario, pathName) ? DEFAULT_PORTFOLIO_TIMEOUT_MS : fallback))
+  return listCaptureInfo(pathName)?.showAll ? Math.max(baseTimeout, LIST_SHOW_ALL_HYDRATION_TIMEOUT_MS) : baseTimeout
 }
 
 function effectiveDataReadyTimeout(scenario, pathName, fallback) {
-  return Number(scenario.dataReadyTimeoutMs ?? scenario.defaults?.dataReadyTimeoutMs ?? (isPortfolioCapture(scenario, pathName) ? DEFAULT_PORTFOLIO_TIMEOUT_MS : fallback))
+  const baseTimeout = Number(scenario.dataReadyTimeoutMs ?? scenario.defaults?.dataReadyTimeoutMs ?? (isPortfolioCapture(scenario, pathName) ? DEFAULT_PORTFOLIO_TIMEOUT_MS : fallback))
+  return listCaptureInfo(pathName)?.showAll ? Math.max(baseTimeout, LIST_SHOW_ALL_HYDRATION_TIMEOUT_MS) : baseTimeout
 }
 
 function effectiveCaptureBudget(scenario, pathName) {
-  return Number(scenario.captureBudgetMs ?? scenario.defaults?.captureBudgetMs ?? (isPortfolioCapture(scenario, pathName) ? DEFAULT_PORTFOLIO_CAPTURE_BUDGET_MS : DEFAULT_CAPTURE_BUDGET_MS))
+  const baseBudget = Number(scenario.captureBudgetMs ?? scenario.defaults?.captureBudgetMs ?? (isPortfolioCapture(scenario, pathName) ? DEFAULT_PORTFOLIO_CAPTURE_BUDGET_MS : DEFAULT_CAPTURE_BUDGET_MS))
+  return listCaptureInfo(pathName)?.showAll ? Math.max(baseBudget, LIST_SHOW_ALL_HYDRATION_TIMEOUT_MS) : baseBudget
 }
 
 function isPortfolioCapture(scenario, pathName = '') {
   return String(scenario?.id || '').includes('portfolio') || String(pathName || '').includes('/portfolio')
+}
+
+function listCaptureInfo(pathName = '') {
+  let url
+  try {
+    url = new URL(String(pathName || ''), 'http://parity.local')
+  }
+  catch {
+    return null
+  }
+
+  if (url.pathname === '/borrow') {
+    return {
+      listName: 'borrow-pair',
+      selector: '[data-id="vault-list"][data-list="borrow-pair"], [data-list="borrow-pair"]',
+      itemSelector: '[data-list="borrow-pair"][data-key]',
+      showAll: isShowAllQuery(url.searchParams),
+    }
+  }
+
+  if (url.pathname === '/lend') {
+    return {
+      listName: 'lend',
+      selector: '[data-id="vault-list"][data-list="lend"], [data-list="lend"]',
+      itemSelector: '[data-list="lend"][data-key]',
+      showAll: isShowAllQuery(url.searchParams),
+    }
+  }
+
+  return null
+}
+
+function isShowAllQuery(searchParams) {
+  const values = searchParams.getAll('showAll')
+  if (!values.length) return false
+  return values.some((value) => {
+    const normalized = String(value ?? '').trim().toLowerCase()
+    return normalized === '' || normalized === '1' || normalized === 'true'
+  })
+}
+
+async function hydrateListPageBeforeScrape(page, pathName) {
+  const list = listCaptureInfo(pathName)
+  if (!list) return
+
+  const timeoutMs = list.showAll ? LIST_SHOW_ALL_HYDRATION_TIMEOUT_MS : DEFAULT_WAIT_TIMEOUT_MS
+  const deadline = Date.now() + timeoutMs
+
+  await page.waitForSelector(list.selector, { state: 'attached', timeout: Math.max(1, timeoutMs) })
+
+  let stableRounds = 0
+  let previousSignature = ''
+
+  do {
+    await scrollListPage(page)
+    const state = await listHydrationState(page, list)
+    const signature = state.itemCount + ':' + state.containerCount + ':' + state.scrollHeight
+
+    if (signature === previousSignature) {
+      stableRounds += 1
+    }
+    else {
+      stableRounds = 0
+      previousSignature = signature
+    }
+
+    if (!list.showAll || stableRounds >= LIST_HYDRATION_SETTLE_ROUNDS) break
+    await page.waitForTimeout(LIST_HYDRATION_SCROLL_DELAY_MS)
+  } while (Date.now() < deadline)
+}
+
+async function scrollListPage(page) {
+  await page.evaluate(async ({ segments, delayMs }) => {
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+    const scrollElement = document.scrollingElement || document.documentElement
+
+    for (let index = 1; index <= segments; index += 1) {
+      const maxScrollTop = Math.max(0, scrollElement.scrollHeight - window.innerHeight)
+      scrollElement.scrollTo(0, Math.round(maxScrollTop * (index / segments)))
+      await sleep(delayMs)
+    }
+  }, {
+    segments: LIST_HYDRATION_SCROLL_SEGMENTS,
+    delayMs: LIST_HYDRATION_SCROLL_DELAY_MS,
+  })
+}
+
+async function listHydrationState(page, list) {
+  return page.evaluate(({ itemSelector, selector }) => {
+    const visible = (element) => {
+      const style = window.getComputedStyle(element)
+      if (style.display === 'none' || style.visibility === 'hidden') return false
+      const rect = element.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0
+    }
+    const container = document.querySelector(selector)
+    return {
+      itemCount: Array.from(document.querySelectorAll(itemSelector)).filter(visible).length,
+      containerCount: Number(container?.getAttribute('data-count') || 0),
+      scrollHeight: document.scrollingElement?.scrollHeight || document.documentElement.scrollHeight || 0,
+    }
+  }, {
+    itemSelector: list.itemSelector,
+    selector: list.selector,
+  })
 }
 
 async function pendingReadinessMarkers(page) {
