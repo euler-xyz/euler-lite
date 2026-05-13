@@ -150,6 +150,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
       intrinsicAPY: intrinsicAPY.value,
       intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
       campaigns: getSupplyRewardCampaigns(vault.address),
+      rewardVaultAddress: vault.address,
     },
   })
 }

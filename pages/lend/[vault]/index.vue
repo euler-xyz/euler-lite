@@ -566,6 +566,7 @@ const onSupplyInfoIconClick = () => {
       intrinsicAPY: intrinsicApy.value,
       intrinsicApyInfo: getIntrinsicApyInfo(asset.value?.address),
       campaigns: getSupplyRewardCampaigns(vaultAddress),
+      rewardVaultAddress: vaultAddress,
     },
   })
 }

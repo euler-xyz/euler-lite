@@ -33,6 +33,7 @@ const onSupplyInfoIconClick = () => {
       intrinsicAPY: getIntrinsicApy(vault.asset.address),
       intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
       campaigns: supplyRewardInfo.value,
+      rewardVaultAddress: vault.address,
     },
   })
 }
@@ -44,6 +45,7 @@ const onBorrowInfoIconClick = () => {
       intrinsicAPY: getIntrinsicApy(vault.asset.address),
       intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
       campaigns: borrowRewardInfo.value,
+      rewardVaultAddress: vault.address,
     },
   })
 }

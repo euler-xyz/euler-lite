@@ -34,6 +34,7 @@ const onSupplyInfoIconClick = () => {
       intrinsicAPY: getIntrinsicApy(vault.asset.address),
       intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
       campaigns: getSupplyRewardCampaigns(vault.address),
+      rewardVaultAddress: vault.address,
       baseApyAverageLabel: '1h',
     },
   })

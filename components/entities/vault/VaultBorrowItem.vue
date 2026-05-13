@@ -176,6 +176,7 @@ const onBorrowInfoIconClick = (event: MouseEvent) => {
       intrinsicAPY: getIntrinsicApy(pair.borrow.asset.address),
       intrinsicApyInfo: getIntrinsicApyInfo(pair.borrow.asset.address),
       campaigns: getBorrowRewardCampaigns(pair.borrow.address, pair.collateral.address),
+      rewardVaultAddress: pair.borrow.address,
     },
   })
 }
@@ -192,6 +193,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
       intrinsicAPY: getIntrinsicApy(pair.collateral.asset.address),
       intrinsicApyInfo: getIntrinsicApyInfo(pair.collateral.asset.address),
       campaigns: getSupplyRewardCampaigns(pair.collateral.address),
+      rewardVaultAddress: pair.collateral.address,
     },
   })
 }

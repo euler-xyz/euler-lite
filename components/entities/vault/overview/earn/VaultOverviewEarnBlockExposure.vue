@@ -138,6 +138,7 @@ const onStrategySupplyInfoClick = (event: MouseEvent, strategyVault: EVault) => 
       intrinsicAPY: getIntrinsicApy(strategyVault.asset.address),
       intrinsicApyInfo: getIntrinsicApyInfo(strategyVault.asset.address),
       campaigns: getSupplyRewardCampaigns(strategyVault.address),
+      rewardVaultAddress: strategyVault.address,
     },
   })
 }
