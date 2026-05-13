@@ -69,6 +69,30 @@ describe('shouldInvertOraclePrice', () => {
     })
   })
 
+  describe('wrapper / core aliases on both sides', () => {
+    // Both label sides match both wiring sides loosely — exact matches must
+    // win the tie so the flipped direction is chosen.
+    it('inverts stETH / ETH when adapter wiring is (ETH, stETH)', () => {
+      expect(shouldInvertOraclePrice('stETH / ETH', 'ETH', 'stETH')).toBe(true)
+    })
+
+    it('does not invert stETH / ETH when adapter wiring is (stETH, ETH)', () => {
+      expect(shouldInvertOraclePrice('stETH / ETH', 'stETH', 'ETH')).toBe(false)
+    })
+
+    it('inverts wstETH / stETH when adapter wiring is (stETH, wstETH)', () => {
+      expect(shouldInvertOraclePrice('wstETH / stETH', 'stETH', 'wstETH')).toBe(true)
+    })
+
+    it('does not invert wstETH / stETH when adapter wiring is (wstETH, stETH)', () => {
+      expect(shouldInvertOraclePrice('wstETH / stETH', 'wstETH', 'stETH')).toBe(false)
+    })
+
+    it('inverts wSTRCx / STRCx when adapter wiring is (STRCx, wSTRCx)', () => {
+      expect(shouldInvertOraclePrice('wSTRCx / STRCx', 'STRCx', 'wSTRCx')).toBe(true)
+    })
+  })
+
   describe('false-positive guards', () => {
     it('does not match USD against USDC', () => {
       // "USDC / USD" with adapter base=USDC, quote=USD: aligned → no invert.
