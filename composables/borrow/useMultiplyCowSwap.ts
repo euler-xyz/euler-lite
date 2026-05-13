@@ -219,12 +219,12 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     signSteps.push({ index: idx++, label: 'Sign EVC permit', isSeparateTx: false })
     signSteps.push({ index: idx++, label: 'Sign CoW order', isSeparateTx: false })
 
-    const collateralVaultName = options.multiplySupplyProduct.value.name || collateralAsset.symbol
-    const borrowVaultName = options.multiplyShortProduct.value.name || borrowAsset.symbol
+    const collateralVaultName = options.multiplySupplyProduct.value.name || undefined
+    const borrowVaultName = options.multiplyShortProduct.value.name || undefined
     let wIdx = 1
     const wrapperSteps: DisplayStep[] = [
-      { index: wIdx++, label: 'Enable collateral', labelSuffix: collateralVaultName, isSeparateTx: false },
-      { index: wIdx++, label: 'Enable controller', labelSuffix: borrowVaultName, isSeparateTx: false },
+      { index: wIdx++, label: 'Enable collateral', labelSuffix: collateralVaultName, isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address } },
+      { index: wIdx++, label: 'Enable controller', labelSuffix: borrowVaultName, isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address } },
       { index: wIdx++, label: 'Supply', isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: options.multiplyInputAmount.value } },
       { index: wIdx++, label: 'Borrow', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: borrowAmountStr } },
       { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: borrowAmountStr }, toAssetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: options.multiplyLongAmount.value } },
