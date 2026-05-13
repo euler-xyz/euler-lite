@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { arrow as arrowMiddleware, autoPlacement, autoUpdate, offset, shift, size, useFloating, type Placement } from '@floating-ui/vue'
+import { arrow as arrowMiddleware, autoUpdate, flip, offset, shift, size, useFloating, type Placement } from '@floating-ui/vue'
 import { type ModalData, useModal } from '~/components/ui/composables/useModal'
 
 const {
@@ -34,22 +34,45 @@ let openTimer: number | undefined
 let closeTimer: number | undefined
 let isDocumentKeydownListening = false
 
+const isVerticalPlacement = (value: Placement) =>
+  value.startsWith('top') || value.startsWith('bottom')
+
+const withVerticalSide = (value: Placement, side: 'top' | 'bottom'): Placement => {
+  const alignment = value.includes('-') ? `-${value.split('-')[1]}` : ''
+  return `${side}${alignment}` as Placement
+}
+
+const oppositeVerticalPlacement = (value: Placement): Placement => (
+  value.startsWith('bottom')
+    ? withVerticalSide(value, 'top')
+    : withVerticalSide(value, 'bottom')
+)
+
+const preferredPlacement = ref<Placement>(placement)
+
+const middleware = computed(() => [
+  offset(12),
+  flip({
+    padding: 8,
+    fallbackPlacements: isVerticalPlacement(preferredPlacement.value)
+      ? [oppositeVerticalPlacement(preferredPlacement.value)]
+      : undefined,
+  }),
+  shift({ padding: 8 }),
+  size({
+    padding: 8,
+    apply({ availableWidth, availableHeight, elements }) {
+      elements.floating.style.maxWidth = `${availableWidth}px`
+      elements.floating.style.setProperty('--popover-available-height', `${availableHeight}px`)
+    },
+  }),
+  arrowMiddleware({ element: arrowRef, padding: 12 }),
+])
+
 const { floatingStyles, update, placement: resolvedPlacement, middlewareData } = useFloating(trigger, floating, {
-  placement,
+  placement: preferredPlacement,
   strategy: 'fixed',
-  middleware: [
-    offset(12),
-    autoPlacement({ allowedPlacements: ['top', 'bottom'], padding: 8 }),
-    shift({ padding: 8 }),
-    size({
-      padding: 8,
-      apply({ availableWidth, availableHeight, elements }) {
-        elements.floating.style.maxWidth = `${availableWidth}px`
-        elements.floating.style.setProperty('--popover-available-height', `${availableHeight}px`)
-      },
-    }),
-    arrowMiddleware({ element: arrowRef, padding: 12 }),
-  ],
+  middleware,
   whileElementsMounted: autoUpdate,
 })
 
@@ -104,10 +127,33 @@ const popoverData = computed(() => {
   }
 })
 
+const updatePreferredPlacement = () => {
+  if (!isVerticalPlacement(placement)) {
+    preferredPlacement.value = placement
+    return
+  }
+
+  const triggerRect = trigger.value?.getBoundingClientRect()
+  const viewportHeight = window.visualViewport?.height ?? window.innerHeight
+  const viewportOffsetTop = window.visualViewport?.offsetTop ?? 0
+  if (!triggerRect || !viewportHeight) {
+    preferredPlacement.value = placement
+    return
+  }
+
+  const spaceAbove = triggerRect.top - viewportOffsetTop
+  const spaceBelow = viewportOffsetTop + viewportHeight - triggerRect.bottom
+  preferredPlacement.value = withVerticalSide(
+    placement,
+    spaceBelow >= spaceAbove ? 'bottom' : 'top',
+  )
+}
+
 const showPopover = () => {
   if (!canHover.value) return
   clearOpenTimer()
   clearCloseTimer()
+  updatePreferredPlacement()
   isRendered.value = true
   nextTick(() => {
     isVisible.value = true
