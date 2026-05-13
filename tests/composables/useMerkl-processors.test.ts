@@ -152,11 +152,7 @@ describe('processBorrowFromCollateralOpportunities', () => {
     expect(entries?.[0].type).toBe('euler_borrow_collateral')
   })
 
-  // TEMPORARY: while the upstream URL passes `&test=true`, the LIVE-status
-  // filter is relaxed so test campaigns (Merkl marks them PAST) reach the UI.
-  // Restore an `opportunity.status !== 'LIVE'` test case when test=true is
-  // removed.
-  it('emits PAST opportunities with active campaigns (test-mode behaviour)', () => {
+  it('drops opportunities that are not LIVE', () => {
     const opportunity = makeOpportunity({
       status: 'PAST',
       campaigns: [makeCampaign({
@@ -164,7 +160,7 @@ describe('processBorrowFromCollateralOpportunities', () => {
       })],
     })
     const map = processBorrowFromCollateralOpportunities([opportunity], 'EULER_MULTI_BORROW_FROM_COLLATERAL')
-    expect(map.size).toBe(1)
+    expect(map.size).toBe(0)
   })
 
   it('drops active campaigns with no APR', () => {

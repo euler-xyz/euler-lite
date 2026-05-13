@@ -104,11 +104,7 @@ const processOpportunitiesToCampaigns = (
   const now = Math.floor(Date.now() / 1000)
 
   for (const opportunity of opportunities) {
-    // TEMPORARY: status check relaxed while the upstream URL passes
-    // `&test=true`. Merkl marks test opportunities as PAST even when their
-    // campaigns are active; the per-campaign `endTimestamp > now` filter
-    // below already drops truly expired campaigns. Restore the
-    // `status !== 'LIVE'` filter when test=true is removed.
+    if (opportunity.status !== 'LIVE') continue
     if (!opportunity.campaigns?.length) continue
     if (!opportunity.aprRecord?.breakdowns) continue
 
@@ -170,7 +166,7 @@ const processMultiLendBorrowOpportunities = (
   const now = Math.floor(Date.now() / 1000)
 
   for (const opportunity of opportunities) {
-    // TEMPORARY: see processOpportunitiesToCampaigns for rationale.
+    if (opportunity.status !== 'LIVE') continue
     if (!opportunity.campaigns?.length) continue
 
     const side: RewardCampaignType | null
@@ -246,7 +242,7 @@ export const processBorrowFromCollateralOpportunities = (
   const now = Math.floor(Date.now() / 1000)
 
   for (const opportunity of opportunities) {
-    // TEMPORARY: see processOpportunitiesToCampaigns for rationale.
+    if (opportunity.status !== 'LIVE') continue
     if (!opportunity.campaigns?.length) continue
 
     const aprs = new Map<string, number>()
