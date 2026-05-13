@@ -82,7 +82,7 @@ Addresses are validated via viem's `isAddress` (strict EIP-55 checks) and normal
 - **Server-side cache**: per-chain in-memory verified set with a 5-minute TTL. A warm-cache process rebuilds every cache entry every 5 minutes on its own schedule (force-refresh, ignores fresh entries), so the cache is always continuously fresh in steady state.
 - **In-flight dedup**: concurrent cold requests for the same chain collapse onto a single upstream pass.
 - **Propagation**: on-chain governor changes and `products.json` / `entities.json` edits typically propagate within **~5 minutes**. The labels / vault snapshot and the verified-set cache are warmed on the same 5-minute cycle, so a label edit picked up by the labels cache flows into the next bridge rebuild within the same cycle.
-- **Stale-while-revalidate fallback**: during prolonged upstream outages (labels endpoint, vault snapshot, or RPC failing), the bridge serves the last-known-good verified set for up to 30 minutes past TTL before returning a hard error. The hard 30-minute ceiling bounds how far stale data can drift.
+- **Stale fallback**: during prolonged upstream outages (labels endpoint, vault snapshot, or RPC failing), the bridge serves the last-known-good verified set for up to 10 minutes past TTL before returning a hard error.
 
 ### Rate limit
 
@@ -218,7 +218,7 @@ Same shape as [`/is-known` caching](#caching-and-propagation):
 - **Warm cycle**: the warm-cache plugin force-rebuilds the metadata map every 5 minutes on its own schedule, so a fresh entry is always available.
 - **In-flight dedup**: concurrent cold requests for the same chain collapse onto a single upstream pass.
 - **Propagation**: on-chain changes and label edits propagate within **~5 minutes**.
-- **Stale-while-revalidate fallback**: serves last-known-good data for up to 30 minutes past TTL during prolonged upstream outages.
+- **Stale fallback**: serves last-known-good data for up to 10 minutes past TTL during prolonged upstream outages.
 
 ### Rate limit
 
