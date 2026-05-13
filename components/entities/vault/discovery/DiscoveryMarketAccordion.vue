@@ -430,6 +430,7 @@ onMounted(() => {
   <div
     class="flex flex-col gap-8"
     data-id="discovery-market-list"
+    data-list="discovery-market"
     :data-count="markets.length"
   >
     <article
@@ -437,6 +438,7 @@ onMounted(() => {
       :key="market.id"
       class="bg-surface rounded-12 border border-line-default shadow-card transition-all"
       data-id="discovery-market-list-item"
+      data-list="discovery-market"
       :data-key="market.id"
       :data-market-id="market.id"
       :data-vault-count="market.vaults.length"
@@ -483,6 +485,12 @@ onMounted(() => {
           <div
             v-if="matrix"
             class="border-t border-line-subtle"
+            data-id="discovery-market-expanded"
+            data-list="discovery-market-expanded"
+            :data-key="market.id"
+            :data-market-id="market.id"
+            :data-field="getExpandedView(market.id)"
+            :data-matrix-view="getMatrixView(market.id)"
             @click="selectedGraphNode?.marketId === market.id && (selectedGraphNode = null)"
           >
             <!-- Controls: view toggle + metric dropdown -->
@@ -494,6 +502,11 @@ onMounted(() => {
               <div class="flex rounded-[100px] border border-line-default overflow-hidden">
                 <button
                   class="flex items-center gap-4 min-h-36 py-6 px-12 cursor-pointer transition-all text-p3"
+                  data-id="discovery-view-toggle"
+                  data-list="discovery-view-toggle"
+                  :data-key="`${market.id}:graph`"
+                  :data-market-id="market.id"
+                  data-field="graph"
                   :class="getExpandedView(market.id) === 'graph'
                     ? 'bg-accent-300/20 text-accent-700 font-medium'
                     : 'bg-surface text-content-secondary hover:bg-surface-secondary'"
@@ -507,6 +520,11 @@ onMounted(() => {
                 </button>
                 <button
                   class="flex items-center gap-4 min-h-36 py-6 px-12 cursor-pointer transition-all text-p3 border-l border-line-default"
+                  data-id="discovery-view-toggle"
+                  data-list="discovery-view-toggle"
+                  :data-key="`${market.id}:matrix`"
+                  :data-market-id="market.id"
+                  data-field="matrix"
                   :class="getExpandedView(market.id) === 'matrix'
                     ? 'bg-accent-300/20 text-accent-700 font-medium'
                     : 'bg-surface text-content-secondary hover:bg-surface-secondary'"
@@ -531,6 +549,10 @@ onMounted(() => {
               >
                 <div
                   class="ui-select__field"
+                  data-id="discovery-matrix-view-select"
+                  :data-key="market.id"
+                  :data-market-id="market.id"
+                  :data-field="getMatrixView(market.id)"
                   @click.stop="toggleMatrixDropdown(market.id)"
                 >
                   <UiIcon
@@ -552,6 +574,11 @@ onMounted(() => {
                     v-for="option in MATRIX_VIEW_OPTIONS"
                     :key="option.id"
                     class="w-full text-left px-14 py-6 text-p3 cursor-pointer transition-colors"
+                    data-id="discovery-matrix-view-option"
+                    data-list="discovery-matrix-view-option"
+                    :data-key="`${market.id}:${option.id}`"
+                    :data-market-id="market.id"
+                    :data-field="option.id"
                     :class="getMatrixView(market.id) === option.id
                       ? 'text-accent-700 bg-accent-300/20 font-medium'
                       : 'text-content-secondary hover:bg-surface-secondary'"
@@ -596,6 +623,7 @@ onMounted(() => {
             <DiscoveryMarketAttributeMatrix
               v-else-if="attributeMatrixMap.get(market.id)"
               :data="attributeMatrixMap.get(market.id)!"
+              :view="getMatrixView(market.id)"
               :usd-cache="vaultUsdCache"
               :apy-cache="vaultApyCache"
               :selected-header="selectedMatrixHeader?.marketId === market.id ? { address: selectedMatrixHeader.address, axis: selectedMatrixHeader.axis } : null"

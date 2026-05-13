@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { isEVault } from '@eulerxyz/euler-v2-sdk'
 import {
+  type MatrixViewId,
   type AttributeMatrixData,
   type AttributeCell,
   type AttributeMatrixColumn,
@@ -17,6 +18,7 @@ import { VaultHooksInfoModal } from '#components'
 
 const props = defineProps<{
   data: AttributeMatrixData
+  view: MatrixViewId
   usdCache: Map<string, VaultUsdCacheEntry>
   apyCache: Map<string, VaultApyCacheEntry>
   selectedHeader: { address: string, axis: 'row' | 'column' } | null
@@ -65,6 +67,9 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
   <div
     class="px-16 pb-12 flex items-center justify-center"
     data-id="attribute-matrix"
+    data-list="attribute-matrix"
+    :data-key="view"
+    :data-field="view"
     :data-row-count="data.columns.length"
     :data-column-count="attributeColumns.length"
   >
@@ -87,6 +92,7 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
               :key="col.attribute.id"
               class="text-center text-p4 text-content-secondary font-medium py-6 px-8 whitespace-nowrap bg-surface border-b border-r border-white/[0.04] transition-colors"
               data-id="attribute-matrix-column"
+              data-list="attribute-matrix-column"
               :data-key="col.attribute.id"
               :data-field="col.attribute.id"
               :class="isAttributeColumnHighlighted(col.attribute.id) ? '!bg-white/[0.06] text-content-primary' : ''"
@@ -100,12 +106,14 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
             v-for="(vault, vaultIdx) in data.columns"
             :key="vault.address"
             data-id="attribute-matrix-row"
+            data-list="attribute-matrix-row"
             :data-key="vault.address"
             :data-vault-address="vault.address"
           >
             <td
               class="text-p4 font-medium py-6 pr-10 pl-6 whitespace-nowrap sticky left-0 z-10 bg-surface border-b border-r border-white/[0.04] cursor-pointer transition-colors"
               data-id="attribute-matrix-row-header"
+              data-list="attribute-matrix-row-header"
               :data-key="vault.address"
               :data-vault-address="vault.address"
               :class="
@@ -134,6 +142,7 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
               :key="col.attribute.id"
               class="text-center py-6 px-8 min-w-[80px] transition-colors border-b border-r border-white/[0.04]"
               data-id="attribute-matrix-cell"
+              data-list="attribute-matrix-cell"
               :data-key="`${vault.address}:${col.attribute.id}`"
               :data-vault-address="vault.address"
               :data-field="col.attribute.id"
