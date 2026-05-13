@@ -76,12 +76,21 @@ const borrowPairCache = new Map<string, AnyBorrowVaultPair>()
 
 const borrowList = computed((): AnyBorrowVaultPair[] => {
   const { getVerifiedEVaults, getVault: registryGetVault } = useVaultRegistry()
+  const { verifiedVaultAddresses } = useEulerLabels()
   const pairs: AnyBorrowVaultPair[] = []
-  const eVaults = getVerifiedEVaults(showAllLabelEntries.value)
+  const vaultOrder = new Map(
+    verifiedVaultAddresses.value.map((address, index) => [address.toLowerCase(), index]),
+  )
+  const getVaultOrder = (address: string) => vaultOrder.get(address.toLowerCase()) ?? Number.MAX_SAFE_INTEGER
+  const eVaults = [...getVerifiedEVaults(showAllLabelEntries.value)]
+    .sort((a, b) => getVaultOrder(a.address) - getVaultOrder(b.address))
   const seenKeys = new Set<string>()
 
   eVaults.forEach((borrowVault) => {
-    borrowVault.collaterals.forEach((ltv) => {
+    const collaterals = [...borrowVault.collaterals]
+      .sort((a, b) => getVaultOrder(a.address) - getVaultOrder(b.address))
+
+    collaterals.forEach((ltv) => {
       if (ltv.borrowLTV <= 0) return
 
       const collateralVault = registryGetVault(ltv.address)

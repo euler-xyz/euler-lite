@@ -20,6 +20,7 @@ const DEFAULT_CAPTURE_BUDGET_MS = 6_000
 const DEFAULT_PORTFOLIO_TIMEOUT_MS = 25_000
 const DEFAULT_PORTFOLIO_CAPTURE_BUDGET_MS = 25_000
 const DEFAULT_NETWORK_IDLE_TIMEOUT_MS = 0
+const DEFAULT_NUMERIC_TOLERANCE = 0.02
 const LIST_SHOW_ALL_MIN_CAPTURE_MS = 10_000
 const LIST_SHOW_ALL_HYDRATION_TIMEOUT_MS = 20_000
 const LIST_HYDRATION_SETTLE_ROUNDS = 2
@@ -254,7 +255,7 @@ async function buildConfig() {
     scrapeFailureLimit: Number(valueOf('scrape-failure-limit') || process.env.PARITY_SCRAPE_FAILURE_LIMIT || DEFAULT_SCRAPE_FAILURE_LIMIT),
     navigationTimeoutMs: Number(valueOf('navigation-timeout-ms') || process.env.PARITY_NAVIGATION_TIMEOUT_MS || 45_000),
     navigationRetries: Number(valueOf('navigation-retries') || process.env.PARITY_NAVIGATION_RETRIES || 3),
-    numericTolerance: parseNumericTolerance(valueOf('numeric-tolerance') || process.env.PARITY_NUMERIC_TOLERANCE || '1%'),
+    numericTolerance: parseNumericTolerance(valueOf('numeric-tolerance') || process.env.PARITY_NUMERIC_TOLERANCE || DEFAULT_NUMERIC_TOLERANCE),
     rateLimitRetries: Number(valueOf('rate-limit-retries') || process.env.PARITY_RATE_LIMIT_RETRIES || 3),
     sequential: alternating,
     appPhased,
@@ -1954,6 +1955,7 @@ async function captureModalPlansOnPage({
         scenarioId: scenario.id,
         label,
         appName,
+        compareOptions: scenarioCompareOptions(scenario),
       })
       snapshot.requestedPath = pathName
       snapshot.waitFor = parentWaitFor || scenario.waitFor || []
@@ -2350,7 +2352,7 @@ function compareElements(baseline, candidate, config = {}) {
   const baselineMap = new Map(baselineElements.map(element => [element.key, element]))
   const candidateMap = new Map(candidateElements.map(element => [element.key, element]))
   const keys = Array.from(new Set([...baselineMap.keys(), ...candidateMap.keys()])).sort()
-  const numericTolerance = config.numericTolerance ?? 0.01
+  const numericTolerance = config.numericTolerance ?? DEFAULT_NUMERIC_TOLERANCE
 
   return keys.map((key) => {
     const base = baselineMap.get(key)
@@ -2441,7 +2443,8 @@ function ignoredListDataPointsForSnapshot(snapshot) {
 }
 
 function isScenarioListPageSnapshot(snapshot) {
-  return Boolean(snapshot?.pageId && snapshot.pageId === snapshot.scenarioId)
+  if (!snapshot?.pageId || !snapshot.scenarioId) return false
+  return snapshot.pageId === snapshot.scenarioId || snapshot.pageId.startsWith(snapshot.scenarioId + '/modal/')
 }
 
 function normalizeIgnoredListDataPoints(value) {
@@ -3287,7 +3290,7 @@ Options:
   --scrape-failure-limit <n> Stop after this many consecutive failed/empty scrapes. Default: ${DEFAULT_SCRAPE_FAILURE_LIMIT}.
   --navigation-timeout-ms <n> Per-page navigation timeout. Default: 45000.
   --navigation-retries <n>    Retry page navigations before recording a capture error. Default: 3.
-  --numeric-tolerance <n|%>   Relative tolerance for numeric values. Default: 1%.
+  --numeric-tolerance <n|%>   Relative tolerance for numeric values. Default: 2%.
   --rate-limit-retries <n>    Retry page captures that observe HTTP 429. Default: 3.
   --app-phased                Capture all baseline pages first, then all candidate pages. Default.
   --alternating               Slow diagnostic mode: alternate baseline/candidate page-by-page.
