@@ -490,7 +490,7 @@
       "label": "Full run: Mainnet portfolio spy rewards, show all",
       "path": "/portfolio/rewards?network=1&showAll=true&spy=0x75cFE4ef963232ae8313aC33e21fC39241338618",
       "waitFor": [
-        "[data-id=\"portfolio-list\"]",
+        "[data-id=\"reward-unlock-list\"]",
         "[data-id=\"data-point\"]"
       ]
     }
