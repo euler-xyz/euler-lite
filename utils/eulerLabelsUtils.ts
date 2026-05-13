@@ -70,6 +70,9 @@ export const getProductByVault = (vaultAddress: string): EulerLabelProduct =>
 export const getProductKeyByVault = (vaultAddress: string): string | undefined =>
   getEulerLabelProductKeyByVault(labels(), vaultAddress)
 
+export const getActiveProductVaultAddresses = (): string[] =>
+  Object.values(labels().products).flatMap(product => product.vaults)
+
 export const getVaultBlock = (vaultAddress: string): string[] | undefined =>
   getEulerLabelVaultBlock(labels(), vaultAddress)
 
