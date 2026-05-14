@@ -236,6 +236,7 @@ export const useFuul = () => {
       throw new Error('Wallet not connected')
     }
 
+    assertOperationNotBlocked()
     await ensureWalletOnCurrentChain()
 
     const contractCheck = mapRewardToContractCheck(reward)

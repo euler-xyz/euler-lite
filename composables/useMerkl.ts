@@ -358,6 +358,7 @@ export const useMerkl = () => {
       throw new Error('Wallet not connected')
     }
 
+    assertOperationNotBlocked()
     await ensureWalletOnCurrentChain()
     assertOperationNotBlocked()
 

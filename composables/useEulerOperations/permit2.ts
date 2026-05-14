@@ -4,6 +4,7 @@ import type { OperationsContext, Permit2Helpers } from './types'
 import { MAX_UINT160, PERMIT2_TYPES, permit2Abi } from '~/entities/permit2'
 import { PERMIT2_SIG_WINDOW } from '~/entities/constants'
 import type { EVCCall } from '~/utils/evc-converter'
+import { assertOperationNotBlocked } from '~/utils/operationGuardRegistry'
 
 const maxUint256Hex = toHex(maxUint256, { size: 32 })
 const nowInSeconds = () => BigInt(Math.floor(Date.now() / 1000))
@@ -63,6 +64,7 @@ export const createPermit2Helpers = (ctx: OperationsContext): Permit2Helpers => 
       sigDeadline: currentTime + PERMIT2_SIG_WINDOW,
     }
 
+    assertOperationNotBlocked()
     const signature = await ctx.signTypedDataAsync({
       domain: {
         name: 'Permit2',

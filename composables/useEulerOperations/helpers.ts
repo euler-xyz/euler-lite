@@ -11,6 +11,7 @@ import { buildPythUpdateCalls, buildPythUpdateCallsFromFeeds, collectPythFeedsFo
 import { logWarn } from '~/utils/errorHandling'
 import { INTEREST_ADJUSTMENT_BPS, BPS_BASE } from '~/entities/tuning-constants'
 import type { Vault } from '~/entities/vault'
+import { assertOperationNotBlocked } from '~/utils/operationGuardRegistry'
 
 /** Pad amount by 0.01% to cover interest accrual between plan build and tx execution */
 export const adjustForInterest = (amount: bigint) => (amount * INTEREST_ADJUSTMENT_BPS) / BPS_BASE
@@ -100,6 +101,7 @@ export const createOperationHelpers = (ctx: OperationsContext, permit2: Permit2H
       }
 
       if (includePermit2) {
+        assertOperationNotBlocked()
         permitCall = await permit2.buildPermit2Call(assetAddr, spenderAddr, amount, userAddr, permit2Address)
       }
     }

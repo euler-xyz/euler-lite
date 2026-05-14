@@ -255,6 +255,7 @@ export const useBrevis = () => {
       throw new Error('Wallet not connected')
     }
 
+    assertOperationNotBlocked()
     await ensureWalletOnCurrentChain()
 
     const request: MerkleProofRequest = {
