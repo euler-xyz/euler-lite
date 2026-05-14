@@ -31,6 +31,7 @@ type SwapQuotesRequestOptions = {
   providers?: string[]
   errorMessage?: string
   providerExtraData?: Partial<Record<string, SwapApiProviderExtraData>>
+  providerParams?: Partial<Record<string, Partial<SwapApiRequestInput>>>
 }
 
 export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
@@ -250,6 +251,16 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
       ?? (isCowProvider(provider) ? params.providerExtraData : undefined)
   }
 
+  const getProviderParams = (
+    provider: string,
+    requestOptions: SwapQuotesRequestOptions,
+  ) => {
+    const normalizedProvider = provider.toLowerCase()
+    return requestOptions.providerParams?.[provider]
+      ?? requestOptions.providerParams?.[normalizedProvider]
+      ?? {}
+  }
+
   const requestQuotes = async (
     params: SwapApiRequestInput,
     requestOptions: SwapQuotesRequestOptions = {},
@@ -312,10 +323,14 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
 
       const fetchProviderQuote = async (provider: string) => {
         try {
-          const data = await getSwapQuotes({
+          const providerParams = {
             ...params,
+            ...getProviderParams(provider, requestOptions),
+          }
+          const data = await getSwapQuotes({
+            ...providerParams,
             provider,
-            providerExtraData: getProviderExtraData(provider, params, requestOptions),
+            providerExtraData: getProviderExtraData(provider, providerParams, requestOptions),
           }, { signal: controller.signal })
 
           if (guard.isStale(gen)) {
@@ -324,7 +339,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
 
           const best = pickBestQuote(data, options.amountField, options.compare)
           if (best) {
-            const card = await enrichQuoteCard(provider, best, params, client, gasPricePromise)
+            const card = await enrichQuoteCard(provider, best, providerParams, client, gasPricePromise)
             if (guard.isStale(gen) || !card) {
               return
             }

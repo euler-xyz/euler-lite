@@ -117,6 +117,20 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     let subAccount: string
     try {
       subAccount = await getNewSubAccount(address.value, shortVault.address)
+      if (
+        quote.accountIn.toLowerCase() !== subAccount.toLowerCase()
+        || quote.accountOut.toLowerCase() !== subAccount.toLowerCase()
+      ) {
+        logWarn('multiply/cowswap/subaccountMismatch', 'Selected CoW quote uses a different sub-account', {
+          data: {
+            quoteAccountIn: quote.accountIn,
+            quoteAccountOut: quote.accountOut,
+            executionSubAccount: subAccount,
+          },
+        })
+        error('Quote is stale. Refresh quote and try again.')
+        return
+      }
     }
     catch (e) {
       logWarn('multiply/cowswap/resolveSubaccount', e)

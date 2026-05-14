@@ -43,6 +43,7 @@ import { useMultiplyCollateralOptions } from '~/composables/useMultiplyCollatera
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
+import { getNewSubAccount } from '~/entities/account'
 
 type MultiplyPlanParamsCommon = {
   supplyVaultAddress: string
@@ -693,12 +694,21 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
     const quoteDeadline = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
     const cowProviderExtraData = { ...COWSWAP_PROVIDER_EXTRA_DATA.openPosition }
+    let cowAccount: Address | null = null
     const chainConfig = getCowSwapChainConfig(chainId.value ?? 0)
-    if (chainConfig) {
+    if (chainConfig && address.value) {
+      try {
+        cowAccount = await getNewSubAccount(address.value, multiplyShortVault.value.address) as Address
+      }
+      catch (e) {
+        logWarn('multiply/cowswap/resolveQuoteSubaccount', e)
+      }
+    }
+    if (chainConfig && cowAccount) {
       cowProviderExtraData.appData = buildOpenPositionQuoteAppData(
         {
           owner: (address.value || zeroAddress) as Address,
-          account,
+          account: cowAccount,
           deadline: quoteDeadline,
           collateralVault: multiplySupplyVault.value.address as Address,
           borrowVault: multiplyShortVault.value.address as Address,
@@ -724,10 +734,13 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       isRepay: false,
       targetDebt: 0n,
       currentDebt: 0n,
-      providerExtraData: cowProviderExtraData,
     }
     await requestMultiplyQuotes(requestParams, {
       errorMessage: 'Unable to fetch swap quote. Multiply feature is not available for this asset.',
+      providerExtraData: cowAccount ? { cow: cowProviderExtraData } : undefined,
+      providerParams: cowAccount
+        ? { cow: { accountIn: cowAccount, accountOut: cowAccount } }
+        : undefined,
     })
   }, 500)
 
