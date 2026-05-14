@@ -143,8 +143,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     if (!positions.length) return undefined
     const selected = selectedSavingSubAccount.value
     if (selected) {
-      const match = positions.find(p => normalizeAddressOrEmpty(p.subAccount) === normalizeAddressOrEmpty(selected))
-      if (match) return match
+      return positions.find(p => normalizeAddressOrEmpty(p.subAccount) === normalizeAddressOrEmpty(selected))
     }
     return [...positions].sort((a, b) => (b.assets > a.assets ? 1 : b.assets < a.assets ? -1 : 0))[0]
   })
@@ -370,6 +369,9 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     if (borrowNeedsSwap.value && !borrowSwapQuoteCards.value.length && +collateralAmount.value > 0) {
       return isBorrowSwapQuoteLoading.value ? null : 'No swap quote available'
     }
+    if (isSavingCollateral.value && !savingCollateral.value) {
+      return 'Savings position not found'
+    }
     return null
   })
 
@@ -400,6 +402,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
     if (findBlockingDisabledOp(borrowPlannedOps.value)) return true
+    if (isSavingCollateral.value && !savingCollateral.value) return true
     if (borrowActiveBalance.value < valueToNano(collateralAmount.value, borrowActiveAssetDecimals.value)) return true
     if (!(+collateralAmount.value)) return true
     if ((borrowVault.value?.supply || 0n) < valueToNano(borrowAmount.value, borrowVault.value?.decimals)) return true
