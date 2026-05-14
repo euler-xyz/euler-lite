@@ -72,6 +72,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   // --- Source vault state ---
   const sourceVault: Ref<Vault | undefined> = ref()
   const sourceAssets = ref(0n)
+  const sourceShares = computed(() => sourceVault.value ? (getSavingsPosition(sourceVault.value.address)?.shares || 0n) : 0n)
   const isSameVaultRepay = computed(() =>
     !!sourceVault.value
     && !!borrowVault.value
@@ -97,6 +98,8 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     position,
     borrowVault,
     sourceVault,
+    sourceAssets,
+    sourceShares,
     sourceBalance,
     formTab,
     formTabName: 'savings',

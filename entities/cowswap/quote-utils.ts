@@ -30,6 +30,7 @@ type CowSwapQuoteSlippageTarget = 'buyAmount' | 'sellAmount'
 type CowSwapQuoteOrderAmountOptions = {
   slippage?: number
   slippageTarget?: CowSwapQuoteSlippageTarget
+  maxSellAmount?: bigint
 }
 
 const parseSlippagePercent = (slippage: number): { slippageUnits: bigint, denominator: bigint } => {
@@ -76,9 +77,12 @@ export const getCowSwapQuoteOrderAmounts = (
   }
 
   const orderSellAmount = quoteSellAmount + feeAmount
-  const adjustedSellAmount = options.slippageTarget === 'sellAmount'
+  const slippageAdjustedSellAmount = options.slippageTarget === 'sellAmount'
     ? increaseBySlippage(orderSellAmount, options.slippage)
     : orderSellAmount
+  const adjustedSellAmount = options.maxSellAmount !== undefined && slippageAdjustedSellAmount > options.maxSellAmount
+    ? options.maxSellAmount
+    : slippageAdjustedSellAmount
   const adjustedBuyAmount = options.slippageTarget === 'buyAmount'
     ? reduceBySlippage(buyAmount, options.slippage)
     : buyAmount

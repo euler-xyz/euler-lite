@@ -44,6 +44,20 @@ describe('getCowSwapQuoteOrderAmounts', () => {
     })
   })
 
+  it('caps slippage-adjusted sell amount when a max sell amount is provided', () => {
+    expect(getCowSwapQuoteOrderAmounts({
+      providerData: {
+        sellAmount: '1000',
+        buyAmount: '2500',
+        feeAmount: '7',
+      },
+    }, { slippage: 0.5, slippageTarget: 'sellAmount', maxSellAmount: 1010n })).toEqual({
+      sellAmount: 1010n,
+      buyAmount: 2500n,
+      feeAmount: 7n,
+    })
+  })
+
   it('rejects quotes without complete positive order amounts', () => {
     expect(getCowSwapQuoteOrderAmounts({
       providerData: {

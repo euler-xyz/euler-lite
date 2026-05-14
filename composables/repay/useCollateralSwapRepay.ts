@@ -76,6 +76,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   // --- Source vault state ---
   const sourceVault: Ref<Vault | undefined> = ref()
   const sourceAssets = ref(0n)
+  const sourceShares = ref(0n)
   const sourceBalance = computed(() => getCashLimitedWithdrawAmount(
     sourceAssets.value,
     sourceVault.value,
@@ -120,6 +121,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     position,
     borrowVault,
     sourceVault,
+    sourceAssets,
+    sourceShares,
     sourceBalance,
     formTab,
     formTabName: 'collateral',
@@ -349,11 +352,13 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const updateSourceBalance = async () => {
     if (!position.value || !sourceVault.value) {
       sourceAssets.value = 0n
+      sourceShares.value = 0n
       return
     }
     const primaryAddress = normalizeAddressOrEmpty(position.value.collateral.address)
     const targetAddress = normalizeAddressOrEmpty(sourceVault.value.address)
     sourceAssets.value = targetAddress === primaryAddress ? (position.value.supplied || 0n) : 0n
+    sourceShares.value = 0n
 
     try {
       if (!isEulerAddressesReady.value) {
@@ -368,8 +373,9 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
         abi: eulerAccountLensABI as Abi,
         functionName: 'getVaultAccountInfo',
         args: [position.value.subAccount, sourceVault.value.address],
-      }) as { assets: bigint }
+      }) as { assets: bigint, shares: bigint }
       sourceAssets.value = res.assets
+      sourceShares.value = res.shares
     }
     catch (e) {
       logWarn('collateralSwapRepay/loadBalance', e)
@@ -473,6 +479,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     const orderAmounts = getCowSwapQuoteOrderAmounts(quote, {
       slippage: slippage.value,
       slippageTarget: 'sellAmount',
+      maxSellAmount: isTargetDebt && sourceShares.value > 0n ? sourceShares.value : undefined,
     })
     if (!orderAmounts) {
       error('Invalid quote: missing CoW order amounts')

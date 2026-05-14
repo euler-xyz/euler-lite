@@ -1,7 +1,7 @@
 import type { Ref, ComputedRef } from 'vue'
 import { useAccount } from '@wagmi/vue'
 import { formatUnits, zeroAddress, type Address } from 'viem'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
+import { previewWithdraw, type Vault, type SecuritizeVault } from '~/entities/vault'
 import { getAssetUsdValue } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
@@ -22,6 +22,8 @@ export interface UseRepaySwapCoreOptions {
   position: Ref<AccountBorrowPosition | undefined>
   borrowVault: ComputedRef<AccountBorrowPosition['borrow'] | undefined>
   sourceVault: Ref<Vault | undefined>
+  sourceAssets: Readonly<Ref<bigint>>
+  sourceShares: Readonly<Ref<bigint>>
   sourceBalance: ComputedRef<bigint>
   formTab: Ref<string>
   formTabName: string
@@ -39,6 +41,8 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     position,
     borrowVault,
     sourceVault,
+    sourceAssets,
+    sourceShares,
     sourceBalance,
     formTab,
     formTabName,
@@ -287,6 +291,20 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     quotes.selectProvider(provider)
   }
 
+  const getClosePositionQuoteCollateralAmount = async (): Promise<bigint> => {
+    if (!sourceVault.value || sourceBalance.value <= 0n) return 0n
+
+    if (sourceBalance.value < sourceAssets.value) {
+      const withdrawShares = await previewWithdraw(sourceVault.value.address, sourceBalance.value)
+      return sourceShares.value > 0n && withdrawShares > sourceShares.value
+        ? sourceShares.value
+        : withdrawShares
+    }
+
+    if (sourceShares.value > 0n) return sourceShares.value
+    return previewWithdraw(sourceVault.value.address, sourceBalance.value)
+  }
+
   // --- Quote request ---
   const requestQuote = useDebounceFn(async () => {
     if (!position.value || !sourceVault.value || !borrowVault.value) {
@@ -371,9 +389,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     const cowProviderExtraData = { ...COWSWAP_PROVIDER_EXTRA_DATA.closePosition }
     const chainConfig = getCowSwapChainConfig(chainId.value ?? 0)
     if (chainConfig) {
-      const sourceSharesAmount = sourceVault.value.totalAssets > 0n
-        ? (sourceBalance.value * sourceVault.value.totalShares + sourceVault.value.totalAssets - 1n) / sourceVault.value.totalAssets
-        : sourceBalance.value
+      const sourceSharesAmount = await getClosePositionQuoteCollateralAmount()
       cowProviderExtraData.appData = buildClosePositionQuoteAppData(
         {
           owner: (address.value || zeroAddress) as Address,
@@ -428,7 +444,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     }
   })
 
-  watch([sourceVault, slippage], () => {
+  watch([sourceVault, sourceBalance, sourceShares, slippage], () => {
     clearSimulationError()
     if (amount.value || debtAmount.value) {
       requestQuote()
