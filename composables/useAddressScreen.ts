@@ -49,6 +49,7 @@ export const useAddressScreen = () => {
     if (isRestricted) {
       screeningStatus.value = 'blocked'
       await disconnect()
+      if (gen !== screeningGeneration) return false
       showBlockedModal(address)
       return true
     }
