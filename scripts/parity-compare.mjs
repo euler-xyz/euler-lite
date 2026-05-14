@@ -2610,6 +2610,7 @@ function isIgnoredListDataPointElement(element, ignoredLists) {
 }
 
 const STRUCTURAL_CONTAINER_COMPARE_IDS = new Set([
+  'vault-header',
   'discovery-market-list',
   'discovery-market-list-item',
   'discovery-market-card',
