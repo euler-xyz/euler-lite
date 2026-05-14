@@ -37,7 +37,7 @@ const { refreshAllPositions: _refreshAllPositions, depositPositions } = useEuler
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
 const { eulerLensAddresses: _eulerLensAddresses } = useEulerAddresses()
-const { fetchSingleBalance, fetchVaultShareBalance } = useWallets()
+const { fetchSingleBalance } = useWallets()
 const openSlippageSettings = () => {
   modal.open(SlippageSettingsModal)
 }
@@ -48,7 +48,6 @@ useOperationGuard([collateralAddress, borrowAddress])
 
 // --- Shared state ---
 const balance = ref(0n)
-const savingBalance = ref(0n)
 const tab = ref()
 const formTab = ref<'borrow' | 'multiply'>('borrow')
 const pendingSubAccount = ref<string | null>(null)
@@ -137,7 +136,6 @@ const borrow = useBorrowForm({
   formTab,
   savingPositions,
   balance,
-  savingBalance,
   resolvePendingSubAccount,
   collateralSupplyApy,
   borrowApy,
@@ -249,7 +247,6 @@ watch(tabs, (next) => {
 const updateBalance = async () => {
   if (!isConnected.value) {
     balance.value = 0n
-    savingBalance.value = 0n
     multiply.multiplyAssetBalance.value = 0n
     return
   }
@@ -259,16 +256,6 @@ const updateBalance = async () => {
   }
   else {
     balance.value = 0n
-  }
-
-  if (collateralVault.value?.address) {
-    savingBalance.value = await fetchVaultShareBalance(
-      collateralVault.value.address,
-      borrow.savingCollateral.value?.subAccount,
-    )
-  }
-  else {
-    savingBalance.value = 0n
   }
 
   await Promise.all([
@@ -395,14 +382,6 @@ watch(address, () => {
   pendingSubAccount.value = null
   pendingSubAccountPromise = null
   updateBalance()
-})
-
-watch(() => borrow.savingCollateral.value?.subAccount, async () => {
-  if (!collateralVault.value?.address) return
-  savingBalance.value = await fetchVaultShareBalance(
-    collateralVault.value.address,
-    borrow.savingCollateral.value?.subAccount,
-  )
 })
 
 watch(formTab, () => {

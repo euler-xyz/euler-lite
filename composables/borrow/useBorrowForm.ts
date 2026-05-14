@@ -47,7 +47,6 @@ export interface UseBorrowFormOptions {
 
   savingPositions: ComputedRef<AccountDepositPosition[]>
   balance: Ref<bigint>
-  savingBalance: Ref<bigint>
 
   resolvePendingSubAccount: () => Promise<string>
 
@@ -73,7 +72,6 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     formTab: _formTab,
     savingPositions,
     balance,
-    savingBalance,
     resolvePendingSubAccount,
     collateralSupplyApy,
     borrowApy,
@@ -706,7 +704,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
       if (isSavingCollateral.value) {
         if (savingCollateral.value?.assets === collateralAmountNano) {
-          collateralAmountForPlan = savingBalance.value
+          collateralAmountForPlan = savingCollateral.value.shares
         }
         else {
           collateralAmountForPlan = await convertAssetsToShares(collateralVault.value.address, collateralAmountNano)
@@ -794,7 +792,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         let collateralAmountForPlan = collateralAmountFixed.value.toFormat({ decimals: Number(collateralVault.value.decimals) }).value
         if (isSavingCollateral.value) {
           if (savingCollateral.value?.assets === collateralAmountForPlan) {
-            collateralAmountForPlan = savingBalance.value
+            collateralAmountForPlan = savingCollateral.value.shares
           }
           else {
             collateralAmountForPlan = await convertAssetsToShares(collateralVault.value.address, collateralAmountForPlan)
