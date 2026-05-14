@@ -154,6 +154,11 @@ describe('useSavingsRepay', () => {
       getSwapProviders: vi.fn(async () => []),
       getSwapQuotes: vi.fn(async () => []),
     }))
+    vi.stubGlobal('useRpcClient', () => ({ client: ref(null) }))
+    vi.stubGlobal('useWagmi', () => ({
+      address: ref(USER),
+      chain: ref({ nativeCurrency: { decimals: 18 } }),
+    }))
   })
 
   afterEach(() => {
