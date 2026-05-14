@@ -114,6 +114,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     selectedProvider: borrowSwapSelectedProvider,
     selectedQuote: borrowSwapSelectedQuote,
     effectiveQuote: borrowSwapEffectiveQuote,
+    effectiveQuoteFetchedAt: borrowSwapEffectiveQuoteFetchedAt,
     isLoading: isBorrowSwapQuoteLoading,
     quoteError: borrowSwapQuoteError,
     statusLabel: borrowSwapQuotesStatusLabel,
@@ -121,7 +122,11 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     reset: resetBorrowSwapQuoteState,
     requestQuotes: requestBorrowSwapQuotes,
     selectProvider: selectBorrowSwapQuote,
-  } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+  } = useSwapQuotesParallel({
+    amountField: 'amountOut',
+    compare: 'max',
+    buildTxPlanForQuote: quote => buildSwapBorrowPlanFromQuote(quote, { includePermit2Call: false }),
+  })
   // --- Form state ---
   const ltv = ref(0)
   const borrowAmount = ref('')
@@ -275,11 +280,25 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     return `${formatSmartAmount(formatUnits(amountIn, Number(borrowSelectedAsset.value.decimals)))} ${borrowSelectedAsset.value.symbol}`
   })
 
+  const borrowSwapInputExactDisplay = computed(() => {
+    if (!borrowSwapEffectiveQuote.value || !borrowSelectedAsset.value) return ''
+    const amountIn = BigInt(borrowSwapEffectiveQuote.value.amountIn || 0)
+    if (amountIn <= 0n) return ''
+    return `${formatUnits(amountIn, Number(borrowSelectedAsset.value.decimals))} ${borrowSelectedAsset.value.symbol}`
+  })
+
   const borrowSwapOutputDisplay = computed(() => {
     if (!borrowSwapEffectiveQuote.value || !collateralVault.value) return ''
     const amountOut = BigInt(borrowSwapEffectiveQuote.value.amountOut || 0)
     if (amountOut <= 0n) return ''
     return `${formatSmartAmount(formatUnits(amountOut, Number(collateralVault.value.asset.decimals)))} ${collateralVault.value.asset.symbol}`
+  })
+
+  const borrowSwapOutputExactDisplay = computed(() => {
+    if (!borrowSwapEffectiveQuote.value || !collateralVault.value) return ''
+    const amountOut = BigInt(borrowSwapEffectiveQuote.value.amountOut || 0)
+    if (amountOut <= 0n) return ''
+    return `${formatUnits(amountOut, Number(collateralVault.value.asset.decimals))} ${collateralVault.value.asset.symbol}`
   })
 
   const borrowSwapRoutedVia = computed(() => {
@@ -685,6 +704,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             asset: reviewAsset,
             amount: collateralAmount.value,
             plan: plan.value || undefined,
+            quoteFetchedAt: borrowSwapEffectiveQuoteFetchedAt.value,
             swapToAsset: collateralVault.value.asset,
             swapToAmount: borrowSwapEstimatedCollateral.value,
             swapMode: SwapperMode.EXACT_IN,
@@ -978,7 +998,9 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     // Computed: swap
     borrowSwapEstimatedCollateral,
     borrowSwapInputDisplay,
+    borrowSwapInputExactDisplay,
     borrowSwapOutputDisplay,
+    borrowSwapOutputExactDisplay,
     borrowSwapRoutedVia,
     borrowSwapPriceImpact,
     borrowSwapRouteItems,

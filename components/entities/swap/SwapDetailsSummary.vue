@@ -5,6 +5,8 @@ import { formatNumber } from '~/utils/string-utils'
 defineProps<{
   inputDisplay: string | null
   outputDisplay: string | null
+  inputExactDisplay?: string | null
+  outputExactDisplay?: string | null
   priceImpact: number | null
   slippage: number
   routedVia: string | null
@@ -22,7 +24,17 @@ const emit = defineEmits<{
     label="Swap in"
   >
     <p class="text-p2 text-right">
-      {{ inputDisplay }}
+      <UiExactAmount
+        v-if="inputExactDisplay && inputExactDisplay !== inputDisplay"
+        :exact="inputExactDisplay"
+        placement="bottom"
+        align="end"
+      >
+        {{ inputDisplay }}
+      </UiExactAmount>
+      <template v-else>
+        {{ inputDisplay }}
+      </template>
     </p>
   </SummaryRow>
   <SummaryRow
@@ -30,7 +42,16 @@ const emit = defineEmits<{
     label="Swap out"
   >
     <p class="text-p2 text-right">
-      {{ outputDisplay }}
+      <UiExactAmount
+        v-if="outputExactDisplay && outputExactDisplay !== outputDisplay"
+        :exact="outputExactDisplay"
+        align="end"
+      >
+        {{ outputDisplay }}
+      </UiExactAmount>
+      <template v-else>
+        {{ outputDisplay }}
+      </template>
     </p>
   </SummaryRow>
   <SummaryRow

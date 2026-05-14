@@ -33,7 +33,7 @@ const close = () => {
   isComponentVisible.value = false
 }
 const onClickWrapper = () => {
-  if (!data.isNotClosable) {
+  if (!data.isNotClosable || data.closeOnBackdropWhenAllowed) {
     close()
   }
 }

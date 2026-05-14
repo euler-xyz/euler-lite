@@ -20,7 +20,7 @@ import { getHookDisabledWarning, getUtilisationWarning } from '~/composables/use
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import type { TxPlan } from '~/entities/txPlan'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
-import { SwapperMode } from '~/entities/swap'
+import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatNumber, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
@@ -101,6 +101,7 @@ const {
   selectedProvider: swapSelectedProvider,
   selectedQuote: swapSelectedQuote,
   effectiveQuote: swapEffectiveQuote,
+  effectiveQuoteFetchedAt: swapEffectiveQuoteFetchedAt,
   isLoading: isSwapQuoteLoading,
   quoteError: swapQuoteError,
   statusLabel: swapQuotesStatusLabel,
@@ -108,7 +109,11 @@ const {
   reset: resetSwapQuoteState,
   requestQuotes: requestSwapQuotes,
   selectProvider: selectSwapQuote,
-} = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+} = useSwapQuotesParallel({
+  amountField: 'amountOut',
+  compare: 'max',
+  buildTxPlanForQuote: quote => buildSwapWithdrawPlanFromQuote(quote),
+})
 const rewardApy = computed(() => getSupplyRewardApy(vault.value?.address || ''))
 const amountFixed = computed(() => {
   return FixedPoint.fromValue(
@@ -194,11 +199,25 @@ const swapInputDisplay = computed(() => {
   return `${formatSmartAmount(formatUnits(amountIn, Number(asset.value.decimals)))} ${asset.value.symbol}`
 })
 
+const swapInputExactDisplay = computed(() => {
+  if (!swapEffectiveQuote.value || !asset.value) return ''
+  const amountIn = BigInt(swapEffectiveQuote.value.amountIn || 0)
+  if (amountIn <= 0n) return ''
+  return `${formatUnits(amountIn, Number(asset.value.decimals))} ${asset.value.symbol}`
+})
+
 const swapOutputDisplay = computed(() => {
   if (!swapEffectiveQuote.value || !selectedOutputAsset.value) return ''
   const amountOut = BigInt(swapEffectiveQuote.value.amountOut || 0)
   if (amountOut <= 0n) return ''
   return `${formatSmartAmount(formatUnits(amountOut, Number(selectedOutputAsset.value.decimals)))} ${selectedOutputAsset.value.symbol}`
+})
+
+const swapOutputExactDisplay = computed(() => {
+  if (!swapEffectiveQuote.value || !selectedOutputAsset.value) return ''
+  const amountOut = BigInt(swapEffectiveQuote.value.amountOut || 0)
+  if (amountOut <= 0n) return ''
+  return `${formatUnits(amountOut, Number(selectedOutputAsset.value.decimals))} ${selectedOutputAsset.value.symbol}`
 })
 
 const swapRoutedVia = computed(() => {
@@ -226,6 +245,25 @@ const swapRouteItems = computed(() => {
     formatAmount: formatSmartAmount,
   })
 })
+
+async function buildSwapWithdrawPlanFromQuote(quote: SwapApiQuote): Promise<TxPlan> {
+  const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
+  return isMax
+    ? buildRedeemAndSwapPlan({
+        vaultAddress: vaultAddress as Address,
+        sharesAmount: sharesBalance.value,
+        quote,
+        requestedSlippage: swapSlippage.value,
+        subAccount: subAccount.value,
+      })
+    : buildWithdrawAndSwapPlan({
+        vaultAddress: vaultAddress as Address,
+        assetsAmount: amountFixed.value.value,
+        quote,
+        requestedSlippage: swapSlippage.value,
+        subAccount: subAccount.value,
+      })
+}
 
 const requestSwapQuote = useDebounceFn(async () => {
   swapQuoteError.value = null
@@ -397,6 +435,7 @@ const submit = async () => {
           asset: asset.value,
           amount: amount.value,
           plan: plan.value || undefined,
+          quoteFetchedAt: needsSwap.value ? swapEffectiveQuoteFetchedAt.value : null,
           swapToAsset: needsSwap.value ? selectedOutputAsset.value : undefined,
           swapToAmount: needsSwap.value ? swapEstimatedOutput.value : undefined,
           swapMode: needsSwap.value ? SwapperMode.EXACT_IN : undefined,
@@ -635,7 +674,9 @@ watch(swapSelectedQuote, () => {
               >
                 <SwapDetailsSummary
                   :input-display="swapInputDisplay"
+                  :input-exact-display="swapInputExactDisplay"
                   :output-display="swapOutputDisplay"
+                  :output-exact-display="swapOutputExactDisplay"
                   :price-impact="swapPriceImpact"
                   :slippage="swapSlippage"
                   :routed-via="swapRoutedVia"
