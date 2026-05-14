@@ -1507,6 +1507,7 @@ async function openAndCapture({
         scenarioId: scenario.id,
         label: scenario.label || scenario.id,
         appName: app.name,
+        captureSelector: scenario.captureSelector || scenario.defaults?.captureSelector || null,
         compareOptions: scenarioCompareOptions(scenario),
       })
     }
@@ -2039,6 +2040,16 @@ function limitFollowLinks(links, follow, config) {
 
 function scrapePage(meta) {
   const normalize = value => String(value || '').replace(/\\s+/g, ' ').trim()
+  const normalizeComparableText = (element, value) => {
+    const text = String(value || '')
+    if (element.getAttribute?.('data-id') !== 'vault-header') return normalize(text)
+
+    return text
+      .split(/\n+/)
+      .map(item => item.trim())
+      .filter(item => item && item !== 'Copy vault link')
+      .join('\n')
+  }
   const structuralContainerIds = new Set([
     'discovery-market-list',
     'discovery-market-list-item',
@@ -2073,7 +2084,7 @@ function scrapePage(meta) {
     })
 
     try {
-      return normalize(element.innerText || element.textContent || '')
+      return normalizeComparableText(element, element.innerText || element.textContent || '')
     }
     finally {
       ignoredNodes.forEach(({ node, display }) => {
@@ -2101,6 +2112,80 @@ function scrapePage(meta) {
     const anchor = element.closest('a') || (element.tagName === 'A' ? element : null)
     return anchor?.href || ''
   }
+  const normalizeCssSelector = selector => String(selector || '').replace(/^css=/, '')
+  const matrixMarketIndex = () => {
+    const match = String(meta.pageId || '').match(/(?:^|-)market-(\d+)$/)
+    if (!match) return ''
+    const index = Number(match[1])
+    return Number.isFinite(index) && index > 0 ? String(index) : ''
+  }
+  const defaultCaptureSelectors = () => {
+    const scenarioId = String(meta.scenarioId || '')
+    const pageId = String(meta.pageId || '')
+    if (!scenarioId.includes('explore-matrix') && !pageId.includes('explore-matrix')) return []
+
+    const index = matrixMarketIndex()
+    const marketSelector = index
+      ? '[data-id="discovery-market-list-item"]:nth-child(' + index + ')'
+      : '[data-id="discovery-market-list-item"]:first-child'
+
+    return [
+      marketSelector + ' [data-id="attribute-matrix"]',
+      marketSelector + ' [data-id="collateral-matrix"]',
+      marketSelector + ' [data-id="discovery-market-expanded"]',
+    ]
+  }
+  const captureSelectors = () => {
+    if (Array.isArray(meta.captureSelector)) return meta.captureSelector.map(normalizeCssSelector).filter(Boolean)
+    if (meta.captureSelector) return [normalizeCssSelector(meta.captureSelector)].filter(Boolean)
+    return defaultCaptureSelectors()
+  }
+  const scrapeRoots = () => {
+    const selectors = captureSelectors()
+    if (!selectors.length) {
+      return {
+        roots: [document],
+        selector: '',
+        found: true,
+      }
+    }
+
+    for (const selector of selectors) {
+      const roots = Array.from(document.querySelectorAll(selector))
+      if (roots.length) {
+        return {
+          roots,
+          selector,
+          found: true,
+        }
+      }
+    }
+
+    return {
+      roots: [],
+      selector: selectors.join(', '),
+      found: false,
+    }
+  }
+  const elementsInRoots = (roots) => {
+    const seen = new Set()
+    const scoped = []
+
+    for (const root of roots) {
+      const candidates = [
+        ...(root.matches?.('[data-id]') ? [root] : []),
+        ...Array.from(root.querySelectorAll?.('[data-id]') || []),
+      ]
+
+      for (const element of candidates) {
+        if (seen.has(element)) continue
+        seen.add(element)
+        scoped.push(element)
+      }
+    }
+
+    return scoped
+  }
   const inferredListFor = (attrs) => {
     if (attrs.list) return attrs.list
     const id = attrs.id || ''
@@ -2127,9 +2212,27 @@ function scrapePage(meta) {
     keylessContainerIds.has(attrs.id || '') ? '' : (attrs.key || ''),
     keylessContainerIds.has(attrs.id || '') ? '' : (attrs.field || ''),
   ].join('|')
-  const occurrenceByBaseKey = new Map()
+  const normalizedDataValue = (attrs) => {
+    if (!Object.prototype.hasOwnProperty.call(attrs, 'value')) return null
 
-  const elements = Array.from(document.querySelectorAll('[data-id]'))
+    const value = String(attrs.value ?? '').trim()
+    if (!value || value === 'false' || value === 'undefined' || value === 'null') return null
+    return value
+  }
+  const visibleDataPointValue = (attrs, text) => {
+    if ((attrs.id || '') !== 'data-point' || !(attrs.field || '')) return text
+
+    const lines = String(text || '')
+      .split(/\n+/)
+      .map(item => item.trim())
+      .filter(Boolean)
+    if (lines[0] !== attrs.field || lines.length < 2) return text
+    return lines.slice(1).join('\n')
+  }
+  const occurrenceByBaseKey = new Map()
+  const rootInfo = scrapeRoots()
+
+  const elements = elementsInRoots(rootInfo.roots)
     .filter(isVisible)
     .map((element, index) => {
       const attrs = dataAttrs(element)
@@ -2140,12 +2243,16 @@ function scrapePage(meta) {
       occurrenceByBaseKey.set(baseKey, occurrence + 1)
       const text = comparableText(element)
       const rect = element.getBoundingClientRect()
-      const hasDataValue = Object.prototype.hasOwnProperty.call(attrs, 'value')
+      const dataValue = normalizedDataValue(attrs)
+      const hasDataValue = dataValue !== null
+      const fallbackCompareValue = visibleDataPointValue(attrs, text)
+      const hasDerivedCompareValue = !hasDataValue && fallbackCompareValue !== text
+      if (hasDerivedCompareValue) attrs['parity-derived-value'] = 'true'
       const compareValue = hasDataValue
-        ? attrs.value
+        ? dataValue
         : isStructuralContainer(attrs)
           ? ''
-          : text
+          : fallbackCompareValue
 
       return {
         key: baseKey + '#' + occurrence,
@@ -2157,7 +2264,7 @@ function scrapePage(meta) {
         list: attrs.list || '',
         itemKey: attrs.key || '',
         field: attrs.field || '',
-        value: hasDataValue ? attrs.value : '',
+        value: hasDataValue ? dataValue : '',
         compareValue,
         text,
         href: hrefFor(element),
@@ -2205,6 +2312,12 @@ function scrapePage(meta) {
     label: meta.label,
     appName: meta.appName,
     compareOptions: meta.compareOptions || {},
+    captureRoot: {
+      selector: rootInfo.selector,
+      found: rootInfo.found,
+      count: rootInfo.roots.length,
+    },
+    captureError: rootInfo.found ? null : 'Capture root not found: ' + rootInfo.selector,
     capturedAt: new Date().toISOString(),
     title: document.title,
     url: window.location.href,
@@ -2427,7 +2540,8 @@ function compareElements(baseline, candidate, config = {}) {
 
     const valueComparison = compareComparableValues(base.compareValue, cand.compareValue, numericTolerance)
     const textComparison = compareComparableValues(base.text, cand.text, numericTolerance)
-    const status = valueComparison.matches && textComparison.matches ? 'match' : 'value-mismatch'
+    const compareValueOnly = shouldCompareDerivedDataPointValueOnly(base, cand)
+    const status = valueComparison.matches && (compareValueOnly || textComparison.matches) ? 'match' : 'value-mismatch'
     const mismatch = status === 'match'
       ? null
       : {
@@ -2444,6 +2558,15 @@ function compareElements(baseline, candidate, config = {}) {
       mismatch,
     }
   })
+}
+
+function shouldCompareDerivedDataPointValueOnly(base, candidate) {
+  return Boolean(
+    base?.id === 'data-point'
+    && candidate?.id === 'data-point'
+    && base.attrs?.['parity-derived-value'] === 'true'
+    && candidate.attrs?.['parity-derived-value'] === 'true',
+  )
 }
 
 function ignoredListDataPointsForSnapshot(snapshot) {

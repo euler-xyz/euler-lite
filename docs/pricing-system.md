@@ -16,13 +16,15 @@ The important rule is that Lite's explicit `source` argument maps to SDK fields 
 | `getCollateralUsdValue(...)` | amount multiplied by the matching collateral edge `marketPriceUsd` | Display USD value for collateral where the borrow vault chooses the price source |
 | `getTokenUsdPrice(address)` | `sdk.priceService.fetchAssetUsdPriceByAddress(...)` | Display price for arbitrary wallet/swap tokens that are not loaded vault entities |
 
-Borrow-position aggregates should prefer SDK precomputed position fields before falling back to helper calculations:
+Borrow-position aggregates use SDK precomputed position fields. Portfolio borrow cards render NAV, Net APY, and ROE from the SDK portfolio position instead of recomputing those values with local price helpers.
 
 | UI value | SDK-backed field |
 |----------|------------------|
-| Total collateral value | `position.totalCollateralValueUsd` |
-| Per-collateral value in borrow context | `position.borrow.liquidity.collaterals[].valueUsd` |
-| Borrow market value | `position.borrow.borrowedValueUsd` |
+| Total collateral value | `position.totalCollateralMarketValueUsd` |
+| Per-collateral value in borrow context | `position.borrow.liquidity.collaterals[].marketValueUsd` |
+| Borrow market value | `position.borrow.borrowedMarketValueUsd` |
+| Borrow-position Net APY | `position.netApy` |
+| Borrow-position ROE | `position.roe` |
 | Primary collateral liquidation price | `position.primaryCollateralLiquidationPrice` |
 | Borrow liquidation price | `position.borrowLiquidationPriceUsd` |
 

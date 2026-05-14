@@ -14,6 +14,7 @@ const {
   depositPositions,
   totalSuppliedValueInfo,
   totalBorrowedValueInfo,
+  netAssetMarketValueInfo,
   portfolioRoe,
   portfolioNetApy,
   isPositionsLoaded,
@@ -82,9 +83,7 @@ const totalBorrowedDisplay = computed(() => {
   return formatCompactUsdValue(total)
 })
 const netAssetValueInfo = computed(() => {
-  const total = totalSuppliedValueInfo.value.total - totalBorrowedValueInfo.value.total
-  const hasMissingPrices = totalSuppliedValueInfo.value.hasMissingPrices || totalBorrowedValueInfo.value.hasMissingPrices
-  return { total, hasMissingPrices }
+  return netAssetMarketValueInfo.value
 })
 const netAssetValueDisplay = computed(() => {
   const { total, hasMissingPrices } = netAssetValueInfo.value

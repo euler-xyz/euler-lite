@@ -179,17 +179,23 @@ export const useEulerAccount = () => {
 
   const portfolioRoe = computed(() => portfolio.value?.roe ?? 0)
   const portfolioNetApy = computed(() => portfolio.value?.netApy ?? 0)
-  const totalSuppliedValue = computed(() => usdWadToNumber(portfolio.value?.totalSuppliedValueUsd))
-  const totalBorrowedValue = computed(() => usdWadToNumber(portfolio.value?.totalBorrowedValueUsd))
+  const totalSuppliedValue = computed(() => usdWadToNumber(portfolio.value?.totalSuppliedMarketValueUsd))
+  const totalBorrowedValue = computed(() => usdWadToNumber(portfolio.value?.totalBorrowedMarketValueUsd))
+  const netAssetMarketValue = computed(() => usdWadToNumber(portfolio.value?.netAssetMarketValueUsd))
   const totalSuppliedValueInfo = computed(() => ({
     total: totalSuppliedValue.value,
-    hasMissingPrices: portfolio.value?.totalSuppliedValueUsd === undefined
+    hasMissingPrices: portfolio.value?.totalSuppliedMarketValueUsd === undefined
       && (depositPositions.value.length > 0 || borrowPositions.value.length > 0),
   }))
   const totalBorrowedValueInfo = computed(() => ({
     total: totalBorrowedValue.value,
-    hasMissingPrices: portfolio.value?.totalBorrowedValueUsd === undefined
+    hasMissingPrices: portfolio.value?.totalBorrowedMarketValueUsd === undefined
       && borrowPositions.value.length > 0,
+  }))
+  const netAssetMarketValueInfo = computed(() => ({
+    total: netAssetMarketValue.value,
+    hasMissingPrices: portfolio.value?.netAssetMarketValueUsd === undefined
+      && (depositPositions.value.length > 0 || borrowPositions.value.length > 0),
   }))
 
   watch(chainId, () => {
@@ -242,6 +248,8 @@ export const useEulerAccount = () => {
     totalSuppliedValueInfo,
     totalBorrowedValue,
     totalBorrowedValueInfo,
+    netAssetMarketValue,
+    netAssetMarketValueInfo,
     portfolioRoe,
     portfolioNetApy,
   }

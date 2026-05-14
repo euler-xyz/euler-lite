@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { getRoe, getNetAPY } from '~/utils/vault/apy'
 import {
   getSubAccountId as getSubAccountIndex,
   isEVault,
@@ -10,7 +9,7 @@ import {
   type VaultEntity,
 } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
-import { getAssetUsdValue, formatAssetValue, getCollateralUsdValue, toUsdAmount, type UsdAmount } from '~/utils/sdk-prices'
+import { toUsdAmount, type UsdAmount } from '~/utils/sdk-prices'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated, getVaultNotice, isVaultNoticeSpecific } from '~/utils/eulerLabelsUtils'
@@ -171,30 +170,7 @@ const borrowApy = computed(() => withIntrinsicBorrowApy(
   borrowVault.value?.asset.address,
 ))
 
-const collateralValue = ref<UsdAmount>({ usd: 0, hasPrice: false })
-
-const updateCollateralValue = async () => {
-  // Collateral price ALWAYS comes from liability vault's oracle, converted to USD
-  if (!collateralItems.value.length) {
-    collateralValue.value = toUsdAmount(await getCollateralUsdValue(supplied.value, borrowVault.value, collateralVault.value, 'off-chain'))
-    return
-  }
-
-  // For multiple collaterals, sum up using liability vault's oracle for each
-  const promises = collateralItems.value.map(item =>
-    getCollateralUsdValue(item.assets, borrowVault.value, item.vault, 'off-chain'),
-  )
-  const values = await Promise.all(promises)
-  const allHavePrice = values.every(v => v !== undefined)
-  collateralValue.value = {
-    usd: values.reduce<number>((total, val) => total + (val ?? 0), 0),
-    hasPrice: allHavePrice,
-  }
-}
-
-watchEffect(() => {
-  updateCollateralValue()
-})
+const collateralValue = computed<UsdAmount>(() => toUsdAmount(position.totalCollateralMarketValueUsd))
 
 const collateralValueDisplay = computed(() => {
   return collateralValue.value.hasPrice
@@ -202,31 +178,22 @@ const collateralValueDisplay = computed(() => {
     : `${roundAndCompactTokens(collateralItems.value[0]?.assets ?? supplied.value, BigInt(collateralVault.value.shares.decimals))} ${collateralVault.value.asset.symbol}`
 })
 
-const borrowedValueInfo = ref<{ display: string, hasPrice: boolean }>({ display: '-', hasPrice: false })
+const borrowedValue = computed<UsdAmount>(() => toUsdAmount(position.borrow.borrowedMarketValueUsd))
 
-const updateBorrowedValueInfo = async () => {
-  const price = await formatAssetValue(borrowed.value, borrowVault.value, 'off-chain')
-  borrowedValueInfo.value = {
-    display: price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display,
-    hasPrice: price.hasPrice,
+const borrowedValueInfo = computed<{ display: string, hasPrice: boolean }>(() => {
+  if (borrowedValue.value.hasPrice) {
+    return {
+      display: formatCompactUsdValue(borrowedValue.value.usd),
+      hasPrice: true,
+    }
   }
-}
-
-watchEffect(() => {
-  updateBorrowedValueInfo()
+  return {
+    display: `${roundAndCompactTokens(borrowed.value, borrowVault.value.shares.decimals)} ${borrowVault.value.asset.symbol}`,
+    hasPrice: false,
+  }
 })
 
 const borrowedValueDisplay = computed(() => borrowedValueInfo.value.display)
-
-const borrowedValue = ref<UsdAmount>({ usd: 0, hasPrice: false })
-
-const updateBorrowedValue = async () => {
-  borrowedValue.value = toUsdAmount(await getAssetUsdValue(borrowed.value, borrowVault.value, 'off-chain'))
-}
-
-watchEffect(() => {
-  updateBorrowedValue()
-})
 
 const netAssetValue = computed<UsdAmount>(() => {
   if (!collateralValue.value.hasPrice || !borrowedValue.value.hasPrice) {
@@ -243,27 +210,11 @@ const netAssetValueDisplay = computed(() => {
 })
 
 const netAPY = computed(() => {
-  return getNetAPY(
-    collateralValue.value.usd,
-    collateralSupplyApy.value,
-    borrowedValue.value.usd,
-    borrowApy.value,
-    supplyRewardAPY.value || null,
-    borrowRewardAPY.value || null,
-    loopingRewardAPY.value || null,
-  )
+  return position.netApy
 })
 
 const roe = computed(() => {
-  return getRoe(
-    collateralValue.value.usd,
-    collateralSupplyApy.value,
-    borrowedValue.value.usd,
-    borrowApy.value,
-    supplyRewardAPY.value || null,
-    borrowRewardAPY.value || null,
-    loopingRewardAPY.value || null,
-  )
+  return position.roe
 })
 
 const intrinsicSupplyApy = computed(() => getIntrinsicApy(collateralVault.value.asset.address))
@@ -278,6 +229,7 @@ const userLTV = computed(() =>
   userLTVValue.value === undefined ? null : ltvToPercent(nanoToValue(userLTVValue.value, 18)),
 )
 const actualMultiplier = computed(() => {
+  if (position.multiplier !== undefined) return position.multiplier
   const equity = collateralValue.value.usd - borrowedValue.value.usd
   if (equity <= 0) return 0
   return collateralValue.value.usd / equity
@@ -296,7 +248,7 @@ const onNetApyClick = () => {
       borrowRewardAPY: borrowRewardAPY.value || null,
       loopingRewardAPY: loopingRewardAPY.value || null,
       loopingEligible: loopingEligible.value,
-      netAPY: netAPY.value,
+      netAPY: netAPY.value ?? 0,
       supplyCampaigns: supplyCampaignsForModal.value,
       borrowCampaigns: borrowCampaignsForModal.value,
       loopingCampaigns: loopingCampaignsForModal.value,
@@ -307,7 +259,7 @@ const onNetApyClick = () => {
 const onRoeClick = () => {
   modal.open(PortfolioRoeModal, {
     props: {
-      roe: roe.value,
+      roe: roe.value ?? 0,
       multiplier: Number.isFinite(actualMultiplier.value) ? actualMultiplier.value : 0,
       supplyAPY: collateralSupplyApy.value,
       borrowAPY: borrowApy.value,
@@ -414,8 +366,8 @@ const onRoeClick = () => {
                 data-id="data-point"
                 :data-key="positionKey"
                 data-field="net-apy"
-                :data-value="Number.isFinite(netAPY) ? netAPY : null"
-                :class="[netAPY >= 0 ? 'text-accent-600' : 'text-error-500']"
+                :data-value="netAPY !== undefined && Number.isFinite(netAPY) ? netAPY : null"
+                :class="[(netAPY ?? 0) >= 0 ? 'text-accent-600' : 'text-error-500']"
               >
                 <SvgIcon
                   v-if="hasRewards"
@@ -424,7 +376,7 @@ const onRoeClick = () => {
                   data-modal-trigger="net-apy"
                   @click.prevent="onNetApyClick"
                 />
-                {{ Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
+                {{ netAPY !== undefined && Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
               </div>
             </div>
             <div class="flex flex-col items-end">
@@ -442,8 +394,8 @@ const onRoeClick = () => {
                 data-id="data-point"
                 :data-key="positionKey"
                 data-field="roe"
-                :data-value="Number.isFinite(roe) ? roe : null"
-                :class="[roe >= 0 ? 'text-accent-600' : 'text-error-500']"
+                :data-value="roe !== undefined && Number.isFinite(roe) ? roe : null"
+                :class="[(roe ?? 0) >= 0 ? 'text-accent-600' : 'text-error-500']"
               >
                 <SvgIcon
                   v-if="hasRewards"
@@ -452,7 +404,7 @@ const onRoeClick = () => {
                   data-modal-trigger="roe"
                   @click.prevent="onRoeClick"
                 />
-                {{ Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}
+                {{ roe !== undefined && Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}
               </div>
             </div>
           </div>

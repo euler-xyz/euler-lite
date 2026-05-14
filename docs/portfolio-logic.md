@@ -200,21 +200,22 @@ Raw oracle calculations use SDK helpers such as `getAssetOraclePrice()` and `get
 |----------|-------------------|
 | Vault asset USD price | `vault.marketPriceUsd` |
 | Borrow-context collateral USD price | `borrowVault.collaterals[].marketPriceUsd` |
-| Borrowed position value | `position.borrow.borrowedValueUsd` |
-| Total borrow-position collateral value | `position.totalCollateralValueUsd` |
-| Per-collateral borrow-position value | `position.borrow.liquidity.collaterals[].valueUsd` |
+| Borrowed position value | `position.borrow.borrowedMarketValueUsd` |
+| Total borrow-position collateral value | `position.totalCollateralMarketValueUsd` |
+| Per-collateral borrow-position value | `position.borrow.liquidity.collaterals[].marketValueUsd` |
+| Borrow-position Net APY | `position.netApy` |
+| Borrow-position ROE | `position.roe` |
 
-Collateral pricing always uses the borrow or liability vault's collateral edge, not the collateral vault's own asset price. This keeps display values aligned with the same borrow context used by the protocol.
+Portfolio borrow cards use the SDK portfolio position fields directly for collateral value, debt value, NAV, Net APY, and ROE.
 
 ### Total Portfolio Value Calculation
 
 ```
 totalSuppliedValue = sum of:
-  - deposit positions (all types): assets * vault.marketPriceUsd
-  - borrow collateral: SDK borrow-position collateral USD fields, or the borrow vault's collateral edge marketPriceUsd
+  - SDK totalSuppliedMarketValueUsd
 
 totalBorrowedValue = sum of:
-  - borrow positions: SDK borrowedValueUsd or borrowed * borrowVault.marketPriceUsd
+  - SDK totalBorrowedMarketValueUsd
 ```
 
 Both are computed reactively and update when position data changes.
