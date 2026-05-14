@@ -18,13 +18,14 @@ import {
   toUsdAmount,
   type UsdAmount,
 } from '~/services/pricing/priceProvider'
-import { type AccountBorrowPosition, isPositionEligibleForLiquidation } from '~/entities/account'
+import { type AccountBorrowPosition, getPositionRampConfig, getPositionRampStatus, isPositionEligibleForLiquidation } from '~/entities/account'
+import { DateTime } from 'luxon'
 import type { TxPlan } from '~/entities/txPlan'
 import { formatTtl, nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { formatNumber, formatHealthScore, formatUsdValue, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { getVaultNotice } from '~/utils/eulerLabelsUtils'
-import { VaultOverviewModal, OperationReviewModal, VaultSupplyApyModal, VaultBorrowApyModal, VaultNetApyModal, PortfolioRoeModal } from '#components'
+import { VaultOverviewModal, OperationReviewModal, VaultSupplyApyModal, VaultBorrowApyModal, VaultNetApyModal, PortfolioRoeModal, VaultRampDownModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -671,6 +672,27 @@ const onSupplyInfoIconClick = (event: MouseEvent, vault: Vault | SecuritizeVault
   })
 }
 
+const rampStatus = computed(() =>
+  position.value ? getPositionRampStatus(position.value) : null,
+)
+const rampEndsRelative = computed(() => {
+  if (!position.value || !rampStatus.value?.isRamping) return ''
+  return DateTime.fromSeconds(Number(position.value.targetTimestamp))
+    .toRelative({ base: DateTime.now(), style: 'short' }) ?? ''
+})
+const forcedLiquidationRelative = computed(() => {
+  const at = rampStatus.value?.forcedLiquidationAt ?? null
+  if (at === null) return ''
+  return DateTime.fromSeconds(Number(at))
+    .toRelative({ base: DateTime.now(), style: 'short' }) ?? ''
+})
+const openRampDownModal = () => {
+  if (!position.value || !rampStatus.value?.isRamping) return
+  modal.open(VaultRampDownModal, {
+    props: getPositionRampConfig(position.value),
+  })
+}
+
 const openCollateralInfoModal = (vault: Vault | SecuritizeVault) => {
   const isSecuritize = 'type' in vault && vault.type === 'securitize'
   modal.open(VaultOverviewModal, {
@@ -728,6 +750,25 @@ watch([isConnected, isSpyMode, address], () => {
         description="Oracle pricing is currently unavailable. Some position details cannot be displayed. You can still repay debt and supply collateral."
         variant="warning"
         size="compact"
+      />
+
+      <UiToast
+        v-if="rampStatus?.isRamping && rampStatus.willBeLiquidated"
+        title="Liquidation LTV ramping down"
+        :description="`The liquidation LTV for this pair is being lowered. Your position is projected to become liquidatable ${forcedLiquidationRelative || 'before the ramp ends'}. Reduce your debt or add collateral to avoid liquidation.`"
+        action-text="Ramp details"
+        variant="error"
+        size="compact"
+        @action="openRampDownModal"
+      />
+      <UiToast
+        v-else-if="rampStatus?.isRamping"
+        title="Liquidation LTV ramping down"
+        :description="`The liquidation LTV for this pair is being lowered (ends ${rampEndsRelative}). Your position is currently safe at the post-ramp threshold.`"
+        action-text="Ramp details"
+        variant="warning"
+        size="compact"
+        @action="openRampDownModal"
       />
 
       <div
@@ -824,10 +865,25 @@ watch([isConnected, isSpyMode, address], () => {
             </div>
           </div>
           <div class="flex justify-between gap-8 flex-wrap">
-            <div class="text-content-secondary text-p3">
+            <div class="text-content-secondary text-p3 flex items-center gap-4">
               Liquidation LTV
+              <SvgIcon
+                v-if="rampStatus?.isRamping"
+                class="!w-16 !h-16 cursor-pointer hover:opacity-80"
+                :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
+                name="info-circle"
+                @click.stop="openRampDownModal"
+              />
             </div>
-            <div class="text-content-primary text-p3">
+            <div class="text-content-primary text-p3 flex items-center gap-4">
+              <SvgIcon
+                v-if="rampStatus?.isRamping"
+                name="arrow-top-right"
+                class="!w-14 !h-14 shrink-0 rotate-180 cursor-pointer"
+                :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
+                title="Liquidation LTV ramping down"
+                @click.stop="openRampDownModal"
+              />
               <span
                 v-if="hasQueryFailure"
                 class="text-warning-500"
@@ -1116,10 +1172,25 @@ watch([isConnected, isSpyMode, address], () => {
                 v-if="!hasNoBorrow && isPrimaryCollateral(collateral.vault)"
                 class="flex justify-between gap-8 flex-wrap mb-16"
               >
-                <div class="text-neutral-500 text-p3">
+                <div class="text-neutral-500 text-p3 flex items-center gap-4">
                   Liquidation LTV
+                  <SvgIcon
+                    v-if="rampStatus?.isRamping"
+                    class="!w-14 !h-14 cursor-pointer hover:opacity-80"
+                    :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
+                    name="info-circle"
+                    @click.stop="openRampDownModal"
+                  />
                 </div>
-                <div class="text-neutral-800 text-p3">
+                <div class="text-neutral-800 text-p3 flex items-center gap-4">
+                  <SvgIcon
+                    v-if="rampStatus?.isRamping"
+                    name="arrow-top-right"
+                    class="!w-12 !h-12 shrink-0 rotate-180 cursor-pointer"
+                    :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
+                    title="Liquidation LTV ramping down"
+                    @click.stop="openRampDownModal"
+                  />
                   {{ formatNumber(nanoToValue(position.liquidationLTV, 2)) }}%
                 </div>
               </div>

@@ -4,8 +4,9 @@ import { getAddress, type Address, type Abi } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
+import { DateTime } from 'luxon'
 import type { AccountBorrowPosition } from '~/entities/account'
-import { getSubAccountIndex } from '~/entities/account'
+import { getPositionRampConfig, getPositionRampStatus, getSubAccountIndex } from '~/entities/account'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import {
   getNetAPY,
@@ -27,7 +28,7 @@ import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated, getVaultNotice, isVaultNoticeSpecific } from '~/utils/eulerLabelsUtils'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { useModal } from '~/components/ui/composables/useModal'
-import { VaultNetApyModal, PortfolioRoeModal } from '#components'
+import { VaultNetApyModal, PortfolioRoeModal, VaultRampDownModal } from '#components'
 
 const { position } = defineProps<{ position: AccountBorrowPosition }>()
 
@@ -284,6 +285,25 @@ const onNetApyClick = () => {
   })
 }
 
+const rampStatus = computed(() => getPositionRampStatus(position))
+const rampEndsRelative = computed(() => {
+  if (!rampStatus.value.isRamping) return ''
+  return DateTime.fromSeconds(Number(position.targetTimestamp))
+    .toRelative({ base: DateTime.now(), style: 'short' }) ?? ''
+})
+const forcedLiquidationRelative = computed(() => {
+  const at = rampStatus.value.forcedLiquidationAt
+  if (at === null) return ''
+  return DateTime.fromSeconds(Number(at))
+    .toRelative({ base: DateTime.now(), style: 'short' }) ?? ''
+})
+const onRampInfoClick = () => {
+  if (!rampStatus.value.isRamping) return
+  modal.open(VaultRampDownModal, {
+    props: getPositionRampConfig(position),
+  })
+}
+
 const onRoeClick = () => {
   modal.open(PortfolioRoeModal, {
     props: {
@@ -511,6 +531,41 @@ onMounted(() => {
           />
           Oracle pricing unavailable. Some details may be missing.
         </div>
+        <div
+          v-if="rampStatus.isRamping && rampStatus.willBeLiquidated"
+          class="flex items-start gap-6 text-error-500 text-p4 cursor-pointer"
+          role="button"
+          tabindex="0"
+          @click.prevent.stop="onRampInfoClick"
+          @keydown.enter.prevent.stop="onRampInfoClick"
+          @keydown.space.prevent.stop="onRampInfoClick"
+        >
+          <UiIcon
+            name="warning"
+            class="!w-14 !h-14 shrink-0 mt-2"
+          />
+          <span>
+            Liquidation LTV ramping down. Your position is projected to become
+            liquidatable {{ forcedLiquidationRelative || 'soon' }} — consider closing or reducing debt.
+          </span>
+        </div>
+        <div
+          v-else-if="rampStatus.isRamping"
+          class="flex items-start gap-6 text-warning-500 text-p4 cursor-pointer"
+          role="button"
+          tabindex="0"
+          @click.prevent.stop="onRampInfoClick"
+          @keydown.enter.prevent.stop="onRampInfoClick"
+          @keydown.space.prevent.stop="onRampInfoClick"
+        >
+          <UiIcon
+            name="info-circle"
+            class="!w-14 !h-14 shrink-0 mt-2"
+          />
+          <span>
+            Liquidation LTV ramping down (ends {{ rampEndsRelative }}). Your position is currently safe at the post-ramp threshold.
+          </span>
+        </div>
         <div class="flex justify-between">
           <div class="text-content-tertiary text-p3">
             Net asset value
@@ -595,7 +650,15 @@ onMounted(() => {
                 :color="nanoToValue(position.userLTV, 18) >= (nanoToValue(position.liquidationLTV, 2) - 2) ? 'danger' : undefined"
                 size="small"
               />
-              <div class="flex justify-between gap-8 text-right">
+              <div class="flex justify-between gap-8 text-right items-center">
+                <SvgIcon
+                  v-if="rampStatus.isRamping"
+                  name="arrow-top-right"
+                  class="!w-14 !h-14 shrink-0 rotate-180 cursor-pointer"
+                  :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
+                  title="Liquidation LTV ramping down"
+                  @click.prevent.stop="onRampInfoClick"
+                />
                 <div class="text-content-primary text-p3">
                   {{ formatNumber(nanoToValue(position.userLTV, 18), 2) }}/{{ nanoToValue(position.liquidationLTV, 2) }}%
                 </div>
