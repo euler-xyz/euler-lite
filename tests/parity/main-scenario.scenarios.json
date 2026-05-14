@@ -52,6 +52,19 @@
       ]
     },
     {
+      "id": "main-lend-list-mainnet-default",
+      "label": "Main scenario: Mainnet lend list with showAll disabled",
+      "path": "/lend?network=1",
+      "ignoreListDataPointsOnListPage": [
+        {
+          "listPrefix": "collateral-exposure:"
+        }
+      ],
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"lend\"]"
+      ]
+    },
+    {
       "id": "main-earn-list-mainnet",
       "label": "Main scenario: Mainnet earn list and all earn details",
       "path": "/earn?network=1&showAll=true",
@@ -78,6 +91,14 @@
             "[data-id=\"data-point\"]"
           ]
         }
+      ]
+    },
+    {
+      "id": "main-earn-list-mainnet-default",
+      "label": "Main scenario: Mainnet earn list with showAll disabled",
+      "path": "/earn?network=1",
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"earn\"]"
       ]
     },
     {
@@ -116,6 +137,14 @@
             "[data-id=\"data-point\"]"
           ]
         }
+      ]
+    },
+    {
+      "id": "main-borrow-list-mainnet-default",
+      "label": "Main scenario: Mainnet borrow list with showAll disabled",
+      "path": "/borrow?network=1",
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"borrow-pair\"]"
       ]
     },
     {

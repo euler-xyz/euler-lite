@@ -1757,6 +1757,15 @@ function listCaptureInfo(pathName = '') {
     }
   }
 
+  if (url.pathname === '/earn') {
+    return {
+      listName: 'earn',
+      selector: '[data-id="vault-list"][data-list="earn"], [data-list="earn"]',
+      itemSelector: '[data-list="earn"][data-key]',
+      showAll: isShowAllQuery(url.searchParams),
+    }
+  }
+
   return null
 }
 
