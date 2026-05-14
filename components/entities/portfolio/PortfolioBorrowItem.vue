@@ -6,7 +6,7 @@ import { formatNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { DateTime } from 'luxon'
 import type { AccountBorrowPosition } from '~/entities/account'
-import { getPositionRampConfig, getPositionRampStatus, getSubAccountIndex } from '~/entities/account'
+import { getPositionRampStatus, getSubAccountIndex } from '~/entities/account'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import {
   getNetAPY,
@@ -28,7 +28,7 @@ import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated, getVaultNotice, isVaultNoticeSpecific } from '~/utils/eulerLabelsUtils'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { useModal } from '~/components/ui/composables/useModal'
-import { VaultNetApyModal, PortfolioRoeModal, VaultRampDownModal } from '#components'
+import { VaultNetApyModal, PortfolioRoeModal } from '#components'
 
 const { position } = defineProps<{ position: AccountBorrowPosition }>()
 
@@ -297,13 +297,6 @@ const forcedLiquidationRelative = computed(() => {
   return DateTime.fromSeconds(Number(at))
     .toRelative({ base: DateTime.now(), style: 'short' }) ?? ''
 })
-const onRampInfoClick = () => {
-  if (!rampStatus.value.isRamping) return
-  modal.open(VaultRampDownModal, {
-    props: getPositionRampConfig(position),
-  })
-}
-
 const onRoeClick = () => {
   modal.open(PortfolioRoeModal, {
     props: {
@@ -637,14 +630,6 @@ onMounted(() => {
                 size="small"
               />
               <div class="flex justify-between gap-8 text-right items-center">
-                <SvgIcon
-                  v-if="rampStatus.isRamping"
-                  name="arrow-top-right"
-                  class="!w-14 !h-14 shrink-0 rotate-180 cursor-pointer"
-                  :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
-                  title="Liquidation LTV ramping down"
-                  @click.prevent.stop="onRampInfoClick"
-                />
                 <div class="text-content-primary text-p3">
                   {{ formatNumber(nanoToValue(position.userLTV, 18), 2) }}/{{ nanoToValue(position.liquidationLTV, 2) }}%
                 </div>
