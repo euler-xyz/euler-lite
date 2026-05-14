@@ -336,13 +336,13 @@ const loadOpportunities = async (chainId: number, isInitialLoading = true, force
       }
     }
 
-    mergeInto(processOpportunitiesToCampaigns(res.opportunities.euler, 'EULER'))
-    mergeInto(processOpportunitiesToCampaigns(res.opportunities.erc20logprocessor, 'ERC20LOGPROCESSOR'))
-    mergeInto(processMultiLendBorrowOpportunities(res.opportunities.multilendborrow))
+    mergeInto(processOpportunitiesToCampaigns(res.opportunities.euler ?? [], 'EULER'))
+    mergeInto(processOpportunitiesToCampaigns(res.opportunities.erc20logprocessor ?? [], 'ERC20LOGPROCESSOR'))
+    mergeInto(processMultiLendBorrowOpportunities(res.opportunities.multilendborrow ?? []))
     mergeInto(processBorrowFromCollateralOpportunities(
-      res.opportunities.euler_borrow_from_collateral, 'EULER_BORROW_FROM_COLLATERAL'))
+      res.opportunities.euler_borrow_from_collateral ?? [], 'EULER_BORROW_FROM_COLLATERAL'))
     mergeInto(processBorrowFromCollateralOpportunities(
-      res.opportunities.euler_multi_borrow_from_collateral, 'EULER_MULTI_BORROW_FROM_COLLATERAL'))
+      res.opportunities.euler_multi_borrow_from_collateral ?? [], 'EULER_MULTI_BORROW_FROM_COLLATERAL'))
 
     merklCampaigns.value = merged
     cacheState.opportunities = { chainId, timestamp: Date.now() }
