@@ -10,6 +10,8 @@ type MockSdk = {
 type BuildEulerSDKOptions = {
   config: {
     rpcUrls: Record<number, string>
+    v3ApiUrl?: string
+    tokenlistApiBaseUrl?: string
     deploymentsUrl?: string
     eulerLabelsBaseUrl?: string
     oracleAdaptersBaseUrl?: string
@@ -125,6 +127,8 @@ describe('useEulerSdk', () => {
         1: '/api/rpc/1',
         8453: '/api/rpc/8453',
       },
+      v3ApiUrl: '/api/v3',
+      tokenlistApiBaseUrl: '/api/v3',
       deploymentsUrl: '/api/euler-chains',
       eulerLabelsBaseUrl: 'https://labels.example.test',
       oracleAdaptersBaseUrl: 'https://oracles.example.test/data',
@@ -155,6 +159,8 @@ describe('useEulerSdk', () => {
       rpcUrls: {
         1: '/api/rpc/1',
       },
+      v3ApiUrl: '/api/v3',
+      tokenlistApiBaseUrl: '/api/v3',
       deploymentsUrl: '/api/euler-chains',
     })
   })

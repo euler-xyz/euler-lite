@@ -47,11 +47,12 @@ cp .env.example .env
 
 | Variable     | Default                       | Description                           |
 | ------------ | ----------------------------- | ------------------------------------- |
-| `V3_API_URL` | SDK default                   | Euler V3 API used by SDK data services |
+| `V3_API_URL` | `https://v3.euler.finance`    | Euler V3 upstream used by the server `/api/v3` proxy |
+| `EULER_SDK_V3_API_KEY` | —                  | Optional server-side V3 API key forwarded by `/api/v3` as `X-API-Key` |
 | `SWAP_API_URL` | —                           | Euler swap API                        |
 | `PYTH_HERMES_URL` | `https://hermes.pyth.network` | Pyth oracle endpoint (server-only, proxied via `/api/pyth/updates`) |
 
-> **Doppler compatibility:** If your secret manager injects `NUXT_PUBLIC_*` prefixed names (e.g. `NUXT_PUBLIC_V3_API_URL`), the app accepts those forms automatically.
+> **Doppler compatibility:** If your secret manager injects `NUXT_PUBLIC_*` prefixed URL names (e.g. `NUXT_PUBLIC_V3_API_URL`), the server accepts those forms automatically. V3 API keys should use server-side names such as `EULER_SDK_V3_API_KEY`.
 
 #### Branding & Feature Flags
 
@@ -260,6 +261,7 @@ To run without Doppler, override the `CMD` and pass env vars directly:
 ```bash
 docker run -p 3000:3000 \
   -e V3_API_URL=https://v3.euler.finance \
+  -e EULER_SDK_V3_API_KEY=your-v3-api-key \
   -e SWAP_API_URL=https://swap.euler.finance \
   -e APPKIT_PROJECT_ID=your-project-id \
   -e RPC_URL_1=https://your-rpc.com \
@@ -320,7 +322,7 @@ Before deploying:
 
 - [ ] Copied `.env.example` to `.env` and filled in values
 - [ ] Set `APPKIT_PROJECT_ID` and `NUXT_PUBLIC_APP_URL`
-- [ ] Set `V3_API_URL`, `SWAP_API_URL`
+- [ ] Set `V3_API_URL`, optional `EULER_SDK_V3_API_KEY`, and `SWAP_API_URL`
 - [ ] Added at least one `RPC_URL_<chainId>` with matching `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`
 - [ ] Configured branding via `NUXT_PUBLIC_CONFIG_*` env vars (title, description, logo, social links, social share image)
 - [ ] Customized theme colors in `assets/styles/variables.scss` (THEME CONFIGURATION section)
@@ -331,7 +333,7 @@ Before deploying:
 
 ### Token logos not loading
 
-- Verify `V3_API_URL` is set correctly. If using Doppler, ensure the env var name matches (`V3_API_URL`, `EULER_SDK_V3_API_URL`, or `NUXT_PUBLIC_V3_API_URL`).
+- Verify `V3_API_URL` is set correctly. If the V3 deployment requires authentication, verify `EULER_SDK_V3_API_KEY` is set. If using Doppler, ensure the URL env var name matches (`V3_API_URL`, `EULER_SDK_V3_API_URL`, or `NUXT_PUBLIC_V3_API_URL`).
 - Token data is fetched server-side via `/api/token-list` which aggregates Euler V3, DefiLlama, Uniswap, and Merkl sources with fallback. Check server logs for upstream failures.
 
 ### Build Errors

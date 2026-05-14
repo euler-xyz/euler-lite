@@ -28,13 +28,14 @@ const buildAppApiPath = (path: string) => {
   return `${requestUrl?.origin ?? ''}${path}`
 }
 
+const buildV3ProxyApiPath = () => buildAppApiPath('/api/v3')
+
 const buildSdkStaticConfig = () => {
   const rc = getPublicRuntimeConfig()
-  const envConfig = useEnvConfig()
   const { enableMerkl, enableIncentra, enableFuul } = useDeployConfig()
   const labelsBaseUrl = cleanUrl(rc.configLabelsBaseUrl)
   const oracleChecksBaseUrl = cleanUrl(rc.configOracleChecksBaseUrl)
-  const v3ApiUrl = cleanUrl(envConfig.v3ApiUrl)
+  const v3ApiUrl = buildV3ProxyApiPath()
   const config: EulerSDKConfig = {
     ...(v3ApiUrl ? { v3ApiUrl, tokenlistApiBaseUrl: v3ApiUrl } : {}),
     deploymentsUrl: buildAppApiPath('/api/euler-chains'),

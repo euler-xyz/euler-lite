@@ -101,7 +101,6 @@ function parseEnvOrigins(): { connect: string[] } {
   // Labels, oracle checks, and token lists are proxied through server /api/*
   // endpoints, so their origins are not needed in connect-src.
   const connectVars = [
-    env('V3_API_URL', 'EULER_SDK_V3_API_URL', 'NUXT_PUBLIC_V3_API_URL'),
     env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL'),
     // Pyth Hermes is proxied through /api/pyth/updates — no external origin needed
     // Dynamic per-chain URLs (RPC for wagmi, subgraph for GraphQL)
@@ -141,7 +140,6 @@ const CONNECT_SRC_BASE = [
   'https://cca-lite.coinbase.com',
   // External data APIs
   'https://api.fuul.xyz',
-  'https://v3.euler.finance',
   // SDK default deployments source
   'https://raw.githubusercontent.com',
   // Reown AppKit SDK version check

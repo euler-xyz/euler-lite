@@ -10,7 +10,7 @@
  * (2) covers static / CDN deployments where the Nitro render hook never fires.
  */
 
-import { readV3ApiUrl } from '~/utils/api-url-env'
+import { V3_API_PROXY_URL } from '~/utils/api-url-env'
 
 interface EnvConfig {
   appTitle: string
@@ -54,7 +54,7 @@ function scanEnv(): EnvConfig {
     pythHermesUrl: env('PYTH_HERMES_URL', 'NUXT_PUBLIC_PYTH_HERMES_URL') || '',
     appKitProjectId: env('APPKIT_PROJECT_ID', 'NUXT_PUBLIC_APP_KIT_PROJECT_ID') || DEFAULTS.appKitProjectId,
     appUrl: env('NUXT_PUBLIC_APP_URL') || DEFAULTS.appUrl,
-    v3ApiUrl: readV3ApiUrl() || DEFAULTS.v3ApiUrl,
+    v3ApiUrl: V3_API_PROXY_URL,
     swapApiUrl: env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL') || DEFAULTS.swapApiUrl,
   }
 }
@@ -71,7 +71,7 @@ function fromRuntimeConfig(): EnvConfig {
     pythHermesUrl: str(rc.pythHermesUrl) ? 'proxy' : '',
     appKitProjectId: str(rc.appKitProjectId) || DEFAULTS.appKitProjectId,
     appUrl: str(rc.appUrl) || DEFAULTS.appUrl,
-    v3ApiUrl: str(rc.v3ApiUrl) || DEFAULTS.v3ApiUrl,
+    v3ApiUrl: str(rc.v3ApiUrl) || V3_API_PROXY_URL,
     swapApiUrl: str(rc.swapApiUrl) || DEFAULTS.swapApiUrl,
   }
 }

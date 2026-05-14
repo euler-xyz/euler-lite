@@ -6,7 +6,7 @@ import { createInFlightDedup } from '~/server/utils/in-flight'
 import { reportStatus } from '~/server/utils/log'
 import { MERKL_API_BASE_URL } from '~/entities/constants'
 import { buildEulerSDK, type EulerSDK, type TokenListItem } from '@eulerxyz/euler-v2-sdk'
-import { readV3ApiUrl } from '~/utils/api-url-env'
+import { readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
 
 const CACHE_TTL_MS = 300_000
 const DEFILLAMA_DEFAULT_URL = 'https://d3g10bzo9rdluh.cloudfront.net'
@@ -18,6 +18,11 @@ interface TokenEntry {
   symbol: string
   decimals: number
   logoURI?: string
+}
+
+type QueryTokenList = (url: string) => Promise<TokenListItem[]>
+type ConfigurableTokenlistService = EulerSDK['tokenlistService'] & {
+  setQueryTokenList?: (fn: QueryTokenList) => void
 }
 
 const rateLimiter = createRateLimiter({
@@ -47,16 +52,64 @@ const mergedInFlight = createInFlightDedup<string, TokenEntry[]>()
 
 let sdkPromise: Promise<EulerSDK> | undefined
 
-function getV3ApiUrl(): string | undefined {
-  return readV3ApiUrl()
-    .trim()
-    .replace(/\/+$/, '') || undefined
+type TokenListPage = TokenListItem[] | {
+  data?: TokenListItem[]
+  meta?: {
+    total?: number
+    limit?: number
+    offset?: number
+  }
+}
+
+function setSearchParam(url: string, key: string, value: string): string {
+  const parsed = new URL(url)
+  parsed.searchParams.set(key, value)
+  return parsed.toString()
+}
+
+async function fetchEulerSdkTokenListPage(url: string, apiKey: string): Promise<TokenListPage> {
+  const resp = await fetchWithTimeout(url, undefined, {
+    headers: apiKey ? { 'X-API-Key': apiKey } : undefined,
+  })
+  if (!resp.ok) throw new Error(`Euler SDK token list upstream returned ${resp.status}`)
+  return await resp.json() as TokenListPage
+}
+
+async function queryEulerSdkTokenList(url: string, apiKey: string): Promise<TokenListItem[]> {
+  const firstPage = await fetchEulerSdkTokenListPage(url, apiKey)
+  if (Array.isArray(firstPage)) return firstPage
+
+  const firstData = Array.isArray(firstPage.data) ? firstPage.data : []
+  const tokens = [...firstData]
+  const total = Number(firstPage.meta?.total)
+  const limit = Number(firstPage.meta?.limit)
+  const firstOffset = Number(firstPage.meta?.offset ?? 0)
+  if (!Number.isFinite(total) || !Number.isFinite(limit) || limit <= 0 || firstOffset + firstData.length >= total) {
+    return tokens
+  }
+
+  for (let offset = firstOffset + limit; offset < total; offset += limit) {
+    const page = await fetchEulerSdkTokenListPage(setSearchParam(url, 'offset', String(offset)), apiKey)
+    if (Array.isArray(page)) throw new Error('Euler SDK token list pagination returned an array page')
+    if (Array.isArray(page.data)) tokens.push(...page.data)
+  }
+
+  return tokens
 }
 
 const getSdk = () => {
-  const v3ApiUrl = getV3ApiUrl()
+  const v3ApiUrl = readResolvedV3ApiUrl()
+  const v3ApiKey = readV3ApiKey().trim()
   sdkPromise ??= buildEulerSDK({
-    ...(v3ApiUrl ? { config: { v3ApiUrl, tokenlistApiBaseUrl: v3ApiUrl } } : {}),
+    config: {
+      v3ApiUrl,
+      tokenlistApiBaseUrl: v3ApiUrl,
+      ...(v3ApiKey ? { v3ApiKey } : {}),
+    },
+  }).then((sdk) => {
+    const tokenlistService = sdk.tokenlistService as ConfigurableTokenlistService
+    tokenlistService.setQueryTokenList?.((url: string) => queryEulerSdkTokenList(url, v3ApiKey))
+    return sdk
   })
   return sdkPromise
 }

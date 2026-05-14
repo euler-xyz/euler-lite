@@ -21,7 +21,7 @@ import { createInFlightDedup } from './in-flight'
 import { buildEntityAddressSets, declaredKeysOf, tryChecksum } from './labels-helpers'
 import { logger } from './logger'
 import { resolveRpcUrl } from './rpc'
-import { readV3ApiUrl } from '~/utils/api-url-env'
+import { readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
 import type { VerificationLabels } from '~/utils/vault/governor-verification'
 
 export interface ChainVaultsSnapshot {
@@ -125,12 +125,15 @@ function getSdk(chainId: number): Promise<EulerSDK> {
   const rpcUrl = resolveRpcUrl(chainId)
   if (!rpcUrl) throw new Error(`No RPC URL configured for chain ${chainId}`)
 
-  const v3ApiUrl = readV3ApiUrl().trim().replace(/\/+$/, '') || undefined
+  const v3ApiUrl = readResolvedV3ApiUrl()
+  const v3ApiKey = readV3ApiKey().trim()
   const promise = buildEulerSDK({
     config: {
       rpcUrls: { [chainId]: rpcUrl },
       eVaultServiceAdapter: 'onchain',
-      ...(v3ApiUrl ? { v3ApiUrl, tokenlistApiBaseUrl: v3ApiUrl } : {}),
+      v3ApiUrl,
+      tokenlistApiBaseUrl: v3ApiUrl,
+      ...(v3ApiKey ? { v3ApiKey } : {}),
     },
   })
   sdkByChain.set(chainId, promise)

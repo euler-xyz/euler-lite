@@ -54,7 +54,7 @@ npm run typecheck     # Type-check the project
 
 Configuration is split into two mechanisms:
 
-1. **`useEnvConfig()`** (`composables/useEnvConfig.ts`) — API URLs, Pyth, Reown, wallet screening. Injected at runtime via `server/plugins/app-config.ts` into `window.__APP_CONFIG__`. V3 data services read `V3_API_URL`, `EULER_SDK_V3_API_URL`, or `NUXT_PUBLIC_V3_API_URL`.
+1. **`useEnvConfig()`** (`composables/useEnvConfig.ts`) — API URLs, Pyth, Reown, wallet screening. Injected at runtime via `server/plugins/app-config.ts` into `window.__APP_CONFIG__`. Browser V3 data services use the same-origin `/api/v3` proxy. The proxy reads `V3_API_URL`, `EULER_SDK_V3_API_URL`, or `NUXT_PUBLIC_V3_API_URL` for the upstream URL and `EULER_SDK_V3_API_KEY` for the optional server-side API key.
 
 2. **Nuxt `runtimeConfig`** (`useDeployConfig()`) — branding, social links, feature flags. Set via `NUXT_PUBLIC_CONFIG_*` env vars. Includes `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL`, `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL`, and `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` for configuring upstream data sources (GitHub or S3/CDN). All three are fetched through server-side proxy endpoints with 5-minute caching — see [Server-Side Data Proxies](#server-side-data-proxies) below.
 
@@ -73,7 +73,7 @@ External metadata (contract addresses, labels, oracle checks) is fetched through
 | `GET /api/euler-chains` | `EulerChains.json` from euler-interfaces | 5 min | `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` |
 | `GET /api/labels/:file?chainId=X` | `{chainId}/{file}` from euler-labels | 5 min | `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` |
 | `GET /api/oracle-adapter?chainId=X&address=0x...` | Per-adapter JSON from oracle-checks | 5 min | `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` |
-| `GET /api/token-list?chainId=X` | Euler V3 + Uniswap + DefiLlama + Merkl reward-tokens | 5 min | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL`, `NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL`, `NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL` |
+| `GET /api/token-list?chainId=X` | Euler V3 + Uniswap + DefiLlama + Merkl reward-tokens | 5 min | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL`, `EULER_SDK_V3_API_KEY`, `NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL`, `NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL` |
 | `GET /api/intrinsic-apy?chainId=X` | Every intrinsic-APY source for chain as `{ [addr]: info }` | 5 min (per upstream) | Provider-specific upstreams (DefiLlama, Pendle, Securitize, etc.) |
 | `GET /api/vaults?chainId=X` | Pre-computed chain vault snapshot | 10 min (safety floor) | — |
 | `GET /api/pyth/updates?ids[]=...` | Pyth Hermes (`/v2/updates/price/latest`) | No cache | `PYTH_HERMES_URL` (server-only) |
@@ -86,7 +86,7 @@ All endpoints use rate limiting and return stale cached data when upstream is un
 
 The `/api/token-list` endpoint aggregates four token sources, all fetched in parallel with stale-fallback resilience:
 
-1. **Euler SDK token list** (`sdk.tokenlistService`, configured via `V3_API_URL`, `EULER_SDK_V3_API_URL`, or `NUXT_PUBLIC_V3_API_URL`) — vault-relevant tokens with logos
+1. **Euler SDK token list** (`sdk.tokenlistService`, configured via `V3_API_URL`, `EULER_SDK_V3_API_URL`, or `NUXT_PUBLIC_V3_API_URL`; authenticated with `EULER_SDK_V3_API_KEY` when set) — vault-relevant tokens with logos
 2. **DefiLlama** (`NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL`) — broad token coverage
 3. **Uniswap** (`NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL`) — baseline token list
 4. **Merkl** — reward tokens
@@ -121,7 +121,7 @@ The `/api/pyth/updates` endpoint proxies Pyth Hermes price update requests throu
 
 - If the app fails to start, ensure Node 24+ and reinstall deps.
 - If blockchain calls fail, verify `RPC_URL_<chainId>` env vars and check that matching `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` is set.
-- If token logos don't load, verify `V3_API_URL` (or `EULER_SDK_V3_API_URL` / `NUXT_PUBLIC_V3_API_URL`) is set. Token data is fetched server-side via `/api/token-list` which aggregates Euler V3, Uniswap, DefiLlama, and Merkl sources with fallback.
+- If token logos don't load, verify `V3_API_URL` (or `EULER_SDK_V3_API_URL` / `NUXT_PUBLIC_V3_API_URL`) and, when required by the upstream, `EULER_SDK_V3_API_KEY`. Token data is fetched server-side via `/api/token-list` which aggregates Euler V3, Uniswap, DefiLlama, and Merkl sources with fallback.
 
 ---
 

@@ -8,7 +8,7 @@
  *
  * Also patches <title> and meta tags so crawlers see the correct values.
  */
-import { readV3ApiUrl } from '~/utils/api-url-env'
+import { V3_API_PROXY_URL } from '~/utils/api-url-env'
 
 const DEFAULTS = {
   appTitle: 'Euler Lite',
@@ -40,7 +40,7 @@ function readAppConfig() {
     pythHermesUrl: env('PYTH_HERMES_URL', 'NUXT_PUBLIC_PYTH_HERMES_URL') ? 'proxy' : '',
     appKitProjectId: env('APPKIT_PROJECT_ID', 'NUXT_PUBLIC_APP_KIT_PROJECT_ID'),
     appUrl: env('NUXT_PUBLIC_APP_URL'),
-    v3ApiUrl: readV3ApiUrl(),
+    v3ApiUrl: V3_API_PROXY_URL,
     swapApiUrl: env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL'),
   }
 }
