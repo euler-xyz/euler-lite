@@ -80,7 +80,7 @@ const isCyclicalNote = computed(() => {
       size="large"
     />
     <CyclicalNoteBadge
-      v-if="isCyclicalNote"
+      v-if="isCyclicalNote && isVerified"
       size="large"
     />
   </div>
