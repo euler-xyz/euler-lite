@@ -162,12 +162,16 @@
       "waitFor": [
         "[data-id=\"discovery-market-list\"]"
       ],
+      "variants": {
+        "count": 10
+      },
       "actions": [
         {
           "type": "click",
           "selector": "[data-id=\"discovery-market-card\"]",
+          "index": "{{variantIndex0}}",
           "waitFor": [
-            "[data-id=\"discovery-graph\"]"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-graph\"]"
           ]
         }
       ]
@@ -179,35 +183,38 @@
       "waitFor": [
         "[data-id=\"discovery-market-list\"]"
       ],
+      "variants": {
+        "count": 10
+      },
       "actions": [
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"]",
           "waitFor": [
-            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
           ],
-          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
         },
         {
           "type": "click",
-          "selector": "css=button:has-text(\"Matrix\")",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) button:has-text(\"Matrix\")",
           "waitFor": [
-            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field"
           ]
         },
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field",
           "waitFor": [
-            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"stats\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Stats\")"
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"stats\"], [data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field + div button:has-text(\"Stats\")"
           ],
           "waitForData": false
         },
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"stats\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Stats\")",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"stats\"], [data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field + div button:has-text(\"Stats\")",
           "waitFor": [
-            "[data-id=\"attribute-matrix\"]"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"attribute-matrix\"]"
           ]
         }
       ]
@@ -219,35 +226,38 @@
       "waitFor": [
         "[data-id=\"discovery-market-list\"]"
       ],
+      "variants": {
+        "count": 10
+      },
       "actions": [
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"]",
           "waitFor": [
-            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
           ],
-          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
         },
         {
           "type": "click",
-          "selector": "css=button:has-text(\"Matrix\")",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) button:has-text(\"Matrix\")",
           "waitFor": [
-            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field"
           ]
         },
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field",
           "waitFor": [
-            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"config\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Configuration\")"
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"config\"], [data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field + div button:has-text(\"Configuration\")"
           ],
           "waitForData": false
         },
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"config\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Configuration\")",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"config\"], [data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field + div button:has-text(\"Configuration\")",
           "waitFor": [
-            "[data-id=\"attribute-matrix\"]"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"attribute-matrix\"]"
           ]
         }
       ]
@@ -259,35 +269,38 @@
       "waitFor": [
         "[data-id=\"discovery-market-list\"]"
       ],
+      "variants": {
+        "count": 10
+      },
       "actions": [
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"]",
           "waitFor": [
-            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
           ],
-          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
         },
         {
           "type": "click",
-          "selector": "css=button:has-text(\"Matrix\")",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) button:has-text(\"Matrix\")",
           "waitFor": [
-            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field"
           ]
         },
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field",
           "waitFor": [
-            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"oracle\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Oracles\")"
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"oracle\"], [data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field + div button:has-text(\"Oracles\")"
           ],
           "waitForData": false
         },
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"oracle\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Oracles\")",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"oracle\"], [data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field + div button:has-text(\"Oracles\")",
           "waitFor": [
-            "[data-id=\"collateral-matrix\"]"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"collateral-matrix\"]"
           ]
         }
       ]
@@ -299,35 +312,38 @@
       "waitFor": [
         "[data-id=\"discovery-market-list\"]"
       ],
+      "variants": {
+        "count": 10
+      },
       "actions": [
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"]",
           "waitFor": [
-            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
           ],
-          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
         },
         {
           "type": "click",
-          "selector": "css=button:has-text(\"Matrix\")",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) button:has-text(\"Matrix\")",
           "waitFor": [
-            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field"
           ]
         },
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field",
           "waitFor": [
-            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"net-apy\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Net APY\")"
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"net-apy\"], [data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field + div button:has-text(\"Net APY\")"
           ],
           "waitForData": false
         },
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"net-apy\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Net APY\")",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"net-apy\"], [data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field + div button:has-text(\"Net APY\")",
           "waitFor": [
-            "[data-id=\"collateral-matrix\"]"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"collateral-matrix\"]"
           ]
         }
       ]
@@ -339,35 +355,38 @@
       "waitFor": [
         "[data-id=\"discovery-market-list\"]"
       ],
+      "variants": {
+        "count": 10
+      },
       "actions": [
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"]",
           "waitFor": [
-            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
           ],
-          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
         },
         {
           "type": "click",
-          "selector": "css=button:has-text(\"Matrix\")",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) button:has-text(\"Matrix\")",
           "waitFor": [
-            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field"
           ]
         },
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field",
           "waitFor": [
-            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"roe\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Max ROE\")"
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"roe\"], [data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field + div button:has-text(\"Max ROE\")"
           ],
           "waitForData": false
         },
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"roe\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Max ROE\")",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"roe\"], [data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field + div button:has-text(\"Max ROE\")",
           "waitFor": [
-            "[data-id=\"collateral-matrix\"]"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"collateral-matrix\"]"
           ]
         }
       ]
@@ -379,35 +398,38 @@
       "waitFor": [
         "[data-id=\"discovery-market-list\"]"
       ],
+      "variants": {
+        "count": 10
+      },
       "actions": [
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"]",
           "waitFor": [
-            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
           ],
-          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
         },
         {
           "type": "click",
-          "selector": "css=button:has-text(\"Matrix\")",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) button:has-text(\"Matrix\")",
           "waitFor": [
-            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field"
           ]
         },
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field",
           "waitFor": [
-            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"multiplier\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Multiplier\")"
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"multiplier\"], [data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field + div button:has-text(\"Multiplier\")"
           ],
           "waitForData": false
         },
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"multiplier\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Multiplier\")",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"multiplier\"], [data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field + div button:has-text(\"Multiplier\")",
           "waitFor": [
-            "[data-id=\"collateral-matrix\"]"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"collateral-matrix\"]"
           ]
         }
       ]
@@ -419,35 +441,38 @@
       "waitFor": [
         "[data-id=\"discovery-market-list\"]"
       ],
+      "variants": {
+        "count": 10
+      },
       "actions": [
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"]",
           "waitFor": [
-            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
           ],
-          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
         },
         {
           "type": "click",
-          "selector": "css=button:has-text(\"Matrix\")",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) button:has-text(\"Matrix\")",
           "waitFor": [
-            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field"
           ]
         },
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field",
           "waitFor": [
-            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"bltv\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Borrow LTV\")"
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"bltv\"], [data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field + div button:has-text(\"Borrow LTV\")"
           ],
           "waitForData": false
         },
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"bltv\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Borrow LTV\")",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"bltv\"], [data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field + div button:has-text(\"Borrow LTV\")",
           "waitFor": [
-            "[data-id=\"collateral-matrix\"]"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"collateral-matrix\"]"
           ]
         }
       ]
@@ -459,35 +484,38 @@
       "waitFor": [
         "[data-id=\"discovery-market-list\"]"
       ],
+      "variants": {
+        "count": 10
+      },
       "actions": [
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"]",
           "waitFor": [
-            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
           ],
-          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
         },
         {
           "type": "click",
-          "selector": "css=button:has-text(\"Matrix\")",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) button:has-text(\"Matrix\")",
           "waitFor": [
-            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field"
           ]
         },
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field",
           "waitFor": [
-            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"lltv\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Liquidation LTV\")"
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"lltv\"], [data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field + div button:has-text(\"Liquidation LTV\")"
           ],
           "waitForData": false
         },
         {
           "type": "click",
-          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"lltv\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Liquidation LTV\")",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"lltv\"], [data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) .ui-select__field + div button:has-text(\"Liquidation LTV\")",
           "waitFor": [
-            "[data-id=\"collateral-matrix\"]"
+            "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"collateral-matrix\"]"
           ]
         }
       ]

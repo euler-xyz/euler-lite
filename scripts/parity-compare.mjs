@@ -3020,17 +3020,8 @@ function renderPersistenceSummary(summary) {
 async function loadScenarios(config) {
   const file = JSON.parse(await fs.readFile(config.scenarioFile, 'utf8'))
   const defaults = file.defaults || {}
-  const scenarios = file.scenarios || []
-  const filtered = config.scenarioFilter.length
-    ? scenarios.filter(scenario => config.scenarioFilter.includes(scenario.id))
-    : scenarios
-
-  return filtered
-    .filter((scenario) => {
-      if (!scenario.skipUnlessEnv) return true
-      return Boolean(process.env[scenario.skipUnlessEnv])
-    })
-    .map(scenario => substituteEnv({
+  const scenarios = (file.scenarios || [])
+    .map(scenario => ({
       ...scenario,
       defaults,
       viewport: scenario.viewport || defaults.viewport,
@@ -3041,6 +3032,69 @@ async function loadScenarios(config) {
       navigationRetries: scenario.navigationRetries ?? defaults.navigationRetries ?? config.navigationRetries,
       navigationTimeoutMs: scenario.navigationTimeoutMs ?? defaults.navigationTimeoutMs ?? config.navigationTimeoutMs,
     }))
+    .flatMap(expandScenarioVariants)
+
+  const filtered = config.scenarioFilter.length
+    ? scenarios.filter(scenario => config.scenarioFilter.includes(scenario.id) || config.scenarioFilter.includes(scenario.baseScenarioId))
+    : scenarios
+
+  return filtered
+    .filter((scenario) => {
+      if (!scenario.skipUnlessEnv) return true
+      return Boolean(process.env[scenario.skipUnlessEnv])
+    })
+    .map(substituteEnv)
+}
+
+function expandScenarioVariants(scenario) {
+  const variants = scenario.variants
+  if (!variants) return [scenario]
+
+  const baseScenario = { ...scenario }
+  delete baseScenario.variants
+  const items = Array.isArray(variants)
+    ? variants
+    : Array.from({ length: Number(variants.count || 0) }, (_, index) => ({
+        idSuffix: variants.idSuffix || 'market-{{variantPadded}}',
+        labelSuffix: variants.labelSuffix || 'market {{variantIndex}}',
+        vars: variants.vars || {},
+        index,
+      }))
+
+  return items.map((variant, arrayIndex) => {
+    const variantIndex0 = Number(variant.index ?? arrayIndex)
+    const vars = {
+      variantIndex0: String(variantIndex0),
+      variantIndex: String(variantIndex0 + 1),
+      variantPadded: String(variantIndex0 + 1).padStart(2, '0'),
+      ...(variant.vars || {}),
+    }
+    const resolvedVars = Object.fromEntries(
+      Object.entries(vars).map(([key, value]) => [key, replaceVariantPlaceholders(String(value), vars)]),
+    )
+    const expanded = replaceVariantPlaceholders(baseScenario, resolvedVars)
+    const idSuffix = replaceVariantPlaceholders(variant.idSuffix || 'variant-{{variantPadded}}', resolvedVars)
+    const labelSuffix = replaceVariantPlaceholders(variant.labelSuffix || 'variant {{variantIndex}}', resolvedVars)
+
+    return {
+      ...expanded,
+      id: expanded.id + '-' + idSuffix,
+      baseScenarioId: expanded.id,
+      label: (expanded.label || expanded.id) + ': ' + labelSuffix,
+    }
+  })
+}
+
+function replaceVariantPlaceholders(value, vars) {
+  if (Array.isArray(value)) return value.map(item => replaceVariantPlaceholders(item, vars))
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, replaceVariantPlaceholders(item, vars)]))
+  }
+  if (typeof value !== 'string') return value
+
+  return value.replace(/\{\{([A-Za-z0-9_]+)\}\}/g, (match, name) => (
+    Object.prototype.hasOwnProperty.call(vars, name) ? vars[name] : match
+  ))
 }
 
 function substituteEnv(value) {
