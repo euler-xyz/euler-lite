@@ -150,11 +150,8 @@ export const useWallets = () => {
         // resetBalances() is called on chain switch and wallet-address
         // change, which is the right boundary to fully clear.
         const merged = new Map(balances.value)
-        tokenAddresses.forEach((asset) => {
-          merged.set(asset, wallet.getBalance(asset))
-        })
-        if (includesNativeCurrency) {
-          merged.set(zeroAddress, wallet.getBalance(zeroAddress))
+        for (const asset of wallet.assets) {
+          merged.set(asset.asset, asset.balance)
         }
         balances.value = merged
         lastFetchChainId.value = currentChainId
