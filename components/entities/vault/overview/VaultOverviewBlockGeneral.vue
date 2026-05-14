@@ -3,7 +3,7 @@ import { getAddress } from 'viem'
 import type { Vault } from '~/entities/vault'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { useEulerEntitiesOfVault, useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { getProductKeyByVault } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { autoLink } from '~/utils/autoLink'
@@ -19,6 +19,7 @@ const vaultAddress = computed(() => getAddress(vault.address))
 const product = useEulerProductOfVault(vaultAddress)
 const entities = useEulerEntitiesOfVault(vault)
 const marketProductKey = computed(() => getProductKeyByVault(vault.address))
+const marketProductName = computed(() => getProductByVault(vault.address).name)
 const description = computed(() => {
   return product.vaultOverrides?.[vaultAddress.value]?.description ?? product.description
 })
@@ -98,10 +99,10 @@ watchEffect(async () => {
             :to="{ name: 'explore-market', params: { market: marketProductKey }, query: { network: route.query.network } }"
             class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
           >
-            {{ product.name }}
+            {{ marketProductName }}
           </NuxtLink>
           <template v-else>
-            {{ product.name || '-' }}
+            {{ marketProductName || '-' }}
           </template>
         </VaultOverviewLabelValue>
         <VaultOverviewLabelValue

@@ -318,7 +318,9 @@ watch(selectedAsset, async () => {
               >
                 <SwapDetailsSummary
                   :input-display="form.swapInputDisplay.value"
+                  :input-exact-display="form.swapInputExactDisplay.value"
                   :output-display="form.swapOutputDisplay.value"
+                  :output-exact-display="form.swapOutputExactDisplay.value"
                   :price-impact="form.swapPriceImpact.value"
                   :slippage="form.swapSlippage.value"
                   :routed-via="form.swapRoutedVia.value"

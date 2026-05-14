@@ -85,7 +85,8 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 ### 🌐 [Public API](./public-api.md)
 
 - Publicly reachable endpoints under `/api/public/` (CORS `*`)
-- `GET /api/public/is-known` — verified-vault lookup by address
+- `GET /api/public/is-known` — verified-vault lookup by address (or list mode)
+- `GET /api/public/metadata` — uniform vault display metadata (name / description / governing entity / asset) across EVK, Securitize, and Earn
 - Request/response shape, caching, rate limits, and examples
 
 ## 🎯 Project Overview

@@ -565,7 +565,9 @@ watch(formTab, () => {
                   >
                     <SwapDetailsSummary
                       :input-display="borrow.borrowSwapInputDisplay.value"
+                      :input-exact-display="borrow.borrowSwapInputExactDisplay.value"
                       :output-display="borrow.borrowSwapOutputDisplay.value"
+                      :output-exact-display="borrow.borrowSwapOutputExactDisplay.value"
                       :price-impact="borrow.borrowSwapPriceImpact.value"
                       :slippage="borrow.borrowSwapSlippage.value"
                       :routed-via="borrow.borrowSwapRoutedVia.value"
@@ -876,7 +878,9 @@ watch(formTab, () => {
                       </SummaryRow>
                       <SwapDetailsSummary
                         :input-display="multiply.multiplySwapSummary.value?.from ?? null"
+                        :input-exact-display="multiply.multiplySwapSummary.value?.fromExact ?? null"
                         :output-display="multiply.multiplySwapSummary.value?.to ?? null"
+                        :output-exact-display="multiply.multiplySwapSummary.value?.toExact ?? null"
                         :price-impact="multiply.multiplyPriceImpact.value"
                         :slippage="multiply.multiplySlippage.value"
                         :routed-via="multiply.multiplyRoutedVia.value"
