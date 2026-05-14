@@ -531,41 +531,27 @@ onMounted(() => {
           />
           Oracle pricing unavailable. Some details may be missing.
         </div>
-        <div
-          v-if="rampStatus.isRamping && rampStatus.willBeLiquidated"
-          class="flex items-start gap-6 text-error-500 text-p4 cursor-pointer"
-          role="button"
-          tabindex="0"
-          @click.prevent.stop="onRampInfoClick"
-          @keydown.enter.prevent.stop="onRampInfoClick"
-          @keydown.space.prevent.stop="onRampInfoClick"
-        >
-          <UiIcon
-            name="warning"
-            class="!w-14 !h-14 shrink-0 mt-2"
-          />
-          <span>
-            Liquidation LTV ramping down. Your position is projected to become
-            liquidatable {{ forcedLiquidationRelative || 'soon' }} — consider closing or reducing debt.
-          </span>
-        </div>
-        <div
+        <UiToast
+          v-if="rampStatus.isRamping && rampStatus.willBeLiquidated && !hasQueryFailure"
+          title="Liquidation LTV ramping down"
+          :description="`Your position is projected to become liquidatable ${forcedLiquidationRelative || 'before the ramp ends'} — consider closing or reducing debt.`"
+          variant="error"
+          size="compact"
+        />
+        <UiToast
+          v-else-if="rampStatus.isRamping && hasQueryFailure"
+          title="Liquidation LTV ramping down"
+          :description="`Ends ${rampEndsRelative}. Oracle pricing is currently unavailable, so we can't tell whether your position will remain safe.`"
+          variant="warning"
+          size="compact"
+        />
+        <UiToast
           v-else-if="rampStatus.isRamping"
-          class="flex items-start gap-6 text-warning-500 text-p4 cursor-pointer"
-          role="button"
-          tabindex="0"
-          @click.prevent.stop="onRampInfoClick"
-          @keydown.enter.prevent.stop="onRampInfoClick"
-          @keydown.space.prevent.stop="onRampInfoClick"
-        >
-          <UiIcon
-            name="info-circle"
-            class="!w-14 !h-14 shrink-0 mt-2"
-          />
-          <span>
-            Liquidation LTV ramping down (ends {{ rampEndsRelative }}). Your position is currently safe at the post-ramp threshold.
-          </span>
-        </div>
+          title="Liquidation LTV ramping down"
+          :description="`Ends ${rampEndsRelative}. Your position is currently safe at the post-ramp threshold.`"
+          variant="warning"
+          size="compact"
+        />
         <div class="flex justify-between">
           <div class="text-content-tertiary text-p3">
             Net asset value

@@ -8,7 +8,7 @@ import {
   type Vault,
   type SecuritizeVault,
 } from '~/entities/vault'
-import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
+import { getUtilisationWarning, getBorrowCapWarning, type VaultWarning } from '~/composables/useVaultWarnings'
 import {
   getAssetUsdValue,
   getAssetUsdPrice,
@@ -147,10 +147,34 @@ const borrowApy = computed(() => withIntrinsicBorrowApy(
 ))
 const borrowApyWithRewards = computed(() => borrowApy.value - borrowRewardAPY.value)
 
+const rampWarning = computed<VaultWarning | null>(() => {
+  if (!rampStatus.value?.isRamping) return null
+  if (rampStatus.value.willBeLiquidated && !hasQueryFailure.value) {
+    return {
+      level: 'critical',
+      title: 'Liquidation LTV ramping down',
+      message: `The liquidation LTV for this pair is being lowered. Your position is projected to become liquidatable ${forcedLiquidationRelative.value || 'before the ramp ends'}. Reduce your debt or add collateral to avoid liquidation.`,
+    }
+  }
+  if (hasQueryFailure.value) {
+    return {
+      level: 'high',
+      title: 'Liquidation LTV ramping down',
+      message: `The liquidation LTV for this pair is being lowered (ends ${rampEndsRelative.value}). Oracle pricing is currently unavailable, so we can't tell whether your position will remain safe.`,
+    }
+  }
+  return {
+    level: 'high',
+    title: 'Liquidation LTV ramping down',
+    message: `The liquidation LTV for this pair is being lowered (ends ${rampEndsRelative.value}). Your position is currently safe at the post-ramp threshold.`,
+  }
+})
+
 // Warnings for borrow vault
 const positionWarnings = computed(() => {
   if (!borrowVault.value) return []
   return [
+    rampWarning.value,
     getUtilisationWarning(borrowVault.value, 'borrow'),
     getBorrowCapWarning(borrowVault.value),
   ]
@@ -752,25 +776,6 @@ watch([isConnected, isSpyMode, address], () => {
         size="compact"
       />
 
-      <UiToast
-        v-if="rampStatus?.isRamping && rampStatus.willBeLiquidated"
-        title="Liquidation LTV ramping down"
-        :description="`The liquidation LTV for this pair is being lowered. Your position is projected to become liquidatable ${forcedLiquidationRelative || 'before the ramp ends'}. Reduce your debt or add collateral to avoid liquidation.`"
-        action-text="Ramp details"
-        variant="error"
-        size="compact"
-        @action="openRampDownModal"
-      />
-      <UiToast
-        v-else-if="rampStatus?.isRamping"
-        title="Liquidation LTV ramping down"
-        :description="`The liquidation LTV for this pair is being lowered (ends ${rampEndsRelative}). Your position is currently safe at the post-ramp threshold.`"
-        action-text="Ramp details"
-        variant="warning"
-        size="compact"
-        @action="openRampDownModal"
-      />
-
       <div
         v-if="!hasNoBorrow"
         class="flex flex-col gap-16 laptop:flex-row laptop:items-stretch"
@@ -1029,7 +1034,7 @@ watch([isConnected, isSpyMode, address], () => {
               size="compact"
             />
             <div
-              class="flex justify-between gap-8 mt-4"
+              class="flex justify-between gap-8 mt-16"
               @click.stop
             >
               <UiButton
@@ -1204,7 +1209,7 @@ watch([isConnected, isSpyMode, address], () => {
               />
               <div
                 v-if="!hasNoBorrow"
-                class="flex gap-8 mt-4"
+                class="flex gap-8 mt-16"
                 @click.stop
               >
                 <UiButton
