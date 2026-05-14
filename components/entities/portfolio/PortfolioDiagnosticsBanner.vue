@@ -1,10 +1,41 @@
 <script setup lang="ts">
+import type { DataIssue } from '@eulerxyz/euler-v2-sdk'
+
 const { portfolioDiagnostics } = useEulerAccount()
 
 const dismissed = ref(false)
 
+const metadataOnlyPaths = new Set([
+  '$.timestamp',
+  '$.lastAccountStatusCheckTimestamp',
+  '$.governance.pendingTimelockValidAt',
+  '$.governance.pendingGuardianValidAt',
+  '$.allocationCap.pendingValidAt',
+  '$.removableAt',
+])
+
+const isPortfolioImpactingDiagnostic = (issue: DataIssue): boolean => {
+  const locations = issue.locations ?? []
+  const paths = locations.map(location => location.path)
+
+  if (paths.length > 0 && paths.every(path => metadataOnlyPaths.has(path))) {
+    return false
+  }
+
+  if (
+    issue.severity === 'warning'
+    && issue.source === 'eVaultV3'
+    && paths.length > 0
+    && paths.every(path => path.endsWith('oraclePriceRaw'))
+  ) {
+    return false
+  }
+
+  return issue.severity === 'error' || issue.severity === 'warning'
+}
+
 const relevantDiagnostics = computed(() =>
-  portfolioDiagnostics.value.filter(issue => issue.severity === 'error' || issue.severity === 'warning'),
+  portfolioDiagnostics.value.filter(isPortfolioImpactingDiagnostic),
 )
 const totalCount = computed(() => relevantDiagnostics.value.length)
 

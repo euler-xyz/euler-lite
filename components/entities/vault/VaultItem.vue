@@ -6,7 +6,7 @@ import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/u
 import { isVaultRecentlyAdded, isVaultKeyring } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
-import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
+import { formatNumber, compactNumber, formatCompactUsdValue, formatSmartAmount } from '~/utils/string-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -167,6 +167,12 @@ const prices = ref<{ totalSupply: string, liquidity: string, walletBalance: stri
   walletBalance: '-',
 })
 
+const formatVaultAssetAmount = (result: { display: string, assetAmount: number, assetSymbol: string }) => {
+  if (result.display) return result.display
+  if (!result.assetSymbol) return '-'
+  return `${formatSmartAmount(result.assetAmount, 2)} ${result.assetSymbol}`
+}
+
 watchEffect(async () => {
   const liquidity = vault.availableLiquidity
   const walletBal = balance.value
@@ -176,8 +182,8 @@ watchEffect(async () => {
     formatAssetValue(walletBal, vault, 'off-chain'),
   ])
   prices.value = {
-    totalSupply: supplyResult.hasPrice ? formatCompactUsdValue(supplyResult.usdValue) : supplyResult.display,
-    liquidity: liquidityResult.hasPrice ? formatCompactUsdValue(liquidityResult.usdValue) : liquidityResult.display,
+    totalSupply: formatVaultAssetAmount(supplyResult),
+    liquidity: formatVaultAssetAmount(liquidityResult),
     walletBalance: walletResult.hasPrice ? formatCompactUsdValue(walletResult.usdValue) : walletResult.display,
   }
 })

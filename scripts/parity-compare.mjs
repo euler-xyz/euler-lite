@@ -21,11 +21,17 @@ const DEFAULT_PORTFOLIO_TIMEOUT_MS = 25_000
 const DEFAULT_PORTFOLIO_CAPTURE_BUDGET_MS = 25_000
 const DEFAULT_NETWORK_IDLE_TIMEOUT_MS = 0
 const DEFAULT_NUMERIC_TOLERANCE = 0.02
-const LIST_SHOW_ALL_MIN_CAPTURE_MS = 10_000
-const LIST_SHOW_ALL_HYDRATION_TIMEOUT_MS = 20_000
-const LIST_HYDRATION_SETTLE_ROUNDS = 2
+const DISPLAY_AMOUNT_ABSOLUTE_TOLERANCE = 0.01
+const LIST_MIN_CAPTURE_MS = 10_000
+const LIST_SHOW_ALL_HYDRATION_TIMEOUT_MS = 45_000
+const LIST_HYDRATION_SETTLE_ROUNDS = 3
 const LIST_HYDRATION_SCROLL_SEGMENTS = 10
 const LIST_HYDRATION_SCROLL_DELAY_MS = 75
+const LIST_FULL_RENDER_SETTLE_ROUNDS = 3
+const MODAL_MIN_CAPTURE_MS = 5_000
+const MODAL_HYDRATION_TIMEOUT_MS = 15_000
+const ZERO_TAG_SCRAPE_RETRIES = 3
+const ZERO_TAG_SCRAPE_RETRY_DELAY_MS = 2_000
 const DEFAULT_PERSISTENCE_RECHECK_MAX_RATIO = 0.1
 const DEFAULT_SCRAPE_FAILURE_LIMIT = 5
 const DEFAULT_WORK_DIR = path.join('/tmp', 'euler-lite-parity', sanitizeFilePart(ROOT_DIR))
@@ -960,7 +966,7 @@ async function verifyPersistentDiscrepancies({ diff, run, config, browser, scena
     failed: results.filter(result => result.status === 'verification-failed').length,
     skipped: 0,
   }
-  diff.pagesWithDiscrepancies = summarizeDiscrepantPages(diff.pages.filter(page => page.status !== 'pass'))
+  finalizeDiffAfterPersistence(diff)
 }
 
 function groupPersistenceRecheckPages(pageDiffs, scenarioById, fallbackScenario) {
@@ -1415,9 +1421,13 @@ async function openAndCapture({
       rateLimitResponses.length = 0
 
       try {
+        const needsFreshListNavigation = Boolean(listCaptureInfo(pathName))
         navigationKind = await navigateForCapture(page, url, {
           timeout: navigationTimeoutMs,
-          forceDocumentNavigation: ownsPage || reusablePage?._parityForceDocumentNavigation || scenario.forceDocumentNavigation,
+          forceDocumentNavigation: ownsPage
+            || reusablePage?._parityForceDocumentNavigation
+            || scenario.forceDocumentNavigation
+            || needsFreshListNavigation,
         })
         if (reusablePage?._parityForceDocumentNavigation) {
           reusablePage._parityForceDocumentNavigation = false
@@ -1470,8 +1480,8 @@ async function openAndCapture({
       if (!navigationError && !waitError && !readinessError && !actionError) {
         try {
           const list = listCaptureInfo(pathName)
-          if (list?.showAll) {
-            const remainingMinCaptureMs = LIST_SHOW_ALL_MIN_CAPTURE_MS - (Date.now() - captureStartedAt)
+          if (list) {
+            const remainingMinCaptureMs = LIST_MIN_CAPTURE_MS - (Date.now() - captureStartedAt)
             if (remainingMinCaptureMs > 0) {
               await page.waitForTimeout(remainingMinCaptureMs)
             }
@@ -1499,29 +1509,63 @@ async function openAndCapture({
     const missingSelectors = waitError && !navigationError
       ? await missingWaitSelectors(page, waitFor)
       : []
+    const retryNetworkIdleTimeoutMs = Number(
+      (scenario.networkIdleTimeoutMs ?? scenario.defaults?.networkIdleTimeoutMs)
+      ?? networkIdleTimeoutMs
+      ?? DEFAULT_NETWORK_IDLE_TIMEOUT_MS,
+    )
 
-    let snapshot = null
-    try {
-      snapshot = await page.evaluate(scrapePage, {
-        pageId,
-        scenarioId: scenario.id,
-        label: scenario.label || scenario.id,
-        appName: app.name,
-        captureSelector: scenario.captureSelector || scenario.defaults?.captureSelector || null,
-        compareOptions: scenarioCompareOptions(scenario),
-      })
+    const scrapeMeta = {
+      pageId,
+      scenarioId: scenario.id,
+      label: scenario.label || scenario.id,
+      appName: app.name,
+      captureSelector: scenario.captureSelector || scenario.defaults?.captureSelector || null,
+      compareOptions: scenarioCompareOptions(scenario),
     }
-    catch (error) {
-      snapshot = createFailedSnapshot({
-        pageId,
-        scenarioId: scenario.id,
-        label: scenario.label || scenario.id,
-        appName: app.name,
-        url: page.url() || url.href,
-        pathName,
-        error: 'Scrape failed: ' + (error?.message || error),
-        compareOptions: scenarioCompareOptions(scenario),
-      })
+    const createScrapeFailureSnapshot = error => createFailedSnapshot({
+      pageId,
+      scenarioId: scenario.id,
+      label: scenario.label || scenario.id,
+      appName: app.name,
+      url: page.url() || url.href,
+      pathName,
+      error: 'Scrape failed: ' + (error?.message || error),
+      compareOptions: scenarioCompareOptions(scenario),
+    })
+
+    let snapshot = await scrapeCurrentPage(page, scrapeMeta, createScrapeFailureSnapshot)
+    let zeroTaggedRetries = 0
+    let retryCaptureError = null
+
+    while (
+      !snapshot.captureError
+      && Number(snapshot.counts?.tagged || 0) === 0
+      && zeroTaggedRetries < ZERO_TAG_SCRAPE_RETRIES
+    ) {
+      zeroTaggedRetries += 1
+      console.warn('[parity-compare] ' + app.name + ' ' + pageId
+        + ' scraped 0 tagged elements; reloading before retry '
+        + zeroTaggedRetries + '/' + ZERO_TAG_SCRAPE_RETRIES)
+
+      try {
+        await page.waitForTimeout(ZERO_TAG_SCRAPE_RETRY_DELAY_MS)
+        await page.goto(url.href, { waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs })
+        await waitForSelectors(page, waitFor, effectiveWaitTimeoutMs)
+        await waitForPageDataReady(page, scenario, effectiveDataReadyTimeoutMs)
+        if (retryNetworkIdleTimeoutMs > 0) {
+          await page.waitForLoadState('networkidle', { timeout: retryNetworkIdleTimeoutMs }).catch(() => {})
+        }
+        await page.waitForTimeout(scenario.settleMs ?? scenario.defaults?.settleMs ?? 0)
+        await hydrateListPageBeforeScrape(page, pathName)
+        retryCaptureError = null
+      }
+      catch (error) {
+        retryCaptureError = error?.message || String(error)
+      }
+
+      snapshot = await scrapeCurrentPage(page, scrapeMeta, createScrapeFailureSnapshot)
+      if (retryCaptureError && Number(snapshot.counts?.tagged || 0) === 0) break
     }
 
     snapshot.requestedPath = pathName
@@ -1542,9 +1586,12 @@ async function openAndCapture({
             ? actionError
             : listHydrationError
               ? 'List hydration failed: ' + listHydrationError
-              : rateLimitResponses.length
-                ? 'HTTP 429 responses observed: ' + rateLimitResponses.map(item => item.url).join(', ')
-                : snapshot.captureError || null
+              : retryCaptureError
+                ? 'Zero-tag retry failed: ' + retryCaptureError
+                : rateLimitResponses.length
+                  ? 'HTTP 429 responses observed: ' + rateLimitResponses.map(item => item.url).join(', ')
+                  : snapshot.captureError || null
+    snapshot.zeroTaggedRetries = zeroTaggedRetries
     snapshot.console = consoleMessages
     snapshot.rateLimitResponses = rateLimitResponses
 
@@ -1558,6 +1605,15 @@ async function openAndCapture({
   finally {
     page.off('console', onConsole)
     page.off('response', onResponse)
+  }
+}
+
+async function scrapeCurrentPage(page, meta, createFailureSnapshot) {
+  try {
+    return await page.evaluate(scrapePage, meta)
+  }
+  catch (error) {
+    return createFailureSnapshot(error)
   }
 }
 
@@ -1783,18 +1839,23 @@ async function hydrateListPageBeforeScrape(page, pathName) {
   const list = listCaptureInfo(pathName)
   if (!list) return
 
-  const timeoutMs = list.showAll ? LIST_SHOW_ALL_HYDRATION_TIMEOUT_MS : DEFAULT_WAIT_TIMEOUT_MS
+  const timeoutMs = list.showAll ? LIST_SHOW_ALL_HYDRATION_TIMEOUT_MS : Math.max(DEFAULT_WAIT_TIMEOUT_MS, LIST_SHOW_ALL_HYDRATION_TIMEOUT_MS)
   const deadline = Date.now() + timeoutMs
 
   await page.waitForSelector(list.selector, { state: 'attached', timeout: Math.max(1, timeoutMs) })
 
   let stableRounds = 0
+  let fullRenderRounds = 0
   let previousSignature = ''
+  let lastState = null
 
   do {
     await scrollListPage(page)
     const state = await listHydrationState(page, list)
-    const signature = state.itemCount + ':' + state.containerCount + ':' + state.scrollHeight
+    lastState = state
+    const signature = state.itemCount + ':' + state.containerCount + ':' + state.renderedCount + ':' + state.scrollHeight
+    const fullRenderTarget = state.renderedCount || state.itemCount
+    const isFullyRendered = state.containerCount <= 0 || fullRenderTarget >= state.containerCount
 
     if (signature === previousSignature) {
       stableRounds += 1
@@ -1804,9 +1865,19 @@ async function hydrateListPageBeforeScrape(page, pathName) {
       previousSignature = signature
     }
 
-    if (!list.showAll || stableRounds >= LIST_HYDRATION_SETTLE_ROUNDS) break
+    fullRenderRounds = isFullyRendered ? fullRenderRounds + 1 : 0
+    if (isFullyRendered && fullRenderRounds >= LIST_FULL_RENDER_SETTLE_ROUNDS && stableRounds >= LIST_HYDRATION_SETTLE_ROUNDS) break
     await page.waitForTimeout(LIST_HYDRATION_SCROLL_DELAY_MS)
   } while (Date.now() < deadline)
+
+  if (lastState?.containerCount > 0) {
+    const rendered = lastState.renderedCount || lastState.itemCount
+    if (rendered < lastState.containerCount) {
+      throw new Error(
+        list.listName + ' list rendered only ' + rendered + ' of ' + lastState.containerCount + ' item(s) before scrape',
+      )
+    }
+  }
 }
 
 async function scrollListPage(page) {
@@ -1830,13 +1901,16 @@ async function listHydrationState(page, list) {
     const visible = (element) => {
       const style = window.getComputedStyle(element)
       if (style.display === 'none' || style.visibility === 'hidden') return false
+      if (Number(style.opacity) === 0) return false
       const rect = element.getBoundingClientRect()
       return rect.width > 0 && rect.height > 0
     }
     const container = document.querySelector(selector)
+    const renderedCount = Number(container?.getAttribute('data-rendered-count') || 0)
     return {
       itemCount: Array.from(document.querySelectorAll(itemSelector)).filter(visible).length,
       containerCount: Number(container?.getAttribute('data-count') || 0),
+      renderedCount,
       scrollHeight: document.scrollingElement?.scrollHeight || document.documentElement.scrollHeight || 0,
     }
   }, {
@@ -1955,6 +2029,11 @@ async function captureModalPlansOnPage({
         await waitForSelectors(page, modal.waitFor || ['[data-id="data-point"]'], effectiveModalWaitTimeoutMs)
         await waitForPageDataReady(page, scenario, modal.dataReadyTimeoutMs ?? dataReadyTimeoutMs)
         await page.waitForTimeout(modal.settleMs ?? scenario.settleMs ?? 0)
+        const remainingMinCaptureMs = MODAL_MIN_CAPTURE_MS - (Date.now() - captureStartedAt)
+        if (remainingMinCaptureMs > 0) {
+          await page.waitForTimeout(remainingMinCaptureMs)
+        }
+        await hydrateModalBeforeScrape(page)
       }
       catch (error) {
         captureError = error.message
@@ -1993,6 +2072,54 @@ async function captureModalPlansOnPage({
   }
 
   return snapshots
+}
+
+async function hydrateModalBeforeScrape(page) {
+  const deadline = Date.now() + MODAL_HYDRATION_TIMEOUT_MS
+  let stableRounds = 0
+  let previousSignature = ''
+
+  do {
+    const state = await modalHydrationState(page)
+    const signature = JSON.stringify(state)
+
+    if (signature === previousSignature) {
+      stableRounds += 1
+    }
+    else {
+      stableRounds = 0
+      previousSignature = signature
+    }
+
+    const allListsRendered = state.every(list => list.count <= 0 || list.rendered >= list.count)
+    if (allListsRendered && stableRounds >= LIST_HYDRATION_SETTLE_ROUNDS) break
+    await page.waitForTimeout(250)
+  } while (Date.now() < deadline)
+}
+
+async function modalHydrationState(page) {
+  return page.evaluate(() => {
+    const modal = Array.from(document.querySelectorAll('.ui-modal__panel-motion, .ui-modal'))
+      .filter((element) => {
+        const style = window.getComputedStyle(element)
+        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false
+        const rect = element.getBoundingClientRect()
+        return rect.width > 0 && rect.height > 0
+      })
+      .at(-1)
+
+    if (!modal) return []
+
+    return Array.from(modal.querySelectorAll('[data-list][data-count]'))
+      .map(element => ({
+        id: element.getAttribute('data-id') || '',
+        list: element.getAttribute('data-list') || '',
+        count: Number(element.getAttribute('data-count') || 0),
+        rendered: Number(element.getAttribute('data-rendered-count') || element.querySelectorAll('[data-list][data-key]').length || 0),
+        text: element.textContent?.replace(/\s+/g, ' ').trim() || '',
+      }))
+      .sort((left, right) => (left.id + left.list).localeCompare(right.id + right.list))
+  })
 }
 
 async function closeModal(page) {
@@ -2122,6 +2249,13 @@ function scrapePage(meta) {
   const defaultCaptureSelectors = () => {
     const scenarioId = String(meta.scenarioId || '')
     const pageId = String(meta.pageId || '')
+    if (pageId.includes('/modal/')) {
+      return [
+        '.ui-modal__panel-motion',
+        '.ui-modal',
+      ]
+    }
+
     if (!scenarioId.includes('explore-matrix') && !pageId.includes('explore-matrix')) return []
 
     const index = matrixMarketIndex()
@@ -2347,6 +2481,7 @@ function compareSnapshots(baseline, candidate, config = {}) {
         candidateTagged: 0,
         elementDiffs: baseline.elements.length,
         listDiffs: Object.keys(baseline.lists || {}).length,
+        listWarnings: 0,
         captureErrors: 1,
         consoleErrors: 0,
         missingInCandidate: baseline.elements.length,
@@ -2369,19 +2504,13 @@ function compareSnapshots(baseline, candidate, config = {}) {
   const listDiffs = compareLists(baseline, candidate)
   const elementDiffs = compareElements(baseline, candidate, config)
   const failedElements = elementDiffs.filter(diff => diff.status !== 'match')
-  const failedLists = listDiffs.filter(diff => diff.status !== 'match')
+  const failedLists = listDiffs.filter(diff => diff.status === 'list-mismatch')
+  const listWarnings = listDiffs.filter(diff => diff.status === 'order-warning')
   const captureErrors = [
     baseline.captureError ? { side: 'baseline', message: baseline.captureError } : null,
     candidate.captureError ? { side: 'candidate', message: candidate.captureError } : null,
   ].filter(Boolean)
-  const consoleErrors = [
-    ...((baseline.console || [])
-      .filter(message => message.type === 'error' && !isIgnoredConsoleError(message))
-      .map(message => ({ side: 'baseline', message: message.text, location: message.location }))),
-    ...((candidate.console || [])
-      .filter(message => message.type === 'error' && !isIgnoredConsoleError(message))
-      .map(message => ({ side: 'candidate', message: message.text, location: message.location }))),
-  ]
+  const consoleErrors = compareConsoleErrors(baseline, candidate)
 
   return {
     pageId: baseline.pageId,
@@ -2405,6 +2534,7 @@ function compareSnapshots(baseline, candidate, config = {}) {
       candidateTagged: candidate.counts.tagged,
       elementDiffs: failedElements.length,
       listDiffs: failedLists.length,
+      listWarnings: listWarnings.length,
       captureErrors: captureErrors.length,
       consoleErrors: consoleErrors.length,
       missingInCandidate: elementDiffs.filter(diff => diff.status === 'missing-in-candidate').length,
@@ -2415,8 +2545,27 @@ function compareSnapshots(baseline, candidate, config = {}) {
     captureErrors,
     consoleErrors,
     listDiffs,
+    listWarnings,
     elementDiffs,
   }
+}
+
+function compareConsoleErrors(baseline, candidate) {
+  const baselineErrors = normalizedConsoleErrors(baseline)
+  const candidateErrors = normalizedConsoleErrors(candidate)
+
+  return [
+    ...multisetDifference(baselineErrors, candidateErrors)
+      .map(message => ({ side: 'baseline', message })),
+    ...multisetDifference(candidateErrors, baselineErrors)
+      .map(message => ({ side: 'candidate', message })),
+  ]
+}
+
+function normalizedConsoleErrors(snapshot) {
+  return (snapshot.console || [])
+    .filter(message => message.type === 'error' && !isIgnoredConsoleError(message))
+    .map(message => String(message.text || ''))
 }
 
 function isIgnoredConsoleError(message) {
@@ -2437,12 +2586,17 @@ function compareLists(baseline, candidate) {
     .map((list) => {
       const base = baselineLists[list] || { keys: [], count: 0, containers: [] }
       const cand = candidateLists[list] || { keys: [], count: 0, containers: [] }
-      const missingKeys = base.keys.filter(key => !cand.keys.includes(key))
-      const extraKeys = cand.keys.filter(key => !base.keys.includes(key))
+      const missingKeys = multisetDifference(base.keys, cand.keys)
+      const extraKeys = multisetDifference(cand.keys, base.keys)
       const orderMismatch = !sameArray(base.keys, cand.keys)
-      const containerMismatch = JSON.stringify(base.containers) !== JSON.stringify(cand.containers)
+      const containerMismatch = listContainerCountSignature(base.containers) !== listContainerCountSignature(cand.containers)
       const instrumentationOnly = isCandidateOnlyExploreInstrumentationList(list, base, cand, baseline.elements || [])
-      const status = instrumentationOnly || !(missingKeys.length || extraKeys.length || orderMismatch || containerMismatch) ? 'match' : 'list-mismatch'
+      const membershipMismatch = missingKeys.length || extraKeys.length || containerMismatch
+      const status = instrumentationOnly || !(membershipMismatch || orderMismatch)
+        ? 'match'
+        : membershipMismatch
+          ? 'list-mismatch'
+          : 'order-warning'
 
       return {
         list,
@@ -2455,10 +2609,35 @@ function compareLists(baseline, candidate) {
         missingKeys,
         extraKeys,
         orderMismatch,
+        orderWarning: status === 'order-warning',
         baselineContainers: base.containers,
         candidateContainers: cand.containers,
       }
     })
+}
+
+function multisetDifference(left = [], right = []) {
+  const remaining = new Map()
+  for (const key of right) remaining.set(key, (remaining.get(key) || 0) + 1)
+
+  const missing = []
+  for (const key of left) {
+    const count = remaining.get(key) || 0
+    if (count > 0) {
+      remaining.set(key, count - 1)
+    }
+    else {
+      missing.push(key)
+    }
+  }
+  return missing
+}
+
+function listContainerCountSignature(containers = []) {
+  return (containers || [])
+    .map(container => [container.id || '', container.dataCount || ''].join(':'))
+    .sort()
+    .join('|')
 }
 
 function compareElements(baseline, candidate, config = {}) {
@@ -2471,19 +2650,35 @@ function compareElements(baseline, candidate, config = {}) {
     filterIgnoredListDataPointElements(candidate.elements, ignoredLists),
     routeVaultContextKey(candidate.path || candidate.requestedPath || ''),
   )
-  const baselineMap = new Map(baselineElements.map(element => [element.key, element]))
-  const candidateMap = new Map(candidateElements.map(element => [element.key, element]))
-  const keys = Array.from(new Set([...baselineMap.keys(), ...candidateMap.keys()])).sort()
+  const baselineByBaseKey = groupElementsByBaseKey(baselineElements)
+  const candidateByBaseKey = groupElementsByBaseKey(candidateElements)
+  const baseKeys = Array.from(new Set([...baselineByBaseKey.keys(), ...candidateByBaseKey.keys()])).sort()
   const numericTolerance = config.numericTolerance ?? DEFAULT_NUMERIC_TOLERANCE
 
-  return keys.map((key) => {
-    const base = baselineMap.get(key)
-    const cand = candidateMap.get(key)
+  return baseKeys.flatMap((baseKey) => {
+    const baseGroup = baselineByBaseKey.get(baseKey) || []
+    const candidateGroup = candidateByBaseKey.get(baseKey) || []
+    return compareElementGroup(baseGroup, candidateGroup, baselineElements, candidateElements, numericTolerance)
+  })
+}
 
-    if (!base) {
+function groupElementsByBaseKey(elements) {
+  const groups = new Map()
+  for (const element of elements) {
+    const key = element.baseKey || element.key
+    const group = groups.get(key) || []
+    group.push(element)
+    groups.set(key, group)
+  }
+  return groups
+}
+
+function compareElementGroup(baseGroup, candidateGroup, baselineElements, candidateElements, numericTolerance) {
+  if (!baseGroup.length) {
+    return candidateGroup.map((cand) => {
       if (isCandidateOnlyExploreInstrumentationElement(cand, baselineElements)) {
         return {
-          key,
+          key: cand.key,
           baseKey: cand.baseKey,
           status: 'match',
           candidate: summarizeElement(cand),
@@ -2491,17 +2686,19 @@ function compareElements(baseline, candidate, config = {}) {
         }
       }
       return {
-        key,
+        key: cand.key,
         baseKey: cand.baseKey,
         status: 'extra-in-candidate',
         candidate: summarizeElement(cand),
       }
-    }
+    })
+  }
 
-    if (!cand) {
+  if (!candidateGroup.length) {
+    return baseGroup.map((base) => {
       if (isBaselineOnlyExploreInstrumentationElement(base, candidateElements)) {
         return {
-          key,
+          key: base.key,
           baseKey: base.baseKey,
           status: 'match',
           baseline: summarizeElement(base),
@@ -2509,55 +2706,144 @@ function compareElements(baseline, candidate, config = {}) {
         }
       }
       return {
-        key,
+        key: base.key,
         baseKey: base.baseKey,
         status: 'missing-in-candidate',
         baseline: summarizeElement(base),
       }
+    })
+  }
+
+  if (baseGroup.length === 1 && candidateGroup.length === 1) {
+    return [compareElementPair(baseGroup[0], candidateGroup[0], numericTolerance)]
+  }
+
+  const remainingCandidates = new Set(candidateGroup.map((_, index) => index))
+  const paired = []
+
+  for (let baseIndex = 0; baseIndex < baseGroup.length; baseIndex += 1) {
+    const base = baseGroup[baseIndex]
+    let match = null
+
+    for (const candidateIndex of remainingCandidates) {
+      const diff = compareElementPair(base, candidateGroup[candidateIndex], numericTolerance)
+      if (diff.status !== 'match') continue
+      match = { candidateIndex, diff }
+      break
     }
 
-    if (isStructuralListElement(base) && isStructuralListElement(cand)) {
-      return {
-        key,
-        baseKey: base.baseKey,
-        status: 'match',
-        baseline: summarizeElement(base),
+    if (match) {
+      remainingCandidates.delete(match.candidateIndex)
+      paired.push({ baseIndex, candidateIndex: match.candidateIndex, diff: match.diff })
+    }
+  }
+
+  const pairedBaseIndexes = new Set(paired.map(item => item.baseIndex))
+  for (let baseIndex = 0; baseIndex < baseGroup.length; baseIndex += 1) {
+    if (pairedBaseIndexes.has(baseIndex)) continue
+    if (!remainingCandidates.size) {
+      const base = baseGroup[baseIndex]
+      paired.push({
+        baseIndex,
+        candidateIndex: null,
+        diff: {
+          key: base.key,
+          baseKey: base.baseKey,
+          status: 'missing-in-candidate',
+          baseline: summarizeElement(base),
+        },
+      })
+      continue
+    }
+
+    let bestCandidateIndex = null
+    let bestDiff = null
+    let bestScore = Number.POSITIVE_INFINITY
+
+    for (const candidateIndex of remainingCandidates) {
+      const diff = compareElementPair(baseGroup[baseIndex], candidateGroup[candidateIndex], numericTolerance)
+      const score = elementDiffScore(diff)
+      if (score >= bestScore) continue
+      bestScore = score
+      bestCandidateIndex = candidateIndex
+      bestDiff = diff
+    }
+
+    remainingCandidates.delete(bestCandidateIndex)
+    paired.push({ baseIndex, candidateIndex: bestCandidateIndex, diff: bestDiff })
+  }
+
+  for (const candidateIndex of remainingCandidates) {
+    const cand = candidateGroup[candidateIndex]
+    paired.push({
+      baseIndex: Number.POSITIVE_INFINITY,
+      candidateIndex,
+      diff: {
+        key: cand.key,
+        baseKey: cand.baseKey,
+        status: 'extra-in-candidate',
         candidate: summarizeElement(cand),
-        mismatch: null,
-      }
-    }
+      },
+    })
+  }
 
-    if (isStructuralContainerElement(base) && isStructuralContainerElement(cand)) {
-      return {
-        key,
-        baseKey: base.baseKey,
-        status: 'match',
-        baseline: summarizeElement(base),
-        candidate: summarizeElement(cand),
-        mismatch: null,
-      }
-    }
+  return paired
+    .sort((a, b) => a.baseIndex - b.baseIndex || (a.candidateIndex ?? 0) - (b.candidateIndex ?? 0))
+    .map(item => item.diff)
+}
 
-    const valueComparison = compareComparableValues(base.compareValue, cand.compareValue, numericTolerance)
-    const textComparison = compareComparableValues(base.text, cand.text, numericTolerance)
-    const compareValueOnly = shouldCompareDerivedDataPointValueOnly(base, cand)
-    const status = valueComparison.matches && (compareValueOnly || textComparison.matches) ? 'match' : 'value-mismatch'
-    const mismatch = status === 'match'
-      ? null
-      : {
-          value: buildMismatchEntry(valueComparison, base.compareValue, cand.compareValue),
-          text: buildMismatchEntry(textComparison, base.text, cand.text),
-        }
-
+function compareElementPair(base, cand, numericTolerance) {
+  if (isStructuralListElement(base) && isStructuralListElement(cand)) {
     return {
-      key,
+      key: base.key,
       baseKey: base.baseKey,
-      status,
+      status: 'match',
       baseline: summarizeElement(base),
       candidate: summarizeElement(cand),
-      mismatch,
+      mismatch: null,
     }
-  })
+  }
+
+  if (isStructuralContainerElement(base) && isStructuralContainerElement(cand)) {
+    return {
+      key: base.key,
+      baseKey: base.baseKey,
+      status: 'match',
+      baseline: summarizeElement(base),
+      candidate: summarizeElement(cand),
+      mismatch: null,
+    }
+  }
+
+  const valueComparison = compareComparableValues(base.compareValue, cand.compareValue, numericTolerance)
+  const textComparison = compareComparableValues(base.text, cand.text, numericTolerance)
+  const compareValueOnly = shouldCompareDerivedDataPointValueOnly(base, cand)
+  const status = valueComparison.matches && (compareValueOnly || textComparison.matches) ? 'match' : 'value-mismatch'
+  const mismatch = status === 'match'
+    ? null
+    : {
+        value: buildMismatchEntry(valueComparison, base.compareValue, cand.compareValue),
+        text: buildMismatchEntry(textComparison, base.text, cand.text),
+      }
+
+  return {
+    key: base.key,
+    baseKey: base.baseKey,
+    status,
+    baseline: summarizeElement(base),
+    candidate: summarizeElement(cand),
+    mismatch,
+  }
+}
+
+function elementDiffScore(diff) {
+  if (diff.status === 'match') return 0
+  if (diff.status !== 'value-mismatch') return Number.POSITIVE_INFINITY
+  const valueDifference = Number(diff.mismatch?.value?.comparison?.difference)
+  const textDifference = Number(diff.mismatch?.text?.comparison?.difference)
+  const valueScore = Number.isFinite(valueDifference) ? valueDifference : 1
+  const textScore = Number.isFinite(textDifference) ? textDifference : 1
+  return valueScore + textScore
 }
 
 function shouldCompareDerivedDataPointValueOnly(base, candidate) {
@@ -2660,6 +2946,7 @@ function elementsForComparison(elements = [], routeContextKey = '') {
 
 const ROUTE_VAULT_CONTEXT_FIELDS = new Set([
   'Available liquidity',
+  'Adjustment speed',
   'Bad debt socialisation',
   'Base rate',
   'Borrow APY',
@@ -2679,6 +2966,8 @@ const ROUTE_VAULT_CONTEXT_FIELDS = new Set([
   'Liquidation bonus',
   'Market',
   'Max rate',
+  'Max rate at kink',
+  'Min rate at kink',
   'Oracle router',
   'Price',
   'Projected earnings per month',
@@ -2862,6 +3151,24 @@ function compareComparableValues(baseline, candidate, numericTolerance) {
     }
   }
 
+  const baselineDisplayAmount = parsePrimaryDisplayAmount(baseline)
+  const candidateDisplayAmount = parsePrimaryDisplayAmount(candidate)
+  if (baselineDisplayAmount && candidateDisplayAmount) {
+    const difference = Math.abs(baselineDisplayAmount.value - candidateDisplayAmount.value)
+    const denominator = Math.max(Math.abs(baselineDisplayAmount.value), Math.abs(candidateDisplayAmount.value), Number.EPSILON)
+    const allowedDifference = Math.max(denominator * numericTolerance, DISPLAY_AMOUNT_ABSOLUTE_TOLERANCE)
+
+    return {
+      matches: difference <= allowedDifference,
+      mode: 'display-amount',
+      tolerance: numericTolerance,
+      baselineNumber: baselineDisplayAmount.value,
+      candidateNumber: candidateDisplayAmount.value,
+      difference,
+      allowedDifference,
+    }
+  }
+
   return { matches: false, mode: 'exact' }
 }
 
@@ -2898,6 +3205,48 @@ function parseDisplayNumber(value) {
   return { value: parsed * multiplier }
 }
 
+function parsePrimaryDisplayAmount(value) {
+  const lines = String(value ?? '')
+    .replace(/\u00a0/g, ' ')
+    .split(/\n+/)
+    .map(item => item.trim())
+    .filter(Boolean)
+
+  for (const line of lines) {
+    const parsed = parsePrimaryDisplayAmountLine(line)
+    if (parsed) return parsed
+  }
+  return null
+}
+
+function parsePrimaryDisplayAmountLine(line) {
+  const normalized = String(line || '').replaceAll(',', '').trim()
+  if (!normalized || /^[-–—]+$/.test(normalized) || /^n\/?a$/i.test(normalized)) return null
+
+  const match = normalized.match(/[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/i)
+  if (!match) return null
+
+  const before = normalized.slice(0, match.index)
+  if (!/^[\s$€£¥₿~≈<>+-]*$/.test(before)) return null
+
+  const after = normalized.slice((match.index || 0) + match[0].length).trimStart()
+  const parsed = Number(match[0])
+  if (!Number.isFinite(parsed)) return null
+
+  const suffix = /^[kKmMbBtT](?![A-Za-z])/.test(after) ? after[0].toLowerCase() : ''
+  const multiplier = suffix === 'k'
+    ? 1_000
+    : suffix === 'm'
+      ? 1_000_000
+      : suffix === 'b'
+        ? 1_000_000_000
+        : suffix === 't'
+          ? 1_000_000_000_000
+          : 1
+
+  return { value: parsed * multiplier }
+}
+
 function summarizeElement(element) {
   return {
     id: element.id,
@@ -2913,8 +3262,6 @@ function summarizeElement(element) {
 }
 
 function buildDiff({ run, config, outputDir, baselineSnapshots, candidateSnapshots, pageDiffs }) {
-  const failedPages = pageDiffs.filter(page => page.status !== 'pass')
-
   const diff = {
     runId: run.runId,
     generatedAt: new Date().toISOString(),
@@ -2927,25 +3274,65 @@ function buildDiff({ run, config, outputDir, baselineSnapshots, candidateSnapsho
       diff: path.join(outputDir, 'diff.json'),
       report: path.join(outputDir, 'report.html'),
     },
-    summary: {
-      pages: pageDiffs.length,
-      failedPages: failedPages.length,
+    summary: buildDiffSummary(pageDiffs, {
       baselineSnapshots: baselineSnapshots.length,
       candidateSnapshots: candidateSnapshots.length,
-      elementDiffs: pageDiffs.reduce((total, page) => total + page.summary.elementDiffs, 0),
-      listDiffs: pageDiffs.reduce((total, page) => total + page.summary.listDiffs, 0),
-      captureErrors: pageDiffs.reduce((total, page) => total + page.summary.captureErrors, 0),
-      consoleErrors: pageDiffs.reduce((total, page) => total + page.summary.consoleErrors, 0),
-      slowCaptures: pageDiffs.reduce((total, page) => total + (page.summary.slowCaptures || 0), 0),
-      missingInCandidate: pageDiffs.reduce((total, page) => total + page.summary.missingInCandidate, 0),
-      extraInCandidate: pageDiffs.reduce((total, page) => total + page.summary.extraInCandidate, 0),
-      valueMismatches: pageDiffs.reduce((total, page) => total + page.summary.valueMismatches, 0),
       numericTolerance: config.numericTolerance,
-    },
+    }),
     pages: pageDiffs,
-    pagesWithDiscrepancies: summarizeDiscrepantPages(failedPages),
+    pagesWithDiscrepancies: summarizeDiscrepantPages(failedDiffPages(pageDiffs)),
   }
   return diff
+}
+
+function buildDiffSummary(pageDiffs, { baselineSnapshots, candidateSnapshots, numericTolerance }) {
+  const failedPages = failedDiffPages(pageDiffs)
+
+  return {
+    pages: pageDiffs.length,
+    failedPages: failedPages.length,
+    baselineSnapshots,
+    candidateSnapshots,
+    elementDiffs: failedPages.reduce((total, page) => total + effectivePageSummary(page).elementDiffs, 0),
+    listDiffs: failedPages.reduce((total, page) => total + effectivePageSummary(page).listDiffs, 0),
+    listWarnings: pageDiffs.reduce((total, page) => total + (effectivePageSummary(page).listWarnings || 0), 0),
+    captureErrors: failedPages.reduce((total, page) => total + effectivePageSummary(page).captureErrors, 0),
+    consoleErrors: failedPages.reduce((total, page) => total + effectivePageSummary(page).consoleErrors, 0),
+    slowCaptures: pageDiffs.reduce((total, page) => total + (effectivePageSummary(page).slowCaptures || 0), 0),
+    missingInCandidate: failedPages.reduce((total, page) => total + effectivePageSummary(page).missingInCandidate, 0),
+    extraInCandidate: failedPages.reduce((total, page) => total + effectivePageSummary(page).extraInCandidate, 0),
+    valueMismatches: failedPages.reduce((total, page) => total + effectivePageSummary(page).valueMismatches, 0),
+    numericTolerance,
+    resolvedAfterReload: pageDiffs.filter(page => page.persistence?.status === 'resolved-after-reload').length,
+  }
+}
+
+function finalizeDiffAfterPersistence(diff) {
+  for (const page of diff.pages) {
+    page.effectiveStatus = effectivePageStatus(page)
+    page.effectiveSummary = effectivePageSummary(page)
+  }
+
+  diff.summary = buildDiffSummary(diff.pages, {
+    baselineSnapshots: diff.summary.baselineSnapshots,
+    candidateSnapshots: diff.summary.candidateSnapshots,
+    numericTolerance: diff.summary.numericTolerance,
+  })
+  diff.pagesWithDiscrepancies = summarizeDiscrepantPages(failedDiffPages(diff.pages))
+}
+
+function failedDiffPages(pageDiffs) {
+  return pageDiffs.filter(page => effectivePageStatus(page) !== 'pass')
+}
+
+function effectivePageStatus(page) {
+  if (page.persistence?.status === 'resolved-after-reload') return 'pass'
+  if (page.persistence?.status === 'persistent' || page.persistence?.status === 'verification-failed') return 'fail'
+  return page.status
+}
+
+function effectivePageSummary(page) {
+  return page.persistence?.summary || page.summary
 }
 
 async function writeIncrementalJsonArtifacts({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs }) {
@@ -3024,7 +3411,8 @@ function summarizeDiscrepantPages(pages) {
     parentWaitFor: page.parentWaitFor,
     persistence: page.persistence || null,
     captureDurationsMs: page.captureDurationsMs,
-    summary: page.summary,
+    status: effectivePageStatus(page),
+    summary: effectivePageSummary(page),
     captureErrors: page.captureErrors,
     consoleErrors: page.consoleErrors,
   }))
@@ -3032,20 +3420,26 @@ function summarizeDiscrepantPages(pages) {
 
 function renderHtmlReport(diff) {
   const rows = diff.pages.map((page) => {
-    const cls = page.status === 'pass' ? 'pass' : 'fail'
+    const status = effectivePageStatus(page)
+    const summary = effectivePageSummary(page)
+    const cls = status === 'pass' ? 'pass' : 'fail'
+    const statusLabel = page.persistence?.status === 'resolved-after-reload'
+      ? 'pass (resolved after reload)'
+      : status
     return [
       '<tr class="' + cls + '">',
-      '<td>' + escapeHtml(page.status) + '</td>',
+      '<td>' + escapeHtml(statusLabel) + '</td>',
       '<td><code>' + escapeHtml(page.pageId) + '</code><br>' + escapeHtml(page.label) + '</td>',
       '<td><a href="' + escapeAttr(page.baselineUrl) + '">baseline</a> | <a href="' + escapeAttr(page.candidateUrl) + '">candidate</a></td>',
-      '<td>' + page.summary.listDiffs + '</td>',
-      '<td>' + page.summary.elementDiffs + '</td>',
-      '<td>' + page.summary.captureErrors + '</td>',
-      '<td>' + page.summary.consoleErrors + '</td>',
-      '<td>' + (page.summary.slowCaptures || 0) + '</td>',
-      '<td>' + page.summary.missingInCandidate + '</td>',
-      '<td>' + page.summary.extraInCandidate + '</td>',
-      '<td>' + page.summary.valueMismatches + '</td>',
+      '<td>' + summary.listDiffs + '</td>',
+      '<td>' + (summary.listWarnings || 0) + '</td>',
+      '<td>' + summary.elementDiffs + '</td>',
+      '<td>' + summary.captureErrors + '</td>',
+      '<td>' + summary.consoleErrors + '</td>',
+      '<td>' + (summary.slowCaptures || 0) + '</td>',
+      '<td>' + summary.missingInCandidate + '</td>',
+      '<td>' + summary.extraInCandidate + '</td>',
+      '<td>' + summary.valueMismatches + '</td>',
       '</tr>',
     ].join('')
   }).join('\n')
@@ -3074,7 +3468,7 @@ function renderHtmlReport(diff) {
 </head>
 <body>
   <h1>Parity report ${escapeHtml(diff.runId)}</h1>
-  <p>${diff.summary.failedPages} failed pages out of ${diff.summary.pages}. Element diffs: ${diff.summary.elementDiffs}. List diffs: ${diff.summary.listDiffs}.</p>
+  <p>${diff.summary.failedPages} failed pages out of ${diff.summary.pages}. Element diffs: ${diff.summary.elementDiffs}. List diffs: ${diff.summary.listDiffs}. List order warnings: ${diff.summary.listWarnings || 0}. Resolved after reload: ${diff.summary.resolvedAfterReload || 0}.</p>
   <p>Reload recheck: ${renderPersistenceSummary(diff.persistenceSummary)}</p>
   <h2>Discrepancy links</h2>
   <ul>${problemLinks || '<li>None</li>'}</ul>
@@ -3086,6 +3480,7 @@ function renderHtmlReport(diff) {
         <th>Page</th>
         <th>Links</th>
         <th>List diffs</th>
+        <th>List warnings</th>
         <th>Element diffs</th>
         <th>Capture errors</th>
         <th>Console errors</th>
@@ -3109,6 +3504,7 @@ function printSummary(diff) {
   console.log('[parity-compare] diff.json: ' + diff.artifacts.diff)
   console.log('[parity-compare] report.html: ' + diff.artifacts.report)
   console.log('[parity-compare] failed pages: ' + diff.summary.failedPages + '/' + diff.summary.pages)
+  console.log('[parity-compare] list order warnings: ' + (diff.summary.listWarnings || 0))
   console.log('[parity-compare] slow captures: ' + diff.summary.slowCaptures)
   if (diff.persistenceSummary) {
     console.log('[parity-compare] reload recheck: ' + renderPersistenceSummary(diff.persistenceSummary))
