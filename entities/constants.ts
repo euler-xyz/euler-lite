@@ -56,7 +56,9 @@ export const TTL_ERROR = -BigInt(2)
 export { CACHE_TTL_15S_MS as DEFAULT_PRICE_CACHE_TTL_MS } from './tuning-constants'
 export const EXCLUDED_SWAP_PROVIDERS = new Set<string>([])
 export const SWAP_DEFAULT_DEADLINE_SECONDS = 1800
+export const SLIPPAGE_OVERRIDE_STORAGE_KEY = 'swap-slippage-override'
 export const SLIPPAGE_STORAGE_KEY = 'swap-slippage'
+export const SLIPPAGE_CONTEXT_DEFAULT_STORAGE_KEY = 'swap-slippage-context-default'
 export const PERMIT2_PREFERENCE_STORAGE_KEY = 'permit2-enabled'
 export const SHOW_ALL_HINT_DISMISSED_KEY = 'show-all-hint-dismissed'
 export const DEFAULT_SLIPPAGE = 0.3

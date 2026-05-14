@@ -32,6 +32,7 @@ const isCustomValue = computed(() => !presetValues.includes(slippage.value) && s
 const customChipActive = computed(() => isCustomInputVisible.value || isCustomSelected.value || isCustomValue.value)
 const customChipValue = computed(() => `${formatNumber(slippage.value, 2, 0)}%`)
 
+const isSlippageAboveDefault = computed(() => slippage.value > defaultSlippage.value)
 const isHighSlippage = computed(() => slippage.value > HIGH_SLIPPAGE_THRESHOLD)
 
 const onPresetSelect = (value: number) => {
@@ -130,7 +131,7 @@ defineExpose({ savePending })
         Slippage settings
       </div>
       <div class="text-p3 text-content-muted">
-        <template v-if="isOverrideActive && slippage > DEFAULT_SLIPPAGE">
+        <template v-if="isOverrideActive && isSlippageAboveDefault">
           Custom slippage (resets to {{ defaultSlippage }}% default after 24h)
         </template>
         <template v-else-if="defaultSlippage !== DEFAULT_SLIPPAGE">
@@ -157,7 +158,7 @@ defineExpose({ savePending })
         >
           <span v-if="isCustomSelected && !isCustomInputVisible">
             Custom
-            <span class="text-content-primary font-semibold">{{ customChipValue }}</span>
+            <span class="font-semibold">{{ customChipValue }}</span>
           </span>
           <span v-else>
             Set custom
