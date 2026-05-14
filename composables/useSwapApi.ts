@@ -8,7 +8,7 @@ import {
   type SwapApiResponse,
   SwapperMode,
 } from '~/entities/swap'
-import { EXCLUDED_SWAP_PROVIDERS, SWAP_DEFAULT_DEADLINE_SECONDS } from '~/entities/constants'
+import { SWAP_DEFAULT_DEADLINE_SECONDS } from '~/entities/constants'
 import { COWSWAP_PROVIDER_NAME, isCowSwapSupportedChain } from '~/entities/cowswap'
 
 export interface SwapApiRequestInput {
@@ -170,8 +170,7 @@ export const useSwapApi = () => {
       const includeCow = options?.includeCowSwap && isCowSwapSupportedChain(chainId.value ?? 0)
       return providers.filter((p) => {
         const normalized = p.toLowerCase()
-        return !EXCLUDED_SWAP_PROVIDERS.has(normalized)
-          && (normalized !== COWSWAP_PROVIDER_NAME || includeCow)
+        return normalized !== COWSWAP_PROVIDER_NAME || includeCow
       })
     }
     catch (error) {
