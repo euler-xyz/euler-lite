@@ -5,6 +5,7 @@ import { createPermit2Helpers } from './permit2'
 import { createAllowanceHelpers } from './allowance'
 import { createOperationHelpers } from './helpers'
 import { createExecutionHelpers } from './execution'
+import { createGasEstimationHelpers } from './gas-estimation'
 import { createVaultBuilders } from './vault'
 import { createRepayBuilders } from './repay'
 import { createSwapBuilders } from './swaps'
@@ -49,6 +50,7 @@ export const useEulerOperations = () => {
   const allowance = createAllowanceHelpers(ctx, permit2)
   const helpers = createOperationHelpers(ctx, permit2, allowance)
   const execution = createExecutionHelpers(ctx, allowance)
+  const gasEstimation = createGasEstimationHelpers(ctx, allowance)
 
   const vault = createVaultBuilders(ctx, helpers, permit2, allowance)
   const repay = createRepayBuilders(ctx, helpers)
@@ -56,7 +58,10 @@ export const useEulerOperations = () => {
 
   return {
     ...execution,
+    ...gasEstimation,
     buildSimulationStateOverride: allowance.buildSimulationStateOverride,
+    buildEvcBatchStep: helpers.buildEvcBatchStep,
+    prepareTokenApproval: helpers.prepareTokenApproval,
     ...vault,
     ...repay,
     ...swaps,

@@ -1,11 +1,15 @@
 import type { Ref, ComputedRef } from 'vue'
 import { useAccount } from '@wagmi/vue'
-import { zeroAddress, type Address, type Abi } from 'viem'
+import { formatUnits, zeroAddress, type Address, type Abi } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
+import type { DisplayStep } from '~/utils/stepDecoding'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
+import { CLOSE_POSITION_WRAPPER_ABI } from '~/abis/cowswap-wrapper'
 import { getCashLimitedWithdrawAmount, isEVKVault, type Vault } from '~/entities/vault'
+import { COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapClosePositionExecuteParams, getCowSwapChainConfig, getCowSwapQuoteOrderAmounts, isCowProvider } from '~/entities/cowswap'
+import { useCowSwapClosePositionExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
 import { getAssetUsdValue, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
@@ -24,6 +28,7 @@ import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createRaceGuard } from '~/utils/race-guard'
 import { findBlockingDisabledOp, OP_REPAY, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning, getUtilisationWarning, type VaultWarning } from '~/composables/useVaultWarnings'
+import { formatNumber, trimTrailingZeros } from '~/utils/string-utils'
 
 interface UseCollateralSwapRepayOptions {
   position: Ref<AccountBorrowPosition | undefined>
@@ -56,12 +61,14 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     isEligibleForLiquidation,
   } = options
 
+  const router = useRouter()
   const modal = useModal()
   const { error } = useToast()
   const { isConnected, address } = useAccount()
   const { buildSwapPlan, buildSameAssetRepayPlan, buildSameAssetFullRepayPlan, buildSwapFullRepayPlan, executeTxPlan } = useEulerOperations()
   const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
   const { finalizeTxAndRedirect } = useTxFinalization()
+  const { refreshAllPositions } = useEulerAccount()
   const { client: rpcClient } = useRpcClient()
   const { withIntrinsicSupplyApy, withIntrinsicBorrowApy } = useIntrinsicApy()
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
@@ -69,6 +76,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   // --- Source vault state ---
   const sourceVault: Ref<Vault | undefined> = ref()
   const sourceAssets = ref(0n)
+  const sourceShares = ref(0n)
   const sourceBalance = computed(() => getCashLimitedWithdrawAmount(
     sourceAssets.value,
     sourceVault.value,
@@ -113,17 +121,55 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     position,
     borrowVault,
     sourceVault,
+    sourceAssets,
+    sourceShares,
     sourceBalance,
     formTab,
     formTabName: 'collateral',
     slippage,
     clearSimulationError,
     getCurrentDebt,
+    includeCowSwap: true,
+    buildTxPlanForQuote: quote => buildRepayPlan(quote),
     getQuoteAccounts: () => {
       const subAccount = (position.value?.subAccount || address.value || zeroAddress) as Address
       return { accountIn: subAccount, accountOut: subAccount }
     },
   })
+
+  // --- CowSwap close position ---
+  const { chainId: currentChainId } = useEulerAddresses()
+  const cowModal = useModal()
+  const cowSwapExecution = useCowSwapClosePositionExecution()
+  const cowSwapOrderbookUrl = computed(() => getCowSwapChainConfig(currentChainId.value ?? 0)?.orderbookUrl)
+  const cowSwapOrderStatus = useCowSwapOrderStatus(
+    computed(() => cowSwapExecution.orderUid.value),
+    cowSwapOrderbookUrl,
+  )
+  const isCowSwapProvider = computed(() =>
+    isCowProvider(core.quotes.selectedProvider.value),
+  )
+
+  const closePositionInboxExists = async (params: CowSwapClosePositionExecuteParams): Promise<boolean> => {
+    const client = rpcClient.value
+    const wrapperAddress = getCowSwapChainConfig(params.chainId)?.closePositionWrapper
+    if (!client || !wrapperAddress) return false
+
+    try {
+      const [inboxAddress] = await client.readContract({
+        address: wrapperAddress,
+        abi: CLOSE_POSITION_WRAPPER_ABI,
+        functionName: 'getInboxAddressAndDomainSeparator',
+        args: [params.wrapper.owner, params.wrapper.account],
+      }) as [Address, `0x${string}`]
+      const inboxCode = await client.getCode({ address: inboxAddress })
+      return !!inboxCode && inboxCode !== '0x'
+    }
+    catch (err) {
+      logWarn('collateralSwapRepay/cowswap/inboxExists', err)
+      return false
+    }
+  }
 
   // --- Swap details ---
   const details = useRepaySwapDetails({
@@ -288,7 +334,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
   const disabledReason = computed(() => {
     if (core.isRepayExceedsDebt.value) {
-      return 'You repaying more than required'
+      return 'Repay amount exceeds outstanding debt'
     }
     if (isInsufficientSource.value) {
       return 'Insufficient collateral balance to cover the required swap amount.'
@@ -306,11 +352,13 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const updateSourceBalance = async () => {
     if (!position.value || !sourceVault.value) {
       sourceAssets.value = 0n
+      sourceShares.value = 0n
       return
     }
     const primaryAddress = normalizeAddressOrEmpty(position.value.collateral.address)
     const targetAddress = normalizeAddressOrEmpty(sourceVault.value.address)
     sourceAssets.value = targetAddress === primaryAddress ? (position.value.supplied || 0n) : 0n
+    sourceShares.value = 0n
 
     try {
       if (!isEulerAddressesReady.value) {
@@ -325,8 +373,9 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
         abi: eulerAccountLensABI as Abi,
         functionName: 'getVaultAccountInfo',
         args: [position.value.subAccount, sourceVault.value.address],
-      }) as { assets: bigint }
+      }) as { assets: bigint, shares: bigint }
       sourceAssets.value = res.assets
+      sourceShares.value = res.shares
     }
     catch (e) {
       logWarn('collateralSwapRepay/loadBalance', e)
@@ -338,7 +387,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   }, { immediate: true })
 
   // --- Build / Submit / Send ---
-  const buildRepayPlan = async (): Promise<TxPlan> => {
+  async function buildRepayPlan(quote?: import('~/entities/swap').SwapApiQuote): Promise<TxPlan> {
     if (!position.value || !borrowVault.value || !sourceVault.value) {
       throw new Error('Position or vaults not loaded')
     }
@@ -368,7 +417,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       })
     }
 
-    if (!core.quotes.selectedQuote.value) {
+    const swapQuote = quote || core.quotes.selectedQuote.value
+    if (!swapQuote) {
       throw new Error('No quote selected')
     }
 
@@ -383,7 +433,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     const isFullRepay = targetDebt === 0n && swapMode === SwapperMode.TARGET_DEBT
     if (isFullRepay) {
       return buildSwapFullRepayPlan({
-        quote: core.quotes.selectedQuote.value,
+        quote: swapQuote,
         swapperMode: swapMode,
         requestedSlippage: slippage.value,
         targetDebt,
@@ -395,7 +445,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     }
 
     return buildSwapPlan({
-      quote: core.quotes.selectedQuote.value,
+      quote: swapQuote,
       swapperMode: swapMode,
       isRepay: true,
       requestedSlippage: slippage.value,
@@ -406,9 +456,136 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     })
   }
 
+  const submitCowSwapClosePosition = async () => {
+    if (!position.value || !borrowVault.value || !sourceVault.value || !core.quotes.selectedQuote.value || !address.value) return
+    if (isHealthInsufficient.value) return
+    if (core.isRepayExceedsDebt.value) return
+
+    cowSwapExecution.reset()
+
+    const chainId = currentChainId.value ?? 0
+    const chainConfig = getCowSwapChainConfig(chainId)
+    if (!chainConfig) return
+
+    const validTo = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
+    const swapMode = core.direction.value
+    const isTargetDebt = swapMode === SwapperMode.TARGET_DEBT
+
+    // Target-debt mode always uses a BUY order. The quote fixes buyAmount
+    // and the wrapper returns any unused collateral to the subaccount.
+    const orderKind: 'buy' | 'sell' = isTargetDebt ? 'buy' : 'sell'
+
+    const quote = core.quotes.selectedQuote.value
+    const orderAmounts = getCowSwapQuoteOrderAmounts(quote, {
+      slippage: slippage.value,
+      slippageTarget: 'sellAmount',
+      maxSellAmount: isTargetDebt && sourceShares.value > 0n ? sourceShares.value : undefined,
+    })
+    if (!orderAmounts) {
+      error('Invalid quote: missing CoW order amounts')
+      return
+    }
+    const { sellAmount, buyAmount } = orderAmounts
+
+    const cowParams: CowSwapClosePositionExecuteParams = {
+      chainId,
+      sellToken: sourceVault.value.address as Address,
+      buyToken: borrowVault.value.asset.address as Address,
+      sellAmount,
+      buyAmount,
+      quoteId: quote.providerData?.quoteId,
+      slippageBips: Math.round(slippage.value * 100),
+      validTo,
+      orderKind,
+      wrapper: {
+        owner: (address.value || zeroAddress) as Address,
+        account: position.value.subAccount as Address,
+        deadline: validTo,
+        borrowVault: borrowVault.value.address as Address,
+        collateralVault: sourceVault.value.address as Address,
+        collateralAmount: sellAmount,
+      },
+    }
+
+    const source = sourceVault.value
+    const sourceAsset = source.asset
+    const borrowAsset = borrowVault.value.asset
+    const transferredShareAmount = trimTrailingZeros(formatUnits(sellAmount, Number(source.decimals)))
+    const transferredAssets = source.totalShares > 0n
+      ? (sellAmount * source.totalAssets) / source.totalShares
+      : sellAmount
+    const transferredAssetAmount = nanoToValue(transferredAssets, sourceAsset.decimals)
+    const transferLabelSuffix = `(Selling max ${formatNumber(transferredAssetAmount, 8, 0)} ${sourceAsset.symbol})`
+
+    const signSteps: DisplayStep[] = []
+    let idx = 1
+    const hasExistingInbox = await closePositionInboxExists(cowParams)
+    if (!hasExistingInbox) {
+      signSteps.push({ index: idx++, label: 'Prepare order receiver', isSeparateTx: true })
+    }
+    signSteps.push({ index: idx++, label: 'Sign EVC permit', isSeparateTx: false })
+    signSteps.push({ index: idx++, label: 'Sign CoW order', isSeparateTx: false })
+
+    let wIdx = 1
+    const wrapperSteps: DisplayStep[] = [
+      {
+        index: wIdx++,
+        label: 'Transfer collateral to Inbox',
+        labelSuffix: transferLabelSuffix,
+        isSeparateTx: false,
+        assetInfo: {
+          symbol: source.symbol || sourceAsset.symbol,
+          address: source.address,
+          iconAddress: sourceAsset.address,
+          amount: transferredShareAmount,
+        },
+      },
+      { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: sourceAsset.symbol, address: sourceAsset.address, amount: core.amount.value }, toAssetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: core.debtAmount.value || '?' } },
+      { index: wIdx++, label: 'Repay', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address } },
+    ]
+
+    const walletWarningsDescription
+      = 'The CoW order and Inbox transfer use vault-share amounts. Swap and repay amounts are shown in underlying assets. '
+        + 'The CoW order receiver is a temporary Inbox contract — your wallet will flag this as an unfamiliar address. '
+        + 'The Inbox holds funds only during settlement and returns them to your position.'
+
+    openCowSwapReviewModal(cowModal, {
+      signSteps,
+      wrapperSteps,
+      walletWarningsDescription,
+      execution: cowSwapExecution,
+      orderStatus: cowSwapOrderStatus,
+      executeParams: cowParams,
+      quoteFetchedAt: core.quotes.effectiveQuoteFetchedAt.value,
+      logPrefix: 'collateralSwapRepay/cowswap',
+    })
+  }
+
+  // Watch for CowSwap order completion
+  watch(() => cowSwapOrderStatus.orderStatus.value, (status) => {
+    if (!status?.terminal) return
+    if (status.type === 'traded' || status.type === 'fulfilled') {
+      refreshAllPositions(eulerLensAddresses.value, address.value as string)
+      cowModal.close()
+      setTimeout(() => {
+        router.replace('/portfolio')
+        cowSwapExecution.reset()
+      }, 400)
+    }
+    else {
+      // Don't reset — leave terminal status visible in modal until user dismisses
+    }
+  })
+
   const submit = async () => {
     if (isPreparing.value || isSubmitting.value || !position.value || !borrowVault.value || !sourceVault.value) return
     if (!core.isSameAsset.value && !core.quotes.selectedQuote.value) return
+
+    // CowSwap path: skip plan building and simulation
+    if (isCowSwapProvider.value) {
+      await submitCowSwapClosePosition()
+      return
+    }
 
     isPreparing.value = true
     try {
@@ -438,6 +615,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
           asset: sourceVault.value.asset,
           amount: inputDisplay,
           plan: plan.value || undefined,
+          quoteFetchedAt: !core.isSameAsset.value ? core.quotes.effectiveQuoteFetchedAt.value : null,
           swapToAsset: !core.isSameAsset.value ? borrowVault.value.asset : undefined,
           swapToAmount: !core.isSameAsset.value ? core.debtAmount.value : undefined,
           swapMode: !core.isSameAsset.value ? core.direction.value : undefined,
@@ -537,6 +715,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     onSourceVaultChange,
     onRefreshQuotes: core.onRefreshQuotes,
     onSourceMax: core.onSourceMax,
+    onProviderSelect: core.onProviderSelect,
     submit,
     send,
     updateSourceBalance,

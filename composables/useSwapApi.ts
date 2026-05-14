@@ -3,11 +3,13 @@ import { zeroAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import {
   type RoutingConfig,
+  type SwapApiProviderExtraData,
   type SwapApiQuote,
   type SwapApiResponse,
   SwapperMode,
 } from '~/entities/swap'
 import { EXCLUDED_SWAP_PROVIDERS, SWAP_DEFAULT_DEADLINE_SECONDS } from '~/entities/constants'
+import { COWSWAP_PROVIDER_NAME, isCowSwapSupportedChain } from '~/entities/cowswap'
 
 export interface SwapApiRequestInput {
   chainId?: number
@@ -30,6 +32,14 @@ export interface SwapApiRequestInput {
   transferOutputToReceiver?: boolean
   routingOverride?: RoutingConfig
   provider?: string
+  providerExtraData?: SwapApiProviderExtraData
+}
+
+const serializeProviderExtraData = (providerExtraData?: SwapApiProviderExtraData): string | undefined => {
+  if (!providerExtraData) return undefined
+  return JSON.stringify(providerExtraData, (_key, value) =>
+    typeof value === 'bigint' ? value.toString() : value,
+  )
 }
 
 const buildRequestParams = (
@@ -59,6 +69,7 @@ const buildRequestParams = (
     transferOutputToReceiver: params.transferOutputToReceiver != null ? String(params.transferOutputToReceiver) : undefined,
     routingOverride: params.routingOverride ? JSON.stringify(params.routingOverride) : undefined,
     provider: params.provider,
+    providerExtraData: serializeProviderExtraData(params.providerExtraData),
   }
 
   return Object.fromEntries(
@@ -84,6 +95,32 @@ const parseSwapProvidersResponse = (payload: { success?: boolean, data?: string[
     return payload.data
   }
   return []
+}
+
+const normalizeQuoteId = (quoteId: unknown): number | undefined => {
+  if (typeof quoteId === 'number' && Number.isSafeInteger(quoteId)) {
+    return quoteId
+  }
+  if (typeof quoteId === 'string' && /^-?\d+$/.test(quoteId)) {
+    const parsed = Number(quoteId)
+    if (Number.isSafeInteger(parsed)) {
+      return parsed
+    }
+  }
+  return undefined
+}
+
+const normalizeSwapQuote = (quote: SwapApiQuote): SwapApiQuote => {
+  const normalizedQuoteId = normalizeQuoteId(quote.providerData?.quoteId)
+  if (!quote.providerData) return quote
+
+  return {
+    ...quote,
+    providerData: {
+      ...quote.providerData,
+      quoteId: normalizedQuoteId,
+    },
+  }
 }
 
 export const useSwapApi = () => {
@@ -113,10 +150,10 @@ export const useSwapApi = () => {
       },
     )
 
-    return parseSwapApiResponse(response.data)
+    return parseSwapApiResponse(response.data).map(normalizeSwapQuote)
   }
 
-  const getSwapProviders = async (): Promise<string[]> => {
+  const getSwapProviders = async (options?: { includeCowSwap?: boolean }): Promise<string[]> => {
     if (!chainId.value) {
       return []
     }
@@ -130,7 +167,12 @@ export const useSwapApi = () => {
         },
       )
       const providers = parseSwapProvidersResponse(response.data)
-      return providers.filter(p => !EXCLUDED_SWAP_PROVIDERS.has(p.toLowerCase()))
+      const includeCow = options?.includeCowSwap && isCowSwapSupportedChain(chainId.value ?? 0)
+      return providers.filter((p) => {
+        const normalized = p.toLowerCase()
+        return !EXCLUDED_SWAP_PROVIDERS.has(normalized)
+          && (normalized !== COWSWAP_PROVIDER_NAME || includeCow)
+      })
     }
     catch (error) {
       logWarn('swapApi/providers', error)

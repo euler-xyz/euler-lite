@@ -72,6 +72,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   // --- Source vault state ---
   const sourceVault: Ref<Vault | undefined> = ref()
   const sourceAssets = ref(0n)
+  const sourceShares = computed(() => sourceVault.value ? (getSavingsPosition(sourceVault.value.address)?.shares || 0n) : 0n)
   const isSameVaultRepay = computed(() =>
     !!sourceVault.value
     && !!borrowVault.value
@@ -97,6 +98,8 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     position,
     borrowVault,
     sourceVault,
+    sourceAssets,
+    sourceShares,
     sourceBalance,
     formTab,
     formTabName: 'savings',
@@ -109,6 +112,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
       const borrowSubAccount = (position.value?.subAccount || address.value || zeroAddress) as Address
       return { accountIn: savingsSubAccount, accountOut: borrowSubAccount }
     },
+    buildTxPlanForQuote: quote => buildRepayPlan(quote),
   })
 
   // --- Swap details ---
@@ -239,7 +243,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
 
   const disabledReason = computed(() => {
     if (core.isRepayExceedsDebt.value) {
-      return 'You repaying more than required'
+      return 'Repay amount exceeds outstanding debt'
     }
     if (isInsufficientSource.value) {
       return 'Insufficient savings balance to cover the required swap amount.'
@@ -265,7 +269,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   })
 
   // --- Build / Submit / Send ---
-  const buildRepayPlan = async (): Promise<TxPlan> => {
+  async function buildRepayPlan(quote?: import('~/entities/swap').SwapApiQuote): Promise<TxPlan> {
     if (!position.value || !borrowVault.value || !sourceVault.value) {
       throw new Error('Position or vaults not loaded')
     }
@@ -301,7 +305,8 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
       })
     }
 
-    if (!core.quotes.selectedQuote.value) {
+    const swapQuote = quote || core.quotes.selectedQuote.value
+    if (!swapQuote) {
       throw new Error('No quote selected')
     }
 
@@ -316,7 +321,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     const isFullRepay = targetDebt === 0n && swapMode === SwapperMode.TARGET_DEBT
     if (isFullRepay) {
       return buildSwapFullRepayPlan({
-        quote: core.quotes.selectedQuote.value,
+        quote: swapQuote,
         swapperMode: swapMode,
         requestedSlippage: slippage.value,
         targetDebt,
@@ -328,7 +333,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     }
 
     return buildSwapPlan({
-      quote: core.quotes.selectedQuote.value,
+      quote: swapQuote,
       swapperMode: swapMode,
       isRepay: true,
       requestedSlippage: slippage.value,
@@ -376,6 +381,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
           type: 'repay',
           asset: sourceVault.value.asset,
           amount: inputDisplay,
+          quoteFetchedAt: !core.isSameAsset.value ? core.quotes.effectiveQuoteFetchedAt.value : null,
           swapToAsset: !core.isSameAsset.value ? borrowVault.value.asset : undefined,
           swapToAmount: !core.isSameAsset.value ? core.debtAmount.value : undefined,
           swapMode: !core.isSameAsset.value ? core.direction.value : undefined,
@@ -478,6 +484,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     onSourceVaultChange,
     onRefreshQuotes: core.onRefreshQuotes,
     onSourceMax: core.onSourceMax,
+    onProviderSelect: core.onProviderSelect,
     submit,
     send,
     updateSourceBalance,
