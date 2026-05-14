@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useAccount } from '@wagmi/vue'
+import { getSubAccountIndex } from '~/entities/account'
 import { getVaultProductName } from '~/utils/eulerLabelsUtils'
 import type { CollateralOption } from '~/entities/vault'
 import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
@@ -15,9 +17,12 @@ const { productName, symbol, collateralOptions, selected = 0, title = 'Select co
 }>()
 
 const { isEscrowVault } = useVaultRegistry()
+const { address } = useAccount()
+const { portfolioAddress } = useEulerAccount()
 
 const searchQuery = ref('')
 const selectedIdx = ref(selected)
+const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
 const getOptionLabel = (option: CollateralOption) => {
   if (option.vaultAddress && isEscrowVault(option.vaultAddress)) return 'Escrowed collateral'
   if (option.label) return option.label
@@ -32,6 +37,17 @@ const getOptionType = (option: CollateralOption) => {
   if (option.type === 'escrow') return 'escrow'
   if (option.vaultAddress && isEscrowVault(option.vaultAddress)) return 'escrow'
   return option.type
+}
+const shortenAddress = (value: string) => `${value.slice(0, 6)}...${value.slice(-4)}`
+const getSubAccountLabel = (option: CollateralOption) => {
+  if (!option.subAccount) return ''
+  if (!ownerAddress.value) return shortenAddress(option.subAccount)
+  try {
+    return `Position ${getSubAccountIndex(ownerAddress.value, option.subAccount)}`
+  }
+  catch {
+    return shortenAddress(option.subAccount)
+  }
 }
 const getApyLabel = (option: CollateralOption) => {
   return option.type === 'wallet' ? 'If supplied: APY' : apyLabel
@@ -106,6 +122,12 @@ const handleClose = () => {
                 class="ml-6 text-[12px] leading-[16px] py-4 px-8 rounded-8 bg-[#CBC0951A] text-yellow-600"
               >
                 Savings
+              </div>
+              <div
+                v-if="getSubAccountLabel(option)"
+                class="ml-6 text-[12px] leading-[16px] py-4 px-8 rounded-8 bg-card text-content-secondary"
+              >
+                {{ getSubAccountLabel(option) }}
               </div>
               <span
                 v-for="tag in (option.tags || [])"

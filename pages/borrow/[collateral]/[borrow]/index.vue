@@ -507,6 +507,7 @@ watch(formTab, () => {
                   :collateral-options="borrow.borrowNeedsSwap.value ? undefined : (borrow.collateralOptions.value as CollateralOption[])"
                   :selected-source="borrow.isSavingCollateral.value ? 'saving' : 'wallet'"
                   :selected-sub-account="borrow.selectedSavingSubAccount.value"
+                  :selected-vault-address="collateralVault.address"
                   maxable
                   @input="borrow.onCollateralInput"
                   @change-collateral="borrow.onChangeCollateral"
@@ -717,6 +718,7 @@ watch(formTab, () => {
                       :collateral-options="multiply.multiplyCollateralOptions.value"
                       :selected-source="multiply.isMultiplySavingCollateral.value ? 'saving' : 'wallet'"
                       :selected-sub-account="multiply.multiplySavingSubAccount.value"
+                      :selected-vault-address="multiply.multiplySupplyVault.value.address"
                       maxable
                       @input="multiply.onMultiplyInput"
                       @change-collateral="multiply.onMultiplyCollateralChange"
