@@ -89,6 +89,7 @@ const {
   selectedProvider: multiplySelectedProvider,
   selectedQuote: multiplySelectedQuote,
   effectiveQuote: multiplyEffectiveQuote,
+  effectiveQuoteFetchedAt: multiplyEffectiveQuoteFetchedAt,
   providersCount: multiplyProvidersCount,
   isLoading: isMultiplyQuoteLoading,
   quoteError: multiplyQuoteError,
@@ -97,11 +98,41 @@ const {
   reset: resetMultiplyQuoteStateInternal,
   requestQuotes: requestMultiplyQuotes,
   selectProvider: selectMultiplyQuote,
-} = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+} = useSwapQuotesParallel({
+  amountField: 'amountOut',
+  compare: 'max',
+  buildTxPlanForQuote: quote => buildIncreasePositionTxPlanForQuote(quote, false),
+})
 const multiplyLongVault = computed(() => position.value?.collateral)
 const multiplyShortVault = computed(() => position.value?.borrow)
 const multiplySubAccount = computed(() => position.value?.subAccount || null)
 useOperationGuard(computed(() => [multiplySupplyVault.value?.address, multiplyLongVault.value?.address, multiplyShortVault.value?.address].filter(Boolean)))
+
+async function buildIncreasePositionTxPlanForQuote(quote: SwapApiQuote, includePermit2Call: boolean): Promise<TxPlan> {
+  if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
+    throw new Error('Vaults not loaded')
+  }
+  const subAccount = multiplySubAccount.value
+  if (!subAccount) {
+    throw new Error('Unable to resolve position')
+  }
+  return buildMultiplyPlan({
+    supplyVaultAddress: multiplySupplyVault.value.address,
+    supplyAssetAddress: multiplySupplyVault.value.asset.address,
+    supplyAmount: 0n,
+    longVaultAddress: multiplyLongVault.value.address,
+    longAssetAddress: multiplyLongVault.value.asset.address,
+    borrowVaultAddress: multiplyShortVault.value.address,
+    debtAmount: multiplyDebtAmountNano.value,
+    quote,
+    requestedSlippage: multiplySlippage.value,
+    swapperMode: SwapperMode.EXACT_IN,
+    subAccount,
+    includePermit2Call,
+    enabledCollaterals: position.value?.collaterals,
+    enabledController: position.value?.borrow.address,
+  })
+}
 
 const pairAssets = computed(() => {
   if (!multiplyLongVault.value || !multiplyShortVault.value) {
@@ -412,6 +443,8 @@ const multiplySwapSummary = computed(() => {
   return {
     from: `${formatSmartAmount(amountIn)} ${multiplyShortVault.value.asset.symbol}`,
     to: `${formatSmartAmount(amountOut)} ${multiplyLongVault.value.asset.symbol}`,
+    fromExact: `${amountIn} ${multiplyShortVault.value.asset.symbol}`,
+    toExact: `${amountOut} ${multiplyLongVault.value.asset.symbol}`,
   }
 })
 const multiplyPriceImpact = ref<number | null>(null)
@@ -636,6 +669,7 @@ const submitMultiply = async () => {
           asset: multiplyShortVault.value.asset,
           amount: reviewBorrowAmount,
           plan: plan.value || undefined,
+          quoteFetchedAt: quote ? multiplyEffectiveQuoteFetchedAt.value : null,
           swapToAsset: quote ? multiplyLongVault.value.asset : undefined,
           swapToAmount: reviewSwapToAmount,
           swapMode: quote ? SwapperMode.EXACT_IN : undefined,
@@ -954,7 +988,9 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
             </SummaryRow>
             <SwapDetailsSummary
               :input-display="multiplySwapSummary?.from ?? null"
+              :input-exact-display="multiplySwapSummary?.fromExact ?? null"
               :output-display="multiplySwapSummary?.to ?? null"
+              :output-exact-display="multiplySwapSummary?.toExact ?? null"
               :price-impact="multiplyPriceImpact"
               :slippage="multiplySlippage"
               :routed-via="multiplyRoutedVia"
