@@ -29,6 +29,7 @@ import { createRaceGuard } from '~/utils/race-guard'
 import { findBlockingDisabledOp, OP_REPAY, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning, getUtilisationWarning, type VaultWarning } from '~/composables/useVaultWarnings'
 import { formatNumber, trimTrailingZeros } from '~/utils/string-utils'
+import { getClosePositionCollateralShares } from '~/composables/repay/closePositionShares'
 
 interface UseCollateralSwapRepayOptions {
   position: Ref<AccountBorrowPosition | undefined>
@@ -169,6 +170,21 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       logWarn('collateralSwapRepay/cowswap/inboxExists', err)
       return false
     }
+  }
+
+  const getClosePositionExpectedSellAmount = async (assetsAmount: bigint): Promise<bigint> => {
+    return getClosePositionCollateralShares({
+      sourceVault: sourceVault.value,
+      sourceAssets: sourceAssets.value,
+      sourceShares: sourceShares.value,
+      assetsAmount,
+    })
+  }
+
+  const convertSourceSharesToAssets = (sharesAmount: bigint): bigint => {
+    const vault = sourceVault.value
+    if (!vault || vault.totalShares <= 0n) return sharesAmount
+    return (sharesAmount * vault.totalAssets) / vault.totalShares
   }
 
   // --- Swap details ---
@@ -467,7 +483,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     const chainConfig = getCowSwapChainConfig(chainId)
     if (!chainConfig) return
 
-    const validTo = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
+    const quote = core.quotes.selectedQuote.value
+    const validTo = quote.providerData?.appDataDeadline ?? Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
     const swapMode = core.direction.value
     const isTargetDebt = swapMode === SwapperMode.TARGET_DEBT
 
@@ -475,26 +492,81 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     // and the wrapper returns any unused collateral to the subaccount.
     const orderKind: 'buy' | 'sell' = isTargetDebt ? 'buy' : 'sell'
 
-    const quote = core.quotes.selectedQuote.value
+    const expectedSellAmount = orderKind === 'sell'
+      ? await getClosePositionExpectedSellAmount(valueToNano(core.amount.value || '0', sourceVault.value.asset.decimals))
+      : undefined
+    const targetDebtCollateralAmount = orderKind === 'buy'
+      ? await getClosePositionExpectedSellAmount(sourceBalance.value)
+      : undefined
+    const wrapperCollateralAmount = targetDebtCollateralAmount ?? expectedSellAmount
+    const maxSellAmount = targetDebtCollateralAmount && targetDebtCollateralAmount > 0n
+      ? targetDebtCollateralAmount
+      : undefined
+    const expectedBuyAmount = orderKind === 'buy'
+      ? valueToNano(core.debtAmount.value || '0', borrowVault.value.asset.decimals)
+      : undefined
+    const rawOrderAmounts = getCowSwapQuoteOrderAmounts(quote)
     const orderAmounts = getCowSwapQuoteOrderAmounts(quote, {
       slippage: slippage.value,
-      slippageTarget: 'sellAmount',
-      maxSellAmount: isTargetDebt && sourceShares.value > 0n ? sourceShares.value : undefined,
+      slippageTarget: orderKind === 'buy' ? 'sellAmount' : 'buyAmount',
+      maxSellAmount,
     })
-    if (!orderAmounts) {
+    if (!rawOrderAmounts || !orderAmounts) {
       error('Invalid quote: missing CoW order amounts')
       return
     }
+    if (!quote.providerData?.appData) {
+      error('Invalid quote: missing CoW appData')
+      return
+    }
     const { sellAmount, buyAmount } = orderAmounts
+    if (expectedSellAmount !== undefined && sellAmount !== expectedSellAmount) {
+      error('Quote is stale. Refresh quote and try again.')
+      return
+    }
+    if (expectedBuyAmount !== undefined && buyAmount !== expectedBuyAmount) {
+      error('Quote is stale. Refresh quote and try again.')
+      return
+    }
+    if (orderKind === 'sell') {
+      const displayedBuyAmount = BigInt(quote.amountOut || 0)
+      const displayedBuyMin = BigInt(quote.amountOutMin || 0)
+      if (displayedBuyAmount > 0n && rawOrderAmounts.buyAmount !== displayedBuyAmount) {
+        error('Quote is stale. Refresh quote and try again.')
+        return
+      }
+      if (displayedBuyMin > 0n && buyAmount !== displayedBuyMin) {
+        error('Quote is stale. Refresh quote and try again.')
+        return
+      }
+    }
+    else {
+      const displayedSellAmount = BigInt(quote.amountIn || 0)
+      const displayedSellMax = BigInt(quote.amountInMax || 0)
+      if (displayedSellAmount > 0n && convertSourceSharesToAssets(rawOrderAmounts.sellAmount) > displayedSellAmount) {
+        error('Quote is stale. Refresh quote and try again.')
+        return
+      }
+      if (displayedSellMax > 0n && convertSourceSharesToAssets(sellAmount) > displayedSellMax) {
+        error('Quote is stale. Refresh quote and try again.')
+        return
+      }
+    }
 
     const cowParams: CowSwapClosePositionExecuteParams = {
       chainId,
+      quote,
+      expectedSellAmount,
+      expectedBuyAmount,
+      expectedAppData: quote.providerData.appData,
       sellToken: sourceVault.value.address as Address,
       buyToken: borrowVault.value.asset.address as Address,
       sellAmount,
       buyAmount,
       quoteId: quote.providerData?.quoteId,
+      slippage: slippage.value,
       slippageBips: Math.round(slippage.value * 100),
+      maxSellAmount,
       validTo,
       orderKind,
       wrapper: {
@@ -503,7 +575,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
         deadline: validTo,
         borrowVault: borrowVault.value.address as Address,
         collateralVault: sourceVault.value.address as Address,
-        collateralAmount: sellAmount,
+        collateralAmount: wrapperCollateralAmount ?? sellAmount,
       },
     }
 

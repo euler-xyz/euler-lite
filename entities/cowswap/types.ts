@@ -1,4 +1,5 @@
 import type { Address, Hex } from 'viem'
+import type { SwapApiQuote } from '~/entities/swap'
 
 export type CowSwapOrderKind = 'sell' | 'buy'
 
@@ -74,11 +75,15 @@ export type CowSwapOpenPositionParams = {
 
 export type CowSwapOpenPositionExecuteParams = {
   chainId: number
+  quote: SwapApiQuote
+  expectedSellAmount: bigint
+  expectedAppData?: string
   sellToken: Address
   buyToken: Address
   sellAmount: bigint
   buyAmount: bigint
   quoteId?: number
+  slippage: number
   slippageBips: number
   validTo: number
   collateralToken: Address
@@ -99,11 +104,15 @@ export type CowSwapCollateralSwapParams = {
 
 export type CowSwapCollateralSwapExecuteParams = {
   chainId: number
+  quote: SwapApiQuote
+  expectedSellAmount: bigint
+  expectedAppData?: string
   sellToken: Address
   buyToken: Address
   sellAmount: bigint
   buyAmount: bigint
   quoteId?: number
+  slippage: number
   slippageBips: number
   validTo: number
   wrapper: CowSwapCollateralSwapParams
@@ -122,12 +131,18 @@ export type CowSwapClosePositionParams = {
 
 export type CowSwapClosePositionExecuteParams = {
   chainId: number
+  quote: SwapApiQuote
+  expectedSellAmount?: bigint
+  expectedBuyAmount?: bigint
+  expectedAppData?: string
   sellToken: Address
   buyToken: Address
   sellAmount: bigint
   buyAmount: bigint
   quoteId?: number
+  slippage: number
   slippageBips: number
+  maxSellAmount?: bigint
   validTo: number
   orderKind: 'buy' | 'sell'
   wrapper: CowSwapClosePositionParams

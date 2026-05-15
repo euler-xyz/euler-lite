@@ -60,6 +60,7 @@ describe('useSwapQuotesParallel', () => {
 
     expect(quotes.selectedProvider.value).toBe('first')
     expect(quotes.selectedQuote.value).toBe(quotes.effectiveQuote.value)
+    expect(quotes.effectiveProvider.value).toBe('first')
     expect(changes).toEqual([])
   })
 
@@ -83,6 +84,7 @@ describe('useSwapQuotesParallel', () => {
     await nextTick()
 
     expect(quotes.selectedProvider.value).toBe('other')
+    expect(quotes.effectiveProvider.value).toBe('other')
     expect(quotes.effectiveQuote.value?.amountOut).toBe('200')
     expect(changes).toHaveLength(1)
   })
@@ -91,7 +93,7 @@ describe('useSwapQuotesParallel', () => {
     const cowQuote = makeQuote('100', '300')
     const otherQuote = makeQuote('100', '200')
     const cowAccount = '0x00000000000000000000000000000000000000c0'
-    const cowProviderExtraData = { type: 'openPosition' as const, appData: '{}' }
+    const cowProviderExtraData = { type: 'openPosition' as const, appData: '{}', appDataDeadline: 12345 }
     getSwapProviders.mockResolvedValue(['cow', 'other'])
     getSwapQuotes.mockImplementation(({ provider }: { provider: string }) =>
       Promise.resolve([provider === 'cow' ? cowQuote : otherQuote]),
@@ -119,11 +121,33 @@ describe('useSwapQuotesParallel', () => {
       accountOut: cowAccount,
       providerExtraData: cowProviderExtraData,
     })
+    expect(quotes.quoteCards.value.find(card => card.provider === 'cow')?.quote.providerData).toMatchObject({
+      appData: '{}',
+      appDataDeadline: 12345,
+      requestAmount: requestParams.amount.toString(),
+    })
     expect(otherCall).toMatchObject({
       provider: 'other',
       accountIn: requestParams.accountIn,
       accountOut: requestParams.accountOut,
     })
     expect(otherCall.providerExtraData).toBeUndefined()
+  })
+
+  it('does not treat route provider names as trusted CoW provider identity', async () => {
+    const spoofedQuote = {
+      ...makeQuote('100', '300'),
+      route: [{ providerName: 'cow' }],
+    } as SwapApiQuote
+    getSwapProviders.mockResolvedValue(['other'])
+    getSwapQuotes.mockResolvedValue([spoofedQuote])
+
+    const quotes = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max', includeCowSwap: true })
+    await quotes.requestQuotes(requestParams)
+    await flushPromises()
+    await nextTick()
+
+    expect(quotes.effectiveProvider.value).toBe('other')
+    expect(quotes.sortedQuoteCards.value[0]?.isGasless).toBeUndefined()
   })
 })

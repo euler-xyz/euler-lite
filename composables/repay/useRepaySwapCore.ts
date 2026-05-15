@@ -1,7 +1,7 @@
 import type { Ref, ComputedRef } from 'vue'
 import { useAccount } from '@wagmi/vue'
 import { formatUnits, zeroAddress, type Address } from 'viem'
-import { previewWithdraw, type Vault, type SecuritizeVault } from '~/entities/vault'
+import type { Vault, SecuritizeVault } from '~/entities/vault'
 import { getAssetUsdValue } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
@@ -12,6 +12,7 @@ import { trimTrailingZeros } from '~/utils/string-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { amountToPercent, percentToAmountNano } from '~/utils/repayUtils'
 import { createRaceGuard } from '~/utils/race-guard'
+import { getClosePositionCollateralShares } from '~/composables/repay/closePositionShares'
 
 interface QuoteAccounts {
   accountIn: Address
@@ -291,18 +292,40 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     quotes.selectProvider(provider)
   }
 
-  const getClosePositionQuoteCollateralAmount = async (): Promise<bigint> => {
-    if (!sourceVault.value || sourceBalance.value <= 0n) return 0n
+  const getClosePositionQuoteCollateralAmount = async (assetsAmount = sourceBalance.value): Promise<bigint> => {
+    return getClosePositionCollateralShares({
+      sourceVault: sourceVault.value,
+      sourceAssets: sourceAssets.value,
+      sourceShares: sourceShares.value,
+      assetsAmount,
+    })
+  }
 
-    if (sourceBalance.value < sourceAssets.value) {
-      const withdrawShares = await previewWithdraw(sourceVault.value.address, sourceBalance.value)
-      return sourceShares.value > 0n && withdrawShares > sourceShares.value
-        ? sourceShares.value
-        : withdrawShares
-    }
+  const buildClosePositionCowProviderExtraData = async (
+    collateralAssetsAmount: bigint,
+    account: Address,
+  ) => {
+    const providerExtraData = { ...COWSWAP_PROVIDER_EXTRA_DATA.closePosition }
+    const chainConfig = getCowSwapChainConfig(chainId.value ?? 0)
+    if (!chainConfig) return providerExtraData
 
-    if (sourceShares.value > 0n) return sourceShares.value
-    return previewWithdraw(sourceVault.value.address, sourceBalance.value)
+    const quoteDeadline = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
+    providerExtraData.appDataDeadline = quoteDeadline
+    const sourceSharesAmount = await getClosePositionQuoteCollateralAmount(collateralAssetsAmount)
+    providerExtraData.appData = buildClosePositionQuoteAppData(
+      {
+        owner: (address.value || zeroAddress) as Address,
+        account,
+        deadline: quoteDeadline,
+        borrowVault: borrowVault.value!.address as Address,
+        collateralVault: sourceVault.value!.address as Address,
+        collateralAmount: sourceSharesAmount,
+      },
+      chainConfig.closePositionWrapper,
+      Math.round(slippage.value * 100),
+    )
+
+    return providerExtraData
   }
 
   // --- Quote request ---
@@ -364,6 +387,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
         isRepay: true,
         targetDebt: 0n,
         currentDebt,
+        providerExtraData: await buildClosePositionCowProviderExtraData(parsedAmount, accountIn),
       })
       return
     }
@@ -385,24 +409,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
       return
     }
     const targetDebt = parsedAmount >= currentDebt ? 0n : currentDebt - parsedAmount
-    const quoteDeadline = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
-    const cowProviderExtraData = { ...COWSWAP_PROVIDER_EXTRA_DATA.closePosition }
-    const chainConfig = getCowSwapChainConfig(chainId.value ?? 0)
-    if (chainConfig) {
-      const sourceSharesAmount = await getClosePositionQuoteCollateralAmount()
-      cowProviderExtraData.appData = buildClosePositionQuoteAppData(
-        {
-          owner: (address.value || zeroAddress) as Address,
-          account: accountIn,
-          deadline: quoteDeadline,
-          borrowVault: borrowVault.value.address as Address,
-          collateralVault: sourceVault.value.address as Address,
-          collateralAmount: sourceSharesAmount,
-        },
-        chainConfig.closePositionWrapper,
-        Math.round(slippage.value * 100),
-      )
-    }
+    const cowProviderExtraData = await buildClosePositionCowProviderExtraData(sourceBalance.value, accountIn)
     await quotes.targetDebtQuotes.requestQuotes({
       tokenIn: sourceVault.value.asset.address as Address,
       tokenOut: borrowVault.value.asset.address as Address,

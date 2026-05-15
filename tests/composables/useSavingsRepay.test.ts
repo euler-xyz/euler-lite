@@ -147,7 +147,12 @@ describe('useSavingsRepay', () => {
       executeTxPlan: vi.fn(),
     }))
     vi.stubGlobal('useEulerAccount', () => ({ refreshAllPositions: vi.fn() }))
-    vi.stubGlobal('useEulerAddresses', () => ({ eulerLensAddresses: ref({}) }))
+    vi.stubGlobal('useEulerAddresses', () => ({ eulerLensAddresses: ref({}), chainId: ref(1) }))
+    vi.stubGlobal('useRpcClient', () => ({ client: ref(null) }))
+    vi.stubGlobal('useWagmi', () => ({
+      address: ref(USER),
+      chain: ref({ nativeCurrency: { decimals: 18 } }),
+    }))
     vi.stubGlobal('useVaultRegistry', () => ({ getVault: vi.fn() }))
     vi.stubGlobal('useTxFinalization', () => ({ finalizeTxAndRedirect: vi.fn() }))
     vi.stubGlobal('useSwapApi', () => ({

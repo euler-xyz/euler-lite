@@ -5,9 +5,11 @@ import {
   type CowSwapOrderUid,
   getCowSwapChainConfig,
   buildOpenPositionWrapperData,
+  buildOpenPositionQuoteAppData,
   buildCowSwapAppData,
   buildCowSwapOrderTypedData,
   buildCowSwapOrderPayload,
+  validateCowSwapQuoteOrderAmounts,
 } from '~/entities/cowswap'
 import { useCowSwapExecutionCore } from './useCowSwapExecutionCore'
 
@@ -30,6 +32,20 @@ export const useCowSwapOpenPositionExecution = () => {
     core.error.value = null
 
     try {
+      validateCowSwapQuoteOrderAmounts(params.quote, {
+        sellAmount: params.sellAmount,
+        buyAmount: params.buyAmount,
+        slippage: params.slippage,
+        slippageTarget: 'buyAmount',
+        expectedSellAmount: params.expectedSellAmount,
+        expectedAppData: params.expectedAppData,
+        actualAppData: buildOpenPositionQuoteAppData(
+          params.wrapper,
+          chainConfig.openPositionWrapper,
+          params.slippageBips,
+        ),
+      })
+
       // Approve collateral token → vault + sell token → vault relayer
       core.status.value = 'approving_collateral'
 

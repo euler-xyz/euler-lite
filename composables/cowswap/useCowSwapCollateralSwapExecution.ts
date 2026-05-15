@@ -5,9 +5,11 @@ import {
   type CowSwapOrderUid,
   getCowSwapChainConfig,
   buildCollateralSwapWrapperData,
+  buildCollateralSwapQuoteAppData,
   buildCowSwapAppData,
   buildCowSwapOrderTypedData,
   buildCowSwapOrderPayload,
+  validateCowSwapQuoteOrderAmounts,
 } from '~/entities/cowswap'
 import { useCowSwapExecutionCore } from './useCowSwapExecutionCore'
 
@@ -30,6 +32,20 @@ export const useCowSwapCollateralSwapExecution = () => {
     core.error.value = null
 
     try {
+      validateCowSwapQuoteOrderAmounts(params.quote, {
+        sellAmount: params.sellAmount,
+        buyAmount: params.buyAmount,
+        slippage: params.slippage,
+        slippageTarget: 'buyAmount',
+        expectedSellAmount: params.expectedSellAmount,
+        expectedAppData: params.expectedAppData,
+        actualAppData: buildCollateralSwapQuoteAppData(
+          params.wrapper,
+          chainConfig.collateralSwapWrapper,
+          params.slippageBips,
+        ),
+      })
+
       // Approve fromVault shares → vaultRelayer (so settlement can pull vault shares from owner)
       core.status.value = 'approving_collateral'
       await core.safeApprove(params.sellToken, chainConfig.vaultRelayer, params.sellAmount)

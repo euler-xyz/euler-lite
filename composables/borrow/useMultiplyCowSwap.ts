@@ -11,7 +11,6 @@ import {
   getCowSwapQuoteOrderAmounts,
   getCowSwapChainConfig,
   isCowProvider,
-  isCowQuote,
   isCowSwapSupportedChain,
 } from '~/entities/cowswap'
 import { useCowSwapOpenPositionExecution, useCowSwapOrderStatus, openCowSwapReviewModal, buildApprovalSignSteps } from '~/composables/cowswap'
@@ -29,6 +28,7 @@ const convertVaultSharesToAssets = (vault: Vault, sharesAmount: bigint): bigint 
 
 interface UseMultiplyCowSwapOptions {
   multiplySelectedProvider: ComputedRef<string | null>
+  multiplyEffectiveProvider: ComputedRef<string | null>
   multiplyEffectiveQuote: ComputedRef<SwapApiQuote | null>
   multiplySelectedQuote: ComputedRef<SwapApiQuote | null>
   multiplyEffectiveQuoteFetchedAt: ComputedRef<number | null>
@@ -62,7 +62,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
 
   const isCowSwapProvider = computed(() =>
     isCowProvider(options.multiplySelectedProvider.value)
-    || (!options.multiplySelectedProvider.value && isCowQuote(options.multiplyEffectiveQuote.value)),
+    || (!options.multiplySelectedProvider.value && isCowProvider(options.multiplyEffectiveProvider.value)),
   )
 
   const cowSwapStatusLabel = computed(() => {
@@ -139,7 +139,13 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     }
 
     const supplyAmountNano = valueToNano(options.multiplyInputAmount.value || '0', supplyVault.asset.decimals)
-    const validTo = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
+    const validTo = quote.providerData?.appDataDeadline ?? Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
+    const expectedSellAmount = options.multiplyDebtAmountNano.value
+
+    if (!quote.providerData?.appData) {
+      error('Invalid quote: missing CoW appData')
+      return
+    }
 
     const orderAmounts = getCowSwapQuoteOrderAmounts(quote, {
       slippage: options.multiplySlippage.value,
@@ -150,14 +156,31 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
       return
     }
     const { sellAmount, buyAmount } = orderAmounts
+    const rawOrderAmounts = getCowSwapQuoteOrderAmounts(quote)
+    if (!rawOrderAmounts) {
+      error('Invalid quote: missing CoW order amounts')
+      return
+    }
+    if (sellAmount !== expectedSellAmount) {
+      error('Quote is stale. Refresh quote and try again.')
+      return
+    }
+    if (convertVaultSharesToAssets(longVault, rawOrderAmounts.buyAmount) !== BigInt(quote.amountOut || 0)) {
+      error('Quote is stale. Refresh quote and try again.')
+      return
+    }
 
     const cowParams: CowSwapOpenPositionExecuteParams = {
       chainId,
+      quote,
+      expectedSellAmount,
+      expectedAppData: quote.providerData.appData,
       sellToken: shortVault.asset.address as Address,
       buyToken: longVault.address as Address,
       sellAmount,
       buyAmount,
       quoteId: quote.providerData?.quoteId,
+      slippage: options.multiplySlippage.value,
       slippageBips: Math.round(options.multiplySlippage.value * 100),
       validTo,
       collateralToken: supplyVault.asset.address as Address,
@@ -168,7 +191,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
         collateralVault: supplyVault.address as Address,
         borrowVault: shortVault.address as Address,
         collateralAmount: supplyAmountNano,
-        borrowAmount: sellAmount,
+        borrowAmount: expectedSellAmount,
       },
     }
 

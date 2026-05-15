@@ -24,7 +24,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { COWSWAP_ORDER_DEADLINE_SECONDS, COWSWAP_PROVIDER_EXTRA_DATA, buildCollateralSwapQuoteAppData, type CowSwapCollateralSwapExecuteParams, getCowSwapChainConfig, getCowSwapQuoteOrderAmounts, isCowProvider } from '~/entities/cowswap'
+import { COWSWAP_ORDER_DEADLINE_SECONDS, COWSWAP_PROVIDER_EXTRA_DATA, buildCollateralSwapQuoteAppData, type CowSwapCollateralSwapExecuteParams, getCowSwapChainConfig, getCowSwapQuoteOrderAmounts, isCowProvider, validateCowSwapQuoteOrderAmounts } from '~/entities/cowswap'
 import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus, openCowSwapReviewModal, buildApprovalSignSteps } from '~/composables/cowswap'
 
 const route = useRoute()
@@ -149,6 +149,7 @@ const swap = useSwapPageLogic({
     if (swapCollateralSharesAmountIn <= 0n) return null
     const quoteDeadline = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
     const providerExtraData = COWSWAP_PROVIDER_EXTRA_DATA.collateralSwap(swapCollateralSharesAmountIn)
+    providerExtraData.appDataDeadline = quoteDeadline
     const chainConfig = getCowSwapChainConfig(currentChainId.value ?? 0)
     if (chainConfig) {
       providerExtraData.appData = buildCollateralSwapQuoteAppData(
@@ -270,9 +271,32 @@ const cowSwapErrorText = computed(() => {
   // Sell amount must not exceed collateral balance
   const inputNano = valueToNano(fromAmount.value || '0', fromVault.value.asset.decimals)
   if (inputNano > balance.value) return 'Sell amount exceeds collateral balance'
+  const expectedSellAmount = getSwapCollateralSharesAmountIn(inputNano)
 
-  if (!getCowSwapQuoteOrderAmounts(selectedQuote.value, { slippage: slippage.value, slippageTarget: 'buyAmount' })) {
+  const orderAmounts = getCowSwapQuoteOrderAmounts(selectedQuote.value, { slippage: slippage.value, slippageTarget: 'buyAmount' })
+  if (!orderAmounts) {
     return 'Invalid CoW quote: missing order amounts'
+  }
+  if (!selectedQuote.value.providerData?.appData) {
+    return 'Invalid CoW quote: missing appData'
+  }
+  const rawOrderAmounts = getCowSwapQuoteOrderAmounts(selectedQuote.value)
+  if (!rawOrderAmounts) {
+    return 'Invalid CoW quote: missing order amounts'
+  }
+  if (convertVaultSharesToAssets(toVault.value, rawOrderAmounts.buyAmount) !== BigInt(selectedQuote.value.amountOut || 0)) {
+    return 'CoW quote buy amount does not match displayed amount'
+  }
+  try {
+    validateCowSwapQuoteOrderAmounts(selectedQuote.value, {
+      ...orderAmounts,
+      slippage: slippage.value,
+      slippageTarget: 'buyAmount',
+      expectedSellAmount,
+    })
+  }
+  catch (err) {
+    return err instanceof Error ? err.message : 'Invalid CoW quote'
   }
 
   // Destination vault supply cap
@@ -302,7 +326,10 @@ const submitCowSwapCollateralSwap = async () => {
   const chainConfig = getCowSwapChainConfig(chainId)
   if (!chainConfig) return
 
-  const validTo = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
+  const validTo = selectedQuote.value.providerData?.appDataDeadline ?? Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
+  const expectedSellAmount = getSwapCollateralSharesAmountIn(
+    valueToNano(fromAmount.value || '0', fromVault.value.asset.decimals),
+  )
 
   const orderAmounts = getCowSwapQuoteOrderAmounts(selectedQuote.value, {
     slippage: slippage.value,
@@ -312,15 +339,28 @@ const submitCowSwapCollateralSwap = async () => {
     logWarn('collateralSwap/cowswap/orderAmounts', new Error('Invalid CoW quote: missing order amounts'))
     return
   }
+  if (!selectedQuote.value.providerData?.appData) {
+    logWarn('collateralSwap/cowswap/orderAmounts', new Error('Invalid CoW quote: missing appData'))
+    return
+  }
   const { sellAmount, buyAmount } = orderAmounts
+  const rawOrderAmounts = getCowSwapQuoteOrderAmounts(selectedQuote.value)
+  if (!rawOrderAmounts || convertVaultSharesToAssets(toVault.value, rawOrderAmounts.buyAmount) !== BigInt(selectedQuote.value.amountOut || 0)) {
+    logWarn('collateralSwap/cowswap/orderAmounts', new Error('CoW quote buy amount does not match displayed amount'))
+    return
+  }
 
   const cowParams: CowSwapCollateralSwapExecuteParams = {
     chainId,
+    quote: selectedQuote.value,
+    expectedSellAmount,
+    expectedAppData: selectedQuote.value.providerData.appData,
     sellToken: fromVault.value.address as Address,
     buyToken: toVault.value.address as Address,
     sellAmount,
     buyAmount,
     quoteId: selectedQuote.value.providerData?.quoteId,
+    slippage: slippage.value,
     slippageBips: Math.round(slippage.value * 100),
     validTo,
     wrapper: {
@@ -329,7 +369,7 @@ const submitCowSwapCollateralSwap = async () => {
       deadline: validTo,
       fromVault: fromVault.value.address as Address,
       toVault: toVault.value.address as Address,
-      fromAmount: sellAmount,
+      fromAmount: expectedSellAmount,
       disableSourceCollateral: isMaxSwap.value,
     },
   }

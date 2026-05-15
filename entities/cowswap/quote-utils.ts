@@ -1,4 +1,5 @@
 import type { SwapApiQuote } from '~/entities/swap'
+import { MAX_SLIPPAGE } from '~/entities/constants'
 
 const parseBigIntAmount = (value: unknown): bigint | undefined => {
   if (typeof value === 'bigint') {
@@ -31,6 +32,17 @@ type CowSwapQuoteOrderAmountOptions = {
   slippage?: number
   slippageTarget?: CowSwapQuoteSlippageTarget
   maxSellAmount?: bigint
+}
+
+type CowSwapQuoteOrderAmountValidationOptions = Omit<CowSwapQuoteOrderAmountOptions, 'slippage' | 'slippageTarget'> & {
+  slippage: number
+  slippageTarget: CowSwapQuoteSlippageTarget
+  sellAmount: bigint
+  buyAmount: bigint
+  expectedSellAmount?: bigint
+  expectedBuyAmount?: bigint
+  expectedAppData?: string
+  actualAppData?: string
 }
 
 const parseSlippagePercent = (slippage: number): { slippageUnits: bigint, denominator: bigint } => {
@@ -67,6 +79,10 @@ export const getCowSwapQuoteOrderAmounts = (
   quote?: Pick<SwapApiQuote, 'providerData'> | null,
   options: CowSwapQuoteOrderAmountOptions = {},
 ): CowSwapQuoteOrderAmounts | undefined => {
+  if (!isValidCowSwapSlippage(options.slippage)) {
+    return undefined
+  }
+
   const providerData = quote?.providerData
   const quoteSellAmount = parseBigIntAmount(providerData?.sellAmount)
   const buyAmount = parseBigIntAmount(providerData?.buyAmount)
@@ -95,5 +111,71 @@ export const getCowSwapQuoteOrderAmounts = (
     sellAmount: adjustedSellAmount,
     buyAmount: adjustedBuyAmount,
     feeAmount,
+  }
+}
+
+export const validateCowSwapQuoteOrderAmounts = (
+  quote: Pick<SwapApiQuote, 'amountIn' | 'amountInMax' | 'amountOut' | 'amountOutMin' | 'providerData'>,
+  options: CowSwapQuoteOrderAmountValidationOptions,
+): CowSwapQuoteOrderAmounts => {
+  assertValidCowSwapSlippage(options.slippage)
+
+  const orderAmounts = getCowSwapQuoteOrderAmounts(quote, options)
+  if (!orderAmounts) {
+    throw new Error('Invalid CoW quote: missing order amounts')
+  }
+
+  if (options.sellAmount !== orderAmounts.sellAmount || options.buyAmount !== orderAmounts.buyAmount) {
+    throw new Error('CoW order amounts do not match selected quote')
+  }
+  if (options.actualAppData !== undefined && !options.expectedAppData) {
+    throw new Error('CoW quote appData is missing request binding')
+  }
+  if (options.expectedAppData !== undefined && options.actualAppData !== options.expectedAppData) {
+    throw new Error('CoW quote appData does not match requested order')
+  }
+
+  assertCowSwapProviderAmountsMatchQuote(quote, orderAmounts, options)
+
+  return orderAmounts
+}
+
+const isValidCowSwapSlippage = (slippage: number | undefined): boolean => (
+  slippage === undefined
+  || (Number.isFinite(slippage) && slippage >= 0 && slippage <= MAX_SLIPPAGE)
+)
+
+const assertValidCowSwapSlippage = (slippage: number | undefined): void => {
+  if (slippage === undefined || !isValidCowSwapSlippage(slippage)) {
+    throw new Error('Valid slippage between 0 and 50% must be provided for CoW swap')
+  }
+}
+
+const assertCowSwapProviderAmountsMatchQuote = (
+  quote: Pick<SwapApiQuote, 'amountIn' | 'amountInMax' | 'amountOut' | 'amountOutMin' | 'providerData'>,
+  orderAmounts: CowSwapQuoteOrderAmounts,
+  options: CowSwapQuoteOrderAmountValidationOptions,
+): void => {
+  const providerSellAmount = parseBigIntAmount(quote.providerData?.sellAmount)
+  const providerBuyAmount = parseBigIntAmount(quote.providerData?.buyAmount)
+  const providerFeeAmount = parseBigIntAmount(quote.providerData?.feeAmount)
+
+  if (providerSellAmount === undefined || providerBuyAmount === undefined || providerFeeAmount === undefined) {
+    throw new Error('Invalid CoW quote: missing order amounts')
+  }
+
+  const rawOrderSellAmount = providerSellAmount + providerFeeAmount
+  if (options.expectedSellAmount !== undefined && rawOrderSellAmount !== options.expectedSellAmount) {
+    throw new Error('CoW quote sell amount does not match requested amount')
+  }
+  if (options.expectedBuyAmount !== undefined && providerBuyAmount !== options.expectedBuyAmount) {
+    throw new Error('CoW quote buy amount does not match requested amount')
+  }
+
+  if (options.slippageTarget === 'sellAmount') {
+    const maxSellAmount = options.maxSellAmount
+    if (maxSellAmount !== undefined && maxSellAmount < rawOrderSellAmount) {
+      throw new Error('CoW order sell amount is below quoted sell amount')
+    }
   }
 }

@@ -6,6 +6,7 @@ import {
   type CowSwapOrderUid,
   getCowSwapChainConfig,
   buildClosePositionWrapperData,
+  buildClosePositionQuoteAppData,
   buildCowSwapAppData,
   buildCowSwapOrderTypedData,
   buildCowSwapOrderPayload,
@@ -14,6 +15,7 @@ import {
   verifyInboxDomainSeparator,
   INBOX_DOMAIN_NAME,
   INBOX_DOMAIN_VERSION,
+  validateCowSwapQuoteOrderAmounts,
 } from '~/entities/cowswap'
 import { useCowSwapExecutionCore } from './useCowSwapExecutionCore'
 
@@ -46,6 +48,22 @@ export const useCowSwapClosePositionExecution = () => {
     core.error.value = null
 
     try {
+      validateCowSwapQuoteOrderAmounts(params.quote, {
+        sellAmount: params.sellAmount,
+        buyAmount: params.buyAmount,
+        slippage: params.slippage,
+        slippageTarget: params.orderKind === 'buy' ? 'sellAmount' : 'buyAmount',
+        maxSellAmount: params.maxSellAmount,
+        expectedSellAmount: params.expectedSellAmount,
+        expectedBuyAmount: params.expectedBuyAmount,
+        expectedAppData: params.expectedAppData,
+        actualAppData: buildClosePositionQuoteAppData(
+          params.wrapper,
+          chainConfig.closePositionWrapper,
+          params.slippageBips,
+        ),
+      })
+
       // Step 1: Fetch Inbox address and domain separator
       core.status.value = 'fetching_inbox'
 

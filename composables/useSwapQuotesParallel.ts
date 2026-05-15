@@ -15,7 +15,7 @@ import {
 } from '~/utils/swapQuotes'
 import { createRaceGuard } from '~/utils/race-guard'
 import { isAbortError, logWarn } from '~/utils/errorHandling'
-import { isCowProvider, isCowProviderOrQuote } from '~/entities/cowswap'
+import { isCowProvider } from '~/entities/cowswap'
 import { getTokenUsdValue } from '~/services/pricing/priceProvider'
 import { resolveWrappedNativeAddress } from '~/utils/native-currency'
 import { shouldDiscardQuoteOnEstimateGasError } from '~/utils/tx-errors'
@@ -81,6 +81,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     return next
   })
   const effectiveQuote = computed(() => effectiveQuoteCard.value?.quote || null)
+  const effectiveProvider = computed(() => effectiveQuoteCard.value?.provider || null)
   const effectiveQuoteFetchedAt = computed(() => effectiveQuoteCard.value?.fetchedAt || null)
   const statusLabel = computed(() => {
     if (!providersCount.value) {
@@ -160,7 +161,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   ): Promise<SwapQuoteCard | null> => {
     const amountUsdPromise = getAmountUsd(quote).catch(() => undefined)
 
-    if (isCowProviderOrQuote(provider, quote)) {
+    if (isCowProvider(provider)) {
       return {
         provider,
         quote,
@@ -251,6 +252,25 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
       ?? (isCowProvider(provider) ? params.providerExtraData : undefined)
   }
 
+  const bindQuoteRequestMetadata = (
+    provider: string,
+    quote: SwapApiQuote,
+    params: SwapApiRequestInput,
+    providerExtraData: SwapApiProviderExtraData | undefined,
+  ): SwapApiQuote => {
+    if (!isCowProvider(provider) || !providerExtraData) return quote
+
+    return {
+      ...quote,
+      providerData: {
+        ...quote.providerData,
+        appData: providerExtraData.appData,
+        appDataDeadline: providerExtraData.appDataDeadline,
+        requestAmount: params.amount?.toString(),
+      },
+    }
+  }
+
   const getProviderParams = (
     provider: string,
     requestOptions: SwapQuotesRequestOptions,
@@ -327,10 +347,11 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
             ...params,
             ...getProviderParams(provider, requestOptions),
           }
+          const providerExtraData = getProviderExtraData(provider, providerParams, requestOptions)
           const data = await getSwapQuotes({
             ...providerParams,
             provider,
-            providerExtraData: getProviderExtraData(provider, providerParams, requestOptions),
+            providerExtraData,
           }, { signal: controller.signal })
 
           if (guard.isStale(gen)) {
@@ -339,7 +360,8 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
 
           const best = pickBestQuote(data, options.amountField, options.compare)
           if (best) {
-            const card = await enrichQuoteCard(provider, best, providerParams, client, gasPricePromise)
+            const boundQuote = bindQuoteRequestMetadata(provider, best, providerParams, providerExtraData)
+            const card = await enrichQuoteCard(provider, boundQuote, providerParams, client, gasPricePromise)
             if (guard.isStale(gen) || !card) {
               return
             }
@@ -429,6 +451,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     selectedQuote,
     selectedQuoteFetchedAt,
     effectiveQuote,
+    effectiveProvider,
     effectiveQuoteFetchedAt,
     providersCount,
     providersFetchedCount,

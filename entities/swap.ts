@@ -54,6 +54,9 @@ export interface SwapApiProviderData {
   sellAmount?: string
   buyAmount?: string
   feeAmount?: string
+  appData?: string
+  appDataDeadline?: number
+  requestAmount?: string
 }
 
 export type SwapApiProviderExtraDataType = 'openPosition' | 'closePosition' | 'collateralSwap'
@@ -62,6 +65,7 @@ export interface SwapApiProviderExtraData {
   type: SwapApiProviderExtraDataType
   swapCollateralSharesAmountIn?: bigint
   appData?: string
+  appDataDeadline?: number
 }
 
 export interface SwapApiQuote {
