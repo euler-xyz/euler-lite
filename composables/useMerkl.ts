@@ -275,6 +275,9 @@ export const processBorrowFromCollateralOpportunities = (
       const apr = aprs.get(campaign.campaignId) || campaign.apr || 0
       if (campaign.endTimestamp > now && !apr) continue
 
+      const whitelist = normalizeAddressList(campaign.params?.whitelist)
+      const blacklist = normalizeAddressList(campaign.params?.blacklist)
+
       const pairs: { vault: string, collateral: string }[] = []
 
       const vaults = campaign.params?.vaults
@@ -306,6 +309,8 @@ export const processBorrowFromCollateralOpportunities = (
           endTimestamp: campaign.endTimestamp,
           rewardToken: { symbol: campaign.rewardToken.symbol, icon: campaign.rewardToken.icon },
           sourceUrl: merklOpportunityUrl(opportunity, opType),
+          whitelist,
+          blacklist,
         }
 
         const existing = campaignMap.get(vault)
