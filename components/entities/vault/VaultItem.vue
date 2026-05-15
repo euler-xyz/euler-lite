@@ -183,7 +183,7 @@ watchEffect(async () => {
             />
             Recently added
           </span>
-          <KeyringBadge v-if="isKeyring" />
+          <KeyringBadge v-if="isKeyring && isGovernorVerified" />
           <GovernanceLimitedBadge v-if="isGovernanceLimited" />
           <CyclicalNoteBadge v-if="isCyclicalNote && isGovernorVerified" />
           <RestrictedBadge v-if="isGeoBlocked" />
