@@ -54,11 +54,11 @@ describe('isCampaignEligibleForAddress', () => {
     expect(isCampaignEligibleForAddress(c, USER)).toBe(false)
   })
 
-  it('blacklist takes precedence over whitelist', () => {
+  it('whitelist takes precedence over blacklist', () => {
     const c = makeCampaign({
       whitelist: [USER.toLowerCase()],
       blacklist: [USER.toLowerCase()],
     })
-    expect(isCampaignEligibleForAddress(c, USER)).toBe(false)
+    expect(isCampaignEligibleForAddress(c, USER)).toBe(true)
   })
 })
