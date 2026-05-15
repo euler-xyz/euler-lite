@@ -9,7 +9,7 @@ import {
   SwapperMode,
 } from '~/entities/swap'
 import { EXCLUDED_SWAP_PROVIDERS, SWAP_DEFAULT_DEADLINE_SECONDS } from '~/entities/constants'
-import { COWSWAP_PROVIDER_NAME, isCowSwapSupportedChain } from '~/entities/cowswap'
+import { COWSWAP_PROVIDER_NAME, isCowProvider, isCowQuote, isCowSwapSupportedChain, validateCowSwapQuoteMatchesRequest } from '~/entities/cowswap'
 
 export interface SwapApiRequestInput {
   chainId?: number
@@ -150,7 +150,18 @@ export const useSwapApi = () => {
       },
     )
 
-    return parseSwapApiResponse(response.data).map(normalizeSwapQuote)
+    return parseSwapApiResponse(response.data).map((quote) => {
+      const normalizedQuote = normalizeSwapQuote(quote)
+      if (isCowProvider(params.provider) || isCowQuote(normalizedQuote)) {
+        validateCowSwapQuoteMatchesRequest({
+          ...params,
+          chainId: chainId.value,
+          origin,
+          deadline,
+        }, normalizedQuote)
+      }
+      return normalizedQuote
+    })
   }
 
   const getSwapProviders = async (options?: { includeCowSwap?: boolean }): Promise<string[]> => {

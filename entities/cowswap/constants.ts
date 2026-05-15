@@ -2,6 +2,7 @@ import type { Address } from 'viem'
 import type { SwapApiProviderExtraData, SwapApiQuote } from '~/entities/swap'
 
 export const COWSWAP_PROVIDER_NAME = 'cow'
+const COWSWAP_PROVIDER_LABEL = 'cow swap'
 
 export const COWSWAP_PROVIDER_EXTRA_DATA = {
   openPosition: { type: 'openPosition' } as SwapApiProviderExtraData,
@@ -15,10 +16,10 @@ export const COWSWAP_PROVIDER_EXTRA_DATA = {
 export type CowSwapProviderExtraData = SwapApiProviderExtraData
 
 export const isCowProvider = (provider: string | null | undefined): boolean =>
-  !!provider && provider.toLowerCase() === COWSWAP_PROVIDER_NAME
+  !!provider && [COWSWAP_PROVIDER_NAME, COWSWAP_PROVIDER_LABEL].includes(provider.toLowerCase())
 
 export const isCowQuote = (quote: SwapApiQuote | null | undefined): boolean =>
-  !!quote?.route?.some(r => r.providerName?.toLowerCase() === COWSWAP_PROVIDER_NAME)
+  !!quote?.route?.some(r => isCowProvider(r.providerName))
 
 export const isCowProviderOrQuote = (
   provider: string | null | undefined,
