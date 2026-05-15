@@ -883,6 +883,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       supplyAmount: supplyAmountNano,
       supplySharesAmount,
       supplyIsSavings: isMultiplySavingCollateral.value,
+      savingsSubAccount: isMultiplySavingCollateral.value ? multiplySavingPosition.value?.subAccount : undefined,
       longVaultAddress: multiplyLongVault.value.address,
       longAssetAddress: multiplyLongVault.value.asset.address,
       borrowVaultAddress: multiplyShortVault.value.address,

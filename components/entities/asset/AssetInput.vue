@@ -62,14 +62,12 @@ const matchesSelectedVault = (a?: string, b?: string) => {
 }
 const getSelectedIdx = () => {
   if (props.selectedSource && props.collateralOptions?.length) {
-    if (props.selectedSubAccount) {
-      const exact = props.collateralOptions.findIndex(o =>
-        o.type === props.selectedSource
-        && matchesSelectedSubAccount(o.subAccount, props.selectedSubAccount)
-        && matchesSelectedVault(o.vaultAddress, props.selectedVaultAddress),
-      )
-      if (exact >= 0) return exact
-    }
+    const exact = props.collateralOptions.findIndex(o =>
+      o.type === props.selectedSource
+      && matchesSelectedVault(o.vaultAddress, props.selectedVaultAddress)
+      && (!props.selectedSubAccount || matchesSelectedSubAccount(o.subAccount, props.selectedSubAccount)),
+    )
+    if (exact >= 0) return exact
     const idx = props.collateralOptions.findIndex(o => o.type === props.selectedSource)
     if (idx >= 0) return idx
   }

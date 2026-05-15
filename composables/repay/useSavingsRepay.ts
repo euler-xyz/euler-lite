@@ -73,7 +73,9 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   const sourceVault: Ref<Vault | undefined> = ref()
   const selectedSavingSubAccount = ref<string | undefined>()
   const sourceAssets = ref(0n)
-  const sourceShares = computed(() => sourceVault.value ? (getSavingsPosition(sourceVault.value.address)?.shares || 0n) : 0n)
+  const sourceShares = computed(() => sourceVault.value
+    ? (getSavingsPosition(sourceVault.value.address, selectedSavingSubAccount.value)?.shares || 0n)
+    : 0n)
   const isSameVaultRepay = computed(() =>
     !!sourceVault.value
     && !!borrowVault.value
