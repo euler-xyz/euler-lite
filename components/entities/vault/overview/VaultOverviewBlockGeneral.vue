@@ -14,7 +14,8 @@ const { vault } = defineProps<{ vault: EVault }>()
 const route = useRoute()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
-const { borrowList, isVaultGovernorVerified } = useVaults()
+const { isVaultGovernorVerified } = useVaults()
+const { getEVaults } = useVaultRegistry()
 
 const vaultAddress = computed(() => getAddress(vault.address))
 const product = useEulerProductOfVault(vaultAddress)
@@ -33,9 +34,14 @@ const isRestricted = computed(() => isVaultBlockedByCountry(vault.address))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
 const isGovernanceLimited = computed(() => product.isGovernanceLimited && isGovernorVerified.value)
 
-// Count how many borrow pairs have this vault as collateral
+// Count how many EVaults reference this vault as a borrowable collateral.
+// Use the registry directly, matching the baseline app. `borrowList` is
+// filtered for visible borrow discovery pairs and undercounts deep-linked or
+// otherwise filtered relationships.
 const collateralCount = computed(() => {
-  return borrowList.value.filter(pair => normalizeAddress(pair.collateral.address) === vaultAddress.value).length
+  return getEVaults().filter(v => v.collaterals.some(
+    ltv => normalizeAddress(ltv.address) === vaultAddress.value && ltv.borrowLTV > 0,
+  )).length
 })
 
 // Count how many borrow pairs have this vault as the liability (borrow) side

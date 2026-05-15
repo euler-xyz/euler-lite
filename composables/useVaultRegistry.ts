@@ -196,7 +196,9 @@ const isVerifiedVault = (address: string): boolean => {
     || verifiedVaultAddresses.value.some(vault => normalizeAddress(vault) === normalized)
     || earnVaults.value.some(vault => normalizeAddress(vault) === normalized)
 }
-const getVaultCategory = (address: string): 'standard' | 'escrow' | undefined => get(address)?.vaultCategory
+const getVaultCategory = (address: string): 'standard' | 'escrow' | undefined => {
+  return get(address)?.vaultCategory ?? (isKnownEscrowAddress(address) ? 'escrow' : undefined)
+}
 
 // Reactive size for watchers
 const size = computed(() => registry.value.size)

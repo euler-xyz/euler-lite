@@ -28,7 +28,7 @@ const LIST_HYDRATION_SETTLE_ROUNDS = 3
 const LIST_HYDRATION_SCROLL_SEGMENTS = 10
 const LIST_HYDRATION_SCROLL_DELAY_MS = 75
 const LIST_FULL_RENDER_SETTLE_ROUNDS = 3
-const MODAL_MIN_CAPTURE_MS = 5_000
+const MODAL_MIN_CAPTURE_MS = 500
 const MODAL_HYDRATION_TIMEOUT_MS = 15_000
 const ZERO_TAG_SCRAPE_RETRIES = 3
 const ZERO_TAG_SCRAPE_RETRY_DELAY_MS = 2_000
@@ -495,13 +495,19 @@ async function runScenario({ run, scenario, config, browser, baseline, candidate
       networkIdleTimeoutMs: config.networkIdleTimeoutMs,
       keepPage: true,
     })
+    const candidatePlan = stabilizeExploreMarketPlan({
+      pageId: scenario.id,
+      scenario,
+      pathName: scenario.path,
+      waitFor: scenario.waitFor,
+    }, basePageResult.snapshot)
     const candidatePageResult = await openAndCapture({
       app: candidate,
       context: candidateContext,
-      scenario,
-      pageId: scenario.id,
-      pathName: scenario.path,
-      waitFor: scenario.waitFor,
+      scenario: candidatePlan.scenario,
+      pageId: candidatePlan.pageId,
+      pathName: candidatePlan.pathName,
+      waitFor: candidatePlan.waitFor,
       waitTimeoutMs: config.waitTimeoutMs,
       dataReadyTimeoutMs: config.dataReadyTimeoutMs,
       networkIdleTimeoutMs: config.networkIdleTimeoutMs,
@@ -554,13 +560,19 @@ async function runScenario({ run, scenario, config, browser, baseline, candidate
             dataReadyTimeoutMs: config.dataReadyTimeoutMs,
             networkIdleTimeoutMs: config.networkIdleTimeoutMs,
           })
+          const candidatePlan = stabilizeExploreMarketPlan({
+            pageId,
+            scenario: followScenario,
+            pathName: detailPath,
+            waitFor: capture.waitFor || follow.waitFor || scenario.waitFor,
+          }, baseDetail.snapshot)
           const candidateDetail = await openAndCapture({
             app: candidate,
             context: candidateContext,
-            scenario: followScenario,
-            pageId,
-            pathName: detailPath,
-            waitFor: capture.waitFor || follow.waitFor || scenario.waitFor,
+            scenario: candidatePlan.scenario,
+            pageId: candidatePlan.pageId,
+            pathName: candidatePlan.pathName,
+            waitFor: candidatePlan.waitFor,
             waitTimeoutMs: config.waitTimeoutMs,
             dataReadyTimeoutMs: config.dataReadyTimeoutMs,
             networkIdleTimeoutMs: config.networkIdleTimeoutMs,
@@ -622,7 +634,7 @@ async function runScenariosSequentialByPage({ run, scenarios, config, browser, b
         app: candidateApp,
         config,
         browser,
-        plan: mainPlan,
+        plan: stabilizeExploreMarketPlan(mainPlan, baselineResult.snapshot),
         state,
       })
 
@@ -666,7 +678,7 @@ async function runScenariosSequentialByPage({ run, scenarios, config, browser, b
           app: candidateApp,
           config,
           browser,
-          plan: followPlan,
+          plan: stabilizeExploreMarketPlan(followPlan, baselineDetail.snapshot),
           state,
         })
 
@@ -827,6 +839,9 @@ async function runScenariosAppPhased({
   try {
     console.log('[parity-compare] Running candidate phase: ' + candidateQueue.length + ' page/modal captures')
     for (const item of candidateQueue) {
+      const candidatePlan = item.type === 'modal'
+        ? item.plan
+        : stabilizeExploreMarketPlan(item.plan, item.baselineSnapshot)
       let candidateSnapshot = resumeState.candidateByPageId.get(item.baselineSnapshot.pageId) || null
       const existingDiff = resumeState.diffByPageId.get(item.baselineSnapshot.pageId)
 
@@ -839,14 +854,14 @@ async function runScenariosAppPhased({
         !candidateSnapshot
         && item.type === 'modal'
         && currentCandidatePage
-        && currentCandidatePage.pageId === item.plan.parentPageId
-        && currentCandidatePage.pathName === item.plan.pathName
+        && currentCandidatePage.pageId === candidatePlan.parentPageId
+        && currentCandidatePage.pathName === candidatePlan.pathName
       ) {
         candidateSnapshot = await captureModalPlanOnCurrentPage({
           app: candidateApp,
           config,
           runtime: candidateRuntime,
-          plan: item.plan,
+          plan: candidatePlan,
         })
       }
       else if (!candidateSnapshot && item.type === 'modal') {
@@ -856,12 +871,12 @@ async function runScenariosAppPhased({
           config,
           browser,
           runtime: candidateRuntime,
-          plan: item.plan,
+          plan: candidatePlan,
           state,
         })
         currentCandidatePage = {
-          pageId: item.plan.parentPageId,
-          pathName: item.plan.pathName,
+          pageId: candidatePlan.parentPageId,
+          pathName: candidatePlan.pathName,
         }
       }
       else if (!candidateSnapshot) {
@@ -871,14 +886,14 @@ async function runScenariosAppPhased({
           config,
           browser,
           runtime: candidateRuntime,
-          plan: item.plan,
+          plan: candidatePlan,
           state,
           returnResult: true,
         })
         candidateSnapshot = result.snapshot
         currentCandidatePage = {
-          pageId: item.plan.pageId,
-          pathName: item.plan.pathName,
+          pageId: candidatePlan.pageId,
+          pathName: candidatePlan.pathName,
         }
       }
 
@@ -1504,6 +1519,7 @@ async function openAndCapture({
 
   const onConsole = (message) => {
     if (!['error', 'warning'].includes(message.type())) return
+    if (isIgnoredConsoleMessage(message)) return
     consoleMessages.push({
       type: message.type(),
       text: message.text(),
@@ -1533,6 +1549,7 @@ async function openAndCapture({
     let pendingReadiness = []
     let navigationError = null
     let navigationKind = null
+    let captureTarget = scenario.captureTarget || null
     const navigationTimeoutMs = Number(scenario.navigationTimeoutMs || effectiveWaitTimeoutMs || 45_000)
     const maxAttempts = Math.max(
       1,
@@ -1636,6 +1653,8 @@ async function openAndCapture({
       break
     }
 
+    captureTarget = captureTarget || await resolveExploreMarketCaptureTarget(page, { pageId, scenario }).catch(() => null)
+
     const missingSelectors = waitError && !navigationError
       ? await missingWaitSelectors(page, waitFor)
       : []
@@ -1651,6 +1670,7 @@ async function openAndCapture({
       label: scenario.label || scenario.id,
       appName: app.name,
       captureSelector: scenario.captureSelector || scenario.defaults?.captureSelector || null,
+      captureTarget,
       compareOptions: scenarioCompareOptions(scenario),
     }
     const createScrapeFailureSnapshot = error => createFailedSnapshot({
@@ -1701,6 +1721,7 @@ async function openAndCapture({
     snapshot.requestedPath = pathName
     snapshot.waitFor = waitFor || []
     snapshot.navigationKind = navigationKind
+    snapshot.captureTarget = captureTarget
     snapshot.url = url.href
     snapshot.path = url.pathname + url.search
     snapshot.captureDurationMs = Date.now() - captureStartedAt
@@ -1875,6 +1896,103 @@ async function performScenarioActions(page, scenario, { waitTimeoutMs, dataReady
 
     throw new Error('Unsupported scenario action "' + actionLabel + '"')
   }
+}
+
+function stabilizeExploreMarketPlan(plan, baselineSnapshot) {
+  const marketKey = String(baselineSnapshot?.captureTarget?.marketKey || '').trim()
+  if (!marketKey || !isExploreMarketCapture(plan?.pageId, plan?.scenario)) return plan
+
+  return {
+    ...plan,
+    scenario: stabilizeExploreMarketScenario(plan.scenario, marketKey),
+    waitFor: stabilizeExploreMarketSelectors(plan.waitFor, marketKey),
+  }
+}
+
+function stabilizeExploreMarketScenario(scenario = {}, marketKey) {
+  return {
+    ...scenario,
+    captureTarget: {
+      ...(scenario.captureTarget || {}),
+      marketKey,
+    },
+    waitFor: stabilizeExploreMarketSelectors(scenario.waitFor, marketKey),
+    captureSelector: stabilizeExploreMarketSelectors(scenario.captureSelector, marketKey),
+    actions: Array.isArray(scenario.actions)
+      ? scenario.actions.map(action => stabilizeExploreMarketAction(action, marketKey))
+      : scenario.actions,
+  }
+}
+
+function stabilizeExploreMarketAction(action = {}, marketKey) {
+  const next = {
+    ...action,
+    selector: stabilizeExploreMarketSelector(action.selector, marketKey),
+    waitFor: stabilizeExploreMarketSelectors(action.waitFor, marketKey),
+    skipIfPresent: stabilizeExploreMarketSelector(action.skipIfPresent, marketKey),
+  }
+
+  if (isIndexedExploreMarketCardSelector(action.selector) && action.index !== undefined) {
+    next.selector = 'css=' + exploreMarketListItemSelector(marketKey) + ' [data-id="discovery-market-card"]'
+    delete next.index
+  }
+
+  return next
+}
+
+function stabilizeExploreMarketSelectors(value, marketKey) {
+  if (Array.isArray(value)) return value.map(item => stabilizeExploreMarketSelector(item, marketKey))
+  return stabilizeExploreMarketSelector(value, marketKey)
+}
+
+function stabilizeExploreMarketSelector(value, marketKey) {
+  if (typeof value !== 'string') return value
+  return value.replace(
+    /\[data-id=(["'])discovery-market-list-item\1\]:nth-child\(\d+\)/g,
+    exploreMarketListItemSelector(marketKey),
+  )
+}
+
+function isIndexedExploreMarketCardSelector(selector) {
+  const normalized = String(selector || '').replace(/^css=/, '').trim()
+  return normalized === '[data-id="discovery-market-card"]'
+    || normalized === '[data-id=\'discovery-market-card\']'
+}
+
+function exploreMarketListItemSelector(marketKey) {
+  return '[data-id="discovery-market-list-item"][data-key="' + cssAttributeValue(marketKey) + '"]'
+}
+
+function cssAttributeValue(value) {
+  return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
+function isExploreMarketCapture(pageId, scenario = {}) {
+  const text = [pageId, scenario.id, scenario.baseScenarioId].map(value => String(value || '')).join(' ')
+  return text.includes('explore-graph') || text.includes('explore-matrix')
+}
+
+async function resolveExploreMarketCaptureTarget(page, { pageId, scenario }) {
+  if (!isExploreMarketCapture(pageId, scenario)) return null
+
+  return page.evaluate((targetPageId) => {
+    const keyFrom = element => element?.getAttribute?.('data-key')
+      || element?.getAttribute?.('data-market-id')
+      || ''
+
+    const expandedCard = document.querySelector('[data-id="discovery-market-card"][data-expanded="true"]')
+    const expandedItem = expandedCard?.closest?.('[data-id="discovery-market-list-item"]')
+    const expandedKey = keyFrom(expandedCard) || keyFrom(expandedItem)
+    if (expandedKey) return { marketKey: expandedKey }
+
+    const match = String(targetPageId || '').match(/(?:^|-)market-(\d+)$/)
+    const index = match ? Number(match[1]) : 0
+    const indexedItem = Number.isFinite(index) && index > 0
+      ? document.querySelector('[data-id="discovery-market-list-item"]:nth-child(' + index + ')')
+      : null
+    const indexedKey = keyFrom(indexedItem)
+    return indexedKey ? { marketKey: indexedKey } : null
+  }, pageId)
 }
 
 async function navigateForCapture(page, url, { timeout, forceDocumentNavigation = false } = {}) {
@@ -2291,6 +2409,8 @@ async function hydrateModalBeforeScrape(page) {
 
   do {
     const state = await modalHydrationState(page)
+    if (!state.length) break
+
     const signature = JSON.stringify(state)
 
     if (signature === previousSignature) {
@@ -2408,6 +2528,7 @@ function scrapePage(meta) {
     'discovery-graph',
     'attribute-matrix',
     'collateral-matrix',
+    'select-modal',
   ])
   const listContainerOnlyIds = new Set([
     'discovery-market-expanded',
@@ -2462,11 +2583,24 @@ function scrapePage(meta) {
     return anchor?.href || ''
   }
   const normalizeCssSelector = selector => String(selector || '').replace(/^css=/, '')
+  const cssEscape = (value) => {
+    if (window.CSS?.escape) return window.CSS.escape(String(value))
+    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+  }
   const matrixMarketIndex = () => {
     const match = String(meta.pageId || '').match(/(?:^|-)market-(\d+)$/)
     if (!match) return ''
     const index = Number(match[1])
     return Number.isFinite(index) && index > 0 ? String(index) : ''
+  }
+  const selectedMarketSelector = () => {
+    const key = String(meta.captureTarget?.marketKey || '').trim()
+    if (key) return '[data-id="discovery-market-list-item"][data-key="' + cssEscape(key) + '"]'
+
+    const index = matrixMarketIndex()
+    return index
+      ? '[data-id="discovery-market-list-item"]:nth-child(' + index + ')'
+      : '[data-id="discovery-market-list-item"]:first-child'
   }
   const defaultCaptureSelectors = () => {
     const scenarioId = String(meta.scenarioId || '')
@@ -2478,12 +2612,18 @@ function scrapePage(meta) {
       ]
     }
 
-    if (!scenarioId.includes('explore-matrix') && !pageId.includes('explore-matrix')) return []
+    const isExploreMatrix = scenarioId.includes('explore-matrix') || pageId.includes('explore-matrix')
+    const isExploreGraph = scenarioId.includes('explore-graph') || pageId.includes('explore-graph')
+    if (!isExploreMatrix && !isExploreGraph) return []
 
-    const index = matrixMarketIndex()
-    const marketSelector = index
-      ? '[data-id="discovery-market-list-item"]:nth-child(' + index + ')'
-      : '[data-id="discovery-market-list-item"]:first-child'
+    const marketSelector = selectedMarketSelector()
+
+    if (isExploreGraph) {
+      return [
+        marketSelector + ' [data-id="discovery-graph"]',
+        marketSelector + ' [data-id="discovery-market-expanded"]',
+      ]
+    }
 
     return [
       marketSelector + ' [data-id="attribute-matrix"]',
@@ -2668,6 +2808,7 @@ function scrapePage(meta) {
     label: meta.label,
     appName: meta.appName,
     compareOptions: meta.compareOptions || {},
+    captureTarget: meta.captureTarget || null,
     captureRoot: {
       selector: rootInfo.selector,
       found: rootInfo.found,
@@ -2790,11 +2931,38 @@ function normalizedConsoleErrors(snapshot) {
     .map(message => String(message.text || ''))
 }
 
+function isIgnoredConsoleMessage(message) {
+  return isIgnoredTokenImageConsoleError({
+    type: message.type(),
+    text: message.text(),
+    location: message.location(),
+  })
+}
+
 function isIgnoredConsoleError(message) {
+  if (isIgnoredTokenImageConsoleError(message)) return true
   const text = String(message?.text || '')
   if (!text.startsWith('Failed to load resource:')) return false
   return text.includes('net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin')
     || text.includes('the server responded with a status of 404')
+}
+
+function isIgnoredTokenImageConsoleError(message) {
+  if (message?.type !== 'error') return false
+  const text = String(message?.text || '')
+  const url = String(message?.location?.url || '')
+  return text.startsWith('Failed to load resource:')
+    && text.includes('net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin')
+    && tokenImageUrl(url)
+}
+
+function tokenImageUrl(url) {
+  try {
+    return new URL(url).hostname === 'token-images.euler.finance'
+  }
+  catch {
+    return false
+  }
 }
 
 function compareLists(baseline, candidate) {
@@ -3040,6 +3208,7 @@ function compareElementPair(base, cand, numericTolerance) {
   const valueComparison = compareComparableValues(base.compareValue, cand.compareValue, numericTolerance)
   const textComparison = compareComparableValues(base.text, cand.text, numericTolerance)
   const compareValueOnly = shouldCompareDerivedDataPointValueOnly(base, cand)
+    || shouldCompareSelectModalOptionValueOnly(base, cand)
   const status = valueComparison.matches && (compareValueOnly || textComparison.matches) ? 'match' : 'value-mismatch'
   const mismatch = status === 'match'
     ? null
@@ -3074,6 +3243,15 @@ function shouldCompareDerivedDataPointValueOnly(base, candidate) {
     && candidate?.id === 'data-point'
     && base.attrs?.['parity-derived-value'] === 'true'
     && candidate.attrs?.['parity-derived-value'] === 'true',
+  )
+}
+
+function shouldCompareSelectModalOptionValueOnly(base, candidate) {
+  return Boolean(
+    base?.id === 'select-modal-option'
+    && candidate?.id === 'select-modal-option'
+    && Object.prototype.hasOwnProperty.call(base.attrs || {}, 'value')
+    && Object.prototype.hasOwnProperty.call(candidate.attrs || {}, 'value'),
   )
 }
 
@@ -3127,6 +3305,7 @@ const STRUCTURAL_CONTAINER_COMPARE_IDS = new Set([
   'discovery-graph',
   'attribute-matrix',
   'collateral-matrix',
+  'select-modal',
 ])
 
 function isStructuralContainerElement(element) {
@@ -3175,11 +3354,13 @@ const ROUTE_VAULT_CONTEXT_FIELDS = new Set([
   'Borrow cap',
   'Can be borrowed',
   'Can be used as collateral',
+  'Curator',
   'Cycle length',
   'Disabled operations',
   'Fee receiver',
   'Fixed APY',
   'Fixed rate cycle',
+  'Guardian',
   'Hook target',
   'Hooked operations',
   'Interest fee',
@@ -3191,6 +3372,7 @@ const ROUTE_VAULT_CONTEXT_FIELDS = new Set([
   'Max rate at kink',
   'Min rate at kink',
   'Oracle router',
+  'Owner',
   'Price',
   'Projected earnings per month',
   'Rate at kink',
@@ -3200,6 +3382,7 @@ const ROUTE_VAULT_CONTEXT_FIELDS = new Set([
   'Share token exchange rate',
   'Supply APY',
   'Supply cap',
+  'Timelock',
   'Total borrowed',
   'Total supply',
   'Unit of account',

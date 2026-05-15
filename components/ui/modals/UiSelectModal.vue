@@ -88,7 +88,7 @@ watch(() => props.selected, (val) => {
           data-id="select-modal-option"
           :data-key="opt.value"
           data-field="option"
-          :data-value="opt.label"
+          :data-value="opt.value"
           @click="toggleOption(opt.value)"
         >
           <div class="ui-select-modal__asset">

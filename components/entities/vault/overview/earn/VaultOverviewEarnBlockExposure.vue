@@ -251,6 +251,9 @@ load()
           <VaultOverviewLabelValue
             label="Current allocation"
             orientation="horizontal"
+            data-list="earn-exposure-strategy"
+            :data-key="getAddress(row.exposure.address)"
+            data-field="Current allocation"
           >
             <template v-if="hasExposureUsdPrice(row.exposure)">
               {{ formatCompactUsdValue(getExposureUsdPrice(row.exposure)) }}
@@ -265,6 +268,9 @@ load()
           </VaultOverviewLabelValue>
           <VaultOverviewLabelValue
             orientation="horizontal"
+            data-list="earn-exposure-strategy"
+            :data-key="getAddress(row.exposure.address)"
+            data-field="Allocation cap"
           >
             <template #label>
               <span class="flex items-center gap-4">
