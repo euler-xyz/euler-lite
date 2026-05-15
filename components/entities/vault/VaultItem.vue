@@ -11,7 +11,6 @@ import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
-import { useModal } from '~/components/ui/composables/useModal'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { VaultSupplyApyModal, VaultCollateralExposureModal } from '#components'
 
@@ -44,7 +43,6 @@ const displayName = computed(() => {
 const { getBalance, isLoading: isBalancesLoading } = useWallets()
 const { withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
-const modal = useModal()
 const { get: registryGet } = useVaultRegistry()
 
 const collateralAssets = computed(() => {
@@ -114,24 +112,18 @@ const deprecationReason = computed(() =>
   isDeprecated.value ? product.deprecationReason : '',
 )
 
-const onSupplyInfoIconClick = (event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY: lendingAPY.value,
-      intrinsicAPY: intrinsicAPY.value,
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
-      campaigns: getSupplyRewardCampaigns(vault.address),
-    },
-  })
-}
+const supplyApyModalData = computed(() => ({
+  props: {
+    lendingAPY: lendingAPY.value,
+    intrinsicAPY: intrinsicAPY.value,
+    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    campaigns: getSupplyRewardCampaigns(vault.address),
+  },
+}))
 
-const onCollateralInfoClick = (event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(VaultCollateralExposureModal, { props: { vault } })
-}
+const collateralExposureModalData = computed(() => ({
+  props: { vault },
+}))
 
 const prices = ref<{ totalSupply: string, liquidity: string, walletBalance: string }>({
   totalSupply: '-',
@@ -206,23 +198,33 @@ watchEffect(async () => {
       <div class="flex flex-col items-end">
         <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
           Supply APY
-          <SvgIcon
-            class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-            name="info-circle"
-            @click="onSupplyInfoIconClick"
-          />
+          <UiModalPreviewTrigger
+            :component="VaultSupplyApyModal"
+            :modal-data="supplyApyModalData"
+            aria-label="Show supply APY breakdown"
+          >
+            <SvgIcon
+              class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+              name="info-circle"
+            />
+          </UiModalPreviewTrigger>
         </div>
         <div class="flex items-center">
           <div class="mr-6">
             <VaultPoints :vault="vault" />
           </div>
           <div class="text-p2 flex items-center text-accent-600 font-semibold">
-            <SvgIcon
+            <UiModalPreviewTrigger
               v-if="hasRewards"
-              class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
-              name="sparks"
-              @click="onSupplyInfoIconClick"
-            />
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY rewards breakdown"
+            >
+              <SvgIcon
+                class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
+                name="sparks"
+              />
+            </UiModalPreviewTrigger>
             {{ formatNumber(supplyApyWithRewards) }}%
           </div>
         </div>
@@ -315,29 +317,37 @@ watchEffect(async () => {
       >
         <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
           Collateral exposure
-          <SvgIcon
+          <UiModalPreviewTrigger
             v-if="collateralAssets.length > 0"
-            class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-            name="info-circle"
-            @click="onCollateralInfoClick"
-          />
-        </div>
-        <div
-          v-if="collateralAssets.length > 0"
-          class="flex items-center gap-4 cursor-pointer"
-          @click="onCollateralInfoClick"
-        >
-          <AssetAvatar
-            :asset="collateralDisplayAssets"
-            size="20"
-          />
-          <span
-            v-if="collateralOverflowCount > 0"
-            class="text-p3 text-content-tertiary whitespace-nowrap"
+            :component="VaultCollateralExposureModal"
+            :modal-data="collateralExposureModalData"
+            aria-label="Show collateral exposure details"
           >
-            & {{ collateralOverflowCount }} more
-          </span>
+            <SvgIcon
+              class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+              name="info-circle"
+            />
+          </UiModalPreviewTrigger>
         </div>
+        <UiModalPreviewTrigger
+          v-if="collateralAssets.length > 0"
+          :component="VaultCollateralExposureModal"
+          :modal-data="collateralExposureModalData"
+          aria-label="Show collateral exposure details"
+        >
+          <div class="flex items-center gap-4 cursor-pointer">
+            <AssetAvatar
+              :asset="collateralDisplayAssets"
+              size="20"
+            />
+            <span
+              v-if="collateralOverflowCount > 0"
+              class="text-p3 text-content-tertiary whitespace-nowrap"
+            >
+              & {{ collateralOverflowCount }} more
+            </span>
+          </div>
+        </UiModalPreviewTrigger>
         <div
           v-else
           class="text-p2 text-content-primary"
@@ -422,31 +432,39 @@ watchEffect(async () => {
         <div class="flex-1">
           <div class="text-content-tertiary text-p3 flex items-center gap-4">
             Collateral exposure
-            <SvgIcon
+            <UiModalPreviewTrigger
               v-if="collateralAssets.length > 0"
-              class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-              name="info-circle"
-              @click="onCollateralInfoClick"
-            />
+              :component="VaultCollateralExposureModal"
+              :modal-data="collateralExposureModalData"
+              aria-label="Show collateral exposure details"
+            >
+              <SvgIcon
+                class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+                name="info-circle"
+              />
+            </UiModalPreviewTrigger>
           </div>
         </div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
-          <div
+          <UiModalPreviewTrigger
             v-if="collateralAssets.length > 0"
-            class="flex items-center gap-8 cursor-pointer"
-            @click="onCollateralInfoClick"
+            :component="VaultCollateralExposureModal"
+            :modal-data="collateralExposureModalData"
+            aria-label="Show collateral exposure details"
           >
-            <AssetAvatar
-              :asset="collateralDisplayAssets"
-              size="20"
-            />
-            <span
-              v-if="collateralOverflowCount > 0"
-              class="text-p3 text-content-tertiary whitespace-nowrap"
-            >
-              & {{ collateralOverflowCount }} more
-            </span>
-          </div>
+            <div class="flex items-center gap-8 cursor-pointer">
+              <AssetAvatar
+                :asset="collateralDisplayAssets"
+                size="20"
+              />
+              <span
+                v-if="collateralOverflowCount > 0"
+                class="text-p3 text-content-tertiary whitespace-nowrap"
+              >
+                & {{ collateralOverflowCount }} more
+              </span>
+            </div>
+          </UiModalPreviewTrigger>
           <div
             v-else
             class="text-p2 text-content-primary"

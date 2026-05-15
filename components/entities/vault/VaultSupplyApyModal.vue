@@ -6,12 +6,14 @@ import { PROVIDER_LABELS, PROVIDER_LOGOS } from '~/entities/reward-campaign'
 import type { IntrinsicApyInfo } from '~/entities/intrinsic-apy'
 
 const emits = defineEmits(['close'])
-const { lendingAPY, intrinsicAPY, intrinsicApyInfo, campaigns, baseApyAverageLabel } = defineProps<{
+const { lendingAPY, intrinsicAPY, intrinsicApyInfo, campaigns, baseApyAverageLabel, inline = false, close = true } = defineProps<{
   lendingAPY: number
   intrinsicAPY?: number
   intrinsicApyInfo?: IntrinsicApyInfo
   campaigns?: RewardCampaign[]
   baseApyAverageLabel?: string
+  inline?: boolean
+  close?: boolean
 }>()
 
 const rewardsTotalAPY = computed(() => {
@@ -47,6 +49,8 @@ const handleClose = () => {
 <template>
   <BaseModalWrapper
     title="Supply APY"
+    :inline="inline"
+    :close="close"
     @close="handleClose"
   >
     <div class="mb-24">
