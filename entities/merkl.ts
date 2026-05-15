@@ -131,6 +131,15 @@ export interface Opportunity {
           targetToken: string
         }
       }[]
+      // Used by EULER_BORROW_FROM_COLLATERAL (single entry) and
+      // EULER_MULTI_BORROW_FROM_COLLATERAL (multiple entries). Each vault
+      // pairs a borrow vault (evkAddress) with the list of collateral vaults
+      // eligible for the reward (collaterals[].tokenAddress is the EVK
+      // collateral vault address, not the underlying).
+      vaults?: {
+        evkAddress: string
+        collaterals?: { tokenAddress: string }[]
+      }[]
     }
     createdAt: string
   }[]
@@ -189,3 +198,23 @@ export interface RewardToken {
   price: number | null
   minimumAmountPerHour: string
 }
+
+export type MerklOpportunityType
+  = | 'EULER'
+    | 'MULTILENDBORROW'
+    | 'ERC20LOGPROCESSOR'
+    | 'EULER_BORROW_FROM_COLLATERAL'
+    | 'EULER_MULTI_BORROW_FROM_COLLATERAL'
+
+// Single source of truth for the proxy response shape and warm-cache fan-out.
+// Lowercase keys (`Lowercase<MerklOpportunityType>`) are derived from these
+// values so reordering this list cannot silently swap response payloads.
+export const MERKL_TYPES: readonly MerklOpportunityType[] = [
+  'EULER',
+  'MULTILENDBORROW',
+  'ERC20LOGPROCESSOR',
+  'EULER_BORROW_FROM_COLLATERAL',
+  'EULER_MULTI_BORROW_FROM_COLLATERAL',
+] as const
+
+export type MerklResponseKey = Lowercase<MerklOpportunityType>
