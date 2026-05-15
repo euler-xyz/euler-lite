@@ -15,8 +15,9 @@ export interface RewardCampaign {
   minMultiplier?: number
   maxMultiplier?: number
   // Address lists honoured by the campaign distributor, stored lowercase.
-  // - `whitelist` (when non-empty): only these recipients earn.
-  // - `blacklist`: these recipients never earn.
+  // - `whitelist` (when non-empty): only these recipients earn; it takes
+  //   precedence over blacklist.
+  // - `blacklist`: these recipients do not earn when there is no whitelist.
   whitelist?: string[]
   blacklist?: string[]
 }
@@ -29,6 +30,8 @@ export interface RewardCampaign {
  *     unidentified visitor is definitionally NOT on it, so they're ineligible.
  *   - A blacklist is an explicit deny-list; an unidentified visitor can't be
  *     on it, so they pass the blacklist check.
+ *   - When both are present, whitelist precedence matches Merkl's campaign
+ *     semantics: whitelist membership is sufficient for eligibility.
  *
  * Net result: discovery surfaces (no wallet connected) hide whitelisted
  * campaigns from the headline APR — they're not earnable by an arbitrary
@@ -39,7 +42,7 @@ export const isCampaignEligibleForAddress = (
   userAddress: string | undefined | null,
 ): boolean => {
   const addr = userAddress ? userAddress.toLowerCase() : ''
-  if (campaign.whitelist?.length && !campaign.whitelist.includes(addr)) return false
+  if (campaign.whitelist?.length) return campaign.whitelist.includes(addr)
   if (addr && campaign.blacklist?.includes(addr)) return false
   return true
 }
