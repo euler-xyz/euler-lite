@@ -6,6 +6,7 @@ import { getSpecialAddressLabel } from '~/utils/special-addresses'
 const { vault } = defineProps<{ vault: Vault }>()
 
 const { chainId } = useEulerAddresses()
+const { copyToClipboard, isCopied } = useClipboardCopy()
 
 // "Borrowable" = the vault has at least one collateral configured to allow
 // borrowing. Read from the vault's own LTV table rather than `borrowList`
@@ -78,8 +79,8 @@ const shortenAddress = (address: string) => {
   return `${address.slice(0, 6)}...${address.slice(-4)}`
 }
 
-const onCopyClick = (address: string) => {
-  navigator.clipboard.writeText(address)
+const onCopyClick = (address: string, key = address) => {
+  copyToClipboard(address, key)
 }
 
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
@@ -120,11 +121,11 @@ const getExplorerAddressLink = (address: string) => getExplorerLink(address, cha
           </NuxtLink>
           <button
             class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary"
-            @click="onCopyClick(infoItem.address)"
+            @click="onCopyClick(infoItem.address, infoItem.title)"
           >
             <SvgIcon
               class="!w-18 !h-18"
-              name="copy"
+              :name="isCopied(infoItem.title) ? 'check' : 'copy'"
             />
           </button>
         </div>

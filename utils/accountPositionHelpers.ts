@@ -92,10 +92,15 @@ export const resolvePositionCollaterals = (liquidityInfo: LensLiquidityInfo, fal
     || liquidityInfo?.collateralValuesLiquidation
     || liquidityInfo?.collateralValuesBorrowing
 
+  // Sort by value descending so the largest collateral is treated as primary
   if (infoCollaterals.length && Array.isArray(values) && values.length === infoCollaterals.length) {
-    const withValue = infoCollaterals.filter((_: string, idx: number) => toBigInt(values[idx]) > 0n)
-    if (withValue.length) {
-      return withValue
+    const ranked = infoCollaterals
+      .map((addr, idx) => ({ addr, value: toBigInt(values[idx]) }))
+      .filter(({ value }) => value > 0n)
+      .sort((a, b) => (a.value === b.value ? 0 : a.value > b.value ? -1 : 1))
+      .map(({ addr }) => addr)
+    if (ranked.length) {
+      return ranked
     }
   }
 

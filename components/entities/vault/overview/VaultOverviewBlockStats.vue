@@ -4,12 +4,10 @@ import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal, VaultBorrowApyModal } from '#components'
 
 const { vault } = defineProps<{ vault: Vault }>()
 
-const modal = useModal()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, getBorrowRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, hasSupplyRewards, hasBorrowRewards } = useRewardsApy()
 const isBorrowable = computed(() => vault.collateralLTVs.some(ltv => ltv.borrowLTV > 0n))
@@ -27,27 +25,23 @@ const borrowApyWithRewards = computed(() => withIntrinsicBorrowApy(
 const supplyRewardInfo = computed(() => getSupplyRewardCampaigns(vault.address))
 const borrowRewardInfo = computed(() => getBorrowRewardCampaigns(vault.address))
 
-const onSupplyInfoIconClick = () => {
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY: nanoToValue(vault.interestRateInfo.supplyAPY, 25),
-      intrinsicAPY: getIntrinsicApy(vault.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
-      campaigns: supplyRewardInfo.value,
-    },
-  })
-}
+const supplyApyModalData = computed(() => ({
+  props: {
+    lendingAPY: nanoToValue(vault.interestRateInfo.supplyAPY, 25),
+    intrinsicAPY: getIntrinsicApy(vault.asset.address),
+    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    campaigns: supplyRewardInfo.value,
+  },
+}))
 
-const onBorrowInfoIconClick = () => {
-  modal.open(VaultBorrowApyModal, {
-    props: {
-      borrowingAPY: nanoToValue(vault.interestRateInfo.borrowAPY, 25),
-      intrinsicAPY: getIntrinsicApy(vault.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
-      campaigns: borrowRewardInfo.value,
-    },
-  })
-}
+const borrowApyModalData = computed(() => ({
+  props: {
+    borrowingAPY: nanoToValue(vault.interestRateInfo.borrowAPY, 25),
+    intrinsicAPY: getIntrinsicApy(vault.asset.address),
+    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    campaigns: borrowRewardInfo.value,
+  },
+}))
 
 const utilization = computed(() => getVaultUtilization(vault))
 const utilisationWarning = computed(() => getUtilisationWarning(vault, 'general'))
@@ -102,20 +96,30 @@ watchEffect(async () => {
         <template #label>
           <span class="flex items-center gap-4">
             Supply APY
-            <SvgIcon
-              class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-              name="info-circle"
-              @click="onSupplyInfoIconClick"
-            />
+            <UiModalPreviewTrigger
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY breakdown"
+            >
+              <SvgIcon
+                class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                name="info-circle"
+              />
+            </UiModalPreviewTrigger>
           </span>
         </template>
         <span class="flex items-center gap-4">
-          <SvgIcon
+          <UiModalPreviewTrigger
             v-if="hasSupplyRewards(vault.address)"
-            class="!w-20 !h-20 text-accent-500 cursor-pointer"
-            name="sparks"
-            @click="onSupplyInfoIconClick"
-          />
+            :component="VaultSupplyApyModal"
+            :modal-data="supplyApyModalData"
+            aria-label="Show supply APY rewards breakdown"
+          >
+            <SvgIcon
+              class="!w-20 !h-20 text-accent-500 cursor-pointer"
+              name="sparks"
+            />
+          </UiModalPreviewTrigger>
           {{ formatNumber(supplyApyWithRewards) }}%
         </span>
       </VaultOverviewLabelValue>
@@ -126,20 +130,30 @@ watchEffect(async () => {
         <template #label>
           <span class="flex items-center gap-4">
             Borrow APY
-            <SvgIcon
-              class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-              name="info-circle"
-              @click="onBorrowInfoIconClick"
-            />
+            <UiModalPreviewTrigger
+              :component="VaultBorrowApyModal"
+              :modal-data="borrowApyModalData"
+              aria-label="Show borrow APY breakdown"
+            >
+              <SvgIcon
+                class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                name="info-circle"
+              />
+            </UiModalPreviewTrigger>
           </span>
         </template>
         <span class="flex items-center gap-4">
-          <SvgIcon
+          <UiModalPreviewTrigger
             v-if="hasBorrowRewards(vault.address)"
-            class="!w-20 !h-20 text-accent-500 cursor-pointer"
-            name="sparks"
-            @click="onBorrowInfoIconClick"
-          />
+            :component="VaultBorrowApyModal"
+            :modal-data="borrowApyModalData"
+            aria-label="Show borrow APY rewards breakdown"
+          >
+            <SvgIcon
+              class="!w-20 !h-20 text-accent-500 cursor-pointer"
+              name="sparks"
+            />
+          </UiModalPreviewTrigger>
           {{ formatNumber(borrowApyWithRewards) }}%
         </span>
       </VaultOverviewLabelValue>

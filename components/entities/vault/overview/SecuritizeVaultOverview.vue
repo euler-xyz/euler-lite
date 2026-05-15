@@ -13,7 +13,6 @@ import { getSpecialAddressLabel } from '~/utils/special-addresses'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { formatNumber, compactNumber, formatUsdValue, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
 
 const { vault } = defineProps<{ vault: SecuritizeVault, desktopOverview?: boolean }>()
@@ -22,10 +21,10 @@ const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enab
 
 const { client: rpcClient } = useRpcClient()
 const { chainId } = useEulerAddresses()
+const { copyToClipboard, isCopied } = useClipboardCopy()
 const { isVaultGovernorVerified } = useVaults()
 const { getEvkVaults } = useVaultRegistry()
 const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
-const modal = useModal()
 const { getSupplyRewardApy, getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
 const vaultAddress = computed(() => getAddress(vault.address))
 const product = useEulerProductOfVault(vaultAddress)
@@ -49,7 +48,7 @@ const shortenAddress = (address: string) => {
 }
 
 const onCopyClick = (address: string) => {
-  navigator.clipboard.writeText(address)
+  copyToClipboard(address)
 }
 
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
@@ -81,16 +80,14 @@ const rewardSupplyAPY = computed(() => getSupplyRewardApy(vault.address))
 const intrinsicApy = computed(() => getIntrinsicApy(vault.asset.address))
 const supplyApyWithRewards = computed(() => intrinsicApy.value + rewardSupplyAPY.value)
 
-const onSupplyInfoIconClick = () => {
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY: 0, // Securitize vaults don't have interest rates
-      intrinsicAPY: intrinsicApy.value,
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
-      campaigns: getSupplyRewardCampaigns(vault.address),
-    },
-  })
-}
+const supplyApyModalData = computed(() => ({
+  props: {
+    lendingAPY: 0, // Securitize vaults don't have interest rates
+    intrinsicAPY: intrinsicApy.value,
+    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    campaigns: getSupplyRewardCampaigns(vault.address),
+  },
+}))
 
 // Risk parameters - fetch share token exchange rate (ERC4626 standard)
 const shareTokenExchangeRate: Ref<bigint | undefined> = ref()
@@ -297,12 +294,17 @@ const supplyCapPercentageDisplay = computed(() => {
             Supply APY
           </template>
           <span class="flex items-center gap-4">
-            <SvgIcon
+            <UiModalPreviewTrigger
               v-if="hasSupplyRewards(vault.address)"
-              class="!w-20 !h-20 text-accent-500 cursor-pointer"
-              name="sparks"
-              @click="onSupplyInfoIconClick"
-            />
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY rewards breakdown"
+            >
+              <SvgIcon
+                class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                name="sparks"
+              />
+            </UiModalPreviewTrigger>
             {{ formatNumber(supplyApyWithRewards) }}%
           </span>
         </VaultOverviewLabelValue>
@@ -375,7 +377,7 @@ const supplyCapPercentageDisplay = computed(() => {
             >
               <SvgIcon
                 class="!w-18 !h-18"
-                name="copy"
+                :name="isCopied(vault.asset.address) ? 'check' : 'copy'"
               />
             </button>
           </div>
@@ -398,7 +400,7 @@ const supplyCapPercentageDisplay = computed(() => {
             >
               <SvgIcon
                 class="!w-18 !h-18"
-                name="copy"
+                :name="isCopied(vault.address) ? 'check' : 'copy'"
               />
             </button>
           </div>
@@ -422,7 +424,7 @@ const supplyCapPercentageDisplay = computed(() => {
             >
               <SvgIcon
                 class="!w-18 !h-18"
-                name="copy"
+                :name="isCopied(vault.governorAdmin) ? 'check' : 'copy'"
               />
             </button>
           </div>
