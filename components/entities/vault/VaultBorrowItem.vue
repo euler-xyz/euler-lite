@@ -289,7 +289,7 @@ const linkPath = computed(() => ({
             </span>
             <KeyringBadge v-if="isKeyring" />
             <GovernanceLimitedBadge v-if="isAnyGovernanceLimited" />
-            <CyclicalNoteBadge v-if="isCyclicalNote" />
+            <CyclicalNoteBadge v-if="isCyclicalNote && !isAnyGovernorUnverified" />
             <RestrictedBadge
               v-if="isGeoBlocked"
               variant="blocked"

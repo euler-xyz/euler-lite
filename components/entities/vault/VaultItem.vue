@@ -185,7 +185,7 @@ watchEffect(async () => {
           </span>
           <KeyringBadge v-if="isKeyring" />
           <GovernanceLimitedBadge v-if="isGovernanceLimited" />
-          <CyclicalNoteBadge v-if="isCyclicalNote" />
+          <CyclicalNoteBadge v-if="isCyclicalNote && isGovernorVerified" />
           <RestrictedBadge v-if="isGeoBlocked" />
           <span
             v-if="isDeprecated"
