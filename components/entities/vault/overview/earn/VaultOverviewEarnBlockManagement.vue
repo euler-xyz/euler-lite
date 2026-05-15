@@ -6,6 +6,7 @@ import { getSpecialAddressLabel } from '~/utils/special-addresses'
 
 const { vault } = defineProps<{ vault: EarnVault }>()
 const { chainId } = useEulerAddresses()
+const { copyToClipboard, isCopied } = useClipboardCopy()
 
 const vaultAddressesInfo = computed(() => ([
   {
@@ -36,8 +37,8 @@ const timelockDisplay = computed(() => {
   return formatTtl(timelockInDays)?.display || 'Unknown'
 })
 
-const onCopyClick = (address: string) => {
-  navigator.clipboard.writeText(address)
+const onCopyClick = (address: string, key = address) => {
+  copyToClipboard(address, key)
 }
 
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
@@ -65,11 +66,11 @@ const getExplorerAddressLink = (address: string) => getExplorerLink(address, cha
           </NuxtLink>
           <button
             class="text-neutral-400 cursor-pointer outline-none hover:text-neutral-600 active:text-neutral-700"
-            @click="onCopyClick(infoItem.address)"
+            @click="onCopyClick(infoItem.address, infoItem.title)"
           >
             <SvgIcon
               class="!w-18 !h-18"
-              name="copy"
+              :name="isCopied(infoItem.title) ? 'check' : 'copy'"
             />
           </button>
         </div>
