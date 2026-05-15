@@ -7,6 +7,7 @@ export interface ModalData {
   noLock?: boolean
   absolute?: boolean
   isNotClosable?: boolean
+  closeOnBackdropWhenAllowed?: boolean
   custom?: boolean
   props?: Record<string, any> // eslint-disable-line
   [key: string]: any // eslint-disable-line

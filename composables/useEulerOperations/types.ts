@@ -51,6 +51,7 @@ export interface OperationHelpers {
     userAddr: Address
     amount: bigint
     includePermit2Call?: boolean
+    directApproval?: boolean
   }) => Promise<{ steps: import('~/entities/txPlan').TxStep[], permitCall: import('~/utils/evc-converter').EVCCall | undefined, usesPermit2: boolean }>
 
   injectPythHealthCheckUpdates: (params: {
