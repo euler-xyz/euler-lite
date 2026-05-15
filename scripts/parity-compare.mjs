@@ -96,19 +96,22 @@ async function main() {
       dataReadyTimeoutMs: config.dataReadyTimeoutMs,
       networkIdleTimeoutMs: config.networkIdleTimeoutMs,
       persistenceRecheckMaxRatio: config.persistenceRecheckMaxRatio,
+      persistenceRecheckDelayMs: config.persistenceRecheckDelayMs,
       scrapeFailureLimit: config.scrapeFailureLimit,
       scenarioFilter: config.scenarioFilter,
       appPhased: config.appPhased,
       alternating: config.sequential,
       parallel: config.parallel,
       workDir: config.workDir,
+      resume: config.resume,
     })
 
     state.browser = await launchBrowser(config.headless)
     const scenarios = await loadScenarios(config)
-    let baselineSnapshots = []
-    let candidateSnapshots = []
-    let pageDiffs = []
+    const resumeState = config.resume ? await loadResumeState(config) : createEmptyResumeState()
+    let baselineSnapshots = [...resumeState.baselineSnapshots]
+    let candidateSnapshots = [...resumeState.candidateSnapshots]
+    let pageDiffs = [...resumeState.pageDiffs]
     const scrapeFailureGuard = createScrapeFailureGuard(config)
 
     if (config.appPhased) {
@@ -121,6 +124,10 @@ async function main() {
         candidate: run.candidate,
         state,
         scrapeFailureGuard,
+        resumeState,
+        initialBaselineSnapshots: baselineSnapshots,
+        initialCandidateSnapshots: candidateSnapshots,
+        initialPageDiffs: pageDiffs,
       })
       baselineSnapshots = result.baseline
       candidateSnapshots = result.candidate
@@ -138,6 +145,7 @@ async function main() {
         candidate: run.candidate,
         state,
         scrapeFailureGuard,
+        resumeState,
       })
       baselineSnapshots = result.baseline
       candidateSnapshots = result.candidate
@@ -194,12 +202,14 @@ async function main() {
       snapshots: candidateSnapshots,
     })
     await writeJson(path.join(config.outputDir, 'diff.json'), diff)
+    await writeJson(path.join(config.outputDir, 'progress.json'), buildProgressArtifact({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs }))
     await fs.writeFile(path.join(config.outputDir, 'report.html'), renderHtmlReport(diff), 'utf8')
     await fs.writeFile(path.join(ROOT_DIR, 'artifacts/parity/latest-run.json'), JSON.stringify({
       runId: config.runId,
       outputDir: config.outputDir,
       diff: path.join(config.outputDir, 'diff.json'),
       report: path.join(config.outputDir, 'report.html'),
+      progress: path.join(config.outputDir, 'progress.json'),
     }, null, 2) + '\n')
 
     printSummary(diff)
@@ -220,6 +230,7 @@ async function buildConfig() {
     || process.env.PARITY_OUTPUT_DIR
     || path.join(ROOT_DIR, 'artifacts/parity', runId),
   )
+  const resume = Boolean(args.flags.resume || process.env.PARITY_RESUME === '1')
   const alternating = Boolean(
     args.flags.alternating
     || args.flags.sequential
@@ -247,6 +258,7 @@ async function buildConfig() {
     baselinePort: Number(valueOf('baseline-port') || process.env.PARITY_BASELINE_PORT || 3100),
     candidatePort: Number(valueOf('candidate-port') || process.env.PARITY_CANDIDATE_PORT || 3200),
     headless: !args.flags.headed && process.env.PARITY_HEADED !== '1',
+    resume,
     noFail: Boolean(args.flags.noFail || args.flags['no-fail']),
     skipInstall: Boolean(args.flags.skipInstall || args.flags['skip-install'] || process.env.PARITY_SKIP_INSTALL === '1'),
     maxFollowItems: numberOrNull(valueOf('max-follow-items') || process.env.PARITY_MAX_FOLLOW_ITEMS),
@@ -258,6 +270,7 @@ async function buildConfig() {
     portfolioCaptureBudgetMs: Number(valueOf('portfolio-capture-budget-ms') || process.env.PARITY_PORTFOLIO_CAPTURE_BUDGET_MS || DEFAULT_PORTFOLIO_CAPTURE_BUDGET_MS),
     networkIdleTimeoutMs: Number(valueOf('network-idle-timeout-ms') || process.env.PARITY_NETWORK_IDLE_TIMEOUT_MS || DEFAULT_NETWORK_IDLE_TIMEOUT_MS),
     persistenceRecheckMaxRatio: Number(valueOf('persistence-recheck-max-ratio') || process.env.PARITY_PERSISTENCE_RECHECK_MAX_RATIO || DEFAULT_PERSISTENCE_RECHECK_MAX_RATIO),
+    persistenceRecheckDelayMs: Number(valueOf('persistence-recheck-delay-ms') || process.env.PARITY_PERSISTENCE_RECHECK_DELAY_MS || 0),
     scrapeFailureLimit: Number(valueOf('scrape-failure-limit') || process.env.PARITY_SCRAPE_FAILURE_LIMIT || DEFAULT_SCRAPE_FAILURE_LIMIT),
     navigationTimeoutMs: Number(valueOf('navigation-timeout-ms') || process.env.PARITY_NAVIGATION_TIMEOUT_MS || 45_000),
     navigationRetries: Number(valueOf('navigation-retries') || process.env.PARITY_NAVIGATION_RETRIES || 3),
@@ -512,38 +525,54 @@ async function runScenario({ run, scenario, config, browser, baseline, candidate
       for (let index = 0; index < limited.length; index += 1) {
         const link = limited[index]
         const detailPath = pathFromUrl(link.href)
-        const pageId = scenario.id + '/' + follow.id + '/' + String(index + 1).padStart(4, '0') + '-' + sanitizeFilePart(link.key || 'item')
-        const label = (follow.label || follow.id) + ' ' + (link.key || index + 1)
+        const captures = normalizeFollowCaptures(follow)
 
-        const baseDetail = await openAndCapture({
-          app: baseline,
-          context: baselineContext,
-          scenario: { ...scenario, label },
-          pageId,
-          pathName: detailPath,
-          waitFor: follow.waitFor || scenario.waitFor,
-          waitTimeoutMs: config.waitTimeoutMs,
-          dataReadyTimeoutMs: config.dataReadyTimeoutMs,
-          networkIdleTimeoutMs: config.networkIdleTimeoutMs,
-        })
-        const candidateDetail = await openAndCapture({
-          app: candidate,
-          context: candidateContext,
-          scenario: { ...scenario, label },
-          pageId,
-          pathName: detailPath,
-          waitFor: follow.waitFor || scenario.waitFor,
-          waitTimeoutMs: config.waitTimeoutMs,
-          dataReadyTimeoutMs: config.dataReadyTimeoutMs,
-          networkIdleTimeoutMs: config.networkIdleTimeoutMs,
-        })
+        for (const capture of captures) {
+          const pageIdParts = [
+            scenario.id,
+            follow.id,
+            String(index + 1).padStart(4, '0') + '-' + sanitizeFilePart(link.key || 'item'),
+          ]
+          if (capture.id) pageIdParts.push(sanitizeFilePart(capture.id))
+          const pageId = pageIdParts.join('/')
+          const label = (capture.label || follow.label || follow.id) + ' ' + (link.key || index + 1)
+          const followScenario = {
+            ...scenario,
+            label,
+            actions: capture.actions || follow.actions || [],
+            captureSelector: capture.captureSelector || follow.captureSelector || scenario.captureSelector,
+          }
 
-        baselineSnapshots.push(baseDetail.snapshot)
-        candidateSnapshots.push(candidateDetail.snapshot)
-        diffs.push(compareSnapshots(baseDetail.snapshot, candidateDetail.snapshot, config))
-        await writeIncrementalJsonArtifacts({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs: diffs })
-        scrapeFailureGuard.observe(baseDetail.snapshot)
-        scrapeFailureGuard.observe(candidateDetail.snapshot)
+          const baseDetail = await openAndCapture({
+            app: baseline,
+            context: baselineContext,
+            scenario: followScenario,
+            pageId,
+            pathName: detailPath,
+            waitFor: capture.waitFor || follow.waitFor || scenario.waitFor,
+            waitTimeoutMs: config.waitTimeoutMs,
+            dataReadyTimeoutMs: config.dataReadyTimeoutMs,
+            networkIdleTimeoutMs: config.networkIdleTimeoutMs,
+          })
+          const candidateDetail = await openAndCapture({
+            app: candidate,
+            context: candidateContext,
+            scenario: followScenario,
+            pageId,
+            pathName: detailPath,
+            waitFor: capture.waitFor || follow.waitFor || scenario.waitFor,
+            waitTimeoutMs: config.waitTimeoutMs,
+            dataReadyTimeoutMs: config.dataReadyTimeoutMs,
+            networkIdleTimeoutMs: config.networkIdleTimeoutMs,
+          })
+
+          baselineSnapshots.push(baseDetail.snapshot)
+          candidateSnapshots.push(candidateDetail.snapshot)
+          diffs.push(compareSnapshots(baseDetail.snapshot, candidateDetail.snapshot, config))
+          await writeIncrementalJsonArtifacts({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs: diffs })
+          scrapeFailureGuard.observe(baseDetail.snapshot)
+          scrapeFailureGuard.observe(candidateDetail.snapshot)
+        }
       }
     }
 
@@ -683,10 +712,23 @@ async function runScenariosSequentialByPage({ run, scenarios, config, browser, b
   }
 }
 
-async function runScenariosAppPhased({ run, scenarios, config, browser, baseline, candidate, state, scrapeFailureGuard }) {
-  const baselineSnapshots = []
-  const candidateSnapshots = []
-  const diffs = []
+async function runScenariosAppPhased({
+  run,
+  scenarios,
+  config,
+  browser,
+  baseline,
+  candidate,
+  state,
+  scrapeFailureGuard,
+  resumeState = createEmptyResumeState(),
+  initialBaselineSnapshots = [],
+  initialCandidateSnapshots = [],
+  initialPageDiffs = [],
+}) {
+  const baselineSnapshots = initialBaselineSnapshots
+  const candidateSnapshots = initialCandidateSnapshots
+  const diffs = initialPageDiffs
   const candidateQueue = []
 
   // Default fast path: capture all baseline pages first, then all candidate
@@ -714,9 +756,10 @@ async function runScenariosAppPhased({ run, scenarios, config, browser, baseline
         plan: mainPlan,
         follows: scenario.follow || [],
         state,
+        resumeState,
       })
 
-      baselineSnapshots.push(baselineResult.snapshot)
+      appendSnapshotIfNew(baselineSnapshots, resumeState.baselineByPageId, baselineResult.snapshot)
       candidateQueue.push({
         type: 'page',
         plan: mainPlan,
@@ -726,7 +769,7 @@ async function runScenariosAppPhased({ run, scenarios, config, browser, baseline
       scrapeFailureGuard.observe(baselineResult.snapshot)
 
       for (const baselineModal of baselineResult.modalPlans) {
-        baselineSnapshots.push(baselineModal.snapshot)
+        appendSnapshotIfNew(baselineSnapshots, resumeState.baselineByPageId, baselineModal.snapshot)
         candidateQueue.push({
           type: 'modal',
           plan: baselineModal,
@@ -745,9 +788,10 @@ async function runScenariosAppPhased({ run, scenarios, config, browser, baseline
           runtime: baselineRuntime,
           plan: followPlan,
           state,
+          resumeState,
         })
 
-        baselineSnapshots.push(baselineDetail.snapshot)
+        appendSnapshotIfNew(baselineSnapshots, resumeState.baselineByPageId, baselineDetail.snapshot)
         candidateQueue.push({
           type: 'page',
           plan: followPlan,
@@ -757,7 +801,7 @@ async function runScenariosAppPhased({ run, scenarios, config, browser, baseline
         scrapeFailureGuard.observe(baselineDetail.snapshot)
 
         for (const baselineModal of baselineDetail.modalPlans) {
-          baselineSnapshots.push(baselineModal.snapshot)
+          appendSnapshotIfNew(baselineSnapshots, resumeState.baselineByPageId, baselineModal.snapshot)
           candidateQueue.push({
             type: 'modal',
             plan: baselineModal,
@@ -783,10 +827,17 @@ async function runScenariosAppPhased({ run, scenarios, config, browser, baseline
   try {
     console.log('[parity-compare] Running candidate phase: ' + candidateQueue.length + ' page/modal captures')
     for (const item of candidateQueue) {
-      let candidateSnapshot = null
+      let candidateSnapshot = resumeState.candidateByPageId.get(item.baselineSnapshot.pageId) || null
+      const existingDiff = resumeState.diffByPageId.get(item.baselineSnapshot.pageId)
+
+      if (candidateSnapshot && existingDiff) {
+        console.log('[parity-compare] Resume skip candidate ' + item.baselineSnapshot.pageId)
+        continue
+      }
 
       if (
-        item.type === 'modal'
+        !candidateSnapshot
+        && item.type === 'modal'
         && currentCandidatePage
         && currentCandidatePage.pageId === item.plan.parentPageId
         && currentCandidatePage.pathName === item.plan.pathName
@@ -798,7 +849,7 @@ async function runScenariosAppPhased({ run, scenarios, config, browser, baseline
           plan: item.plan,
         })
       }
-      else if (item.type === 'modal') {
+      else if (!candidateSnapshot && item.type === 'modal') {
         candidateSnapshot = await captureModalPlanSequential({
           appDefinition: candidate,
           app: candidateApp,
@@ -813,7 +864,7 @@ async function runScenariosAppPhased({ run, scenarios, config, browser, baseline
           pathName: item.plan.pathName,
         }
       }
-      else {
+      else if (!candidateSnapshot) {
         const result = await capturePlanSequential({
           appDefinition: candidate,
           app: candidateApp,
@@ -831,8 +882,8 @@ async function runScenariosAppPhased({ run, scenarios, config, browser, baseline
         }
       }
 
-      candidateSnapshots.push(candidateSnapshot)
-      diffs.push(compareSnapshots(item.baselineSnapshot, candidateSnapshot, config))
+      appendSnapshotIfNew(candidateSnapshots, resumeState.candidateByPageId, candidateSnapshot)
+      appendDiffIfNew(diffs, resumeState.diffByPageId, compareSnapshots(item.baselineSnapshot, candidateSnapshot, config))
       await writeIncrementalJsonArtifacts({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs: diffs })
       scrapeFailureGuard.observe(candidateSnapshot)
     }
@@ -872,28 +923,27 @@ async function verifyPersistentDiscrepancies({ diff, run, config, browser, scena
     return
   }
 
-  const failedRatio = failedPages.length / Math.max(diff.pages.length, 1)
-  if (failedRatio > config.persistenceRecheckMaxRatio) {
+  const scenarioById = new Map(scenarios.map(scenario => [scenario.id, scenario]))
+  const recheckPlan = buildPersistenceRecheckPlan(diff.pages, failedPages, scenarioById, scenarios[0], config)
+  if (!recheckPlan.pages.length) {
     diff.persistenceSummary = {
       checked: 0,
       persistent: 0,
       resolved: 0,
       failed: 0,
       skipped: failedPages.length,
-      reason: 'discrepancy-ratio-exceeded',
-      failedRatio,
-      maxRatio: config.persistenceRecheckMaxRatio,
+      skippedByScenario: recheckPlan.skippedByScenario,
     }
-    console.log('[parity-compare] Skipping reload recheck: '
-      + failedPages.length + '/' + diff.pages.length
-      + ' discrepant captures exceeds '
-      + Math.round(config.persistenceRecheckMaxRatio * 100)
-      + '% threshold')
+    console.log('[parity-compare] Skipping reload recheck: all discrepant captures exceeded scenario thresholds')
     return
   }
 
-  console.log('[parity-compare] Rechecking ' + failedPages.length + ' discrepant page(s) after reload')
-  const scenarioById = new Map(scenarios.map(scenario => [scenario.id, scenario]))
+  if (recheckPlan.delayMs > 0) {
+    console.log('[parity-compare] Waiting ' + formatDuration(recheckPlan.delayMs) + ' before reload recheck')
+    await sleep(recheckPlan.delayMs)
+  }
+
+  console.log('[parity-compare] Rechecking ' + recheckPlan.pages.length + ' discrepant page(s) after reload')
   const baselineApp = await startOrAttach(run.baseline, config)
   const candidateApp = await startOrAttach(run.candidate, config)
   state.apps = [baselineApp, candidateApp]
@@ -901,7 +951,7 @@ async function verifyPersistentDiscrepancies({ diff, run, config, browser, scena
   const baselineRuntime = await createAppPhaseRuntime(browser, scenarios[0])
   const candidateRuntime = await createAppPhaseRuntime(browser, scenarios[0])
 
-  const groups = groupPersistenceRecheckPages(failedPages, scenarioById, scenarios[0])
+  const groups = groupPersistenceRecheckPages(recheckPlan.pages, scenarioById, scenarios[0])
   const results = []
   try {
     for (const group of groups) {
@@ -964,9 +1014,64 @@ async function verifyPersistentDiscrepancies({ diff, run, config, browser, scena
     persistent: results.filter(result => result.status === 'persistent').length,
     resolved: results.filter(result => result.status === 'resolved-after-reload').length,
     failed: results.filter(result => result.status === 'verification-failed').length,
-    skipped: 0,
+    skipped: recheckPlan.skippedPages.length,
+    skippedByScenario: recheckPlan.skippedByScenario,
+    delayMs: recheckPlan.delayMs,
   }
   finalizeDiffAfterPersistence(diff)
+}
+
+function buildPersistenceRecheckPlan(allPages, failedPages, scenarioById, fallbackScenario, config) {
+  const countsByScenario = new Map()
+  for (const page of allPages) {
+    const key = page.scenarioId || fallbackScenario?.id || 'unknown'
+    const counts = countsByScenario.get(key) || { total: 0, failed: 0 }
+    counts.total += 1
+    if (page.status !== 'pass') counts.failed += 1
+    countsByScenario.set(key, counts)
+  }
+
+  const pages = []
+  const skippedPages = []
+  const skippedByScenario = []
+  let delayMs = 0
+
+  for (const page of failedPages) {
+    const scenario = scenarioById.get(page.scenarioId) || fallbackScenario || {}
+    const counts = countsByScenario.get(page.scenarioId) || { total: allPages.length, failed: failedPages.length }
+    const maxRatio = numericSetting(scenario.persistenceRecheckMaxRatio, config.persistenceRecheckMaxRatio)
+    const failedRatio = counts.failed / Math.max(counts.total, 1)
+
+    if (failedRatio > maxRatio) {
+      skippedPages.push(page)
+      continue
+    }
+
+    delayMs = Math.max(delayMs, numericSetting(scenario.persistenceRecheckDelayMs, config.persistenceRecheckDelayMs))
+    pages.push(page)
+  }
+
+  for (const [scenarioId, counts] of countsByScenario.entries()) {
+    if (!counts.failed) continue
+    const scenario = scenarioById.get(scenarioId) || fallbackScenario || {}
+    const maxRatio = numericSetting(scenario.persistenceRecheckMaxRatio, config.persistenceRecheckMaxRatio)
+    const failedRatio = counts.failed / Math.max(counts.total, 1)
+    if (failedRatio <= maxRatio) continue
+    skippedByScenario.push({
+      scenarioId,
+      failed: counts.failed,
+      total: counts.total,
+      failedRatio,
+      maxRatio,
+    })
+    console.log('[parity-compare] Skipping reload recheck for ' + scenarioId + ': '
+      + counts.failed + '/' + counts.total
+      + ' discrepant captures exceeds '
+      + Math.round(maxRatio * 100)
+      + '% threshold')
+  }
+
+  return { pages, skippedPages, skippedByScenario, delayMs }
 }
 
 function groupPersistenceRecheckPages(pageDiffs, scenarioById, fallbackScenario) {
@@ -1097,7 +1202,7 @@ function scenarioLocalStorage(scenario) {
   return scenario?.localStorage || scenario?.defaults?.localStorage || {}
 }
 
-async function capturePlanAndFollowPlans({ appDefinition, app: startedApp = null, config, browser, runtime = null, plan, follows, state }) {
+async function capturePlanAndFollowPlans({ appDefinition, app: startedApp = null, config, browser, runtime = null, plan, follows, state, resumeState = createEmptyResumeState() }) {
   const ownsApp = !startedApp
   const app = startedApp || await startOrAttach(appDefinition, config)
   if (ownsApp) state.apps = [app]
@@ -1133,15 +1238,30 @@ async function capturePlanAndFollowPlans({ appDefinition, app: startedApp = null
       for (let index = 0; index < limited.length; index += 1) {
         const link = limited[index]
         const detailPath = pathFromUrl(link.href)
-        const pageId = plan.pageId + '/' + follow.id + '/' + String(index + 1).padStart(4, '0') + '-' + sanitizeFilePart(link.key || 'item')
-        const label = (follow.label || follow.id) + ' ' + (link.key || index + 1)
+        const captures = normalizeFollowCaptures(follow)
 
-        followPlans.push({
-          pageId,
-          scenario: { ...plan.scenario, label },
-          pathName: detailPath,
-          waitFor: follow.waitFor || plan.waitFor,
-        })
+        for (const capture of captures) {
+          const pageIdParts = [
+            plan.pageId,
+            follow.id,
+            String(index + 1).padStart(4, '0') + '-' + sanitizeFilePart(link.key || 'item'),
+          ]
+          if (capture.id) pageIdParts.push(sanitizeFilePart(capture.id))
+          const pageId = pageIdParts.join('/')
+          const label = (capture.label || follow.label || follow.id) + ' ' + (link.key || index + 1)
+
+          followPlans.push({
+            pageId,
+            scenario: {
+              ...plan.scenario,
+              label,
+              actions: capture.actions || follow.actions || [],
+              captureSelector: capture.captureSelector || follow.captureSelector || plan.scenario.captureSelector,
+            },
+            pathName: detailPath,
+            waitFor: capture.waitFor || follow.waitFor || plan.waitFor,
+          })
+        }
       }
     }
 
@@ -1155,7 +1275,12 @@ async function capturePlanAndFollowPlans({ appDefinition, app: startedApp = null
       dataReadyTimeoutMs: config.dataReadyTimeoutMs,
       networkIdleTimeoutMs: config.networkIdleTimeoutMs,
       parentWaitFor: plan.waitFor,
+      resumeState,
     })
+
+    if (resumeState.enabled && resumeState.baselineByPageId.has(plan.pageId)) {
+      pageResult.snapshot = resumeState.baselineByPageId.get(plan.pageId)
+    }
 
     return {
       snapshot: pageResult.snapshot,
@@ -1172,7 +1297,7 @@ async function capturePlanAndFollowPlans({ appDefinition, app: startedApp = null
   }
 }
 
-async function capturePlanWithModalsSequential({ appDefinition, app: startedApp = null, config, browser, runtime = null, plan, state }) {
+async function capturePlanWithModalsSequential({ appDefinition, app: startedApp = null, config, browser, runtime = null, plan, state, resumeState = createEmptyResumeState() }) {
   const ownsApp = !startedApp
   const app = startedApp || await startOrAttach(appDefinition, config)
   if (ownsApp) state.apps = [app]
@@ -1197,8 +1322,12 @@ async function capturePlanWithModalsSequential({ appDefinition, app: startedApp 
       keepPage: true,
     })
 
+    const snapshot = resumeState.enabled && resumeState.baselineByPageId.has(plan.pageId)
+      ? resumeState.baselineByPageId.get(plan.pageId)
+      : pageResult.snapshot
+
     return {
-      snapshot: pageResult.snapshot,
+      snapshot,
       modalPlans: await captureModalPlansOnPage({
         page: pageResult.page,
         scenario: plan.scenario,
@@ -1209,6 +1338,7 @@ async function capturePlanWithModalsSequential({ appDefinition, app: startedApp 
         dataReadyTimeoutMs: config.dataReadyTimeoutMs,
         networkIdleTimeoutMs: config.networkIdleTimeoutMs,
         parentWaitFor: plan.waitFor,
+        resumeState,
       }),
     }
   }
@@ -1608,6 +1738,71 @@ async function openAndCapture({
   }
 }
 
+function createEmptyResumeState() {
+  return {
+    enabled: false,
+    baselineSnapshots: [],
+    candidateSnapshots: [],
+    pageDiffs: [],
+    baselineByPageId: new Map(),
+    candidateByPageId: new Map(),
+    diffByPageId: new Map(),
+  }
+}
+
+async function loadResumeState(config) {
+  const state = createEmptyResumeState()
+  state.enabled = true
+
+  const baseline = await readJsonIfExists(path.join(config.outputDir, 'baseline.json'))
+  const candidate = await readJsonIfExists(path.join(config.outputDir, 'candidate.json'))
+  const diff = await readJsonIfExists(path.join(config.outputDir, 'diff.json'))
+
+  state.baselineSnapshots = Array.isArray(baseline?.snapshots) ? baseline.snapshots : []
+  state.candidateSnapshots = Array.isArray(candidate?.snapshots) ? candidate.snapshots : []
+  state.pageDiffs = Array.isArray(diff?.pages) ? diff.pages : []
+  state.baselineByPageId = mapSnapshotsByPageId(state.baselineSnapshots)
+  state.candidateByPageId = mapSnapshotsByPageId(state.candidateSnapshots)
+  state.diffByPageId = new Map(state.pageDiffs.map(page => [page.pageId, page]))
+
+  console.log('[parity-compare] Resume enabled from ' + config.outputDir
+    + ': ' + state.baselineSnapshots.length + ' baseline snapshot(s), '
+    + state.candidateSnapshots.length + ' candidate snapshot(s), '
+    + state.pageDiffs.length + ' diff(s)')
+
+  return state
+}
+
+async function readJsonIfExists(filePath) {
+  try {
+    return JSON.parse(await fs.readFile(filePath, 'utf8'))
+  }
+  catch (error) {
+    if (error?.code === 'ENOENT') return null
+    throw error
+  }
+}
+
+function mapSnapshotsByPageId(snapshots) {
+  return new Map((snapshots || []).map(snapshot => [snapshot.pageId, snapshot]))
+}
+
+function appendSnapshotIfNew(list, map, snapshot) {
+  if (!snapshot?.pageId) return false
+  if (map.has(snapshot.pageId)) return false
+  list.push(snapshot)
+  map.set(snapshot.pageId, snapshot)
+  return true
+}
+
+function appendDiffIfNew(list, map, diff) {
+  if (!diff?.pageId) return false
+  if (map.has(diff.pageId)) return false
+  list.push(diff)
+  map.set(diff.pageId, diff)
+  return true
+}
+
 async function scrapeCurrentPage(page, meta, createFailureSnapshot) {
   try {
     return await page.evaluate(scrapePage, meta)
@@ -2004,6 +2199,7 @@ async function captureModalPlansOnPage({
   dataReadyTimeoutMs = DEFAULT_DATA_READY_TIMEOUT_MS,
   parentWaitFor = null,
   onlyModalId = null,
+  resumeState = createEmptyResumeState(),
 }) {
   const modalCaptures = scenario.modals || []
   const snapshots = []
@@ -2023,38 +2219,50 @@ async function captureModalPlansOnPage({
       const label = (modal.label || modal.id) + ' ' + (index + 1)
       const captureStartedAt = Date.now()
       let captureError = null
+      let snapshot = resumeState.enabled ? resumeState.baselineByPageId.get(modalPageId) : null
 
-      try {
-        await locator.nth(index).click({ timeout: effectiveModalWaitTimeoutMs })
-        await waitForSelectors(page, modal.waitFor || ['[data-id="data-point"]'], effectiveModalWaitTimeoutMs)
-        await waitForPageDataReady(page, scenario, modal.dataReadyTimeoutMs ?? dataReadyTimeoutMs)
-        await page.waitForTimeout(modal.settleMs ?? scenario.settleMs ?? 0)
-        const remainingMinCaptureMs = MODAL_MIN_CAPTURE_MS - (Date.now() - captureStartedAt)
-        if (remainingMinCaptureMs > 0) {
-          await page.waitForTimeout(remainingMinCaptureMs)
+      if (snapshot) {
+        console.log('[parity-compare] Resume skip baseline ' + modalPageId)
+      }
+      else {
+        try {
+          await locator.nth(index).click({ timeout: effectiveModalWaitTimeoutMs })
+          await waitForSelectors(page, modal.waitFor || ['[data-id="data-point"]'], effectiveModalWaitTimeoutMs)
+          await waitForPageDataReady(page, scenario, modal.dataReadyTimeoutMs ?? dataReadyTimeoutMs)
+          if (modal.actions?.length) {
+            await performScenarioActions(page, { ...scenario, actions: modal.actions }, {
+              waitTimeoutMs: effectiveModalWaitTimeoutMs,
+              dataReadyTimeoutMs: modal.dataReadyTimeoutMs ?? dataReadyTimeoutMs,
+            })
+          }
+          await page.waitForTimeout(modal.settleMs ?? scenario.settleMs ?? 0)
+          const remainingMinCaptureMs = MODAL_MIN_CAPTURE_MS - (Date.now() - captureStartedAt)
+          if (remainingMinCaptureMs > 0) {
+            await page.waitForTimeout(remainingMinCaptureMs)
+          }
+          await hydrateModalBeforeScrape(page)
         }
-        await hydrateModalBeforeScrape(page)
-      }
-      catch (error) {
-        captureError = error.message
-      }
+        catch (error) {
+          captureError = error.message
+        }
 
-      const snapshot = await page.evaluate(scrapePage, {
-        pageId: modalPageId,
-        scenarioId: scenario.id,
-        label,
-        appName,
-        compareOptions: scenarioCompareOptions(scenario),
-      })
-      snapshot.requestedPath = pathName
-      snapshot.waitFor = parentWaitFor || scenario.waitFor || []
-      snapshot.parentWaitFor = parentWaitFor || scenario.waitFor || []
-      snapshot.path = new URL(page.url()).pathname + new URL(page.url()).search
-      snapshot.captureDurationMs = Date.now() - captureStartedAt
-      snapshot.captureBudgetMs = effectiveCaptureBudget(scenario, pathName)
-      snapshot.slowCapture = snapshot.captureDurationMs > snapshot.captureBudgetMs
-      snapshot.captureError = captureError
-      snapshot.console = []
+        snapshot = await page.evaluate(scrapePage, {
+          pageId: modalPageId,
+          scenarioId: scenario.id,
+          label,
+          appName,
+          compareOptions: scenarioCompareOptions(scenario),
+        })
+        snapshot.requestedPath = pathName
+        snapshot.waitFor = parentWaitFor || scenario.waitFor || []
+        snapshot.parentWaitFor = parentWaitFor || scenario.waitFor || []
+        snapshot.path = new URL(page.url()).pathname + new URL(page.url()).search
+        snapshot.captureDurationMs = Date.now() - captureStartedAt
+        snapshot.captureBudgetMs = effectiveCaptureBudget(scenario, pathName)
+        snapshot.slowCapture = snapshot.captureDurationMs > snapshot.captureBudgetMs
+        snapshot.captureError = captureError
+        snapshot.console = []
+      }
 
       snapshots.push({
         modalId,
@@ -2067,7 +2275,9 @@ async function captureModalPlansOnPage({
         snapshot,
       })
 
-      await closeModal(page)
+      if (!resumeState.enabled || !resumeState.baselineByPageId.has(modalPageId)) {
+        await closeModal(page)
+      }
     }
   }
 
@@ -2163,6 +2373,18 @@ function limitFollowLinks(links, follow, config) {
   const max = config.maxFollowItems ?? follow.maxItems ?? null
   if (!max || max < 0) return links
   return links.slice(0, max)
+}
+
+function normalizeFollowCaptures(follow = {}) {
+  const captures = Array.isArray(follow.captures) ? follow.captures.filter(Boolean) : []
+  if (!captures.length) return [{ id: '', label: follow.label || follow.id || '' }]
+  return captures.map(capture => ({
+    id: capture.id || '',
+    label: capture.label || follow.label || follow.id || '',
+    waitFor: capture.waitFor,
+    actions: capture.actions,
+    captureSelector: capture.captureSelector,
+  }))
 }
 
 function scrapePage(meta) {
@@ -3154,6 +3376,15 @@ function compareComparableValues(baseline, candidate, numericTolerance) {
   const baselineDisplayAmount = parsePrimaryDisplayAmount(baseline)
   const candidateDisplayAmount = parsePrimaryDisplayAmount(candidate)
   if (baselineDisplayAmount && candidateDisplayAmount) {
+    if (baselineDisplayAmount.kind === 'token' && candidateDisplayAmount.kind === 'currency') {
+      return {
+        matches: true,
+        mode: 'baseline-token-candidate-currency',
+        baselineNumber: baselineDisplayAmount.value,
+        candidateNumber: candidateDisplayAmount.value,
+      }
+    }
+
     const difference = Math.abs(baselineDisplayAmount.value - candidateDisplayAmount.value)
     const denominator = Math.max(Math.abs(baselineDisplayAmount.value), Math.abs(candidateDisplayAmount.value), Number.EPSILON)
     const allowedDifference = Math.max(denominator * numericTolerance, DISPLAY_AMOUNT_ABSOLUTE_TOLERANCE)
@@ -3234,6 +3465,8 @@ function parsePrimaryDisplayAmountLine(line) {
   if (!Number.isFinite(parsed)) return null
 
   const suffix = /^[kKmMbBtT](?![A-Za-z])/.test(after) ? after[0].toLowerCase() : ''
+  const hasCurrencySymbol = /[$€£¥₿]/.test(before)
+  const hasTokenUnit = !hasCurrencySymbol && /^[A-Za-z][A-Za-z0-9-]*/.test(after)
   const multiplier = suffix === 'k'
     ? 1_000
     : suffix === 'm'
@@ -3244,7 +3477,10 @@ function parsePrimaryDisplayAmountLine(line) {
           ? 1_000_000_000_000
           : 1
 
-  return { value: parsed * multiplier }
+  return {
+    value: parsed * multiplier,
+    kind: hasCurrencySymbol ? 'currency' : hasTokenUnit ? 'token' : 'number',
+  }
 }
 
 function summarizeElement(element) {
@@ -3273,6 +3509,7 @@ function buildDiff({ run, config, outputDir, baselineSnapshots, candidateSnapsho
       candidate: path.join(outputDir, 'candidate.json'),
       diff: path.join(outputDir, 'diff.json'),
       report: path.join(outputDir, 'report.html'),
+      progress: path.join(outputDir, 'progress.json'),
     },
     summary: buildDiffSummary(pageDiffs, {
       baselineSnapshots: baselineSnapshots.length,
@@ -3355,13 +3592,30 @@ async function writeIncrementalJsonArtifacts({ run, config, baselineSnapshots, c
       snapshots: candidateSnapshots,
     }),
     writeJson(path.join(config.outputDir, 'diff.json'), diff),
+    writeJson(path.join(config.outputDir, 'progress.json'), buildProgressArtifact({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs })),
+    fs.writeFile(path.join(config.outputDir, 'report.html'), renderHtmlReport(diff), 'utf8'),
     fs.writeFile(path.join(ROOT_DIR, 'artifacts/parity/latest-run.json'), JSON.stringify({
       runId: config.runId,
       outputDir: config.outputDir,
       diff: path.join(config.outputDir, 'diff.json'),
       report: path.join(config.outputDir, 'report.html'),
+      progress: path.join(config.outputDir, 'progress.json'),
     }, null, 2) + '\n'),
   ])
+}
+
+function buildProgressArtifact({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs }) {
+  return {
+    runId: run.runId,
+    outputDir: config.outputDir,
+    updatedAt: new Date().toISOString(),
+    baselineSnapshots: baselineSnapshots.length,
+    candidateSnapshots: candidateSnapshots.length,
+    diffs: pageDiffs.length,
+    baselinePageIds: baselineSnapshots.map(snapshot => snapshot.pageId),
+    candidatePageIds: candidateSnapshots.map(snapshot => snapshot.pageId),
+    diffPageIds: pageDiffs.map(page => page.pageId),
+  }
 }
 
 function createScrapeFailureGuard(config) {
@@ -3551,6 +3805,8 @@ async function loadScenarios(config) {
       rateLimitRetries: scenario.rateLimitRetries ?? defaults.rateLimitRetries ?? config.rateLimitRetries,
       navigationRetries: scenario.navigationRetries ?? defaults.navigationRetries ?? config.navigationRetries,
       navigationTimeoutMs: scenario.navigationTimeoutMs ?? defaults.navigationTimeoutMs ?? config.navigationTimeoutMs,
+      persistenceRecheckMaxRatio: scenario.persistenceRecheckMaxRatio ?? defaults.persistenceRecheckMaxRatio ?? config.persistenceRecheckMaxRatio,
+      persistenceRecheckDelayMs: scenario.persistenceRecheckDelayMs ?? defaults.persistenceRecheckDelayMs ?? config.persistenceRecheckDelayMs,
     }))
     .flatMap(expandScenarioVariants)
 
@@ -3833,6 +4089,18 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+function numericSetting(value, fallback) {
+  const parsed = Number(value ?? fallback)
+  return Number.isFinite(parsed) ? parsed : Number(fallback)
+}
+
+function formatDuration(ms) {
+  const seconds = Math.round(Number(ms) / 1000)
+  if (seconds >= 60 && seconds % 60 === 0) return (seconds / 60) + ' min'
+  if (seconds >= 60) return Math.floor(seconds / 60) + ' min ' + (seconds % 60) + ' sec'
+  return seconds + ' sec'
+}
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -3869,7 +4137,8 @@ Options:
   --wait-timeout-ms <n>       Per-selector and modal action timeout. Default: ${DEFAULT_WAIT_TIMEOUT_MS}.
   --data-ready-timeout-ms <n> Wait for visible loading placeholders to clear. Default: ${DEFAULT_DATA_READY_TIMEOUT_MS}.
   --network-idle-timeout-ms <n> Network idle wait after selectors. Default: ${DEFAULT_NETWORK_IDLE_TIMEOUT_MS}.
-  --persistence-recheck-max-ratio <n> Skip reload recheck above this discrepant capture ratio. Default: ${DEFAULT_PERSISTENCE_RECHECK_MAX_RATIO}.
+  --persistence-recheck-max-ratio <n> Default reload recheck skip ratio. Scenario defaults or scenarios can override.
+  --persistence-recheck-delay-ms <n> Default delay before reload recheck. Scenario defaults or scenarios can override.
   --scrape-failure-limit <n> Stop after this many consecutive failed/empty scrapes. Default: ${DEFAULT_SCRAPE_FAILURE_LIMIT}.
   --navigation-timeout-ms <n> Per-page navigation timeout. Default: 45000.
   --navigation-retries <n>    Retry page navigations before recording a capture error. Default: 3.
@@ -3880,6 +4149,7 @@ Options:
   --sequential                Legacy alias for --alternating.
   --parallel                  Run both apps together and compare each scenario before moving on.
   --headed                    Show browser.
+  --resume                    Continue from existing artifacts in --output-dir.
   --no-fail                   Exit 0 even when diffs are found.
   --skip-install              Do not run npm ci in missing-node_modules worktrees.
   --skip-build                Reuse existing .output production builds.
@@ -3898,11 +4168,13 @@ Environment:
   PARITY_RATE_LIMIT_RETRIES   Same as --rate-limit-retries.
   PARITY_DATA_READY_TIMEOUT_MS Same as --data-ready-timeout-ms.
   PARITY_PERSISTENCE_RECHECK_MAX_RATIO Same as --persistence-recheck-max-ratio.
+  PARITY_PERSISTENCE_RECHECK_DELAY_MS Same as --persistence-recheck-delay-ms.
   PARITY_SCRAPE_FAILURE_LIMIT Same as --scrape-failure-limit.
   PARITY_NAVIGATION_TIMEOUT_MS Same as --navigation-timeout-ms.
   PARITY_NAVIGATION_RETRIES   Same as --navigation-retries.
   PARITY_ALTERNATING=1        Same as --alternating.
   PARITY_PARALLEL=1           Same as --parallel.
+  PARITY_RESUME=1             Same as --resume.
   PARITY_HEADED=1             Show browser.
 `)
 }

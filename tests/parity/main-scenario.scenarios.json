@@ -13,7 +13,9 @@
       "[data-id]"
     ],
     "settleMs": 1000,
-    "rateLimitRetries": 3
+    "rateLimitRetries": 3,
+    "persistenceRecheckMaxRatio": 0.5,
+    "persistenceRecheckDelayMs": 300000
   },
   "scenarios": [
     {
@@ -35,6 +37,23 @@
           "selector": "css=[data-modal-trigger=\"supply-apy\"], :is(div, span):has-text(\"Supply APY\") > svg",
           "waitFor": [
             "[data-field=\"supply-apy-total\"]"
+          ]
+        },
+        {
+          "id": "filter-select",
+          "label": "Filter select modal",
+          "selector": "[data-id=\"filter-trigger\"]",
+          "maxItems": 10,
+          "waitFor": [
+            "[data-id=\"select-modal\"]"
+          ]
+        },
+        {
+          "id": "custom-filter",
+          "label": "Custom filter modal",
+          "selector": "[data-id=\"custom-filter-trigger\"]",
+          "waitFor": [
+            "[data-id=\"custom-filter-modal\"]"
           ]
         }
       ],
@@ -65,6 +84,32 @@
       ]
     },
     {
+      "id": "main-lend-list-sort-supply-apy-mainnet",
+      "label": "Main scenario: Mainnet lend list sorted by Supply APY",
+      "path": "/lend?network=1&showAll=true",
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"lend\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "selector": "[data-id=\"sort-trigger\"]",
+          "waitFor": [
+            "[data-id=\"sort-modal\"]"
+          ],
+          "waitForData": false
+        },
+        {
+          "type": "click",
+          "selector": "[data-id=\"sort-option\"][data-key=\"Supply APY\"]",
+          "waitFor": [
+            "[data-id=\"vault-list\"][data-list=\"lend\"]"
+          ],
+          "settleMs": 500
+        }
+      ]
+    },
+    {
       "id": "main-earn-list-mainnet",
       "label": "Main scenario: Mainnet earn list and all earn details",
       "path": "/earn?network=1&showAll=true",
@@ -78,6 +123,23 @@
           "selector": "css=[data-modal-trigger=\"supply-apy\"], :is(div, span):has-text(\"Supply APY\") > svg",
           "waitFor": [
             "[data-field=\"supply-apy-total\"]"
+          ]
+        },
+        {
+          "id": "filter-select",
+          "label": "Filter select modal",
+          "selector": "[data-id=\"filter-trigger\"]",
+          "maxItems": 10,
+          "waitFor": [
+            "[data-id=\"select-modal\"]"
+          ]
+        },
+        {
+          "id": "custom-filter",
+          "label": "Custom filter modal",
+          "selector": "[data-id=\"custom-filter-trigger\"]",
+          "waitFor": [
+            "[data-id=\"custom-filter-modal\"]"
           ]
         }
       ],
@@ -99,6 +161,32 @@
       "path": "/earn?network=1",
       "waitFor": [
         "[data-id=\"vault-list\"][data-list=\"earn\"]"
+      ]
+    },
+    {
+      "id": "main-earn-list-sort-supply-apy-mainnet",
+      "label": "Main scenario: Mainnet earn list sorted by Supply APY",
+      "path": "/earn?network=1&showAll=true",
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"earn\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "selector": "[data-id=\"sort-trigger\"]",
+          "waitFor": [
+            "[data-id=\"sort-modal\"]"
+          ],
+          "waitForData": false
+        },
+        {
+          "type": "click",
+          "selector": "[data-id=\"sort-option\"][data-key=\"Supply APY\"]",
+          "waitFor": [
+            "[data-id=\"vault-list\"][data-list=\"earn\"]"
+          ],
+          "settleMs": 500
+        }
       ]
     },
     {
@@ -124,6 +212,23 @@
           "waitFor": [
             "[data-field=\"supply-apy-total\"]"
           ]
+        },
+        {
+          "id": "filter-select",
+          "label": "Filter select modal",
+          "selector": "[data-id=\"filter-trigger\"]",
+          "maxItems": 10,
+          "waitFor": [
+            "[data-id=\"select-modal\"]"
+          ]
+        },
+        {
+          "id": "custom-filter",
+          "label": "Custom filter modal",
+          "selector": "[data-id=\"custom-filter-trigger\"]",
+          "waitFor": [
+            "[data-id=\"custom-filter-modal\"]"
+          ]
         }
       ],
       "follow": [
@@ -132,6 +237,38 @@
           "label": "Borrow pair details",
           "selector": "[data-id=\"vault-list-item\"][data-list=\"borrow-pair\"]",
           "maxItems": 20,
+          "captures": [
+            {
+              "id": "pair-tab",
+              "label": "Borrow pair details"
+            },
+            {
+              "id": "collateral-tab",
+              "label": "Borrow pair collateral tab",
+              "actions": [
+                {
+                  "type": "click",
+                  "selector": "[data-id=\"tab\"][data-key=\"collateral\"]",
+                  "waitFor": [
+                    "[data-id=\"data-point\"]"
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "borrow-tab",
+              "label": "Borrow pair borrow tab",
+              "actions": [
+                {
+                  "type": "click",
+                  "selector": "[data-id=\"tab\"][data-key=\"borrow\"]",
+                  "waitFor": [
+                    "[data-id=\"data-point\"]"
+                  ]
+                }
+              ]
+            }
+          ],
           "waitFor": [
             "[data-id=\"vault-header\"]",
             "[data-id=\"data-point\"]"
@@ -148,11 +285,56 @@
       ]
     },
     {
+      "id": "main-borrow-list-sort-liquidity-mainnet",
+      "label": "Main scenario: Mainnet borrow list sorted by Liquidity",
+      "path": "/borrow?network=1&showAll=true",
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"borrow-pair\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "selector": "[data-id=\"sort-trigger\"]",
+          "waitFor": [
+            "[data-id=\"sort-modal\"]"
+          ],
+          "waitForData": false
+        },
+        {
+          "type": "click",
+          "selector": "[data-id=\"sort-option\"][data-key=\"Liquidity\"]",
+          "waitFor": [
+            "[data-id=\"vault-list\"][data-list=\"borrow-pair\"]"
+          ],
+          "settleMs": 500
+        }
+      ]
+    },
+    {
       "id": "main-explore-list-mainnet",
       "label": "Main scenario: Mainnet explore market list",
       "path": "/explore?network=1",
       "waitFor": [
         "[data-id=\"discovery-market-list\"]"
+      ],
+      "modals": [
+        {
+          "id": "filter-select",
+          "label": "Filter select modal",
+          "selector": "[data-id=\"filter-trigger\"]",
+          "maxItems": 10,
+          "waitFor": [
+            "[data-id=\"select-modal\"]"
+          ]
+        },
+        {
+          "id": "custom-filter",
+          "label": "Custom filter modal",
+          "selector": "[data-id=\"custom-filter-trigger\"]",
+          "waitFor": [
+            "[data-id=\"custom-filter-modal\"]"
+          ]
+        }
       ]
     },
     {
@@ -173,6 +355,32 @@
           "waitFor": [
             "css=[data-id=\"discovery-market-list-item\"]:nth-child({{variantIndex}}) [data-id=\"discovery-graph\"]"
           ]
+        }
+      ]
+    },
+    {
+      "id": "main-explore-list-sort-total-supply-mainnet",
+      "label": "Main scenario: Mainnet explore list sorted by Total Supply",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "selector": "[data-id=\"sort-trigger\"]",
+          "waitFor": [
+            "[data-id=\"sort-modal\"]"
+          ],
+          "waitForData": false
+        },
+        {
+          "type": "click",
+          "selector": "[data-id=\"sort-option\"][data-key=\"Total Supply\"]",
+          "waitFor": [
+            "[data-id=\"discovery-market-list\"]"
+          ],
+          "settleMs": 500
         }
       ]
     },
@@ -544,6 +752,90 @@
           "waitFor": [
             "[data-field=\"supply-apy-total\"]"
           ]
+        },
+        {
+          "id": "position-information-borrow-card",
+          "label": "Position information modal from borrow card",
+          "selector": "[data-modal-trigger=\"position-information\"][data-position-section=\"borrow\"]",
+          "waitFor": [
+            "[data-id=\"tab\"]"
+          ]
+        },
+        {
+          "id": "position-information-borrow-card-collateral-tab",
+          "label": "Position information modal from borrow card collateral tab",
+          "selector": "[data-modal-trigger=\"position-information\"][data-position-section=\"borrow\"]",
+          "waitFor": [
+            "[data-id=\"tab\"]"
+          ],
+          "actions": [
+            {
+              "type": "click",
+              "selector": "[data-id=\"tab\"][data-key=\"collateral-0\"]",
+              "waitFor": [
+                "[data-id=\"data-point\"]"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "position-information-borrow-card-borrow-tab",
+          "label": "Position information modal from borrow card borrow tab",
+          "selector": "[data-modal-trigger=\"position-information\"][data-position-section=\"borrow\"]",
+          "waitFor": [
+            "[data-id=\"tab\"]"
+          ],
+          "actions": [
+            {
+              "type": "click",
+              "selector": "[data-id=\"tab\"][data-key=\"borrow\"]",
+              "waitFor": [
+                "[data-id=\"data-point\"]"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "position-information-collateral-card",
+          "label": "Position information modal from collateral card",
+          "selector": "[data-modal-trigger=\"position-information\"][data-position-section=\"collateral\"]",
+          "waitFor": [
+            "[data-id=\"tab\"]"
+          ]
+        },
+        {
+          "id": "position-information-collateral-card-collateral-tab",
+          "label": "Position information modal from collateral card collateral tab",
+          "selector": "[data-modal-trigger=\"position-information\"][data-position-section=\"collateral\"]",
+          "waitFor": [
+            "[data-id=\"tab\"]"
+          ],
+          "actions": [
+            {
+              "type": "click",
+              "selector": "[data-id=\"tab\"][data-key=\"collateral-0\"]",
+              "waitFor": [
+                "[data-id=\"data-point\"]"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "position-information-collateral-card-borrow-tab",
+          "label": "Position information modal from collateral card borrow tab",
+          "selector": "[data-modal-trigger=\"position-information\"][data-position-section=\"collateral\"]",
+          "waitFor": [
+            "[data-id=\"tab\"]"
+          ],
+          "actions": [
+            {
+              "type": "click",
+              "selector": "[data-id=\"tab\"][data-key=\"borrow\"]",
+              "waitFor": [
+                "[data-id=\"data-point\"]"
+              ]
+            }
+          ]
         }
       ]
     },
@@ -562,6 +854,15 @@
           "selector": "css=[data-modal-trigger=\"supply-apy\"], :is(div, span):has-text(\"Supply APY\") > svg",
           "waitFor": [
             "[data-field=\"supply-apy-total\"]"
+          ]
+        },
+        {
+          "id": "vault-information",
+          "label": "Vault information modal",
+          "selector": "[data-id=\"portfolio-list-item\"][data-modal-trigger=\"vault-information\"]",
+          "maxItems": 10,
+          "waitFor": [
+            "[data-id=\"data-point\"]"
           ]
         }
       ]

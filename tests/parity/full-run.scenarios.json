@@ -31,6 +31,23 @@
           "waitFor": [
             "[data-field=\"supply-apy-total\"]"
           ]
+        },
+        {
+          "id": "filter-select",
+          "label": "Filter select modal",
+          "selector": "[data-id=\"filter-trigger\"]",
+          "maxItems": 10,
+          "waitFor": [
+            "[data-id=\"select-modal\"]"
+          ]
+        },
+        {
+          "id": "custom-filter",
+          "label": "Custom filter modal",
+          "selector": "[data-id=\"custom-filter-trigger\"]",
+          "waitFor": [
+            "[data-id=\"custom-filter-modal\"]"
+          ]
         }
       ],
       "follow": [
@@ -68,6 +85,23 @@
           "waitFor": [
             "[data-field=\"supply-apy-total\"]"
           ]
+        },
+        {
+          "id": "filter-select",
+          "label": "Filter select modal",
+          "selector": "[data-id=\"filter-trigger\"]",
+          "maxItems": 10,
+          "waitFor": [
+            "[data-id=\"select-modal\"]"
+          ]
+        },
+        {
+          "id": "custom-filter",
+          "label": "Custom filter modal",
+          "selector": "[data-id=\"custom-filter-trigger\"]",
+          "waitFor": [
+            "[data-id=\"custom-filter-modal\"]"
+          ]
         }
       ],
       "follow": [
@@ -76,6 +110,38 @@
           "label": "Borrow pair details",
           "selector": "[data-id=\"vault-list-item\"][data-list=\"borrow-pair\"]",
           "maxItems": 100,
+          "captures": [
+            {
+              "id": "pair-tab",
+              "label": "Borrow pair details"
+            },
+            {
+              "id": "collateral-tab",
+              "label": "Borrow pair collateral tab",
+              "actions": [
+                {
+                  "type": "click",
+                  "selector": "[data-id=\"tab\"][data-key=\"collateral\"]",
+                  "waitFor": [
+                    "[data-id=\"data-point\"]"
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "borrow-tab",
+              "label": "Borrow pair borrow tab",
+              "actions": [
+                {
+                  "type": "click",
+                  "selector": "[data-id=\"tab\"][data-key=\"borrow\"]",
+                  "waitFor": [
+                    "[data-id=\"data-point\"]"
+                  ]
+                }
+              ]
+            }
+          ],
           "waitFor": [
             "[data-id=\"vault-header\"]",
             "[data-id=\"data-point\"]"
@@ -107,6 +173,22 @@
           "waitFor": [
             "[data-field=\"supply-apy-total\"]"
           ]
+        },
+        {
+          "id": "position-information-borrow-card",
+          "label": "Position information modal from borrow card",
+          "selector": "[data-modal-trigger=\"position-information\"][data-position-section=\"borrow\"]",
+          "waitFor": [
+            "[data-id=\"tab\"]"
+          ]
+        },
+        {
+          "id": "position-information-collateral-card",
+          "label": "Position information modal from collateral card",
+          "selector": "[data-modal-trigger=\"position-information\"][data-position-section=\"collateral\"]",
+          "waitFor": [
+            "[data-id=\"tab\"]"
+          ]
         }
       ],
       "follow": [
@@ -126,6 +208,25 @@
       "path": "/explore?network=1",
       "waitFor": [
         "[data-id=\"discovery-market-list\"]"
+      ],
+      "modals": [
+        {
+          "id": "filter-select",
+          "label": "Filter select modal",
+          "selector": "[data-id=\"filter-trigger\"]",
+          "maxItems": 10,
+          "waitFor": [
+            "[data-id=\"select-modal\"]"
+          ]
+        },
+        {
+          "id": "custom-filter",
+          "label": "Custom filter modal",
+          "selector": "[data-id=\"custom-filter-trigger\"]",
+          "waitFor": [
+            "[data-id=\"custom-filter-modal\"]"
+          ]
+        }
       ]
     },
     {
@@ -480,6 +581,15 @@
           "selector": "css=[data-modal-trigger=\"supply-apy\"], :is(div, span):has-text(\"Supply APY\") > svg",
           "waitFor": [
             "[data-field=\"supply-apy-total\"]"
+          ]
+        },
+        {
+          "id": "vault-information",
+          "label": "Vault information modal",
+          "selector": "[data-id=\"portfolio-list-item\"][data-modal-trigger=\"vault-information\"]",
+          "maxItems": 10,
+          "waitFor": [
+            "[data-id=\"data-point\"]"
           ]
         }
       ]

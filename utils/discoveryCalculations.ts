@@ -751,7 +751,9 @@ const formatCapPercentDisplay = (pct: number, uncapped: boolean, exceeded: boole
   // exceeded cap was displayed as exactly 100%, which read as 'at cap' rather
   // than 'over'.
   if (exceeded || pct > 100) return '>100%'
-  return `${compactNumber(pct, 2)}%`
+  const factor = 100
+  const displayedPct = Math.floor((pct + Number.EPSILON) * factor) / factor
+  return `${compactNumber(displayedPct, 2)}%`
 }
 
 // SDK APY helpers already return percentage values (e.g. 5.2 for 5.2%) —

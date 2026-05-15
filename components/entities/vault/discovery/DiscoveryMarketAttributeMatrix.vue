@@ -61,6 +61,9 @@ const isVaultRowHighlighted = (vaultAddr: string): boolean =>
 
 const isAttributeColumnHighlighted = (attributeId: string): boolean =>
   hoveredCell.value?.attributeId === attributeId
+
+const cellDataValue = (cell: AttributeCell): string | number =>
+  props.view === 'stats' ? cell.display : (cell.numeric ?? cell.display)
 </script>
 
 <template>
@@ -146,7 +149,7 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
               :data-key="`${vault.address}:${col.attribute.id}`"
               :data-vault-address="vault.address"
               :data-field="col.attribute.id"
-              :data-value="col.cells[vaultIdx].numeric ?? col.cells[vaultIdx].display"
+              :data-value="cellDataValue(col.cells[vaultIdx])"
               :class="(isVaultRowHighlighted(vault.address) || isAttributeColumnHighlighted(col.attribute.id)) ? '!bg-white/[0.06]' : ''"
               @mouseenter="hoveredCell = { vaultAddr: vault.address, attributeId: col.attribute.id }"
               @mouseleave="hoveredCell = null"

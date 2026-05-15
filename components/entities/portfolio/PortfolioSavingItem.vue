@@ -112,6 +112,7 @@ const onClick = () => {
     v-if="isSecuritize"
     class="block no-underline bg-surface rounded-xl border border-line-subtle shadow-card cursor-pointer transition-all duration-default ease-default hover:shadow-card-hover hover:border-line-emphasis"
     data-id="portfolio-list-item"
+    data-modal-trigger="vault-information"
     data-list="lend"
     :data-key="positionKey"
     :data-vault-address="vault.address.toLowerCase()"
@@ -255,6 +256,7 @@ const onClick = () => {
     v-else
     class="block no-underline bg-surface rounded-xl border border-line-subtle shadow-card cursor-pointer transition-all duration-default ease-default hover:shadow-card-hover hover:border-line-emphasis"
     data-id="portfolio-list-item"
+    data-modal-trigger="vault-information"
     data-list="lend"
     :data-key="positionKey"
     :data-vault-address="vault.address.toLowerCase()"

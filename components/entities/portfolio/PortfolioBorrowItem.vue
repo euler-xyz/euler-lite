@@ -15,7 +15,7 @@ import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated, getVaultNotice, isVaultNoticeSpecific } from '~/utils/eulerLabelsUtils'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { useModal } from '~/components/ui/composables/useModal'
-import { VaultNetApyModal, PortfolioRoeModal } from '#components'
+import { VaultNetApyModal, PortfolioRoeModal, VaultOverviewModal } from '#components'
 import { useAccount } from '@wagmi/vue'
 import { getAddress } from 'viem'
 import { formatNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
@@ -274,6 +274,16 @@ const onRoeClick = () => {
     },
   })
 }
+
+const openPositionInformationModal = () => {
+  modal.open(VaultOverviewModal, {
+    props: {
+      title: 'Position information',
+      pair: position,
+      collateralVaults: collateralItems.value.map(item => item.vault),
+    },
+  })
+}
 </script>
 
 <template>
@@ -453,7 +463,13 @@ const onRoeClick = () => {
           <div class="text-content-tertiary text-p3">
             My Debt
           </div>
-          <div class="flex justify-between gap-8 text-right">
+          <div
+            class="flex justify-between gap-8 text-right cursor-pointer"
+            data-id="position-information-trigger"
+            data-modal-trigger="position-information"
+            data-position-section="borrow"
+            @click.prevent.stop="openPositionInformationModal"
+          >
             <div
               class="text-content-primary text-p3"
               data-id="data-point"
@@ -477,7 +493,13 @@ const onRoeClick = () => {
           <div class="text-content-tertiary text-p3">
             Collateral value
           </div>
-          <div class="flex justify-between gap-8 text-right">
+          <div
+            class="flex justify-between gap-8 text-right cursor-pointer"
+            data-id="position-information-trigger"
+            data-modal-trigger="position-information"
+            data-position-section="collateral"
+            @click.prevent.stop="openPositionInformationModal"
+          >
             <div
               class="text-content-primary text-p3"
               data-id="data-point"
