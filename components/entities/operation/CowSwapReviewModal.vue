@@ -9,7 +9,7 @@ import {
   type CowSwapOrderStatus,
 } from '~/entities/cowswap'
 import { resolveCowSwapReviewState } from './cowSwapReviewState'
-import { playMooolerSound } from '~/utils/moooler-sound'
+import { playMooolerSound, prepareMooolerSound } from '~/utils/moooler-sound'
 
 const props = defineProps<{
   signSteps: DisplayStep[]
@@ -56,6 +56,7 @@ const staleQuoteThresholdMs = 3 * 60 * 1000
 let nowTimer: ReturnType<typeof setInterval> | undefined
 
 onMounted(() => {
+  prepareMooolerSound()
   nowTimer = setInterval(() => {
     nowMs.value = Date.now()
   }, 1000)
@@ -95,6 +96,8 @@ const isSwapQuoteStale = computed(() =>
 const internalSubmitting = ref(false)
 const hasUnresolvedSubmittedOrder = computed(() => reviewState.value.hasUnresolvedSubmittedOrder)
 const canClose = computed(() => !internalSubmitting.value && !hasUnresolvedSubmittedOrder.value)
+const isOrderSubmitted = computed(() => props.executionStatus === 'submitted')
+const hasPlayedMooolerSound = ref(false)
 
 watch(
   canClose,
@@ -102,8 +105,11 @@ watch(
   { immediate: true },
 )
 
-watch(isSubmitted, (value, prev) => {
-  if (value && !prev) playMooolerSound()
+watch(isOrderSubmitted, (value, prev) => {
+  if (value && !prev && !hasPlayedMooolerSound.value) {
+    hasPlayedMooolerSound.value = true
+    playMooolerSound()
+  }
 })
 
 const handleClose = () => {

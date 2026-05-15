@@ -110,6 +110,24 @@ describe('refreshMerklType', () => {
     // Distinct type key — not polluted by the EULER cache.
     expect(readMerklType(5, 'MULTILENDBORROW')).toBeUndefined()
   })
+
+  it('round-trips the new BORROW_FROM_COLLATERAL types independently', async () => {
+    installFetch(async (url) => {
+      if (String(url).includes('type=EULER_BORROW_FROM_COLLATERAL')) {
+        return jsonResponse([{ id: 'single' }])
+      }
+      if (String(url).includes('type=EULER_MULTI_BORROW_FROM_COLLATERAL')) {
+        return jsonResponse([{ id: 'multi' }])
+      }
+      return jsonResponse([])
+    })
+
+    await refreshMerklType(7, 'EULER_BORROW_FROM_COLLATERAL')
+    await refreshMerklType(7, 'EULER_MULTI_BORROW_FROM_COLLATERAL')
+
+    expect(readMerklType(7, 'EULER_BORROW_FROM_COLLATERAL')?.data).toEqual([{ id: 'single' }])
+    expect(readMerklType(7, 'EULER_MULTI_BORROW_FROM_COLLATERAL')?.data).toEqual([{ id: 'multi' }])
+  })
 })
 
 describe('refreshBrevisCampaigns', () => {

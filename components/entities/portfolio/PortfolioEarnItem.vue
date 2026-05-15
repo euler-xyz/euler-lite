@@ -7,7 +7,7 @@ import { type AccountDepositPosition, getSubAccountIndex } from '~/entities/acco
 import type { EarnVault } from '~/entities/vault'
 import { VaultOverviewModal, VaultSupplyApyModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
-import { formatNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
+import { formatNumber, compactNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 
 const { position } = defineProps<{ position: AccountDepositPosition }>()
@@ -58,19 +58,31 @@ watchEffect(() => {
   updateHasPrice()
 })
 
-const onSupplyInfoIconClick = (event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY: nanoToValue(vault.value.interestRateInfo.supplyAPY, 25),
-      intrinsicAPY: getIntrinsicApy(vault.value.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.value.asset.address),
-      campaigns: getSupplyRewardCampaigns(vault.value.address),
-      baseApyAverageLabel: '1h',
-    },
-  })
+const projectedEarningsPerMonth = ref('—')
+
+const updateProjectedEarningsPerMonth = async () => {
+  const price = await getAssetUsdValue(position.assets, vault.value, 'off-chain')
+  if (price === undefined || price === 0) {
+    projectedEarningsPerMonth.value = '—'
+    return
+  }
+  // Monthly earnings = (value * APY%) / 12
+  projectedEarningsPerMonth.value = compactNumber((price * supplyApyWithRewards.value) / 12 / 100)
 }
+
+watchEffect(() => {
+  updateProjectedEarningsPerMonth()
+})
+
+const supplyApyModalData = computed(() => ({
+  props: {
+    lendingAPY: nanoToValue(vault.value.interestRateInfo.supplyAPY, 25),
+    intrinsicAPY: getIntrinsicApy(vault.value.asset.address),
+    intrinsicApyInfo: getIntrinsicApyInfo(vault.value.asset.address),
+    campaigns: getSupplyRewardCampaigns(vault.value.address),
+    baseApyAverageLabel: '1h',
+  },
+}))
 
 const onClick = () => {
   modal.open(VaultOverviewModal, {
@@ -134,21 +146,31 @@ const onClick = () => {
             <span class="inline-flex items-center rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5">
               1h
             </span>
-            <SvgIcon
-              class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-              name="info-circle"
-              @click.stop="onSupplyInfoIconClick"
-            />
+            <UiModalPreviewTrigger
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY breakdown"
+            >
+              <SvgIcon
+                class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+                name="info-circle"
+              />
+            </UiModalPreviewTrigger>
           </div>
           <div
             class="text-p2 flex text-accent-600"
           >
-            <SvgIcon
+            <UiModalPreviewTrigger
               v-if="rewardsExist"
-              name="sparks"
-              class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
-              @click.stop="onSupplyInfoIconClick"
-            />
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY rewards breakdown"
+            >
+              <SvgIcon
+                name="sparks"
+                class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
+              />
+            </UiModalPreviewTrigger>
             {{ formatNumber(supplyApyWithRewards) }}%
           </div>
         </div>

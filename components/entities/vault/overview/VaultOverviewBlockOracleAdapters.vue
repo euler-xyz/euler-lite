@@ -17,6 +17,7 @@ const props = defineProps<{
 const { oracleAdapters, loadOracleAdapter } = useEulerLabels()
 const { chainId } = useEulerAddresses()
 const { buildKnownSymbols, resolveSymbol: resolveTokenSymbol, shortenAddress } = useTokenSymbolResolver()
+const { copyToClipboard, isCopied } = useClipboardCopy()
 
 const sourceVaults = computed(() => {
   if (props.vaults?.length) {
@@ -136,8 +137,8 @@ watch(
 
 const resolveSymbol = (address: string) => resolveTokenSymbol(address, knownSymbols.value)
 
-const onCopyClick = (address: string) => {
-  navigator.clipboard.writeText(address)
+const onCopyClick = (address: string, key = address) => {
+  copyToClipboard(address, key)
 }
 
 const getAdapterKey = (adapter: OracleAdapterEntry) => `${adapter.oracle.toLowerCase()}:${adapter.base.toLowerCase()}:${adapter.quote.toLowerCase()}`
@@ -352,11 +353,11 @@ const onTooltipMouseLeave = () => {
               :class="$style.copyBtn"
               class="text-content-muted"
               aria-label="Copy address"
-              @click="onCopyClick(adapter.oracle)"
+              @click="onCopyClick(adapter.oracle, getAdapterKey(adapter))"
             >
               <SvgIcon
                 class="!w-18 !h-18"
-                name="copy"
+                :name="isCopied(getAdapterKey(adapter)) ? 'check' : 'copy'"
               />
             </button>
           </div>

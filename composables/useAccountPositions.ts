@@ -498,10 +498,20 @@ const updateBorrowPositions = async (
     const liquidityInfo = p.res.vaultAccountInfo.liquidityInfo
     const hasQueryFailure = Boolean(liquidityInfo.queryFailure)
 
+    // Look up the on-chain (borrow vault, collateral) LTV entry once — it holds
+    // the post-ramp target plus all ramp-down config we need to surface on the
+    // position. The lens-derived `liquidationLTV` below is the CURRENT effective
+    // value; ramp-down detection requires `initialLiquidationLTV` /
+    // `targetTimestamp` / `rampDuration` from this entry.
+    const ltvConfig = p.borrowVault.collateralLTVs.find(ltv =>
+      getAddress(ltv.collateral) === getAddress(p.collateral.address),
+    )
+    const initialLiquidationLTV = ltvConfig?.initialLiquidationLTV ?? 0n
+    const targetLiquidationLTV = ltvConfig?.liquidationLTV ?? 0n
+    const targetTimestamp = ltvConfig?.targetTimestamp ?? 0n
+    const rampDuration = ltvConfig?.rampDuration ?? 0n
+
     if (hasQueryFailure) {
-      const ltvConfig = p.borrowVault.collateralLTVs.find(ltv =>
-        getAddress(ltv.collateral) === getAddress(p.collateral.address),
-      )
       return {
         borrow: p.borrowVault,
         collateral: p.collateral,
@@ -510,7 +520,11 @@ const updateBorrowPositions = async (
         borrowed: p.res.vaultAccountInfo.borrowed,
         supplied: suppliedAssets,
         borrowLTV: ltvConfig?.borrowLTV ?? 0n,
-        liquidationLTV: ltvConfig?.liquidationLTV ?? 0n,
+        liquidationLTV: targetLiquidationLTV,
+        initialLiquidationLTV,
+        targetLiquidationLTV,
+        targetTimestamp,
+        rampDuration,
         health: 0n,
         userLTV: 0n,
         price: 0n,
@@ -566,6 +580,10 @@ const updateBorrowPositions = async (
         supplied: suppliedAssets,
         borrowLTV: effectiveBorrowLTV,
         liquidationLTV,
+        initialLiquidationLTV,
+        targetLiquidationLTV,
+        targetTimestamp,
+        rampDuration,
         health: healthFixed.value,
         userLTV,
         price: 0n,
@@ -600,6 +618,10 @@ const updateBorrowPositions = async (
       liabilityValueBorrowing,
       liabilityValueLiquidation: liquidityInfo.liabilityValueLiquidation,
       liquidationLTV,
+      initialLiquidationLTV,
+      targetLiquidationLTV,
+      targetTimestamp,
+      rampDuration,
       collateralValueLiquidation,
     } as AccountBorrowPosition
   }))

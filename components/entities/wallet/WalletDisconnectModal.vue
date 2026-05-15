@@ -8,12 +8,13 @@ const { address } = useAccount()
 const { disconnect } = useDisconnect()
 const { chainId } = useEulerAddresses()
 const { isSpyMode, spyAddress, clearSpyMode } = useSpyMode()
+const { copyToClipboard, isCopied } = useClipboardCopy()
 
 const displayAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const explorerLink = computed(() => getExplorerLink(displayAddress.value, chainId.value, true))
 
 const onCopyAddressClick = () => {
-  navigator.clipboard.writeText(displayAddress.value || '')
+  copyToClipboard(displayAddress.value || '')
 }
 
 const onDisconnectClick = () => {
@@ -42,7 +43,7 @@ const onDisconnectClick = () => {
         <UiButton
           variant="primary-stroke"
           size="medium"
-          icon="copy"
+          :icon="isCopied(displayAddress || '') ? 'check' : 'copy'"
           icon-only
           @click="onCopyAddressClick"
         />

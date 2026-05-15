@@ -8,7 +8,7 @@ import {
   type Vault,
   type SecuritizeVault,
 } from '~/entities/vault'
-import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
+import { getUtilisationWarning, getBorrowCapWarning, type VaultWarning } from '~/composables/useVaultWarnings'
 import {
   getAssetUsdValue,
   getAssetUsdPrice,
@@ -18,13 +18,14 @@ import {
   toUsdAmount,
   type UsdAmount,
 } from '~/services/pricing/priceProvider'
-import { type AccountBorrowPosition, isPositionEligibleForLiquidation } from '~/entities/account'
+import { type AccountBorrowPosition, getPositionRampConfig, getPositionRampStatus, isPositionEligibleForLiquidation } from '~/entities/account'
+import { DateTime } from 'luxon'
 import type { TxPlan } from '~/entities/txPlan'
 import { formatTtl, nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { formatNumber, formatHealthScore, formatUsdValue, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { getVaultNotice } from '~/utils/eulerLabelsUtils'
-import { VaultOverviewModal, OperationReviewModal, VaultSupplyApyModal, VaultBorrowApyModal, VaultNetApyModal, PortfolioRoeModal } from '#components'
+import { VaultOverviewModal, OperationReviewModal, VaultSupplyApyModal, VaultBorrowApyModal, VaultNetApyModal, PortfolioRoeModal, VaultRampDownModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -146,10 +147,34 @@ const borrowApy = computed(() => withIntrinsicBorrowApy(
 ))
 const borrowApyWithRewards = computed(() => borrowApy.value - borrowRewardAPY.value)
 
+const rampWarning = computed<VaultWarning | null>(() => {
+  if (!rampStatus.value?.isRamping) return null
+  if (rampStatus.value.willBeLiquidated && !hasQueryFailure.value) {
+    return {
+      level: 'critical',
+      title: 'Liquidation LTV ramping down',
+      message: `The liquidation LTV for this pair is being lowered. Your position is projected to become liquidatable ${forcedLiquidationRelative.value || 'before the ramp ends'}. Reduce your debt or add collateral to avoid liquidation.`,
+    }
+  }
+  if (hasQueryFailure.value) {
+    return {
+      level: 'high',
+      title: 'Liquidation LTV ramping down',
+      message: `The liquidation LTV for this pair is being lowered (ends ${rampEndsRelative.value}). Oracle pricing is currently unavailable, so we can't tell whether your position will remain safe.`,
+    }
+  }
+  return {
+    level: 'high',
+    title: 'Liquidation LTV ramping down',
+    message: `The liquidation LTV for this pair is being lowered (ends ${rampEndsRelative.value}). Your position is currently safe at the post-ramp threshold.`,
+  }
+})
+
 // Warnings for borrow vault
 const positionWarnings = computed(() => {
   if (!borrowVault.value) return []
   return [
+    rampWarning.value,
     getUtilisationWarning(borrowVault.value, 'borrow'),
     getBorrowCapWarning(borrowVault.value),
   ]
@@ -373,39 +398,35 @@ const positionMultiplier = computed(() => {
   return collateralValue.value.usd / equity
 })
 
-const onNetApyInfoClick = () => {
-  modal.open(VaultNetApyModal, {
-    props: {
-      supplyUSD: collateralValue.value.usd,
-      borrowUSD: borrowMarketValue.value.usd,
-      baseSupplyAPY: baseSupplyAPY.value,
-      baseBorrowAPY: baseBorrowAPY.value,
-      intrinsicSupplyAPY: _intrinsicSupplyAPY.value,
-      intrinsicBorrowAPY: intrinsicBorrowAPY.value,
-      supplyRewardAPY: supplyRewardAPY.value || null,
-      borrowRewardAPY: borrowRewardAPY.value || null,
-      netAPY: netAPY.value,
-      supplyCampaigns: supplyCampaignsForModal.value,
-      borrowCampaigns: borrowCampaignsForModal.value,
-    },
-  })
-}
+const netApyModalData = computed(() => ({
+  props: {
+    supplyUSD: collateralValue.value.usd,
+    borrowUSD: borrowMarketValue.value.usd,
+    baseSupplyAPY: baseSupplyAPY.value,
+    baseBorrowAPY: baseBorrowAPY.value,
+    intrinsicSupplyAPY: _intrinsicSupplyAPY.value,
+    intrinsicBorrowAPY: intrinsicBorrowAPY.value,
+    supplyRewardAPY: supplyRewardAPY.value || null,
+    borrowRewardAPY: borrowRewardAPY.value || null,
+    netAPY: netAPY.value,
+    supplyCampaigns: supplyCampaignsForModal.value,
+    borrowCampaigns: borrowCampaignsForModal.value,
+  },
+}))
 
-const onRoeInfoClick = () => {
-  modal.open(PortfolioRoeModal, {
-    props: {
-      roe: roe.value,
-      multiplier: Number.isFinite(positionMultiplier.value) ? positionMultiplier.value : 0,
-      supplyAPY: collateralSupplyApy.value,
-      borrowAPY: borrowApy.value,
-      supplyRewardAPY: supplyRewardAPY.value || null,
-      borrowRewardAPY: borrowRewardAPY.value || null,
-      userLTV: position.value ? nanoToValue(position.value.userLTV, 18) : 0,
-      supplyCampaigns: supplyCampaignsForModal.value,
-      borrowCampaigns: borrowCampaignsForModal.value,
-    },
-  })
-}
+const roeModalData = computed(() => ({
+  props: {
+    roe: roe.value,
+    multiplier: Number.isFinite(positionMultiplier.value) ? positionMultiplier.value : 0,
+    supplyAPY: collateralSupplyApy.value,
+    borrowAPY: borrowApy.value,
+    supplyRewardAPY: supplyRewardAPY.value || null,
+    borrowRewardAPY: borrowRewardAPY.value || null,
+    userLTV: position.value ? nanoToValue(position.value.userLTV, 18) : 0,
+    supplyCampaigns: supplyCampaignsForModal.value,
+    borrowCampaigns: borrowCampaignsForModal.value,
+  },
+}))
 
 const isPrimaryCollateral = (vault: Vault | SecuritizeVault) => {
   if (!primaryCollateralAddress.value) {
@@ -644,30 +665,45 @@ const load = async () => {
     console.warn(e)
   }
 }
-const onBorrowInfoIconClick = (event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  if (!borrowVault.value) return
-  modal.open(VaultBorrowApyModal, {
+const borrowApyModalData = computed(() => {
+  if (!borrowVault.value) return {}
+  return {
     props: {
       borrowingAPY: baseBorrowAPY.value,
       intrinsicAPY: intrinsicBorrowAPY.value,
       intrinsicApyInfo: getIntrinsicApyInfo(borrowVault.value.asset.address),
       campaigns: getBorrowRewardCampaigns(borrowVault.value.address, collateralVault.value?.address),
     },
-  })
-}
+  }
+})
 
-const onSupplyInfoIconClick = (event: MouseEvent, vault: Vault | SecuritizeVault) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY: nanoToValue(vault.interestRateInfo.supplyAPY, 25),
-      intrinsicAPY: getIntrinsicApy(vault.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
-      campaigns: getSupplyRewardCampaigns(vault.address),
-    },
+const getSupplyApyModalData = (vault: Vault | SecuritizeVault) => ({
+  props: {
+    lendingAPY: nanoToValue(vault.interestRateInfo.supplyAPY, 25),
+    intrinsicAPY: getIntrinsicApy(vault.asset.address),
+    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    campaigns: getSupplyRewardCampaigns(vault.address),
+  },
+})
+
+const rampStatus = computed(() =>
+  position.value ? getPositionRampStatus(position.value) : null,
+)
+const rampEndsRelative = computed(() => {
+  if (!position.value || !rampStatus.value?.isRamping) return ''
+  return DateTime.fromSeconds(Number(position.value.targetTimestamp))
+    .toRelative({ base: DateTime.now(), style: 'short' }) ?? ''
+})
+const forcedLiquidationRelative = computed(() => {
+  const at = rampStatus.value?.forcedLiquidationAt ?? null
+  if (at === null) return ''
+  return DateTime.fromSeconds(Number(at))
+    .toRelative({ base: DateTime.now(), style: 'short' }) ?? ''
+})
+const openRampDownModal = () => {
+  if (!position.value || !rampStatus.value?.isRamping) return
+  modal.open(VaultRampDownModal, {
+    props: getPositionRampConfig(position.value),
   })
 }
 
@@ -741,44 +777,64 @@ watch([isConnected, isSpyMode, address], () => {
           <div class="flex justify-between items-center">
             <div class="flex items-center gap-4 text-p2 text-content-secondary">
               Net APY
-              <SvgIcon
-                class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
-                name="info-circle"
-                @click="onNetApyInfoClick"
-              />
+              <UiModalPreviewTrigger
+                :component="VaultNetApyModal"
+                :modal-data="netApyModalData"
+                aria-label="Show net APY breakdown"
+              >
+                <SvgIcon
+                  class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
+                  name="info-circle"
+                />
+              </UiModalPreviewTrigger>
             </div>
             <div
               class="text-h5 flex items-center gap-4"
               :class="[netAPY >= 0 ? 'text-accent-600' : 'text-error-500']"
             >
-              <SvgIcon
+              <UiModalPreviewTrigger
                 v-if="hasSupplyRewards(collateralVault?.address || '') || hasBorrowRewards(borrowVault?.address || '', collateralVault?.address || '')"
-                class="!w-20 !h-20 text-accent-500 cursor-pointer"
-                name="sparks"
-                @click="onNetApyInfoClick"
-              />
+                :component="VaultNetApyModal"
+                :modal-data="netApyModalData"
+                aria-label="Show net APY rewards breakdown"
+              >
+                <SvgIcon
+                  class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                  name="sparks"
+                />
+              </UiModalPreviewTrigger>
               {{ Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
             </div>
           </div>
           <div class="flex justify-between items-center">
             <div class="flex items-center gap-4 text-p2 text-content-secondary">
               ROE
-              <SvgIcon
-                class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
-                name="info-circle"
-                @click="onRoeInfoClick"
-              />
+              <UiModalPreviewTrigger
+                :component="PortfolioRoeModal"
+                :modal-data="roeModalData"
+                aria-label="Show ROE breakdown"
+              >
+                <SvgIcon
+                  class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
+                  name="info-circle"
+                />
+              </UiModalPreviewTrigger>
             </div>
             <div
               class="text-h5 flex items-center gap-4"
               :class="[roe >= 0 ? 'text-accent-600' : 'text-error-500']"
             >
-              <SvgIcon
+              <UiModalPreviewTrigger
                 v-if="hasSupplyRewards(collateralVault?.address || '') || hasBorrowRewards(borrowVault?.address || '', collateralVault?.address || '')"
-                class="!w-20 !h-20 text-accent-500 cursor-pointer"
-                name="sparks"
-                @click="onRoeInfoClick"
-              />
+                :component="PortfolioRoeModal"
+                :modal-data="roeModalData"
+                aria-label="Show ROE rewards breakdown"
+              >
+                <SvgIcon
+                  class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                  name="sparks"
+                />
+              </UiModalPreviewTrigger>
               {{ Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}
             </div>
           </div>
@@ -824,10 +880,25 @@ watch([isConnected, isSpyMode, address], () => {
             </div>
           </div>
           <div class="flex justify-between gap-8 flex-wrap">
-            <div class="text-content-secondary text-p3">
+            <div class="text-content-secondary text-p3 flex items-center gap-4">
               Liquidation LTV
+              <SvgIcon
+                v-if="rampStatus?.isRamping"
+                class="!w-16 !h-16 cursor-pointer hover:opacity-80"
+                :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
+                name="info-circle"
+                @click.stop="openRampDownModal"
+              />
             </div>
-            <div class="text-content-primary text-p3">
+            <div class="text-content-primary text-p3 flex items-center gap-4">
+              <SvgIcon
+                v-if="rampStatus?.isRamping"
+                name="arrow-top-right"
+                class="!w-14 !h-14 shrink-0 rotate-180 cursor-pointer"
+                :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
+                title="Liquidation LTV ramping down"
+                @click.stop="openRampDownModal"
+              />
               <span
                 v-if="hasQueryFailure"
                 class="text-warning-500"
@@ -863,19 +934,29 @@ watch([isConnected, isSpyMode, address], () => {
             <div class="flex flex-col items-end">
               <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                 Borrow APY
-                <SvgIcon
-                  class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-                  name="info-circle"
-                  @click.stop="onBorrowInfoIconClick"
-                />
+                <UiModalPreviewTrigger
+                  :component="VaultBorrowApyModal"
+                  :modal-data="borrowApyModalData"
+                  aria-label="Show borrow APY breakdown"
+                >
+                  <SvgIcon
+                    class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+                    name="info-circle"
+                  />
+                </UiModalPreviewTrigger>
               </div>
               <div class="text-p2 flex items-center text-accent-600 font-semibold">
-                <SvgIcon
+                <UiModalPreviewTrigger
                   v-if="hasBorrowRewards(borrowVault?.address || '', collateralVault?.address || '')"
-                  class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
-                  name="sparks"
-                  @click.stop="onBorrowInfoIconClick"
-                />
+                  :component="VaultBorrowApyModal"
+                  :modal-data="borrowApyModalData"
+                  aria-label="Show borrow APY rewards breakdown"
+                >
+                  <SvgIcon
+                    class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
+                    name="sparks"
+                  />
+                </UiModalPreviewTrigger>
                 {{ formatNumber(borrowApyWithRewards) }}%
               </div>
             </div>
@@ -973,7 +1054,7 @@ watch([isConnected, isSpyMode, address], () => {
               size="compact"
             />
             <div
-              class="flex justify-between gap-8 mt-4"
+              class="flex justify-between gap-8 mt-16"
               @click.stop
             >
               <UiButton
@@ -1034,19 +1115,29 @@ watch([isConnected, isSpyMode, address], () => {
               <div class="flex flex-col items-end">
                 <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                   Supply APY
-                  <SvgIcon
-                    class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-                    name="info-circle"
-                    @click.stop="(e: MouseEvent) => onSupplyInfoIconClick(e, collateral.vault)"
-                  />
+                  <UiModalPreviewTrigger
+                    :component="VaultSupplyApyModal"
+                    :modal-data="() => getSupplyApyModalData(collateral.vault)"
+                    aria-label="Show supply APY breakdown"
+                  >
+                    <SvgIcon
+                      class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+                      name="info-circle"
+                    />
+                  </UiModalPreviewTrigger>
                 </div>
                 <div class="text-p2 flex items-center text-accent-600 font-semibold">
-                  <SvgIcon
+                  <UiModalPreviewTrigger
                     v-if="hasSupplyRewards(collateral.vault.address)"
-                    class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
-                    name="sparks"
-                    @click.stop="(e: MouseEvent) => onSupplyInfoIconClick(e, collateral.vault)"
-                  />
+                    :component="VaultSupplyApyModal"
+                    :modal-data="() => getSupplyApyModalData(collateral.vault)"
+                    aria-label="Show supply APY rewards breakdown"
+                  >
+                    <SvgIcon
+                      class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
+                      name="sparks"
+                    />
+                  </UiModalPreviewTrigger>
                   {{ formatNumber(collateral.supplyApyWithRewards) }}%
                 </div>
               </div>
@@ -1116,10 +1207,25 @@ watch([isConnected, isSpyMode, address], () => {
                 v-if="!hasNoBorrow && isPrimaryCollateral(collateral.vault)"
                 class="flex justify-between gap-8 flex-wrap mb-16"
               >
-                <div class="text-neutral-500 text-p3">
+                <div class="text-neutral-500 text-p3 flex items-center gap-4">
                   Liquidation LTV
+                  <SvgIcon
+                    v-if="rampStatus?.isRamping"
+                    class="!w-14 !h-14 cursor-pointer hover:opacity-80"
+                    :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
+                    name="info-circle"
+                    @click.stop="openRampDownModal"
+                  />
                 </div>
-                <div class="text-neutral-800 text-p3">
+                <div class="text-neutral-800 text-p3 flex items-center gap-4">
+                  <SvgIcon
+                    v-if="rampStatus?.isRamping"
+                    name="arrow-top-right"
+                    class="!w-12 !h-12 shrink-0 rotate-180 cursor-pointer"
+                    :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
+                    title="Liquidation LTV ramping down"
+                    @click.stop="openRampDownModal"
+                  />
                   {{ formatNumber(nanoToValue(position.liquidationLTV, 2)) }}%
                 </div>
               </div>
@@ -1133,7 +1239,7 @@ watch([isConnected, isSpyMode, address], () => {
               />
               <div
                 v-if="!hasNoBorrow"
-                class="flex gap-8 mt-4"
+                class="flex gap-8 mt-16"
                 @click.stop
               >
                 <UiButton

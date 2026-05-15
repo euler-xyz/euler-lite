@@ -4,8 +4,9 @@ import { getAddress, type Address, type Abi } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
+import { DateTime } from 'luxon'
 import type { AccountBorrowPosition } from '~/entities/account'
-import { getSubAccountIndex } from '~/entities/account'
+import { getPositionRampStatus, getSubAccountIndex } from '~/entities/account'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import {
   getNetAPY,
@@ -26,7 +27,6 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated, getVaultNotice, isVaultNoticeSpecific } from '~/utils/eulerLabelsUtils'
 import { normalizeAddress } from '~/utils/normalizeAddress'
-import { useModal } from '~/components/ui/composables/useModal'
 import { VaultNetApyModal, PortfolioRoeModal } from '#components'
 
 const { position } = defineProps<{ position: AccountBorrowPosition }>()
@@ -39,7 +39,6 @@ const subAccountIndex = computed(() => {
   return getSubAccountIndex(ownerAddress.value, position.subAccount)
 })
 
-const modal = useModal()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy } = useIntrinsicApy()
 const { getSupplyRewardApy, getBorrowRewardApy, getEligibleLoopingRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, getLoopingRewardCampaigns, hasSupplyRewards, hasBorrowRewards, isLoopingEligible } = useRewardsApy()
 
@@ -263,45 +262,53 @@ const actualMultiplier = computed(() => {
   return collateralValue.value.usd / equity
 })
 
-const onNetApyClick = () => {
-  modal.open(VaultNetApyModal, {
-    props: {
-      supplyUSD: collateralValue.value.usd,
-      borrowUSD: borrowedValue.value.usd,
-      baseSupplyAPY: baseSupplyApy.value,
-      baseBorrowAPY: baseBorrowApy.value,
-      intrinsicSupplyAPY: intrinsicSupplyApy.value,
-      intrinsicBorrowAPY: intrinsicBorrowApy.value,
-      supplyRewardAPY: supplyRewardAPY.value || null,
-      borrowRewardAPY: borrowRewardAPY.value || null,
-      loopingRewardAPY: loopingRewardAPY.value || null,
-      loopingEligible: loopingEligible.value,
-      netAPY: netAPY.value,
-      supplyCampaigns: supplyCampaignsForModal.value,
-      borrowCampaigns: borrowCampaignsForModal.value,
-      loopingCampaigns: loopingCampaignsForModal.value,
-    },
-  })
-}
+const netApyModalData = computed(() => ({
+  props: {
+    supplyUSD: collateralValue.value.usd,
+    borrowUSD: borrowedValue.value.usd,
+    baseSupplyAPY: baseSupplyApy.value,
+    baseBorrowAPY: baseBorrowApy.value,
+    intrinsicSupplyAPY: intrinsicSupplyApy.value,
+    intrinsicBorrowAPY: intrinsicBorrowApy.value,
+    supplyRewardAPY: supplyRewardAPY.value || null,
+    borrowRewardAPY: borrowRewardAPY.value || null,
+    loopingRewardAPY: loopingRewardAPY.value || null,
+    loopingEligible: loopingEligible.value,
+    netAPY: netAPY.value,
+    supplyCampaigns: supplyCampaignsForModal.value,
+    borrowCampaigns: borrowCampaignsForModal.value,
+    loopingCampaigns: loopingCampaignsForModal.value,
+  },
+}))
 
-const onRoeClick = () => {
-  modal.open(PortfolioRoeModal, {
-    props: {
-      roe: roe.value,
-      multiplier: Number.isFinite(actualMultiplier.value) ? actualMultiplier.value : 0,
-      supplyAPY: collateralSupplyApy.value,
-      borrowAPY: borrowApy.value,
-      supplyRewardAPY: supplyRewardAPY.value || null,
-      borrowRewardAPY: borrowRewardAPY.value || null,
-      loopingRewardAPY: loopingRewardAPY.value || null,
-      loopingEligible: loopingEligible.value,
-      userLTV: userLTV.value,
-      supplyCampaigns: supplyCampaignsForModal.value,
-      borrowCampaigns: borrowCampaignsForModal.value,
-      loopingCampaigns: loopingCampaignsForModal.value,
-    },
-  })
-}
+const rampStatus = computed(() => getPositionRampStatus(position))
+const rampEndsRelative = computed(() => {
+  if (!rampStatus.value.isRamping) return ''
+  return DateTime.fromSeconds(Number(position.targetTimestamp))
+    .toRelative({ base: DateTime.now(), style: 'short' }) ?? ''
+})
+const forcedLiquidationRelative = computed(() => {
+  const at = rampStatus.value.forcedLiquidationAt
+  if (at === null) return ''
+  return DateTime.fromSeconds(Number(at))
+    .toRelative({ base: DateTime.now(), style: 'short' }) ?? ''
+})
+const roeModalData = computed(() => ({
+  props: {
+    roe: roe.value,
+    multiplier: Number.isFinite(actualMultiplier.value) ? actualMultiplier.value : 0,
+    supplyAPY: collateralSupplyApy.value,
+    borrowAPY: borrowApy.value,
+    supplyRewardAPY: supplyRewardAPY.value || null,
+    borrowRewardAPY: borrowRewardAPY.value || null,
+    loopingRewardAPY: loopingRewardAPY.value || null,
+    loopingEligible: loopingEligible.value,
+    userLTV: userLTV.value,
+    supplyCampaigns: supplyCampaignsForModal.value,
+    borrowCampaigns: borrowCampaignsForModal.value,
+    loopingCampaigns: loopingCampaignsForModal.value,
+  },
+}))
 
 const loadCollaterals = async () => {
   // Only load additional collaterals if position has multiple,
@@ -444,44 +451,64 @@ onMounted(() => {
             <div class="flex flex-col items-end">
               <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                 Net APY
-                <SvgIcon
-                  class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
-                  name="info-circle"
-                  @click.prevent="onNetApyClick"
-                />
+                <UiModalPreviewTrigger
+                  :component="VaultNetApyModal"
+                  :modal-data="netApyModalData"
+                  aria-label="Show net APY breakdown"
+                >
+                  <SvgIcon
+                    class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
+                    name="info-circle"
+                  />
+                </UiModalPreviewTrigger>
               </div>
               <div
                 class="text-p2 flex items-center"
                 :class="[netAPY >= 0 ? 'text-accent-600' : 'text-error-500']"
               >
-                <SvgIcon
+                <UiModalPreviewTrigger
                   v-if="hasRewards"
-                  class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
-                  name="sparks"
-                  @click.prevent="onNetApyClick"
-                />
+                  :component="VaultNetApyModal"
+                  :modal-data="netApyModalData"
+                  aria-label="Show net APY rewards breakdown"
+                >
+                  <SvgIcon
+                    class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
+                    name="sparks"
+                  />
+                </UiModalPreviewTrigger>
                 {{ Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
               </div>
             </div>
             <div class="flex flex-col items-end">
               <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                 ROE
-                <SvgIcon
-                  class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
-                  name="info-circle"
-                  @click.prevent="onRoeClick"
-                />
+                <UiModalPreviewTrigger
+                  :component="PortfolioRoeModal"
+                  :modal-data="roeModalData"
+                  aria-label="Show ROE breakdown"
+                >
+                  <SvgIcon
+                    class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
+                    name="info-circle"
+                  />
+                </UiModalPreviewTrigger>
               </div>
               <div
                 class="text-p2 flex items-center"
                 :class="[roe >= 0 ? 'text-accent-600' : 'text-error-500']"
               >
-                <SvgIcon
+                <UiModalPreviewTrigger
                   v-if="hasRewards"
-                  class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
-                  name="sparks"
-                  @click.prevent="onRoeClick"
-                />
+                  :component="PortfolioRoeModal"
+                  :modal-data="roeModalData"
+                  aria-label="Show ROE rewards breakdown"
+                >
+                  <SvgIcon
+                    class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
+                    name="sparks"
+                  />
+                </UiModalPreviewTrigger>
                 {{ Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}
               </div>
             </div>
@@ -511,6 +538,27 @@ onMounted(() => {
           />
           Oracle pricing unavailable. Some details may be missing.
         </div>
+        <UiToast
+          v-if="rampStatus.isRamping && rampStatus.willBeLiquidated && !hasQueryFailure"
+          title="Liquidation LTV ramping down"
+          :description="`Your position is projected to become liquidatable ${forcedLiquidationRelative || 'before the ramp ends'} — consider closing or reducing debt.`"
+          variant="error"
+          size="compact"
+        />
+        <UiToast
+          v-else-if="rampStatus.isRamping && hasQueryFailure"
+          title="Liquidation LTV ramping down"
+          :description="`Ends ${rampEndsRelative}. Oracle pricing is currently unavailable, so we can't tell whether your position will remain safe.`"
+          variant="warning"
+          size="compact"
+        />
+        <UiToast
+          v-else-if="rampStatus.isRamping"
+          title="Liquidation LTV ramping down"
+          :description="`Ends ${rampEndsRelative}. Your position is currently safe at the post-ramp threshold.`"
+          variant="warning"
+          size="compact"
+        />
         <div class="flex justify-between">
           <div class="text-content-tertiary text-p3">
             Net asset value
@@ -595,7 +643,7 @@ onMounted(() => {
                 :color="nanoToValue(position.userLTV, 18) >= (nanoToValue(position.liquidationLTV, 2) - 2) ? 'danger' : undefined"
                 size="small"
               />
-              <div class="flex justify-between gap-8 text-right">
+              <div class="flex justify-between gap-8 text-right items-center">
                 <div class="text-content-primary text-p3">
                   {{ formatNumber(nanoToValue(position.userLTV, 18), 2) }}/{{ nanoToValue(position.liquidationLTV, 2) }}%
                 </div>

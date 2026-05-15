@@ -37,7 +37,7 @@ const { refreshAllPositions: _refreshAllPositions, depositPositions } = useEuler
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
 const { eulerLensAddresses: _eulerLensAddresses } = useEulerAddresses()
-const { fetchSingleBalance, fetchVaultShareBalance } = useWallets()
+const { fetchSingleBalance } = useWallets()
 const openSlippageSettings = () => {
   modal.open(SlippageSettingsModal)
 }
@@ -48,8 +48,6 @@ useOperationGuard([collateralAddress, borrowAddress])
 
 // --- Shared state ---
 const balance = ref(0n)
-const savingBalance = ref(0n)
-const savingAssets = ref(0n)
 const tab = ref()
 const formTab = ref<'borrow' | 'multiply'>('borrow')
 const pendingSubAccount = ref<string | null>(null)
@@ -119,8 +117,11 @@ const isPairFullyRestricted = computed(() =>
   !isGeoBlocked.value && isVaultRestrictedByCountry(collateralAddress) && isVaultRestrictedByCountry(borrowAddress))
 
 // --- Savings collateral ---
-const savingCollateral = computed(() => {
-  return depositPositions.value.find(position => position.vault.address === route.params.collateral)
+const savingPositions = computed(() => {
+  const normalizedCollateral = normalizeAddress(collateralAddress)
+  return depositPositions.value.filter(position =>
+    position.assets > 0n && normalizeAddress(position.vault.address) === normalizedCollateral,
+  )
 })
 
 // --- Product labels ---
@@ -133,10 +134,8 @@ const borrow = useBorrowForm({
   borrowVault: borrowVault as ComputedRef<Vault | undefined>,
   collateralVault: collateralVault as ComputedRef<Vault | undefined>,
   formTab,
-  savingCollateral: savingCollateral as ComputedRef<{ assets: bigint, subAccount?: string, shares: bigint } | undefined>,
+  savingPositions,
   balance,
-  savingBalance,
-  savingAssets,
   resolvePendingSubAccount,
   collateralSupplyApy,
   borrowApy,
@@ -248,7 +247,6 @@ watch(tabs, (next) => {
 const updateBalance = async () => {
   if (!isConnected.value) {
     balance.value = 0n
-    savingBalance.value = 0n
     multiply.multiplyAssetBalance.value = 0n
     return
   }
@@ -258,16 +256,6 @@ const updateBalance = async () => {
   }
   else {
     balance.value = 0n
-  }
-
-  if (collateralVault.value?.address) {
-    savingBalance.value = await fetchVaultShareBalance(
-      collateralVault.value.address,
-      savingCollateral.value?.subAccount,
-    )
-  }
-  else {
-    savingBalance.value = 0n
   }
 
   await Promise.all([
@@ -518,6 +506,8 @@ watch(formTab, () => {
                   :balance="borrow.borrowActiveBalance.value"
                   :collateral-options="borrow.borrowNeedsSwap.value ? undefined : (borrow.collateralOptions.value as CollateralOption[])"
                   :selected-source="borrow.isSavingCollateral.value ? 'saving' : 'wallet'"
+                  :selected-sub-account="borrow.selectedSavingSubAccount.value"
+                  :selected-vault-address="collateralVault.address"
                   maxable
                   @input="borrow.onCollateralInput"
                   @change-collateral="borrow.onChangeCollateral"
@@ -729,6 +719,8 @@ watch(formTab, () => {
                       :balance="multiply.multiplyBalance.value"
                       :collateral-options="multiply.multiplyCollateralOptions.value"
                       :selected-source="multiply.isMultiplySavingCollateral.value ? 'saving' : 'wallet'"
+                      :selected-sub-account="multiply.multiplySavingSubAccount.value"
+                      :selected-vault-address="multiply.multiplySupplyVault.value.address"
                       maxable
                       @input="multiply.onMultiplyInput"
                       @change-collateral="multiply.onMultiplyCollateralChange"
