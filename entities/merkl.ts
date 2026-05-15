@@ -121,6 +121,10 @@ export interface Opportunity {
       evkAddress?: string
       targetToken?: string
       collateralAddress?: string
+      // When non-empty, only these recipient addresses earn the campaign
+      // rewards — displaying the APR to everyone would be misleading.
+      whitelist?: string[]
+      blacklist?: string[]
       markets?: {
         campaignParameters: {
           evkAddress?: string

@@ -94,6 +94,16 @@ const fetchMerklProxy = (chainId: number): Promise<MerklProxyResponse | null> =>
         return null
       }))
 
+// Merkl campaigns can carry a `params.whitelist` (only these recipients earn)
+// or `params.blacklist` (these recipients don't earn). We don't drop campaigns
+// here — discovery views show the unfiltered APR — but we lowercase the lists
+// onto the emitted `RewardCampaign` so `useRewardsApy` can filter per the
+// connected/spied address.
+const normalizeAddressList = (list: readonly string[] | undefined): string[] | undefined => {
+  if (!list?.length) return undefined
+  return list.map(a => a.toLowerCase())
+}
+
 const processOpportunitiesToCampaigns = (
   opportunities: Opportunity[],
   opType: 'EULER' | 'ERC20LOGPROCESSOR',
@@ -143,6 +153,8 @@ const processOpportunitiesToCampaigns = (
         endTimestamp: campaign.endTimestamp,
         rewardToken: { symbol: campaign.rewardToken.symbol, icon: campaign.rewardToken.icon },
         sourceUrl: merklOpportunityUrl(opportunity, opType),
+        whitelist: normalizeAddressList(campaign.params.whitelist),
+        blacklist: normalizeAddressList(campaign.params.blacklist),
       }
 
       const existing = campaignMap.get(vaultAddress)
@@ -184,6 +196,9 @@ const processMultiLendBorrowOpportunities = (
       const markets = campaign.params?.markets
       if (!markets?.length || !campaign.rewardToken) continue
 
+      const whitelist = normalizeAddressList(campaign.params?.whitelist)
+      const blacklist = normalizeAddressList(campaign.params?.blacklist)
+
       // Merkl provides a single campaign-level APR (keyed by campaignId in
       // aprRecord.breakdowns), shared across all markets under MAX_APR. For
       // MULTILENDBORROW that breakdown can be absent/zero while the top-level
@@ -206,6 +221,8 @@ const processMultiLendBorrowOpportunities = (
           endTimestamp: campaign.endTimestamp,
           rewardToken: { symbol: campaign.rewardToken.symbol, icon: campaign.rewardToken.icon },
           sourceUrl: merklOpportunityUrl(opportunity, 'MULTILENDBORROW'),
+          whitelist,
+          blacklist,
         }
 
         const existing = campaignMap.get(vaultAddress)
