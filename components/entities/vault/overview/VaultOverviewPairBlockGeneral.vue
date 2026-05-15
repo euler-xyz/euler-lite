@@ -6,18 +6,35 @@ import { getCollateralOraclePrice, getAssetOraclePrice } from '~/services/pricin
 import { formatNumber, formatSignificant } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
-import type { AccountBorrowPosition } from '~/entities/account'
+import { type AccountBorrowPosition, getPositionRampConfig } from '~/entities/account'
+import type { LTVRampConfig } from '~/entities/vault/ltv'
 import { VaultNetApyPairModal, VaultMaxRoeModal, VaultRampDownModal, VaultSupplyApyModal, VaultBorrowApyModal } from '#components'
 
 const { pair } = defineProps<{ pair: AnyBorrowVaultPair | AccountBorrowPosition }>()
 
-const hasRampConfig = computed(() => 'initialLiquidationLTV' in pair)
-const currentLiquidationLTV = computed(() =>
-  hasRampConfig.value ? getCurrentLiquidationLTV(pair as AnyBorrowVaultPair) : pair.liquidationLTV,
-)
-const isRamping = computed(() =>
-  hasRampConfig.value && isLiquidationLTVRamping(pair as AnyBorrowVaultPair),
-)
+// `BorrowVaultPair` carries ramp fields flat on the pair, with `liquidationLTV`
+// meaning the post-ramp target. `AccountBorrowPosition` exposes them via
+// `targetLiquidationLTV` + friends — `position.liquidationLTV` is the live
+// effective value from the lens. Normalise to a single `LTVRampConfig` shape
+// here so the helpers and modal don't need to know which type they got.
+const isAccountPosition = (p: typeof pair): p is AccountBorrowPosition => 'targetLiquidationLTV' in p
+const rampConfig = computed<LTVRampConfig | null>(() => {
+  if (isAccountPosition(pair)) {
+    if (pair.rampDuration === 0n && pair.targetTimestamp === 0n) return null
+    return getPositionRampConfig(pair)
+  }
+  if ('initialLiquidationLTV' in pair) return pair as LTVRampConfig
+  return null
+})
+const currentLiquidationLTV = computed(() => {
+  // For an account position the lens already gives the live effective value;
+  // for a market pair we interpolate from the ramp config so the modal and the
+  // row stay in sync as time advances.
+  if (isAccountPosition(pair)) return pair.liquidationLTV
+  if (rampConfig.value) return getCurrentLiquidationLTV(rampConfig.value)
+  return pair.liquidationLTV
+})
+const isRamping = computed(() => !!rampConfig.value && isLiquidationLTVRamping(rampConfig.value))
 
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, getLoopingRewardCampaigns, hasSupplyRewards, hasBorrowRewards, hasLoopingRewards } = useRewardsApy()
@@ -121,7 +138,7 @@ const maxRoeModalData = computed(() => ({
 }))
 
 const rampDownModalData = computed(() => ({
-  props: pair,
+  props: rampConfig.value ?? {},
 }))
 </script>
 

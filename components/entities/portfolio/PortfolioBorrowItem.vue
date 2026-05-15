@@ -4,8 +4,9 @@ import { getAddress, type Address, type Abi } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
+import { DateTime } from 'luxon'
 import type { AccountBorrowPosition } from '~/entities/account'
-import { getSubAccountIndex } from '~/entities/account'
+import { getPositionRampStatus, getSubAccountIndex } from '~/entities/account'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import {
   getNetAPY,
@@ -280,6 +281,18 @@ const netApyModalData = computed(() => ({
   },
 }))
 
+const rampStatus = computed(() => getPositionRampStatus(position))
+const rampEndsRelative = computed(() => {
+  if (!rampStatus.value.isRamping) return ''
+  return DateTime.fromSeconds(Number(position.targetTimestamp))
+    .toRelative({ base: DateTime.now(), style: 'short' }) ?? ''
+})
+const forcedLiquidationRelative = computed(() => {
+  const at = rampStatus.value.forcedLiquidationAt
+  if (at === null) return ''
+  return DateTime.fromSeconds(Number(at))
+    .toRelative({ base: DateTime.now(), style: 'short' }) ?? ''
+})
 const roeModalData = computed(() => ({
   props: {
     roe: roe.value,
@@ -525,6 +538,27 @@ onMounted(() => {
           />
           Oracle pricing unavailable. Some details may be missing.
         </div>
+        <UiToast
+          v-if="rampStatus.isRamping && rampStatus.willBeLiquidated && !hasQueryFailure"
+          title="Liquidation LTV ramping down"
+          :description="`Your position is projected to become liquidatable ${forcedLiquidationRelative || 'before the ramp ends'} — consider closing or reducing debt.`"
+          variant="error"
+          size="compact"
+        />
+        <UiToast
+          v-else-if="rampStatus.isRamping && hasQueryFailure"
+          title="Liquidation LTV ramping down"
+          :description="`Ends ${rampEndsRelative}. Oracle pricing is currently unavailable, so we can't tell whether your position will remain safe.`"
+          variant="warning"
+          size="compact"
+        />
+        <UiToast
+          v-else-if="rampStatus.isRamping"
+          title="Liquidation LTV ramping down"
+          :description="`Ends ${rampEndsRelative}. Your position is currently safe at the post-ramp threshold.`"
+          variant="warning"
+          size="compact"
+        />
         <div class="flex justify-between">
           <div class="text-content-tertiary text-p3">
             Net asset value
@@ -609,7 +643,7 @@ onMounted(() => {
                 :color="nanoToValue(position.userLTV, 18) >= (nanoToValue(position.liquidationLTV, 2) - 2) ? 'danger' : undefined"
                 size="small"
               />
-              <div class="flex justify-between gap-8 text-right">
+              <div class="flex justify-between gap-8 text-right items-center">
                 <div class="text-content-primary text-p3">
                   {{ formatNumber(nanoToValue(position.userLTV, 18), 2) }}/{{ nanoToValue(position.liquidationLTV, 2) }}%
                 </div>
