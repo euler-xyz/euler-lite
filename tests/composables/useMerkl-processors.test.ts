@@ -83,6 +83,8 @@ describe('processBorrowFromCollateralOpportunities', () => {
       campaigns: [
         makeCampaign({
           params: {
+            whitelist: ['0x1111111111111111111111111111111111111111'],
+            blacklist: ['0x2222222222222222222222222222222222222222'],
             vaults: [
               {
                 evkAddress: '0x6Fe7Fa90756434645F0b0428fDff78E99Dda0FBc',
@@ -124,6 +126,8 @@ describe('processBorrowFromCollateralOpportunities', () => {
       expect(c.apr).toBe(1.5)
       expect(c.vault).toBe(c.vault.toLowerCase())
       expect(c.collateral).toBe(c.collateral?.toLowerCase())
+      expect(c.whitelist).toEqual(['0x1111111111111111111111111111111111111111'])
+      expect(c.blacklist).toEqual(['0x2222222222222222222222222222222222222222'])
     }
 
     expect(second?.[0].collateral).toBe('0xc1ff5490651b9b8d0400b0146e7fb174b90e315b')
