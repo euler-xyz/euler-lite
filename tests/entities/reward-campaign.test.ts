@@ -34,10 +34,13 @@ describe('isCampaignEligibleForAddress', () => {
     expect(isCampaignEligibleForAddress(c, USER)).toBe(false)
   })
 
-  it('rejects an unidentified visitor when the campaign has a whitelist', () => {
-    const c = makeCampaign({ whitelist: [USER.toLowerCase()] })
-    expect(isCampaignEligibleForAddress(c, undefined)).toBe(false)
-    expect(isCampaignEligibleForAddress(c, '')).toBe(false)
+  it('passes an unidentified visitor unconditionally', () => {
+    const whitelistOnly = makeCampaign({ whitelist: [USER.toLowerCase()] })
+    const blacklistOnly = makeCampaign({ blacklist: [USER.toLowerCase()] })
+    for (const addr of [undefined, null, '']) {
+      expect(isCampaignEligibleForAddress(whitelistOnly, addr)).toBe(true)
+      expect(isCampaignEligibleForAddress(blacklistOnly, addr)).toBe(true)
+    }
   })
 
   it('treats an empty whitelist as "no restriction"', () => {
@@ -49,11 +52,6 @@ describe('isCampaignEligibleForAddress', () => {
   it('rejects an address on the blacklist (case-insensitive)', () => {
     const c = makeCampaign({ blacklist: [USER.toLowerCase()] })
     expect(isCampaignEligibleForAddress(c, USER)).toBe(false)
-  })
-
-  it('passes an unidentified visitor against a blacklist-only campaign', () => {
-    const c = makeCampaign({ blacklist: [USER.toLowerCase()] })
-    expect(isCampaignEligibleForAddress(c, undefined)).toBe(true)
   })
 
   it('blacklist takes precedence over whitelist', () => {

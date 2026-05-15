@@ -24,23 +24,20 @@ export interface RewardCampaign {
 /**
  * Decide whether `userAddress` is eligible to earn the campaign.
  *
- * The helper is symmetric in how it handles a missing address:
- *   - A campaign with a non-empty whitelist is an explicit allow-list; an
- *     unidentified visitor is definitionally NOT on it, so they're ineligible.
- *   - A blacklist is an explicit deny-list; an unidentified visitor can't be
- *     on it, so they pass the blacklist check.
- *
- * Net result: discovery surfaces (no wallet connected) hide whitelisted
- * campaigns from the headline APR — they're not earnable by an arbitrary
- * visitor — but blacklists alone don't suppress anything.
+ * Without a connected wallet we can't tell who the visitor is, so we keep the
+ * full "headline" APR visible — discovery surfaces still advertise the
+ * upside. Once a wallet (or spy address) is in scope we filter strictly:
+ *   - non-empty whitelist + user not on it → ineligible
+ *   - user on the blacklist → ineligible
  */
 export const isCampaignEligibleForAddress = (
   campaign: Pick<RewardCampaign, 'whitelist' | 'blacklist'>,
   userAddress: string | undefined | null,
 ): boolean => {
-  const addr = userAddress ? userAddress.toLowerCase() : ''
+  if (!userAddress) return true
+  const addr = userAddress.toLowerCase()
   if (campaign.whitelist?.length && !campaign.whitelist.includes(addr)) return false
-  if (addr && campaign.blacklist?.includes(addr)) return false
+  if (campaign.blacklist?.includes(addr)) return false
   return true
 }
 

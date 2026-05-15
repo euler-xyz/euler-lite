@@ -14,9 +14,8 @@ export const useRewardsApy = () => {
 
   // Active address for whitelist/blacklist filtering: spy mode wins (we want
   // to see what the spied user actually earns), otherwise the connected
-  // wallet. When neither is set, whitelisted campaigns still get filtered out
-  // — an unidentified visitor is definitionally not on any whitelist, so
-  // crediting their APR with whitelist-only campaigns would be misleading.
+  // wallet. When neither is set the filter is a no-op — discovery surfaces
+  // keep the full "headline" APR visible to unconnected visitors.
   const eligibilityAddress = computed(() =>
     spyAddress.value || connectedAddress.value || undefined,
   )
