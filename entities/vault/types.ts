@@ -256,6 +256,7 @@ export interface CollateralOption {
   symbol?: string
   assetAddress?: string
   vaultAddress?: string
+  subAccount?: string
   disabled?: boolean
   tags?: string[]
 }

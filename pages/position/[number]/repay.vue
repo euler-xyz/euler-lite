@@ -851,6 +851,9 @@ watch(formTab, () => {
                 :asset="savings.sourceVault.value.asset"
                 :vault="savings.sourceVault.value"
                 :collateral-options="savings.savingsOptions.value"
+                :selected-source="'saving'"
+                :selected-sub-account="savings.selectedSavingSubAccount.value"
+                :selected-vault-address="savings.sourceVault.value.address"
                 :balance="savings.sourceBalance.value"
                 :max-handler="savings.onSourceMax"
                 maxable

@@ -51,6 +51,7 @@ type MultiplyPlanParamsCommon = {
   supplyAmount: bigint
   supplySharesAmount?: bigint
   supplyIsSavings?: boolean
+  savingsSubAccount?: string
   longVaultAddress: string
   longAssetAddress: string
   borrowVaultAddress: string
@@ -142,6 +143,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const multiplySupplyVault: Ref<Vault | undefined> = ref()
   const multiplyAssetBalance: Ref<bigint> = ref(0n)
   const isMultiplySavingCollateral = ref(false)
+  const multiplySavingSubAccount = ref<string | undefined>()
   const isMultiplySubmitting = ref(false)
   const isMultiplyPreparing = ref(false)
   const multiplyPlan = ref<TxPlan | null>(null)
@@ -163,11 +165,20 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const multiplyShortProduct = useEulerProductOfVault(computed(() => multiplyShortVault.value?.address || ''))
 
   // --- Savings position ---
+  // When a sub-account is explicitly selected, require an exact match; falling
+  // back to the first matching vault could silently source from the wrong
+  // sub-account if the selected position disappears between refreshes.
   const multiplySavingPosition = computed(() => {
     if (!multiplySupplyVault.value) return null
-    return depositPositions.value.find(
-      position => normalizeAddress(position.vault.address) === normalizeAddress(multiplySupplyVault.value?.address),
-    ) || null
+    const vaultAddr = normalizeAddress(multiplySupplyVault.value.address)
+    const selectedSub = multiplySavingSubAccount.value
+    const matches = depositPositions.value.filter(
+      position => normalizeAddress(position.vault.address) === vaultAddr,
+    )
+    if (selectedSub) {
+      return matches.find(p => normalizeAddress(p.subAccount) === normalizeAddress(selectedSub)) || null
+    }
+    return matches[0] || null
   })
   const multiplySavingBalance = computed(() => multiplySavingPosition.value?.shares || 0n)
 
@@ -810,12 +821,15 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     if (!nextVault || !nextOption) return
 
     const nextIsSaving = nextOption.type === 'saving'
+    const nextSubAccount = nextIsSaving ? nextOption.subAccount : undefined
     const vaultChanged = !multiplySupplyVault.value
       || normalizeAddress(multiplySupplyVault.value.address) !== normalizeAddress(nextVault.address)
     const savingChanged = nextIsSaving !== isMultiplySavingCollateral.value
-    if (vaultChanged || savingChanged) {
+    const subAccountChanged = normalizeAddress(nextSubAccount) !== normalizeAddress(multiplySavingSubAccount.value)
+    if (vaultChanged || savingChanged || subAccountChanged) {
       multiplySupplyVault.value = nextVault
       isMultiplySavingCollateral.value = nextIsSaving
+      multiplySavingSubAccount.value = nextSubAccount
       multiplyInputAmount.value = ''
       resetMultiplyQuoteState()
     }
@@ -869,6 +883,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       supplyAmount: supplyAmountNano,
       supplySharesAmount,
       supplyIsSavings: isMultiplySavingCollateral.value,
+      savingsSubAccount: isMultiplySavingCollateral.value ? multiplySavingPosition.value?.subAccount : undefined,
       longVaultAddress: multiplyLongVault.value.address,
       longAssetAddress: multiplyLongVault.value.asset.address,
       borrowVaultAddress: multiplyShortVault.value.address,
@@ -946,6 +961,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         supplyAmount: supplyAmountNano,
         supplySharesAmount,
         supplyIsSavings: isMultiplySavingCollateral.value,
+        savingsSubAccount: isMultiplySavingCollateral.value ? multiplySavingPosition.value?.subAccount : undefined,
         longVaultAddress: multiplyLongVault.value.address,
         longAssetAddress: multiplyLongVault.value.asset.address,
         borrowVaultAddress: multiplyShortVault.value.address,
@@ -1034,6 +1050,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const initMultiplySupplyVault = (vault: Vault) => {
     multiplySupplyVault.value = vault
     isMultiplySavingCollateral.value = false
+    multiplySavingSubAccount.value = undefined
   }
 
   // --- Watchers ---
@@ -1115,6 +1132,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     multiplySupplyVault,
     multiplyAssetBalance,
     isMultiplySavingCollateral,
+    multiplySavingSubAccount,
     isMultiplySubmitting,
     isMultiplyPreparing,
     multiplyPlan,
