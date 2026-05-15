@@ -9,7 +9,7 @@ import {
   SwapperMode,
 } from '~/entities/swap'
 import { EXCLUDED_SWAP_PROVIDERS, SWAP_DEFAULT_DEADLINE_SECONDS } from '~/entities/constants'
-import { COWSWAP_PROVIDER_NAME, isCowProvider, isCowQuote, isCowSwapSupportedChain, validateCowSwapQuoteMatchesRequest } from '~/entities/cowswap'
+import { isCowProvider, isCowQuote, isCowSwapSupportedChain, validateCowSwapQuoteMatchesRequest } from '~/entities/cowswap'
 
 export interface SwapApiRequestInput {
   chainId?: number
@@ -182,7 +182,7 @@ export const useSwapApi = () => {
       return providers.filter((p) => {
         const normalized = p.toLowerCase()
         return !EXCLUDED_SWAP_PROVIDERS.has(normalized)
-          && (normalized !== COWSWAP_PROVIDER_NAME || includeCow)
+          && (!isCowProvider(p) || includeCow)
       })
     }
     catch (error) {
