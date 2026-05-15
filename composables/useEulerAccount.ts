@@ -179,22 +179,22 @@ export const useEulerAccount = () => {
 
   const portfolioRoe = computed(() => portfolio.value?.roe ?? 0)
   const portfolioNetApy = computed(() => portfolio.value?.netApy ?? 0)
-  const totalSuppliedValue = computed(() => usdWadToNumber(portfolio.value?.totalSuppliedMarketValueUsd))
-  const totalBorrowedValue = computed(() => usdWadToNumber(portfolio.value?.totalBorrowedMarketValueUsd))
-  const netAssetMarketValue = computed(() => usdWadToNumber(portfolio.value?.netAssetMarketValueUsd))
+  const totalSuppliedValue = computed(() => usdWadToNumber(portfolio.value?.totalSuppliedValueUsd))
+  const totalBorrowedValue = computed(() => usdWadToNumber(portfolio.value?.totalBorrowedValueUsd))
+  const netAssetMarketValue = computed(() => usdWadToNumber(portfolio.value?.netAssetValueUsd))
   const totalSuppliedValueInfo = computed(() => ({
     total: totalSuppliedValue.value,
-    hasMissingPrices: portfolio.value?.totalSuppliedMarketValueUsd === undefined
+    hasMissingPrices: portfolio.value?.totalSuppliedValueUsd === undefined
       && (depositPositions.value.length > 0 || borrowPositions.value.length > 0),
   }))
   const totalBorrowedValueInfo = computed(() => ({
     total: totalBorrowedValue.value,
-    hasMissingPrices: portfolio.value?.totalBorrowedMarketValueUsd === undefined
+    hasMissingPrices: portfolio.value?.totalBorrowedValueUsd === undefined
       && borrowPositions.value.length > 0,
   }))
   const netAssetMarketValueInfo = computed(() => ({
     total: netAssetMarketValue.value,
-    hasMissingPrices: portfolio.value?.netAssetMarketValueUsd === undefined
+    hasMissingPrices: portfolio.value?.netAssetValueUsd === undefined
       && (depositPositions.value.length > 0 || borrowPositions.value.length > 0),
   }))
 

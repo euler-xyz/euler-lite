@@ -200,9 +200,9 @@ Raw oracle calculations use SDK helpers such as `getAssetOraclePrice()` and `get
 |----------|-------------------|
 | Vault asset USD price | `vault.marketPriceUsd` |
 | Borrow-context collateral USD price | `borrowVault.collaterals[].marketPriceUsd` |
-| Borrowed position value | `position.borrow.borrowedMarketValueUsd` |
-| Total borrow-position collateral value | `position.totalCollateralMarketValueUsd` |
-| Per-collateral borrow-position value | `position.borrow.liquidity.collaterals[].marketValueUsd` |
+| Borrowed position value | `position.borrow.borrowedValueUsd` |
+| Total borrow-position collateral value | `position.totalCollateralValueUsd` |
+| Per-collateral borrow-position value | `position.borrow.liquidity.collaterals[].valueUsd` |
 | Borrow-position Net APY | `position.netApy` |
 | Borrow-position ROE | `position.roe` |
 
@@ -212,10 +212,10 @@ Portfolio borrow cards use the SDK portfolio position fields directly for collat
 
 ```
 totalSuppliedValue = sum of:
-  - SDK totalSuppliedMarketValueUsd
+  - SDK totalSuppliedValueUsd
 
 totalBorrowedValue = sum of:
-  - SDK totalBorrowedMarketValueUsd
+  - SDK totalBorrowedValueUsd
 ```
 
 Both are computed reactively and update when position data changes.

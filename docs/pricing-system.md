@@ -18,11 +18,13 @@ The important rule is that Lite's explicit `source` argument maps to SDK fields 
 
 Borrow-position aggregates use SDK precomputed position fields. Portfolio borrow cards render NAV, Net APY, and ROE from the SDK portfolio position instead of recomputing those values with local price helpers.
 
+For SDK account and portfolio properties, numerical fields whose names include `Usd` are market-priced USD values. Oracle and risk-unit values stay in explicit oracle and liquidity fields such as `oraclePriceRaw`, `assetRiskPrice`, `liabilityValue`, and `totalCollateralValue`.
+
 | UI value | SDK-backed field |
 |----------|------------------|
-| Total collateral value | `position.totalCollateralMarketValueUsd` |
-| Per-collateral value in borrow context | `position.borrow.liquidity.collaterals[].marketValueUsd` |
-| Borrow market value | `position.borrow.borrowedMarketValueUsd` |
+| Total collateral value | `position.totalCollateralValueUsd` |
+| Per-collateral value in borrow context | `position.borrow.liquidity.collaterals[].valueUsd` |
+| Borrow market value | `position.borrow.borrowedValueUsd` |
 | Borrow-position Net APY | `position.netApy` |
 | Borrow-position ROE | `position.roe` |
 | Primary collateral liquidation price | `position.primaryCollateralLiquidationPrice` |

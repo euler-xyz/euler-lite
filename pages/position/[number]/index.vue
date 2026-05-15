@@ -230,7 +230,7 @@ watchEffect(async () => {
       let oraclePriceUsd = 0
 
       const liquidityCollateral = getBorrowLiquidityCollateral(item.vault.address)
-      const valueRaw = usdWadToNumber(liquidityCollateral?.marketValueUsd)
+      const valueRaw = usdWadToNumber(liquidityCollateral?.valueUsd)
         ?? await getCollateralUsdValue(item.assets, borrowVault.value!, item.vault as EVault, 'off-chain')
       const priceInfo = await getCollateralUsdPrice(borrowVault.value!, item.vault as EVault, 'off-chain')
       if (priceInfo) {
@@ -264,8 +264,8 @@ watchEffect(async () => {
     return
   }
 
-  if (position.value.totalCollateralMarketValueUsd !== undefined) {
-    collateralValue.value = usdWadToAmount(position.value.totalCollateralMarketValueUsd)
+  if (position.value.totalCollateralValueUsd !== undefined) {
+    collateralValue.value = usdWadToAmount(position.value.totalCollateralValueUsd)
     return
   }
 
@@ -296,7 +296,7 @@ watchEffect(async () => {
     return
   }
 
-  borrowMarketValue.value = usdWadToAmount(position.value.borrow.borrowedMarketValueUsd)
+  borrowMarketValue.value = usdWadToAmount(position.value.borrow.borrowedValueUsd)
 })
 
 // Net asset value in USD: sync computed so it tracks both collateralValue and borrowMarketValue

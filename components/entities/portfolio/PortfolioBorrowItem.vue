@@ -170,7 +170,7 @@ const borrowApy = computed(() => withIntrinsicBorrowApy(
   borrowVault.value?.asset.address,
 ))
 
-const collateralValue = computed<UsdAmount>(() => toUsdAmount(position.totalCollateralMarketValueUsd))
+const collateralValue = computed<UsdAmount>(() => toUsdAmount(position.totalCollateralValueUsd))
 
 const collateralValueDisplay = computed(() => {
   return collateralValue.value.hasPrice
@@ -178,7 +178,7 @@ const collateralValueDisplay = computed(() => {
     : `${roundAndCompactTokens(collateralItems.value[0]?.assets ?? supplied.value, BigInt(collateralVault.value.shares.decimals))} ${collateralVault.value.asset.symbol}`
 })
 
-const borrowedValue = computed<UsdAmount>(() => toUsdAmount(position.borrow.borrowedMarketValueUsd))
+const borrowedValue = computed<UsdAmount>(() => toUsdAmount(position.borrow.borrowedValueUsd))
 
 const borrowedValueInfo = computed<{ display: string, hasPrice: boolean }>(() => {
   if (borrowedValue.value.hasPrice) {
