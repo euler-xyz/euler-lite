@@ -401,6 +401,7 @@ export const createVaultBuilders = (
     supplyAmount: bigint
     supplySharesAmount?: bigint
     supplyIsSavings?: boolean
+    savingsSubAccount?: string
     longVaultAddress: string
     longAssetAddress: string
     borrowVaultAddress: string
@@ -425,6 +426,7 @@ export const createVaultBuilders = (
       supplyAmount,
       supplySharesAmount,
       supplyIsSavings = false,
+      savingsSubAccount,
       longVaultAddress,
       longAssetAddress,
       borrowVaultAddress,
@@ -504,12 +506,16 @@ export const createVaultBuilders = (
       usesPermit2 = usesPermit2 || longApproval.usesPermit2Local
     }
 
+    const isSavingsAtSubAccount = isSupplySavings
+      && savingsSubAccount
+      && getAddress(savingsSubAccount) !== getAddress(userAddr)
+
     const hooks = new SaHooksBuilder()
     hooks.addContractInterface(supplyVaultAddr, vaultDepositAbi)
     if (isSupplySavings) {
       hooks.addContractInterface(supplyVaultAddr, erc20TransferAbi)
     }
-    if (isSupplySavings) {
+    if (isSupplySavings && !isSavingsAtSubAccount) {
       hooks.addPreHookCallFromSelf(supplyVaultAddr, 'transfer', [subAccountAddr, supplySharesAmount!])
     }
     if (!isSameVault) {
@@ -520,6 +526,16 @@ export const createVaultBuilders = (
 
     const saHooks = hooks.build()
     const evcCalls = convertSaHooksToEVCCalls(saHooks, userAddr, userAddr)
+
+    if (isSavingsAtSubAccount) {
+      const transferCall: EVCCall = {
+        targetContract: supplyVaultAddr,
+        onBehalfOfAccount: getAddress(savingsSubAccount!) as Address,
+        value: 0n,
+        data: hooks.getDataForCall(supplyVaultAddr, 'transfer', [subAccountAddr, supplySharesAmount!]) as Hash,
+      }
+      evcCalls.unshift(transferCall)
+    }
 
     if (permitCalls.length) {
       evcCalls.unshift(...permitCalls)

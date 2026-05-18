@@ -10,6 +10,8 @@ import { SwapperMode } from '~/entities/swap'
 export interface StepAssetInfo {
   symbol: string
   address?: string
+  /** Optional address used only for the displayed asset logo. */
+  iconAddress?: string
   amount?: number | string
   iconUrl?: string
   /** When true, the displayed amount is an estimate (rendered with a "~" prefix). */

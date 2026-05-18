@@ -93,6 +93,9 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   )
   priceInvert.autoInvert(oraclePriceRatio)
   const sourceProduct = useEulerProductOfVault(computed(() => sourceVault.value?.address || ''))
+  const selectedSavingSubAccount = computed(() =>
+    sourceVault.value ? getSavingsPosition(sourceVault.value.address)?.subAccount : undefined,
+  )
 
   // --- Core swap logic ---
   const core = useRepaySwapCore({
@@ -444,6 +447,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     debtBalance,
     priceInvert,
     sourceProduct,
+    selectedSavingSubAccount,
     savingsPositions,
     savingsVaults,
     savingsOptions,
@@ -478,6 +482,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     onAmountInput: core.onAmountInput,
     onDebtInput: core.onDebtInput,
     onPercentInput: core.onPercentInput,
+    onProviderSelect: core.onProviderSelect,
     onSourceVaultChange,
     onRefreshQuotes: core.onRefreshQuotes,
     onSourceMax: core.onSourceMax,

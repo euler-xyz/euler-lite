@@ -2,7 +2,7 @@
 import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { useSwapDebtOptions } from '~/composables/useSwapDebtOptions'
-import { SwapperMode } from '~/entities/swap'
+import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import type { TxPlan } from '~/entities/txPlan'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
@@ -218,7 +218,7 @@ const swap = useSwapPageLogic({
     }
   },
 
-  async buildPlan(): Promise<TxPlan> {
+  async buildPlan(quote?: SwapApiQuote): Promise<TxPlan> {
     if (!fromVault.value || !toVault.value) throw new Error('Vaults not loaded')
     if (isSameAsset.value) {
       const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
@@ -230,9 +230,10 @@ const swap = useSwapPageLogic({
         enabledCollaterals: position.value ? position.value.collateralVaults : undefined,
       })
     }
-    if (!selectedQuote.value) throw new Error('No quote selected')
+    const swapQuote = quote || selectedQuote.value
+    if (!swapQuote) throw new Error('No quote selected')
     return buildSwapPlan({
-      quote: selectedQuote.value,
+      quote: swapQuote,
       swapperMode: SwapperMode.TARGET_DEBT,
       isRepay: true,
       requestedSlippage: slippage.value,
@@ -560,7 +561,9 @@ const onToVaultChange = (selectedIndex: number) => {
             <SwapDetailsSummary
               v-if="!isSameAsset"
               :input-display="swapSummary?.from ?? null"
+              :input-exact-display="swapSummary?.fromExact ?? null"
               :output-display="swapSummary?.to ?? null"
+              :output-exact-display="swapSummary?.toExact ?? null"
               :price-impact="priceImpact"
               :slippage="slippage"
               :routed-via="routedVia"

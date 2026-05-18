@@ -3,7 +3,7 @@ import type { SecuritizeCollateralVault, EVault } from '@eulerxyz/euler-v2-sdk'
 import { getSubAccountAddress } from '@eulerxyz/euler-v2-sdk'
 import { isSecuritizeVault } from '~/utils/vault/categories'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
-import { SwapperMode } from '~/entities/swap'
+import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import type { TxPlan } from '~/entities/txPlan'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
@@ -110,7 +110,7 @@ const swap = useSwapPageLogic({
     }
   },
 
-  async buildPlan(): Promise<TxPlan> {
+  async buildPlan(quote?: SwapApiQuote): Promise<TxPlan> {
     if (isSameAsset.value) {
       if (!fromVault.value || !toVault.value) throw new Error('Vaults not loaded')
       const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
@@ -123,9 +123,10 @@ const swap = useSwapPageLogic({
         maxShares: isMax ? savingPosition.value?.shares : undefined,
       })
     }
-    if (!selectedQuote.value) throw new Error('No quote selected')
+    const swapQuote = quote || selectedQuote.value
+    if (!swapQuote) throw new Error('No quote selected')
     return buildSwapPlan({
-      quote: selectedQuote.value,
+      quote: swapQuote,
       swapperMode: SwapperMode.EXACT_IN,
       isRepay: false,
       requestedSlippage: slippage.value,
@@ -329,7 +330,9 @@ watch([() => route.params.vault, () => route.query.to], () => {
               </SummaryRow>
               <SwapDetailsSummary
                 :input-display="swapSummary?.from ?? null"
+                :input-exact-display="swapSummary?.fromExact ?? null"
                 :output-display="swapSummary?.to ?? null"
+                :output-exact-display="swapSummary?.toExact ?? null"
                 :price-impact="priceImpact"
                 :slippage="slippage"
                 :routed-via="routedVia"

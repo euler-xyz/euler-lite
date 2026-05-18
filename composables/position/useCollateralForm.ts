@@ -146,6 +146,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     selectedProvider: swapSelectedProvider,
     selectedQuote: swapSelectedQuote,
     effectiveQuote: swapEffectiveQuote,
+    effectiveQuoteFetchedAt: swapEffectiveQuoteFetchedAt,
     providersCount: swapProvidersCount,
     isLoading: isSwapQuoteLoading,
     quoteError: swapQuoteError,
@@ -154,7 +155,11 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     reset: resetSwapQuoteState,
     requestQuotes: requestSwapQuotes,
     selectProvider: selectSwapQuote,
-  } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+  } = useSwapQuotesParallel({
+    amountField: 'amountOut',
+    compare: 'max',
+    buildTxPlanForQuote: quote => buildSwapTxPlanForQuote(quote, false),
+  })
   // --- Position/vault computeds ---
   const position = computed(() => getPositionBySubAccountIndex(+positionIndex))
   const isPositionLoaded = computed(() => !!position.value)
@@ -306,12 +311,28 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     return `${formatSmartAmount(formatUnits(amountIn, tokenIn.decimals))} ${tokenIn.symbol}`
   })
 
+  const swapInputExactDisplay = computed(() => {
+    if (!swapEffectiveQuote.value) return ''
+    const amountIn = BigInt(swapEffectiveQuote.value.amountIn || 0)
+    if (amountIn <= 0n) return ''
+    const tokenIn = swapEffectiveQuote.value.tokenIn
+    return `${formatUnits(amountIn, tokenIn.decimals)} ${tokenIn.symbol}`
+  })
+
   const swapOutputDisplay = computed(() => {
     const outputAsset = options.getSwapOutputAsset()
     if (!swapEffectiveQuote.value || !outputAsset) return ''
     const amountOut = BigInt(swapEffectiveQuote.value.amountOut || 0)
     if (amountOut <= 0n) return ''
     return `${formatSmartAmount(formatUnits(amountOut, Number(outputAsset.decimals)))} ${outputAsset.symbol}`
+  })
+
+  const swapOutputExactDisplay = computed(() => {
+    const outputAsset = options.getSwapOutputAsset()
+    if (!swapEffectiveQuote.value || !outputAsset) return ''
+    const amountOut = BigInt(swapEffectiveQuote.value.amountOut || 0)
+    if (amountOut <= 0n) return ''
+    return `${formatUnits(amountOut, Number(outputAsset.decimals))} ${outputAsset.symbol}`
   })
 
   const swapRoutedVia = computed(() => {
@@ -610,6 +631,19 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     }
   }
 
+  async function buildSwapTxPlanForQuote(quote: SwapApiQuote, includePermit2Call: boolean): Promise<TxPlan> {
+    if (!collateralVault.value?.address || !asset.value?.address) {
+      throw new Error('Missing collateral vault or asset')
+    }
+    return options.buildSwapPlan(quote, {
+      vaultAddress: collateralVault.value.address,
+      amountNano: valueToNano(amount.value || '0', asset.value.decimals),
+      slippage: swapSlippage.value,
+      subAccount: position.value?.subAccount,
+      includePermit2Call,
+    })
+  }
+
   // --- Submit ---
   const submit = async () => {
     if (isOperationBlocked.value) return
@@ -626,13 +660,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
         try {
           if (options.needsSwap.value && swapEffectiveQuote.value) {
-            plan.value = await options.buildSwapPlan(swapEffectiveQuote.value, {
-              vaultAddress: collateralVault.value.address,
-              amountNano: valueToNano(amount.value || '0', asset.value.decimals),
-              slippage: swapSlippage.value,
-              subAccount: position.value?.subAccount,
-              includePermit2Call: false,
-            })
+            plan.value = await buildSwapTxPlanForQuote(swapEffectiveQuote.value, false)
           }
           else {
             plan.value = await options.buildDirectPlan({
@@ -662,6 +690,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
             asset: reviewAsset,
             amount: amount.value,
             plan: plan.value || undefined,
+            quoteFetchedAt: options.needsSwap.value ? swapEffectiveQuoteFetchedAt.value : null,
             subAccount: position.value?.subAccount,
             hasBorrows: (position.value?.borrowed || 0n) > 0n,
             swapToAsset: options.needsSwap.value ? options.getSwapToAsset() : undefined,
@@ -808,7 +837,9 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     swapQuotesStatusLabel,
     swapEstimatedOutput,
     swapInputDisplay,
+    swapInputExactDisplay,
     swapOutputDisplay,
+    swapOutputExactDisplay,
     swapRoutedVia,
     swapPriceImpact,
     swapRouteItems,

@@ -11,6 +11,7 @@ import type { EVCCall } from '~/utils/evc-converter'
 import { buildPythUpdateCalls, buildPythUpdateCallsFromFeeds, collectPythFeedsForHealthCheck, sumCallValues } from '~/utils/pyth'
 import { logWarn } from '~/utils/errorHandling'
 import { getEulerSdk } from '~/composables/useEulerSdk'
+import { APPROVE_RESET_REQUIRED_TOKENS } from '~/entities/constants'
 
 /** Pad amount by 0.01% to cover interest accrual between plan build and tx execution */
 export const adjustForInterest = (amount: bigint) => (amount * INTEREST_ADJUSTMENT_BPS) / BPS_BASE
@@ -74,8 +75,9 @@ export const createOperationHelpers = (ctx: OperationsContext, permit2: Permit2H
     userAddr: Address
     amount: bigint
     includePermit2Call?: boolean
+    directApproval?: boolean
   }) => {
-    const { assetAddr, spenderAddr, userAddr, amount, includePermit2Call: includePermit2 = true } = params
+    const { assetAddr, spenderAddr, userAddr, amount, includePermit2Call: includePermit2 = true, directApproval = false } = params
     const fetchWalletAllowances = async (): Promise<AssetAllowances | undefined> => {
       if (!ctx.chainId.value) return undefined
 
@@ -107,17 +109,30 @@ export const createOperationHelpers = (ctx: OperationsContext, permit2: Permit2H
     const currentAllowance = walletAllowances?.assetForVault
       ?? await allowance.checkAllowance(assetAddr, spenderAddr, userAddr)
     const permit2Address = permit2.resolvePermit2Address()
-    const canUsePermit2 = !!ctx.chainId.value && !!permit2Address && ctx.permit2Enabled.value
+    const canUsePermit2 = !directApproval && !!ctx.chainId.value && !!permit2Address && ctx.permit2Enabled.value
 
     const steps: TxStep[] = []
     let permitCall: EVCCall | undefined
     const usesPermit2 = canUsePermit2 && currentAllowance < amount
+    const needsApproveReset = (currentAmount: bigint) =>
+      currentAmount > 0n && APPROVE_RESET_REQUIRED_TOKENS.has(assetAddr.toLowerCase())
 
     if (usesPermit2 && permit2Address) {
       const permit2Allowance = walletAllowances?.assetForPermit2
         ?? await allowance.checkAllowance(assetAddr, permit2Address, userAddr)
       const needsPermit2Approval = permit2Allowance < amount
       if (needsPermit2Approval) {
+        if (needsApproveReset(permit2Allowance)) {
+          steps.push({
+            type: 'approve',
+            label: 'Reset approval',
+            to: assetAddr,
+            abi: erc20ABI as Abi,
+            functionName: 'approve',
+            args: [permit2Address, 0n] as const,
+            value: 0n,
+          })
+        }
         steps.push({
           type: 'permit2-approve',
           label: 'Approve token for Permit2',
@@ -141,6 +156,17 @@ export const createOperationHelpers = (ctx: OperationsContext, permit2: Permit2H
       }
     }
     else if (currentAllowance < amount) {
+      if (needsApproveReset(currentAllowance)) {
+        steps.push({
+          type: 'approve',
+          label: 'Reset approval',
+          to: assetAddr,
+          abi: erc20ABI as Abi,
+          functionName: 'approve',
+          args: [spenderAddr, 0n] as const,
+          value: 0n,
+        })
+      }
       steps.push({
         type: 'approve',
         label: 'Approve asset for vault',

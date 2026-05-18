@@ -20,10 +20,6 @@ const props = withDefaults(defineProps<{
 
 const toast = useToast()
 const router = useRouter()
-const copied = ref(false)
-let copiedTimer: ReturnType<typeof setTimeout>
-
-const displayLabel = computed(() => copied.value ? 'Link copied' : props.label)
 
 const resolvedUrl = computed(() => {
   const href = router.resolve({
@@ -67,6 +63,9 @@ const writeToClipboard = async (text: string) => {
   }
 }
 
+const { copied, copyToClipboard } = useClipboardCopy({ write: writeToClipboard })
+const displayLabel = computed(() => copied.value ? 'Link copied' : props.label)
+
 const copyLink = async (event?: Event) => {
   if (props.stopPropagation) {
     event?.preventDefault()
@@ -74,20 +73,13 @@ const copyLink = async (event?: Event) => {
   }
 
   try {
-    await writeToClipboard(resolvedUrl.value)
-    copied.value = true
-    clearTimeout(copiedTimer)
-    copiedTimer = setTimeout(() => (copied.value = false), 2000)
+    await copyToClipboard(resolvedUrl.value)
     toast.success('Link copied')
   }
   catch {
     toast.error('Could not copy link')
   }
 }
-
-onBeforeUnmount(() => {
-  clearTimeout(copiedTimer)
-})
 </script>
 
 <template>

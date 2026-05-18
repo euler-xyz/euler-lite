@@ -142,6 +142,9 @@ const CONNECT_SRC_BASE = [
   'https://api.fuul.xyz',
   // SDK default deployments source
   'https://raw.githubusercontent.com',
+  // CoW Protocol orderbook
+  'https://barn.api.cow.fi',
+  'https://api.cow.fi',
   // Reown AppKit SDK version check
   'https://registry.npmjs.org',
   // RPC providers (wildcard — operators configure per chain)

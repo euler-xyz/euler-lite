@@ -7,6 +7,7 @@ export interface ModalData {
   noLock?: boolean
   absolute?: boolean
   isNotClosable?: boolean
+  closeOnBackdropWhenAllowed?: boolean
   custom?: boolean
   props?: Record<string, any> // eslint-disable-line
   [key: string]: any // eslint-disable-line
@@ -68,6 +69,8 @@ export const useModal = () => {
     if (data.absolute) {
       bus.emit('open')
     }
+
+    return id
   }
 
   const close = (id?: number | undefined, isBack = false) => {
@@ -76,14 +79,17 @@ export const useModal = () => {
       popstateHandler = undefined
     }
 
-    if (!id) {
+    if (id === undefined) {
       list.pop()
     }
     else {
-      list.splice(list.findIndex(item => item.id === id), 1)
+      const index = list.findIndex(item => item.id === id)
+      if (index !== -1) {
+        list.splice(index, 1)
+      }
     }
 
-    if (!isBack && window.history.state?.modalId === id) {
+    if (id !== undefined && !isBack && window.history.state?.modalId === id) {
       window.history.back()
     }
 

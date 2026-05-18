@@ -128,6 +128,10 @@ const position = {
   price: 0n,
   borrowLTV: 0n,
   liquidationLTV: 0n,
+  initialLiquidationLTV: 0n,
+  targetLiquidationLTV: 0n,
+  targetTimestamp: 0n,
+  rampDuration: 0n,
   liabilityValueBorrowing: 0n,
   liabilityValueLiquidation: 0n,
   timeToLiquidation: 0n,
@@ -160,6 +164,11 @@ describe('useSavingsRepay', () => {
     vi.stubGlobal('useSwapApi', () => ({
       getSwapProviders: vi.fn(async () => []),
       getSwapQuotes: vi.fn(async () => []),
+    }))
+    vi.stubGlobal('useRpcClient', () => ({ client: ref(null) }))
+    vi.stubGlobal('useWagmi', () => ({
+      address: ref(USER),
+      chain: ref({ nativeCurrency: { decimals: 18 } }),
     }))
   })
 

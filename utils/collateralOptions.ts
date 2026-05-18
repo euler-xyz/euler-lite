@@ -31,8 +31,9 @@ export async function buildCollateralOption(params: {
   apy: number
   tagContext: VaultTagContext
   showBalance?: boolean
+  subAccount?: string
 }): Promise<CollateralOption> {
-  const { vault, type, amount, priceAmount, apy, tagContext, showBalance } = params
+  const { vault, type, amount, priceAmount, apy, tagContext, showBalance, subAccount } = params
   const { tags, disabled } = getVaultTags(vault.address, tagContext)
 
   return {
@@ -45,6 +46,7 @@ export async function buildCollateralOption(params: {
     assetAddress: vault.asset.address,
     label: getVaultProductName(vault.address) || vault.shares.name,
     vaultAddress: vault.address,
+    subAccount,
     tags,
     disabled,
   }

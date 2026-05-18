@@ -18,6 +18,7 @@ const emits = defineEmits<{ close: [] }>()
 const { vault } = defineProps<{ vault: EVault }>()
 
 const { chainId } = useEulerAddresses()
+const { copyToClipboard, isCopied } = useClipboardCopy()
 
 const hookedOperations = computed(() => getVaultHookedOperations(vault))
 
@@ -66,7 +67,7 @@ const hookTargetLabel = computed(() => {
 })
 
 const onCopyClick = (address: string) => {
-  navigator.clipboard.writeText(address).catch(() => {})
+  copyToClipboard(address).catch(() => {})
 }
 
 const handleClose = () => {
@@ -107,7 +108,7 @@ const handleClose = () => {
         >
           <SvgIcon
             class="!w-18 !h-18"
-            name="copy"
+            :name="isCopied(hookTarget) ? 'check' : 'copy'"
           />
         </button>
       </div>

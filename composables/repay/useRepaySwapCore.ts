@@ -227,6 +227,10 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     requestQuote()
   }
 
+  const onProviderSelect = (provider: string) => {
+    quotes.selectProvider(provider)
+  }
+
   // Max on source input: if source is worth at least as much as the debt,
   // behave like Max on debt (TARGET_DEBT with full debt). Otherwise default
   // to EXACT_IN with full source balance. Prevents accidental over-repay.
@@ -439,6 +443,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     onAmountInput,
     onDebtInput,
     onPercentInput,
+    onProviderSelect,
     onSourceVaultChange,
     onRefreshQuotes,
     onSourceMax,

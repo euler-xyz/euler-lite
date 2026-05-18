@@ -8,6 +8,7 @@ export interface CollateralOption {
   symbol?: string
   assetAddress?: string
   vaultAddress?: string
+  subAccount?: string
   tags?: string[]
   disabled?: boolean
   showBalance?: boolean

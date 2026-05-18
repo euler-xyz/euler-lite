@@ -11,6 +11,8 @@ const {
   borrowLTV,
   borrowVaultAddress,
   collateralAddress,
+  inline = false,
+  close = true,
 } = defineProps<{
   maxRoe: number
   maxMultiplier: number
@@ -20,6 +22,8 @@ const {
   borrowVaultAddress?: string
   collateralAddress?: string
   isBestInMarket?: boolean
+  inline?: boolean
+  close?: boolean
 }>()
 
 const { getLoopingRewardApy, getLoopingRewardCampaigns, getSupplyRewardApy, getBorrowRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns } = useRewardsApy()
@@ -70,6 +74,8 @@ const handleClose = () => {
 <template>
   <BaseModalWrapper
     title="Max ROE"
+    :inline="inline"
+    :close="close"
     @close="handleClose"
   >
     <p class="text-content-primary text-p3 mb-16">

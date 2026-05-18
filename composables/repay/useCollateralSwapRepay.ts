@@ -538,6 +538,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     onAmountInput: core.onAmountInput,
     onDebtInput: core.onDebtInput,
     onPercentInput: core.onPercentInput,
+    onProviderSelect: core.onProviderSelect,
     onSourceVaultChange,
     onRefreshQuotes: core.onRefreshQuotes,
     onSourceMax: core.onSourceMax,
