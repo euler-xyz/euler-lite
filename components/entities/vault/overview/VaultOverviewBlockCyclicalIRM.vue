@@ -36,7 +36,7 @@ const cyclicalInfo = computed((): CyclicalNoteInfo | null => {
   }
 })
 
-const now = useNow({ interval: 60_000 })
+const now = useNow({ interval: 1_000 })
 
 const cycleLength = computed(() => {
   if (!cyclicalInfo.value) return 0n
@@ -78,16 +78,6 @@ const isInFixedRate = computed(() => {
   return elapsedInCycle.value < cyclicalInfo.value.primaryDuration
 })
 
-const primaryDurationDays = computed(() => {
-  if (!cyclicalInfo.value) return 0
-  return Number(cyclicalInfo.value.primaryDuration) / 86400
-})
-
-const secondaryDurationDays = computed(() => {
-  if (!cyclicalInfo.value) return 0
-  return Number(cyclicalInfo.value.secondaryDuration) / 86400
-})
-
 const currentPhaseDurationSec = computed(() => {
   if (!cyclicalInfo.value) return 0n
   return isInFixedRate.value
@@ -95,19 +85,11 @@ const currentPhaseDurationSec = computed(() => {
     : cyclicalInfo.value.secondaryDuration
 })
 
-const currentPhaseDurationDays = computed(() => {
-  return Number(currentPhaseDurationSec.value) / 86400
-})
-
 const elapsedInPhase = computed(() => {
   if (!cyclicalInfo.value) return 0n
   if (isInFixedRate.value) return elapsedInCycle.value
   const elapsed = elapsedInCycle.value - cyclicalInfo.value.primaryDuration
   return elapsed < 0n ? 0n : elapsed
-})
-
-const dayInPhase = computed(() => {
-  return Number(elapsedInPhase.value) / 86400
 })
 
 // Bar represents the full cycle proportionally. The 100% tick sits at the
@@ -177,29 +159,73 @@ const formatPercent = (value: number): string => {
   return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-const formatDuration = (days: number): string => {
-  if (days >= 1) {
-    const rounded = Math.round(days)
-    return `${rounded} day${rounded !== 1 ? 's' : ''}`
-  }
-  const hours = Math.round(days * 24)
-  return `${hours} hour${hours !== 1 ? 's' : ''}`
+type DurationUnit = {
+  label: string
+  seconds: bigint
+}
+
+const DURATION_UNITS: DurationUnit[] = [
+  { label: 'day', seconds: 86_400n },
+  { label: 'hour', seconds: 3_600n },
+  { label: 'minute', seconds: 60n },
+  { label: 'second', seconds: 1n },
+]
+
+const pluralize = (value: number, unit: string): string => {
+  return `${value} ${unit}${value !== 1 ? 's' : ''}`
+}
+
+const selectDurationUnit = (seconds: bigint, minimumWholeUnits = 1n): DurationUnit => {
+  return DURATION_UNITS.find(unit => seconds >= unit.seconds * minimumWholeUnits)
+    ?? DURATION_UNITS[DURATION_UNITS.length - 1]
+}
+
+const roundToUnit = (seconds: bigint, unit: DurationUnit): number => {
+  return Math.round(Number(seconds) / Number(unit.seconds))
+}
+
+const ceilToUnit = (seconds: bigint, unit: DurationUnit): number => {
+  return Number((seconds + unit.seconds - 1n) / unit.seconds)
+}
+
+const formatDuration = (seconds: bigint): string => {
+  if (seconds <= 0n) return '0 seconds'
+  const unit = selectDurationUnit(seconds)
+  return pluralize(Math.max(1, roundToUnit(seconds, unit)), unit.label)
+}
+
+const formatProgressTickLabel = (seconds: bigint, unit: DurationUnit): string => {
+  const value = roundToUnit(seconds, unit)
+  return `${unit.label[0].toUpperCase()}${unit.label.slice(1)} ${value}`
 }
 
 // Tick marks at 0%, 50%, 100% of the fixed rate period. The 100% mark sits
 // at the phase boundary on the bar, and the repayment portion continues past.
 const progressTicks = computed(() => {
-  const totalDays = primaryDurationDays.value
+  const totalDuration = cyclicalInfo.value?.primaryDuration ?? 0n
   const fixedEnd = fixedRatePercent.value
+  const unit = selectDurationUnit(totalDuration, 2n)
   return [
-    { label: 'Day 0', pct: '0%', position: '0%' },
-    { label: `Day ${Math.round(totalDays / 2)}`, pct: '50%', position: `${fixedEnd / 2}%` },
-    { label: `Day ${Math.round(totalDays)}`, pct: '100%', position: `${fixedEnd}%` },
+    { label: formatProgressTickLabel(0n, unit), pct: '0%', position: '0%' },
+    { label: formatProgressTickLabel(totalDuration / 2n, unit), pct: '50%', position: `${fixedEnd / 2}%` },
+    { label: formatProgressTickLabel(totalDuration, unit), pct: '100%', position: `${fixedEnd}%` },
   ]
 })
 
 const phaseLabel = computed(() => {
   return isInFixedRate.value ? 'Fixed rate period' : 'Repayment window'
+})
+
+const phaseProgressLabel = computed(() => {
+  const duration = currentPhaseDurationSec.value
+  if (duration <= 0n) return 'second 0 of 0'
+
+  const unit = selectDurationUnit(duration, 2n)
+  const elapsed = elapsedInPhase.value > duration ? duration : elapsedInPhase.value
+  const elapsedUnits = Math.floor(Number(elapsed) / Number(unit.seconds))
+  const totalUnits = Math.max(1, ceilToUnit(duration, unit))
+
+  return `${unit.label} ${elapsedUnits} of ${totalUnits}`
 })
 </script>
 
@@ -247,7 +273,7 @@ const phaseLabel = computed(() => {
         </VaultOverviewLabelValue>
         <VaultOverviewLabelValue label="Cycle length">
           <span class="text-p3 text-content-primary">
-            {{ formatDuration(primaryDurationDays) }} / {{ formatDuration(secondaryDurationDays) }}
+            {{ formatDuration(cyclicalInfo.primaryDuration) }} / {{ formatDuration(cyclicalInfo.secondaryDuration) }}
           </span>
         </VaultOverviewLabelValue>
       </div>
@@ -330,7 +356,7 @@ const phaseLabel = computed(() => {
 
       <!-- Status text -->
       <div class="text-[12px] text-content-secondary">
-        {{ phaseLabel }} day {{ Math.floor(dayInPhase) }} of {{ Math.round(currentPhaseDurationDays) }}
+        {{ phaseLabel }} {{ phaseProgressLabel }}
       </div>
     </div>
   </div>
