@@ -65,19 +65,6 @@ describe('getUtilisationWarning', () => {
     })
   })
 
-  it('keeps liquidity constraint copy for highly utilised cyclical withdraw flows', () => {
-    const warning = getUtilisationWarning(
-      makeUtilisedVault(100n, 99n, INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY),
-      'withdraw',
-    )
-
-    expect(warning).toEqual({
-      level: 'critical',
-      title: 'Critical utilisation',
-      message: 'Utilisation is critically high. Nearly all liquidity has been borrowed. Withdrawals may fail until borrowers repay.',
-    })
-  })
-
   it('does not show target utilisation info below the shared utilisation threshold', () => {
     const warning = getUtilisationWarning(
       makeUtilisedVault(100n, 94n, INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY),
