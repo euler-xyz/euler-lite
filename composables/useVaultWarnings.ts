@@ -1,4 +1,4 @@
-import { isSecuritizeCollateralVault, type EVault, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import { getVaultUtilization, getSupplyCapPercentage, getBorrowCapPercentage, isCyclicalNoteVault, isEVKVault, type SecuritizeVault, type Vault } from '~/entities/vault'
 import {
   findBlockingDisabledOp,
   getOpMeta,
@@ -19,12 +19,13 @@ import {
 } from '~/utils/vault-hooks'
 
 export type WarningLevel = 'info' | 'high' | 'critical'
-export type WarningContext = 'lend' | 'borrow' | 'repay' | 'general'
+export type WarningContext = 'lend' | 'borrow' | 'repay' | 'withdraw' | 'general'
 
 export interface VaultWarning {
   level: WarningLevel
   title: string
   message: string
+  tone?: 'success'
 }
 
 const UTILISATION_HIGH = 95
@@ -64,6 +65,16 @@ const utilisationMessages: Record<WarningContext, Record<'high' | 'critical', { 
       message: 'Utilisation is critically high on this collateral market. Available liquidity is near zero, so repaying with collateral may fail.',
     },
   },
+  withdraw: {
+    high: {
+      title: 'High utilisation',
+      message: 'Utilisation is high on this market. Available liquidity is limited, which may affect your ability to withdraw.',
+    },
+    critical: {
+      title: 'Critical utilisation',
+      message: 'Utilisation is critically high. Nearly all liquidity has been borrowed. Withdrawals may fail until borrowers repay.',
+    },
+  },
   general: {
     high: {
       title: 'High utilisation',
@@ -74,6 +85,11 @@ const utilisationMessages: Record<WarningContext, Record<'high' | 'critical', { 
       message: 'Utilisation is critically high. Nearly all available liquidity has been borrowed.',
     },
   },
+}
+
+const targetUtilisationMessage = {
+  title: 'Target utilisation',
+  message: 'This market is designed to run near 100% utilisation. Higher utilisation means higher depositor APY.',
 }
 
 const getUtilisationLevel = (utilisation: number): 'high' | 'critical' | null => {
@@ -95,6 +111,10 @@ export const getUtilisationWarning = (
   const utilisation = vault.utilization
   const level = getUtilisationLevel(utilisation)
   if (!level) return null
+
+  if (context !== 'repay' && context !== 'withdraw' && isCyclicalNoteVault(vault)) {
+    return { level: 'info', tone: 'success', ...targetUtilisationMessage }
+  }
 
   const { title, message } = utilisationMessages[context][level]
   return { level, title, message }
