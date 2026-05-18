@@ -457,7 +457,10 @@ const renderChart = async () => {
       },
     }
 
-    if (kinkUtilization !== null && kinkIndex !== null) {
+    // Kinky still injects a sample at the kink so the curve bends sharply there,
+    // but the "kink" utilization isn't a regime boundary the user cares about —
+    // rates curve smoothly past it — so we suppress the vertical annotation.
+    if (kinkUtilization !== null && kinkIndex !== null && decoded?.type === 'kink') {
       const labelsAreClose = Math.abs(currentUtilization - kinkUtilization) < 20
       const currentIsLower = currentUtilization <= kinkUtilization
       const yOffset = labelsAreClose ? 24 : 0
