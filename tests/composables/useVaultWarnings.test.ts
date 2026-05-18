@@ -47,7 +47,7 @@ describe('getUtilisationWarning', () => {
         level: 'info',
         tone: 'success',
         title: 'Target utilisation',
-        message: 'This market is designed to run near 100% utilisation. Higher utilisation means higher depositor APY.',
+        message: 'Cyclical Note markets are designed to run near full utilization. Withdrawal liquidity opens up at the end of each cycle, when borrowers are pushed to repay.',
       })
     },
   )
