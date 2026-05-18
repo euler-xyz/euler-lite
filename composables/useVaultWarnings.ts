@@ -19,7 +19,7 @@ import {
 } from '~/utils/vault-hooks'
 
 export type WarningLevel = 'info' | 'high' | 'critical'
-export type WarningContext = 'lend' | 'borrow' | 'repay' | 'withdraw' | 'general'
+export type WarningContext = 'lend' | 'borrow' | 'repay' | 'general'
 
 export interface VaultWarning {
   level: WarningLevel
@@ -65,16 +65,6 @@ const utilisationMessages: Record<WarningContext, Record<'high' | 'critical', { 
       message: 'Utilisation is critically high on this collateral market. Available liquidity is near zero, so repaying with collateral may fail.',
     },
   },
-  withdraw: {
-    high: {
-      title: 'High utilisation',
-      message: 'Utilisation is high on this market. Available liquidity is limited, which may affect your ability to withdraw.',
-    },
-    critical: {
-      title: 'Critical utilisation',
-      message: 'Utilisation is critically high. Nearly all liquidity has been borrowed. Withdrawals may fail until borrowers repay.',
-    },
-  },
   general: {
     high: {
       title: 'High utilisation',
@@ -112,7 +102,7 @@ export const getUtilisationWarning = (
   const level = getUtilisationLevel(utilisation)
   if (!level) return null
 
-  if (context !== 'repay' && context !== 'withdraw' && isCyclicalNoteVault(vault)) {
+  if (context !== 'repay' && isCyclicalNoteVault(vault)) {
     return { level: 'info', tone: 'success', ...targetUtilisationMessage }
   }
 
