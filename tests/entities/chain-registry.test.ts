@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  getChainById,
+  getDefiLlamaChainName,
   getKnownChainIds,
   getNetworksByChainIds,
   getUnknownChainIds,
@@ -9,7 +11,17 @@ import {
 describe('chainRegistry', () => {
   it('identifies supported chain IDs', () => {
     expect(isKnownChainId(1)).toBe(true)
+    expect(isKnownChainId(999)).toBe(true)
     expect(isKnownChainId(923)).toBe(false)
+  })
+
+  it('resolves HyperEVM for chain ID 999 despite upstream ID collisions', () => {
+    const chain = getChainById(999)
+
+    expect(chain?.name).toBe('HyperEVM')
+    expect(chain?.nativeCurrency.symbol).toBe('HYPE')
+    expect(chain?.rpcUrls.default.http).toContain('https://rpc.hyperliquid.xyz/evm')
+    expect(getDefiLlamaChainName(999)).toBe('Hyperliquid')
   })
 
   it('partitions known and unknown chain IDs', () => {
