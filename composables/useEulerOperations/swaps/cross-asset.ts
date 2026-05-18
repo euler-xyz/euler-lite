@@ -226,6 +226,7 @@ export const createCrossAssetSwapBuilders = (
     currentDebt = 0n,
     liabilityVault,
     enabledCollaterals,
+    sweepableCollaterals,
     source,
   }: {
     quote: SwapApiQuote
@@ -235,6 +236,11 @@ export const createCrossAssetSwapBuilders = (
     currentDebt?: bigint
     liabilityVault?: string
     enabledCollaterals?: string[]
+    /**
+     * Subset of `enabledCollaterals` that supports `transferFromMax` — EVK
+     * vaults only. Defaults to all enabled collaterals for back-compat.
+     */
+    sweepableCollaterals?: string[]
     source: 'collateral' | 'savings'
   }): Promise<TxPlan> => {
     if (!ctx.address.value || !ctx.eulerCoreAddresses.value) {
@@ -258,8 +264,13 @@ export const createCrossAssetSwapBuilders = (
     hooks.addContractInterface(evcAddress, evcDisableCollateralAbi)
 
     const collateralAddresses = enabledCollaterals || []
+    const sweepableSet = new Set(
+      (sweepableCollaterals ?? collateralAddresses).map(addr => (addr as Address).toLowerCase()),
+    )
     for (const collateralAddr of collateralAddresses) {
-      hooks.addContractInterface(collateralAddr as Address, vaultTransferFromMaxAbi)
+      if (sweepableSet.has((collateralAddr as Address).toLowerCase())) {
+        hooks.addContractInterface(collateralAddr as Address, vaultTransferFromMaxAbi)
+      }
     }
 
     // Disable controller
@@ -284,6 +295,7 @@ export const createCrossAssetSwapBuilders = (
     const isMainAccount = subAccountAddr.toLowerCase() === userAddr.toLowerCase()
     if (!isMainAccount) {
       for (const collateralAddr of collateralAddresses) {
+        if (!sweepableSet.has((collateralAddr as Address).toLowerCase())) continue
         evcCalls.push({
           targetContract: collateralAddr as Address,
           onBehalfOfAccount: subAccountAddr,

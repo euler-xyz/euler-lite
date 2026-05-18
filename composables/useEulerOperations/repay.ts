@@ -68,7 +68,7 @@ export const createRepayBuilders = (
     amount: bigint,
     subAccount: string,
     collateralAddresses: string[],
-    options: { includePermit2Call?: boolean } = {},
+    options: { includePermit2Call?: boolean, sweepableCollaterals?: string[] } = {},
   ): Promise<TxPlan> => {
     if (!ctx.address.value || !ctx.eulerCoreAddresses.value || !ctx.eulerPeripheryAddresses.value) {
       throw new Error('Wallet not connected or addresses not available')
@@ -91,13 +91,21 @@ export const createRepayBuilders = (
     })
 
     const collateralAddrs = collateralAddresses.map(addr => addr as Address)
+    // Only EVK vaults expose `transferFromMax`. Defaults to all collaterals
+    // for back-compat — callers with non-EVK co-collaterals (e.g. securitize)
+    // must pass a filtered list to avoid reverts on the sweep step.
+    const sweepableSet = new Set(
+      (options.sweepableCollaterals ?? collateralAddresses).map(addr => (addr as Address).toLowerCase()),
+    )
 
     const hooks = new SaHooksBuilder()
     hooks.addContractInterface(borrowVaultAddr, [...vaultRepayAbi, ...evcDisableControllerAbi])
     hooks.addContractInterface(evcAddress, evcDisableCollateralAbi)
 
     for (const collateralAddr of collateralAddrs) {
-      hooks.addContractInterface(collateralAddr, vaultTransferFromMaxAbi)
+      if (sweepableSet.has(collateralAddr.toLowerCase())) {
+        hooks.addContractInterface(collateralAddr, vaultTransferFromMaxAbi)
+      }
     }
 
     const evcCalls: EVCCall[] = []
@@ -133,7 +141,7 @@ export const createRepayBuilders = (
       }
       evcCalls.push(disableCollateralCall)
 
-      if (!isMainAccount) {
+      if (!isMainAccount && sweepableSet.has(collateralAddr.toLowerCase())) {
         const transferCall: EVCCall = {
           targetContract: collateralAddr,
           onBehalfOfAccount: subAccountAddr,
@@ -294,6 +302,7 @@ export const createRepayBuilders = (
     savingsSubAccount,
     borrowSubAccount,
     enabledCollaterals,
+    sweepableCollaterals,
   }: {
     savingsVaultAddress: string
     borrowVaultAddress: string
@@ -301,6 +310,13 @@ export const createRepayBuilders = (
     savingsSubAccount: string
     borrowSubAccount: string
     enabledCollaterals?: string[]
+    /**
+     * Subset of `enabledCollaterals` that supports `transferFromMax` — i.e.
+     * EVK vaults. Defaults to all enabled collaterals for back-compat.
+     * Non-EVK co-collaterals (e.g. securitize) must be excluded or the
+     * sweep step reverts.
+     */
+    sweepableCollaterals?: string[]
   }): Promise<TxPlan> => {
     if (!ctx.address.value || !ctx.eulerCoreAddresses.value || !ctx.eulerPeripheryAddresses.value) {
       throw new Error('Wallet not connected or addresses not available')
@@ -322,6 +338,10 @@ export const createRepayBuilders = (
 
     const sameVault = savingsVaultAddr.toLowerCase() === borrowVaultAddr.toLowerCase()
     const collateralAddresses = enabledCollaterals || []
+    // See param doc — defaults to all collaterals for back-compat.
+    const sweepableSet = new Set(
+      (sweepableCollaterals ?? collateralAddresses).map(addr => (addr as Address).toLowerCase()),
+    )
 
     const hooks = new SaHooksBuilder()
     if (sameVault) {
@@ -335,7 +355,9 @@ export const createRepayBuilders = (
     }
     hooks.addContractInterface(evcAddress, evcDisableCollateralAbi)
     for (const collateralAddr of collateralAddresses) {
-      hooks.addContractInterface(collateralAddr as Address, vaultTransferFromMaxAbi)
+      if (sweepableSet.has((collateralAddr as Address).toLowerCase())) {
+        hooks.addContractInterface(collateralAddr as Address, vaultTransferFromMaxAbi)
+      }
     }
 
     const evcCalls: EVCCall[] = []
@@ -410,6 +432,7 @@ export const createRepayBuilders = (
     const isMainAccount = borrowSubAccountAddr.toLowerCase() === userAddr.toLowerCase()
     if (!isMainAccount) {
       for (const collateralAddr of collateralAddresses) {
+        if (!sweepableSet.has((collateralAddr as Address).toLowerCase())) continue
         evcCalls.push({
           targetContract: collateralAddr as Address,
           onBehalfOfAccount: borrowSubAccountAddr,

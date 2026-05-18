@@ -78,7 +78,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     collateralSupplyRewardApy,
     borrowRewardApy,
     collateralSupplyApyWithRewards,
-    isSecuritizeCollateral: _isSecuritizeCollateral,
+    isSecuritizeCollateral,
     isGeoBlocked,
     isBorrowRestricted,
     collateralAddress,
@@ -231,6 +231,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   const borrowNeedsSwap = computed(() => {
     if (!borrowSelectedAsset.value || !collateralVault.value) return false
+    // Swap-and-borrow ends with verifyAmountMinAndSkim which calls skim() on the
+    // collateral vault — securitize vaults don't implement skim, so the swap
+    // path is structurally unsupported here.
+    if (isSecuritizeCollateral.value) return false
     try {
       if (isNativeOfWrapped(borrowSelectedAsset.value.address, collateralVault.value.asset.address, chainId.value!)) return false
       return getAddress(borrowSelectedAsset.value.address) !== getAddress(collateralVault.value.asset.address)
