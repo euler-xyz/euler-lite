@@ -8,11 +8,20 @@ import { vaultRepayAbi, vaultRepayWithSharesAbi, vaultRedeemAbi, vaultSkimAbi, v
 import { SaHooksBuilder } from '~/entities/saHooksSDK'
 import { convertSaHooksToEVCCalls, type EVCCall } from '~/utils/evc-converter'
 import type { TxPlan } from '~/entities/txPlan'
+import { isEVKVault, type Vault, type SecuritizeVault } from '~/entities/vault'
 
 export const createRepayBuilders = (
   ctx: OperationsContext,
   helpers: OperationHelpers,
 ) => {
+  // Only EVK collaterals expose `transferFromMax`. Non-EVK collaterals (e.g.
+  // securitize) would revert the sweep step — and with it the whole atomic
+  // batch. Lives here rather than at callsites so every builder that closes
+  // a sub-account gets it for free.
+  const isSweepable = (addr: string): boolean => {
+    const v = ctx.registryGetVault(addr as Address) as Vault | SecuritizeVault | undefined
+    return !!v && isEVKVault(v)
+  }
   const buildRepayPlan = async (
     borrowVaultAddress: string,
     borrowAssetAddress: string,
@@ -68,7 +77,7 @@ export const createRepayBuilders = (
     amount: bigint,
     subAccount: string,
     collateralAddresses: string[],
-    options: { includePermit2Call?: boolean, sweepableCollaterals?: string[] } = {},
+    options: { includePermit2Call?: boolean } = {},
   ): Promise<TxPlan> => {
     if (!ctx.address.value || !ctx.eulerCoreAddresses.value || !ctx.eulerPeripheryAddresses.value) {
       throw new Error('Wallet not connected or addresses not available')
@@ -91,19 +100,13 @@ export const createRepayBuilders = (
     })
 
     const collateralAddrs = collateralAddresses.map(addr => addr as Address)
-    // Only EVK vaults expose `transferFromMax`. Defaults to all collaterals
-    // for back-compat — callers with non-EVK co-collaterals (e.g. securitize)
-    // must pass a filtered list to avoid reverts on the sweep step.
-    const sweepableSet = new Set(
-      (options.sweepableCollaterals ?? collateralAddresses).map(addr => (addr as Address).toLowerCase()),
-    )
 
     const hooks = new SaHooksBuilder()
     hooks.addContractInterface(borrowVaultAddr, [...vaultRepayAbi, ...evcDisableControllerAbi])
     hooks.addContractInterface(evcAddress, evcDisableCollateralAbi)
 
     for (const collateralAddr of collateralAddrs) {
-      if (sweepableSet.has(collateralAddr.toLowerCase())) {
+      if (isSweepable(collateralAddr)) {
         hooks.addContractInterface(collateralAddr, vaultTransferFromMaxAbi)
       }
     }
@@ -141,7 +144,7 @@ export const createRepayBuilders = (
       }
       evcCalls.push(disableCollateralCall)
 
-      if (!isMainAccount && sweepableSet.has(collateralAddr.toLowerCase())) {
+      if (!isMainAccount && isSweepable(collateralAddr)) {
         const transferCall: EVCCall = {
           targetContract: collateralAddr,
           onBehalfOfAccount: subAccountAddr,
@@ -302,7 +305,6 @@ export const createRepayBuilders = (
     savingsSubAccount,
     borrowSubAccount,
     enabledCollaterals,
-    sweepableCollaterals,
   }: {
     savingsVaultAddress: string
     borrowVaultAddress: string
@@ -310,13 +312,6 @@ export const createRepayBuilders = (
     savingsSubAccount: string
     borrowSubAccount: string
     enabledCollaterals?: string[]
-    /**
-     * Subset of `enabledCollaterals` that supports `transferFromMax` — i.e.
-     * EVK vaults. Defaults to all enabled collaterals for back-compat.
-     * Non-EVK co-collaterals (e.g. securitize) must be excluded or the
-     * sweep step reverts.
-     */
-    sweepableCollaterals?: string[]
   }): Promise<TxPlan> => {
     if (!ctx.address.value || !ctx.eulerCoreAddresses.value || !ctx.eulerPeripheryAddresses.value) {
       throw new Error('Wallet not connected or addresses not available')
@@ -338,10 +333,6 @@ export const createRepayBuilders = (
 
     const sameVault = savingsVaultAddr.toLowerCase() === borrowVaultAddr.toLowerCase()
     const collateralAddresses = enabledCollaterals || []
-    // See param doc — defaults to all collaterals for back-compat.
-    const sweepableSet = new Set(
-      (sweepableCollaterals ?? collateralAddresses).map(addr => (addr as Address).toLowerCase()),
-    )
 
     const hooks = new SaHooksBuilder()
     if (sameVault) {
@@ -355,7 +346,7 @@ export const createRepayBuilders = (
     }
     hooks.addContractInterface(evcAddress, evcDisableCollateralAbi)
     for (const collateralAddr of collateralAddresses) {
-      if (sweepableSet.has((collateralAddr as Address).toLowerCase())) {
+      if (isSweepable(collateralAddr)) {
         hooks.addContractInterface(collateralAddr as Address, vaultTransferFromMaxAbi)
       }
     }
@@ -432,7 +423,7 @@ export const createRepayBuilders = (
     const isMainAccount = borrowSubAccountAddr.toLowerCase() === userAddr.toLowerCase()
     if (!isMainAccount) {
       for (const collateralAddr of collateralAddresses) {
-        if (!sweepableSet.has((collateralAddr as Address).toLowerCase())) continue
+        if (!isSweepable(collateralAddr)) continue
         evcCalls.push({
           targetContract: collateralAddr as Address,
           onBehalfOfAccount: borrowSubAccountAddr,

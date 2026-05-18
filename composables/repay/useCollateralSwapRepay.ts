@@ -7,7 +7,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
 import { CLOSE_POSITION_WRAPPER_ABI } from '~/abis/cowswap-wrapper'
-import { getCashLimitedWithdrawAmount, isEVKVault, type Vault, type SecuritizeVault } from '~/entities/vault'
+import { getCashLimitedWithdrawAmount, isEVKVault, type Vault } from '~/entities/vault'
 import { COWSWAP_ORDER_DEADLINE_SECONDS, type CowSwapClosePositionExecuteParams, getCowSwapChainConfig, getCowSwapQuoteOrderAmounts, isCowProvider } from '~/entities/cowswap'
 import { useCowSwapClosePositionExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
 import { getAssetUsdValue, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
@@ -72,16 +72,6 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const { client: rpcClient } = useRpcClient()
   const { withIntrinsicSupplyApy, withIntrinsicBorrowApy } = useIntrinsicApy()
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
-  const { getVault: registryGetVault } = useVaultRegistry()
-
-  // Only EVK collaterals expose `transferFromMax`. Non-EVK (e.g. securitize)
-  // co-collaterals must be excluded from the sweep — passing them would
-  // revert the entire batch.
-  const filterSweepable = (addrs: string[]): string[] =>
-    addrs.filter((addr) => {
-      const v = registryGetVault(addr) as Vault | SecuritizeVault | undefined
-      return !!v && isEVKVault(v)
-    })
 
   // --- Source vault state ---
   const sourceVault: Ref<Vault | undefined> = ref()
@@ -442,7 +432,6 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
     const isFullRepay = targetDebt === 0n && swapMode === SwapperMode.TARGET_DEBT
     if (isFullRepay) {
-      const collaterals = position.value.collaterals
       return buildSwapFullRepayPlan({
         quote: swapQuote,
         swapperMode: swapMode,
@@ -450,8 +439,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
         targetDebt,
         currentDebt,
         liabilityVault: borrowVault.value.address,
-        enabledCollaterals: collaterals,
-        sweepableCollaterals: collaterals ? filterSweepable(collaterals) : undefined,
+        enabledCollaterals: position.value.collaterals,
         source: 'collateral',
       })
     }

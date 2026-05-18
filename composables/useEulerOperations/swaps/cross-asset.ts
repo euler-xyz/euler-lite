@@ -12,11 +12,18 @@ import { logWarn } from '~/utils/errorHandling'
 import { assertSwapperVerifierAllowed } from '~/utils/swap-validation'
 import type { TxPlan } from '~/entities/txPlan'
 import { type SwapApiQuote, SwapperMode, SwapVerificationType } from '~/entities/swap'
+import { isEVKVault, type Vault, type SecuritizeVault } from '~/entities/vault'
 
 export const createCrossAssetSwapBuilders = (
   ctx: OperationsContext,
   helpers: OperationHelpers,
 ) => {
+  // Only EVK collaterals expose `transferFromMax`. See repay.ts for the same
+  // guard — kept colocated with the sweep so future builders can't forget it.
+  const isSweepable = (addr: string): boolean => {
+    const v = ctx.registryGetVault(addr as Address) as Vault | SecuritizeVault | undefined
+    return !!v && isEVKVault(v)
+  }
   const buildSwapEvcCalls = async ({
     quote,
     swapperMode,
@@ -226,7 +233,6 @@ export const createCrossAssetSwapBuilders = (
     currentDebt = 0n,
     liabilityVault,
     enabledCollaterals,
-    sweepableCollaterals,
     source,
   }: {
     quote: SwapApiQuote
@@ -236,11 +242,6 @@ export const createCrossAssetSwapBuilders = (
     currentDebt?: bigint
     liabilityVault?: string
     enabledCollaterals?: string[]
-    /**
-     * Subset of `enabledCollaterals` that supports `transferFromMax` — EVK
-     * vaults only. Defaults to all enabled collaterals for back-compat.
-     */
-    sweepableCollaterals?: string[]
     source: 'collateral' | 'savings'
   }): Promise<TxPlan> => {
     if (!ctx.address.value || !ctx.eulerCoreAddresses.value) {
@@ -264,11 +265,8 @@ export const createCrossAssetSwapBuilders = (
     hooks.addContractInterface(evcAddress, evcDisableCollateralAbi)
 
     const collateralAddresses = enabledCollaterals || []
-    const sweepableSet = new Set(
-      (sweepableCollaterals ?? collateralAddresses).map(addr => (addr as Address).toLowerCase()),
-    )
     for (const collateralAddr of collateralAddresses) {
-      if (sweepableSet.has((collateralAddr as Address).toLowerCase())) {
+      if (isSweepable(collateralAddr)) {
         hooks.addContractInterface(collateralAddr as Address, vaultTransferFromMaxAbi)
       }
     }
@@ -295,7 +293,7 @@ export const createCrossAssetSwapBuilders = (
     const isMainAccount = subAccountAddr.toLowerCase() === userAddr.toLowerCase()
     if (!isMainAccount) {
       for (const collateralAddr of collateralAddresses) {
-        if (!sweepableSet.has((collateralAddr as Address).toLowerCase())) continue
+        if (!isSweepable(collateralAddr)) continue
         evcCalls.push({
           targetContract: collateralAddr as Address,
           onBehalfOfAccount: subAccountAddr,

@@ -91,15 +91,6 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   })
   const { getVault: registryGetVault } = useVaultRegistry()
 
-  // Only EVK collaterals expose `transferFromMax`. Non-EVK (e.g. securitize)
-  // co-collaterals must be excluded from the sweep — passing them would
-  // revert the entire batch.
-  const filterSweepable = (addrs: string[]): string[] =>
-    addrs.filter((addr) => {
-      const v = registryGetVault(addr) as Vault | SecuritizeVault | undefined
-      return !!v && isEVKVault(v)
-    })
-
   // Wallet repay touches the liability vault (OP_REPAY). A full repay also
   // sweeps residual collateral shares back to the main account via
   // transferFromMax (OP_TRANSFER) on EVERY enabled collateral vault before
@@ -120,7 +111,9 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       const collAddrs = position.value?.collaterals ?? (collateralVault.value ? [collateralVault.value.address] : [])
       for (const addr of collAddrs) {
         const v = registryGetVault(addr) as Vault | SecuritizeVault | undefined
-        // Only EVK collaterals get swept via transferFromMax — see filterSweepable.
+        // Only EVK collaterals are swept via transferFromMax in
+        // buildFullRepayPlan — non-EVK (e.g. securitize) are filtered out
+        // by the builder, so don't surface a transfer-op warning for them.
         if (v && isEVKVault(v)) steps.push({ vault: v, op: OP_TRANSFER })
       }
     }
@@ -147,15 +140,14 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       const shouldFullRepay = amountNano >= currentDebt || walletRepayPercent.value >= 100
 
       try {
-        const collAddrs = position.value.collaterals ?? [collateralVault.value.address]
         plan.value = shouldFullRepay
           ? await buildFullRepayPlan(
               borrowVault.value.address,
               borrowVault.value.asset.address,
               amountNano,
               position.value.subAccount,
-              collAddrs,
-              { includePermit2Call: false, sweepableCollaterals: filterSweepable(collAddrs) },
+              position.value.collaterals ?? [collateralVault.value.address],
+              { includePermit2Call: false },
             )
           : await buildRepayPlan(
               borrowVault.value.address,
@@ -203,15 +195,14 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       const amountNano = valueToNano(amount.value, borrowVault.value.asset.decimals)
       const currentDebt = position.value.borrowed || 0n
       const isFullRepay = amountNano >= currentDebt || walletRepayPercent.value >= 100
-      const collAddrs = position.value.collaterals ?? [collateralVault.value.address]
       const txPlan = isFullRepay
         ? await buildFullRepayPlan(
             borrowVault.value.address,
             borrowVault.value.asset.address,
             amountNano,
             position.value.subAccount,
-            collAddrs,
-            { includePermit2Call: true, sweepableCollaterals: filterSweepable(collAddrs) },
+            position.value.collaterals ?? [collateralVault.value.address],
+            { includePermit2Call: true },
           )
         : await buildRepayPlan(
             borrowVault.value.address,

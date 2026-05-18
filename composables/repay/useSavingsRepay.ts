@@ -274,15 +274,6 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   })
 
   // --- Build / Submit / Send ---
-  // Only EVK collaterals expose `transferFromMax`. Non-EVK (e.g. securitize)
-  // co-collaterals must be excluded from the sweep — passing them would
-  // revert the entire batch.
-  const filterSweepable = (addrs: string[]): string[] =>
-    addrs.filter((addr) => {
-      const v = registryGetVault(addr) as Vault | SecuritizeVault | undefined
-      return !!v && isEVKVault(v)
-    })
-
   async function buildRepayPlan(quote?: import('~/entities/swap').SwapApiQuote): Promise<TxPlan> {
     if (!position.value || !borrowVault.value || !sourceVault.value) {
       throw new Error('Position or vaults not loaded')
@@ -292,9 +283,6 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     if (!savingsPos) {
       throw new Error('Savings position not found')
     }
-
-    const collaterals = position.value.collaterals
-    const sweepable = collaterals ? filterSweepable(collaterals) : undefined
 
     if (core.isSameAsset.value) {
       const debtNano = core.debtAmount.value
@@ -310,8 +298,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
           amount: currentDebtVal,
           savingsSubAccount: savingsPos.subAccount,
           borrowSubAccount: position.value.subAccount,
-          enabledCollaterals: collaterals,
-          sweepableCollaterals: sweepable,
+          enabledCollaterals: position.value.collaterals,
         })
       }
       return buildSavingsRepayPlan({
@@ -345,8 +332,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
         targetDebt,
         currentDebt,
         liabilityVault: borrowVault.value.address,
-        enabledCollaterals: collaterals,
-        sweepableCollaterals: sweepable,
+        enabledCollaterals: position.value.collaterals,
         source: 'savings',
       })
     }
