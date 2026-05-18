@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { decodeAbiParameters, formatUnits, zeroAddress, type Hex } from 'viem'
-import { FIXED_CYCLICAL_BINARY_IRM_COMPONENTS, SECONDS_IN_YEAR } from '~/entities/constants'
-import type { Vault, SecuritizeVault, CyclicalNoteInfo } from '~/entities/vault'
+import {
+  FIXED_CYCLICAL_BINARY_IRM_COMPONENTS,
+  FIXED_CYCLICAL_BINARY_MONTHLY_IRM_COMPONENTS,
+  INTEREST_RATE_MODEL_TYPE,
+  SECONDS_IN_YEAR,
+} from '~/entities/constants'
+import type { Vault, SecuritizeVault, CyclicalNoteInfo, CyclicalNoteMonthlyInfo } from '~/entities/vault'
 import { hasCollateralExposure } from '~/entities/vault'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 
@@ -21,7 +26,13 @@ const hasValidIRM = computed(() => {
     && vault.interestRateModelAddress !== zeroAddress
 })
 
+const irmType = computed(() => vault.irmInfo?.interestRateModelInfo?.interestRateModelType)
+const isMonthly = computed(() =>
+  irmType.value === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY_MONTHLY,
+)
+
 const cyclicalInfo = computed((): CyclicalNoteInfo | null => {
+  if (isMonthly.value) return null
   const params = vault.irmInfo?.interestRateModelInfo?.interestRateModelParams
   if (!params) return null
   try {
@@ -36,33 +47,107 @@ const cyclicalInfo = computed((): CyclicalNoteInfo | null => {
   }
 })
 
+const monthlyInfo = computed((): CyclicalNoteMonthlyInfo | null => {
+  if (!isMonthly.value) return null
+  const params = vault.irmInfo?.interestRateModelInfo?.interestRateModelParams
+  if (!params) return null
+  try {
+    const [decoded] = decodeAbiParameters(
+      [{ type: 'tuple', components: FIXED_CYCLICAL_BINARY_MONTHLY_IRM_COMPONENTS }],
+      params as Hex,
+    )
+    return decoded as CyclicalNoteMonthlyInfo
+  }
+  catch {
+    return null
+  }
+})
+
 const now = useNow({ interval: 1_000 })
 
-const cycleLength = computed(() => {
-  if (!cyclicalInfo.value) return 0n
-  return cyclicalInfo.value.primaryDuration + cyclicalInfo.value.secondaryDuration
+type CurrentCycle = {
+  primaryRate: bigint
+  secondaryRate: bigint
+  startSec: bigint
+  primaryDurationSec: bigint
+  secondaryDurationSec: bigint
+  hasStarted: boolean
+  preStartTimestamp: bigint | null
+}
+
+// Both cyclical IRM variants are normalised into the same shape so the
+// progress/phase/tick logic below is variant-agnostic. The Monthly variant
+// derives the current cycle from calendar dates (UTC), matching the contract.
+const currentCycle = computed((): CurrentCycle | null => {
+  if (isMonthly.value) {
+    const m = monthlyInfo.value
+    if (!m) return null
+    const d = new Date(now.value.getTime())
+    const y = d.getUTCFullYear()
+    const mo = d.getUTCMonth()
+    const day = d.getUTCDate()
+    const startDay = Number(m.cycleStartDay)
+    const cycleStartMs = day >= startDay
+      ? Date.UTC(y, mo, startDay)
+      : Date.UTC(y, mo - 1, startDay)
+    const cycleEndMs = day >= startDay
+      ? Date.UTC(y, mo + 1, startDay)
+      : Date.UTC(y, mo, startDay)
+    const startSec = BigInt(Math.floor(cycleStartMs / 1000))
+    const endSec = BigInt(Math.floor(cycleEndMs / 1000))
+    const secondaryDurationSec = m.secondaryDays * 86_400n
+    const cycleLengthSec = endSec - startSec
+    const primaryDurationSec = cycleLengthSec > secondaryDurationSec
+      ? cycleLengthSec - secondaryDurationSec
+      : 0n
+    return {
+      primaryRate: m.primaryRate,
+      secondaryRate: m.secondaryRate,
+      startSec,
+      primaryDurationSec,
+      secondaryDurationSec,
+      hasStarted: true,
+      preStartTimestamp: null,
+    }
+  }
+  const info = cyclicalInfo.value
+  if (!info) return null
+  const cycleLen = info.primaryDuration + info.secondaryDuration
+  const nowSec = BigInt(Math.floor(now.value.getTime() / 1000))
+  const hasStarted = nowSec >= info.startTimestamp
+  const startSec = hasStarted && cycleLen > 0n
+    ? info.startTimestamp + ((nowSec - info.startTimestamp) / cycleLen) * cycleLen
+    : info.startTimestamp
+  return {
+    primaryRate: info.primaryRate,
+    secondaryRate: info.secondaryRate,
+    startSec,
+    primaryDurationSec: info.primaryDuration,
+    secondaryDurationSec: info.secondaryDuration,
+    hasStarted,
+    preStartTimestamp: hasStarted ? null : info.startTimestamp,
+  }
 })
 
-const hasStarted = computed(() => {
-  const info = cyclicalInfo.value
-  if (!info) return false
-  const nowSec = BigInt(Math.floor(now.value.getTime() / 1000))
-  return nowSec >= info.startTimestamp
+const cycleLength = computed(() => {
+  const c = currentCycle.value
+  if (!c) return 0n
+  return c.primaryDurationSec + c.secondaryDurationSec
 })
+
+const hasStarted = computed(() => currentCycle.value?.hasStarted ?? false)
 
 const currentCycleStart = computed(() => {
-  const info = cyclicalInfo.value
-  if (!info || cycleLength.value === 0n || !hasStarted.value) return 0n
-  const nowSec = BigInt(Math.floor(now.value.getTime() / 1000))
-  const elapsed = nowSec - info.startTimestamp
-  const cycleIndex = elapsed / cycleLength.value
-  return info.startTimestamp + cycleIndex * cycleLength.value
+  const c = currentCycle.value
+  if (!c || !c.hasStarted) return 0n
+  return c.startSec
 })
 
 const fixedRateStart = computed(() => currentCycleStart.value)
 const fixedRateEnd = computed(() => {
-  if (!cyclicalInfo.value) return 0n
-  return currentCycleStart.value + cyclicalInfo.value.primaryDuration
+  const c = currentCycle.value
+  if (!c) return 0n
+  return currentCycleStart.value + c.primaryDurationSec
 })
 const repaymentWindowStart = computed(() => fixedRateEnd.value)
 const repaymentWindowEnd = computed(() => currentCycleStart.value + cycleLength.value)
@@ -74,21 +159,22 @@ const elapsedInCycle = computed(() => {
 })
 
 const isInFixedRate = computed(() => {
-  if (!cyclicalInfo.value) return true
-  return elapsedInCycle.value < cyclicalInfo.value.primaryDuration
+  const c = currentCycle.value
+  if (!c) return true
+  return elapsedInCycle.value < c.primaryDurationSec
 })
 
 const currentPhaseDurationSec = computed(() => {
-  if (!cyclicalInfo.value) return 0n
-  return isInFixedRate.value
-    ? cyclicalInfo.value.primaryDuration
-    : cyclicalInfo.value.secondaryDuration
+  const c = currentCycle.value
+  if (!c) return 0n
+  return isInFixedRate.value ? c.primaryDurationSec : c.secondaryDurationSec
 })
 
 const elapsedInPhase = computed(() => {
-  if (!cyclicalInfo.value) return 0n
+  const c = currentCycle.value
+  if (!c) return 0n
   if (isInFixedRate.value) return elapsedInCycle.value
-  const elapsed = elapsedInCycle.value - cyclicalInfo.value.primaryDuration
+  const elapsed = elapsedInCycle.value - c.primaryDurationSec
   return elapsed < 0n ? 0n : elapsed
 })
 
@@ -96,8 +182,9 @@ const elapsedInPhase = computed(() => {
 // phase boundary, so fixedRatePercent is the position (in % of bar width)
 // of both the boundary and the end-of-fixed-rate tick.
 const fixedRatePercent = computed(() => {
-  if (!cyclicalInfo.value || cycleLength.value === 0n) return 0
-  return (Number(cyclicalInfo.value.primaryDuration) / Number(cycleLength.value)) * 100
+  const c = currentCycle.value
+  if (!c || cycleLength.value === 0n) return 0
+  return (Number(c.primaryDurationSec) / Number(cycleLength.value)) * 100
 })
 
 const cyclePositionPercent = computed(() => {
@@ -122,13 +209,15 @@ const spyToApy = (spy: bigint): number => {
 }
 
 const fixedBorrowAPY = computed(() => {
-  if (!cyclicalInfo.value) return 0
-  return spyToApy(cyclicalInfo.value.primaryRate)
+  const c = currentCycle.value
+  if (!c) return 0
+  return spyToApy(c.primaryRate)
 })
 
 const repaymentBorrowAPY = computed(() => {
-  if (!cyclicalInfo.value) return 0
-  return spyToApy(cyclicalInfo.value.secondaryRate)
+  const c = currentCycle.value
+  if (!c) return 0
+  return spyToApy(c.secondaryRate)
 })
 
 const formatCyclicalDate = (timestamp: bigint): string => {
@@ -202,7 +291,7 @@ const formatProgressTickLabel = (seconds: bigint, unit: DurationUnit): string =>
 // Tick marks at 0%, 50%, 100% of the fixed rate period. The 100% mark sits
 // at the phase boundary on the bar, and the repayment portion continues past.
 const progressTicks = computed(() => {
-  const totalDuration = cyclicalInfo.value?.primaryDuration ?? 0n
+  const totalDuration = currentCycle.value?.primaryDurationSec ?? 0n
   const fixedEnd = fixedRatePercent.value
   const unit = selectDurationUnit(totalDuration, 2n)
   return [
@@ -231,7 +320,7 @@ const phaseProgressLabel = computed(() => {
 
 <template>
   <div
-    v-if="hasValidIRM && cyclicalInfo"
+    v-if="hasValidIRM && currentCycle"
     class="bg-surface-secondary rounded-xl flex flex-col gap-16 p-24 shadow-card"
   >
     <!-- Header -->
@@ -246,10 +335,10 @@ const phaseProgressLabel = computed(() => {
 
     <!-- Pre-start notice -->
     <div
-      v-if="!hasStarted && cyclicalInfo"
+      v-if="currentCycle.preStartTimestamp !== null"
       class="text-p3 text-content-secondary"
     >
-      First cycle starts {{ formatCyclicalDate(cyclicalInfo.startTimestamp) }}
+      First cycle starts {{ formatCyclicalDate(currentCycle.preStartTimestamp) }}
     </div>
 
     <!-- Current cycle -->
@@ -273,7 +362,7 @@ const phaseProgressLabel = computed(() => {
         </VaultOverviewLabelValue>
         <VaultOverviewLabelValue label="Cycle length">
           <span class="text-p3 text-content-primary">
-            {{ formatDuration(cyclicalInfo.primaryDuration) }} / {{ formatDuration(cyclicalInfo.secondaryDuration) }}
+            {{ formatDuration(currentCycle.primaryDurationSec) }} / {{ formatDuration(currentCycle.secondaryDurationSec) }}
           </span>
         </VaultOverviewLabelValue>
       </div>
