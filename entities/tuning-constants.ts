@@ -18,6 +18,9 @@ export const BATCH_DELAY_COLLECT_MS = 100
 /** Subgraph query timeout (client-side). Longer than server-side subgraph
  * calls because client traffic tolerates higher variance. */
 export const SUBGRAPH_TIMEOUT_MS = 30_000
+/** Wallet screening must resolve promptly so the app can fail closed instead
+ * of leaving a connected wallet in an indeterminate state. */
+export const WALLET_SCREENING_TIMEOUT_MS = 10_000
 
 // ── Debounce ──────────────────────────────────────────────
 /** Price-fetch watchEffects on list pages. Collapses bursts of registry

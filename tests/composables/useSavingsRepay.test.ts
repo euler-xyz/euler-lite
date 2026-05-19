@@ -162,6 +162,7 @@ describe('useSavingsRepay', () => {
     vi.stubGlobal('useRpcClient', () => ({ client: ref(null) }))
     vi.stubGlobal('useWagmi', () => ({
       address: ref(USER),
+      isConnected: ref(true),
       chain: ref({ nativeCurrency: { decimals: 18 } }),
     }))
   })
