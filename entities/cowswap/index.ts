@@ -3,6 +3,9 @@ export * from './types'
 export * from './quote-utils'
 
 export {
+  buildClosePositionQuoteAppData,
+  buildCollateralSwapQuoteAppData,
+  buildOpenPositionQuoteAppData,
   cancelCowSwapOrder,
   type CowSwapPermitCancellation,
   type CowSwapPlanItemExecutionResult,

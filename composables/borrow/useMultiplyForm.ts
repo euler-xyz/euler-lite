@@ -18,12 +18,21 @@ import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { useAccount } from '@wagmi/vue'
-import { formatUnits, type Address } from 'viem'
+import { formatUnits, zeroAddress, type Address } from 'viem'
 import { OperationReviewModal } from '#components'
 import type { Ref, ComputedRef } from 'vue'
 import { logWarn } from '~/utils/errorHandling'
 import { createRaceGuard } from '~/utils/race-guard'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
+import { useMultiplyCowSwap } from '~/composables/borrow/useMultiplyCowSwap'
+import {
+  COWSWAP_ORDER_DEADLINE_SECONDS,
+  COWSWAP_PROVIDER_EXTRA_DATA,
+  buildOpenPositionQuoteAppData,
+  getCowSwapChainConfig,
+  isCowProviderOrQuote,
+} from '~/entities/cowswap'
+import { getNewSubAccount } from '~/composables/useSubAccounts'
 
 export interface UseMultiplyFormOptions {
   pair: Ref<AnyBorrowVaultPair | undefined>
@@ -55,8 +64,9 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const { planMultiply, executePlan } = useEulerTx()
-  const { isConnected } = useAccount()
+  const { isConnected, address } = useAccount()
   const { depositPositions } = useEulerAccount()
+  const { chainId } = useEulerAddresses()
   const { fetchSingleBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
@@ -81,6 +91,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     selectedProvider: multiplySelectedProvider,
     selectedQuote: multiplySelectedQuote,
     effectiveQuote: multiplyEffectiveQuote,
+    effectiveQuoteFetchedAt: multiplyEffectiveQuoteFetchedAt,
     providersCount: multiplyProvidersCount,
     isLoading: isMultiplyQuoteLoading,
     quoteError: multiplyQuoteError,
@@ -89,7 +100,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     reset: resetMultiplyQuoteStateInternal,
     requestQuotes: requestMultiplyQuotes,
     selectProvider: selectMultiplyQuote,
-  } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+  } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max', includeCowSwap: true })
   // --- Form state ---
   const multiplyInputAmount = ref('')
   const multiplier = ref(1)
@@ -502,6 +513,13 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     return 'No quotes found'
   })
 
+  // --- CoW provider detection ---
+  // Locally redefined here (matches the same logic in useMultiplyCowSwap) so
+  // we can gate `multiplyErrorText` without a forward-reference cycle.
+  const isCowSwapProvider = computed(() =>
+    isCowProviderOrQuote(multiplySelectedProvider.value, multiplyEffectiveQuote.value),
+  )
+
   // --- Validation ---
   const multiplyErrorText = computed(() => {
     if (!multiplySupplyVault.value || !multiplyShortVault.value) return null
@@ -510,6 +528,17 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     }
     if (multiplyDebtAmountNano.value > 0n && multiplyShortVault.value.availableLiquidity < multiplyDebtAmountNano.value) {
       return 'Not enough liquidity in the vault'
+    }
+    if (isCowSwapProvider.value && isMultiplySavingCollateral.value) {
+      return 'CoW Swap is not available when using savings as collateral'
+    }
+    if (
+      isCowSwapProvider.value
+      && multiplyLongVault.value
+      && multiplySupplyVault.value
+      && normalizeAddress(multiplySupplyVault.value.address) !== normalizeAddress(multiplyLongVault.value.address)
+    ) {
+      return 'CoW Swap is not available when margin vault differs from the long vault'
     }
     return null
   })
@@ -597,6 +626,38 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       return
     }
 
+    // CoW open position uses a different sub-account than the EVC batch path:
+    // it must be free of controllers because the wrapper enables the borrow
+    // vault controller itself. Resolve it here so the CoW quote is scoped to
+    // it; if unavailable we fall back to skipping the CoW provider.
+    const quoteDeadline = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
+    const cowProviderExtraData = { ...COWSWAP_PROVIDER_EXTRA_DATA.openPosition }
+    let cowAccount: Address | null = null
+    const chainConfig = getCowSwapChainConfig(chainId.value ?? 0)
+    if (chainConfig && address.value) {
+      try {
+        cowAccount = await getNewSubAccount(address.value, multiplyShortVault.value.address) as Address
+      }
+      catch (e) {
+        logWarn('multiply/cowswap/resolveQuoteSubaccount', e)
+      }
+    }
+    if (chainConfig && cowAccount) {
+      cowProviderExtraData.appData = buildOpenPositionQuoteAppData(
+        {
+          owner: (address.value || zeroAddress) as Address,
+          account: cowAccount,
+          deadline: quoteDeadline,
+          collateralVault: multiplySupplyVault.value.address as Address,
+          borrowVault: multiplyShortVault.value.address as Address,
+          collateralAmount: valueToNano(multiplyInputAmount.value || '0', multiplySupplyVault.value.asset.decimals),
+          borrowAmount: debtAmount,
+        },
+        chainConfig.openPositionWrapper,
+        Math.round(multiplySlippage.value * 100),
+      )
+    }
+
     setMultiplyAmounts(null, null)
     const requestParams = {
       tokenIn: multiplyShortVault.value.asset.address as Address,
@@ -614,6 +675,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     }
     await requestMultiplyQuotes(requestParams, {
       errorMessage: 'Unable to fetch swap quote. Multiply feature is not available for this asset.',
+      providerExtraData: cowAccount ? { cow: cowProviderExtraData } : undefined,
+      providerParams: cowAccount
+        ? { cow: { accountIn: cowAccount, accountOut: cowAccount } }
+        : undefined,
     })
   }, 500)
 
@@ -694,10 +759,44 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     }
   }
 
+  // --- CowSwap ---
+  const cowSwap = useMultiplyCowSwap({
+    multiplySelectedProvider: computed(() => multiplySelectedProvider.value),
+    multiplyEffectiveQuote: computed(() => multiplyEffectiveQuote.value),
+    multiplySelectedQuote: computed(() => multiplySelectedQuote.value),
+    multiplyEffectiveQuoteFetchedAt: computed(() => multiplyEffectiveQuoteFetchedAt.value),
+    multiplySlippage,
+    multiplySupplyVault: computed(() => multiplySupplyVault.value),
+    multiplyLongVault,
+    multiplyShortVault,
+    multiplySupplyProduct: computed(() => multiplySupplyProduct),
+    multiplyShortProduct: computed(() => multiplyShortProduct),
+    multiplyInputAmount,
+    multiplyShortAmount: computed(() => multiplyShortAmount.value),
+    multiplyLongAmount: computed(() => multiplyLongAmount.value),
+    multiplyDebtAmountNano: computed(() => multiplyDebtAmountNano.value),
+    multiplyErrorText,
+  })
+  const { cowSwapExecution, cowSwapOrderStatus, cowSwapStatusLabel, submitCowSwapMultiply } = cowSwap
+
   // --- Actions: submit & send ---
   const submitMultiply = async () => {
     if (isOperationBlocked.value) return
     if (isMultiplyPreparing.value || isGeoBlocked.value || isMultiplyRestricted.value) return
+
+    // CowSwap branch: skip plan building and simulation, go straight to the
+    // CoW review modal which signs the EVC permit + order off-chain.
+    if (isCowProviderOrQuote(multiplySelectedProvider.value, multiplyEffectiveQuote.value)) {
+      isMultiplyPreparing.value = true
+      try {
+        await submitCowSwapMultiply()
+      }
+      finally {
+        isMultiplyPreparing.value = false
+      }
+      return
+    }
+
     isMultiplyPreparing.value = true
     try {
       if (isMultiplySubmitting.value || !isConnected.value) return
@@ -995,6 +1094,13 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     multiplySupplyProduct,
     multiplyLongProduct,
     multiplyShortProduct,
+
+    // CowSwap
+    isCowSwapProvider,
+    cowSwapExecution,
+    cowSwapOrderStatus,
+    cowSwapStatusLabel,
+    multiplyEffectiveQuoteFetchedAt,
 
     // Actions
     onMultiplyInput,
