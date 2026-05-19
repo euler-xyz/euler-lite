@@ -9,7 +9,7 @@ import { swapperAbi } from '~/entities/euler/abis'
 import type { EVCCall } from '~/utils/evc-converter'
 import { sumCallValues } from '~/utils/pyth'
 import { logWarn } from '~/utils/errorHandling'
-import { assertSwapperVerifierAllowed } from '~/utils/swap-validation'
+import { assertSwapQuoteContractsAllowed } from '~/utils/swap-validation'
 import type { TxPlan } from '~/entities/txPlan'
 import { type SwapApiQuote, SwapperMode, SwapVerificationType } from '~/entities/swap'
 
@@ -49,7 +49,10 @@ export const createCrossAssetSwapBuilders = (
     const userAddr = ctx.address.value as Address
     const evcAddress = ctx.eulerCoreAddresses.value.evc as Address
 
-    assertSwapperVerifierAllowed(quote.verify.verifierAddress, ctx.eulerPeripheryAddresses.value.swapVerifier)
+    assertSwapQuoteContractsAllowed({
+      swapperAddress: quote.swap.swapperAddress,
+      verifierAddress: quote.verify.verifierAddress,
+    }, ctx.eulerPeripheryAddresses.value)
 
     if (isRepay && quote.verify.type !== SwapVerificationType.DebtMax) {
       throw new Error('Swap verifier type mismatch')
