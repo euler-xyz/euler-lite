@@ -18,7 +18,7 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel } = defineProps<{
+const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel, quoteFetchedAt } = defineProps<{
   type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
@@ -41,6 +41,8 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
   hasBorrows?: boolean
   transferAmounts?: Record<string, string>
   submittingLabel?: string
+  /** Milliseconds since epoch when the active swap quote was fetched */
+  quoteFetchedAt?: number | null
 }>()
 
 const { address: walletAddress, chainId: currentChainId } = useWagmi()
@@ -56,8 +58,11 @@ const {
   fetchEnabled: fetchTenderlyEnabled,
 } = useTenderlySimulation()
 
-const copied = ref(false)
 const tenderlyEnabled = ref(false)
+const { copied, copyToClipboard } = useClipboardCopy()
+const nowMs = ref(Date.now())
+const staleQuoteThresholdMs = 3 * 60 * 1000
+let nowTimer: ReturnType<typeof setInterval> | undefined
 // `preparedPlan` is the prepared envelope's plan when the caller passed
 // `prepared`, otherwise it's the result of an on-the-fly prepare for callers
 // still on the legacy raw-plan path. Once every caller migrates, the
@@ -70,6 +75,18 @@ let prepareRequestId = 0
 
 fetchTenderlyEnabled().then((enabled) => {
   tenderlyEnabled.value = enabled
+})
+
+onMounted(() => {
+  nowTimer = setInterval(() => {
+    nowMs.value = Date.now()
+  }, 1000)
+})
+
+onUnmounted(() => {
+  if (nowTimer) {
+    clearInterval(nowTimer)
+  }
 })
 
 const findFirstEvcBatch = (p?: TransactionPlan) => p?.find(item => item.type === 'evcBatch')
@@ -237,11 +254,7 @@ const copyCalldata = async () => {
       }
     }
 
-    navigator.clipboard.writeText(JSON.stringify(entries, null, 2))
-    copied.value = true
-    setTimeout(() => {
-      copied.value = false
-    }, 2000)
+    copyToClipboard(JSON.stringify(entries, null, 2), 'calldata')
   }
   catch (err) {
     logWarn('OperationReviewSdkModal/copyCalldata', err)
@@ -301,6 +314,11 @@ const hasTenderlyFailedSimulation = computed(() => {
   return !!(tenderlyUrl.value && tenderlyError.value)
 })
 
+const isSwapQuoteStale = computed(() => {
+  return typeof quoteFetchedAt === 'number'
+    && nowMs.value - quoteFetchedAt > staleQuoteThresholdMs
+})
+
 const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract used to authorize future transfers with signatures. Each future transfer still requires your explicit signature and can be limited by amount and duration.'
 const isConfirmDisabled = computed(() => isSpyMode.value || internalSubmitting.value || isPreparingPlan.value || !!prepareError.value || !reviewPlan.value?.length)
 const confirmLabel = computed(() => {
@@ -313,7 +331,7 @@ const confirmLabel = computed(() => {
 <template>
   <BaseModalWrapper
     title="Transaction review"
-    @close="$emit('close')"
+    @close="!internalSubmitting && $emit('close')"
   >
     <div class="flex flex-col gap-24">
       <div
@@ -335,7 +353,7 @@ const confirmLabel = computed(() => {
           @click="copyCalldata"
         >
           <SvgIcon
-            name="copy"
+            :name="copied ? 'check' : 'copy'"
             class="!w-16 !h-16"
           />
           {{ copied ? 'Copied!' : 'Copy calldata' }}
@@ -397,6 +415,24 @@ const confirmLabel = computed(() => {
         :description="prepareError"
         size="compact"
       />
+
+      <div
+        v-if="isSwapQuoteStale"
+        class="flex items-start gap-8 rounded-12 bg-warning-100 p-12 text-warning-500"
+      >
+        <SvgIcon
+          name="warning-circle"
+          class="!w-16 !h-16 shrink-0 mt-1"
+        />
+        <p class="text-p4">
+          This swap quote is more than 3 minutes old. Consider refreshing quotes with the
+          <SvgIcon
+            name="refresh"
+            class="inline-block !w-14 !h-14 align-[-2px]"
+          />
+          icon before submitting to get the best execution price.
+        </p>
+      </div>
 
       <UiToast
         v-if="type === 'reward'"

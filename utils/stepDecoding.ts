@@ -9,6 +9,8 @@ import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 export interface StepAssetInfo {
   symbol: string
   address?: string
+  /** Optional address used only for the displayed asset logo. */
+  iconAddress?: string
   amount?: number | string
   iconUrl?: string
   /** When true, the displayed amount is an estimate (rendered with a "~" prefix). */
