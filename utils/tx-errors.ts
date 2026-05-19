@@ -111,6 +111,16 @@ export const getTxErrorCode = (error: unknown) => {
   return extractErrorCode(error)
 }
 
+// True for revert codes that mean "this specific route can't execute"
+// (swapper produced a bad swap, or the verifier caught an invariant). The
+// parallel-quotes pipeline uses this to drop such quotes during gas
+// estimation rather than show them as selectable options. Other estimate
+// failures (RPC blip, generic E_*) still surface as user-visible errors.
+export const shouldDiscardQuoteOnEstimateGasError = (error: unknown) => {
+  const code = extractErrorCode(error)
+  return code === 'Swapper_SwapError' || code?.startsWith('SwapVerifier_') === true
+}
+
 export const isNonBlockingSimulationError = (error: unknown) => {
   const code = extractErrorCode(error)
   return code ? NON_BLOCKING_SIMULATION_ERRORS.has(code) : false

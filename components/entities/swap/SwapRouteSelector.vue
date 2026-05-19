@@ -5,7 +5,10 @@ type SwapRouteItem = {
   provider: string
   amount: string
   symbol: string
+  gasCostLabel?: string
+  netUsdLabel?: string
   routeLabel?: string
+  isGasless?: boolean
   badge?: {
     label: string
     tone: SwapRouteBadgeTone
@@ -13,6 +16,8 @@ type SwapRouteItem = {
 }
 
 const VISIBLE_COUNT = 3
+
+const isGaslessItem = (item: SwapRouteItem) => !!item.isGasless
 
 const props = withDefaults(defineProps<{
   title?: string
@@ -37,9 +42,22 @@ const emit = defineEmits<{
 const expanded = ref(false)
 
 const hasMore = computed(() => props.items.length > VISIBLE_COUNT)
-const visibleItems = computed(() =>
-  expanded.value ? props.items : props.items.slice(0, VISIBLE_COUNT),
-)
+const visibleItems = computed(() => {
+  if (expanded.value) return props.items
+
+  const top = props.items.slice(0, VISIBLE_COUNT)
+  // If a gasless (CoW) route exists but is below the visible cutoff, always
+  // surface it in the collapsed view so users see the gasless option without
+  // expanding the list.
+  if (top.some(isGaslessItem)) return top
+
+  const cow = props.items.find(isGaslessItem)
+  if (!cow) return top
+
+  return top.length >= VISIBLE_COUNT
+    ? [...top.slice(0, VISIBLE_COUNT - 1), cow]
+    : [...top, cow]
+})
 
 const onSelect = (provider: string) => {
   emit('select', provider)
@@ -103,16 +121,40 @@ const onSelect = (provider: string) => {
               : 'border-line-default bg-surface hover:bg-surface-secondary'"
             @click="onSelect(item.provider)"
           >
-            <div class="flex items-center justify-between gap-8">
-              <p
-                class="text-p2 text-content-primary"
-                data-id="data-point"
-                :data-key="item.provider"
-                data-field="swap-route-amount"
-                :data-value="item.amount"
-              >
-                {{ item.amount }} {{ item.symbol }}
-              </p>
+            <div
+              class="flex justify-between gap-8"
+              :class="item.netUsdLabel ? 'items-start' : 'items-center'"
+            >
+              <div class="flex flex-col gap-2 min-w-0">
+                <p
+                  class="text-p2 text-content-primary"
+                  data-id="data-point"
+                  :data-key="item.provider"
+                  data-field="swap-route-amount"
+                  :data-value="item.amount"
+                >
+                  {{ item.amount }} {{ item.symbol }}
+                </p>
+                <p
+                  class="text-p3 text-content-secondary truncate"
+                  data-id="data-point"
+                  :data-key="item.provider"
+                  data-field="swap-route-label"
+                  :data-value="item.routeLabel || '-'"
+                >
+                  {{ item.routeLabel || '-' }}
+                </p>
+                <p
+                  v-if="item.netUsdLabel"
+                  class="text-p3 text-content-secondary"
+                  data-id="data-point"
+                  :data-key="item.provider"
+                  data-field="swap-route-net-usd"
+                  :data-value="item.netUsdLabel"
+                >
+                  {{ item.netUsdLabel }}
+                </p>
+              </div>
               <div class="flex flex-col items-end gap-2 text-p3 text-content-secondary">
                 <p
                   v-if="item.badge"
@@ -125,12 +167,19 @@ const onSelect = (provider: string) => {
                   {{ item.badge.label }}
                 </p>
                 <span
-                  class="truncate"
+                  v-if="isGaslessItem(item) || item.gasCostLabel"
+                  class="flex items-center gap-2 text-success-600"
                   data-id="data-point"
                   :data-key="item.provider"
-                  data-field="swap-route-label"
-                  :data-value="item.routeLabel || '-'"
-                >{{ item.routeLabel || '-' }}</span>
+                  data-field="swap-route-gas"
+                  :data-value="isGaslessItem(item) ? 'Gasless' : item.gasCostLabel"
+                >
+                  <SvgIcon
+                    name="gas"
+                    class="!w-12 !h-12"
+                  />
+                  {{ isGaslessItem(item) ? 'Gasless' : item.gasCostLabel }}
+                </span>
               </div>
             </div>
           </button>

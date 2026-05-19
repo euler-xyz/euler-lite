@@ -1,8 +1,9 @@
 import { zeroAddress, type Address } from 'viem'
-import type { SwapQuote, SwapQuoteRequest } from '@eulerxyz/euler-v2-sdk'
+import type { SwapProviderExtraData, SwapQuote, SwapQuoteRequest } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdk } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
 import { EXCLUDED_SWAP_PROVIDERS, SWAP_DEFAULT_DEADLINE_SECONDS } from '~/entities/constants'
+import { COWSWAP_PROVIDER_NAME, isCowSwapSupportedChain } from '~/entities/cowswap'
 
 // Re-export the SDK's SwapQuoteRequest, but with the three environment-derived
 // fields (chainId, origin, deadline) optional. The composable fills them from
@@ -10,6 +11,11 @@ import { EXCLUDED_SWAP_PROVIDERS, SWAP_DEFAULT_DEADLINE_SECONDS } from '~/entiti
 export type SwapQuoteInput
   = Omit<SwapQuoteRequest, 'chainId' | 'origin' | 'deadline'>
     & Partial<Pick<SwapQuoteRequest, 'chainId' | 'origin' | 'deadline'>>
+
+// Alias kept for parity with `origin/development`'s call sites; the dev branch
+// names this `SwapApiRequestInput`. Same shape — pick whichever reads better
+// at the call site.
+export type SwapApiRequestInput = SwapQuoteInput
 
 const withDefaults = (
   params: SwapQuoteInput,
@@ -47,12 +53,23 @@ export const useSwapApi = () => {
     return sdk.swapService.fetchSwapQuotes(request)
   }
 
-  const getSwapProviders = async (): Promise<string[]> => {
+  // `includeCowSwap` lets the parallel-quotes pipeline opt CoW back in for
+  // pages that wire CoW execution (multiply / repay-with-collateral). The
+  // baseline excludes CoW because most legacy code paths assume an EVC
+  // batch, not an intent.
+  const getSwapProviders = async (
+    options?: { includeCowSwap?: boolean },
+  ): Promise<string[]> => {
     if (!chainId.value) return []
     try {
       const sdk = await getEulerSdk()
       const providers = await sdk.swapService.fetchProviders(chainId.value)
-      return providers.filter(p => !EXCLUDED_SWAP_PROVIDERS.has(p.toLowerCase()))
+      const includeCow = options?.includeCowSwap && isCowSwapSupportedChain(chainId.value)
+      return providers.filter((p) => {
+        const normalized = p.toLowerCase()
+        return !EXCLUDED_SWAP_PROVIDERS.has(normalized)
+          && (normalized !== COWSWAP_PROVIDER_NAME || includeCow)
+      })
     }
     catch (error) {
       logWarn('swapApi/providers', error)
@@ -74,3 +91,7 @@ export const useSwapApi = () => {
     getSwapProviders,
   }
 }
+
+// Re-export the SDK's provider-extra-data type so call sites that want to
+// type-check their CoW wrapper payloads don't need to reach into the SDK.
+export type { SwapProviderExtraData }

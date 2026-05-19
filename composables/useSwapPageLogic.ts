@@ -61,6 +61,8 @@ export interface UseSwapPageLogicOptions {
   swapperMode: SwapperMode
   /** Override the displayed side marked as estimated in the review modal. */
   reviewSwapEstimatedSide?: 'input' | 'output'
+  /** Include CowSwap provider in swap quotes (Ethereum mainnet etc.) */
+  includeCowSwap?: boolean
 }
 
 export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
@@ -84,6 +86,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     sameAssetModalType = 'transfer',
     swapperMode,
     reviewSwapEstimatedSide,
+    includeCowSwap,
   } = options
 
   const otherAmountField: SwapQuoteAmountField = displayAmountField === 'amountIn' ? 'amountOut' : 'amountIn'
@@ -114,6 +117,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     selectedProvider,
     selectedQuote,
     effectiveQuote,
+    effectiveQuoteFetchedAt,
     providersCount,
     isLoading: isQuoteLoading,
     quoteError,
@@ -122,7 +126,15 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     reset: resetQuoteStateInternal,
     requestQuotes,
     selectProvider,
-  } = useSwapQuotesParallel({ amountField, compare })
+  } = useSwapQuotesParallel({
+    amountField,
+    compare,
+    includeCowSwap,
+    // Each call site already encodes the same-asset vs swap-quote branch in
+    // its own buildPlan. We just forward the candidate quote so the parallel
+    // engine can build a plan per quote for gas estimation.
+    buildTxPlanForQuote: () => buildPlan(),
+  })
   // ── Vault products & price invert ──────────────────────────────────────
   const fromProduct = useEulerProductOfVault(computed(() => fromVault.value?.address || ''))
   const toProduct = useEulerProductOfVault(computed(() => toVault.value?.address || ''))
@@ -422,6 +434,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
       symbol: toVault.value.asset.symbol,
       formatAmount: formatSmartAmount,
       amountField: displayAmountField,
+      compare,
       diffPrefix: quoteDiffPrefix,
     })
   })
@@ -471,6 +484,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
             swapMode: showSwapAmounts ? swapperMode : undefined,
             swapEstimatedSide: showSwapAmounts ? reviewSwapEstimatedSide : undefined,
             plan: plan.value || undefined,
+            quoteFetchedAt: !isSameAsset.value ? effectiveQuoteFetchedAt.value : null,
             onConfirm: async () => {
               await send()
             },
@@ -521,6 +535,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     quoteCardsSorted,
     selectedProvider,
     selectedQuote,
+    effectiveQuoteFetchedAt,
     providersCount,
     isQuoteLoading,
     quoteError,

@@ -38,6 +38,12 @@ describe('useSwapQuotesParallel', () => {
       getSwapProviders,
       getSwapQuotes,
     }))
+    vi.stubGlobal('useRpcClient', () => ({ client: ref(null) }))
+    vi.stubGlobal('useWagmi', () => ({
+      address: ref('0x0000000000000000000000000000000000000007'),
+      chain: ref({ nativeCurrency: { decimals: 18 } }),
+    }))
+    vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
   })
 
   it('keeps effectiveQuote stable when selecting the current best provider', async () => {
@@ -83,5 +89,45 @@ describe('useSwapQuotesParallel', () => {
     expect(quotes.selectedProvider.value).toBe('other')
     expect(quotes.effectiveQuote.value?.amountOut).toBe('200')
     expect(changes).toHaveLength(1)
+  })
+
+  it('applies provider-specific request params and extra data', async () => {
+    const cowQuote = makeQuote('100', '300')
+    const otherQuote = makeQuote('100', '200')
+    const cowAccount = '0x00000000000000000000000000000000000000c0'
+    const cowProviderExtraData = { type: 'openPosition' as const, appData: '{}' }
+    getSwapProviders.mockResolvedValue(['cow', 'other'])
+    getSwapQuotes.mockImplementation(({ provider }: { provider: string }) =>
+      Promise.resolve([provider === 'cow' ? cowQuote : otherQuote]),
+    )
+
+    const quotes = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max', includeCowSwap: true })
+    await quotes.requestQuotes(requestParams, {
+      providerExtraData: { cow: cowProviderExtraData },
+      providerParams: {
+        cow: {
+          accountIn: cowAccount,
+          accountOut: cowAccount,
+        },
+      },
+    })
+    await flushPromises()
+    await nextTick()
+
+    const cowCall = getSwapQuotes.mock.calls.find(([params]) => params.provider === 'cow')?.[0]
+    const otherCall = getSwapQuotes.mock.calls.find(([params]) => params.provider === 'other')?.[0]
+
+    expect(cowCall).toMatchObject({
+      provider: 'cow',
+      accountIn: cowAccount,
+      accountOut: cowAccount,
+      providerExtraData: cowProviderExtraData,
+    })
+    expect(otherCall).toMatchObject({
+      provider: 'other',
+      accountIn: requestParams.accountIn,
+      accountOut: requestParams.accountOut,
+    })
+    expect(otherCall.providerExtraData).toBeUndefined()
   })
 })

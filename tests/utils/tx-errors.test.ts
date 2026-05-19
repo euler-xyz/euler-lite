@@ -1,6 +1,6 @@
 import { afterEach, describe, it, expect } from 'vitest'
 import { ContractFunctionRevertedError, encodeAbiParameters, type Hex } from 'viem'
-import { getTxErrorCode, getTxErrorMessage } from '~/utils/tx-errors'
+import { getTxErrorCode, getTxErrorMessage, shouldDiscardQuoteOnEstimateGasError } from '~/utils/tx-errors'
 import { clearOperationMeta, setOperationMeta } from '~/utils/operationGuardRegistry'
 
 const buildRevertError = (raw: Hex) =>
@@ -54,6 +54,23 @@ describe('tx-errors: Swapper_SwapError decoding', () => {
   it('omits the inner reason suffix when inner bytes are unrecognised', async () => {
     const err = buildRevertError(encodeSwapperSwapError('0xdeadbeef'))
     expect(await getTxErrorMessage(err)).not.toMatch(/\(.*\)$/)
+  })
+})
+
+describe('shouldDiscardQuoteOnEstimateGasError', () => {
+  it('discards quote estimation failures caused by Swapper_SwapError', () => {
+    const err = buildRevertError(encodeSwapperSwapError('0xdeadbeef'))
+    expect(shouldDiscardQuoteOnEstimateGasError(err)).toBe(true)
+  })
+
+  it('discards quote estimation failures caused by SwapVerifier errors', () => {
+    const err = buildRevertError('0x1c27d2c0')
+    expect(shouldDiscardQuoteOnEstimateGasError(err)).toBe(true)
+  })
+
+  it('keeps quotes for other estimation failures', () => {
+    const err = new Error('execution reverted: E_InsufficientCash')
+    expect(shouldDiscardQuoteOnEstimateGasError(err)).toBe(false)
   })
 })
 
