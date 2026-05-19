@@ -225,6 +225,7 @@ const rampDownModalData = computed(() => ({
             </span>
           </template>
           <span class="flex items-center gap-4">
+            <VaultPoints :vault="pair.collateral" />
             <UiModalPreviewTrigger
               v-if="hasSupplyRewards(pair.collateral.address)"
               :component="VaultSupplyApyModal"

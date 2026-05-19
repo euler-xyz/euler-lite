@@ -34,6 +34,7 @@ const onPointClick = (
 
 <template>
   <div
+    v-if="points.length"
     class="text-p1 flex items-center gap-0 hover:gap-8 transition-[gap] duration-300 ease-in-out"
   >
     <img
