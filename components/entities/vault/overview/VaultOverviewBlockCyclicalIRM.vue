@@ -78,6 +78,15 @@ type CurrentCycle = {
 const MIN_MONTHLY_CYCLE_START_DAY = 1n
 const MAX_MONTHLY_CYCLE_START_DAY = 31n
 
+const getUTCMonthDayCount = (year: number, month: number): number => {
+  return new Date(Date.UTC(year, month + 1, 0)).getUTCDate()
+}
+
+const getMonthlyCycleBoundaryMs = (year: number, month: number, startDay: number): number => {
+  const effectiveStartDay = Math.min(startDay, getUTCMonthDayCount(year, month))
+  return Date.UTC(year, month, effectiveStartDay)
+}
+
 // Both cyclical IRM variants are normalised into the same shape so the
 // progress/phase/tick logic below is variant-agnostic. The Monthly variant
 // derives the current cycle from calendar dates (UTC), matching the contract.
@@ -94,14 +103,15 @@ const currentCycle = computed((): CurrentCycle | null => {
     const d = new Date(now.value.getTime())
     const y = d.getUTCFullYear()
     const mo = d.getUTCMonth()
-    const day = d.getUTCDate()
     const startDay = Number(m.cycleStartDay)
-    const cycleStartMs = day >= startDay
-      ? Date.UTC(y, mo, startDay)
-      : Date.UTC(y, mo - 1, startDay)
-    const cycleEndMs = day >= startDay
-      ? Date.UTC(y, mo + 1, startDay)
-      : Date.UTC(y, mo, startDay)
+    const currentMonthBoundaryMs = getMonthlyCycleBoundaryMs(y, mo, startDay)
+    const isAfterCurrentMonthBoundary = d.getTime() >= currentMonthBoundaryMs
+    const cycleStartMs = isAfterCurrentMonthBoundary
+      ? currentMonthBoundaryMs
+      : getMonthlyCycleBoundaryMs(y, mo - 1, startDay)
+    const cycleEndMs = isAfterCurrentMonthBoundary
+      ? getMonthlyCycleBoundaryMs(y, mo + 1, startDay)
+      : currentMonthBoundaryMs
     if (!Number.isFinite(cycleStartMs) || !Number.isFinite(cycleEndMs)) return null
     const startSec = BigInt(Math.floor(cycleStartMs / 1000))
     const endSec = BigInt(Math.floor(cycleEndMs / 1000))
@@ -215,27 +225,31 @@ const repaymentBorrowAPY = computed(() => {
   return spyToApy(c.secondaryRate)
 })
 
+const shouldFormatCycleDatesInUTC = computed(() => isMonthly.value)
+
 const formatCyclicalDate = (timestamp: bigint): string => {
   const date = new Date(Number(timestamp) * 1000)
-  const day = date.getDate()
+  const useUTC = shouldFormatCycleDatesInUTC.value
+  const day = useUTC ? date.getUTCDate() : date.getDate()
   const suffix = getDaySuffix(day)
-  const month = date.toLocaleString('en-US', { month: 'short' })
-  const year = date.getFullYear()
-  const hour = date.getHours()
+  const month = date.toLocaleString('en-US', { month: 'short', timeZone: useUTC ? 'UTC' : undefined })
+  const year = useUTC ? date.getUTCFullYear() : date.getFullYear()
+  const hour = useUTC ? date.getUTCHours() : date.getHours()
   const ampm = hour >= 12 ? 'pm' : 'am'
   const hour12 = hour % 12 || 12
-  const min = date.getMinutes()
+  const min = useUTC ? date.getUTCMinutes() : date.getMinutes()
   const timeStr = min === 0 ? `${hour12}${ampm}` : `${hour12}:${String(min).padStart(2, '0')}${ampm}`
   return `${month} ${day}${suffix}, ${year} ${timeStr}`
 }
 
 const formatTimelineDate = (timestamp: bigint): string => {
   const date = new Date(Number(timestamp) * 1000)
-  const month = date.toLocaleString('en-US', { month: 'short' })
-  const day = date.getDate()
-  const year = date.getFullYear()
-  const hours = String(date.getHours()).padStart(2, '0')
-  const minutes = String(date.getMinutes()).padStart(2, '0')
+  const useUTC = shouldFormatCycleDatesInUTC.value
+  const month = date.toLocaleString('en-US', { month: 'short', timeZone: useUTC ? 'UTC' : undefined })
+  const day = useUTC ? date.getUTCDate() : date.getDate()
+  const year = useUTC ? date.getUTCFullYear() : date.getFullYear()
+  const hours = String(useUTC ? date.getUTCHours() : date.getHours()).padStart(2, '0')
+  const minutes = String(useUTC ? date.getUTCMinutes() : date.getMinutes()).padStart(2, '0')
   return `${month} ${day}, ${year} ${hours}:${minutes}`
 }
 
