@@ -66,8 +66,8 @@ const isSecuritizeVaultType = computed(() => !!vault.value && isSecuritizeCollat
 const withdrawWarnings = computed(() => {
   if (!vault.value || isSecuritizeVaultType.value) return []
   return [
-    getHookDisabledWarning(vault.value as Vault, effectiveWithdrawOp.value),
-    getUtilisationWarning(vault.value as Vault, 'lend'),
+    getHookDisabledWarning(vault.value as EVault, effectiveWithdrawOp.value),
+    getUtilisationWarning(vault.value as EVault, 'lend'),
   ]
 })
 const assetsBalance = ref(0n)

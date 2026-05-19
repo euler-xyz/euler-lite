@@ -90,6 +90,7 @@ const collateralAssets = computed(() => {
 })
 const collateralDisplayAssets = computed(() => collateralAssets.value.slice(0, 5))
 const collateralOverflowCount = computed(() => Math.max(0, collateralAssets.value.length - 5))
+const collateralExposureListId = computed(() => `collateral-exposure:${vault.address.toLowerCase()}`)
 
 const balance = computed(() =>
   getBalance(vault.asset.address as `0x${string}`),

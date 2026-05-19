@@ -1,4 +1,4 @@
-import type { EVault, EVaultCollateralRamping, PortfolioBorrowPosition } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, EVaultCollateralRamping, IHasVaultAddress, PortfolioBorrowPosition } from '@eulerxyz/euler-v2-sdk'
 
 const WAD = 10n ** 18n
 const BPS = 10000n
@@ -100,7 +100,7 @@ const findCollateralEdge = (
  * collateral edge isn't found or doesn't ramp.
  */
 export const getPositionRampStatus = (
-  position: PortfolioBorrowPosition,
+  position: PortfolioBorrowPosition<IHasVaultAddress>,
   nowSeconds?: bigint,
 ): PositionRampStatus => {
   if (position.userLTV === undefined) {
@@ -122,7 +122,7 @@ export const getPositionRampStatus = (
 
 /** True when the primary collateral edge of a borrow position is currently ramping down. */
 export const isPositionLiquidationLTVRamping = (
-  position: PortfolioBorrowPosition,
+  position: PortfolioBorrowPosition<IHasVaultAddress>,
   nowSeconds?: bigint,
 ): boolean => {
   const edge = findCollateralEdge(
@@ -140,7 +140,7 @@ export const isPositionLiquidationLTVRamping = (
  * ramping.
  */
 export const getPositionRampTargetTimestamp = (
-  position: PortfolioBorrowPosition,
+  position: PortfolioBorrowPosition<IHasVaultAddress>,
 ): bigint | null => {
   const edge = findCollateralEdge(
     position.borrowVault as EVault | undefined,

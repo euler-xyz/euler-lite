@@ -27,9 +27,6 @@ function initializeWagmi() {
   const { screenConnectedAddress, resetScreeningCache, isAddressScreened } = useAddressScreen()
 
   const chainId = computed(() => wagmiChain.value?.id)
-  const screenedWagmiAddress: ComputedRef<Address | undefined> = computed(() =>
-    isAddressScreened(wagmiAddress.value) ? (wagmiAddress.value || undefined) : undefined,
-  )
 
   // Route internal wagmi reads through the screened address so wallet-tied
   // queries (ENS, native balance) don't surface for an address whose

@@ -23,7 +23,7 @@ const props = defineProps<{
   readonly?: boolean
   priceOverride?: number // USD unit price for assets without a vault (e.g., swap-to-deposit)
   swappable?: boolean // When true, asset pill shows dropdown arrow and emits click-asset
-  selectedSource?: 'wallet' | 'saving' // Source indicator chip when multiple collateral options exist
+  selectedSource?: string // Matches CollateralOption.type (e.g. 'wallet' / 'saving' / 'vault') for the source-chip indicator
   selectedSubAccount?: string // Disambiguates between multiple savings positions on different sub-accounts
   selectedVaultAddress?: string // Disambiguates same sub-account positions across different vaults (e.g. wallet rows)
   maxHandler?: () => void // When provided, replaces the default "Max" button behavior

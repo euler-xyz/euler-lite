@@ -477,12 +477,12 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     // step from the visible list to keep the step count honest. On any RPC
     // failure we keep the step (fail-closed = correct count > optimistic).
     const client = rpcClient.value
-    const hasExistingInbox = client && address.value
+    const hasExistingInbox = client && address.value && position.value
       ? await cowSwapInboxExists({
           client,
           wrapperAddress: chainConfig.closePositionWrapper,
           owner: address.value as Address,
-          subaccount: sdkAccount.address as Address,
+          subaccount: position.value.subAccount as Address,
         })
       : false
 
