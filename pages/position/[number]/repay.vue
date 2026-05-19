@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { isEVault, type SecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { getNetAPY } from '~/utils/vault/apy'
 import { getAssetUsdValueOrZero, getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
-import type { TxPlan } from '~/entities/txPlan'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { useModal } from '~/components/ui/composables/useModal'
 import { SlippageSettingsModal, SwapTokenSelector } from '#components'
@@ -34,7 +33,7 @@ const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
 const { eulerLensAddresses: _eulerLensAddresses } = useEulerAddresses()
 const { fetchSingleBalance } = useWallets()
-const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
+const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const { slippage } = useSlippage({
   fromSymbol: () => {
     if (formTab.value === 'wallet') return walletSwap.selectedAsset.value?.symbol
@@ -48,7 +47,7 @@ const isLoading = ref(false)
 const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const formTab = ref<'wallet' | 'collateral' | 'savings'>('wallet')
-const plan = ref<TxPlan | null>(null)
+const plan = ref<TransactionPlan | null>(null)
 const position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined> = ref()
 const walletBalance = ref(0n)
 

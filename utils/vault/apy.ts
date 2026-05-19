@@ -1,5 +1,6 @@
-import type { Address } from 'viem'
+import type { Address, PublicClient } from 'viem'
 import { eulerVaultLensABI } from '~/entities/euler/abis'
+import { getEulerSdk } from '~/composables/useEulerSdk'
 
 export interface ProjectedRates {
   supplyAPY: bigint // 27 decimals
@@ -13,10 +14,9 @@ export const getProjectedRates = async (
   cashDelta: bigint,
   borrowsDelta: bigint,
 ): Promise<ProjectedRates | null> => {
-  const { client: rpcClient } = useRpcClient()
-  const { eulerLensAddresses } = useEulerAddresses()
+  const { chainId, eulerLensAddresses } = useEulerAddresses()
 
-  if (!eulerLensAddresses.value?.vaultLens) {
+  if (!eulerLensAddresses.value?.vaultLens || !chainId.value) {
     return null
   }
 
@@ -27,7 +27,13 @@ export const getProjectedRates = async (
     return { supplyAPY: 0n, borrowAPY: 0n }
   }
 
-  const result = await rpcClient.value!.readContract({
+  const sdk = await getEulerSdk()
+  // The SDK is linked from a workspace and ships its own viem (2.43.x), so
+  // its PublicClient is structurally similar but not identical to the app's
+  // viem (2.48.x) — cast once at the boundary.
+  const provider = sdk.providerService.getProvider(chainId.value) as unknown as PublicClient
+
+  const result = await provider.readContract({
     address: eulerLensAddresses.value.vaultLens as Address,
     abi: eulerVaultLensABI,
     functionName: 'getVaultInterestRateModelInfo',

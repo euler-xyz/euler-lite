@@ -1,13 +1,23 @@
 <script setup lang="ts">
 import { OperationReviewModal } from '#components'
 import { formatUnits } from 'viem'
-import type { UserReward } from '@eulerxyz/euler-v2-sdk'
-import type { TxPlan } from '~/entities/txPlan'
+import type { TransactionPlan, UserReward } from '@eulerxyz/euler-v2-sdk'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber, formatUsdValue } from '~/utils/string-utils'
-import { getRewardPlanKind, getRewardProviderLabel } from '~/utils/sdk-rewards'
+
+const REWARD_PROVIDER_LABELS: Record<UserReward['provider'], string> = {
+  merkl: 'Merkl',
+  brevis: 'Incentra',
+  fuul: 'Fuul',
+}
+
+const REWARD_PROVIDER_TYPES: Record<UserReward['provider'], 'reward' | 'brevis-reward' | 'fuul-reward'> = {
+  merkl: 'reward',
+  brevis: 'brevis-reward',
+  fuul: 'fuul-reward',
+}
 
 const { reward } = defineProps<{ reward: UserReward }>()
 const rewardKey = computed(() =>
@@ -15,22 +25,22 @@ const rewardKey = computed(() =>
 )
 
 const { buildClaimRewardPlan, refreshRewards } = useSdkRewards()
-const { executeTxPlan } = useEulerOperations()
+const { executePlan } = useEulerTx()
 const { getTokenByAddress } = useTokenList()
 const { isSpyMode } = useSpyMode()
 const modal = useModal()
 const { error } = useToast()
 const { chainId: walletChainId, switchChain } = useWagmi()
-const { runSimulation, simulationError } = useTxPlanSimulation()
+const { runSimulation, simulationError } = useTransactionPlanSimulation()
 
 const isClaiming = ref(false)
 const isPreparing = ref(false)
-const plan = ref<TxPlan | null>(null)
+const plan = ref<TransactionPlan | null>(null)
 
 const rewardAmount = computed(() => Number(formatUnits(BigInt(reward.unclaimed), reward.token.decimals)))
 const rewardUsdValue = computed(() => rewardAmount.value * reward.tokenPrice)
-const providerLabel = computed(() => getRewardProviderLabel(reward.provider))
-const planKind = computed(() => getRewardPlanKind(reward.provider))
+const providerLabel = computed(() => REWARD_PROVIDER_LABELS[reward.provider] ?? reward.provider)
+const planKind = computed(() => REWARD_PROVIDER_TYPES[reward.provider] ?? 'reward')
 const isEulFamily = computed(() => ['rEUL', 'EUL'].includes(reward.token.symbol))
 const externalIconUrl = computed(() => {
   if (isEulFamily.value) return undefined
@@ -56,7 +66,7 @@ const claim = async () => {
     if (!plan.value) {
       plan.value = await buildClaimRewardPlan(reward)
     }
-    await executeTxPlan(plan.value)
+    await executePlan(plan.value)
     modal.close()
     await refreshRewards()
   }

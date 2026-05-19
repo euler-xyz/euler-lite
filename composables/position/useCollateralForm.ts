@@ -1,16 +1,14 @@
 import { getProjectedRates, getNetAPY } from '~/utils/vault/apy'
-import type { EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, SecuritizeCollateralVault, TransactionPlan, TransactionPlanPrepared, SwapperMode, type SwapQuote } from '@eulerxyz/euler-v2-sdk'
 import { isEVault } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { getAssetUsdValueOrZero, getCollateralUsdValueOrZero } from '~/utils/sdk-prices'
-import type { TxPlan } from '~/entities/txPlan'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
-import { SwapperMode, type SwapApiQuote } from '~/entities/swap'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
-import type { SwapApiRequestInput } from '~/composables/useSwapApi'
+import type { SwapQuoteInput } from '~/composables/useSwapApi'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -31,6 +29,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { createRaceGuard } from '~/utils/race-guard'
 import { FixedPoint } from '~/utils/fixed-point'
 import { getTotalCollateralValue } from '~/utils/position-estimates'
+import { getTxErrorMessage } from '~/utils/tx-errors'
 
 export interface UseCollateralFormOptions {
   mode: 'supply' | 'withdraw'
@@ -70,16 +69,14 @@ export interface UseCollateralFormOptions {
     assetAddress: string
     amountNano: bigint
     subAccount?: string
-    includePermit2Call?: boolean
-  }) => Promise<TxPlan>
+  }) => Promise<TransactionPlan>
 
-  buildSwapPlan: (quote: SwapApiQuote, ctx: {
+  buildSwapPlan: (quote: SwapQuote, ctx: {
     vaultAddress: string
     amountNano: bigint
     slippage: number
     subAccount?: string
-    includePermit2Call?: boolean
-  }) => Promise<TxPlan>
+  }) => Promise<TransactionPlan>
 
   requestSwapQuoteParams: (ctx: {
     userAddr: Address
@@ -88,7 +85,7 @@ export interface UseCollateralFormOptions {
     slippage: number
     asset: VaultAsset
     vaultAddress: string
-  }) => SwapApiRequestInput | null
+  }) => SwapQuoteInput | null
 
   getSwapOutputAsset: () => VaultAsset | undefined
 
@@ -100,6 +97,19 @@ export interface UseCollateralFormOptions {
 
   onAfterLoad?: () => Promise<void> | void
   onAfterSend?: () => Promise<void> | void
+
+  /**
+   * When true, route plan construction through the prepared-envelope pipeline:
+   * builds the raw plan, runs {@link prepareTransactionPlan} once, simulates
+   * against the envelope, opens the modal with `prepared`, and uses
+   * `executePreparedPlan` on confirm. Plugin reads (TOS / Keyring / Pyth) run
+   * exactly once per Review click — no in-modal preparation spinner.
+   *
+   * Callers should also pass their cached account into their `buildDirectPlan`/
+   * `buildSwapPlan` closures (via the SDK planner's optional `account` arg) so
+   * the per-click `freshPlanContext.fetchAccount` round-trip is skipped.
+   */
+  usePreparedPipeline?: boolean
 }
 
 export const useCollateralForm = (options: UseCollateralFormOptions) => {
@@ -107,7 +117,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const submitLabel = options.reviewLabel
-  const { executeTxPlan } = useEulerOperations()
+  const { executePlan, executePreparedPlan, prepareTransactionPlan } = useEulerTx()
   const { isConnected, address } = useAccount()
   const { isSpyMode } = useSpyMode()
   const { finalizeTxAndRedirect } = useTxFinalization()
@@ -115,7 +125,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const { isPositionsLoaded, getPositionBySubAccountIndex } = useEulerAccount()
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
   const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
-  const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
+  const { runSimulation, runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
   const { isReady: isVaultsReady } = useVaults()
   const { getOrFetch } = useVaultRegistry()
   const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
@@ -127,7 +137,10 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const isPreparing = ref(false)
   const isEstimatesLoading = ref(false)
   const amount = ref('')
-  const plan = ref<TxPlan | null>(null)
+  const plan = ref<TransactionPlan | null>(null)
+  // `shallowRef` so Vue doesn't deep-unwrap the envelope's Account class
+  // entity — the class has private brand members that drop on UnwrapRef.
+  const preparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
   const estimateNetAPY = ref(0)
   const estimateUserLTV = ref(0n)
   const estimateHealth = ref(0n)
@@ -610,6 +623,24 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     }
   }
 
+  const buildRawPlan = async (): Promise<TransactionPlan | null> => {
+    if (!collateralVault.value?.address || !asset.value?.address) return null
+    if (options.needsSwap.value && swapEffectiveQuote.value) {
+      return options.buildSwapPlan(swapEffectiveQuote.value, {
+        vaultAddress: collateralVault.value.address,
+        amountNano: valueToNano(amount.value || '0', asset.value.decimals),
+        slippage: swapSlippage.value,
+        subAccount: position.value?.subAccount,
+      })
+    }
+    return options.buildDirectPlan({
+      vaultAddress: collateralVault.value.address,
+      assetAddress: asset.value.address,
+      amountNano: valueToNano(amount.value || '0', asset.value.decimals),
+      subAccount: position.value?.subAccount,
+    })
+  }
+
   // --- Submit ---
   const submit = async () => {
     if (isOperationBlocked.value) return
@@ -624,32 +655,34 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       await guardWithPriceImpact(async () => {
         if (!collateralVault.value?.address || !asset.value?.address) return
 
+        plan.value = null
+        preparedPlan.value = null
         try {
-          if (options.needsSwap.value && swapEffectiveQuote.value) {
-            plan.value = await options.buildSwapPlan(swapEffectiveQuote.value, {
-              vaultAddress: collateralVault.value.address,
-              amountNano: valueToNano(amount.value || '0', asset.value.decimals),
-              slippage: swapSlippage.value,
-              subAccount: position.value?.subAccount,
-              includePermit2Call: false,
-            })
-          }
-          else {
-            plan.value = await options.buildDirectPlan({
-              vaultAddress: collateralVault.value.address,
-              assetAddress: asset.value.address,
-              amountNano: valueToNano(amount.value || '0', asset.value.decimals),
-              subAccount: position.value?.subAccount,
-              includePermit2Call: false,
-            })
+          const rawPlan = await buildRawPlan()
+          plan.value = rawPlan
+          if (rawPlan && options.usePreparedPipeline) {
+            preparedPlan.value = await prepareTransactionPlan(rawPlan)
           }
         }
         catch (e) {
           logWarn(`collateral/${options.mode}/buildPlan`, e)
           plan.value = null
+          preparedPlan.value = null
+          if (options.usePreparedPipeline) {
+            // In the prepared pipeline, opening the modal with no envelope
+            // would show "Transaction plan is unavailable" — surface the real
+            // error inline instead.
+            simulationError.value = await getTxErrorMessage(e)
+            return
+          }
         }
 
-        if (plan.value) {
+        if (options.usePreparedPipeline) {
+          if (!preparedPlan.value) return
+          const ok = await runPreparedSimulation(preparedPlan.value)
+          if (!ok) return
+        }
+        else if (plan.value) {
           const ok = await runSimulation(plan.value)
           if (!ok) return
         }
@@ -661,7 +694,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
             type: reviewType,
             asset: reviewAsset,
             amount: amount.value,
-            plan: plan.value || undefined,
+            plan: options.usePreparedPipeline ? undefined : (plan.value || undefined),
+            prepared: options.usePreparedPipeline ? (preparedPlan.value || undefined) : undefined,
             subAccount: position.value?.subAccount,
             hasBorrows: (position.value?.borrowed || 0n) > 0n,
             swapToAsset: options.needsSwap.value ? options.getSwapToAsset() : undefined,
@@ -686,26 +720,33 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       isSubmitting.value = true
       if (!asset.value?.address || !collateralVault.value?.address) return
 
-      let txPlan: TxPlan
-      if (options.needsSwap.value && (swapSelectedQuote.value || swapEffectiveQuote.value)) {
-        const quote = swapSelectedQuote.value || swapEffectiveQuote.value!
-        txPlan = await options.buildSwapPlan(quote, {
-          vaultAddress: collateralVault.value.address,
-          amountNano: valueToNano(amount.value || '0', asset.value.decimals),
-          slippage: swapSlippage.value,
-          subAccount: position.value?.subAccount,
-        })
+      if (options.usePreparedPipeline) {
+        if (!preparedPlan.value) return
+        await executePreparedPlan(preparedPlan.value)
       }
       else {
-        txPlan = await options.buildDirectPlan({
-          vaultAddress: collateralVault.value.address,
-          assetAddress: asset.value.address,
-          amountNano: valueToNano(amount.value || '0', asset.value.decimals),
-          subAccount: position.value?.subAccount,
-          includePermit2Call: true,
-        })
+        // Legacy path rebuilds the plan at send time. Migrated forms should
+        // adopt `usePreparedPipeline` to reuse the envelope created in submit().
+        let txPlan: TransactionPlan
+        if (options.needsSwap.value && (swapSelectedQuote.value || swapEffectiveQuote.value)) {
+          const quote = swapSelectedQuote.value || swapEffectiveQuote.value!
+          txPlan = await options.buildSwapPlan(quote, {
+            vaultAddress: collateralVault.value.address,
+            amountNano: valueToNano(amount.value || '0', asset.value.decimals),
+            slippage: swapSlippage.value,
+            subAccount: position.value?.subAccount,
+          })
+        }
+        else {
+          txPlan = await options.buildDirectPlan({
+            vaultAddress: collateralVault.value.address,
+            assetAddress: asset.value.address,
+            amountNano: valueToNano(amount.value || '0', asset.value.decimals),
+            subAccount: position.value?.subAccount,
+          })
+        }
+        await executePlan(txPlan)
       }
-      await executeTxPlan(txPlan)
       await finalizeTxAndRedirect({ onAfterClose: options.onAfterSend })
     }
     catch (e) {

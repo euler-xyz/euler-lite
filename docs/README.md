@@ -43,9 +43,16 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 
 ### 🔧 [Transaction Building](./transaction-building.md)
 
-- TxPlan architecture and composite operations
+- SDK TransactionPlan architecture and composite operations
 - EVC batching and Permit2 integration
 - Sub-accounts and position isolation
+
+### 🧩 [SDK Integration](./sdk-integration.md)
+
+- Two-instance SDK split (`getEulerSdk` fast / `getEulerSdkFresh` plan-time)
+- Backend selection via `enableV3Backend` (v3 adapters vs onchain/subgraph/direct)
+- Shared vue-query `QueryClient`, `STALE_TIMES`, and `FRESH_OVERRIDES`
+- Where env vars, runtime config, and stale times live
 
 ### 🔮 [Pyth Oracle Handling](./pyth-oracle-handling.md)
 
@@ -64,7 +71,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 
 - Keyring identity verification for private vaults
 - On-chain credential checking and extension flow
-- Operation guard registry for automatic TxPlan injection
+- Operation guard registry for automatic SDK TransactionPlan injection
 - UI components (badges, alerts, verification flow)
 
 ### 🪙 [Token List](./token-list.md)

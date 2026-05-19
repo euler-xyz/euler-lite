@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, nextTick, ref, watch } from 'vue'
-import type { SwapApiQuote } from '~/entities/swap'
+import { SwapperMode, type SwapQuote } from '@eulerxyz/euler-v2-sdk'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 
-const makeQuote = (amountIn: string, amountOut: string): SwapApiQuote =>
-  ({ amountIn, amountOut }) as SwapApiQuote
+const makeQuote = (amountIn: string, amountOut: string): SwapQuote =>
+  ({ amountIn, amountOut }) as SwapQuote
 
 const requestParams = {
   tokenIn: '0x0000000000000000000000000000000000000001',
@@ -14,6 +14,11 @@ const requestParams = {
   amount: 100n,
   vaultIn: '0x0000000000000000000000000000000000000005',
   receiver: '0x0000000000000000000000000000000000000006',
+  slippage: 1,
+  swapperMode: SwapperMode.EXACT_IN,
+  isRepay: false,
+  targetDebt: 0n,
+  currentDebt: 0n,
 } as const satisfies Parameters<ReturnType<typeof useSwapQuotesParallel>['requestQuotes']>[0]
 
 const flushPromises = () => new Promise(resolve => setTimeout(resolve, 0))
@@ -45,7 +50,7 @@ describe('useSwapQuotesParallel', () => {
     await flushPromises()
     await nextTick()
 
-    const changes: Array<SwapApiQuote | null> = []
+    const changes: Array<SwapQuote | null> = []
     watch(quotes.effectiveQuote, quote => changes.push(quote))
 
     quotes.selectProvider('first')
@@ -69,7 +74,7 @@ describe('useSwapQuotesParallel', () => {
     await flushPromises()
     await nextTick()
 
-    const changes: Array<SwapApiQuote | null> = []
+    const changes: Array<SwapQuote | null> = []
     watch(quotes.effectiveQuote, quote => changes.push(quote))
 
     quotes.selectProvider('other')

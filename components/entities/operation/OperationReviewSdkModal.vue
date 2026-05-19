@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
-import { encodeFunctionData, type Address, type Hex, type StateOverride } from 'viem'
-import type { SwapperMode, flattenBatchEntries, type EVCBatchItem, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
-import { buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
+import type { Address, Hex } from 'viem'
+import type { TransactionPlan, EVCBatchItem, SwapperMode } from '@eulerxyz/euler-v2-sdk'
+import { flattenBatchEntries } from '@eulerxyz/euler-v2-sdk'
+import { buildSdkDisplaySteps } from '~/utils/sdkStepDecoding'
+import type { DisplayStep, StepDecodingContext } from '~/utils/stepDecoding'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getEulerSdk } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
@@ -11,31 +13,18 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 
 const emits = defineEmits(['close', 'confirm'])
 
-interface REULUnlockInfo {
-  unlockableAmount: number
-  amountToBeBurned: number
-  maturityDate: string
-  daysUntilMaturity: number
-}
-
-const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel } = defineProps<{
-  type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
+const { type, asset, assetIconUrl, amount, onConfirm, plan, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel } = defineProps<{
+  type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'reward' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
   amount: number | string
-  /** Raw plan, used as a fallback when the caller hasn't pre-prepared.
-   *  Migrated callers should pass `prepared` instead. */
   plan?: TransactionPlan
-  /** Pre-prepared envelope. When set, the modal renders immediately — no
-   *  in-modal plugin/approval-resolution round-trip. */
-  prepared?: TransactionPlanPrepared
   supplyingAssetForBorrow?: VaultAsset
   supplyingAmount?: number | string
   swapToAsset?: VaultAsset
   swapToAmount?: number | string
   swapMode?: SwapperMode
   swapEstimatedSide?: 'input' | 'output'
-  reulUnlockInfo?: REULUnlockInfo
   onConfirm: () => void | Promise<void>
   subAccount?: string
   hasBorrows?: boolean
@@ -46,7 +35,6 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
 const { address: walletAddress, chainId: currentChainId } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { getVault } = useVaultRegistry()
-const { prepareTransactionPlan } = useEulerTx()
 const {
   isSimulating: isTenderlySimulating,
   simulationError: tenderlyError,
@@ -58,88 +46,20 @@ const {
 
 const copied = ref(false)
 const tenderlyEnabled = ref(false)
-// `preparedPlan` is the prepared envelope's plan when the caller passed
-// `prepared`, otherwise it's the result of an on-the-fly prepare for callers
-// still on the legacy raw-plan path. Once every caller migrates, the
-// raw-plan branch below can be deleted.
-const preparedPlan = shallowRef<TransactionPlan | undefined>()
-const prepareError = ref('')
-const isPreparingPlan = ref(false)
-const reviewPlan = computed(() => preparedPlan.value)
-let prepareRequestId = 0
 
 fetchTenderlyEnabled().then((enabled) => {
   tenderlyEnabled.value = enabled
 })
 
 const findFirstEvcBatch = (p?: TransactionPlan) => p?.find(item => item.type === 'evcBatch')
-const toTenderlyStateOverrides = (overrides: StateOverride) =>
-  overrides.flatMap((entry) => {
-    if (!entry.stateDiff?.length) return []
-    return [{
-      address: entry.address,
-      stateDiff: entry.stateDiff.map(diff => ({
-        slot: diff.slot,
-        value: diff.value,
-      })),
-    }]
-  })
-
-watch(
-  () => [prepared, plan, walletAddress.value, currentChainId.value] as const,
-  async () => {
-    const requestId = ++prepareRequestId
-    prepareError.value = ''
-    preparedPlan.value = undefined
-
-    // Preferred path: caller pre-prepared the envelope. No async work — modal
-    // renders the prepared plan synchronously.
-    if (prepared?.plan?.length) {
-      preparedPlan.value = prepared.plan
-      isPreparingPlan.value = false
-      return
-    }
-
-    if (!plan?.length) {
-      isPreparingPlan.value = false
-      prepareError.value = 'Transaction plan is unavailable. Close this review and try again.'
-      return
-    }
-
-    // Legacy fallback: caller passed only a raw plan. Run prepare here.
-    // Migrated callers should pass `prepared` and bypass this.
-    isPreparingPlan.value = true
-    try {
-      const envelope = await prepareTransactionPlan(plan)
-      if (requestId === prepareRequestId) {
-        preparedPlan.value = envelope.plan
-        prepareError.value = ''
-      }
-    }
-    catch (err) {
-      logWarn('OperationReviewSdkModal/prepareTransactionPlan', err)
-      if (requestId === prepareRequestId) {
-        preparedPlan.value = undefined
-        prepareError.value = 'Transaction preparation failed. Close this review and try again.'
-      }
-    }
-    finally {
-      if (requestId === prepareRequestId) {
-        isPreparingPlan.value = false
-      }
-    }
-  },
-  { immediate: true },
-)
 
 const handleTenderlySimulate = async () => {
-  const currentPlan = reviewPlan.value
-  if (!currentPlan || !walletAddress.value || !currentChainId.value) return
+  if (!plan || !walletAddress.value || !currentChainId.value) return
   clearTenderly()
 
   try {
     const owner = walletAddress.value as Address
-    const batchItem = findFirstEvcBatch(currentPlan)
+    const batchItem = findFirstEvcBatch(plan)
     if (!batchItem || batchItem.type !== 'evcBatch') return
 
     const sdk = await getEulerSdk()
@@ -150,7 +70,7 @@ const handleTenderlySimulate = async () => {
     const stateOverrides = await sdk.executionService.deriveStateOverrides(
       currentChainId.value,
       owner,
-      currentPlan,
+      plan,
     )
 
     await tenderlySimulate({
@@ -159,7 +79,7 @@ const handleTenderlySimulate = async () => {
       to: evcAddress,
       data: data as Hex,
       value: value.toString(),
-      stateOverrides: toTenderlyStateOverrides(stateOverrides),
+      stateOverrides: stateOverrides as never,
     })
   }
   catch (err) {
@@ -170,7 +90,6 @@ const handleTenderlySimulate = async () => {
 const internalSubmitting = ref(false)
 
 const handleConfirm = async () => {
-  if (!reviewPlan.value || prepareError.value || isPreparingPlan.value) return
   if (internalSubmitting.value) return
   const result = onConfirm()
   if (result && typeof (result as Promise<void>).then === 'function') {
@@ -188,25 +107,23 @@ const handleConfirm = async () => {
 }
 
 const displaySteps = computed((): DisplayStep[] => {
-  const currentPlan = reviewPlan.value
-  if (!currentPlan?.length) return []
+  if (!plan?.length) return []
   const ctx: StepDecodingContext = {
     type, asset, assetIconUrl, amount,
     supplyingAssetForBorrow, supplyingAmount,
     swapToAsset, swapToAmount, swapMode, swapEstimatedSide, transferAmounts,
   }
-  return buildTransactionPlanDisplaySteps(currentPlan, ctx, getVault, getAssetLogoUrl)
+  return buildSdkDisplaySteps(plan, ctx, getVault, getAssetLogoUrl)
 })
 
 const copyCalldata = async () => {
-  const currentPlan = reviewPlan.value
-  if (!currentPlan?.length) return
+  if (!plan?.length) return
   try {
     const sdk = await getEulerSdk()
     const cid = currentChainId.value
     const entries: { to: string, data: string, value: string }[] = []
 
-    for (const item of currentPlan) {
+    for (const item of plan) {
       if (item.type === 'requiredApproval') {
         for (const r of item.resolved ?? []) {
           if (r.type === 'approve') {
@@ -225,13 +142,10 @@ const copyCalldata = async () => {
         continue
       }
       if (item.type === 'contractCall') {
+        // Encoded at execution time; show abi/function for diagnostic copy
         entries.push({
           to: item.to,
-          data: encodeFunctionData({
-            abi: item.abi,
-            functionName: item.functionName,
-            args: item.args,
-          }),
+          data: JSON.stringify({ functionName: item.functionName, args: item.args }),
           value: item.value.toString(),
         })
       }
@@ -265,23 +179,13 @@ const btnLabel = computed(() => {
       return 'Swap'
     case 'transfer':
       return 'Transfer'
-    case 'reul-unlock':
-      return 'Unlock'
     case 'reward':
-    case 'brevis-reward':
-    case 'fuul-reward':
       return 'Claim'
     case 'disableCollateral':
       return 'Disable collateral'
     default:
       return 'Submit'
   }
-})
-
-const reulUnlockDisclaimerText = computed(() => {
-  if (type !== 'reul-unlock' || !reulUnlockInfo) return
-
-  return `This action will unlock ${formatNumber(reulUnlockInfo.unlockableAmount, 6)} EUL, and ${formatNumber(reulUnlockInfo.amountToBeBurned, 6)} EUL will be permanently burned. To fully redeem your EUL rewards, you must wait for the 6-month vesting period to complete (${reulUnlockInfo.daysUntilMaturity} days remaining, maturity date: ${reulUnlockInfo.maturityDate}).`
 })
 
 const disclaimerText = computed(() => {
@@ -291,7 +195,7 @@ const disclaimerText = computed(() => {
 })
 
 const hasPermit2Approval = computed(() => {
-  return reviewPlan.value?.some(item => item.type === 'requiredApproval'
+  return plan?.some(item => item.type === 'requiredApproval'
     && item.resolved?.some(r => r.type === 'permit2')) ?? false
 })
 
@@ -302,12 +206,6 @@ const hasTenderlyFailedSimulation = computed(() => {
 })
 
 const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract used to authorize future transfers with signatures. Each future transfer still requires your explicit signature and can be limited by amount and duration.'
-const isConfirmDisabled = computed(() => isSpyMode.value || internalSubmitting.value || isPreparingPlan.value || !!prepareError.value || !reviewPlan.value?.length)
-const confirmLabel = computed(() => {
-  if (isSpyMode.value) return 'Spy mode (read-only)'
-  if (isPreparingPlan.value) return 'Preparing...'
-  return internalSubmitting.value && submittingLabel ? submittingLabel : btnLabel.value
-})
 </script>
 
 <template>
@@ -326,7 +224,7 @@ const confirmLabel = computed(() => {
       </div>
 
       <div
-        v-if="reviewPlan?.length"
+        v-if="plan?.length"
         class="flex items-center justify-center gap-16"
       >
         <button
@@ -390,26 +288,12 @@ const confirmLabel = computed(() => {
         :description="tenderlyError"
         size="compact"
       />
-      <UiToast
-        v-if="prepareError"
-        title="Preparation failed"
-        variant="error"
-        :description="prepareError"
-        size="compact"
-      />
 
       <UiToast
         v-if="type === 'reward'"
         title="Disclaimer"
         variant="warning"
         :description="disclaimerText"
-        size="compact"
-      />
-      <UiToast
-        v-if="type === 'reul-unlock'"
-        title="Important"
-        variant="warning"
-        :description="reulUnlockDisclaimerText"
         size="compact"
       />
       <UiToast
@@ -424,11 +308,11 @@ const confirmLabel = computed(() => {
         variant="primary"
         size="xlarge"
         rounded
-        :disabled="isConfirmDisabled"
-        :loading="internalSubmitting || isPreparingPlan"
+        :disabled="isSpyMode || internalSubmitting"
+        :loading="internalSubmitting"
         @click="handleConfirm"
       >
-        {{ confirmLabel }}
+        {{ isSpyMode ? 'Spy mode (read-only)' : (internalSubmitting && submittingLabel ? submittingLabel : btnLabel) }}
       </UiButton>
     </div>
   </BaseModalWrapper>

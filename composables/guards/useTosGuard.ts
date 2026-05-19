@@ -3,8 +3,8 @@ import type { Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { tosSignerReadAbi } from '~/abis/tos'
 import { getTosData, type TosData } from '~/composables/useTosData'
-import { injectTosSignature } from '~/utils/tos-injection'
-import { registerOperationGuard, unregisterOperationGuard, registerOperationBlocker, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
+import { clearLiteTosSignature, setLiteTosSignature } from '~/utils/sdk-tos'
+import { registerOperationBlocker, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
 
 export interface TosGuardState {
   isTermsRequired: boolean
@@ -94,21 +94,24 @@ export const useTosGuard = () => {
     sessionAccepted.value = true
   }
 
-  // Register/unregister the plan transformer
-  const updateGuardRegistration = () => {
-    const signer = tosSignerAddress.value
+  // Publish the accepted TOS signature to the SDK TOS plugin store. The SDK
+  // prepends signTermsOfUse to evcBatch entries during plan construction;
+  // Lite no longer mutates plans for TOS.
+  const updateSdkSignature = () => {
     const data = tosData.value
     const user = address.value
+    const cid = chainId.value
 
-    if (sessionAccepted.value && !hasSigned.value && signer && data && user) {
-      registerOperationGuard(
-        'tos',
-        plan => injectTosSignature(plan, signer, data.tosMessage, data.tosMessageHash, user as Address),
-        { priority: 0 },
-      )
+    if (sessionAccepted.value && !hasSigned.value && data && user && cid) {
+      setLiteTosSignature({
+        chainId: cid,
+        account: user as Address,
+        tosMessage: data.tosMessage,
+        tosMessageHash: data.tosMessageHash,
+      })
     }
-    else {
-      unregisterOperationGuard('tos')
+    else if (user && cid) {
+      clearLiteTosSignature({ chainId: cid, account: user as Address })
     }
   }
 
@@ -125,8 +128,8 @@ export const useTosGuard = () => {
     }
   }
 
-  watch([sessionAccepted, hasSigned, tosSignerAddress, () => tosData.value, address], () => {
-    updateGuardRegistration()
+  watch([sessionAccepted, hasSigned, tosSignerAddress, () => tosData.value, address, chainId], () => {
+    updateSdkSignature()
     updateBlockerRegistration()
   }, { immediate: true })
 
@@ -134,19 +137,19 @@ export const useTosGuard = () => {
     updateBlockerRegistration()
   })
 
-  watch(address, () => {
+  watch(address, (next, prev) => {
     hasSigned.value = null
     sessionAccepted.value = false
-    unregisterOperationGuard('tos')
+    if (prev && chainId.value) clearLiteTosSignature({ chainId: chainId.value, account: prev as Address })
     if (enableTosSignature) {
       void checkHasSigned()
     }
   })
 
-  watch(chainId, () => {
+  watch(chainId, (next, prev) => {
     hasSigned.value = null
     sessionAccepted.value = false
-    unregisterOperationGuard('tos')
+    if (prev && address.value) clearLiteTosSignature({ chainId: prev, account: address.value as Address })
     if (enableTosSignature) {
       void checkHasSigned()
     }
@@ -160,7 +163,9 @@ export const useTosGuard = () => {
   })
 
   onUnmounted(() => {
-    unregisterOperationGuard('tos')
+    if (address.value && chainId.value) {
+      clearLiteTosSignature({ chainId: chainId.value, account: address.value as Address })
+    }
     unregisterOperationBlocker('tos')
   })
 

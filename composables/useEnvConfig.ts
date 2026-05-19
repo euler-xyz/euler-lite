@@ -10,7 +10,7 @@
  * (2) covers static / CDN deployments where the Nitro render hook never fires.
  */
 
-import { V3_API_PROXY_URL } from '~/utils/api-url-env'
+import { readV3ApiUrl, V3_API_PROXY_URL } from '~/utils/api-url-env'
 
 interface EnvConfig {
   appTitle: string
@@ -21,6 +21,10 @@ interface EnvConfig {
   appKitProjectId: string
   appUrl: string
   v3ApiUrl: string
+  /** True when the deployment has an upstream V3 API configured. Drives the
+   *  SDK "fast" instance: when true it uses v3 adapters; when false it falls
+   *  back to direct on-chain reads with longer caching. */
+  enableV3Backend: boolean
   swapApiUrl: string
 }
 
@@ -33,6 +37,7 @@ const DEFAULTS: EnvConfig = {
   appKitProjectId: '',
   appUrl: '',
   v3ApiUrl: '',
+  enableV3Backend: false,
   swapApiUrl: '',
 }
 
@@ -46,6 +51,7 @@ function env(key: string, ...fallbackKeys: string[]): string {
 }
 
 function scanEnv(): EnvConfig {
+  const v3UpstreamConfigured = !!readV3ApiUrl()
   return {
     appTitle: env('APP_TITLE', 'NUXT_PUBLIC_CONFIG_APP_TITLE') || DEFAULTS.appTitle,
     appDescription: env('APP_DESCRIPTION', 'NUXT_PUBLIC_CONFIG_APP_DESCRIPTION') || DEFAULTS.appDescription,
@@ -55,6 +61,7 @@ function scanEnv(): EnvConfig {
     appKitProjectId: env('APPKIT_PROJECT_ID', 'NUXT_PUBLIC_APP_KIT_PROJECT_ID') || DEFAULTS.appKitProjectId,
     appUrl: env('NUXT_PUBLIC_APP_URL') || DEFAULTS.appUrl,
     v3ApiUrl: V3_API_PROXY_URL,
+    enableV3Backend: v3UpstreamConfigured,
     swapApiUrl: env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL') || DEFAULTS.swapApiUrl,
   }
 }
@@ -62,6 +69,10 @@ function scanEnv(): EnvConfig {
 function fromRuntimeConfig(): EnvConfig {
   const rc = useRuntimeConfig().public
   const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+  const isTruthy = (v: unknown): boolean => {
+    const s = str(v).toLowerCase().trim()
+    return s === '1' || s === 'true' || s === 'yes'
+  }
 
   return {
     appTitle: str(rc.configAppTitle) || DEFAULTS.appTitle,
@@ -72,6 +83,7 @@ function fromRuntimeConfig(): EnvConfig {
     appKitProjectId: str(rc.appKitProjectId) || DEFAULTS.appKitProjectId,
     appUrl: str(rc.appUrl) || DEFAULTS.appUrl,
     v3ApiUrl: str(rc.v3ApiUrl) || V3_API_PROXY_URL,
+    enableV3Backend: isTruthy(rc.enableV3Backend),
     swapApiUrl: str(rc.swapApiUrl) || DEFAULTS.swapApiUrl,
   }
 }

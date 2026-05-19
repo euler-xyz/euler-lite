@@ -1,6 +1,8 @@
 import { BaseError, ContractFunctionRevertedError, decodeAbiParameters, formatUnits, type Hex } from 'viem'
+import { decodeSmartContractErrors } from '@eulerxyz/euler-v2-sdk'
+import type { DecodedSmartContractError, SimulateBatchResult, SimulationInsufficientRequirement, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { ERROR_MESSAGE_MAP, ERROR_SIGNATURE_MAP, NON_BLOCKING_SIMULATION_ERRORS } from '~/entities/constants'
-import { hasGuard, getGuardMeta } from '~/utils/operationGuardRegistry'
+import { getOperationMeta } from '~/utils/operationGuardRegistry'
 import { getChainById } from '~/entities/chainRegistry'
 
 const SWAPPER_SWAP_ERROR_SELECTOR = '0x436fa211'
@@ -120,12 +122,129 @@ const isInsufficientBalanceError = (error: unknown): boolean => {
     || message.includes('insufficient funds')
 }
 
-export const getTxErrorMessage = (error: unknown) => {
+// ---------------------------------------------------------------------------
+// SDK SimulateBatchResult → human-readable error string
+//
+// The SDK gives us structured failure data: insufficiency requirements,
+// per-batch-item reverts (with chained DecodedSmartContractError entries),
+// EVC-level simulation errors, and post-batch account/vault status check
+// failures. This formatter walks those in priority order and renders the
+// most actionable signal — preserving signature + params rather than the
+// bare signature string we used to surface.
+// ---------------------------------------------------------------------------
+
+const shortenAddress = (addr: string) =>
+  addr.length === 42 && addr.startsWith('0x') ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : addr
+
+const formatDecodedParam = (value: unknown): string => {
+  if (typeof value === 'bigint') return value.toString()
+  if (typeof value === 'string') return value.startsWith('0x') ? shortenAddress(value) : value
+  if (Array.isArray(value)) return `[${value.map(formatDecodedParam).join(', ')}]`
+  if (value === null || value === undefined) return String(value)
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value, (_k, v) => typeof v === 'bigint' ? v.toString() : v)
+    }
+    catch {
+      return String(value)
+    }
+  }
+  return String(value)
+}
+
+const formatDecodedError = (decoded: DecodedSmartContractError): string => {
+  const name = decoded.signature.split('(')[0] ?? decoded.signature
+  if (!decoded.params.length) return `${name}()`
+  return `${name}(${decoded.params.map(formatDecodedParam).join(', ')})`
+}
+
+// The SDK returns the decoded chain in nesting order (outer wrapper first,
+// inner cause last). For UX we want the most specific entry surfaced, then
+// the outer wrapper as context so EVC-level reverts (BatchPanic etc.) don't
+// hide the underlying vault error.
+const formatDecodedChain = (chain: readonly DecodedSmartContractError[]): string => {
+  if (!chain.length) return ''
+  if (chain.length === 1) return formatDecodedError(chain[0])
+  const inner = formatDecodedError(chain[chain.length - 1])
+  const outer = formatDecodedError(chain[0])
+  return inner === outer ? inner : `${inner}  (wrapped by ${outer})`
+}
+
+const formatInsufficiency = (
+  label: string,
+  reqs: SimulationInsufficientRequirement[] | undefined,
+): string | null => {
+  if (!reqs?.length) return null
+  const parts = reqs.map(r => `${r.amount.toString()} of ${shortenAddress(r.token)}`)
+  return `${label}: ${parts.join('; ')}`
+}
+
+export const formatSimulationFailure = <T extends VaultEntity>(
+  result: SimulateBatchResult<T>,
+): string => {
+  // 1. Insufficiency diagnostics — most actionable for the user.
+  const insufficientWallet = formatInsufficiency('Insufficient wallet balance', result.insufficientWalletAssets)
+  if (insufficientWallet) return insufficientWallet
+  const insufficientPermit2 = formatInsufficiency('Insufficient Permit2 allowance', result.insufficientPermit2Allowances)
+  if (insufficientPermit2) return insufficientPermit2
+  const insufficientDirect = formatInsufficiency('Insufficient token allowance', result.insufficientDirectAllowances)
+  if (insufficientDirect) return insufficientDirect
+
+  // 2. Per-batch-item revert: SDK has already attempted to decode the chain.
+  const firstFailed = result.failedBatchItems?.[0]
+  if (firstFailed) {
+    const decoded = formatDecodedChain(firstFailed.decodedError)
+    return decoded || `Batch item ${firstFailed.index} failed`
+  }
+
+  // 3. EVC-level simulation error (couldn't decode the batch at all).
+  if (result.simulationError) {
+    const decoded = formatDecodedChain(result.simulationError.decoded)
+    return decoded || 'EVC simulation reverted'
+  }
+
+  // 4. Post-batch account / vault status check failures.
+  const acctErr = result.accountStatusErrors?.[0]
+  if (acctErr) {
+    const decoded = formatDecodedChain(acctErr.decoded)
+    return decoded
+      ? `Account check ${shortenAddress(acctErr.account)}: ${decoded}`
+      : `Account check failed for ${shortenAddress(acctErr.account)}`
+  }
+  const vaultErr = result.vaultStatusErrors?.[0]
+  if (vaultErr) {
+    const decoded = formatDecodedChain(vaultErr.decoded)
+    return decoded
+      ? `Vault check ${shortenAddress(vaultErr.vault)}: ${decoded}`
+      : `Vault check failed for ${shortenAddress(vaultErr.vault)}`
+  }
+
+  return 'Simulation failed'
+}
+
+// SDK decoder fallback. The local ERROR_SIGNATURE_MAP covers known protocol
+// errors; this catches selectors we haven't mapped — e.g. new aggregator or
+// CowSwap reverts — by going through OpenChain/Sourcify signature lookup.
+// Returns a code string (e.g. "NotAuthorized") when the SDK can name the
+// outermost error, otherwise undefined.
+const decodeUnknownErrorCode = async (error: unknown): Promise<string | undefined> => {
+  try {
+    const decoded = await decodeSmartContractErrors(error)
+    const first = decoded[0]
+    if (!first?.signature) return undefined
+    return first.signature.split('(')[0] || undefined
+  }
+  catch {
+    return undefined
+  }
+}
+
+export const getTxErrorMessage = async (error: unknown): Promise<string> => {
   if (isInsufficientBalanceError(error)) {
-    if (hasGuard('keyring').value) {
-      const meta = getGuardMeta('keyring').value
-      const cost = meta?.credentialCost as number | undefined
-      const cid = meta?.chainId as number | undefined
+    const keyringMeta = getOperationMeta('keyring').value
+    const cost = keyringMeta?.credentialCost as number | undefined
+    const cid = keyringMeta?.chainId as number | undefined
+    if (cost !== undefined) {
       const chain = cid ? getChainById(cid) : undefined
       const symbol = chain?.nativeCurrency?.symbol ?? 'ETH'
       const decimals = chain?.nativeCurrency?.decimals ?? 18
@@ -137,14 +256,21 @@ export const getTxErrorMessage = (error: unknown) => {
     return 'Insufficient balance to cover gas fees and transaction value.'
   }
 
-  const code = extractErrorCode(error)
-  if (code) {
-    const base = ERROR_MESSAGE_MAP[code] || `Transaction simulation failed: ${formatErrorCode(code)}`
-    if (code === 'Swapper_SwapError') {
+  const localCode = extractErrorCode(error)
+  if (localCode) {
+    const base = ERROR_MESSAGE_MAP[localCode] || `Transaction simulation failed: ${formatErrorCode(localCode)}`
+    if (localCode === 'Swapper_SwapError') {
       const innerReason = decodeSwapperInnerReason(getRawRevertData(error))
       if (innerReason) return `${base} (${innerReason})`
     }
     return base
+  }
+
+  // Local lookups missed — fall back to the SDK decoder, which can resolve
+  // unknown selectors via OpenChain/Sourcify before we give up.
+  const sdkCode = await decodeUnknownErrorCode(error)
+  if (sdkCode) {
+    return ERROR_MESSAGE_MAP[sdkCode] || `Transaction simulation failed: ${formatErrorCode(sdkCode)}`
   }
   return 'Transaction simulation failed.'
 }

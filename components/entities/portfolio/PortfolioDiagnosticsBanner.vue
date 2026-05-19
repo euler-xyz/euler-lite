@@ -14,7 +14,16 @@ const metadataOnlyPaths = new Set([
   '$.removableAt',
 ])
 
-const isPortfolioImpactingDiagnostic = (issue: DataIssue): boolean => {
+// Sources whose warnings come from the onchain (vaultLens/accountLens) path.
+// When a FALLBACK_USED issue is present from the matching V3 primary, these
+// are downstream noise from the secondary that has already populated the data.
+const FALLBACK_SECONDARY_SOURCES_BY_PRIMARY: Record<string, readonly string[]> = {
+  accountV3: ['accountLens', 'vaultLens'],
+  eVaultV3: ['vaultLens'],
+  eulerEarnV3: ['vaultLens', 'eulerEarnVault'],
+}
+
+const isPortfolioImpactingDiagnostic = (issue: DataIssue, fallbackPrimaries: Set<string>): boolean => {
   const locations = issue.locations ?? []
   const paths = locations.map(location => location.path)
 
@@ -24,19 +33,33 @@ const isPortfolioImpactingDiagnostic = (issue: DataIssue): boolean => {
 
   if (
     issue.severity === 'warning'
-    && issue.source === 'eVaultV3'
     && paths.length > 0
     && paths.every(path => path.endsWith('oraclePriceRaw'))
   ) {
     return false
   }
 
+  if (issue.severity === 'warning' && issue.source) {
+    for (const primary of fallbackPrimaries) {
+      if (FALLBACK_SECONDARY_SOURCES_BY_PRIMARY[primary]?.includes(issue.source)) {
+        return false
+      }
+    }
+  }
+
   return issue.severity === 'error' || issue.severity === 'warning'
 }
 
-const relevantDiagnostics = computed(() =>
-  portfolioDiagnostics.value.filter(isPortfolioImpactingDiagnostic),
-)
+const relevantDiagnostics = computed(() => {
+  const fallbackPrimaries = new Set(
+    portfolioDiagnostics.value
+      .filter(issue => issue.code === 'FALLBACK_USED' && issue.source)
+      .map(issue => issue.source as string),
+  )
+  return portfolioDiagnostics.value.filter(issue =>
+    isPortfolioImpactingDiagnostic(issue, fallbackPrimaries),
+  )
+})
 const totalCount = computed(() => relevantDiagnostics.value.length)
 
 watch(totalCount, (count, prev) => {

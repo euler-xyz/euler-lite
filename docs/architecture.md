@@ -60,7 +60,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 3. **Type Safety**: Full TypeScript integration for better development experience
 4. **Reactive State**: Vue 3 reactivity system for state management
 5. **Modular Design**: Well-defined boundaries between different system parts
-6. **Directory-based Modules**: Large composables and UI workflow helpers are split into focused modules within directories (e.g., `useEulerOperations/`, `utils/vault/`, `composables/repay/`). SDK entities are imported directly from `@eulerxyz/euler-v2-sdk`
+6. **Directory-based Modules**: Large composables and UI workflow helpers are split into focused modules within directories (e.g., `utils/vault/`, `composables/repay/`). Protocol transaction planning flows through `useEulerTx.ts`, and SDK entities are imported directly from `@eulerxyz/euler-v2-sdk`
 7. **Structured Logging**: a single `logger` API from `~/utils/logger` (console-backed shim, used by shared code) and `~/server/utils/logger` (pino, JSON to stdout for BetterStack on Fargate). Errors passed in `err` are summarised by `~/utils/viem-errors` so viem's `abi` / `metaMessages` / hex request bodies never leak. `~/utils/errorHandling` exposes a small `logWarn` helper for the long tail of client-side call sites; it routes through the same shared logger
 
 ## 🔄 Data Flow Architecture
@@ -225,7 +225,7 @@ The public interface of `useVaults()` is unchanged — the 15 exports (`isReady`
 
 ### Reward campaign and claim pipeline
 
-Reward APRs and account claimable rewards are SDK-owned data. Lite reads reward campaigns through SDK-populated vault entities and reads claimable user rewards from `portfolio.account.userRewards`. Claim plans are built through `sdk.rewardsService.buildClaimPlan(s)` and converted into Lite `TxPlan` steps only at the UI execution boundary.
+Reward APRs and account claimable rewards are SDK-owned data. Lite reads reward campaigns through SDK-populated vault entities and reads claimable user rewards from `portfolio.account.userRewards`. Claim plans are built through `sdk.rewardsService.buildClaimPlan(s)` and executed as SDK `TransactionPlan` items through `useEulerTx()`.
 
 The SDK's default rewards adapter reads V3 reward APIs and uses direct provider reads where V3 does not expose claim-specific helper data. Lite's provider feature flags are passed into SDK config as `rewardsEnableMerkl`, `rewardsEnableBrevis`, and `rewardsEnableFuul` only when a provider is disabled. Display formatting, provider labels, sorting, and transaction review remain in Lite.
 

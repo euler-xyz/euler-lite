@@ -146,12 +146,10 @@ describe('useSavingsRepay', () => {
     vi.stubGlobal('useDebounceFn', (fn: unknown) => fn)
     vi.stubGlobal('useRouter', () => ({ replace: vi.fn() }))
     vi.stubGlobal('usePriceInvert', () => ({ autoInvert: vi.fn() }))
-    vi.stubGlobal('useEulerOperations', () => ({
-      buildSwapPlan: vi.fn(),
-      buildSavingsRepayPlan: vi.fn(),
-      buildSavingsFullRepayPlan: vi.fn(),
-      buildSwapFullRepayPlan: vi.fn(),
-      executeTxPlan: vi.fn(),
+    vi.stubGlobal('useEulerTx', () => ({
+      planRepayFromDeposit: vi.fn(),
+      planRepayWithSwap: vi.fn(),
+      executePlan: vi.fn(),
     }))
     vi.stubGlobal('useEulerAccount', () => ({ refreshAllPositions: vi.fn() }))
     vi.stubGlobal('useEulerAddresses', () => ({ eulerLensAddresses: ref({}) }))

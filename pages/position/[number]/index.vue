@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { getRoe, getNetAPY } from '~/utils/vault/apy'
-import { isSecuritizeCollateralVault, type EVault, type SecuritizeCollateralVault, type PortfolioBorrowPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { isSecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
 import { getAssetUsdPrice, getCollateralUsdPrice, getCollateralUsdValue, toUsdAmount, type UsdAmount } from '~/utils/sdk-prices'
 import { getBorrowPositionEffectiveLiquidationLTV, getBorrowPositionTimeToLiquidation } from '~/utils/ltv'
-import type { TxPlan } from '~/entities/txPlan'
+import { maxUint256 } from 'viem'
 import { formatTtl, nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { formatNumber, formatHealthScore, formatUsdValue, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
@@ -26,12 +26,12 @@ const { isSpyMode } = useSpyMode()
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = useEulerAccount()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, getBorrowRewardApy, hasSupplyRewards, hasBorrowRewards, getSupplyRewardCampaigns, getBorrowRewardCampaigns } = useRewardsApy()
-const { buildDisableCollateralPlan, executeTxPlan } = useEulerOperations()
+const { planTransfer, executePlan } = useEulerTx()
 const {
   runSimulation: runDisableCollateralSimulation,
   simulationError: disableCollateralSimulationError,
   clearSimulationError: clearDisableCollateralSimulationError,
-} = useTxPlanSimulation()
+} = useTransactionPlanSimulation()
 
 const positionIndex = usePositionIndex()
 
@@ -544,14 +544,17 @@ const disableCollateral = async (vault: EVault) => {
   try {
     clearDisableCollateralSimulationError()
     disableCollateralErrorVault.value = null
-    let plan: TxPlan | null = null
+    let plan: TransactionPlan | null = null
     try {
-      plan = await buildDisableCollateralPlan(
-        position.value!.subAccount,
-        vault.address,
-        borrowVault.value!.address,
-        position.value!.collateralVaults,
-      )
+      const subAccount = position.value!.subAccount as Address
+      const owner = address.value as Address
+      plan = await planTransfer({
+        vaultAddress: vault.address as Address,
+        from: subAccount,
+        to: owner,
+        amount: maxUint256,
+        disableCollateralFrom: true,
+      })
     }
     catch (e) {
       console.warn('[OperationReviewModal] failed to build plan', e)
@@ -587,13 +590,16 @@ const disableCollateral = async (vault: EVault) => {
 const send = async (collateralAddress: string) => {
   try {
     isSubmitting.value = true
-    const txPlan = await buildDisableCollateralPlan(
-      position.value!.subAccount,
-      collateralAddress,
-      borrowVault.value!.address,
-      position.value!.collateralVaults,
-    )
-    await executeTxPlan(txPlan)
+    const subAccount = position.value!.subAccount as Address
+    const owner = address.value as Address
+    const txPlan = await planTransfer({
+      vaultAddress: collateralAddress as Address,
+      from: subAccount,
+      to: owner,
+      amount: maxUint256,
+      disableCollateralFrom: true,
+    })
+    await executePlan(txPlan)
 
     modal.close()
     setTimeout(() => {

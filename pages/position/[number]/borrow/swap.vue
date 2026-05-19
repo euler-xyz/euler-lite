@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { useSwapDebtOptions } from '~/composables/useSwapDebtOptions'
-import { SwapperMode } from '~/entities/swap'
-import type { TxPlan } from '~/entities/txPlan'
+import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/utils/repayUtils'
@@ -17,7 +16,7 @@ const route = useRoute()
 const { isConnected, address } = useAccount()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = useEulerAccount()
-const { buildSwapPlan, buildSameAssetDebtSwapPlan } = useEulerOperations()
+const { planDebtChange } = useEulerTx()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 
@@ -218,29 +217,18 @@ const swap = useSwapPageLogic({
     }
   },
 
-  async buildPlan(): Promise<TxPlan> {
+  async buildPlan(): Promise<TransactionPlan> {
     if (!fromVault.value || !toVault.value) throw new Error('Vaults not loaded')
-    if (isSameAsset.value) {
-      const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
-      return buildSameAssetDebtSwapPlan({
-        oldVaultAddress: fromVault.value.address,
-        newVaultAddress: toVault.value.address,
-        amount,
-        subAccount: position.value?.subAccount || address.value!,
-        enabledCollaterals: position.value ? position.value.collateralVaults : undefined,
-      })
-    }
-    if (!selectedQuote.value) throw new Error('No quote selected')
-    return buildSwapPlan({
-      quote: selectedQuote.value,
+    if (!isSameAsset.value && !selectedQuote.value) throw new Error('No quote selected')
+    const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
+    return planDebtChange({
+      oldLiabilityVault: fromVault.value.address as Address,
+      newLiabilityVault: toVault.value.address as Address,
+      liabilityAccount: (position.value?.subAccount || address.value!) as Address,
+      liabilityAmount: amount,
+      newLiabilityAsset: toVault.value.asset.address as Address,
+      swapQuote: isSameAsset.value ? undefined : selectedQuote.value!,
       swapperMode: SwapperMode.TARGET_DEBT,
-      isRepay: true,
-      requestedSlippage: slippage.value,
-      isDebtSwap: true,
-      targetDebt: 0n,
-      currentDebt: currentDebt.value,
-      liabilityVault: fromVault.value.address,
-      enabledCollaterals: position.value ? position.value.collateralVaults : undefined,
     })
   },
 

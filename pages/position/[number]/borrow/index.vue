@@ -7,8 +7,8 @@ import { getAssetUsdValueOrZero, getAssetOraclePrice, getCollateralOraclePrice, 
 import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
-import type { PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import type { TxPlan } from '~/entities/txPlan'
+import type { PortfolioBorrowPosition, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { Address } from 'viem'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { ltvToPercent, nanoToValue } from '~/utils/crypto-utils'
@@ -26,14 +26,14 @@ const router = useRouter()
 const _route = useRoute()
 const modal = useModal()
 const { error } = useToast()
-const { buildBorrowPlan, executeTxPlan } = useEulerOperations()
+const { planBorrow, executePlan } = useEulerTx()
 const { getBorrowVaultPair } = useVaults()
 const { isConnected, address } = useAccount()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, getPositionBySubAccountIndex } = useEulerAccount()
 const positionIndex = usePositionIndex()
 const { fetchSingleBalance } = useWallets()
-const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
+const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
 
@@ -51,7 +51,7 @@ const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const isBalanceLoading = ref(false)
 const isEstimatesLoading = ref(false)
-const plan = ref<TxPlan | null>(null)
+const plan = ref<TransactionPlan | null>(null)
 const pair: Ref<BorrowVaultPair | undefined> = ref()
 const health = ref()
 const netAPY = ref()
@@ -242,20 +242,11 @@ const submit = async () => {
     }
 
     try {
-      plan.value = await buildBorrowPlan(
-        collateralVault.value.address,
-        collateralVault.value.asset.address,
-        0n,
-        borrowVault.value.address,
-        valueToNano(borrowAmount.value || '0', borrowVault.value.shares.decimals),
-        position.value?.subAccount,
-        {
-          includePermit2Call: false,
-          enabledCollaterals: position.value ? position.value.collateralVaults : undefined,
-          enabledController: borrowVault.value.address,
-          acceptedCollaterals: borrowVault.value.collaterals.filter(c => c.borrowLTV > 0).map(c => c.address),
-        },
-      )
+      plan.value = await planBorrow({
+        vaultAddress: borrowVault.value.address as Address,
+        amount: valueToNano(borrowAmount.value || '0', borrowVault.value.shares.decimals),
+        borrowAccount: position.value!.subAccount as Address,
+      })
     }
     catch (e) {
       console.warn('[OperationReviewModal] failed to build plan', e)
@@ -294,21 +285,12 @@ const send = async () => {
     if (!collateralVault.value || !borrowVault.value || !position.value) {
       return
     }
-    const txPlan = await buildBorrowPlan(
-      collateralVault.value.address,
-      collateralVault.value.asset.address,
-      0n,
-      borrowVault.value.address,
-      borrowAmountFixed.value.toFormat({ decimals: Number(borrowVault.value.shares.decimals) }).value,
-      position.value.subAccount,
-      {
-        includePermit2Call: true,
-        enabledCollaterals: position.value.collateralVaults,
-        enabledController: borrowVault.value.address,
-        acceptedCollaterals: borrowVault.value.collaterals.filter(c => c.borrowLTV > 0).map(c => c.address),
-      },
-    )
-    await executeTxPlan(txPlan)
+    const txPlan = await planBorrow({
+      vaultAddress: borrowVault.value.address as Address,
+      amount: borrowAmountFixed.value.toFormat({ decimals: Number(borrowVault.value.shares.decimals) }).value,
+      borrowAccount: position.value.subAccount as Address,
+    })
+    await executePlan(txPlan)
 
     modal.close()
     updateBalance()

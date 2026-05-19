@@ -21,6 +21,7 @@ const {
   isShowAllPositions,
   refreshAllPositions,
 } = useEulerAccount()
+const { refresh: refreshFreshAccount } = useFreshAccount()
 const { rewards } = useSdkRewards()
 const { locks } = useREULLocks()
 const { isConnected, address } = useAccount()
@@ -94,6 +95,10 @@ const netAssetValueDisplay = computed(() => {
 const updatePositions = async () => {
   const targetAddress = isSpyMode.value ? spyAddress.value : address.value
   if (!targetAddress) return
+  // Refresh the rich portfolio snapshot (drives the UI on this page) and the
+  // plan-time Account snapshot in parallel. The two write into disjoint stores,
+  // so the calls are independent.
+  refreshFreshAccount()
   await refreshAllPositions(eulerLensAddresses.value, targetAddress)
 }
 
