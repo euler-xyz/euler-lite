@@ -110,4 +110,19 @@ describe('useAddressScreen', () => {
     expect(screening.isScreening.value).toBe(false)
     expect(screening.isAddressScreened(USER)).toBe(false)
   })
+
+  it('does not show a stale blocked modal if disconnect resets screening state', async () => {
+    mocks.detectVpn.mockResolvedValue(false)
+    mocks.screenAddress.mockResolvedValue(true)
+    mocks.disconnect.mockImplementation(async () => {
+      useAddressScreen().resetScreeningCache()
+    })
+
+    const screening = useAddressScreen()
+    await screening.screenConnectedAddress(USER)
+
+    expect(mocks.disconnect).toHaveBeenCalledTimes(1)
+    expect(mocks.modalOpen).not.toHaveBeenCalled()
+    expect(screening.isAddressScreened(USER)).toBe(false)
+  })
 })

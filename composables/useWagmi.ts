@@ -27,13 +27,16 @@ function initializeWagmi() {
   const { screenConnectedAddress, resetScreeningCache, isAddressScreened } = useAddressScreen()
 
   const chainId = computed(() => wagmiChain.value?.id)
+  const screenedWagmiAddress: ComputedRef<Address | undefined> = computed(() =>
+    isAddressScreened(wagmiAddress.value) ? (wagmiAddress.value || undefined) : undefined,
+  )
 
   const { data: ensName } = useEnsName({
-    address: wagmiAddress,
+    address: screenedWagmiAddress,
     chainId: chainId.value,
   })
   const { data: balanceData, isLoading: isLoadingBalance, refetch: refetchBalance } = useBalance({
-    address: wagmiAddress,
+    address: screenedWagmiAddress,
   })
 
   // AppKit may be deferred-initialized (see plugins/00.wagmi.ts). Route
