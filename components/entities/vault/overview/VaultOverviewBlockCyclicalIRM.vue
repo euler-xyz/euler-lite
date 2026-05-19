@@ -75,6 +75,9 @@ type CurrentCycle = {
   preStartTimestamp: bigint | null
 }
 
+const MIN_MONTHLY_CYCLE_START_DAY = 1n
+const MAX_MONTHLY_CYCLE_START_DAY = 31n
+
 // Both cyclical IRM variants are normalised into the same shape so the
 // progress/phase/tick logic below is variant-agnostic. The Monthly variant
 // derives the current cycle from calendar dates (UTC), matching the contract.
@@ -82,6 +85,12 @@ const currentCycle = computed((): CurrentCycle | null => {
   if (isMonthly.value) {
     const m = monthlyInfo.value
     if (!m) return null
+    if (
+      m.cycleStartDay < MIN_MONTHLY_CYCLE_START_DAY
+      || m.cycleStartDay > MAX_MONTHLY_CYCLE_START_DAY
+    ) {
+      return null
+    }
     const d = new Date(now.value.getTime())
     const y = d.getUTCFullYear()
     const mo = d.getUTCMonth()
@@ -93,6 +102,7 @@ const currentCycle = computed((): CurrentCycle | null => {
     const cycleEndMs = day >= startDay
       ? Date.UTC(y, mo + 1, startDay)
       : Date.UTC(y, mo, startDay)
+    if (!Number.isFinite(cycleStartMs) || !Number.isFinite(cycleEndMs)) return null
     const startSec = BigInt(Math.floor(cycleStartMs / 1000))
     const endSec = BigInt(Math.floor(cycleEndMs / 1000))
     const secondaryDurationSec = m.secondaryDays * 86_400n
