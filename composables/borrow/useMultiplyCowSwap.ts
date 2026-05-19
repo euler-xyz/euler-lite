@@ -1,6 +1,6 @@
 import type { Ref, ComputedRef } from 'vue'
 import { useAccount } from '@wagmi/vue'
-import { erc20Abi, formatUnits, type Address } from 'viem'
+import { erc20Abi, formatUnits, maxUint256, type Address } from 'viem'
 import type { EVault, SwapQuote, Account, IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
 import type { CowSwapOpenPositionExecuteParams } from '~/composables/cowswap'
 import { logWarn } from '~/utils/errorHandling'
@@ -105,6 +105,19 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
 
     const quote = options.multiplySelectedQuote.value
     if (!quote) return
+
+    // CoW pre-flight: orders can't be simulated, so the multiply form's
+    // existing errorText already screens most failure modes — but it doesn't
+    // see the post-swap collateral amount that we're about to push into the
+    // long vault. Guard against exceeding the supply cap on the long side.
+    const longCap = longVault.caps?.supplyCap
+    if (typeof longCap === 'bigint' && longCap > 0n && longCap < maxUint256) {
+      const buyAmount = BigInt(quote.amountOut || '0')
+      if (longVault.totalAssets + buyAmount > longCap) {
+        error('Long vault supply cap would be exceeded')
+        return
+      }
+    }
 
     const chainId = currentChainId.value ?? 0
     if (!isCowSwapSupportedChain(chainId)) return
