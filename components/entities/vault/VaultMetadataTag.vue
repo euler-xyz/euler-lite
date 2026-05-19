@@ -72,7 +72,7 @@ const onKeydown = (event: KeyboardEvent) => {
 
   &--small {
     padding: 8px 12px;
-    font-size: 14px;
+    font-size: 16px;
 
     .vault-metadata-tag__icon {
       width: 20px;
@@ -195,6 +195,37 @@ const onKeydown = (event: KeyboardEvent) => {
 
   .vault-metadata-tag__info {
     display: block;
+  }
+}
+
+.vault-metadata-tag--small:not(.vault-metadata-tag--block) {
+  gap: 8px;
+  padding: 0;
+  background-color: transparent;
+  border-color: transparent;
+  border-radius: 0;
+
+  .vault-metadata-tag__icon {
+    width: 24px;
+    height: 24px;
+  }
+
+  &:hover {
+    background-color: transparent;
+    border-color: transparent;
+  }
+}
+
+.vault-metadata-tag--small.vault-metadata-tag--governance:not(.vault-metadata-tag--block) {
+  padding: 4px 10px;
+  border-radius: 10px;
+  background-color: rgba(136, 166, 204, 0.1);
+  border-color: rgba(136, 166, 204, 0.3);
+  transform: translateY(-4px);
+
+  &:hover {
+    background-color: rgba(136, 166, 204, 0.14);
+    border-color: rgba(136, 166, 204, 0.4);
   }
 }
 

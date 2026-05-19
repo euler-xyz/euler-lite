@@ -128,6 +128,7 @@ watchEffect(async () => {
               <BaseAvatar
                 :label="entity.name"
                 :src="getEulerLabelEntityLogo(entity.logo)"
+                class="!w-28 !h-28"
               />
               <a
                 v-if="entity.url"

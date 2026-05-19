@@ -227,6 +227,7 @@ const supplyCapPercentageDisplay = computed(() => {
               <BaseAvatar
                 :label="entity.name"
                 :src="getEulerLabelEntityLogo(entity.logo)"
+                class="!w-28 !h-28"
               />
               <a
                 :href="entity.url"
