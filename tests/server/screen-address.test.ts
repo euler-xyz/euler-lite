@@ -25,7 +25,7 @@ const handler = (await import('~/server/api/screen-address.post')).default
 const USER = '0x0000000000000000000000000000000000000001'
 const SCREENING_URI = 'https://trm.example/screen'
 
-function makeEvent(body: unknown, headers: Record<string, string | undefined> = {}): H3Event {
+function makeEvent(body: unknown, headers: Record<string, string | string[] | undefined> = {}): H3Event {
   return {
     context: { body },
     node: {
@@ -84,6 +84,14 @@ describe('POST /api/screen-address', () => {
       { 'x-is-proxy-or-vpn': 'true' },
     ))
     await handler(makeEvent(
+      { address: USER, vpnIsUsed: false },
+      { 'x-is-vpn': 'false, TRUE' },
+    ))
+    await handler(makeEvent(
+      { address: USER, vpnIsUsed: false },
+      { 'x-is-proxy-or-vpn': ['false', ' true '] },
+    ))
+    await handler(makeEvent(
       { address: USER, vpnIsUsed: true },
       {},
     ))
@@ -92,6 +100,6 @@ describe('POST /api/screen-address', () => {
       const init = call[1]
       return JSON.parse(String(init?.body)) as { vpnIsUsed: string }
     })
-    expect(bodies.map(body => body.vpnIsUsed)).toEqual(['true', 'true', 'false'])
+    expect(bodies.map(body => body.vpnIsUsed)).toEqual(['true', 'true', 'true', 'true', 'false'])
   })
 })

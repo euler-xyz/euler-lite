@@ -15,8 +15,11 @@ function isValidAddress(value: unknown): value is string {
 }
 
 function isTruthyHeader(value: string | string[] | undefined): boolean {
-  const header = Array.isArray(value) ? value[0] : value
-  return header === 'true'
+  const headers = Array.isArray(value) ? value : [value]
+  return headers
+    .filter((header): header is string => typeof header === 'string')
+    .flatMap(header => header.split(','))
+    .some(token => token.trim().toLowerCase() === 'true')
 }
 
 export default defineEventHandler(async (event) => {
