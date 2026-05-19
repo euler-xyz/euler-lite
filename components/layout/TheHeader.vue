@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { onClickOutside } from '@vueuse/core'
 import { offset, useFloating } from '@floating-ui/vue'
-import { useAccount } from '@wagmi/vue'
 import {
   WalletDisconnectModal,
   SelectChainModal,
@@ -15,7 +14,7 @@ import { getChainLogoUrl } from '~/utils/chain-logo'
 const { connect } = useWagmi()
 
 // Wagmi account info
-const { address, isConnected } = useAccount()
+const { address, isConnected } = useWagmi()
 const { chainId, allowedChainIds } = useEulerAddresses()
 const chainLogoSrc = computed(() => getChainLogoUrl(chainId.value))
 const { isSpyMode, spyShortAddress } = useSpyMode()

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { getAddress } from 'viem'
 import { getVaultUtilization, getCurrentLiquidationLTV, isCyclicalNoteVault, type Vault } from '~/entities/vault'
 import { getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
@@ -14,7 +13,7 @@ import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { VaultSupplyApyModal, VaultCollateralExposureModal } from '#components'
 
-const { isConnected } = useAccount()
+const { isConnected } = useWagmi()
 const { vault } = defineProps<{ vault: Vault }>()
 const vaultAddress = computed(() => vault.address)
 const product = useEulerProductOfVault(vaultAddress)

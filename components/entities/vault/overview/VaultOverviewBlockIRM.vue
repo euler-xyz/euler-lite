@@ -21,6 +21,7 @@ import {
   KINK_IRM_COMPONENTS,
   ADAPTIVE_CURVE_IRM_COMPONENTS,
   KINKY_IRM_COMPONENTS,
+  SECONDS_IN_YEAR,
 } from '~/entities/constants'
 import {
   type Vault,
@@ -76,7 +77,6 @@ const hasValidIRM = computed(() => {
     && vault.interestRateModelAddress !== zeroAddress
 })
 
-const SECONDS_PER_YEAR = 31_557_600 // 365.25 days
 const MAX_UINT32 = 4_294_967_295
 
 // Key borrow APY values derived from the chart data (populated in renderChart)
@@ -180,7 +180,7 @@ const irmParamsDisplay = computed<Array<{ label: string, value: string }>>(() =>
       { label: 'Min rate at kink', value: fmtRate(adaptiveMinRateAPY.value) },
       { label: 'Max rate at kink', value: fmtRate(adaptiveMaxRateAPY.value) },
       { label: 'Kink', value: formatWadPercent(decoded.targetUtilization) },
-      { label: 'Adjustment speed', value: `${(Number(formatUnits(decoded.adjustmentSpeed, 18)) * SECONDS_PER_YEAR).toFixed(1)}x/yr` },
+      { label: 'Adjustment speed', value: `${(Number(formatUnits(decoded.adjustmentSpeed, 18)) * SECONDS_IN_YEAR).toFixed(1)}x/yr` },
     ]
   }
   if (decoded.type === 'kinky') {

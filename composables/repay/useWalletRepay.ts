@@ -1,5 +1,4 @@
 import type { Ref, ComputedRef } from 'vue'
-import { useAccount } from '@wagmi/vue'
 import { formatUnits } from 'viem'
 import { FixedPoint } from '~/utils/fixed-point'
 import { logWarn } from '~/utils/errorHandling'
@@ -61,7 +60,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const { buildRepayPlan, buildFullRepayPlan, executeTxPlan } = useEulerOperations()
-  const { isConnected } = useAccount()
+  const { isConnected } = useWagmi()
   const { finalizeTxAndRedirect } = useTxFinalization()
 
   const amount = ref('')

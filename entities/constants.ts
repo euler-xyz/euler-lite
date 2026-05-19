@@ -176,7 +176,9 @@ export const PYTH_ORACLE_COMPONENTS = [
   { name: 'maxConfWidth', type: 'uint256' },
 ] as const
 
-export const SECONDS_IN_YEAR = 31_536_000
+// Gregorian year (365.2425 * 86400). Matches EVK/Lens SECONDS_PER_YEAR used by
+// on-chain APY math, so display values round-trip exactly with contract output.
+export const SECONDS_IN_YEAR = 31_556_952
 export const TARGET_TIME_AGO = 3600
 
 export const PERMIT2_TYPES = {
