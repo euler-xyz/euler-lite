@@ -1,4 +1,5 @@
 import type { Ref } from 'vue'
+import type { SwapQuote, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 
@@ -6,11 +7,15 @@ import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
  * Wraps two useSwapQuotesParallel instances (exact-in + target-debt) and provides
  * direction-aware computed properties. Used by both collateral-swap and savings tabs.
  */
-export const useSwapRepayQuotes = (options: { direction: Ref<SwapperMode> }) => {
-  const { direction } = options
+export const useSwapRepayQuotes = (options: {
+  direction: Ref<SwapperMode>
+  includeCowSwap?: boolean
+  buildTxPlanForQuote?: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
+}) => {
+  const { direction, includeCowSwap, buildTxPlanForQuote } = options
 
-  const exactInQuotes = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
-  const targetDebtQuotes = useSwapQuotesParallel({ amountField: 'amountIn', compare: 'min' })
+  const exactInQuotes = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max', includeCowSwap, buildTxPlanForQuote })
+  const targetDebtQuotes = useSwapQuotesParallel({ amountField: 'amountIn', compare: 'min', includeCowSwap, buildTxPlanForQuote })
 
   const isExactIn = computed(() => direction.value === SwapperMode.EXACT_IN)
 
@@ -29,6 +34,10 @@ export const useSwapRepayQuotes = (options: { direction: Ref<SwapperMode> }) => 
   const effectiveQuote = computed(() => isExactIn.value
     ? exactInQuotes.effectiveQuote.value
     : targetDebtQuotes.effectiveQuote.value)
+
+  const effectiveQuoteFetchedAt = computed(() => isExactIn.value
+    ? exactInQuotes.effectiveQuoteFetchedAt.value
+    : targetDebtQuotes.effectiveQuoteFetchedAt.value)
 
   const providersCount = computed(() => isExactIn.value
     ? exactInQuotes.providersCount.value
@@ -73,6 +82,7 @@ export const useSwapRepayQuotes = (options: { direction: Ref<SwapperMode> }) => 
     selectedProvider,
     selectedQuote,
     effectiveQuote,
+    effectiveQuoteFetchedAt,
     providersCount,
     isLoading,
     quoteError,

@@ -627,7 +627,9 @@ watch(formTab, () => {
               <SwapDetailsSummary
                 v-if="walletSwap.needsSwap.value && (walletSwap.swapEstimatedOutput.value || walletSwap.quotes.quoteError.value)"
                 :input-display="walletSwap.swapInputDisplay.value"
+                :input-exact-display="walletSwap.swapInputExactDisplay.value"
                 :output-display="walletSwap.swapOutputDisplay.value"
+                :output-exact-display="walletSwap.swapOutputExactDisplay.value"
                 :price-impact="walletSwap.swapPriceImpact.value"
                 :slippage="slippage"
                 :routed-via="walletSwap.swapRoutedVia.value"
@@ -708,7 +710,7 @@ watch(formTab, () => {
                 :status-label="collateral.quotes.statusLabel.value"
                 :is-loading="collateral.quotes.isLoading.value"
                 :empty-message="collateral.routeEmptyMessage.value"
-                @select="collateral.quotes.selectProvider"
+                @select="collateral.onProviderSelect"
                 @refresh="collateral.onRefreshQuotes"
               />
 
@@ -810,7 +812,9 @@ watch(formTab, () => {
               <SwapDetailsSummary
                 v-if="!collateral.isSameAsset.value"
                 :input-display="collateral.summary.value?.from ?? null"
+                :input-exact-display="collateral.summary.value?.fromExact ?? null"
                 :output-display="collateral.summary.value?.to ?? null"
+                :output-exact-display="collateral.summary.value?.toExact ?? null"
                 :price-impact="collateral.priceImpact.value"
                 :slippage="slippage"
                 :routed-via="collateral.routedVia.value"
@@ -985,7 +989,9 @@ watch(formTab, () => {
               <SwapDetailsSummary
                 v-if="!savings.isSameAsset.value"
                 :input-display="savings.summary.value?.from ?? null"
+                :input-exact-display="savings.summary.value?.fromExact ?? null"
                 :output-display="savings.summary.value?.to ?? null"
+                :output-exact-display="savings.summary.value?.toExact ?? null"
                 :price-impact="savings.priceImpact.value"
                 :slippage="slippage"
                 :routed-via="savings.routedVia.value"

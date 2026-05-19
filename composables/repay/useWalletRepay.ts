@@ -212,7 +212,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
         throw new Error('Not enough balance')
       }
       if (borrowedFixed.value.lt(amountFixed.value)) {
-        throw new Error('You repaying more than required')
+        throw new Error('Repay amount exceeds outstanding debt')
       }
       // Use on-chain LTV to derive total collateral value (multi-collateral aware)
       const totalValue = getTotalCollateralValue(position.value!)

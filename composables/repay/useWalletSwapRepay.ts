@@ -84,7 +84,10 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const debtPercent = ref(0)
 
   // --- Swap quotes (dual-direction) ---
-  const quotes = useSwapRepayQuotes({ direction })
+  const quotes = useSwapRepayQuotes({
+    direction,
+    buildTxPlanForQuote: quote => buildRepayPlan(quote),
+  })
   // --- Derived ---
   const needsSwap = computed(() => {
     if (!selectedAsset.value || !borrowVault.value) return false
@@ -141,11 +144,25 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     return `${formatSmartAmount(formatUnits(amountIn, Number(selectedAsset.value.decimals)))} ${selectedAsset.value.symbol}`
   })
 
+  const swapInputExactDisplay = computed(() => {
+    if (!quotes.effectiveQuote.value || !selectedAsset.value) return ''
+    const amountIn = BigInt(quotes.effectiveQuote.value.amountIn || 0)
+    if (amountIn <= 0n) return ''
+    return `${formatUnits(amountIn, Number(selectedAsset.value.decimals))} ${selectedAsset.value.symbol}`
+  })
+
   const swapOutputDisplay = computed(() => {
     if (!quotes.effectiveQuote.value || !borrowVault.value) return ''
     const amountOut = BigInt(quotes.effectiveQuote.value.amountOut || 0)
     if (amountOut <= 0n) return ''
     return `${formatSmartAmount(formatUnits(amountOut, Number(borrowVault.value.asset.decimals)))} ${borrowVault.value.asset.symbol}`
+  })
+
+  const swapOutputExactDisplay = computed(() => {
+    if (!quotes.effectiveQuote.value || !borrowVault.value) return ''
+    const amountOut = BigInt(quotes.effectiveQuote.value.amountOut || 0)
+    if (amountOut <= 0n) return ''
+    return `${formatUnits(amountOut, Number(borrowVault.value.asset.decimals))} ${borrowVault.value.asset.symbol}`
   })
 
   const swapRoutedVia = computed(() => {
@@ -161,12 +178,17 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
   const swapRouteItems = computed(() => {
     if (!borrowVault.value) return []
+    const isExactIn = direction.value === SwapperMode.EXACT_IN
+    const routeAsset = isExactIn ? borrowVault.value.asset : selectedAsset.value
+    if (!routeAsset) return []
     return buildSwapRouteItems({
       quoteCards: quotes.sortedQuoteCards.value,
       getQuoteDiffPct: quotes.getQuoteDiffPct,
-      decimals: Number(borrowVault.value.asset.decimals),
-      symbol: borrowVault.value.asset.symbol,
+      decimals: Number(routeAsset.decimals),
+      symbol: routeAsset.symbol,
       formatAmount: formatSmartAmount,
+      amountField: isExactIn ? 'amountOut' : 'amountIn',
+      compare: isExactIn ? 'max' : 'min',
     })
   })
 
@@ -270,7 +292,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
   const disabledReason = computed(() => {
     if (isRepayExceedsDebt.value) {
-      return 'You repaying more than required'
+      return 'Repay amount exceeds outstanding debt'
     }
     return undefined
   })
@@ -660,13 +682,14 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   })
 
   // --- Build plan ---
-  const buildRepayPlan = async (): Promise<TransactionPlan> => {
-    if (!position.value || !borrowVault.value || !collateralVault.value || !quotes.selectedQuote.value || !selectedAsset.value) {
+  async function buildRepayPlan(quote?: import('@eulerxyz/euler-v2-sdk').SwapQuote): Promise<TransactionPlan> {
+    const swapQuote = quote || quotes.selectedQuote.value
+    if (!position.value || !borrowVault.value || !collateralVault.value || !swapQuote || !selectedAsset.value) {
       throw new Error('Missing data for swap repay plan')
     }
 
     const swapMode = direction.value
-    const inputAmount = getSwapInputAmount(quotes.selectedQuote.value, swapMode)
+    const inputAmount = getSwapInputAmount(swapQuote, swapMode)
 
     const isNative = isNativeCurrencyAddress(selectedAsset.value.address)
     const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
@@ -675,7 +698,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     }
 
     return planSwapAndRepay({
-      swapQuote: quotes.selectedQuote.value,
+      swapQuote,
       amount: inputAmount,
       tokenIn: (wrappedAddress || selectedAsset.value.address) as Address,
       liabilityVault: borrowVault.value.address as Address,
@@ -729,6 +752,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
           type: 'repay',
           asset: reviewAsset,
           amount: inputDisplay,
+          quoteFetchedAt: quotes.effectiveQuoteFetchedAt.value,
           swapToAsset: borrowVault.value.asset,
           swapToAmount: direction.value === SwapperMode.TARGET_DEBT ? debtAmount.value : swapEstimatedOutput.value,
           swapMode: direction.value,
@@ -795,7 +819,9 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     quotes,
     swapEstimatedOutput,
     swapInputDisplay,
+    swapInputExactDisplay,
     swapOutputDisplay,
+    swapOutputExactDisplay,
     swapRoutedVia,
     swapPriceImpact,
     swapRouteItems,
