@@ -17,8 +17,12 @@ export async function screenAddress(
       signal: controller.signal,
     })
 
+    if (!resp.ok) {
+      return true
+    }
+
     const data = await resp.json()
-    return Boolean(data?.addressIsSuspicious)
+    return data?.addressIsSuspicious !== false
   }
   catch {
     return true
