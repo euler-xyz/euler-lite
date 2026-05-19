@@ -119,6 +119,7 @@ const feeDisplay = computed(() => {
             v-else
             :vault="vault"
             type="unknown"
+            nudge
             class="w-fit"
           />
         </VaultOverviewLabelValue>

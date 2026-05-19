@@ -113,6 +113,7 @@ watchEffect(async () => {
             v-if="!isGovernorVerified"
             :vault="vault"
             type="unknown"
+            nudge
             class="w-fit"
           />
           <div

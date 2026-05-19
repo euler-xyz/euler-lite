@@ -241,6 +241,7 @@ const supplyCapPercentageDisplay = computed(() => {
             v-else-if="!isGovernorVerified"
             :vault="vault"
             type="unknown"
+            nudge
           />
           <div v-else>
             -
