@@ -13,6 +13,9 @@ defineProps<{ pair: AnyBorrowVaultPair | AccountBorrowPosition, desktopOverview?
     <VaultOverviewPairBlockGeneral
       :pair="pair"
     />
+    <VaultOverviewPairBlockTypes
+      :pair="pair"
+    />
     <!-- Oracle adapters should always come from the liability (borrow) vault -->
     <VaultOverviewBlockOracleAdapters
       :vault="pair.borrow"

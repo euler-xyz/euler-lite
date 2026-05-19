@@ -55,8 +55,6 @@ interface EulerChainConfig {
     peripheryAddrs: {
       adaptiveCurveIRMFactory: string
       capRiskStewardFactory?: string
-      edgeFactory: string
-      edgeFactoryPerspective: string
       escrowedCollateralPerspective: string
       eulerEarnFactoryPerspective: string
       eulerEarnGovernedPerspective: string
@@ -199,8 +197,6 @@ export const useEulerAddresses = () => {
     return {
       adaptiveCurveIRMFactory: config.addresses.peripheryAddrs.adaptiveCurveIRMFactory,
       capRiskStewardFactory: config.addresses.peripheryAddrs.capRiskStewardFactory,
-      edgeFactory: config.addresses.peripheryAddrs.edgeFactory,
-      edgeFactoryPerspective: config.addresses.peripheryAddrs.edgeFactoryPerspective,
       escrowedCollateralPerspective: config.addresses.peripheryAddrs.escrowedCollateralPerspective,
       eulerEarnFactoryPerspective: config.addresses.peripheryAddrs.eulerEarnFactoryPerspective,
       eulerEarnGovernedPerspective: config.addresses.peripheryAddrs.eulerEarnGovernedPerspective,
