@@ -17,7 +17,7 @@ import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated, getVaultNotice, isVaultNoticeSpecific } from '~/utils/eulerLabelsUtils'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { useModal } from '~/components/ui/composables/useModal'
-import { VaultNetApyModal, PortfolioRoeModal, VaultOverviewModal } from '#components'
+import { VaultNetApyModal, PortfolioRoeModal, VaultOverviewModal, UiModalPreviewTrigger } from '#components'
 import { getAddress } from 'viem'
 import { formatNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
@@ -249,45 +249,41 @@ const actualMultiplier = computed(() => {
   return collateralValue.value.usd / equity
 })
 
-const onNetApyClick = () => {
-  modal.open(VaultNetApyModal, {
-    props: {
-      supplyUSD: collateralValue.value.usd,
-      borrowUSD: borrowedValue.value.usd,
-      baseSupplyAPY: baseSupplyApy.value,
-      baseBorrowAPY: baseBorrowApy.value,
-      intrinsicSupplyAPY: intrinsicSupplyApy.value,
-      intrinsicBorrowAPY: intrinsicBorrowApy.value,
-      supplyRewardAPY: supplyRewardAPY.value || null,
-      borrowRewardAPY: borrowRewardAPY.value || null,
-      loopingRewardAPY: loopingRewardAPY.value || null,
-      loopingEligible: loopingEligible.value,
-      netAPY: netAPY.value ?? 0,
-      supplyCampaigns: supplyCampaignsForModal.value,
-      borrowCampaigns: borrowCampaignsForModal.value,
-      loopingCampaigns: loopingCampaignsForModal.value,
-    },
-  })
-}
+const netApyModalData = computed(() => ({
+  props: {
+    supplyUSD: collateralValue.value.usd,
+    borrowUSD: borrowedValue.value.usd,
+    baseSupplyAPY: baseSupplyApy.value,
+    baseBorrowAPY: baseBorrowApy.value,
+    intrinsicSupplyAPY: intrinsicSupplyApy.value,
+    intrinsicBorrowAPY: intrinsicBorrowApy.value,
+    supplyRewardAPY: supplyRewardAPY.value || null,
+    borrowRewardAPY: borrowRewardAPY.value || null,
+    loopingRewardAPY: loopingRewardAPY.value || null,
+    loopingEligible: loopingEligible.value,
+    netAPY: netAPY.value ?? 0,
+    supplyCampaigns: supplyCampaignsForModal.value,
+    borrowCampaigns: borrowCampaignsForModal.value,
+    loopingCampaigns: loopingCampaignsForModal.value,
+  },
+}))
 
-const onRoeClick = () => {
-  modal.open(PortfolioRoeModal, {
-    props: {
-      roe: roe.value ?? 0,
-      multiplier: Number.isFinite(actualMultiplier.value) ? actualMultiplier.value : 0,
-      supplyAPY: collateralSupplyApy.value,
-      borrowAPY: borrowApy.value,
-      supplyRewardAPY: supplyRewardAPY.value || null,
-      borrowRewardAPY: borrowRewardAPY.value || null,
-      loopingRewardAPY: loopingRewardAPY.value || null,
-      loopingEligible: loopingEligible.value,
-      userLTV: userLTV.value,
-      supplyCampaigns: supplyCampaignsForModal.value,
-      borrowCampaigns: borrowCampaignsForModal.value,
-      loopingCampaigns: loopingCampaignsForModal.value,
-    },
-  })
-}
+const roeModalData = computed(() => ({
+  props: {
+    roe: roe.value ?? 0,
+    multiplier: Number.isFinite(actualMultiplier.value) ? actualMultiplier.value : 0,
+    supplyAPY: collateralSupplyApy.value,
+    borrowAPY: borrowApy.value,
+    supplyRewardAPY: supplyRewardAPY.value || null,
+    borrowRewardAPY: borrowRewardAPY.value || null,
+    loopingRewardAPY: loopingRewardAPY.value || null,
+    loopingEligible: loopingEligible.value,
+    userLTV: userLTV.value,
+    supplyCampaigns: supplyCampaignsForModal.value,
+    borrowCampaigns: borrowCampaignsForModal.value,
+    loopingCampaigns: loopingCampaignsForModal.value,
+  },
+}))
 
 const openPositionInformationModal = () => {
   modal.open(VaultOverviewModal, {
@@ -375,62 +371,70 @@ const openPositionInformationModal = () => {
             </div>
           </div>
           <div class="flex gap-16 items-start shrink-0">
-            <div class="flex flex-col items-end">
-              <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-                Net APY
-                <SvgIcon
-                  class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
-                  name="info-circle"
-                  data-modal-trigger="net-apy"
-                  @click.prevent="onNetApyClick"
-                />
+            <UiModalPreviewTrigger
+              :component="VaultNetApyModal"
+              :modal-data="() => netApyModalData"
+              aria-label="Net APY details"
+            >
+              <div class="flex flex-col items-end">
+                <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+                  Net APY
+                  <SvgIcon
+                    class="!w-16 !h-16 text-content-muted hover:text-content-secondary"
+                    name="info-circle"
+                    data-modal-trigger="net-apy"
+                  />
+                </div>
+                <div
+                  class="text-p2 flex items-center"
+                  data-id="data-point"
+                  :data-key="positionKey"
+                  data-field="net-apy"
+                  :data-value="netAPY !== undefined && Number.isFinite(netAPY) ? netAPY : null"
+                  :class="[(netAPY ?? 0) >= 0 ? 'text-accent-600' : 'text-error-500']"
+                >
+                  <SvgIcon
+                    v-if="hasRewards"
+                    class="!w-20 !h-20 text-accent-500 mr-4"
+                    name="sparks"
+                    data-modal-trigger="net-apy"
+                  />
+                  {{ netAPY !== undefined && Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
+                </div>
               </div>
-              <div
-                class="text-p2 flex items-center"
-                data-id="data-point"
-                :data-key="positionKey"
-                data-field="net-apy"
-                :data-value="netAPY !== undefined && Number.isFinite(netAPY) ? netAPY : null"
-                :class="[(netAPY ?? 0) >= 0 ? 'text-accent-600' : 'text-error-500']"
-              >
-                <SvgIcon
-                  v-if="hasRewards"
-                  class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
-                  name="sparks"
-                  data-modal-trigger="net-apy"
-                  @click.prevent="onNetApyClick"
-                />
-                {{ netAPY !== undefined && Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
+            </UiModalPreviewTrigger>
+            <UiModalPreviewTrigger
+              :component="PortfolioRoeModal"
+              :modal-data="() => roeModalData"
+              aria-label="ROE details"
+            >
+              <div class="flex flex-col items-end">
+                <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+                  ROE
+                  <SvgIcon
+                    class="!w-16 !h-16 text-content-muted hover:text-content-secondary"
+                    name="info-circle"
+                    data-modal-trigger="roe"
+                  />
+                </div>
+                <div
+                  class="text-p2 flex items-center"
+                  data-id="data-point"
+                  :data-key="positionKey"
+                  data-field="roe"
+                  :data-value="roe !== undefined && Number.isFinite(roe) ? roe : null"
+                  :class="[(roe ?? 0) >= 0 ? 'text-accent-600' : 'text-error-500']"
+                >
+                  <SvgIcon
+                    v-if="hasRewards"
+                    class="!w-20 !h-20 text-accent-500 mr-4"
+                    name="sparks"
+                    data-modal-trigger="roe"
+                  />
+                  {{ roe !== undefined && Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}
+                </div>
               </div>
-            </div>
-            <div class="flex flex-col items-end">
-              <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-                ROE
-                <SvgIcon
-                  class="!w-16 !h-16 text-content-muted cursor-pointer hover:text-content-secondary"
-                  name="info-circle"
-                  data-modal-trigger="roe"
-                  @click.prevent="onRoeClick"
-                />
-              </div>
-              <div
-                class="text-p2 flex items-center"
-                data-id="data-point"
-                :data-key="positionKey"
-                data-field="roe"
-                :data-value="roe !== undefined && Number.isFinite(roe) ? roe : null"
-                :class="[(roe ?? 0) >= 0 ? 'text-accent-600' : 'text-error-500']"
-              >
-                <SvgIcon
-                  v-if="hasRewards"
-                  class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
-                  name="sparks"
-                  data-modal-trigger="roe"
-                  @click.prevent="onRoeClick"
-                />
-                {{ roe !== undefined && Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}
-              </div>
-            </div>
+            </UiModalPreviewTrigger>
           </div>
         </div>
 

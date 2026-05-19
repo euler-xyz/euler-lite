@@ -5,8 +5,7 @@ import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { useModal } from '~/components/ui/composables/useModal'
-import { VaultSupplyApyModal } from '#components'
+import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 
 const { isConnected } = useWagmi()
@@ -37,7 +36,6 @@ const displayName = computed(() => product.name || vault.shares.name)
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
 
 const { getBalance, isLoading: isBalancesLoading } = useWallets()
-const modal = useModal()
 const { withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 
@@ -56,19 +54,15 @@ const supplyApyWithRewards = computed(
   () => supplyApy.value + totalRewardsAPY.value,
 )
 
-const onSupplyInfoIconClick = (event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY: lendingAPY.value,
-      intrinsicAPY: getIntrinsicApy(vault.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
-      campaigns: getSupplyRewardCampaigns(vault.address),
-      rewardVaultAddress: vault.address,
-    },
-  })
-}
+const supplyApyModalData = computed(() => ({
+  props: {
+    lendingAPY: lendingAPY.value,
+    intrinsicAPY: getIntrinsicApy(vault.asset.address),
+    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    campaigns: getSupplyRewardCampaigns(vault.address),
+    rewardVaultAddress: vault.address,
+  },
+}))
 
 const statsGridCols = computed(() => {
   const cols: string[] = []
@@ -136,34 +130,39 @@ watchEffect(async () => {
           {{ vault.asset.symbol }}
         </div>
       </div>
-      <div class="flex flex-col items-end">
-        <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
-          Supply APY
-          <SvgIcon
-            class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-            name="info-circle"
-            data-modal-trigger="supply-apy"
-            @click="onSupplyInfoIconClick"
-          />
-        </div>
-        <div class="flex items-center">
-          <div
-            class="text-p2 flex items-center text-accent-600 font-semibold"
-            data-id="data-point"
-            :data-key="vault.address.toLowerCase()"
-            data-field="supply-apy"
-            :data-value="supplyApyWithRewards"
-          >
+      <UiModalPreviewTrigger
+        :component="VaultSupplyApyModal"
+        :modal-data="() => supplyApyModalData"
+        aria-label="Supply APY details"
+      >
+        <div class="flex flex-col items-end">
+          <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
+            Supply APY
             <SvgIcon
-              v-if="hasRewards"
-              class="!w-20 !h-20 text-accent-500 mr-4"
-              name="sparks"
+              class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors"
+              name="info-circle"
               data-modal-trigger="supply-apy"
             />
-            {{ formatNumber(supplyApyWithRewards) }}%
+          </div>
+          <div class="flex items-center">
+            <div
+              class="text-p2 flex items-center text-accent-600 font-semibold"
+              data-id="data-point"
+              :data-key="vault.address.toLowerCase()"
+              data-field="supply-apy"
+              :data-value="supplyApyWithRewards"
+            >
+              <SvgIcon
+                v-if="hasRewards"
+                class="!w-20 !h-20 text-accent-500 mr-4"
+                name="sparks"
+                data-modal-trigger="supply-apy"
+              />
+              {{ formatNumber(supplyApyWithRewards) }}%
+            </div>
           </div>
         </div>
-      </div>
+      </UiModalPreviewTrigger>
     </div>
     <div
       class="grid gap-x-16 py-12 px-16 pb-12 mobile:!flex mobile:justify-between mobile:border-b mobile:border-line-subtle"
