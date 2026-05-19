@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import type { EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { getCollateralSupplyCapWarning, getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
-import type { SecuritizeVault, Vault } from '~/entities/vault'
 
 const makeVault = (supplyCapUtilization: number): EVault =>
   ({
@@ -14,16 +14,12 @@ const makeUtilisedVault = (
   totalAssets: bigint,
   borrow: bigint,
   interestRateModelType: number = INTEREST_RATE_MODEL_TYPE.KINK,
-): Vault =>
+): EVault =>
   ({
     totalAssets,
     borrow,
-    irmInfo: {
-      interestRateModelInfo: {
-        interestRateModelType,
-      },
-    },
-  }) as Vault
+    interestRateModel: { type: interestRateModelType },
+  }) as unknown as EVault
 
 describe('getUtilisationWarning', () => {
   it('returns the standard high utilisation warning for non-cyclical borrow markets', () => {

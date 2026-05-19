@@ -1,4 +1,6 @@
-import { getVaultUtilization, getSupplyCapPercentage, getBorrowCapPercentage, isCyclicalNoteVault, isEVKVault, type SecuritizeVault, type Vault } from '~/entities/vault'
+import { isSecuritizeCollateralVault, type EVault, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import { isCyclicalNoteVault } from '~/utils/vault/classification'
+import { getVaultUtilization } from '~/utils/vault-display'
 import {
   findBlockingDisabledOp,
   getOpMeta,
@@ -98,7 +100,7 @@ export const getUtilisationWarning = (
   vault: EVault,
   context: WarningContext = 'general',
 ): VaultWarning | null => {
-  const utilisation = vault.utilization
+  const utilisation = getVaultUtilization(vault)
   const level = getUtilisationLevel(utilisation)
   if (!level) return null
 
