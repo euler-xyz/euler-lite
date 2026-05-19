@@ -122,8 +122,23 @@ const isPairFullyRestricted = computed(() =>
   !isGeoBlocked.value && isVaultRestrictedByCountry(collateralAddress) && isVaultRestrictedByCountry(borrowAddress))
 
 // --- Savings collateral ---
+// Page-level selection so `borrow.selectedSavingSubAccount` (set when the user
+// picks a row in AssetInput) feeds back into which savings position we resolve.
+// Falls back to the largest-asset match when the user hasn't picked yet, so the
+// default chip shows a meaningful balance without silently picking the wrong row
+// when multiple positions are present.
 const savingCollateral = computed(() => {
-  return depositPositions.value.find(position => position.vault?.address === route.params.collateral)
+  const matches = depositPositions.value.filter(position => position.vault?.address === route.params.collateral)
+  if (matches.length === 0) return undefined
+  const selected = borrow?.selectedSavingSubAccount?.value
+  if (selected) {
+    const exact = matches.find(p => p.subAccount?.toLowerCase() === selected.toLowerCase())
+    if (exact) return exact
+  }
+  if (matches.length === 1) return matches[0]
+  // Pick the largest-asset match as the default so the displayed balance is the
+  // most useful one; user can override via the chooser.
+  return [...matches].sort((a, b) => (b.assets > a.assets ? 1 : -1))[0]
 })
 
 // --- Product labels ---
@@ -520,6 +535,8 @@ watch(formTab, () => {
                   :balance="borrow.borrowActiveBalance.value"
                   :collateral-options="borrow.borrowNeedsSwap.value ? undefined : (borrow.collateralOptions.value as CollateralOption[])"
                   :selected-source="borrow.isSavingCollateral.value ? 'saving' : 'wallet'"
+                  :selected-sub-account="borrow.selectedSavingSubAccount.value"
+                  :selected-vault-address="collateralVault?.address"
                   maxable
                   @input="borrow.onCollateralInput"
                   @change-collateral="borrow.onChangeCollateral"
@@ -731,6 +748,8 @@ watch(formTab, () => {
                       :balance="multiply.multiplyBalance.value"
                       :collateral-options="multiply.multiplyCollateralOptions.value"
                       :selected-source="multiply.isMultiplySavingCollateral.value ? 'saving' : 'wallet'"
+                      :selected-sub-account="multiply.multiplySelectedSavingSubAccount.value"
+                      :selected-vault-address="multiply.multiplySupplyVault.value?.address"
                       maxable
                       @input="multiply.onMultiplyInput"
                       @change-collateral="multiply.onMultiplyCollateralChange"
