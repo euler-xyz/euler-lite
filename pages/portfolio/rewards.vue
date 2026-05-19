@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { formatUnits } from 'viem'
 import type { UserReward } from '@eulerxyz/euler-v2-sdk'
 
-const { isConnected } = useAccount()
+const { isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { enableMerkl, enableIncentra, enableFuul } = useDeployConfig()
 const { rewards, isRewardsLoading } = useSdkRewards()

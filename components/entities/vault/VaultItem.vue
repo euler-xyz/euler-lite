@@ -10,11 +10,10 @@ import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/stri
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { VaultSupplyApyModal, VaultCollateralExposureModal } from '#components'
-import { useAccount } from '@wagmi/vue'
 import { isCyclicalNoteVault } from '~/utils/vault/classification'
 import { getAddress } from 'viem'
 
-const { isConnected } = useAccount()
+const { isConnected } = useWagmi()
 const { vault, type = 'lend' } = defineProps<{ vault: EVault, type?: 'lend' | 'borrow' }>()
 const vaultAddress = computed(() => vault.address)
 const product = useEulerProductOfVault(vaultAddress)
@@ -91,7 +90,6 @@ const collateralAssets = computed(() => {
 })
 const collateralDisplayAssets = computed(() => collateralAssets.value.slice(0, 5))
 const collateralOverflowCount = computed(() => Math.max(0, collateralAssets.value.length - 5))
-const collateralExposureListId = computed(() => `collateral-exposure:${vault.address.toLowerCase()}`)
 
 const balance = computed(() =>
   getBalance(vault.asset.address as `0x${string}`),

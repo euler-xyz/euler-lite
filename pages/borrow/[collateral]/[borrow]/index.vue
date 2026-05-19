@@ -15,7 +15,6 @@ import { useBorrowForm } from '~/composables/borrow/useBorrowForm'
 import { useMultiplyForm } from '~/composables/borrow/useMultiplyForm'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
-import { useAccount } from '@wagmi/vue'
 import { SlippageSettingsModal, VaultUnverifiedDisclaimerModal } from '#components'
 import { getAddress } from 'viem'
 
@@ -25,7 +24,7 @@ const modal = useModal()
 const reviewBorrowLabel = 'Review Borrow'
 const reviewMultiplyLabel = 'Review Multiply'
 const { getBorrowVaultPair, updateVault } = useVaults()
-const { address, isConnected } = useAccount()
+const { address, isConnected } = useWagmi()
 const { chainId } = useEulerAddresses()
 const shareLinkQuery = computed(() => {
   const network = route.query.network

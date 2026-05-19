@@ -9,7 +9,6 @@ import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { amountToPercent, percentToAmountNano } from '~/utils/repayUtils'
 import { createRaceGuard } from '~/utils/race-guard'
 import { type Address, formatUnits, zeroAddress } from 'viem'
-import { useAccount } from '@wagmi/vue'
 import type { Ref, ComputedRef } from 'vue'
 
 interface QuoteAccounts {
@@ -51,7 +50,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     getQuoteAccounts,
     onQuoteReceived,
   } = options
-  const { address } = useAccount()
+  const { address } = useWagmi()
   const { chainId } = useEulerAddresses()
 
   // --- State ---

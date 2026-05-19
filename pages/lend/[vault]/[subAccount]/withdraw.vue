@@ -19,7 +19,6 @@ import { isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composabl
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { getTxErrorMessage } from '~/utils/tx-errors'
-import { useAccount } from '@wagmi/vue'
 import { getAddress, formatUnits, zeroAddress, type Address } from 'viem'
 import { SwapTokenSelector, SlippageSettingsModal, OperationReviewModal } from '#components'
 import { FixedPoint } from '~/utils/fixed-point'
@@ -34,7 +33,7 @@ useFullBalances()
 const { planWithdrawOrRedeem, prepareTransactionPlan, executePreparedPlan } = useEulerTx()
 const { account: cachedAccount } = useFreshAccount()
 const { getVault, getSecuritizeVault: _getSecuritizeVault, getEscrowVault: _getEscrowVault } = useVaults()
-const { isConnected, address } = useAccount()
+const { isConnected, address } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const { fetchVaultShareBalance } = useWallets()

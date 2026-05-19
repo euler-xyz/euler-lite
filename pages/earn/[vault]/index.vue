@@ -10,7 +10,6 @@ import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
-import { useAccount } from '@wagmi/vue'
 import type { Address } from 'viem'
 import { getTxErrorMessage } from '~/utils/tx-errors'
 import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultSupplyApyModal } from '#components'
@@ -22,7 +21,7 @@ const { error } = useToast()
 const { planDeposit, simulatePlan, executePlan } = useEulerTx()
 const { getEarnVault, updateEarnVault } = useVaults()
 const { isReady: isLabelsReady } = useEulerLabels()
-const { isConnected, address } = useAccount()
+const { isConnected, address } = useWagmi()
 const { fetchSingleBalance } = useWallets()
 const simulationError = ref('')
 const isSimulating = ref(false)

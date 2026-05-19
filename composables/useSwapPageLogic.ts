@@ -1,6 +1,5 @@
 import type { SecuritizeCollateralVault, EVault, TransactionPlan, SwapQuote, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, formatUnits } from 'viem'
-import { useAccount } from '@wagmi/vue'
 import { logWarn } from '~/utils/errorHandling'
 import { OperationReviewModal, SlippageSettingsModal } from '#components'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -93,7 +92,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
 
   const router = useRouter()
   const route = useRoute()
-  const { isConnected } = useAccount()
+  const { isConnected } = useWagmi()
   const { executePlan } = useEulerTx()
   const modal = useModal()
   const { error: showError } = useToast()

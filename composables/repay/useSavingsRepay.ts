@@ -2,7 +2,6 @@ import type { EVault, SecuritizeCollateralVault, PortfolioBorrowPosition, VaultE
 import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import type { Ref, ComputedRef } from 'vue'
-import { useAccount } from '@wagmi/vue'
 import { zeroAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -62,7 +61,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
 
   const modal = useModal()
   const { error } = useToast()
-  const { isConnected, address } = useAccount()
+  const { isConnected, address } = useWagmi()
   const { planRepayFromSource, executePlan } = useEulerTx()
   const { getVault: registryGetVault } = useVaultRegistry()
   const { finalizeTxAndRedirect } = useTxFinalization()

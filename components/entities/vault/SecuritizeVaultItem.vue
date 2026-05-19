@@ -5,12 +5,10 @@ import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
 import { VaultSupplyApyModal } from '#components'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
-import { useAccount } from '@wagmi/vue'
 
-const { isConnected } = useAccount()
+const { isConnected } = useWagmi()
 const { vault } = defineProps<{ vault: SecuritizeCollateralVault }>()
 
 const vaultAddress = computed(() => vault.address)

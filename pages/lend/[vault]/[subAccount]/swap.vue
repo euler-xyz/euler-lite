@@ -9,13 +9,12 @@ import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { useAccount } from '@wagmi/vue'
 import { getAddress, type Address, zeroAddress, isAddress } from 'viem'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 
 const route = useRoute()
 const { getVault, getSecuritizeVault } = useVaults()
-const { address } = useAccount()
+const { address } = useWagmi()
 const { depositPositions } = useEulerAccount()
 const { planCollateralChange } = useEulerTx()
 const { withIntrinsicSupplyApy } = useIntrinsicApy()

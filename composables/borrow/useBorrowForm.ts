@@ -6,7 +6,6 @@ import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, ty
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
-import { useAccount } from '@wagmi/vue'
 import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatio, getCollateralUsdPrice, getAssetUsdValueOrZero, getTokenUsdPrice } from '~/utils/sdk-prices'
 import { getAddress, formatUnits, zeroAddress, type Address } from 'viem'
 import { SwapTokenSelector, OperationReviewModal } from '#components'
@@ -78,7 +77,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const { planBorrow, planSwapAndBorrow, executePlan } = useEulerTx()
-  const { address, isConnected } = useAccount()
+  const { address, isConnected } = useWagmi()
   const { chainId } = useEulerAddresses()
   const { fetchSingleBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()

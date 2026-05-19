@@ -11,13 +11,12 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { useCollateralForm } from '~/composables/position/useCollateralForm'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
-import { useAccount } from '@wagmi/vue'
 import { getAddress, type Address, zeroAddress } from 'viem'
 import { FixedPoint } from '~/utils/fixed-point'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 
 const positionIndex = usePositionIndex()
-const { address } = useAccount()
+const { address } = useWagmi()
 const { planWithdraw, planWithdrawAndSwap } = useEulerTx()
 const { account: cachedAccount } = useFreshAccount()
 const { refreshAllPositions } = useEulerAccount()

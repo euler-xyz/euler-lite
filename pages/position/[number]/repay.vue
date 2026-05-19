@@ -18,12 +18,11 @@ import { useCollateralSwapRepay } from '~/composables/repay/useCollateralSwapRep
 import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { useAccount } from '@wagmi/vue'
 
 const _route = useRoute()
 const _router = useRouter()
 const modal = useModal()
-const { isConnected, address } = useAccount()
+const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()

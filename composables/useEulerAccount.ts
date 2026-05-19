@@ -1,6 +1,5 @@
 import { formatUnits, getAddress, type Address } from 'viem'
 import { watch, computed, ref, shallowRef, type Ref } from 'vue'
-import { useAccount } from '@wagmi/vue'
 import { accountDiagnosticOwner, dataIssueLocation, type DataIssue, type Portfolio, type PortfolioBorrowPosition, type PortfolioPositionFilter, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import type { EulerLensAddresses } from '~/composables/useEulerAddresses'
 import { useVaults } from '~/composables/useVaults'
@@ -71,7 +70,7 @@ export const useEulerAccount = () => {
   const { isReady: isLabelsReady } = useEulerLabels()
   const { isReady: isVaultsReady } = useVaults()
   const { isReady: isEulerAddressesReady, chainId } = useEulerAddresses()
-  const { address } = useAccount()
+  const { address } = useWagmi()
   const { spyAddress } = useSpyMode()
   const portfolioAddress = computed(() => normalizeAddressOrEmpty(spyAddress.value) || normalizeAddressOrEmpty(address.value))
 

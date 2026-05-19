@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { EulerEarn, PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getSubAccountId as getSubAccountIndex } from '@eulerxyz/euler-v2-sdk'
-import { useAccount } from '@wagmi/vue'
 import { getAddress } from 'viem'
 import { formatAssetValue, getAssetUsdValue } from '~/utils/sdk-prices'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
@@ -15,7 +14,7 @@ import { roundAndCompactTokens } from '~/utils/crypto-utils'
 const { position } = defineProps<{ position: PortfolioSavingsPosition<VaultEntity> }>()
 const modal = useModal()
 
-const { address } = useAccount()
+const { address } = useWagmi()
 const { portfolioAddress } = useEulerAccount()
 const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
 const subAccountIndex = computed(() => {

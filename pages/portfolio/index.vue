@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { getSubAccountId as getSubAccountIndex } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 
-const { isConnected, address } = useAccount()
+const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { borrowPositions, isPositionsLoaded, portfolioAddress } = useEulerAccount()
 const { isReady } = useVaults()

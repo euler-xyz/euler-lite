@@ -1,4 +1,3 @@
-import { useAccount } from '@wagmi/vue'
 import type { Address } from 'viem'
 import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import type { REULLock } from '~/entities/reul'
@@ -13,7 +12,7 @@ const locks: Ref<REULLock[]> = ref([])
 let interval: NodeJS.Timeout | null = null
 
 export const useREULLocks = () => {
-  const { isConnected, address: wagmiAddress, chainId } = useAccount()
+  const { isConnected, address: wagmiAddress, chainId } = useWagmi()
   const { eulerTokenAddresses } = useEulerAddresses()
   const { spyAddress } = useSpyMode()
 

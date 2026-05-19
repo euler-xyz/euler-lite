@@ -17,7 +17,6 @@ import { findBlockingDisabledOp, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
-import { useAccount } from '@wagmi/vue'
 import { getAddress, formatUnits, zeroAddress, type Address } from 'viem'
 import { OperationReviewModal } from '#components'
 import type { Ref, ComputedRef } from 'vue'
@@ -69,7 +68,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const { error } = useToast()
   const { planSwapAndRepay, executePlan } = useEulerTx()
   const { chainId } = useEulerAddresses()
-  const { isConnected, address } = useAccount()
+  const { isConnected, address } = useWagmi()
   const { fetchSingleBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { getVault: registryGetVault } = useVaultRegistry()

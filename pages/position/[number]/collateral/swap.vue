@@ -12,7 +12,6 @@ import type { DisplayStep } from '~/utils/stepDecoding'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { useAccount } from '@wagmi/vue'
 import { erc20Abi, formatUnits, getAddress, maxUint256, zeroAddress, type Address, type Abi } from 'viem'
 import { eulerAccountLensABI } from '~/entities/euler/abis'
 import {
@@ -28,7 +27,7 @@ import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus, openCowSwapRe
 import { logWarn } from '~/utils/errorHandling'
 
 const route = useRoute()
-const { isConnected, address } = useAccount()
+const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = useEulerAccount()
 const { planCollateralChange } = useEulerTx()

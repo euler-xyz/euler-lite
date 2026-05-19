@@ -17,7 +17,6 @@ import { createRaceGuard } from '~/utils/race-guard'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
-import { useAccount } from '@wagmi/vue'
 import type { BorrowVaultPair } from '~/types/borrow-pair'
 import { OperationReviewModal } from '#components'
 import { FixedPoint } from '~/utils/fixed-point'
@@ -28,7 +27,7 @@ const modal = useModal()
 const { error } = useToast()
 const { planBorrow, executePlan } = useEulerTx()
 const { getBorrowVaultPair } = useVaults()
-const { isConnected, address } = useAccount()
+const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, getPositionBySubAccountIndex } = useEulerAccount()
 const positionIndex = usePositionIndex()

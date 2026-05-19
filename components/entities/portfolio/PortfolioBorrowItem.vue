@@ -21,7 +21,7 @@ import { VaultNetApyModal, PortfolioRoeModal } from '#components'
 const { position } = defineProps<{ position: PortfolioBorrowPosition<VaultEntity> }>()
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
 
-const { address } = useAccount()
+const { address } = useWagmi()
 const { portfolioAddress } = useEulerAccount()
 const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
 const subAccountIndex = computed(() => {

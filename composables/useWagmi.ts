@@ -24,16 +24,23 @@ function initializeWagmi() {
   const { disconnect: wagmiDisconnect } = useDisconnect()
   const { switchChain } = useSwitchChain()
   const config = useConfig()
-  const { screenConnectedAddress, resetScreeningCache } = useAddressScreen()
+  const { screenConnectedAddress, resetScreeningCache, isAddressScreened } = useAddressScreen()
 
   const chainId = computed(() => wagmiChain.value?.id)
 
+  // Route internal wagmi reads through the screened address so wallet-tied
+  // queries (ENS, native balance) don't surface for an address whose
+  // screening verdict isn't in yet.
+  const screenedWagmiAddress: ComputedRef<Address | undefined> = computed(() =>
+    isAddressScreened(wagmiAddress.value) ? (wagmiAddress.value || undefined) : undefined,
+  )
+
   const { data: ensName } = useEnsName({
-    address: wagmiAddress,
+    address: screenedWagmiAddress,
     chainId: chainId.value,
   })
   const { data: balanceData, isLoading: isLoadingBalance, refetch: refetchBalance } = useBalance({
-    address: wagmiAddress,
+    address: screenedWagmiAddress,
   })
 
   // AppKit may be deferred-initialized (see plugins/00.wagmi.ts). Route
@@ -65,7 +72,7 @@ function initializeWagmi() {
 
   watch(wagmiAddress, (address, oldAddress) => {
     if (address && address !== oldAddress) {
-      screenConnectedAddress(address)
+      void screenConnectedAddress(address).catch(err => logWarn('useWagmi/screenConnectedAddress', err))
     }
     if (!address && oldAddress) {
       resetScreeningCache()
@@ -86,6 +93,7 @@ function initializeWagmi() {
     refetchBalance,
     modal,
     connectBaseAppInjectedWallet,
+    isAddressScreened,
   }
 }
 
@@ -111,9 +119,15 @@ export const useWagmi = () => {
     refetchBalance,
     modal,
     connectBaseAppInjectedWallet,
+    isAddressScreened,
   } = cachedWagmiData
-  const address: ComputedRef<Address | undefined> = computed(() => wagmiAddress.value || undefined)
-  const isConnected = computed(() => Boolean(wagmiIsConnected.value))
+  // Fail closed: a connected address only becomes user-visible once screening
+  // returns a non-restricted verdict. Consumers that read `address`/`isConnected`
+  // automatically see the gated state without each having to import useAddressScreen.
+  const address: ComputedRef<Address | undefined> = computed(() =>
+    isAddressScreened(wagmiAddress.value) ? (wagmiAddress.value || undefined) : undefined,
+  )
+  const isConnected = computed(() => Boolean(wagmiIsConnected.value && isAddressScreened(wagmiAddress.value)))
   const chain = computed(() => wagmiChain.value)
   const chainId = computed(() => wagmiChain.value?.id)
 

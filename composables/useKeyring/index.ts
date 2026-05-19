@@ -1,5 +1,5 @@
 import { type Ref, ref, watch, onUnmounted } from 'vue'
-import { useAccount, useChainId } from '@wagmi/vue'
+import { useChainId } from '@wagmi/vue'
 import { zeroAddress, type Address } from 'viem'
 import {
   KeyringConnect,
@@ -45,7 +45,7 @@ const readHookTargetField = async <T>(
 
 export const useKeyring = (vaultAddress: string | Ref<string>) => {
   const addressRef = typeof vaultAddress === 'string' ? ref(vaultAddress) : vaultAddress
-  const { address: userAddress } = useAccount()
+  const { address: userAddress } = useWagmi()
   const chainId = useChainId()
   const { getVault } = useVaultRegistry()
   const { rpcUrl } = useRpcClient()

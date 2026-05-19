@@ -1,6 +1,5 @@
 import { computed, ref, shallowRef, watch, type Ref } from 'vue'
 import { getAddress, type Address } from 'viem'
-import { useAccount } from '@wagmi/vue'
 import type { Account, AccountFetchOptions, IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdk, getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
@@ -118,7 +117,7 @@ const reset = () => {
  * `freshPlanContext`.
  */
 export const useFreshAccount = () => {
-  const { address } = useAccount()
+  const { address } = useWagmi()
   const { isSpyMode, spyAddress } = useSpyMode()
   const { chainId } = useEulerAddresses()
   const { portfolioRefreshCounter } = usePortfolioRefresh()

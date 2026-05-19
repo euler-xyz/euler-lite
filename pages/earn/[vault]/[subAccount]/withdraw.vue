@@ -8,7 +8,6 @@ import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
-import { useAccount } from '@wagmi/vue'
 import { getSubAccountAddress } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 import { OperationReviewModal } from '#components'
@@ -21,7 +20,7 @@ const modal = useModal()
 const { error } = useToast()
 const { planWithdrawOrRedeem, executePlan } = useEulerTx()
 const { getEarnVault } = useVaults()
-const { isConnected, address } = useAccount()
+const { isConnected, address } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const { fetchVaultShareBalance } = useWallets()

@@ -21,7 +21,6 @@ import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/uti
 import { type Address, type Abi, formatUnits, zeroAddress } from 'viem'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
-import { useAccount } from '@wagmi/vue'
 import { eulerAccountLensABI } from '~/entities/euler/abis'
 import { SwapTokenSelector, SlippageSettingsModal, OperationReviewModal } from '#components'
 import type { ComputedRef } from 'vue'
@@ -118,7 +117,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const { error } = useToast()
   const submitLabel = options.reviewLabel
   const { executePlan, executePreparedPlan, prepareTransactionPlan } = useEulerTx()
-  const { isConnected, address } = useAccount()
+  const { isConnected, address } = useWagmi()
   const { isSpyMode } = useSpyMode()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const positionIndex = usePositionIndex()

@@ -21,7 +21,6 @@ import { isOpDisabled, OP_DEPOSIT } from '~/utils/vault-hooks'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
-import { useAccount } from '@wagmi/vue'
 import { getAddress, type Address, formatUnits, zeroAddress } from 'viem'
 import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultSupplyApyModal, SwapTokenSelector, SlippageSettingsModal } from '#components'
 import { getProjectedRates } from '~/utils/vault/apy'
@@ -69,7 +68,7 @@ const { planDeposit, planDepositWithSwap, executePlan } = useEulerTx()
 const { getVault, getSecuritizeVault, getEscrowVault, updateVault, isEscrowLoadedOnce } = useVaults()
 const { isReady: isLabelsReady } = useEulerLabels()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
-const { isConnected, address } = useAccount()
+const { isConnected, address } = useWagmi()
 const { chainId } = useEulerAddresses()
 const { fetchSingleBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()

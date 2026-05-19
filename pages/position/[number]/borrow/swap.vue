@@ -9,11 +9,10 @@ import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/util
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { useAccount } from '@wagmi/vue'
 import { formatUnits, zeroAddress, type Address } from 'viem'
 
 const route = useRoute()
-const { isConnected, address } = useAccount()
+const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = useEulerAccount()
 const { planDebtChange } = useEulerTx()

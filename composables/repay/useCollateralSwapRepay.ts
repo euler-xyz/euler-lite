@@ -2,7 +2,6 @@ import type { Account, EVault, IHasVaultAddress, SecuritizeCollateralVault, Port
 import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import type { Ref, ComputedRef } from 'vue'
-import { useAccount } from '@wagmi/vue'
 import { formatUnits, zeroAddress, type Address, type Abi } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { cowSwapInboxExists } from '~/utils/cowswap-inbox'
@@ -65,7 +64,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const router = useRouter()
   const modal = useModal()
   const { error } = useToast()
-  const { isConnected, address } = useAccount()
+  const { isConnected, address } = useWagmi()
   const { planRepayFromSource, executePlan } = useEulerTx()
   const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig, chainId: currentChainId } = useEulerAddresses()
   const { finalizeTxAndRedirect } = useTxFinalization()

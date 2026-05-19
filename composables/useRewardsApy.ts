@@ -1,4 +1,3 @@
-import { useAccount } from '@wagmi/vue'
 import type { RewardCampaign, VaultRewardInfo } from '@eulerxyz/euler-v2-sdk'
 import { isCampaignEligibleForAddress, rewardCampaignAprPercent } from '~/entities/reward-campaign'
 
@@ -6,7 +5,7 @@ export const useRewardsApy = () => {
   const { settings } = useUserSettings()
   const { enableMerkl, enableIncentra, enableFuul } = useDeployConfig()
   const { getVault, registryVersion } = useVaultRegistry()
-  const { address: connectedAddress } = useAccount()
+  const { address: connectedAddress } = useWagmi()
   const { spyAddress } = useSpyMode()
 
   const isEnabled = computed(() => settings.value.enableRewardsApy)

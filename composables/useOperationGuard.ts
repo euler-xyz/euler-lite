@@ -1,5 +1,5 @@
 import { computed, isRef, watch, onUnmounted, provide, reactive, type Ref } from 'vue'
-import { useAccount, useChainId } from '@wagmi/vue'
+import { useChainId } from '@wagmi/vue'
 import type { Address } from 'viem'
 import { useKeyring, KeyringFlowState } from '~/composables/useKeyring'
 import { useTosGuard } from '~/composables/guards/useTosGuard'
@@ -9,7 +9,7 @@ import { clearSdkKeyringCredential, setSdkKeyringCredential } from '~/utils/sdk-
 import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
 
 export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | (string | undefined)[]) => {
-  const { address: userAddress } = useAccount()
+  const { address: userAddress } = useWagmi()
   const chainId = useChainId()
 
   const addresses = computed((): string[] => {

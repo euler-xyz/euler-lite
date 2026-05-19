@@ -17,7 +17,6 @@ import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, ty
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
-import { useAccount } from '@wagmi/vue'
 import { formatUnits, zeroAddress, type Address } from 'viem'
 import { OperationReviewModal } from '#components'
 import type { Ref, ComputedRef } from 'vue'
@@ -64,7 +63,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const { planMultiply, executePlan } = useEulerTx()
-  const { isConnected, address } = useAccount()
+  const { isConnected, address } = useWagmi()
   const { depositPositions } = useEulerAccount()
   const { chainId } = useEulerAddresses()
   const { fetchSingleBalance } = useWallets()

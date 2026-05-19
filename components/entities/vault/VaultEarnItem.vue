@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
 
 import { formatAssetValue } from '~/utils/sdk-prices'
@@ -11,7 +10,7 @@ import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { VaultSupplyApyModal } from '#components'
 
-const { isConnected } = useAccount()
+const { isConnected } = useWagmi()
 const { vault } = defineProps<{ vault: EulerEarn }>()
 const product = useEulerProductOfVault(vault.address)
 const { enableEntityBranding } = useDeployConfig()

@@ -4,7 +4,6 @@ import type { Ref, ComputedRef } from 'vue'
 import { maxUint256, type Address } from 'viem'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
-import { useAccount } from '@wagmi/vue'
 import { OperationReviewModal } from '#components'
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import { formatUnits } from 'viem'
@@ -62,7 +61,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const { planRepayFromWallet, executePlan } = useEulerTx()
-  const { isConnected } = useAccount()
+  const { isConnected } = useWagmi()
   const { finalizeTxAndRedirect } = useTxFinalization()
 
   const amount = ref('')

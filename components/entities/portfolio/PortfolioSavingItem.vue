@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { getSubAccountId as getSubAccountIndex, isSecuritizeCollateralVault, type EVault, type PortfolioSavingsPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 
@@ -15,7 +14,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 const { position } = defineProps<{ position: PortfolioSavingsPosition<VaultEntity> }>()
 const modal = useModal()
 
-const { address } = useAccount()
+const { address } = useWagmi()
 const { portfolioAddress } = useEulerAccount()
 const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
 const subAccountIndex = computed(() => {
