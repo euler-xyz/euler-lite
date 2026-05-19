@@ -339,7 +339,7 @@ const progressDayLabel = computed(() => {
             <dd>{{ formatDuration(currentCycle.primaryDurationSec) }}</dd>
           </div>
           <div class="cyclical-irm-row">
-            <dt>APY</dt>
+            <dt>Borrow APY</dt>
             <dd class="!font-semibold !text-accent-500">
               {{ formatPercent(fixedBorrowAPY) }}%
             </dd>
@@ -370,7 +370,7 @@ const progressDayLabel = computed(() => {
             <dd>{{ formatDuration(currentCycle.secondaryDurationSec) }}</dd>
           </div>
           <div class="cyclical-irm-row">
-            <dt>APY</dt>
+            <dt>Borrow APY</dt>
             <dd class="!font-semibold !text-warning-500">
               {{ formatPercent(repaymentBorrowAPY) }}%
             </dd>
