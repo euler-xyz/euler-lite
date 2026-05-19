@@ -11,6 +11,8 @@ import { getSpecialAddressLabel } from '~/utils/special-addresses'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, compactNumber, formatUsdValue, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
+import { normalizeAddress } from '~/utils/normalizeAddress'
+import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
 import { getAddress, type Address, maxUint256 } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
@@ -24,6 +26,7 @@ const { chainId } = useEulerAddresses()
 const { borrowList: _borrowList, isVaultGovernorVerified } = useVaults()
 const { getEVaults } = useVaultRegistry()
 const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const modal = useModal()
 const { getSupplyRewardApy, getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
 const vaultAddress = computed(() => getAddress(vault.address))
 const product = useEulerProductOfVault(vaultAddress)
@@ -79,14 +82,17 @@ const rewardSupplyAPY = computed(() => getSupplyRewardApy(vault.address))
 const intrinsicApy = computed(() => getIntrinsicApy(vault.asset.address))
 const supplyApyWithRewards = computed(() => intrinsicApy.value + rewardSupplyAPY.value)
 
-const supplyApyModalData = computed(() => ({
-  props: {
-    lendingAPY: 0, // Securitize vaults don't have interest rates
-    intrinsicAPY: intrinsicApy.value,
-    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
-    campaigns: getSupplyRewardCampaigns(vault.address),
-  },
-}))
+const onSupplyInfoIconClick = () => {
+  modal.open(VaultSupplyApyModal, {
+    props: {
+      lendingAPY: 0, // Securitize vaults don't have interest rates
+      intrinsicAPY: intrinsicApy.value,
+      intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+      campaigns: getSupplyRewardCampaigns(vault.address),
+      rewardVaultAddress: vault.address,
+    },
+  })
+}
 
 // Risk parameters - fetch share token exchange rate (ERC4626 standard)
 const shareTokenExchangeRate: Ref<bigint | undefined> = ref()
@@ -293,17 +299,13 @@ const supplyCapPercentageDisplay = computed(() => {
             Supply APY
           </template>
           <span class="flex items-center gap-4">
-            <UiModalPreviewTrigger
+            <SvgIcon
               v-if="hasSupplyRewards(vault.address)"
-              :component="VaultSupplyApyModal"
-              :modal-data="supplyApyModalData"
-              aria-label="Show supply APY rewards breakdown"
-            >
-              <SvgIcon
-                class="!w-20 !h-20 text-accent-500 cursor-pointer"
-                name="sparks"
-              />
-            </UiModalPreviewTrigger>
+              class="!w-20 !h-20 text-accent-500 cursor-pointer"
+              name="sparks"
+              data-modal-trigger="supply-apy"
+              @click="onSupplyInfoIconClick"
+            />
             {{ formatNumber(supplyApyWithRewards) }}%
           </span>
         </VaultOverviewLabelValue>

@@ -17,8 +17,6 @@ const {
   supplyCampaigns,
   borrowCampaigns,
   loopingCampaigns,
-  inline = false,
-  close = true,
 } = defineProps<{
   supplyUSD: number
   borrowUSD: number
@@ -34,8 +32,6 @@ const {
   supplyCampaigns?: RewardCampaign[]
   borrowCampaigns?: RewardCampaign[]
   loopingCampaigns?: RewardCampaign[]
-  inline?: boolean
-  close?: boolean
 }>()
 
 const hasIntrinsicSupply = computed(() => (intrinsicSupplyAPY ?? 0) !== 0)
@@ -60,8 +56,6 @@ const handleClose = () => {
 <template>
   <BaseModalWrapper
     title="Net APY"
-    :inline="inline"
-    :close="close"
     @close="handleClose"
   >
     <p class="text-content-primary text-p3 mb-16">

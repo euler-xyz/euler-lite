@@ -551,14 +551,17 @@ const updateEstimates = useDebounceFn(async () => {
   }
 }, 500)
 
-const supplyApyModalData = computed(() => ({
-  props: {
-    lendingAPY: baseSupplyApy.value,
-    intrinsicAPY: intrinsicApy.value,
-    intrinsicApyInfo: getIntrinsicApyInfo(asset.value?.address),
-    campaigns: getSupplyRewardCampaigns(vaultAddress),
-  },
-}))
+const onSupplyInfoIconClick = () => {
+  modal.open(VaultSupplyApyModal, {
+    props: {
+      lendingAPY: baseSupplyApy.value,
+      intrinsicAPY: intrinsicApy.value,
+      intrinsicApyInfo: getIntrinsicApyInfo(asset.value?.address),
+      campaigns: getSupplyRewardCampaigns(vaultAddress),
+      rewardVaultAddress: vaultAddress,
+    },
+  })
+}
 
 // Swap quote helpers
 const swapEstimatedOutput = computed(() => {
@@ -793,16 +796,11 @@ watch(address, () => {
             >
               <p class="text-h3 text-content-tertiary flex items-center gap-4">
                 Supply APY
-                <UiModalPreviewTrigger
-                  :component="VaultSupplyApyModal"
-                  :modal-data="supplyApyModalData"
-                  aria-label="Show supply APY breakdown"
-                >
-                  <SvgIcon
-                    class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-                    name="info-circle"
-                  />
-                </UiModalPreviewTrigger>
+                <SvgIcon
+                  class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                  name="info-circle"
+                  @click="onSupplyInfoIconClick"
+                />
               </p>
 
               <p class="flex items-center gap-4 text-h3">
@@ -811,17 +809,12 @@ watch(address, () => {
                   class="mr-4"
                   :vault="vault"
                 />
-                <UiModalPreviewTrigger
+                <SvgIcon
                   v-if="hasRewards"
-                  :component="VaultSupplyApyModal"
-                  :modal-data="supplyApyModalData"
-                  aria-label="Show supply APY rewards breakdown"
-                >
-                  <SvgIcon
-                    class="!w-24 !h-24 text-accent-600 cursor-pointer"
-                    name="sparks"
-                  />
-                </UiModalPreviewTrigger>
+                  class="!w-24 !h-24 text-accent-600 cursor-pointer"
+                  name="sparks"
+                  @click="onSupplyInfoIconClick"
+                />
                 <span>
                   {{ supplyAPYDisplay }}%
                 </span>

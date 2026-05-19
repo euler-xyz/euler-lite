@@ -68,8 +68,6 @@ export const useModal = () => {
     if (data.absolute) {
       bus.emit('open')
     }
-
-    return id
   }
 
   const close = (id?: number | undefined, isBack = false) => {
@@ -78,17 +76,14 @@ export const useModal = () => {
       popstateHandler = undefined
     }
 
-    if (id === undefined) {
+    if (!id) {
       list.pop()
     }
     else {
-      const index = list.findIndex(item => item.id === id)
-      if (index !== -1) {
-        list.splice(index, 1)
-      }
+      list.splice(list.findIndex(item => item.id === id), 1)
     }
 
-    if (id !== undefined && !isBack && window.history.state?.modalId === id) {
+    if (!isBack && window.history.state?.modalId === id) {
       window.history.back()
     }
 

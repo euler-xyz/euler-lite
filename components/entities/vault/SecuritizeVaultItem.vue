@@ -5,6 +5,7 @@ import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
+import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 
@@ -36,6 +37,7 @@ const displayName = computed(() => product.name || vault.shares.name)
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
 
 const { getBalance, isLoading: isBalancesLoading } = useWallets()
+const modal = useModal()
 const { withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 
@@ -54,14 +56,19 @@ const supplyApyWithRewards = computed(
   () => supplyApy.value + totalRewardsAPY.value,
 )
 
-const supplyApyModalData = computed(() => ({
-  props: {
-    lendingAPY: lendingAPY.value,
-    intrinsicAPY: getIntrinsicApy(vault.asset.address),
-    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
-    campaigns: getSupplyRewardCampaigns(vault.address),
-  },
-}))
+const onSupplyInfoIconClick = (event: MouseEvent) => {
+  event.preventDefault()
+  event.stopPropagation()
+  modal.open(VaultSupplyApyModal, {
+    props: {
+      lendingAPY: lendingAPY.value,
+      intrinsicAPY: getIntrinsicApy(vault.asset.address),
+      intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+      campaigns: getSupplyRewardCampaigns(vault.address),
+      rewardVaultAddress: vault.address,
+    },
+  })
+}
 
 const statsGridCols = computed(() => {
   const cols: string[] = []
@@ -132,30 +139,27 @@ watchEffect(async () => {
       <div class="flex flex-col items-end">
         <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
           Supply APY
-          <UiModalPreviewTrigger
-            :component="VaultSupplyApyModal"
-            :modal-data="supplyApyModalData"
-            aria-label="Show supply APY breakdown"
-          >
-            <SvgIcon
-              class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-              name="info-circle"
-            />
-          </UiModalPreviewTrigger>
+          <SvgIcon
+            class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+            name="info-circle"
+            data-modal-trigger="supply-apy"
+            @click="onSupplyInfoIconClick"
+          />
         </div>
         <div class="flex items-center">
-          <div class="text-p2 flex items-center text-accent-600 font-semibold">
-            <UiModalPreviewTrigger
+          <div
+            class="text-p2 flex items-center text-accent-600 font-semibold"
+            data-id="data-point"
+            :data-key="vault.address.toLowerCase()"
+            data-field="supply-apy"
+            :data-value="supplyApyWithRewards"
+          >
+            <SvgIcon
               v-if="hasRewards"
-              :component="VaultSupplyApyModal"
-              :modal-data="supplyApyModalData"
-              aria-label="Show supply APY rewards breakdown"
-            >
-              <SvgIcon
-                class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
-                name="sparks"
-              />
-            </UiModalPreviewTrigger>
+              class="!w-20 !h-20 text-accent-500 mr-4"
+              name="sparks"
+              data-modal-trigger="supply-apy"
+            />
             {{ formatNumber(supplyApyWithRewards) }}%
           </div>
         </div>

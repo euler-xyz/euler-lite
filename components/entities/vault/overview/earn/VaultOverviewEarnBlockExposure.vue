@@ -4,6 +4,7 @@ import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { formatNumber, compactNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
+import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
 import { getStrategyHookWarning } from '~/composables/useVaultWarnings'
 import { DateTime } from 'luxon'
@@ -23,6 +24,7 @@ const { getOrFetch } = useVaultRegistry()
 const { isEscrowLoadedOnce } = useVaults()
 const { withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
+const modal = useModal()
 
 const exposureVaults: Ref<EVault[]> = ref([])
 const isLoading = ref(false)
@@ -126,10 +128,11 @@ const getStrategySupplyApy = (strategyVault: EVault) => {
   return supplyApy + getSupplyRewardApy(strategyVault.address)
 }
 
-const getStrategySupplyApyModalData = (strategyVault?: Vault) => {
-  if (!strategyVault) return {}
-  const lendingAPY = nanoToValue(strategyVault.interestRateInfo.supplyAPY, 25)
-  return {
+const onStrategySupplyInfoClick = (event: MouseEvent, strategyVault: EVault) => {
+  event.preventDefault()
+  event.stopPropagation()
+  const lendingAPY = getVaultSupplyApy(strategyVault)
+  modal.open(VaultSupplyApyModal, {
     props: {
       lendingAPY,
       intrinsicAPY: getIntrinsicApy(strategyVault.asset.address),
@@ -137,7 +140,7 @@ const getStrategySupplyApyModalData = (strategyVault?: Vault) => {
       campaigns: getSupplyRewardCampaigns(strategyVault.address),
       rewardVaultAddress: strategyVault.address,
     },
-  }
+  })
 }
 
 const hasExposureUsdPrice = (exposure: typeof exposureList.value[0]) => {
@@ -227,29 +230,19 @@ load()
           >
             <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
               Supply APY
-              <UiModalPreviewTrigger
-                :component="VaultSupplyApyModal"
-                :modal-data="() => getStrategySupplyApyModalData(row.vault)"
-                aria-label="Show supply APY breakdown"
-              >
-                <SvgIcon
-                  class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-                  name="info-circle"
-                />
-              </UiModalPreviewTrigger>
+              <SvgIcon
+                class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+                name="info-circle"
+                @click="onStrategySupplyInfoClick($event, row.vault)"
+              />
             </div>
             <div class="text-p2 flex items-center text-accent-600 font-semibold">
-              <UiModalPreviewTrigger
+              <SvgIcon
                 v-if="hasSupplyRewards(row.vault.address)"
-                :component="VaultSupplyApyModal"
-                :modal-data="() => getStrategySupplyApyModalData(row.vault)"
-                aria-label="Show supply APY rewards breakdown"
-              >
-                <SvgIcon
-                  class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
-                  name="sparks"
-                />
-              </UiModalPreviewTrigger>
+                class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
+                name="sparks"
+                @click="onStrategySupplyInfoClick($event, row.vault)"
+              />
               {{ formatNumber(getStrategySupplyApy(row.vault)) }}%
             </div>
           </div>
