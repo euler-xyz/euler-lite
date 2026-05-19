@@ -16,6 +16,7 @@ import {
 import annotationPlugin from 'chartjs-plugin-annotation'
 import { formatUnits, zeroAddress, decodeAbiParameters, type Address, type Abi, type Hex } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
+import { useModal } from '~/components/ui/composables/useModal'
 import {
   INTEREST_RATE_MODEL_TYPE,
   KINK_IRM_COMPONENTS,
@@ -34,6 +35,7 @@ import {
 } from '~/entities/vault'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { eulerUtilsLensABI, eulerVaultLensABI } from '~/entities/euler/abis'
+import { UiFootnoteModal } from '#components'
 
 // Register Chart.js components
 ChartJS.register(
@@ -61,6 +63,7 @@ const { getChartColors, isDark } = useThemeColors()
 const { client: rpcClient } = useRpcClient()
 const { eulerLensAddresses } = useEulerAddresses()
 const { get: registryGet } = useVaultRegistry()
+const modal = useModal()
 
 // Only render the IRM chart for vaults that have live borrow-side exposure —
 // either currently borrowable, or still accruing interest on existing debt
@@ -216,6 +219,19 @@ const irmTooltip = computed<{ title: string, text: string } | null>(() => {
   }
   return null
 })
+
+const openIRMInfoModal = (event: MouseEvent | KeyboardEvent) => {
+  event.preventDefault()
+  event.stopPropagation()
+  const tooltip = irmTooltip.value
+  if (!tooltip) return
+  modal.open(UiFootnoteModal, {
+    props: {
+      modalTitle: tooltip.title,
+      text: tooltip.text,
+    },
+  })
+}
 
 // Generate cash and borrows data points for chart (0-100% utilization).
 // When `kinkFraction` is provided (in 0..1), injects an extra sample at the
@@ -635,22 +651,30 @@ watch(isDark, async () => {
     v-if="hasValidIRM"
     class="bg-surface-secondary rounded-xl flex flex-col gap-16 p-24 shadow-card"
   >
-    <div class="flex justify-between items-center flex-wrap gap-12">
-      <div class="flex items-center gap-8">
-        <p class="text-h3 text-content-primary">
-          Interest rate model
-        </p>
-        <div class="irm-type-chip inline-flex items-center py-2 px-8 rounded-8 text-[13px] font-medium">
-          {{ irmTypeLabel }}
-        </div>
+    <header class="flex items-center justify-between gap-16">
+      <h2 class="text-h3 text-content-primary">
+        Interest rate model
+      </h2>
+      <div
+        v-if="irmTooltip"
+        class="flex shrink-0 items-center gap-8"
+      >
+        <VaultMetadataTag
+          as="button"
+          icon="pulse"
+          :label="irmTypeLabel"
+          tone="accent"
+          title="Interest rate model details"
+          @click="openIRMInfoModal"
+        />
         <UiFootnote
-          v-if="irmTooltip"
           :title="irmTooltip.title"
           :text="irmTooltip.text"
+          tooltip-placement="top-end"
           class="[--ui-footnote-icon-color:var(--text-muted)] hover:[--ui-footnote-icon-color:var(--text-secondary)]"
         />
       </div>
-    </div>
+    </header>
 
     <div class="relative w-full min-h-400">
       <div
@@ -689,15 +713,3 @@ watch(isDark, async () => {
     </div>
   </div>
 </template>
-
-<style scoped lang="scss">
-.irm-type-chip {
-  background-color: rgba(var(--accent-rgb), 0.15);
-  color: var(--accent-600);
-
-  [data-theme="dark"] & {
-    background-color: rgba(var(--accent-rgb), 0.2);
-    color: var(--accent-500);
-  }
-}
-</style>
