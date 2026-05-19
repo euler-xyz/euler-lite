@@ -44,6 +44,27 @@ export const isRewardCampaignActive = (
   return endTimestamp === 0 || endTimestamp > now
 }
 
+/**
+ * Decide whether `userAddress` is eligible to earn `campaign`.
+ *
+ * Without a connected wallet we can't tell who the visitor is, so we keep the
+ * full "headline" APR visible — discovery surfaces still advertise the upside.
+ * Once a wallet (or spy address) is in scope we filter per Merkl semantics:
+ *   - non-empty whitelist → eligibility is exactly whitelist membership,
+ *     even if the user is also on the blacklist
+ *   - otherwise, blacklist membership disqualifies
+ */
+export const isCampaignEligibleForAddress = (
+  campaign: Pick<RewardCampaign, 'whitelist' | 'blacklist'>,
+  userAddress: string | undefined | null,
+): boolean => {
+  if (!userAddress) return true
+  const addr = userAddress.toLowerCase()
+  if (campaign.whitelist?.length) return campaign.whitelist.includes(addr)
+  if (campaign.blacklist?.includes(addr)) return false
+  return true
+}
+
 export const rewardCampaignAprPercent = (campaign: RewardCampaign): number =>
   campaign.apr * 100
 

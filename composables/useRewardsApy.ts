@@ -1,19 +1,30 @@
+import { useAccount } from '@wagmi/vue'
 import type { RewardCampaign, VaultRewardInfo } from '@eulerxyz/euler-v2-sdk'
-import { rewardCampaignAprPercent } from '~/entities/reward-campaign'
+import { isCampaignEligibleForAddress, rewardCampaignAprPercent } from '~/entities/reward-campaign'
 
 export const useRewardsApy = () => {
   const { settings } = useUserSettings()
   const { enableMerkl, enableIncentra, enableFuul } = useDeployConfig()
   const { getVault, registryVersion } = useVaultRegistry()
+  const { address: connectedAddress } = useAccount()
+  const { spyAddress } = useSpyMode()
 
   const isEnabled = computed(() => settings.value.enableRewardsApy)
+
+  // Active address for whitelist/blacklist filtering: spy mode wins (we want
+  // to see what the spied user actually earns), otherwise the connected
+  // wallet. When neither is set the filter is a no-op — discovery surfaces
+  // keep the full "headline" APR visible to unconnected visitors.
+  const eligibilityAddress = computed(() =>
+    spyAddress.value || connectedAddress.value || undefined,
+  )
 
   // Reactive version counter — bumps when any underlying data or settings change.
   // Consumers should read `version.value` in the sync phase of watchEffect(async)
   // to ensure they re-run when reward data updates.
   const _versionCounter = ref(0)
   watch(
-    [isEnabled, registryVersion],
+    [isEnabled, registryVersion, eligibilityAddress],
     () => { _versionCounter.value++ },
   )
   const version = computed(() => _versionCounter.value)
@@ -32,8 +43,10 @@ export const useRewardsApy = () => {
 
   const getCampaignsForVault = (vaultAddress: string): RewardCampaign[] => {
     if (!isEnabled.value) return []
+    const addr = eligibilityAddress.value
     return (getVaultRewards(vaultAddress)?.campaigns ?? [])
       .filter(isCampaignProviderEnabled)
+      .filter(c => isCampaignEligibleForAddress(c, addr))
   }
 
   const isMatchingCollateral = (campaign: RewardCampaign, collateralAddress?: string): boolean =>
