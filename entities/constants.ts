@@ -93,6 +93,7 @@ export const INTEREST_RATE_MODEL_TYPE = {
   ADAPTIVE_CURVE: 2,
   KINKY: 3,
   FIXED_CYCLICAL_BINARY: 4,
+  FIXED_CYCLICAL_BINARY_MONTHLY: 5,
 } as const
 
 // EVK Vault.configFlags is a bitmask. CFG_DONT_SOCIALIZE_DEBT is the only
@@ -130,6 +131,13 @@ export const FIXED_CYCLICAL_BINARY_IRM_COMPONENTS = [
   { name: 'primaryDuration', type: 'uint256' },
   { name: 'secondaryDuration', type: 'uint256' },
   { name: 'startTimestamp', type: 'uint256' },
+] as const
+
+export const FIXED_CYCLICAL_BINARY_MONTHLY_IRM_COMPONENTS = [
+  { name: 'primaryRate', type: 'uint256' },
+  { name: 'secondaryRate', type: 'uint256' },
+  { name: 'cycleStartDay', type: 'uint256' },
+  { name: 'secondaryDays', type: 'uint256' },
 ] as const
 
 export const ORACLE_DETAILED_INFO_COMPONENTS = [
