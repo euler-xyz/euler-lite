@@ -77,16 +77,22 @@ export const useMultiplyCollateralOptions = ({
     const validCollaterals = new Set(
       liability.collaterals.filter(ltv => ltv.borrowLTV > 0).map(ltv => getAddress(ltv.address)),
     )
+    // Enumerate one entry per (vault × sub-account) so a user with savings of
+    // the same vault in multiple sub-accounts gets distinct options.
     return depositPositions.value
       .map(position => ({ position, vault: position.vault as EVault | undefined }))
       .filter(({ position, vault }) => !!vault && position.assets > 0n && validCollaterals.has(getAddress(vault.address)))
-      .map(({ position, vault }) => ({ vault: vault!, assets: position.assets }))
+      .map(({ position, vault }) => ({
+        vault: vault!,
+        assets: position.assets,
+        subAccount: position.subAccount as string,
+      }))
   })
 
   const savingItems = useReactiveMap(
     savingItemsInput,
     [rewardsVersion, intrinsicVersion],
-    async ({ vault, assets }) => ({
+    async ({ vault, assets, subAccount }) => ({
       vault,
       option: await buildCollateralOption({
         vault, type: 'saving',
@@ -94,6 +100,7 @@ export const useMultiplyCollateralOptions = ({
         priceAmount: nanoToValue(assets, vault.asset.decimals),
         apy: computeSupplyApy(vault, withIntrinsicSupplyApy, getSupplyRewardApy),
         tagContext: 'supply-source',
+        subAccount,
       }),
     } as CollateralItem),
   )

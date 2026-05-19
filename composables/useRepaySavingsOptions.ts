@@ -58,15 +58,32 @@ export const useRepaySavingsOptions = () => {
         assetAddress: vault.asset.address,
         label: getVaultProductName(vault.address) || vault.shares.name,
         vaultAddress: vault.address,
+        subAccount: position.subAccount as string,
       }
     },
   )
 
-  const getSavingsPosition = (vaultAddress: string): PortfolioSavingsPosition<VaultEntity> | undefined => {
+  /**
+   * Look up a savings position by vault + sub-account. Fail-closed when
+   * `subAccount` is omitted but the user has positions of the same vault in
+   * more than one sub-account — otherwise we'd silently default to the first
+   * match and the form would redeem from the wrong account.
+   */
+  const getSavingsPosition = (
+    vaultAddress: string,
+    subAccount?: string,
+  ): PortfolioSavingsPosition<VaultEntity> | undefined => {
     const normalized = getAddress(vaultAddress)
-    return savingsPositions.value.find(
+    const matches = savingsPositions.value.filter(
       position => getAddress(position.vault?.address || '0x0000000000000000000000000000000000000000') === normalized,
     )
+    if (matches.length === 0) return undefined
+    if (subAccount) {
+      const wantedSub = getAddress(subAccount)
+      return matches.find(p => getAddress(p.subAccount) === wantedSub)
+    }
+    // No sub-account specified: only safe to default-pick when there's exactly one match.
+    return matches.length === 1 ? matches[0] : undefined
   }
 
   return {
