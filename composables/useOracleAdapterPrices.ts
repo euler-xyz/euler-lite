@@ -6,15 +6,15 @@ import {
 } from '@eulerxyz/euler-v2-sdk'
 import { buildPythBatchItemsFromFeeds } from '~/utils/pyth'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { buildBatchItem } from '~/utils/multicall'
-import { getPublicClient } from '~/utils/public-client'
+import { buildBatchItem, evcBatchCall } from '~/utils/multicall'
 import { logWarn } from '~/utils/errorHandling'
 import { USD_ADDRESS, EUR_ADDRESS, BTC_ADDRESS, ETH_ADDRESS } from '~/entities/constants'
-import { type BatchItem, EVC_ABI, type BatchItemResult } from '~/abis/evc'
-import { encodeFunctionData, type Address, decodeFunctionResult, type Hex } from 'viem'
+import type { BatchItem, BatchItemResult } from '~/abis/evc'
+import { encodeFunctionData, type Address, decodeFunctionResult, type Hex, type PublicClient } from 'viem'
 import { erc20DecimalsAbi } from '~/abis/erc20'
 import { vaultConvertToAssetsAbi } from '~/abis/vault'
 import { priceOracleAbi } from '~/abis/oracle'
+import { getEulerSdk } from '~/composables/useEulerSdk'
 import type { ComputedRef } from 'vue'
 
 export type AdapterPriceInfo = {
@@ -90,7 +90,7 @@ const findUnknownDecimalsAddresses = (
 const fetchMissingDecimals = async (
   addresses: string[],
   evcAddress: string,
-  rpcUrl: string,
+  provider: PublicClient,
 ): Promise<Map<string, number>> => {
   const result = new Map<string, number>()
   if (!addresses.length) return result
@@ -102,60 +102,37 @@ const fetchMissingDecimals = async (
     })),
   )
 
-  const client = getPublicClient(rpcUrl)
-
+  let batchResults: BatchItemResult[]
   try {
-    const callData = encodeFunctionData({
-      abi: EVC_ABI,
-      functionName: 'batchSimulation',
-      args: [items],
-    })
-
-    const callResult = await client.call({
-      to: evcAddress as Address,
-      data: callData,
-      value: 0n,
-    })
-
-    if (!callResult.data) {
-      addresses.forEach(addr => result.set(addr.toLowerCase(), 18))
-      return result
-    }
-
-    const decoded = decodeFunctionResult({
-      abi: EVC_ABI,
-      functionName: 'batchSimulation',
-      data: callResult.data,
-    })
-
-    const batchResults = decoded[0] as unknown as BatchItemResult[]
-
-    batchResults.forEach((res, i) => {
-      if (res.success) {
-        try {
-          const decimals = decodeFunctionResult({
-            abi: erc20DecimalsAbi,
-            functionName: 'decimals',
-            data: res.result as Hex,
-          }) as number
-          result.set(addresses[i].toLowerCase(), decimals)
-        }
-        catch {
-          result.set(addresses[i].toLowerCase(), 18)
-        }
-      }
-      else {
-        // Non-ERC20 addresses (e.g. BTC/ETH placeholders) will fail
-        // decimals() calls — default to 18 so their adapters are not
-        // filtered out of price queries.
-        result.set(addresses[i].toLowerCase(), 18)
-      }
-    })
+    batchResults = await evcBatchCall(provider, evcAddress, items)
   }
   catch {
     // Batch call failed — return empty map so all adapters with
     // unknown decimals are skipped rather than mis-priced.
+    return result
   }
+
+  batchResults.forEach((res, i) => {
+    if (res.success && res.result && res.result !== '0x') {
+      try {
+        const decimals = decodeFunctionResult({
+          abi: erc20DecimalsAbi,
+          functionName: 'decimals',
+          data: res.result as Hex,
+        }) as number
+        result.set(addresses[i].toLowerCase(), decimals)
+      }
+      catch {
+        result.set(addresses[i].toLowerCase(), 18)
+      }
+    }
+    else {
+      // Non-ERC20 addresses (e.g. BTC/ETH placeholders) will fail
+      // decimals() calls — default to 18 so their adapters are not
+      // filtered out of price queries.
+      result.set(addresses[i].toLowerCase(), 18)
+    }
+  })
 
   return result
 }
@@ -253,19 +230,22 @@ export const useOracleAdapterPrices = (
   const isLoading = ref(false)
 
   const { PYTH_HERMES_URL } = useEulerConfig()
-  const { client: rpcClient, rpcUrl } = useRpcClient()
-  const { eulerCoreAddresses } = useEulerAddresses()
+  const { chainId, eulerCoreAddresses } = useEulerAddresses()
 
   const fetchPrices = async () => {
     const adapterList = adapters.value
     const evcAddress = eulerCoreAddresses.value?.evc
-    if (!adapterList.length || !evcAddress || !rpcUrl.value) {
+    if (!adapterList.length || !evcAddress || !chainId.value) {
       prices.value = new Map()
       return
     }
 
     try {
-      const client = rpcClient.value!
+      const sdk = await getEulerSdk()
+      // The SDK is linked from a workspace and ships its own viem (2.43.x), so
+      // its PublicClient is structurally similar but not identical to the app's
+      // viem (2.48.x) — cast once at the boundary.
+      const provider = sdk.providerService.getProvider(chainId.value) as unknown as PublicClient
 
       // 1. Build known decimals
       const knownDecimals = buildKnownDecimals(sourceVaults.value, collateralVaults.value)
@@ -275,14 +255,14 @@ export const useOracleAdapterPrices = (
 
       // 3. Fetch missing decimals if needed
       if (unknownAddresses.length) {
-        const fetched = await fetchMissingDecimals(unknownAddresses, evcAddress, rpcUrl.value)
+        const fetched = await fetchMissingDecimals(unknownAddresses, evcAddress, provider)
         fetched.forEach((dec, addr) => knownDecimals.set(addr, dec))
       }
 
       // 4. Build Pyth update batch items for the adapters being quoted
-      const { items: pythItems, totalFee } = await buildPythBatchItemsFromFeeds(
+      const { items: pythItems } = await buildPythBatchItemsFromFeeds(
         collectPythFeedsFromAdapters(adapterList),
-        rpcUrl.value,
+        provider,
         PYTH_HERMES_URL,
       )
 
@@ -291,30 +271,7 @@ export const useOracleAdapterPrices = (
 
       // 6. Execute single batchSimulation
       const allItems = [...pythItems, ...priceItems]
-      const batchCallData = encodeFunctionData({
-        abi: EVC_ABI,
-        functionName: 'batchSimulation',
-        args: [allItems],
-      })
-
-      const callResult = await client.call({
-        to: evcAddress as Address,
-        data: batchCallData,
-        value: totalFee,
-      })
-
-      if (!callResult.data) {
-        prices.value = new Map()
-        return
-      }
-
-      const decoded = decodeFunctionResult({
-        abi: EVC_ABI,
-        functionName: 'batchSimulation',
-        data: callResult.data,
-      })
-
-      const batchResults = decoded[0] as unknown as BatchItemResult[]
+      const batchResults = await evcBatchCall(provider, evcAddress, allItems)
 
       // 7. Decode price results (skip Pyth update results)
       const priceResults = batchResults.slice(pythItems.length)

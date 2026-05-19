@@ -1,16 +1,13 @@
 <script setup lang="ts">
-import { isSecuritizeCollateralVault, type SecuritizeCollateralVault, type EVault } from '@eulerxyz/euler-v2-sdk'
-import { collectPythFeedsFromAdapters } from '@eulerxyz/euler-v2-sdk'
+import { collectPythFeedsFromAdapters, isSecuritizeCollateralVault, type EVault, type SecuritizeCollateralVault, type TransactionPlan, type SwapQuote, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { isSecuritizeVault } from '~/utils/vault/categories'
 import { getHookDisabledWarning, getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { getAssetOraclePrice, getTokenUsdPrice } from '~/utils/sdk-prices'
-import type { TxPlan } from '~/entities/txPlan'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
-import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
@@ -68,14 +65,14 @@ const { error } = useToast()
 const reviewSupplyLabel = 'Review Supply'
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
-const { buildSupplyPlan, buildSwapAndSupplyPlan, executeTxPlan } = useEulerOperations()
+const { planDeposit, planDepositWithSwap, executePlan } = useEulerTx()
 const { getVault, getSecuritizeVault, getEscrowVault, updateVault, isEscrowLoadedOnce } = useVaults()
 const { isReady: isLabelsReady } = useEulerLabels()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
 const { isConnected, address } = useAccount()
 const { chainId } = useEulerAddresses()
 const { fetchSingleBalance } = useWallets()
-const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
+const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const vaultAddress = route.params.vault as string
 useOperationGuard([vaultAddress])
 const { name } = useEulerProductOfVault(vaultAddress)
@@ -88,7 +85,7 @@ const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const isEstimatesLoading = ref(false)
 const amount = ref('')
-const plan = ref<TxPlan | null>(null)
+const plan = ref<TransactionPlan | null>(null)
 const estimateSupplyAPY = ref(0)
 
 // Swap & deposit state
@@ -382,7 +379,7 @@ const load = async () => {
   }
 }
 
-const buildSwapSupplyPlanFromQuote = async (quote: SwapApiQuote, options: { includePermit2Call?: boolean } = {}): Promise<TxPlan> => {
+const buildSwapSupplyPlanFromQuote = async (quote: SwapQuote): Promise<TransactionPlan> => {
   if (!selectedAsset.value) {
     throw new Error('No selected asset')
   }
@@ -392,12 +389,10 @@ const buildSwapSupplyPlanFromQuote = async (quote: SwapApiQuote, options: { incl
   if (isNative && !wrappedAddress) {
     throw new Error('Wrapped native token not found')
   }
-  return buildSwapAndSupplyPlan({
-    inputTokenAddress: (wrappedAddress || selectedAsset.value.address) as Address,
-    inputAmount,
-    quote,
-    requestedSlippage: swapSlippage.value,
-    includePermit2Call: options.includePermit2Call,
+  return planDepositWithSwap({
+    swapQuote: quote,
+    amount: inputAmount,
+    tokenIn: (wrappedAddress || selectedAsset.value.address) as Address,
     wrappedNativeInfo: isNative && wrappedAddress
       ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
       : undefined,
@@ -416,23 +411,19 @@ const submit = async () => {
 
       try {
         if (needsSwap.value && swapEffectiveQuote.value) {
-          plan.value = await buildSwapSupplyPlanFromQuote(swapEffectiveQuote.value, { includePermit2Call: false })
+          plan.value = await buildSwapSupplyPlanFromQuote(swapEffectiveQuote.value)
         }
         else {
           const supplyAmount = valueToNano(amount.value || '0', asset.value.decimals)
           const wrappedAddr = isNativeWrap.value ? resolveWrappedNativeAddress(chainId.value!) : null
-          plan.value = await buildSupplyPlan(
-            vaultAddress,
-            asset.value.address,
-            supplyAmount,
-            undefined,
-            {
-              includePermit2Call: false,
-              wrappedNativeInfo: isNativeWrap.value && wrappedAddr
-                ? { wrappedTokenAddress: wrappedAddr, nativeAmount: supplyAmount }
-                : undefined,
-            },
-          )
+          plan.value = await planDeposit({
+            vaultAddress: vaultAddress as Address,
+            assetAddress: asset.value.address as Address,
+            amount: supplyAmount,
+            wrappedNativeInfo: isNativeWrap.value && wrappedAddr
+              ? { wrappedTokenAddress: wrappedAddr, nativeAmount: supplyAmount }
+              : undefined,
+          })
         }
       }
       catch (e) {
@@ -481,7 +472,7 @@ const send = async () => {
       return
     }
 
-    let txPlan: TxPlan
+    let txPlan: TransactionPlan
     if (needsSwap.value && swapSelectedQuote.value) {
       txPlan = await buildSwapSupplyPlanFromQuote(swapSelectedQuote.value)
     }
@@ -491,14 +482,16 @@ const send = async () => {
     else {
       const supplyAmount = valueToNano(amount.value || '0', asset.value.decimals)
       const wrappedAddr = isNativeWrap.value ? resolveWrappedNativeAddress(chainId.value!) : null
-      txPlan = await buildSupplyPlan(vaultAddress, asset.value.address, supplyAmount, undefined, {
-        includePermit2Call: true,
+      txPlan = await planDeposit({
+        vaultAddress: vaultAddress as Address,
+        assetAddress: asset.value.address as Address,
+        amount: supplyAmount,
         wrappedNativeInfo: isNativeWrap.value && wrappedAddr
           ? { wrappedTokenAddress: wrappedAddr, nativeAmount: supplyAmount }
           : undefined,
       })
     }
-    await executeTxPlan(txPlan)
+    await executePlan(txPlan)
 
     modal.close()
     await updateEstimates()

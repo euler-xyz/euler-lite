@@ -1,19 +1,18 @@
 import { getProjectedRates, getNetAPY } from '~/utils/vault/apy'
-import type { EVault, SecuritizeCollateralVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, SecuritizeCollateralVault, PortfolioBorrowPosition, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { getAssetUsdValue, getAssetUsdValueOrZero, getTokenUsdValue } from '~/utils/sdk-prices'
 import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
-import type { TxPlan } from '~/entities/txPlan'
 import { valueToNano } from '~/utils/crypto-utils'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { amountToPercent, percentToAmountNano } from '~/utils/repayUtils'
-import { SwapperMode } from '~/entities/swap'
+import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { createRaceGuard } from '~/utils/race-guard'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
 import { getRepaySwapReviewInputAmount } from '~/composables/repay/reviewAmount'
-import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
+import { getSwapInputAmount } from '~/utils/swapQuotes'
 import { findBlockingDisabledOp, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -32,12 +31,12 @@ interface UseWalletSwapRepayOptions {
   borrowVault: ComputedRef<EVault | undefined>
   collateralVault: ComputedRef<EVault | SecuritizeCollateralVault | undefined>
   formTab: Ref<string>
-  plan: Ref<TxPlan | null>
+  plan: Ref<TransactionPlan | null>
   isSubmitting: Ref<boolean>
   isPreparing: Ref<boolean>
   slippage: Readonly<Ref<number>>
   clearSimulationError: () => void
-  runSimulation: (plan: TxPlan) => Promise<boolean>
+  runSimulation: (plan: TransactionPlan) => Promise<boolean>
   netAPY: Ref<number>
   collateralSupplyApy: ComputedRef<number>
   borrowApy: ComputedRef<number>
@@ -68,7 +67,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
   const modal = useModal()
   const { error } = useToast()
-  const { buildSwapAndRepayPlan, executeTxPlan } = useEulerOperations()
+  const { planSwapAndRepay, executePlan } = useEulerTx()
   const { chainId } = useEulerAddresses()
   const { isConnected, address } = useAccount()
   const { fetchSingleBalance } = useWallets()
@@ -661,20 +660,12 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   })
 
   // --- Build plan ---
-  const buildRepayPlan = async (includePermit2Call: boolean): Promise<TxPlan> => {
+  const buildRepayPlan = async (): Promise<TransactionPlan> => {
     if (!position.value || !borrowVault.value || !collateralVault.value || !quotes.selectedQuote.value || !selectedAsset.value) {
       throw new Error('Missing data for swap repay plan')
     }
 
-    const currentDebt = getCurrentDebt()
     const swapMode = direction.value
-    let targetDebt = 0n
-
-    if (swapMode === SwapperMode.TARGET_DEBT && debtAmount.value) {
-      const debtAmountNano = valueToNano(debtAmount.value, borrowVault.value.asset.decimals)
-      targetDebt = debtAmountNano >= currentDebt ? 0n : currentDebt - debtAmountNano
-    }
-
     const inputAmount = getSwapInputAmount(quotes.selectedQuote.value, swapMode)
 
     const isNative = isNativeCurrencyAddress(selectedAsset.value.address)
@@ -683,19 +674,14 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       throw new Error('Wrapped native token not found')
     }
 
-    return buildSwapAndRepayPlan({
-      inputTokenAddress: (wrappedAddress || selectedAsset.value.address) as Address,
-      inputAmount,
-      quote: quotes.selectedQuote.value,
-      requestedSlippage: slippage.value,
-      borrowVaultAddress: borrowVault.value.address as Address,
-      subAccount: (position.value.subAccount || address.value || zeroAddress) as Address,
-      enabledCollaterals: position.value.collateralVaults,
-      isFullRepay: isFullRepay.value,
-      swapperMode: swapMode,
-      targetDebt,
-      currentDebt,
-      includePermit2Call,
+    return planSwapAndRepay({
+      swapQuote: quotes.selectedQuote.value,
+      amount: inputAmount,
+      tokenIn: (wrappedAddress || selectedAsset.value.address) as Address,
+      liabilityVault: borrowVault.value.address as Address,
+      repayAccount: (position.value.subAccount || address.value || zeroAddress) as Address,
+      isMax: isFullRepay.value,
+      cleanupOnMax: isFullRepay.value,
       wrappedNativeInfo: isNative && wrappedAddress
         ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
         : undefined,
@@ -712,7 +698,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     isPreparing.value = true
     try {
       try {
-        plan.value = await buildRepayPlan(false)
+        plan.value = await buildRepayPlan()
       }
       catch (e) {
         logWarn('walletSwapRepay/buildPlan', e)
@@ -766,8 +752,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       isSubmitting.value = true
       if (!position.value || !borrowVault.value || !collateralVault.value || !quotes.selectedQuote.value || !selectedAsset.value) return
 
-      const txPlan = await buildRepayPlan(true)
-      await executeTxPlan(txPlan)
+      const txPlan = await buildRepayPlan()
+      await executePlan(txPlan)
       await finalizeTxAndRedirect()
     }
     catch (e) {

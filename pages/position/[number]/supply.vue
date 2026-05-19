@@ -2,8 +2,8 @@
 import type { VaultAsset } from '~/types/asset'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatio, getTokenUsdPrice } from '~/utils/sdk-prices'
-import type { SwapApiQuote } from '~/entities/swap'
-import { SwapperMode } from '~/entities/swap'
+import type { SwapQuote, EVault } from '@eulerxyz/euler-v2-sdk'
+import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
@@ -11,7 +11,6 @@ import { useCollateralForm } from '~/composables/position/useCollateralForm'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useAccount } from '@wagmi/vue'
 import { getAddress, type Address, zeroAddress } from 'viem'
-import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { FixedPoint } from '~/utils/fixed-point'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
@@ -20,7 +19,7 @@ const positionIndex = usePositionIndex()
 const { isConnected, address } = useAccount()
 const { isSpyMode } = useSpyMode()
 const { fetchSingleBalance } = useWallets()
-const { buildSupplyPlan, buildSwapAndSupplyPlan } = useEulerOperations()
+const { planDeposit, planDepositWithSwap } = useEulerTx()
 const { chainId } = useEulerAddresses()
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
@@ -85,20 +84,23 @@ const form = useCollateralForm({
     }
   },
 
-  buildDirectPlan: async ({ vaultAddress, assetAddress, amountNano, subAccount, includePermit2Call }) => {
+  buildDirectPlan: async ({ vaultAddress, assetAddress, amountNano, subAccount }) => {
     const wrappedAddr = isNativeWrap.value ? resolveWrappedNativeAddress(chainId.value!) : null
     if (isNativeWrap.value && !wrappedAddr) {
       throw new Error('Wrapped native token not found')
     }
-    return buildSupplyPlan(vaultAddress, assetAddress, amountNano, subAccount, {
-      includePermit2Call,
+    return planDeposit({
+      vaultAddress: vaultAddress as Address,
+      assetAddress: assetAddress as Address,
+      amount: amountNano,
+      receiver: subAccount as Address,
       wrappedNativeInfo: isNativeWrap.value && wrappedAddr
         ? { wrappedTokenAddress: wrappedAddr, nativeAmount: amountNano }
         : undefined,
     })
   },
 
-  buildSwapPlan: async (quote: SwapApiQuote, { slippage, includePermit2Call }) => {
+  buildSwapPlan: async (quote: SwapQuote) => {
     if (!selectedAsset.value || !form.collateralVault.value) {
       throw new Error('No selected asset or vault')
     }
@@ -108,12 +110,10 @@ const form = useCollateralForm({
     if (isNative && !wrappedAddress) {
       throw new Error('Wrapped native token not found')
     }
-    return buildSwapAndSupplyPlan({
-      inputTokenAddress: (wrappedAddress || selectedAsset.value.address) as Address,
-      inputAmount,
-      quote,
-      requestedSlippage: slippage,
-      includePermit2Call,
+    return planDepositWithSwap({
+      swapQuote: quote,
+      amount: inputAmount,
+      tokenIn: (wrappedAddress || selectedAsset.value.address) as Address,
       wrappedNativeInfo: isNative && wrappedAddress
         ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
         : undefined,

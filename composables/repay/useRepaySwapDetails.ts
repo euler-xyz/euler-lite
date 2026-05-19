@@ -3,7 +3,7 @@ import { formatUnits } from 'viem'
 import type { Ref, ComputedRef } from 'vue'
 
 import { getAssetUsdValue } from '~/utils/sdk-prices'
-import { SwapperMode } from '~/entities/swap'
+import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { createRaceGuard } from '~/utils/race-guard'
 import type { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'

@@ -61,6 +61,7 @@ const importUseEulerSdk = async (
   vi.stubGlobal('useEulerAddresses', () => ({ allowedChainIds: chainIds }))
   vi.stubGlobal('useEnvConfig', () => ({
     v3ApiUrl: '',
+    enableV3Backend: true,
   }))
   vi.stubGlobal('useDeployConfig', () => ({
     enableMerkl: true,
@@ -162,6 +163,11 @@ describe('useEulerSdk', () => {
       v3ApiUrl: '/api/v3',
       tokenlistApiBaseUrl: '/api/v3',
       deploymentsUrl: '/api/euler-chains',
+      accountServiceAdapter: 'v3',
+      eVaultServiceAdapter: 'v3',
+      eulerEarnServiceAdapter: 'v3',
+      vaultTypeAdapter: 'v3',
+      rewardsServiceAdapter: 'v3',
     })
   })
 

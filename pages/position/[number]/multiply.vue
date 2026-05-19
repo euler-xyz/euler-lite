@@ -6,9 +6,9 @@ import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
-import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
+import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
-import type { TxPlan } from '~/entities/txPlan'
+import { isEVault, type EVault, type PortfolioBorrowPosition, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
@@ -20,7 +20,6 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { useAccount } from '@wagmi/vue'
 import { SlippageSettingsModal, OperationReviewModal } from '#components'
-import { isEVault, type EVault, type PortfolioBorrowPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { formatUnits, type Address } from 'viem'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 
@@ -31,7 +30,7 @@ const { error } = useToast()
 const { address, isConnected } = useAccount()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
-const { buildMultiplyPlan, executeTxPlan } = useEulerOperations()
+const { planMultiply, executePlan } = useEulerTx()
 const { eulerLensAddresses } = useEulerAddresses()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
@@ -39,27 +38,10 @@ const {
   runSimulation: runMultiplySimulation,
   simulationError: multiplySimulationError,
   clearSimulationError: clearMultiplySimulationError,
-} = useTxPlanSimulation()
+} = useTransactionPlanSimulation()
 const openSlippageSettings = () => {
   modal.open(SlippageSettingsModal)
 }
-
-type MultiplyPlanParamsCommon = {
-  supplyVaultAddress: string
-  supplyAssetAddress: string
-  supplyAmount: bigint
-  supplySharesAmount?: bigint
-  supplyIsSavings?: boolean
-  longVaultAddress: string
-  longAssetAddress: string
-  borrowVaultAddress: string
-  debtAmount: bigint
-  swapperMode: SwapperMode
-  subAccount: string
-}
-type MultiplyPlanParams
-  = | (MultiplyPlanParamsCommon & { quote: SwapApiQuote, requestedSlippage: number })
-    | (MultiplyPlanParamsCommon & { quote?: undefined, requestedSlippage?: never })
 
 const priceInvert = usePriceInvert(
   () => multiplyShortVault.value?.asset.symbol,
@@ -72,8 +54,7 @@ const position: Ref<PortfolioBorrowPosition<VaultEntity> | null> = ref(null)
 const isLoading = ref(false)
 const isSubmitting = ref(false)
 const isPreparing = ref(false)
-const plan = ref<TxPlan | null>(null)
-const planParams = ref<MultiplyPlanParams | null>(null)
+const plan = ref<TransactionPlan | null>(null)
 
 const multiplier = ref(1)
 const multiplyLongAmount = ref('')
@@ -597,28 +578,17 @@ const submitMultiply = async () => {
         return
       }
 
-      const baseParams: MultiplyPlanParamsCommon = {
-        supplyVaultAddress: multiplySupplyVault.value.address,
-        supplyAssetAddress: multiplySupplyVault.value.asset.address,
-        supplyAmount: 0n,
-        longVaultAddress: multiplyLongVault.value.address,
-        longAssetAddress: multiplyLongVault.value.asset.address,
-        borrowVaultAddress: multiplyShortVault.value.address,
-        debtAmount,
-        swapperMode: SwapperMode.EXACT_IN,
-        subAccount,
-      }
-      const nextPlanParams: MultiplyPlanParams = quote
-        ? { ...baseParams, quote, requestedSlippage: multiplySlippage.value }
-        : baseParams
-      planParams.value = nextPlanParams
-
       try {
-        plan.value = await buildMultiplyPlan({
-          ...nextPlanParams,
-          includePermit2Call: false,
-          enabledCollaterals: position.value ? position.value.collateralVaults : undefined,
-          enabledController: multiplyShortVault.value.address,
+        plan.value = await planMultiply({
+          collateralVault: multiplySupplyVault.value.address as Address,
+          collateralAmount: 0n,
+          collateralAsset: multiplySupplyVault.value.asset.address as Address,
+          longVault: multiplyLongVault.value.address as Address,
+          liabilityVault: multiplyShortVault.value.address as Address,
+          liabilityAmount: debtAmount,
+          receiver: subAccount as Address,
+          swapQuote: quote ?? undefined,
+          swapperMode: SwapperMode.EXACT_IN,
         })
       }
       catch (e) {
@@ -662,19 +632,12 @@ const submitMultiply = async () => {
 }
 
 const sendMultiply = async () => {
-  if (!planParams.value) {
+  if (!plan.value) {
     return
   }
   isSubmitting.value = true
   try {
-    const nextPlan = await buildMultiplyPlan({
-      ...planParams.value,
-      includePermit2Call: true,
-      enabledCollaterals: position.value ? position.value.collateralVaults : undefined,
-      enabledController: multiplyShortVault.value?.address,
-    })
-    plan.value = nextPlan
-    await executeTxPlan(nextPlan)
+    await executePlan(plan.value)
     modal.close()
     refreshAllPositions(eulerLensAddresses.value, address.value || '')
     setTimeout(() => {

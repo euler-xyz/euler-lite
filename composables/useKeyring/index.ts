@@ -310,6 +310,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
     expiration,
     policyId,
     keyringContractAddress,
+    hookTarget,
     credentialData,
     flowState,
     error,

@@ -1,7 +1,7 @@
 import { getProjectedRates, getNetAPY } from '~/utils/vault/apy'
-import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import type { Ref, ComputedRef } from 'vue'
-import type { TxPlan } from '~/entities/txPlan'
+import { maxUint256, type Address } from 'viem'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { useAccount } from '@wagmi/vue'
@@ -26,11 +26,11 @@ interface UseWalletRepayOptions {
   collateralVault: ComputedRef<EVault | SecuritizeCollateralVault | undefined>
   formTab: Ref<string>
   walletBalance: Ref<bigint>
-  plan: Ref<TxPlan | null>
+  plan: Ref<TransactionPlan | null>
   isSubmitting: Ref<boolean>
   isPreparing: Ref<boolean>
   clearSimulationError: () => void
-  runSimulation: (plan: TxPlan) => Promise<boolean>
+  runSimulation: (plan: TransactionPlan) => Promise<boolean>
   netAPY: Ref<number>
   collateralSupplyApy: ComputedRef<number>
   borrowApy: ComputedRef<number>
@@ -61,7 +61,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
 
   const modal = useModal()
   const { error } = useToast()
-  const { buildRepayPlan, buildFullRepayPlan, executeTxPlan } = useEulerOperations()
+  const { planRepayFromWallet, executePlan } = useEulerTx()
   const { isConnected } = useAccount()
   const { finalizeTxAndRedirect } = useTxFinalization()
 
@@ -140,22 +140,12 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       const shouldFullRepay = amountNano >= currentDebt || walletRepayPercent.value >= 100
 
       try {
-        plan.value = shouldFullRepay
-          ? await buildFullRepayPlan(
-              borrowVault.value.address,
-              borrowVault.value.asset.address,
-              amountNano,
-              position.value.subAccount,
-              position.value.collateralVaults,
-              { includePermit2Call: false },
-            )
-          : await buildRepayPlan(
-              borrowVault.value.address,
-              borrowVault.value.asset.address,
-              amountNano,
-              position.value.subAccount,
-              { includePermit2Call: false },
-            )
+        plan.value = await planRepayFromWallet({
+          liabilityVault: borrowVault.value.address as Address,
+          liabilityAmount: shouldFullRepay ? maxUint256 : amountNano,
+          receiver: position.value.subAccount as Address,
+          cleanupOnMax: shouldFullRepay,
+        })
       }
       catch (e) {
         logWarn('walletRepay/buildPlan', e)
@@ -195,23 +185,13 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       const amountNano = valueToNano(amount.value, borrowVault.value.asset.decimals)
       const currentDebt = position.value.borrowed || 0n
       const isFullRepay = amountNano >= currentDebt || walletRepayPercent.value >= 100
-      const txPlan = isFullRepay
-        ? await buildFullRepayPlan(
-            borrowVault.value.address,
-            borrowVault.value.asset.address,
-            amountNano,
-            position.value.subAccount,
-            position.value.collateralVaults,
-            { includePermit2Call: true },
-          )
-        : await buildRepayPlan(
-            borrowVault.value.address,
-            borrowVault.value.asset.address,
-            amountNano,
-            position.value.subAccount,
-            { includePermit2Call: true },
-          )
-      await executeTxPlan(txPlan)
+      const txPlan = await planRepayFromWallet({
+        liabilityVault: borrowVault.value.address as Address,
+        liabilityAmount: isFullRepay ? maxUint256 : amountNano,
+        receiver: position.value.subAccount as Address,
+        cleanupOnMax: isFullRepay,
+      })
+      await executePlan(txPlan)
       await finalizeTxAndRedirect()
     }
     catch (e) {

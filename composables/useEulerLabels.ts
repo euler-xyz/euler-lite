@@ -9,7 +9,7 @@ import {
   type EVault,
 } from '@eulerxyz/euler-v2-sdk'
 import { toReactive, until } from '@vueuse/core'
-import { decodeFunctionResult, encodeFunctionData, type Hex } from 'viem'
+import { decodeFunctionResult, encodeFunctionData, type Hex, type PublicClient } from 'viem'
 import { computed, ref, shallowReactive, shallowRef, unref, type Ref } from 'vue'
 import { logWarn } from '~/utils/errorHandling'
 import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
@@ -154,8 +154,11 @@ const probeWrapPairs = async (startChainId: number, generation: number) => {
     if (!config || config.chainId !== startChainId || !isCurrentProbe()) return
 
     const evcAddress = config.addresses.coreAddrs.evc
-    const { rpcUrl } = useRpcClient()
-    const startRpcUrl = rpcUrl.value
+    const sdk = await getEulerSdk()
+    // The SDK is linked from a workspace and ships its own viem (2.43.x), so
+    // its PublicClient is structurally similar but not identical to the app's
+    // viem (2.48.x) — cast once at the boundary.
+    const provider = sdk.providerService.getProvider(startChainId) as unknown as PublicClient
 
     const { useVaults } = await import('~/composables/useVaults')
     const { useVaultRegistry } = await import('~/composables/useVaultRegistry')
@@ -182,7 +185,7 @@ const probeWrapPairs = async (startChainId: number, generation: number) => {
       const chunk = candidates.slice(offset, offset + WRAP_PAIR_PROBE_BATCH_SIZE)
       let chunkResults
       try {
-        chunkResults = await evcBatchCall(evcAddress, chunk.map(addr => buildBatchItem(addr, callData)), startRpcUrl)
+        chunkResults = await evcBatchCall(provider, evcAddress, chunk.map(addr => buildBatchItem(addr, callData)))
       }
       catch (err) {
         logWarn('labels/wrap-pairs', err)

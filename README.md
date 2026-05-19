@@ -285,7 +285,7 @@ composables/
   useChainConfig.ts        # Dynamic chain derivation from env vars
   useEulerConfig.ts        # Aggregated config for Euler services
   useTokenList.ts          # Unified token list and icon resolution
-  useEulerOperations.ts    # Operation builders (deposit, borrow, etc.)
+  useEulerTx.ts            # SDK TransactionPlan builders, simulation, and execution
 entities/
   custom.ts                # Theme hue and intrinsic APY sources
   vault.ts                 # Vault types and fetching

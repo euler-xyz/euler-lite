@@ -163,6 +163,7 @@ export default defineNuxtConfig({
       appUrl: '',
       pythHermesUrl: '',
       v3ApiUrl: '',
+      enableV3Backend: '',
       swapApiUrl: '',
       sentryDsn: '', // set via NUXT_PUBLIC_SENTRY_DSN
     },

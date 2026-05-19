@@ -1,5 +1,5 @@
-import type { SwapApiQuote } from '~/entities/swap'
-import type { SwapApiRequestInput } from '~/composables/useSwapApi'
+import type { SwapQuote } from '@eulerxyz/euler-v2-sdk'
+import type { SwapQuoteInput } from '~/composables/useSwapApi'
 import {
   getQuoteAmount,
   getQuoteDiffPct,
@@ -74,7 +74,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
       : 'Quotes fetched'
   })
 
-  const getQuoteDiffPctFor = (quote: SwapApiQuote) => {
+  const getQuoteDiffPctFor = (quote: SwapQuote) => {
     const best = bestAmount.value
     const amount = getQuoteAmount(quote, options.amountField)
     return getQuoteDiffPct(amount, best, options.compare)
@@ -94,7 +94,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     isLoading.value = false
   }
 
-  const upsertQuote = (provider: string, quote: SwapApiQuote) => {
+  const upsertQuote = (provider: string, quote: SwapQuote) => {
     const next = quoteCards.value.filter(card => card.provider !== provider)
     next.push({ provider, quote })
     quoteCards.value = sortQuoteCards(next, options.amountField, options.compare)
@@ -104,7 +104,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   }
 
   const requestQuotes = async (
-    params: SwapApiRequestInput,
+    params: SwapQuoteInput,
     requestOptions: SwapQuotesRequestOptions = {},
   ) => {
     quoteError.value = null

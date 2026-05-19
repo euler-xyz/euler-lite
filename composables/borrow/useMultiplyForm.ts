@@ -1,14 +1,13 @@
-import type { EVault } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { type ProjectedRates, getProjectedRates } from '~/utils/vault/apy'
 import { getAssetUsdValue, getAssetUsdValueOrZero, getAssetOraclePrice, getCollateralOraclePrice, getCollateralShareOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
-import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
+import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
 import { calculateRoe, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
 import { computeMaxMultiplier, computeMinMultiplier, computeWeightedSupplyApy, computeLeverageDebt } from '~/utils/multiply-math'
-import type { TxPlan } from '~/entities/txPlan'
 import { getPlanHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { useMultiplyCollateralOptions } from '~/composables/useMultiplyCollateralOptions'
@@ -25,23 +24,6 @@ import type { Ref, ComputedRef } from 'vue'
 import { logWarn } from '~/utils/errorHandling'
 import { createRaceGuard } from '~/utils/race-guard'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
-
-type MultiplyPlanParamsCommon = {
-  supplyVaultAddress: string
-  supplyAssetAddress: string
-  supplyAmount: bigint
-  supplySharesAmount?: bigint
-  supplyIsSavings?: boolean
-  longVaultAddress: string
-  longAssetAddress: string
-  borrowVaultAddress: string
-  debtAmount: bigint
-  swapperMode: SwapperMode
-  subAccount: string
-}
-type MultiplyPlanParams
-  = | (MultiplyPlanParamsCommon & { quote: SwapApiQuote, requestedSlippage: number })
-    | (MultiplyPlanParamsCommon & { quote?: undefined, requestedSlippage?: never })
 
 export interface UseMultiplyFormOptions {
   pair: Ref<AnyBorrowVaultPair | undefined>
@@ -72,7 +54,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
   const modal = useModal()
   const { error } = useToast()
-  const { buildMultiplyPlan, executeTxPlan } = useEulerOperations()
+  const { planMultiply, executePlan } = useEulerTx()
   const { isConnected } = useAccount()
   const { depositPositions } = useEulerAccount()
   const { fetchSingleBalance } = useWallets()
@@ -83,7 +65,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     runSimulation: runMultiplySimulation,
     simulationError: multiplySimulationError,
     clearSimulationError: clearMultiplySimulationError,
-  } = useTxPlanSimulation()
+  } = useTransactionPlanSimulation()
 
   const multiplyPriceInvert = usePriceInvert(
     () => multiplyShortVault.value?.asset.symbol,
@@ -118,8 +100,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const isMultiplySavingCollateral = ref(false)
   const isMultiplySubmitting = ref(false)
   const isMultiplyPreparing = ref(false)
-  const multiplyPlan = ref<TxPlan | null>(null)
-  const multiplyPlanParams = ref<MultiplyPlanParams | null>(null)
+  const multiplyPlan = ref<TransactionPlan | null>(null)
 
   // --- Vault aliases ---
   const multiplyLongVault = computed(() => collateralVault.value)
@@ -759,28 +740,28 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         return
       }
 
-      const baseParams: MultiplyPlanParamsCommon = {
-        supplyVaultAddress: multiplySupplyVault.value.address,
-        supplyAssetAddress: multiplySupplyVault.value.asset.address,
-        supplyAmount: supplyAmountNano,
-        supplySharesAmount,
-        supplyIsSavings: isMultiplySavingCollateral.value,
-        longVaultAddress: multiplyLongVault.value.address,
-        longAssetAddress: multiplyLongVault.value.asset.address,
-        borrowVaultAddress: multiplyShortVault.value.address,
-        debtAmount,
-        swapperMode: SwapperMode.EXACT_IN,
-        subAccount,
-      }
-      const planParams: MultiplyPlanParams = quote
-        ? { ...baseParams, quote, requestedSlippage: multiplySlippage.value }
-        : baseParams
-      multiplyPlanParams.value = planParams
+      const collateralShareSource = isMultiplySavingCollateral.value
+        && supplySharesAmount
+        && multiplySavingPosition.value
+        ? {
+            from: multiplySavingPosition.value.subAccount as Address,
+            shares: supplySharesAmount,
+          }
+        : undefined
+      const collateralAmount = isMultiplySavingCollateral.value ? 0n : supplyAmountNano
 
       try {
-        multiplyPlan.value = await buildMultiplyPlan({
-          ...planParams,
-          includePermit2Call: false,
+        multiplyPlan.value = await planMultiply({
+          collateralVault: multiplySupplyVault.value.address as Address,
+          collateralAmount,
+          collateralAsset: multiplySupplyVault.value.asset.address as Address,
+          collateralShareSource,
+          longVault: multiplyLongVault.value.address as Address,
+          liabilityVault: multiplyShortVault.value.address as Address,
+          liabilityAmount: debtAmount,
+          receiver: subAccount as Address,
+          swapQuote: quote ?? undefined,
+          swapperMode: SwapperMode.EXACT_IN,
         })
       }
       catch (e) {
@@ -819,15 +800,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   }
 
   const sendMultiply = async () => {
-    if (!multiplyPlanParams.value) return
+    if (!multiplyPlan.value) return
     isMultiplySubmitting.value = true
     try {
-      const plan = await buildMultiplyPlan({
-        ...multiplyPlanParams.value,
-        includePermit2Call: true,
-      })
-      multiplyPlan.value = plan
-      await executeTxPlan(plan)
+      await executePlan(multiplyPlan.value)
       await finalizeTxAndRedirect()
     }
     catch (e) {

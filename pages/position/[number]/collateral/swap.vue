@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import { isSecuritizeCollateralVault, type SecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import type { SwapQuote, isSecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber, getCollateralUsdValueOrZero } from '~/utils/sdk-prices'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
-import { SwapperMode } from '~/entities/swap'
-import type { SwapApiQuote } from '~/entities/swap'
-import type { TxPlan } from '~/entities/txPlan'
+import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
@@ -20,7 +18,7 @@ const route = useRoute()
 const { isConnected, address } = useAccount()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = useEulerAccount()
-const { buildSwapPlan, buildSameAssetSwapPlan } = useEulerOperations()
+const { planCollateralChange } = useEulerTx()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { isReady: isVaultsReady } = useVaults()
@@ -124,34 +122,21 @@ const swap = useSwapPageLogic({
     }
   },
 
-  async buildPlan(): Promise<TxPlan> {
+  async buildPlan(): Promise<TransactionPlan> {
     if (!fromVault.value || !toVault.value || !position.value) throw new Error('Vaults or position not loaded')
-    if (isSameAsset.value) {
-      const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
-      return buildSameAssetSwapPlan({
-        fromVaultAddress: fromVault.value.address,
-        toVaultAddress: toVault.value.address,
-        amount,
-        isMax: isMaxSwap.value,
-        subAccount: position.value.subAccount,
-        enableCollateral: true,
-        disableCollateral: isMaxSwap.value,
-        liabilityVault: borrowVault.value?.address,
-        enabledCollaterals: position.value.collateralVaults,
-      })
-    }
-    if (!selectedQuote.value) throw new Error('No quote selected')
-    return buildSwapPlan({
-      quote: selectedQuote.value,
+    if (!isSameAsset.value && !selectedQuote.value) throw new Error('No quote selected')
+    const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
+    return planCollateralChange({
+      fromVault: fromVault.value.address as Address,
+      toVault: toVault.value.address as Address,
+      amount,
+      positionAccount: position.value.subAccount as Address,
+      toAsset: toVault.value.asset.address as Address,
+      isMax: isMaxSwap.value,
+      enableCollateralTo: true,
+      disableCollateralFrom: isMaxSwap.value,
+      swapQuote: isSameAsset.value ? undefined : selectedQuote.value!,
       swapperMode: SwapperMode.EXACT_IN,
-      isRepay: false,
-      requestedSlippage: slippage.value,
-      targetDebt: 0n,
-      currentDebt: 0n,
-      enableCollateral: true,
-      disableCollateral: isMaxSwap.value ? fromVault.value.address : undefined,
-      liabilityVault: borrowVault.value?.address,
-      enabledCollaterals: position.value.collateralVaults,
     })
   },
 
@@ -164,7 +149,7 @@ const swap = useSwapPageLogic({
     return addresses
   },
 
-  async computePriceImpact(q: SwapApiQuote) {
+  async computePriceImpact(q: SwapQuote) {
     if (!fromVault.value || !toVault.value || !borrowVault.value) return null
     const amountInUsd = await getCollateralValueUsdLocal(BigInt(q.amountIn))
     const amountOutUsd = await getAssetUsdValue(BigInt(q.amountOut), toVault.value, 'off-chain')

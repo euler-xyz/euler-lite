@@ -209,29 +209,31 @@ export const getOpMeta = (op: VaultOperation): VaultOpMeta | undefined =>
 
 // Pre-submission validation for multi-step transaction plans.
 //
-// Each build*Plan in composables/useEulerOperations/ emits an ordered list of
-// (vault, op) pairs for the vault operations it triggers. Running that list
-// through findBlockingDisabledOp lets forms surface a pointed error before the
-// user signs, instead of a cryptic on-chain revert. Keep this builder → ops
-// map in sync when adding new flows:
+// Each composable/page that submits an SDK plan declares the ordered (vault,
+// op) pairs the resulting batch will touch. Running that list through
+// findBlockingDisabledOp lets forms surface a pointed error before the user
+// signs, instead of a cryptic on-chain revert. Keep the per-flow planned-ops
+// map in sync when adding new flows. Reference mapping to SDK planners:
 //
-//   buildSupplyPlan              [{ target, OP_DEPOSIT }]
-//   buildWithdrawPlan            [{ target, OP_WITHDRAW }]
-//   buildRedeemPlan              [{ target, OP_REDEEM }]
-//   buildBorrowPlan (fresh)      [{ coll, OP_DEPOSIT }, { liab, OP_BORROW }]  (deposit goes directly to sub-account via recipient param)
-//   buildBorrowBySavingPlan      [{ coll, OP_TRANSFER }, { liab, OP_BORROW }]
-//   buildRepayPlan               [{ liab, OP_REPAY }]
-//   buildFullRepayPlan           [{ liab, OP_REPAY }, { coll, OP_TRANSFER }]
-//   buildSameAsset*Repay         [{ savings, OP_WITHDRAW }, { liab, OP_SKIM }, { liab, OP_REPAY_WITH_SHARES }]
-//   buildSavingsFullRepayPlan    [{ savings, OP_WITHDRAW }, { savings, OP_TRANSFER }, { liab, OP_REPAY_WITH_SHARES }]
-//   buildDisableCollateralPlan   [{ coll, OP_TRANSFER }]
-//   buildMultiplyPlan (fresh)    [{ coll, OP_DEPOSIT }, { liab, OP_BORROW }] (+ { long, OP_SKIM } when SkimMin verifier)
-//   buildMultiplyPlan (savings)  [{ coll, OP_TRANSFER }, { liab, OP_BORROW }] (+ { long, OP_SKIM } when SkimMin verifier)
-//   buildSameAssetSwapPlan       [{ from, OP_WITHDRAW / OP_REDEEM }, { to, OP_SKIM }]
-//   buildSwapPlan (cross-asset)  [{ from, OP_WITHDRAW }]
-//   buildWithdraw/RedeemAndSwap  [{ src, OP_WITHDRAW / OP_REDEEM }]
-//   buildSwapAndBorrowPlan       [{ liab, OP_BORROW }]
-//   buildSwapAndRepayPlan        [{ liab, OP_REPAY }]
+//   planDeposit                     [{ target, OP_DEPOSIT }]
+//   planWithdraw / planRedeem       [{ target, OP_WITHDRAW / OP_REDEEM }]
+//   planBorrow (wallet collateral)  [{ coll, OP_DEPOSIT }, { liab, OP_BORROW }]
+//   planBorrow (savings collateral) [{ coll, OP_TRANSFER }, { liab, OP_BORROW }]
+//   planRepayFromWallet             [{ liab, OP_REPAY }]  (+ { coll, OP_TRANSFER } on cleanupOnMax)
+//   planRepayFromDeposit            [{ src, OP_WITHDRAW }, { liab, OP_SKIM }, { liab, OP_REPAY_WITH_SHARES }]
+//   planRepayWithSwap               [{ src, OP_WITHDRAW }, { liab, OP_REPAY }]
+//   planTransfer (disableCollateral) [{ coll, OP_TRANSFER }]
+//   planMultiplyWithSwap (fresh)    [{ coll, OP_DEPOSIT }, { liab, OP_BORROW }, { long, OP_SKIM }]
+//   planMultiplyWithSwap (savings)  [{ coll, OP_TRANSFER }, { liab, OP_BORROW }, { long, OP_SKIM }]
+//   planMultiplySameAsset           [{ coll, OP_DEPOSIT }, { liab, OP_BORROW }]
+//   planMigrateSameAssetCollateral  [{ from, OP_WITHDRAW / OP_REDEEM }, { to, OP_SKIM }]
+//   planMigrateSameAssetDebt        [{ new, OP_BORROW }, { old, OP_SKIM }, { old, OP_REPAY_WITH_SHARES }]
+//   planSwapCollateral              [{ from, OP_WITHDRAW }]
+//   planDepositWithSwapFromWallet   [{ to, OP_DEPOSIT } via skim]
+//   planWithdrawAndSwap/RedeemAndSwap [{ src, OP_WITHDRAW / OP_REDEEM }]
+//   planSwapAndBorrowFromWallet     [{ liab, OP_BORROW }]
+//   planSwapAndRepayFromWallet      [{ liab, OP_REPAY }]
+//   planSwapDebt                    [{ new, OP_BORROW }, { old, OP_REPAY }]
 export interface PlannedOp {
   vault: EVault
   op: VaultOperation

@@ -3,8 +3,8 @@ import type { VaultAsset } from '~/types/asset'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatio } from '~/utils/sdk-prices'
-import type { SwapApiQuote } from '~/entities/swap'
-import { SwapperMode } from '~/entities/swap'
+import type { SwapQuote, EVault } from '@eulerxyz/euler-v2-sdk'
+import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
@@ -13,13 +13,13 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
 import { useAccount } from '@wagmi/vue'
 import { getAddress, type Address, zeroAddress } from 'viem'
-import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { FixedPoint } from '~/utils/fixed-point'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 
 const positionIndex = usePositionIndex()
 const { address } = useAccount()
-const { buildWithdrawPlan, buildWithdrawAndSwapPlan } = useEulerOperations()
+const { planWithdraw, planWithdrawAndSwap } = useEulerTx()
+const { account: cachedAccount } = useFreshAccount()
 const { refreshAllPositions } = useEulerAccount()
 const { eulerLensAddresses } = useEulerAddresses()
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
@@ -86,32 +86,24 @@ const form = useCollateralForm({
   },
 
   buildDirectPlan: async ({ vaultAddress, amountNano, subAccount }) => {
-    const hasBorrows = (form.position.value?.borrowed || 0n) > 0n
-    return buildWithdrawPlan(
-      vaultAddress,
-      amountNano,
-      subAccount,
-      {
-        includePythUpdate: hasBorrows,
-        liabilityVault: form.borrowVault.value?.address,
-        enabledCollaterals: form.position.value ? form.position.value.collateralVaults : undefined,
-      },
-    )
+    const owner = (subAccount ?? address.value) as Address
+    return planWithdraw({
+      vaultAddress: vaultAddress as Address,
+      assets: amountNano,
+      owner,
+      // Skip planner's freshPlanContext fetch; reuse the race-replace snapshot.
+      account: cachedAccount.value,
+    })
   },
 
-  buildSwapPlan: async (quote: SwapApiQuote, { vaultAddress, amountNano, slippage, subAccount }) => {
-    const hasBorrows = (form.position.value?.borrowed || 0n) > 0n
-    return buildWithdrawAndSwapPlan({
+  buildSwapPlan: async (quote: SwapQuote, { vaultAddress, amountNano, subAccount }) => {
+    const owner = (subAccount ?? address.value) as Address
+    return planWithdrawAndSwap({
+      swapQuote: quote,
       vaultAddress: vaultAddress as Address,
-      assetsAmount: amountNano,
-      quote,
-      requestedSlippage: slippage,
-      subAccount,
-      options: {
-        includePythUpdate: hasBorrows,
-        liabilityVault: form.borrowVault.value?.address,
-        enabledCollaterals: form.position.value ? form.position.value.collateralVaults : undefined,
-      },
+      assets: amountNano,
+      owner,
+      account: cachedAccount.value,
     })
   },
 
@@ -145,6 +137,7 @@ const form = useCollateralForm({
   onAfterSend: () => {
     refreshAllPositions(eulerLensAddresses.value, address.value as string)
   },
+  usePreparedPipeline: true,
 })
 useOperationGuard(computed(() => [form.collateralVault.value?.address, form.borrowVault.value?.address].filter(Boolean)))
 const withdrawableCollateralAssets = computed(() => cashLimitedCollateralAssets())

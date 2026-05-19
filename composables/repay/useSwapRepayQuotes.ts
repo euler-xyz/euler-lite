@@ -1,5 +1,5 @@
 import type { Ref } from 'vue'
-import { SwapperMode } from '~/entities/swap'
+import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 
 /**

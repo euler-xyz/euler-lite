@@ -1,16 +1,14 @@
 import type { VaultAsset } from '~/types/asset'
 import type { CollateralOption } from '~/types/collateral-option'
-import { isEVault, type EVault } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, type EVault, type TransactionPlan, SwapperMode, type SwapQuote } from '@eulerxyz/euler-v2-sdk'
 import { getProjectedRates, getNetAPY } from '~/utils/vault/apy'
 import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { useAccount } from '@wagmi/vue'
-import type { TxPlan } from '~/entities/txPlan'
 import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatio, getCollateralUsdPrice, getAssetUsdValueOrZero, getTokenUsdPrice } from '~/utils/sdk-prices'
 import { getAddress, formatUnits, zeroAddress, type Address } from 'viem'
-import { SwapperMode, type SwapApiQuote } from '~/entities/swap'
 import { SwapTokenSelector, OperationReviewModal } from '#components'
 import type { Ref, ComputedRef } from 'vue'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
@@ -79,7 +77,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   const modal = useModal()
   const { error } = useToast()
-  const { buildBorrowPlan, buildBorrowBySavingPlan, buildSwapAndBorrowPlan, executeTxPlan } = useEulerOperations()
+  const { planBorrow, planSwapAndBorrow, executePlan } = useEulerTx()
   const { address, isConnected } = useAccount()
   const { chainId } = useEulerAddresses()
   const { fetchSingleBalance } = useWallets()
@@ -89,7 +87,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     runSimulation: runBorrowSimulation,
     simulationError: borrowSimulationError,
     clearSimulationError: clearBorrowSimulationError,
-  } = useTxPlanSimulation()
+  } = useTransactionPlanSimulation()
 
   const borrowPriceInvert = usePriceInvert(
     () => collateralVault.value?.asset.symbol,
@@ -122,7 +120,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const isSubmitting = ref(false)
   const isPreparing = ref(false)
   const isEstimatesLoading = ref(false)
-  const plan = ref<TxPlan | null>(null)
+  const plan = ref<TransactionPlan | null>(null)
 
   // Estimates
   const health = ref<number | undefined>()
@@ -576,7 +574,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   }, 500)
 
   // --- Actions: submit & send ---
-  const buildSwapBorrowPlanFromQuote = async (quote: SwapApiQuote, planOptions: { includePermit2Call?: boolean } = {}): Promise<TxPlan> => {
+  const buildSwapBorrowPlanFromQuote = async (quote: SwapQuote): Promise<TransactionPlan> => {
     if (!borrowSelectedAsset.value || !collateralVault.value || !borrowVault.value) {
       throw new Error('Missing vault or asset data')
     }
@@ -588,16 +586,14 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     }
     const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value.shares.decimals)
     const subAccount = await resolvePendingSubAccount()
-    return buildSwapAndBorrowPlan({
-      inputTokenAddress: (wrappedAddress || borrowSelectedAsset.value.address) as Address,
-      inputAmount,
-      collateralVaultAddress: collateralVault.value.address as Address,
-      borrowVaultAddress: borrowVault.value.address as Address,
-      borrowAmount: borrowAmountNano,
+    return planSwapAndBorrow({
       swapQuote: quote,
-      requestedSlippage: borrowSwapSlippage.value,
-      subAccount,
-      includePermit2Call: planOptions.includePermit2Call,
+      amount: inputAmount,
+      tokenIn: (wrappedAddress || borrowSelectedAsset.value.address) as Address,
+      collateralVault: collateralVault.value.address as Address,
+      borrowVault: borrowVault.value.address as Address,
+      borrowAmount: borrowAmountNano,
+      borrowAccount: subAccount as Address,
       wrappedNativeInfo: isNative && wrappedAddress
         ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
         : undefined,
@@ -621,7 +617,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       // Swap & borrow path
       if (borrowNeedsSwap.value && borrowSwapEffectiveQuote.value) {
         try {
-          plan.value = await buildSwapBorrowPlanFromQuote(borrowSwapEffectiveQuote.value, { includePermit2Call: false })
+          plan.value = await buildSwapBorrowPlanFromQuote(borrowSwapEffectiveQuote.value)
         }
         catch (e) {
           logWarn('borrow/buildSwapPlan', e)
@@ -672,30 +668,32 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       }
 
       try {
+        const subAccountAddr = (await resolvePendingSubAccount()) as Address
         plan.value = isSavingCollateral.value
-          ? await buildBorrowBySavingPlan(
-              collateralVault.value.address,
-              collateralAmountForPlan,
-              borrowVault.value.address,
-              borrowAmountNano,
-              undefined,
-              undefined,
-              savingCollateral.value?.subAccount,
-            )
-          : await buildBorrowPlan(
-              collateralVault.value.address,
-              collateralVault.value.asset.address,
-              collateralAmountForPlan,
-              borrowVault.value.address,
-              borrowAmountNano,
-              undefined,
-              {
-                includePermit2Call: false,
+          ? await planBorrow({
+              vaultAddress: borrowVault.value.address as Address,
+              amount: borrowAmountNano,
+              borrowAccount: subAccountAddr,
+              collateral: {
+                vault: collateralVault.value.address as Address,
+                amount: collateralAmountForPlan,
+                source: 'savings',
+                from: savingCollateral.value?.subAccount as Address,
+              },
+            })
+          : await planBorrow({
+              vaultAddress: borrowVault.value.address as Address,
+              amount: borrowAmountNano,
+              borrowAccount: subAccountAddr,
+              collateral: {
+                vault: collateralVault.value.address as Address,
+                asset: collateralVault.value.asset.address as Address,
+                amount: collateralAmountForPlan,
                 wrappedNativeInfo: isBorrowNativeWrap.value
                   ? { wrappedTokenAddress: resolveWrappedNativeAddress(chainId.value!)!, nativeAmount: collateralAmountForPlan }
                   : undefined,
               },
-            )
+            })
       }
       catch (e) {
         logWarn('borrow/buildPlan', e)
@@ -736,7 +734,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         return
       }
 
-      let txPlan: TxPlan
+      let txPlan: TransactionPlan
 
       // Swap & borrow path
       if (borrowNeedsSwap.value) {
@@ -759,32 +757,34 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
           }
         }
         const borrowAmountNano = borrowAmountFixed.value.toFormat({ decimals: Number(borrowVault.value.shares.decimals) }).value
+        const subAccountAddr = (await resolvePendingSubAccount()) as Address
         txPlan = isSavingCollateral.value
-          ? await buildBorrowBySavingPlan(
-              collateralVault.value.address,
-              collateralAmountForPlan,
-              borrowVault.value.address,
-              borrowAmountNano,
-              undefined,
-              undefined,
-              savingCollateral.value?.subAccount,
-            )
-          : await buildBorrowPlan(
-              collateralVault.value.address,
-              collateralVault.value.asset.address,
-              collateralAmountForPlan,
-              borrowVault.value.address,
-              borrowAmountNano,
-              undefined,
-              {
-                includePermit2Call: true,
+          ? await planBorrow({
+              vaultAddress: borrowVault.value.address as Address,
+              amount: borrowAmountNano,
+              borrowAccount: subAccountAddr,
+              collateral: {
+                vault: collateralVault.value.address as Address,
+                amount: collateralAmountForPlan,
+                source: 'savings',
+                from: savingCollateral.value?.subAccount as Address,
+              },
+            })
+          : await planBorrow({
+              vaultAddress: borrowVault.value.address as Address,
+              amount: borrowAmountNano,
+              borrowAccount: subAccountAddr,
+              collateral: {
+                vault: collateralVault.value.address as Address,
+                asset: collateralVault.value.asset.address as Address,
+                amount: collateralAmountForPlan,
                 wrappedNativeInfo: isBorrowNativeWrap.value
                   ? { wrappedTokenAddress: resolveWrappedNativeAddress(chainId.value!)!, nativeAmount: collateralAmountForPlan }
                   : undefined,
               },
-            )
+            })
       }
-      await executeTxPlan(txPlan)
+      await executePlan(txPlan)
       await finalizeTxAndRedirect()
     }
     catch (e) {

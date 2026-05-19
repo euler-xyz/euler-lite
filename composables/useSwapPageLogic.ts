@@ -1,18 +1,16 @@
-import type { SecuritizeCollateralVault, EVault } from '@eulerxyz/euler-v2-sdk'
+import type { SecuritizeCollateralVault, EVault, TransactionPlan, SwapQuote, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, formatUnits } from 'viem'
 import { useAccount } from '@wagmi/vue'
 import { logWarn } from '~/utils/errorHandling'
 import { OperationReviewModal, SlippageSettingsModal } from '#components'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
-import type { SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, getVaultTags } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { getQuoteAmount, type SwapQuoteAmountField, type SwapQuoteCompare } from '~/utils/swapQuotes'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
-import type { SwapApiRequestInput } from '~/composables/useSwapApi'
-import type { TxPlan } from '~/entities/txPlan'
+import type { SwapQuoteInput } from '~/composables/useSwapApi'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { isSameUnderlyingAsset, isSameVault as isSameVaultCheck } from '~/utils/vault-utils'
@@ -40,9 +38,9 @@ export interface UseSwapPageLogicOptions {
    * Build the swap-API params for a given input amount.
    * Return `null` to skip the request (e.g. amount exceeds debt).
    */
-  buildQuoteRequest: (amount: bigint) => { params: SwapApiRequestInput } | null
-  /** Build the TxPlan for the current swap (same-asset or quote-based). Must throw on failure. */
-  buildPlan: () => Promise<TxPlan>
+  buildQuoteRequest: (amount: bigint) => { params: SwapQuoteInput } | null
+  /** Build the TransactionPlan for the current swap (same-asset or quote-based). Must throw on failure. */
+  buildPlan: () => Promise<TransactionPlan>
   /** Page-specific balance validation error. Receives the parsed nano amount. */
   getBalanceError: (amountNano: bigint) => string | null
   /** Vault addresses to check for geo-blocking */
@@ -55,7 +53,7 @@ export interface UseSwapPageLogicOptions {
   /** Extra error computeds that block submission (e.g. healthError for borrow) */
   additionalErrors?: ComputedRef<string | null>[]
   /** Custom USD-value computation for price impact (collateral page uses oracle perspective) */
-  computePriceImpact?: (quote: SwapApiQuote) => Promise<number | null>
+  computePriceImpact?: (quote: SwapQuote) => Promise<number | null>
   /** Modal type when from/to share the same underlying asset. Default 'transfer'; borrow uses 'swap'. */
   sameAssetModalType?: 'transfer' | 'swap'
   /** Mode the page quotes its swap in. Drives the review-modal "Swap to repay" relabel
@@ -93,16 +91,16 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const router = useRouter()
   const route = useRoute()
   const { isConnected } = useAccount()
-  const { executeTxPlan } = useEulerOperations()
+  const { executePlan } = useEulerTx()
   const modal = useModal()
   const { error: showError } = useToast()
-  const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
+  const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 
   // ── State ──────────────────────────────────────────────────────────────
   const isLoading = ref(false)
   const isSubmitting = ref(false)
   const isPreparing = ref(false)
-  const plan = ref<TxPlan | null>(null)
+  const plan = ref<TransactionPlan | null>(null)
   const fromAmount = ref('')
   const toAmount = ref('')
   const { slippage } = useSlippage({
@@ -493,7 +491,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     isSubmitting.value = true
     try {
       const txPlan = await buildPlan()
-      await executeTxPlan(txPlan)
+      await executePlan(txPlan)
       modal.close()
       setTimeout(() => {
         router.replace({ path: redirectPath, query: { network: route.query.network } })

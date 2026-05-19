@@ -4,8 +4,8 @@ import type { Address } from 'viem'
 import { useKeyring, KeyringFlowState } from '~/composables/useKeyring'
 import { useTosGuard } from '~/composables/guards/useTosGuard'
 import { useUnverifiedVaultGuard } from '~/composables/guards/useUnverifiedVaultGuard'
-import { registerOperationGuard, unregisterOperationGuard, registerOperationBlocker, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
-import { injectKeyringCredential } from '~/utils/keyring-injection'
+import { clearOperationMeta, registerOperationBlocker, setOperationMeta, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
+import { clearSdkKeyringCredential, setSdkKeyringCredential } from '~/utils/sdk-keyring'
 import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
 
 export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | (string | undefined)[]) => {
@@ -48,23 +48,40 @@ export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | 
     cancelVerification: keyring.cancelVerification,
   }))
 
-  // Register/unregister the plan transformer in the guard registry
+  // Publish verified credentials to the SDK keyring plugin store. The SDK
+  // injects createCredential calls during plan construction; Lite no longer
+  // mutates plans for keyring.
   watch(
-    [() => keyring.credentialData.value, () => keyring.keyringContractAddress.value, userAddress],
-    () => {
+    [() => keyring.credentialData.value, () => keyring.hookTarget.value, () => keyring.policyId.value, userAddress],
+    (_next, previous) => {
+      const [prevCred, prevHookTarget, prevPolicyId, prevUser] = previous ?? []
+      if (prevCred && prevHookTarget && prevPolicyId !== undefined && prevUser && chainId.value) {
+        clearSdkKeyringCredential({
+          chainId: chainId.value,
+          account: prevUser as Address,
+          hookTarget: prevHookTarget as Address,
+          policyId: prevPolicyId as number,
+        })
+        clearOperationMeta('keyring')
+      }
+
       const cred = keyring.credentialData.value
-      const kca = keyring.keyringContractAddress.value
+      const hookTarget = keyring.hookTarget.value
+      const policyId = keyring.policyId.value
       const user = userAddress.value
 
-      if (cred && kca && user) {
-        registerOperationGuard(
-          'keyring',
-          plan => injectKeyringCredential(plan, kca, cred, user as Address),
-          { credentialCost: cred.cost, chainId: chainId.value, priority: 10 },
-        )
-      }
-      else {
-        unregisterOperationGuard('keyring')
+      if (cred && hookTarget && policyId !== undefined && user && chainId.value) {
+        setSdkKeyringCredential({
+          chainId: chainId.value,
+          account: user as Address,
+          hookTarget,
+          policyId,
+          credential: cred,
+        })
+        setOperationMeta('keyring', {
+          credentialCost: Number(cred.cost),
+          chainId: chainId.value,
+        })
       }
     },
     { immediate: true },
@@ -85,7 +102,7 @@ export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | 
   )
 
   onUnmounted(() => {
-    unregisterOperationGuard('keyring')
+    clearOperationMeta('keyring')
     unregisterOperationBlocker('keyring')
   })
 }

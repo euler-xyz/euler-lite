@@ -1,19 +1,25 @@
-import { type Hex, type Address, encodeFunctionData, zeroAddress, type Abi, decodeFunctionResult } from 'viem'
+import { type Hex, type Address, encodeFunctionData, zeroAddress, type Abi, decodeFunctionResult, type PublicClient } from 'viem'
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
-import { collectPythFeedsFromAdapters } from '@eulerxyz/euler-v2-sdk'
+import { collectPythFeedsFromAdapters, PythPluginAdapter } from '@eulerxyz/euler-v2-sdk'
 import { PYTH_ABI } from '~/abis/pyth'
 import { DEFAULT_PRICE_CACHE_TTL_MS } from '~/entities/constants'
 import { CACHE_TTL_15S_MS, BATCH_DELAY_COLLECT_MS } from '~/entities/tuning-constants'
 import type { PythFeed } from '~/entities/oracle'
 import type { BatchItem } from '~/abis/evc'
-import type { EVCCall } from './evc-converter'
 
-import { getPublicClient } from '~/utils/public-client'
 import { evcBatchCall } from '~/utils/multicall'
+import { sdkBuildQuery } from '~/utils/sdk-query-cache'
 import { logger } from '~/utils/logger'
 
 const normalizeHex = (value: string): Hex => (value.startsWith('0x') ? value as Hex : (`0x${value}` as Hex))
 const normalizeFeedId = (value: string): Hex => normalizeHex(value).toLowerCase() as Hex
+
+// Module-level SDK Pyth adapter used for on-chain getUpdateFee reads. The Hermes
+// URL is irrelevant here — we keep the local /api/pyth/updates proxy fetch
+// (see fetchPythUpdateDataDirect) for CORS, so this constructor argument is
+// only a placeholder. We pass the SDK build-query so reads go through the
+// shared cache/logging pipeline.
+const pythAdapter = new PythPluginAdapter('https://hermes.pyth.network', sdkBuildQuery)
 
 type CachedPrice = {
   price: bigint
@@ -253,74 +259,6 @@ export const fetchPythUpdateData = async (feedIds: Hex[], endpoint?: string): Pr
   })
 }
 
-export const buildPythUpdateCallsFromFeeds = async (
-  feeds: PythFeed[],
-  providerUrl: string,
-  hermesEndpoint: string | undefined,
-  sender: Address,
-): Promise<{ calls: EVCCall[], totalFee: bigint }> => {
-  if (!feeds.length || !hermesEndpoint) {
-    return { calls: [], totalFee: 0n }
-  }
-
-  const grouped = new Map<string, { pythAddress: Address, feedIds: Set<Hex> }>()
-  feeds.forEach((feed) => {
-    const key = feed.pythAddress.toLowerCase()
-    if (!grouped.has(key)) {
-      grouped.set(key, { pythAddress: feed.pythAddress, feedIds: new Set() })
-    }
-    grouped.get(key)?.feedIds.add(feed.feedId)
-  })
-
-  const client = getPublicClient(providerUrl)
-  const calls: EVCCall[] = []
-  let totalFee = 0n
-
-  for (const [, { pythAddress, feedIds: feedSet }] of grouped.entries()) {
-    const updateData = await fetchPythUpdateData([...feedSet], hermesEndpoint)
-    if (!updateData.length) continue
-
-    let fee = 0n
-    try {
-      fee = await client.readContract({
-        address: pythAddress,
-        abi: PYTH_ABI,
-        functionName: 'getUpdateFee',
-        args: [updateData],
-      }) as bigint
-    }
-    catch (err) {
-      logger.warn({ ctx: 'pyth/buildPythUpdateCalls', err }, 'getUpdateFee failed')
-      continue
-    }
-
-    calls.push({
-      targetContract: pythAddress,
-      onBehalfOfAccount: sender,
-      value: fee,
-      data: encodeFunctionData({
-        abi: PYTH_ABI,
-        functionName: 'updatePriceFeeds',
-        args: [updateData],
-      }) as Hex,
-    })
-
-    totalFee += fee
-  }
-
-  return { calls, totalFee }
-}
-
-export const buildPythUpdateCalls = async (
-  vaults: (EVault | undefined)[],
-  providerUrl: string,
-  hermesEndpoint: string | undefined,
-  sender: Address,
-): Promise<{ calls: EVCCall[], totalFee: bigint }> => {
-  const feeds = collectPythFeedsFromVaults(vaults)
-  return buildPythUpdateCallsFromFeeds(feeds, providerUrl, hermesEndpoint, sender)
-}
-
 export const fetchPythPrices = async (
   feedIds: Hex[],
   hermesEndpoint?: string,
@@ -379,72 +317,22 @@ export const fetchPythPrices = async (
   return prices
 }
 
-export const sumCallValues = (calls: EVCCall[]): bigint => calls.reduce((acc, call) => acc + (call.value || 0n), 0n)
-
 /**
  * Build batch items for Pyth updates.
  * Reusable for both vault fetching AND account lens fetching via batchSimulation.
  *
  * @param vaults - Array of vaults to collect Pyth feeds from
- * @param providerUrl - JSON-RPC provider URL
+ * @param provider - viem PublicClient (typically sourced from sdk.providerService)
  * @param hermesEndpoint - Pyth Hermes endpoint URL
  * @returns BatchItem array for Pyth updates and total fee required
  */
 export const buildPythBatchItems = async (
   vaults: (EVault | undefined)[],
-  providerUrl: string,
+  provider: PublicClient,
   hermesEndpoint: string | undefined,
 ): Promise<{ items: BatchItem[], totalFee: bigint }> => {
   const feeds = collectPythFeedsFromVaults(vaults)
-  if (!feeds.length || !hermesEndpoint) {
-    return { items: [], totalFee: 0n }
-  }
-
-  const grouped = new Map<Address, Set<Hex>>()
-  feeds.forEach((feed) => {
-    const key = feed.pythAddress
-    if (!grouped.has(key)) {
-      grouped.set(key, new Set())
-    }
-    grouped.get(key)?.add(feed.feedId)
-  })
-
-  const client = getPublicClient(providerUrl)
-  const items: BatchItem[] = []
-  let totalFee = 0n
-
-  for (const [pythAddress, feedSet] of grouped.entries()) {
-    const updateData = await fetchPythUpdateData([...feedSet], hermesEndpoint)
-    if (!updateData.length) continue
-
-    let fee = 0n
-    try {
-      fee = await client.readContract({
-        address: pythAddress,
-        abi: PYTH_ABI,
-        functionName: 'getUpdateFee',
-        args: [updateData],
-      }) as bigint
-    }
-    catch (err) {
-      logger.warn({ ctx: 'pyth/buildPythBatchItems', err }, 'getUpdateFee failed')
-      continue
-    }
-
-    items.push({
-      targetContract: pythAddress,
-      onBehalfOfAccount: zeroAddress,
-      value: fee,
-      data: encodeFunctionData({
-        abi: PYTH_ABI,
-        functionName: 'updatePriceFeeds',
-        args: [updateData],
-      }),
-    })
-    totalFee += fee
-  }
-
-  return { items, totalFee }
+  return buildPythBatchItemsFromFeeds(feeds, provider, hermesEndpoint)
 }
 
 /**
@@ -452,13 +340,13 @@ export const buildPythBatchItems = async (
  * Use when you've already collected feeds from multiple sources (e.g., liability + all collaterals).
  *
  * @param feeds - Array of PythFeed objects
- * @param providerUrl - JSON-RPC provider URL
+ * @param provider - viem PublicClient (typically sourced from sdk.providerService)
  * @param hermesEndpoint - Pyth Hermes endpoint URL
  * @returns BatchItem array for Pyth updates and total fee required
  */
 export const buildPythBatchItemsFromFeeds = async (
   feeds: PythFeed[],
-  providerUrl: string,
+  provider: PublicClient,
   hermesEndpoint: string | undefined,
 ): Promise<{ items: BatchItem[], totalFee: bigint }> => {
   if (!feeds.length || !hermesEndpoint) {
@@ -474,7 +362,6 @@ export const buildPythBatchItemsFromFeeds = async (
     grouped.get(key)?.add(feed.feedId)
   })
 
-  const client = getPublicClient(providerUrl)
   const items: BatchItem[] = []
   let totalFee = 0n
 
@@ -484,12 +371,14 @@ export const buildPythBatchItemsFromFeeds = async (
 
     let fee = 0n
     try {
-      fee = await client.readContract({
-        address: pythAddress,
-        abi: PYTH_ABI,
-        functionName: 'getUpdateFee',
-        args: [updateData],
-      }) as bigint
+      // The SDK is linked from a workspace and ships its own viem (2.43.x), so
+      // its PublicClient is structurally similar but not identical to the app's
+      // viem (2.48.x) — cast at the SDK boundary.
+      fee = await pythAdapter.queryPythUpdateFee(
+        provider as unknown as Parameters<typeof pythAdapter.queryPythUpdateFee>[0],
+        pythAddress,
+        updateData,
+      )
     }
     catch (err) {
       logger.warn({ ctx: 'pyth/buildPythBatchItemsFromFeeds', err }, 'getUpdateFee failed')
@@ -526,7 +415,7 @@ export const buildPythBatchItemsFromFeeds = async (
  * @param lensMethod - Method name to call on the lens
  * @param lensArgs - Arguments for the lens method
  * @param evcAddress - EVC contract address
- * @param providerUrl - Provider URL for Pyth batch building and RPC calls
+ * @param provider - viem PublicClient for Pyth fee reads and the batchSimulation eth_call
  * @param hermesEndpoint - Pyth Hermes endpoint
  * @returns Decoded lens result, or undefined if simulation fails
  */
@@ -537,13 +426,13 @@ export const executeLensWithPythSimulation = async <T>(
   lensMethod: string,
   lensArgs: unknown[],
   evcAddress: string,
-  providerUrl: string,
+  provider: PublicClient,
   hermesEndpoint: string,
 ): Promise<T | undefined> => {
   try {
     const { items: pythItems } = await buildPythBatchItemsFromFeeds(
       feeds,
-      providerUrl,
+      provider,
       hermesEndpoint,
     )
 
@@ -560,7 +449,7 @@ export const executeLensWithPythSimulation = async <T>(
 
     const batchItems = [...pythItems, lensBatchItem]
 
-    const batchResults = await evcBatchCall(evcAddress, batchItems, providerUrl)
+    const batchResults = await evcBatchCall(provider, evcAddress, batchItems)
 
     const lensResult = batchResults[batchResults.length - 1]
     if (!lensResult?.success) {
@@ -588,7 +477,7 @@ export const executeLensWithPythSimulation = async <T>(
  * @param lensAbi - ABI of the lens contract
  * @param lensMethod - Method name to call on the lens (e.g. 'getVaultInfoFull')
  * @param evcAddress - EVC contract address
- * @param providerUrl - Provider URL for Pyth batch building and RPC calls
+ * @param provider - viem PublicClient for Pyth fee reads and the batchSimulation eth_call
  * @param hermesEndpoint - Pyth Hermes endpoint
  * @param batchSize - Max lens calls per batchSimulation (default 25)
  * @returns Map of key → decoded result (undefined for failed entries)
@@ -599,7 +488,7 @@ export const executeBatchLensWithPythSimulation = async <T>(
   lensAbi: Abi | readonly unknown[],
   lensMethod: string,
   evcAddress: string,
-  providerUrl: string,
+  provider: PublicClient,
   hermesEndpoint: string,
   batchSize = 25,
 ): Promise<Map<string, T | undefined>> => {
@@ -624,7 +513,7 @@ export const executeBatchLensWithPythSimulation = async <T>(
     // Build Pyth update items once (shared across all sub-batches)
     const { items: pythItems } = await buildPythBatchItemsFromFeeds(
       [...uniqueFeeds.values()],
-      providerUrl,
+      provider,
       hermesEndpoint,
     )
 
@@ -653,7 +542,7 @@ export const executeBatchLensWithPythSimulation = async <T>(
       chunks.map(async (chunk) => {
         const batchItems = [...pythItems, ...chunk.map(c => c.item)]
 
-        const batchResults = await evcBatchCall(evcAddress, batchItems, providerUrl)
+        const batchResults = await evcBatchCall(provider, evcAddress, batchItems)
 
         return chunk.map((entry, i) => {
           const lensResult = batchResults[pythItems.length + i]

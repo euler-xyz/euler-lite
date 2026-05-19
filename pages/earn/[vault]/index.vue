@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
-import type { TxPlan } from '~/entities/txPlan'
+import type { TransactionPlan, EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
@@ -11,19 +11,39 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { useAccount } from '@wagmi/vue'
-import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import type { Address } from 'viem'
+import { getTxErrorMessage } from '~/utils/tx-errors'
 import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultSupplyApyModal } from '#components'
 
 const router = useRouter()
 const route = useRoute()
 const modal = useModal()
 const { error } = useToast()
-const { buildSupplyPlan, executeTxPlan } = useEulerOperations()
+const { planDeposit, simulatePlan, executePlan } = useEulerTx()
 const { getEarnVault, updateEarnVault } = useVaults()
 const { isReady: isLabelsReady } = useEulerLabels()
 const { isConnected, address } = useAccount()
 const { fetchSingleBalance } = useWallets()
-const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
+const simulationError = ref('')
+const isSimulating = ref(false)
+const clearSimulationError = () => {
+  simulationError.value = ''
+}
+const runSimulation = async (p: TransactionPlan) => {
+  clearSimulationError()
+  isSimulating.value = true
+  try {
+    await simulatePlan(p)
+    return true
+  }
+  catch (e) {
+    simulationError.value = await getTxErrorMessage(e)
+    return false
+  }
+  finally {
+    isSimulating.value = false
+  }
+}
 const vaultAddress = route.params.vault as string
 useOperationGuard([vaultAddress])
 const { name } = useEulerProductOfVault(vaultAddress)
@@ -35,7 +55,7 @@ const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const isEstimatesLoading = ref(false)
 const amount = ref('')
-const plan = ref<TxPlan | null>(null)
+const plan = ref<TransactionPlan | null>(null)
 const vault: Ref<EulerEarn | undefined> = ref(undefined)
 const asset: Ref<VaultAsset | undefined> = ref(undefined)
 const estimateSupplyAPY = ref(0)
@@ -119,13 +139,11 @@ const submit = async () => {
     }
 
     try {
-      plan.value = await buildSupplyPlan(
-        vaultAddress,
-        asset.value.address,
-        valueToNano(amount.value || '0', asset.value.decimals),
-        undefined,
-        { includePermit2Call: false },
-      )
+      plan.value = await planDeposit({
+        vaultAddress: vaultAddress as Address,
+        assetAddress: asset.value.address as Address,
+        amount: valueToNano(amount.value || '0', asset.value.decimals),
+      })
     }
     catch (e) {
       console.warn('[OperationReviewModal] failed to build plan', e)
@@ -162,8 +180,12 @@ const send = async () => {
     if (!asset.value?.address) {
       return
     }
-    const txPlan = await buildSupplyPlan(vaultAddress, asset.value.address, valueToNano(amount.value || '0', asset.value.decimals), undefined, { includePermit2Call: true })
-    await executeTxPlan(txPlan)
+    const txPlan = plan.value ?? await planDeposit({
+      vaultAddress: vaultAddress as Address,
+      assetAddress: asset.value.address as Address,
+      amount: valueToNano(amount.value || '0', asset.value.decimals),
+    })
+    await executePlan(txPlan)
 
     modal.close()
     await updateEstimates()

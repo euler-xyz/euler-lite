@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
-import type { TxPlan } from '~/entities/txPlan'
+import type { TransactionPlan, EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { formatNumber, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
@@ -9,7 +9,6 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { useAccount } from '@wagmi/vue'
-import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { getSubAccountAddress } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 import { OperationReviewModal } from '#components'
@@ -20,13 +19,13 @@ const router = useRouter()
 const route = useRoute()
 const modal = useModal()
 const { error } = useToast()
-const { buildWithdrawPlan, buildRedeemPlan, executeTxPlan } = useEulerOperations()
+const { planWithdrawOrRedeem, executePlan } = useEulerTx()
 const { getEarnVault } = useVaults()
 const { isConnected, address } = useAccount()
 const { isSpyMode, spyAddress } = useSpyMode()
 const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const { fetchVaultShareBalance } = useWallets()
-const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
+const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const { getSupplyRewardApy } = useRewardsApy()
 const vaultAddress = route.params.vault as string
 useOperationGuard([vaultAddress])
@@ -42,7 +41,7 @@ const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const isEstimatesLoading = ref(false)
 const amount = ref('')
-const plan = ref<TxPlan | null>(null)
+const plan = ref<TransactionPlan | null>(null)
 const vault: Ref<EulerEarn | undefined> = ref()
 const asset: Ref<VaultAsset | undefined> = ref()
 const assetsBalance = ref(0n)
@@ -139,9 +138,13 @@ const submit = async () => {
     const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
 
     try {
-      plan.value = isMax
-        ? await buildRedeemPlan(vaultAddress, amountFixed.value.value, sharesBalance.value, isMax, subAccount.value)
-        : await buildWithdrawPlan(vaultAddress, amountFixed.value.value, subAccount.value)
+      plan.value = await planWithdrawOrRedeem({
+        vaultAddress: vaultAddress as `0x${string}`,
+        owner: (subAccount.value ?? effectiveAddress.value!) as `0x${string}`,
+        isMax,
+        shares: sharesBalance.value,
+        assets: amountFixed.value.value,
+      })
     }
     catch (e) {
       console.warn('[OperationReviewModal] failed to build plan', e)
@@ -180,11 +183,8 @@ const send = async () => {
       return
     }
 
-    const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
-    const txPlan = isMax
-      ? await buildRedeemPlan(vaultAddress, amountFixed.value.value, sharesBalance.value, isMax, subAccount.value)
-      : await buildWithdrawPlan(vaultAddress, amountFixed.value.value, subAccount.value)
-    await executeTxPlan(txPlan)
+    if (!plan.value) return
+    await executePlan(plan.value)
 
     modal.close()
     setTimeout(() => {

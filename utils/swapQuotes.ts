@@ -1,4 +1,4 @@
-import type { SwapApiQuote } from '~/entities/swap'
+import { SwapperMode, type SwapQuote } from '@eulerxyz/euler-v2-sdk'
 import { BPS_BASE } from '~/entities/tuning-constants'
 
 export type SwapQuoteAmountField = 'amountIn' | 'amountOut'
@@ -6,7 +6,7 @@ export type SwapQuoteCompare = 'max' | 'min'
 
 export type SwapQuoteCard = {
   provider: string
-  quote: SwapApiQuote
+  quote: SwapQuote
 }
 
 const parseBigInt = (value?: string | number | bigint | null) => {
@@ -19,13 +19,20 @@ const parseBigInt = (value?: string | number | bigint | null) => {
 }
 
 export const getQuoteAmount = (
-  quote: SwapApiQuote | null | undefined,
+  quote: SwapQuote | null | undefined,
   field: SwapQuoteAmountField,
 ) => {
   if (!quote) {
     return 0n
   }
   return parseBigInt(quote[field])
+}
+
+export const getSwapInputAmount = (quote: SwapQuote, swapperMode: SwapperMode) => {
+  const amountIn = parseBigInt(quote.amountIn)
+  const amountInMax = parseBigInt(quote.amountInMax)
+  if (swapperMode === SwapperMode.EXACT_IN) return amountIn
+  return amountInMax > 0n ? amountInMax : amountIn
 }
 
 export const sortQuoteCards = (
@@ -47,11 +54,11 @@ export const sortQuoteCards = (
 }
 
 export const pickBestQuote = (
-  quotes: SwapApiQuote[],
+  quotes: SwapQuote[],
   field: SwapQuoteAmountField,
   compare: SwapQuoteCompare,
 ) => {
-  return quotes.reduce<SwapApiQuote | null>((current, quote) => {
+  return quotes.reduce<SwapQuote | null>((current, quote) => {
     if (!current) {
       return quote
     }

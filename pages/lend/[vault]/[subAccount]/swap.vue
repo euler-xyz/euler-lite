@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import type { SecuritizeCollateralVault, EVault } from '@eulerxyz/euler-v2-sdk'
-import { getSubAccountAddress } from '@eulerxyz/euler-v2-sdk'
+import type { SecuritizeCollateralVault, EVault, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { getSubAccountAddress, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { isSecuritizeVault } from '~/utils/vault/categories'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
-import { SwapperMode } from '~/entities/swap'
-import type { TxPlan } from '~/entities/txPlan'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
@@ -19,7 +17,7 @@ const route = useRoute()
 const { getVault, getSecuritizeVault } = useVaults()
 const { address } = useAccount()
 const { depositPositions } = useEulerAccount()
-const { buildSwapPlan, buildSameAssetSwapPlan } = useEulerOperations()
+const { planCollateralChange } = useEulerTx()
 const { withIntrinsicSupplyApy } = useIntrinsicApy()
 const { getSupplyRewardApy } = useRewardsApy()
 
@@ -110,27 +108,21 @@ const swap = useSwapPageLogic({
     }
   },
 
-  async buildPlan(): Promise<TxPlan> {
-    if (isSameAsset.value) {
-      if (!fromVault.value || !toVault.value) throw new Error('Vaults not loaded')
-      const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
-      const isMax = assetsBalance.value > 0n && amount >= assetsBalance.value
-      return buildSameAssetSwapPlan({
-        fromVaultAddress: fromVault.value.address,
-        toVaultAddress: toVault.value.address,
-        amount,
-        isMax,
-        maxShares: isMax ? savingPosition.value?.shares : undefined,
-      })
-    }
-    if (!selectedQuote.value) throw new Error('No quote selected')
-    return buildSwapPlan({
-      quote: selectedQuote.value,
+  async buildPlan(): Promise<TransactionPlan> {
+    if (!fromVault.value || !toVault.value) throw new Error('Vaults not loaded')
+    const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
+    const isMax = assetsBalance.value > 0n && amount >= assetsBalance.value
+    if (!isSameAsset.value && !selectedQuote.value) throw new Error('No quote selected')
+    return planCollateralChange({
+      fromVault: fromVault.value.address as Address,
+      toVault: toVault.value.address as Address,
+      amount,
+      positionAccount: (subAccount.value ?? address.value!) as Address,
+      toAsset: toVault.value.asset.address as Address,
+      isMax,
+      maxShares: isMax ? savingPosition.value?.shares : undefined,
+      swapQuote: isSameAsset.value ? undefined : selectedQuote.value!,
       swapperMode: SwapperMode.EXACT_IN,
-      isRepay: false,
-      requestedSlippage: slippage.value,
-      targetDebt: 0n,
-      currentDebt: 0n,
     })
   },
 

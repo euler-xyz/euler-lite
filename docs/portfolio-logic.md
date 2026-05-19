@@ -285,10 +285,10 @@ This is a `staticCall` - no transaction is sent, no gas is spent, and the state 
 **Borrow position loading** (`composables/useEulerAccount.ts`):
 1. Call `sdk.portfolioService.fetchPortfolio(..., { populateAll: true })`.
 2. Read portfolio positions from SDK `Portfolio` and keep SDK diagnostics beside the portfolio for UI warnings.
-3. Transaction paths still prepend Pyth update calls where needed before execution.
+3. Transaction paths use SDK `TransactionPlan` processing for Pyth updates before execution.
 
-**Transaction building** (`utils/pyth.ts: buildPythUpdateCalls`):
-When submitting transactions that interact with Pyth-priced vaults, Pyth update calls are prepended to the EVC batch so prices are fresh when the vault reads them.
+**Transaction building** (`useEulerTx.ts` + SDK Pyth plugins):
+SDK `TransactionPlan` simulation and execution run through the SDK plugin pipeline, which prepends Pyth update batch items when a planned operation needs fresh Pyth prices.
 
 ### Design Decisions
 
