@@ -1,5 +1,5 @@
 import { type Address, getAddress, maxUint256, zeroAddress } from 'viem'
-import type { Deployment, IDeploymentService, Account, ExecutionService, WalletService, type IWalletAdapter } from '@eulerxyz/euler-v2-sdk'
+import type { Deployment, IDeploymentService, Account, ExecutionService, WalletService, IWalletAdapter } from '@eulerxyz/euler-v2-sdk'
 
 // Addresses used by golden scenarios.
 //   - Chain core (evc, permit2, swapper, swapVerifier, accountLens) are the

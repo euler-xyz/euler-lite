@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { SwapQuote, isSecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { isSecuritizeCollateralVault, type SwapQuote, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber, getCollateralUsdValueOrZero } from '~/utils/sdk-prices'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'

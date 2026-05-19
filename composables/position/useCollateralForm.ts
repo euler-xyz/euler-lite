@@ -1,5 +1,5 @@
 import { getProjectedRates, getNetAPY } from '~/utils/vault/apy'
-import type { EVault, SecuritizeCollateralVault, TransactionPlan, TransactionPlanPrepared, SwapperMode, type SwapQuote } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, SecuritizeCollateralVault, TransactionPlan, TransactionPlanPrepared, SwapperMode, SwapQuote } from '@eulerxyz/euler-v2-sdk'
 import { isEVault } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { getAssetUsdValueOrZero, getCollateralUsdValueOrZero } from '~/utils/sdk-prices'

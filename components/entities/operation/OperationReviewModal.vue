@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
 import { encodeFunctionData, type Address, type Hex, type StateOverride } from 'viem'
-import type { SwapperMode, flattenBatchEntries, type EVCBatchItem, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import { flattenBatchEntries, type SwapperMode, type EVCBatchItem, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getEulerSdk } from '~/composables/useEulerSdk'
