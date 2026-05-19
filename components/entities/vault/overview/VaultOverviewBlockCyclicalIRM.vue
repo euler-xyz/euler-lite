@@ -168,26 +168,6 @@ const elapsedInCycle = computed(() => {
   return elapsed < 0n ? 0n : elapsed
 })
 
-const isInFixedRate = computed(() => {
-  const c = currentCycle.value
-  if (!c) return true
-  return elapsedInCycle.value < c.primaryDurationSec
-})
-
-const currentPhaseDurationSec = computed(() => {
-  const c = currentCycle.value
-  if (!c) return 0n
-  return isInFixedRate.value ? c.primaryDurationSec : c.secondaryDurationSec
-})
-
-const elapsedInPhase = computed(() => {
-  const c = currentCycle.value
-  if (!c) return 0n
-  if (isInFixedRate.value) return elapsedInCycle.value
-  const elapsed = elapsedInCycle.value - c.primaryDurationSec
-  return elapsed < 0n ? 0n : elapsed
-})
-
 // Bar represents the full cycle proportionally. The 100% tick sits at the
 // phase boundary, so fixedRatePercent is the position (in % of bar width)
 // of both the boundary and the end-of-fixed-rate tick.
@@ -203,8 +183,19 @@ const cyclePositionPercent = computed(() => {
   return Math.min(Math.max(pct, 0), 100)
 })
 
-const progressPercentLabel = computed(() => `${Math.round(cyclePositionPercent.value)}%`)
 const repaymentEndCapPercent = computed(() => 100 - fixedRatePercent.value)
+const nowTimestamp = computed(() => BigInt(Math.floor(now.value.getTime() / 1000)))
+const timelineMarkerStyle = computed(() => ({
+  left: `clamp(1px, ${cyclePositionPercent.value}%, calc(100% - 1px))`,
+}))
+const timelineNowStyle = computed(() => ({
+  left: `${cyclePositionPercent.value}%`,
+}))
+const timelineNowAlignment = computed(() => {
+  if (cyclePositionPercent.value < 20) return 'start'
+  if (cyclePositionPercent.value > 80) return 'end'
+  return 'center'
+})
 
 // SPY (27 decimal, per-second) to APY percentage
 const spyToApy = (spy: bigint): number => {
@@ -236,6 +227,16 @@ const formatCyclicalDate = (timestamp: bigint): string => {
   const min = date.getMinutes()
   const timeStr = min === 0 ? `${hour12}${ampm}` : `${hour12}:${String(min).padStart(2, '0')}${ampm}`
   return `${month} ${day}${suffix}, ${year} ${timeStr}`
+}
+
+const formatTimelineDate = (timestamp: bigint): string => {
+  const date = new Date(Number(timestamp) * 1000)
+  const month = date.toLocaleString('en-US', { month: 'short' })
+  const day = date.getDate()
+  const year = date.getFullYear()
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${month} ${day}, ${year} ${hours}:${minutes}`
 }
 
 const getDaySuffix = (day: number): string => {
@@ -277,25 +278,11 @@ const roundToUnit = (seconds: bigint, unit: DurationUnit): number => {
   return Math.round(Number(seconds) / Number(unit.seconds))
 }
 
-const ceilToUnit = (seconds: bigint, unit: DurationUnit): number => {
-  return Number((seconds + unit.seconds - 1n) / unit.seconds)
-}
-
 const formatDuration = (seconds: bigint): string => {
   if (seconds <= 0n) return '0 seconds'
   const unit = selectDurationUnit(seconds)
   return pluralize(Math.max(1, roundToUnit(seconds, unit)), unit.label)
 }
-
-const progressDayLabel = computed(() => {
-  const duration = currentPhaseDurationSec.value
-  if (duration <= 0n) return 'D0 / 0'
-  const elapsed = elapsedInPhase.value > duration ? duration : elapsedInPhase.value
-  const elapsedDays = Math.floor(Number(elapsed) / Number(DURATION_UNITS[0].seconds))
-  const totalDays = Math.max(1, ceilToUnit(duration, DURATION_UNITS[0]))
-
-  return `D${elapsedDays} / ${totalDays}`
-})
 </script>
 
 <template>
@@ -381,9 +368,8 @@ const progressDayLabel = computed(() => {
 
     <footer
       v-if="hasStarted"
-      class="flex items-center gap-12"
+      class="cyclical-irm-timeline"
     >
-      <span class="min-w-[60px] text-p5 text-content-secondary tabular-nums">{{ progressDayLabel }}</span>
       <div class="cyclical-irm-progress">
         <div
           class="cyclical-irm-progress__fill"
@@ -393,8 +379,28 @@ const progressDayLabel = computed(() => {
           class="cyclical-irm-progress__repay"
           :style="{ width: `${repaymentEndCapPercent}%` }"
         />
+        <div
+          class="cyclical-irm-progress__marker"
+          :style="timelineMarkerStyle"
+        />
       </div>
-      <span class="min-w-36 text-right text-p5 text-content-tertiary tabular-nums">{{ progressPercentLabel }}</span>
+      <div class="cyclical-irm-timeline__now-row">
+        <span
+          class="cyclical-irm-timeline__now"
+          :class="`cyclical-irm-timeline__now--${timelineNowAlignment}`"
+          :style="timelineNowStyle"
+        >
+          Now: {{ formatTimelineDate(nowTimestamp) }}
+        </span>
+      </div>
+      <div class="cyclical-irm-timeline__bounds">
+        <span class="cyclical-irm-timeline__bound">
+          {{ formatTimelineDate(fixedRateStart) }}
+        </span>
+        <span class="cyclical-irm-timeline__bound cyclical-irm-timeline__bound--end">
+          {{ formatTimelineDate(repaymentWindowEnd) }}
+        </span>
+      </div>
     </footer>
   </section>
 </template>
@@ -445,11 +451,16 @@ const progressDayLabel = computed(() => {
   }
 }
 
+.cyclical-irm-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+}
+
 .cyclical-irm-progress {
   position: relative;
-  flex: 1;
   height: 4px;
-  overflow: hidden;
   border-radius: 2px;
   background: var(--ui-progress-background-color);
 }
@@ -467,6 +478,69 @@ const progressDayLabel = computed(() => {
   background: var(--warning-500);
 }
 
+.cyclical-irm-progress__marker {
+  position: absolute;
+  top: -5px;
+  width: 2px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--text-primary);
+  transform: translateX(-50%);
+}
+
+.cyclical-irm-timeline__now-row {
+  position: relative;
+  min-height: 16px;
+  font-size: 12px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cyclical-irm-timeline__now {
+  position: absolute;
+  top: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cyclical-irm-timeline__now--start {
+  transform: translateX(0);
+}
+
+.cyclical-irm-timeline__now--center {
+  transform: translateX(-50%);
+}
+
+.cyclical-irm-timeline__now--end {
+  transform: translateX(-100%);
+}
+
+.cyclical-irm-timeline__bounds {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: -3px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cyclical-irm-timeline__bound {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cyclical-irm-timeline__bound--end {
+  text-align: right;
+}
+
 @media (max-width: 640px) {
   .cyclical-irm-grid {
     grid-template-columns: 1fr;
@@ -476,6 +550,11 @@ const progressDayLabel = computed(() => {
   .cyclical-irm-divider {
     width: 100%;
     height: 1px;
+  }
+
+  .cyclical-irm-timeline__bounds {
+    flex-direction: column;
+    gap: 2px;
   }
 }
 </style>
