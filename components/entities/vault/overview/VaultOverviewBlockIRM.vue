@@ -6,7 +6,7 @@ import { eulerUtilsLensABI, eulerVaultLensABI } from '~/entities/euler/abis'
 import annotationPlugin from 'chartjs-plugin-annotation'
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler, type ChartData, type ChartOptions } from 'chart.js'
 import { zeroAddress, formatUnits, type Address, type Abi } from 'viem'
-import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
+import { INTEREST_RATE_MODEL_TYPE, SECONDS_IN_YEAR } from '~/entities/constants'
 import { Line } from 'vue-chartjs'
 import { logWarn } from '~/utils/errorHandling'
 
@@ -53,7 +53,8 @@ const hasValidIRM = computed(() => {
     && interestRateModelAddress !== zeroAddress
 })
 
-const SECONDS_PER_YEAR = 31_557_600 // 365.25 days
+// Gregorian-year seconds (centralised in entities/constants.ts; matches EVK
+// SECONDS_PER_YEAR so APY display rounds-trips with on-chain values).
 const MAX_UINT32 = 4_294_967_295
 
 // Key borrow APY values derived from the chart data (populated in renderChart)
@@ -133,7 +134,7 @@ const irmParamsDisplay = computed<Array<{ label: string, value: string }>>(() =>
       { label: 'Min rate at kink', value: fmtRate(adaptiveMinRateAPY.value) },
       { label: 'Max rate at kink', value: fmtRate(adaptiveMaxRateAPY.value) },
       { label: 'Kink', value: formatWadPercent(decoded.targetUtilization) },
-      { label: 'Adjustment speed', value: `${(Number(formatUnits(decoded.adjustmentSpeed, 18)) * SECONDS_PER_YEAR).toFixed(1)}x/yr` },
+      { label: 'Adjustment speed', value: `${(Number(formatUnits(decoded.adjustmentSpeed, 18)) * SECONDS_IN_YEAR).toFixed(1)}x/yr` },
     ]
   }
   if (decoded.type === 'kinky') {
