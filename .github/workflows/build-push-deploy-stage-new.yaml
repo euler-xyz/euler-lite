@@ -2,9 +2,8 @@
 
   on:
     push:
-      tags:
-        - 'v*-rc*'
-        - 'v*-beta*'
+      branches:
+        - 'chore/pipeline_move'
 
   env:
     FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
