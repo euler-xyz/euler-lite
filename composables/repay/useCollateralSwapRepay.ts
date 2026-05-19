@@ -5,6 +5,7 @@ import type { Ref, ComputedRef } from 'vue'
 import { useAccount } from '@wagmi/vue'
 import { formatUnits, zeroAddress, type Address, type Abi } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
+import { cowSwapInboxExists } from '~/utils/cowswap-inbox'
 import type { DisplayStep } from '~/utils/stepDecoding'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
@@ -472,12 +473,25 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     const transferredAssetAmount = nanoToValue(transferredAssets, sourceAsset.decimals)
     const transferLabelSuffix = `(Selling max ${formatNumber(transferredAssetAmount, 8, 0)} ${sourceAsset.symbol})`
 
-    // Always include the prepare-inbox sign step; the SDK no-ops if the inbox
-    // already exists. (Recreating the wrapper ABI to pre-flight that check
-    // would duplicate SDK-owned logic, so we leave it to runtime.)
+    // Pre-flight whether the user's CoW inbox account already exists on chain.
+    // If it does, the SDK no-ops the prep at execution time — so we omit the
+    // step from the visible list to keep the step count honest. On any RPC
+    // failure we keep the step (fail-closed = correct count > optimistic).
+    const client = rpcClient.value
+    const hasExistingInbox = client && address.value
+      ? await cowSwapInboxExists({
+          client,
+          wrapperAddress: chainConfig.closePositionWrapper,
+          owner: address.value as Address,
+          subaccount: sdkAccount.address as Address,
+        })
+      : false
+
     const signSteps: DisplayStep[] = []
     let idx = 1
-    signSteps.push({ index: idx++, label: 'Prepare order receiver', isSeparateTx: true })
+    if (!hasExistingInbox) {
+      signSteps.push({ index: idx++, label: 'Prepare order receiver', isSeparateTx: true })
+    }
     signSteps.push({ index: idx++, label: 'Sign EVC permit', isSeparateTx: false })
     signSteps.push({ index: idx++, label: 'Sign CoW order', isSeparateTx: false })
 
