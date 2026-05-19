@@ -12,36 +12,26 @@ defineProps<{ pair: AnyBorrowVaultPair | AccountBorrowPosition }>()
     </p>
     <div class="flex flex-col gap-12">
       <div class="w-full rounded-xl bg-surface p-16 flex flex-col gap-12 border border-line-subtle">
-        <div class="flex items-center justify-between gap-8">
-          <div class="flex items-center gap-8 min-w-0">
-            <AssetAvatar
-              :asset="pair.collateral.asset"
-              size="20"
-            />
-            <span class="text-p2 font-semibold text-content-primary truncate">
-              {{ pair.collateral.asset.symbol }}
-            </span>
-          </div>
-          <span class="text-p4 text-content-tertiary uppercase tracking-wide flex-shrink-0">
-            Collateral
+        <div class="flex items-center gap-8 min-w-0">
+          <AssetAvatar
+            :asset="pair.collateral.asset"
+            size="20"
+          />
+          <span class="text-p2 font-semibold text-content-primary truncate">
+            {{ pair.collateral.asset.symbol }}
           </span>
         </div>
         <VaultTypeBadges :vault="pair.collateral" />
       </div>
 
       <div class="w-full rounded-xl bg-surface p-16 flex flex-col gap-12 border border-line-subtle">
-        <div class="flex items-center justify-between gap-8">
-          <div class="flex items-center gap-8 min-w-0">
-            <AssetAvatar
-              :asset="pair.borrow.asset"
-              size="20"
-            />
-            <span class="text-p2 font-semibold text-content-primary truncate">
-              {{ pair.borrow.asset.symbol }}
-            </span>
-          </div>
-          <span class="text-p4 text-content-tertiary uppercase tracking-wide flex-shrink-0">
-            Borrow
+        <div class="flex items-center gap-8 min-w-0">
+          <AssetAvatar
+            :asset="pair.borrow.asset"
+            size="20"
+          />
+          <span class="text-p2 font-semibold text-content-primary truncate">
+            {{ pair.borrow.asset.symbol }}
           </span>
         </div>
         <VaultTypeBadges :vault="pair.borrow" />
