@@ -118,16 +118,43 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
   }
 }
 
+// Chains the SDK's ProviderService can construct a provider for (a function of
+// viem's bundled chain list at the SDK version's lockstep). The SDK throws
+// synchronously from its ProviderService constructor for any rpcUrls entry
+// whose chain id isn't in viem's default chains, taking the whole SDK build
+// down with it — so we filter at the lite boundary instead of letting an
+// env-driven chain id crash the entire SDK.
+const SDK_SUPPORTED_CHAIN_IDS = new Set<number>([
+  1, // mainnet
+  10, // optimism
+  56, // bsc
+  130, // unichain
+  137, // polygon
+  143, // monad
+  146, // sonic
+  239, // tac
+  1923, // swellchain
+  8453, // base
+  9745, // plasma
+  42161, // arbitrum
+  43114, // avalanche
+  59144, // linea
+  60808, // bob
+  80094, // berachain
+])
+
 const buildRpcUrls = (): Record<number, string> => {
   const { allowedChainIds } = useEulerAddresses()
   const requestUrl = import.meta.server ? useRequestURL() : undefined
   const origin = requestUrl?.origin ?? ''
 
   return Object.fromEntries(
-    allowedChainIds.value.map(chainId => [
-      chainId,
-      import.meta.server ? `${origin}/api/rpc/${chainId}` : `/api/rpc/${chainId}`,
-    ]),
+    allowedChainIds.value
+      .filter(chainId => SDK_SUPPORTED_CHAIN_IDS.has(chainId))
+      .map(chainId => [
+        chainId,
+        import.meta.server ? `${origin}/api/rpc/${chainId}` : `/api/rpc/${chainId}`,
+      ]),
   )
 }
 
