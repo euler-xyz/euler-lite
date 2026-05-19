@@ -81,6 +81,7 @@ const hasValidIRM = computed(() => {
 })
 
 const MAX_UINT32 = 4_294_967_295
+const WAD_TO_SPY_SCALE = 10n ** 9n
 
 // Key borrow APY values derived from the chart data (populated in renderChart)
 const chartRateAtZero = ref<number | null>(null)
@@ -280,12 +281,15 @@ const parseAPY = (apy: bigint): number => {
   return Number(formatUnits(apy, 27)) * 100
 }
 
-// Convert a wad-scaled per-second rate into a properly-compounded APY % by
-// round-tripping through UtilsLens.computeAPYs — same math the vault itself
-// uses, so Min/Max rate cells match on-chain accrual for large rates instead
-// of silently collapsing to APR.
+// Convert a WAD-scaled per-second adaptive rate into a properly-compounded
+// APY % by round-tripping through UtilsLens.computeAPYs. The lens expects the
+// 27-decimal borrowSPY scale returned by vault IRM queries, while adaptive IRM
+// params are decoded as 18-decimal WADs.
 const fetchAdaptiveBorrowAPY = async (wadPerSec: bigint): Promise<number | null> => {
   const utilsLens = eulerLensAddresses.value?.utilsLens
+  if (wadPerSec < 0n) {
+    return null
+  }
   if (!utilsLens || wadPerSec === 0n) {
     return wadPerSec === 0n ? 0 : null
   }
@@ -296,7 +300,7 @@ const fetchAdaptiveBorrowAPY = async (wadPerSec: bigint): Promise<number | null>
       abi: eulerUtilsLensABI as Abi,
       functionName: 'computeAPYs',
       // cash/borrows don't influence borrowAPY; interestFee only affects supplyAPY.
-      args: [wadPerSec, 1n, 0n, 0n],
+      args: [wadPerSec * WAD_TO_SPY_SCALE, 1n, 0n, 0n],
     }) as readonly [bigint, bigint]
     const [borrowAPY] = result
     return Number(formatUnits(borrowAPY, 27)) * 100
