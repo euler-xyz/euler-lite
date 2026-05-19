@@ -8,6 +8,8 @@ import {
   type PortfolioBorrowPosition,
   type VaultEntity,
 } from '@eulerxyz/euler-v2-sdk'
+import { DateTime } from 'luxon'
+import { getPositionRampStatus, getPositionRampTargetTimestamp } from '~/entities/account'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { toUsdAmount, type UsdAmount } from '~/utils/sdk-prices'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -72,6 +74,19 @@ const collateralItems = computed<PositionCollateral[]>(() => {
 })
 
 const hasQueryFailure = computed(() => position.borrow.liquidity === undefined)
+
+const rampStatus = computed(() => getPositionRampStatus(position))
+const rampTargetTimestamp = computed(() => getPositionRampTargetTimestamp(position))
+const rampEndsRelative = computed(() => {
+  const t = rampTargetTimestamp.value
+  if (!rampStatus.value.isRamping || t === null) return ''
+  return DateTime.fromSeconds(Number(t)).toRelative({ base: DateTime.now(), style: 'short' }) ?? ''
+})
+const forcedLiquidationRelative = computed(() => {
+  const at = rampStatus.value.forcedLiquidationAt
+  if (at === null) return ''
+  return DateTime.fromSeconds(Number(at)).toRelative({ base: DateTime.now(), style: 'short' }) ?? ''
+})
 
 const utilisationWarning = computed(() => getUtilisationWarning(borrowVault.value, 'borrow'))
 const hasMultipleCollaterals = computed(() => collateralAddresses.value.length > 1)
@@ -438,6 +453,27 @@ const openPositionInformationModal = () => {
         />
         <PortfolioNotice :notice="borrowNotice" />
         <VaultWarningBanner :warnings="[utilisationWarning]" />
+        <UiToast
+          v-if="rampStatus.isRamping && rampStatus.willBeLiquidated && !hasQueryFailure"
+          title="Liquidation LTV ramping down"
+          :description="`Your position is projected to become liquidatable ${forcedLiquidationRelative || 'before the ramp ends'} — consider closing or reducing debt.`"
+          variant="error"
+          size="compact"
+        />
+        <UiToast
+          v-else-if="rampStatus.isRamping && hasQueryFailure"
+          title="Liquidation LTV ramping down"
+          :description="`Ends ${rampEndsRelative}. Oracle pricing is currently unavailable, so we can't tell whether your position will remain safe.`"
+          variant="warning"
+          size="compact"
+        />
+        <UiToast
+          v-else-if="rampStatus.isRamping"
+          title="Liquidation LTV ramping down"
+          :description="`Ends ${rampEndsRelative}. Your position is currently safe at the post-ramp threshold.`"
+          variant="warning"
+          size="compact"
+        />
         <div
           v-if="hasQueryFailure"
           class="flex items-center gap-6 text-warning-500 text-p4"

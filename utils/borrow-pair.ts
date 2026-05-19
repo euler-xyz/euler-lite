@@ -25,5 +25,19 @@ export const getPairBorrowLTV = (pair: BorrowPairLike): number | undefined =>
 export const getPairCurrentLiquidationLTV = (pair: BorrowPairLike): number | undefined =>
   isBorrowVaultPair(pair) ? pair.ltv.currentLiquidationLTV : getBorrowPositionEffectiveLiquidationLTV(pair)
 
-export const getPairRampConfig = (pair: BorrowPairLike): EVaultCollateral | null =>
-  isBorrowVaultPair(pair) ? pair.ltv : null
+/**
+ * Resolve the ramp-bearing collateral edge for a pair.
+ *
+ * Market pairs carry the edge directly as `pair.ltv`. For a live borrow
+ * position we have to find the matching edge on `position.borrowVault.collaterals`
+ * — without this the ramp indicator never showed on the position page (the
+ * arrow + "Ramp details" modal both depend on a non-null ramp config).
+ */
+export const getPairRampConfig = (pair: BorrowPairLike): EVaultCollateral | null => {
+  if (isBorrowVaultPair(pair)) return pair.ltv
+  const borrowVault = pair.borrowVault as EVault | undefined
+  const collateralAddress = pair.collateralVault?.address
+  if (!borrowVault?.collaterals || !collateralAddress) return null
+  const lower = collateralAddress.toLowerCase()
+  return borrowVault.collaterals.find(c => c.address.toLowerCase() === lower) ?? null
+}
