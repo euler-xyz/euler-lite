@@ -109,6 +109,11 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const multiplySupplyVault: Ref<EVault | undefined> = ref()
   const multiplyAssetBalance: Ref<bigint> = ref(0n)
   const isMultiplySavingCollateral = ref(false)
+  // Sub-account of the savings position the user picked from the collateral
+  // options modal. Without this, two savings positions of the same vault on
+  // different sub-accounts look identical to `depositPositions.find(...)` and
+  // the form silently sources shares from whichever happened to be first.
+  const multiplySelectedSavingSubAccount = ref<string | undefined>(undefined)
   const isMultiplySubmitting = ref(false)
   const isMultiplyPreparing = ref(false)
   const multiplyPlan = ref<TransactionPlan | null>(null)
@@ -129,11 +134,22 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const multiplyShortProduct = useEulerProductOfVault(computed(() => multiplyShortVault.value?.address || ''))
 
   // --- Savings position ---
+  // Fail-closed when multiple savings positions match the supply vault but no
+  // sub-account is selected. Returning the first match silently is the bug
+  // dev's PR #436 fixed.
   const multiplySavingPosition = computed(() => {
     if (!multiplySupplyVault.value) return null
-    return depositPositions.value.find(
-      position => position.vault && normalizeAddress(position.vault.address) === normalizeAddress(multiplySupplyVault.value?.address),
-    ) || null
+    const supplyAddr = normalizeAddress(multiplySupplyVault.value.address)
+    const matches = depositPositions.value.filter(
+      position => position.vault && normalizeAddress(position.vault.address) === supplyAddr,
+    )
+    if (matches.length === 0) return null
+    const wantedSub = multiplySelectedSavingSubAccount.value
+    if (wantedSub) {
+      const target = normalizeAddress(wantedSub)
+      return matches.find(p => normalizeAddress(p.subAccount) === target) ?? null
+    }
+    return matches.length === 1 ? matches[0] : null
   })
   const multiplySavingBalance = computed(() => multiplySavingPosition.value?.shares || 0n)
 
@@ -750,12 +766,15 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     if (!nextVault || !nextOption) return
 
     const nextIsSaving = nextOption.type === 'saving'
+    const nextSubAccount = nextIsSaving ? nextOption.subAccount : undefined
     const vaultChanged = !multiplySupplyVault.value
       || normalizeAddress(multiplySupplyVault.value.address) !== normalizeAddress(nextVault.address)
     const savingChanged = nextIsSaving !== isMultiplySavingCollateral.value
-    if (vaultChanged || savingChanged) {
+    const subAccountChanged = (multiplySelectedSavingSubAccount.value ?? undefined) !== nextSubAccount
+    if (vaultChanged || savingChanged || subAccountChanged) {
       multiplySupplyVault.value = nextVault
       isMultiplySavingCollateral.value = nextIsSaving
+      multiplySelectedSavingSubAccount.value = nextSubAccount
       multiplyInputAmount.value = ''
       resetMultiplyQuoteState()
     }
@@ -930,6 +949,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const initMultiplySupplyVault = (vault: EVault) => {
     multiplySupplyVault.value = vault
     isMultiplySavingCollateral.value = false
+    multiplySelectedSavingSubAccount.value = undefined
   }
 
   // --- Watchers ---
@@ -956,13 +976,16 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     requestMultiplyQuote()
   })
 
-  watch([multiplySupplyVault, multiplyLongVault, multiplyShortVault, isMultiplySavingCollateral], () => {
-    clearMultiplySimulationError()
-    resetMultiplyQuoteState()
-    if (multiplyInputAmount.value) {
-      requestMultiplyQuote()
-    }
-  })
+  watch(
+    [multiplySupplyVault, multiplyLongVault, multiplyShortVault, isMultiplySavingCollateral, multiplySelectedSavingSubAccount],
+    () => {
+      clearMultiplySimulationError()
+      resetMultiplyQuoteState()
+      if (multiplyInputAmount.value) {
+        requestMultiplyQuote()
+      }
+    },
+  )
 
   watch(multiplySupplyVault, async (newVault) => {
     if (newVault?.asset.address && isConnected.value) {
@@ -1011,6 +1034,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     multiplySupplyVault,
     multiplyAssetBalance,
     isMultiplySavingCollateral,
+    multiplySelectedSavingSubAccount,
     isMultiplySubmitting,
     isMultiplyPreparing,
     multiplyPlan,

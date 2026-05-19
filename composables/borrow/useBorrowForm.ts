@@ -117,6 +117,11 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const borrowAmount = ref('')
   const collateralAmount = ref('')
   const isSavingCollateral = ref(false)
+  // Sub-account of the savings position the user picked. Mirrors
+  // multiplySelectedSavingSubAccount in useMultiplyForm — the page reads this
+  // ref to disambiguate when the user has the same vault as savings on
+  // multiple sub-accounts.
+  const selectedSavingSubAccount = ref<string | undefined>(undefined)
   const isSubmitting = ref(false)
   const isPreparing = ref(false)
   const isEstimatesLoading = ref(false)
@@ -494,10 +499,14 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const onChangeCollateral = (selection: boolean | number) => {
     clearBorrowSimulationError()
     if (typeof selection === 'number') {
-      isSavingCollateral.value = selection === 1
+      const option = collateralOptions.value[selection]
+      const nextIsSaving = option?.type === 'saving'
+      isSavingCollateral.value = nextIsSaving
+      selectedSavingSubAccount.value = nextIsSaving ? option?.subAccount : undefined
       return
     }
     isSavingCollateral.value = selection
+    if (!selection) selectedSavingSubAccount.value = undefined
   }
 
   // --- Actions: estimates ---
@@ -917,6 +926,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     borrowAmount,
     collateralAmount,
     isSavingCollateral,
+    selectedSavingSubAccount,
     isSubmitting,
     isPreparing,
     isEstimatesLoading,

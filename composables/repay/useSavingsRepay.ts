@@ -72,6 +72,10 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
 
   // --- Source vault state ---
   const sourceVault: Ref<EVault | undefined> = ref()
+  // Picks the savings position when the user has the same vault on multiple
+  // sub-accounts; without this `getSavingsPosition` falls back to the silent-
+  // first-match behaviour PR #436 fixed.
+  const selectedSavingSubAccount = ref<string | undefined>(undefined)
   const sourceAssets = ref(0n)
   const isSameVaultRepay = computed(() =>
     !!sourceVault.value
@@ -105,7 +109,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     clearSimulationError,
     getCurrentDebt,
     getQuoteAccounts: () => {
-      const savingsPos = sourceVault.value ? getSavingsPosition(sourceVault.value.address) : undefined
+      const savingsPos = sourceVault.value ? getSavingsPosition(sourceVault.value.address, selectedSavingSubAccount.value) : undefined
       const savingsSubAccount = (savingsPos?.subAccount || address.value || zeroAddress) as Address
       const borrowSubAccount = (position.value?.subAccount || address.value || zeroAddress) as Address
       return { accountIn: savingsSubAccount, accountOut: borrowSubAccount }
@@ -258,11 +262,11 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
       sourceAssets.value = 0n
       return
     }
-    const pos = getSavingsPosition(sourceVault.value.address)
+    const pos = getSavingsPosition(sourceVault.value.address, selectedSavingSubAccount.value)
     sourceAssets.value = pos?.assets || 0n
   }
 
-  watch(sourceVault, () => {
+  watch([sourceVault, selectedSavingSubAccount], () => {
     updateSourceBalance()
   })
 
@@ -272,7 +276,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
       throw new Error('Position or vaults not loaded')
     }
 
-    const savingsPos = getSavingsPosition(sourceVault.value.address)
+    const savingsPos = getSavingsPosition(sourceVault.value.address, selectedSavingSubAccount.value)
     if (!savingsPos) {
       throw new Error('Savings position not found')
     }
@@ -390,8 +394,10 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   }
 
   const initVault = () => {
-    if (savingsVaults.value.length > 0) {
-      sourceVault.value = savingsVaults.value[0] as EVault
+    if (savingsPositions.value.length > 0) {
+      const first = savingsPositions.value[0]
+      sourceVault.value = first.vault as EVault
+      selectedSavingSubAccount.value = first.subAccount as string
       updateSourceBalance()
     }
   }
@@ -403,11 +409,16 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
 
   const onSourceVaultChange = (selectedIndex: number) => {
     core.onSourceVaultChange(selectedIndex, savingsVaults)
+    // Capture the sub-account from the picked option so the form stops
+    // silently routing through the first matching savings position.
+    const opt = savingsOptions.value[selectedIndex]
+    selectedSavingSubAccount.value = opt?.subAccount
   }
 
   return {
     // State
     sourceVault,
+    selectedSavingSubAccount,
     amount: core.amount,
     debtAmount: core.debtAmount,
     direction: core.direction,
