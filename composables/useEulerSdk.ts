@@ -65,6 +65,11 @@ const buildAppApiPath = (path: string) => {
 }
 
 const buildV3ProxyApiPath = () => buildAppApiPath('/api/v3')
+// Merkl's v4 API doesn't set permissive CORS headers, so the SDK's
+// rewardsDirectAdapter can't fetch it directly from a browser. Route through
+// a lite server proxy that rewrites `${merklApiUrl}/<path>?<qs>` to the
+// upstream `https://api.merkl.xyz/v4/<path>?<qs>`.
+const buildMerklProxyApiPath = () => buildAppApiPath('/api/proxy/merkl')
 
 type SdkBackend = 'fallback' | 'onchain'
 
@@ -102,7 +107,7 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
     ...(labelsBaseUrl ? { eulerLabelsBaseUrl: labelsBaseUrl } : {}),
     ...(oracleChecksBaseUrl ? { oracleAdaptersBaseUrl: oracleChecksBaseUrl } : {}),
     ...(swapApiUrl ? { swapApiUrl } : {}),
-    ...(enableMerkl ? {} : { rewardsEnableMerkl: false }),
+    ...(enableMerkl ? { rewardsMerklApiUrl: buildMerklProxyApiPath() } : { rewardsEnableMerkl: false }),
     ...(enableIncentra ? {} : { rewardsEnableBrevis: false }),
     ...(enableFuul ? {} : { rewardsEnableFuul: false }),
     ...(backend === 'fallback' ? fallbackAdapterConfig : onchainAdapterConfig),
