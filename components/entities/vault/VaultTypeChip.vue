@@ -4,12 +4,13 @@ import { getVaultTypeLabel, getVaultTypeDescription } from '~/entities/vault/des
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultTypeInfoModal } from '#components'
 
-const { type, vault, size = 'small', block = false, as = 'span' } = defineProps<{
+const { type, vault, size = 'small', block = false, as = 'span', nudge = false } = defineProps<{
   type: string
   vault: Vault | EarnVault | SecuritizeVault
   size?: 'small' | 'large'
   block?: boolean
   as?: 'button' | 'span'
+  nudge?: boolean
 }>()
 
 const modal = useModal()
@@ -79,6 +80,7 @@ const openModal = () => {
     :tone="tone"
     :size="size"
     :block="block"
+    :nudge="nudge"
     @click="openModal"
   />
 </template>

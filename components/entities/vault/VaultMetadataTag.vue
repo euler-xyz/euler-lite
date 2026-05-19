@@ -6,6 +6,7 @@ const {
   tone = 'neutral',
   size = 'small',
   block = false,
+  nudge = false,
   title,
 } = defineProps<{
   as?: 'button' | 'span'
@@ -14,6 +15,7 @@ const {
   tone?: 'neutral' | 'governance' | 'accent' | 'warn' | 'danger'
   size?: 'small' | 'large'
   block?: boolean
+  nudge?: boolean
   title?: string
 }>()
 
@@ -37,7 +39,10 @@ const onKeydown = (event: KeyboardEvent) => {
     :class="[
       `vault-metadata-tag--${tone}`,
       `vault-metadata-tag--${size}`,
-      { 'vault-metadata-tag--block': block },
+      {
+        'vault-metadata-tag--block': block,
+        'vault-metadata-tag--nudge': nudge,
+      },
     ]"
     :title="title"
     @click="$emit('click', $event)"
@@ -71,12 +76,14 @@ const onKeydown = (event: KeyboardEvent) => {
   transition: background-color 120ms ease, border-color 120ms ease;
 
   &--small {
-    padding: 8px 12px;
-    font-size: 16px;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 8px;
+    font-size: 14px;
 
     .vault-metadata-tag__icon {
-      width: 20px;
-      height: 20px;
+      width: 14px;
+      height: 14px;
     }
 
     .vault-metadata-tag__info {
@@ -198,34 +205,16 @@ const onKeydown = (event: KeyboardEvent) => {
   }
 }
 
-.vault-metadata-tag--small:not(.vault-metadata-tag--block) {
+.vault-metadata-tag--small.vault-metadata-tag--nudge:not(.vault-metadata-tag--block) {
   gap: 8px;
-  padding: 0;
-  background-color: transparent;
-  border-color: transparent;
-  border-radius: 0;
+  padding: 4px 10px;
+  border-radius: 10px;
+  font-size: 16px;
+  transform: translateY(-4px);
 
   .vault-metadata-tag__icon {
     width: 24px;
     height: 24px;
-  }
-
-  &:hover {
-    background-color: transparent;
-    border-color: transparent;
-  }
-}
-
-.vault-metadata-tag--small.vault-metadata-tag--governance:not(.vault-metadata-tag--block) {
-  padding: 4px 10px;
-  border-radius: 10px;
-  background-color: rgba(136, 166, 204, 0.1);
-  border-color: rgba(136, 166, 204, 0.3);
-  transform: translateY(-4px);
-
-  &:hover {
-    background-color: rgba(136, 166, 204, 0.14);
-    border-color: rgba(136, 166, 204, 0.4);
   }
 }
 

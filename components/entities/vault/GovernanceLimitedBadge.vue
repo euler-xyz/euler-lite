@@ -2,10 +2,11 @@
 import { useModal } from '~/components/ui/composables/useModal'
 import { GovernanceLimitedInfoModal } from '#components'
 
-const { size = 'small', block = false, as = 'span' } = defineProps<{
+const { size = 'small', block = false, as = 'span', nudge = false } = defineProps<{
   size?: 'small' | 'large'
   block?: boolean
   as?: 'button' | 'span'
+  nudge?: boolean
 }>()
 
 const modal = useModal()
@@ -22,9 +23,10 @@ const openInfoModal = (event: MouseEvent | KeyboardEvent) => {
     :as="as"
     icon="pulse"
     label="Limited"
-    tone="neutral"
+    tone="accent"
     :size="size"
     :block="block"
+    :nudge="nudge"
     title="This vault has limited risk management"
     @click="openInfoModal"
   />
