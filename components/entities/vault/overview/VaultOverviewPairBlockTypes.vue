@@ -12,10 +12,7 @@ defineProps<{ pair: AnyBorrowVaultPair | AccountBorrowPosition }>()
     </p>
     <div class="grid grid-cols-[1fr_1px_1fr] gap-20 items-stretch">
       <div class="min-w-0 flex flex-col gap-12">
-        <div class="flex items-center gap-8 min-w-0">
-          <span class="text-[10px] tracking-[0.08em] uppercase text-content-tertiary font-semibold shrink-0">
-            Collateral
-          </span>
+        <div class="flex items-center gap-8 min-w-0 pl-2">
           <AssetAvatar
             :asset="pair.collateral.asset"
             size="20"
@@ -34,10 +31,7 @@ defineProps<{ pair: AnyBorrowVaultPair | AccountBorrowPosition }>()
       <div class="vault-types-divider w-[1px]" />
 
       <div class="min-w-0 flex flex-col gap-12">
-        <div class="flex items-center gap-8 min-w-0">
-          <span class="text-[10px] tracking-[0.08em] uppercase text-content-tertiary font-semibold shrink-0">
-            Debt
-          </span>
+        <div class="flex items-center gap-8 min-w-0 pl-2">
           <AssetAvatar
             :asset="pair.borrow.asset"
             size="20"
