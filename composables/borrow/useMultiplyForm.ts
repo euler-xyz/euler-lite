@@ -1,5 +1,4 @@
 import type { Ref, ComputedRef } from 'vue'
-import { useAccount } from '@wagmi/vue'
 import { formatUnits, maxUint256, zeroAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { createRaceGuard } from '~/utils/race-guard'
@@ -93,7 +92,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const { buildMultiplyPlan, executeTxPlan } = useEulerOperations()
-  const { isConnected, address } = useAccount()
+  const { isConnected, address } = useWagmi()
   const { depositPositions, refreshAllPositions } = useEulerAccount()
   const { eulerLensAddresses, chainId } = useEulerAddresses()
   const { fetchSingleBalance } = useWallets()

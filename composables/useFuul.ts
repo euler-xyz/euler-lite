@@ -1,4 +1,4 @@
-import { useAccount, useSwitchChain, useWriteContract } from '@wagmi/vue'
+import { useSwitchChain, useWriteContract } from '@wagmi/vue'
 import type { Address } from 'viem'
 import axios from 'axios'
 
@@ -51,7 +51,7 @@ const fetchFuulProxy = (chainId: number): Promise<FuulProxyResponse> =>
     $fetch<FuulProxyResponse>('/api/rewards/fuul', { query: { chainId } }))
 
 export const useFuul = () => {
-  const { address: wagmiAddress, chain: wagmiChain } = useAccount()
+  const { address: wagmiAddress, chain: wagmiChain } = useWagmi()
   const { switchChain } = useSwitchChain()
   const { writeContractAsync } = useWriteContract()
   const { FUUL_API_BASE_URL, FUUL_MANAGER_ADDRESS, FUUL_FACTORY_ADDRESS } = useEulerConfig()

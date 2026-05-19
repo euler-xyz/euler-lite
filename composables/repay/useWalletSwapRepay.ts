@@ -1,5 +1,4 @@
 import type { Ref, ComputedRef } from 'vue'
-import { useAccount } from '@wagmi/vue'
 import { formatUnits, getAddress, zeroAddress, type Address } from 'viem'
 import { isNativeCurrencyAddress, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { FixedPoint } from '~/utils/fixed-point'
@@ -68,7 +67,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const { error } = useToast()
   const { buildSwapAndRepayPlan, executeTxPlan } = useEulerOperations()
   const { chainId } = useEulerAddresses()
-  const { isConnected, address } = useAccount()
+  const { isConnected, address } = useWagmi()
   const { fetchSingleBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { getVault: registryGetVault } = useVaultRegistry()
