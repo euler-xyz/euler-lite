@@ -19,11 +19,12 @@
             REF_NAME: ${{ github.ref_name }}
             REF_TYPE: ${{ github.ref_type }}
             CICD_DISPATCH_TOKEN: ${{ secrets.CICD_DISPATCH_TOKEN }}
+            CICD_REPO: ${{ secrets.CICD_REPO }}
           run: |
             curl -fsS -X POST \
               -H "Authorization: Bearer ${CICD_DISPATCH_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
-              https://api.github.com/repos/euler-xyz/euler-lite-cicd/dispatches \
+              "https://api.github.com/repos/euler-xyz/${CICD_REPO}/dispatches" \
               -d "$(jq -n \
                 --arg sha "$SHA" \
                 --arg ref "$REF" \
