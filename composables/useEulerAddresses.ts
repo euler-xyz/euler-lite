@@ -48,6 +48,10 @@ interface EulerChainConfig {
       eUSD?: string
       seUSD?: string
     }
+    eulerSwapAddrs?: {
+      eulerSwapV1Periphery?: string
+      eulerSwapV2Periphery?: string
+    }
     peripheryAddrs: {
       adaptiveCurveIRMFactory: string
       capRiskStewardFactory?: string
@@ -215,6 +219,8 @@ export const useEulerAddresses = () => {
       securitizeFactory: config.addresses.peripheryAddrs.securitizeFactory,
       swapVerifier: config.addresses.peripheryAddrs.swapVerifier,
       swapper: config.addresses.peripheryAddrs.swapper,
+      eulerSwapV1Periphery: config.addresses.eulerSwapAddrs?.eulerSwapV1Periphery,
+      eulerSwapV2Periphery: config.addresses.eulerSwapAddrs?.eulerSwapV2Periphery,
       termsOfUseSigner: config.addresses.peripheryAddrs.termsOfUseSigner,
     }
   })
