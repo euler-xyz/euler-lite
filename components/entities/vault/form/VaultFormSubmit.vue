@@ -10,6 +10,7 @@ import { AcknowledgeTermsModal, VaultUnverifiedDisclaimerModal } from '#componen
 import type { KeyringFlowState, CredentialData } from '~/composables/useKeyring'
 import type { TosGuardState } from '~/composables/guards/useTosGuard'
 import type { UnverifiedVaultGuardState } from '~/composables/guards/useUnverifiedVaultGuard'
+import { useAllowanceSlotResolution } from '~/composables/useEulerOperations/allowance'
 
 interface KeyringGuardState {
   needsVerification: boolean
@@ -26,6 +27,7 @@ const { isConnected } = useAccount()
 const { isSpyMode } = useSpyMode()
 const { chainId: _chainId } = useEulerAddresses()
 const { chainId, switchChain, connect } = useWagmi()
+const { isResolvingAllowanceSlotIndex } = useAllowanceSlotResolution()
 const modal = useModal()
 
 const keyringGuard = inject<KeyringGuardState | null>('keyring-guard', null)
@@ -51,15 +53,17 @@ const needToSwitchChain = computed(() => {
 const hasActiveSession = computed(() => isConnected.value || isSpyMode.value)
 const _disabled = computed(() => {
   if (isOperationBlocked.value) return true
+  if (isResolvingAllowanceSlotIndex.value) return true
   return props.disabled && !needToSwitchChain.value
 })
+const isLoading = computed(() => props.loading || isResolvingAllowanceSlotIndex.value)
 
 const GENERIC_DISABLED_REASON = 'Complete the form fields above to continue.'
 
 const effectiveDisabledReason = computed(() => {
   if (operationBlockReason.value) return operationBlockReason.value
   if (props.disabledReason) return props.disabledReason
-  if (_disabled.value && !props.loading) return GENERIC_DISABLED_REASON
+  if (_disabled.value && !isLoading.value) return GENERIC_DISABLED_REASON
   return undefined
 })
 
@@ -72,7 +76,7 @@ const tooltipVariantClass = computed(() => {
 })
 
 const showTooltip = () => {
-  if (_disabled.value && !props.loading) {
+  if (_disabled.value && !isLoading.value) {
     isTooltipVisible.value = true
     // Defer update until after v-if mounts the floating element,
     // otherwise the first paint lands at the wrapper's origin.
@@ -183,7 +187,7 @@ const openTermsModal = () => {
         size="large"
         type="submit"
         :variant="needToSwitchChain ? 'red' : 'primary'"
-        :loading="loading"
+        :loading="isLoading"
         :disabled="_disabled"
         @click="onClick"
       >
@@ -196,7 +200,7 @@ const openTermsModal = () => {
         </template>
       </UiButton>
       <div
-        v-if="isTooltipVisible && _disabled && !loading"
+        v-if="isTooltipVisible && _disabled && !isLoading"
         ref="floating"
         :style="floatingStyles"
         :class="['vault-form-submit__tooltip', tooltipVariantClass]"

@@ -12,6 +12,7 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber } from '~/utils/string-utils'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
+import { useAllowanceSlotResolution } from '~/composables/useEulerOperations/allowance'
 
 const emits = defineEmits(['close', 'confirm'])
 
@@ -54,6 +55,7 @@ const { address: walletAddress, chainId: currentChainId } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { getVault } = useVaultRegistry()
 const { buildSimulationStateOverride } = useEulerOperations()
+const { isResolvingAllowanceSlotIndex } = useAllowanceSlotResolution()
 const { eulerCoreAddresses } = useEulerAddresses()
 const {
   isSimulating: isTenderlySimulating,
@@ -134,9 +136,15 @@ const handleTenderlySimulate = async () => {
 }
 
 const internalSubmitting = ref(false)
+const isReviewActionBlocked = computed(() =>
+  internalSubmitting.value || isResolvingAllowanceSlotIndex.value,
+)
+const isTenderlyPreparing = computed(() =>
+  isTenderlySimulating.value || isResolvingAllowanceSlotIndex.value,
+)
 
 const handleConfirm = async () => {
-  if (internalSubmitting.value) return
+  if (isReviewActionBlocked.value) return
   const result = onConfirm()
   // If onConfirm returns a promise, keep the modal open with a loading state
   // and let the caller close it via modal.close(). Otherwise close immediately
@@ -305,13 +313,13 @@ const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimite
           v-else-if="tenderlyEnabled"
           type="button"
           class="flex items-center gap-6 text-p3 text-content-primary hover:text-content-primary transition-colors"
-          :disabled="isTenderlySimulating"
+          :disabled="isTenderlyPreparing"
           @click="handleTenderlySimulate"
         >
           <SvgIcon
-            :name="isTenderlySimulating ? 'loading' : 'arrow-top-right'"
+            :name="isTenderlyPreparing ? 'loading' : 'arrow-top-right'"
             class="!w-16 !h-16"
-            :class="{ 'animate-spin': isTenderlySimulating }"
+            :class="{ 'animate-spin': isTenderlyPreparing }"
           />
           Simulate on Tenderly
         </button>
@@ -378,8 +386,8 @@ const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimite
         variant="primary"
         size="xlarge"
         rounded
-        :disabled="isSpyMode || internalSubmitting"
-        :loading="internalSubmitting"
+        :disabled="isSpyMode || isReviewActionBlocked"
+        :loading="isReviewActionBlocked"
         @click="handleConfirm"
       >
         {{ isSpyMode ? 'Spy mode (read-only)' : (internalSubmitting && submittingLabel ? submittingLabel : btnLabel) }}

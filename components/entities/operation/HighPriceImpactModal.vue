@@ -16,7 +16,7 @@ const isConfirmed = computed(() => confirmText.value.trim().toLowerCase() === 'i
 const title = computed(() => props.unknown ? 'Price Impact Unavailable' : 'High Price Impact')
 const description = computed(() =>
   props.unknown
-    ? 'We could not fetch a USD value for one or both sides of this swap, so the price impact cannot be calculated. Please double-check the swap in/out amounts before continuing.'
+    ? 'We could not fetch the market price of one or both sides of this swap, so the price impact cannot be calculated. Please double-check the swap in/out amounts before continuing.'
     : 'This transaction has a very high price impact. You may receive significantly less value than expected.',
 )
 
