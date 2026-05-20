@@ -310,6 +310,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         price: walletCollateralPriceUsd.value,
         apy: collateralSupplyApyWithRewards.value,
         assetAddress: collateralVault.value?.asset.address,
+        vaultAddress: vaultAddr,
         tags,
         disabled,
       },
@@ -322,6 +323,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         price: savingCollateralPriceUsd.value,
         apy: collateralSupplyApyWithRewards.value,
         assetAddress: collateralVault.value?.asset.address,
+        vaultAddress: vaultAddr,
+        subAccount: savingCollateral.value.subAccount,
         tags,
         disabled,
       })
