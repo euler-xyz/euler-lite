@@ -206,115 +206,138 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
           label="Max multiplier"
           :value="pairBorrowLTVPercent === null ? '-' : `${formatNumber(maxMultiplier, 2, 2)}x`"
         />
-        <UiModalPreviewTrigger
-          :component="VaultSupplyApyModal"
-          :modal-data="() => supplyApyModalData"
-          aria-label="Supply APY details"
-        >
-          <VaultOverviewLabelValue>
-            <template #label>
-              <span class="flex items-center gap-4">
-                Supply APY
+        <VaultOverviewLabelValue>
+          <template #label>
+            <span class="flex items-center gap-4">
+              Supply APY
+              <UiModalPreviewTrigger
+                :component="VaultSupplyApyModal"
+                :modal-data="supplyApyModalData"
+                aria-label="Show supply APY breakdown"
+              >
                 <SvgIcon
-                  class="!w-20 !h-20 text-content-muted hover:text-content-secondary"
+                  class="!w-20 !h-20 text-content-muted hover:text-content-secondary cursor-pointer"
                   name="info-circle"
                   data-modal-trigger="supply-apy"
                 />
-              </span>
-            </template>
-            <span class="flex items-center gap-4">
+              </UiModalPreviewTrigger>
+            </span>
+          </template>
+          <span class="flex items-center gap-4">
+            <UiModalPreviewTrigger
+              v-if="hasSupplyRewards(collateralVault.address)"
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY rewards breakdown"
+            >
               <SvgIcon
-                v-if="hasSupplyRewards(collateralVault.address)"
-                class="!w-20 !h-20 text-accent-500"
+                class="!w-20 !h-20 text-accent-500 cursor-pointer"
                 name="sparks"
                 data-modal-trigger="supply-apy"
               />
-              {{ formatNumber(supplyApyWithRewards) }}%
-            </span>
-          </VaultOverviewLabelValue>
-        </UiModalPreviewTrigger>
-        <UiModalPreviewTrigger
-          :component="VaultBorrowApyModal"
-          :modal-data="() => borrowApyModalData"
-          aria-label="Borrow APY details"
-        >
-          <VaultOverviewLabelValue>
-            <template #label>
-              <span class="flex items-center gap-4">
-                Borrow APY
+            </UiModalPreviewTrigger>
+            {{ formatNumber(supplyApyWithRewards) }}%
+          </span>
+        </VaultOverviewLabelValue>
+        <VaultOverviewLabelValue>
+          <template #label>
+            <span class="flex items-center gap-4">
+              Borrow APY
+              <UiModalPreviewTrigger
+                :component="VaultBorrowApyModal"
+                :modal-data="borrowApyModalData"
+                aria-label="Show borrow APY breakdown"
+              >
                 <SvgIcon
-                  class="!w-20 !h-20 text-content-muted hover:text-content-secondary"
+                  class="!w-20 !h-20 text-content-muted hover:text-content-secondary cursor-pointer"
                   name="info-circle"
                   data-modal-trigger="borrow-apy"
                 />
-              </span>
-            </template>
-            <span class="flex items-center gap-4">
+              </UiModalPreviewTrigger>
+            </span>
+          </template>
+          <span class="flex items-center gap-4">
+            <UiModalPreviewTrigger
+              v-if="hasBorrowRewards(borrowVault.address, collateralVault.address)"
+              :component="VaultBorrowApyModal"
+              :modal-data="borrowApyModalData"
+              aria-label="Show borrow APY rewards breakdown"
+            >
               <SvgIcon
-                v-if="hasBorrowRewards(borrowVault.address, collateralVault.address)"
-                class="!w-20 !h-20 text-accent-500"
+                class="!w-20 !h-20 text-accent-500 cursor-pointer"
                 name="sparks"
                 data-modal-trigger="borrow-apy"
               />
-              {{ formatNumber(borrowApyWithRewards) }}%
-            </span>
-          </VaultOverviewLabelValue>
-        </UiModalPreviewTrigger>
-        <UiModalPreviewTrigger
-          :component="VaultNetApyPairModal"
-          :modal-data="() => netApyModalData"
-          aria-label="Net APY details"
-        >
-          <VaultOverviewLabelValue>
-            <template #label>
-              <span class="flex items-center gap-4">
-                Net APY
+            </UiModalPreviewTrigger>
+            {{ formatNumber(borrowApyWithRewards) }}%
+          </span>
+        </VaultOverviewLabelValue>
+        <VaultOverviewLabelValue>
+          <template #label>
+            <span class="flex items-center gap-4">
+              Net APY
+              <UiModalPreviewTrigger
+                :component="VaultNetApyPairModal"
+                :modal-data="netApyModalData"
+                aria-label="Show net APY breakdown"
+              >
                 <SvgIcon
-                  class="!w-20 !h-20 text-content-muted hover:text-content-secondary"
+                  class="!w-20 !h-20 text-content-muted hover:text-content-secondary cursor-pointer"
                   name="info-circle"
                   data-modal-trigger="net-apy"
                 />
-              </span>
-            </template>
-            <span class="flex items-center gap-4">
+              </UiModalPreviewTrigger>
+            </span>
+          </template>
+          <span class="flex items-center gap-4">
+            <UiModalPreviewTrigger
+              v-if="hasSupplyRewards(collateralVault.address) || hasBorrowRewards(borrowVault.address, collateralVault.address) || hasLoopingRewards(borrowVault.address, collateralVault.address)"
+              :component="VaultNetApyPairModal"
+              :modal-data="netApyModalData"
+              aria-label="Show net APY rewards breakdown"
+            >
               <SvgIcon
-                v-if="hasSupplyRewards(collateralVault.address) || hasBorrowRewards(borrowVault.address, collateralVault.address) || hasLoopingRewards(borrowVault.address, collateralVault.address)"
-                class="!w-20 !h-20 text-accent-500"
+                class="!w-20 !h-20 text-accent-500 cursor-pointer"
                 name="sparks"
                 data-modal-trigger="net-apy"
               />
-              {{ formatNumber(netApy) }}%
-            </span>
-          </VaultOverviewLabelValue>
-        </UiModalPreviewTrigger>
-        <UiModalPreviewTrigger
-          v-if="isBorrowable"
-          :component="VaultMaxRoeModal"
-          :modal-data="() => maxRoeModalData"
-          aria-label="Max ROE details"
-        >
-          <VaultOverviewLabelValue>
-            <template #label>
-              <span class="flex items-center gap-4">
-                Max ROE
+            </UiModalPreviewTrigger>
+            {{ formatNumber(netApy) }}%
+          </span>
+        </VaultOverviewLabelValue>
+        <VaultOverviewLabelValue v-if="isBorrowable">
+          <template #label>
+            <span class="flex items-center gap-4">
+              Max ROE
+              <UiModalPreviewTrigger
+                :component="VaultMaxRoeModal"
+                :modal-data="maxRoeModalData"
+                aria-label="Show max ROE breakdown"
+              >
                 <SvgIcon
-                  class="!w-20 !h-20 text-content-muted hover:text-content-secondary"
+                  class="!w-20 !h-20 text-content-muted hover:text-content-secondary cursor-pointer"
                   name="info-circle"
                   data-modal-trigger="max-roe"
                 />
-              </span>
-            </template>
-            <span class="flex items-center gap-4">
+              </UiModalPreviewTrigger>
+            </span>
+          </template>
+          <span class="flex items-center gap-4">
+            <UiModalPreviewTrigger
+              v-if="hasSupplyRewards(collateralVault.address) || hasBorrowRewards(borrowVault.address, collateralVault.address) || hasLoopingRewards(borrowVault.address, collateralVault.address)"
+              :component="VaultMaxRoeModal"
+              :modal-data="maxRoeModalData"
+              aria-label="Show max ROE rewards breakdown"
+            >
               <SvgIcon
-                v-if="hasSupplyRewards(collateralVault.address) || hasBorrowRewards(borrowVault.address, collateralVault.address) || hasLoopingRewards(borrowVault.address, collateralVault.address)"
-                class="!w-20 !h-20 text-accent-500"
+                class="!w-20 !h-20 text-accent-500 cursor-pointer"
                 name="sparks"
                 data-modal-trigger="max-roe"
               />
-              {{ formatNumber(maxRoe) }}%
-            </span>
-          </VaultOverviewLabelValue>
-        </UiModalPreviewTrigger>
+            </UiModalPreviewTrigger>
+            {{ formatNumber(maxRoe) }}%
+          </span>
+        </VaultOverviewLabelValue>
         <VaultOverviewLabelValue
           label="Max LTV"
           :value="pairBorrowLTVPercent === null ? '-' : `${formatNumber(pairBorrowLTVPercent, 2)}%`"

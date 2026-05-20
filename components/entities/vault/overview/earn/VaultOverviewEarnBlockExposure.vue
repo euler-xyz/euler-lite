@@ -217,30 +217,38 @@ load()
               </div>
             </div>
           </template>
-          <UiModalPreviewTrigger
+          <div
             v-if="row.vault"
-            :component="VaultSupplyApyModal"
-            :modal-data="() => getStrategySupplyApyModalData(row.vault!)"
-            aria-label="Supply APY details"
+            class="flex flex-col items-end shrink-0"
           >
-            <div class="flex flex-col items-end shrink-0">
-              <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-                Supply APY
+            <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+              Supply APY
+              <UiModalPreviewTrigger
+                :component="VaultSupplyApyModal"
+                :modal-data="getStrategySupplyApyModalData(row.vault)"
+                aria-label="Show supply APY breakdown"
+              >
                 <SvgIcon
-                  class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors"
+                  class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                   name="info-circle"
                 />
-              </div>
-              <div class="text-p2 flex items-center text-accent-600 font-semibold">
+              </UiModalPreviewTrigger>
+            </div>
+            <div class="text-p2 flex items-center text-accent-600 font-semibold">
+              <UiModalPreviewTrigger
+                v-if="hasSupplyRewards(row.vault.address)"
+                :component="VaultSupplyApyModal"
+                :modal-data="getStrategySupplyApyModalData(row.vault)"
+                aria-label="Show supply APY rewards breakdown"
+              >
                 <SvgIcon
-                  v-if="hasSupplyRewards(row.vault.address)"
-                  class="!w-20 !h-20 text-accent-500 mr-4"
+                  class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
                   name="sparks"
                 />
-                {{ formatNumber(getStrategySupplyApy(row.vault)) }}%
-              </div>
+              </UiModalPreviewTrigger>
+              {{ formatNumber(getStrategySupplyApy(row.vault)) }}%
             </div>
-          </UiModalPreviewTrigger>
+          </div>
         </div>
         <div class="flex flex-col gap-12 px-16 pt-12 pb-16">
           <VaultOverviewLabelValue

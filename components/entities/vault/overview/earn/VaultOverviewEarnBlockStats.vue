@@ -53,33 +53,33 @@ const supplyApyModalData = computed(() => ({
         :value="availableLiquidityDisplay"
         orientation="horizontal"
       />
-      <UiModalPreviewTrigger
-        :component="VaultSupplyApyModal"
-        :modal-data="() => supplyApyModalData"
-        aria-label="Supply APY details"
+      <VaultOverviewLabelValue
+        orientation="horizontal"
       >
-        <VaultOverviewLabelValue
-          orientation="horizontal"
-        >
-          <template #label>
-            <span class="flex items-center gap-6">
-              Supply APY
-              <span class="inline-flex items-center rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5">
-                1h
-              </span>
+        <template #label>
+          <span class="flex items-center gap-6">
+            Supply APY
+            <span class="inline-flex items-center rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5">
+              1h
             </span>
-          </template>
-          <span class="flex items-center gap-4">
+          </span>
+        </template>
+        <span class="flex items-center gap-4">
+          <UiModalPreviewTrigger
+            v-if="hasSupplyRewards(vault.address)"
+            :component="VaultSupplyApyModal"
+            :modal-data="supplyApyModalData"
+            aria-label="Show supply APY rewards breakdown"
+          >
             <SvgIcon
-              v-if="hasSupplyRewards(vault.address)"
-              class="!w-20 !h-20 text-accent-500"
+              class="!w-20 !h-20 text-accent-500 cursor-pointer"
               name="sparks"
               data-modal-trigger="supply-apy"
             />
-            {{ formatNumber(getVaultSupplyApy(vault) + rewardSupplyAPY) }}%
-          </span>
-        </VaultOverviewLabelValue>
-      </UiModalPreviewTrigger>
+          </UiModalPreviewTrigger>
+          {{ formatNumber(getVaultSupplyApy(vault) + rewardSupplyAPY) }}%
+        </span>
+      </VaultOverviewLabelValue>
     </div>
   </div>
 </template>

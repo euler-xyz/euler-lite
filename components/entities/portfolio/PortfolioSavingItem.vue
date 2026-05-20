@@ -165,37 +165,43 @@ const onClick = () => {
             {{ vault.asset.symbol }}
           </div>
         </div>
-        <UiModalPreviewTrigger
-          :component="VaultSupplyApyModal"
-          :modal-data="() => supplyApyModalData"
-          aria-label="Supply APY details"
-        >
-          <div class="flex flex-col items-end">
-            <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-              Supply APY
+        <div class="flex flex-col items-end">
+          <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+            Supply APY
+            <UiModalPreviewTrigger
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY breakdown"
+            >
               <SvgIcon
-                class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors"
+                class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                 name="info-circle"
                 data-modal-trigger="supply-apy"
               />
-            </div>
-            <div
-              class="text-p2 flex text-accent-600"
-              data-id="data-point"
-              :data-key="positionKey"
-              data-field="supply-apy"
-              :data-value="supplyApyWithRewards"
+            </UiModalPreviewTrigger>
+          </div>
+          <div
+            class="text-p2 flex text-accent-600"
+            data-id="data-point"
+            :data-key="positionKey"
+            data-field="supply-apy"
+            :data-value="supplyApyWithRewards"
+          >
+            <UiModalPreviewTrigger
+              v-if="rewardsExist"
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY rewards breakdown"
             >
               <SvgIcon
-                v-if="rewardsExist"
                 name="sparks"
-                class="!w-20 !h-20 text-accent-600 mr-4"
+                class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
                 data-modal-trigger="supply-apy"
               />
-              {{ formatNumber(supplyApyWithRewards) }}%
-            </div>
+            </UiModalPreviewTrigger>
+            {{ formatNumber(supplyApyWithRewards) }}%
           </div>
-        </UiModalPreviewTrigger>
+        </div>
       </div>
     </div>
     <div class="flex py-12 px-16 pb-16">
@@ -313,37 +319,43 @@ const onClick = () => {
             {{ vault.asset.symbol }}
           </div>
         </div>
-        <UiModalPreviewTrigger
-          :component="VaultSupplyApyModal"
-          :modal-data="() => supplyApyModalData"
-          aria-label="Supply APY details"
-        >
-          <div class="flex flex-col items-end">
-            <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-              Supply APY
+        <div class="flex flex-col items-end">
+          <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+            Supply APY
+            <UiModalPreviewTrigger
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY breakdown"
+            >
               <SvgIcon
-                class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors"
+                class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                 name="info-circle"
                 data-modal-trigger="supply-apy"
               />
-            </div>
-            <div
-              class="text-p2 flex text-accent-600"
-              data-id="data-point"
-              :data-key="positionKey"
-              data-field="supply-apy"
-              :data-value="supplyApyWithRewards"
+            </UiModalPreviewTrigger>
+          </div>
+          <div
+            class="text-p2 flex text-accent-600"
+            data-id="data-point"
+            :data-key="positionKey"
+            data-field="supply-apy"
+            :data-value="supplyApyWithRewards"
+          >
+            <UiModalPreviewTrigger
+              v-if="rewardsExist"
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY rewards breakdown"
             >
               <SvgIcon
-                v-if="rewardsExist"
                 name="sparks"
-                class="!w-20 !h-20 text-accent-600 mr-4"
+                class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
                 data-modal-trigger="supply-apy"
               />
-              {{ formatNumber(supplyApyWithRewards) }}%
-            </div>
+            </UiModalPreviewTrigger>
+            {{ formatNumber(supplyApyWithRewards) }}%
           </div>
-        </UiModalPreviewTrigger>
+        </div>
       </div>
     </div>
     <div class="flex py-12 px-16 pb-16">

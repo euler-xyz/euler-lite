@@ -91,65 +91,77 @@ watchEffect(async () => {
         :value="availableLiquidityDisplay"
         orientation="horizontal"
       />
-      <UiModalPreviewTrigger
-        :component="VaultSupplyApyModal"
-        :modal-data="() => supplyApyModalData"
-        aria-label="Supply APY details"
+      <VaultOverviewLabelValue
+        orientation="horizontal"
       >
-        <VaultOverviewLabelValue
-          orientation="horizontal"
-        >
-          <template #label>
-            <span class="flex items-center gap-4">
-              Supply APY
+        <template #label>
+          <span class="flex items-center gap-4">
+            Supply APY
+            <UiModalPreviewTrigger
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY breakdown"
+            >
               <SvgIcon
-                class="!w-20 !h-20 text-content-muted hover:text-content-secondary"
+                class="!w-20 !h-20 text-content-muted hover:text-content-secondary cursor-pointer"
                 name="info-circle"
                 data-modal-trigger="supply-apy"
               />
-            </span>
-          </template>
-          <span class="flex items-center gap-4">
+            </UiModalPreviewTrigger>
+          </span>
+        </template>
+        <span class="flex items-center gap-4">
+          <UiModalPreviewTrigger
+            v-if="hasSupplyRewards(vault.address)"
+            :component="VaultSupplyApyModal"
+            :modal-data="supplyApyModalData"
+            aria-label="Show supply APY rewards breakdown"
+          >
             <SvgIcon
-              v-if="hasSupplyRewards(vault.address)"
-              class="!w-20 !h-20 text-accent-500"
+              class="!w-20 !h-20 text-accent-500 cursor-pointer"
               name="sparks"
               data-modal-trigger="supply-apy"
             />
-            {{ formatNumber(supplyApyWithRewards) }}%
-          </span>
-        </VaultOverviewLabelValue>
-      </UiModalPreviewTrigger>
-      <UiModalPreviewTrigger
+          </UiModalPreviewTrigger>
+          {{ formatNumber(supplyApyWithRewards) }}%
+        </span>
+      </VaultOverviewLabelValue>
+      <VaultOverviewLabelValue
         v-if="isBorrowable"
-        :component="VaultBorrowApyModal"
-        :modal-data="() => borrowApyModalData"
-        aria-label="Borrow APY details"
+        orientation="horizontal"
       >
-        <VaultOverviewLabelValue
-          orientation="horizontal"
-        >
-          <template #label>
-            <span class="flex items-center gap-4">
-              Borrow APY
+        <template #label>
+          <span class="flex items-center gap-4">
+            Borrow APY
+            <UiModalPreviewTrigger
+              :component="VaultBorrowApyModal"
+              :modal-data="borrowApyModalData"
+              aria-label="Show borrow APY breakdown"
+            >
               <SvgIcon
-                class="!w-20 !h-20 text-content-muted hover:text-content-secondary"
+                class="!w-20 !h-20 text-content-muted hover:text-content-secondary cursor-pointer"
                 name="info-circle"
                 data-modal-trigger="borrow-apy"
               />
-            </span>
-          </template>
-          <span class="flex items-center gap-4">
+            </UiModalPreviewTrigger>
+          </span>
+        </template>
+        <span class="flex items-center gap-4">
+          <UiModalPreviewTrigger
+            v-if="hasBorrowRewards(vault.address)"
+            :component="VaultBorrowApyModal"
+            :modal-data="borrowApyModalData"
+            aria-label="Show borrow APY rewards breakdown"
+          >
             <SvgIcon
-              v-if="hasBorrowRewards(vault.address)"
-              class="!w-20 !h-20 text-accent-500"
+              class="!w-20 !h-20 text-accent-500 cursor-pointer"
               name="sparks"
               data-modal-trigger="borrow-apy"
             />
-            {{ formatNumber(borrowApyWithRewards) }}%
-          </span>
-        </VaultOverviewLabelValue>
-      </UiModalPreviewTrigger>
+          </UiModalPreviewTrigger>
+          {{ formatNumber(borrowApyWithRewards) }}%
+        </span>
+      </VaultOverviewLabelValue>
       <VaultOverviewLabelValue
         v-if="isBorrowable"
         orientation="horizontal"

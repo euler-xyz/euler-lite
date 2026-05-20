@@ -371,70 +371,82 @@ const openPositionInformationModal = () => {
             </div>
           </div>
           <div class="flex gap-16 items-start shrink-0">
-            <UiModalPreviewTrigger
-              :component="VaultNetApyModal"
-              :modal-data="() => netApyModalData"
-              aria-label="Net APY details"
-            >
-              <div class="flex flex-col items-end">
-                <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-                  Net APY
+            <div class="flex flex-col items-end">
+              <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+                Net APY
+                <UiModalPreviewTrigger
+                  :component="VaultNetApyModal"
+                  :modal-data="netApyModalData"
+                  aria-label="Show net APY breakdown"
+                >
                   <SvgIcon
-                    class="!w-16 !h-16 text-content-muted hover:text-content-secondary"
+                    class="!w-16 !h-16 text-content-muted hover:text-content-secondary cursor-pointer"
                     name="info-circle"
                     data-modal-trigger="net-apy"
                   />
-                </div>
-                <div
-                  class="text-p2 flex items-center"
-                  data-id="data-point"
-                  :data-key="positionKey"
-                  data-field="net-apy"
-                  :data-value="netAPY !== undefined && Number.isFinite(netAPY) ? netAPY : null"
-                  :class="[(netAPY ?? 0) >= 0 ? 'text-accent-600' : 'text-error-500']"
+                </UiModalPreviewTrigger>
+              </div>
+              <div
+                class="text-p2 flex items-center"
+                data-id="data-point"
+                :data-key="positionKey"
+                data-field="net-apy"
+                :data-value="netAPY !== undefined && Number.isFinite(netAPY) ? netAPY : null"
+                :class="[(netAPY ?? 0) >= 0 ? 'text-accent-600' : 'text-error-500']"
+              >
+                <UiModalPreviewTrigger
+                  v-if="hasRewards"
+                  :component="VaultNetApyModal"
+                  :modal-data="netApyModalData"
+                  aria-label="Show net APY rewards breakdown"
                 >
                   <SvgIcon
-                    v-if="hasRewards"
-                    class="!w-20 !h-20 text-accent-500 mr-4"
+                    class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
                     name="sparks"
                     data-modal-trigger="net-apy"
                   />
-                  {{ netAPY !== undefined && Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
-                </div>
+                </UiModalPreviewTrigger>
+                {{ netAPY !== undefined && Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
               </div>
-            </UiModalPreviewTrigger>
-            <UiModalPreviewTrigger
-              :component="PortfolioRoeModal"
-              :modal-data="() => roeModalData"
-              aria-label="ROE details"
-            >
-              <div class="flex flex-col items-end">
-                <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-                  ROE
+            </div>
+            <div class="flex flex-col items-end">
+              <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+                ROE
+                <UiModalPreviewTrigger
+                  :component="PortfolioRoeModal"
+                  :modal-data="roeModalData"
+                  aria-label="Show ROE breakdown"
+                >
                   <SvgIcon
-                    class="!w-16 !h-16 text-content-muted hover:text-content-secondary"
+                    class="!w-16 !h-16 text-content-muted hover:text-content-secondary cursor-pointer"
                     name="info-circle"
                     data-modal-trigger="roe"
                   />
-                </div>
-                <div
-                  class="text-p2 flex items-center"
-                  data-id="data-point"
-                  :data-key="positionKey"
-                  data-field="roe"
-                  :data-value="roe !== undefined && Number.isFinite(roe) ? roe : null"
-                  :class="[(roe ?? 0) >= 0 ? 'text-accent-600' : 'text-error-500']"
+                </UiModalPreviewTrigger>
+              </div>
+              <div
+                class="text-p2 flex items-center"
+                data-id="data-point"
+                :data-key="positionKey"
+                data-field="roe"
+                :data-value="roe !== undefined && Number.isFinite(roe) ? roe : null"
+                :class="[(roe ?? 0) >= 0 ? 'text-accent-600' : 'text-error-500']"
+              >
+                <UiModalPreviewTrigger
+                  v-if="hasRewards"
+                  :component="PortfolioRoeModal"
+                  :modal-data="roeModalData"
+                  aria-label="Show ROE rewards breakdown"
                 >
                   <SvgIcon
-                    v-if="hasRewards"
-                    class="!w-20 !h-20 text-accent-500 mr-4"
+                    class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
                     name="sparks"
                     data-modal-trigger="roe"
                   />
-                  {{ roe !== undefined && Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}
-                </div>
+                </UiModalPreviewTrigger>
+                {{ roe !== undefined && Number.isFinite(roe) ? `${formatNumber(roe)}%` : '-' }}
               </div>
-            </UiModalPreviewTrigger>
+            </div>
           </div>
         </div>
 
