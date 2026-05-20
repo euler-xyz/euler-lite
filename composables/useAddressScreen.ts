@@ -47,9 +47,10 @@ export const useAddressScreen = () => {
       const vpnIsUsed = await detectVpn()
       if (gen !== screeningGeneration) return false
 
-      const isRestricted = await screenAddress(address, vpnIsUsed)
+      const addressIsRestricted = await screenAddress(address, vpnIsUsed)
       if (gen !== screeningGeneration) return false
 
+      const isRestricted = vpnIsUsed || addressIsRestricted
       if (isRestricted) {
         await disconnect()
         if (gen !== screeningGeneration) return false

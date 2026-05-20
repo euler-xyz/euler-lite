@@ -68,7 +68,7 @@ describe('POST /api/screen-address', () => {
     await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true })
   })
 
-  it('derives vpnIsUsed from trusted request headers', async () => {
+  it('derives vpnIsUsed from trusted request headers or a positive client signal', async () => {
     process.env.WALLET_SCREENING_URI = SCREENING_URI
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
       new Response(JSON.stringify({ addressIsSuspicious: false }), { status: 200 }),
@@ -100,6 +100,6 @@ describe('POST /api/screen-address', () => {
       const init = call[1]
       return JSON.parse(String(init?.body)) as { vpnIsUsed: string }
     })
-    expect(bodies.map(body => body.vpnIsUsed)).toEqual(['true', 'true', 'true', 'true', 'false'])
+    expect(bodies.map(body => body.vpnIsUsed)).toEqual(['true', 'true', 'true', 'true', 'true'])
   })
 })

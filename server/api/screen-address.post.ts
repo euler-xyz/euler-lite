@@ -34,7 +34,8 @@ export default defineEventHandler(async (event) => {
   const address = body.address
   const vpnIsUsed = String(
     isTruthyHeader(event.node.req.headers['x-is-vpn'])
-    || isTruthyHeader(event.node.req.headers['x-is-proxy-or-vpn']),
+    || isTruthyHeader(event.node.req.headers['x-is-proxy-or-vpn'])
+    || body.vpnIsUsed === true,
   )
 
   const screeningUri = process.env.WALLET_SCREENING_URI
