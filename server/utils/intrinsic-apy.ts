@@ -40,6 +40,7 @@ const UPSTREAM_URLS = {
   infinifi: 'https://eth-api.infinifi.xyz/api/protocol/data',
   accountable: 'https://yield.accountable.capital/api/loan/address',
   coinshift: 'https://uspc-nav.coinshift.xyz/api/nav/returns',
+  yuzuDashboard: 'https://yuzu-accountable.yuzu.money/v1/dashboard',
 } as const
 
 const PENDLE_API_BASE = 'https://api-v2.pendle.finance/core/v2'
@@ -372,6 +373,70 @@ async function extractCoinshift(sources: CoinshiftSource[]): Promise<Array<[stri
   return out
 }
 
+type YuzuDashboardSource = Extract<IntrinsicApySourceConfig, { provider: 'yuzu-dashboard' }>
+type YuzuDashboardTimelineRow = {
+  date?: string
+  ts?: string | number
+} & Partial<Record<YuzuDashboardSource['yuzuApyField'], string | number | null>>
+type YuzuDashboardResponse = {
+  data?: {
+    reserves?: {
+      timeline?: YuzuDashboardTimelineRow[]
+    }
+  }
+}
+
+const yuzuDateValue = (date?: string): number => {
+  if (!date) return Number.NEGATIVE_INFINITY
+  const parsed = Date.parse(`${date}T00:00:00Z`)
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY
+}
+
+const yuzuTimestampValue = (ts?: string | number): number => {
+  const parsed = Number(ts)
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY
+}
+
+export function extractLatestYuzuApy(
+  rows: readonly YuzuDashboardTimelineRow[] | undefined,
+  field: YuzuDashboardSource['yuzuApyField'],
+): number | null {
+  let latest: YuzuDashboardTimelineRow | undefined
+  for (const row of rows ?? []) {
+    if (!row) continue
+    if (!latest) {
+      latest = row
+      continue
+    }
+    const rowDate = yuzuDateValue(row.date)
+    const latestDate = yuzuDateValue(latest.date)
+    if (
+      rowDate > latestDate
+      || (rowDate === latestDate && yuzuTimestampValue(row.ts) > yuzuTimestampValue(latest.ts))
+    ) {
+      latest = row
+    }
+  }
+
+  const apy = Number(latest?.[field])
+  return Number.isFinite(apy) ? apy : null
+}
+
+async function extractYuzuDashboard(sources: YuzuDashboardSource[]): Promise<Array<[string, IntrinsicApyInfo]>> {
+  const data = await fetchUpstream<YuzuDashboardResponse>('yuzu-dashboard', UPSTREAM_URLS.yuzuDashboard)
+  const out: Array<[string, IntrinsicApyInfo]> = []
+  for (const s of sources) {
+    const apy = extractLatestYuzuApy(data?.data?.reserves?.timeline, s.yuzuApyField)
+    if (apy === null) continue
+    out.push([normalize(s.address), {
+      apy,
+      provider: 'Yuzu',
+      source: UPSTREAM_URLS.yuzuDashboard,
+    }])
+  }
+  return out
+}
+
 type YoSource = Extract<IntrinsicApySourceConfig, { provider: 'yo' }>
 
 async function extractYo(sources: YoSource[]): Promise<Array<[string, IntrinsicApyInfo]>> {
@@ -426,7 +491,7 @@ async function extractSimple<S extends IntrinsicApySourceConfig, T>(
 }
 
 // Providers with dedicated extractors in the switch below.
-type ExplicitProvider = 'defillama' | 'pendle' | 'securitize' | 'stablewatch' | 'renzo' | 'midas' | 'yo' | 'infinifi' | 'accountable' | 'coinshift'
+type ExplicitProvider = 'defillama' | 'pendle' | 'securitize' | 'stablewatch' | 'renzo' | 'midas' | 'yo' | 'infinifi' | 'accountable' | 'coinshift' | 'yuzu-dashboard'
 // Every remaining provider must have an entry in SIMPLE_SPECS — enforced at the type level.
 type SimpleProvider = Exclude<IntrinsicApySourceConfig['provider'], ExplicitProvider>
 
@@ -494,6 +559,7 @@ async function extractForProvider(
     case 'infinifi': return extractInfinifi(sources as InfinifiSource[])
     case 'accountable': return extractAccountable(sources as AccountableSource[])
     case 'coinshift': return extractCoinshift(sources as CoinshiftSource[])
+    case 'yuzu-dashboard': return extractYuzuDashboard(sources as YuzuDashboardSource[])
     default: {
       const simpleProvider: SimpleProvider = provider
       const spec = SIMPLE_SPECS[simpleProvider]
