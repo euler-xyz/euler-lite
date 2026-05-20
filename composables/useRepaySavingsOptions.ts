@@ -11,8 +11,20 @@ import { computeSupplyApy } from '~/utils/collateralOptions'
 
 /**
  * Provides eligible savings positions that can be used to repay debt.
- * Only includes standard EVK vaults — Earn vaults have an incompatible ABI
- * and Securitize vaults have restricted withdrawals.
+ * Only includes standard EVK vaults.
+ *
+ * Earn vaults are excluded: they expose a MetaMorpho-style ABI that doesn't
+ * line up with the EVK withdraw/skim/repayWithShares dance the repay plans
+ * rely on.
+ *
+ * Securitize vaults are excluded because the repay plan would call
+ * `savingsVault.withdraw(amount, borrowVault, ...)` — pushing the underlying
+ * ERC-20 directly into the borrow vault. Securitize underlyings (tokenized
+ * RWAs) are themselves permissioned tokens whose transfer reverts unless the
+ * recipient is on a whitelist. The borrow vault isn't on that whitelist, so
+ * the withdraw step would revert at the ERC-20 transfer. It is not the
+ * missing `skim` that blocks this path — `skim` is called on the borrow
+ * vault (always EVK), not on the savings side.
  */
 export const useRepaySavingsOptions = () => {
   const { depositPositions } = useEulerAccount()

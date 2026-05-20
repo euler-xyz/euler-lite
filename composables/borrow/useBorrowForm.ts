@@ -1,5 +1,4 @@
 import type { Ref, ComputedRef } from 'vue'
-import { useAccount } from '@wagmi/vue'
 import { getAddress, formatUnits, zeroAddress, type Address } from 'viem'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { logWarn } from '~/utils/errorHandling'
@@ -78,7 +77,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     collateralSupplyRewardApy,
     borrowRewardApy,
     collateralSupplyApyWithRewards,
-    isSecuritizeCollateral: _isSecuritizeCollateral,
+    isSecuritizeCollateral,
     isGeoBlocked,
     isBorrowRestricted,
     collateralAddress,
@@ -88,7 +87,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const { buildBorrowPlan, buildBorrowBySavingPlan, buildSwapAndBorrowPlan, executeTxPlan } = useEulerOperations()
-  const { address, isConnected } = useAccount()
+  const { address, isConnected } = useWagmi()
   const { chainId } = useEulerAddresses()
   const { fetchSingleBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
@@ -231,6 +230,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   const borrowNeedsSwap = computed(() => {
     if (!borrowSelectedAsset.value || !collateralVault.value) return false
+    // Swap-and-borrow ends with verifyAmountMinAndSkim which calls skim() on the
+    // collateral vault — securitize vaults don't implement skim, so the swap
+    // path is structurally unsupported here.
+    if (isSecuritizeCollateral.value) return false
     try {
       if (isNativeOfWrapped(borrowSelectedAsset.value.address, collateralVault.value.asset.address, chainId.value!)) return false
       return getAddress(borrowSelectedAsset.value.address) !== getAddress(collateralVault.value.asset.address)
@@ -339,6 +342,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         price: walletCollateralPriceUsd.value,
         apy: collateralSupplyApyWithRewards.value,
         assetAddress,
+        vaultAddress: vaultAddr,
         tags,
         disabled,
       },
@@ -352,6 +356,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         price: collateralUnitPrice.value !== undefined ? amount * collateralUnitPrice.value : 0,
         apy: collateralSupplyApyWithRewards.value,
         assetAddress,
+        vaultAddress: position.vault.address,
         subAccount: position.subAccount,
         tags,
         disabled,
