@@ -1,4 +1,4 @@
-import { useAccount, useSwitchChain, useWriteContract } from '@wagmi/vue'
+import { useSwitchChain, useWriteContract } from '@wagmi/vue'
 import type { Address } from 'viem'
 import axios from 'axios'
 
@@ -434,7 +434,7 @@ const getMerklCampaignsForVault = (vaultAddress: string): RewardCampaign[] => {
 }
 
 export const useMerkl = () => {
-  const { isConnected, address: wagmiAddress, chain: wagmiChain } = useAccount()
+  const { isConnected, address: wagmiAddress, chain: wagmiChain } = useWagmi()
   const { switchChain } = useSwitchChain()
   const { MERKL_ADDRESS } = useEulerConfig()
   const { client: rpcClient } = useRpcClient()

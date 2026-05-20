@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { nanoToValue } from '~/utils/crypto-utils'
 
-const { isConnected } = useAccount()
+const { isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { enableMerkl, enableIncentra, enableFuul } = useDeployConfig()
 const { rewards, isRewardsLoading } = useMerkl()

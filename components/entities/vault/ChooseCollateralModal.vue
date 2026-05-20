@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { getSubAccountIndex } from '~/entities/account'
 import { getVaultProductName } from '~/utils/eulerLabelsUtils'
 import type { CollateralOption } from '~/entities/vault'
@@ -17,7 +16,7 @@ const { productName, symbol, collateralOptions, selected = 0, title = 'Select co
 }>()
 
 const { isEscrowVault } = useVaultRegistry()
-const { address } = useAccount()
+const { address } = useWagmi()
 const { portfolioAddress } = useEulerAccount()
 
 const searchQuery = ref('')
