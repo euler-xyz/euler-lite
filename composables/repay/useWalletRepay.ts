@@ -16,7 +16,7 @@ import { trimTrailingZeros } from '~/utils/string-utils'
 import { amountToPercent, percentToAmountNano } from '~/utils/repayUtils'
 import { findBlockingDisabledOp, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
-import type { Vault } from '~/entities/vault'
+import { isEVKVault, type Vault, type SecuritizeVault } from '~/entities/vault'
 
 interface UseWalletRepayOptions {
   position: Ref<AccountBorrowPosition | undefined>
@@ -109,8 +109,11 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     if (isFullRepay) {
       const collAddrs = position.value?.collaterals ?? (collateralVault.value ? [collateralVault.value.address] : [])
       for (const addr of collAddrs) {
-        const v = registryGetVault(addr) as Vault | undefined
-        if (v) steps.push({ vault: v, op: OP_TRANSFER })
+        const v = registryGetVault(addr) as Vault | SecuritizeVault | undefined
+        // Only EVK collaterals are swept via transferFromMax in
+        // buildFullRepayPlan — non-EVK (e.g. securitize) are filtered out
+        // by the builder, so don't surface a transfer-op warning for them.
+        if (v && isEVKVault(v)) steps.push({ vault: v, op: OP_TRANSFER })
       }
     }
     return steps

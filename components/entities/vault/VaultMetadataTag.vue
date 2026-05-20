@@ -116,7 +116,7 @@ const onKeydown = (event: KeyboardEvent) => {
   &--neutral {
     background-color: transparent;
     border-color: var(--border-subtle);
-    color: var(--content-primary);
+    color: var(--text-primary);
 
     &:hover {
       background-color: var(--bg-card-hover);
