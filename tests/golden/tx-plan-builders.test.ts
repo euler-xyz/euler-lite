@@ -114,6 +114,31 @@ const setupLegacy = (overrides?: Parameters<typeof buildLegacyContext>[0]) => {
   }
 }
 
+type GoldenGlobal = typeof globalThis & {
+  useEulerAccount?: unknown
+}
+
+const withLegacyPortfolio = async <T>(
+  portfolio: { getNewSubAccount: () => Address | undefined },
+  run: () => Promise<T>,
+): Promise<T> => {
+  const goldenGlobal = globalThis as GoldenGlobal
+  const previousUseEulerAccount = goldenGlobal.useEulerAccount
+  goldenGlobal.useEulerAccount = () => ({
+    portfolio: {
+      value: portfolio,
+    },
+  })
+
+  try {
+    return await run()
+  }
+  finally {
+    if (previousUseEulerAccount === undefined) delete goldenGlobal.useEulerAccount
+    else goldenGlobal.useEulerAccount = previousUseEulerAccount
+  }
+}
+
 const evcDisableCollateralAbi = [{
   type: 'function',
   name: 'disableCollateral',
@@ -143,6 +168,7 @@ const CURRENT_STATE_OLD_COLLATERALS = [
   getAddress('0xbC4B4AC47582c3E38Ce5940B80Da65401F4628f1'),
   getAddress('0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9'),
 ] as const
+const CURRENT_STATE_POSITION_ASSET = ADDR.assetUsdc
 
 const trackingEntriesToPositions = (entries: readonly string[]) => entries.map(entry => ({
   subAccount: getAddress(entry.slice(0, 42)),
@@ -166,6 +192,31 @@ const CURRENT_STATE_ACTIVE_DEPOSITS = trackingEntriesToPositions([
   '0xcfe5660d6c55906ec8c488a466bd4f77f77eec8f797dd80692c3b2dadabce8e30c07fde5307d48a9',
   '0xcfe5660d6c55906ec8c488a466bd4f77f77eec89797dd80692c3b2dadabce8e30c07fde5307d48a9',
 ])
+
+const buildCurrentStateSdkAccount = () => buildSdkAccount({
+  owner: CURRENT_STATE_OWNER,
+  positions: [
+    ...CURRENT_STATE_ACTIVE_BORROWS.map(({ subAccount, vault }) => ({
+      subAccount,
+      vault,
+      asset: CURRENT_STATE_POSITION_ASSET,
+      borrowed: 1n,
+    })),
+    ...CURRENT_STATE_ACTIVE_DEPOSITS.map(({ subAccount, vault }) => ({
+      subAccount,
+      vault,
+      asset: CURRENT_STATE_POSITION_ASSET,
+      shares: 1n,
+      assets: 1n,
+      isCollateral: true,
+    })),
+  ],
+  subAccounts: [{
+    subAccount: CURRENT_STATE_SELECTED_SUB_ACCOUNT,
+    enabledControllers: [CURRENT_STATE_OLD_CONTROLLER],
+    enabledCollaterals: [...CURRENT_STATE_OLD_COLLATERALS],
+  }],
+})
 
 const getOnlyCanonicalBatch = (txs: CanonicalTx[]) => {
   const batch = txs.find(tx => tx.evcBatch)?.evcBatch
@@ -383,7 +434,7 @@ describe('golden tx-plan parity: vault.borrow (wallet collateral)', () => {
   // happens at the end of the batch), but byte-different.
   it.skip('borrow against fresh sub-account, wallet collateral (reordered)', () => {})
 
-  it('borrow against current 0xcfe state cleans up the old controller in legacy and SDK', async () => {
+  it('opens a new borrow for current 0xcfe state and cleans up the selected stale-controller sub-account', async () => {
     const collateralAmount = 1_000_000n
     const borrowAmount = 100_000n
     goldenMocks.evcAccountInfo = {
@@ -395,31 +446,32 @@ describe('golden tx-plan parity: vault.borrow (wallet collateral)', () => {
       deposits: CURRENT_STATE_ACTIVE_DEPOSITS,
     }
 
+    const currentAccount = buildCurrentStateSdkAccount()
+    const selectedSubAccount = currentAccount.getNewSubAccount()
+    expect(selectedSubAccount).toBe(CURRENT_STATE_SELECTED_SUB_ACCOUNT)
+    if (!selectedSubAccount) throw new Error('Current 0xcfe state did not select a new sub-account')
+    expect(currentAccount.getSubAccount(selectedSubAccount)?.enabledControllers).toEqual([CURRENT_STATE_OLD_CONTROLLER])
+    expect(currentAccount.getSubAccount(selectedSubAccount)?.enabledCollaterals).toEqual([...CURRENT_STATE_OLD_COLLATERALS])
+
     const { vault } = setupLegacy({ owner: CURRENT_STATE_OWNER })
-    const legacy = await vault.buildBorrowPlan(
-      ADDR.vaultWeth,
-      ADDR.assetWeth,
-      collateralAmount,
-      ADDR.vaultUsdt,
-      borrowAmount,
-      CURRENT_STATE_SELECTED_SUB_ACCOUNT,
-      { includePermit2Call: false },
-    )
+    const legacy = await withLegacyPortfolio(currentAccount, () =>
+      vault.buildBorrowPlan(
+        ADDR.vaultWeth,
+        ADDR.assetWeth,
+        collateralAmount,
+        ADDR.vaultUsdt,
+        borrowAmount,
+        undefined,
+        { includePermit2Call: false },
+      ))
     const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
 
     const sdk = buildSdkExecutionService()
     const sdkPlan = sdk.planBorrow({
-      account: buildSdkAccount({
-        owner: CURRENT_STATE_OWNER,
-        subAccounts: [{
-          subAccount: CURRENT_STATE_SELECTED_SUB_ACCOUNT,
-          enabledControllers: [CURRENT_STATE_OLD_CONTROLLER],
-          enabledCollaterals: [...CURRENT_STATE_OLD_COLLATERALS],
-        }],
-      }),
+      account: currentAccount,
       vault: ADDR.vaultUsdt,
       amount: borrowAmount,
-      borrowAccount: CURRENT_STATE_SELECTED_SUB_ACCOUNT,
+      borrowAccount: selectedSubAccount,
       receiver: CURRENT_STATE_OWNER,
       collateral: {
         vault: ADDR.vaultWeth,
