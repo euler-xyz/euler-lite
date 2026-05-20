@@ -1,3 +1,4 @@
+import { useAccount } from '@wagmi/vue'
 import { SHOW_ALL_HINT_DISMISSED_KEY } from '~/entities/constants'
 
 const dismissed = useLocalStorage<boolean>(SHOW_ALL_HINT_DISMISSED_KEY, false)
@@ -13,7 +14,7 @@ export const useShowAllHint = () => {
   } = useEulerAccount()
 
   const { isSpyMode } = useSpyMode()
-  const { isConnected } = useWagmi()
+  const { isConnected } = useAccount()
 
   const hasHiddenPositions = computed(() =>
     hiddenBorrowCount.value > 0 || hiddenDepositCount.value > 0,

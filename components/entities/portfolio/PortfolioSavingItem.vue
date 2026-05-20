@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAccount } from '@wagmi/vue'
 import type { Vault } from '~/entities/vault'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { getAssetUsdValue, formatAssetValue } from '~/services/pricing/priceProvider'
@@ -13,7 +14,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 const { position } = defineProps<{ position: AccountDepositPosition }>()
 const modal = useModal()
 
-const { address } = useWagmi()
+const { address } = useAccount()
 const { portfolioAddress } = useEulerAccount()
 const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
 const subAccountIndex = computed(() => {

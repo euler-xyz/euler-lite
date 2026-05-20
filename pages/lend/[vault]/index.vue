@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAccount } from '@wagmi/vue'
 import { getAddress, formatUnits, type Address, zeroAddress } from 'viem'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -69,7 +70,7 @@ const { buildSupplyPlan, buildSwapAndSupplyPlan, executeTxPlan } = useEulerOpera
 const { getVault, getSecuritizeVault, getEscrowVault, updateVault, isEscrowLoadedOnce } = useVaults()
 const { isReady: isLabelsReady } = useEulerLabels()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
-const { isConnected, address } = useWagmi()
+const { isConnected, address } = useAccount()
 const { chainId } = useEulerAddresses()
 const shareLinkQuery = computed(() => {
   const network = route.query.network

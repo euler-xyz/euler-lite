@@ -1,4 +1,5 @@
 import { getAddress, formatUnits } from 'viem'
+import { useAccount } from '@wagmi/vue'
 import { logWarn } from '~/utils/errorHandling'
 import { OperationReviewModal, SlippageSettingsModal } from '#components'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -94,7 +95,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
 
   const router = useRouter()
   const route = useRoute()
-  const { isConnected } = useWagmi()
+  const { isConnected } = useAccount()
   const { executeTxPlan } = useEulerOperations()
   const modal = useModal()
   const { error: showError } = useToast()

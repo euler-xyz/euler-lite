@@ -1,4 +1,5 @@
 import type { Ref, ComputedRef } from 'vue'
+import { useAccount } from '@wagmi/vue'
 import { formatUnits, zeroAddress, type Address } from 'viem'
 import { previewWithdraw, type Vault, type SecuritizeVault } from '~/entities/vault'
 import { getAssetUsdValue } from '~/services/pricing/priceProvider'
@@ -51,7 +52,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     getQuoteAccounts,
     onQuoteReceived,
   } = options
-  const { address } = useWagmi()
+  const { address } = useAccount()
   const { chainId } = useEulerAddresses()
 
   // --- State ---

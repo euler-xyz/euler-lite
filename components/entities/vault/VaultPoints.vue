@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import type { EarnVault, SecuritizeVault, Vault } from '~/entities/vault'
+import type { EarnVault, Vault } from '~/entities/vault'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultPointsModal } from '#components'
 
-const { vault } = defineProps<{ vault: Vault | EarnVault | SecuritizeVault }>()
+const { vault } = defineProps<{ vault: Vault | EarnVault }>()
 
 const points = useEulerPointsOfVault(vault.address)
 const modal = useModal()
@@ -34,7 +34,6 @@ const onPointClick = (
 
 <template>
   <div
-    v-if="points.length"
     class="text-p1 flex items-center gap-0 hover:gap-8 transition-[gap] duration-300 ease-in-out"
   >
     <img

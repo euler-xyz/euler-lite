@@ -14,14 +14,6 @@ function isValidAddress(value: unknown): value is string {
   return typeof value === 'string' && /^0x[0-9a-fA-F]{40}$/.test(value)
 }
 
-function isTruthyHeader(value: string | string[] | undefined): boolean {
-  const headers = Array.isArray(value) ? value : [value]
-  return headers
-    .filter((header): header is string => typeof header === 'string')
-    .flatMap(header => header.split(','))
-    .some(token => token.trim().toLowerCase() === 'true')
-}
-
 export default defineEventHandler(async (event) => {
   rateLimiter.consume(event)
 
@@ -32,10 +24,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const address = body.address
-  const vpnIsUsed = String(
-    isTruthyHeader(event.node.req.headers['x-is-vpn'])
-    || isTruthyHeader(event.node.req.headers['x-is-proxy-or-vpn']),
-  )
+  const vpnIsUsed = String(body.vpnIsUsed ?? false)
 
   const screeningUri = process.env.WALLET_SCREENING_URI
 
@@ -61,10 +50,10 @@ export default defineEventHandler(async (event) => {
     }
 
     const data = await resp.json()
-    const isSuspicious = data?.addressIsSuspicious !== false
+    const isSuspicious = Boolean(data?.addressIsSuspicious)
 
     if (isSuspicious) {
-      logger.warn({ ctx: 'screen-address', address }, 'flagged, malformed, or ambiguous TRM response — failing closed')
+      logger.warn({ ctx: 'screen-address', address }, 'flagged address')
     }
 
     return { addressIsSuspicious: isSuspicious }

@@ -119,7 +119,6 @@ const feeDisplay = computed(() => {
             v-else
             :vault="vault"
             type="unknown"
-            nudge
             class="w-fit"
           />
         </VaultOverviewLabelValue>
@@ -127,10 +126,7 @@ const feeDisplay = computed(() => {
           v-if="enableVaultTypeDisplay"
           label="Vault type"
         >
-          <VaultTypeBadges
-            :vault="vault"
-            nudge
-          />
+          <VaultTypeBadges :vault="vault" />
         </VaultOverviewLabelValue>
       </div>
     </div>

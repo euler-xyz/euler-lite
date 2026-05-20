@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAccount } from '@wagmi/vue'
 import type { EarnVault } from '~/entities/vault'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { useEulerProductOfVault, useEulerEntitiesOfEarnVault } from '~/composables/useEulerLabels'
@@ -10,7 +11,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { VaultSupplyApyModal } from '#components'
 
-const { isConnected } = useWagmi()
+const { isConnected } = useAccount()
 const { vault } = defineProps<{ vault: EarnVault }>()
 const product = useEulerProductOfVault(vault.address)
 const { enableEntityBranding } = useDeployConfig()

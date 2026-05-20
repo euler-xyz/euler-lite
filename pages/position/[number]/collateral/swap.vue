@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAccount } from '@wagmi/vue'
 import { erc20Abi, formatUnits, getAddress, maxUint256, zeroAddress, type Address, type Abi } from 'viem'
 import type { AccountBorrowPosition } from '~/entities/account'
 import { eulerAccountLensABI } from '~/entities/euler/abis'
@@ -27,7 +28,7 @@ import { COWSWAP_ORDER_DEADLINE_SECONDS, COWSWAP_PROVIDER_EXTRA_DATA, buildColla
 import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus, openCowSwapReviewModal, buildApprovalSignSteps } from '~/composables/cowswap'
 
 const route = useRoute()
-const { isConnected, address } = useWagmi()
+const { isConnected, address } = useAccount()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = useEulerAccount()
 const { buildSwapPlan, buildSameAssetSwapPlan } = useEulerOperations()

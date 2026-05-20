@@ -13,9 +13,7 @@ export const isCyclicalNoteVault = (
 ): boolean => {
   if (!vault || !('irmInfo' in vault)) return false
   const type = vault.irmInfo?.interestRateModelInfo?.interestRateModelType
-  return typeof type === 'number'
-    && (type === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY
-      || type === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY_MONTHLY)
+  return typeof type === 'number' && type === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY
 }
 
 export const getBorrowVaultsByMap = (vaultsMap: Map<string, Vault>) => {

@@ -6,13 +6,6 @@ const { warnings } = defineProps<{
 }>()
 
 const activeWarnings = computed(() => warnings.filter((w): w is VaultWarning => w !== null))
-
-const getWarningVariant = (warning: VaultWarning) => {
-  if (warning.level === 'critical') return 'error'
-  if (warning.tone === 'success') return 'success'
-  if (warning.level === 'info') return 'info'
-  return 'warning'
-}
 </script>
 
 <template>
@@ -25,7 +18,7 @@ const getWarningVariant = (warning: VaultWarning) => {
       :key="warning.title"
       :title="warning.title"
       :description="warning.message"
-      :variant="getWarningVariant(warning)"
+      :variant="warning.level === 'critical' ? 'error' : warning.level === 'info' ? 'info' : 'warning'"
       size="compact"
     />
   </div>

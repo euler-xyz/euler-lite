@@ -749,7 +749,6 @@ const getIrmTypeLabel = (t: number | undefined): string => {
   if (t === INTEREST_RATE_MODEL_TYPE.ADAPTIVE_CURVE) return 'Adaptive'
   if (t === INTEREST_RATE_MODEL_TYPE.KINKY) return 'Kinky'
   if (t === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY) return 'Cyclical note'
-  if (t === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY_MONTHLY) return 'Cyclical note'
   return '—'
 }
 

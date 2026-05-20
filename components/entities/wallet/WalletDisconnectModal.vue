@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { useDisconnect } from '@wagmi/vue'
+import { useAccount, useDisconnect } from '@wagmi/vue'
 import { getExplorerLink } from '~/utils/block-explorer'
 
 const emits = defineEmits(['close'])
 
-const { address } = useWagmi()
+const { address } = useAccount()
 const { disconnect } = useDisconnect()
 const { chainId } = useEulerAddresses()
 const { isSpyMode, spyAddress, clearSpyMode } = useSpyMode()

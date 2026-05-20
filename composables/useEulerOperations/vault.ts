@@ -14,7 +14,7 @@ import type { TxPlan, TxStep } from '~/entities/txPlan'
 import type { SwapApiQuote } from '~/entities/swap'
 import { SwapperMode, SwapVerificationType } from '~/entities/swap'
 import { logWarn } from '~/utils/errorHandling'
-import { assertSwapQuoteContractsAllowed } from '~/utils/swap-validation'
+import { assertSwapperVerifierAllowed } from '~/utils/swap-validation'
 
 const isAlreadyEnabled = (list: string[] | undefined, address: string): boolean =>
   !!list?.some(c => c.toLowerCase() === address.toLowerCase())
@@ -577,10 +577,7 @@ export const createVaultBuilders = (
     }
 
     if (swapInfo) {
-      assertSwapQuoteContractsAllowed({
-        swapperAddress: swapInfo.quote.swap.swapperAddress,
-        verifierAddress: swapInfo.quote.verify.verifierAddress,
-      }, ctx.eulerPeripheryAddresses.value)
+      assertSwapperVerifierAllowed(swapInfo.quote.verify.verifierAddress, ctx.eulerPeripheryAddresses.value!.swapVerifier)
     }
 
     const borrowRecipient = swapInfo ? swapInfo.quote.swap.swapperAddress : userAddr

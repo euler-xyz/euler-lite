@@ -93,7 +93,6 @@ export const INTEREST_RATE_MODEL_TYPE = {
   ADAPTIVE_CURVE: 2,
   KINKY: 3,
   FIXED_CYCLICAL_BINARY: 4,
-  FIXED_CYCLICAL_BINARY_MONTHLY: 5,
 } as const
 
 // EVK Vault.configFlags is a bitmask. CFG_DONT_SOCIALIZE_DEBT is the only
@@ -133,13 +132,6 @@ export const FIXED_CYCLICAL_BINARY_IRM_COMPONENTS = [
   { name: 'startTimestamp', type: 'uint256' },
 ] as const
 
-export const FIXED_CYCLICAL_BINARY_MONTHLY_IRM_COMPONENTS = [
-  { name: 'primaryRate', type: 'uint256' },
-  { name: 'secondaryRate', type: 'uint256' },
-  { name: 'cycleStartDay', type: 'uint256' },
-  { name: 'secondaryDays', type: 'uint256' },
-] as const
-
 export const ORACLE_DETAILED_INFO_COMPONENTS = [
   { name: 'oracle', type: 'address' },
   { name: 'name', type: 'string' },
@@ -176,9 +168,7 @@ export const PYTH_ORACLE_COMPONENTS = [
   { name: 'maxConfWidth', type: 'uint256' },
 ] as const
 
-// Gregorian year (365.2425 * 86400). Matches EVK/Lens SECONDS_PER_YEAR used by
-// on-chain APY math, so display values round-trip exactly with contract output.
-export const SECONDS_IN_YEAR = 31_556_952
+export const SECONDS_IN_YEAR = 31_536_000
 export const TARGET_TIME_AGO = 3600
 
 export const PERMIT2_TYPES = {

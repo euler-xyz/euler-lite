@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAccount } from '@wagmi/vue'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal, VaultSupplyApyModal, VaultUnverifiedDisclaimerModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
@@ -27,7 +28,7 @@ const shareLinkQuery = computed(() => {
   }
 })
 const { isReady: isLabelsReady } = useEulerLabels()
-const { isConnected, address } = useWagmi()
+const { isConnected, address } = useAccount()
 const { fetchSingleBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
 const vaultAddress = route.params.vault as string

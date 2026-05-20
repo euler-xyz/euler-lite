@@ -10,7 +10,7 @@ import { resolveAssetPriceInfo, resolveUnitOfAccountPriceInfo } from './pricing'
 import { calculateEarnVaultAPYFromExchangeRate, calculateEarnVaultAPYWithCache, fetchBlockDataForAPY } from './apy'
 import { logger } from '~/utils/logger'
 import { summarizeViemError } from '~/utils/viem-errors'
-import { BATCH_SIZE_VAULT_FETCH, BATCH_SIZE_PARALLEL_ROUNDS } from '~/entities/tuning-constants'
+import { BATCH_SIZE_PARALLEL_ROUNDS, getVaultFetchBatchSize } from '~/entities/tuning-constants'
 import type { PythFeed } from '~/entities/oracle'
 import { collectPythFeedIds } from '~/entities/oracle'
 import {
@@ -382,7 +382,7 @@ export const fetchVaults = async function* (
   // Use provided addresses if available, otherwise fall back to verifiedVaultAddresses
   // (pre-categorization by caller is preferred to eliminate per-vault RPC calls)
   const verifiedVaults = vaultAddresses || ctx.verifiedVaultAddresses
-  const batchSize = BATCH_SIZE_VAULT_FETCH
+  const batchSize = getVaultFetchBatchSize(ctx.chainId)
   const parallelBatches = BATCH_SIZE_PARALLEL_ROUNDS
 
   const batchCount = Math.ceil(verifiedVaults.length / batchSize)
@@ -434,6 +434,7 @@ export const fetchVaults = async function* (
         eulerVaultLensABI,
         calls,
         ctx.rpcUrl,
+        batchSize,
       )
 
       const vaults: Vault[] = []

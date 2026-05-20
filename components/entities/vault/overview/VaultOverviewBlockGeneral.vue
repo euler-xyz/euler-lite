@@ -113,7 +113,6 @@ watchEffect(async () => {
             v-if="!isGovernorVerified"
             :vault="vault"
             type="unknown"
-            nudge
             class="w-fit"
           />
           <div
@@ -129,7 +128,6 @@ watchEffect(async () => {
               <BaseAvatar
                 :label="entity.name"
                 :src="getEulerLabelEntityLogo(entity.logo)"
-                class="!w-28 !h-28"
               />
               <a
                 v-if="entity.url"
@@ -152,10 +150,7 @@ watchEffect(async () => {
           v-if="enableVaultTypeDisplay"
           label="Vault type"
         >
-          <VaultTypeBadges
-            :vault="vault"
-            nudge
-          />
+          <VaultTypeBadges :vault="vault" />
         </VaultOverviewLabelValue>
         <VaultOverviewLabelValue label="Can be borrowed">
           <div class="flex items-center gap-8">

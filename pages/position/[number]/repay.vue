@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAccount } from '@wagmi/vue'
 import { type Vault, type VaultAsset, getNetAPY } from '~/entities/vault'
 import { getAssetUsdValueOrZero, getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import { type AccountBorrowPosition, isPositionEligibleForLiquidation } from '~/entities/account'
@@ -22,7 +23,7 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 const _route = useRoute()
 const _router = useRouter()
 const modal = useModal()
-const { isConnected, address } = useWagmi()
+const { isConnected, address } = useAccount()
 const { isSpyMode } = useSpyMode()
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()

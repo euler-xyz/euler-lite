@@ -9,7 +9,11 @@ export const POLL_INTERVAL_60S_MS = 60_000
 // ── RPC Batch Sizes ───────────────────────────────────────
 export const BATCH_SIZE_RPC_CALLS = 5
 export const BATCH_SIZE_VAULT_FETCH = 25
+export const BATCH_SIZE_VAULT_FETCH_HYPEREVM = 15
 export const BATCH_SIZE_PARALLEL_ROUNDS = 5
+
+export const getVaultFetchBatchSize = (chainId: number): number =>
+  chainId === 999 ? BATCH_SIZE_VAULT_FETCH_HYPEREVM : BATCH_SIZE_VAULT_FETCH
 
 // ── Request Batching Delays ───────────────────────────────
 export const BATCH_DELAY_COLLECT_MS = 100
@@ -18,9 +22,6 @@ export const BATCH_DELAY_COLLECT_MS = 100
 /** Subgraph query timeout (client-side). Longer than server-side subgraph
  * calls because client traffic tolerates higher variance. */
 export const SUBGRAPH_TIMEOUT_MS = 30_000
-/** Wallet screening must resolve promptly so the app can fail closed instead
- * of leaving a connected wallet in an indeterminate state. */
-export const WALLET_SCREENING_TIMEOUT_MS = 10_000
 
 // ── Debounce ──────────────────────────────────────────────
 /** Price-fetch watchEffects on list pages. Collapses bursts of registry

@@ -181,18 +181,6 @@ describe('isCyclicalNoteVault', () => {
     expect(isCyclicalNoteVault(vault)).toBe(true)
   })
 
-  it('returns true for EVK vaults using the monthly cyclical IRM', () => {
-    const vault = {
-      irmInfo: {
-        interestRateModelInfo: {
-          interestRateModelType: INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY_MONTHLY,
-        },
-      },
-    } as Vault
-
-    expect(isCyclicalNoteVault(vault)).toBe(true)
-  })
-
   it('returns false for non-cyclical EVK vaults', () => {
     const vault = {
       irmInfo: {

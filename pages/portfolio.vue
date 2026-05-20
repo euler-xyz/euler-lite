@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAccount } from '@wagmi/vue'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 
@@ -21,7 +22,7 @@ const {
 } = useEulerAccount()
 const { rewards } = useMerkl()
 const { locks } = useREULLocks()
-const { isConnected, address } = useWagmi()
+const { isConnected, address } = useAccount()
 const { isLoaded: isBalancesLoaded, updateBalances } = useWallets()
 const { eulerLensAddresses } = useEulerAddresses()
 const { portfolioRefreshCounter } = usePortfolioRefresh()
