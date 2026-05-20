@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { formatUnits, type Address } from 'viem'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { OperationReviewModal, SlippageSettingsModal } from '#components'
@@ -28,7 +27,7 @@ const route = useRoute()
 const router = useRouter()
 const modal = useModal()
 const { error } = useToast()
-const { address, isConnected } = useAccount()
+const { address, isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
 const { buildMultiplyPlan, executeTxPlan } = useEulerOperations()

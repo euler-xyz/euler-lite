@@ -1,4 +1,4 @@
-import { getVaultUtilization, getSupplyCapPercentage, getBorrowCapPercentage, isEVKVault, type SecuritizeVault, type Vault } from '~/entities/vault'
+import { getVaultUtilization, getSupplyCapPercentage, getBorrowCapPercentage, isCyclicalNoteVault, isEVKVault, type SecuritizeVault, type Vault } from '~/entities/vault'
 import {
   findBlockingDisabledOp,
   getOpMeta,
@@ -24,6 +24,7 @@ export interface VaultWarning {
   level: WarningLevel
   title: string
   message: string
+  tone?: 'success'
 }
 
 const UTILISATION_HIGH = 95
@@ -75,6 +76,11 @@ const utilisationMessages: Record<WarningContext, Record<'high' | 'critical', { 
   },
 }
 
+const targetUtilisationMessage = {
+  title: 'Target utilisation',
+  message: 'Cyclical Note markets are designed to run near full utilization. Withdrawal liquidity opens up at the end of each cycle, when borrowers are pushed to repay.',
+}
+
 const getUtilisationLevel = (utilisation: number): 'high' | 'critical' | null => {
   if (utilisation >= UTILISATION_CRITICAL) return 'critical'
   if (utilisation >= UTILISATION_HIGH) return 'high'
@@ -98,6 +104,10 @@ export const getUtilisationWarning = (
   const utilisation = getVaultUtilization(vault)
   const level = getUtilisationLevel(utilisation)
   if (!level) return null
+
+  if (context !== 'repay' && isCyclicalNoteVault(vault)) {
+    return { level: 'info', tone: 'success', ...targetUtilisationMessage }
+  }
 
   const { title, message } = utilisationMessages[context][level]
   return { level, title, message }

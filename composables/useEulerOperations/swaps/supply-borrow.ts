@@ -12,12 +12,18 @@ import { buildCollateralCleanupCalls } from '~/utils/collateral-cleanup'
 import type { TxPlan } from '~/entities/txPlan'
 import { type SwapApiQuote, SwapperMode, SwapVerificationType } from '~/entities/swap'
 import { logWarn } from '~/utils/errorHandling'
-import { assertSwapperVerifierAllowed } from '~/utils/swap-validation'
+import { assertSwapQuoteContractsAllowed } from '~/utils/swap-validation'
+import { isEVKVault, type SecuritizeVault, type Vault } from '~/entities/vault'
 
 export const createSupplyBorrowSwapBuilders = (
   ctx: OperationsContext,
   helpers: OperationHelpers,
 ) => {
+  const isSweepable = (addr: string): boolean => {
+    const v = ctx.registryGetVault(addr as Address) as Vault | SecuritizeVault | undefined
+    return !!v && isEVKVault(v)
+  }
+
   /**
    * Swap an arbitrary token from the user's wallet and deposit the output into a vault.
    */
@@ -43,7 +49,10 @@ export const createSupplyBorrowSwapBuilders = (
     const userAddr = ctx.address.value as Address
     const swapVerifierAddress = ctx.eulerPeripheryAddresses.value.swapVerifier as Address
 
-    assertSwapperVerifierAllowed(quote.verify.verifierAddress, ctx.eulerPeripheryAddresses.value.swapVerifier)
+    assertSwapQuoteContractsAllowed({
+      swapperAddress: quote.swap.swapperAddress,
+      verifierAddress: quote.verify.verifierAddress,
+    }, ctx.eulerPeripheryAddresses.value)
 
     const { steps, permitCall, usesPermit2 } = await helpers.prepareTokenApproval({
       assetAddr: inputTokenAddress,
@@ -155,7 +164,10 @@ export const createSupplyBorrowSwapBuilders = (
     const evcAddress = ctx.eulerCoreAddresses.value.evc as Address
     const swapVerifierAddress = ctx.eulerPeripheryAddresses.value.swapVerifier as Address
 
-    assertSwapperVerifierAllowed(swapQuote.verify.verifierAddress, ctx.eulerPeripheryAddresses.value.swapVerifier)
+    assertSwapQuoteContractsAllowed({
+      swapperAddress: swapQuote.swap.swapperAddress,
+      verifierAddress: swapQuote.verify.verifierAddress,
+    }, ctx.eulerPeripheryAddresses.value)
 
     const subAccountAddr = (subAccount || await getNewSubAccount(ctx.address.value)) as Address
 
@@ -303,7 +315,10 @@ export const createSupplyBorrowSwapBuilders = (
     const withdrawFromAddr = subAccount ? (subAccount as Address) : userAddr
     const swapperAddress = quote.swap.swapperAddress as Address
 
-    assertSwapperVerifierAllowed(quote.verify.verifierAddress, ctx.eulerPeripheryAddresses.value.swapVerifier)
+    assertSwapQuoteContractsAllowed({
+      swapperAddress: quote.swap.swapperAddress,
+      verifierAddress: quote.verify.verifierAddress,
+    }, ctx.eulerPeripheryAddresses.value)
 
     const hooks = new SaHooksBuilder()
     hooks.addContractInterface(vaultAddr, vaultWithdrawAbi)
@@ -393,7 +408,10 @@ export const createSupplyBorrowSwapBuilders = (
     const redeemFromAddr = subAccount ? (subAccount as Address) : userAddr
     const swapperAddress = quote.swap.swapperAddress as Address
 
-    assertSwapperVerifierAllowed(quote.verify.verifierAddress, ctx.eulerPeripheryAddresses.value.swapVerifier)
+    assertSwapQuoteContractsAllowed({
+      swapperAddress: quote.swap.swapperAddress,
+      verifierAddress: quote.verify.verifierAddress,
+    }, ctx.eulerPeripheryAddresses.value)
 
     const hooks = new SaHooksBuilder()
     hooks.addContractInterface(vaultAddr, vaultRedeemAbi)
@@ -499,7 +517,10 @@ export const createSupplyBorrowSwapBuilders = (
     const swapVerifierAddress = ctx.eulerPeripheryAddresses.value.swapVerifier as Address
     const borrowVaultAddr = borrowVaultAddress
 
-    assertSwapperVerifierAllowed(quote.verify.verifierAddress, ctx.eulerPeripheryAddresses.value.swapVerifier)
+    assertSwapQuoteContractsAllowed({
+      swapperAddress: quote.swap.swapperAddress,
+      verifierAddress: quote.verify.verifierAddress,
+    }, ctx.eulerPeripheryAddresses.value)
 
     if (quote.verify.type !== SwapVerificationType.DebtMax) {
       throw new Error('Swap verifier type mismatch')
@@ -528,7 +549,9 @@ export const createSupplyBorrowSwapBuilders = (
       hooks.addContractInterface(evcAddress, evcDisableCollateralAbi)
       const collateralAddresses = enabledCollaterals || []
       for (const collateralAddr of collateralAddresses) {
-        hooks.addContractInterface(collateralAddr as Address, vaultTransferFromMaxAbi)
+        if (isSweepable(collateralAddr)) {
+          hooks.addContractInterface(collateralAddr as Address, vaultTransferFromMaxAbi)
+        }
       }
     }
 
@@ -599,6 +622,7 @@ export const createSupplyBorrowSwapBuilders = (
       const isMainAccount = subAccount.toLowerCase() === userAddr.toLowerCase()
       if (!isMainAccount) {
         for (const collateralAddr of collateralAddresses) {
+          if (!isSweepable(collateralAddr)) continue
           evcCalls.push({
             targetContract: collateralAddr as Address,
             onBehalfOfAccount: subAccount,

@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { inject } from 'vue'
-import { useAccount } from '@wagmi/vue'
 import { flip, offset, shift, useFloating } from '@floating-ui/vue'
 
 import { isOperationBlocked, operationBlockReason } from '~/utils/operationGuardRegistry'
@@ -22,7 +21,7 @@ interface KeyringGuardState {
 }
 
 const props = defineProps<{ disabled?: boolean, loading?: boolean, disabledReason?: string, disabledReasonVariant?: DisabledReasonVariant }>()
-const { isConnected } = useAccount()
+const { isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { chainId: _chainId } = useEulerAddresses()
 const { chainId, switchChain, connect } = useWagmi()
