@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { getAddress, type Address, zeroAddress } from 'viem'
 import { FixedPoint } from '~/utils/fixed-point'
 import { getCashLimitedWithdrawAmount, type Vault, type VaultAsset } from '~/entities/vault'
@@ -19,7 +18,7 @@ import { useCollateralForm } from '~/composables/position/useCollateralForm'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const positionIndex = usePositionIndex()
-const { address } = useAccount()
+const { address } = useWagmi()
 const { buildWithdrawPlan, buildWithdrawAndSwapPlan } = useEulerOperations()
 const { refreshAllPositions } = useEulerAccount()
 const { eulerLensAddresses } = useEulerAddresses()

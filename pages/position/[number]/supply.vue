@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { getAddress, type Address, zeroAddress } from 'viem'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { FixedPoint } from '~/utils/fixed-point'
@@ -17,7 +16,7 @@ import { useCollateralForm } from '~/composables/position/useCollateralForm'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const positionIndex = usePositionIndex()
-const { isConnected, address } = useAccount()
+const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { fetchSingleBalance } = useWallets()
 const { buildSupplyPlan, buildSwapAndSupplyPlan } = useEulerOperations()

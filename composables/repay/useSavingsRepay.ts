@@ -1,5 +1,4 @@
 import type { Ref, ComputedRef } from 'vue'
-import { useAccount } from '@wagmi/vue'
 import { zeroAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -61,7 +60,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
 
   const modal = useModal()
   const { error } = useToast()
-  const { isConnected, address } = useAccount()
+  const { isConnected, address } = useWagmi()
   const { buildSwapPlan, buildSavingsRepayPlan, buildSavingsFullRepayPlan, buildSwapFullRepayPlan, executeTxPlan } = useEulerOperations()
   const { getVault: registryGetVault } = useVaultRegistry()
   const { finalizeTxAndRedirect } = useTxFinalization()

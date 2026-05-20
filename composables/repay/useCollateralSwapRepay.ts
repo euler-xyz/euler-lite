@@ -1,5 +1,4 @@
 import type { Ref, ComputedRef } from 'vue'
-import { useAccount } from '@wagmi/vue'
 import { formatUnits, zeroAddress, type Address, type Abi } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import type { DisplayStep } from '~/utils/stepDecoding'
@@ -64,7 +63,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const router = useRouter()
   const modal = useModal()
   const { error } = useToast()
-  const { isConnected, address } = useAccount()
+  const { isConnected, address } = useWagmi()
   const { buildSwapPlan, buildSameAssetRepayPlan, buildSameAssetFullRepayPlan, buildSwapFullRepayPlan, executeTxPlan } = useEulerOperations()
   const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
   const { finalizeTxAndRedirect } = useTxFinalization()

@@ -6,6 +6,13 @@ import { resetCountryCache } from '~/services/country'
 import { screenAddress } from '~/services/trm'
 import { getDefaultPageRoute } from '~/entities/menu'
 
+const blockedAddress = ref<string | null>(null)
+const isScreening = ref(false)
+const screenedAddress = ref<string | null>(null)
+let screeningGeneration = 0
+
+const normalizeAddress = (address?: string | null) => address?.toLowerCase() ?? ''
+
 export const useAddressScreen = () => {
   const modal = useModal()
   const { disconnect } = useDisconnect()
@@ -13,9 +20,6 @@ export const useAddressScreen = () => {
 
   const { enableEarnPage, enableLendPage, enableExplorePage } = useDeployConfig()
   const defaultPageRoute = getDefaultPageRoute(enableEarnPage, enableLendPage, enableExplorePage)
-  const blockedAddress = ref<string | null>(null)
-  const isScreening = ref(false)
-  let screeningGeneration = 0
 
   const showBlockedModal = (address: string) => {
     blockedAddress.value = address
@@ -37,6 +41,7 @@ export const useAddressScreen = () => {
     }
 
     const gen = ++screeningGeneration
+    screenedAddress.value = null
     isScreening.value = true
     try {
       const vpnIsUsed = await detectVpn()
@@ -47,9 +52,11 @@ export const useAddressScreen = () => {
 
       if (isRestricted) {
         await disconnect()
+        if (gen !== screeningGeneration) return false
         showBlockedModal(address)
         return true
       }
+      screenedAddress.value = address
       return false
     }
     finally {
@@ -59,7 +66,13 @@ export const useAddressScreen = () => {
     }
   }
 
+  const isAddressScreened = (address?: string | null) =>
+    Boolean(address && normalizeAddress(screenedAddress.value) === normalizeAddress(address))
+
   const resetScreeningCache = () => {
+    screeningGeneration++
+    screenedAddress.value = null
+    isScreening.value = false
     resetVpnCache()
     resetCountryCache()
   }
@@ -67,6 +80,8 @@ export const useAddressScreen = () => {
   return {
     isScreening,
     blockedAddress,
+    screenedAddress,
+    isAddressScreened,
     screenConnectedAddress,
     resetScreeningCache,
   }

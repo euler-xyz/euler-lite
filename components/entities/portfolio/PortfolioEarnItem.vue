@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { getAssetUsdValue, formatAssetValue } from '~/services/pricing/priceProvider'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated, getVaultNotice } from '~/utils/eulerLabelsUtils'
@@ -13,7 +12,7 @@ import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 const { position } = defineProps<{ position: AccountDepositPosition }>()
 const modal = useModal()
 
-const { address } = useAccount()
+const { address } = useWagmi()
 const { portfolioAddress } = useEulerAccount()
 const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
 const subAccountIndex = computed(() => {
