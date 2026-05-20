@@ -224,6 +224,7 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
             </span>
           </template>
           <span class="flex items-center gap-4">
+            <VaultPoints :vault="collateralVault" />
             <UiModalPreviewTrigger
               v-if="hasSupplyRewards(collateralVault.address)"
               :component="VaultSupplyApyModal"

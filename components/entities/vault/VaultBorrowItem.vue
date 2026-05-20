@@ -508,6 +508,10 @@ const linkPath = computed(() => ({
           data-field="supply-apy"
           :data-value="supplyApyWithRewards"
         >
+          <VaultPoints
+            class="mr-4"
+            :vault="pair.collateral"
+          />
           <UiModalPreviewTrigger
             v-if="hasSupplyRewards(pair.collateral.address)"
             :component="VaultSupplyApyModal"
@@ -673,6 +677,7 @@ const linkPath = computed(() => ({
           </div>
         </div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
+          <VaultPoints :vault="pair.collateral" />
           <UiModalPreviewTrigger
             v-if="hasSupplyRewards(pair.collateral.address)"
             :component="VaultSupplyApyModal"
