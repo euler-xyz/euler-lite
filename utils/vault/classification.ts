@@ -6,5 +6,7 @@ export const isCyclicalNoteVault = (
 ): boolean => {
   if (!vault) return false
   const type = (vault as { interestRateModel?: { type?: unknown } }).interestRateModel?.type
-  return typeof type === 'number' && type === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY
+  return typeof type === 'number'
+    && (type === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY
+      || type === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY_MONTHLY)
 }

@@ -87,6 +87,7 @@ export const INTEREST_RATE_MODEL_TYPE = {
   ADAPTIVE_CURVE: 2,
   KINKY: 3,
   FIXED_CYCLICAL_BINARY: 4,
+  FIXED_CYCLICAL_BINARY_MONTHLY: 5,
 } as const
 
 // EVK Vault.configFlags is a bitmask. CFG_DONT_SOCIALIZE_DEBT is the only
