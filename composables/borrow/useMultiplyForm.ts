@@ -1,4 +1,4 @@
-import type { EVault, SwapQuote, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, SwapQuote, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { type ProjectedRates, getProjectedRates } from '~/utils/vault/apy'
 import { getAssetUsdValue, getAssetUsdValueOrZero, getAssetOraclePrice, getCollateralOraclePrice, getCollateralShareOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
@@ -62,7 +62,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
   const modal = useModal()
   const { error } = useToast()
-  const { planMultiply, executePlan } = useEulerTx()
+  const { planMultiply, prepareTransactionPlan, executePreparedPlan } = useEulerTx()
   const { isConnected, address } = useWagmi()
   const { depositPositions } = useEulerAccount()
   const { chainId } = useEulerAddresses()
@@ -71,7 +71,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
   const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
   const {
-    runSimulation: runMultiplySimulation,
+    runPreparedSimulation: runMultiplySimulation,
     simulationError: multiplySimulationError,
     clearSimulationError: clearMultiplySimulationError,
   } = useTransactionPlanSimulation()
@@ -153,6 +153,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const isMultiplySubmitting = ref(false)
   const isMultiplyPreparing = ref(false)
   const multiplyPlan = ref<TransactionPlan | null>(null)
+  const preparedMultiplyPlan = shallowRef<TransactionPlanPrepared | null>(null)
 
   // --- Vault aliases ---
   const multiplyLongVault = computed(() => collateralVault.value)
@@ -919,14 +920,16 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           swapQuote: quote ?? undefined,
           swapperMode: SwapperMode.EXACT_IN,
         })
+        preparedMultiplyPlan.value = await prepareTransactionPlan(multiplyPlan.value)
       }
       catch (e) {
         logWarn('multiply/buildPlan', e)
         multiplyPlan.value = null
+        preparedMultiplyPlan.value = null
       }
 
-      if (multiplyPlan.value) {
-        const ok = await runMultiplySimulation(multiplyPlan.value)
+      if (preparedMultiplyPlan.value) {
+        const ok = await runMultiplySimulation(preparedMultiplyPlan.value)
         if (!ok) return
       }
 
@@ -935,7 +938,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           type: 'borrow',
           asset: multiplyShortVault.value.asset,
           amount: multiplyShortAmount.value || formatUnits(debtAmount, Number(multiplyShortVault.value.asset.decimals)),
-          plan: multiplyPlan.value || undefined,
+          prepared: preparedMultiplyPlan.value || undefined,
           supplyingAssetForBorrow: multiplySupplyVault.value.asset,
           supplyingAmount: multiplyInputAmount.value,
           swapToAsset: quote ? multiplyLongVault.value.asset : undefined,
@@ -956,10 +959,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   }
 
   const sendMultiply = async () => {
-    if (!multiplyPlan.value) return
+    if (!preparedMultiplyPlan.value) return
     isMultiplySubmitting.value = true
     try {
-      await executePlan(multiplyPlan.value)
+      await executePreparedPlan(preparedMultiplyPlan.value)
       await finalizeTxAndRedirect()
     }
     catch (e) {
