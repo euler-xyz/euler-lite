@@ -12,11 +12,18 @@ import { logWarn } from '~/utils/errorHandling'
 import { assertSwapQuoteContractsAllowed } from '~/utils/swap-validation'
 import type { TxPlan } from '~/entities/txPlan'
 import { type SwapApiQuote, SwapperMode, SwapVerificationType } from '~/entities/swap'
+import { isEVKVault, type Vault, type SecuritizeVault } from '~/entities/vault'
 
 export const createCrossAssetSwapBuilders = (
   ctx: OperationsContext,
   helpers: OperationHelpers,
 ) => {
+  // Only EVK collaterals expose `transferFromMax`. See repay.ts for the same
+  // guard — kept colocated with the sweep so future builders can't forget it.
+  const isSweepable = (addr: string): boolean => {
+    const v = ctx.registryGetVault(addr as Address) as Vault | SecuritizeVault | undefined
+    return !!v && isEVKVault(v)
+  }
   const buildSwapEvcCalls = async ({
     quote,
     swapperMode,
@@ -262,7 +269,9 @@ export const createCrossAssetSwapBuilders = (
 
     const collateralAddresses = enabledCollaterals || []
     for (const collateralAddr of collateralAddresses) {
-      hooks.addContractInterface(collateralAddr as Address, vaultTransferFromMaxAbi)
+      if (isSweepable(collateralAddr)) {
+        hooks.addContractInterface(collateralAddr as Address, vaultTransferFromMaxAbi)
+      }
     }
 
     // Disable controller
@@ -287,6 +296,7 @@ export const createCrossAssetSwapBuilders = (
     const isMainAccount = subAccountAddr.toLowerCase() === userAddr.toLowerCase()
     if (!isMainAccount) {
       for (const collateralAddr of collateralAddresses) {
+        if (!isSweepable(collateralAddr)) continue
         evcCalls.push({
           targetContract: collateralAddr as Address,
           onBehalfOfAccount: subAccountAddr,
