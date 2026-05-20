@@ -11,7 +11,17 @@ export const useTransactionPlanSimulation = () => {
   }
 
   const handleResult = (result: Awaited<ReturnType<typeof simulatePlan>>) => {
-    if (!result.canExecute) {
+    // canExecute is false when EITHER the simulated batch reverted OR the
+    // user is just missing approvals/balances (diagnostics). We only want to
+    // block Review on real reverts — the modal handles approval prompts and
+    // shows insufficient-balance toasts, and simulations run with state
+    // overrides so the batch itself is verified independently.
+    const hasHardFailure
+      = !!result.failedBatchItems?.length
+        || !!result.accountStatusErrors?.length
+        || !!result.vaultStatusErrors?.length
+        || !!result.simulationError
+    if (hasHardFailure) {
       simulationError.value = formatSimulationFailure(result)
       return false
     }

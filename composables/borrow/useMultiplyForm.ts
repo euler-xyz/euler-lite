@@ -64,6 +64,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const { error } = useToast()
   const { planMultiply, prepareTransactionPlan, executePreparedPlan } = useEulerTx()
   const { isConnected, address } = useWagmi()
+  const { isSpyMode } = useSpyMode()
   const { depositPositions } = useEulerAccount()
   const { chainId } = useEulerAddresses()
   const { fetchSingleBalance } = useWallets()
@@ -628,7 +629,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   })
 
   const isMultiplySubmitDisabled = computed(() => {
-    if (!isConnected.value) return false
+    // Disconnected wallets fall through to enable the connect-wallet button.
+    // Spy mode has a "wallet" (the spied address) so it must run the same
+    // disabling logic — no quote selected, missing amount, etc.
+    if (!isConnected.value && !isSpyMode.value) return false
     if (findBlockingDisabledOp(multiplyPlannedOps.value)) return true
     if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) return true
     if (!multiplyInputAmount.value || multiplyDebtAmountNano.value <= 0n) return true
@@ -857,7 +861,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
     isMultiplyPreparing.value = true
     try {
-      if (isMultiplySubmitting.value || !isConnected.value) return
+      if (isMultiplySubmitting.value || (!isConnected.value && !isSpyMode.value)) return
       if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) return
       if (!multiplyInputAmount.value || multiplyDebtAmountNano.value <= 0n) return
       if (multiplyErrorText.value) return
@@ -976,7 +980,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
   // --- Balance ---
   const updateMultiplyAssetBalance = async () => {
-    if (multiplySupplyVault.value?.asset.address && isConnected.value) {
+    if (multiplySupplyVault.value?.asset.address && (isConnected.value || isSpyMode.value)) {
       multiplyAssetBalance.value = await fetchSingleBalance(multiplySupplyVault.value.asset.address)
     }
     else {
@@ -1027,7 +1031,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   )
 
   watch(multiplySupplyVault, async (newVault) => {
-    if (newVault?.asset.address && isConnected.value) {
+    if (newVault?.asset.address && (isConnected.value || isSpyMode.value)) {
       multiplyAssetBalance.value = await fetchSingleBalance(newVault.asset.address)
     }
     else {
