@@ -475,6 +475,11 @@ const multipliedPriceImpact = computed(() =>
 const { guardWithPriceImpact } = usePriceImpactGate({
   directPriceImpact: multiplyPriceImpact,
   multipliedPriceImpact,
+  shouldGateUnknown: computed(() =>
+    !multiplyIsSameAsset.value
+    && multiplyEffectiveQuote.value !== null
+    && multiplyPriceImpact.value === null,
+  ),
 })
 const multiplyRoutedVia = computed(() => {
   if (!multiplySelectedProvider.value) return isMultiplyQuoteLoading.value ? null : 'Not selected'

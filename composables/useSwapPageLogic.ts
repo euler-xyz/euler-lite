@@ -394,7 +394,13 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
 
   // ── Price impact ───────────────────────────────────────────────────────
   const priceImpact = ref<number | null>(null)
-  const { guardWithPriceImpact } = usePriceImpactGate({ directPriceImpact: priceImpact })
+  const shouldGateUnknownPriceImpact = computed(() =>
+    !isSameAsset.value && quote.value !== null && priceImpact.value === null,
+  )
+  const { guardWithPriceImpact } = usePriceImpactGate({
+    directPriceImpact: priceImpact,
+    shouldGateUnknown: shouldGateUnknownPriceImpact,
+  })
 
   watchEffect(async () => {
     if (!quote.value || !fromVault.value || !toVault.value) {
