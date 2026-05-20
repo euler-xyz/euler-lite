@@ -1,4 +1,4 @@
-import { useWriteContract } from '@wagmi/vue'
+import { useAccount, useWriteContract } from '@wagmi/vue'
 import type { Address, Abi } from 'viem'
 import { reulLockAbi, reulWithdrawABI } from '~/abis/reul'
 import type { REULLock } from '~/entities/reul'
@@ -13,7 +13,7 @@ const locks: Ref<REULLock[]> = ref([])
 let interval: NodeJS.Timeout | null = null
 
 export const useREULLocks = () => {
-  const { isConnected, address: wagmiAddress, chainId } = useWagmi()
+  const { isConnected, address: wagmiAddress, chainId } = useAccount()
   const { writeContractAsync } = useWriteContract()
   const { eulerTokenAddresses } = useEulerAddresses()
   const { client: rpcClient } = useRpcClient()

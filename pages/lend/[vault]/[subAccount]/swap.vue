@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAccount } from '@wagmi/vue'
 import { isAddress, getAddress, zeroAddress, type Address } from 'viem'
 import { getCashLimitedWithdrawAmount, type Vault, type SecuritizeVault, fetchSecuritizeVault } from '~/entities/vault'
 import { isSecuritizeVault } from '~/entities/vault/factory'
@@ -16,7 +17,7 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const route = useRoute()
 const { getVault } = useVaults()
-const { address } = useWagmi()
+const { address } = useAccount()
 const { isSpyMode, spyAddress } = useSpyMode()
 const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const { depositPositions } = useEulerAccount()

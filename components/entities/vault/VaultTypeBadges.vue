@@ -6,11 +6,8 @@ import { isCyclicalNoteVault } from '~/entities/vault'
 import { isVaultKeyring, getEntitiesByVault, getEntitiesByEarnVault } from '~/utils/eulerLabelsUtils'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 
-const { vault, layout = 'inline', size = 'small', nudge = false } = defineProps<{
+const { vault } = defineProps<{
   vault: AnyVault
-  layout?: 'inline' | 'stacked'
-  size?: 'small' | 'large'
-  nudge?: boolean
 }>()
 
 const { isVaultGovernorVerified, isEarnVaultOwnerVerified } = useVaults()
@@ -61,53 +58,30 @@ const isCyclicalNote = computed(() => {
   if (isEarn.value || isSecuritize.value) return false
   return isCyclicalNoteVault(vault as Vault)
 })
-
-const isStacked = computed(() => layout === 'stacked')
-const tagElement = computed(() => isStacked.value ? 'button' : 'span')
 </script>
 
 <template>
-  <div
-    class="flex gap-8"
-    :class="isStacked ? 'flex-col items-stretch' : 'items-center flex-wrap'"
-  >
+  <div class="flex items-center gap-8 flex-wrap">
     <VaultTypeChip
       :vault="vault"
       :type="governanceType"
-      :size="size"
-      :block="isStacked"
-      :as="tagElement"
-      :nudge="nudge"
     />
     <VaultTypeChip
       v-if="extraType && isVerified"
       :vault="vault"
       :type="extraType"
-      :size="size"
-      :block="isStacked"
-      :as="tagElement"
-      :nudge="nudge"
     />
     <KeyringBadge
       v-if="isKeyring && isVerified"
-      :size="size"
-      :block="isStacked"
-      :as="tagElement"
-      :nudge="nudge"
+      size="large"
     />
     <GovernanceLimitedBadge
       v-if="isGovernanceLimited"
-      :size="size"
-      :block="isStacked"
-      :as="tagElement"
-      :nudge="nudge"
+      size="large"
     />
     <CyclicalNoteBadge
       v-if="isCyclicalNote && isVerified"
-      :size="size"
-      :block="isStacked"
-      :as="tagElement"
-      :nudge="nudge"
+      size="large"
     />
   </div>
 </template>

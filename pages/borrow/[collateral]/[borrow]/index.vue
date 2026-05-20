@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAccount } from '@wagmi/vue'
 import { getAddress } from 'viem'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultUnverifiedDisclaimerModal, SlippageSettingsModal } from '#components'
@@ -21,7 +22,7 @@ const modal = useModal()
 const reviewBorrowLabel = 'Review Borrow'
 const reviewMultiplyLabel = 'Review Multiply'
 const { getBorrowVaultPair, updateVault } = useVaults()
-const { address, isConnected } = useWagmi()
+const { address, isConnected } = useAccount()
 const { chainId } = useEulerAddresses()
 const shareLinkQuery = computed(() => {
   const network = route.query.network
@@ -514,7 +515,7 @@ watch(formTab, () => {
 
                 <!-- Pay with token selector -->
                 <div
-                  v-if="collateralVault && !isSecuritizeCollateral"
+                  v-if="collateralVault"
                   class="flex items-center gap-8"
                 >
                   <span class="text-p3 text-content-tertiary">Pay with</span>

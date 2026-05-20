@@ -8,20 +8,11 @@ import { vaultRepayAbi, vaultRepayWithSharesAbi, vaultRedeemAbi, vaultSkimAbi, v
 import { SaHooksBuilder } from '~/entities/saHooksSDK'
 import { convertSaHooksToEVCCalls, type EVCCall } from '~/utils/evc-converter'
 import type { TxPlan } from '~/entities/txPlan'
-import { isEVKVault, type Vault, type SecuritizeVault } from '~/entities/vault'
 
 export const createRepayBuilders = (
   ctx: OperationsContext,
   helpers: OperationHelpers,
 ) => {
-  // Only EVK collaterals expose `transferFromMax`. Non-EVK collaterals (e.g.
-  // securitize) would revert the sweep step — and with it the whole atomic
-  // batch. Lives here rather than at callsites so every builder that closes
-  // a sub-account gets it for free.
-  const isSweepable = (addr: string): boolean => {
-    const v = ctx.registryGetVault(addr as Address) as Vault | SecuritizeVault | undefined
-    return !!v && isEVKVault(v)
-  }
   const buildRepayPlan = async (
     borrowVaultAddress: string,
     borrowAssetAddress: string,
@@ -106,9 +97,7 @@ export const createRepayBuilders = (
     hooks.addContractInterface(evcAddress, evcDisableCollateralAbi)
 
     for (const collateralAddr of collateralAddrs) {
-      if (isSweepable(collateralAddr)) {
-        hooks.addContractInterface(collateralAddr, vaultTransferFromMaxAbi)
-      }
+      hooks.addContractInterface(collateralAddr, vaultTransferFromMaxAbi)
     }
 
     const evcCalls: EVCCall[] = []
@@ -144,7 +133,7 @@ export const createRepayBuilders = (
       }
       evcCalls.push(disableCollateralCall)
 
-      if (!isMainAccount && isSweepable(collateralAddr)) {
+      if (!isMainAccount) {
         const transferCall: EVCCall = {
           targetContract: collateralAddr,
           onBehalfOfAccount: subAccountAddr,
@@ -179,9 +168,7 @@ export const createRepayBuilders = (
     const evcAddress = ctx.eulerCoreAddresses.value.evc as Address
 
     const hooks = new SaHooksBuilder()
-    if (isSweepable(vaultAddr)) {
-      hooks.addContractInterface(vaultAddr, vaultTransferFromMaxAbi)
-    }
+    hooks.addContractInterface(vaultAddr, vaultTransferFromMaxAbi)
     hooks.addContractInterface(evcAddress, evcDisableCollateralAbi)
 
     const evcCalls: EVCCall[] = []
@@ -195,7 +182,7 @@ export const createRepayBuilders = (
       userAddr,
     })
 
-    if (subAccountAddr.toLowerCase() !== userAddr.toLowerCase() && isSweepable(vaultAddr)) {
+    if (subAccountAddr.toLowerCase() !== userAddr.toLowerCase()) {
       const transferCall: EVCCall = {
         targetContract: vaultAddr,
         onBehalfOfAccount: subAccountAddr,
@@ -348,9 +335,7 @@ export const createRepayBuilders = (
     }
     hooks.addContractInterface(evcAddress, evcDisableCollateralAbi)
     for (const collateralAddr of collateralAddresses) {
-      if (isSweepable(collateralAddr)) {
-        hooks.addContractInterface(collateralAddr as Address, vaultTransferFromMaxAbi)
-      }
+      hooks.addContractInterface(collateralAddr as Address, vaultTransferFromMaxAbi)
     }
 
     const evcCalls: EVCCall[] = []
@@ -425,7 +410,6 @@ export const createRepayBuilders = (
     const isMainAccount = borrowSubAccountAddr.toLowerCase() === userAddr.toLowerCase()
     if (!isMainAccount) {
       for (const collateralAddr of collateralAddresses) {
-        if (!isSweepable(collateralAddr)) continue
         evcCalls.push({
           targetContract: collateralAddr as Address,
           onBehalfOfAccount: borrowSubAccountAddr,

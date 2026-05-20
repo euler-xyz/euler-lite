@@ -1,6 +1,7 @@
 import { getAddress } from 'viem'
 import { watch, computed } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
+import { useAccount } from '@wagmi/vue'
 import { useAccountPositions } from './useAccountPositions'
 import { useAccountValues } from './useAccountValues'
 import { useAccountPortfolioMetrics } from './useAccountPortfolioMetrics'
@@ -44,7 +45,7 @@ const {
 export const useEulerAccount = () => {
   const { isLoaded: isBalancesLoaded } = useWallets()
   const { eulerLensAddresses, isReady: isEulerLensAddressesReady, chainId } = useEulerAddresses()
-  const { address } = useWagmi()
+  const { address } = useAccount()
   const { spyAddress } = useSpyMode()
   const portfolioAddress = computed(() => normalizeAddressOrEmpty(spyAddress.value) || normalizeAddressOrEmpty(address.value))
 

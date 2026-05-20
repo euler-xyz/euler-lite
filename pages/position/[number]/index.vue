@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAccount } from '@wagmi/vue'
 import { getAddress, type Address, type Abi } from 'viem'
 import { eulerAccountLensABI } from '~/entities/euler/abis'
 import {
@@ -33,7 +34,7 @@ const _route = useRoute()
 const router = useRouter()
 const modal = useModal()
 const { error } = useToast()
-const { isConnected, address } = useWagmi()
+const { isConnected, address } = useAccount()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = useEulerAccount()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()

@@ -25,8 +25,8 @@ const hasAction = computed(() => !!props.actionText)
 const iconName = computed(() => {
   const iconMap: Record<ToastVariant, string> = {
     info: 'info-circle',
-    success: 'check',
-    warning: 'warning',
+    success: 'check-circle',
+    warning: 'info-circle',
     error: 'warning-circle',
     neutral: 'info-circle',
   }
@@ -79,9 +79,7 @@ if (!props.persistent && props.duration > 0) {
         </div>
         <button
           v-if="!persistent"
-          type="button"
           class="ui-toast__close"
-          aria-label="Close notification"
           @click="$emit('close')"
         >
           <UiIcon
@@ -95,7 +93,6 @@ if (!props.persistent && props.duration > 0) {
         class="ui-toast__action"
       >
         <button
-          type="button"
           class="ui-toast__action-button"
           @click="$emit('action')"
         >
@@ -114,51 +111,49 @@ if (!props.persistent && props.duration > 0) {
 .ui-toast {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
   width: 100%;
-  min-width: min(220px, 100%);
-  max-width: 320px;
-  color: var(--ui-toast-neutral-text-color);
-  background-color: var(--ui-toast-background-color);
-  border: 1px solid var(--ui-toast-neutral-border-color);
-  border-radius: var(--radius-md);
-  box-shadow: var(--ui-toast-box-shadow);
+  border-radius: var(--radius-xl);
+  border: 1px solid;
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(20px);
   overflow: hidden;
 
+  // Variant colors
   &--info {
-    .ui-toast__icon {
-      color: var(--ui-toast-info-text-color);
-    }
+    border-color: var(--ui-toast-info-border-color);
+    background: var(--ui-toast-info-background-color);
+    color: var(--ui-toast-info-text-color);
   }
 
   &--success {
-    .ui-toast__icon {
-      color: var(--ui-toast-success-text-color);
-    }
+    border-color: var(--ui-toast-success-border-color);
+    background: var(--ui-toast-success-background-color);
+    color: var(--ui-toast-success-text-color);
   }
 
   &--warning {
-    .ui-toast__icon {
-      color: var(--ui-toast-warning-text-color);
-    }
+    border-color: var(--ui-toast-warning-border-color);
+    background: var(--ui-toast-warning-background-color);
+    color: var(--ui-toast-warning-text-color);
   }
 
   &--error {
-    .ui-toast__icon {
-      color: var(--ui-toast-error-text-color);
-    }
+    border-color: var(--ui-toast-error-border-color);
+    background: var(--ui-toast-error-background-color);
+    color: var(--ui-toast-error-text-color);
   }
 
   &--neutral {
-    .ui-toast__icon {
-      color: var(--text-tertiary);
-    }
+    border-color: var(--ui-toast-neutral-border-color);
+    background: var(--ui-toast-neutral-background-color);
+    color: var(--ui-toast-neutral-text-color);
   }
 
+  // Size variants
   &--normal {
     .ui-toast__body {
-      padding: 12px 14px;
-      gap: 10px;
+      padding: 16px;
+      gap: 12px;
     }
 
     .ui-toast__title {
@@ -168,29 +163,24 @@ if (!props.persistent && props.duration > 0) {
     }
 
     .ui-toast__description {
-      font-size: 13px;
-      line-height: 18px;
+      font-size: 14px;
+      line-height: 20px;
     }
 
     .ui-toast__icon {
-      width: 18px;
-      height: 18px;
+      width: 20px;
+      height: 20px;
     }
 
     .ui-toast__action {
-      padding: 0 14px 12px 42px;
-    }
-
-    .ui-toast__action-button {
-      font-size: 13px;
-      line-height: 18px;
+      padding: 12px 16px;
     }
   }
 
   &--compact {
     .ui-toast__body {
-      padding: 12px 14px;
-      gap: 10px;
+      padding: 12px;
+      gap: 8px;
     }
 
     .ui-toast__content {
@@ -214,12 +204,7 @@ if (!props.persistent && props.duration > 0) {
     }
 
     .ui-toast__action {
-      padding: 0 14px 12px 40px;
-    }
-
-    .ui-toast__action-button {
-      font-size: 12px;
-      line-height: 16px;
+      padding: 8px 12px;
     }
 
     .ui-toast__action-icon {
@@ -228,10 +213,10 @@ if (!props.persistent && props.duration > 0) {
     }
   }
 
+  // Structure
   &__body {
     display: flex;
     align-items: center;
-    width: 100%;
   }
 
   &__icon {
@@ -243,8 +228,6 @@ if (!props.persistent && props.duration > 0) {
     flex-direction: column;
     flex: 1;
     min-width: 0;
-    align-self: center;
-    gap: 2px;
   }
 
   &__title,
@@ -253,12 +236,8 @@ if (!props.persistent && props.duration > 0) {
     text-align: left;
   }
 
-  &__title {
-    color: var(--text-primary);
-  }
-
   &__description {
-    color: var(--text-secondary);
+    opacity: 0.8;
   }
 
   &__close {
@@ -266,35 +245,33 @@ if (!props.persistent && props.duration > 0) {
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    width: 20px;
-    height: 20px;
+    width: 24px;
+    height: 24px;
     padding: 0;
-    background: transparent;
+    background: none;
     border: none;
     border-radius: var(--radius-sm);
     cursor: pointer;
-    color: var(--text-tertiary);
-    transition: background-color var(--trs-fast), color var(--trs-fast);
+    color: currentColor;
+    opacity: 0.5;
+    transition: opacity var(--duration-fast) var(--ease-default);
 
     &:hover {
-      color: var(--text-primary);
-      background-color: var(--ui-button-secondary-ghost-hover-background-color);
-    }
-
-    &:focus-visible {
-      outline: 2px solid var(--focus-ring);
-      outline-offset: 2px;
+      opacity: 1;
     }
   }
 
   &__close-icon {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
   }
 
   &__action {
     display: flex;
     align-items: center;
+    border-top: 1px solid currentColor;
+    border-top-color: inherit;
+    opacity: 0.8;
   }
 
   &__action-button {
@@ -303,22 +280,15 @@ if (!props.persistent && props.duration > 0) {
     gap: 6px;
     background: none;
     border: none;
-    border-radius: var(--radius-sm);
     cursor: pointer;
     padding: 0;
-    color: var(--text-accent);
+    color: currentColor;
     font-size: inherit;
     font-weight: 600;
-    line-height: inherit;
-    transition: background-color var(--trs-fast), color var(--trs-fast);
+    transition: opacity var(--duration-fast) var(--ease-default);
 
     &:hover {
-      color: var(--text-primary);
-    }
-
-    &:focus-visible {
-      outline: 2px solid var(--focus-ring);
-      outline-offset: 2px;
+      opacity: 0.7;
     }
   }
 

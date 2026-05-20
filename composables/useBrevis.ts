@@ -1,4 +1,4 @@
-import { useSwitchChain, useWriteContract } from '@wagmi/vue'
+import { useAccount, useSwitchChain, useWriteContract } from '@wagmi/vue'
 import type { Address } from 'viem'
 import axios from 'axios'
 
@@ -100,7 +100,7 @@ const getBrevisCampaignsForVault = (vaultAddress: string): RewardCampaign[] => {
 }
 
 export const useBrevis = () => {
-  const { isConnected, address: wagmiAddress, chain: wagmiChain } = useWagmi()
+  const { isConnected, address: wagmiAddress, chain: wagmiChain } = useAccount()
   const { switchChain } = useSwitchChain()
   const { writeContractAsync } = useWriteContract()
   const { BREVIS_API_URL, BREVIS_MERKLE_PROOF_URL } = useEulerConfig()

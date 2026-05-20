@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { useAccount } from '@wagmi/vue'
 import { getDefaultPageRoute } from '~/entities/menu'
 
-const { isConnected } = useWagmi()
+const { isConnected } = useAccount()
 
 const { connect } = useWagmi()
 const {

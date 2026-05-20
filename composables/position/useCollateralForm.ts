@@ -1,4 +1,5 @@
 import type { ComputedRef } from 'vue'
+import { useAccount } from '@wagmi/vue'
 import { formatUnits, type Address, type Abi, zeroAddress } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { createRaceGuard } from '~/utils/race-guard'
@@ -113,7 +114,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const { error } = useToast()
   const submitLabel = options.reviewLabel
   const { executeTxPlan } = useEulerOperations()
-  const { isConnected, address } = useWagmi()
+  const { isConnected, address } = useAccount()
   const { isSpyMode } = useSpyMode()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const positionIndex = usePositionIndex()

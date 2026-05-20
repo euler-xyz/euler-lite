@@ -4,13 +4,9 @@ import { getVaultTypeLabel, getVaultTypeDescription } from '~/entities/vault/des
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultTypeInfoModal } from '#components'
 
-const { type, vault, size = 'small', block = false, as = 'span', nudge = false } = defineProps<{
+const { type, vault } = defineProps<{
   type: string
   vault: Vault | EarnVault | SecuritizeVault
-  size?: 'small' | 'large'
-  block?: boolean
-  as?: 'button' | 'span'
-  nudge?: boolean
 }>()
 
 const modal = useModal()
@@ -39,7 +35,7 @@ const icon = computed(() => {
   switch (type) {
     case 'governed':
     case 'managed':
-      return 'governed'
+      return 'bank'
     case 'escrow':
     case 'securitize':
       return 'shield'
@@ -56,12 +52,6 @@ const label = computed(() => {
 
 const effectiveType = computed(() => isVerified.value ? type : 'unknown')
 
-const tone = computed(() => {
-  if (isWarning.value) return 'danger'
-  if (type === 'governed' || type === 'ungoverned' || type === 'managed') return 'governance'
-  return 'neutral'
-})
-
 const openModal = () => {
   modal.open(VaultTypeInfoModal, {
     props: {
@@ -73,14 +63,37 @@ const openModal = () => {
 </script>
 
 <template>
-  <VaultMetadataTag
-    :as="as"
-    :icon="icon"
-    :label="label"
-    :tone="tone"
-    :size="size"
-    :block="block"
-    :nudge="nudge"
+  <div
+    class="vault-type-chip flex gap-8 items-center py-8 px-12 rounded-8 cursor-pointer"
+    :class="{ 'vault-type-chip--warning': isWarning }"
     @click="openModal"
-  />
+  >
+    <UiIcon
+      class="mr-2 !w-20 !h-20"
+      :name="icon"
+    />
+    {{ label }}
+  </div>
 </template>
+
+<style scoped lang="scss">
+.vault-type-chip {
+  background-color: rgba(var(--accent-rgb), 0.15);
+  color: var(--accent-600);
+
+  [data-theme="dark"] & {
+    background-color: rgba(var(--accent-rgb), 0.2);
+    color: var(--accent-500);
+  }
+
+  &--warning {
+    background-color: rgba(var(--error-rgb), 0.1);
+    color: var(--error-500);
+
+    [data-theme="dark"] & {
+      background-color: rgba(var(--error-rgb), 0.1);
+      color: var(--error-500);
+    }
+  }
+}
+</style>
