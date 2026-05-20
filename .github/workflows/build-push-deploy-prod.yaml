@@ -1,16 +1,13 @@
 name: Build, Push & Deploy (prod)
 on:
+  # Auto-triggers disabled: deploys now run from euler-lite-cicd via repository_dispatch.
+  # workflow_dispatch retained temporarily for manual rollback. Remove this file once new pipeline is proven.
   workflow_dispatch:
     inputs:
       image_tag:
         description: 'ECR image tag to deploy (defaults to "latest")'
         required: false
         default: 'latest'
-  push:
-    tags:
-      - 'v*'
-      - '!v*-rc*'
-      - '!v*-beta*'
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
