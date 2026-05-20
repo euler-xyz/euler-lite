@@ -20,6 +20,7 @@ export type IntrinsicApySourceConfig
     | { provider: 'infinifi', address: string, chainId: number, infinifiVariant: 'locked' | 'staked', infinifiLockedKey?: string }
     | { provider: 'accountable', address: string, chainId: number, loanAddress: string }
     | { provider: 'coinshift', address: string, chainId: number, period: '7d' | '30d' | '90d' }
+    | { provider: 'yuzu-dashboard', address: string, chainId: number, yuzuApyField: 'yzprime_apy_1d' | 'yzprime_apy_7d' | 'yzprime_apy_30d' }
 
 export const intrinsicApySources: readonly IntrinsicApySourceConfig[] = [
   // DefiLlama pools — Ethereum (1)
@@ -92,6 +93,9 @@ export const intrinsicApySources: readonly IntrinsicApySourceConfig[] = [
   // Accountable loans — Monad (143)
   { provider: 'accountable', chainId: 143, address: '0x8d3F9f9Eb2f5E8B48EFBB4074440D1E2A34Bc365', loanAddress: '0x8dCE15fc6a98484C995Fc702cBfBdA14A30454af' },
   { provider: 'accountable', chainId: 143, address: '0xC6De1DC0B59682bE906E5BcA14E385E74EE88168', loanAddress: '0x2653137fd4118AD25BCEFb31Ca748957b8528B01' },
+
+  // Yuzu — yzPrime
+  { provider: 'yuzu-dashboard', chainId: 143, address: '0xc9ea90692757831d98Ac629F2A0140E02b80A7DA', yuzuApyField: 'yzprime_apy_7d' },
 
   // DefiLlama pools — Sonic (146)
   { provider: 'defillama', chainId: 146, address: '0x16af6b1315471Dc306D47e9CcEfEd6e5996285B6', poolId: '24b3096a-488d-4a61-afa6-e5e9be2ce4bf' },
