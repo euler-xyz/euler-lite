@@ -8,7 +8,7 @@ import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/compos
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
-import { isEVault, type EVault, type PortfolioBorrowPosition, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, type EVault, type PortfolioBorrowPosition, type SwapQuote, type TransactionPlan, type TransactionPlanPrepared, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
@@ -29,12 +29,12 @@ const { error } = useToast()
 const { address, isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
-const { planMultiply, executePlan } = useEulerTx()
+const { planMultiply, prepareTransactionPlan, executePreparedPlan } = useEulerTx()
 const { eulerLensAddresses } = useEulerAddresses()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
 const {
-  runSimulation: runMultiplySimulation,
+  runPreparedSimulation: runMultiplySimulation,
   simulationError: multiplySimulationError,
   clearSimulationError: clearMultiplySimulationError,
 } = useTransactionPlanSimulation()
@@ -54,6 +54,7 @@ const isLoading = ref(false)
 const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const plan = ref<TransactionPlan | null>(null)
+const preparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
 
 const multiplier = ref(1)
 const multiplyLongAmount = ref('')
@@ -78,7 +79,11 @@ const {
   reset: resetMultiplyQuoteStateInternal,
   requestQuotes: requestMultiplyQuotes,
   selectProvider: selectMultiplyQuote,
-} = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+} = useSwapQuotesParallel({
+  amountField: 'amountOut',
+  compare: 'max',
+  buildTxPlanForQuote: quote => buildMultiplyPlanFromQuote(quote),
+})
 const multiplyLongVault = computed<EVault | undefined>(() => {
   const vault = position.value ? position.value.collateralVault : undefined
   return vault && isEVault(vault) ? vault : undefined
@@ -495,6 +500,27 @@ const onRefreshMultiplyQuotes = () => {
   requestMultiplyQuote()
 }
 
+async function buildMultiplyPlanFromQuote(quote: SwapQuote): Promise<TransactionPlan> {
+  if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
+    throw new Error('Multiply vaults not loaded')
+  }
+  const subAccount = multiplySubAccount.value
+  if (!subAccount) throw new Error('Sub-account not resolved')
+  const debtAmount = multiplyDebtAmountNano.value
+  if (debtAmount <= 0n) throw new Error('Debt amount not set')
+  return planMultiply({
+    collateralVault: multiplySupplyVault.value.address as Address,
+    collateralAmount: 0n,
+    collateralAsset: multiplySupplyVault.value.asset.address as Address,
+    longVault: multiplyLongVault.value.address as Address,
+    liabilityVault: multiplyShortVault.value.address as Address,
+    liabilityAmount: debtAmount,
+    receiver: subAccount as Address,
+    swapQuote: quote,
+    swapperMode: SwapperMode.EXACT_IN,
+  })
+}
+
 const requestMultiplyQuote = useDebounceFn(async () => {
   multiplyQuoteError.value = null
 
@@ -590,14 +616,16 @@ const submitMultiply = async () => {
           swapQuote: quote ?? undefined,
           swapperMode: SwapperMode.EXACT_IN,
         })
+        preparedPlan.value = await prepareTransactionPlan(plan.value)
       }
       catch (e) {
         console.warn('[Multiply] failed to build plan', e)
         plan.value = null
+        preparedPlan.value = null
       }
 
-      if (plan.value) {
-        const ok = await runMultiplySimulation(plan.value)
+      if (preparedPlan.value) {
+        const ok = await runMultiplySimulation(preparedPlan.value)
         if (!ok) {
           return
         }
@@ -613,7 +641,7 @@ const submitMultiply = async () => {
           type: 'borrow',
           asset: multiplyShortVault.value.asset,
           amount: reviewBorrowAmount,
-          plan: plan.value || undefined,
+          prepared: preparedPlan.value || undefined,
           quoteFetchedAt: quote ? multiplyEffectiveQuoteFetchedAt.value : null,
           swapToAsset: quote ? multiplyLongVault.value.asset : undefined,
           swapToAmount: reviewSwapToAmount,
@@ -633,12 +661,12 @@ const submitMultiply = async () => {
 }
 
 const sendMultiply = async () => {
-  if (!plan.value) {
+  if (!preparedPlan.value) {
     return
   }
   isSubmitting.value = true
   try {
-    await executePlan(plan.value)
+    await executePreparedPlan(preparedPlan.value)
     modal.close()
     refreshAllPositions(eulerLensAddresses.value, address.value || '')
     setTimeout(() => {

@@ -78,6 +78,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const { error } = useToast()
   const { planBorrow, planSwapAndBorrow, executePlan } = useEulerTx()
   const { address, isConnected } = useWagmi()
+  const { isSpyMode } = useSpyMode()
   const { chainId } = useEulerAddresses()
   const { fetchSingleBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
@@ -110,7 +111,11 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     reset: resetBorrowSwapQuoteState,
     requestQuotes: requestBorrowSwapQuotes,
     selectProvider: selectBorrowSwapQuote,
-  } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+  } = useSwapQuotesParallel({
+    amountField: 'amountOut',
+    compare: 'max',
+    buildTxPlanForQuote: quote => buildSwapBorrowPlanFromQuote(quote),
+  })
   // --- Form state ---
   const ltv = ref(0)
   const borrowAmount = ref('')
@@ -827,7 +832,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   // --- Actions: balance ---
   const updateBorrowSwapAssetBalance = async () => {
-    if (borrowSelectedAsset.value?.address && isConnected.value) {
+    if (borrowSelectedAsset.value?.address && (isConnected.value || isSpyMode.value)) {
       borrowSelectedAssetBalance.value = await fetchSingleBalance(borrowSelectedAsset.value.address)
     }
     else {
@@ -855,7 +860,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   })
 
   watch(borrowSelectedAsset, async () => {
-    if (borrowSelectedAsset.value?.address && isConnected.value) {
+    if (borrowSelectedAsset.value?.address && (isConnected.value || isSpyMode.value)) {
       borrowSelectedAssetBalance.value = await fetchSingleBalance(borrowSelectedAsset.value.address)
     }
     else {

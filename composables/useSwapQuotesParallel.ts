@@ -45,7 +45,15 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   const { getSwapQuotes, getSwapProviders } = useSwapApi()
   const { client: rpcClient } = useRpcClient()
   const { address, chain } = useWagmi()
+  const { isSpyMode, spyAddress } = useSpyMode()
   const { chainId } = useEulerAddresses()
+  // Spy mode has no connected wallet — fall through to the spied owner so
+  // estimate/simulate calls have a real EOA as `from`. Without this the
+  // estimate runs as `quote.accountIn` (a fresh sub-account) and EVC.batch
+  // reverts with `EVC_NotAuthorized()` before state overrides can help.
+  const effectiveOwner = computed<Address | undefined>(() =>
+    address.value ?? (isSpyMode.value ? (spyAddress.value as Address | undefined) : undefined),
+  )
 
   const quoteCards = ref<SwapQuoteCard[]>([])
   const selectedProvider = ref<string | null>(null)
@@ -165,7 +173,11 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   const estimateTxPlanGas = async (plan: TransactionPlan, account: Address): Promise<bigint> => {
     if (!chainId.value) throw new Error('estimateTxPlanGas: no chainId')
     const sdk = await getEulerSdkFresh()
-    return sdk.executionService.estimateGasForTransactionPlan(chainId.value, account, plan)
+    // stateOverrides:true mirrors the simulate path — derives fake balances,
+    // allowances and approvals from the plan so estimation works for accounts
+    // that haven't pre-approved (every spy-mode account, every fresh wallet
+    // building a plan against a new sub-account).
+    return sdk.executionService.estimateGasForTransactionPlan(chainId.value, account, plan, { stateOverrides: true })
   }
 
   const enrichQuoteCard = async (
@@ -198,7 +210,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
 
     let gas: bigint
     try {
-      const account = (params.origin || address.value || quote.accountIn) as Address
+      const account = (params.origin || effectiveOwner.value || quote.accountIn) as Address
       const plan = await options.buildTxPlanForQuote(quote, provider)
       gas = await estimateTxPlanGas(plan, account)
     }

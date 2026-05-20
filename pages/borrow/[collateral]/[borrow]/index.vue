@@ -25,6 +25,7 @@ const reviewBorrowLabel = 'Review Borrow'
 const reviewMultiplyLabel = 'Review Multiply'
 const { getBorrowVaultPair, updateVault } = useVaults()
 const { address, isConnected } = useWagmi()
+const { isSpyMode, spyAddress } = useSpyMode()
 const { chainId } = useEulerAddresses()
 const shareLinkQuery = computed(() => {
   const network = route.query.network
@@ -83,10 +84,11 @@ const normalizeAddress = (addr?: string) => {
 
 const resolvePendingSubAccount = async (): Promise<string> => {
   if (pendingSubAccount.value) return pendingSubAccount.value
-  if (!address.value) throw new Error('Wallet not connected')
+  const owner = address.value || (isSpyMode.value ? spyAddress.value : undefined)
+  if (!owner) throw new Error('Wallet not connected')
   if (!pendingSubAccountPromise) {
     isPendingSubAccountLoading.value = true
-    pendingSubAccountPromise = getNewSubAccount(address.value)
+    pendingSubAccountPromise = getNewSubAccount(owner)
       .then((subAccount) => {
         pendingSubAccount.value = subAccount
         return subAccount
@@ -263,7 +265,7 @@ watch(tabs, (next) => {
 
 // --- Balance ---
 const updateBalance = async () => {
-  if (!isConnected.value) {
+  if (!isConnected.value && !isSpyMode.value) {
     balance.value = 0n
     savingBalance.value = 0n
     multiply.multiplyAssetBalance.value = 0n

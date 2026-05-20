@@ -35,6 +35,7 @@ const withDefaults = (
 export const useSwapApi = () => {
   const { chainId } = useEulerAddresses()
   const { address } = useWagmi()
+  const { isSpyMode, spyAddress } = useSpyMode()
 
   const getSwapQuotes = async (
     params: SwapQuoteInput,
@@ -45,7 +46,12 @@ export const useSwapApi = () => {
   ): Promise<SwapQuote[]> => {
     if (!params.tokenIn || !params.tokenOut) return []
 
-    const fallbackOrigin = (address.value ?? zeroAddress) as Address
+    // Spy mode has no connected wallet, so address.value is empty. Falling
+    // through to zeroAddress makes every aggregator reject the request as the
+    // simulating `from` is invalid. Use the spied owner instead so providers
+    // see a real address with realistic balances/allowances.
+    const spyOrigin = isSpyMode.value && spyAddress.value ? spyAddress.value as Address : null
+    const fallbackOrigin = (address.value ?? spyOrigin ?? zeroAddress) as Address
     const request = withDefaults(params, chainId.value, fallbackOrigin)
     if (!request) return []
 

@@ -1,4 +1,4 @@
-import type { EVault, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, SwapQuote, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { type ProjectedRates, getProjectedRates } from '~/utils/vault/apy'
 import { getAssetUsdValue, getAssetUsdValueOrZero, getAssetOraclePrice, getCollateralOraclePrice, getCollateralShareOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
@@ -62,8 +62,9 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
   const modal = useModal()
   const { error } = useToast()
-  const { planMultiply, executePlan } = useEulerTx()
+  const { planMultiply, prepareTransactionPlan, executePreparedPlan } = useEulerTx()
   const { isConnected, address } = useWagmi()
+  const { isSpyMode } = useSpyMode()
   const { depositPositions } = useEulerAccount()
   const { chainId } = useEulerAddresses()
   const { fetchSingleBalance } = useWallets()
@@ -71,7 +72,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
   const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
   const {
-    runSimulation: runMultiplySimulation,
+    runPreparedSimulation: runMultiplySimulation,
     simulationError: multiplySimulationError,
     clearSimulationError: clearMultiplySimulationError,
   } = useTransactionPlanSimulation()
@@ -99,7 +100,44 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     reset: resetMultiplyQuoteStateInternal,
     requestQuotes: requestMultiplyQuotes,
     selectProvider: selectMultiplyQuote,
-  } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max', includeCowSwap: true })
+  } = useSwapQuotesParallel({
+    amountField: 'amountOut',
+    compare: 'max',
+    includeCowSwap: true,
+    buildTxPlanForQuote: quote => buildMultiplyPlanFromQuote(quote),
+  })
+
+  async function buildMultiplyPlanFromQuote(quote: SwapQuote): Promise<TransactionPlan> {
+    if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
+      throw new Error('Multiply vaults not loaded')
+    }
+    const debtAmount = multiplyDebtAmountNano.value
+    if (debtAmount <= 0n) throw new Error('Debt amount not set')
+    const supplyAmountNano = valueToNano(multiplyInputAmount.value || '0', multiplySupplyVault.value.asset.decimals)
+    let supplySharesAmount: bigint | undefined
+    if (isMultiplySavingCollateral.value && multiplySavingPosition.value) {
+      supplySharesAmount = multiplySavingPosition.value.assets === supplyAmountNano
+        ? multiplySavingBalance.value
+        : multiplySupplyVault.value.convertToShares(supplyAmountNano)
+    }
+    const collateralShareSource = isMultiplySavingCollateral.value && supplySharesAmount && multiplySavingPosition.value
+      ? { from: multiplySavingPosition.value.subAccount as Address, shares: supplySharesAmount }
+      : undefined
+    const collateralAmount = isMultiplySavingCollateral.value ? 0n : supplyAmountNano
+    const receiver = (quote.accountIn || address.value || zeroAddress) as Address
+    return planMultiply({
+      collateralVault: multiplySupplyVault.value.address as Address,
+      collateralAmount,
+      collateralAsset: multiplySupplyVault.value.asset.address as Address,
+      collateralShareSource,
+      longVault: multiplyLongVault.value.address as Address,
+      liabilityVault: multiplyShortVault.value.address as Address,
+      liabilityAmount: debtAmount,
+      receiver,
+      swapQuote: quote,
+      swapperMode: SwapperMode.EXACT_IN,
+    })
+  }
   // --- Form state ---
   const multiplyInputAmount = ref('')
   const multiplier = ref(1)
@@ -116,6 +154,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const isMultiplySubmitting = ref(false)
   const isMultiplyPreparing = ref(false)
   const multiplyPlan = ref<TransactionPlan | null>(null)
+  const preparedMultiplyPlan = shallowRef<TransactionPlanPrepared | null>(null)
 
   // --- Vault aliases ---
   const multiplyLongVault = computed(() => collateralVault.value)
@@ -590,7 +629,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   })
 
   const isMultiplySubmitDisabled = computed(() => {
-    if (!isConnected.value) return false
+    // Disconnected wallets fall through to enable the connect-wallet button.
+    // Spy mode has a "wallet" (the spied address) so it must run the same
+    // disabling logic — no quote selected, missing amount, etc.
+    if (!isConnected.value && !isSpyMode.value) return false
     if (findBlockingDisabledOp(multiplyPlannedOps.value)) return true
     if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) return true
     if (!multiplyInputAmount.value || multiplyDebtAmountNano.value <= 0n) return true
@@ -819,7 +861,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
     isMultiplyPreparing.value = true
     try {
-      if (isMultiplySubmitting.value || !isConnected.value) return
+      if (isMultiplySubmitting.value || (!isConnected.value && !isSpyMode.value)) return
       if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) return
       if (!multiplyInputAmount.value || multiplyDebtAmountNano.value <= 0n) return
       if (multiplyErrorText.value) return
@@ -882,14 +924,16 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           swapQuote: quote ?? undefined,
           swapperMode: SwapperMode.EXACT_IN,
         })
+        preparedMultiplyPlan.value = await prepareTransactionPlan(multiplyPlan.value)
       }
       catch (e) {
         logWarn('multiply/buildPlan', e)
         multiplyPlan.value = null
+        preparedMultiplyPlan.value = null
       }
 
-      if (multiplyPlan.value) {
-        const ok = await runMultiplySimulation(multiplyPlan.value)
+      if (preparedMultiplyPlan.value) {
+        const ok = await runMultiplySimulation(preparedMultiplyPlan.value)
         if (!ok) return
       }
 
@@ -898,7 +942,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           type: 'borrow',
           asset: multiplyShortVault.value.asset,
           amount: multiplyShortAmount.value || formatUnits(debtAmount, Number(multiplyShortVault.value.asset.decimals)),
-          plan: multiplyPlan.value || undefined,
+          prepared: preparedMultiplyPlan.value || undefined,
           supplyingAssetForBorrow: multiplySupplyVault.value.asset,
           supplyingAmount: multiplyInputAmount.value,
           swapToAsset: quote ? multiplyLongVault.value.asset : undefined,
@@ -919,10 +963,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   }
 
   const sendMultiply = async () => {
-    if (!multiplyPlan.value) return
+    if (!preparedMultiplyPlan.value) return
     isMultiplySubmitting.value = true
     try {
-      await executePlan(multiplyPlan.value)
+      await executePreparedPlan(preparedMultiplyPlan.value)
       await finalizeTxAndRedirect()
     }
     catch (e) {
@@ -936,7 +980,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
   // --- Balance ---
   const updateMultiplyAssetBalance = async () => {
-    if (multiplySupplyVault.value?.asset.address && isConnected.value) {
+    if (multiplySupplyVault.value?.asset.address && (isConnected.value || isSpyMode.value)) {
       multiplyAssetBalance.value = await fetchSingleBalance(multiplySupplyVault.value.asset.address)
     }
     else {
@@ -987,7 +1031,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   )
 
   watch(multiplySupplyVault, async (newVault) => {
-    if (newVault?.asset.address && isConnected.value) {
+    if (newVault?.asset.address && (isConnected.value || isSpyMode.value)) {
       multiplyAssetBalance.value = await fetchSingleBalance(newVault.asset.address)
     }
     else {
