@@ -14,6 +14,9 @@ defineProps<{ pair: AnyBorrowVaultPair | PortfolioBorrowPosition<VaultEntity>, d
     <VaultOverviewPairBlockGeneral
       :pair="pair"
     />
+    <VaultOverviewPairBlockTypes
+      :pair="pair"
+    />
     <!-- Oracle adapters should always come from the liability (borrow) vault -->
     <VaultOverviewBlockOracleAdapters
       :vault="getPairBorrowVault(pair)"

@@ -136,8 +136,6 @@ export const useEulerAddresses = () => {
     return {
       adaptiveCurveIRMFactory: peripheryAddrs.adaptiveCurveIRMFactory,
       capRiskStewardFactory: peripheryAddrs.capRiskStewardFactory,
-      edgeFactory: peripheryAddrs.edgeFactory,
-      edgeFactoryPerspective: peripheryAddrs.edgeFactoryPerspective,
       escrowedCollateralPerspective: peripheryAddrs.escrowedCollateralPerspective,
       eulerEarnFactoryPerspective: peripheryAddrs.eulerEarnFactoryPerspective,
       eulerEarnGovernedPerspective: peripheryAddrs.eulerEarnGovernedPerspective,

@@ -232,6 +232,7 @@ const supplyCapPercentageDisplay = computed(() => {
               <BaseAvatar
                 :label="entity.name"
                 :src="getEulerLabelEntityLogo(entity.logo)"
+                class="!w-28 !h-28"
               />
               <a
                 :href="entity.url"
@@ -245,6 +246,7 @@ const supplyCapPercentageDisplay = computed(() => {
             v-else-if="!isGovernorVerified"
             :vault="vault"
             type="unknown"
+            nudge
           />
           <div v-else>
             -
@@ -254,7 +256,10 @@ const supplyCapPercentageDisplay = computed(() => {
           v-if="enableVaultTypeDisplay"
           label="Vault type"
         >
-          <VaultTypeBadges :vault="vault" />
+          <VaultTypeBadges
+            :vault="vault"
+            nudge
+          />
         </VaultOverviewLabelValue>
         <VaultOverviewLabelValue label="Can be borrowed">
           <div class="flex items-center gap-8">
