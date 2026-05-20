@@ -2,8 +2,9 @@
 import { formatNumber } from '~/utils/string-utils'
 
 const props = defineProps<{
-  directPriceImpact: number
+  directPriceImpact: number | null
   multipliedPriceImpact?: number | null
+  unknown?: boolean
   onConfirm: () => void | Promise<void>
 }>()
 const emits = defineEmits(['close'])
@@ -11,6 +12,13 @@ const emits = defineEmits(['close'])
 const confirmText = ref('')
 const isSubmitting = ref(false)
 const isConfirmed = computed(() => confirmText.value.trim().toLowerCase() === 'i understand')
+
+const title = computed(() => props.unknown ? 'Price Impact Unavailable' : 'High Price Impact')
+const description = computed(() =>
+  props.unknown
+    ? 'We could not fetch a USD value for one or both sides of this swap, so the price impact cannot be calculated. Please double-check the swap in/out amounts before continuing.'
+    : 'This transaction has a very high price impact. You may receive significantly less value than expected.',
+)
 
 const onCancel = () => {
   emits('close')
@@ -31,18 +39,21 @@ const onSubmit = async () => {
 <template>
   <BaseModalWrapper
     warning
-    title="High Price Impact"
+    :title="title"
     @close="onCancel"
   >
     <div class="flex flex-col gap-24 flex-grow">
       <div class="text-p3 text-content-secondary">
-        This transaction has a very high price impact. You may receive significantly less value than expected.
+        {{ description }}
       </div>
 
-      <div class="bg-surface-secondary rounded-12 p-16 flex flex-col gap-8">
+      <div
+        v-if="!unknown"
+        class="bg-surface-secondary rounded-12 p-16 flex flex-col gap-8"
+      >
         <div class="flex justify-between">
           <span class="text-p3 text-content-tertiary">Price impact</span>
-          <span class="text-p2 text-error-500">{{ formatNumber(directPriceImpact, 2, 2) }}%</span>
+          <span class="text-p2 text-error-500">{{ directPriceImpact !== null ? `${formatNumber(directPriceImpact, 2, 2)}%` : 'Unknown' }}</span>
         </div>
         <div
           v-if="multipliedPriceImpact !== undefined && multipliedPriceImpact !== null"

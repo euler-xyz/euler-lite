@@ -160,6 +160,11 @@ const walletSwap = useWalletSwapRepay({
 
 const { guardWithPriceImpact: guardWithWalletSwapPriceImpact } = usePriceImpactGate({
   directPriceImpact: walletSwap.swapPriceImpact,
+  shouldGateUnknown: computed(() =>
+    walletSwap.needsSwap.value
+    && walletSwap.quotes.selectedQuote.value !== null
+    && walletSwap.swapPriceImpact.value === null,
+  ),
 })
 
 const isWalletSwapRestricted = computed(() =>
@@ -211,9 +216,19 @@ const savings = useSavingsRepay({
 
 const { guardWithPriceImpact: guardWithCollateralPriceImpact } = usePriceImpactGate({
   directPriceImpact: collateral.priceImpact,
+  shouldGateUnknown: computed(() =>
+    !collateral.isSameAsset.value
+    && collateral.quotes.selectedQuote.value !== null
+    && collateral.priceImpact.value === null,
+  ),
 })
 const { guardWithPriceImpact: guardWithSavingsPriceImpact } = usePriceImpactGate({
   directPriceImpact: savings.priceImpact,
+  shouldGateUnknown: computed(() =>
+    !savings.isSameAsset.value
+    && savings.quotes.selectedQuote.value !== null
+    && savings.priceImpact.value === null,
+  ),
 })
 
 // --- Form tabs ---

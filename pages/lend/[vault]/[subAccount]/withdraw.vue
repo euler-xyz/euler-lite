@@ -231,8 +231,12 @@ const { priceImpact: swapPriceImpact } = useSwapPriceImpact({
   fromVault: vault,
 })
 
+const shouldGateUnknownPriceImpact = computed(() =>
+  swapEffectiveQuote.value !== null && swapPriceImpact.value === null,
+)
 const { guardWithPriceImpact } = usePriceImpactGate({
   directPriceImpact: swapPriceImpact,
+  shouldGateUnknown: shouldGateUnknownPriceImpact,
 })
 
 const swapRouteItems = computed(() => {

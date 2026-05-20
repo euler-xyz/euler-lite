@@ -163,10 +163,20 @@ const multiply = useMultiplyForm({
 const { guardWithPriceImpact: guardWithMultiplyPriceImpact } = usePriceImpactGate({
   directPriceImpact: multiply.multiplyPriceImpact,
   multipliedPriceImpact: multiply.multipliedPriceImpact,
+  shouldGateUnknown: computed(() =>
+    !multiply.multiplyIsSameAsset.value
+    && multiply.multiplyEffectiveQuote.value !== null
+    && multiply.multiplyPriceImpact.value === null,
+  ),
 })
 
 const { guardWithPriceImpact: guardWithBorrowSwapPriceImpact } = usePriceImpactGate({
   directPriceImpact: borrow.borrowSwapPriceImpact,
+  shouldGateUnknown: computed(() =>
+    borrow.borrowNeedsSwap.value
+    && borrow.borrowSwapEffectiveQuote.value !== null
+    && borrow.borrowSwapPriceImpact.value === null,
+  ),
 })
 
 // --- Submit disabled ---

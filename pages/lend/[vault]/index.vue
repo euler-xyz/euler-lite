@@ -625,8 +625,14 @@ const { priceImpact: swapPriceImpact } = useSwapPriceImpact({
   toVault: evkVault,
 })
 
+const shouldGateUnknownPriceImpact = computed(() =>
+  needsSwap.value
+  && swapEffectiveQuote.value !== null
+  && swapPriceImpact.value === null,
+)
 const { guardWithPriceImpact } = usePriceImpactGate({
   directPriceImpact: swapPriceImpact,
+  shouldGateUnknown: shouldGateUnknownPriceImpact,
 })
 
 const swapRouteItems = computed(() => {

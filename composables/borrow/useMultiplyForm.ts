@@ -1162,6 +1162,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     multiplySwapReady,
     multiplySlippage,
     multiplySelectedProvider,
+    multiplyEffectiveQuote,
     multiplyQuoteCardsSorted,
     isMultiplyQuoteLoading,
     multiplyQuoteError,
