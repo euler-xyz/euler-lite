@@ -1,4 +1,4 @@
-import type { EVault, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, SwapQuote, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { type ProjectedRates, getProjectedRates } from '~/utils/vault/apy'
 import { getAssetUsdValue, getAssetUsdValueOrZero, getAssetOraclePrice, getCollateralOraclePrice, getCollateralShareOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
@@ -99,7 +99,44 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     reset: resetMultiplyQuoteStateInternal,
     requestQuotes: requestMultiplyQuotes,
     selectProvider: selectMultiplyQuote,
-  } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max', includeCowSwap: true })
+  } = useSwapQuotesParallel({
+    amountField: 'amountOut',
+    compare: 'max',
+    includeCowSwap: true,
+    buildTxPlanForQuote: quote => buildMultiplyPlanFromQuote(quote),
+  })
+
+  async function buildMultiplyPlanFromQuote(quote: SwapQuote): Promise<TransactionPlan> {
+    if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
+      throw new Error('Multiply vaults not loaded')
+    }
+    const debtAmount = multiplyDebtAmountNano.value
+    if (debtAmount <= 0n) throw new Error('Debt amount not set')
+    const supplyAmountNano = valueToNano(multiplyInputAmount.value || '0', multiplySupplyVault.value.asset.decimals)
+    let supplySharesAmount: bigint | undefined
+    if (isMultiplySavingCollateral.value && multiplySavingPosition.value) {
+      supplySharesAmount = multiplySavingPosition.value.assets === supplyAmountNano
+        ? multiplySavingBalance.value
+        : multiplySupplyVault.value.convertToShares(supplyAmountNano)
+    }
+    const collateralShareSource = isMultiplySavingCollateral.value && supplySharesAmount && multiplySavingPosition.value
+      ? { from: multiplySavingPosition.value.subAccount as Address, shares: supplySharesAmount }
+      : undefined
+    const collateralAmount = isMultiplySavingCollateral.value ? 0n : supplyAmountNano
+    const receiver = (quote.accountIn || address.value || zeroAddress) as Address
+    return planMultiply({
+      collateralVault: multiplySupplyVault.value.address as Address,
+      collateralAmount,
+      collateralAsset: multiplySupplyVault.value.asset.address as Address,
+      collateralShareSource,
+      longVault: multiplyLongVault.value.address as Address,
+      liabilityVault: multiplyShortVault.value.address as Address,
+      liabilityAmount: debtAmount,
+      receiver,
+      swapQuote: quote,
+      swapperMode: SwapperMode.EXACT_IN,
+    })
+  }
   // --- Form state ---
   const multiplyInputAmount = ref('')
   const multiplier = ref(1)

@@ -166,7 +166,23 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     reset: resetSwapQuoteState,
     requestQuotes: requestSwapQuotes,
     selectProvider: selectSwapQuote,
-  } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
+  } = useSwapQuotesParallel({
+    amountField: 'amountOut',
+    compare: 'max',
+    buildTxPlanForQuote: quote => buildCollateralSwapPlanFromQuote(quote),
+  })
+
+  async function buildCollateralSwapPlanFromQuote(quote: SwapQuote): Promise<TransactionPlan> {
+    if (!collateralVault.value?.address || !asset.value?.address) {
+      throw new Error('Collateral vault not loaded')
+    }
+    return options.buildSwapPlan(quote, {
+      vaultAddress: collateralVault.value.address,
+      amountNano: valueToNano(amount.value || '0', asset.value.decimals),
+      slippage: swapSlippage.value,
+      subAccount: position.value?.subAccount,
+    })
+  }
   // --- Position/vault computeds ---
   const position = computed(() => getPositionBySubAccountIndex(+positionIndex))
   const isPositionLoaded = computed(() => !!position.value)
