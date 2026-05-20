@@ -1,4 +1,4 @@
-import type { Address, Hash, Hex, TransactionReceipt } from 'viem'
+import { getAddress, type Address, type Hash, type Hex, type TransactionReceipt } from 'viem'
 import type {
   Account,
   CollateralShareSource,
@@ -38,6 +38,11 @@ import { waitForSubgraphBlock } from '~/utils/subgraph'
 
 const OKX_POST_APPROVE_DELAY_MS = 3000
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
+const SUB_ACCOUNT_SNAPSHOT_FETCH_OPTIONS = {
+  populateVaults: false,
+  populateMarketPrices: false,
+  populateUserRewards: false,
+} as const
 
 const isOkxWallet = async (connector?: { id?: string, name?: string, getProvider?: () => Promise<unknown> }) => {
   if (!connector) return false
@@ -90,6 +95,7 @@ export interface PlanBorrowInput {
   amount: bigint
   borrowAccount: Address
   receiver?: Address
+  skipCleanup?: boolean
   collateral?: {
     vault: Address
     amount: bigint
@@ -162,6 +168,7 @@ export interface PlanSwapAndBorrowInput {
   collateralVault?: Address
   receiver?: Address
   wrappedNativeInfo?: WrappedNativeInfo
+  skipCleanup?: boolean
 }
 
 export interface PlanSwapAndRepayInput {
@@ -223,6 +230,7 @@ export interface PlanMultiplyWithSwapInput {
   collateralWrappedNativeInfo?: WrappedNativeInfo
   swapQuote: SwapQuote
   swapperMode?: SwapperMode
+  skipCleanup?: boolean
 }
 
 export interface PlanMultiplySameAssetInput {
@@ -235,6 +243,7 @@ export interface PlanMultiplySameAssetInput {
   liabilityVault: Address
   liabilityAmount: bigint
   receiver: Address
+  skipCleanup?: boolean
 }
 
 export interface PlanTransferInput {
@@ -273,6 +282,7 @@ export interface PlanMultiplyInput {
   // Swap path
   swapQuote?: SwapQuote
   swapperMode?: SwapperMode
+  skipCleanup?: boolean
 }
 
 export interface PlanRepayFromSourceInput {
@@ -386,6 +396,31 @@ export const useEulerTx = () => {
     return { sdk, account: fetched.result }
   }
 
+  const attachSubAccountSnapshot = async (
+    sdk: Awaited<ReturnType<typeof getEulerSdkFresh>>,
+    account: Account<IHasVaultAddress>,
+    subAccount: Address,
+  ) => {
+    const existingSubAccount = account.getSubAccount(getAddress(subAccount))
+    const vaults = [
+      ...new Set(existingSubAccount?.positions.map(position => getAddress(position.vaultAddress)) ?? []),
+    ]
+    const fetched = await sdk.accountService.fetchSubAccount(
+      account.chainId,
+      getAddress(subAccount),
+      vaults,
+      SUB_ACCOUNT_SNAPSHOT_FETCH_OPTIONS,
+    )
+    fetched.errors.forEach(issue => logWarn('useEulerTx/attachSubAccountSnapshot', issue))
+    if (fetched.result) {
+      account.setSubAccount(
+        existingSubAccount && fetched.result.positions.length === 0 && existingSubAccount.positions.length > 0
+          ? { ...fetched.result, positions: existingSubAccount.positions }
+          : fetched.result,
+      )
+    }
+  }
+
   const planDeposit = async (input: PlanDepositInput): Promise<TransactionPlan> => {
     const owner = requireOwner()
     const { sdk, account } = await freshPlanContext()
@@ -434,6 +469,7 @@ export const useEulerTx = () => {
   const planBorrow = async (input: PlanBorrowInput): Promise<TransactionPlan> => {
     const owner = requireOwner()
     const { sdk, account } = await freshPlanContext()
+    await attachSubAccountSnapshot(sdk, account, input.borrowAccount)
     const args: PlanBorrowArgs = {
       account,
       vault: input.vaultAddress,
@@ -441,6 +477,7 @@ export const useEulerTx = () => {
       borrowAccount: input.borrowAccount,
       receiver: input.receiver ?? owner,
       collateral: input.collateral,
+      skipCleanup: input.skipCleanup,
     }
     return sdk.executionService.planBorrow(args)
   }
@@ -529,6 +566,8 @@ export const useEulerTx = () => {
 
   const planSwapAndBorrow = async (input: PlanSwapAndBorrowInput): Promise<TransactionPlan> => {
     const { sdk, account } = await freshPlanContext()
+    const borrowAccount = input.borrowAccount ?? input.swapQuote.accountOut
+    await attachSubAccountSnapshot(sdk, account, borrowAccount)
     const args: PlanSwapAndBorrowFromWalletArgs = {
       account,
       swapQuote: input.swapQuote,
@@ -536,10 +575,11 @@ export const useEulerTx = () => {
       tokenIn: input.tokenIn,
       borrowVault: input.borrowVault,
       borrowAmount: input.borrowAmount,
-      borrowAccount: input.borrowAccount,
+      borrowAccount,
       collateralVault: input.collateralVault,
       receiver: input.receiver,
       wrappedNativeInfo: input.wrappedNativeInfo,
+      skipCleanup: input.skipCleanup,
     }
     return sdk.executionService.planSwapAndBorrowFromWallet(args)
   }
@@ -620,6 +660,7 @@ export const useEulerTx = () => {
 
   const planMultiplyWithSwap = async (input: PlanMultiplyWithSwapInput): Promise<TransactionPlan> => {
     const { sdk, account } = await freshPlanContext()
+    await attachSubAccountSnapshot(sdk, account, input.swapQuote.accountIn)
     const args: PlanMultiplyWithSwapArgs = {
       account,
       collateralVault: input.collateralVault,
@@ -629,12 +670,14 @@ export const useEulerTx = () => {
       collateralWrappedNativeInfo: input.collateralWrappedNativeInfo,
       swapQuote: input.swapQuote,
       swapperMode: input.swapperMode,
+      skipCleanup: input.skipCleanup,
     }
     return sdk.executionService.planMultiplyWithSwap(args)
   }
 
   const planMultiplySameAsset = async (input: PlanMultiplySameAssetInput): Promise<TransactionPlan> => {
     const { sdk, account } = await freshPlanContext()
+    await attachSubAccountSnapshot(sdk, account, input.receiver)
     const args: PlanMultiplySameAssetArgs = {
       account,
       collateralVault: input.collateralVault,
@@ -646,6 +689,7 @@ export const useEulerTx = () => {
       liabilityVault: input.liabilityVault,
       liabilityAmount: input.liabilityAmount,
       receiver: input.receiver,
+      skipCleanup: input.skipCleanup,
     }
     return sdk.executionService.planMultiplySameAsset(args)
   }
@@ -688,6 +732,7 @@ export const useEulerTx = () => {
         collateralWrappedNativeInfo: input.collateralWrappedNativeInfo,
         swapQuote: input.swapQuote,
         swapperMode: input.swapperMode,
+        skipCleanup: input.skipCleanup,
       })
     }
     return planMultiplySameAsset({
@@ -700,6 +745,7 @@ export const useEulerTx = () => {
       liabilityVault: input.liabilityVault,
       liabilityAmount: input.liabilityAmount,
       receiver: input.receiver,
+      skipCleanup: input.skipCleanup,
     })
   }
 
@@ -815,8 +861,8 @@ export const useEulerTx = () => {
     const cid = requireChainId()
     // Simulate via the fresh SDK so the internal state-override / batch
     // simulation reads pick up live chain state. simulateTransactionPlan runs
-    // processPlanPlugins internally — TOS and Keyring items are injected by
-    // the SDK; Lite no longer mutates plans here.
+    // processPlanPlugins internally — the SDK injects TOS and Keyring items,
+    // and Lite passes the plan through unchanged here.
     const sdk = await getEulerSdkFresh()
     const result = await sdk.executionService.simulateTransactionPlan(
       cid,

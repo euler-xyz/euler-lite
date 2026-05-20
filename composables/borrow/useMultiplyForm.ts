@@ -685,10 +685,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       return
     }
 
-    // CoW open position uses a different sub-account than the EVC batch path:
-    // it must be free of controllers because the wrapper enables the borrow
-    // vault controller itself. Resolve it here so the CoW quote is scoped to
-    // it; if unavailable we fall back to skipping the CoW provider.
+    // CoW open position uses a compatible empty sub-account because the
+    // wrapper enables the borrow vault controller itself. Resolve it here so
+    // the CoW quote is scoped to it; if unavailable we fall back to skipping
+    // the CoW provider.
     const quoteDeadline = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
     const cowProviderExtraData = { ...COWSWAP_PROVIDER_EXTRA_DATA.openPosition }
     let cowAccount: Address | null = null

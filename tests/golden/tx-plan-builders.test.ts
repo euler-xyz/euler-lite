@@ -19,7 +19,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Address } from 'viem'
+import { decodeFunctionData, getAddress, toFunctionSelector, type Address } from 'viem'
 import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 
 import { createVaultBuilders } from '~/composables/useEulerOperations/vault'
@@ -32,8 +32,19 @@ import { createAllowanceHelpers } from '~/composables/useEulerOperations/allowan
 import { createOperationHelpers } from '~/composables/useEulerOperations/helpers'
 
 import { ADDR, CHAIN_ID, buildLegacyContext, buildSdkAccount, buildSdkExecutionService } from '@golden/harness'
-import { normalizeLegacyPlan, normalizeSdkPlan } from '@golden/normalize'
+import { normalizeLegacyPlan, normalizeSdkPlan, type CanonicalTx } from '@golden/normalize'
 import { loadSwapFixture } from '@golden/load-fixture'
+
+const goldenMocks = vi.hoisted(() => ({
+  accountPositions: {
+    borrows: [] as Array<{ subAccount: Address, vault: Address }>,
+    deposits: [] as Array<{ subAccount: Address, vault: Address }>,
+  },
+  evcAccountInfo: {
+    enabledControllers: [] as Address[],
+    enabledCollaterals: [] as Address[],
+  },
+}))
 
 // Stub the SDK accessor the legacy helpers reach for via Nuxt auto-import.
 // They use it only to fetch wallet allowances; throwing forces them onto the
@@ -43,16 +54,28 @@ vi.mock('~/composables/useEulerSdk', () => ({
   getEulerSdk: async () => { throw new Error('stub: golden tests use rpc allowance fallback') },
 }))
 
-// `useEulerSubgraph` (transitively via collateral-cleanup) shouldn't be hit by
-// our scenarios; if any test path reaches it, we want a hard fail rather than
-// a network call. The stub here keeps the import resolvable.
+vi.mock('~/utils/public-client', () => ({
+  getPublicClient: () => ({
+    readContract: async (args: { functionName: string, args: readonly unknown[] }) => {
+      if (args.functionName === 'getEVCAccountInfo') return goldenMocks.evcAccountInfo
+      if (args.functionName === 'previewWithdraw') return args.args[0] as bigint
+      if (args.functionName === 'allowance') return 2n ** 256n - 1n
+      throw new Error(`Unmocked public-client readContract: ${args.functionName}`)
+    },
+  }),
+}))
+
 vi.mock('~/utils/subgraph', () => ({
-  fetchAccountPositions: async () => { throw new Error('stub: subgraph not available in golden tests') },
+  fetchAccountPositions: async () => goldenMocks.accountPositions,
   waitForSubgraphBlock: async () => false,
 }))
 
-const expectPlansEqual = async (
-  legacyTxs: ReturnType<typeof normalizeLegacyPlan>,
+beforeEach(() => {
+  goldenMocks.accountPositions = { borrows: [], deposits: [] }
+  goldenMocks.evcAccountInfo = { enabledControllers: [], enabledCollaterals: [] }
+})
+
+const normalizeResolvedSdkPlan = async (
   sdkPlan: TransactionPlan,
   owner: Address = ADDR.user,
 ) => {
@@ -63,7 +86,15 @@ const expectPlansEqual = async (
     account: owner,
     usePermit2: false,
   })
-  const sdkTxs = normalizeSdkPlan(resolved, ADDR.evc)
+  return normalizeSdkPlan(resolved, ADDR.evc)
+}
+
+const expectPlansEqual = async (
+  legacyTxs: ReturnType<typeof normalizeLegacyPlan>,
+  sdkPlan: TransactionPlan,
+  owner: Address = ADDR.user,
+) => {
+  const sdkTxs = await normalizeResolvedSdkPlan(sdkPlan, owner)
   expect(sdkTxs).toEqual(legacyTxs)
 }
 
@@ -81,6 +112,95 @@ const setupLegacy = (overrides?: Parameters<typeof buildLegacyContext>[0]) => {
     crossAsset: createCrossAssetSwapBuilders(ctx as never, helpers),
     supplyBorrow: createSupplyBorrowSwapBuilders(ctx as never, helpers),
   }
+}
+
+const evcDisableCollateralAbi = [{
+  type: 'function',
+  name: 'disableCollateral',
+  stateMutability: 'nonpayable',
+  inputs: [
+    { name: 'account', type: 'address' },
+    { name: 'collateral', type: 'address' },
+  ],
+  outputs: [],
+}] as const
+
+const vaultDisableControllerAbi = [{
+  type: 'function',
+  name: 'disableController',
+  stateMutability: 'nonpayable',
+  inputs: [],
+  outputs: [],
+}] as const
+
+const DISABLE_COLLATERAL_SELECTOR = toFunctionSelector(evcDisableCollateralAbi[0])
+const DISABLE_CONTROLLER_SELECTOR = toFunctionSelector(vaultDisableControllerAbi[0])
+
+const CURRENT_STATE_OWNER = getAddress('0xcfe5660d6c55906EC8C488A466bd4f77F77eec88')
+const CURRENT_STATE_SELECTED_SUB_ACCOUNT = getAddress('0xcfe5660D6c55906Ec8c488A466bd4F77f77eeC8A')
+const CURRENT_STATE_OLD_CONTROLLER = getAddress('0xD8b27CF359b7D15710a5BE299AF6e7Bf904984C2')
+const CURRENT_STATE_OLD_COLLATERALS = [
+  getAddress('0xbC4B4AC47582c3E38Ce5940B80Da65401F4628f1'),
+  getAddress('0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9'),
+] as const
+
+const trackingEntriesToPositions = (entries: readonly string[]) => entries.map(entry => ({
+  subAccount: getAddress(entry.slice(0, 42)),
+  vault: getAddress(`0x${entry.slice(42)}`),
+}))
+
+const CURRENT_STATE_ACTIVE_BORROWS = trackingEntriesToPositions([
+  '0xcfe5660d6c55906ec8c488a466bd4f77f77eec8ca94f9ce821c7bd57cc12991cb46ca19f5789278f',
+  '0xcfe5660d6c55906ec8c488a466bd4f77f77eec8dba98fc35c9dfd69178ad5dce9fa29c64554783b5',
+  '0xcfe5660d6c55906ec8c488a466bd4f77f77eec8fbc4b4ac47582c3e38ce5940b80da65401f4628f1',
+  '0xcfe5660d6c55906ec8c488a466bd4f77f77eec89bc4b4ac47582c3e38ce5940b80da65401f4628f1',
+])
+
+const CURRENT_STATE_ACTIVE_DEPOSITS = trackingEntriesToPositions([
+  '0xcfe5660d6c55906ec8c488a466bd4f77f77eec8805755d78cad24417c42960b93d3bf821a92e4d82',
+  '0xcfe5660d6c55906ec8c488a466bd4f77f77eec88fc6600b186d5b8b2fe59667efc0a479a7ac3f1b4',
+  '0xcfe5660d6c55906ec8c488a466bd4f77f77eec8ca3e0943d0196f76db58d3549c9a7528ef4ac335f',
+  '0xcfe5660d6c55906ec8c488a466bd4f77f77eec8dab2726daf820aa9270d14db9b18c8d187cbf2f30',
+  '0xcfe5660d6c55906ec8c488a466bd4f77f77eec88dae9216e77fef9cfae15b57783d99c99b66de0d1',
+  '0xcfe5660d6c55906ec8c488a466bd4f77f77eec88313603fa690301b0caeef8069c065862f9162162',
+  '0xcfe5660d6c55906ec8c488a466bd4f77f77eec8f797dd80692c3b2dadabce8e30c07fde5307d48a9',
+  '0xcfe5660d6c55906ec8c488a466bd4f77f77eec89797dd80692c3b2dadabce8e30c07fde5307d48a9',
+])
+
+const getOnlyCanonicalBatch = (txs: CanonicalTx[]) => {
+  const batch = txs.find(tx => tx.evcBatch)?.evcBatch
+  expect(batch).toBeDefined()
+  return batch!
+}
+
+const expectCurrentStateCleanup = (txs: CanonicalTx[]) => {
+  const batch = getOnlyCanonicalBatch(txs)
+  expect(batch).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      selector: DISABLE_CONTROLLER_SELECTOR,
+      targetContract: CURRENT_STATE_OLD_CONTROLLER,
+      onBehalfOfAccount: CURRENT_STATE_SELECTED_SUB_ACCOUNT,
+    }),
+  ]))
+
+  const disabledCollaterals = batch
+    .filter(item => item.selector === DISABLE_COLLATERAL_SELECTOR)
+    .map((item) => {
+      const decoded = decodeFunctionData({ abi: evcDisableCollateralAbi, data: item.data })
+      return {
+        targetContract: item.targetContract,
+        account: getAddress(decoded.args[0]),
+        collateral: getAddress(decoded.args[1]),
+      }
+    })
+
+  expect(disabledCollaterals).toEqual(expect.arrayContaining(
+    CURRENT_STATE_OLD_COLLATERALS.map(collateral => ({
+      targetContract: ADDR.evc,
+      account: CURRENT_STATE_SELECTED_SUB_ACCOUNT,
+      collateral,
+    })),
+  ))
 }
 
 describe('golden tx-plan parity: vault.deposit', () => {
@@ -262,6 +382,56 @@ describe('golden tx-plan parity: vault.borrow (wallet collateral)', () => {
   // Both batches are functionally equivalent at the EVC level (status-check
   // happens at the end of the batch), but byte-different.
   it.skip('borrow against fresh sub-account, wallet collateral (reordered)', () => {})
+
+  it('borrow against current 0xcfe state cleans up the old controller in legacy and SDK', async () => {
+    const collateralAmount = 1_000_000n
+    const borrowAmount = 100_000n
+    goldenMocks.evcAccountInfo = {
+      enabledControllers: [CURRENT_STATE_OLD_CONTROLLER],
+      enabledCollaterals: [...CURRENT_STATE_OLD_COLLATERALS],
+    }
+    goldenMocks.accountPositions = {
+      borrows: CURRENT_STATE_ACTIVE_BORROWS,
+      deposits: CURRENT_STATE_ACTIVE_DEPOSITS,
+    }
+
+    const { vault } = setupLegacy({ owner: CURRENT_STATE_OWNER })
+    const legacy = await vault.buildBorrowPlan(
+      ADDR.vaultWeth,
+      ADDR.assetWeth,
+      collateralAmount,
+      ADDR.vaultUsdt,
+      borrowAmount,
+      CURRENT_STATE_SELECTED_SUB_ACCOUNT,
+      { includePermit2Call: false },
+    )
+    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
+
+    const sdk = buildSdkExecutionService()
+    const sdkPlan = sdk.planBorrow({
+      account: buildSdkAccount({
+        owner: CURRENT_STATE_OWNER,
+        subAccounts: [{
+          subAccount: CURRENT_STATE_SELECTED_SUB_ACCOUNT,
+          enabledControllers: [CURRENT_STATE_OLD_CONTROLLER],
+          enabledCollaterals: [...CURRENT_STATE_OLD_COLLATERALS],
+        }],
+      }),
+      vault: ADDR.vaultUsdt,
+      amount: borrowAmount,
+      borrowAccount: CURRENT_STATE_SELECTED_SUB_ACCOUNT,
+      receiver: CURRENT_STATE_OWNER,
+      collateral: {
+        vault: ADDR.vaultWeth,
+        amount: collateralAmount,
+        asset: ADDR.assetWeth,
+      },
+    })
+    const sdkTxs = await normalizeResolvedSdkPlan(sdkPlan, CURRENT_STATE_OWNER)
+
+    expectCurrentStateCleanup(legacyTxs)
+    expectCurrentStateCleanup(sdkTxs)
+  })
 })
 
 describe('golden tx-plan parity: vault.borrowBySaving', () => {
@@ -631,6 +801,7 @@ describe('golden tx-plan parity: swap-quote operations', () => {
       collateralAmount: 0n,
       collateralAsset: quote.tokenIn.address,
       swapQuote: quote,
+      skipCleanup: true,
     })
     await expectPlansEqual(legacyTxs, plan)
   })

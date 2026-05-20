@@ -1,5 +1,5 @@
 import { type Address, getAddress, maxUint256, zeroAddress } from 'viem'
-import type { Deployment, IDeploymentService, Account, ExecutionService, WalletService, IWalletAdapter } from '@eulerxyz/euler-v2-sdk'
+import { Account, ExecutionService, WalletService, type Deployment, type IDeploymentService, type IWalletAdapter } from '@eulerxyz/euler-v2-sdk'
 
 // Addresses used by golden scenarios.
 //   - Chain core (evc, permit2, swapper, swapVerifier, accountLens) are the
@@ -127,6 +127,12 @@ export interface SeedPosition {
   isCollateral?: boolean
 }
 
+export interface SeedSubAccountState {
+  subAccount: Address
+  enabledControllers?: Address[]
+  enabledCollaterals?: Address[]
+}
+
 /**
  * Returns an SDK `Account`. By default it's a "fresh wallet, no positions"
  * snapshot — pass `positions` to seed sub-account state the planners need
@@ -136,6 +142,7 @@ export interface SeedPosition {
 export function buildSdkAccount(opts: {
   owner?: Address
   positions?: SeedPosition[]
+  subAccounts?: SeedSubAccountState[]
 } = {}) {
   const owner = opts.owner ?? ADDR.user
   const positions = opts.positions ?? []
@@ -189,6 +196,26 @@ export function buildSdkAccount(opts: {
       if (!sa.enabledCollaterals.includes(p.vault)) sa.enabledCollaterals.push(p.vault)
     }
   }
+  for (const state of opts.subAccounts ?? []) {
+    if (!subAccounts[state.subAccount]) {
+      subAccounts[state.subAccount] = {
+        timestamp: 0,
+        account: state.subAccount,
+        owner,
+        lastAccountStatusCheckTimestamp: 0,
+        enabledControllers: [],
+        enabledCollaterals: [],
+        positions: [],
+      }
+    }
+    const sa = subAccounts[state.subAccount]
+    for (const controller of state.enabledControllers ?? []) {
+      if (!sa.enabledControllers.includes(controller)) sa.enabledControllers.push(controller)
+    }
+    for (const collateral of state.enabledCollaterals ?? []) {
+      if (!sa.enabledCollaterals.includes(collateral)) sa.enabledCollaterals.push(collateral)
+    }
+  }
   return new Account({
     chainId: CHAIN_ID,
     owner,
@@ -208,10 +235,12 @@ export function buildSdkAccount(opts: {
  *    scope and indicates a missing scenario constraint.
  */
 export function buildLegacyContext(overrides?: {
+  owner?: Address
   permit2Enabled?: boolean
   evcEnabledCollaterals?: readonly Address[]
   evcEnabledControllers?: readonly Address[]
 }) {
+  const owner = overrides?.owner ?? ADDR.user
   const enabledCollaterals = overrides?.evcEnabledCollaterals ?? []
   const enabledControllers = overrides?.evcEnabledControllers ?? []
   const rpcProvider = {
@@ -229,7 +258,7 @@ export function buildLegacyContext(overrides?: {
   }
 
   const ctx = {
-    address: { value: ADDR.user },
+    address: { value: owner },
     chainId: { value: CHAIN_ID },
     writeContractAsync: async () => { throw new Error('not used in golden tests') },
     signTypedDataAsync: async () => { throw new Error('not used in golden tests') },
