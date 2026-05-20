@@ -179,7 +179,9 @@ export const createRepayBuilders = (
     const evcAddress = ctx.eulerCoreAddresses.value.evc as Address
 
     const hooks = new SaHooksBuilder()
-    hooks.addContractInterface(vaultAddr, vaultTransferFromMaxAbi)
+    if (isSweepable(vaultAddr)) {
+      hooks.addContractInterface(vaultAddr, vaultTransferFromMaxAbi)
+    }
     hooks.addContractInterface(evcAddress, evcDisableCollateralAbi)
 
     const evcCalls: EVCCall[] = []
@@ -193,7 +195,7 @@ export const createRepayBuilders = (
       userAddr,
     })
 
-    if (subAccountAddr.toLowerCase() !== userAddr.toLowerCase()) {
+    if (subAccountAddr.toLowerCase() !== userAddr.toLowerCase() && isSweepable(vaultAddr)) {
       const transferCall: EVCCall = {
         targetContract: vaultAddr,
         onBehalfOfAccount: subAccountAddr,
