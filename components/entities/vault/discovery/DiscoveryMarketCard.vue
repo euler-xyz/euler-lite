@@ -12,8 +12,7 @@ import {
   type BestMaxRoeResult,
 } from '~/utils/discoveryCalculations'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
-import { useModal } from '~/components/ui/composables/useModal'
-import { VaultMaxRoeModal } from '#components'
+import { VaultMaxRoeModal, UiModalPreviewTrigger } from '#components'
 
 const props = defineProps<{
   market: MarketGroup
@@ -27,7 +26,6 @@ defineEmits<{
 const { withIntrinsicSupplyApy, withIntrinsicBorrowApy } = useIntrinsicApy()
 const { getBorrowRewardApy, getSupplyRewardApy, getLoopingRewardApy } = useRewardsApy()
 const { products } = useEulerLabels()
-const modal = useModal()
 
 const isGovernanceLimited = computed(() =>
   props.market.source === 'product' && !!products[props.market.id]?.isGovernanceLimited,
@@ -98,22 +96,18 @@ const getBestMaxRoe = (market: MarketGroup): BestMaxRoeResult => {
   }
 }
 
-const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(VaultMaxRoeModal, {
-    props: {
-      maxRoe: result.value,
-      maxMultiplier: result.maxMultiplier,
-      supplyAPY: result.supplyAPY,
-      borrowAPY: result.borrowAPY,
-      borrowLTV: result.borrowLTV,
-      borrowVaultAddress: result.borrowVaultAddress,
-      collateralAddress: result.collateralAddress,
-      isBestInMarket: true,
-    },
-  })
-}
+const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
+  props: {
+    maxRoe: result.value,
+    maxMultiplier: result.maxMultiplier,
+    supplyAPY: result.supplyAPY,
+    borrowAPY: result.borrowAPY,
+    borrowLTV: result.borrowLTV,
+    borrowVaultAddress: result.borrowVaultAddress,
+    collateralAddress: result.collateralAddress,
+    isBestInMarket: true,
+  },
+})
 </script>
 
 <template>
@@ -278,34 +272,38 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
         >
           <div class="flex-1 min-w-0">
             <template v-if="bestRoe.value > 0">
-              <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-                Max ROE
-                <SvgIcon
-                  class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-                  name="info-circle"
-                  @click="onMaxRoeInfoIconClick($event, bestRoe)"
-                />
-              </div>
-              <div
-                class="text-p2 text-content-primary flex items-center gap-4 min-w-0"
-                data-id="data-point"
-                :data-key="market.id"
-                data-field="best-max-roe"
-                :data-value="bestRoe.value"
+              <UiModalPreviewTrigger
+                :component="VaultMaxRoeModal"
+                :modal-data="() => getMaxRoeModalData(bestRoe)"
+                aria-label="Max ROE details"
               >
-                <SvgIcon
-                  v-if="bestRoe.hasRewards"
-                  name="sparks"
-                  class="!w-20 !h-20 text-accent-500 shrink-0 cursor-pointer hover:text-accent-400 transition-colors"
-                  @click="onMaxRoeInfoIconClick($event, bestRoe)"
-                />
-                <span class="shrink-0">{{ formatNumber(bestRoe.value, 2, 2) }}%</span>
-                <span
-                  v-if="bestRoe.pair"
-                  class="text-p4 text-content-muted min-w-0"
-                  :class="isExpanded ? '' : 'truncate'"
-                >{{ bestRoe.pair }}</span>
-              </div>
+                <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+                  Max ROE
+                  <SvgIcon
+                    class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors"
+                    name="info-circle"
+                  />
+                </div>
+                <div
+                  class="text-p2 text-content-primary flex items-center gap-4 min-w-0"
+                  data-id="data-point"
+                  :data-key="market.id"
+                  data-field="best-max-roe"
+                  :data-value="bestRoe.value"
+                >
+                  <SvgIcon
+                    v-if="bestRoe.hasRewards"
+                    name="sparks"
+                    class="!w-20 !h-20 text-accent-500 shrink-0 hover:text-accent-400 transition-colors"
+                  />
+                  <span class="shrink-0">{{ formatNumber(bestRoe.value, 2, 2) }}%</span>
+                  <span
+                    v-if="bestRoe.pair"
+                    class="text-p4 text-content-muted min-w-0"
+                    :class="isExpanded ? '' : 'truncate'"
+                  >{{ bestRoe.pair }}</span>
+                </div>
+              </UiModalPreviewTrigger>
             </template>
           </div>
         </template>
@@ -414,35 +412,37 @@ const onMaxRoeInfoIconClick = (event: MouseEvent, result: BestMaxRoeResult) => {
         v-for="(bestRoe, bestRoeIdx) in [getBestMaxRoe(market)]"
         :key="'max-roe-mobile-' + bestRoeIdx"
       >
-        <div
+        <UiModalPreviewTrigger
           v-if="bestRoe.value > 0"
-          class="flex w-full justify-between"
+          :component="VaultMaxRoeModal"
+          :modal-data="() => getMaxRoeModalData(bestRoe)"
+          aria-label="Max ROE details"
         >
-          <div class="text-content-tertiary text-p3 flex items-center gap-4 whitespace-nowrap">
-            Max ROE
-            <SvgIcon
-              class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-              name="info-circle"
-              @click="onMaxRoeInfoIconClick($event, bestRoe)"
-            />
-          </div>
-          <div class="text-p2 text-content-primary flex flex-wrap items-center justify-end gap-x-4">
-            <span class="flex items-center gap-4 shrink-0">
+          <div class="flex w-full justify-between">
+            <div class="text-content-tertiary text-p3 flex items-center gap-4 whitespace-nowrap">
+              Max ROE
               <SvgIcon
-                v-if="bestRoe.hasRewards"
-                name="sparks"
-                class="!w-20 !h-20 text-accent-500 shrink-0 cursor-pointer hover:text-accent-400 transition-colors"
-                @click="onMaxRoeInfoIconClick($event, bestRoe)"
+                class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors"
+                name="info-circle"
               />
-              {{ formatNumber(bestRoe.value, 2, 2) }}%
-            </span>
-            <span
-              v-if="bestRoe.pair"
-              class="text-p4 text-content-muted"
-              :class="isExpanded ? '' : 'truncate max-w-[100px]'"
-            >{{ bestRoe.pair }}</span>
+            </div>
+            <div class="text-p2 text-content-primary flex flex-wrap items-center justify-end gap-x-4">
+              <span class="flex items-center gap-4 shrink-0">
+                <SvgIcon
+                  v-if="bestRoe.hasRewards"
+                  name="sparks"
+                  class="!w-20 !h-20 text-accent-500 shrink-0 hover:text-accent-400 transition-colors"
+                />
+                {{ formatNumber(bestRoe.value, 2, 2) }}%
+              </span>
+              <span
+                v-if="bestRoe.pair"
+                class="text-p4 text-content-muted"
+                :class="isExpanded ? '' : 'truncate max-w-[100px]'"
+              >{{ bestRoe.pair }}</span>
+            </div>
           </div>
-        </div>
+        </UiModalPreviewTrigger>
       </template>
     </div>
   </button>

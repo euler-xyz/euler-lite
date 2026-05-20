@@ -4,8 +4,7 @@ import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { formatNumber, compactNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
-import { useModal } from '~/components/ui/composables/useModal'
-import { VaultSupplyApyModal } from '#components'
+import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
 import { getStrategyHookWarning } from '~/composables/useVaultWarnings'
 import { DateTime } from 'luxon'
 import { getAddress } from 'viem'
@@ -24,7 +23,6 @@ const { getOrFetch } = useVaultRegistry()
 const { isEscrowLoadedOnce } = useVaults()
 const { withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
-const modal = useModal()
 
 const exposureVaults: Ref<EVault[]> = ref([])
 const isLoading = ref(false)
@@ -128,20 +126,15 @@ const getStrategySupplyApy = (strategyVault: EVault) => {
   return supplyApy + getSupplyRewardApy(strategyVault.address)
 }
 
-const onStrategySupplyInfoClick = (event: MouseEvent, strategyVault: EVault) => {
-  event.preventDefault()
-  event.stopPropagation()
-  const lendingAPY = getVaultSupplyApy(strategyVault)
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY,
-      intrinsicAPY: getIntrinsicApy(strategyVault.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(strategyVault.asset.address),
-      campaigns: getSupplyRewardCampaigns(strategyVault.address),
-      rewardVaultAddress: strategyVault.address,
-    },
-  })
-}
+const getStrategySupplyApyModalData = (strategyVault: EVault) => ({
+  props: {
+    lendingAPY: getVaultSupplyApy(strategyVault),
+    intrinsicAPY: getIntrinsicApy(strategyVault.asset.address),
+    intrinsicApyInfo: getIntrinsicApyInfo(strategyVault.asset.address),
+    campaigns: getSupplyRewardCampaigns(strategyVault.address),
+    rewardVaultAddress: strategyVault.address,
+  },
+})
 
 const hasExposureUsdPrice = (exposure: typeof exposureList.value[0]) => {
   return exposureUsdPrices.value.has(exposure.address)
@@ -224,28 +217,30 @@ load()
               </div>
             </div>
           </template>
-          <div
+          <UiModalPreviewTrigger
             v-if="row.vault"
-            class="flex flex-col items-end shrink-0"
+            :component="VaultSupplyApyModal"
+            :modal-data="() => getStrategySupplyApyModalData(row.vault!)"
+            aria-label="Supply APY details"
           >
-            <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-              Supply APY
-              <SvgIcon
-                class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-                name="info-circle"
-                @click="onStrategySupplyInfoClick($event, row.vault)"
-              />
+            <div class="flex flex-col items-end shrink-0">
+              <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+                Supply APY
+                <SvgIcon
+                  class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors"
+                  name="info-circle"
+                />
+              </div>
+              <div class="text-p2 flex items-center text-accent-600 font-semibold">
+                <SvgIcon
+                  v-if="hasSupplyRewards(row.vault.address)"
+                  class="!w-20 !h-20 text-accent-500 mr-4"
+                  name="sparks"
+                />
+                {{ formatNumber(getStrategySupplyApy(row.vault)) }}%
+              </div>
             </div>
-            <div class="text-p2 flex items-center text-accent-600 font-semibold">
-              <SvgIcon
-                v-if="hasSupplyRewards(row.vault.address)"
-                class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
-                name="sparks"
-                @click="onStrategySupplyInfoClick($event, row.vault)"
-              />
-              {{ formatNumber(getStrategySupplyApy(row.vault)) }}%
-            </div>
-          </div>
+          </UiModalPreviewTrigger>
         </div>
         <div class="flex flex-col gap-12 px-16 pt-12 pb-16">
           <VaultOverviewLabelValue

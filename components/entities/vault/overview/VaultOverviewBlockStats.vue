@@ -3,12 +3,10 @@ import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { useModal } from '~/components/ui/composables/useModal'
-import { VaultSupplyApyModal, VaultBorrowApyModal } from '#components'
+import { VaultSupplyApyModal, VaultBorrowApyModal, UiModalPreviewTrigger } from '#components'
 
 const { vault } = defineProps<{ vault: EVault }>()
 
-const modal = useModal()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, getBorrowRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, hasSupplyRewards, hasBorrowRewards } = useRewardsApy()
 const isBorrowable = computed(() => vault.collaterals.some(ltv => ltv.borrowLTV > 0))
@@ -26,29 +24,25 @@ const borrowApyWithRewards = computed(() => withIntrinsicBorrowApy(
 const supplyRewardInfo = computed(() => getSupplyRewardCampaigns(vault.address))
 const borrowRewardInfo = computed(() => getBorrowRewardCampaigns(vault.address))
 
-const onSupplyInfoIconClick = () => {
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY: getVaultSupplyApy(vault),
-      intrinsicAPY: getIntrinsicApy(vault.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
-      campaigns: supplyRewardInfo.value,
-      rewardVaultAddress: vault.address,
-    },
-  })
-}
+const supplyApyModalData = computed(() => ({
+  props: {
+    lendingAPY: getVaultSupplyApy(vault),
+    intrinsicAPY: getIntrinsicApy(vault.asset.address),
+    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    campaigns: supplyRewardInfo.value,
+    rewardVaultAddress: vault.address,
+  },
+}))
 
-const onBorrowInfoIconClick = () => {
-  modal.open(VaultBorrowApyModal, {
-    props: {
-      borrowingAPY: getVaultBorrowApy(vault),
-      intrinsicAPY: getIntrinsicApy(vault.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
-      campaigns: borrowRewardInfo.value,
-      rewardVaultAddress: vault.address,
-    },
-  })
-}
+const borrowApyModalData = computed(() => ({
+  props: {
+    borrowingAPY: getVaultBorrowApy(vault),
+    intrinsicAPY: getIntrinsicApy(vault.asset.address),
+    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    campaigns: borrowRewardInfo.value,
+    rewardVaultAddress: vault.address,
+  },
+}))
 
 const utilization = computed(() => vault.utilization)
 const utilisationWarning = computed(() => getUtilisationWarning(vault, 'general'))
@@ -97,57 +91,65 @@ watchEffect(async () => {
         :value="availableLiquidityDisplay"
         orientation="horizontal"
       />
-      <VaultOverviewLabelValue
-        orientation="horizontal"
+      <UiModalPreviewTrigger
+        :component="VaultSupplyApyModal"
+        :modal-data="() => supplyApyModalData"
+        aria-label="Supply APY details"
       >
-        <template #label>
+        <VaultOverviewLabelValue
+          orientation="horizontal"
+        >
+          <template #label>
+            <span class="flex items-center gap-4">
+              Supply APY
+              <SvgIcon
+                class="!w-20 !h-20 text-content-muted hover:text-content-secondary"
+                name="info-circle"
+                data-modal-trigger="supply-apy"
+              />
+            </span>
+          </template>
           <span class="flex items-center gap-4">
-            Supply APY
             <SvgIcon
-              class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-              name="info-circle"
+              v-if="hasSupplyRewards(vault.address)"
+              class="!w-20 !h-20 text-accent-500"
+              name="sparks"
               data-modal-trigger="supply-apy"
-              @click="onSupplyInfoIconClick"
             />
+            {{ formatNumber(supplyApyWithRewards) }}%
           </span>
-        </template>
-        <span class="flex items-center gap-4">
-          <SvgIcon
-            v-if="hasSupplyRewards(vault.address)"
-            class="!w-20 !h-20 text-accent-500 cursor-pointer"
-            name="sparks"
-            data-modal-trigger="supply-apy"
-            @click="onSupplyInfoIconClick"
-          />
-          {{ formatNumber(supplyApyWithRewards) }}%
-        </span>
-      </VaultOverviewLabelValue>
-      <VaultOverviewLabelValue
+        </VaultOverviewLabelValue>
+      </UiModalPreviewTrigger>
+      <UiModalPreviewTrigger
         v-if="isBorrowable"
-        orientation="horizontal"
+        :component="VaultBorrowApyModal"
+        :modal-data="() => borrowApyModalData"
+        aria-label="Borrow APY details"
       >
-        <template #label>
+        <VaultOverviewLabelValue
+          orientation="horizontal"
+        >
+          <template #label>
+            <span class="flex items-center gap-4">
+              Borrow APY
+              <SvgIcon
+                class="!w-20 !h-20 text-content-muted hover:text-content-secondary"
+                name="info-circle"
+                data-modal-trigger="borrow-apy"
+              />
+            </span>
+          </template>
           <span class="flex items-center gap-4">
-            Borrow APY
             <SvgIcon
-              class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-              name="info-circle"
+              v-if="hasBorrowRewards(vault.address)"
+              class="!w-20 !h-20 text-accent-500"
+              name="sparks"
               data-modal-trigger="borrow-apy"
-              @click="onBorrowInfoIconClick"
             />
+            {{ formatNumber(borrowApyWithRewards) }}%
           </span>
-        </template>
-        <span class="flex items-center gap-4">
-          <SvgIcon
-            v-if="hasBorrowRewards(vault.address)"
-            class="!w-20 !h-20 text-accent-500 cursor-pointer"
-            name="sparks"
-            data-modal-trigger="borrow-apy"
-            @click="onBorrowInfoIconClick"
-          />
-          {{ formatNumber(borrowApyWithRewards) }}%
-        </span>
-      </VaultOverviewLabelValue>
+        </VaultOverviewLabelValue>
+      </UiModalPreviewTrigger>
       <VaultOverviewLabelValue
         v-if="isBorrowable"
         orientation="horizontal"

@@ -168,27 +168,21 @@ watchEffect(async () => {
   liquidityDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
 })
 
-const onBorrowInfoIconClick = (event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(VaultBorrowApyModal, {
-    props: {
-      borrowingAPY: getVaultBorrowApy(pair.borrow),
-      intrinsicAPY: getIntrinsicApy(pair.borrow.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(pair.borrow.asset.address),
-      campaigns: getBorrowRewardCampaigns(pair.borrow.address, pair.collateral.address),
-      rewardVaultAddress: pair.borrow.address,
-    },
-  })
-}
+const borrowApyModalData = computed(() => ({
+  props: {
+    borrowingAPY: getVaultBorrowApy(pair.borrow),
+    intrinsicAPY: getIntrinsicApy(pair.borrow.asset.address),
+    intrinsicApyInfo: getIntrinsicApyInfo(pair.borrow.asset.address),
+    campaigns: getBorrowRewardCampaigns(pair.borrow.address, pair.collateral.address),
+    rewardVaultAddress: pair.borrow.address,
+  },
+}))
 
-const onSupplyInfoIconClick = (event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
+const supplyApyModalData = computed(() => {
   const baseSupply = 'interestRateInfo' in pair.collateral
     ? getVaultSupplyApy(pair.collateral as EVault)
     : 0
-  modal.open(VaultSupplyApyModal, {
+  return {
     props: {
       lendingAPY: baseSupply,
       intrinsicAPY: getIntrinsicApy(pair.collateral.asset.address),
@@ -196,44 +190,60 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
       campaigns: getSupplyRewardCampaigns(pair.collateral.address),
       rewardVaultAddress: pair.collateral.address,
     },
-  })
-}
+  }
+})
 
+const netApyModalData = computed(() => ({
+  props: {
+    supplyAPY: getVaultSupplyApy(pair.collateral),
+    borrowAPY: getVaultBorrowApy(pair.borrow),
+    intrinsicSupplyAPY: getIntrinsicApy(pair.collateral.asset.address),
+    intrinsicBorrowAPY: getIntrinsicApy(pair.borrow.asset.address),
+    supplyRewardAPY: supplyRewardsAPY.value || null,
+    borrowRewardAPY: borrowRewardsAPY.value || null,
+    loopingRewardAPY: loopingRewardsAPY.value || null,
+    supplyCampaigns: getSupplyRewardCampaigns(pair.collateral.address),
+    borrowCampaigns: getBorrowRewardCampaigns(pair.borrow.address, pair.collateral.address),
+    loopingCampaigns: getLoopingRewardCampaigns(pair.borrow.address, pair.collateral.address),
+  },
+}))
+
+const maxRoeModalData = computed(() => ({
+  props: {
+    maxRoe: maxRoe.value,
+    maxMultiplier: maxMultiplier.value,
+    supplyAPY: supplyApyWithRewards.value,
+    borrowAPY: borrowApyWithRewards.value,
+    borrowLTV: ltvToPercent(pair.ltv.borrowLTV),
+    borrowVaultAddress: pair.borrow.address,
+    collateralAddress: pair.collateral.address,
+  },
+}))
+
+// Click-through handlers retained so the existing template @click bindings
+// in this file's three layout variants keep opening the modal. The
+// VaultBorrowItem hover-popover wrap is intentionally deferred — there are
+// ~14 click sites across compact/expanded/mobile layouts and each requires
+// careful wrapping without breaking row alignment.
+const onBorrowInfoIconClick = (event: MouseEvent) => {
+  event.preventDefault()
+  event.stopPropagation()
+  modal.open(VaultBorrowApyModal, borrowApyModalData.value)
+}
+const onSupplyInfoIconClick = (event: MouseEvent) => {
+  event.preventDefault()
+  event.stopPropagation()
+  modal.open(VaultSupplyApyModal, supplyApyModalData.value)
+}
 const onNetApyInfoIconClick = (event: MouseEvent) => {
   event.preventDefault()
   event.stopPropagation()
-  const baseSupply = getVaultSupplyApy(pair.collateral)
-  const baseBorrow = getVaultBorrowApy(pair.borrow)
-  modal.open(VaultNetApyPairModal, {
-    props: {
-      supplyAPY: baseSupply,
-      borrowAPY: baseBorrow,
-      intrinsicSupplyAPY: getIntrinsicApy(pair.collateral.asset.address),
-      intrinsicBorrowAPY: getIntrinsicApy(pair.borrow.asset.address),
-      supplyRewardAPY: supplyRewardsAPY.value || null,
-      borrowRewardAPY: borrowRewardsAPY.value || null,
-      loopingRewardAPY: loopingRewardsAPY.value || null,
-      supplyCampaigns: getSupplyRewardCampaigns(pair.collateral.address),
-      borrowCampaigns: getBorrowRewardCampaigns(pair.borrow.address, pair.collateral.address),
-      loopingCampaigns: getLoopingRewardCampaigns(pair.borrow.address, pair.collateral.address),
-    },
-  })
+  modal.open(VaultNetApyPairModal, netApyModalData.value)
 }
-
 const onMaxRoeInfoIconClick = (event: MouseEvent) => {
   event.preventDefault()
   event.stopPropagation()
-  modal.open(VaultMaxRoeModal, {
-    props: {
-      maxRoe: maxRoe.value,
-      maxMultiplier: maxMultiplier.value,
-      supplyAPY: supplyApyWithRewards.value,
-      borrowAPY: borrowApyWithRewards.value,
-      borrowLTV: ltvToPercent(pair.ltv.borrowLTV),
-      borrowVaultAddress: pair.borrow.address,
-      collateralAddress: pair.collateral.address,
-    },
-  })
+  modal.open(VaultMaxRoeModal, maxRoeModalData.value)
 }
 
 const route = useRoute()
