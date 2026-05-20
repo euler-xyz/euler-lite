@@ -19,6 +19,22 @@ type ConfigurableOracleAdapterService = EulerSDK['oracleAdapterService'] & {
   setQueryOracleAdapters?: (fn: QueryOracleAdapters) => void
 }
 
+// Browser CSP blocks hermes.pyth.network. The SDK's Pyth plugin issues
+// `GET <hermesUrl>/v2/updates/price/latest?ids[]=…` — rewrite that request to
+// our same-origin proxy at `/api/pyth/updates`, which forwards to Hermes
+// server-side. Non-Pyth/non-browser callers fall through to the native fetch.
+const pythProxyFetch: typeof fetch = (input, init) => {
+  if (typeof window === 'undefined') return fetch(input, init)
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+  if (url && /\/v2\/updates\/price\/latest(\?|$)/.test(url)) {
+    const incoming = new URL(url, window.location.origin)
+    const proxied = new URL('/api/pyth/updates', window.location.origin)
+    incoming.searchParams.forEach((v, k) => proxied.searchParams.append(k, v))
+    return fetch(proxied.toString(), init)
+  }
+  return fetch(input, init)
+}
+
 /**
  * Two SDK instances are exposed:
  *
@@ -173,7 +189,7 @@ const buildInstance = async ({ backend, buildQuery }: InstanceBuildArgs): Promis
     config,
     buildQuery,
     plugins: [
-      createPythPlugin({ buildQuery }),
+      createPythPlugin({ buildQuery, fetchFn: pythProxyFetch }),
       createKeyringPlugin({
         hookTargets: keyringHookTargets,
         getCredentialData: getSdkKeyringCredential,

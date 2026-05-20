@@ -192,28 +192,26 @@ const formatInsufficiency = (
 export const formatSimulationFailure = <T extends VaultEntity>(
   result: SimulateBatchResult<T>,
 ): string => {
-  // 1. Insufficiency diagnostics — most actionable for the user.
-  const insufficientWallet = formatInsufficiency('Insufficient wallet balance', result.insufficientWalletAssets)
-  if (insufficientWallet) return insufficientWallet
-  const insufficientPermit2 = formatInsufficiency('Insufficient Permit2 allowance', result.insufficientPermit2Allowances)
-  if (insufficientPermit2) return insufficientPermit2
-  const insufficientDirect = formatInsufficiency('Insufficient token allowance', result.insufficientDirectAllowances)
-  if (insufficientDirect) return insufficientDirect
+  // Called only when there's a hard failure (revert). The SDK still populates
+  // insufficiency diagnostics from live chain state in parallel — those
+  // describe pre-tx wallet/approval state, not the cause of the revert.
+  // Surface actual revert reasons first; fall back to insufficiency only when
+  // no revert detail is present (rare, but keeps the message actionable).
 
-  // 2. Per-batch-item revert: SDK has already attempted to decode the chain.
+  // 1. Per-batch-item revert: SDK has already attempted to decode the chain.
   const firstFailed = result.failedBatchItems?.[0]
   if (firstFailed) {
     const decoded = formatDecodedChain(firstFailed.decodedError)
     return decoded || `Batch item ${firstFailed.index} failed`
   }
 
-  // 3. EVC-level simulation error (couldn't decode the batch at all).
+  // 2. EVC-level simulation error (couldn't decode the batch at all).
   if (result.simulationError) {
     const decoded = formatDecodedChain(result.simulationError.decoded)
     return decoded || 'EVC simulation reverted'
   }
 
-  // 4. Post-batch account / vault status check failures.
+  // 3. Post-batch account / vault status check failures.
   const acctErr = result.accountStatusErrors?.[0]
   if (acctErr) {
     const decoded = formatDecodedChain(acctErr.decoded)
@@ -228,6 +226,14 @@ export const formatSimulationFailure = <T extends VaultEntity>(
       ? `Vault check ${shortenAddress(vaultErr.vault)}: ${decoded}`
       : `Vault check failed for ${shortenAddress(vaultErr.vault)}`
   }
+
+  // 4. Insufficiency diagnostics — last resort when no revert detail exists.
+  const insufficientWallet = formatInsufficiency('Insufficient wallet balance', result.insufficientWalletAssets)
+  if (insufficientWallet) return insufficientWallet
+  const insufficientPermit2 = formatInsufficiency('Insufficient Permit2 allowance', result.insufficientPermit2Allowances)
+  if (insufficientPermit2) return insufficientPermit2
+  const insufficientDirect = formatInsufficiency('Insufficient token allowance', result.insufficientDirectAllowances)
+  if (insufficientDirect) return insufficientDirect
 
   return 'Simulation failed'
 }
