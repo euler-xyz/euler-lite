@@ -543,7 +543,7 @@ watch(formTab, () => {
 
                 <!-- Pay with token selector -->
                 <div
-                  v-if="collateralVault"
+                  v-if="collateralVault && !isSecuritizeCollateral"
                   class="flex items-center gap-8"
                 >
                   <span class="text-p3 text-content-tertiary">Pay with</span>

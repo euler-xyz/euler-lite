@@ -1,5 +1,5 @@
 import { getProjectedRates, getNetAPY } from '~/utils/vault/apy'
-import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, type SecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type VaultEntity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import type { Ref, ComputedRef } from 'vue'
 import { maxUint256, type Address } from 'viem'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -112,8 +112,12 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
         ? position.value.collateralVaults
         : (collateralVault.value ? [collateralVault.value.address] : [])
       for (const addr of collAddrs) {
-        const v = registryGetVault(addr) as EVault | undefined
-        if (v) steps.push({ vault: v, op: OP_TRANSFER })
+        const v = registryGetVault(addr)
+        // Only EVK collaterals get swept via transferFromMax; securitize
+        // vaults don't implement it and the SDK's appendMaxRepayCleanup
+        // skips them. Mirror that here so the OP_TRANSFER warning surface
+        // doesn't claim a transfer that won't happen.
+        if (v && isEVault(v)) steps.push({ vault: v, op: OP_TRANSFER })
       }
     }
     return steps
