@@ -16,7 +16,7 @@ export async function detectVpn(): Promise<boolean> {
     cached = { value: header === 'true', timestamp: Date.now() }
   }
   catch {
-    cached = { value: false, timestamp: Date.now() }
+    cached = { value: true, timestamp: Date.now() }
   }
   finally {
     clearTimeout(timeout)

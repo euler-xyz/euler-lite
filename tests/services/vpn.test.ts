@@ -19,7 +19,7 @@ describe('detectVpn', () => {
     await expect(detectVpn()).resolves.toBe(true)
   })
 
-  it('returns false when VPN detection stalls', async () => {
+  it('fails closed when VPN detection stalls', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('window', { location: { origin: 'http://localhost:3000' } })
     vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) =>
@@ -32,6 +32,6 @@ describe('detectVpn', () => {
 
     await vi.advanceTimersByTimeAsync(WALLET_SCREENING_TIMEOUT_MS)
 
-    await expect(promise).resolves.toBe(false)
+    await expect(promise).resolves.toBe(true)
   })
 })
