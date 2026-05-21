@@ -1,5 +1,4 @@
 import type { Ref, ComputedRef } from 'vue'
-import { useAccount } from '@wagmi/vue'
 import { erc20Abi, formatUnits, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import type { DisplayStep } from '~/utils/stepDecoding'
@@ -49,7 +48,7 @@ interface UseMultiplyCowSwapOptions {
 }
 
 export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
-  const { address } = useAccount()
+  const { address } = useWagmi()
   const router = useRouter()
   const modal = useModal()
   const { error } = useToast()

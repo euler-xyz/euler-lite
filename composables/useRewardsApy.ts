@@ -1,4 +1,3 @@
-import { useAccount } from '@wagmi/vue'
 import { isCampaignEligibleForAddress, type RewardCampaign } from '~/entities/reward-campaign'
 
 export const useRewardsApy = () => {
@@ -7,7 +6,7 @@ export const useRewardsApy = () => {
   const { merklCampaigns, getMerklCampaignsForVault } = useMerkl()
   const { brevisCampaigns, getBrevisCampaignsForVault } = useBrevis()
   const { fuulCampaigns, getFuulCampaignsForVault } = useFuul()
-  const { address: connectedAddress } = useAccount()
+  const { address: connectedAddress } = useWagmi()
   const { spyAddress } = useSpyMode()
 
   const isEnabled = computed(() => settings.value.enableRewardsApy)

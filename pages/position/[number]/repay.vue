@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { type Vault, type VaultAsset, getNetAPY } from '~/entities/vault'
 import { getAssetUsdValueOrZero, getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import { type AccountBorrowPosition, isPositionEligibleForLiquidation } from '~/entities/account'
@@ -23,7 +22,7 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 const _route = useRoute()
 const _router = useRouter()
 const modal = useModal()
-const { isConnected, address } = useAccount()
+const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
@@ -160,6 +159,11 @@ const walletSwap = useWalletSwapRepay({
 
 const { guardWithPriceImpact: guardWithWalletSwapPriceImpact } = usePriceImpactGate({
   directPriceImpact: walletSwap.swapPriceImpact,
+  shouldGateUnknown: computed(() =>
+    walletSwap.needsSwap.value
+    && walletSwap.quotes.selectedQuote.value !== null
+    && walletSwap.swapPriceImpact.value === null,
+  ),
 })
 
 const isWalletSwapRestricted = computed(() =>
@@ -211,9 +215,19 @@ const savings = useSavingsRepay({
 
 const { guardWithPriceImpact: guardWithCollateralPriceImpact } = usePriceImpactGate({
   directPriceImpact: collateral.priceImpact,
+  shouldGateUnknown: computed(() =>
+    !collateral.isSameAsset.value
+    && collateral.quotes.selectedQuote.value !== null
+    && collateral.priceImpact.value === null,
+  ),
 })
 const { guardWithPriceImpact: guardWithSavingsPriceImpact } = usePriceImpactGate({
   directPriceImpact: savings.priceImpact,
+  shouldGateUnknown: computed(() =>
+    !savings.isSameAsset.value
+    && savings.quotes.selectedQuote.value !== null
+    && savings.priceImpact.value === null,
+  ),
 })
 
 // --- Form tabs ---

@@ -52,6 +52,12 @@ export interface CyclicalNoteInfo {
   secondaryDuration: bigint
   startTimestamp: bigint
 }
+export interface CyclicalNoteMonthlyInfo {
+  primaryRate: bigint
+  secondaryRate: bigint
+  cycleStartDay: bigint
+  secondaryDays: bigint
+}
 export interface VaultIRMInfo {
   interestRateModelInfo?: {
     interestRateModelType?: number

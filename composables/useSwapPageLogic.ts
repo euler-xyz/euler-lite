@@ -1,5 +1,4 @@
 import { getAddress, formatUnits } from 'viem'
-import { useAccount } from '@wagmi/vue'
 import { logWarn } from '~/utils/errorHandling'
 import { OperationReviewModal, SlippageSettingsModal } from '#components'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -95,7 +94,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
 
   const router = useRouter()
   const route = useRoute()
-  const { isConnected } = useAccount()
+  const { isConnected } = useWagmi()
   const { executeTxPlan } = useEulerOperations()
   const modal = useModal()
   const { error: showError } = useToast()
@@ -395,7 +394,13 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
 
   // ── Price impact ───────────────────────────────────────────────────────
   const priceImpact = ref<number | null>(null)
-  const { guardWithPriceImpact } = usePriceImpactGate({ directPriceImpact: priceImpact })
+  const shouldGateUnknownPriceImpact = computed(() =>
+    !isSameAsset.value && quote.value !== null && priceImpact.value === null,
+  )
+  const { guardWithPriceImpact } = usePriceImpactGate({
+    directPriceImpact: priceImpact,
+    shouldGateUnknown: shouldGateUnknownPriceImpact,
+  })
 
   watchEffect(async () => {
     if (!quote.value || !fromVault.value || !toVault.value) {

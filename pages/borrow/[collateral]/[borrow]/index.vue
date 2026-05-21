@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { getAddress } from 'viem'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultUnverifiedDisclaimerModal, SlippageSettingsModal } from '#components'
@@ -22,7 +21,7 @@ const modal = useModal()
 const reviewBorrowLabel = 'Review Borrow'
 const reviewMultiplyLabel = 'Review Multiply'
 const { getBorrowVaultPair, updateVault } = useVaults()
-const { address, isConnected } = useAccount()
+const { address, isConnected } = useWagmi()
 const { chainId } = useEulerAddresses()
 const shareLinkQuery = computed(() => {
   const network = route.query.network
@@ -163,10 +162,20 @@ const multiply = useMultiplyForm({
 const { guardWithPriceImpact: guardWithMultiplyPriceImpact } = usePriceImpactGate({
   directPriceImpact: multiply.multiplyPriceImpact,
   multipliedPriceImpact: multiply.multipliedPriceImpact,
+  shouldGateUnknown: computed(() =>
+    !multiply.multiplyIsSameAsset.value
+    && multiply.multiplyEffectiveQuote.value !== null
+    && multiply.multiplyPriceImpact.value === null,
+  ),
 })
 
 const { guardWithPriceImpact: guardWithBorrowSwapPriceImpact } = usePriceImpactGate({
   directPriceImpact: borrow.borrowSwapPriceImpact,
+  shouldGateUnknown: computed(() =>
+    borrow.borrowNeedsSwap.value
+    && borrow.borrowSwapEffectiveQuote.value !== null
+    && borrow.borrowSwapPriceImpact.value === null,
+  ),
 })
 
 // --- Submit disabled ---
@@ -515,7 +524,7 @@ watch(formTab, () => {
 
                 <!-- Pay with token selector -->
                 <div
-                  v-if="collateralVault"
+                  v-if="collateralVault && !isSecuritizeCollateral"
                   class="flex items-center gap-8"
                 >
                   <span class="text-p3 text-content-tertiary">Pay with</span>

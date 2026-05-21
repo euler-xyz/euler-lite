@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import type { AccountDepositPosition } from '~/entities/account'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 
-const { isConnected } = useAccount()
+const { isConnected } = useWagmi()
 const { depositPositions, isDepositsLoaded } = useEulerAccount()
 const { isReady } = useVaults()
 const { isEarnVault } = useVaultRegistry()

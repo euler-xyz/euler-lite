@@ -1,5 +1,4 @@
 import type { Ref, ComputedRef } from 'vue'
-import { useAccount } from '@wagmi/vue'
 import { formatUnits, getAddress, zeroAddress, type Address } from 'viem'
 import { isNativeCurrencyAddress, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { FixedPoint } from '~/utils/fixed-point'
@@ -8,7 +7,7 @@ import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
-import { getNetAPY, getProjectedRates, type Vault, type VaultAsset } from '~/entities/vault'
+import { getNetAPY, getProjectedRates, isEVKVault, type SecuritizeVault, type Vault, type VaultAsset } from '~/entities/vault'
 import { getAssetUsdValue, getAssetUsdValueOrZero, getTokenUsdValue } from '~/services/pricing/priceProvider'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { TxPlan } from '~/entities/txPlan'
@@ -68,7 +67,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const { error } = useToast()
   const { buildSwapAndRepayPlan, executeTxPlan } = useEulerOperations()
   const { chainId } = useEulerAddresses()
-  const { isConnected, address } = useAccount()
+  const { isConnected, address } = useWagmi()
   const { fetchSingleBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { getVault: registryGetVault } = useVaultRegistry()
@@ -278,8 +277,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     if (isFullRepay.value) {
       const collAddrs = position.value?.collaterals ?? (collateralVault.value ? [collateralVault.value.address] : [])
       for (const addr of collAddrs) {
-        const v = registryGetVault(addr) as Vault | undefined
-        if (v) steps.push({ vault: v, op: OP_TRANSFER })
+        const v = registryGetVault(addr) as Vault | SecuritizeVault | undefined
+        if (v && isEVKVault(v)) steps.push({ vault: v, op: OP_TRANSFER })
       }
     }
     return steps
