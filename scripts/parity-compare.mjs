@@ -11,7 +11,7 @@ import { chromium } from 'playwright'
 const execFile = promisify(execFileCallback)
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DEFAULT_SCENARIOS = path.join(ROOT_DIR, 'tests/parity/scenarios.json')
-const DEFAULT_BASELINE_BRANCH = 'feature/parity-data-tags'
+const DEFAULT_BASELINE_BRANCH = 'parity-baseline'
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_READY_TIMEOUT_MS = 120_000
 const DEFAULT_WAIT_TIMEOUT_MS = 6_000
@@ -742,6 +742,7 @@ async function runScenariosAppPhased({
   const candidateSnapshots = initialCandidateSnapshots
   const diffs = initialPageDiffs
   const candidateQueue = []
+  const baselineProgress = createProgressLogger({ label: 'baseline' })
 
   // Default fast path: capture all baseline pages first, then all candidate
   // pages, reusing one browser page/context per app. This avoids the expensive
@@ -771,7 +772,9 @@ async function runScenariosAppPhased({
         resumeState,
       })
 
-      appendSnapshotIfNew(baselineSnapshots, resumeState.baselineByPageId, baselineResult.snapshot)
+      if (appendSnapshotIfNew(baselineSnapshots, resumeState.baselineByPageId, baselineResult.snapshot)) {
+        baselineProgress.tick(baselineResult.snapshot.pageId)
+      }
       candidateQueue.push({
         type: 'page',
         plan: mainPlan,
@@ -781,7 +784,9 @@ async function runScenariosAppPhased({
       scrapeFailureGuard.observe(baselineResult.snapshot)
 
       for (const baselineModal of baselineResult.modalPlans) {
-        appendSnapshotIfNew(baselineSnapshots, resumeState.baselineByPageId, baselineModal.snapshot)
+        if (appendSnapshotIfNew(baselineSnapshots, resumeState.baselineByPageId, baselineModal.snapshot)) {
+          baselineProgress.tick(baselineModal.snapshot.pageId)
+        }
         candidateQueue.push({
           type: 'modal',
           plan: baselineModal,
@@ -803,7 +808,9 @@ async function runScenariosAppPhased({
           resumeState,
         })
 
-        appendSnapshotIfNew(baselineSnapshots, resumeState.baselineByPageId, baselineDetail.snapshot)
+        if (appendSnapshotIfNew(baselineSnapshots, resumeState.baselineByPageId, baselineDetail.snapshot)) {
+          baselineProgress.tick(baselineDetail.snapshot.pageId)
+        }
         candidateQueue.push({
           type: 'page',
           plan: followPlan,
@@ -813,7 +820,9 @@ async function runScenariosAppPhased({
         scrapeFailureGuard.observe(baselineDetail.snapshot)
 
         for (const baselineModal of baselineDetail.modalPlans) {
-          appendSnapshotIfNew(baselineSnapshots, resumeState.baselineByPageId, baselineModal.snapshot)
+          if (appendSnapshotIfNew(baselineSnapshots, resumeState.baselineByPageId, baselineModal.snapshot)) {
+            baselineProgress.tick(baselineModal.snapshot.pageId)
+          }
           candidateQueue.push({
             type: 'modal',
             plan: baselineModal,
@@ -836,6 +845,8 @@ async function runScenariosAppPhased({
   const candidateRuntime = await createAppPhaseRuntime(browser, candidateQueue[0]?.plan?.scenario || scenarios[0])
   let currentCandidatePage = null
 
+  const candidateProgress = createProgressLogger({ label: 'candidate', total: candidateQueue.length })
+
   try {
     console.log('[parity-compare] Running candidate phase: ' + candidateQueue.length + ' page/modal captures')
     for (const item of candidateQueue) {
@@ -847,6 +858,7 @@ async function runScenariosAppPhased({
 
       if (candidateSnapshot && existingDiff) {
         console.log('[parity-compare] Resume skip candidate ' + item.baselineSnapshot.pageId)
+        candidateProgress.tick(item.baselineSnapshot.pageId)
         continue
       }
 
@@ -901,6 +913,7 @@ async function runScenariosAppPhased({
       appendDiffIfNew(diffs, resumeState.diffByPageId, compareSnapshots(item.baselineSnapshot, candidateSnapshot, config))
       await writeIncrementalJsonArtifacts({ run, config, baselineSnapshots, candidateSnapshots, pageDiffs: diffs })
       scrapeFailureGuard.observe(candidateSnapshot)
+      candidateProgress.tick(candidateSnapshot?.pageId || item.baselineSnapshot.pageId)
     }
   }
   finally {
@@ -1814,6 +1827,28 @@ function appendSnapshotIfNew(list, map, snapshot) {
   list.push(snapshot)
   map.set(snapshot.pageId, snapshot)
   return true
+}
+
+function createProgressLogger({ label, total = null }) {
+  const startedAt = Date.now()
+  let count = 0
+  return {
+    tick(pageId) {
+      count += 1
+      const elapsedMs = Date.now() - startedAt
+      const parts = [label + ' ' + count + (total ? '/' + total : '')]
+      parts.push('elapsed ' + formatDuration(elapsedMs))
+      if (total && count < total) {
+        const avgMs = elapsedMs / count
+        const remaining = Math.max(0, total - count)
+        parts.push('eta ' + formatDuration(avgMs * remaining))
+      }
+      console.log('[parity-compare] ' + parts.join(' • ') + (pageId ? ' — ' + pageId : ''))
+    },
+    get count() {
+      return count
+    },
+  }
 }
 
 function appendDiffIfNew(list, map, diff) {
