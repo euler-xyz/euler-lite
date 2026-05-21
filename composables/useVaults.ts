@@ -9,6 +9,7 @@ import type {
 import {
   EVault,
   EulerEarn,
+  IntrinsicApyService,
   SecuritizeCollateralVault,
 } from '@eulerxyz/euler-v2-sdk'
 import { extractUnresolvedCollateralAddresses } from '~/utils/vault/collateral-discovery'
@@ -27,6 +28,13 @@ import {
 import { liteSecuritizeVaultFetchOptions, liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
 import { decodeBigints } from '~/utils/snapshot-codec'
 import { buildRegistryMetaService } from '~/utils/sdk-vault-meta-stub'
+import {
+  buildSnapshotIndex,
+  buildSnapshotIntrinsicApyAdapter,
+  buildSnapshotPriceService,
+  buildSnapshotRewardsService,
+  type SnapshotArgsByAddress,
+} from '~/utils/sdk-snapshot-populate-stubs'
 import type { SerialisedSnapshot, SerialisedVault } from '~/utils/snapshot-types'
 
 const isReady = ref(false)
@@ -457,18 +465,26 @@ const isSerialisedSnapshot = (v: unknown): v is SerialisedSnapshot => {
     && Array.isArray(s.escrowVaults)
 }
 
-const instantiate = (entry: SerialisedVault): EVaultClass | EulerEarnClass | SecuritizeCollateralVaultClass | undefined => {
+type Hydrated<V> = { vault: V, args: Record<string, unknown> }
+
+const decodeArgs = (entry: SerialisedVault): Record<string, unknown> | undefined => {
   const args = decodeBigints(entry.data) as Record<string, unknown>
-  if (!args || typeof args !== 'object') return undefined
-  switch (entry.kind) {
-    case 'evk':
-    case 'escrow':
-      return new EVault(args as IEVault)
-    case 'earn':
-      return new EulerEarn(args as IEulerEarn)
-    case 'securitize':
-      return new SecuritizeCollateralVault(args as ISecuritizeCollateralVault)
-  }
+  return args && typeof args === 'object' ? args : undefined
+}
+
+const instantiateEvk = (entry: SerialisedVault): Hydrated<EVaultClass> | undefined => {
+  const args = decodeArgs(entry)
+  return args ? { vault: new EVault(args as IEVault), args } : undefined
+}
+
+const instantiateEarn = (entry: SerialisedVault): Hydrated<EulerEarnClass> | undefined => {
+  const args = decodeArgs(entry)
+  return args ? { vault: new EulerEarn(args as IEulerEarn), args } : undefined
+}
+
+const instantiateSecuritize = (entry: SerialisedVault): Hydrated<SecuritizeCollateralVaultClass> | undefined => {
+  const args = decodeArgs(entry)
+  return args ? { vault: new SecuritizeCollateralVault(args as ISecuritizeCollateralVault), args } : undefined
 }
 
 /**
@@ -511,37 +527,60 @@ const hydrateFromServer = async (targetChainId: number, generation: number): Pro
       return false
     }
 
-    // Pass 1: instantiate + register.
-    const evk = snap.evkVaults.map(instantiate).filter((v): v is EVaultClass => Boolean(v))
-    const earn = snap.earnVaults.map(instantiate).filter((v): v is EulerEarnClass => Boolean(v))
-    const securitize = snap.securitizeVaults
-      .map(instantiate)
-      .filter((v): v is SecuritizeCollateralVaultClass => Boolean(v))
-    const escrow = snap.escrowVaults.map(instantiate).filter((v): v is EVaultClass => Boolean(v))
+    // Pass 1: instantiate + register. Keep the decoded args alongside each
+    // instance so the populate-stubs in pass 2 can read snapshot fields
+    // that the SDK constructors don't restore (marketPriceUsd, rewards,
+    // intrinsicApy, and per-collateral marketPriceUsd).
+    const isHydrated = <V>(h: Hydrated<V> | undefined): h is Hydrated<V> => h !== undefined
+    const evk = snap.evkVaults.map(instantiateEvk).filter(isHydrated)
+    const earn = snap.earnVaults.map(instantiateEarn).filter(isHydrated)
+    const securitize = snap.securitizeVaults.map(instantiateSecuritize).filter(isHydrated)
+    const escrow = snap.escrowVaults.map(instantiateEvk).filter(isHydrated)
 
-    const escrowAddrs: string[] = escrow.map(v => v.address)
+    const escrowAddrs: string[] = escrow.map(h => h.vault.address)
     setEscrowAddresses(escrowAddrs)
 
     registrySetMany([
-      ...evk.map(v => ({ address: v.address, vault: v, type: 'evk' as const, verified: true })),
-      ...escrow.map(v => ({
-        address: v.address,
-        vault: v,
+      ...evk.map(h => ({ address: h.vault.address, vault: h.vault, type: 'evk' as const, verified: true })),
+      ...escrow.map(h => ({
+        address: h.vault.address,
+        vault: h.vault,
         type: 'evk' as const,
         verified: true,
         vaultCategory: 'escrow' as const,
       })),
-      ...earn.map(v => ({ address: v.address, vault: v, type: 'earn' as const, verified: true })),
-      ...securitize.map(v => ({ address: v.address, vault: v, type: 'securitize' as const, verified: true })),
+      ...earn.map(h => ({ address: h.vault.address, vault: h.vault, type: 'earn' as const, verified: true })),
+      ...securitize.map(h => ({ address: h.vault.address, vault: h.vault, type: 'securitize' as const, verified: true })),
     ])
 
-    // Pass 2: registry-backed cross-ref wiring. Pure memory work.
+    // Pass 2a: registry-backed cross-ref wiring (collaterals/strategies).
     const registry = useVaultRegistry()
     const meta = buildRegistryMetaService(registry)
     await Promise.all([
-      ...evk.map(v => v.populateCollaterals(meta)),
-      ...escrow.map(v => v.populateCollaterals(meta)),
-      ...earn.map(v => v.populateStrategyVaults(meta)),
+      ...evk.map(h => h.vault.populateCollaterals(meta)),
+      ...escrow.map(h => h.vault.populateCollaterals(meta)),
+      ...earn.map(h => h.vault.populateStrategyVaults(meta)),
+    ])
+
+    // Pass 2b: drive the SDK's populate paths through snapshot-backed
+    // stubs so marketPriceUsd / rewards / intrinsicApy land on each
+    // instance. The constructors don't carry these across from args, so
+    // without this pass the first paint falls back to asset-denominated
+    // amounts until the silent RPC refresh runs.
+    //
+    // Order matters for EVault: populateMarketPrices reads collateral.vault
+    // for the per-collateral price loop, so it must run after pass 2a.
+    const snapshotIndex: SnapshotArgsByAddress = buildSnapshotIndex([
+      ...evk, ...escrow, ...earn, ...securitize,
+    ].map(h => ({ address: h.vault.address, args: h.args })))
+    const priceStub = buildSnapshotPriceService(snapshotIndex)
+    const rewardsStub = buildSnapshotRewardsService(snapshotIndex)
+    const intrinsicApyService = new IntrinsicApyService(buildSnapshotIntrinsicApyAdapter(snapshotIndex))
+    const allHydrated = [...evk, ...escrow, ...earn, ...securitize]
+    await Promise.all([
+      ...allHydrated.map(h => h.vault.populateMarketPrices(priceStub)),
+      ...allHydrated.map(h => h.vault.populateRewards(rewardsStub)),
+      intrinsicApyService.populateIntrinsicApy(allHydrated.map(h => h.vault)),
     ])
 
     // Clear loading/updating flags so the UI renders immediately. The
