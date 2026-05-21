@@ -2,11 +2,23 @@
 import type { AnyBorrowVaultPair } from '~/entities/vault'
 import type { AccountBorrowPosition } from '~/entities/account'
 
-defineProps<{ pair: AnyBorrowVaultPair | AccountBorrowPosition }>()
+const { pair } = defineProps<{ pair: AnyBorrowVaultPair | AccountBorrowPosition }>()
+
+const collateral = computed(() => pair.collateral)
+const borrow = computed(() => pair.borrow)
+const collateralBadges = useVaultTypeBadges(collateral)
+const borrowBadges = useVaultTypeBadges(borrow)
+
+const showVaultTypesSummary = computed(() =>
+  collateralBadges.hasSummaryBadges.value || borrowBadges.hasSummaryBadges.value,
+)
 </script>
 
 <template>
-  <div class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card">
+  <div
+    v-if="showVaultTypesSummary"
+    class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card"
+  >
     <p class="text-h3 text-content-primary">
       Vault types
     </p>
@@ -25,6 +37,7 @@ defineProps<{ pair: AnyBorrowVaultPair | AccountBorrowPosition }>()
           :vault="pair.collateral"
           layout="stacked"
           size="large"
+          summary-only
         />
       </div>
 
@@ -44,6 +57,7 @@ defineProps<{ pair: AnyBorrowVaultPair | AccountBorrowPosition }>()
           :vault="pair.borrow"
           layout="stacked"
           size="large"
+          summary-only
         />
       </div>
     </div>
