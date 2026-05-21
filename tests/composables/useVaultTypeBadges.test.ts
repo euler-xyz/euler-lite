@@ -167,18 +167,33 @@ describe('useVaultTypeBadges', () => {
     expect(summaryGovernanceType.value).toBe('unknown')
   })
 
-  it('keeps ungoverned and governance-limited badges out of the pair summary', () => {
+  it('keeps unverified ungoverned vaults out of the pair summary', () => {
     const vault = makeVault({
       address: '0x4000000000000000000000000000000000000004',
       governorAdmin: zeroAddress,
     })
+
+    const { badges, governanceType, hasSummaryBadges, isVerified, summaryBadges } = useVaultTypeBadges(ref(vault))
+
+    expect(governanceType.value).toBe('ungoverned')
+    expect(isVerified.value).toBe(false)
+    expect(badges.value).toEqual(['ungoverned'])
+    expect(summaryBadges.value).toEqual([])
+    expect(hasSummaryBadges.value).toBe(false)
+  })
+
+  it('keeps governance-limited badges out of the pair summary', () => {
+    const vault = makeVault({
+      address: '0x4000000000000000000000000000000000000004',
+    })
     state.verifiedVaults.add(vault.address.toLowerCase())
     state.governanceLimitedVaults.add(vault.address.toLowerCase())
+    state.entityGovernors.add(vault.governorAdmin.toLowerCase())
 
     const { badges, governanceType, hasSummaryBadges, summaryBadges } = useVaultTypeBadges(ref(vault))
 
-    expect(governanceType.value).toBe('ungoverned')
-    expect(badges.value).toEqual(['ungoverned', 'governanceLimited'])
+    expect(governanceType.value).toBe('governed')
+    expect(badges.value).toEqual(['governed', 'governanceLimited'])
     expect(summaryBadges.value).toEqual([])
     expect(hasSummaryBadges.value).toBe(false)
   })

@@ -51,6 +51,11 @@ export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
     return isCyclicalNoteVault(vault.value as Vault)
   })
 
+  const shouldSummarizeAsUnknown = computed(() =>
+    governanceType.value === 'unknown'
+    || (!isVerified.value && !['escrow', 'ungoverned'].includes(governanceType.value)),
+  )
+
   const badges = computed<VaultTypeBadge[]>(() => {
     const result: VaultTypeBadge[] = [governanceType.value]
 
@@ -65,7 +70,7 @@ export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
   const summaryBadges = computed<VaultTypeSummaryBadge[]>(() => {
     const result: VaultTypeSummaryBadge[] = []
 
-    if (!isVerified.value || governanceType.value === 'unknown') result.push('unknown')
+    if (shouldSummarizeAsUnknown.value) result.push('unknown')
     if (badges.value.includes('private')) result.push('private')
     if (badges.value.includes('cyclicalNote')) result.push('cyclicalNote')
 
