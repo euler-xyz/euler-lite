@@ -6,6 +6,7 @@ import { getAssetUsdValueOrZero, getCollateralUsdValueOrZero } from '~/utils/sdk
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import type { SwapQuoteInput } from '~/composables/useSwapApi'
@@ -123,7 +124,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const positionIndex = usePositionIndex()
   const { isPositionsLoaded, getPositionBySubAccountIndex } = useEulerAccount()
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
-  const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
+  const { settings } = useUserSettings()
+  const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
   const { runSimulation, runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
   const { isReady: isVaultsReady } = useVaults()
   const { getOrFetch } = useVaultRegistry()
@@ -203,14 +205,16 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const borrowRewardApy = computed(() => getBorrowRewardApy(borrowVault.value?.address || '', collateralVault.value?.address || ''))
   const collateralSupplyApy = computed(() => {
     if (!collateralVault.value) return 0
-    return withIntrinsicSupplyApy(
+    return withVaultIntrinsicApy(
       getVaultSupplyApy(collateralVault.value),
-      collateralVault.value?.asset.address,
+      collateralVault.value,
+      enableIntrinsicApy.value,
     )
   })
-  const borrowApy = computed(() => withIntrinsicBorrowApy(
+  const borrowApy = computed(() => withVaultIntrinsicApy(
     getVaultBorrowApy(borrowVault.value),
-    borrowVault.value?.asset.address,
+    borrowVault.value,
+    enableIntrinsicApy.value,
   ))
 
   const getCollateralValueUsdLocal = async (amt: bigint) => {
@@ -593,7 +597,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       if (asyncEstimatesGuard.isStale(gen)) return
 
       const projectedSupplyApy = projected
-        ? withIntrinsicSupplyApy(nanoToValue(projected.supplyAPY, 25), evault.asset.address)
+        ? withVaultIntrinsicApy(nanoToValue(projected.supplyAPY, 25), evault, enableIntrinsicApy.value)
         : collateralSupplyApy.value
 
       estimateNetAPY.value = getNetAPY(

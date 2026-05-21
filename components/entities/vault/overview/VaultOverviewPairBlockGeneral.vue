@@ -4,6 +4,7 @@ import type { EVaultCollateral, PortfolioBorrowPosition, VaultEntity } from '@eu
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import { getCollateralOraclePrice, getAssetOraclePrice } from '~/utils/sdk-prices'
+import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSignificant } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
@@ -35,7 +36,8 @@ const isRamping = computed(() =>
 )
 
 const modal = useModal()
-const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, getLoopingRewardCampaigns, hasSupplyRewards, hasBorrowRewards, hasLoopingRewards } = useRewardsApy()
 
 const isBorrowable = computed(() => borrowVault.value.isBorrowable)
@@ -44,13 +46,15 @@ const isDeprecated = computed(() => isVaultDeprecated(collateralVault.value.addr
 
 const collateralRewardAPY = computed(() => getSupplyRewardApy(collateralVault.value.address))
 const borrowRewardAPY = computed(() => getBorrowRewardApy(borrowVault.value.address, collateralVault.value.address))
-const supplyApyWithRewards = computed(() => withIntrinsicSupplyApy(
+const supplyApyWithRewards = computed(() => withVaultIntrinsicApy(
   getVaultSupplyApy(collateralVault.value),
-  collateralVault.value.asset.address,
+  collateralVault.value,
+  enableIntrinsicApy.value,
 ) + collateralRewardAPY.value)
-const borrowApyWithRewards = computed(() => withIntrinsicBorrowApy(
+const borrowApyWithRewards = computed(() => withVaultIntrinsicApy(
   getVaultBorrowApy(borrowVault.value),
-  borrowVault.value.asset.address,
+  borrowVault.value,
+  enableIntrinsicApy.value,
 ) - borrowRewardAPY.value)
 
 const loopingRewardAPY = computed(() => getLoopingRewardApy(borrowVault.value.address, collateralVault.value.address))
@@ -62,8 +66,8 @@ const maxRoe = computed(() =>
 
 const baseSupplyApy = computed(() => getVaultSupplyApy(collateralVault.value))
 const baseBorrowApy = computed(() => getVaultBorrowApy(borrowVault.value))
-const intrinsicSupplyApy = computed(() => getIntrinsicApy(collateralVault.value.asset.address))
-const intrinsicBorrowApy = computed(() => getIntrinsicApy(borrowVault.value.asset.address))
+const intrinsicSupplyApy = computed(() => getVaultIntrinsicApy(collateralVault.value, enableIntrinsicApy.value))
+const intrinsicBorrowApy = computed(() => getVaultIntrinsicApy(borrowVault.value, enableIntrinsicApy.value))
 
 const supplyCampaignsForModal = computed(() => getSupplyRewardCampaigns(collateralVault.value.address))
 const borrowCampaignsForModal = computed(() => getBorrowRewardCampaigns(borrowVault.value.address, collateralVault.value.address))
@@ -90,7 +94,7 @@ const supplyApyModalData = computed(() => ({
   props: {
     lendingAPY: baseSupplyApy.value,
     intrinsicAPY: intrinsicSupplyApy.value,
-    intrinsicApyInfo: getIntrinsicApyInfo(collateralVault.value.asset.address),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(collateralVault.value, enableIntrinsicApy.value),
     campaigns: supplyCampaignsForModal.value,
     rewardVaultAddress: collateralVault.value.address,
   },
@@ -100,7 +104,7 @@ const borrowApyModalData = computed(() => ({
   props: {
     borrowingAPY: baseBorrowApy.value,
     intrinsicAPY: intrinsicBorrowApy.value,
-    intrinsicApyInfo: getIntrinsicApyInfo(borrowVault.value.asset.address),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(borrowVault.value, enableIntrinsicApy.value),
     campaigns: borrowCampaignsForModal.value,
     rewardVaultAddress: borrowVault.value.address,
   },

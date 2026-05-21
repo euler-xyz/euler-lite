@@ -22,6 +22,7 @@ import { getAddress } from 'viem'
 import { formatNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
+import { withVaultIntrinsicApy, getVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 
 const { position } = defineProps<{ position: PortfolioBorrowPosition<VaultEntity> }>()
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
@@ -35,7 +36,8 @@ const subAccountIndex = computed(() => {
 })
 
 const modal = useModal()
-const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, getEligibleLoopingRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, getLoopingRewardCampaigns, hasSupplyRewards, hasBorrowRewards, isLoopingEligible } = useRewardsApy()
 
 const borrowVault = computed(() => position.borrowVault as EVault)
@@ -174,14 +176,16 @@ const hasRewards = computed(() =>
   || loopingEligible.value,
 )
 const collateralSupplyApy = computed(() => {
-  return withIntrinsicSupplyApy(
+  return withVaultIntrinsicApy(
     getVaultSupplyApy(collateralVault.value),
-    collateralVault.value?.asset.address,
+    collateralVault.value,
+    enableIntrinsicApy.value,
   )
 })
-const borrowApy = computed(() => withIntrinsicBorrowApy(
+const borrowApy = computed(() => withVaultIntrinsicApy(
   getVaultBorrowApy(borrowVault.value),
-  borrowVault.value?.asset.address,
+  borrowVault.value,
+  enableIntrinsicApy.value,
 ))
 
 const collateralValue = computed<UsdAmount>(() => toUsdAmount(position.totalCollateralValueUsd))
@@ -231,8 +235,8 @@ const roe = computed(() => {
   return position.roe
 })
 
-const intrinsicSupplyApy = computed(() => getIntrinsicApy(collateralVault.value.asset.address))
-const intrinsicBorrowApy = computed(() => getIntrinsicApy(borrowVault.value.asset.address))
+const intrinsicSupplyApy = computed(() => getVaultIntrinsicApy(collateralVault.value, enableIntrinsicApy.value))
+const intrinsicBorrowApy = computed(() => getVaultIntrinsicApy(borrowVault.value, enableIntrinsicApy.value))
 const baseSupplyApy = computed(() => getVaultSupplyApy(collateralVault.value))
 const baseBorrowApy = computed(() => getVaultBorrowApy(borrowVault.value))
 const supplyCampaignsForModal = computed(() => getSupplyRewardCampaigns(collateralVault.value.address))

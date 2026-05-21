@@ -9,6 +9,7 @@ import { truncate, formatNumber } from '~/utils/string-utils'
 import { shouldInvertOraclePrice } from '~/utils/oracle-label'
 import { useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
 import type { MarketGroup } from '~/entities/lend-discovery'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import type { Address } from 'viem'
 import type { CSSProperties } from 'vue'
 
@@ -25,7 +26,8 @@ defineEmits<{
   selectHeader: [address: string, axis: 'row' | 'column']
 }>()
 
-const { withIntrinsicSupplyApy, withIntrinsicBorrowApy } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const {
   getBorrowRewardApy,
   getSupplyRewardApy,
@@ -64,7 +66,7 @@ const computeEnhancedApys = (
   let supplyRewards = 0
   if (collateral) {
     const base = getVaultSupplyApy(collateral)
-    supplyApy = withIntrinsicSupplyApy(base, collateral.asset.address)
+    supplyApy = withVaultIntrinsicApy(base, collateral, enableIntrinsicApy.value)
     supplyRewards = getSupplyRewardApy(collateral.address)
   }
 
@@ -73,7 +75,7 @@ const computeEnhancedApys = (
   let borrowRewards = 0
   if (liability) {
     const base = getVaultBorrowApy(liability)
-    borrowApy = withIntrinsicBorrowApy(base, liability.asset.address)
+    borrowApy = withVaultIntrinsicApy(base, liability, enableIntrinsicApy.value)
     borrowRewards = getBorrowRewardApy(liability.address, collateral?.address)
     utilization = isEVault(liability) ? liability.utilization : 0
   }

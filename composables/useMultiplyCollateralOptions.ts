@@ -4,7 +4,6 @@ import { useReactiveMap } from '~/composables/useReactiveMap'
 import { shouldIncludeWalletCollateral } from '~/utils/collateralFilters'
 import type { CollateralOption } from '~/types/collateral-option'
 import { getAddress, type Address } from 'viem'
-import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 
 type CollateralItem = {
@@ -22,7 +21,8 @@ export const useMultiplyCollateralOptions = ({
   const { getVault } = useVaultRegistry()
   const { getBalance } = useWallets()
   const { depositPositions } = useEulerAccount()
-  const { withIntrinsicSupplyApy, version: intrinsicVersion } = useIntrinsicApy()
+  const { settings } = useUserSettings()
+  const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
   const { getSupplyRewardApy, version: rewardsVersion } = useRewardsApy()
 
   const primaryCollateralAddress = computed(() => {
@@ -58,14 +58,14 @@ export const useMultiplyCollateralOptions = ({
 
   const walletItems = useReactiveMap(
     walletItemsInput,
-    [rewardsVersion, intrinsicVersion],
+    [rewardsVersion, enableIntrinsicApy],
     async ({ vault, balance }) => ({
       vault,
       option: await buildCollateralOption({
         vault, type: 'wallet',
         amount: nanoToValue(balance, vault.asset.decimals),
         priceAmount: nanoToValue(balance, vault.asset.decimals),
-        apy: computeSupplyApy(vault, withIntrinsicSupplyApy, getSupplyRewardApy),
+        apy: computeSupplyApy(vault, getSupplyRewardApy, enableIntrinsicApy.value),
         tagContext: 'supply-source',
       }),
     } as CollateralItem),
@@ -91,14 +91,14 @@ export const useMultiplyCollateralOptions = ({
 
   const savingItems = useReactiveMap(
     savingItemsInput,
-    [rewardsVersion, intrinsicVersion],
+    [rewardsVersion, enableIntrinsicApy],
     async ({ vault, assets, subAccount }) => ({
       vault,
       option: await buildCollateralOption({
         vault, type: 'saving',
         amount: nanoToValue(assets, vault.asset.decimals),
         priceAmount: nanoToValue(assets, vault.asset.decimals),
-        apy: computeSupplyApy(vault, withIntrinsicSupplyApy, getSupplyRewardApy),
+        apy: computeSupplyApy(vault, getSupplyRewardApy, enableIntrinsicApy.value),
         tagContext: 'supply-source',
         subAccount,
       }),

@@ -14,7 +14,8 @@ import {
 } from '~/entities/cowswap'
 import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
-import { invalidateSdkQueries, PLAN_CRITICAL_QUERIES } from '~/utils/sdk-query-cache'
+import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
+import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
 import { usePortfolioRefresh } from '~/composables/usePortfolioRefresh'
 import { logWarn } from '~/utils/errorHandling'
 
@@ -193,7 +194,7 @@ export const useCowSwapExecutionCore = () => {
         })
 
         // Post-tx side effects (EVC nonce write touched chain state)
-        void invalidateSdkQueries([...PLAN_CRITICAL_QUERIES])
+        void invalidateSdkQueries([...INVALIDATE_AFTER_TX])
         triggerPortfolioRefresh()
         cancellationStatus.value = 'hard_confirmed'
       }

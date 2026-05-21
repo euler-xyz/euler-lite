@@ -11,6 +11,7 @@ import { computeMaxMultiplier, computeMinMultiplier, computeWeightedSupplyApy, c
 import { getPlanHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { useMultiplyCollateralOptions } from '~/composables/useMultiplyCollateralOptions'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
@@ -70,7 +71,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const { fetchSingleBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
-  const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
+  const { settings } = useUserSettings()
+  const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
   const {
     runPreparedSimulation: runMultiplySimulation,
     simulationError: multiplySimulationError,
@@ -371,7 +373,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const multiplySupplyApy = computed(() => {
     if (!multiplySupplyVault.value) return null
     const currentRaw = getVaultSupplyApy(multiplySupplyVault.value)
-    const base = withIntrinsicSupplyApy(currentRaw, multiplySupplyVault.value.asset.address) + getSupplyRewardApy(multiplySupplyVault.value.address)
+    const base = withVaultIntrinsicApy(currentRaw, multiplySupplyVault.value, enableIntrinsicApy.value) + getSupplyRewardApy(multiplySupplyVault.value.address)
     if (!projectedSupplyRates.value) return base
     const projectedRaw = nanoToValue(projectedSupplyRates.value.supplyAPY, 25)
     return base + (projectedRaw - currentRaw)
@@ -380,7 +382,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const multiplyLongApy = computed(() => {
     if (!multiplyLongVault.value) return null
     const currentRaw = getVaultSupplyApy(multiplyLongVault.value)
-    const base = withIntrinsicSupplyApy(currentRaw, multiplyLongVault.value.asset.address) + getSupplyRewardApy(multiplyLongVault.value.address)
+    const base = withVaultIntrinsicApy(currentRaw, multiplyLongVault.value, enableIntrinsicApy.value) + getSupplyRewardApy(multiplyLongVault.value.address)
     if (!projectedLongRates.value) return base
     const projectedRaw = nanoToValue(projectedLongRates.value.supplyAPY, 25)
     return base + (projectedRaw - currentRaw)
@@ -389,7 +391,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const multiplyBorrowApy = computed(() => {
     if (!multiplyShortVault.value) return null
     const currentRaw = getVaultBorrowApy(multiplyShortVault.value)
-    const base = withIntrinsicBorrowApy(currentRaw, multiplyShortVault.value.asset.address) - getBorrowRewardApy(multiplyShortVault.value.address, multiplySupplyVault.value?.address)
+    const base = withVaultIntrinsicApy(currentRaw, multiplyShortVault.value, enableIntrinsicApy.value) - getBorrowRewardApy(multiplyShortVault.value.address, multiplySupplyVault.value?.address)
     if (!projectedBorrowRates.value) return base
     const projectedRaw = nanoToValue(projectedBorrowRates.value.borrowAPY, 25)
     return base + (projectedRaw - currentRaw)

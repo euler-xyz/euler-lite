@@ -4,6 +4,7 @@ import { getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVau
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
 import { isVaultRecentlyAdded, isVaultKeyring } from '~/utils/eulerLabelsUtils'
+import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
@@ -42,7 +43,8 @@ const displayName = computed(() => {
   return product.name || vault.shares.name
 })
 const { getBalance, isLoading: isBalancesLoading } = useWallets()
-const { withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 const modal = useModal()
 const collateralAssets = computed(() => {
@@ -100,9 +102,9 @@ const hasRewards = computed(() => hasSupplyRewards(vault.address))
 const lendingAPY = computed(() =>
   getVaultSupplyApy(vault),
 )
-const intrinsicAPY = computed(() => getIntrinsicApy(vault.asset.address))
+const intrinsicAPY = computed(() => getVaultIntrinsicApy(vault, enableIntrinsicApy.value))
 const supplyApy = computed(() =>
-  withIntrinsicSupplyApy(lendingAPY.value, vault.asset.address),
+  withVaultIntrinsicApy(lendingAPY.value, vault, enableIntrinsicApy.value),
 )
 const supplyApyWithRewards = computed(
   () => supplyApy.value + totalRewardsAPY.value,
@@ -144,7 +146,7 @@ const supplyApyModalData = computed(() => ({
   props: {
     lendingAPY: lendingAPY.value,
     intrinsicAPY: intrinsicAPY.value,
-    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
     campaigns: getSupplyRewardCampaigns(vault.address),
     rewardVaultAddress: vault.address,
   },

@@ -13,15 +13,17 @@ import { useVaults } from '~/composables/useVaults'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { getVaultAvailableLiquidity, getVaultUtilization } from '~/utils/vault-display'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 
-const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy } = useRewardsApy()
 
 const getNetApy = (pair: AnyBorrowVaultPair) => {
   const baseSupplyApy = getVaultSupplyApy(pair.collateral)
   const baseBorrowApy = getVaultBorrowApy(pair.borrow)
-  const supplyApy = withIntrinsicSupplyApy(baseSupplyApy, pair.collateral.asset.address)
-  const borrowApy = withIntrinsicBorrowApy(baseBorrowApy, pair.borrow.asset.address)
+  const supplyApy = withVaultIntrinsicApy(baseSupplyApy, pair.collateral, enableIntrinsicApy.value)
+  const borrowApy = withVaultIntrinsicApy(baseBorrowApy, pair.borrow, enableIntrinsicApy.value)
   const supplyRewards = getSupplyRewardApy(pair.collateral.address)
   const borrowRewards = getBorrowRewardApy(pair.borrow.address, pair.collateral.address)
   const loopingRewards = getLoopingRewardApy(pair.borrow.address, pair.collateral.address)
@@ -33,8 +35,8 @@ const getSortMaxRoe = (pair: AnyBorrowVaultPair) => {
   const maxMultiplier = Math.max(1, Math.floor(100 / (100 - borrowLTV) * 100) / 100)
   const baseSupplyApy = getVaultSupplyApy(pair.collateral)
   const baseBorrowApy = getVaultBorrowApy(pair.borrow)
-  const supplyApy = withIntrinsicSupplyApy(baseSupplyApy, pair.collateral.asset.address)
-  const borrowApy = withIntrinsicBorrowApy(baseBorrowApy, pair.borrow.asset.address)
+  const supplyApy = withVaultIntrinsicApy(baseSupplyApy, pair.collateral, enableIntrinsicApy.value)
+  const borrowApy = withVaultIntrinsicApy(baseBorrowApy, pair.borrow, enableIntrinsicApy.value)
   const supplyFinal = supplyApy + getSupplyRewardApy(pair.collateral.address)
   const borrowFinal = borrowApy - getBorrowRewardApy(pair.borrow.address, pair.collateral.address)
   const loopingRewards = getLoopingRewardApy(pair.borrow.address, pair.collateral.address)
@@ -169,14 +171,14 @@ watchEffect(() => {
 
 const getPairBorrowApy = (pair: AnyBorrowVaultPair): number => {
   const baseBorrowApy = getVaultBorrowApy(pair.borrow)
-  const borrowApy = withIntrinsicBorrowApy(baseBorrowApy, pair.borrow.asset.address)
+  const borrowApy = withVaultIntrinsicApy(baseBorrowApy, pair.borrow, enableIntrinsicApy.value)
   const borrowRewards = getBorrowRewardApy(pair.borrow.address, pair.collateral.address)
   return borrowApy - borrowRewards
 }
 
 const getPairSupplyApy = (pair: AnyBorrowVaultPair): number => {
   const baseSupplyApy = getVaultSupplyApy(pair.collateral)
-  const supplyApy = withIntrinsicSupplyApy(baseSupplyApy, pair.collateral.asset.address)
+  const supplyApy = withVaultIntrinsicApy(baseSupplyApy, pair.collateral, enableIntrinsicApy.value)
   const supplyRewards = getSupplyRewardApy(pair.collateral.address)
   return supplyApy + supplyRewards
 }

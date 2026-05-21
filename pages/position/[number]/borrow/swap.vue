@@ -3,7 +3,7 @@ import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, VaultE
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { useSwapDebtOptions } from '~/composables/useSwapDebtOptions'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
-import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
@@ -16,7 +16,8 @@ const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = useEulerAccount()
 const { planDebtChange } = useEulerTx()
-const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 
 const positionIndex = usePositionIndex()
@@ -73,17 +74,17 @@ const currentLiqDisplaySymbol = computed(() => {
 const collateralSupplyApy = computed(() => {
   if (!collateralVault.value) return null
   const base = getVaultSupplyApy(collateralVault.value)
-  return withIntrinsicSupplyApy(base, collateralVault.value.asset.address) + getSupplyRewardApy(collateralVault.value.address)
+  return withVaultIntrinsicApy(base, collateralVault.value, enableIntrinsicApy.value) + getSupplyRewardApy(collateralVault.value.address)
 })
 const fromBorrowApy = computed(() => {
   if (!fromVault.value) return null
   const base = getVaultBorrowApy(fromVault.value)
-  return withIntrinsicBorrowApy(base, fromVault.value.asset.address) - getBorrowRewardApy(fromVault.value.address, collateralVault.value?.address)
+  return withVaultIntrinsicApy(base, fromVault.value, enableIntrinsicApy.value) - getBorrowRewardApy(fromVault.value.address, collateralVault.value?.address)
 })
 const toBorrowApy = computed(() => {
   if (!toVault.value) return null
   const base = getVaultBorrowApy(toVault.value)
-  return withIntrinsicBorrowApy(base, toVault.value.asset.address) - getBorrowRewardApy(toVault.value.address, collateralVault.value?.address)
+  return withVaultIntrinsicApy(base, toVault.value, enableIntrinsicApy.value) - getBorrowRewardApy(toVault.value.address, collateralVault.value?.address)
 })
 
 const supplyValueUsd = ref<number | null>(null)

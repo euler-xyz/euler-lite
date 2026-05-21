@@ -1,6 +1,5 @@
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
-import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 
 import type { VaultTagContext } from '~/composables/useGeoBlock'
@@ -19,7 +18,8 @@ export const useSwapCollateralOptions = ({
   const { borrowList } = useVaults()
   const { getVault: registryGetVault, getVerifiedEVaults, getEscrowVaults, getVaultCategory } = useVaultRegistry()
   const { getBalance } = useWallets()
-  const { withIntrinsicSupplyApy, version: intrinsicVersion } = useIntrinsicApy()
+  const { settings } = useUserSettings()
+  const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
   const { getSupplyRewardApy, version: rewardsVersion } = useRewardsApy()
 
   const collateralVaults = computed(() => {
@@ -67,11 +67,11 @@ export const useSwapCollateralOptions = ({
 
   const collateralOptions = useReactiveMap(
     collateralVaults,
-    [rewardsVersion, intrinsicVersion],
+    [rewardsVersion, enableIntrinsicApy],
     async (vault) => {
       const balance = getBalance(vault.asset.address as Address)
       const amount = nanoToValue(balance, vault.asset.decimals)
-      const apy = computeSupplyApy(vault, withIntrinsicSupplyApy, getSupplyRewardApy)
+      const apy = computeSupplyApy(vault, getSupplyRewardApy, enableIntrinsicApy.value)
       const type = getVaultCategory(vault.address) === 'escrow' ? 'escrow' : 'vault'
       return buildCollateralOption({ vault, type, amount, priceAmount: amount, apy, tagContext })
     },

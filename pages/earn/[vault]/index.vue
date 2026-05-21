@@ -2,6 +2,7 @@
 import type { VaultAsset } from '~/types/asset'
 import type { TransactionPlan, EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
+import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
@@ -46,7 +47,8 @@ const runSimulation = async (p: TransactionPlan) => {
 const vaultAddress = route.params.vault as string
 useOperationGuard([vaultAddress])
 const { name } = useEulerProductOfVault(vaultAddress)
-const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 
 const isLoading = ref(false)
@@ -120,7 +122,7 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 })
 const totalRewardsAPY = computed(() => getSupplyRewardApy(vaultAddress))
 const hasRewards = computed(() => hasSupplyRewards(vaultAddress))
-const intrinsicApy = computed(() => getIntrinsicApy(vault.value?.asset.address))
+const intrinsicApy = computed(() => getVaultIntrinsicApy(vault.value, enableIntrinsicApy.value))
 const supplyAPYDisplay = computed(() => {
   if (!vault.value) return '0.00'
   return formatNumber(getVaultSupplyApy(vault.value) + totalRewardsAPY.value)
@@ -219,7 +221,7 @@ const onSupplyInfoIconClick = () => {
     props: {
       lendingAPY: getVaultSupplyApy(vault.value),
       intrinsicAPY: intrinsicApy.value,
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.value?.asset.address),
+      intrinsicApyInfo: getVaultIntrinsicApyInfo(vault.value, enableIntrinsicApy.value),
       campaigns: getSupplyRewardCampaigns(vaultAddress),
       rewardVaultAddress: vaultAddress,
       baseApyAverageLabel: '1h',

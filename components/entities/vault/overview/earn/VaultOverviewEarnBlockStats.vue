@@ -3,10 +3,12 @@ import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
+import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 
 const { vault } = defineProps<{ vault: EulerEarn }>()
 
-const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
 
 const rewardSupplyAPY = computed(() => getSupplyRewardApy(vault.address))
@@ -28,8 +30,8 @@ watchEffect(async () => {
 const supplyApyModalData = computed(() => ({
   props: {
     lendingAPY: getVaultSupplyApy(vault),
-    intrinsicAPY: getIntrinsicApy(vault.asset.address),
-    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    intrinsicAPY: getVaultIntrinsicApy(vault, enableIntrinsicApy.value),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
     campaigns: getSupplyRewardCampaigns(vault.address),
     rewardVaultAddress: vault.address,
     baseApyAverageLabel: '1h',

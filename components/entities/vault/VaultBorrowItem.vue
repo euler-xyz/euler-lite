@@ -4,6 +4,7 @@ import { isCyclicalNoteVault } from '~/utils/vault/classification'
 import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
+import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { getVaultAvailableLiquidity, getVaultUtilization } from '~/utils/vault-display'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isVaultFeatured, isVaultKeyring, getEntitiesByVault } from '~/utils/eulerLabelsUtils'
@@ -53,8 +54,8 @@ const entityDisplay = computed(() => {
   }
 })
 
-const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo }
-  = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getBorrowRewardApy, getSupplyRewardApy, getLoopingRewardApy, hasSupplyRewards, hasBorrowRewards, hasLoopingRewards, getBorrowRewardCampaigns, getSupplyRewardCampaigns, getLoopingRewardCampaigns } = useRewardsApy()
 
 const collateralProduct = useEulerProductOfVault(
@@ -132,12 +133,13 @@ const hasAnyRewards = computed(() =>
 )
 const supplyApy = computed(() => {
   const baseApy = getVaultSupplyApy(pair.collateral)
-  return withIntrinsicSupplyApy(baseApy, pair.collateral.asset.address)
+  return withVaultIntrinsicApy(baseApy, pair.collateral, enableIntrinsicApy.value)
 })
 const borrowApy = computed(() =>
-  withIntrinsicBorrowApy(
+  withVaultIntrinsicApy(
     getVaultBorrowApy(pair.borrow),
-    pair.borrow.asset.address,
+    pair.borrow,
+    enableIntrinsicApy.value,
   ),
 )
 const supplyApyWithRewards = computed(
@@ -169,8 +171,8 @@ watchEffect(async () => {
 const borrowApyModalData = computed(() => ({
   props: {
     borrowingAPY: getVaultBorrowApy(pair.borrow),
-    intrinsicAPY: getIntrinsicApy(pair.borrow.asset.address),
-    intrinsicApyInfo: getIntrinsicApyInfo(pair.borrow.asset.address),
+    intrinsicAPY: getVaultIntrinsicApy(pair.borrow, enableIntrinsicApy.value),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(pair.borrow, enableIntrinsicApy.value),
     campaigns: getBorrowRewardCampaigns(pair.borrow.address, pair.collateral.address),
     rewardVaultAddress: pair.borrow.address,
   },
@@ -183,8 +185,8 @@ const supplyApyModalData = computed(() => {
   return {
     props: {
       lendingAPY: baseSupply,
-      intrinsicAPY: getIntrinsicApy(pair.collateral.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(pair.collateral.asset.address),
+      intrinsicAPY: getVaultIntrinsicApy(pair.collateral, enableIntrinsicApy.value),
+      intrinsicApyInfo: getVaultIntrinsicApyInfo(pair.collateral, enableIntrinsicApy.value),
       campaigns: getSupplyRewardCampaigns(pair.collateral.address),
       rewardVaultAddress: pair.collateral.address,
     },
@@ -195,8 +197,8 @@ const netApyModalData = computed(() => ({
   props: {
     supplyAPY: getVaultSupplyApy(pair.collateral),
     borrowAPY: getVaultBorrowApy(pair.borrow),
-    intrinsicSupplyAPY: getIntrinsicApy(pair.collateral.asset.address),
-    intrinsicBorrowAPY: getIntrinsicApy(pair.borrow.asset.address),
+    intrinsicSupplyAPY: getVaultIntrinsicApy(pair.collateral, enableIntrinsicApy.value),
+    intrinsicBorrowAPY: getVaultIntrinsicApy(pair.borrow, enableIntrinsicApy.value),
     supplyRewardAPY: supplyRewardsAPY.value || null,
     borrowRewardAPY: borrowRewardsAPY.value || null,
     loopingRewardAPY: loopingRewardsAPY.value || null,

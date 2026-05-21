@@ -338,21 +338,22 @@ describe('buildVaultApyCache', () => {
         supplyAPY: 4,
         borrowAPY: 6,
       },
+      intrinsicApy: { apy: 1, provider: 'test' },
     } as unknown as EVault
     const market = makeMarket([vault])
 
     const cache = buildVaultApyCache(
       [market],
-      (apy, _addr) => apy + 1, // intrinsic supply contribution: +1
-      (apy, _addr) => apy + 2, // intrinsic borrow contribution: +2
+      true,
       _addr => 0.5, // supply rewards
       _addr => 0.25, // general borrow rewards
     )
 
     const entry = cache.get(vault.address.toLowerCase())
     expect(entry).toBeDefined()
-    expect(entry!.supplyApy).toBeCloseTo(4 + 1 + 0.5)
-    expect(entry!.borrowApy).toBeCloseTo(6 + 2 - 0.25)
+    // withVaultIntrinsicApy(base, vault, true) = base + (1 + base/100) * 1
+    expect(entry!.supplyApy).toBeCloseTo(4 + (1 + 4 / 100) * 1 + 0.5)
+    expect(entry!.borrowApy).toBeCloseTo(6 + (1 + 6 / 100) * 1 - 0.25)
   })
 
   it('caches external-collateral vaults so attribute matrix externals match the per-vault card', () => {
@@ -365,20 +366,20 @@ describe('buildVaultApyCache', () => {
         supplyAPY: 3,
         borrowAPY: 5,
       },
+      intrinsicApy: { apy: 1, provider: 'test' },
     } as unknown as EVault
     const market = makeMarket([], [externalVault])
 
     const cache = buildVaultApyCache(
       [market],
-      (apy, _addr) => apy + 1,
-      (apy, _addr) => apy + 2,
+      true,
       _addr => 0.5,
       _addr => 0.25,
     )
 
     const entry = cache.get(externalVault.address.toLowerCase())
     expect(entry).toBeDefined()
-    expect(entry!.supplyApy).toBeCloseTo(3 + 1 + 0.5)
-    expect(entry!.borrowApy).toBeCloseTo(5 + 2 - 0.25)
+    expect(entry!.supplyApy).toBeCloseTo(3 + (1 + 3 / 100) * 1 + 0.5)
+    expect(entry!.borrowApy).toBeCloseTo(5 + (1 + 5 / 100) * 1 - 0.25)
   })
 })

@@ -4,6 +4,7 @@ import type { VaultAsset } from '~/types/asset'
 import type { CollateralOption } from '~/types/collateral-option'
 import { collectPythFeedsFromAdapters, isEVault, type EVault, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { getAssetOraclePrice, getCollateralShareOraclePrice } from '~/utils/sdk-prices'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { getNewSubAccount } from '~/composables/useSubAccounts'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
@@ -38,7 +39,8 @@ const shareLinkQuery = computed(() => {
 useFullBalances()
 const { refreshAllPositions: _refreshAllPositions, depositPositions } = useEulerAccount()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
-const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { eulerLensAddresses: _eulerLensAddresses } = useEulerAddresses()
 const { fetchSingleBalance, fetchVaultShareBalance } = useWallets()
 const openSlippageSettings = () => {
@@ -104,14 +106,16 @@ const resolvePendingSubAccount = async (): Promise<string> => {
 // --- APYs ---
 const collateralSupplyRewardApy = computed(() => getSupplyRewardApy(pair.value?.collateral.address || ''))
 const borrowRewardApy = computed(() => getBorrowRewardApy(pair.value?.borrow.address || '', pair.value?.collateral.address || ''))
-const collateralSupplyApy = computed(() => withIntrinsicSupplyApy(
+const collateralSupplyApy = computed(() => withVaultIntrinsicApy(
   getVaultSupplyApy(collateralVault.value),
-  collateralVault.value?.asset.address,
+  collateralVault.value,
+  enableIntrinsicApy.value,
 ))
 const collateralSupplyApyWithRewards = computed(() => collateralSupplyApy.value + collateralSupplyRewardApy.value)
-const borrowApy = computed(() => withIntrinsicBorrowApy(
+const borrowApy = computed(() => withVaultIntrinsicApy(
   getVaultBorrowApy(borrowVault.value),
-  borrowVault.value?.asset.address,
+  borrowVault.value,
+  enableIntrinsicApy.value,
 ))
 
 // --- Geo-blocking ---

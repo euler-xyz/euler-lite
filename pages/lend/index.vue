@@ -13,6 +13,7 @@ import { useVaultSearch } from '~/composables/useVaultSearch'
 import { isOpDisabled, OP_DEPOSIT } from '~/utils/vault-hooks'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 
 defineOptions({
   name: 'LendPage',
@@ -28,7 +29,8 @@ const isPricesReady = ref(false)
 const isLoading = computed(() => isEVaultUpdating.value || !isPricesReady.value)
 const { isSlow } = useSlowLoading(isLoading)
 const { entities } = useEulerLabels()
-const { withIntrinsicSupplyApy } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, version: rewardsVersion } = useRewardsApy()
 const { getBalance } = useWallets()
 
@@ -68,7 +70,7 @@ const vaultWalletUsd = ref<Map<string, number>>(new Map())
 
 const getDisplayedVaultSupplyApy = (vault: EVault): number => {
   const baseApy = getVaultSupplyApy(vault)
-  return withIntrinsicSupplyApy(baseApy, vault.asset.address) + getSupplyRewardApy(vault.address)
+  return withVaultIntrinsicApy(baseApy, vault, enableIntrinsicApy.value) + getSupplyRewardApy(vault.address)
 }
 
 const {

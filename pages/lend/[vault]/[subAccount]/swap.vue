@@ -3,7 +3,7 @@ import type { SecuritizeCollateralVault, EVault, TransactionPlan } from '@eulerx
 import { getSubAccountAddress, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { isSecuritizeVault } from '~/utils/vault/categories'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
-import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import { normalizeAddress } from '~/utils/normalizeAddress'
@@ -17,7 +17,8 @@ const { getVault, getSecuritizeVault } = useVaults()
 const { address } = useWagmi()
 const { depositPositions } = useEulerAccount()
 const { planCollateralChange } = useEulerTx()
-const { withIntrinsicSupplyApy } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy } = useRewardsApy()
 
 const subAccountIndex = Number(route.params.subAccount)
@@ -66,12 +67,12 @@ const balance = computed(() => getCashLimitedWithdrawAmount(
 const fromSupplyApy = computed(() => {
   if (!fromVault.value) return null
   const base = getVaultSupplyApy(fromVault.value)
-  return withIntrinsicSupplyApy(base, fromVault.value.asset.address) + getSupplyRewardApy(fromVault.value.address)
+  return withVaultIntrinsicApy(base, fromVault.value, enableIntrinsicApy.value) + getSupplyRewardApy(fromVault.value.address)
 })
 const toSupplyApy = computed(() => {
   if (!toVault.value) return null
   const base = getVaultSupplyApy(toVault.value)
-  return withIntrinsicSupplyApy(base, toVault.value.asset.address) + getSupplyRewardApy(toVault.value.address)
+  return withVaultIntrinsicApy(base, toVault.value, enableIntrinsicApy.value) + getSupplyRewardApy(toVault.value.address)
 })
 
 // ── Shared swap logic ────────────────────────────────────────────────────

@@ -223,16 +223,16 @@ const attributeMatrixMap = computed((): Map<string, AttributeMatrixData> => {
 // folded with intrinsic + supply/borrow rewards). The composables fetch this
 // data asynchronously and bump `version` when it lands; the explicit reads
 // here re-trigger the computed so the cells refresh in place.
-const { withIntrinsicSupplyApy, withIntrinsicBorrowApy, version: intrinsicVersion } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, version: rewardsVersion } = useRewardsApy()
 
 const vaultApyCache = computed<Map<string, VaultApyCacheEntry>>(() => {
-  void intrinsicVersion.value
+  void enableIntrinsicApy.value
   void rewardsVersion.value
   return buildVaultApyCache(
     props.markets,
-    withIntrinsicSupplyApy,
-    withIntrinsicBorrowApy,
+    enableIntrinsicApy.value,
     getSupplyRewardApy,
     getBorrowRewardApy,
   )

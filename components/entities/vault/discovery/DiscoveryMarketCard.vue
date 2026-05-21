@@ -12,6 +12,7 @@ import {
   type BestMaxRoeResult,
 } from '~/utils/discoveryCalculations'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { VaultMaxRoeModal, UiModalPreviewTrigger } from '#components'
 
 const props = defineProps<{
@@ -23,7 +24,8 @@ defineEmits<{
   toggle: []
 }>()
 
-const { withIntrinsicSupplyApy, withIntrinsicBorrowApy } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getBorrowRewardApy, getSupplyRewardApy, getLoopingRewardApy } = useRewardsApy()
 const { products } = useEulerLabels()
 
@@ -50,7 +52,7 @@ const getBestMaxRoe = (market: MarketGroup): BestMaxRoeResult => {
 
   for (const liability of borrowable) {
     const borrowBase = getVaultBorrowApy(liability)
-    const borrowApy = withIntrinsicBorrowApy(borrowBase, liability.asset.address)
+    const borrowApy = withVaultIntrinsicApy(borrowBase, liability, enableIntrinsicApy.value)
 
     for (const ltv of liability.collaterals) {
       if (ltv.borrowLTV === 0) continue
@@ -58,7 +60,7 @@ const getBestMaxRoe = (market: MarketGroup): BestMaxRoeResult => {
       if (!collateral) continue
 
       const supplyBase = getVaultSupplyApy(collateral)
-      const supplyApy = withIntrinsicSupplyApy(supplyBase, collateral.asset.address)
+      const supplyApy = withVaultIntrinsicApy(supplyBase, collateral, enableIntrinsicApy.value)
       const supplyRewards = getSupplyRewardApy(collateral.address)
       const borrowRewards = getBorrowRewardApy(liability.address, collateral.address)
       const loopingRewards = getLoopingRewardApy(liability.address, collateral.address)

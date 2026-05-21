@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { getRoe, getNetAPY } from '~/utils/vault/apy'
+import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isSecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
 import { getAssetUsdPrice, getCollateralUsdPrice, getCollateralUsdValue, toUsdAmount, type UsdAmount } from '~/utils/sdk-prices'
@@ -23,7 +24,8 @@ const { error } = useToast()
 const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = useEulerAccount()
-const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, hasSupplyRewards, hasBorrowRewards, getSupplyRewardCampaigns, getBorrowRewardCampaigns } = useRewardsApy()
 const { planTransfer, executePlan } = useEulerTx()
 const {
@@ -163,15 +165,17 @@ const baseSupplyAPY = computed(() => {
   return getVaultSupplyApy(collateralVault.value)
 })
 const baseBorrowAPY = computed(() => getVaultBorrowApy(borrowVault.value))
-const _intrinsicSupplyAPY = computed(() => getIntrinsicApy(collateralVault.value?.asset.address))
-const intrinsicBorrowAPY = computed(() => getIntrinsicApy(borrowVault.value?.asset.address))
-const collateralSupplyApy = computed(() => withIntrinsicSupplyApy(
+const _intrinsicSupplyAPY = computed(() => getVaultIntrinsicApy(collateralVault.value, enableIntrinsicApy.value))
+const intrinsicBorrowAPY = computed(() => getVaultIntrinsicApy(borrowVault.value, enableIntrinsicApy.value))
+const collateralSupplyApy = computed(() => withVaultIntrinsicApy(
   baseSupplyAPY.value,
-  collateralVault.value?.asset.address,
+  collateralVault.value,
+  enableIntrinsicApy.value,
 ))
-const borrowApy = computed(() => withIntrinsicBorrowApy(
+const borrowApy = computed(() => withVaultIntrinsicApy(
   baseBorrowAPY.value,
-  borrowVault.value?.asset.address,
+  borrowVault.value,
+  enableIntrinsicApy.value,
 ))
 const borrowApyWithRewards = computed(() => borrowApy.value - borrowRewardAPY.value)
 
@@ -219,9 +223,10 @@ watchEffect(async () => {
   const results = await Promise.all(
     collateralItems.value.map(async (item) => {
       const rewardApy = getSupplyRewardApy(item.vault.address || '')
-      const supplyApy = withIntrinsicSupplyApy(
+      const supplyApy = withVaultIntrinsicApy(
         getVaultSupplyApy(item.vault),
-        item.vault.asset.address,
+        item.vault,
+        enableIntrinsicApy.value,
       )
 
       // Collateral price ALWAYS comes from liability vault's oracle, converted to USD
@@ -650,7 +655,7 @@ const onBorrowInfoIconClick = (event: MouseEvent) => {
     props: {
       borrowingAPY: baseBorrowAPY.value,
       intrinsicAPY: intrinsicBorrowAPY.value,
-      intrinsicApyInfo: getIntrinsicApyInfo(borrowVault.value.asset.address),
+      intrinsicApyInfo: getVaultIntrinsicApyInfo(borrowVault.value, enableIntrinsicApy.value),
       campaigns: getBorrowRewardCampaigns(borrowVault.value.address, collateralVault.value?.address),
       rewardVaultAddress: borrowVault.value.address,
     },
@@ -663,8 +668,8 @@ const onSupplyInfoIconClick = (event: MouseEvent, vault: EVault | SecuritizeColl
   modal.open(VaultSupplyApyModal, {
     props: {
       lendingAPY: getVaultSupplyApy(vault),
-      intrinsicAPY: getIntrinsicApy(vault.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+      intrinsicAPY: getVaultIntrinsicApy(vault, enableIntrinsicApy.value),
+      intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
       campaigns: getSupplyRewardCampaigns(vault.address),
       rewardVaultAddress: vault.address,
     },

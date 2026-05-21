@@ -11,6 +11,7 @@ import { formatNumber, compactNumber, truncate } from '~/utils/string-utils'
 import { formatHookedOpsSummary, getHookedOperationMetas, getVaultHookedOperations, hasAnyHookedOperation, isVaultEffectivelyPaused } from '~/utils/vault-hooks'
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
 import { getVaultBorrowApy, getVaultSupplyApy } from '~/utils/vault-display'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 
 // ============================================================
 // Types & Constants
@@ -960,16 +961,15 @@ export const STATS_ROWS: AttributeRow[] = [
 ]
 
 // Build a per-vault APY cache that mirrors the per-vault card formula:
-//   supplyApy = withIntrinsicSupplyApy(base) + supplyRewards
-//   borrowApy = withIntrinsicBorrowApy(base) - borrowRewards (general only)
+//   supplyApy = withVaultIntrinsicApy(base) + supplyRewards
+//   borrowApy = withVaultIntrinsicApy(base) - borrowRewards (general only)
 //
 // Borrow rewards here use no collateral context, so collateral-conditional
 // campaigns (`euler_borrow_collateral`) are intentionally excluded — the
 // matrix shows per-vault stats, not per-pair.
 export const buildVaultApyCache = (
   markets: MarketGroup[],
-  withIntrinsicSupplyApy: (apy: number, address: string) => number,
-  withIntrinsicBorrowApy: (apy: number, address: string) => number,
+  enableIntrinsicApy: boolean,
   getSupplyRewardApy: (vaultAddress: string) => number,
   getBorrowRewardApy: (vaultAddress: string) => number,
 ): Map<string, VaultApyCacheEntry> => {
@@ -985,8 +985,8 @@ export const buildVaultApyCache = (
       const baseSupply = supplyApyPercent(vault)
       const baseBorrow = borrowApyPercent(vault)
       result.set(addr, {
-        supplyApy: withIntrinsicSupplyApy(baseSupply, vault.asset.address) + getSupplyRewardApy(vault.address),
-        borrowApy: withIntrinsicBorrowApy(baseBorrow, vault.asset.address) - getBorrowRewardApy(vault.address),
+        supplyApy: withVaultIntrinsicApy(baseSupply, vault, enableIntrinsicApy) + getSupplyRewardApy(vault.address),
+        borrowApy: withVaultIntrinsicApy(baseBorrow, vault, enableIntrinsicApy) - getBorrowRewardApy(vault.address),
       })
     }
   }

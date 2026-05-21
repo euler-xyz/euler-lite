@@ -1,7 +1,7 @@
 import type { EVault, PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 import { getVaultProductName } from '~/utils/eulerLabelsUtils'
-import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
@@ -28,7 +28,8 @@ import { useReactiveMap } from '~/composables/useReactiveMap'
 export const useRepaySavingsOptions = () => {
   const { depositPositions } = useEulerAccount()
   const { isEVaultAddress } = useVaultRegistry()
-  const { withIntrinsicSupplyApy, version: intrinsicVersion } = useIntrinsicApy()
+  const { settings } = useUserSettings()
+  const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
   const { getSupplyRewardApy, version: rewardsVersion } = useRewardsApy()
 
   const savingsPositions = computed(() => {
@@ -52,7 +53,7 @@ export const useRepaySavingsOptions = () => {
 
   const savingsOptions = useReactiveMap(
     savingsPositions,
-    [rewardsVersion, intrinsicVersion],
+    [rewardsVersion, enableIntrinsicApy],
     async (position) => {
       const vault = position.vault as EVault | undefined
       if (!vault) {
@@ -60,7 +61,7 @@ export const useRepaySavingsOptions = () => {
       }
       const amount = nanoToValue(position.assets, vault.asset.decimals)
       const baseApy = getVaultSupplyApy(vault)
-      const apy = withIntrinsicSupplyApy(baseApy, vault.asset.address) + getSupplyRewardApy(vault.address)
+      const apy = withVaultIntrinsicApy(baseApy, vault, enableIntrinsicApy.value) + getSupplyRewardApy(vault.address)
       return {
         type: 'vault' as const,
         amount,

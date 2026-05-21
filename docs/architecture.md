@@ -201,16 +201,23 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 
 | Endpoint | TTL | Notes |
 |----------|-----|-------|
-| `/api/labels/*` | 5 min | 404 → empty shape; stale-fallback on upstream error |
+| `/api/labels/{file}` | 5 min | Query-shape labels endpoint (`?chainId=N`); used internally by Lite helpers. 404 → empty shape; stale-fallback on upstream error |
+| `/api/labels/{chainId}/{file}` | 5 min | Path-shape labels endpoint matching the SDK's default `eulerLabelsBaseUrl` template; shares the underlying cache with the query-shape route |
 | `/api/token-list` | 5 min | Three sources merged via `Promise.allSettled`; per-source cache with stale fallback |
-| `/api/intrinsic-apy` | 5 min | One endpoint, returns `{ [address]: { apy, provider, source? } }` for a chain; server orchestrates every upstream |
 | `/api/oracle-adapter` | 5 min | Lazy per-address fetch |
 | `/api/euler-chains` | 5 min | Static chain-agnostic config from `euler-interfaces` repo |
-| `/api/vaults` | 5 min | Pre-computed chain vault snapshot; warm-cache rewrites every 5 min. Handler is read-only — no request-triggered refresh |
+| `/api/vaults` | 2 min (V3) / 5 min (no V3) | Pre-computed chain vault snapshot. Handler is read-only — no request-triggered refresh; warm-cache rewrites at the same cadence as the TTL |
+| `/api/proxy/merkl/{path}` | 60 s | Same-origin proxy to Merkl v4; path allowlist; GET/HEAD only |
+| `/api/proxy/fuul/{path}` | 30 s | Same-origin proxy to Fuul; path allowlist; GET/HEAD/POST |
+| `/api/proxy/incentra/{path}` | 30 s | Same-origin proxy to Incentra/Brevis; path allowlist; GET/HEAD/POST |
+| `/api/proxy/subgraph/{chainId}` | 30 s | Same-origin proxy to per-chain Goldsky subgraph; POST only |
+| `/api/v3/{...path}` | request-scoped | Pass-through to the V3 backend; no TTL — V3 manages its own caching |
 
-Every cacheable proxy above uses the same pattern: TTL cache for fresh hits, stale-cache fallback on upstream failure, and in-flight request deduplication so concurrent cache-miss callers (e.g. warm-cache racing real traffic) collapse onto a single upstream fetch per cache key. The in-flight dedup pattern itself is a shared util — `createInFlightDedup` / `scheduleBackgroundRefresh` in `server/utils/in-flight.ts`.
+Every cacheable proxy above uses the same pattern: TTL cache for fresh hits, stale-cache fallback on upstream failure, and in-flight request deduplication so concurrent cache-miss callers (e.g. warm-cache racing real traffic) collapse onto a single upstream fetch per cache key. The in-flight dedup pattern itself is a shared util — `createInFlightDedup` / `scheduleBackgroundRefresh` in `server/utils/in-flight.ts`. The per-host proxies (`/api/proxy/{merkl,fuul,incentra,subgraph}`) share a common forwarder at `server/utils/external-proxy.ts`.
 
-`server/plugins/warm-cache.ts` pre-populates labels, token-list, and `/api/intrinsic-apy` for every enabled chain, plus `/api/euler-chains` once globally. Every warm task is a **direct function call** to a `refreshX()` that bypasses the handler's fresh-cache short-circuit and writes straight to the cache. This matters: if warm cycled via HTTP, the handler would short-circuit on the still-fresh entry from the previous cycle (age ≈ 298 s at the 5-min mark) and the entry would then expire with no refresh until the next cycle — leaving a ~5 min stale window per cycle. With direct refresh calls, the cache is always rewritten while the previous entry is still serving live traffic, so user requests arriving during a refresh continue to read the fresh previous entry (no blocking on the in-flight refresh). Warming runs fire-and-forget so Nitro's listener is never delayed; caches are typically hot within ~5 s of boot, and users arriving before that just pay the usual cold-upstream latency for whichever endpoints they hit.
+`server/plugins/warm-cache.ts` pre-populates labels and token-list for every enabled chain, plus `/api/euler-chains` once globally, on a 5-min cycle. The vault snapshot runs on its own faster timer (1 min when V3 is configured, 5 min otherwise) so V3-backed refreshes stay tight without hammering upstream. Every warm task is a **direct function call** to a `refreshX()` that bypasses the handler's fresh-cache short-circuit and writes straight to the cache. This matters: if warm cycled via HTTP, the handler would short-circuit on the still-fresh entry from the previous cycle (age ≈ TTL − 2 s) and the entry would then expire with no refresh until the next cycle — leaving a stale window per cycle. With direct refresh calls, the cache is always rewritten while the previous entry is still serving live traffic, so user requests arriving during a refresh continue to read the fresh previous entry (no blocking on the in-flight refresh). Warming runs fire-and-forget so Nitro's listener is never delayed; caches are typically hot within ~5 s of boot, and users arriving before that just pay the usual cold-upstream latency for whichever endpoints they hit.
+
+For the full setup — per-host proxies, vault snapshot pipeline, two-pass client hydration, V3-conditional cadence, and the bigint wire codec — see [Server-Side Caching](./server-side-caching.md).
 
 ### Vault snapshot pipeline
 
@@ -218,10 +225,12 @@ Every cacheable proxy above uses the same pattern: TTL cache for fresh hits, sta
 
 The client composable `useVaults.loadVaults()` runs in two phases:
 
-1. **Hydrate** (`~100 ms`): `$fetch('/api/vaults?chainId=X')`, deserialise, populate the vault registry, flip `isReady=true`. UI renders a fully populated `borrowList` immediately.
-2. **Fresh RPC pass** (`~3-6 s`): the existing batched lens pipeline (`fetchVaults`/`fetchEarnVaults`/`fetchSecuritizeVault`/`fetchEscrowVault`) runs against the client's RPC with Pyth simulation, overwriting registry entries with live prices and rates.
+1. **Hydrate** (`~100 ms`): `$fetch('/api/vaults?chainId=X')`, deserialise via the bigint codec, instantiate each vault into its SDK class (`new EVault(args)` etc.), then run `populateCollaterals` / `populateStrategyVaults` against a registry-backed `IVaultMetaService` stub (`utils/sdk-vault-meta-stub.ts`) so cross-references resolve to the same EVault instances already in the registry (no RPC). Flip `isReady=true`; UI renders a fully populated `borrowList` immediately.
+2. **Fresh RPC pass** (`~3-6 s`): the existing batched lens pipeline (`fetchVaults`/`fetchEarnVaults`/`fetchSecuritizeVault`/`fetchEscrowVault`) runs against the client's RPC with Pyth simulation, overwriting registry entries with live prices and rates in silent mode (loading flags stay false).
 
 The public interface of `useVaults()` is unchanged — the 15 exports (`isReady`, `borrowList`, `getVault`, etc.) keep their names, types, and semantics. Vault entities are SDK-owned (`EVault`, `EulerEarn`, `SecuritizeCollateralVault`), while Lite keeps UI-only categorization, LTV, APY, collateral discovery, and presentation helpers under `utils/vault/`.
+
+The wire payload uses the bigint codec at `utils/snapshot-codec.ts`: bigints serialise as `{ __bi: "<decimal>" }` (object-wrapper tag, unforgeable by adversary-controlled ERC-20 metadata). The server-side SDK builder at `server/utils/sdk-server.ts` instantiates one `EulerSDK` per chain (lazy, cached at module scope) with the default `'fallback'` adapter chain — V3 primary, onchain secondary when V3 is configured; pure onchain otherwise.
 
 ### Reward campaign and claim pipeline
 

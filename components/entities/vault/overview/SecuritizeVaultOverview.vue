@@ -16,6 +16,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
 import { getAddress, type Address, maxUint256 } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
+import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 
 const { vault } = defineProps<{ vault: SecuritizeCollateralVault, desktopOverview?: boolean }>()
 const route = useRoute()
@@ -25,7 +26,8 @@ const { client: rpcClient } = useRpcClient()
 const { chainId } = useEulerAddresses()
 const { borrowList: _borrowList, isVaultGovernorVerified } = useVaults()
 const { getEVaults } = useVaultRegistry()
-const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const modal = useModal()
 const { getSupplyRewardApy, getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
 const vaultAddress = computed(() => getAddress(vault.address))
@@ -79,7 +81,7 @@ const collateralCount = computed(() => borrowMarkets.value.length)
 
 // Supply APY calculation (intrinsic + rewards, no base interest for securitize vaults)
 const rewardSupplyAPY = computed(() => getSupplyRewardApy(vault.address))
-const intrinsicApy = computed(() => getIntrinsicApy(vault.asset.address))
+const intrinsicApy = computed(() => getVaultIntrinsicApy(vault, enableIntrinsicApy.value))
 const supplyApyWithRewards = computed(() => intrinsicApy.value + rewardSupplyAPY.value)
 
 const onSupplyInfoIconClick = () => {
@@ -87,7 +89,7 @@ const onSupplyInfoIconClick = () => {
     props: {
       lendingAPY: 0, // Securitize vaults don't have interest rates
       intrinsicAPY: intrinsicApy.value,
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+      intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
       campaigns: getSupplyRewardCampaigns(vault.address),
       rewardVaultAddress: vault.address,
     },

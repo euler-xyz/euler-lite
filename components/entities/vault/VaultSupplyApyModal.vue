@@ -2,7 +2,7 @@
 import { formatNumber } from '~/utils/string-utils'
 import type { RewardCampaign } from '~/entities/reward-campaign'
 import { PROVIDER_LABELS, PROVIDER_LOGOS, rewardCampaignAprPercent, rewardCampaignDisplays } from '~/entities/reward-campaign'
-import type { IntrinsicApyInfo } from '~/entities/intrinsic-apy'
+import type { IntrinsicApyInfo } from '@eulerxyz/euler-v2-sdk'
 
 const emits = defineEmits(['close'])
 const { lendingAPY, intrinsicAPY, intrinsicApyInfo, campaigns, baseApyAverageLabel, rewardVaultAddress, inline = false, close = true } = defineProps<{

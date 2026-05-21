@@ -10,6 +10,7 @@ import { formatNumber, formatCompactUsdValue, formatSmartAmount, formatExactAmou
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { VaultOverviewModal, VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
+import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 
 const { position } = defineProps<{ position: PortfolioSavingsPosition<VaultEntity> }>()
 const modal = useModal()
@@ -22,7 +23,8 @@ const subAccountIndex = computed(() => {
   return getSubAccountIndex(getAddress(ownerAddress.value), getAddress(position.subAccount))
 })
 
-const { withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 
 const vault = computed(() => position.vault!)
@@ -36,9 +38,10 @@ const isSecuritize = computed(() => isSecuritizeCollateralVault(vault.value))
 
 const rewardsExist = computed(() => hasSupplyRewards(vault.value.address))
 const supplyApy = computed(() => {
-  return withIntrinsicSupplyApy(
+  return withVaultIntrinsicApy(
     getVaultSupplyApy(vault.value),
-    vault.value.asset.address,
+    vault.value,
+    enableIntrinsicApy.value,
   )
 })
 const supplyApyWithRewards = computed(() => supplyApy.value + getSupplyRewardApy(vault.value.address))
@@ -85,8 +88,8 @@ const assetAmount = computed(() => {
 const supplyApyModalData = computed(() => ({
   props: {
     lendingAPY: getVaultSupplyApy(vault.value),
-    intrinsicAPY: getIntrinsicApy(vault.value.asset.address),
-    intrinsicApyInfo: getIntrinsicApyInfo(vault.value.asset.address),
+    intrinsicAPY: getVaultIntrinsicApy(vault.value, enableIntrinsicApy.value),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(vault.value, enableIntrinsicApy.value),
     campaigns: getSupplyRewardCampaigns(vault.value.address),
     rewardVaultAddress: vault.value.address,
   },

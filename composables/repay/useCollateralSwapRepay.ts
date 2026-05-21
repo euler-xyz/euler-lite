@@ -4,6 +4,7 @@ import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import type { Ref, ComputedRef } from 'vue'
 import { formatUnits, zeroAddress, type Address, type Abi } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { cowSwapInboxExists } from '~/utils/cowswap-inbox'
 import type { DisplayStep } from '~/utils/stepDecoding'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -71,7 +72,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const { refreshAllPositions } = useEulerAccount()
   const { account: freshAccount } = useFreshAccount()
   const { client: rpcClient } = useRpcClient()
-  const { withIntrinsicSupplyApy, withIntrinsicBorrowApy } = useIntrinsicApy()
+  const { settings } = useUserSettings()
+  const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 
   // --- Source vault state ---
@@ -161,13 +163,13 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const collateralSupplyApy = computed(() => {
     if (!sourceVault.value) return null
     const base = getVaultSupplyApy(sourceVault.value)
-    return withIntrinsicSupplyApy(base, sourceVault.value.asset.address) + getSupplyRewardApy(sourceVault.value.address)
+    return withVaultIntrinsicApy(base, sourceVault.value, enableIntrinsicApy.value) + getSupplyRewardApy(sourceVault.value.address)
   })
 
   const borrowApy = computed(() => {
     if (!borrowVault.value) return null
     const base = getVaultBorrowApy(borrowVault.value)
-    return withIntrinsicBorrowApy(base, borrowVault.value.asset.address) - getBorrowRewardApy(borrowVault.value.address, collateralVault.value?.address)
+    return withVaultIntrinsicApy(base, borrowVault.value, enableIntrinsicApy.value) - getBorrowRewardApy(borrowVault.value.address, collateralVault.value?.address)
   })
 
   // --- Price ratio ---

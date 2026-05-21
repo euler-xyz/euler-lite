@@ -33,7 +33,8 @@ import { useConfig, useSendTransaction, useSignTypedData } from '@wagmi/vue'
 import { getAccount } from '@wagmi/vue/actions'
 import { getEulerSdk, getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
-import { invalidateSdkQueries, PLAN_CRITICAL_QUERIES } from '~/utils/sdk-query-cache'
+import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
+import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
 import { waitForSubgraphBlock } from '~/utils/subgraph'
 
 const OKX_POST_APPROVE_DELAY_MS = 3000
@@ -881,7 +882,7 @@ export const useEulerTx = () => {
    *
    * Uses the **fast** SDK so the plugin's vault/account/oracle-adapter reads
    * hit the shared QueryClient cache populated by `useFreshAccount` at mount
-   * and refreshed by `invalidateSdkQueries(PLAN_CRITICAL_QUERIES)` post-tx.
+   * and refreshed by `invalidateSdkQueries(INVALIDATE_AFTER_TX)` post-tx.
    * Time-sensitive Pyth/balance/allowance queries keep their short stale times
    * either way.
    */
@@ -941,13 +942,13 @@ export const useEulerTx = () => {
     // would otherwise serve cached pre-tx state into the new plan.
     // `triggerPortfolioRefresh` re-drives the rich portfolio data that the
     // portfolio page renders; the two are complementary.
-    void invalidateSdkQueries([...PLAN_CRITICAL_QUERIES])
+    void invalidateSdkQueries([...INVALIDATE_AFTER_TX])
     triggerPortfolioRefresh()
     if (lastReceipt && SUBGRAPH_URL) {
       void waitForSubgraphBlock(SUBGRAPH_URL, lastReceipt.blockNumber)
         .then((caughtUp) => {
           if (caughtUp) {
-            void invalidateSdkQueries([...PLAN_CRITICAL_QUERIES])
+            void invalidateSdkQueries([...INVALIDATE_AFTER_TX])
             triggerPortfolioRefresh()
           }
         })

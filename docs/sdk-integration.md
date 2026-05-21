@@ -7,7 +7,8 @@ This document describes how `@eulerxyz/euler-v2-sdk` is initiated inside Euler L
 | File | Purpose |
 |------|---------|
 | `composables/useEulerSdk.ts` | Two-instance SDK factory (`getEulerSdk`, `getEulerSdkFresh`) with Map-based instance cache |
-| `utils/sdk-query-cache.ts` | Shared `QueryClient`, `BuildQueryFn` factories, `STALE_TIMES`, and `FRESH_OVERRIDES` |
+| `utils/sdk-query-policy.ts` | **Single source of truth** — per-query `staleTimeMs` / `formStaleTimeMs` / `invalidateAfterTx`; derived `STALE_TIMES`, `FORM_STALE_TIMES`, `INVALIDATE_AFTER_TX` |
+| `utils/sdk-query-cache.ts` | Runtime: shared `QueryClient`, `buildQuery` wrappers, `invalidateSdkQueries` |
 | `composables/useEnvConfig.ts` | Resolves env-derived config (incl. `enableV3Backend`) on server and client |
 | `server/plugins/app-config.ts` | Reads env at server startup and injects `window.__APP_CONFIG__` |
 | `nuxt.config.ts` | Declares the public runtime config keys that mirror env vars |
@@ -17,9 +18,9 @@ This document describes how `@eulerxyz/euler-v2-sdk` is initiated inside Euler L
 
 The app exposes two SDK instances, both produced by the same factory in `composables/useEulerSdk.ts`:
 
-- **`getEulerSdk()` — fast / browsing instance.** When `enableV3Backend` is true, this routes reads through the v3 adapters (`accountServiceAdapter: 'v3'`, etc.) talking to `/api/v3`. When it is false, it falls back to direct on-chain adapters (`'onchain'` / `'subgraph'` / `'direct'`). It uses the default `sdkBuildQuery` cache policy, so reads benefit from sub-minute stale times for hot data (account info, vault info, prices) and long stale times for catalogue data (deployments, ABIs, labels). UI surfaces — vault lists, portfolio display, prices, rewards — consume this instance.
+- **`getEulerSdk()` — fast / browsing instance.** Uses the SDK's `'fallback'` adapter mode. When `enableV3Backend` is true the chain runs V3 primary → onchain secondary; when it's false the SDK is built with `disableV3: true` and the fallback chain short-circuits to onchain. Cache wrapper is `sdkBuildQuery`, which applies `STALE_TIMES` (the per-query stale times from `SDK_QUERY_POLICY`). UI surfaces — vault lists, portfolio display, prices, rewards — consume this instance.
 
-- **`getEulerSdkFresh()` — slow / plan-time instance.** This always uses on-chain adapters regardless of `enableV3Backend`, and uses `sdkFreshBuildQuery`, which forces `staleTime: 0` on plan-critical queries (`queryEVCAccountInfo`, `queryVaultAccountInfo`, `queryEVaultInfoFull`, `queryEulerEarnVaultInfoFull`, `queryBatchSimulation`, `queryBalanceOf`, `queryNativeBalance`, `queryAllowance`, `queryPermit2Allowance`, `queryPythUpdateData`, `queryPythUpdateFee`). Catalogue / labels / prices fall through to the default `STALE_TIMES` and continue to hit the shared cache. `composables/useEulerTx.ts` consumes this instance through a small `freshPlanContext()` helper which also fetches a live `Account` so planner entity math (share/asset conversion, sub-account positions, controller flags) reflects the latest block.
+- **`getEulerSdkFresh()` — form-time / plan-time instance.** Pinned to on-chain / direct / subgraph adapters regardless of `enableV3Backend`. Cache wrapper is `sdkFreshBuildQuery`, which applies `FORM_STALE_TIMES` — pre-resolved `formStaleTimeMs ?? staleTimeMs` per row, so plan-critical reads (`queryEVCAccountInfo`, `queryVaultAccountInfo`, `queryEVaultInfoFull`, `queryEulerEarnVaultInfoFull`, `queryBatchSimulation`, balance/allowance probes, Pyth update data) are forced to `staleTime: 0`. Catalogue / labels / prices fall through to the same row's `staleTimeMs` and continue to hit the shared cache. `composables/useEulerTx.ts` consumes this instance through a small `freshPlanContext()` helper which also fetches a live `Account` so planner entity math reflects the latest block.
 
 Both instances share the same `QueryClient`, so a refetch driven by the fresh instance writes back to the cache that the fast instance reads from. A subsequent UI render will see the just-refreshed value within its own staleness window.
 
@@ -32,18 +33,18 @@ freshness | backend | rpcCacheKey | staticCacheKey
 ```
 
 - `freshness` is `'cached'` or `'fresh'`.
-- `backend` is `'v3'` or `'onchain'`.
+- `backend` is `'fallback'` or `'onchain'`.
 - `rpcCacheKey` is a stable join of `chainId:rpcUrl` for the chains declared by `useEulerAddresses().allowedChainIds`.
 - `staticCacheKey` is `JSON.stringify(config)` for the rest of the SDK config (URLs, reward toggles, adapter selection).
 
 On a cache miss, `buildInstance({ backend, buildQuery })` does:
 
 1. Resolves `rpcUrls` from `useEulerAddresses()`. RPC routes through `/api/rpc/<chainId>`, absolute on the server and relative on the client.
-2. Builds the static config (see below), merging in the backend-specific adapter block (`v3AdapterConfig` or `onchainAdapterConfig`).
-3. Calls `buildEulerSDK({ config, buildQuery, plugins: [createPythPlugin({ buildQuery })] })`.
+2. Builds the static config (see below), merging in the backend-specific adapter block (`fallbackAdapterConfig` or `onchainAdapterConfig`).
+3. Calls `buildEulerSDK({ config, buildQuery, plugins: [createPythPlugin(...), createKeyringPlugin(...), createLiteTosPlugin()] })`.
 4. Wires app-side proxy callbacks via `configureAppProxies` — currently `oracleAdapterService.setQueryOracleAdapters` for `/api/oracle-adapters`. The proxy callback is wrapped in `buildQuery('queryOracleAdapters', …)` so its results land in the same shared cache as native SDK queries.
 
-If `buildEulerSDK` rejects, the map entry is cleared so the next caller retries instead of being stuck on a poisoned promise. If the chain list or any URL changes between calls, the cache key changes and a new instance is built. Older in-flight builds that resolve after the key has moved on do not overwrite the current value because the map only stores promises keyed by current config.
+If `buildEulerSDK` rejects, the map entry is cleared so the next caller retries instead of being stuck on a poisoned promise.
 
 ## Configuration
 
@@ -59,7 +60,7 @@ There are two layers of configuration: env vars (resolved by `useEnvConfig`) and
 
 The field that drives backend selection is `enableV3Backend: boolean`:
 
-- On the server it is set to `!!readV3ApiUrl()` — the deployment is considered v3-enabled if any of the upstream V3 API URL env vars resolves to a non-empty value.
+- On the server it is set to `!!readV3ApiUrl()` — the deployment is considered v3-enabled if any of the upstream V3 API URL env vars (`V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL`) resolves to a non-empty value.
 - The server plugin emits the boolean as part of `window.__APP_CONFIG__`.
 - On the client (no `__APP_CONFIG__`, e.g. static deploy) it is derived from `useRuntimeConfig().public.enableV3Backend` via `isTruthy` (`'1' | 'true' | 'yes'`).
 
@@ -67,79 +68,108 @@ The field that drives backend selection is `enableV3Backend: boolean`:
 
 ### Static SDK config
 
-`buildSdkStaticConfig(backend)` in `useEulerSdk.ts` assembles the rest of the SDK config:
+`buildSdkStaticConfig(backend)` in `useEulerSdk.ts` assembles the rest of the SDK config — every external host is pointed at a same-origin proxy:
 
-- `v3ApiUrl` and `tokenlistApiBaseUrl` — always set to the absolute `/api/v3` proxy path regardless of `backend`, so utility endpoints (tokenlist, deployments resolve) keep working even when adapters are pinned to onchain. The per-service adapter flags are what actually steer reads.
-- `deploymentsUrl` — `/api/euler-chains` proxy path.
-- `eulerLabelsBaseUrl`, `oracleAdaptersBaseUrl`, `swapApiUrl` — pulled from `useRuntimeConfig().public` if set.
-- Reward provider flags — `rewardsEnableMerkl`, `rewardsEnableBrevis`, `rewardsEnableFuul` are only emitted as `false` when the deployment disables them via `useDeployConfig()`; otherwise the SDK applies its own defaults.
-- Adapter block — either `v3AdapterConfig` or `onchainAdapterConfig`, merged in last.
+| SDK field | Value | Backing endpoint |
+|-----------|-------|-----------------|
+| `v3ApiUrl`, `tokenlistApiBaseUrl` | `/api/v3` | V3 proxy (`server/api/v3/[...path].ts`) |
+| `deploymentsUrl` | `/api/euler-chains` | Local proxy |
+| `eulerLabelsBaseUrl` | `/api/labels` | Path-shape labels endpoint (see [server-side caching](./server-side-caching.md)) |
+| `rewardsMerklApiUrl` | `/api/proxy/merkl` | Merkl proxy |
+| `rewardsFuulApiUrl` | `/api/proxy/fuul` | Fuul proxy |
+| `rewardsBrevisApiUrl` | `/api/proxy/incentra/sdk/v1/eulerCampaigns` | Incentra/Brevis proxy |
+| `rewardsBrevisProofsApiUrl` | `/api/proxy/incentra/v1/getMerkleProofsBatch` | Incentra/Brevis proxy |
+| `accountVaultsSubgraphUrls[chainId]` | `/api/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
+| `vaultTypeSubgraphUrls[chainId]` | `/api/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
+| `rpcUrls[chainId]` | `/api/rpc/{chainId}` | JSON-RPC proxy |
+| Adapter block | `fallbackAdapterConfig` or `onchainAdapterConfig` | — |
+| `disableV3` | `true` only when `backend === 'fallback'` and `!enableV3Backend` | — |
 
-The full object is serialized into `staticCacheKey`, so any change to any of these fields produces a new instance.
+Reward provider toggles (`rewardsEnableMerkl`, `rewardsEnableBrevis`, `rewardsEnableFuul`) are emitted as `false` only when `useDeployConfig()` disables them.
 
-## Cache Layer
+The full object is serialized into `staticCacheKey`, so any change produces a new instance.
 
-`utils/sdk-query-cache.ts` owns the shared `QueryClient` and the two `BuildQueryFn` factories the SDK uses to wrap every query:
+## Query Policy (single source of truth)
+
+`utils/sdk-query-policy.ts` owns the per-query policy. One row per `query*` name:
+
+```ts
+interface SdkQueryPolicyEntry {
+  staleTimeMs: number              // QueryClient stale time on the browsing SDK
+  formStaleTimeMs?: number         // override on the plan-time SDK; defaults to staleTimeMs
+  invalidateAfterTx?: boolean      // explicitly evicted at form mount + post-tx
+}
+```
+
+A few representative rows:
+
+```ts
+export const SDK_QUERY_POLICY = {
+  // Static catalogue
+  queryDeployments:    { staleTimeMs: 5 * MINUTE },
+  queryABI:            { staleTimeMs: Infinity },
+
+  // Plan-critical chain reads
+  queryEVaultInfoFull: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: 0, invalidateAfterTx: true },
+  queryEVCAccountInfo: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: 0, invalidateAfterTx: true },
+
+  // Time-sensitive
+  queryPythUpdateData: { staleTimeMs: 10 * SECOND, formStaleTimeMs: 0 },
+
+  // Balances
+  queryBalanceOf:      { staleTimeMs: 5 * SECOND,  formStaleTimeMs: 0 },
+}
+```
+
+Three derived exports drop out (pre-resolved so the runtime is a flat lookup):
+
+```ts
+export const STALE_TIMES:        Partial<Record<EulerSDKQueryName, number>>  // for sdkBuildQuery
+export const FORM_STALE_TIMES:   Partial<Record<EulerSDKQueryName, number>>  // for sdkFreshBuildQuery
+export const INVALIDATE_AFTER_TX: readonly EulerSDKQueryName[]               // for invalidateSdkQueries
+```
+
+`FORM_STALE_TIMES[name]` resolves to `policy.formStaleTimeMs ?? policy.staleTimeMs` per row; no two-table lookup at runtime.
+
+### What each field controls
+
+| field | scope | runtime effect |
+|---|---|---|
+| `staleTimeMs` | browsing SDK | `QueryClient.fetchQuery({ staleTime: STALE_TIMES[name] ?? 5_000 })`. Cached entries younger than this are returned without re-invoking the SDK. |
+| `formStaleTimeMs` | plan-time SDK | Same mechanism but on the fresh SDK's wrapper. Setting `0` forces re-fetch on every plan-time call regardless of cache age. |
+| `invalidateAfterTx` | shared QueryClient | Names listed get evicted via `invalidateSdkQueries(INVALIDATE_AFTER_TX)` at form mount and after every successful tx, so the next browsing read re-fetches. |
+
+`formStaleTimeMs` and `invalidateAfterTx` look redundant but cover different scopes — `formStaleTimeMs` only affects the plan-time SDK's per-fetch behaviour, while `invalidateAfterTx` evicts entries from the shared cache so the browsing SDK's *next* read re-fetches too. Some queries need only one (V3-only plan reads, Pyth simulation, etc.); some need both.
+
+## Runtime: `sdk-query-cache.ts`
+
+`utils/sdk-query-cache.ts` is now just runtime — no policy data lives there. It exports:
 
 ```ts
 export const sdkQueryClient = new QueryClient()
 
-const buildSdkQuery = (overrides: Partial<Record<EulerSDKQueryName, number>>): BuildQueryFn =>
-  (queryName, fn, _target, context) => async (...args) => {
-    const serializedArgs = context?.getCacheKey(args) ?? serializeQueryArgs(args)
-    return sdkQueryClient.fetchQuery({
-      queryKey: ['sdk', queryName, serializedArgs],
-      queryFn: () => fn(...args),
-      staleTime: overrides[queryName] ?? STALE_TIMES[queryName] ?? 5 * SECOND,
-    })
-  }
+export const sdkBuildQuery      = buildSdkQuery(STALE_TIMES)
+export const sdkFreshBuildQuery = buildSdkQuery(FORM_STALE_TIMES)
 
-export const sdkBuildQuery = buildSdkQuery({})
-export const sdkFreshBuildQuery = buildSdkQuery(FRESH_OVERRIDES)
+export const invalidateSdkQueries = (queryNames: EulerSDKQueryName[]) => { … }
 ```
+
+`buildSdkQuery(staleTimes)` returns a `BuildQueryFn` that wraps each SDK `query*` method with a `QueryClient.fetchQuery({ queryKey: ['sdk', queryName, serializedArgs], queryFn, staleTime: staleTimes[queryName] ?? 5_000 })` call. Non-listed queries fall through to the 5-second default — exercised by `tests/utils/sdk-query-cache.test.ts`.
 
 Key properties:
 
-- **One `QueryClient` for everything.** Both SDK instances, the Pyth plugin, and the app-side oracle-adapters proxy all write into the same cache keyed by `['sdk', queryName, serializedArgs]`.
-- **Args are serialized via the SDK's `serializeQueryArgs`** (or the per-call `context.getCacheKey` when the SDK provides one). Non-serializable args throw — by design, so we never silently route different args to the same cache slot.
-- **`undefined` is rewritten to `null` on the way in and back to `undefined` on the way out**, because vue-query refuses to cache `undefined`. Callers see no change.
-
-### Where stale times live
-
-`STALE_TIMES` in `utils/sdk-query-cache.ts` is the canonical default policy, organized by data volatility:
-
-| Bucket | Examples | Stale time |
-|--------|----------|-----------|
-| Catalogue / static | `queryABI`, `queryTokenList` | `Infinity` |
-| Deployments / labels / oracle adapters | `queryDeployments`, `queryEulerLabelsEntities`, `queryOracleAdapters`, `queryV3VaultResolve`, `queryEVaultVerifiedArray`, `queryEulerEarnVerifiedArray` | `5 * MINUTE` |
-| Vault info / prices / rewards | `queryEVaultInfoFull`, `queryEulerEarnVaultInfoFull`, `queryV3EVaultDetail`, `queryV3EulerEarnDetail`, `queryAssetPriceInfo`, `queryV3RewardsBreakdown`, `queryV3IntrinsicApy` | `20 * SECOND` – `1 * MINUTE` |
-| Simulation / pyth update batches | `queryBatchSimulation`, `queryPythUpdateData`, `queryPythUpdateFee` | `10 * SECOND` |
-| Hot reads (balances, allowances) | `queryNativeBalance`, `queryTokenBalances`, `queryBalanceOf`, `queryAllowance`, `queryPermit2Allowance` | `5 * SECOND` |
-| Anything else | — | `5 * SECOND` (default fallback) |
-
-`FRESH_OVERRIDES` lists the queries that must always be refetched at plan time:
-
-```ts
-const FRESH_OVERRIDES = {
-  queryEVCAccountInfo: 0,
-  queryVaultAccountInfo: 0,
-  queryEVaultInfoFull: 0,
-  queryEulerEarnVaultInfoFull: 0,
-  queryBatchSimulation: 0,
-  queryBalanceOf: 0,
-  queryNativeBalance: 0,
-  queryAllowance: 0,
-  queryPermit2Allowance: 0,
-  queryPythUpdateData: 0,
-  queryPythUpdateFee: 0,
-}
-```
-
-`sdkFreshBuildQuery` applies these on top of the same `STALE_TIMES`, so cheap reads in the fresh fetch path (labels, ABIs, deployments, prices, rewards) still hit the shared cache and only position-critical queries pay the extra RPC.
+- **One `QueryClient` for everything.** Both SDK instances, the Pyth plugin, and the app-side oracle-adapters proxy all write into the same cache.
+- **Args serialized via the SDK's `serializeQueryArgs`** (or per-call `context.getCacheKey`). Non-serializable args throw.
+- **`undefined` is rewritten to `null` in / `undefined` out** because vue-query refuses to cache `undefined`.
 
 ### Invalidation
 
-`invalidateSdkQueries(queryNames)` exposes a targeted invalidation pass that walks the QueryClient and drops any cache key whose `queryName` matches. Use it sparingly — most plan-time freshness should come from `FRESH_OVERRIDES`, not manual invalidation.
+`invalidateSdkQueries(queryNames)` walks the QueryClient and drops any cache key whose `queryName` matches. Two callers:
+
+- `composables/useEulerTx.ts:finalizeExecution` — fires after every successful tx with `[...INVALIDATE_AFTER_TX]`.
+- `composables/cowswap/useCowSwapExecutionCore.ts` — same, post-CoW-swap settlement.
+
+Both import `INVALIDATE_AFTER_TX` directly from `~/utils/sdk-query-policy`. Most plan-time freshness should come from `formStaleTimeMs: 0`, not manual invalidation.
 
 ## Plan-Time Fresh Fetch
 
@@ -155,9 +185,9 @@ const freshPlanContext = async () => {
 }
 ```
 
-All ~20 plan builders (`planDeposit`, `planWithdraw`, `planBorrow`, `planRepayFromWallet`, `planSwapCollateral`, `planMultiplyWithSwap`, …) call `freshPlanContext()` and pass `account` into the SDK. `simulatePlan`, `executePlan`, and `preparePlanForReview` use `getEulerSdkFresh()` directly so approval resolution and simulation see the same fresh state.
+All ~20 plan builders call `freshPlanContext()` and pass `account` into the SDK. `simulatePlan`, `executePlan`, and `preparePlanForReview` use `getEulerSdkFresh()` directly so approval resolution and simulation see the same fresh state.
 
-The fresh `Account` snapshot is what gives planners correct entity math at the moment of plan construction; the zero-stale `FRESH_OVERRIDES` ensure subsequent SDK reads inside the planner (simulate batches, pyth updates, allowance checks) also reflect the latest block.
+The fresh `Account` snapshot gives planners correct entity math at the moment of plan construction; the zero-`formStaleTimeMs` rows ensure subsequent SDK reads inside the planner (simulate batches, pyth updates, allowance checks) also reflect the latest block.
 
 ## Where to Extend
 
@@ -165,7 +195,7 @@ The fresh `Account` snapshot is what gives planners correct entity math at the m
 |---------|-------|
 | A new env var the SDK needs | `server/plugins/app-config.ts` (server read + `__APP_CONFIG__`), `nuxt.config.ts` (public runtime config key), `composables/useEnvConfig.ts` (resolution order + interface), then pass it into `buildSdkStaticConfig` |
 | A new SDK config field | `buildSdkStaticConfig` in `composables/useEulerSdk.ts` (it folds into the existing cache key automatically) |
-| A new stale-time policy for an existing query | `STALE_TIMES` in `utils/sdk-query-cache.ts` |
-| A new plan-critical query that must always refetch | `FRESH_OVERRIDES` in `utils/sdk-query-cache.ts` |
-| A new app-side proxy that SDK calls through | Add a `setQueryX` wrapper inside `configureAppProxies` in `composables/useEulerSdk.ts`, wrapping the call in `buildQuery('queryX', ...)` so it lands in the shared cache |
+| A new stale-time policy for an existing query | One row in `SDK_QUERY_POLICY` (`utils/sdk-query-policy.ts`). Derived exports re-compute automatically. |
+| A new plan-critical query | Same row, add `formStaleTimeMs: 0` and/or `invalidateAfterTx: true`. |
+| A new app-side proxy that SDK calls through | Add a same-origin proxy under `server/api/proxy/...`, point the corresponding SDK config field at it in `buildSdkStaticConfig`. See [server-side caching](./server-side-caching.md) for the shared `external-proxy.ts` helper. |
 | A new planner | Add the wrapper in `composables/useEulerTx.ts` using `freshPlanContext()` to get a fresh SDK + `Account` |

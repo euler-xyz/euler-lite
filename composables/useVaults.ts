@@ -1,4 +1,16 @@
-import type { EulerEarn, SecuritizeCollateralVault, EVault } from '@eulerxyz/euler-v2-sdk'
+import type {
+  EulerEarn as EulerEarnClass,
+  SecuritizeCollateralVault as SecuritizeCollateralVaultClass,
+  EVault as EVaultClass,
+  IEulerEarn,
+  IEVault,
+  ISecuritizeCollateralVault,
+} from '@eulerxyz/euler-v2-sdk'
+import {
+  EVault,
+  EulerEarn,
+  SecuritizeCollateralVault,
+} from '@eulerxyz/euler-v2-sdk'
 import { extractUnresolvedCollateralAddresses } from '~/utils/vault/collateral-discovery'
 import { isLiveCollateralEdge } from '~/utils/vault/ltv'
 import { fetchChainVaultCategories, fetchVaultCategory, isSecuritizeVault, resetVaultCategoryCache } from '~/utils/vault/categories'
@@ -13,6 +25,9 @@ import {
   type VerificationLabels,
 } from '~/utils/vault/governor-verification'
 import { liteSecuritizeVaultFetchOptions, liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
+import { decodeBigints } from '~/utils/snapshot-codec'
+import { buildRegistryMetaService } from '~/utils/sdk-vault-meta-stub'
+import type { SerialisedSnapshot, SerialisedVault } from '~/utils/snapshot-types'
 
 const isReady = ref(false)
 const isEVaultLoading = ref(false)
@@ -424,6 +439,132 @@ const updateSecuritizeVaults = async (securitizeAddresses: string[], generation:
   }
 }
 
+/**
+ * Reject snapshots older than this — indicates the warm-cache plugin
+ * has been stalled across multiple cycles. Falling through to a full
+ * RPC load is preferable to rendering ancient TVLs / rates.
+ */
+const MAX_HYDRATION_AGE_MS = 6 * 60_000
+
+const isSerialisedSnapshot = (v: unknown): v is SerialisedSnapshot => {
+  if (!v || typeof v !== 'object') return false
+  const s = v as Partial<SerialisedSnapshot>
+  return typeof s.chainId === 'number'
+    && typeof s.fetchedAt === 'number'
+    && Array.isArray(s.evkVaults)
+    && Array.isArray(s.earnVaults)
+    && Array.isArray(s.securitizeVaults)
+    && Array.isArray(s.escrowVaults)
+}
+
+const instantiate = (entry: SerialisedVault): EVaultClass | EulerEarnClass | SecuritizeCollateralVaultClass | undefined => {
+  const args = decodeBigints(entry.data) as Record<string, unknown>
+  if (!args || typeof args !== 'object') return undefined
+  switch (entry.kind) {
+    case 'evk':
+    case 'escrow':
+      return new EVault(args as IEVault)
+    case 'earn':
+      return new EulerEarn(args as IEulerEarn)
+    case 'securitize':
+      return new SecuritizeCollateralVault(args as ISecuritizeCollateralVault)
+  }
+}
+
+/**
+ * Two-pass hydrate from the server snapshot at /api/vaults?chainId=N.
+ *
+ * Pass 1: instantiate every vault as its SDK class and write to the
+ *         registry. Class methods are restored via the constructor; data
+ *         fields come from the decoded snapshot.
+ *
+ * Pass 2: let the SDK wire cross-references by calling each vault's
+ *         `populateCollaterals` / `populateStrategyVaults` with a
+ *         registry-backed `IVaultMetaService` stub. Pure-memory work —
+ *         no RPC, but it restores `collateral.vault` and
+ *         `strategy.vault` instances pointing at the same EVault refs
+ *         registered in pass 1 (preserving object identity for Vue
+ *         reactivity).
+ *
+ * Returns true if the registry is populated and the UI can render
+ * immediately. Returns false if the snapshot is too stale, the wire
+ * shape is malformed, or fetch failed — caller falls through to a
+ * full RPC load.
+ */
+const hydrateFromServer = async (targetChainId: number, generation: number): Promise<boolean> => {
+  const { setMany: registrySetMany, setEscrowAddresses } = useVaultRegistry()
+  try {
+    const wire = await $fetch<SerialisedSnapshot>('/api/vaults', { query: { chainId: targetChainId } })
+    if (loadGeneration.value !== generation) return false
+
+    const snap = decodeBigints(wire) as SerialisedSnapshot
+    if (!isSerialisedSnapshot(snap)) {
+      logWarn('useVaults/hydrateFromServer', 'server returned a malformed snapshot; falling back to RPC')
+      return false
+    }
+    if (snap.chainId !== targetChainId) return false
+    if (Date.now() - snap.fetchedAt > MAX_HYDRATION_AGE_MS) {
+      logWarn(
+        'useVaults/hydrateFromServer',
+        `snapshot too stale (${Math.round((Date.now() - snap.fetchedAt) / 1000)}s old); falling back to RPC`,
+      )
+      return false
+    }
+
+    // Pass 1: instantiate + register.
+    const evk = snap.evkVaults.map(instantiate).filter((v): v is EVaultClass => Boolean(v))
+    const earn = snap.earnVaults.map(instantiate).filter((v): v is EulerEarnClass => Boolean(v))
+    const securitize = snap.securitizeVaults
+      .map(instantiate)
+      .filter((v): v is SecuritizeCollateralVaultClass => Boolean(v))
+    const escrow = snap.escrowVaults.map(instantiate).filter((v): v is EVaultClass => Boolean(v))
+
+    const escrowAddrs: string[] = escrow.map(v => v.address)
+    setEscrowAddresses(escrowAddrs)
+
+    registrySetMany([
+      ...evk.map(v => ({ address: v.address, vault: v, type: 'evk' as const, verified: true })),
+      ...escrow.map(v => ({
+        address: v.address,
+        vault: v,
+        type: 'evk' as const,
+        verified: true,
+        vaultCategory: 'escrow' as const,
+      })),
+      ...earn.map(v => ({ address: v.address, vault: v, type: 'earn' as const, verified: true })),
+      ...securitize.map(v => ({ address: v.address, vault: v, type: 'securitize' as const, verified: true })),
+    ])
+
+    // Pass 2: registry-backed cross-ref wiring. Pure memory work.
+    const registry = useVaultRegistry()
+    const meta = buildRegistryMetaService(registry)
+    await Promise.all([
+      ...evk.map(v => v.populateCollaterals(meta)),
+      ...escrow.map(v => v.populateCollaterals(meta)),
+      ...earn.map(v => v.populateStrategyVaults(meta)),
+    ])
+
+    // Clear loading/updating flags so the UI renders immediately. The
+    // subsequent silent RPC refresh runs without touching these flags.
+    isEVaultLoading.value = false
+    isEVaultUpdating.value = false
+    isEarnLoading.value = false
+    isEarnUpdating.value = false
+    isSecuritizeLoading.value = false
+    isSecuritizeUpdating.value = false
+    isEscrowLoading.value = false
+    isEscrowUpdating.value = false
+    isEscrowLoadedOnce.value = true
+    isReady.value = true
+    loadedChainId.value = targetChainId
+    return true
+  }
+  catch (err) {
+    logWarn('useVaults/hydrateFromServer', err)
+    return false
+  }
+}
+
 const loadVaults = async () => {
   const { chainId } = useEulerAddresses()
   const { verifiedVaultAddresses, earnVaults: earnVaultAddresses } = useEulerLabels()
@@ -433,7 +574,16 @@ const loadVaults = async () => {
   const generation = loadGeneration.value
   const startChainId = chainId.value
 
-  const silent = false
+  // Phase 0: try to hydrate from the warm snapshot at /api/vaults. On
+  // success the registry is populated and the UI renders immediately;
+  // the subsequent RPC pipeline runs in *silent* mode so the per-category
+  // loading/updating flags stay false. On failure (stale, malformed, or
+  // network error) we fall through and the RPC pipeline drives the
+  // loading state normally.
+  const hydrated = await hydrateFromServer(startChainId, generation)
+  if (loadGeneration.value !== generation) return
+
+  const silent = hydrated
 
   // Filter out non-explorable vaults before any on-chain work
   const explorableVaultAddresses = showAllLabelEntries.value

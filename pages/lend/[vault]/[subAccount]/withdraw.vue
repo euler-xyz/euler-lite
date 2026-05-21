@@ -4,6 +4,7 @@ import type { VaultAsset } from '~/types/asset'
 import { getProjectedRates } from '~/utils/vault/apy'
 import { isSecuritizeVault } from '~/utils/vault/categories'
 import { getHookDisabledWarning, getUtilisationWarning } from '~/composables/useVaultWarnings'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
@@ -39,7 +40,8 @@ const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : add
 const { fetchVaultShareBalance } = useWallets()
 const { runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const { getSupplyRewardApy } = useRewardsApy()
-const { withIntrinsicSupplyApy } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const vaultAddress = route.params.vault as string
 useOperationGuard([vaultAddress])
 const subAccountIndex = Number(route.params.subAccount)
@@ -154,14 +156,14 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 })
 const supplyAPYDisplay = computed(() => {
   if (!vault.value) return '0.00'
-  const base = withIntrinsicSupplyApy(getVaultSupplyApy(vault.value), vault.value.asset.address)
+  const base = withVaultIntrinsicApy(getVaultSupplyApy(vault.value), vault.value, enableIntrinsicApy.value)
   return formatNumber(base + rewardApy.value)
 })
 const estimateSupplyAPYDisplay = computed(() => {
   const estimate = typeof estimateSupplyAPY.value === 'bigint'
     ? nanoToValue(estimateSupplyAPY.value, 25)
     : estimateSupplyAPY.value
-  const base = withIntrinsicSupplyApy(estimate, vault.value?.asset.address)
+  const base = withVaultIntrinsicApy(estimate, vault.value, enableIntrinsicApy.value)
   return formatNumber(base + rewardApy.value)
 })
 

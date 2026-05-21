@@ -10,6 +10,7 @@ import { VaultOverviewModal, VaultSupplyApyModal, UiModalPreviewTrigger } from '
 import { useModal } from '~/components/ui/composables/useModal'
 import { formatNumber, formatCompactUsdValue, compactNumber, formatExactAmount } from '~/utils/string-utils'
 import { roundAndCompactTokens } from '~/utils/crypto-utils'
+import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 
 const { position } = defineProps<{ position: PortfolioSavingsPosition<VaultEntity> }>()
 const modal = useModal()
@@ -23,7 +24,8 @@ const subAccountIndex = computed(() => {
 })
 
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
-const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 
 const vault = computed(() => position.vault as EulerEarn)
 const positionKey = computed(() => `${position.subAccount.toLowerCase()}:${vault.value.address.toLowerCase()}`)
@@ -80,8 +82,8 @@ watchEffect(() => {
 const supplyApyModalData = computed(() => ({
   props: {
     lendingAPY: getVaultSupplyApy(vault.value),
-    intrinsicAPY: getIntrinsicApy(vault.value.asset.address),
-    intrinsicApyInfo: getIntrinsicApyInfo(vault.value.asset.address),
+    intrinsicAPY: getVaultIntrinsicApy(vault.value, enableIntrinsicApy.value),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(vault.value, enableIntrinsicApy.value),
     campaigns: getSupplyRewardCampaigns(vault.value.address),
     rewardVaultAddress: vault.value.address,
     baseApyAverageLabel: '1h',

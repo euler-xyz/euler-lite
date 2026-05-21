@@ -4,21 +4,25 @@ import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { VaultSupplyApyModal, VaultBorrowApyModal, UiModalPreviewTrigger } from '#components'
+import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 
 const { vault } = defineProps<{ vault: EVault }>()
 
-const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, hasSupplyRewards, hasBorrowRewards } = useRewardsApy()
 const isBorrowable = computed(() => vault.collaterals.some(ltv => ltv.borrowLTV > 0))
 
-const supplyApyWithRewards = computed(() => withIntrinsicSupplyApy(
+const supplyApyWithRewards = computed(() => withVaultIntrinsicApy(
   getVaultSupplyApy(vault),
-  vault.asset.address,
+  vault,
+  enableIntrinsicApy.value,
 ) + getSupplyRewardApy(vault.address))
 // Vault overview shows generic borrow rewards (no specific collateral context available here)
-const borrowApyWithRewards = computed(() => withIntrinsicBorrowApy(
+const borrowApyWithRewards = computed(() => withVaultIntrinsicApy(
   getVaultBorrowApy(vault),
-  vault.asset.address,
+  vault,
+  enableIntrinsicApy.value,
 ) - getBorrowRewardApy(vault.address))
 
 const supplyRewardInfo = computed(() => getSupplyRewardCampaigns(vault.address))
@@ -27,8 +31,8 @@ const borrowRewardInfo = computed(() => getBorrowRewardCampaigns(vault.address))
 const supplyApyModalData = computed(() => ({
   props: {
     lendingAPY: getVaultSupplyApy(vault),
-    intrinsicAPY: getIntrinsicApy(vault.asset.address),
-    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    intrinsicAPY: getVaultIntrinsicApy(vault, enableIntrinsicApy.value),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
     campaigns: supplyRewardInfo.value,
     rewardVaultAddress: vault.address,
   },
@@ -37,8 +41,8 @@ const supplyApyModalData = computed(() => ({
 const borrowApyModalData = computed(() => ({
   props: {
     borrowingAPY: getVaultBorrowApy(vault),
-    intrinsicAPY: getIntrinsicApy(vault.asset.address),
-    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    intrinsicAPY: getVaultIntrinsicApy(vault, enableIntrinsicApy.value),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
     campaigns: borrowRewardInfo.value,
     rewardVaultAddress: vault.address,
   },

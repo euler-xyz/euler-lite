@@ -4,6 +4,7 @@ import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { formatNumber, compactNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
+import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
 import { getStrategyHookWarning } from '~/composables/useVaultWarnings'
 import { DateTime } from 'luxon'
@@ -21,7 +22,8 @@ const { vault } = defineProps<{ vault: EulerEarn }>()
 
 const { getOrFetch } = useVaultRegistry()
 const { isEscrowLoadedOnce } = useVaults()
-const { withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 
 const exposureVaults: Ref<EVault[]> = ref([])
@@ -122,15 +124,15 @@ const getAllocationPercentage = (exposure: EulerEarnStrategyInfo) => {
 
 const getStrategySupplyApy = (strategyVault: EVault) => {
   const lendingAPY = getVaultSupplyApy(strategyVault)
-  const supplyApy = withIntrinsicSupplyApy(lendingAPY, strategyVault.asset.address)
+  const supplyApy = withVaultIntrinsicApy(lendingAPY, strategyVault, enableIntrinsicApy.value)
   return supplyApy + getSupplyRewardApy(strategyVault.address)
 }
 
 const getStrategySupplyApyModalData = (strategyVault: EVault) => ({
   props: {
     lendingAPY: getVaultSupplyApy(strategyVault),
-    intrinsicAPY: getIntrinsicApy(strategyVault.asset.address),
-    intrinsicApyInfo: getIntrinsicApyInfo(strategyVault.asset.address),
+    intrinsicAPY: getVaultIntrinsicApy(strategyVault, enableIntrinsicApy.value),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(strategyVault, enableIntrinsicApy.value),
     campaigns: getSupplyRewardCampaigns(strategyVault.address),
     rewardVaultAddress: strategyVault.address,
   },

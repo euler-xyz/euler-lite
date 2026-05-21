@@ -4,7 +4,6 @@
  * but sources normalized labels and vault entities through the SDK.
  */
 import {
-  buildEulerSDK,
   StandardEVaultPerspectives,
   VaultType,
   type EulerEarn,
@@ -20,8 +19,7 @@ import type { Address } from 'viem'
 import { createInFlightDedup } from './in-flight'
 import { buildEntityAddressSets, declaredKeysOf, tryChecksum } from './labels-helpers'
 import { logger } from './logger'
-import { resolveRpcUrl } from './rpc'
-import { readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
+import { getServerSdk } from './sdk-server'
 import type { VerificationLabels } from '~/utils/vault/governor-verification'
 
 export interface ChainVaultsSnapshot {
@@ -88,7 +86,6 @@ export interface LabelsView {
 }
 
 const inflight = createInFlightDedup<number, LabelsView>()
-const sdkByChain = new Map<number, Promise<EulerSDK>>()
 
 function strOrNull(value: unknown): string | null {
   if (typeof value !== 'string') return null
@@ -118,27 +115,8 @@ function uniqueAddresses(addresses: Iterable<string>): Address[] {
   return [...result.values()]
 }
 
-function getSdk(chainId: number): Promise<EulerSDK> {
-  const cached = sdkByChain.get(chainId)
-  if (cached) return cached
-
-  const rpcUrl = resolveRpcUrl(chainId)
-  if (!rpcUrl) throw new Error(`No RPC URL configured for chain ${chainId}`)
-
-  const v3ApiUrl = readResolvedV3ApiUrl()
-  const v3ApiKey = readV3ApiKey().trim()
-  const promise = buildEulerSDK({
-    config: {
-      rpcUrls: { [chainId]: rpcUrl },
-      eVaultServiceAdapter: 'onchain',
-      v3ApiUrl,
-      tokenlistApiBaseUrl: v3ApiUrl,
-      ...(v3ApiKey ? { v3ApiKey } : {}),
-    },
-  })
-  sdkByChain.set(chainId, promise)
-  return promise
-}
+// SDK builder shared with vaults-cache via server/utils/sdk-server.ts.
+const getSdk = (chainId: number): Promise<EulerSDK> => getServerSdk(chainId)
 
 async function fetchTokenList(chainId: number): Promise<TokenListEntry[]> {
   const data = await $fetch<TokenListResponse>('/api/token-list', { query: { chainId } })

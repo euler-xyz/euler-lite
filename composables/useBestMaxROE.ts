@@ -2,6 +2,7 @@ import type { MarketGroup } from '~/entities/lend-discovery'
 import { isEVault } from '@eulerxyz/euler-v2-sdk'
 import { type BestMaxRoeResult, getBorrowableVaults } from '~/utils/discoveryCalculations'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 
 /**
  * Computes the best max ROE for each market group by iterating all actual
@@ -11,7 +12,8 @@ import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
  * Returns a reactive map of marketGroupId -> BestMaxRoeResult.
  */
 export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
-  const { withIntrinsicSupplyApy, withIntrinsicBorrowApy, version: intrinsicVersion } = useIntrinsicApy()
+  const { settings } = useUserSettings()
+  const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
   const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy, version: rewardsVersion } = useRewardsApy()
 
   const computeForGroup = (group: MarketGroup): BestMaxRoeResult => {
@@ -34,7 +36,7 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
 
     for (const liability of borrowableVaults) {
       const borrowBase = getVaultBorrowApy(liability)
-      const borrowApy = withIntrinsicBorrowApy(borrowBase, liability.asset.address)
+      const borrowApy = withVaultIntrinsicApy(borrowBase, liability, enableIntrinsicApy.value)
 
       for (const ltv of liability.collaterals) {
         if (ltv.borrowLTV <= 0) continue
@@ -47,7 +49,7 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
         if (!collateral || !isEVault(collateral)) continue
 
         const supplyBase = getVaultSupplyApy(collateral)
-        const supplyApy = withIntrinsicSupplyApy(supplyBase, collateral.asset.address)
+        const supplyApy = withVaultIntrinsicApy(supplyBase, collateral, enableIntrinsicApy.value)
         const supplyRewards = getSupplyRewardApy(collateral.address)
         const borrowRewards = getBorrowRewardApy(liability.address, collateral.address)
         const loopingRewards = getLoopingRewardApy(liability.address, collateral.address)
@@ -86,7 +88,7 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
   }
 
   const bestMaxROEMap = computed((): Map<string, BestMaxRoeResult> => {
-    void intrinsicVersion.value
+    void enableIntrinsicApy.value
     void rewardsVersion.value
 
     const result = new Map<string, BestMaxRoeResult>()

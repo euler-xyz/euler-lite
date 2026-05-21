@@ -2,6 +2,7 @@
 import type { SecuritizeBorrowVaultPair } from '~/types/borrow-pair'
 import { getAssetOraclePrice, getCollateralOraclePrice } from '~/utils/sdk-prices'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
+import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultBorrowApyModal, VaultRampDownModal, VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
 import type { EVaultCollateral } from '@eulerxyz/euler-v2-sdk'
@@ -13,24 +14,26 @@ const currentLiquidationLTV = computed(() => pair.ltv.currentLiquidationLTV)
 const isRamping = computed(() => pair.ltv.isLiquidationLTVRamping)
 
 const modal = useModal()
-const { withIntrinsicBorrowApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, hasSupplyRewards, hasBorrowRewards } = useRewardsApy()
 
 // Borrow APY (from EVault borrow vault)
 const totalBorrowRewardsAPY = computed(() => getBorrowRewardApy(pair.borrow.address, pair.collateral.address))
 
-const borrowApyWithRewards = computed(() => withIntrinsicBorrowApy(
+const borrowApyWithRewards = computed(() => withVaultIntrinsicApy(
   getVaultBorrowApy(pair.borrow),
-  pair.borrow.asset.address,
+  pair.borrow,
+  enableIntrinsicApy.value,
 ) - totalBorrowRewardsAPY.value)
 
 const baseBorrowApy = computed(() => getVaultBorrowApy(pair.borrow))
-const intrinsicBorrowApy = computed(() => getIntrinsicApy(pair.borrow.asset.address))
+const intrinsicBorrowApy = computed(() => getVaultIntrinsicApy(pair.borrow, enableIntrinsicApy.value))
 const borrowRewardInfo = computed(() => getBorrowRewardCampaigns(pair.borrow.address, pair.collateral.address))
 
 // Supply APY (for securitize collateral - intrinsic + rewards only, no interest rate)
 const collateralRewardAPY = computed(() => getSupplyRewardApy(pair.collateral.address))
-const intrinsicSupplyApy = computed(() => getIntrinsicApy(pair.collateral.asset.address))
+const intrinsicSupplyApy = computed(() => getVaultIntrinsicApy(pair.collateral, enableIntrinsicApy.value))
 const supplyApyWithRewards = computed(() => intrinsicSupplyApy.value + collateralRewardAPY.value)
 const supplyRewardInfo = computed(() => getSupplyRewardCampaigns(pair.collateral.address))
 
@@ -62,7 +65,7 @@ const supplyApyModalData = computed(() => ({
   props: {
     lendingAPY: 0, // Securitize vaults don't have interest rates
     intrinsicAPY: intrinsicSupplyApy.value,
-    intrinsicApyInfo: getIntrinsicApyInfo(pair.collateral.asset.address),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(pair.collateral, enableIntrinsicApy.value),
     campaigns: supplyRewardInfo.value,
     rewardVaultAddress: pair.collateral.address,
   },
@@ -72,7 +75,7 @@ const borrowApyModalData = computed(() => ({
   props: {
     borrowingAPY: baseBorrowApy.value,
     intrinsicAPY: intrinsicBorrowApy.value,
-    intrinsicApyInfo: getIntrinsicApyInfo(pair.borrow.asset.address),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(pair.borrow, enableIntrinsicApy.value),
     campaigns: borrowRewardInfo.value,
     rewardVaultAddress: pair.borrow.address,
   },

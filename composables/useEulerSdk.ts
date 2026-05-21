@@ -81,11 +81,19 @@ const buildAppApiPath = (path: string) => {
 }
 
 const buildV3ProxyApiPath = () => buildAppApiPath('/api/v3')
-// Merkl's v4 API doesn't set permissive CORS headers, so the SDK's
-// rewardsDirectAdapter can't fetch it directly from a browser. Route through
-// a lite server proxy that rewrites `${merklApiUrl}/<path>?<qs>` to the
-// upstream `https://api.merkl.xyz/v4/<path>?<qs>`.
+// Per-host proxies wrap the SDK's direct upstream calls so they (1) share
+// one server-side TTL cache across browser tabs, (2) take the cold-TLS
+// hit once at proxy startup rather than on every user, and (3) keep
+// upstream URLs (and any auth) server-only. See
+// `server/api/proxy/{merkl,fuul,incentra,subgraph}/[...path].ts` and
+// `server/api/labels/[chainId]/[file].get.ts`.
 const buildMerklProxyApiPath = () => buildAppApiPath('/api/proxy/merkl')
+const buildFuulProxyApiPath = () => buildAppApiPath('/api/proxy/fuul')
+const buildIncentraProxyApiPath = (path: string) =>
+  buildAppApiPath(`/api/proxy/incentra/${path.replace(/^\/+/, '')}`)
+const buildSubgraphProxyApiPath = (chainId: number) =>
+  buildAppApiPath(`/api/proxy/subgraph/${chainId}`)
+const buildLabelsProxyApiPath = () => buildAppApiPath('/api/labels')
 
 type SdkBackend = 'fallback' | 'onchain'
 
@@ -105,13 +113,27 @@ const onchainAdapterConfig: Partial<EulerSDKConfig> = {
   rewardsServiceAdapter: 'direct',
 }
 
+// Per-chain subgraph URL map → server proxy. The proxy resolves the real
+// upstream from env (`SUBGRAPH_URL_<chainId>` or
+// `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`). We register every enabled chain
+// up-front so the SDK's subgraph adapters never see a direct Goldsky URL.
+const buildSubgraphUrlMap = (): Record<number, string> => {
+  const { allowedChainIds } = useEulerAddresses()
+  const out: Record<number, string> = {}
+  for (const chainId of allowedChainIds.value) {
+    out[chainId] = buildSubgraphProxyApiPath(chainId)
+  }
+  return out
+}
+
 const buildSdkStaticConfig = (backend: SdkBackend) => {
   const rc = getPublicRuntimeConfig()
   const { enableMerkl, enableIncentra, enableFuul } = useDeployConfig()
-  const labelsBaseUrl = cleanUrl(rc.configLabelsBaseUrl)
   const oracleChecksBaseUrl = cleanUrl(rc.configOracleChecksBaseUrl)
   const swapApiUrl = cleanUrl(rc.swapApiUrl)
   const v3ApiUrl = buildV3ProxyApiPath()
+  const labelsProxyUrl = buildLabelsProxyApiPath()
+  const subgraphUrls = buildSubgraphUrlMap()
   const { enableV3Backend } = useEnvConfig()
   const config: EulerSDKConfig = {
     // The proxy path is wired regardless of `backend` so that the SDK can still
@@ -120,12 +142,29 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
     // what actually steer reads through the fallback chain vs straight onchain.
     ...(v3ApiUrl ? { v3ApiUrl, tokenlistApiBaseUrl: v3ApiUrl } : {}),
     deploymentsUrl: buildAppApiPath('/api/euler-chains'),
-    ...(labelsBaseUrl ? { eulerLabelsBaseUrl: labelsBaseUrl } : {}),
+    // Labels always go through the local /api/labels proxy. Server-side env
+    // (`NUXT_PUBLIC_CONFIG_LABELS_BASE_URL`/`*_REPO`) controls where the proxy
+    // fetches upstream, so callers see a single internal hostname. Same
+    // pattern as `tokenlistApiBaseUrl` above.
+    eulerLabelsBaseUrl: labelsProxyUrl,
     ...(oracleChecksBaseUrl ? { oracleAdaptersBaseUrl: oracleChecksBaseUrl } : {}),
     ...(swapApiUrl ? { swapApiUrl } : {}),
     ...(enableMerkl ? { rewardsMerklApiUrl: buildMerklProxyApiPath() } : { rewardsEnableMerkl: false }),
-    ...(enableIncentra ? {} : { rewardsEnableBrevis: false }),
-    ...(enableFuul ? {} : { rewardsEnableFuul: false }),
+    // Incentra/Brevis: SDK takes the full URL for each endpoint, so map both
+    // to the corresponding paths under our incentra proxy.
+    ...(enableIncentra
+      ? {
+          rewardsBrevisApiUrl: buildIncentraProxyApiPath('sdk/v1/eulerCampaigns'),
+          rewardsBrevisProofsApiUrl: buildIncentraProxyApiPath('v1/getMerkleProofsBatch'),
+        }
+      : { rewardsEnableBrevis: false }),
+    // Fuul: SDK appends `/incentives?...` itself, so just set the base URL.
+    ...(enableFuul ? { rewardsFuulApiUrl: buildFuulProxyApiPath() } : { rewardsEnableFuul: false }),
+    // Goldsky subgraph: route every chain through `/api/proxy/subgraph/{id}`
+    // so the browser never sees the upstream URL or hits api.goldsky.com
+    // directly.
+    accountVaultsSubgraphUrls: subgraphUrls,
+    vaultTypeSubgraphUrls: subgraphUrls,
     ...(backend === 'fallback' ? fallbackAdapterConfig : onchainAdapterConfig),
     // Fallback chains short-circuit to the secondary (onchain/direct/subgraph)
     // when no upstream V3 is configured. Slow/onchain backend ignores this

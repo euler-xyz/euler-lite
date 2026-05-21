@@ -5,14 +5,17 @@ export const liteVaultFetchOptions = {
   populateCollaterals: true,
   populateStrategyVaults: true,
   populateRewards: true,
+  populateIntrinsicApy: true,
   eVaultFetchOptions: {
     populateMarketPrices: true,
     populateCollaterals: true,
     populateRewards: true,
+    populateIntrinsicApy: true,
   },
 } satisfies VaultFetchOptions
 
 export const liteSecuritizeVaultFetchOptions = {
   populateMarketPrices: true,
   populateRewards: true,
+  populateIntrinsicApy: true,
 } satisfies VaultFetchOptions

@@ -2,6 +2,7 @@
 import { isEVault, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { getNetAPY } from '~/utils/vault/apy'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { getAssetUsdValueOrZero, getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -29,7 +30,8 @@ useFullBalances()
 const positionIndex = usePositionIndex()
 const { isPositionsLoading, isPositionsLoaded, isDepositsLoaded, refreshAllPositions: _refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
-const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { eulerLensAddresses: _eulerLensAddresses } = useEulerAddresses()
 const { fetchSingleBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
@@ -87,13 +89,15 @@ const liqPriceFromHealth = (health: number | null | undefined): number | null =>
 // --- APYs ---
 const collateralSupplyRewardApy = computed(() => getSupplyRewardApy(collateralVault.value?.address || ''))
 const borrowRewardApy = computed(() => getBorrowRewardApy(borrowVault.value?.address || '', collateralVault.value?.address || ''))
-const collateralSupplyApy = computed(() => withIntrinsicSupplyApy(
+const collateralSupplyApy = computed(() => withVaultIntrinsicApy(
   getVaultSupplyApy(collateralVault.value),
-  collateralVault.value?.asset.address,
+  collateralVault.value,
+  enableIntrinsicApy.value,
 ))
-const borrowApy = computed(() => withIntrinsicBorrowApy(
+const borrowApy = computed(() => withVaultIntrinsicApy(
   getVaultBorrowApy(borrowVault.value),
-  borrowVault.value?.asset.address,
+  borrowVault.value,
+  enableIntrinsicApy.value,
 ))
 
 const netApyGuard = createRaceGuard()

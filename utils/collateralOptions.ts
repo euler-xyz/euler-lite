@@ -3,24 +3,25 @@ import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import type { CollateralOption } from '~/types/collateral-option'
 import { getVaultProductName } from '~/utils/eulerLabelsUtils'
 import { getVaultTags, type VaultTagContext } from '~/composables/useGeoBlock'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 
 export function computeSupplyApy(
   vault: EVault,
-  withIntrinsicSupplyApy: (base: number, assetAddress: string) => number,
   getSupplyRewardApy: (vaultAddress: string) => number,
+  enableIntrinsicApy: boolean,
 ): number {
   const base = getVaultSupplyApy(vault)
-  return withIntrinsicSupplyApy(base, vault.asset.address) + getSupplyRewardApy(vault.address)
+  return withVaultIntrinsicApy(base, vault, enableIntrinsicApy) + getSupplyRewardApy(vault.address)
 }
 
 export function computeBorrowApy(
   vault: EVault,
-  withIntrinsicBorrowApy: (base: number, assetAddress: string) => number,
   getBorrowRewardApy: (vaultAddress: string, collateralAddress?: string) => number,
+  enableIntrinsicApy: boolean,
   collateralAddress?: string,
 ): number {
   const base = getVaultBorrowApy(vault)
-  return withIntrinsicBorrowApy(base, vault.asset.address) - getBorrowRewardApy(vault.address, collateralAddress)
+  return withVaultIntrinsicApy(base, vault, enableIntrinsicApy) - getBorrowRewardApy(vault.address, collateralAddress)
 }
 
 export async function buildCollateralOption(params: {

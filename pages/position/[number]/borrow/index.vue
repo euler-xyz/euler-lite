@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { getNetAPY, getProjectedRates } from '~/utils/vault/apy'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import type { VaultAsset } from '~/types/asset'
 import { getHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
 import { isOpDisabled, OP_BORROW } from '~/utils/vault-hooks'
@@ -34,7 +35,8 @@ const positionIndex = usePositionIndex()
 const { fetchSingleBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
-const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 
 const priceInvert = usePriceInvert(
   () => collateralVault.value?.asset.symbol,
@@ -150,13 +152,15 @@ const _collateralProduct = useEulerProductOfVault(computed(() => collateralVault
 
 const collateralSupplyRewardApy = computed(() => getSupplyRewardApy(collateralVault.value?.address || ''))
 const borrowRewardApy = computed(() => getBorrowRewardApy(borrowVault.value?.address || '', collateralVault.value?.address || ''))
-const collateralSupplyApy = computed(() => withIntrinsicSupplyApy(
+const collateralSupplyApy = computed(() => withVaultIntrinsicApy(
   getVaultSupplyApy(collateralVault.value),
-  collateralVault.value?.asset.address,
+  collateralVault.value,
+  enableIntrinsicApy.value,
 ))
-const borrowApy = computed(() => withIntrinsicBorrowApy(
+const borrowApy = computed(() => withVaultIntrinsicApy(
   getVaultBorrowApy(borrowVault.value),
-  borrowVault.value?.asset.address,
+  borrowVault.value,
+  enableIntrinsicApy.value,
 ))
 
 const load = async () => {
