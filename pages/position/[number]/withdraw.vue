@@ -278,7 +278,7 @@ watch(selectedOutputAsset, () => {
                 />
               </VaultFormInfoBlock>
 
-              <UiToast
+              <UiAlert
                 v-if="form.swapQuoteError.value"
                 title="Swap quote"
                 variant="warning"
@@ -287,7 +287,7 @@ watch(selectedOutputAsset, () => {
               />
             </template>
 
-            <UiToast
+            <UiAlert
               v-if="isUnknownSwapToken && needsSwap"
               title="Unknown token"
               description="This token is not on any recognized token list. It could be fraudulent or malicious. Verify the contract address before proceeding."
@@ -295,35 +295,35 @@ watch(selectedOutputAsset, () => {
               size="compact"
             />
 
-            <UiToast
+            <UiAlert
               v-if="form.isGeoBlocked.value"
               title="Region restricted"
               description="This operation is not available in your region. You can still repay existing debt."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="!form.isGeoBlocked.value && (form.isOutputAssetBlocked.value || form.isOutputAssetRestricted.value)"
               title="Asset restricted"
               description="Receiving this asset is not available in your region. Pick a different token."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="!form.isGeoBlocked.value && !form.isOutputAssetBlocked.value && !form.isOutputAssetRestricted.value && form.isSwapRestricted.value"
               title="Swap restricted"
               description="Swapping from this vault is not available in your region. You can withdraw the vault's underlying asset directly."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-show="form.estimatesError.value"
               title="Error"
               variant="error"
               :description="form.estimatesError.value"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="form.simulationError.value"
               title="Error"
               variant="error"

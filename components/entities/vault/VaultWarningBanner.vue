@@ -20,7 +20,7 @@ const getWarningVariant = (warning: VaultWarning) => {
     v-if="activeWarnings.length"
     class="flex flex-col gap-12"
   >
-    <UiToast
+    <UiAlert
       v-for="warning in activeWarnings"
       :key="warning.title"
       :title="warning.title"
