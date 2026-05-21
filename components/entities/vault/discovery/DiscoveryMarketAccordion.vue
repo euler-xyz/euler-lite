@@ -220,22 +220,19 @@ const attributeMatrixMap = computed((): Map<string, AttributeMatrixData> => {
 })
 
 // Stats matrix needs the same APY users see on per-vault cards (base IRM rate
-// folded with intrinsic + supply/borrow rewards). The composables fetch this
-// data asynchronously and bump `version` when it lands; the explicit reads
-// here re-trigger the computed so the cells refresh in place.
+// folded with intrinsic + supply/borrow rewards). Viewer + settings are
+// reactive — touching them inside the computed re-runs the cache build when
+// the connected wallet changes or the user toggles intrinsic/rewards.
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
-const { getSupplyRewardApy, getBorrowRewardApy, version: rewardsVersion } = useRewardsApy()
+const enableRewardsApy = computed(() => settings.value.enableRewardsApy)
+const { viewer } = useApyVisibility()
 
 const vaultApyCache = computed<Map<string, VaultApyCacheEntry>>(() => {
-  void enableIntrinsicApy.value
-  void rewardsVersion.value
-  return buildVaultApyCache(
-    props.markets,
-    enableIntrinsicApy.value,
-    getSupplyRewardApy,
-    getBorrowRewardApy,
-  )
+  return buildVaultApyCache(props.markets, viewer.value, {
+    enableIntrinsicApy: enableIntrinsicApy.value,
+    enableRewardsApy: enableRewardsApy.value,
+  })
 })
 
 // -- Cell selection state (matrix view) --

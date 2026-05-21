@@ -13,6 +13,7 @@ import {
 } from '~/utils/discoveryCalculations'
 import type { MarketGroup } from '~/entities/lend-discovery'
 import type { EVault, EVaultCollateral, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import { VaultRewardInfo } from '@eulerxyz/euler-v2-sdk'
 
 vi.mock('~/entities/euler/labels', () => ({
   getEulerLabelEntityLogo: () => undefined,
@@ -331,6 +332,28 @@ describe('attribute config matrix', () => {
 })
 
 describe('buildVaultApyCache', () => {
+  const settings = { enableIntrinsicApy: true, enableRewardsApy: true }
+  // 0.5% supply + 0.25% borrow campaigns expressed as VaultRewardInfo;
+  // c.apr is a decimal fraction, so 0.5% = 0.005.
+  const rewards = () => new VaultRewardInfo({
+    campaigns: [
+      {
+        campaignId: 'lend',
+        source: 'merkl',
+        action: 'LEND',
+        apr: 0.005,
+        rewardTokenSymbol: 'EUL',
+      },
+      {
+        campaignId: 'borrow',
+        source: 'merkl',
+        action: 'BORROW',
+        apr: 0.0025,
+        rewardTokenSymbol: 'EUL',
+      },
+    ] as never,
+  })
+
   it('folds intrinsic and reward APY into the per-vault entries', () => {
     const vault = {
       ...makeVault('0xPT', []),
@@ -339,20 +362,17 @@ describe('buildVaultApyCache', () => {
         borrowAPY: 6,
       },
       intrinsicApy: { apy: 1, provider: 'test' },
+      rewards: rewards(),
     } as unknown as EVault
     const market = makeMarket([vault])
 
-    const cache = buildVaultApyCache(
-      [market],
-      true,
-      _addr => 0.5, // supply rewards
-      _addr => 0.25, // general borrow rewards
-    )
+    const cache = buildVaultApyCache([market], undefined, settings)
 
     const entry = cache.get(vault.address.toLowerCase())
     expect(entry).toBeDefined()
-    // withVaultIntrinsicApy(base, vault, true) = base + (1 + base/100) * 1
+    // computeSupplyApyBreakdown: lending + intrinsic + rewards = base + (1 + base/100) * intrinsic + lendRewards
     expect(entry!.supplyApy).toBeCloseTo(4 + (1 + 4 / 100) * 1 + 0.5)
+    // computeBorrowApy: base + (1 + base/100) * intrinsic - borrowRewards
     expect(entry!.borrowApy).toBeCloseTo(6 + (1 + 6 / 100) * 1 - 0.25)
   })
 
@@ -367,15 +387,11 @@ describe('buildVaultApyCache', () => {
         borrowAPY: 5,
       },
       intrinsicApy: { apy: 1, provider: 'test' },
+      rewards: rewards(),
     } as unknown as EVault
     const market = makeMarket([], [externalVault])
 
-    const cache = buildVaultApyCache(
-      [market],
-      true,
-      _addr => 0.5,
-      _addr => 0.25,
-    )
+    const cache = buildVaultApyCache([market], undefined, settings)
 
     const entry = cache.get(externalVault.address.toLowerCase())
     expect(entry).toBeDefined()

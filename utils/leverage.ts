@@ -1,36 +1,25 @@
-import { BPS_BASE } from '~/entities/tuning-constants'
-
-// 0.5% safety margin subtracted from the raw multiplier (50 basis points)
-const SAFETY_MARGIN_BPS = 50n
+import { getMaxMultiplier as sdkGetMaxMultiplier, getMaxRoe as sdkGetMaxRoe } from '@eulerxyz/euler-v2-sdk'
 
 /**
  * Compute the maximum leverage multiplier for a given borrow LTV.
- * Raw formula: 1 / (1 - LTV), with a 0.5% safety margin deducted.
+ * Accepts either decimal (0.85) or basis points (8500n).
  *
- * @param borrowLTV - LTV in basis points (e.g. 9000n = 90%)
+ * @param borrowLTV - LTV in basis points (bigint, e.g. 9000n = 90%) or decimal (number, e.g. 0.9)
  * @returns max multiplier floored to 2 decimal places, minimum 1
  */
 export const getMaxMultiplier = (borrowLTV: bigint | number): number => {
-  const ltv = typeof borrowLTV === 'number'
-    ? BigInt(Math.round(borrowLTV * 10_000))
-    : borrowLTV || 0n
-  if (ltv <= 0n || ltv >= BPS_BASE) {
-    return 1
-  }
-  const result = (BPS_BASE * ltv) / (BPS_BASE - ltv) - SAFETY_MARGIN_BPS + BPS_BASE
-  const value = Number(result) / 10000
-  if (!Number.isFinite(value)) {
-    return 1
-  }
-  return Math.max(1, Math.floor(value * 100) / 100)
+  const ltv = typeof borrowLTV === 'bigint'
+    ? Number(borrowLTV) / 10_000
+    : borrowLTV
+  if (!Number.isFinite(ltv) || ltv <= 0 || ltv >= 1) return 1
+  return sdkGetMaxMultiplier(ltv)
 }
 
 /**
  * Compute the maximum Return on Equity for a leveraged position.
- * Formula: supplyApy + (multiplier - 1) * (supplyApy - borrowApy) + loopingRewardApr
  *
- * Looping rewards are added flat (not scaled by leverage) because they are
- * based on net liquidity which stays constant regardless of leverage.
+ * `sdkGetMaxRoe(M, S, B) = S + (M - 1) * (S - B)`. Looping rewards are paid
+ * per unit of equity (not scaled by leverage), so they're added flat.
  *
  * @param maxMultiplier - from getMaxMultiplier()
  * @param supplyApy - supply APY including rewards (%)
@@ -44,14 +33,13 @@ export const getMaxRoe = (
   borrowApy: number,
   loopingRewardApr: number = 0,
 ): number => {
-  const netApy = supplyApy - borrowApy
   if (
     !Number.isFinite(maxMultiplier)
     || !Number.isFinite(supplyApy)
-    || !Number.isFinite(netApy)
+    || !Number.isFinite(borrowApy)
     || !Number.isFinite(loopingRewardApr)
   ) {
     return 0
   }
-  return supplyApy + (maxMultiplier - 1) * netApy + loopingRewardApr
+  return sdkGetMaxRoe(maxMultiplier, supplyApy, borrowApy) + loopingRewardApr
 }

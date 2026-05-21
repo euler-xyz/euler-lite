@@ -23,13 +23,17 @@ const subAccountIndex = computed(() => {
   return getSubAccountIndex(getAddress(ownerAddress.value), getAddress(position.subAccount))
 })
 
-const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
+const { getSupplyRewardCampaigns } = useRewardsApy()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
+const { viewer, visibleTotal } = useApyVisibility()
 
 const vault = computed(() => position.vault as EulerEarn)
 const positionKey = computed(() => `${position.subAccount.toLowerCase()}:${vault.value.address.toLowerCase()}`)
-const rewardsExist = computed(() => hasSupplyRewards(vault.value.address))
+const apyBreakdown = computed(() => position.getApyBreakdown({ viewer: viewer.value }))
+const rewardsExist = computed(() =>
+  settings.value.enableRewardsApy && (apyBreakdown.value?.rewards ?? 0) > 0,
+)
 const { isVerifiedVault } = useVaultRegistry()
 
 const product = useEulerProductOfVault(computed(() => vault.value.address))
@@ -50,7 +54,7 @@ watchEffect(() => {
   updateSupplyValueDisplay()
 })
 
-const supplyApyWithRewards = computed(() => getVaultSupplyApy(vault.value) + getSupplyRewardApy(vault.value.address))
+const supplyApyWithRewards = computed(() => visibleTotal(apyBreakdown.value) ?? 0)
 
 const hasPrice = ref(false)
 

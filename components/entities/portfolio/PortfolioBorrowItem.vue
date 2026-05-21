@@ -39,6 +39,7 @@ const modal = useModal()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, getEligibleLoopingRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, getLoopingRewardCampaigns, hasSupplyRewards, hasBorrowRewards, isLoopingEligible } = useRewardsApy()
+const { viewer, visibleTotal } = useApyVisibility()
 
 const borrowVault = computed(() => position.borrowVault as EVault)
 const collateralVault = computed(() => position.collateralVault as EVault | SecuritizeCollateralVault)
@@ -227,13 +228,10 @@ const netAssetValueDisplay = computed(() => {
   return netAssetValue.value.hasPrice ? formatCompactUsdValue(netAssetValue.value.usd) : '-'
 })
 
-const netAPY = computed(() => {
-  return position.netApy
-})
-
-const roe = computed(() => {
-  return position.roe
-})
+const apyBreakdown = computed(() => position.getApyBreakdown({ viewer: viewer.value }))
+const roeBreakdown = computed(() => position.getRoeBreakdown({ viewer: viewer.value }))
+const netAPY = computed(() => visibleTotal(apyBreakdown.value))
+const roe = computed(() => visibleTotal(roeBreakdown.value))
 
 const intrinsicSupplyApy = computed(() => getVaultIntrinsicApy(collateralVault.value, enableIntrinsicApy.value))
 const intrinsicBorrowApy = computed(() => getVaultIntrinsicApy(borrowVault.value, enableIntrinsicApy.value))
@@ -246,12 +244,7 @@ const loopingCampaignsForModal = computed(() => getLoopingRewardCampaigns(borrow
 const userLTV = computed(() =>
   userLTVValue.value === undefined ? null : ltvToPercent(nanoToValue(userLTVValue.value, 18)),
 )
-const actualMultiplier = computed(() => {
-  if (position.multiplier !== undefined) return position.multiplier
-  const equity = collateralValue.value.usd - borrowedValue.value.usd
-  if (equity <= 0) return 0
-  return collateralValue.value.usd / equity
-})
+const actualMultiplier = computed(() => position.multiplier ?? 0)
 
 const netApyModalData = computed(() => ({
   props: {

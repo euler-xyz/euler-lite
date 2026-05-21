@@ -10,7 +10,7 @@ import { formatNumber, formatCompactUsdValue, formatSmartAmount, formatExactAmou
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { VaultOverviewModal, VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
-import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
+import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 
 const { position } = defineProps<{ position: PortfolioSavingsPosition<VaultEntity> }>()
 const modal = useModal()
@@ -25,7 +25,8 @@ const subAccountIndex = computed(() => {
 
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
-const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
+const { getSupplyRewardCampaigns } = useRewardsApy()
+const { viewer, visibleTotal } = useApyVisibility()
 
 const vault = computed(() => position.vault!)
 const positionKey = computed(() => `${position.subAccount.toLowerCase()}:${vault.value.address.toLowerCase()}`)
@@ -36,15 +37,11 @@ const utilisationWarning = computed(() => {
 
 const isSecuritize = computed(() => isSecuritizeCollateralVault(vault.value))
 
-const rewardsExist = computed(() => hasSupplyRewards(vault.value.address))
-const supplyApy = computed(() => {
-  return withVaultIntrinsicApy(
-    getVaultSupplyApy(vault.value),
-    vault.value,
-    enableIntrinsicApy.value,
-  )
-})
-const supplyApyWithRewards = computed(() => supplyApy.value + getSupplyRewardApy(vault.value.address))
+const apyBreakdown = computed(() => position.getApyBreakdown({ viewer: viewer.value }))
+const rewardsExist = computed(() =>
+  settings.value.enableRewardsApy && (apyBreakdown.value?.rewards ?? 0) > 0,
+)
+const supplyApyWithRewards = computed(() => visibleTotal(apyBreakdown.value) ?? 0)
 
 const product = useEulerProductOfVault(computed(() => vault.value.address))
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()

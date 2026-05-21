@@ -84,6 +84,19 @@
       ]
     },
     {
+      "id": "main-lend-list-spy-mainnet",
+      "label": "Main scenario: Mainnet lend list with spy (viewer-aware rewards)",
+      "path": "/lend?network=1&showAll=true&spy=0x75cFE4ef963232ae8313aC33e21fC39241338618",
+      "ignoreListDataPointsOnListPage": [
+        {
+          "listPrefix": "collateral-exposure:"
+        }
+      ],
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"lend\"]"
+      ]
+    },
+    {
       "id": "main-lend-list-sort-supply-apy-mainnet",
       "label": "Main scenario: Mainnet lend list sorted by Supply APY",
       "path": "/lend?network=1&showAll=true",

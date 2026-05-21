@@ -23,7 +23,12 @@ export const useMultiplyCollateralOptions = ({
   const { depositPositions } = useEulerAccount()
   const { settings } = useUserSettings()
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
-  const { getSupplyRewardApy, version: rewardsVersion } = useRewardsApy()
+  const enableRewardsApy = computed(() => settings.value.enableRewardsApy)
+  const { viewer } = useApyVisibility()
+  const visibilitySettings = computed(() => ({
+    enableIntrinsicApy: enableIntrinsicApy.value,
+    enableRewardsApy: enableRewardsApy.value,
+  }))
 
   const primaryCollateralAddress = computed(() => {
     const primary = primaryCollateralVault.value
@@ -58,14 +63,14 @@ export const useMultiplyCollateralOptions = ({
 
   const walletItems = useReactiveMap(
     walletItemsInput,
-    [rewardsVersion, enableIntrinsicApy],
+    [viewer, enableIntrinsicApy, enableRewardsApy],
     async ({ vault, balance }) => ({
       vault,
       option: await buildCollateralOption({
         vault, type: 'wallet',
         amount: nanoToValue(balance, vault.asset.decimals),
         priceAmount: nanoToValue(balance, vault.asset.decimals),
-        apy: computeSupplyApy(vault, getSupplyRewardApy, enableIntrinsicApy.value),
+        apy: computeSupplyApy(vault, viewer.value, visibilitySettings.value),
         tagContext: 'supply-source',
       }),
     } as CollateralItem),
@@ -91,14 +96,14 @@ export const useMultiplyCollateralOptions = ({
 
   const savingItems = useReactiveMap(
     savingItemsInput,
-    [rewardsVersion, enableIntrinsicApy],
+    [viewer, enableIntrinsicApy, enableRewardsApy],
     async ({ vault, assets, subAccount }) => ({
       vault,
       option: await buildCollateralOption({
         vault, type: 'saving',
         amount: nanoToValue(assets, vault.asset.decimals),
         priceAmount: nanoToValue(assets, vault.asset.decimals),
-        apy: computeSupplyApy(vault, getSupplyRewardApy, enableIntrinsicApy.value),
+        apy: computeSupplyApy(vault, viewer.value, visibilitySettings.value),
         tagContext: 'supply-source',
         subAccount,
       }),

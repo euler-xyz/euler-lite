@@ -11,7 +11,7 @@ import { formatNumber, compactNumber, truncate } from '~/utils/string-utils'
 import { formatHookedOpsSummary, getHookedOperationMetas, getVaultHookedOperations, hasAnyHookedOperation, isVaultEffectivelyPaused } from '~/utils/vault-hooks'
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
 import { getVaultBorrowApy, getVaultSupplyApy } from '~/utils/vault-display'
-import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import { computeSupplyApy, computeBorrowApy, type ApyVisibilitySettings } from '~/utils/collateralOptions'
 
 // ============================================================
 // Types & Constants
@@ -960,18 +960,14 @@ export const STATS_ROWS: AttributeRow[] = [
   },
 ]
 
-// Build a per-vault APY cache that mirrors the per-vault card formula:
-//   supplyApy = withVaultIntrinsicApy(base) + supplyRewards
-//   borrowApy = withVaultIntrinsicApy(base) - borrowRewards (general only)
-//
-// Borrow rewards here use no collateral context, so collateral-conditional
-// campaigns (`euler_borrow_collateral`) are intentionally excluded — the
-// matrix shows per-vault stats, not per-pair.
+// Build a per-vault APY cache. Mirrors the per-vault card formula: supply APY
+// includes LEND rewards (viewer-filtered), borrow APY subtracts BORROW rewards
+// (general only — no collateral context, since the matrix shows per-vault
+// stats, not per-pair).
 export const buildVaultApyCache = (
   markets: MarketGroup[],
-  enableIntrinsicApy: boolean,
-  getSupplyRewardApy: (vaultAddress: string) => number,
-  getBorrowRewardApy: (vaultAddress: string) => number,
+  viewer: string | undefined,
+  settings: ApyVisibilitySettings,
 ): Map<string, VaultApyCacheEntry> => {
   const result = new Map<string, VaultApyCacheEntry>()
   for (const market of markets) {
@@ -982,11 +978,15 @@ export const buildVaultApyCache = (
       if (!isVaultType(vault)) continue
       const addr = vault.address.toLowerCase()
       if (result.has(addr)) continue
-      const baseSupply = supplyApyPercent(vault)
-      const baseBorrow = borrowApyPercent(vault)
+      if (!isEVault(vault)) {
+        const baseSupply = supplyApyPercent(vault)
+        result.set(addr, { supplyApy: baseSupply, borrowApy: 0 })
+        continue
+      }
       result.set(addr, {
-        supplyApy: withVaultIntrinsicApy(baseSupply, vault, enableIntrinsicApy) + getSupplyRewardApy(vault.address),
-        borrowApy: withVaultIntrinsicApy(baseBorrow, vault, enableIntrinsicApy) - getBorrowRewardApy(vault.address),
+        supplyApy: computeSupplyApy(vault, viewer, settings),
+        // No collateral context here: BORROW_COLLATERAL is intentionally excluded.
+        borrowApy: computeBorrowApy(vault, viewer, settings, undefined),
       })
     }
   }

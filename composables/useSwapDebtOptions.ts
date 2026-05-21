@@ -15,7 +15,8 @@ export const useSwapDebtOptions = ({
   const { getVerifiedEVaults } = useVaultRegistry()
   const { settings } = useUserSettings()
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
-  const { getBorrowRewardApy, version: rewardsVersion } = useRewardsApy()
+  const enableRewardsApy = computed(() => settings.value.enableRewardsApy)
+  const { viewer } = useApyVisibility()
 
   const borrowVaults = computed(() => {
     const collateral = collateralVault.value
@@ -47,9 +48,17 @@ export const useSwapDebtOptions = ({
 
   const borrowOptions = useReactiveMap(
     borrowVaults,
-    [rewardsVersion, enableIntrinsicApy],
+    [viewer, enableIntrinsicApy, enableRewardsApy],
     async (vault) => {
-      const apy = computeBorrowApy(vault, getBorrowRewardApy, enableIntrinsicApy.value, collateralVault?.value?.address)
+      const apy = computeBorrowApy(
+        vault,
+        viewer.value,
+        {
+          enableIntrinsicApy: enableIntrinsicApy.value,
+          enableRewardsApy: enableRewardsApy.value,
+        },
+        collateralVault?.value?.address,
+      )
       return buildCollateralOption({ vault, type: 'vault', amount: 0, priceAmount: 0, apy, tagContext: 'swap-target', showBalance: false })
     },
   )

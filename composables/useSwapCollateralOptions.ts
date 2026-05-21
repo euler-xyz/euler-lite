@@ -20,7 +20,8 @@ export const useSwapCollateralOptions = ({
   const { getBalance } = useWallets()
   const { settings } = useUserSettings()
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
-  const { getSupplyRewardApy, version: rewardsVersion } = useRewardsApy()
+  const enableRewardsApy = computed(() => settings.value.enableRewardsApy)
+  const { viewer } = useApyVisibility()
 
   const collateralVaults = computed(() => {
     const current = currentVault.value
@@ -67,11 +68,14 @@ export const useSwapCollateralOptions = ({
 
   const collateralOptions = useReactiveMap(
     collateralVaults,
-    [rewardsVersion, enableIntrinsicApy],
+    [viewer, enableIntrinsicApy, enableRewardsApy],
     async (vault) => {
       const balance = getBalance(vault.asset.address as Address)
       const amount = nanoToValue(balance, vault.asset.decimals)
-      const apy = computeSupplyApy(vault, getSupplyRewardApy, enableIntrinsicApy.value)
+      const apy = computeSupplyApy(vault, viewer.value, {
+        enableIntrinsicApy: enableIntrinsicApy.value,
+        enableRewardsApy: enableRewardsApy.value,
+      })
       const type = getVaultCategory(vault.address) === 'escrow' ? 'escrow' : 'vault'
       return buildCollateralOption({ vault, type, amount, priceAmount: amount, apy, tagContext })
     },
