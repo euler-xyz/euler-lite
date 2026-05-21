@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import type { ToastVariant, ToastSize } from './toast.types'
+import type { ToastPresentation, ToastVariant, ToastSize } from './toast.types'
 
-export type { ToastVariant, ToastSize }
+export type { ToastPresentation, ToastVariant, ToastSize }
 
 const props = withDefaults(defineProps<{
   variant?: ToastVariant
   size?: ToastSize
+  presentation?: ToastPresentation
   title: string
   description?: string
   actionText?: string
@@ -14,6 +15,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   variant: 'info',
   size: 'normal',
+  presentation: 'inline',
   persistent: true,
   duration: 5000,
 })
@@ -37,6 +39,7 @@ const classes = computed(() => {
   return {
     [`ui-toast--${props.variant}`]: props.variant,
     [`ui-toast--${props.size}`]: props.size,
+    [`ui-toast--${props.presentation}`]: props.presentation,
     'ui-toast--with-action': hasAction.value,
   }
 })
@@ -117,13 +120,58 @@ if (!props.persistent && props.duration > 0) {
   align-items: stretch;
   width: 100%;
   min-width: min(220px, 100%);
-  max-width: 320px;
   color: var(--ui-toast-neutral-text-color);
   background-color: var(--ui-toast-background-color);
   border: 1px solid var(--ui-toast-neutral-border-color);
   border-radius: var(--radius-md);
   box-shadow: var(--ui-toast-box-shadow);
   overflow: hidden;
+
+  &--floating {
+    max-width: 320px;
+  }
+
+  &--inline {
+    &.ui-toast--info {
+      color: var(--ui-toast-info-text-color);
+      background-color: var(--ui-toast-info-background-color);
+      border-color: var(--ui-toast-info-border-color);
+    }
+
+    &.ui-toast--success {
+      color: var(--ui-toast-success-text-color);
+      background-color: var(--ui-toast-success-background-color);
+      border-color: var(--ui-toast-success-border-color);
+    }
+
+    &.ui-toast--warning {
+      color: var(--ui-toast-warning-text-color);
+      background-color: var(--ui-toast-warning-background-color);
+      border-color: var(--ui-toast-warning-border-color);
+    }
+
+    &.ui-toast--error {
+      color: var(--ui-toast-error-text-color);
+      background-color: var(--ui-toast-error-background-color);
+      border-color: var(--ui-toast-error-border-color);
+    }
+
+    &.ui-toast--neutral {
+      color: var(--ui-toast-neutral-text-color);
+      background-color: var(--ui-toast-neutral-background-color);
+      border-color: var(--ui-toast-neutral-border-color);
+    }
+
+    .ui-toast__title,
+    .ui-toast__description,
+    .ui-toast__icon {
+      color: currentColor;
+    }
+
+    .ui-toast__description {
+      opacity: 0.8;
+    }
+  }
 
   &--info {
     .ui-toast__icon {
