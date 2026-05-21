@@ -11,20 +11,56 @@
  * cleared on build failure so the next call retries instead of poisoning
  * the entry.
  *
- * Service adapters are left unset so the SDK defaults to `'fallback'` —
- * V3 primary, onchain secondary when V3 is configured; pure onchain
- * otherwise. To force an onchain-only snapshot regardless of V3 health,
- * pin `*ServiceAdapter` in `buildServerSdkConfig` below.
+ * The adapter chain is selected by `SERVER_VAULT_CACHE_SOURCE`:
+ *   - `fallback` (default): V3 primary → onchain secondary. With no V3
+ *     configured the SDK degrades to onchain via `disableV3: true`.
+ *   - `onchain`: pin every service to onchain — bypasses V3 entirely.
+ *   - `v3`: pin to V3; SDK build throws when V3 is not configured.
  */
 import {
   buildEulerSDK,
   type EulerSDK,
   type EulerSDKConfig,
 } from '@eulerxyz/euler-v2-sdk'
-import { readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
+import {
+  readResolvedV3ApiUrl,
+  readServerVaultCacheSource,
+  readV3ApiKey,
+  readV3ApiUrl,
+  type VaultDataSource,
+} from '~/utils/api-url-env'
 import { resolveRpcUrl } from './rpc'
 
 const sdkByChain = new Map<number, Promise<EulerSDK>>()
+
+const fallbackAdapterConfig: Partial<EulerSDKConfig> = {
+  accountServiceAdapter: 'fallback',
+  eVaultServiceAdapter: 'fallback',
+  eulerEarnServiceAdapter: 'fallback',
+  rewardsServiceAdapter: 'fallback',
+}
+
+const onchainAdapterConfig: Partial<EulerSDKConfig> = {
+  accountServiceAdapter: 'onchain',
+  eVaultServiceAdapter: 'onchain',
+  eulerEarnServiceAdapter: 'onchain',
+  rewardsServiceAdapter: 'direct',
+}
+
+const v3AdapterConfig: Partial<EulerSDKConfig> = {
+  accountServiceAdapter: 'v3',
+  eVaultServiceAdapter: 'v3',
+  eulerEarnServiceAdapter: 'v3',
+  rewardsServiceAdapter: 'v3',
+}
+
+const adapterConfigForSource = (source: VaultDataSource): Partial<EulerSDKConfig> => {
+  switch (source) {
+    case 'onchain': return onchainAdapterConfig
+    case 'v3': return v3AdapterConfig
+    default: return fallbackAdapterConfig
+  }
+}
 
 const buildServerSdkConfig = (chainId: number): EulerSDKConfig => {
   const rpcUrl = resolveRpcUrl(chainId)
@@ -32,18 +68,18 @@ const buildServerSdkConfig = (chainId: number): EulerSDKConfig => {
 
   const v3ApiUrl = readResolvedV3ApiUrl()
   const v3ApiKey = readV3ApiKey().trim()
-  // Service adapters left unset so the SDK defaults to 'fallback' — V3
-  // primary, onchain secondary when V3 is configured. When V3 is not
-  // configured, the SDK still resolves 'fallback' but with disableV3
-  // semantics (the snapshot pipeline doesn't pass disableV3 explicitly;
-  // V3 calls will fail and the SDK falls through to onchain). To force
-  // an onchain-only snapshot regardless of V3 health, pin
-  // `*ServiceAdapter` here.
+  const source = readServerVaultCacheSource()
+  const hasV3 = !!readV3ApiUrl()
+
   return {
     rpcUrls: { [chainId]: rpcUrl },
     v3ApiUrl,
     tokenlistApiBaseUrl: v3ApiUrl,
     ...(v3ApiKey ? { v3ApiKey } : {}),
+    ...adapterConfigForSource(source),
+    // Fallback short-circuits to onchain when no V3 is configured —
+    // otherwise the SDK keeps trying V3 and every refresh logs failures.
+    ...(source === 'fallback' && !hasV3 ? { disableV3: true } : {}),
   }
 }
 

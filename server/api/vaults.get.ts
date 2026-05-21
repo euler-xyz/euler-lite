@@ -18,6 +18,7 @@ import { createRateLimiter } from '~/server/utils/rate-limit'
 import { resolveChainId } from '~/server/utils/resolve-chain-id'
 import { reportStatus } from '~/server/utils/log'
 import { refreshChainVaults, vaultsCache } from '~/server/utils/vaults-cache'
+import { readDisableServerVaultCache } from '~/utils/api-url-env'
 
 const rateLimiter = createRateLimiter({
   max: 600,
@@ -27,6 +28,15 @@ const rateLimiter = createRateLimiter({
 
 export default defineEventHandler(async (event) => {
   rateLimiter.consume(event)
+
+  // Operator opt-out: when the snapshot is disabled the endpoint is
+  // unavailable, the warm cycle doesn't run, and the browser's
+  // hydrateFromServer treats this as a hydrate failure and falls through
+  // to the normal RPC pipeline. Returning 503 (vs 404) signals "feature
+  // intentionally disabled" rather than "route not found".
+  if (readDisableServerVaultCache()) {
+    throw createError({ statusCode: 503, statusMessage: 'Vault snapshot disabled' })
+  }
 
   const chainId = resolveChainId(event)
   const cacheKey = String(chainId)

@@ -8,7 +8,11 @@
  *
  * Also patches <title> and meta tags so crawlers see the correct values.
  */
-import { readV3ApiUrl, V3_API_PROXY_URL } from '~/utils/api-url-env'
+import {
+  readBrowserVaultSource,
+  readV3ApiUrl,
+  V3_API_PROXY_URL,
+} from '~/utils/api-url-env'
 
 const DEFAULTS = {
   appTitle: 'Euler Lite',
@@ -44,6 +48,9 @@ function readAppConfig() {
     // The client uses this to decide whether the SDK's "fast" instance routes
     // reads via /api/v3 (v3 adapters) or falls back to direct on-chain reads.
     enableV3Backend: !!readV3ApiUrl(),
+    // Adapter chain pinned for the browser's "fast" SDK instance. See
+    // utils/api-url-env.ts:readBrowserVaultSource.
+    browserVaultSource: readBrowserVaultSource(),
     swapApiUrl: env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL'),
   }
 }

@@ -10,7 +10,13 @@
  * (2) covers static / CDN deployments where the Nitro render hook never fires.
  */
 
-import { readV3ApiUrl, V3_API_PROXY_URL } from '~/utils/api-url-env'
+import {
+  DEFAULT_VAULT_DATA_SOURCE,
+  readBrowserVaultSource,
+  readV3ApiUrl,
+  V3_API_PROXY_URL,
+  type VaultDataSource,
+} from '~/utils/api-url-env'
 
 interface EnvConfig {
   appTitle: string
@@ -25,6 +31,9 @@ interface EnvConfig {
    *  SDK "fast" instance: when true it uses v3 adapters; when false it falls
    *  back to direct on-chain reads with longer caching. */
   enableV3Backend: boolean
+  /** Adapter chain the browser's "fast" SDK uses (vault lists, prices,
+   *  rewards). Mirrors `SERVER_VAULT_CACHE_SOURCE` on the snapshot side. */
+  browserVaultSource: VaultDataSource
   swapApiUrl: string
 }
 
@@ -38,6 +47,7 @@ const DEFAULTS: EnvConfig = {
   appUrl: '',
   v3ApiUrl: '',
   enableV3Backend: false,
+  browserVaultSource: DEFAULT_VAULT_DATA_SOURCE,
   swapApiUrl: '',
 }
 
@@ -62,6 +72,7 @@ function scanEnv(): EnvConfig {
     appUrl: env('NUXT_PUBLIC_APP_URL') || DEFAULTS.appUrl,
     v3ApiUrl: V3_API_PROXY_URL,
     enableV3Backend: v3UpstreamConfigured,
+    browserVaultSource: readBrowserVaultSource(),
     swapApiUrl: env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL') || DEFAULTS.swapApiUrl,
   }
 }
@@ -72,6 +83,12 @@ function fromRuntimeConfig(): EnvConfig {
   const isTruthy = (v: unknown): boolean => {
     const s = str(v).toLowerCase().trim()
     return s === '1' || s === 'true' || s === 'yes'
+  }
+  const parseSource = (v: unknown): VaultDataSource => {
+    const s = str(v).toLowerCase().trim()
+    return (s === 'fallback' || s === 'onchain' || s === 'v3')
+      ? s as VaultDataSource
+      : DEFAULT_VAULT_DATA_SOURCE
   }
 
   return {
@@ -84,6 +101,7 @@ function fromRuntimeConfig(): EnvConfig {
     appUrl: str(rc.appUrl) || DEFAULTS.appUrl,
     v3ApiUrl: str(rc.v3ApiUrl) || V3_API_PROXY_URL,
     enableV3Backend: isTruthy(rc.enableV3Backend),
+    browserVaultSource: parseSource(rc.browserVaultSource),
     swapApiUrl: str(rc.swapApiUrl) || DEFAULTS.swapApiUrl,
   }
 }

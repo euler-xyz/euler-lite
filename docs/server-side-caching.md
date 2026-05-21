@@ -120,14 +120,26 @@ Fetch options:
 
 ### Server-side SDK builder
 
-`server/utils/sdk-server.ts:getServerSdk(chainId)` builds one SDK per chain, cached at module scope. No explicit adapter pins — the SDK defaults to `'fallback'`:
+`server/utils/sdk-server.ts:getServerSdk(chainId)` builds one SDK per chain, cached at module scope. The adapter chain is selected by `SERVER_VAULT_CACHE_SOURCE` (default `fallback`):
 
-- **V3 configured**: snapshot is built by V3 batched endpoints with onchain fallback. Cheap, fast.
-- **V3 not configured**: SDK's fallback chain still resolves but V3 calls fail and fall through to onchain lens multicalls. Slower (~20 multicalls per chain) but authoritative.
+| Value | Behavior |
+|---|---|
+| `fallback` *(default)* | V3 primary, on-chain secondary. With V3 configured: cheap/fast batched fetches. Without V3: `disableV3: true` short-circuits the fallback chain so the snapshot is built from onchain lens multicalls (slower but authoritative). |
+| `onchain` | Direct on-chain reads only — bypasses V3 entirely regardless of `V3_API_URL`. |
+| `v3` | V3 only; SDK build throws when no V3 endpoint is configured. |
 
-To force the snapshot to read directly from the chain regardless of V3 health, pin `*ServiceAdapter: 'onchain'` here.
+A boot-time warning fires if `SERVER_VAULT_CACHE_SOURCE` (or `NUXT_PUBLIC_BROWSER_VAULT_SOURCE`) needs V3 but `V3_API_URL` is unset — see `utils/api-url-env.ts:warnIfVaultSourceNeedsV3`.
 
 `labels-view.ts` shares the same `getServerSdk` instance per chain.
+
+### Disabling the snapshot
+
+Set `DISABLE_SERVER_VAULT_CACHE=true` to:
+
+- Skip the vault warm-cache cycle in `warm-cache.ts` (the labels / token-list / chains cycle still runs).
+- Make `/api/vaults?chainId=N` respond `503 Vault snapshot disabled`.
+
+The browser's snapshot hydrate (`hydrateFromServer`) treats the 503 as a hydrate failure and falls through to the normal RPC pipeline — visually identical to the cold-snapshot path, just always taken. Useful when the host can't afford the snapshot's outbound V3/RPC fan-out, or when bot-management throttles bursty origin traffic.
 
 ### Wire format
 
@@ -236,17 +248,28 @@ Chains are warmed sequentially, not in parallel. Cross-chain upstreams (DefiLlam
 
 ## V3 Configuration Effects
 
-Whether `V3_API_URL` (or aliases) is set changes three things:
+Whether `V3_API_URL` (or aliases) is set changes how the default `fallback` adapter chain behaves on both the server (snapshot builder) and the browser (fast SDK):
 
 | | V3 configured | V3 not configured |
 |---|---|---|
 | `enableV3Backend` (env) | `true` | `false` |
-| Browsing SDK's fallback chain | V3 primary → onchain secondary | `disableV3: true` → onchain only |
-| Server-side SDK adapters | SDK default `'fallback'` → V3 primary | SDK default `'fallback'` → onchain (V3 calls fail) |
+| Browser fast SDK (`NUXT_PUBLIC_BROWSER_VAULT_SOURCE=fallback`) | V3 primary → onchain secondary | `disableV3: true` → onchain only |
+| Server snapshot builder (`SERVER_VAULT_CACHE_SOURCE=fallback`) | V3 primary → onchain secondary | `disableV3: true` → onchain lens multicalls |
 | Vault snapshot TTL | 2 min | 5 min |
 | Vault snapshot warm cadence | every 1 min | every 5 min |
 
-The snapshot remains active in both modes. With V3 the snapshot is built quickly from V3's batched endpoints; without V3 it's built from onchain lens multicalls. Either way the browser sees the same wire-format payload and benefits identically.
+Pinning either source to `onchain` ignores V3 even when `V3_API_URL` is set. Pinning to `v3` requires `V3_API_URL` — the SDK build throws otherwise, and the boot warning surfaces this misconfiguration before warming starts.
+
+The snapshot remains active in all modes (unless `DISABLE_SERVER_VAULT_CACHE=true`). With V3 the snapshot is built quickly from V3's batched endpoints; without V3 it's built from onchain lens multicalls. Either way the browser sees the same wire-format payload and benefits identically.
+
+## Configuration Flags Summary
+
+| Env var | Side | Values | Default | Effect |
+|---|---|---|---|---|
+| `SERVER_VAULT_CACHE_SOURCE` | server | `fallback` \| `onchain` \| `v3` | `fallback` | Adapter chain in `server/utils/sdk-server.ts`. |
+| `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` | browser (exposed) | `fallback` \| `onchain` \| `v3` | `fallback` | Adapter chain in `composables/useEulerSdk.ts:getEulerSdk()`. The "fresh" / plan-time SDK is always `onchain` regardless. |
+| `DISABLE_SERVER_VAULT_CACHE` | server | `true` \| `false` | `false` | When true: warm-cache skips the vault cycle, `/api/vaults` returns 503, browser falls through to RPC pipeline. |
+| `V3_API_URL` *(plus aliases)* | server | URL | unset | Required upstream when any source ∈ `{fallback, v3}` actually needs V3. Boot warning fires when unset and a V3-requiring source is configured.
 
 ## Verification
 

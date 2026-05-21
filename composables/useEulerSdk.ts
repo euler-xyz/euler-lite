@@ -38,25 +38,26 @@ const pythProxyFetch: typeof fetch = (input, init) => {
 /**
  * Two SDK instances are exposed:
  *
- *   - `getEulerSdk()`  — "fast" / browsing instance. Uses the SDK's built-in
- *     `'fallback'` adapter mode: V3 HTTP primary with on-chain secondary, wired
- *     by the SDK via `createFallbackAdapter`. When the deployment has no V3
- *     upstream configured (`enableV3Backend` false), we set `disableV3: true`
- *     so the fallback chain degrades to onchain only. Uses the default
- *     `sdkBuildQuery` cache policy (sub-minute stale times for hot reads,
- *     longer for static catalogue data). Consumed by UI surfaces: vault lists,
- *     portfolio display, prices, rewards.
+ *   - `getEulerSdk()`  — "fast" / browsing instance. Adapter chain is picked
+ *     by `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` (default `fallback`):
+ *       • `fallback` — V3 HTTP primary, on-chain secondary; auto-degrades to
+ *         onchain via `disableV3: true` when no V3 endpoint is configured.
+ *       • `onchain`  — direct on-chain reads only; never touches V3.
+ *       • `v3`       — V3 only; SDK build throws without a V3 endpoint.
+ *     Uses the default `sdkBuildQuery` cache policy (sub-minute stale times
+ *     for hot reads, longer for catalogue data). Consumed by UI surfaces:
+ *     vault lists, portfolio display, prices, rewards.
  *
  *   - `getEulerSdkFresh()`  — "slow" / plan-time instance. Always uses on-chain
- *     adapters directly (no fallback wrapping) so the Account/Vault state used
- *     to build a transaction plan reflects the latest block. Uses
- *     `sdkFreshBuildQuery`, which forces a zero stale time on plan-critical
- *     queries (account, vault info, balances, allowances, pyth update data)
- *     while letting catalogue / labels / prices fall through to the same
- *     QueryClient cache that the fast instance fills. The fresh instance's
- *     refetches write back to the shared cache, so a subsequent fast read sees
- *     the just-refreshed value within its own staleness window. Consumed by
- *     `useEulerTx` planners and simulate/execute.
+ *     adapters directly (no fallback wrapping) regardless of the browser
+ *     source, so the Account/Vault state used to build a transaction plan
+ *     reflects the latest block. Uses `sdkFreshBuildQuery`, which forces a
+ *     zero stale time on plan-critical queries (account, vault info, balances,
+ *     allowances, pyth update data) while letting catalogue / labels / prices
+ *     fall through to the same QueryClient cache that the fast instance fills.
+ *     The fresh instance's refetches write back to the shared cache, so a
+ *     subsequent fast read sees the just-refreshed value within its own
+ *     staleness window. Consumed by `useEulerTx` planners and simulate/execute.
  */
 
 type SdkInstance = { sdk: EulerSDK }
@@ -95,7 +96,7 @@ const buildSubgraphProxyApiPath = (chainId: number) =>
   buildAppApiPath(`/api/proxy/subgraph/${chainId}`)
 const buildLabelsProxyApiPath = () => buildAppApiPath('/api/labels')
 
-type SdkBackend = 'fallback' | 'onchain'
+type SdkBackend = 'fast' | 'onchain'
 
 const fallbackAdapterConfig: Partial<EulerSDKConfig> = {
   accountServiceAdapter: 'fallback',
@@ -103,6 +104,14 @@ const fallbackAdapterConfig: Partial<EulerSDKConfig> = {
   eulerEarnServiceAdapter: 'fallback',
   vaultTypeAdapter: 'fallback',
   rewardsServiceAdapter: 'fallback',
+}
+
+const v3AdapterConfig: Partial<EulerSDKConfig> = {
+  accountServiceAdapter: 'v3',
+  eVaultServiceAdapter: 'v3',
+  eulerEarnServiceAdapter: 'v3',
+  vaultTypeAdapter: 'v3',
+  rewardsServiceAdapter: 'v3',
 }
 
 const onchainAdapterConfig: Partial<EulerSDKConfig> = {
@@ -126,6 +135,14 @@ const buildSubgraphUrlMap = (): Record<number, string> => {
   return out
 }
 
+const adapterConfigForFastSource = (source: 'fallback' | 'onchain' | 'v3'): Partial<EulerSDKConfig> => {
+  switch (source) {
+    case 'onchain': return onchainAdapterConfig
+    case 'v3': return v3AdapterConfig
+    default: return fallbackAdapterConfig
+  }
+}
+
 const buildSdkStaticConfig = (backend: SdkBackend) => {
   const rc = getPublicRuntimeConfig()
   const { enableMerkl, enableIncentra, enableFuul } = useDeployConfig()
@@ -134,7 +151,12 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
   const v3ApiUrl = buildV3ProxyApiPath()
   const labelsProxyUrl = buildLabelsProxyApiPath()
   const subgraphUrls = buildSubgraphUrlMap()
-  const { enableV3Backend } = useEnvConfig()
+  const { enableV3Backend, browserVaultSource } = useEnvConfig()
+  // 'fast' resolves to whatever NUXT_PUBLIC_BROWSER_VAULT_SOURCE pins. The
+  // plan-time / 'onchain' instance is forced to onchain regardless — it
+  // exists specifically so the planner sees fresh chain state, not
+  // V3-cached data, even when fast reads can tolerate stale.
+  const fastSource = backend === 'fast' ? browserVaultSource : 'onchain'
   const config: EulerSDKConfig = {
     // The proxy path is wired regardless of `backend` so that the SDK can still
     // resolve v3-only utility endpoints (tokenlist) when adapters that fall
@@ -165,11 +187,12 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
     // directly.
     accountVaultsSubgraphUrls: subgraphUrls,
     vaultTypeSubgraphUrls: subgraphUrls,
-    ...(backend === 'fallback' ? fallbackAdapterConfig : onchainAdapterConfig),
+    ...adapterConfigForFastSource(fastSource),
     // Fallback chains short-circuit to the secondary (onchain/direct/subgraph)
-    // when no upstream V3 is configured. Slow/onchain backend ignores this
-    // since its per-service adapters are pinned explicitly.
-    ...(backend === 'fallback' && !enableV3Backend ? { disableV3: true } : {}),
+    // when no upstream V3 is configured. Other sources have their adapters
+    // pinned explicitly; v3-pinned without V3 will fail the SDK build (the
+    // boot-time warning in api-url-env.ts flags this earlier).
+    ...(fastSource === 'fallback' && !enableV3Backend ? { disableV3: true } : {}),
   }
 
   return {
@@ -264,16 +287,18 @@ const lookupInstance = async (
   return entry
 }
 
-/** "Fast" instance: SDK fallback adapters (v3 primary, onchain secondary).
- *  When `enableV3Backend` is false, `disableV3` short-circuits to onchain. */
+/** "Fast" instance: adapter chain picked by `NUXT_PUBLIC_BROWSER_VAULT_SOURCE`
+ *  (defaults to `fallback` — v3 primary, onchain secondary). When `fallback`
+ *  is selected and no V3 endpoint is configured, `disableV3` short-circuits
+ *  to onchain. */
 export const getEulerSdk = async (): Promise<EulerSDK> => {
-  const { sdk } = await lookupInstance('cached', 'fallback', sdkBuildQuery)
+  const { sdk } = await lookupInstance('cached', 'fast', sdkBuildQuery)
   return sdk
 }
 
-/** "Slow"/plan-time instance: always onchain adapters, zero stale-time on
- *  plan-critical queries. Used by useEulerTx for plan construction, simulate,
- *  and execute. */
+/** "Slow"/plan-time instance: always onchain adapters regardless of the
+ *  browser source, with zero stale-time on plan-critical queries. Used by
+ *  useEulerTx for plan construction, simulate, and execute. */
 export const getEulerSdkFresh = async (): Promise<EulerSDK> => {
   const { sdk } = await lookupInstance('fresh', 'onchain', sdkFreshBuildQuery)
   return sdk

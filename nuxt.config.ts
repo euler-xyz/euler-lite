@@ -164,6 +164,9 @@ export default defineNuxtConfig({
       pythHermesUrl: '',
       v3ApiUrl: '',
       enableV3Backend: '',
+      // Adapter chain for the browser "fast" SDK. fallback (default) | onchain | v3.
+      // Maps to NUXT_PUBLIC_BROWSER_VAULT_SOURCE.
+      browserVaultSource: '',
       swapApiUrl: '',
       sentryDsn: '', // set via NUXT_PUBLIC_SENTRY_DSN
     },

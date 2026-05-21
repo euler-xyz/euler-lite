@@ -39,7 +39,11 @@ import { LABEL_FILES, refreshLabelFile } from '../api/labels/[file].get'
 import { refreshEulerChains } from '../api/euler-chains.get'
 import { refreshTokenList } from '../api/token-list.get'
 import { refreshChainVaults } from '../utils/vaults-cache'
-import { readV3ApiUrl } from '~/utils/api-url-env'
+import {
+  readDisableServerVaultCache,
+  readV3ApiUrl,
+  warnIfVaultSourceNeedsV3,
+} from '~/utils/api-url-env'
 import { getEnabledChainIds } from '~/utils/chain-env'
 import { parseDeprecatedChains } from '~/utils/parseDeprecatedChains'
 import { reportStatus } from '../utils/log'
@@ -131,12 +135,20 @@ export default defineNitroPlugin(() => {
   if (g[WARM_LATCH_KEY]) return
   g[WARM_LATCH_KEY] = true
 
+  // One-time boot check: surface a misconfiguration (source needs V3 but
+  // no V3_API_URL set) before the first warm cycle starts producing noisy
+  // SDK errors. Caller-friendly: a single log line instead of one per
+  // failing SDK fetchVaults call.
+  warnIfVaultSourceNeedsV3()
+
   const enabledChainIds = getEnabledChainIds()
   const deprecatedChainIds = new Set(
     parseDeprecatedChains(process.env.DEPRECATED_CHAINS, new Set(enabledChainIds)),
   )
   const chainIds = enabledChainIds.filter(id => !deprecatedChainIds.has(id))
   if (chainIds.length === 0) return
+
+  const serverVaultCacheDisabled = readDisableServerVaultCache()
 
   const warmChainsSequentially = async () => {
     for (const chainId of chainIds) {
@@ -172,15 +184,27 @@ export default defineNitroPlugin(() => {
   }
 
   warmAll()
-  warmVaultsForChains()
 
   const globalInterval = setInterval(warmAll, REWARM_INTERVAL_MS)
   globalInterval.unref()
-  // Run the vaults timer separately so its cadence can be faster than
-  // the global cycle when V3 is configured. When the two intervals are
-  // equal (no V3), the timers naturally double-warm at every cycle; the
-  // in-flight dedup inside refreshChainVaults collapses the concurrent
-  // calls onto a single upstream pass.
-  const vaultsInterval = setInterval(warmVaultsForChains, VAULTS_REWARM_INTERVAL_MS)
-  vaultsInterval.unref()
+
+  // Vault snapshot cycle is opt-out via DISABLE_SERVER_VAULT_CACHE. When
+  // disabled, /api/vaults responds 503 and the browser falls through to
+  // its normal RPC pipeline — useful when the host can't afford the
+  // outbound V3/RPC fan-out the snapshot builder needs, or when running
+  // behind aggressive bot-management (CF) that throttles bursty
+  // origin-side traffic.
+  if (!serverVaultCacheDisabled) {
+    warmVaultsForChains()
+    // Run the vaults timer separately so its cadence can be faster than
+    // the global cycle when V3 is configured. When the two intervals are
+    // equal (no V3), the timers naturally double-warm at every cycle; the
+    // in-flight dedup inside refreshChainVaults collapses the concurrent
+    // calls onto a single upstream pass.
+    const vaultsInterval = setInterval(warmVaultsForChains, VAULTS_REWARM_INTERVAL_MS)
+    vaultsInterval.unref()
+  }
+  else {
+    logger.info({ ctx: 'warm-cache' }, 'vault snapshot cycle disabled via DISABLE_SERVER_VAULT_CACHE')
+  }
 })
