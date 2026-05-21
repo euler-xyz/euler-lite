@@ -939,7 +939,7 @@ watch(address, () => {
                 />
               </VaultFormInfoBlock>
 
-              <UiToast
+              <UiAlert
                 v-if="swapQuoteError"
                 title="Swap quote"
                 variant="warning"
@@ -948,35 +948,35 @@ watch(address, () => {
               />
             </template>
 
-            <UiToast
+            <UiAlert
               v-if="isGeoBlocked"
               title="Region restricted"
               description="This operation is not available in your region. You can still withdraw existing deposits."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="!isGeoBlocked && isSourceAssetBlocked"
               title="Asset restricted"
               description="Paying with this asset is not available in your region. Pick a different token."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="!isGeoBlocked && !isSourceAssetBlocked && isSwapRestricted"
               title="Swap restricted"
               description="Swapping into this vault is not available in your region. You can deposit the vault's underlying asset directly."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-show="errorText"
               title="Error"
               variant="error"
               :description="errorText || ''"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="simulationError"
               title="Error"
               variant="error"
@@ -984,7 +984,7 @@ watch(address, () => {
               size="compact"
             />
 
-            <UiToast
+            <UiAlert
               v-if="isUnknownSwapToken && needsSwap"
               title="Unknown token"
               description="This token is not on any recognized token list. It could be fraudulent or malicious. Verify the contract address before proceeding."

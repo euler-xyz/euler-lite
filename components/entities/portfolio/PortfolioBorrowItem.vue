@@ -537,21 +537,21 @@ onMounted(() => {
           />
           Oracle pricing unavailable. Some details may be missing.
         </div>
-        <UiToast
+        <UiAlert
           v-if="rampStatus.isRamping && rampStatus.willBeLiquidated && !hasQueryFailure"
           title="Liquidation LTV ramping down"
           :description="`Your position is projected to become liquidatable ${forcedLiquidationRelative || 'before the ramp ends'} — consider closing or reducing debt.`"
           variant="error"
           size="compact"
         />
-        <UiToast
+        <UiAlert
           v-else-if="rampStatus.isRamping && hasQueryFailure"
           title="Liquidation LTV ramping down"
           :description="`Ends ${rampEndsRelative}. Oracle pricing is currently unavailable, so we can't tell whether your position will remain safe.`"
           variant="warning"
           size="compact"
         />
-        <UiToast
+        <UiAlert
           v-else-if="rampStatus.isRamping"
           title="Liquidation LTV ramping down"
           :description="`Ends ${rampEndsRelative}. Your position is currently safe at the post-ramp threshold.`"

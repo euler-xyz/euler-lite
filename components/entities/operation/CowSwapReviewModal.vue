@@ -163,13 +163,12 @@ const handleCancel = async () => {
       </div>
 
       <!-- Wallet signing notes (pre-submission) -->
-      <UiToast
+      <UiAlert
         v-if="!isSubmitted && walletWarningsDescription"
         title="Your wallet may show warnings"
         :description="walletWarningsDescription"
         variant="info"
         size="compact"
-        persistent
       />
 
       <div
@@ -191,23 +190,21 @@ const handleCancel = async () => {
       </div>
 
       <!-- Execution progress -->
-      <UiToast
+      <UiAlert
         v-if="executionLabel && !isSubmitted"
         :title="executionLabel"
         variant="info"
         size="compact"
-        persistent
       />
 
       <!-- Submitted state -->
       <template v-if="isSubmitted">
-        <UiToast
+        <UiAlert
           class="cow-swap-review-status"
           :title="orderStatusLabel"
           :description="orderStatusDescription"
           :variant="orderStatusVariant"
           size="compact"
-          persistent
         />
 
         <a
@@ -220,13 +217,12 @@ const handleCancel = async () => {
           View on CoW Explorer &rarr;
         </a>
 
-        <UiToast
+        <UiAlert
           v-if="showSoftCancelWarning"
           title="Cancellation is not guaranteed"
           description="CoW cancellations are soft. This order may still fill until CoW reports it cancelled."
           variant="warning"
           size="compact"
-          persistent
         />
 
         <UiButton
@@ -243,13 +239,12 @@ const handleCancel = async () => {
       </template>
 
       <!-- Error -->
-      <UiToast
+      <UiAlert
         v-if="executionErrorMessage"
         title="Something went wrong"
         :description="executionErrorMessage"
         variant="error"
         size="compact"
-        persistent
       />
 
       <!-- Confirm button (pre-submission only) -->
@@ -273,26 +268,26 @@ const handleCancel = async () => {
   box-shadow: none;
 }
 
-.cow-swap-review-status :deep(.ui-toast__body) {
+.cow-swap-review-status :deep(.ui-alert__body) {
   align-items: flex-start;
   gap: 11px;
   padding: 15px 16px;
 }
 
-.cow-swap-review-status :deep(.ui-toast__icon) {
+.cow-swap-review-status :deep(.ui-alert__icon) {
   margin-top: 2px;
 }
 
-.cow-swap-review-status :deep(.ui-toast__content) {
+.cow-swap-review-status :deep(.ui-alert__content) {
   gap: 4px;
 }
 
-.cow-swap-review-status :deep(.ui-toast__title) {
+.cow-swap-review-status :deep(.ui-alert__title) {
   font-size: 13px;
   line-height: 18px;
 }
 
-.cow-swap-review-status :deep(.ui-toast__description) {
+.cow-swap-review-status :deep(.ui-alert__description) {
   max-width: 64ch;
   font-size: 13px;
   line-height: 19px;

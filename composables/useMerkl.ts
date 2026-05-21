@@ -404,6 +404,7 @@ const loadRewards = async (chainId: number, isInitialLoading = true, forceRefres
     const res = await axios.get(userRewardsEndpoint(address.value), {
       params: {
         chainId,
+        type: 'TOKEN',
       },
     })
 

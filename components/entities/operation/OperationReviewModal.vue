@@ -332,7 +332,7 @@ const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimite
       </p>
 
       <!-- Tenderly error -->
-      <UiToast
+      <UiAlert
         v-if="tenderlyError && !hasTenderlyFailedSimulation"
         title="Simulation failed"
         variant="warning"
@@ -359,21 +359,21 @@ const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimite
       </div>
 
       <!-- Disclaimers -->
-      <UiToast
+      <UiAlert
         v-if="type === 'reward'"
         title="Disclaimer"
         variant="warning"
         :description="disclaimerText"
         size="compact"
       />
-      <UiToast
+      <UiAlert
         v-if="type === 'reul-unlock'"
         title="Important"
         variant="warning"
         :description="reulUnlockDisclaimerText"
         size="compact"
       />
-      <UiToast
+      <UiAlert
         v-if="hasPermit2Approval"
         title="Infinite approval"
         variant="info"

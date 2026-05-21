@@ -758,7 +758,7 @@ const nextLiquidationPrice = computed(() => {
               :readonly="true"
               @change-collateral="onToVaultChange"
             />
-            <UiToast
+            <UiAlert
               v-else-if="!isLoading && !isPositionsLoading"
               title="No collateral swap options"
               description="There are no other vaults that accept this collateral for this position."
@@ -766,28 +766,28 @@ const nextLiquidationPrice = computed(() => {
               size="compact"
             />
 
-            <UiToast
+            <UiAlert
               v-if="isGeoBlocked"
               title="Region restricted"
               description="This operation is not available in your region. You can still repay existing debt."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-show="errorText || cowSwapErrorText"
               title="Error"
               variant="error"
               :description="cowSwapErrorText || errorText || ''"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="toVault && sameVaultError"
               title="Error"
               variant="error"
               :description="sameVaultError"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="simulationError"
               title="Error"
               variant="error"
@@ -795,7 +795,7 @@ const nextLiquidationPrice = computed(() => {
               size="compact"
             />
 
-            <UiToast
+            <UiAlert
               v-if="toVault && quoteError"
               title="Swap quote"
               variant="warning"

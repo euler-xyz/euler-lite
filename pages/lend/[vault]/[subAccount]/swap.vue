@@ -270,28 +270,28 @@ watch([() => route.params.vault, () => route.query.to], () => {
               No asset swap options available
             </div>
 
-            <UiToast
+            <UiAlert
               v-if="isGeoBlocked"
               title="Region restricted"
               description="This operation is not available in your region. You can still withdraw existing deposits."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-show="errorText"
               title="Error"
               variant="error"
               :description="errorText || ''"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="sameVaultError"
               title="Error"
               variant="error"
               :description="sameVaultError"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="simulationError"
               title="Error"
               variant="error"
@@ -299,7 +299,7 @@ watch([() => route.params.vault, () => route.query.to], () => {
               size="compact"
             />
 
-            <UiToast
+            <UiAlert
               v-if="quoteError"
               title="Swap quote"
               variant="warning"
