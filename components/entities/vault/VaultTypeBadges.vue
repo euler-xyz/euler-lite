@@ -11,13 +11,14 @@ const { vault, layout = 'inline', size = 'small', nudge = false, summaryOnly = f
 }>()
 
 const vaultRef = computed(() => vault)
-const { badges, governanceType, summaryBadges } = useVaultTypeBadges(vaultRef)
+const { badges, governanceType, summaryBadges, summaryGovernanceType } = useVaultTypeBadges(vaultRef)
 
 const isStacked = computed(() => layout === 'stacked')
 const tagElement = computed(() => isStacked.value ? 'button' : 'span')
 const visibleBadges = computed(() => summaryOnly ? summaryBadges.value : badges.value)
+const visibleGovernanceType = computed(() => summaryOnly ? summaryGovernanceType.value : governanceType.value)
 const hasVisibleBadge = (badge: VaultTypeBadge): boolean => visibleBadges.value.includes(badge)
-const showGovernanceType = computed(() => hasVisibleBadge(governanceType.value))
+const showGovernanceType = computed(() => hasVisibleBadge(visibleGovernanceType.value))
 </script>
 
 <template>
@@ -28,7 +29,7 @@ const showGovernanceType = computed(() => hasVisibleBadge(governanceType.value))
     <VaultTypeChip
       v-if="showGovernanceType"
       :vault="vault"
-      :type="governanceType"
+      :type="visibleGovernanceType"
       :size="size"
       :block="isStacked"
       :as="tagElement"

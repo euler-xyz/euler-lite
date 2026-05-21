@@ -73,6 +73,9 @@ export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
   })
 
   const hasSummaryBadges = computed(() => summaryBadges.value.length > 0)
+  const summaryGovernanceType = computed<VaultGovernanceBadge>(() =>
+    summaryBadges.value.includes('unknown') ? 'unknown' : governanceType.value,
+  )
 
   return {
     badges,
@@ -80,5 +83,6 @@ export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
     hasSummaryBadges,
     isVerified,
     summaryBadges,
+    summaryGovernanceType,
   }
 }

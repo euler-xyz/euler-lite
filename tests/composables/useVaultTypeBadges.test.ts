@@ -148,6 +148,25 @@ describe('useVaultTypeBadges', () => {
     expect(summaryBadges.value).toEqual(['unknown'])
   })
 
+  it('renders failed verification as unknown even when the governor has a label entity', () => {
+    const vault = makeVault({
+      irmInfo: {
+        interestRateModelInfo: {
+          interestRateModelType: INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY,
+        },
+      },
+      verified: false,
+    })
+    state.entityGovernors.add(vault.governorAdmin.toLowerCase())
+
+    const { badges, governanceType, summaryBadges, summaryGovernanceType } = useVaultTypeBadges(ref(vault))
+
+    expect(governanceType.value).toBe('governed')
+    expect(badges.value).toEqual(['governed'])
+    expect(summaryBadges.value).toEqual(['unknown'])
+    expect(summaryGovernanceType.value).toBe('unknown')
+  })
+
   it('keeps ungoverned and governance-limited badges out of the pair summary', () => {
     const vault = makeVault({
       address: '0x4000000000000000000000000000000000000004',
