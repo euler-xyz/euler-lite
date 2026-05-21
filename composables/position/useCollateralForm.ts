@@ -349,8 +349,14 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     toVault: computed(() => options.mode === 'supply' ? collateralVault.value : null),
   })
 
+  const shouldGateUnknownPriceImpact = computed(() =>
+    options.needsSwap.value
+    && swapEffectiveQuote.value !== null
+    && swapPriceImpact.value === null,
+  )
   const { guardWithPriceImpact } = usePriceImpactGate({
     directPriceImpact: swapPriceImpact,
+    shouldGateUnknown: shouldGateUnknownPriceImpact,
   })
 
   const swapRouteItems = computed(() => {
