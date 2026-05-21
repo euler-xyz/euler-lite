@@ -78,7 +78,6 @@ onUnmounted(() => {
           :key="toast.id"
           :variant="toast.variant"
           :size="toast.size"
-          presentation="floating"
           :title="toast.title"
           :description="toast.description"
           :action-text="toast.actionText"

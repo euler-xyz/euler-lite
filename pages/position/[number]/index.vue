@@ -757,7 +757,7 @@ watch([isConnected, isSpyMode, address], () => {
         :assets-label="pairAssetsLabel"
       />
 
-      <UiToast
+      <UiAlert
         v-if="hasQueryFailure"
         title="Oracle unavailable"
         description="Oracle pricing is currently unavailable. Some position details cannot be displayed. You can still repay debt and supply collateral."
@@ -1020,7 +1020,7 @@ watch([isConnected, isSpyMode, address], () => {
               </div>
             </div>
             <VaultWarningBanner :warnings="positionWarnings" />
-            <UiToast
+            <UiAlert
               v-if="isEligibleForLiquidation"
               class="my-12"
               title="Liquidation risk"
@@ -1028,7 +1028,7 @@ watch([isConnected, isSpyMode, address], () => {
               variant="error"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="isOverBorrowLTV && !isEligibleForLiquidation"
               class="my-12"
               title="LTV limit reached"
@@ -1036,7 +1036,7 @@ watch([isConnected, isSpyMode, address], () => {
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="isPositionGeoBlocked || isPairFullyRestricted"
               class="my-12"
               title="Region restricted"
@@ -1044,7 +1044,7 @@ watch([isConnected, isSpyMode, address], () => {
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="!isPositionGeoBlocked && !isPairFullyRestricted && (isBorrowRestricted || isMultiplyRestricted)"
               class="my-12"
               title="Asset restricted"
@@ -1228,7 +1228,7 @@ watch([isConnected, isSpyMode, address], () => {
                   {{ formatNumber(nanoToValue(position.liquidationLTV, 2)) }}%
                 </div>
               </div>
-              <UiToast
+              <UiAlert
                 v-if="!hasNoBorrow && isEligibleForLiquidation"
                 class="my-12"
                 title="Liquidation risk"
@@ -1282,7 +1282,7 @@ watch([isConnected, isSpyMode, address], () => {
                 >
                   Disable collateral
                 </UiButton>
-                <UiToast
+                <UiAlert
                   v-if="disableCollateralSimulationError && isDisableCollateralError(collateral.vault)"
                   class="mt-12"
                   title="Error"

@@ -484,28 +484,28 @@ watch([collateralAmount, borrowAmount], async () => {
               @update:model-value="onLtvInput"
             />
 
-            <UiToast
+            <UiAlert
               v-if="isGeoBlocked"
               title="Region restricted"
               description="This operation is not available in your region. You can still repay existing debt."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="!isGeoBlocked && isBorrowRestricted"
               title="Asset restricted"
               description="Borrowing this asset is not available in your region."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-show="errorText"
               title="Error"
               variant="error"
               :description="errorText || ''"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="simulationError"
               title="Error"
               variant="error"
