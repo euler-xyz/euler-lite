@@ -10,6 +10,15 @@ import { logWarn } from '~/utils/errorHandling'
 
 const allowanceSlotIndexCache = new Map<string, bigint>()
 const maxUint256Hex = toHex(maxUint256, { size: 32 })
+const pendingAllowanceSlotResolutions = ref(0)
+
+export const useAllowanceSlotResolution = () => {
+  const isResolvingAllowanceSlotIndex = computed(() => pendingAllowanceSlotResolutions.value > 0)
+
+  return {
+    isResolvingAllowanceSlotIndex,
+  }
+}
 
 export const createAllowanceHelpers = (ctx: OperationsContext, permit2: Permit2Helpers): AllowanceHelpers => {
   const checkAllowance = async (assetAddress: Address, spenderAddress: Address, userAddress: Address): Promise<bigint> => {
@@ -75,15 +84,21 @@ export const createAllowanceHelpers = (ctx: OperationsContext, permit2: Permit2H
       return false
     }
 
-    for (let i = 0; i <= ALLOWANCE_MAX_SEQUENTIAL_SLOT; i++) {
-      if (await trySlot(BigInt(i))) return BigInt(i)
-    }
-    for (const slotIndex of ALLOWANCE_EXTRA_SLOT_CANDIDATES) {
-      if (await trySlot(slotIndex)) return slotIndex
-    }
+    pendingAllowanceSlotResolutions.value += 1
+    try {
+      for (let i = 0; i <= ALLOWANCE_MAX_SEQUENTIAL_SLOT; i++) {
+        if (await trySlot(BigInt(i))) return BigInt(i)
+      }
+      for (const slotIndex of ALLOWANCE_EXTRA_SLOT_CANDIDATES) {
+        if (await trySlot(slotIndex)) return slotIndex
+      }
 
-    logWarn('resolveAllowanceSlotIndex', 'no slot found for token', { data: { token: tokenKey, owner, spender } })
-    return undefined
+      logWarn('resolveAllowanceSlotIndex', 'no slot found for token', { data: { token: tokenKey, owner, spender } })
+      return undefined
+    }
+    finally {
+      pendingAllowanceSlotResolutions.value = Math.max(0, pendingAllowanceSlotResolutions.value - 1)
+    }
   }
 
   const buildErc20AllowanceOverrides = async (

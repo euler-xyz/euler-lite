@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { getAssetUsdValue, formatAssetValue } from '~/services/pricing/priceProvider'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated, getVaultNotice } from '~/utils/eulerLabelsUtils'
@@ -7,13 +6,13 @@ import { type AccountDepositPosition, getSubAccountIndex } from '~/entities/acco
 import type { EarnVault } from '~/entities/vault'
 import { VaultOverviewModal, VaultSupplyApyModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
-import { formatNumber, formatCompactUsdValue, compactNumber, formatExactAmount } from '~/utils/string-utils'
+import { formatNumber, compactNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 
 const { position } = defineProps<{ position: AccountDepositPosition }>()
 const modal = useModal()
 
-const { address } = useAccount()
+const { address } = useWagmi()
 const { portfolioAddress } = useEulerAccount()
 const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
 const subAccountIndex = computed(() => {
@@ -74,19 +73,15 @@ watchEffect(() => {
   updateProjectedEarningsPerMonth()
 })
 
-const onSupplyInfoIconClick = (event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY: nanoToValue(vault.value.interestRateInfo.supplyAPY, 25),
-      intrinsicAPY: getIntrinsicApy(vault.value.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.value.asset.address),
-      campaigns: getSupplyRewardCampaigns(vault.value.address),
-      baseApyAverageLabel: '1h',
-    },
-  })
-}
+const supplyApyModalData = computed(() => ({
+  props: {
+    lendingAPY: nanoToValue(vault.value.interestRateInfo.supplyAPY, 25),
+    intrinsicAPY: getIntrinsicApy(vault.value.asset.address),
+    intrinsicApyInfo: getIntrinsicApyInfo(vault.value.asset.address),
+    campaigns: getSupplyRewardCampaigns(vault.value.address),
+    baseApyAverageLabel: '1h',
+  },
+}))
 
 const onClick = () => {
   modal.open(VaultOverviewModal, {
@@ -150,21 +145,31 @@ const onClick = () => {
             <span class="inline-flex items-center rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5">
               1h
             </span>
-            <SvgIcon
-              class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-              name="info-circle"
-              @click.stop="onSupplyInfoIconClick"
-            />
+            <UiModalPreviewTrigger
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY breakdown"
+            >
+              <SvgIcon
+                class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+                name="info-circle"
+              />
+            </UiModalPreviewTrigger>
           </div>
           <div
             class="text-p2 flex text-accent-600"
           >
-            <SvgIcon
+            <UiModalPreviewTrigger
               v-if="rewardsExist"
-              name="sparks"
-              class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
-              @click.stop="onSupplyInfoIconClick"
-            />
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY rewards breakdown"
+            >
+              <SvgIcon
+                name="sparks"
+                class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
+              />
+            </UiModalPreviewTrigger>
             {{ formatNumber(supplyApyWithRewards) }}%
           </div>
         </div>
@@ -190,19 +195,6 @@ const onClick = () => {
             >
               ~ {{ roundAndCompactTokens(position.assets, vault.asset.decimals) }} {{ vault.asset.symbol }}
             </UiExactAmount>
-          </div>
-        </div>
-        <div
-          v-if="hasPrice"
-          class="flex justify-between"
-        >
-          <div class="text-content-tertiary text-p3">
-            Projected earnings per month
-          </div>
-          <div class="flex justify-between gap-8 text-right">
-            <div class="text-content-primary text-p3">
-              ${{ projectedEarningsPerMonth }}
-            </div>
           </div>
         </div>
         <div

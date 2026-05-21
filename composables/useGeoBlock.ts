@@ -1,5 +1,17 @@
 import { detectCountry } from '~/services/country'
-import { getVaultBlock, getEarnVaultBlock, getVaultRestricted, getEarnVaultRestricted, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
+import {
+  getVaultBlock,
+  getEarnVaultBlock,
+  getVaultRestricted,
+  getEarnVaultRestricted,
+  getAssetBlock,
+  getAssetRestricted,
+  isVaultDeprecated,
+  patternRuleMatches,
+  isWrapPair,
+} from '~/utils/eulerLabelsUtils'
+import { assetPatternRules } from '~/utils/eulerLabelsState'
+import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { SANCTIONED_COUNTRIES, COUNTRY_GROUPS } from '~/entities/constants'
 
 // undefined = not yet loaded, null = loaded but country unknown, string = loaded with country
@@ -33,6 +45,181 @@ const expandBlockList = (codes: readonly string[]): string[] => {
   return codes.flatMap(code => COUNTRY_GROUPS[code] ?? [code])
 }
 
+/**
+ * Asset reference accepted by the asset-level geo helpers.
+ * - A plain address string keeps backward compatibility with callers that
+ *   only know the address; pattern rules (symbol/name) can't be consulted.
+ * - An asset-like object (VaultAsset or any subset) unlocks symbol/name
+ *   pattern matching in addition to the address lookup.
+ */
+export type AssetLike = string | { address?: string, symbol?: string, name?: string } | undefined
+
+// Normalize an AssetLike into the three fields we consult. Returns undefined
+// when nothing is available (keeps callers' guards simple).
+const toAssetFields = (asset: AssetLike): { address?: string, symbol?: string, name?: string } | undefined => {
+  if (asset === undefined) return undefined
+  if (typeof asset === 'string') return asset ? { address: asset } : undefined
+  if (!asset.address && !asset.symbol && !asset.name) return undefined
+  return {
+    address: asset.address,
+    symbol: asset.symbol,
+    name: asset.name,
+  }
+}
+
+// Per-country cache for asset-level block / restricted resolution. Browse
+// pages call these helpers per-row for potentially hundreds of rows on each
+// render; the pattern-rule scan is O(rules) which adds up. Cache key
+// composes country + address + symbol + name so a country change (rare) or
+// a new unique asset produces a fresh entry without ever serving stale data.
+// Pattern-rule content lives in module-scoped `assetPatternRules`; the
+// labels loader calls `clearAssetGeoCache()` after repopulating that list
+// so we never serve a decision computed against removed rules.
+const MAX_ASSET_CACHE_SIZE = 1000
+const assetBlockCache = new Map<string, boolean>()
+const assetRestrictedCache = new Map<string, boolean>()
+
+const makeAssetCacheKey = (fields: { address?: string, symbol?: string, name?: string }): string =>
+  `${country.value ?? ''}|${fields.address?.toLowerCase() ?? ''}|${fields.symbol?.toLowerCase() ?? ''}|${fields.name?.toLowerCase() ?? ''}`
+
+const cacheSet = (cache: Map<string, boolean>, key: string, value: boolean): boolean => {
+  if (cache.size >= MAX_ASSET_CACHE_SIZE) cache.clear()
+  cache.set(key, value)
+  return value
+}
+
+export const clearAssetGeoCache = (): void => {
+  assetBlockCache.clear()
+  assetRestrictedCache.clear()
+}
+
+// Resolve the underlying asset for a vault via the registry.
+// Used by vault-level helpers to OR-in asset-level rules from assets.json,
+// including pattern rules against the asset's symbol and name.
+//
+// The registry accessor is resolved lazily on first use instead of at
+// module-load time. Module-load destructuring against `useVaultRegistry()`
+// triggered a TDZ error in some import orderings (auto-imports create
+// cycles that we can't see at call sites). Lazy-once keeps the per-call
+// allocation cost at zero after the first invocation without coupling
+// to module-eval order.
+let registryGetVault: ((addr: string) => ReturnType<ReturnType<typeof useVaultRegistry>['getVault']>) | null = null
+const getVaultUnderlyingAsset = (vaultAddress: string): { address: string, symbol: string, name: string } | undefined => {
+  if (!registryGetVault) {
+    registryGetVault = useVaultRegistry().getVault
+  }
+  const asset = registryGetVault(vaultAddress)?.asset
+  if (!asset) return undefined
+  return { address: asset.address, symbol: asset.symbol, name: asset.name }
+}
+
+export const isAssetBlockedByCountry = (asset: AssetLike): boolean => {
+  const fields = toAssetFields(asset)
+  if (!fields) return false
+  if (country.value === undefined) return false // still loading
+  if (country.value === null) return true // loaded, country unknown
+
+  const cacheKey = makeAssetCacheKey(fields)
+  const cached = assetBlockCache.get(cacheKey)
+  if (cached !== undefined) return cached
+
+  // Sanctioned countries are always blocked
+  if (isCountryInList(SANCTIONED_COUNTRIES)) return cacheSet(assetBlockCache, cacheKey, true)
+
+  if (fields.address) {
+    const assetBlock = getAssetBlock(fields.address)
+    if (assetBlock?.length && isCountryInList(expandBlockList(assetBlock))) {
+      return cacheSet(assetBlockCache, cacheKey, true)
+    }
+  }
+
+  // Pattern rules: only consulted when symbol or name is available. Callers
+  // that pass a plain address skip this path (same as pre-PR behavior for
+  // non-pattern rules).
+  const symbolLower = fields.symbol?.toLowerCase()
+  const nameLower = fields.name?.toLowerCase()
+  if (symbolLower || nameLower) {
+    for (const rule of assetPatternRules) {
+      if (!rule.block?.length) continue
+      if (!patternRuleMatches(rule, symbolLower, nameLower)) continue
+      if (isCountryInList(expandBlockList(rule.block))) {
+        return cacheSet(assetBlockCache, cacheKey, true)
+      }
+    }
+  }
+
+  return cacheSet(assetBlockCache, cacheKey, false)
+}
+
+/**
+ * Determine whether `asset` is soft-restricted in the detected country.
+ *
+ * `opts.counterpart` lets the caller pass the asset on the other side of the
+ * flow (e.g. the input asset of a swap when checking the output). When the
+ * two form an ERC-4626 wrap pair, the restriction is bypassed: wrapping or
+ * unwrapping existing exposure is a technical conversion, not a new
+ * acquisition. Hard-block (`isAssetBlockedByCountry`) is never bypassed and
+ * remains the unconditional gate.
+ */
+export const isAssetRestrictedByCountry = (
+  asset: AssetLike,
+  opts?: { counterpart?: AssetLike },
+): boolean => {
+  const fields = toAssetFields(asset)
+  if (!fields) return false
+  if (country.value === undefined) return false // still loading
+  if (country.value === null) return true // loaded, country unknown
+
+  const cacheKey = makeAssetCacheKey(fields)
+  const cached = assetRestrictedCache.get(cacheKey)
+  const restricted = cached !== undefined ? cached : computeAssetRestricted(fields, cacheKey)
+  if (!restricted) return false
+
+  // Counterpart bypass: cached against the asset alone so the counterpart check
+  // sits outside the cache. Two cases bypass the soft-restrict — both reflect
+  // "already-held exposure, not a new acquisition":
+  // 1. Identity: candidate and counterpart are the same on-chain asset (e.g.
+  //    receiving the vault's underlying back during withdraw, no swap involved).
+  // 2. Wrap pair: candidate and counterpart form an ERC-4626 wrap pair per the
+  //    map populated by the labels loader once per reload cycle.
+  if (opts?.counterpart) {
+    const counterFields = toAssetFields(opts.counterpart)
+    if (counterFields?.address && fields.address) {
+      const aLower = fields.address.toLowerCase()
+      const cLower = counterFields.address.toLowerCase()
+      if (aLower === cLower) return false
+      if (isWrapPair(aLower, cLower)) return false
+    }
+  }
+  return true
+}
+
+const computeAssetRestricted = (
+  fields: { address?: string, symbol?: string, name?: string },
+  cacheKey: string,
+): boolean => {
+  if (fields.address) {
+    const assetRestricted = getAssetRestricted(fields.address)
+    if (assetRestricted?.length && isCountryInList(expandBlockList(assetRestricted))) {
+      return cacheSet(assetRestrictedCache, cacheKey, true)
+    }
+  }
+
+  const symbolLower = fields.symbol?.toLowerCase()
+  const nameLower = fields.name?.toLowerCase()
+  if (symbolLower || nameLower) {
+    for (const rule of assetPatternRules) {
+      if (!rule.restricted?.length) continue
+      if (!patternRuleMatches(rule, symbolLower, nameLower)) continue
+      if (isCountryInList(expandBlockList(rule.restricted))) {
+        return cacheSet(assetRestrictedCache, cacheKey, true)
+      }
+    }
+  }
+
+  return cacheSet(assetRestrictedCache, cacheKey, false)
+}
+
 export const isVaultBlockedByCountry = (vaultAddress: string): boolean => {
   if (country.value === undefined) return false // still loading
   if (country.value === null) return true // loaded, country unknown
@@ -46,6 +233,10 @@ export const isVaultBlockedByCountry = (vaultAddress: string): boolean => {
   const earnBlock = getEarnVaultBlock(vaultAddress)
   if (earnBlock?.length && isCountryInList(expandBlockList(earnBlock))) return true
 
+  // Asset-level block: a vault is blocked whenever its underlying asset is blocked.
+  // Pass the full asset so pattern rules (symbol/name) also apply.
+  if (isAssetBlockedByCountry(getVaultUnderlyingAsset(vaultAddress))) return true
+
   return false
 }
 
@@ -53,7 +244,10 @@ export const isAnyVaultBlockedByCountry = (...addresses: string[]): boolean => {
   return addresses.some(addr => isVaultBlockedByCountry(addr))
 }
 
-export const isVaultRestrictedByCountry = (vaultAddress: string): boolean => {
+export const isVaultRestrictedByCountry = (
+  vaultAddress: string,
+  opts?: { counterpart?: AssetLike },
+): boolean => {
   if (country.value === undefined) return false // still loading
   if (country.value === null) return true // loaded, country unknown
 
@@ -62,6 +256,13 @@ export const isVaultRestrictedByCountry = (vaultAddress: string): boolean => {
 
   const earnRestricted = getEarnVaultRestricted(vaultAddress)
   if (earnRestricted?.length && isCountryInList(expandBlockList(earnRestricted))) return true
+
+  // Asset-level restriction: a vault is restricted whenever its underlying asset is
+  // restricted. Forward `counterpart` so swap flows depositing into the vault can
+  // bypass soft-restrict when input and underlying are an ERC-4626 wrap pair —
+  // mirrors the asset-level bypass in `isAssetRestrictedByCountry`. Vault-level
+  // restrictions above (product/earn) are unconditional and not bypassable.
+  if (isAssetRestrictedByCountry(getVaultUnderlyingAsset(vaultAddress), opts)) return true
 
   return false
 }

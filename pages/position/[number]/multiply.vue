@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { formatUnits, type Address } from 'viem'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { OperationReviewModal, SlippageSettingsModal } from '#components'
@@ -9,7 +8,6 @@ import type { AccountBorrowPosition } from '~/entities/account'
 import type { Vault, VaultAsset } from '~/entities/vault'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
-import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
@@ -29,7 +27,7 @@ const route = useRoute()
 const router = useRouter()
 const modal = useModal()
 const { error } = useToast()
-const { address, isConnected } = useAccount()
+const { address, isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
 const { buildMultiplyPlan, executeTxPlan } = useEulerOperations()
@@ -90,6 +88,7 @@ const {
   selectedProvider: multiplySelectedProvider,
   selectedQuote: multiplySelectedQuote,
   effectiveQuote: multiplyEffectiveQuote,
+  effectiveQuoteFetchedAt: multiplyEffectiveQuoteFetchedAt,
   providersCount: multiplyProvidersCount,
   isLoading: isMultiplyQuoteLoading,
   quoteError: multiplyQuoteError,
@@ -98,13 +97,41 @@ const {
   reset: resetMultiplyQuoteStateInternal,
   requestQuotes: requestMultiplyQuotes,
   selectProvider: selectMultiplyQuote,
-} = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
-const multiplyQuoteSlippage = computed(() => computeQuoteSlippage(multiplyEffectiveQuote.value))
-
+} = useSwapQuotesParallel({
+  amountField: 'amountOut',
+  compare: 'max',
+  buildTxPlanForQuote: quote => buildIncreasePositionTxPlanForQuote(quote, false),
+})
 const multiplyLongVault = computed(() => position.value?.collateral)
 const multiplyShortVault = computed(() => position.value?.borrow)
 const multiplySubAccount = computed(() => position.value?.subAccount || null)
 useOperationGuard(computed(() => [multiplySupplyVault.value?.address, multiplyLongVault.value?.address, multiplyShortVault.value?.address].filter(Boolean)))
+
+async function buildIncreasePositionTxPlanForQuote(quote: SwapApiQuote, includePermit2Call: boolean): Promise<TxPlan> {
+  if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
+    throw new Error('Vaults not loaded')
+  }
+  const subAccount = multiplySubAccount.value
+  if (!subAccount) {
+    throw new Error('Unable to resolve position')
+  }
+  return buildMultiplyPlan({
+    supplyVaultAddress: multiplySupplyVault.value.address,
+    supplyAssetAddress: multiplySupplyVault.value.asset.address,
+    supplyAmount: 0n,
+    longVaultAddress: multiplyLongVault.value.address,
+    longAssetAddress: multiplyLongVault.value.asset.address,
+    borrowVaultAddress: multiplyShortVault.value.address,
+    debtAmount: multiplyDebtAmountNano.value,
+    quote,
+    requestedSlippage: multiplySlippage.value,
+    swapperMode: SwapperMode.EXACT_IN,
+    subAccount,
+    includePermit2Call,
+    enabledCollaterals: position.value?.collaterals,
+    enabledController: position.value?.borrow.address,
+  })
+}
 
 const pairAssets = computed(() => {
   if (!multiplyLongVault.value || !multiplyShortVault.value) {
@@ -415,6 +442,8 @@ const multiplySwapSummary = computed(() => {
   return {
     from: `${formatSmartAmount(amountIn)} ${multiplyShortVault.value.asset.symbol}`,
     to: `${formatSmartAmount(amountOut)} ${multiplyLongVault.value.asset.symbol}`,
+    fromExact: `${amountIn} ${multiplyShortVault.value.asset.symbol}`,
+    toExact: `${amountOut} ${multiplyLongVault.value.asset.symbol}`,
   }
 })
 const multiplyPriceImpact = ref<number | null>(null)
@@ -446,6 +475,11 @@ const multipliedPriceImpact = computed(() =>
 const { guardWithPriceImpact } = usePriceImpactGate({
   directPriceImpact: multiplyPriceImpact,
   multipliedPriceImpact,
+  shouldGateUnknown: computed(() =>
+    !multiplyIsSameAsset.value
+    && multiplyEffectiveQuote.value !== null
+    && multiplyPriceImpact.value === null,
+  ),
 })
 const multiplyRoutedVia = computed(() => {
   if (!multiplySelectedProvider.value) return isMultiplyQuoteLoading.value ? null : 'Not selected'
@@ -456,7 +490,7 @@ const multiplyErrorText = computed(() => {
   if (!multiplyShortVault.value) {
     return null
   }
-  if (multiplyDebtAmountNano.value > 0n && (multiplyShortVault.value.supply || 0n) < multiplyDebtAmountNano.value) {
+  if (multiplyDebtAmountNano.value > 0n && (multiplyShortVault.value.totalCash || 0n) < multiplyDebtAmountNano.value) {
     return 'Not enough liquidity in the vault'
   }
   return null
@@ -639,8 +673,10 @@ const submitMultiply = async () => {
           asset: multiplyShortVault.value.asset,
           amount: reviewBorrowAmount,
           plan: plan.value || undefined,
+          quoteFetchedAt: quote ? multiplyEffectiveQuoteFetchedAt.value : null,
           swapToAsset: quote ? multiplyLongVault.value.asset : undefined,
           swapToAmount: reviewSwapToAmount,
+          swapMode: quote ? SwapperMode.EXACT_IN : undefined,
           subAccount,
           submittingLabel: 'Submitting...',
           onConfirm: async () => {
@@ -853,28 +889,28 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
               :readonly="true"
             />
 
-            <UiToast
+            <UiAlert
               v-if="isGeoBlocked"
               title="Region restricted"
               description="This operation is not available in your region. You can still repay existing debt."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="!isGeoBlocked && isMultiplyRestricted"
               title="Asset restricted"
               description="Multiply is not available for this pair in your region."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-show="multiplyErrorText"
               title="Error"
               variant="error"
               :description="multiplyErrorText || ''"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="multiplySimulationError"
               title="Error"
               variant="error"
@@ -882,7 +918,7 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
               size="compact"
             />
 
-            <UiToast
+            <UiAlert
               v-if="multiplyQuoteError"
               title="Swap quote"
               variant="warning"
@@ -956,10 +992,11 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
             </SummaryRow>
             <SwapDetailsSummary
               :input-display="multiplySwapSummary?.from ?? null"
+              :input-exact-display="multiplySwapSummary?.fromExact ?? null"
               :output-display="multiplySwapSummary?.to ?? null"
+              :output-exact-display="multiplySwapSummary?.toExact ?? null"
               :price-impact="multiplyPriceImpact"
               :slippage="multiplySlippage"
-              :quote-slippage="multiplyQuoteSlippage"
               :routed-via="multiplyRoutedVia"
               :multiplied-price-impact="multipliedPriceImpact"
               @open-slippage-settings="openSlippageSettings"

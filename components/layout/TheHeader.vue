@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { onClickOutside } from '@vueuse/core'
 import { offset, useFloating } from '@floating-ui/vue'
-import { useAccount } from '@wagmi/vue'
 import {
   WalletDisconnectModal,
   SelectChainModal,
@@ -9,18 +8,21 @@ import {
 } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { type MenuItem, getMenuItems } from '~/entities/menu'
+import { getChainLogoUrl } from '~/utils/chain-logo'
 
 // Wallet connect modal (lazy-initializes AppKit on first call)
 const { connect } = useWagmi()
 
 // Wagmi account info
-const { address, isConnected } = useAccount()
-const { chainId } = useEulerAddresses()
+const { address, isConnected } = useWagmi()
+const { chainId, allowedChainIds } = useEulerAddresses()
+const chainLogoSrc = computed(() => getChainLogoUrl(chainId.value))
 const { isSpyMode, spyShortAddress } = useSpyMode()
 const modal = useModal()
 const route = useRoute()
 const {
   docsUrl,
+  stargateUrl,
   tosUrl,
   privacyPolicyUrl,
   riskDisclosuresUrl,
@@ -42,11 +44,13 @@ const menuItems = getMenuItems(
   enableLendPage,
   enableExplorePage,
 )
+const canSwitchChains = computed(() => allowedChainIds.value.length > 1)
 
 const links = computed(
   () =>
     [
       docsUrl ? { title: 'Docs', url: docsUrl } : null,
+      stargateUrl ? { title: 'Stargate', url: stargateUrl } : null,
       tosUrl ? { title: 'Terms of Use', url: tosUrl } : null,
       privacyPolicyUrl ? { title: 'Privacy Policy', url: privacyPolicyUrl } : null,
       riskDisclosuresUrl ? { title: 'Risk Disclosures', url: riskDisclosuresUrl } : null,
@@ -83,6 +87,7 @@ const onWalletButtonClick = () => {
   }
 }
 const onChainButtonClick = () => {
+  if (!canSwitchChains.value) return
   modal.open(SelectChainModal)
 }
 const onSettingsClick = () => {
@@ -102,7 +107,7 @@ onClickOutside(wrapperRef, () => {
 
 <template>
   <header
-    class="relative sticky top-0 right-0 left-0 z-[101] min-h-[72px] border-b border-line-default py-16 px-24 mobile:min-h-[56px] mobile:border-b-0 mobile:p-16 flex items-center justify-between bg-header backdrop-blur-[20px]"
+    class="relative sticky top-0 right-0 left-0 z-[101] min-h-[72px] border-b border-line-default py-16 px-24 mobile:min-h-[56px] mobile:border-b-0 mobile:p-16 flex items-center gap-16 bg-header backdrop-blur-[20px]"
   >
     <!-- Left: Logo -->
     <div
@@ -198,14 +203,14 @@ onClickOutside(wrapperRef, () => {
       </Transition>
     </div>
 
-    <!-- Center: Navigation -->
-    <div class="absolute left-1/2 -translate-x-1/2 pointer-events-none mobile:!hidden">
-      <div class="flex pointer-events-auto">
+    <!-- Navigation -->
+    <div class="hidden laptop:block min-w-0 tablet:absolute tablet:left-1/2 tablet:-translate-x-1/2">
+      <div class="flex gap-4 tablet:gap-0">
         <NuxtLink
           v-for="item in menuItems"
           :key="item.name"
           :to="'/' + item.name"
-          class="flex gap-8 text-[13px] font-medium no-underline py-10 px-16 rounded-8 text-content-secondary items-center justify-center hover:text-content-primary hover:bg-surface-secondary transition-all"
+          class="flex gap-8 text-[13px] font-medium no-underline py-6 px-12 tablet:px-16 rounded-8 text-content-secondary items-center justify-center hover:text-content-primary hover:bg-surface-secondary transition-all"
           :class="[
             getIsMenuItemActive(item)
               ? 'bg-surface-secondary text-content-primary'
@@ -221,14 +226,22 @@ onClickOutside(wrapperRef, () => {
             ]"
             :name="item.icon"
           />
-          <span>{{ item.label }}</span>
+          <span
+            v-if="item.sublabel"
+            class="flex flex-col items-start leading-[1.15]"
+          >
+            <span>{{ item.label }}</span>
+            <span class="text-[10px] font-normal text-content-tertiary">{{ item.sublabel }}</span>
+          </span>
+          <span v-else>{{ item.label }}</span>
         </NuxtLink>
       </div>
     </div>
 
     <!-- Right: Wallet -->
-    <div class="flex flex-nowrap gap-8 min-w-0">
+    <div class="ml-auto flex flex-nowrap gap-8 min-w-0">
       <UiButton
+        v-if="canSwitchChains"
         class="py-6 px-12"
         icon="arrow-down"
         variant="secondary"
@@ -237,10 +250,22 @@ onClickOutside(wrapperRef, () => {
         @click="onChainButtonClick"
       >
         <BaseAvatar
-          :src="`/chains/${chainId}.webp`"
+          :src="chainLogoSrc"
           :label="String(chainId)"
         />
       </UiButton>
+      <div
+        v-else
+        class="ui-button ui-button--medium ui-button--secondary chain-chip py-6 px-12"
+        aria-label="Current chain"
+      >
+        <div class="ui-button__wrap">
+          <BaseAvatar
+            :src="chainLogoSrc"
+            :label="String(chainId)"
+          />
+        </div>
+      </div>
       <UiButton
         class="min-w-0 [&>span]:truncate"
         :icon="(isConnected || isSpyMode) ? 'arrow-down' : 'plus'"
@@ -268,3 +293,10 @@ onClickOutside(wrapperRef, () => {
     </div>
   </header>
 </template>
+
+<style scoped>
+.chain-chip {
+  cursor: default;
+  pointer-events: none;
+}
+</style>

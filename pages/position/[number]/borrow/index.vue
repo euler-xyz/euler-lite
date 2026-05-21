@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { FixedPoint } from '~/utils/fixed-point'
 import { useModal } from '~/components/ui/composables/useModal'
 import { OperationReviewModal } from '#components'
@@ -26,7 +25,7 @@ const modal = useModal()
 const { error } = useToast()
 const { buildBorrowPlan, executeTxPlan } = useEulerOperations()
 const { getBorrowVaultPair } = useVaults()
-const { isConnected, address } = useAccount()
+const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, getPositionBySubAccountIndex } = useEulerAccount()
 const positionIndex = usePositionIndex()
@@ -485,28 +484,28 @@ watch([collateralAmount, borrowAmount], async () => {
               @update:model-value="onLtvInput"
             />
 
-            <UiToast
+            <UiAlert
               v-if="isGeoBlocked"
               title="Region restricted"
               description="This operation is not available in your region. You can still repay existing debt."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="!isGeoBlocked && isBorrowRestricted"
               title="Asset restricted"
               description="Borrowing this asset is not available in your region."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-show="errorText"
               title="Error"
               variant="error"
               :description="errorText || ''"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="simulationError"
               title="Error"
               variant="error"

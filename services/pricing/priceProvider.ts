@@ -222,7 +222,7 @@ export const getUnitOfAccountUsdRate = async (
         vault.unitOfAccount as `0x${string}`,
       )
       if (backendPrice) {
-        const rate = backendPriceToBigInt(backendPrice.price)
+        const rate = backendPriceToBigInt(backendPrice.priceUsd)
         if (rate > 0n) return rate
       }
     }
@@ -272,9 +272,20 @@ const usesUtilsLensPricing = (vault: AnyVault | null | undefined): boolean => {
  * Convert backend price data to PriceResult format.
  */
 const backendPriceToPriceResult = (data: BackendPriceData): PriceResult | undefined => {
-  const mid = backendPriceToBigInt(data.price)
+  const mid = backendPriceToBigInt(data.priceUsd)
   if (mid <= 0n) return undefined
   return { amountOutMid: mid, amountOutAsk: mid, amountOutBid: mid }
+}
+
+/**
+ * Scale factor for the vault's unit of account. The on-chain VaultLens
+ * returns liability/collateral prices in the UoA token's native decimals;
+ * dividing by this scale (rather than ONE_18) yields a USD price in
+ * 18-decimal fixed-point regardless of UoA decimals.
+ */
+const getUoaScale = (vault: Vault | null | undefined): bigint => {
+  const decimals = vault?.unitOfAccountDecimals
+  return decimals !== undefined ? 10n ** BigInt(decimals) : ONE_18
 }
 
 /**
@@ -305,10 +316,12 @@ const getAssetUsdPriceFromOracle = async (
   const uoaRate = await getUnitOfAccountUsdRate(vault as Vault)
   if (!uoaRate) return undefined
 
+  const uoaScale = getUoaScale(vault as Vault)
+
   return {
-    amountOutMid: (oraclePrice.amountOutMid * uoaRate) / ONE_18,
-    amountOutAsk: (oraclePrice.amountOutAsk * uoaRate) / ONE_18,
-    amountOutBid: (oraclePrice.amountOutBid * uoaRate) / ONE_18,
+    amountOutMid: (oraclePrice.amountOutMid * uoaRate) / uoaScale,
+    amountOutAsk: (oraclePrice.amountOutAsk * uoaRate) / uoaScale,
+    amountOutBid: (oraclePrice.amountOutBid * uoaRate) / uoaScale,
   }
 }
 
@@ -332,10 +345,12 @@ const getCollateralUsdPriceFromOracle = async (
   const uoaRate = await getUnitOfAccountUsdRate(liabilityVault)
   if (!uoaRate) return undefined
 
+  const uoaScale = getUoaScale(liabilityVault)
+
   return {
-    amountOutMid: (oraclePrice.amountOutMid * uoaRate) / ONE_18,
-    amountOutAsk: (oraclePrice.amountOutAsk * uoaRate) / ONE_18,
-    amountOutBid: (oraclePrice.amountOutBid * uoaRate) / ONE_18,
+    amountOutMid: (oraclePrice.amountOutMid * uoaRate) / uoaScale,
+    amountOutAsk: (oraclePrice.amountOutAsk * uoaRate) / uoaScale,
+    amountOutBid: (oraclePrice.amountOutBid * uoaRate) / uoaScale,
   }
 }
 
@@ -399,7 +414,7 @@ export const getCollateralUsdPrice = async (
 
   // Try backend first if configured and source is 'off-chain'
   // Use fetchBackendPrice directly with the collateral asset address
-  // (the /v1/prices endpoint returns asset prices without needing liability context)
+  // (the /v3/prices endpoint returns asset prices without needing liability context)
   if (source === 'off-chain' && isBackendConfigured()) {
     try {
       const backendPrice = await fetchBackendPrice(
@@ -506,9 +521,9 @@ export const getTokenUsdValue = async (
     return getAssetUsdValue(amount, vault, 'off-chain')
   }
   const priceData = await fetchBackendPrice(tokenAddress as `0x${string}`)
-  if (!priceData?.price) return undefined
+  if (!priceData?.priceUsd) return undefined
   const tokenAmount = nanoToValue(amount, decimals)
-  return tokenAmount * priceData.price
+  return tokenAmount * priceData.priceUsd
 }
 
 /**

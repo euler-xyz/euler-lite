@@ -70,6 +70,15 @@ export const getNetworksByChainIds = (ids: readonly number[]): AppKitNetwork[] =
 export const getChainById = (chainId: number): AppKitNetwork | undefined =>
   chainMap.get(chainId)
 
+export const isKnownChainId = (chainId: number): boolean =>
+  chainMap.has(chainId)
+
+export const getKnownChainIds = (ids: readonly number[]): number[] =>
+  ids.filter(isKnownChainId)
+
+export const getUnknownChainIds = (ids: readonly number[]): number[] =>
+  ids.filter(id => !isKnownChainId(id))
+
 const DEFI_LLAMA_NAMES: ReadonlyMap<number, string> = new Map([
   [1, 'Ethereum'],
   [56, 'BSC'],

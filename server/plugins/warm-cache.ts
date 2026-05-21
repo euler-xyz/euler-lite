@@ -12,12 +12,22 @@
  * warm pipeline always find a cached entry (refresh completes just as the
  * previous entry would otherwise expire).
  *
- * Warm-up structure (per cycle): all tasks run in parallel.
+ * Warm-up structure (per cycle):
  *
- *   • Global:    /api/euler-chains
- *   • Per-chain: labels, token-list, intrinsic-apy, vault-categories,
- *                Merkl opportunities × 3, Brevis campaigns, Fuul × 2,
- *                refreshChainVaults(chainId)
+ *   • Global (parallel with the chain loop): /api/euler-chains and
+ *     cross-chain `all/assets.json`.
+ *   • Per-chain (serialized one chain at a time): labels, token-list,
+ *     intrinsic-apy, vault-categories, Merkl opportunities × 5,
+ *     Brevis campaigns, Fuul × 2, refreshChainVaults(chainId). Tasks
+ *     within a single chain still run in parallel.
+ *
+ * Serializing chains avoids a cold-start thundering herd (~250
+ * simultaneous HTTPS requests across all chains × all providers) that
+ * overshot the 10 s upstream timeout for slow first-hit DNS/TLS
+ * handshakes. Cross-chain upstreams (defillama, stablewatch, etherfi,
+ * etc.) dedupe via the in-flight cache, so chains 2..N hit warm cache
+ * for those rather than refetching — sequential mode is therefore much
+ * cheaper than N× the first chain's wall time.
  *
  * Per-chain warms skip chains listed in `DEPRECATED_CHAINS`. Their data
  * is still served — the first visitor to a deprecated chain pays a
@@ -42,17 +52,18 @@ import { logger } from '~/server/utils/logger'
 import { refreshChainVaults } from '../utils/vaults-cache'
 import { refreshVaultCategories } from '../utils/vault-categories-store'
 import { refreshIntrinsicApyForChain } from '../utils/intrinsic-apy'
+import { refreshVerifiedAddressSet } from '../utils/verified-vaults'
+import { refreshChainVaultMetadata } from '../utils/vault-metadata'
 import {
   type FuulProtocol,
-  type MerklOpportunityType,
   refreshBrevisCampaigns,
   refreshFuulProtocol,
   refreshMerklType,
 } from '../utils/rewards-cache'
+import { MERKL_TYPES } from '~/entities/merkl'
 
 const REWARM_INTERVAL_MS = 5 * 60_000
 
-const MERKL_TYPES: MerklOpportunityType[] = ['EULER', 'MULTILENDBORROW', 'ERC20LOGPROCESSOR']
 const FUUL_PROTOCOLS: FuulProtocol[] = ['euler', 'euler-looping']
 
 // Nitro dev mode re-imports server plugins across its double-init (Vite
@@ -95,6 +106,13 @@ const reportWarm = <T>(context: string, task: Promise<T>): Promise<T | undefined
 const warmEulerChains = () =>
   reportWarm('euler-chains', refreshEulerChains())
 
+// Cross-chain pattern rules for asset geo-blocking live at `all/assets.json`
+// upstream. The /api/labels/assets.json handler unions this with the
+// per-chain file; warm it once so the first chain-scoped request doesn't
+// pay the cold-upstream cost.
+const warmGlobalAssets = () =>
+  reportWarm('labels/assets.json scope=all', refreshLabelFile('all', 'assets.json'))
+
 // --- Per-chain warms (parallel across chains and within a chain) ---
 
 const warmLabels = (chainId: number): Promise<unknown>[] =>
@@ -128,6 +146,20 @@ const warmVaultCategories = (chainId: number) =>
 const warmChainVaults = (chainId: number) =>
   reportWarm(`vaults chain=${chainId}`, refreshChainVaults(chainId))
 
+// Public /api/public/is-known reads from this. Force-rebuilds the verified
+// set every cycle (5 min); without this warm, the bridge cache drifts on its
+// own 5-min clock and propagation lag can stretch to ~10 min in the worst
+// case. Its internal $fetches to /api/labels/* and call to refreshChainVaults
+// collapse onto the parallel warms via in-flight dedup.
+const warmVerifiedAddresses = (chainId: number) =>
+  reportWarm(`verified-vaults chain=${chainId}`, refreshVerifiedAddressSet(chainId))
+
+// Public /api/public/metadata reads from this. Same rationale as
+// verified-vaults — keeps the bridge cache continuously fresh so propagation
+// of label / on-chain changes stays at ~5 min.
+const warmVaultMetadata = (chainId: number) =>
+  reportWarm(`vault-metadata chain=${chainId}`, refreshChainVaultMetadata(chainId))
+
 const warmChainTasks = (chainId: number): Promise<unknown>[] => [
   ...warmLabels(chainId),
   warmTokenList(chainId),
@@ -135,6 +167,8 @@ const warmChainTasks = (chainId: number): Promise<unknown>[] => [
   warmVaultCategories(chainId),
   ...warmRewardCampaigns(chainId),
   warmChainVaults(chainId),
+  warmVerifiedAddresses(chainId),
+  warmVaultMetadata(chainId),
 ]
 
 // --- Orchestration ---
@@ -151,11 +185,18 @@ export default defineNitroPlugin(() => {
   const chainIds = enabledChainIds.filter(id => !deprecatedChainIds.has(id))
   if (chainIds.length === 0) return
 
+  const warmChainsSequentially = async () => {
+    for (const chainId of chainIds) {
+      await Promise.allSettled(warmChainTasks(chainId))
+    }
+  }
+
   const warmAll = async () => {
     try {
       await Promise.allSettled([
         warmEulerChains(),
-        ...chainIds.flatMap(warmChainTasks),
+        warmGlobalAssets(),
+        warmChainsSequentially(),
       ])
     }
     catch (err) {

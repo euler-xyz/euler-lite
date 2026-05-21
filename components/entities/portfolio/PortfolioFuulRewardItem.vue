@@ -127,7 +127,7 @@ const onClaimClick = async () => {
       >
         Claim
       </UiButton>
-      <UiToast
+      <UiAlert
         v-if="simulationError"
         class="mt-12"
         title="Error"

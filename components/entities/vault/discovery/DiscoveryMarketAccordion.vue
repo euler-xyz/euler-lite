@@ -14,19 +14,32 @@ import {
   isMatrixCompatibleVault,
   formatCapDisplay,
   isAttributeMatrixView,
+  buildVaultApyCache,
   MATRIX_VIEW_OPTIONS,
   type CollateralMatrixData,
   type DotMetric,
   type ExpandedViewMode,
+  type MatrixVariant,
   type AttributeMatrixData,
   type MatrixViewId,
   type VaultUsdCacheEntry,
+  type VaultApyCacheEntry,
 } from '~/utils/discoveryCalculations'
 
 const props = defineProps<{
   markets: MarketGroup[]
   initialExpanded?: string[]
 }>()
+
+const route = useRoute()
+const { chainId } = useEulerAddresses()
+const shareLinkQuery = computed(() => {
+  const network = route.query.network
+
+  return {
+    network: Array.isArray(network) ? network[0] ?? chainId.value : network ?? chainId.value,
+  }
+})
 
 // -- Accordion expand state --
 
@@ -44,6 +57,9 @@ const toggleExpand = (marketId: string) => {
     }
     if (selectedGraphNode.value?.marketId === marketId) {
       selectedGraphNode.value = null
+    }
+    if (matrixDropdownOpenMarketId.value === marketId) {
+      matrixDropdownOpenMarketId.value = null
     }
   }
   else {
@@ -71,6 +87,9 @@ const setExpandedView = (marketId: string, mode: ExpandedViewMode) => {
     }
     if (selectedMatrixHeader.value?.marketId === marketId) {
       selectedMatrixHeader.value = null
+    }
+    if (matrixDropdownOpenMarketId.value === marketId) {
+      matrixDropdownOpenMarketId.value = null
     }
   }
   else {
@@ -140,24 +159,44 @@ const onToggle = (market: MarketGroup) => {
 // -- Matrix view selector (single dropdown spans Stats, Configuration,
 // Oracles, and the four numeric pair metrics) --
 
-const matrixView = ref<MatrixViewId>('stats')
-const matrixDropdownOpen = ref(false)
+const matrixViews = ref<Map<string, MatrixViewId>>(new Map())
+const matrixDropdownOpenMarketId = ref<string | null>(null)
 
-const matrixVariant = computed(() => isAttributeMatrixView(matrixView.value) ? matrixView.value : 'pairs')
-const dotMetric = computed<DotMetric>(() => {
-  if (isAttributeMatrixView(matrixView.value)) return 'net-apy' // unused for attribute matrices
-  return matrixView.value
-})
+const getMatrixView = (marketId: string): MatrixViewId =>
+  matrixViews.value.get(marketId) ?? 'stats'
 
-const setMatrixView = (view: MatrixViewId) => {
-  if (matrixView.value === view) {
-    matrixDropdownOpen.value = false
+const getMatrixVariant = (marketId: string): MatrixVariant => {
+  const view = getMatrixView(marketId)
+  return isAttributeMatrixView(view) ? view : 'pairs'
+}
+
+const getDotMetric = (marketId: string): DotMetric => {
+  const view = getMatrixView(marketId)
+  if (isAttributeMatrixView(view)) return 'net-apy' // unused for attribute matrices
+  return view
+}
+
+const setMatrixView = (marketId: string, view: MatrixViewId) => {
+  if (getMatrixView(marketId) === view) {
+    matrixDropdownOpenMarketId.value = null
     return
   }
-  matrixView.value = view
-  matrixDropdownOpen.value = false
-  selectedCell.value = null
-  selectedMatrixHeader.value = null
+  const next = new Map(matrixViews.value)
+  next.set(marketId, view)
+  matrixViews.value = next
+  matrixDropdownOpenMarketId.value = null
+  if (selectedCell.value?.marketId === marketId) {
+    selectedCell.value = null
+  }
+  if (selectedMatrixHeader.value?.marketId === marketId) {
+    selectedMatrixHeader.value = null
+  }
+}
+
+const isMatrixDropdownOpen = (marketId: string) => matrixDropdownOpenMarketId.value === marketId
+
+const toggleMatrixDropdown = (marketId: string) => {
+  matrixDropdownOpenMarketId.value = isMatrixDropdownOpen(marketId) ? null : marketId
 }
 
 // -- Precomputed matrix map --
@@ -172,11 +211,32 @@ const matrixMap = computed((): Map<string, CollateralMatrixData | null> => {
 
 const attributeMatrixMap = computed((): Map<string, AttributeMatrixData> => {
   const result = new Map<string, AttributeMatrixData>()
-  if (!isAttributeMatrixView(matrixView.value)) return result
   for (const market of props.markets) {
-    result.set(market.id, getAttributeMatrix(market, matrixView.value))
+    const matrixView = getMatrixView(market.id)
+    if (isAttributeMatrixView(matrixView)) {
+      result.set(market.id, getAttributeMatrix(market, matrixView))
+    }
   }
   return result
+})
+
+// Stats matrix needs the same APY users see on per-vault cards (base IRM rate
+// folded with intrinsic + supply/borrow rewards). The composables fetch this
+// data asynchronously and bump `version` when it lands; the explicit reads
+// here re-trigger the computed so the cells refresh in place.
+const { withIntrinsicSupplyApy, withIntrinsicBorrowApy, version: intrinsicVersion } = useIntrinsicApy()
+const { getSupplyRewardApy, getBorrowRewardApy, version: rewardsVersion } = useRewardsApy()
+
+const vaultApyCache = computed<Map<string, VaultApyCacheEntry>>(() => {
+  void intrinsicVersion.value
+  void rewardsVersion.value
+  return buildVaultApyCache(
+    props.markets,
+    withIntrinsicSupplyApy,
+    withIntrinsicBorrowApy,
+    getSupplyRewardApy,
+    getBorrowRewardApy,
+  )
 })
 
 // -- Cell selection state (matrix view) --
@@ -368,7 +428,7 @@ const hasSelection = (market: MarketGroup): boolean => {
 
 onMounted(() => {
   const onClick = () => {
-    matrixDropdownOpen.value = false
+    matrixDropdownOpenMarketId.value = null
   }
   window.addEventListener('click', onClick)
   onUnmounted(() => {
@@ -478,36 +538,44 @@ onMounted(() => {
               >
                 <div
                   class="ui-select__field"
-                  @click.stop="matrixDropdownOpen = !matrixDropdownOpen"
+                  @click.stop="toggleMatrixDropdown(market.id)"
                 >
                   <UiIcon
                     name="filter"
                     class="ui-select__icon"
                   />
-                  <span class="ui-select__text">{{ MATRIX_VIEW_OPTIONS.find(o => o.id === matrixView)?.label }}</span>
+                  <span class="ui-select__text">{{ MATRIX_VIEW_OPTIONS.find(o => o.id === getMatrixView(market.id))?.label }}</span>
                   <UiIcon
                     name="arrow-down"
                     class="ui-select__arrow"
-                    :style="matrixDropdownOpen ? 'transform: rotate(180deg)' : ''"
+                    :style="isMatrixDropdownOpen(market.id) ? 'transform: rotate(180deg)' : ''"
                   />
                 </div>
                 <div
-                  v-if="matrixDropdownOpen"
+                  v-if="isMatrixDropdownOpen(market.id)"
                   class="absolute left-0 top-full mt-4 z-50 bg-surface border border-line-default rounded-12 shadow-card py-4 min-w-[180px]"
                 >
                   <button
                     v-for="option in MATRIX_VIEW_OPTIONS"
                     :key="option.id"
                     class="w-full text-left px-14 py-6 text-p3 cursor-pointer transition-colors"
-                    :class="matrixView === option.id
+                    :class="getMatrixView(market.id) === option.id
                       ? 'text-accent-700 bg-accent-300/20 font-medium'
                       : 'text-content-secondary hover:bg-surface-secondary'"
-                    @click.stop="setMatrixView(option.id)"
+                    @click.stop="setMatrixView(market.id, option.id)"
                   >
                     {{ option.label }}
                   </button>
                 </div>
               </div>
+
+              <UiShareLinkButton
+                class="ml-auto !w-28 !h-28"
+                :path="`/explore/${market.id}`"
+                :query="shareLinkQuery"
+                label="Copy market link"
+                variant="ghost"
+              />
             </div>
 
             <!-- Graph View -->
@@ -521,10 +589,10 @@ onMounted(() => {
 
             <!-- Matrix View: LTV pairs -->
             <DiscoveryMarketMatrix
-              v-else-if="matrixVariant === 'pairs'"
+              v-else-if="getMatrixVariant(market.id) === 'pairs'"
               :market="market"
               :matrix="matrix"
-              :dot-metric="dotMetric"
+              :dot-metric="getDotMetric(market.id)"
               :selected-cell="selectedCell?.marketId === market.id ? { collateralAddr: selectedCell.collateralAddr, liabilityAddr: selectedCell.liabilityAddr } : null"
               :selected-header="selectedMatrixHeader?.marketId === market.id ? { address: selectedMatrixHeader.address, axis: selectedMatrixHeader.axis } : null"
               @select-cell="(col: string, lia: string) => onCellClick(market.id, col, lia)"
@@ -536,6 +604,7 @@ onMounted(() => {
               v-else-if="attributeMatrixMap.get(market.id)"
               :data="attributeMatrixMap.get(market.id)!"
               :usd-cache="vaultUsdCache"
+              :apy-cache="vaultApyCache"
               :selected-header="selectedMatrixHeader?.marketId === market.id ? { address: selectedMatrixHeader.address, axis: selectedMatrixHeader.axis } : null"
               @select-header="(addr: string, axis: 'row' | 'column') => toggleMatrixHeader(market.id, addr, axis)"
             />

@@ -10,6 +10,7 @@ export type {
   AdaptiveCurveIRMParams,
   KinkyIRMParams,
   CyclicalNoteInfo,
+  CyclicalNoteMonthlyInfo,
   Erc4626Vault,
   SecuritizeVault,
   Vault,
@@ -20,6 +21,7 @@ export type {
   EarnVaultStrategyInfo,
   EarnVault,
   CollateralOption,
+  CollateralOptionType,
 } from './types'
 export { isSecuritizeBorrowPair, isEVKVault } from './types'
 
@@ -53,6 +55,16 @@ export type { ChainVaultsSnapshot, LoadSnapshotInput } from './loader'
 export { serialiseSnapshot, deserialiseSnapshot } from './loader-serde'
 export type { SerialisedSnapshot } from './loader-serde'
 
+// Shared governor / owner verification rule. Used by client `useVaults` and
+// the server `is-known` proxy to keep verdicts in lockstep.
+export {
+  isVaultGovernorVerified,
+  isEarnVaultOwnerVerified,
+  resolveGoverningEntityKeys,
+  resolveEarnGoverningEntityKeys,
+} from './governor-verification'
+export type { VerificationLabels } from './governor-verification'
+
 // LTV ramp calculations
 export {
   getCurrentLiquidationLTV,
@@ -60,6 +72,10 @@ export {
   isLiveCollateralEdge,
   getRampTimeRemaining,
 } from './ltv'
+
+// Collateral discovery (find addresses referenced as live collateral but
+// not yet resolved into the registry).
+export { extractUnresolvedCollateralAddresses } from './collateral-discovery'
 
 // Collateral exposure (borrow-side pair derivation)
 export {
@@ -88,6 +104,7 @@ export {
   convertAssetsToShares,
   previewWithdraw,
   getMaxWithdraw,
+  getCashLimitedWithdrawAmount,
   getUtilization,
   getVaultUtilization,
   getSupplyCapPercentage,

@@ -3,7 +3,7 @@ import { getAddress, maxUint256, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import type { SecuritizeVault, Vault, VaultCollateralLTV } from '~/entities/vault'
 import { useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
-import { getProductKeyByVault } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
@@ -13,7 +13,6 @@ import { getSpecialAddressLabel } from '~/utils/special-addresses'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { formatNumber, compactNumber, formatUsdValue, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
 
 const { vault } = defineProps<{ vault: SecuritizeVault, desktopOverview?: boolean }>()
@@ -22,10 +21,10 @@ const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enab
 
 const { client: rpcClient } = useRpcClient()
 const { chainId } = useEulerAddresses()
-const { borrowList: _borrowList, isVaultGovernorVerified } = useVaults()
+const { copyToClipboard, isCopied } = useClipboardCopy()
+const { isVaultGovernorVerified } = useVaults()
 const { getEvkVaults } = useVaultRegistry()
 const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
-const modal = useModal()
 const { getSupplyRewardApy, getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
 const vaultAddress = computed(() => getAddress(vault.address))
 const product = useEulerProductOfVault(vaultAddress)
@@ -36,6 +35,7 @@ const entities = useEulerEntitiesOfVault(vault as unknown as Vault)
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault as unknown as Vault))
 const isGovernanceLimited = computed(() => product.isGovernanceLimited && isGovernorVerified.value)
 const marketProductKey = computed(() => getProductKeyByVault(vault.address))
+const marketProductName = computed(() => getProductByVault(vault.address).name)
 
 const isDeprecated = computed(() => {
   return product.deprecatedVaults?.includes(vaultAddress.value) ?? false
@@ -48,7 +48,7 @@ const shortenAddress = (address: string) => {
 }
 
 const onCopyClick = (address: string) => {
-  navigator.clipboard.writeText(address)
+  copyToClipboard(address)
 }
 
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
@@ -80,16 +80,14 @@ const rewardSupplyAPY = computed(() => getSupplyRewardApy(vault.address))
 const intrinsicApy = computed(() => getIntrinsicApy(vault.asset.address))
 const supplyApyWithRewards = computed(() => intrinsicApy.value + rewardSupplyAPY.value)
 
-const onSupplyInfoIconClick = () => {
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY: 0, // Securitize vaults don't have interest rates
-      intrinsicAPY: intrinsicApy.value,
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
-      campaigns: getSupplyRewardCampaigns(vault.address),
-    },
-  })
-}
+const supplyApyModalData = computed(() => ({
+  props: {
+    lendingAPY: 0, // Securitize vaults don't have interest rates
+    intrinsicAPY: intrinsicApy.value,
+    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    campaigns: getSupplyRewardCampaigns(vault.address),
+  },
+}))
 
 // Risk parameters - fetch share token exchange rate (ERC4626 standard)
 const shareTokenExchangeRate: Ref<bigint | undefined> = ref()
@@ -206,10 +204,10 @@ const supplyCapPercentageDisplay = computed(() => {
             :to="{ name: 'explore-market', params: { market: marketProductKey }, query: { network: route.query.network } }"
             class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
           >
-            {{ product.name }}
+            {{ marketProductName }}
           </NuxtLink>
           <template v-else>
-            {{ product.name || '-' }}
+            {{ marketProductName || '-' }}
           </template>
         </VaultOverviewLabelValue>
         <VaultOverviewLabelValue
@@ -229,6 +227,7 @@ const supplyCapPercentageDisplay = computed(() => {
               <BaseAvatar
                 :label="entity.name"
                 :src="getEulerLabelEntityLogo(entity.logo)"
+                class="!w-28 !h-28"
               />
               <a
                 :href="entity.url"
@@ -242,6 +241,7 @@ const supplyCapPercentageDisplay = computed(() => {
             v-else-if="!isGovernorVerified"
             :vault="vault"
             type="unknown"
+            nudge
           />
           <div v-else>
             -
@@ -251,7 +251,10 @@ const supplyCapPercentageDisplay = computed(() => {
           v-if="enableVaultTypeDisplay"
           label="Vault type"
         >
-          <VaultTypeBadges :vault-address="vault.address" />
+          <VaultTypeBadges
+            :vault="vault"
+            nudge
+          />
         </VaultOverviewLabelValue>
         <VaultOverviewLabelValue label="Can be borrowed">
           <div class="flex items-center gap-8">
@@ -296,12 +299,17 @@ const supplyCapPercentageDisplay = computed(() => {
             Supply APY
           </template>
           <span class="flex items-center gap-4">
-            <SvgIcon
+            <UiModalPreviewTrigger
               v-if="hasSupplyRewards(vault.address)"
-              class="!w-20 !h-20 text-accent-500 cursor-pointer"
-              name="sparks"
-              @click="onSupplyInfoIconClick"
-            />
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY rewards breakdown"
+            >
+              <SvgIcon
+                class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                name="sparks"
+              />
+            </UiModalPreviewTrigger>
             {{ formatNumber(supplyApyWithRewards) }}%
           </span>
         </VaultOverviewLabelValue>
@@ -374,7 +382,7 @@ const supplyCapPercentageDisplay = computed(() => {
             >
               <SvgIcon
                 class="!w-18 !h-18"
-                name="copy"
+                :name="isCopied(vault.asset.address) ? 'check' : 'copy'"
               />
             </button>
           </div>
@@ -397,7 +405,7 @@ const supplyCapPercentageDisplay = computed(() => {
             >
               <SvgIcon
                 class="!w-18 !h-18"
-                name="copy"
+                :name="isCopied(vault.address) ? 'check' : 'copy'"
               />
             </button>
           </div>
@@ -421,7 +429,7 @@ const supplyCapPercentageDisplay = computed(() => {
             >
               <SvgIcon
                 class="!w-18 !h-18"
-                name="copy"
+                :name="isCopied(vault.governorAdmin) ? 'check' : 'copy'"
               />
             </button>
           </div>

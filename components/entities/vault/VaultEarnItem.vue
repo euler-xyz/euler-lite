@@ -1,18 +1,16 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import type { EarnVault } from '~/entities/vault'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { useEulerProductOfVault, useEulerEntitiesOfEarnVault } from '~/composables/useEulerLabels'
-import { isVaultFeatured, getEarnVaultDescription } from '~/utils/eulerLabelsUtils'
+import { isVaultRecentlyAdded, getEarnVaultDescription } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
-import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
 
-const { isConnected } = useAccount()
+const { isConnected } = useWagmi()
 const { vault } = defineProps<{ vault: EarnVault }>()
 const product = useEulerProductOfVault(vault.address)
 const { enableEntityBranding } = useDeployConfig()
@@ -32,7 +30,6 @@ const entityLogos = computed(() => {
 const { getBalance, isLoading: isBalancesLoading } = useWallets()
 const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
-const modal = useModal()
 
 const balance = computed(() =>
   getBalance(vault.asset.address as `0x${string}`),
@@ -40,7 +37,7 @@ const balance = computed(() =>
 const totalRewardsAPY = computed(() => getSupplyRewardApy(vault.address))
 const hasRewards = computed(() => hasSupplyRewards(vault.address))
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
-const isFeatured = computed(() => isVaultFeatured(vault.address))
+const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address))
 const isUnverified = computed(() => !vault.verified)
 const displayName = computed(() => product.name || vault.name)
 const description = computed(() => getEarnVaultDescription(vault.address))
@@ -75,19 +72,15 @@ const statsGridCols = computed(() => {
   return cols.join(' ')
 })
 
-const onSupplyInfoIconClick = (event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY: nanoToValue(vault.interestRateInfo.supplyAPY, 25),
-      intrinsicAPY: getIntrinsicApy(vault.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
-      campaigns: getSupplyRewardCampaigns(vault.address),
-      baseApyAverageLabel: '1h',
-    },
-  })
-}
+const supplyApyModalData = computed(() => ({
+  props: {
+    lendingAPY: nanoToValue(vault.interestRateInfo.supplyAPY, 25),
+    intrinsicAPY: getIntrinsicApy(vault.asset.address),
+    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    campaigns: getSupplyRewardCampaigns(vault.address),
+    baseApyAverageLabel: '1h',
+  },
+}))
 </script>
 
 <template>
@@ -108,27 +101,17 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
             :is-unverified="isUnverified"
           />
           <span
-            v-if="isFeatured"
+            v-if="isRecentlyAdded"
             class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5"
-            title="Featured Vault"
+            title="Recently added vault"
           >
             <SvgIcon
               name="star"
               class="!w-14 !h-14"
             />
-            Featured
+            Recently added
           </span>
-          <span
-            v-if="isGeoBlocked"
-            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-            title="This vault is not available in your region"
-          >
-            <SvgIcon
-              name="warning"
-              class="!w-14 !h-14"
-            />
-            Restricted
-          </span>
+          <RestrictedBadge v-if="isGeoBlocked" />
         </div>
         <div class="text-h5 text-content-primary">
           {{ vault.asset.symbol }}
@@ -146,22 +129,32 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
           <span class="inline-flex items-center rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5">
             1h
           </span>
-          <SvgIcon
-            class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-            name="info-circle"
-            @click="onSupplyInfoIconClick"
-          />
+          <UiModalPreviewTrigger
+            :component="VaultSupplyApyModal"
+            :modal-data="supplyApyModalData"
+            aria-label="Show supply APY breakdown"
+          >
+            <SvgIcon
+              class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+              name="info-circle"
+            />
+          </UiModalPreviewTrigger>
         </div>
         <div class="text-p2 flex items-center text-accent-600">
           <div class="mr-6">
             <VaultPoints :vault="vault" />
           </div>
-          <SvgIcon
+          <UiModalPreviewTrigger
             v-if="hasRewards"
-            class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
-            name="sparks"
-            @click="onSupplyInfoIconClick"
-          />
+            :component="VaultSupplyApyModal"
+            :modal-data="supplyApyModalData"
+            aria-label="Show supply APY rewards breakdown"
+          >
+            <SvgIcon
+              class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
+              name="sparks"
+            />
+          </UiModalPreviewTrigger>
           {{ formatNumber(nanoToValue(vault.interestRateInfo.supplyAPY, 25) + totalRewardsAPY) }}%
         </div>
       </div>
@@ -174,7 +167,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
         v-if="enableEntityBranding"
         class="flex-1 mobile:!hidden"
       >
-        <div class="text-content-tertiary text-p3 mb-4">Capital allocator</div>
+        <div class="text-content-tertiary text-p3 mb-4">Curator</div>
         <div
           v-if="!isOwnerVerified"
           class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
@@ -246,7 +239,7 @@ const onSupplyInfoIconClick = (event: MouseEvent) => {
         class="flex w-full justify-between"
       >
         <div class="flex-1">
-          <div class="text-content-tertiary text-p3">Capital allocator</div>
+          <div class="text-content-tertiary text-p3">Curator</div>
         </div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
           <div

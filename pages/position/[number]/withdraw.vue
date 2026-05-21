@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { getAddress, type Address, zeroAddress } from 'viem'
 import { FixedPoint } from '~/utils/fixed-point'
-import type { Vault, VaultAsset } from '~/entities/vault'
+import { getCashLimitedWithdrawAmount, type Vault, type VaultAsset } from '~/entities/vault'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import {
@@ -19,7 +18,7 @@ import { useCollateralForm } from '~/composables/position/useCollateralForm'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const positionIndex = usePositionIndex()
-const { address } = useAccount()
+const { address } = useWagmi()
 const { buildWithdrawPlan, buildWithdrawAndSwapPlan } = useEulerOperations()
 const { refreshAllPositions } = useEulerAccount()
 const { eulerLensAddresses } = useEulerAddresses()
@@ -40,10 +39,13 @@ const needsSwap = computed(() => {
   }
 })
 
+const cashLimitedCollateralAssets = () =>
+  getCashLimitedWithdrawAmount(form.collateralAssets.value, form.collateralVault.value)
+
 const form = useCollateralForm({
   mode: 'withdraw',
   needsSwap,
-  effectiveBalance: computed(() => form.collateralAssets.value),
+  effectiveBalance: computed(() => cashLimitedCollateralAssets()),
   effectiveAsset: computed(() => form.asset.value),
 
   computePriceFixed: (_pos, borrowVault, collateralVault) => {
@@ -71,6 +73,9 @@ const form = useCollateralForm({
     if (!form.position.value) return
     if (userLtvFixed.gte(FixedPoint.fromValue(form.position.value.liquidationLTV, 2))) {
       throw new Error('Not enough liquidity for the vault, LTV is too large')
+    }
+    if (cashLimitedCollateralAssets() < amountFixed.value) {
+      throw new Error('Not enough liquidity in vault')
     }
   },
 
@@ -136,9 +141,11 @@ const form = useCollateralForm({
   },
 })
 useOperationGuard(computed(() => [form.collateralVault.value?.address, form.borrowVault.value?.address].filter(Boolean)))
+const withdrawableCollateralAssets = computed(() => cashLimitedCollateralAssets())
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (form.isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (form.isOutputAssetBlocked.value || form.isOutputAssetRestricted.value) return { message: 'Receiving this asset is not available in your region', variant: 'warning' }
   if (form.isSwapRestricted.value) return { message: 'Swapping from this vault is not available in your region', variant: 'warning' }
   if (form.estimatesError.value) return { message: form.estimatesError.value, variant: 'error' }
   if (form.simulationError.value) return { message: form.simulationError.value, variant: 'error' }
@@ -218,7 +225,7 @@ watch(selectedOutputAsset, () => {
               label="Withdraw amount"
               :asset="form.asset.value"
               :vault="(form.collateralVault.value as Vault)"
-              :balance="form.collateralAssets.value"
+              :balance="withdrawableCollateralAssets"
               maxable
             />
 
@@ -261,16 +268,17 @@ watch(selectedOutputAsset, () => {
               >
                 <SwapDetailsSummary
                   :input-display="form.swapInputDisplay.value"
+                  :input-exact-display="form.swapInputExactDisplay.value"
                   :output-display="form.swapOutputDisplay.value"
+                  :output-exact-display="form.swapOutputExactDisplay.value"
                   :price-impact="form.swapPriceImpact.value"
                   :slippage="form.swapSlippage.value"
-                  :quote-slippage="form.swapQuoteSlippage.value"
                   :routed-via="form.swapRoutedVia.value"
                   @open-slippage-settings="form.openSlippageSettings"
                 />
               </VaultFormInfoBlock>
 
-              <UiToast
+              <UiAlert
                 v-if="form.swapQuoteError.value"
                 title="Swap quote"
                 variant="warning"
@@ -279,7 +287,7 @@ watch(selectedOutputAsset, () => {
               />
             </template>
 
-            <UiToast
+            <UiAlert
               v-if="isUnknownSwapToken && needsSwap"
               title="Unknown token"
               description="This token is not on any recognized token list. It could be fraudulent or malicious. Verify the contract address before proceeding."
@@ -287,28 +295,35 @@ watch(selectedOutputAsset, () => {
               size="compact"
             />
 
-            <UiToast
+            <UiAlert
               v-if="form.isGeoBlocked.value"
               title="Region restricted"
               description="This operation is not available in your region. You can still repay existing debt."
               variant="warning"
               size="compact"
             />
-            <UiToast
-              v-if="!form.isGeoBlocked.value && form.isSwapRestricted.value"
+            <UiAlert
+              v-if="!form.isGeoBlocked.value && (form.isOutputAssetBlocked.value || form.isOutputAssetRestricted.value)"
+              title="Asset restricted"
+              description="Receiving this asset is not available in your region. Pick a different token."
+              variant="warning"
+              size="compact"
+            />
+            <UiAlert
+              v-if="!form.isGeoBlocked.value && !form.isOutputAssetBlocked.value && !form.isOutputAssetRestricted.value && form.isSwapRestricted.value"
               title="Swap restricted"
               description="Swapping from this vault is not available in your region. You can withdraw the vault's underlying asset directly."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-show="form.estimatesError.value"
               title="Error"
               variant="error"
               :description="form.estimatesError.value"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="form.simulationError.value"
               title="Error"
               variant="error"

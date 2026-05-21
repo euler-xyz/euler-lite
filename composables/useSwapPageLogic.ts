@@ -1,19 +1,17 @@
 import { getAddress, formatUnits } from 'viem'
-import { useAccount } from '@wagmi/vue'
 import { logWarn } from '~/utils/errorHandling'
 import { OperationReviewModal, SlippageSettingsModal } from '#components'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import type { Vault, SecuritizeVault } from '~/entities/vault'
-import type { SwapApiQuote } from '~/entities/swap'
+import type { SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { getAssetUsdValue } from '~/services/pricing/priceProvider'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, getVaultTags } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
-import { computeQuoteSlippage, getQuoteAmount, type SwapQuoteAmountField, type SwapQuoteCompare } from '~/utils/swapQuotes'
+import { getQuoteAmount, type SwapQuoteAmountField, type SwapQuoteCompare } from '~/utils/swapQuotes'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import type { SwapApiRequestInput } from '~/composables/useSwapApi'
 import type { TxPlan } from '~/entities/txPlan'
-import { SwapperMode } from '~/entities/swap'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { isSameUnderlyingAsset, isSameVault as isSameVaultCheck } from '~/utils/vault-utils'
@@ -43,7 +41,7 @@ export interface UseSwapPageLogicOptions {
    */
   buildQuoteRequest: (amount: bigint) => { params: SwapApiRequestInput } | null
   /** Build the TxPlan for the current swap (same-asset or quote-based). Must throw on failure. */
-  buildPlan: () => Promise<TxPlan>
+  buildPlan: (quote?: SwapApiQuote) => Promise<TxPlan>
   /** Page-specific balance validation error. Receives the parsed nano amount. */
   getBalanceError: (amountNano: bigint) => string | null
   /** Vault addresses to check for geo-blocking */
@@ -59,6 +57,13 @@ export interface UseSwapPageLogicOptions {
   computePriceImpact?: (quote: SwapApiQuote) => Promise<number | null>
   /** Modal type when from/to share the same underlying asset. Default 'transfer'; borrow uses 'swap'. */
   sameAssetModalType?: 'transfer' | 'swap'
+  /** Mode the page quotes its swap in. Drives the review-modal "Swap to repay" relabel
+   *  and which leg is rendered as estimated. */
+  swapperMode: SwapperMode
+  /** Override the displayed side marked as estimated in the review modal. */
+  reviewSwapEstimatedSide?: 'input' | 'output'
+  /** Include CowSwap provider in swap quotes (Ethereum mainnet only) */
+  includeCowSwap?: boolean
 }
 
 export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
@@ -80,13 +85,16 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     additionalErrors = [],
     computePriceImpact,
     sameAssetModalType = 'transfer',
+    swapperMode,
+    reviewSwapEstimatedSide,
+    includeCowSwap,
   } = options
 
   const otherAmountField: SwapQuoteAmountField = displayAmountField === 'amountIn' ? 'amountOut' : 'amountIn'
 
   const router = useRouter()
   const route = useRoute()
-  const { isConnected } = useAccount()
+  const { isConnected } = useWagmi()
   const { executeTxPlan } = useEulerOperations()
   const modal = useModal()
   const { error: showError } = useToast()
@@ -110,6 +118,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     selectedProvider,
     selectedQuote,
     effectiveQuote,
+    effectiveQuoteFetchedAt,
     providersCount,
     isLoading: isQuoteLoading,
     quoteError,
@@ -118,12 +127,12 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     reset: resetQuoteStateInternal,
     requestQuotes,
     selectProvider,
-  } = useSwapQuotesParallel({ amountField, compare })
-  const quoteSlippage = computed(() => computeQuoteSlippage(
-    effectiveQuote.value,
-    amountField === 'amountIn' ? SwapperMode.TARGET_DEBT : SwapperMode.EXACT_IN,
-  ))
-
+  } = useSwapQuotesParallel({
+    amountField,
+    compare,
+    includeCowSwap,
+    buildTxPlanForQuote: quote => buildPlan(quote),
+  })
   // ── Vault products & price invert ──────────────────────────────────────
   const fromProduct = useEulerProductOfVault(computed(() => fromVault.value?.address || ''))
   const toProduct = useEulerProductOfVault(computed(() => toVault.value?.address || ''))
@@ -378,12 +387,20 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     return {
       from: `${formatSmartAmount(fromSide)} ${fromVault.value.asset.symbol}`,
       to: `${formatSmartAmount(toSide)} ${toVault.value.asset.symbol}`,
+      fromExact: `${fromSide} ${fromVault.value.asset.symbol}`,
+      toExact: `${toSide} ${toVault.value.asset.symbol}`,
     }
   })
 
   // ── Price impact ───────────────────────────────────────────────────────
   const priceImpact = ref<number | null>(null)
-  const { guardWithPriceImpact } = usePriceImpactGate({ directPriceImpact: priceImpact })
+  const shouldGateUnknownPriceImpact = computed(() =>
+    !isSameAsset.value && quote.value !== null && priceImpact.value === null,
+  )
+  const { guardWithPriceImpact } = usePriceImpactGate({
+    directPriceImpact: priceImpact,
+    shouldGateUnknown: shouldGateUnknownPriceImpact,
+  })
 
   watchEffect(async () => {
     if (!quote.value || !fromVault.value || !toVault.value) {
@@ -423,6 +440,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
       symbol: toVault.value.asset.symbol,
       formatAmount: formatSmartAmount,
       amountField: displayAmountField,
+      compare,
       diffPrefix: quoteDiffPrefix,
     })
   })
@@ -469,7 +487,10 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
             amount: fromAmount.value,
             swapToAsset: showSwapAmounts ? toVault.value?.asset : undefined,
             swapToAmount: showSwapAmounts ? toAmount.value : undefined,
+            swapMode: showSwapAmounts ? swapperMode : undefined,
+            swapEstimatedSide: showSwapAmounts ? reviewSwapEstimatedSide : undefined,
             plan: plan.value || undefined,
+            quoteFetchedAt: !isSameAsset.value ? effectiveQuoteFetchedAt.value : null,
             onConfirm: async () => {
               await send()
             },
@@ -520,11 +541,11 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     quoteCardsSorted,
     selectedProvider,
     selectedQuote,
+    effectiveQuoteFetchedAt,
     providersCount,
     isQuoteLoading,
     quoteError,
     quotesStatusLabel,
-    quoteSlippage,
     selectProvider,
 
     // Vault identity

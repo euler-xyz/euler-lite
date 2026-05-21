@@ -77,14 +77,16 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 ### 🌍 [Geo-Blocking](./geo-blocking.md)
 
 - Country detection and sanctioned country lists
-- Product-level and per-vault blocking overrides
+- Product-level, per-vault, earn-vault, and asset-level blocking rules
+- Asset-level pattern matching (exact `symbols`/`names` + `symbolRegex`/`nameRegex`) and cross-chain `all/assets.json`
 - Country group aliases (EU, EEA, EFTA)
-- UI enforcement across browse, detail, action, and modal pages
+- UI enforcement across browse, detail, action, and modal pages, plus the arbitrary-asset swap selector
 
 ### 🌐 [Public API](./public-api.md)
 
 - Publicly reachable endpoints under `/api/public/` (CORS `*`)
-- `GET /api/public/is-known` — verified-vault lookup by address
+- `GET /api/public/is-known` — verified-vault lookup by address (or list mode)
+- `GET /api/public/metadata` — uniform vault display metadata (name / description / governing entity / asset) across EVK, Securitize, and Earn
 - Request/response shape, caching, rate limits, and examples
 
 ## 🎯 Project Overview

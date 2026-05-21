@@ -22,6 +22,8 @@ const props = defineProps<{
   priceOverride?: number // USD unit price for assets without a vault (e.g., swap-to-deposit)
   swappable?: boolean // When true, asset pill shows dropdown arrow and emits click-asset
   selectedSource?: 'wallet' | 'saving' // Source indicator chip when multiple collateral options exist
+  selectedSubAccount?: string // Disambiguates between multiple savings positions on different sub-accounts
+  selectedVaultAddress?: string // Disambiguates same sub-account positions across different vaults
   maxHandler?: () => void // When provided, replaces the default "Max" button behavior
 }>()
 const emits = defineEmits(['input', 'change-collateral', 'click-asset'])
@@ -49,8 +51,23 @@ const emitInputNow = () => {
   emits('input')
 }
 
+const matchesSelectedSubAccount = (a?: string, b?: string) => {
+  if (!a || !b) return false
+  return a.toLowerCase() === b.toLowerCase()
+}
+const matchesSelectedVault = (a?: string, b?: string) => {
+  if (!b) return true
+  if (!a) return false
+  return a.toLowerCase() === b.toLowerCase()
+}
 const getSelectedIdx = () => {
   if (props.selectedSource && props.collateralOptions?.length) {
+    const exact = props.collateralOptions.findIndex(o =>
+      o.type === props.selectedSource
+      && matchesSelectedVault(o.vaultAddress, props.selectedVaultAddress)
+      && (!props.selectedSubAccount || matchesSelectedSubAccount(o.subAccount, props.selectedSubAccount)),
+    )
+    if (exact >= 0) return exact
     const idx = props.collateralOptions.findIndex(o => o.type === props.selectedSource)
     if (idx >= 0) return idx
   }
@@ -58,7 +75,7 @@ const getSelectedIdx = () => {
 }
 const selectedIdx = ref(getSelectedIdx())
 watch(
-  [() => props.selectedSource, () => props.collateralOptions],
+  [() => props.selectedSource, () => props.selectedSubAccount, () => props.selectedVaultAddress, () => props.collateralOptions],
   () => { selectedIdx.value = getSelectedIdx() },
 )
 const friendlyBalance = computed(() => nanoToValue(props.balance ?? 0n, props.asset?.decimals || 18))

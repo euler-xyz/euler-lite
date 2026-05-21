@@ -5,7 +5,10 @@ type SwapRouteItem = {
   provider: string
   amount: string
   symbol: string
+  gasCostLabel?: string
+  netUsdLabel?: string
   routeLabel?: string
+  isGasless?: boolean
   badge?: {
     label: string
     tone: SwapRouteBadgeTone
@@ -13,6 +16,8 @@ type SwapRouteItem = {
 }
 
 const VISIBLE_COUNT = 3
+
+const isGaslessItem = (item: SwapRouteItem) => !!item.isGasless
 
 const props = withDefaults(defineProps<{
   title?: string
@@ -37,9 +42,19 @@ const emit = defineEmits<{
 const expanded = ref(false)
 
 const hasMore = computed(() => props.items.length > VISIBLE_COUNT)
-const visibleItems = computed(() =>
-  expanded.value ? props.items : props.items.slice(0, VISIBLE_COUNT),
-)
+const visibleItems = computed(() => {
+  if (expanded.value) return props.items
+
+  const top = props.items.slice(0, VISIBLE_COUNT)
+  if (top.some(isGaslessItem)) return top
+
+  const cow = props.items.find(isGaslessItem)
+  if (!cow) return top
+
+  return top.length >= VISIBLE_COUNT
+    ? [...top.slice(0, VISIBLE_COUNT - 1), cow]
+    : [...top, cow]
+})
 
 const onSelect = (provider: string) => {
   emit('select', provider)
@@ -73,35 +88,66 @@ const onSelect = (provider: string) => {
   <div class="bg-surface-secondary p-16 rounded-16 flex flex-col gap-12 border border-line-default">
     <div class="flex flex-col gap-8">
       <template v-if="items.length">
-        <button
-          v-for="item in visibleItems"
-          :key="item.provider"
-          type="button"
-          class="w-full text-left rounded-12 border p-12 transition-colors"
-          :class="selectedProvider === item.provider
-            ? 'border-accent-500 bg-neutral-200'
-            : 'border-line-default bg-surface hover:bg-surface-secondary'"
-          @click="onSelect(item.provider)"
+        <div
+          class="flex flex-col gap-8"
+          :class="{
+            'mobile:max-h-[max(168px,min(320px,calc(100dvh-360px)))] mobile:overflow-y-auto mobile:overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden': expanded && hasMore,
+          }"
         >
-          <div class="flex items-center justify-between gap-8">
-            <p class="text-p2 text-content-primary">
-              {{ item.amount }} {{ item.symbol }}
-            </p>
-            <div class="flex flex-col items-end gap-2 text-p3 text-content-secondary">
-              <p
-                v-if="item.badge"
-                :class="item.badge.tone === 'best' ? 'text-success-600' : 'text-error-500'"
-              >
-                {{ item.badge.label }}
-              </p>
-              <span class="truncate">{{ item.routeLabel || '-' }}</span>
+          <button
+            v-for="item in visibleItems"
+            :key="item.provider"
+            type="button"
+            class="w-full text-left rounded-12 border p-12 transition-colors"
+            :class="selectedProvider === item.provider
+              ? 'border-accent-500 bg-surface-elevated shadow-sm'
+              : 'border-line-default bg-surface hover:border-accent-500/60 hover:bg-surface-elevated'"
+            @click="onSelect(item.provider)"
+          >
+            <div
+              class="flex justify-between gap-8"
+              :class="item.netUsdLabel ? 'items-start' : 'items-center'"
+            >
+              <div class="flex flex-col gap-2 min-w-0">
+                <p class="text-p2 text-content-primary">
+                  {{ item.amount }} {{ item.symbol }}
+                </p>
+                <p class="text-p3 text-content-secondary truncate">
+                  {{ item.routeLabel || '-' }}
+                </p>
+                <p
+                  v-if="item.netUsdLabel"
+                  class="text-p3 text-content-secondary"
+                >
+                  {{ item.netUsdLabel }}
+                </p>
+              </div>
+              <div class="flex flex-col items-end gap-2 text-p3 text-content-secondary">
+                <p
+                  v-if="item.badge"
+                  :class="item.badge.tone === 'best' ? 'text-success-600' : 'text-error-500'"
+                >
+                  {{ item.badge.label }}
+                </p>
+                <span
+                  v-if="isGaslessItem(item) || item.gasCostLabel"
+                  class="flex items-center gap-2 text-success-600"
+                >
+                  <SvgIcon
+                    name="gas"
+                    class="!w-12 !h-12"
+                  />
+                  {{ isGaslessItem(item) ? 'Gasless' : item.gasCostLabel }}
+                </span>
+              </div>
             </div>
-          </div>
-        </button>
+          </button>
+        </div>
         <button
           v-if="hasMore"
           type="button"
           class="flex items-center justify-center gap-4 text-p3 text-content-secondary hover:text-content-primary transition-colors py-4"
+          :aria-expanded="expanded"
           @click="expanded = !expanded"
         >
           <span>{{ expanded ? 'Show less' : `Show all ${items.length} quotes` }}</span>

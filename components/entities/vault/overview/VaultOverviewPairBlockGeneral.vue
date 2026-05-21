@@ -6,31 +6,45 @@ import { getCollateralOraclePrice, getAssetOraclePrice } from '~/services/pricin
 import { formatNumber, formatSignificant } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
-import type { AccountBorrowPosition } from '~/entities/account'
+import { type AccountBorrowPosition, getPositionRampConfig } from '~/entities/account'
 import type { LTVRampConfig } from '~/entities/vault/ltv'
-import { useModal } from '~/components/ui/composables/useModal'
-import { VaultNetApyPairModal, VaultMaxRoeModal, VaultRampDownModal } from '#components'
+import { VaultNetApyPairModal, VaultMaxRoeModal, VaultRampDownModal, VaultSupplyApyModal, VaultBorrowApyModal } from '#components'
 
 const { pair } = defineProps<{ pair: AnyBorrowVaultPair | AccountBorrowPosition }>()
 
-const hasRampConfig = computed(() => 'initialLiquidationLTV' in pair)
-const currentLiquidationLTV = computed(() =>
-  hasRampConfig.value ? getCurrentLiquidationLTV(pair as AnyBorrowVaultPair) : pair.liquidationLTV,
-)
-const isRamping = computed(() =>
-  hasRampConfig.value && isLiquidationLTVRamping(pair as AnyBorrowVaultPair),
-)
-
-const modal = useModal()
-const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy } = useIntrinsicApy()
-const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, getLoopingRewardCampaigns, hasSupplyRewards, hasBorrowRewards, hasLoopingRewards } = useRewardsApy()
-const { borrowList } = useVaults()
-
-const borrowCount = computed(() => {
-  return borrowList.value.filter(p => p.borrow.address === pair.borrow.address).length
+// `BorrowVaultPair` carries ramp fields flat on the pair, with `liquidationLTV`
+// meaning the post-ramp target. `AccountBorrowPosition` exposes them via
+// `targetLiquidationLTV` + friends — `position.liquidationLTV` is the live
+// effective value from the lens. Normalise to a single `LTVRampConfig` shape
+// here so the helpers and modal don't need to know which type they got.
+const isAccountPosition = (p: typeof pair): p is AccountBorrowPosition => 'targetLiquidationLTV' in p
+const rampConfig = computed<LTVRampConfig | null>(() => {
+  if (isAccountPosition(pair)) {
+    if (pair.rampDuration === 0n && pair.targetTimestamp === 0n) return null
+    return getPositionRampConfig(pair)
+  }
+  if ('initialLiquidationLTV' in pair) return pair as LTVRampConfig
+  return null
 })
+const currentLiquidationLTV = computed(() => {
+  // For an account position the lens already gives the live effective value;
+  // for a market pair we interpolate from the ramp config so the modal and the
+  // row stay in sync as time advances.
+  if (isAccountPosition(pair)) return pair.liquidationLTV
+  if (rampConfig.value) return getCurrentLiquidationLTV(rampConfig.value)
+  return pair.liquidationLTV
+})
+const isRamping = computed(() => !!rampConfig.value && isLiquidationLTVRamping(rampConfig.value))
 
-const isBorrowable = computed(() => borrowCount.value > 0)
+const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, getLoopingRewardCampaigns, hasSupplyRewards, hasBorrowRewards, hasLoopingRewards } = useRewardsApy()
+
+// On a borrow pair detail page the pair only exists because the on-chain
+// collateralLTV has a non-zero borrowLTV — gate on that directly so deep links
+// to unverified (off-label) pairs render the borrow-side metrics. Sourcing this
+// from `useVaults().borrowList` would skip pairs whose borrow vault isn't in
+// the labels repo.
+const isBorrowable = computed(() => pair.borrowLTV > 0n)
 const isRestricted = computed(() => isAnyVaultBlockedByCountry(pair.collateral.address, pair.borrow.address))
 const isDeprecated = computed(() => isVaultDeprecated(pair.collateral.address) || isVaultDeprecated(pair.borrow.address))
 
@@ -78,42 +92,54 @@ const price = computed(() => {
   return nanoToValue(collateralPrice.amountOutMid, 18) / nanoToValue(borrowPrice.amountOutMid, 18)
 })
 
-const onNetApyInfoIconClick = () => {
-  modal.open(VaultNetApyPairModal, {
-    props: {
-      supplyAPY: baseSupplyApy.value,
-      borrowAPY: baseBorrowApy.value,
-      intrinsicSupplyAPY: intrinsicSupplyApy.value,
-      intrinsicBorrowAPY: intrinsicBorrowApy.value,
-      supplyRewardAPY: collateralRewardAPY.value || null,
-      borrowRewardAPY: borrowRewardAPY.value || null,
-      loopingRewardAPY: loopingRewardAPY.value || null,
-      supplyCampaigns: supplyCampaignsForModal.value,
-      borrowCampaigns: borrowCampaignsForModal.value,
-      loopingCampaigns: loopingCampaignsForModal.value,
-    },
-  })
-}
+const supplyApyModalData = computed(() => ({
+  props: {
+    lendingAPY: baseSupplyApy.value,
+    intrinsicAPY: intrinsicSupplyApy.value,
+    intrinsicApyInfo: getIntrinsicApyInfo(pair.collateral.asset.address),
+    campaigns: supplyCampaignsForModal.value,
+  },
+}))
 
-const onMaxRoeInfoIconClick = () => {
-  modal.open(VaultMaxRoeModal, {
-    props: {
-      maxRoe: maxRoe.value,
-      maxMultiplier: maxMultiplier.value,
-      supplyAPY: supplyApyWithRewards.value,
-      borrowAPY: borrowApyWithRewards.value,
-      borrowLTV: nanoToValue(pair.borrowLTV, 2),
-      borrowVaultAddress: pair.borrow.address,
-      collateralAddress: pair.collateral.address,
-    },
-  })
-}
+const borrowApyModalData = computed(() => ({
+  props: {
+    borrowingAPY: baseBorrowApy.value,
+    intrinsicAPY: intrinsicBorrowApy.value,
+    intrinsicApyInfo: getIntrinsicApyInfo(pair.borrow.asset.address),
+    campaigns: borrowCampaignsForModal.value,
+  },
+}))
 
-const onRampDownInfoIconClick = (event: MouseEvent, pair: LTVRampConfig) => {
-  modal.open(VaultRampDownModal, {
-    props: pair,
-  })
-}
+const netApyModalData = computed(() => ({
+  props: {
+    supplyAPY: baseSupplyApy.value,
+    borrowAPY: baseBorrowApy.value,
+    intrinsicSupplyAPY: intrinsicSupplyApy.value,
+    intrinsicBorrowAPY: intrinsicBorrowApy.value,
+    supplyRewardAPY: collateralRewardAPY.value || null,
+    borrowRewardAPY: borrowRewardAPY.value || null,
+    loopingRewardAPY: loopingRewardAPY.value || null,
+    supplyCampaigns: supplyCampaignsForModal.value,
+    borrowCampaigns: borrowCampaignsForModal.value,
+    loopingCampaigns: loopingCampaignsForModal.value,
+  },
+}))
+
+const maxRoeModalData = computed(() => ({
+  props: {
+    maxRoe: maxRoe.value,
+    maxMultiplier: maxMultiplier.value,
+    supplyAPY: supplyApyWithRewards.value,
+    borrowAPY: borrowApyWithRewards.value,
+    borrowLTV: nanoToValue(pair.borrowLTV, 2),
+    borrowVaultAddress: pair.borrow.address,
+    collateralAddress: pair.collateral.address,
+  },
+}))
+
+const rampDownModalData = computed(() => ({
+  props: rampConfig.value ?? {},
+}))
 </script>
 
 <template>
@@ -185,21 +211,94 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: LTVRampConfig) => {
         <VaultOverviewLabelValue>
           <template #label>
             <span class="flex items-center gap-4">
-              Net APY
-              <SvgIcon
-                class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-                name="info-circle"
-                @click="onNetApyInfoIconClick"
-              />
+              Supply APY
+              <UiModalPreviewTrigger
+                :component="VaultSupplyApyModal"
+                :modal-data="supplyApyModalData"
+                aria-label="Show supply APY breakdown"
+              >
+                <SvgIcon
+                  class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                  name="info-circle"
+                />
+              </UiModalPreviewTrigger>
             </span>
           </template>
           <span class="flex items-center gap-4">
-            <SvgIcon
+            <VaultPoints :vault="pair.collateral" />
+            <UiModalPreviewTrigger
+              v-if="hasSupplyRewards(pair.collateral.address)"
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY rewards breakdown"
+            >
+              <SvgIcon
+                class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                name="sparks"
+              />
+            </UiModalPreviewTrigger>
+            {{ formatNumber(supplyApyWithRewards) }}%
+          </span>
+        </VaultOverviewLabelValue>
+        <VaultOverviewLabelValue>
+          <template #label>
+            <span class="flex items-center gap-4">
+              Borrow APY
+              <UiModalPreviewTrigger
+                :component="VaultBorrowApyModal"
+                :modal-data="borrowApyModalData"
+                aria-label="Show borrow APY breakdown"
+              >
+                <SvgIcon
+                  class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                  name="info-circle"
+                />
+              </UiModalPreviewTrigger>
+            </span>
+          </template>
+          <span class="flex items-center gap-4">
+            <UiModalPreviewTrigger
+              v-if="hasBorrowRewards(pair.borrow.address, pair.collateral.address)"
+              :component="VaultBorrowApyModal"
+              :modal-data="borrowApyModalData"
+              aria-label="Show borrow APY rewards breakdown"
+            >
+              <SvgIcon
+                class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                name="sparks"
+              />
+            </UiModalPreviewTrigger>
+            {{ formatNumber(borrowApyWithRewards) }}%
+          </span>
+        </VaultOverviewLabelValue>
+        <VaultOverviewLabelValue>
+          <template #label>
+            <span class="flex items-center gap-4">
+              Net APY
+              <UiModalPreviewTrigger
+                :component="VaultNetApyPairModal"
+                :modal-data="netApyModalData"
+                aria-label="Show net APY breakdown"
+              >
+                <SvgIcon
+                  class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                  name="info-circle"
+                />
+              </UiModalPreviewTrigger>
+            </span>
+          </template>
+          <span class="flex items-center gap-4">
+            <UiModalPreviewTrigger
               v-if="hasSupplyRewards(pair.collateral.address) || hasBorrowRewards(pair.borrow.address, pair.collateral.address) || hasLoopingRewards(pair.borrow.address, pair.collateral.address)"
-              class="!w-20 !h-20 text-accent-500 cursor-pointer"
-              name="sparks"
-              @click="onNetApyInfoIconClick"
-            />
+              :component="VaultNetApyPairModal"
+              :modal-data="netApyModalData"
+              aria-label="Show net APY rewards breakdown"
+            >
+              <SvgIcon
+                class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                name="sparks"
+              />
+            </UiModalPreviewTrigger>
             {{ formatNumber(netApy) }}%
           </span>
         </VaultOverviewLabelValue>
@@ -207,20 +306,30 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: LTVRampConfig) => {
           <template #label>
             <span class="flex items-center gap-4">
               Max ROE
-              <SvgIcon
-                class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-                name="info-circle"
-                @click="onMaxRoeInfoIconClick"
-              />
+              <UiModalPreviewTrigger
+                :component="VaultMaxRoeModal"
+                :modal-data="maxRoeModalData"
+                aria-label="Show max ROE breakdown"
+              >
+                <SvgIcon
+                  class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                  name="info-circle"
+                />
+              </UiModalPreviewTrigger>
             </span>
           </template>
           <span class="flex items-center gap-4">
-            <SvgIcon
+            <UiModalPreviewTrigger
               v-if="hasSupplyRewards(pair.collateral.address) || hasBorrowRewards(pair.borrow.address, pair.collateral.address) || hasLoopingRewards(pair.borrow.address, pair.collateral.address)"
-              class="!w-20 !h-20 text-accent-500 cursor-pointer"
-              name="sparks"
-              @click="onMaxRoeInfoIconClick"
-            />
+              :component="VaultMaxRoeModal"
+              :modal-data="maxRoeModalData"
+              aria-label="Show max ROE rewards breakdown"
+            >
+              <SvgIcon
+                class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                name="sparks"
+              />
+            </UiModalPreviewTrigger>
             {{ formatNumber(maxRoe) }}%
           </span>
         </VaultOverviewLabelValue>
@@ -232,22 +341,31 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: LTVRampConfig) => {
           <template #label>
             <span class="flex items-center gap-4">
               Liquidation LTV
-              <SvgIcon
+              <UiModalPreviewTrigger
                 v-if="isRamping"
-                class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-                name="info-circle"
-                @click.stop.prevent="onRampDownInfoIconClick($event, pair as AnyBorrowVaultPair)"
-              />
+                :component="VaultRampDownModal"
+                :modal-data="rampDownModalData"
+                aria-label="Show liquidation LTV ramp-down details"
+              >
+                <SvgIcon
+                  class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                  name="info-circle"
+                />
+              </UiModalPreviewTrigger>
             </span>
           </template>
           <span class="flex items-center gap-4">
-            <SvgIcon
+            <UiModalPreviewTrigger
               v-if="isRamping"
-              name="arrow-top-right"
-              class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
-              title="Liquidation LTV ramping down"
-              @click.stop.prevent="onRampDownInfoIconClick($event, pair as AnyBorrowVaultPair)"
-            />
+              :component="VaultRampDownModal"
+              :modal-data="rampDownModalData"
+              aria-label="Show liquidation LTV ramp-down details"
+            >
+              <SvgIcon
+                name="arrow-top-right"
+                class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
+              />
+            </UiModalPreviewTrigger>
             {{ `${formatNumber(nanoToValue(currentLiquidationLTV, 2), 2)}%` }}
           </span>
         </VaultOverviewLabelValue>

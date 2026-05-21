@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import type { Vault } from '~/entities/vault'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { getAssetUsdValue, formatAssetValue } from '~/services/pricing/priceProvider'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated, getVaultNotice } from '~/utils/eulerLabelsUtils'
-import { formatNumber, compactNumber, formatCompactUsdValue, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
+import { formatNumber, formatCompactUsdValue, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { type AccountDepositPosition, getSubAccountIndex } from '~/entities/account'
 import { VaultOverviewModal, VaultSupplyApyModal } from '#components'
@@ -14,7 +13,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 const { position } = defineProps<{ position: AccountDepositPosition }>()
 const modal = useModal()
 
-const { address } = useAccount()
+const { address } = useWagmi()
 const { portfolioAddress } = useEulerAccount()
 const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
 const subAccountIndex = computed(() => {
@@ -76,39 +75,19 @@ watchEffect(() => {
   updateHasPrice()
 })
 
-const projectedEarningsPerMonth = ref('—')
-
-const updateProjectedEarningsPerMonth = async () => {
-  const price = await getAssetUsdValue(position.assets, vault.value, 'off-chain')
-  if (price === undefined || price === 0) {
-    projectedEarningsPerMonth.value = '—'
-    return
-  }
-  // Monthly earnings = (value * APY%) / 12
-  projectedEarningsPerMonth.value = compactNumber((price * supplyApyWithRewards.value) / 12 / 100)
-}
-
-watchEffect(() => {
-  updateProjectedEarningsPerMonth()
-})
-
 // Securitize-specific computed properties
 const assetAmount = computed(() => {
   return nanoToValue(position.assets, vault.value.asset.decimals)
 })
 
-const onSupplyInfoIconClick = (event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY: nanoToValue(vault.value.interestRateInfo.supplyAPY, 25),
-      intrinsicAPY: getIntrinsicApy(vault.value.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.value.asset.address),
-      campaigns: getSupplyRewardCampaigns(vault.value.address),
-    },
-  })
-}
+const supplyApyModalData = computed(() => ({
+  props: {
+    lendingAPY: nanoToValue(vault.value.interestRateInfo.supplyAPY, 25),
+    intrinsicAPY: getIntrinsicApy(vault.value.asset.address),
+    intrinsicApyInfo: getIntrinsicApyInfo(vault.value.asset.address),
+    campaigns: getSupplyRewardCampaigns(vault.value.address),
+  },
+}))
 
 const onClick = () => {
   modal.open(VaultOverviewModal, {
@@ -168,19 +147,29 @@ const onClick = () => {
         <div class="flex flex-col items-end">
           <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
             Supply APY
-            <SvgIcon
-              class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-              name="info-circle"
-              @click.stop="onSupplyInfoIconClick"
-            />
+            <UiModalPreviewTrigger
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY breakdown"
+            >
+              <SvgIcon
+                class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+                name="info-circle"
+              />
+            </UiModalPreviewTrigger>
           </div>
           <div class="text-p2 flex text-accent-600">
-            <SvgIcon
+            <UiModalPreviewTrigger
               v-if="rewardsExist"
-              name="sparks"
-              class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
-              @click.stop="onSupplyInfoIconClick"
-            />
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY rewards breakdown"
+            >
+              <SvgIcon
+                name="sparks"
+                class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
+              />
+            </UiModalPreviewTrigger>
             {{ formatNumber(supplyApyWithRewards) }}%
           </div>
         </div>
@@ -280,19 +269,29 @@ const onClick = () => {
         <div class="flex flex-col items-end">
           <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
             Supply APY
-            <SvgIcon
-              class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-              name="info-circle"
-              @click.stop="onSupplyInfoIconClick"
-            />
+            <UiModalPreviewTrigger
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY breakdown"
+            >
+              <SvgIcon
+                class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+                name="info-circle"
+              />
+            </UiModalPreviewTrigger>
           </div>
           <div class="text-p2 flex text-accent-600">
-            <SvgIcon
+            <UiModalPreviewTrigger
               v-if="rewardsExist"
-              name="sparks"
-              class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
-              @click.stop="onSupplyInfoIconClick"
-            />
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY rewards breakdown"
+            >
+              <SvgIcon
+                name="sparks"
+                class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
+              />
+            </UiModalPreviewTrigger>
             {{ formatNumber(supplyApyWithRewards) }}%
           </div>
         </div>
@@ -318,19 +317,6 @@ const onClick = () => {
               ~ {{ roundAndCompactTokens(position.assets, vault.decimals) }}
               {{ vault.asset.symbol }}
             </UiExactAmount>
-          </div>
-        </div>
-        <div
-          v-if="hasPrice"
-          class="flex justify-between"
-        >
-          <div class="text-content-tertiary text-p3">
-            Projected earnings per month
-          </div>
-          <div class="flex justify-between gap-8 text-right">
-            <div class="text-content-primary text-p3">
-              ${{ projectedEarningsPerMonth }}
-            </div>
           </div>
         </div>
         <div

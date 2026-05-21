@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { formatUnits, zeroAddress, type Address } from 'viem'
 import type { AccountBorrowPosition } from '~/entities/account'
 import type { Vault, VaultAsset } from '~/entities/vault'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import { useSwapDebtOptions } from '~/composables/useSwapDebtOptions'
-import { SwapperMode } from '~/entities/swap'
+import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import type { TxPlan } from '~/entities/txPlan'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
@@ -15,7 +14,7 @@ import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const route = useRoute()
-const { isConnected, address } = useAccount()
+const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = useEulerAccount()
 const { buildSwapPlan, buildSameAssetDebtSwapPlan } = useEulerOperations()
@@ -183,6 +182,8 @@ const swap = useSwapPageLogic({
   targetVaultAddress,
   additionalErrors: [healthError],
   sameAssetModalType: 'swap',
+  swapperMode: SwapperMode.TARGET_DEBT,
+  reviewSwapEstimatedSide: 'output',
 
   buildQuoteRequest(amount) {
     if (!fromVault.value || !toVault.value || !position.value) return null
@@ -207,7 +208,7 @@ const swap = useSwapPageLogic({
     }
   },
 
-  async buildPlan(): Promise<TxPlan> {
+  async buildPlan(quote?: SwapApiQuote): Promise<TxPlan> {
     if (!fromVault.value || !toVault.value) throw new Error('Vaults not loaded')
     if (isSameAsset.value) {
       const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
@@ -219,9 +220,10 @@ const swap = useSwapPageLogic({
         enabledCollaterals: position.value?.collaterals,
       })
     }
-    if (!selectedQuote.value) throw new Error('No quote selected')
+    const swapQuote = quote || selectedQuote.value
+    if (!swapQuote) throw new Error('No quote selected')
     return buildSwapPlan({
-      quote: selectedQuote.value,
+      quote: swapQuote,
       swapperMode: SwapperMode.TARGET_DEBT,
       isRepay: true,
       requestedSlippage: slippage.value,
@@ -252,7 +254,7 @@ const {
   isGeoBlocked, reviewSwapDisabled, reviewSwapLabel, simulationError,
   isQuoteLoading, quoteError, quotesStatusLabel, selectedProvider, selectedQuote,
   fromProduct, toProduct, swapPriceInvert, currentPrice, swapSummary, priceImpact, routedVia,
-  quoteSlippage, swapRouteItems, swapRouteEmptyMessage,
+  swapRouteItems, swapRouteEmptyMessage,
   selectProvider, onFromInput: _onFromInput, onRefreshQuotes, submit, openSlippageSettings,
   normalizeAddress, clearSimulationError, requestQuote,
 } = swap
@@ -360,7 +362,7 @@ const onToVaultChange = (selectedIndex: number) => {
               class="opacity-60 pointer-events-none"
             />
 
-            <UiToast
+            <UiAlert
               title="Full amount required"
               description="The entire debt amount must be swapped at once. Only one debt is allowed per sub-account."
               variant="info"
@@ -403,7 +405,7 @@ const onToVaultChange = (selectedIndex: number) => {
               </div>
             </div>
 
-            <UiToast
+            <UiAlert
               v-if="!toVault && !isLoading && !isPositionsLoading"
               title="No refinance options"
               description="There are no other vaults that accept this collateral to swap your debt to."
@@ -411,35 +413,35 @@ const onToVaultChange = (selectedIndex: number) => {
               size="compact"
             />
 
-            <UiToast
+            <UiAlert
               v-if="isGeoBlocked"
               title="Region restricted"
               description="This operation is not available in your region. You can still repay existing debt."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-show="errorText"
               title="Error"
               variant="error"
               :description="errorText || ''"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="sameVaultError"
               title="Error"
               variant="error"
               :description="sameVaultError"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="healthError"
               title="Unhealthy position"
               variant="error"
               :description="healthError"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="simulationError"
               title="Error"
               variant="error"
@@ -447,7 +449,7 @@ const onToVaultChange = (selectedIndex: number) => {
               size="compact"
             />
 
-            <UiToast
+            <UiAlert
               v-if="quoteError && !isSameAsset"
               title="Swap quote"
               variant="warning"
@@ -549,10 +551,11 @@ const onToVaultChange = (selectedIndex: number) => {
             <SwapDetailsSummary
               v-if="!isSameAsset"
               :input-display="swapSummary?.from ?? null"
+              :input-exact-display="swapSummary?.fromExact ?? null"
               :output-display="swapSummary?.to ?? null"
+              :output-exact-display="swapSummary?.toExact ?? null"
               :price-impact="priceImpact"
               :slippage="slippage"
-              :quote-slippage="quoteSlippage"
               :routed-via="routedVia"
               @open-slippage-settings="openSlippageSettings"
             />

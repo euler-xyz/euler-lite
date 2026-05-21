@@ -9,7 +9,7 @@ const { list } = useModal()
     v-if="list.length"
     class="ui-modals"
   >
-    <transition-group name="modal">
+    <transition-group name="modal-layer">
       <UiModal
         v-for="modal in list"
         v-show="modal"

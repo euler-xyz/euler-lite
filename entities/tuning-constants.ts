@@ -12,12 +12,15 @@ export const BATCH_SIZE_VAULT_FETCH = 25
 export const BATCH_SIZE_PARALLEL_ROUNDS = 5
 
 // ── Request Batching Delays ───────────────────────────────
-export const BATCH_DELAY_COLLECT_MS = 50
+export const BATCH_DELAY_COLLECT_MS = 100
 
 // ── Request Timeouts ────────────────────────────────────
 /** Subgraph query timeout (client-side). Longer than server-side subgraph
  * calls because client traffic tolerates higher variance. */
 export const SUBGRAPH_TIMEOUT_MS = 30_000
+/** Wallet screening must resolve promptly so the app can fail closed instead
+ * of leaving a connected wallet in an indeterminate state. */
+export const WALLET_SCREENING_TIMEOUT_MS = 10_000
 
 // ── Debounce ──────────────────────────────────────────────
 /** Price-fetch watchEffects on list pages. Collapses bursts of registry
@@ -36,6 +39,19 @@ export const LIST_ROW_HEIGHT_PX = 88
  * token list for the pay-with selector). Navigating between swap pages
  * within this window reuses the cached Map rather than re-fetching. */
 export const FULL_BALANCES_TTL_MS = 60_000
+
+// ── UI/Interaction Timings ────────────────────────────────
+/** Delay after modal close before redirecting to /portfolio so the close
+ * animation can play before the route change unmounts the form. */
+export const MODAL_CLOSE_REDIRECT_DELAY_MS = 400
+
+// ── Subgraph indexing catch-up ────────────────────────────
+/** Poll interval while waiting for the subgraph to index the tx's block. */
+export const SUBGRAPH_BLOCK_POLL_INTERVAL_MS = 1_000
+/** Hard cap on the catch-up wait. If subgraph is this far behind, we fall
+ * back on the immediate triggerPortfolioRefresh + the 60s portfolio page
+ * poll to eventually reconcile state. */
+export const SUBGRAPH_BLOCK_CATCHUP_TIMEOUT_MS = 30_000
 
 // ── Basis Points ──────────────────────────────────────────
 export const BPS_BASE = 10_000n

@@ -5,6 +5,12 @@ import { formatNumber } from '~/utils/string-utils'
 defineProps<{
   steps: DisplayStep[]
 }>()
+
+const getFullAmountText = (assetInfo?: DisplayStep['assetInfo']) => {
+  const amount = assetInfo?.amount
+  if (!assetInfo || amount === undefined || amount === 'max' || amount === 'remaining') return undefined
+  return `${String(amount)} ${assetInfo.symbol}`
+}
 </script>
 
 <template>
@@ -19,7 +25,7 @@ defineProps<{
       </p>
       <template v-if="step.assetInfo">
         <AssetAvatar
-          :asset="{ address: step.assetInfo.address || '', symbol: step.assetInfo.symbol }"
+          :asset="{ address: step.assetInfo.iconAddress || step.assetInfo.address || '', symbol: step.assetInfo.symbol }"
           :icon-url="step.assetInfo.iconUrl"
           size="16"
         />
@@ -28,11 +34,19 @@ defineProps<{
           class="text-p3"
         >
           <template v-if="step.assetInfo.amount === 'max' || step.assetInfo.amount === 'remaining'">
-            {{ step.assetInfo.amount }}&nbsp;
+            {{ step.assetInfo.amount }}&nbsp;{{ step.assetInfo.symbol }}
           </template>
-          <template v-else-if="step.assetInfo.amount !== undefined">
-            {{ formatNumber(step.assetInfo.amount, 8, 0) }}&nbsp;
-          </template>{{ step.assetInfo.symbol }}
+          <template v-else-if="getFullAmountText(step.assetInfo)">
+            <UiExactAmount
+              :exact="getFullAmountText(step.assetInfo)!"
+              :placement="step.index === 1 ? 'bottom' : 'top'"
+            >
+              {{ step.assetInfo.estimated ? '~' : '' }}{{ formatNumber(step.assetInfo.amount, 8, 0) }}&nbsp;{{ step.assetInfo.symbol }}
+            </UiExactAmount>
+          </template>
+          <template v-else>
+            {{ step.assetInfo.symbol }}
+          </template>
         </p>
       </template>
       <p
@@ -49,16 +63,25 @@ defineProps<{
           &rarr;
         </p>
         <AssetAvatar
-          :asset="{ address: step.toAssetInfo.address || '', symbol: step.toAssetInfo.symbol }"
+          :asset="{ address: step.toAssetInfo.iconAddress || step.toAssetInfo.address || '', symbol: step.toAssetInfo.symbol }"
+          :icon-url="step.toAssetInfo.iconUrl"
           size="16"
         />
         <p
           v-if="!step.iconOnly"
           class="text-p3"
         >
-          <template v-if="step.toAssetInfo.amount !== undefined">
-            {{ formatNumber(step.toAssetInfo.amount, 8, 0) }}&nbsp;
-          </template>{{ step.toAssetInfo.symbol }}
+          <template v-if="getFullAmountText(step.toAssetInfo)">
+            <UiExactAmount
+              :exact="getFullAmountText(step.toAssetInfo)!"
+              :placement="step.index === 1 ? 'bottom' : 'top'"
+            >
+              {{ step.toAssetInfo.estimated ? '~' : '' }}{{ formatNumber(step.toAssetInfo.amount, 8, 0) }}&nbsp;{{ step.toAssetInfo.symbol }}
+            </UiExactAmount>
+          </template>
+          <template v-else>
+            {{ step.toAssetInfo.symbol }}
+          </template>
         </p>
       </template>
     </div>

@@ -1,5 +1,4 @@
 import type { ComputedRef } from 'vue'
-import { useAccount } from '@wagmi/vue'
 import { formatUnits, type Address, type Abi, zeroAddress } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { createRaceGuard } from '~/utils/race-guard'
@@ -22,11 +21,11 @@ import {
   getCollateralUsdValueOrZero,
 } from '~/services/pricing/priceProvider'
 import type { TxPlan } from '~/entities/txPlan'
-import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
+import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
-import type { SwapApiQuote } from '~/entities/swap'
+import { SwapperMode, type SwapApiQuote } from '~/entities/swap'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import type { SwapApiRequestInput } from '~/composables/useSwapApi'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
@@ -34,7 +33,6 @@ import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { formatSmartAmount } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { isOpDisabled, OP_DEPOSIT, OP_WITHDRAW } from '~/utils/vault-hooks'
 import { getHookDisabledWarning } from '~/composables/useVaultWarnings'
@@ -110,14 +108,14 @@ export interface UseCollateralFormOptions {
 }
 
 export const useCollateralForm = (options: UseCollateralFormOptions) => {
-  const router = useRouter()
   const route = useRoute()
   const modal = useModal()
   const { error } = useToast()
   const submitLabel = options.reviewLabel
   const { executeTxPlan } = useEulerOperations()
-  const { isConnected, address } = useAccount()
+  const { isConnected, address } = useWagmi()
   const { isSpyMode } = useSpyMode()
+  const { finalizeTxAndRedirect } = useTxFinalization()
   const positionIndex = usePositionIndex()
   const { isPositionsLoaded, getPositionBySubAccountIndex } = useEulerAccount()
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
@@ -153,6 +151,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     selectedProvider: swapSelectedProvider,
     selectedQuote: swapSelectedQuote,
     effectiveQuote: swapEffectiveQuote,
+    effectiveQuoteFetchedAt: swapEffectiveQuoteFetchedAt,
     providersCount: swapProvidersCount,
     isLoading: isSwapQuoteLoading,
     quoteError: swapQuoteError,
@@ -161,9 +160,11 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     reset: resetSwapQuoteState,
     requestQuotes: requestSwapQuotes,
     selectProvider: selectSwapQuote,
-  } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
-  const swapQuoteSlippage = computed(() => computeQuoteSlippage(swapEffectiveQuote.value))
-
+  } = useSwapQuotesParallel({
+    amountField: 'amountOut',
+    compare: 'max',
+    buildTxPlanForQuote: quote => buildSwapTxPlanForQuote(quote, false),
+  })
   // --- Position/vault computeds ---
   const position = computed(() => getPositionBySubAccountIndex(+positionIndex))
   const isPositionLoaded = computed(() => !!position.value)
@@ -312,12 +313,28 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     return `${formatSmartAmount(formatUnits(amountIn, tokenIn.decimals))} ${tokenIn.symbol}`
   })
 
+  const swapInputExactDisplay = computed(() => {
+    if (!swapEffectiveQuote.value) return ''
+    const amountIn = BigInt(swapEffectiveQuote.value.amountIn || 0)
+    if (amountIn <= 0n) return ''
+    const tokenIn = swapEffectiveQuote.value.tokenIn
+    return `${formatUnits(amountIn, tokenIn.decimals)} ${tokenIn.symbol}`
+  })
+
   const swapOutputDisplay = computed(() => {
     const outputAsset = options.getSwapOutputAsset()
     if (!swapEffectiveQuote.value || !outputAsset) return ''
     const amountOut = BigInt(swapEffectiveQuote.value.amountOut || 0)
     if (amountOut <= 0n) return ''
     return `${formatSmartAmount(formatUnits(amountOut, Number(outputAsset.decimals)))} ${outputAsset.symbol}`
+  })
+
+  const swapOutputExactDisplay = computed(() => {
+    const outputAsset = options.getSwapOutputAsset()
+    if (!swapEffectiveQuote.value || !outputAsset) return ''
+    const amountOut = BigInt(swapEffectiveQuote.value.amountOut || 0)
+    if (amountOut <= 0n) return ''
+    return `${formatUnits(amountOut, Number(outputAsset.decimals))} ${outputAsset.symbol}`
   })
 
   const swapRoutedVia = computed(() => {
@@ -332,8 +349,14 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     toVault: computed(() => options.mode === 'supply' ? collateralVault.value : null),
   })
 
+  const shouldGateUnknownPriceImpact = computed(() =>
+    options.needsSwap.value
+    && swapEffectiveQuote.value !== null
+    && swapPriceImpact.value === null,
+  )
   const { guardWithPriceImpact } = usePriceImpactGate({
     directPriceImpact: swapPriceImpact,
+    shouldGateUnknown: shouldGateUnknownPriceImpact,
   })
 
   const swapRouteItems = computed(() => {
@@ -391,6 +414,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
         onSelect: onSelect || (() => {}),
         mode: options.mode === 'withdraw' ? 'output' : 'input',
         allowNativeCurrency: options.mode === 'supply',
+        pairedAsset: collateralVault.value?.asset,
       },
     })
   }
@@ -413,7 +437,34 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   })
 
   const isSwapRestricted = computed(() =>
-    options.needsSwap.value && isVaultRestrictedByCountry(collateralVault.value?.address || ''),
+    options.needsSwap.value && isVaultRestrictedByCountry(
+      collateralVault.value?.address || '',
+      { counterpart: options.effectiveAsset.value },
+    ),
+  )
+
+  // Asset-level geo checks for swap flows. The user-selected swap input (pay-with)
+  // and/or output (receive-as) can be arbitrary ERC-20 tokens not tied to any
+  // vault, so vault-level checks above won't see them. Hard-block always applies;
+  // soft-restrict applies only to the "acquire" side (output). Pass the full
+  // asset object so symbol/name pattern rules are also consulted.
+  //
+  // Input-side check is scoped to supply mode: in withdraw, `effectiveAsset`
+  // is the collateral vault's own underlying, which `isGeoBlocked` above
+  // already covers via the vault-level OR. Re-checking there would disable
+  // submit with no corresponding toast (withdraw.vue's disabledReasonInfo
+  // doesn't consult this flag).
+  const isInputAssetBlocked = computed(() =>
+    options.mode === 'supply'
+    && options.needsSwap.value
+    && isAssetBlockedByCountry(options.effectiveAsset.value),
+  )
+  const isOutputAssetBlocked = computed(() =>
+    options.needsSwap.value && isAssetBlockedByCountry(options.getSwapOutputAsset()),
+  )
+  const isOutputAssetRestricted = computed(() =>
+    options.needsSwap.value
+    && isAssetRestrictedByCountry(options.getSwapOutputAsset(), { counterpart: options.effectiveAsset.value }),
   )
 
   const collateralOp = computed(() => options.mode === 'supply' ? OP_DEPOSIT : OP_WITHDRAW)
@@ -434,7 +485,13 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   })
 
   const submitDisabled = computed(() =>
-    isGeoBlocked.value || isSwapRestricted.value || isLoading.value || isSubmitDisabled.value,
+    isGeoBlocked.value
+    || isSwapRestricted.value
+    || isInputAssetBlocked.value
+    || isOutputAssetBlocked.value
+    || isOutputAssetRestricted.value
+    || isLoading.value
+    || isSubmitDisabled.value,
   )
 
   // --- Estimates ---
@@ -577,10 +634,28 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     }
   }
 
+  async function buildSwapTxPlanForQuote(quote: SwapApiQuote, includePermit2Call: boolean): Promise<TxPlan> {
+    if (!collateralVault.value?.address || !asset.value?.address) {
+      throw new Error('Missing collateral vault or asset')
+    }
+    return options.buildSwapPlan(quote, {
+      vaultAddress: collateralVault.value.address,
+      amountNano: valueToNano(amount.value || '0', asset.value.decimals),
+      slippage: swapSlippage.value,
+      subAccount: position.value?.subAccount,
+      includePermit2Call,
+    })
+  }
+
   // --- Submit ---
   const submit = async () => {
     if (isOperationBlocked.value) return
-    if (isPreparing.value || isGeoBlocked.value || isSwapRestricted.value) return
+    if (isPreparing.value
+      || isGeoBlocked.value
+      || isSwapRestricted.value
+      || isInputAssetBlocked.value
+      || isOutputAssetBlocked.value
+      || isOutputAssetRestricted.value) return
     isPreparing.value = true
     try {
       await guardWithPriceImpact(async () => {
@@ -588,13 +663,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
         try {
           if (options.needsSwap.value && swapEffectiveQuote.value) {
-            plan.value = await options.buildSwapPlan(swapEffectiveQuote.value, {
-              vaultAddress: collateralVault.value.address,
-              amountNano: valueToNano(amount.value || '0', asset.value.decimals),
-              slippage: swapSlippage.value,
-              subAccount: position.value?.subAccount,
-              includePermit2Call: false,
-            })
+            plan.value = await buildSwapTxPlanForQuote(swapEffectiveQuote.value, false)
           }
           else {
             plan.value = await options.buildDirectPlan({
@@ -624,10 +693,12 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
             asset: reviewAsset,
             amount: amount.value,
             plan: plan.value || undefined,
+            quoteFetchedAt: options.needsSwap.value ? swapEffectiveQuoteFetchedAt.value : null,
             subAccount: position.value?.subAccount,
             hasBorrows: (position.value?.borrowed || 0n) > 0n,
             swapToAsset: options.needsSwap.value ? options.getSwapToAsset() : undefined,
             swapToAmount: options.needsSwap.value ? swapEstimatedOutput.value : undefined,
+            swapMode: options.needsSwap.value ? SwapperMode.EXACT_IN : undefined,
             onConfirm: async () => {
               await send()
             },
@@ -667,12 +738,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
         })
       }
       await executeTxPlan(txPlan)
-
-      modal.close()
-      await options.onAfterSend?.()
-      setTimeout(() => {
-        router.replace('/portfolio')
-      }, 400)
+      await finalizeTxAndRedirect({ onAfterClose: options.onAfterSend })
     }
     catch (e) {
       logWarn('collateral/send', e)
@@ -768,14 +834,15 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     swapSelectedProvider,
     swapSelectedQuote,
     swapEffectiveQuote,
-    swapQuoteSlippage,
     swapProvidersCount,
     isSwapQuoteLoading,
     swapQuoteError,
     swapQuotesStatusLabel,
     swapEstimatedOutput,
     swapInputDisplay,
+    swapInputExactDisplay,
     swapOutputDisplay,
+    swapOutputExactDisplay,
     swapRoutedVia,
     swapPriceImpact,
     swapRouteItems,
@@ -789,6 +856,9 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     // Validation
     isGeoBlocked,
     isSwapRestricted,
+    isInputAssetBlocked,
+    isOutputAssetBlocked,
+    isOutputAssetRestricted,
     isSubmitDisabled,
     submitDisabled,
     submitLabel,

@@ -1,9 +1,11 @@
-import { useAccount, useDisconnect, useBalance, useSwitchChain, useEnsName } from '@wagmi/vue'
+import { useAccount, useDisconnect, useBalance, useSwitchChain, useEnsName, useConfig } from '@wagmi/vue'
+import { connect as connectWallet, getConnectors } from '@wagmi/vue/actions'
 import { formatUnits, getAddress, isAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { truncate } from '~/utils/string-utils'
 import { useAddressScreen } from '~/composables/useAddressScreen'
 import { parseChainId } from '~/entities/chainRegistry'
+import { hasBaseAppInjectedProvider, selectBaseAppConnector } from '~/utils/base-app-wallet'
 
 let isChangingChain = false
 let chainChangeCooldownUntil = 0
@@ -21,34 +23,52 @@ function initializeWagmi() {
   const { address: wagmiAddress, isConnected: wagmiIsConnected, connector, chain: wagmiChain, status } = useAccount()
   const { disconnect: wagmiDisconnect } = useDisconnect()
   const { switchChain } = useSwitchChain()
-  const { screenConnectedAddress, resetScreeningCache } = useAddressScreen()
+  const config = useConfig()
+  const { screenConnectedAddress, resetScreeningCache, isAddressScreened } = useAddressScreen()
 
   const chainId = computed(() => wagmiChain.value?.id)
+  const screenedWagmiAddress: ComputedRef<Address | undefined> = computed(() =>
+    isAddressScreened(wagmiAddress.value) ? (wagmiAddress.value || undefined) : undefined,
+  )
 
   const { data: ensName } = useEnsName({
-    address: wagmiAddress,
+    address: screenedWagmiAddress,
     chainId: chainId.value,
   })
   const { data: balanceData, isLoading: isLoadingBalance, refetch: refetchBalance } = useBalance({
-    address: wagmiAddress,
+    address: screenedWagmiAddress,
   })
 
   // AppKit may be deferred-initialized (see plugins/00.wagmi.ts). Route
   // through the plugin-provided helper so the AppKit singleton is created
   // only on first connect for signed-out visitors.
-  const modal = () => {
+  const modal = async () => {
     const nuxtApp = useNuxtApp()
     const open = nuxtApp.$openWalletModal as (() => Promise<void>) | undefined
     if (!open) {
       console.warn('[useWagmi] $openWalletModal not available — wallet plugin may not have loaded')
       return
     }
-    open().catch(err => logWarn('useWagmi/modal', err))
+    await open()
+  }
+
+  const connectBaseAppInjectedWallet = async (): Promise<boolean> => {
+    if (!hasBaseAppInjectedProvider()) {
+      return false
+    }
+
+    const connector = selectBaseAppConnector(getConnectors(config))
+    if (!connector) {
+      return false
+    }
+
+    await connectWallet(config, { connector })
+    return true
   }
 
   watch(wagmiAddress, (address, oldAddress) => {
     if (address && address !== oldAddress) {
-      screenConnectedAddress(address)
+      void screenConnectedAddress(address).catch(err => logWarn('useWagmi/screenConnectedAddress', err))
     }
     if (!address && oldAddress) {
       resetScreeningCache()
@@ -68,6 +88,8 @@ function initializeWagmi() {
     isLoadingBalance,
     refetchBalance,
     modal,
+    connectBaseAppInjectedWallet,
+    isAddressScreened,
   }
 }
 
@@ -92,9 +114,13 @@ export const useWagmi = () => {
     isLoadingBalance,
     refetchBalance,
     modal,
+    connectBaseAppInjectedWallet,
+    isAddressScreened,
   } = cachedWagmiData
-  const address: ComputedRef<Address | undefined> = computed(() => wagmiAddress.value || undefined)
-  const isConnected = computed(() => Boolean(wagmiIsConnected.value))
+  const address: ComputedRef<Address | undefined> = computed(() =>
+    isAddressScreened(wagmiAddress.value) ? (wagmiAddress.value || undefined) : undefined,
+  )
+  const isConnected = computed(() => Boolean(wagmiIsConnected.value && isAddressScreened(wagmiAddress.value)))
   const chain = computed(() => wagmiChain.value)
   const chainId = computed(() => wagmiChain.value?.id)
 
@@ -166,8 +192,17 @@ export const useWagmi = () => {
     await wagmiDisconnect()
   }
 
-  const connect = () => {
-    modal()
+  const connect = async () => {
+    try {
+      if (await connectBaseAppInjectedWallet()) {
+        return
+      }
+    }
+    catch (err) {
+      logWarn('useWagmi/baseAppConnect', err)
+    }
+
+    modal().catch(err => logWarn('useWagmi/modal', err))
   }
 
   const syncRouteNetwork = async (targetChainId: number) => {

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { type Vault, type VaultAsset, getNetAPY } from '~/entities/vault'
 import { getAssetUsdValueOrZero, getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
 import { type AccountBorrowPosition, isPositionEligibleForLiquidation } from '~/entities/account'
@@ -12,7 +11,7 @@ import { createRaceGuard } from '~/utils/race-guard'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
-import { isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
+import { isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useWalletRepay } from '~/composables/repay/useWalletRepay'
 import { useWalletSwapRepay } from '~/composables/repay/useWalletSwapRepay'
 import { useCollateralSwapRepay } from '~/composables/repay/useCollateralSwapRepay'
@@ -23,7 +22,7 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 const _route = useRoute()
 const _router = useRouter()
 const modal = useModal()
-const { isConnected, address } = useAccount()
+const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
@@ -160,10 +159,26 @@ const walletSwap = useWalletSwapRepay({
 
 const { guardWithPriceImpact: guardWithWalletSwapPriceImpact } = usePriceImpactGate({
   directPriceImpact: walletSwap.swapPriceImpact,
+  shouldGateUnknown: computed(() =>
+    walletSwap.needsSwap.value
+    && walletSwap.quotes.selectedQuote.value !== null
+    && walletSwap.swapPriceImpact.value === null,
+  ),
 })
 
 const isWalletSwapRestricted = computed(() =>
-  walletSwap.needsSwap.value && isVaultRestrictedByCountry(borrowVault.value?.address || ''),
+  walletSwap.needsSwap.value && isVaultRestrictedByCountry(
+    borrowVault.value?.address || '',
+    { counterpart: walletSwap.selectedAsset.value },
+  ),
+)
+
+// Pay-with asset can be an arbitrary ERC-20 not tied to any vault, so the
+// vault-level geo-check above can't see it. Hard-block the asset directly.
+// Soft-restrict does not apply: pay-with reduces exposure to that asset.
+// Pass the asset object (not just address) so symbol/name pattern rules apply.
+const isPayWithAssetBlocked = computed(() =>
+  walletSwap.needsSwap.value && isAssetBlockedByCountry(walletSwap.selectedAsset.value),
 )
 
 const collateral = useCollateralSwapRepay({
@@ -200,9 +215,19 @@ const savings = useSavingsRepay({
 
 const { guardWithPriceImpact: guardWithCollateralPriceImpact } = usePriceImpactGate({
   directPriceImpact: collateral.priceImpact,
+  shouldGateUnknown: computed(() =>
+    !collateral.isSameAsset.value
+    && collateral.quotes.selectedQuote.value !== null
+    && collateral.priceImpact.value === null,
+  ),
 })
 const { guardWithPriceImpact: guardWithSavingsPriceImpact } = usePriceImpactGate({
   directPriceImpact: savings.priceImpact,
+  shouldGateUnknown: computed(() =>
+    !savings.isSameAsset.value
+    && savings.quotes.selectedQuote.value !== null
+    && savings.priceImpact.value === null,
+  ),
 })
 
 // --- Form tabs ---
@@ -222,7 +247,7 @@ const reviewRepayLabel = 'Review Repay'
 const reviewRepayDisabled = computed(() => {
   if (formTab.value === 'wallet') {
     return walletSwap.needsSwap.value
-      ? (isWalletSwapRestricted.value || walletSwap.isSubmitDisabled.value)
+      ? (isWalletSwapRestricted.value || isPayWithAssetBlocked.value || walletSwap.isSubmitDisabled.value)
       : wallet.isSubmitDisabled.value
   }
   if (formTab.value === 'savings') return savings.isSubmitDisabled.value
@@ -232,6 +257,7 @@ const reviewRepayDisabled = computed(() => {
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (formTab.value === 'wallet') {
     if (walletSwap.needsSwap.value) {
+      if (isPayWithAssetBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
       if (isWalletSwapRestricted.value) return { message: 'Swapping into this vault is not available in your region', variant: 'warning' }
       if (walletSwap.disabledReason.value) return { message: walletSwap.disabledReason.value, variant: 'error' }
       if (walletSwap.estimatesError.value) return { message: walletSwap.estimatesError.value, variant: 'error' }
@@ -272,7 +298,7 @@ const onSubmitForm = async () => {
   if (isOperationBlocked.value) return
   if (formTab.value === 'wallet') {
     if (walletSwap.needsSwap.value) {
-      if (isWalletSwapRestricted.value) return
+      if (isWalletSwapRestricted.value || isPayWithAssetBlocked.value) return
       await guardWithWalletSwapPriceImpact(() => walletSwap.submit())
     }
     else {
@@ -297,6 +323,7 @@ const openWalletSwapTokenSelector = () => {
       currentAssetAddress: walletSwap.selectedAsset.value?.address || borrowVault.value?.asset.address,
       onSelect: walletSwap.onSelectSwapAsset,
       allowNativeCurrency: true,
+      pairedAsset: borrowVault.value?.asset,
     },
   })
 }
@@ -395,7 +422,7 @@ watch(formTab, () => {
           :list="formTabs"
         />
 
-        <UiToast
+        <UiAlert
           v-if="activeHookWarning"
           :title="activeHookWarning.title"
           :description="activeHookWarning.message"
@@ -511,35 +538,42 @@ watch(formTab, () => {
                 @refresh="walletSwap.onRefreshSwapQuotes"
               />
 
-              <UiToast
-                v-if="isWalletSwapRestricted"
+              <UiAlert
+                v-if="isPayWithAssetBlocked"
+                title="Asset restricted"
+                description="Paying with this asset is not available in your region. Pick a different asset."
+                variant="warning"
+                size="compact"
+              />
+              <UiAlert
+                v-if="!isPayWithAssetBlocked && isWalletSwapRestricted"
                 title="Swap restricted"
                 description="Swapping into this vault is not available in your region. You can repay with the vault's underlying asset directly."
                 variant="warning"
                 size="compact"
               />
-              <UiToast
-                v-if="walletSwap.needsSwap.value && !isWalletSwapRestricted && walletSwap.disabledReason.value"
+              <UiAlert
+                v-if="walletSwap.needsSwap.value && !isWalletSwapRestricted && !isPayWithAssetBlocked && walletSwap.disabledReason.value"
                 title="Error"
                 variant="error"
                 :description="walletSwap.disabledReason.value"
                 size="compact"
               />
-              <UiToast
+              <UiAlert
                 v-show="walletSwap.needsSwap.value ? walletSwap.estimatesError.value : wallet.estimatesError.value"
                 title="Error"
                 variant="error"
                 :description="walletSwap.needsSwap.value ? walletSwap.estimatesError.value : wallet.estimatesError.value"
                 size="compact"
               />
-              <UiToast
+              <UiAlert
                 v-if="walletSwap.needsSwap.value && walletSwap.quotes.quoteError.value"
                 title="Swap quote"
                 variant="warning"
                 :description="walletSwap.quotes.quoteError.value"
                 size="compact"
               />
-              <UiToast
+              <UiAlert
                 v-if="simulationError"
                 title="Error"
                 variant="error"
@@ -606,10 +640,11 @@ watch(formTab, () => {
               <SwapDetailsSummary
                 v-if="walletSwap.needsSwap.value && (walletSwap.swapEstimatedOutput.value || walletSwap.quotes.quoteError.value)"
                 :input-display="walletSwap.swapInputDisplay.value"
+                :input-exact-display="walletSwap.swapInputExactDisplay.value"
                 :output-display="walletSwap.swapOutputDisplay.value"
+                :output-exact-display="walletSwap.swapOutputExactDisplay.value"
                 :price-impact="walletSwap.swapPriceImpact.value"
                 :slippage="slippage"
-                :quote-slippage="walletSwap.quoteSlippage.value"
                 :routed-via="walletSwap.swapRoutedVia.value"
                 @open-slippage-settings="openSlippageSettings"
               />
@@ -637,7 +672,7 @@ watch(formTab, () => {
         <template v-else-if="formTab === 'collateral'">
           <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
             <div class="flex flex-col gap-16 w-full">
-              <UiToast
+              <UiAlert
                 v-if="isEligibleForLiquidation"
                 title="Position in violation"
                 variant="warning"
@@ -688,32 +723,32 @@ watch(formTab, () => {
                 :status-label="collateral.quotes.statusLabel.value"
                 :is-loading="collateral.quotes.isLoading.value"
                 :empty-message="collateral.routeEmptyMessage.value"
-                @select="collateral.quotes.selectProvider"
+                @select="collateral.onProviderSelect"
                 @refresh="collateral.onRefreshQuotes"
               />
 
-              <UiToast
+              <UiAlert
                 v-if="collateral.quotes.quoteError.value && !collateral.isSameAsset.value"
                 title="Swap quote"
                 variant="warning"
                 :description="collateral.quotes.quoteError.value"
                 size="compact"
               />
-              <UiToast
+              <UiAlert
                 v-if="collateral.isRepayExceedsDebt.value"
                 title="Error"
                 variant="error"
                 :description="collateral.disabledReason.value"
                 size="compact"
               />
-              <UiToast
+              <UiAlert
                 v-if="!collateral.isRepayExceedsDebt.value && collateral.disabledReason.value"
                 title="Cannot submit"
                 variant="warning"
                 :description="collateral.disabledReason.value"
                 size="compact"
               />
-              <UiToast
+              <UiAlert
                 v-if="simulationError"
                 title="Error"
                 variant="error"
@@ -790,10 +825,11 @@ watch(formTab, () => {
               <SwapDetailsSummary
                 v-if="!collateral.isSameAsset.value"
                 :input-display="collateral.summary.value?.from ?? null"
+                :input-exact-display="collateral.summary.value?.fromExact ?? null"
                 :output-display="collateral.summary.value?.to ?? null"
+                :output-exact-display="collateral.summary.value?.toExact ?? null"
                 :price-impact="collateral.priceImpact.value"
                 :slippage="slippage"
-                :quote-slippage="collateral.quoteSlippage.value"
                 :routed-via="collateral.routedVia.value"
                 @open-slippage-settings="openSlippageSettings"
               />
@@ -829,6 +865,9 @@ watch(formTab, () => {
                 :asset="savings.sourceVault.value.asset"
                 :vault="savings.sourceVault.value"
                 :collateral-options="savings.savingsOptions.value"
+                :selected-source="'saving'"
+                :selected-sub-account="savings.selectedSavingSubAccount.value"
+                :selected-vault-address="savings.sourceVault.value.address"
                 :balance="savings.sourceBalance.value"
                 :max-handler="savings.onSourceMax"
                 maxable
@@ -864,32 +903,32 @@ watch(formTab, () => {
                 :status-label="savings.quotes.statusLabel.value"
                 :is-loading="savings.quotes.isLoading.value"
                 :empty-message="savings.routeEmptyMessage.value"
-                @select="savings.quotes.selectProvider"
+                @select="savings.onProviderSelect"
                 @refresh="savings.onRefreshQuotes"
               />
 
-              <UiToast
+              <UiAlert
                 v-if="savings.quotes.quoteError.value && !savings.isSameAsset.value"
                 title="Swap quote"
                 variant="warning"
                 :description="savings.quotes.quoteError.value"
                 size="compact"
               />
-              <UiToast
+              <UiAlert
                 v-if="savings.isRepayExceedsDebt.value"
                 title="Error"
                 variant="error"
                 :description="savings.disabledReason.value"
                 size="compact"
               />
-              <UiToast
+              <UiAlert
                 v-if="!savings.isRepayExceedsDebt.value && savings.disabledReason.value"
                 title="Cannot submit"
                 variant="warning"
                 :description="savings.disabledReason.value"
                 size="compact"
               />
-              <UiToast
+              <UiAlert
                 v-if="simulationError"
                 title="Error"
                 variant="error"
@@ -966,10 +1005,11 @@ watch(formTab, () => {
               <SwapDetailsSummary
                 v-if="!savings.isSameAsset.value"
                 :input-display="savings.summary.value?.from ?? null"
+                :input-exact-display="savings.summary.value?.fromExact ?? null"
                 :output-display="savings.summary.value?.to ?? null"
+                :output-exact-display="savings.summary.value?.toExact ?? null"
                 :price-impact="savings.priceImpact.value"
                 :slippage="slippage"
-                :quote-slippage="savings.quoteSlippage.value"
                 :routed-via="savings.routedVia.value"
                 @open-slippage-settings="openSlippageSettings"
               />

@@ -1,5 +1,4 @@
 import type { Ref, ComputedRef } from 'vue'
-import { useAccount } from '@wagmi/vue'
 import { formatUnits } from 'viem'
 import { FixedPoint } from '~/utils/fixed-point'
 import { logWarn } from '~/utils/errorHandling'
@@ -17,7 +16,7 @@ import { trimTrailingZeros } from '~/utils/string-utils'
 import { amountToPercent, percentToAmountNano } from '~/utils/repayUtils'
 import { findBlockingDisabledOp, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
-import type { Vault } from '~/entities/vault'
+import { isEVKVault, type Vault, type SecuritizeVault } from '~/entities/vault'
 
 interface UseWalletRepayOptions {
   position: Ref<AccountBorrowPosition | undefined>
@@ -58,13 +57,11 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     oraclePriceRatio,
   } = options
 
-  const router = useRouter()
   const modal = useModal()
   const { error } = useToast()
   const { buildRepayPlan, buildFullRepayPlan, executeTxPlan } = useEulerOperations()
-  const { refreshAllPositions } = useEulerAccount()
-  const { eulerLensAddresses } = useEulerAddresses()
-  const { isConnected, address } = useAccount()
+  const { isConnected } = useWagmi()
+  const { finalizeTxAndRedirect } = useTxFinalization()
 
   const amount = ref('')
   const walletRepayPercent = ref(0)
@@ -112,8 +109,11 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     if (isFullRepay) {
       const collAddrs = position.value?.collaterals ?? (collateralVault.value ? [collateralVault.value.address] : [])
       for (const addr of collAddrs) {
-        const v = registryGetVault(addr) as Vault | undefined
-        if (v) steps.push({ vault: v, op: OP_TRANSFER })
+        const v = registryGetVault(addr) as Vault | SecuritizeVault | undefined
+        // Only EVK collaterals are swept via transferFromMax in
+        // buildFullRepayPlan — non-EVK (e.g. securitize) are filtered out
+        // by the builder, so don't surface a transfer-op warning for them.
+        if (v && isEVKVault(v)) steps.push({ vault: v, op: OP_TRANSFER })
       }
     }
     return steps
@@ -211,12 +211,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
             { includePermit2Call: true },
           )
       await executeTxPlan(txPlan)
-
-      modal.close()
-      refreshAllPositions(eulerLensAddresses.value, address.value as string)
-      setTimeout(() => {
-        router.replace('/portfolio')
-      }, 400)
+      await finalizeTxAndRedirect()
     }
     catch (e) {
       error('Transaction failed')
@@ -236,7 +231,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
         throw new Error('Not enough balance')
       }
       if (borrowedFixed.value.lt(amountFixed.value)) {
-        throw new Error('You repaying more than required')
+        throw new Error('Repay amount exceeds outstanding debt')
       }
       // Use on-chain LTV to derive total collateral value (multi-collateral aware)
       const totalValue = getTotalCollateralValue(position.value!)
@@ -258,10 +253,6 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       _estimateUserLTV.value = userLtvFixed.toScaledBigint(18)
       _estimateHealth.value = healthFixed ? healthFixed.toScaledBigint(18) : 10n ** 36n
       hasEstimate.value = true
-
-      if (userLtvFixed.gte(FixedPoint.fromValue(position.value!.liquidationLTV, 2))) {
-        throw new Error('Not enough liquidity for the vault, LTV is too large')
-      }
     }
     catch (e: unknown) {
       logWarn('walletRepay/syncEstimates', e)

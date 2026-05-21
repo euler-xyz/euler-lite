@@ -1,4 +1,4 @@
-import { getAddress, zeroAddress } from 'viem'
+import { getAddress } from 'viem'
 import { useVaultRegistry } from './useVaultRegistry'
 import { logWarn } from '~/utils/errorHandling'
 import {
@@ -7,6 +7,7 @@ import {
   type EarnVault,
   type SecuritizeVault,
   type SerialisedSnapshot,
+  type VerificationLabels,
   deserialiseSnapshot,
   fetchEarnVaults,
   fetchVault,
@@ -15,12 +16,14 @@ import {
   fetchSecuritizeVault,
   fetchVaults,
   clearPriceCaches,
+  extractUnresolvedCollateralAddresses,
+  isEarnVaultOwnerVerified as ruleIsEarnVaultOwnerVerified,
   isLiveCollateralEdge,
+  isVaultGovernorVerified as ruleIsVaultGovernorVerified,
   type Vault,
 } from '~/entities/vault'
-import { fetchChainVaultCategories, isSecuritizeVault, resetVaultCategoryCache } from '~/entities/vault/factory'
+import { fetchChainVaultCategories, fetchVaultCategory, isSecuritizeVault, resetVaultCategoryCache } from '~/entities/vault/factory'
 import { getProductByVault, isVaultNotExplorable, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
-import { getEulerRouterGovernor } from '~/entities/oracle'
 
 const isReady = ref(false)
 const isEVKLoading = ref(false)
@@ -37,6 +40,13 @@ const isEscrowLoading = ref(false)
 const isEscrowUpdating = ref(false)
 const isEscrowLoadedOnce = ref(false)
 
+// True once the bulk loaders AND the unresolved-collateral sweep have settled.
+// Distinct from `isReady`, which flips as soon as the server snapshot lands —
+// the snapshot doesn't include lazy collateral references, so consumers that
+// classify "unknown collateral" need this stricter signal to avoid the brief
+// post-hydration flash where unfetched collaterals look unrecognised.
+const isCollateralResolved = ref(false)
+
 // Generation counter to invalidate stale in-flight operations after chain switch.
 // Incremented in resetVaultsState(); any async operation capturing an older generation
 // must stop registering vaults.
@@ -44,6 +54,12 @@ const loadGeneration = ref(0)
 
 const contextForGeneration = (gen: number) =>
   buildFetchContext(() => loadGeneration.value !== gen)
+
+const showAllLabelEntries = ref(false)
+
+const setShowAllLabelEntries = (enabled: boolean) => {
+  showAllLabelEntries.value = enabled
+}
 
 // Pair-object cache keyed by `${borrow}:${collateral}`. Vault references in
 // the registry are stable across batch updates for vaults NOT in the current
@@ -61,7 +77,7 @@ const borrowPairCache = new Map<string, AnyBorrowVaultPair>()
 const borrowList = computed((): AnyBorrowVaultPair[] => {
   const { getVerifiedEvkVaults, getVault: registryGetVault } = useVaultRegistry()
   const pairs: AnyBorrowVaultPair[] = []
-  const evkVaults = getVerifiedEvkVaults()
+  const evkVaults = getVerifiedEvkVaults(showAllLabelEntries.value)
   const seenKeys = new Set<string>()
 
   evkVaults.forEach((borrowVault) => {
@@ -70,7 +86,7 @@ const borrowList = computed((): AnyBorrowVaultPair[] => {
 
       const collateralVault = registryGetVault(ltv.collateral)
       if (!collateralVault) return
-      if (isVaultNotExplorable(collateralVault.address)) return
+      if (!showAllLabelEntries.value && isVaultNotExplorable(collateralVault.address)) return
 
       const key = `${borrowVault.address.toLowerCase()}:${ltv.collateral.toLowerCase()}`
       seenKeys.add(key)
@@ -110,6 +126,7 @@ const resetVaultsState = () => {
   loadGeneration.value++
   borrowPairCache.clear()
   isReady.value = false
+  isCollateralResolved.value = false
   isEVKLoading.value = true
   isEVKUpdating.value = true
   isEarnLoading.value = true
@@ -264,6 +281,75 @@ const fetchNeededEscrowVaults = async (addresses: string[], generation: number):
     }
   })
   registrySetMany(entries)
+}
+
+/**
+ * Lazy-resolve collateral addresses that aren't covered by the bulk loaders.
+ *
+ * `fetchChainVaultCategories` already ran earlier in this `loadVaults` call
+ * and populated the per-address category cache, so `fetchVaultCategory` is a
+ * cache hit for every address indexed by the subgraph. We group addresses
+ * by category and hand each group to the existing bulk loader for that type
+ * (`updateEVKVaults` / `updateEarnVaults` / `updateSecuritizeVaults` /
+ * `fetchNeededEscrowVaults`) — same multicall batching, same registry-write
+ * path, no parallel implementation. `silent=true` keeps loading flags
+ * untouched since this runs after the initial reveal.
+ *
+ * Addresses the subgraph has not indexed (category === null) are skipped —
+ * a probe-and-guess fallback would misidentify brand-new escrows as plain
+ * EVK, and the next `loadVaults` cycle picks them up once the subgraph
+ * catches up. The diagnostic warns in `useMarketGroups` and
+ * `VaultOverviewBlockBorrow` surface the gap in the meantime.
+ */
+const fetchUnresolvedCollaterals = async (addresses: string[], generation: number): Promise<void> => {
+  if (!addresses.length || loadGeneration.value !== generation) return
+
+  const evkAddrs: string[] = []
+  const earnAddrs: string[] = []
+  const securitizeAddrs: string[] = []
+  const escrowAddrs: string[] = []
+
+  await Promise.allSettled(addresses.map(async (addr) => {
+    const category = await fetchVaultCategory(addr)
+    switch (category) {
+      case 'escrow':
+        escrowAddrs.push(addr)
+        break
+      case 'evk':
+        evkAddrs.push(addr)
+        break
+      case 'earn':
+        earnAddrs.push(addr)
+        break
+      case 'securitize':
+        securitizeAddrs.push(addr)
+        break
+      default:
+        // Subgraph hasn't indexed this address — skip and let the next
+        // loadVaults cycle pick it up once the category endpoint warms.
+        break
+    }
+  }))
+
+  if (loadGeneration.value !== generation) return
+
+  // Bulk loaders short-circuit on empty input, so call unconditionally.
+  await Promise.all([
+    updateEVKVaults(evkAddrs, generation, true),
+    updateEarnVaults(earnAddrs, generation, true),
+    updateSecuritizeVaults(securitizeAddrs, generation, true),
+    fetchNeededEscrowVaults(escrowAddrs, generation),
+  ])
+}
+
+const resolveUnresolvedCollaterals = async (generation: number): Promise<void> => {
+  const { getEvkVaults, has: registryHas } = useVaultRegistry()
+  const unresolvedAddresses = extractUnresolvedCollateralAddresses(
+    getEvkVaults(),
+    registryHas,
+  ).filter(addr => showAllLabelEntries.value || !isVaultNotExplorable(addr))
+
+  await fetchUnresolvedCollaterals(unresolvedAddresses, generation)
 }
 
 const updateSecuritizeVaults = async (securitizeAddresses: string[], generation: number, silent = false) => {
@@ -430,12 +516,12 @@ const loadVaults = async () => {
   const silent = hydrated
 
   // Filter out non-explorable vaults before any on-chain work
-  const explorableVaultAddresses = verifiedVaultAddresses.value.filter(
-    addr => !isVaultNotExplorable(addr),
-  )
-  const explorableEarnAddresses = earnVaultAddresses.value.filter(
-    addr => !isEarnVaultNotExplorable(addr),
-  )
+  const explorableVaultAddresses = showAllLabelEntries.value
+    ? verifiedVaultAddresses.value
+    : verifiedVaultAddresses.value.filter(addr => !isVaultNotExplorable(addr))
+  const explorableEarnAddresses = showAllLabelEntries.value
+    ? earnVaultAddresses.value
+    : earnVaultAddresses.value.filter(addr => !isEarnVaultNotExplorable(addr))
 
   try {
     if (!silent) {
@@ -501,6 +587,23 @@ const loadVaults = async () => {
 
     if (loadGeneration.value !== generation) return
 
+    // After bulk loaders + escrow lazy-fetch settle, sweep up any collateral
+    // address referenced by a member vault that isn't yet in the registry.
+    // These are typically EVK vaults that exist on chain but aren't part of
+    // any product label — without this, discovery views silently drop the
+    // relationship. Single pass is enough: discovery views iterate only
+    // member vaults, so a resolved off-label vault is a leaf in those views;
+    // any second-hop unknowns will surface as diagnostic warns and resolve
+    // on the next loadVaults cycle.
+    await resolveUnresolvedCollaterals(generation)
+
+    if (loadGeneration.value !== generation) return
+
+    // Bulk loaders + unresolved-collateral sweep are complete. Consumers
+    // gating "unknown collateral" classification can now run without
+    // misclassifying not-yet-hydrated lazy collateral references.
+    isCollateralResolved.value = true
+
     // Clear flags AFTER all needed escrow vaults are loaded.
     // Silent mode skips EVK/Earn flags (already false from hydration) but
     // still clears escrow + securitize which were never touched during
@@ -517,6 +620,10 @@ const loadVaults = async () => {
   catch (e) {
     logWarn('useVaults/loadVaults', e)
     if (loadGeneration.value === generation) {
+      // A failed load means no collateral-resolution task is still in flight.
+      // Unblock consumers so direct market pages can render their fallback
+      // state instead of waiting forever on a failed sweep.
+      isCollateralResolved.value = true
       isEVKLoading.value = false
       isEVKUpdating.value = false
       isEarnLoading.value = false
@@ -631,7 +738,22 @@ const refreshVaults = async () => {
   const { getEvkVaults, getEarnVaults, getSecuritizeVaults } = useVaultRegistry()
   const gen = loadGeneration.value
 
-  await updateEVKVaults(getEvkVaults().map(v => v.address), gen, true)
+  try {
+    await updateEVKVaults(getEvkVaults().map(v => v.address), gen, true)
+    if (loadGeneration.value !== gen) return
+
+    await resolveUnresolvedCollaterals(gen)
+    if (loadGeneration.value !== gen) return
+  }
+  catch (e) {
+    logWarn('useVaults/refreshVaults', e)
+  }
+  finally {
+    if (loadGeneration.value === gen) {
+      isCollateralResolved.value = true
+    }
+  }
+
   if (loadGeneration.value !== gen) return
 
   await updateEarnVaults(getEarnVaults().map(v => v.address), gen, true)
@@ -751,6 +873,7 @@ const getBorrowVaultPair = async (
   if (!borrowVault) {
     throw '[getBorrowVaultPair]: Borrow vault not found'
   }
+  registrySet(borrowAddr, borrowVault, 'evk')
 
   const collateralLTV = borrowVault.collateralLTVs.find(c => c.collateral === collateralAddr)
   if (!collateralLTV) {
@@ -770,11 +893,13 @@ const getBorrowVaultPair = async (
   else {
     try {
       collateralVault = await fetchVault(collateralAddr, ctx)
+      registrySet(collateralAddr, collateralVault, 'evk')
     }
     catch {
       // Try escrow vault first
       try {
         collateralVault = await fetchEscrowVault(collateralAddr, ctx)
+        registrySet(collateralAddr, collateralVault, 'evk')
       }
       catch {
         // Check if it's a securitize vault
@@ -791,6 +916,14 @@ const getBorrowVaultPair = async (
     }
   }
 
+  // Fire the off-label sweep so the freshly registered borrow / collateral
+  // vault's own collateralLTVs[] get resolved into the registry — without
+  // this, deep-linked unverified pairs render with empty Collateral exposure
+  // blocks because referenced vaults were never loaded by the bulk pipeline.
+  // Fire-and-forget: the pair render shouldn't wait on additional lens reads,
+  // and resolveUnresolvedCollaterals updates the reactive registry as it goes.
+  void resolveUnresolvedCollaterals(loadGeneration.value)
+
   return {
     borrow: borrowVault,
     collateral: collateralVault,
@@ -803,90 +936,38 @@ const getBorrowVaultPair = async (
 }
 
 export const useVaults = () => {
-  // Check if vault's on-chain governorAdmin matches any of the product's declared entities
-  const isVaultGovernorVerified = (vault: Vault): boolean => {
-    const { entities } = useEulerLabels()
-
-    // Escrow vaults don't have a risk manager - show "-" not "Unknown"
-    if (vault.vaultCategory === 'escrow') {
-      return true
-    }
-
-    // Unverified vaults (not in products.json) show unknown risk manager
-    if (!vault.verified) {
-      return false
-    }
-
-    const product = getProductByVault(vault.address)
-    if (!product.name) {
-      // Vault marked verified but not in products.json - shouldn't happen, but treat as unknown
-      return false
-    }
-
-    const declaredEntityKeys = Array.isArray(product.entity) ? product.entity : [product.entity].filter(Boolean)
-    if (declaredEntityKeys.length === 0) {
-      // No entities declared in product, nothing to verify against
-      return true
-    }
-
-    // Check if governorAdmin matches any address in any of the declared entities
-    const governorAdminVerified = declaredEntityKeys.some((entityKey) => {
-      const entity = entities[entityKey]
-      return entity && Object.keys(entity.addresses).includes(vault.governorAdmin)
-    })
-
-    if (!governorAdminVerified) {
-      return false
-    }
-
-    // Also verify oracle router governor if the oracle is an EulerRouter
-    const routerGovernor = getEulerRouterGovernor(vault.oracleDetailedInfo)
-    if (routerGovernor && routerGovernor !== zeroAddress) {
-      const routerGovernorVerified = declaredEntityKeys.some((entityKey) => {
-        const entity = entities[entityKey]
-        return entity && Object.keys(entity.addresses).includes(routerGovernor)
-      })
-
-      if (!routerGovernorVerified) {
-        return false
-      }
-    }
-
-    return true
+  // Build the shared `VerificationLabels` shape once per useVaults() call.
+  // The closures read live from the reactive labels store, so the rule
+  // always sees current entities/products without rebuilding the shape on
+  // every call. Both isVaultGovernorVerified and isEarnVaultOwnerVerified
+  // delegate to entities/vault/governor-verification.ts.
+  const { entities } = useEulerLabels()
+  const verificationLabels: VerificationLabels = {
+    getDeclaredEntityKeys: (addr) => {
+      const product = getProductByVault(addr)
+      if (!product.name) return undefined
+      return Array.isArray(product.entity) ? product.entity : [product.entity].filter(Boolean)
+    },
+    hasEntityAddress: (key, address) => {
+      // Static type says addresses is non-null, but the label data flows
+      // through JSON from an external repo — a malformed entity entry can
+      // arrive without an `addresses` map, in which case `in` would throw
+      // and a single bad entry would break verification for every vault.
+      const entity = entities[key]
+      return !!entity?.addresses && address in entity.addresses
+    },
   }
 
-  // Check if earn vault's on-chain owner matches any of the product's declared entities
-  const isEarnVaultOwnerVerified = (earnVault: EarnVault): boolean => {
-    const { entities } = useEulerLabels()
+  const isVaultGovernorVerified = (vault: Vault | SecuritizeVault): boolean =>
+    ruleIsVaultGovernorVerified(vault, verificationLabels)
 
-    if (!earnVault.verified) {
-      return false
-    }
-
-    const product = getProductByVault(earnVault.address)
-    if (!product.name) {
-      return true
-    }
-
-    const declaredEntityKeys = Array.isArray(product.entity) ? product.entity : [product.entity].filter(Boolean)
-    if (declaredEntityKeys.length === 0) {
-      return true
-    }
-
-    const ownerAddress = getAddress(earnVault.owner)
-    for (const entityKey of declaredEntityKeys) {
-      const entity = entities[entityKey]
-      if (entity && Object.keys(entity.addresses).includes(ownerAddress)) {
-        return true
-      }
-    }
-
-    return false
-  }
+  const isEarnVaultOwnerVerified = (earnVault: EarnVault): boolean =>
+    ruleIsEarnVaultOwnerVerified(earnVault, verificationLabels)
 
   return {
     // State
     isReady,
+    isCollateralResolved,
     loadedChainId,
     isEVKLoading,
     isEVKUpdating,
@@ -901,6 +982,7 @@ export const useVaults = () => {
     // Loading
     loadVaults,
     resetVaultsState,
+    setShowAllLabelEntries,
 
     // Async getters (with wait-for-load logic)
     getVault,

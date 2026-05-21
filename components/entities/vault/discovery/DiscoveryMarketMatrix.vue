@@ -29,6 +29,7 @@ import {
 import { getOracleProviderLogo } from '~/entities/oracle-providers'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { truncate, formatNumber } from '~/utils/string-utils'
+import { shouldInvertOraclePrice } from '~/utils/oracle-label'
 import { useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
 
 const props = defineProps<{
@@ -239,6 +240,8 @@ interface AdapterView {
   name: string
   base: Address
   quote: Address
+  metaBase?: Address
+  metaQuote?: Address
   provider: string
   methodology?: string
   logo?: string
@@ -259,6 +262,8 @@ const enrichAdapter = (adapter: OracleAdapterEntry): AdapterView => {
     name,
     base: adapter.base,
     quote: adapter.quote,
+    metaBase: meta?.base,
+    metaQuote: meta?.quote,
     provider,
     methodology: meta?.methodology || (isERC4626 ? 'Exchange Rate' : undefined),
     logo: getOracleProviderLogo(provider, name),
@@ -365,7 +370,14 @@ const tooltipPriceText = computed((): string | null => {
   const key = `${ctx.view.oracle.toLowerCase()}:${ctx.view.base.toLowerCase()}:${ctx.view.quote.toLowerCase()}`
   const info = oraclePrices.value.get(key)
   if (!info?.success) return null
-  return formatNumber(info.rate, 4)
+  const invert = shouldInvertOraclePrice({
+    metaBase: ctx.view.metaBase,
+    metaQuote: ctx.view.metaQuote,
+    callerBase: ctx.view.base,
+    callerQuote: ctx.view.quote,
+  })
+  const rate = invert && info.rate > 0 ? 1 / info.rate : info.rate
+  return formatNumber(rate, 4)
 })
 
 const tooltipPriceLoading = computed(() => oraclePricesLoading.value && !oraclePrices.value.size)
@@ -493,8 +505,8 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                   && selectedHeader?.axis === 'row'
                   ? 'text-accent-500 !bg-accent-500/10'
                   : isRowHighlighted(row.address)
-                    ? (row.category === 'external' ? 'text-content-tertiary !bg-white/[0.06]' : 'text-content-primary !bg-white/[0.06]')
-                    : (row.category === 'external'
+                    ? (row.category !== 'borrowable' ? 'text-content-tertiary !bg-white/[0.06]' : 'text-content-primary !bg-white/[0.06]')
+                    : (row.category !== 'borrowable'
                       ? 'text-content-tertiary hover:bg-white/[0.04]'
                       : 'text-content-primary hover:bg-white/[0.04]')
               "

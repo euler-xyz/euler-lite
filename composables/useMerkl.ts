@@ -1,9 +1,15 @@
-import { useAccount, useSwitchChain, useWriteContract } from '@wagmi/vue'
+import { useSwitchChain, useWriteContract } from '@wagmi/vue'
 import type { Address } from 'viem'
 import axios from 'axios'
 
 import { merklDistributorABI } from '~/abis/merkl'
-import type { Opportunity, Reward, RewardsResponseItem } from '~/entities/merkl'
+import type {
+  MerklOpportunityType,
+  MerklResponseKey,
+  Opportunity,
+  Reward,
+  RewardsResponseItem,
+} from '~/entities/merkl'
 import type { RewardCampaign, RewardCampaignType } from '~/entities/reward-campaign'
 import { mapMerklSubType } from '~/entities/reward-campaign'
 import type { TxPlan } from '~/entities/txPlan'
@@ -54,15 +60,26 @@ let latestOpportunitiesRequestId = 0
 let latestRewardsRequestId = 0
 
 interface MerklProxyResponse {
-  opportunities: {
-    euler: Opportunity[]
-    multilendborrow: Opportunity[]
-    erc20logprocessor: Opportunity[]
-  }
+  opportunities: Record<MerklResponseKey, Opportunity[]>
+}
+
+const MERKL_EULER_SOURCE_URL = 'https://app.merkl.xyz/?protocol=euler'
+
+const merklOpportunityUrl = (
+  opportunity: Opportunity,
+  type: MerklOpportunityType,
+): string => {
+  if (!opportunity.identifier) return MERKL_EULER_SOURCE_URL
+
+  const chain = (opportunity.chain?.name || opportunity.chainId?.toString())?.trim()
+  if (!chain) return MERKL_EULER_SOURCE_URL
+
+  const chainSlug = chain.toLowerCase().replace(/\s+/g, '-')
+  return `https://app.merkl.xyz/opportunities/${encodeURIComponent(chainSlug)}/${type}/${encodeURIComponent(opportunity.identifier)}`
 }
 
 // Public campaign data flows through `/api/rewards/merkl`, which warms the
-// three Merkl opportunity types server-side and returns one CDN-cacheable
+// Merkl opportunity types server-side and returns one CDN-cacheable
 // GET. User-specific /users/{addr}/rewards stays direct (per-wallet data
 // not safe to put on a shared cache).
 //
@@ -78,6 +95,16 @@ const fetchMerklProxy = (chainId: number): Promise<MerklProxyResponse | null> =>
         logWarn('merkl/proxy', e)
         return null
       }))
+
+// Merkl campaigns can carry a `params.whitelist` (only these recipients earn)
+// or `params.blacklist` (these recipients don't earn). We don't drop campaigns
+// here — discovery views show the unfiltered APR — but we lowercase the lists
+// onto the emitted `RewardCampaign` so `useRewardsApy` can filter per the
+// connected/spied address.
+const normalizeAddressList = (list: readonly string[] | undefined): string[] | undefined => {
+  if (!list?.length) return undefined
+  return list.map(a => a.toLowerCase())
+}
 
 const processOpportunitiesToCampaigns = (
   opportunities: Opportunity[],
@@ -127,7 +154,9 @@ const processOpportunitiesToCampaigns = (
         provider: 'merkl',
         endTimestamp: campaign.endTimestamp,
         rewardToken: { symbol: campaign.rewardToken.symbol, icon: campaign.rewardToken.icon },
-        sourceUrl: 'https://app.merkl.xyz/?protocol=euler',
+        sourceUrl: merklOpportunityUrl(opportunity, opType),
+        whitelist: normalizeAddressList(campaign.params.whitelist),
+        blacklist: normalizeAddressList(campaign.params.blacklist),
       }
 
       const existing = campaignMap.get(vaultAddress)
@@ -169,6 +198,9 @@ const processMultiLendBorrowOpportunities = (
       const markets = campaign.params?.markets
       if (!markets?.length || !campaign.rewardToken) continue
 
+      const whitelist = normalizeAddressList(campaign.params?.whitelist)
+      const blacklist = normalizeAddressList(campaign.params?.blacklist)
+
       // Merkl provides a single campaign-level APR (keyed by campaignId in
       // aprRecord.breakdowns), shared across all markets under MAX_APR. For
       // MULTILENDBORROW that breakdown can be absent/zero while the top-level
@@ -190,12 +222,100 @@ const processMultiLendBorrowOpportunities = (
           provider: 'merkl',
           endTimestamp: campaign.endTimestamp,
           rewardToken: { symbol: campaign.rewardToken.symbol, icon: campaign.rewardToken.icon },
-          sourceUrl: `https://app.merkl.xyz/opportunities/${(opportunity.chain?.name || String(opportunity.chainId)).toLowerCase()}/MULTILENDBORROW/${opportunity.identifier}`,
+          sourceUrl: merklOpportunityUrl(opportunity, 'MULTILENDBORROW'),
+          whitelist,
+          blacklist,
         }
 
         const existing = campaignMap.get(vaultAddress)
         if (existing) existing.push(rewardCampaign)
         else campaignMap.set(vaultAddress, [rewardCampaign])
+      }
+    }
+  }
+
+  return campaignMap
+}
+
+// EULER_BORROW_FROM_COLLATERAL (single vault) and
+// EULER_MULTI_BORROW_FROM_COLLATERAL (multiple vaults) share a params shape:
+// each campaign carries `params.vaults[]`, where every entry pairs one borrow
+// vault (evkAddress) with the list of collateral vaults (collaterals[].tokenAddress)
+// eligible for the reward. We fan out one RewardCampaign per (vault, collateral)
+// pair using the existing `euler_borrow_collateral` type so the existing
+// per-collateral filter in useRewardsApy picks them up unchanged.
+//
+// Defensive fallback: if `params.vaults` is absent but the flat
+// `evkAddress` + `collateralAddress` pair is present, treat it as a single
+// pair. Keeps us forward-compatible if EULER_BORROW_FROM_COLLATERAL ships
+// with the legacy params layout.
+//
+// Exported for unit tests; the public surface is the `useMerkl` composable.
+export const processBorrowFromCollateralOpportunities = (
+  opportunities: Opportunity[],
+  opType: 'EULER_BORROW_FROM_COLLATERAL' | 'EULER_MULTI_BORROW_FROM_COLLATERAL',
+): Map<string, RewardCampaign[]> => {
+  const campaignMap = new Map<string, RewardCampaign[]>()
+  const now = Math.floor(Date.now() / 1000)
+
+  for (const opportunity of opportunities) {
+    if (opportunity.status !== 'LIVE') continue
+    if (!opportunity.campaigns?.length) continue
+
+    const aprs = new Map<string, number>()
+    for (const breakdown of opportunity.aprRecord?.breakdowns ?? []) {
+      aprs.set(breakdown.identifier, breakdown.value)
+    }
+
+    for (const campaign of opportunity.campaigns) {
+      if (!campaign.rewardToken) continue
+
+      // Mirror the MULTILENDBORROW fallback: breakdown can be absent or zero
+      // while campaign.apr is populated.
+      const apr = aprs.get(campaign.campaignId) || campaign.apr || 0
+      if (campaign.endTimestamp > now && !apr) continue
+
+      const whitelist = normalizeAddressList(campaign.params?.whitelist)
+      const blacklist = normalizeAddressList(campaign.params?.blacklist)
+
+      const pairs: { vault: string, collateral: string }[] = []
+
+      const vaults = campaign.params?.vaults
+      if (vaults?.length) {
+        for (const vault of vaults) {
+          const vaultAddress = vault.evkAddress?.toLowerCase()
+          if (!vaultAddress) continue
+          for (const collateral of vault.collaterals ?? []) {
+            const collateralAddress = collateral.tokenAddress?.toLowerCase()
+            if (!collateralAddress) continue
+            pairs.push({ vault: vaultAddress, collateral: collateralAddress })
+          }
+        }
+      }
+      else if (campaign.params?.evkAddress && campaign.params?.collateralAddress) {
+        pairs.push({
+          vault: campaign.params.evkAddress.toLowerCase(),
+          collateral: campaign.params.collateralAddress.toLowerCase(),
+        })
+      }
+
+      for (const { vault, collateral } of pairs) {
+        const rewardCampaign: RewardCampaign = {
+          vault,
+          collateral,
+          type: 'euler_borrow_collateral',
+          apr,
+          provider: 'merkl',
+          endTimestamp: campaign.endTimestamp,
+          rewardToken: { symbol: campaign.rewardToken.symbol, icon: campaign.rewardToken.icon },
+          sourceUrl: merklOpportunityUrl(opportunity, opType),
+          whitelist,
+          blacklist,
+        }
+
+        const existing = campaignMap.get(vault)
+        if (existing) existing.push(rewardCampaign)
+        else campaignMap.set(vault, [rewardCampaign])
       }
     }
   }
@@ -220,10 +340,9 @@ const loadOpportunities = async (chainId: number, isInitialLoading = true, force
       isOpportunitiesLoading.value = true
     }
 
-    // Server proxy returns the three Merkl opportunity types already
-    // paginated and (for ERC20LOGPROCESSOR) already filtered against the
-    // chain's earn-vault label set — so this composable just merges and
-    // transforms.
+    // Server proxy returns the Merkl opportunity types already paginated
+    // and (for ERC20LOGPROCESSOR) already filtered against the chain's
+    // earn-vault label set — so this composable just merges and transforms.
     const res = await fetchMerklProxy(chainId)
     if (!res) return
 
@@ -239,9 +358,13 @@ const loadOpportunities = async (chainId: number, isInitialLoading = true, force
       }
     }
 
-    mergeInto(processOpportunitiesToCampaigns(res.opportunities.euler, 'EULER'))
-    mergeInto(processOpportunitiesToCampaigns(res.opportunities.erc20logprocessor, 'ERC20LOGPROCESSOR'))
-    mergeInto(processMultiLendBorrowOpportunities(res.opportunities.multilendborrow))
+    mergeInto(processOpportunitiesToCampaigns(res.opportunities.euler ?? [], 'EULER'))
+    mergeInto(processOpportunitiesToCampaigns(res.opportunities.erc20logprocessor ?? [], 'ERC20LOGPROCESSOR'))
+    mergeInto(processMultiLendBorrowOpportunities(res.opportunities.multilendborrow ?? []))
+    mergeInto(processBorrowFromCollateralOpportunities(
+      res.opportunities.euler_borrow_from_collateral ?? [], 'EULER_BORROW_FROM_COLLATERAL'))
+    mergeInto(processBorrowFromCollateralOpportunities(
+      res.opportunities.euler_multi_borrow_from_collateral ?? [], 'EULER_MULTI_BORROW_FROM_COLLATERAL'))
 
     merklCampaigns.value = merged
     cacheState.opportunities = { chainId, timestamp: Date.now() }
@@ -281,6 +404,7 @@ const loadRewards = async (chainId: number, isInitialLoading = true, forceRefres
     const res = await axios.get(userRewardsEndpoint(address.value), {
       params: {
         chainId,
+        type: 'TOKEN',
       },
     })
 
@@ -311,7 +435,7 @@ const getMerklCampaignsForVault = (vaultAddress: string): RewardCampaign[] => {
 }
 
 export const useMerkl = () => {
-  const { isConnected, address: wagmiAddress, chain: wagmiChain } = useAccount()
+  const { isConnected, address: wagmiAddress, chain: wagmiChain } = useWagmi()
   const { switchChain } = useSwitchChain()
   const { MERKL_ADDRESS } = useEulerConfig()
   const { client: rpcClient } = useRpcClient()

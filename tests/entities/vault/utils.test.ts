@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
-import { getUtilization, getVaultUtilization, getBorrowVaultsByMap, isCyclicalNoteVault } from '~/entities/vault/utils'
-import type { Vault, SecuritizeVault } from '~/entities/vault/types'
+import {
+  getCashLimitedWithdrawAmount,
+  getUtilization,
+  getVaultUtilization,
+  getBorrowVaultsByMap,
+  isCyclicalNoteVault,
+} from '~/entities/vault/utils'
+import type { Vault, SecuritizeVault, EarnVault } from '~/entities/vault/types'
 
 describe('getUtilization', () => {
   it('returns 0 when totalAssets is zero', () => {
@@ -54,6 +60,57 @@ describe('getVaultUtilization', () => {
   it('returns 0 for vault with no borrows', () => {
     const vault = { totalAssets: 1000n, borrow: 0n } as Vault
     expect(getVaultUtilization(vault)).toBe(0)
+  })
+})
+
+describe('getCashLimitedWithdrawAmount', () => {
+  const evkVault = (totalCash: bigint) => ({ totalCash } as Vault)
+  const securitizeVault = (totalAssets: bigint) =>
+    ({ type: 'securitize', totalAssets } as unknown as SecuritizeVault)
+  const earnVault = (availableAssets: bigint) =>
+    ({ type: 'earn', availableAssets } as unknown as EarnVault)
+
+  it('returns the user withdrawable amount when EVK cash is higher', () => {
+    expect(getCashLimitedWithdrawAmount(1_000n, evkVault(2_000n))).toBe(1_000n)
+  })
+
+  it('caps the amount to EVK totalCash when cash is lower', () => {
+    expect(getCashLimitedWithdrawAmount(2_000n, evkVault(1_000n))).toBe(1_000n)
+  })
+
+  it('returns the user amount when the vault is undefined', () => {
+    expect(getCashLimitedWithdrawAmount(2_000n, undefined)).toBe(2_000n)
+  })
+
+  it('caps SecuritizeVault by totalAssets (no borrowing on these vaults)', () => {
+    expect(getCashLimitedWithdrawAmount(2_000n, securitizeVault(1_000n))).toBe(1_000n)
+    expect(getCashLimitedWithdrawAmount(500n, securitizeVault(1_000n))).toBe(500n)
+  })
+
+  it('caps EarnVault by availableAssets (strategies may have allocated cash out)', () => {
+    expect(getCashLimitedWithdrawAmount(2_000n, earnVault(1_000n))).toBe(1_000n)
+    expect(getCashLimitedWithdrawAmount(500n, earnVault(1_000n))).toBe(500n)
+  })
+
+  it('models the withdraw form cap when vault cash is lower than user balance', () => {
+    const assetsBalance = 1_000n
+    const vault = evkVault(300n)
+    const amount = 301n
+    const withdrawableAssets = getCashLimitedWithdrawAmount(assetsBalance, vault)
+
+    expect(withdrawableAssets).toBe(300n)
+    expect(assetsBalance < amount).toBe(false)
+    expect(withdrawableAssets < amount).toBe(true)
+  })
+
+  it('models the withdraw form allowing the cash-capped max amount', () => {
+    const assetsBalance = 1_000n
+    const vault = evkVault(300n)
+    const amount = 300n
+    const withdrawableAssets = getCashLimitedWithdrawAmount(assetsBalance, vault)
+
+    expect(withdrawableAssets).toBe(amount)
+    expect(withdrawableAssets < amount).toBe(false)
   })
 })
 
@@ -117,6 +174,18 @@ describe('isCyclicalNoteVault', () => {
       irmInfo: {
         interestRateModelInfo: {
           interestRateModelType: INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY,
+        },
+      },
+    } as Vault
+
+    expect(isCyclicalNoteVault(vault)).toBe(true)
+  })
+
+  it('returns true for EVK vaults using the monthly cyclical IRM', () => {
+    const vault = {
+      irmInfo: {
+        interestRateModelInfo: {
+          interestRateModelType: INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY_MONTHLY,
         },
       },
     } as Vault

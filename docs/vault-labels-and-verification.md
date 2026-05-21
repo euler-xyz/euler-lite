@@ -56,7 +56,7 @@ Structure: `Record<string, Product>` — keys are product identifiers (e.g. `"eu
     "notExplorable": true,                       // If true, hides ALL product vaults from lend/borrow/explore pages
     "block": ["US", "EU"],                       // Country codes/groups to hard-block (see geo-blocking.md)
     "keyring": true,                               // All vaults require Keyring verification (see keyring-hooks.md)
-    "featuredVaults": ["0x1234...abcd"],         // Vault addresses to sort to top in discovery tables
+    "recentlyAddedVaults": ["0x1234...abcd"],    // Vault addresses to sort to top in discovery tables
     "vaultOverrides": {                          // Per-vault customizations (see below)
       "0x5678...ef01": {
         "description": "Custom description for this vault",
@@ -87,7 +87,7 @@ Structure: `Record<string, Product>` — keys are product identifiers (e.g. `"eu
 | `isGovernanceLimited` | `boolean` | No | If `true`, shows "Limited risk management" text under the Risk Manager section on vault overview. The risk manager entity display is also faded to 20% opacity across all UI components (browse lists, vault overview, explore market cards) to visually convey limited active risk management. |
 | `notExplorable` | `boolean` | No | If `true`, hides **all** vaults in this product from lend, borrow, and explore discovery pages. Takes precedence over per-vault `notExplorableLend`/`notExplorableBorrow`. Vaults remain accessible via direct URL. |
 | `block` | `string[]` | No | Country codes or group aliases (`EU`, `EEA`, `EFTA`) for hard geo-blocking. See [geo-blocking.md](./geo-blocking.md). |
-| `featuredVaults` | `string[]` | No | Subset of `vaults` to sort to the top in discovery tables. |
+| `recentlyAddedVaults` | `string[]` | No | Subset of `vaults` to sort to the top in discovery tables. |
 | `keyring` | `boolean` | No | If `true`, all vaults in this product require Keyring identity verification. See [keyring-hooks.md](./keyring-hooks.md). |
 | `vaultOverrides` | `Record<string, VaultOverride>` | No | Per-vault customizations keyed by checksummed address. See next section. |
 
@@ -195,7 +195,7 @@ Structure: `Array<string | EarnVaultEntry>` — each entry is either a plain add
     "address": "0xDetailedEarnVault...",          // Vault address (required)
     "block": ["US", "EU"],                        // Hard geo-blocking (country codes/groups)
     "restricted": ["JP"],                         // Soft geo-restriction
-    "featured": true,                             // Sort to top in earn discovery table
+    "recentlyAdded": true,                        // Sort to top in earn discovery table
     "deprecated": true,                           // Mark as deprecated
     "deprecationReason": "Migrated to new vault", // Deprecation explanation
     "description": "Custom description",          // Vault description
@@ -211,7 +211,7 @@ Structure: `Array<string | EarnVaultEntry>` — each entry is either a plain add
 | `address` | `string` | Yes | Checksummed vault address |
 | `block` | `string[]` | No | Country codes/groups for hard geo-blocking (same syntax as products.json `block`) |
 | `restricted` | `string[]` | No | Country codes/groups for soft geo-restriction |
-| `featured` | `boolean` | No | If `true`, sorts vault to top in earn discovery table |
+| `recentlyAdded` | `boolean` | No | If `true`, sorts vault to top in earn discovery table |
 | `deprecated` | `boolean` | No | If `true`, marks vault as deprecated (hidden from discovery, warning banner shown) |
 | `deprecationReason` | `string` | No | Explanation shown in deprecation warning banner |
 | `description` | `string` | No | Custom description displayed on earn vault items and overview pages |
@@ -242,7 +242,15 @@ Oracle adapter metadata is loaded lazily from the [oracle-checks](https://github
 
 ### Building the Verified Set
 
-The `useEulerLabels` composable builds a set of verified vault addresses from the labels data. A vault is considered verified if it appears in any product's `vaults` or `deprecatedVaults` array.
+The `useEulerLabels` composable builds a set of verified vault addresses from the labels data: a vault address is added if it appears in any product's `vaults` or `deprecatedVaults` array. This drives the `vault.verified` flag — a precondition for governor verification, but not the full verdict.
+
+The full "is this vault verified?" verdict (used by the UI to render markets, and by the `/api/public/is-known` endpoint) additionally requires the on-chain governor to match a declared entity address. See `entities/vault/governor-verification.ts` for the shared rule, and the "Programmatic verification lookup" section below for the public endpoint.
+
+### Ungoverned vaults
+
+Vaults with `governorAdmin = address(0)` are supported via an **artificial entity** convention: declare an `ungoverned` entity in `entities.json` whose `addresses` map contains the zero address, then list ungoverned vaults under a product that declares `entity: ["ungoverned"]`. The shared governor rule then matches the vault's zero `governorAdmin` against the artificial entity, no special-case code path needed. The UI shows the "Ungoverned" governance type chip independently of entity matching (driven by `governorAdmin === zeroAddress` directly).
+
+This keeps the bridge endpoints forward-compatible with the successor backend, which treats ungoverned vaults the same way for verification purposes while sourcing the "ungoverned" presentation signal from the on-chain governor value.
 
 ### How `vault.verified` Is Set
 
@@ -313,7 +321,7 @@ Labels control which vaults appear on each discovery page:
 | Override `notExplorableLend: true` | Hidden | Visible | Visible |
 | Override `notExplorableBorrow: true` | Visible | Hidden (both sides) | Visible |
 | `deprecatedVaults` | Hidden | Hidden | Visible (dimmed) |
-| `featuredVaults` / `featured` | Sorted to top | Sorted to top | Sorted to top |
+| `recentlyAddedVaults` / `recentlyAdded` | Sorted to top | Sorted to top | Sorted to top |
 
 Product-level `notExplorable` always takes precedence over per-vault overrides. Vaults hidden from discovery are still accessible via direct URL and remain visible in the user's portfolio.
 
@@ -380,4 +388,6 @@ These labels appear in address fields across all vault overview types (EVK, Earn
 
 ## Programmatic verification lookup
 
-External consumers that only need a yes/no answer for a vault address can call the public [`GET /api/public/is-known`](./public-api.md#get-apipublicis-known) endpoint instead of loading the full label set. The endpoint merges `products.json`, `earn-vaults.json`, and the on-chain `escrowedCollateralPerspective` into a single per-chain verified set, excludes deprecated entries, and answers batches of up to 100 addresses per request.
+External consumers that only need a yes/no answer for a vault address can call the public [`GET /api/public/is-known`](./public-api.md#get-apipublicis-known) endpoint instead of loading the full label set. The endpoint merges `products.json` (active and deprecated entries), `earn-vaults.json` (active and deprecated entries), and the on-chain `escrowedCollateralPerspective` into a single per-chain verified set, applies the same governor / router-governor / owner verification that the client UI uses (an EVK or Securitize vault must have `governorAdmin` — and a non-zero oracle-router governor, if present — match one of its product's declared entity addresses; an Earn vault listed under a product must have `owner` match), and answers batches of up to 100 addresses per request. The same governor check applies to deprecated and active vaults — deprecation does not change the verification rule. Escrow vaults from the on-chain perspective and earn entries with no product entry are trusted unconditionally.
+
+Consumers that need display metadata (resolved name, description, governing entity, asset) on top of the verification verdict can call [`GET /api/public/metadata`](./public-api.md#get-apipublicmetadata), which applies the same labels / override / verification rules the client UI uses and returns a uniform shape across EVK, Securitize, and Earn vaults.

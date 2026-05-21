@@ -13,12 +13,63 @@ import {
   points,
   earnVaultBlocks,
   earnVaultRestrictions,
-  featuredEarnVaults,
+  recentlyAddedEarnVaults,
   deprecatedEarnVaults,
   earnVaultDescriptions,
   earnVaultNotices,
   notExplorableEarnVaults,
+  assetBlocks,
+  assetRestrictions,
+  wrapPairs,
+  type CompiledPatternRule,
 } from '~/utils/eulerLabelsState'
+
+// Cap inputs passed to regex .test() to protect against catastrophic
+// backtracking if a curator ships a poorly-formed pattern and an on-chain
+// token returns an attacker-chosen long symbol/name. Real ERC-20 symbols are
+// typically <=12 chars and names <=64; 128 is well above any legitimate value.
+const MAX_REGEX_INPUT_LEN = 128
+
+/**
+ * Test whether an asset-pattern rule matches the given lowercased symbol/name.
+ * OR across populated fields — any match wins.
+ *
+ * Fail-closed on overlength inputs: a regex-only rule paired with an attacker-
+ * chosen long symbol/name treats the input as a match rather than skipping the
+ * regex. The ReDoS guard still prevents `.test()` from running on those inputs,
+ * but an oversize symbol/name is treated as restricted instead of silently
+ * bypassing the rule.
+ */
+export const patternRuleMatches = (
+  rule: CompiledPatternRule,
+  symbolLower: string | undefined,
+  nameLower: string | undefined,
+): boolean => {
+  if (rule.symbolsLower && symbolLower && rule.symbolsLower.has(symbolLower)) return true
+  if (rule.symbolRegex && symbolLower) {
+    if (symbolLower.length > MAX_REGEX_INPUT_LEN) return true
+    if (rule.symbolRegex.test(symbolLower)) return true
+  }
+  if (rule.namesLower && nameLower && rule.namesLower.has(nameLower)) return true
+  if (rule.nameRegex && nameLower) {
+    if (nameLower.length > MAX_REGEX_INPUT_LEN) return true
+    if (rule.nameRegex.test(nameLower)) return true
+  }
+  return false
+}
+
+/**
+ * True when `a` and `b` are an ERC-4626 wrap pair in either direction — i.e.
+ * one's address is the other's `asset()` underlying, per the map populated by
+ * the labels loader. Consulted by `isAssetRestrictedByCountry` to bypass the
+ * soft-restrict gate when an operation is a technical wrap/unwrap.
+ */
+export const isWrapPair = (a: string | undefined, b: string | undefined): boolean => {
+  if (!a || !b) return false
+  const al = a.toLowerCase()
+  const bl = b.toLowerCase()
+  return wrapPairs[al] === bl || wrapPairs[bl] === al
+}
 
 // ── Internal helpers ─────────────────────────────────────────
 
@@ -68,12 +119,14 @@ export const normalizeProducts = (data: Record<string, EulerLabelProduct>): { pr
   Object.entries(data).forEach(([key, product]) => {
     const normalizedVaults = product.vaults.map(normalizeAddress)
     const normalizedDeprecated = (product.deprecatedVaults || []).map(normalizeAddress)
+    const normalizedRecentlyAdded = (product.recentlyAddedVaults || []).map(normalizeAddress)
     const fallbackReason = (product as { deprecateReason?: string }).deprecateReason
     const vaultOverrides = extractVaultOverrides(product as unknown as Record<string, unknown>)
     normalized[key] = {
       ...product,
       vaults: normalizedVaults,
       deprecatedVaults: normalizedDeprecated,
+      recentlyAddedVaults: normalizedRecentlyAdded,
       deprecationReason: product.deprecationReason || fallbackReason,
       vaultOverrides,
     }
@@ -184,13 +237,25 @@ export const getEarnVaultRestricted = (vaultAddress: string): string[] | undefin
   return earnVaultRestrictions[normalized]
 }
 
-export const isVaultFeatured = (vaultAddress: string): boolean => {
+export const getAssetBlock = (assetAddress: string): string[] | undefined => {
+  if (!assetAddress) return undefined
+  const normalized = normalizeAddress(assetAddress).toLowerCase()
+  return assetBlocks[normalized]
+}
+
+export const getAssetRestricted = (assetAddress: string): string[] | undefined => {
+  if (!assetAddress) return undefined
+  const normalized = normalizeAddress(assetAddress).toLowerCase()
+  return assetRestrictions[normalized]
+}
+
+export const isVaultRecentlyAdded = (vaultAddress: string): boolean => {
   const normalized = normalizeAddress(vaultAddress)
-  const inFeaturedProduct = Object.values(products).some(product =>
-    product.featuredVaults?.includes(normalized) ?? false,
+  const inRecentlyAddedProduct = Object.values(products).some(product =>
+    product.recentlyAddedVaults?.includes(normalized) ?? false,
   )
-  if (inFeaturedProduct) return true
-  return featuredEarnVaults.has(normalized)
+  if (inRecentlyAddedProduct) return true
+  return recentlyAddedEarnVaults.has(normalized)
 }
 
 export const isEarnVaultDeprecated = (vaultAddress: string): boolean => {

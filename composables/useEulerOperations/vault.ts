@@ -14,7 +14,7 @@ import type { TxPlan, TxStep } from '~/entities/txPlan'
 import type { SwapApiQuote } from '~/entities/swap'
 import { SwapperMode, SwapVerificationType } from '~/entities/swap'
 import { logWarn } from '~/utils/errorHandling'
-import { assertSwapperVerifierAllowed } from '~/utils/swap-validation'
+import { assertSwapQuoteContractsAllowed } from '~/utils/swap-validation'
 
 const isAlreadyEnabled = (list: string[] | undefined, address: string): boolean =>
   !!list?.some(c => c.toLowerCase() === address.toLowerCase())
@@ -401,6 +401,7 @@ export const createVaultBuilders = (
     supplyAmount: bigint
     supplySharesAmount?: bigint
     supplyIsSavings?: boolean
+    savingsSubAccount?: string
     longVaultAddress: string
     longAssetAddress: string
     borrowVaultAddress: string
@@ -425,6 +426,7 @@ export const createVaultBuilders = (
       supplyAmount,
       supplySharesAmount,
       supplyIsSavings = false,
+      savingsSubAccount,
       longVaultAddress,
       longAssetAddress,
       borrowVaultAddress,
@@ -504,12 +506,16 @@ export const createVaultBuilders = (
       usesPermit2 = usesPermit2 || longApproval.usesPermit2Local
     }
 
+    const isSavingsAtSubAccount = isSupplySavings
+      && savingsSubAccount
+      && getAddress(savingsSubAccount) !== getAddress(userAddr)
+
     const hooks = new SaHooksBuilder()
     hooks.addContractInterface(supplyVaultAddr, vaultDepositAbi)
     if (isSupplySavings) {
       hooks.addContractInterface(supplyVaultAddr, erc20TransferAbi)
     }
-    if (isSupplySavings) {
+    if (isSupplySavings && !isSavingsAtSubAccount) {
       hooks.addPreHookCallFromSelf(supplyVaultAddr, 'transfer', [subAccountAddr, supplySharesAmount!])
     }
     if (!isSameVault) {
@@ -520,6 +526,16 @@ export const createVaultBuilders = (
 
     const saHooks = hooks.build()
     const evcCalls = convertSaHooksToEVCCalls(saHooks, userAddr, userAddr)
+
+    if (isSavingsAtSubAccount) {
+      const transferCall: EVCCall = {
+        targetContract: supplyVaultAddr,
+        onBehalfOfAccount: getAddress(savingsSubAccount!) as Address,
+        value: 0n,
+        data: hooks.getDataForCall(supplyVaultAddr, 'transfer', [subAccountAddr, supplySharesAmount!]) as Hash,
+      }
+      evcCalls.unshift(transferCall)
+    }
 
     if (permitCalls.length) {
       evcCalls.unshift(...permitCalls)
@@ -561,7 +577,10 @@ export const createVaultBuilders = (
     }
 
     if (swapInfo) {
-      assertSwapperVerifierAllowed(swapInfo.quote.verify.verifierAddress, ctx.eulerPeripheryAddresses.value!.swapVerifier)
+      assertSwapQuoteContractsAllowed({
+        swapperAddress: swapInfo.quote.swap.swapperAddress,
+        verifierAddress: swapInfo.quote.verify.verifierAddress,
+      }, ctx.eulerPeripheryAddresses.value)
     }
 
     const borrowRecipient = swapInfo ? swapInfo.quote.swap.swapperAddress : userAddr

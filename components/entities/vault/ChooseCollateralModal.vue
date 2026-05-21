@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { getSubAccountIndex } from '~/entities/account'
 import { getVaultProductName } from '~/utils/eulerLabelsUtils'
 import type { CollateralOption } from '~/entities/vault'
-import { formatNumber } from '~/utils/string-utils'
+import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
 
 const emits = defineEmits(['close'])
 const { productName, symbol, collateralOptions, selected = 0, title = 'Select collateral', apyLabel = 'Supply APY', onSave } = defineProps<{
@@ -15,9 +16,12 @@ const { productName, symbol, collateralOptions, selected = 0, title = 'Select co
 }>()
 
 const { isEscrowVault } = useVaultRegistry()
+const { address } = useWagmi()
+const { portfolioAddress } = useEulerAccount()
 
 const searchQuery = ref('')
 const selectedIdx = ref(selected)
+const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
 const getOptionLabel = (option: CollateralOption) => {
   if (option.vaultAddress && isEscrowVault(option.vaultAddress)) return 'Escrowed collateral'
   if (option.label) return option.label
@@ -32,6 +36,24 @@ const getOptionType = (option: CollateralOption) => {
   if (option.type === 'escrow') return 'escrow'
   if (option.vaultAddress && isEscrowVault(option.vaultAddress)) return 'escrow'
   return option.type
+}
+const shortenAddress = (value: string) => `${value.slice(0, 6)}...${value.slice(-4)}`
+const getSubAccountLabel = (option: CollateralOption) => {
+  if (!option.subAccount) return ''
+  if (!ownerAddress.value) return shortenAddress(option.subAccount)
+  try {
+    return `Position ${getSubAccountIndex(ownerAddress.value, option.subAccount)}`
+  }
+  catch {
+    return shortenAddress(option.subAccount)
+  }
+}
+const getApyLabel = (option: CollateralOption) => {
+  return option.type === 'wallet' ? 'If supplied: APY' : apyLabel
+}
+const showBalanceMetric = (option: CollateralOption) => option.showBalance !== false
+const getFormattedAmount = (option: CollateralOption) => {
+  return `${formatSmartAmount(option.amount)} ${getOptionSymbol(option)}`
 }
 
 const filteredOptions = computed(() => {
@@ -68,7 +90,7 @@ const handleClose = () => {
       <div
         v-for="{ option, idx } in filteredOptions"
         :key="`options-${idx}`"
-        class="flex items-center py-12 px-16 rounded-16"
+        class="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-10 py-12 px-16 rounded-16"
         :class="[
           option.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
           selectedIdx === idx && !option.disabled ? 'bg-card-hover' : '',
@@ -80,48 +102,68 @@ const handleClose = () => {
         <AssetAvatar
           :asset="{ address: option.assetAddress || '', symbol: getOptionSymbol(option) }"
           size="36"
-          class="mr-10"
         />
-        <div class="flex-grow">
-          <div class="text-content-primary mb-2">
-            {{ getOptionLabel(option) }}
-          </div>
-          <div class="text-h5 flex items-center">
-            {{ getOptionSymbol(option) }}
-            <div
-              v-if="getOptionType(option) === 'wallet'"
-              class="ml-6 text-[12px] leading-[16px] py-4 px-8 rounded-8 bg-accent-600/10 text-accent-600"
-            >
-              Wallet
+        <div class="grid grid-cols-[minmax(0,1fr)_max-content] items-center gap-12 min-w-0">
+          <div class="min-w-0">
+            <div class="text-content-primary mb-2 truncate">
+              {{ getOptionLabel(option) }}
             </div>
-            <div
-              v-else-if="getOptionType(option) === 'saving'"
-              class="ml-6 text-[12px] leading-[16px] py-4 px-8 rounded-8 bg-[#CBC0951A] text-yellow-600"
-            >
-              Savings
+            <div class="text-h5 flex items-center min-w-0">
+              <span class="truncate">{{ getOptionSymbol(option) }}</span>
+              <div
+                v-if="getOptionType(option) === 'wallet'"
+                class="ml-6 text-[12px] leading-[16px] py-4 px-8 rounded-8 bg-accent-600/10 text-accent-600"
+              >
+                Wallet
+              </div>
+              <div
+                v-else-if="getOptionType(option) === 'saving'"
+                class="ml-6 text-[12px] leading-[16px] py-4 px-8 rounded-8 bg-[#CBC0951A] text-yellow-600"
+              >
+                Savings
+              </div>
+              <div
+                v-if="getSubAccountLabel(option)"
+                class="ml-6 text-[12px] leading-[16px] py-4 px-8 rounded-8 bg-card text-content-secondary"
+              >
+                {{ getSubAccountLabel(option) }}
+              </div>
+              <span
+                v-for="tag in (option.tags || [])"
+                :key="tag"
+                class="ml-6 inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
+              >
+                <SvgIcon
+                  name="warning"
+                  class="!w-14 !h-14"
+                />
+                {{ tag }}
+              </span>
             </div>
-            <span
-              v-for="tag in (option.tags || [])"
-              :key="tag"
-              class="ml-6 inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
+          </div>
+          <div
+            class="grid justify-end text-right"
+            :class="showBalanceMetric(option) ? 'grid-cols-[max-content_max-content] gap-32' : 'grid-cols-[max-content]'"
+          >
+            <div
+              v-if="showBalanceMetric(option)"
+              class="flex flex-col items-end"
             >
-              <SvgIcon
-                name="warning"
-                class="!w-14 !h-14"
-              />
-              {{ tag }}
-            </span>
-          </div>
-        </div>
-        <div
-          v-if="getOptionType(option) !== 'wallet'"
-          class="text-right grow-1"
-        >
-          <div class="text-content-primary mb-2">
-            {{ apyLabel }}
-          </div>
-          <div class="text-h5">
-            {{ option.apy !== undefined ? `${formatNumber(option.apy)}%` : '-' }}
+              <div class="text-content-primary mb-2">
+                Balance
+              </div>
+              <div class="text-h5">
+                {{ getFormattedAmount(option) }}
+              </div>
+            </div>
+            <div class="flex flex-col items-end min-w-[110px]">
+              <div class="text-content-primary mb-2">
+                {{ getApyLabel(option) }}
+              </div>
+              <div class="text-h5">
+                {{ option.apy !== undefined ? `${formatNumber(option.apy)}%` : '-' }}
+              </div>
+            </div>
           </div>
         </div>
       </div>

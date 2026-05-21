@@ -124,8 +124,10 @@ const getStandardEvkVaults = (): Vault[] => {
 }
 
 // Verified EVK vaults (for display in tables) - excludes dynamically fetched unknown vaults
-const getVerifiedEvkVaults = (): Vault[] => {
-  return getEvkVaults().filter(v => v.verified === true && !isVaultNotExplorable(v.address))
+const getVerifiedEvkVaults = (includeNotExplorable = false): Vault[] => {
+  return getEvkVaults().filter(v =>
+    v.verified === true && (includeNotExplorable || !isVaultNotExplorable(v.address)),
+  )
 }
 
 // Type checker convenience methods

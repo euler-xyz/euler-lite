@@ -19,11 +19,11 @@ The pricing functions support two price sources:
 
 ### Backend Configuration
 
-Configure the backend URL in `entities/config.ts`:
+Configure the backend URL via environment variable:
 
 ```bash
 # In .env or Doppler
-PRICE_API_URL=https://api.example.com/prices  # Empty = disabled
+EULER_API_URL=https://your-euler-api.com  # Empty = prices disabled (on-chain only)
 ```
 
 Use `usePriceBackend()` composable to access the configuration:
@@ -40,12 +40,12 @@ const price = await getAssetUsdPrice(vault, 'off-chain', backendConfig.value)
 The backend client (`services/pricing/backendClient.ts`) provides price fetching with automatic optimizations:
 
 **Types:**
-- `BackendPriceData` - Response shape: `{ address, price: number, source, symbol, timestamp }`
-- `BackendPriceResponse` - `Record<string, BackendPriceData>` keyed by lowercase address
+- `BackendPriceData` - Response shape: `{ chainId, address, symbol, priceUsd: number, source, timestamp: string }`
 
 **API Endpoint:**
-- URL: `GET /v1/prices?chainId={chainId}&assets={addr1},{addr2},...`
-- Response: Flat object keyed by lowercase address
+- URL: `GET /v3/prices?chainId={chainId}&addresses={addr1},{addr2},...`
+- Response: `{ data: BackendPriceData[], meta: { ... } }`
+- Max 100 addresses per request (chunked automatically)
 
 **Caching:**
 - TTL: 60 seconds
@@ -53,7 +53,7 @@ The backend client (`services/pricing/backendClient.ts`) provides price fetching
 - Stale entries cleared automatically
 
 **Request Batching:**
-- 50ms debounce window
+- 100ms debounce window
 - Requests grouped by chainId
 - Addresses deduplicated within batch
 
@@ -196,11 +196,15 @@ getAssetUsdPrice(vault, source, backend):
      - If available, return backend price
 
   2. Oracle calculation (fallback or primary if source='on-chain'):
-     a. oraclePrice = vault.liabilityPriceInfo.amountOutMid  // Always on-chain
+     a. oraclePrice = vault.liabilityPriceInfo.amountOutMid
+        // On-chain. Scaled in vault.unitOfAccountDecimals (UoA's native decimals)
      b. uoaRate = await getUnitOfAccountUsdRate(vault)
         - Always tries backend first, falls back to on-chain
         - Returns 1e18 if vault.unitOfAccount === USD_ADDRESS
-     c. return (oraclePrice × uoaRate) / 1e18
+        - Always 18-decimal fixed-point (USD per 1 whole UoA token)
+     c. return (oraclePrice × uoaRate) / 10^unitOfAccountDecimals
+        // Result is 18-decimal USD. The divisor is the UoA's native decimals,
+        // NOT 1e18 — for USD UoA those happen to coincide.
 ```
 
 **Note on UoA Rate**: The UoA rate always tries the backend first, regardless of the caller's `source` parameter. Since UoA is a common denominator (both collateral and borrow prices use the same UoA), using an off-chain UoA rate doesn't affect health factor/LTV ratios - only the USD display values.
@@ -224,7 +228,8 @@ getCollateralUsdPrice(liabilityVault, collateralVault, source, backend):
         // ERC-4626 standard defines 1:1 ratio, so use sharePrice directly
      c. uoaRate = await getUnitOfAccountUsdRate(liabilityVault)
         // Use LIABILITY's UoA - always tries backend first
-     d. return (assetPrice × uoaRate) / 1e18
+     d. return (assetPrice × uoaRate) / 10^liabilityVault.unitOfAccountDecimals
+        // Same scaling rule as getAssetUsdPrice — divisor is UoA's native decimals.
 ```
 
 ## EulerRouter Oracle Configuration
@@ -411,7 +416,7 @@ Located in `utils/pyth.ts`:
 - `collectPythFeedsFromVaults(vaults, maxDepth?)` - Collect from multiple vaults, deduplicated
 
 **Price/Update Fetching:**
-- `fetchPythUpdateData(feedIds, endpoint)` - Fetch update data via `/api/pyth/updates` proxy (50ms batching, 15s cache)
+- `fetchPythUpdateData(feedIds, endpoint)` - Fetch update data via `/api/pyth/updates` proxy (100ms batching, 15s cache)
 - `fetchPythPrices(feedIds, endpoint, cacheTtlMs?)` - Fetch actual price values
 
 **Batch Building:**

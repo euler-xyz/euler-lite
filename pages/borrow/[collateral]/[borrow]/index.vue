@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { getAddress } from 'viem'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultUnverifiedDisclaimerModal, SlippageSettingsModal } from '#components'
@@ -22,14 +21,22 @@ const modal = useModal()
 const reviewBorrowLabel = 'Review Borrow'
 const reviewMultiplyLabel = 'Review Multiply'
 const { getBorrowVaultPair, updateVault } = useVaults()
-const { address, isConnected } = useAccount()
+const { address, isConnected } = useWagmi()
+const { chainId } = useEulerAddresses()
+const shareLinkQuery = computed(() => {
+  const network = route.query.network
+
+  return {
+    network: Array.isArray(network) ? network[0] ?? chainId.value : network ?? chainId.value,
+  }
+})
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
 const { refreshAllPositions: _refreshAllPositions, depositPositions } = useEulerAccount()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
 const { eulerLensAddresses: _eulerLensAddresses } = useEulerAddresses()
-const { fetchSingleBalance, fetchVaultShareBalance } = useWallets()
+const { fetchSingleBalance } = useWallets()
 const openSlippageSettings = () => {
   modal.open(SlippageSettingsModal)
 }
@@ -40,8 +47,6 @@ useOperationGuard([collateralAddress, borrowAddress])
 
 // --- Shared state ---
 const balance = ref(0n)
-const savingBalance = ref(0n)
-const savingAssets = ref(0n)
 const tab = ref()
 const formTab = ref<'borrow' | 'multiply'>('borrow')
 const pendingSubAccount = ref<string | null>(null)
@@ -111,8 +116,11 @@ const isPairFullyRestricted = computed(() =>
   !isGeoBlocked.value && isVaultRestrictedByCountry(collateralAddress) && isVaultRestrictedByCountry(borrowAddress))
 
 // --- Savings collateral ---
-const savingCollateral = computed(() => {
-  return depositPositions.value.find(position => position.vault.address === route.params.collateral)
+const savingPositions = computed(() => {
+  const normalizedCollateral = normalizeAddress(collateralAddress)
+  return depositPositions.value.filter(position =>
+    position.assets > 0n && normalizeAddress(position.vault.address) === normalizedCollateral,
+  )
 })
 
 // --- Product labels ---
@@ -125,10 +133,8 @@ const borrow = useBorrowForm({
   borrowVault: borrowVault as ComputedRef<Vault | undefined>,
   collateralVault: collateralVault as ComputedRef<Vault | undefined>,
   formTab,
-  savingCollateral: savingCollateral as ComputedRef<{ assets: bigint, subAccount?: string, shares: bigint } | undefined>,
+  savingPositions,
   balance,
-  savingBalance,
-  savingAssets,
   resolvePendingSubAccount,
   collateralSupplyApy,
   borrowApy,
@@ -156,19 +162,30 @@ const multiply = useMultiplyForm({
 const { guardWithPriceImpact: guardWithMultiplyPriceImpact } = usePriceImpactGate({
   directPriceImpact: multiply.multiplyPriceImpact,
   multipliedPriceImpact: multiply.multipliedPriceImpact,
+  shouldGateUnknown: computed(() =>
+    !multiply.multiplyIsSameAsset.value
+    && multiply.multiplyEffectiveQuote.value !== null
+    && multiply.multiplyPriceImpact.value === null,
+  ),
 })
 
 const { guardWithPriceImpact: guardWithBorrowSwapPriceImpact } = usePriceImpactGate({
   directPriceImpact: borrow.borrowSwapPriceImpact,
+  shouldGateUnknown: computed(() =>
+    borrow.borrowNeedsSwap.value
+    && borrow.borrowSwapEffectiveQuote.value !== null
+    && borrow.borrowSwapPriceImpact.value === null,
+  ),
 })
 
 // --- Submit disabled ---
-const reviewBorrowDisabled = computed(() => isGeoBlocked.value || isBorrowRestricted.value || borrow.isBorrowSwapRestricted.value || borrow.isSubmitDisabled.value)
+const reviewBorrowDisabled = computed(() => isGeoBlocked.value || isBorrowRestricted.value || borrow.isBorrowSwapRestricted.value || borrow.isBorrowPayWithBlocked.value || borrow.isSubmitDisabled.value)
 const reviewMultiplyDisabled = computed(() => isGeoBlocked.value || isMultiplyRestricted.value || multiply.isMultiplySubmitDisabled.value)
 
 const borrowDisabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
   if (isBorrowRestricted.value) return { message: 'Borrowing this asset is not available in your region', variant: 'warning' }
+  if (borrow.isBorrowPayWithBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
   if (borrow.isBorrowSwapRestricted.value) return { message: 'Swapping into this collateral vault is not available in your region', variant: 'warning' }
   if (borrow.errorText.value) return { message: borrow.errorText.value, variant: 'error' }
   if (borrow.borrowSimulationError.value) return { message: borrow.borrowSimulationError.value, variant: 'error' }
@@ -239,7 +256,6 @@ watch(tabs, (next) => {
 const updateBalance = async () => {
   if (!isConnected.value) {
     balance.value = 0n
-    savingBalance.value = 0n
     multiply.multiplyAssetBalance.value = 0n
     return
   }
@@ -249,16 +265,6 @@ const updateBalance = async () => {
   }
   else {
     balance.value = 0n
-  }
-
-  if (collateralVault.value?.address) {
-    savingBalance.value = await fetchVaultShareBalance(
-      collateralVault.value.address,
-      savingCollateral.value?.subAccount,
-    )
-  }
-  else {
-    savingBalance.value = 0n
   }
 
   await Promise.all([
@@ -406,16 +412,27 @@ watch(formTab, () => {
         class="hidden tablet:inline-flex tablet:absolute tablet:top-8 tablet:right-full tablet:mr-12"
         fallback="/borrow"
       />
-      <VaultLabelsAndAssets
+      <div
         v-if="collateralVault && borrowVault"
-        back
-        back-fallback="/borrow"
         class="mb-24"
-        :vault="collateralVault"
-        :pair-vault="borrowVault"
-        :assets="pairAssets as VaultAsset[]"
-        size="large"
-      />
+      >
+        <VaultLabelsAndAssets
+          back
+          back-fallback="/borrow"
+          :vault="collateralVault"
+          :pair-vault="borrowVault"
+          :assets="pairAssets as VaultAsset[]"
+          size="large"
+        >
+          <UiShareLinkButton
+            class="-ml-4 !w-24 !h-24"
+            :path="`/borrow/${collateralVault.address}/${borrowVault.address}`"
+            :query="shareLinkQuery"
+            label="Copy pair link"
+            variant="ghost"
+          />
+        </VaultLabelsAndAssets>
+      </div>
 
       <div class="flex gap-32">
         <div
@@ -498,6 +515,8 @@ watch(formTab, () => {
                   :balance="borrow.borrowActiveBalance.value"
                   :collateral-options="borrow.borrowNeedsSwap.value ? undefined : (borrow.collateralOptions.value as CollateralOption[])"
                   :selected-source="borrow.isSavingCollateral.value ? 'saving' : 'wallet'"
+                  :selected-sub-account="borrow.selectedSavingSubAccount.value"
+                  :selected-vault-address="collateralVault.address"
                   maxable
                   @input="borrow.onCollateralInput"
                   @change-collateral="borrow.onChangeCollateral"
@@ -505,7 +524,7 @@ watch(formTab, () => {
 
                 <!-- Pay with token selector -->
                 <div
-                  v-if="collateralVault"
+                  v-if="collateralVault && !isSecuritizeCollateral"
                   class="flex items-center gap-8"
                 >
                   <span class="text-p3 text-content-tertiary">Pay with</span>
@@ -545,16 +564,17 @@ watch(formTab, () => {
                   >
                     <SwapDetailsSummary
                       :input-display="borrow.borrowSwapInputDisplay.value"
+                      :input-exact-display="borrow.borrowSwapInputExactDisplay.value"
                       :output-display="borrow.borrowSwapOutputDisplay.value"
+                      :output-exact-display="borrow.borrowSwapOutputExactDisplay.value"
                       :price-impact="borrow.borrowSwapPriceImpact.value"
                       :slippage="borrow.borrowSwapSlippage.value"
-                      :quote-slippage="borrow.borrowSwapQuoteSlippage.value"
                       :routed-via="borrow.borrowSwapRoutedVia.value"
                       @open-slippage-settings="openSlippageSettings"
                     />
                   </VaultFormInfoBlock>
 
-                  <UiToast
+                  <UiAlert
                     v-if="borrow.borrowSwapQuoteError.value"
                     title="Swap quote"
                     variant="warning"
@@ -563,7 +583,7 @@ watch(formTab, () => {
                   />
                 </template>
 
-                <UiToast
+                <UiAlert
                   v-if="borrow.isUnknownBorrowSwapToken.value && borrow.borrowNeedsSwap.value"
                   title="Unknown token"
                   description="This token is not on any recognized token list. It could be fraudulent or malicious. Verify the contract address before proceeding."
@@ -590,42 +610,49 @@ watch(formTab, () => {
                   @input="borrow.onBorrowInput"
                 />
 
-                <UiToast
+                <UiAlert
                   v-if="isGeoBlocked"
                   title="Region restricted"
                   description="This operation is not available in your region. You can still repay existing debt."
                   variant="warning"
                   size="compact"
                 />
-                <UiToast
+                <UiAlert
                   v-if="isPairFullyRestricted"
                   title="Region restricted"
                   description="This pair is not available in your region."
                   variant="warning"
                   size="compact"
                 />
-                <UiToast
+                <UiAlert
                   v-if="!isGeoBlocked && !isPairFullyRestricted && isBorrowRestricted"
                   title="Asset restricted"
                   description="Borrowing this asset is not available in your region."
                   variant="warning"
                   size="compact"
                 />
-                <UiToast
-                  v-if="!isGeoBlocked && !isPairFullyRestricted && !isBorrowRestricted && borrow.isBorrowSwapRestricted.value"
+                <UiAlert
+                  v-if="!isGeoBlocked && !isPairFullyRestricted && !isBorrowRestricted && borrow.isBorrowPayWithBlocked.value"
+                  title="Asset restricted"
+                  description="Paying with this asset is not available in your region. Pick a different token."
+                  variant="warning"
+                  size="compact"
+                />
+                <UiAlert
+                  v-if="!isGeoBlocked && !isPairFullyRestricted && !isBorrowRestricted && !borrow.isBorrowPayWithBlocked.value && borrow.isBorrowSwapRestricted.value"
                   title="Swap restricted"
                   description="Swapping into this collateral vault is not available in your region. You can provide the vault's underlying asset directly."
                   variant="warning"
                   size="compact"
                 />
-                <UiToast
+                <UiAlert
                   v-show="borrow.errorText.value"
                   title="Error"
                   variant="error"
                   :description="borrow.errorText.value || ''"
                   size="compact"
                 />
-                <UiToast
+                <UiAlert
                   v-if="borrow.borrowSimulationError.value"
                   title="Error"
                   variant="error"
@@ -701,6 +728,8 @@ watch(formTab, () => {
                       :balance="multiply.multiplyBalance.value"
                       :collateral-options="multiply.multiplyCollateralOptions.value"
                       :selected-source="multiply.isMultiplySavingCollateral.value ? 'saving' : 'wallet'"
+                      :selected-sub-account="multiply.multiplySavingSubAccount.value"
+                      :selected-vault-address="multiply.multiplySupplyVault.value.address"
                       maxable
                       @input="multiply.onMultiplyInput"
                       @change-collateral="multiply.onMultiplyCollateralChange"
@@ -744,35 +773,35 @@ watch(formTab, () => {
                       :readonly="true"
                     />
 
-                    <UiToast
+                    <UiAlert
                       v-if="isGeoBlocked"
                       title="Region restricted"
                       description="This operation is not available in your region. You can still repay existing debt."
                       variant="warning"
                       size="compact"
                     />
-                    <UiToast
+                    <UiAlert
                       v-if="isPairFullyRestricted"
                       title="Region restricted"
                       description="This pair is restricted in your region."
                       variant="warning"
                       size="compact"
                     />
-                    <UiToast
+                    <UiAlert
                       v-if="!isGeoBlocked && !isPairFullyRestricted && isMultiplyRestricted"
                       title="Asset restricted"
                       description="Multiply is not available for this pair in your region."
                       variant="warning"
                       size="compact"
                     />
-                    <UiToast
+                    <UiAlert
                       v-show="multiply.multiplyErrorText.value"
                       title="Error"
                       variant="error"
                       :description="multiply.multiplyErrorText.value || ''"
                       size="compact"
                     />
-                    <UiToast
+                    <UiAlert
                       v-if="multiply.multiplySimulationError.value"
                       title="Error"
                       variant="error"
@@ -780,7 +809,7 @@ watch(formTab, () => {
                       size="compact"
                     />
 
-                    <UiToast
+                    <UiAlert
                       v-if="multiply.multiplyQuoteError.value"
                       title="Swap quote"
                       variant="warning"
@@ -850,16 +879,26 @@ watch(formTab, () => {
                       </SummaryRow>
                       <SwapDetailsSummary
                         :input-display="multiply.multiplySwapSummary.value?.from ?? null"
+                        :input-exact-display="multiply.multiplySwapSummary.value?.fromExact ?? null"
                         :output-display="multiply.multiplySwapSummary.value?.to ?? null"
+                        :output-exact-display="multiply.multiplySwapSummary.value?.toExact ?? null"
                         :price-impact="multiply.multiplyPriceImpact.value"
                         :slippage="multiply.multiplySlippage.value"
-                        :quote-slippage="multiply.multiplyQuoteSlippage.value"
                         :routed-via="multiply.multiplyRoutedVia.value"
                         :multiplied-price-impact="multiply.multipliedPriceImpact.value"
                         @open-slippage-settings="openSlippageSettings"
                       />
                     </VaultFormInfoBlock>
                   </div>
+                </div>
+              </template>
+
+              <template v-else-if="formTab === 'multiply'">
+                <div
+                  class="flex min-h-[624px] items-center justify-center rounded-16 bg-surface-secondary shadow-card"
+                  aria-busy="true"
+                >
+                  <UiLoader class="text-content-muted" />
                 </div>
               </template>
             </template>

@@ -1,5 +1,4 @@
 import type { Ref, ComputedRef } from 'vue'
-import { useAccount } from '@wagmi/vue'
 import { getAddress, formatUnits, zeroAddress, type Address } from 'viem'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { logWarn } from '~/utils/errorHandling'
@@ -16,6 +15,8 @@ import {
   type Vault,
   convertAssetsToShares,
 } from '~/entities/vault'
+import type { AccountDepositPosition } from '~/entities/account'
+import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import {
   getAssetUsdValueOrZero,
   getAssetOraclePrice,
@@ -29,11 +30,10 @@ import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { TxPlan } from '~/entities/txPlan'
 import { getPlanHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
-import { getVaultTags, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
+import { getVaultTags, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { getNetAPY, getProjectedRates } from '~/entities/vault'
 import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
@@ -44,10 +44,8 @@ export interface UseBorrowFormOptions {
   collateralVault: ComputedRef<Vault | undefined>
   formTab: Ref<'borrow' | 'multiply'>
 
-  savingCollateral: ComputedRef<{ assets: bigint, subAccount?: string, shares: bigint } | undefined>
+  savingPositions: ComputedRef<AccountDepositPosition[]>
   balance: Ref<bigint>
-  savingBalance: Ref<bigint>
-  savingAssets: Ref<bigint>
 
   resolvePendingSubAccount: () => Promise<string>
 
@@ -71,31 +69,28 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     borrowVault,
     collateralVault,
     formTab: _formTab,
-    savingCollateral,
+    savingPositions,
     balance,
-    savingBalance,
-    savingAssets,
     resolvePendingSubAccount,
     collateralSupplyApy,
     borrowApy,
     collateralSupplyRewardApy,
     borrowRewardApy,
     collateralSupplyApyWithRewards,
-    isSecuritizeCollateral: _isSecuritizeCollateral,
+    isSecuritizeCollateral,
     isGeoBlocked,
     isBorrowRestricted,
     collateralAddress,
     borrowAddress: _borrowAddress,
   } = options
 
-  const router = useRouter()
   const modal = useModal()
   const { error } = useToast()
   const { buildBorrowPlan, buildBorrowBySavingPlan, buildSwapAndBorrowPlan, executeTxPlan } = useEulerOperations()
-  const { address, isConnected } = useAccount()
-  const { refreshAllPositions } = useEulerAccount()
-  const { eulerLensAddresses, chainId } = useEulerAddresses()
+  const { address, isConnected } = useWagmi()
+  const { chainId } = useEulerAddresses()
   const { fetchSingleBalance } = useWallets()
+  const { finalizeTxAndRedirect } = useTxFinalization()
 
   const {
     runSimulation: runBorrowSimulation,
@@ -118,6 +113,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     selectedProvider: borrowSwapSelectedProvider,
     selectedQuote: borrowSwapSelectedQuote,
     effectiveQuote: borrowSwapEffectiveQuote,
+    effectiveQuoteFetchedAt: borrowSwapEffectiveQuoteFetchedAt,
     isLoading: isBorrowSwapQuoteLoading,
     quoteError: borrowSwapQuoteError,
     statusLabel: borrowSwapQuotesStatusLabel,
@@ -125,18 +121,35 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     reset: resetBorrowSwapQuoteState,
     requestQuotes: requestBorrowSwapQuotes,
     selectProvider: selectBorrowSwapQuote,
-  } = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
-  const borrowSwapQuoteSlippage = computed(() => computeQuoteSlippage(borrowSwapEffectiveQuote.value))
-
+  } = useSwapQuotesParallel({
+    amountField: 'amountOut',
+    compare: 'max',
+    buildTxPlanForQuote: quote => buildSwapBorrowPlanFromQuote(quote, { includePermit2Call: false }),
+  })
   // --- Form state ---
   const ltv = ref(0)
   const borrowAmount = ref('')
   const collateralAmount = ref('')
   const isSavingCollateral = ref(false)
+  const selectedSavingSubAccount = ref<string | undefined>()
   const isSubmitting = ref(false)
   const isPreparing = ref(false)
   const isEstimatesLoading = ref(false)
   const plan = ref<TxPlan | null>(null)
+
+  // --- Savings position selection ---
+  // Picks the position for the current sub-account when set, else falls back to
+  // the largest matching position so the default shows a meaningful balance.
+  const savingCollateral = computed<AccountDepositPosition | undefined>(() => {
+    const positions = savingPositions.value
+    if (!positions.length) return undefined
+    const selected = selectedSavingSubAccount.value
+    if (selected) {
+      return positions.find(p => normalizeAddressOrEmpty(p.subAccount) === normalizeAddressOrEmpty(selected))
+    }
+    return [...positions].sort((a, b) => (b.assets > a.assets ? 1 : b.assets < a.assets ? -1 : 0))[0]
+  })
+  const savingAssets = computed(() => savingCollateral.value?.assets || 0n)
 
   // Estimates
   const health = ref<number | undefined>()
@@ -217,6 +230,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   const borrowNeedsSwap = computed(() => {
     if (!borrowSelectedAsset.value || !collateralVault.value) return false
+    // Swap-and-borrow ends with verifyAmountMinAndSkim which calls skim() on the
+    // collateral vault — securitize vaults don't implement skim, so the swap
+    // path is structurally unsupported here.
+    if (isSecuritizeCollateral.value) return false
     try {
       if (isNativeOfWrapped(borrowSelectedAsset.value.address, collateralVault.value.asset.address, chainId.value!)) return false
       return getAddress(borrowSelectedAsset.value.address) !== getAddress(collateralVault.value.asset.address)
@@ -266,11 +283,25 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     return `${formatSmartAmount(formatUnits(amountIn, Number(borrowSelectedAsset.value.decimals)))} ${borrowSelectedAsset.value.symbol}`
   })
 
+  const borrowSwapInputExactDisplay = computed(() => {
+    if (!borrowSwapEffectiveQuote.value || !borrowSelectedAsset.value) return ''
+    const amountIn = BigInt(borrowSwapEffectiveQuote.value.amountIn || 0)
+    if (amountIn <= 0n) return ''
+    return `${formatUnits(amountIn, Number(borrowSelectedAsset.value.decimals))} ${borrowSelectedAsset.value.symbol}`
+  })
+
   const borrowSwapOutputDisplay = computed(() => {
     if (!borrowSwapEffectiveQuote.value || !collateralVault.value) return ''
     const amountOut = BigInt(borrowSwapEffectiveQuote.value.amountOut || 0)
     if (amountOut <= 0n) return ''
     return `${formatSmartAmount(formatUnits(amountOut, Number(collateralVault.value.asset.decimals)))} ${collateralVault.value.asset.symbol}`
+  })
+
+  const borrowSwapOutputExactDisplay = computed(() => {
+    if (!borrowSwapEffectiveQuote.value || !collateralVault.value) return ''
+    const amountOut = BigInt(borrowSwapEffectiveQuote.value.amountOut || 0)
+    if (amountOut <= 0n) return ''
+    return `${formatUnits(amountOut, Number(collateralVault.value.asset.decimals))} ${collateralVault.value.asset.symbol}`
   })
 
   const borrowSwapRoutedVia = computed(() => {
@@ -296,29 +327,37 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   })
 
   // --- Computed: collateral options ---
+  // Emits one saving option per matching deposit position so users with the
+  // same vault on multiple sub-accounts can disambiguate.
   const collateralOptions = computed(() => {
     const vaultAddr = collateralVault.value?.address || ''
     const { tags, disabled } = getVaultTags(vaultAddr)
+    const decimals = collateralVault.value?.asset.decimals
+    const assetAddress = collateralVault.value?.asset.address
 
     const opts: CollateralOption[] = [
       {
         type: 'wallet',
-        amount: nanoToValue(balance.value, collateralVault.value?.asset.decimals),
+        amount: nanoToValue(balance.value, decimals),
         price: walletCollateralPriceUsd.value,
         apy: collateralSupplyApyWithRewards.value,
-        assetAddress: collateralVault.value?.asset.address,
+        assetAddress,
+        vaultAddress: vaultAddr,
         tags,
         disabled,
       },
     ]
 
-    if (savingCollateral.value) {
+    for (const position of savingPositions.value) {
+      const amount = nanoToValue(position.assets, decimals)
       opts.push({
         type: 'saving',
-        amount: nanoToValue(savingCollateral.value.assets, collateralVault.value?.asset.decimals),
-        price: savingCollateralPriceUsd.value,
+        amount,
+        price: collateralUnitPrice.value !== undefined ? amount * collateralUnitPrice.value : 0,
         apy: collateralSupplyApyWithRewards.value,
-        assetAddress: collateralVault.value?.asset.address,
+        assetAddress,
+        vaultAddress: position.vault.address,
+        subAccount: position.subAccount,
         tags,
         disabled,
       })
@@ -328,7 +367,18 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   // --- Computed: validation ---
   const isBorrowSwapRestricted = computed(() =>
-    borrowNeedsSwap.value && isVaultRestrictedByCountry(collateralAddress),
+    borrowNeedsSwap.value && isVaultRestrictedByCountry(
+      collateralAddress,
+      { counterpart: borrowSelectedAsset.value },
+    ),
+  )
+
+  // Pay-with asset can be any ERC-20 not tied to any vault, so the
+  // vault-level check above can't see it. Hard-block the asset directly.
+  // Soft-restrict does not apply: pay-with reduces exposure to that asset.
+  // Pass the asset object so symbol/name pattern rules also apply.
+  const isBorrowPayWithBlocked = computed(() =>
+    borrowNeedsSwap.value && isAssetBlockedByCountry(borrowSelectedAsset.value),
   )
 
   const errorText = computed(() => {
@@ -340,6 +390,9 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     }
     if (borrowNeedsSwap.value && !borrowSwapQuoteCards.value.length && +collateralAmount.value > 0) {
       return isBorrowSwapQuoteLoading.value ? null : 'No swap quote available'
+    }
+    if (isSavingCollateral.value && !savingCollateral.value) {
+      return 'Savings position not found'
     }
     return null
   })
@@ -371,6 +424,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
     if (findBlockingDisabledOp(borrowPlannedOps.value)) return true
+    if (isSavingCollateral.value && !savingCollateral.value) return true
     if (borrowActiveBalance.value < valueToNano(collateralAmount.value, borrowActiveAssetDecimals.value)) return true
     if (!(+collateralAmount.value)) return true
     if ((borrowVault.value?.supply || 0n) < valueToNano(borrowAmount.value, borrowVault.value?.decimals)) return true
@@ -447,6 +501,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         currentAssetAddress: borrowSelectedAsset.value?.address || collateralVault.value?.asset.address,
         onSelect: onSelectBorrowSwapAsset,
         allowNativeCurrency: true,
+        pairedAsset: collateralVault.value?.asset,
       },
     })
   }
@@ -487,10 +542,14 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const onChangeCollateral = (selection: boolean | number) => {
     clearBorrowSimulationError()
     if (typeof selection === 'number') {
-      isSavingCollateral.value = selection === 1
+      const option = collateralOptions.value[selection]
+      if (!option) return
+      isSavingCollateral.value = option.type === 'saving'
+      selectedSavingSubAccount.value = option.type === 'saving' ? option.subAccount : undefined
       return
     }
     isSavingCollateral.value = selection
+    if (!selection) selectedSavingSubAccount.value = undefined
   }
 
   // --- Actions: estimates ---
@@ -611,7 +670,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   const submit = async () => {
     if (isOperationBlocked.value) return
-    if (isPreparing.value || isGeoBlocked.value || isBorrowRestricted.value || isBorrowSwapRestricted.value) return
+    if (isPreparing.value || isGeoBlocked.value || isBorrowRestricted.value || isBorrowSwapRestricted.value || isBorrowPayWithBlocked.value) return
     isPreparing.value = true
     try {
       if (!isConnected.value) {
@@ -650,8 +709,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             asset: reviewAsset,
             amount: collateralAmount.value,
             plan: plan.value || undefined,
+            quoteFetchedAt: borrowSwapEffectiveQuoteFetchedAt.value,
             swapToAsset: collateralVault.value.asset,
             swapToAmount: borrowSwapEstimatedCollateral.value,
+            swapMode: SwapperMode.EXACT_IN,
             onConfirm: async () => {
               await send()
             },
@@ -668,7 +729,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
       if (isSavingCollateral.value) {
         if (savingCollateral.value?.assets === collateralAmountNano) {
-          collateralAmountForPlan = savingBalance.value
+          collateralAmountForPlan = savingCollateral.value.shares
         }
         else {
           collateralAmountForPlan = await convertAssetsToShares(collateralVault.value.address, collateralAmountNano)
@@ -756,7 +817,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         let collateralAmountForPlan = collateralAmountFixed.value.toFormat({ decimals: Number(collateralVault.value.decimals) }).value
         if (isSavingCollateral.value) {
           if (savingCollateral.value?.assets === collateralAmountForPlan) {
-            collateralAmountForPlan = savingBalance.value
+            collateralAmountForPlan = savingCollateral.value.shares
           }
           else {
             collateralAmountForPlan = await convertAssetsToShares(collateralVault.value.address, collateralAmountForPlan)
@@ -789,12 +850,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             )
       }
       await executeTxPlan(txPlan)
-
-      modal.close()
-      refreshAllPositions(eulerLensAddresses.value, address.value || '')
-      setTimeout(() => {
-        router.replace('/portfolio')
-      }, 400)
+      await finalizeTxAndRedirect()
     }
     catch (e) {
       logWarn('borrow/send', e)
@@ -828,12 +884,6 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     updateAsyncEstimates()
   })
 
-  watch(savingCollateral, (val) => {
-    if (val?.assets && !savingAssets.value) {
-      savingAssets.value = val.assets
-    }
-  })
-
   watch(borrowSelectedAsset, async () => {
     if (borrowSelectedAsset.value?.address && isConnected.value) {
       borrowSelectedAssetBalance.value = await fetchSingleBalance(borrowSelectedAsset.value.address)
@@ -853,7 +903,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         ? resolveWrappedNativeAddress(chainId.value!) || borrowSelectedAsset.value.address
         : borrowSelectedAsset.value.address
       const priceData = await fetchBackendPrice(priceAddr as Address)
-      borrowSwapAssetUsdPrice.value = priceData?.price
+      borrowSwapAssetUsdPrice.value = priceData?.priceUsd
     }
     else {
       borrowSwapAssetUsdPrice.value = undefined
@@ -913,6 +963,9 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     borrowAmount,
     collateralAmount,
     isSavingCollateral,
+    selectedSavingSubAccount,
+    savingCollateral,
+    savingAssets,
     isSubmitting,
     isPreparing,
     isEstimatesLoading,
@@ -942,6 +995,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     errorText,
     isSubmitDisabled,
     isBorrowSwapRestricted,
+    isBorrowPayWithBlocked,
 
     // Computed: warnings
     borrowFormWarnings,
@@ -949,9 +1003,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     // Computed: swap
     borrowSwapEstimatedCollateral,
     borrowSwapInputDisplay,
+    borrowSwapInputExactDisplay,
     borrowSwapOutputDisplay,
+    borrowSwapOutputExactDisplay,
     borrowSwapRoutedVia,
-    borrowSwapQuoteSlippage,
     borrowSwapPriceImpact,
     borrowSwapRouteItems,
 

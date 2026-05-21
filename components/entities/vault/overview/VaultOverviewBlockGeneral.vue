@@ -3,7 +3,7 @@ import { getAddress } from 'viem'
 import type { Vault } from '~/entities/vault'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { useEulerEntitiesOfVault, useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { getProductKeyByVault } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { autoLink } from '~/utils/autoLink'
@@ -12,12 +12,14 @@ const { vault } = defineProps<{ vault: Vault }>()
 const route = useRoute()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
-const { borrowList, isVaultGovernorVerified } = useVaults()
+const { isVaultGovernorVerified } = useVaults()
+const { getEvkVaults } = useVaultRegistry()
 
 const vaultAddress = computed(() => getAddress(vault.address))
 const product = useEulerProductOfVault(vaultAddress)
 const entities = useEulerEntitiesOfVault(vault)
 const marketProductKey = computed(() => getProductKeyByVault(vault.address))
+const marketProductName = computed(() => getProductByVault(vault.address).name)
 const description = computed(() => {
   return product.vaultOverrides?.[vaultAddress.value]?.description ?? product.description
 })
@@ -30,9 +32,16 @@ const isRestricted = computed(() => isVaultBlockedByCountry(vault.address))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
 const isGovernanceLimited = computed(() => product.isGovernanceLimited && isGovernorVerified.value)
 
-// Count how many borrow pairs have this vault as collateral
+// Count how many EVK vaults reference this vault as a borrowable collateral.
+// Sources from the registry directly (not `borrowList`) so deep-linked
+// unverified pairs still report "Yes in N markets" — `borrowList` is filtered
+// to verified vaults for discovery views and would otherwise hide the
+// relationship even though we're literally rendering it. Mirrors the pattern
+// in SecuritizeVaultOverview.vue.
 const collateralCount = computed(() => {
-  return borrowList.value.filter(pair => pair.collateral.address === vault.address).length
+  return getEvkVaults().filter(v => v.collateralLTVs.some(
+    ltv => ltv.collateral === vault.address && ltv.borrowLTV > 0n,
+  )).length
 })
 
 // Count how many borrow pairs have this vault as the liability (borrow) side
@@ -90,10 +99,10 @@ watchEffect(async () => {
             :to="{ name: 'explore-market', params: { market: marketProductKey }, query: { network: route.query.network } }"
             class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
           >
-            {{ product.name }}
+            {{ marketProductName }}
           </NuxtLink>
           <template v-else>
-            {{ product.name || '-' }}
+            {{ marketProductName || '-' }}
           </template>
         </VaultOverviewLabelValue>
         <VaultOverviewLabelValue
@@ -104,6 +113,7 @@ watchEffect(async () => {
             v-if="!isGovernorVerified"
             :vault="vault"
             type="unknown"
+            nudge
             class="w-fit"
           />
           <div
@@ -119,6 +129,7 @@ watchEffect(async () => {
               <BaseAvatar
                 :label="entity.name"
                 :src="getEulerLabelEntityLogo(entity.logo)"
+                class="!w-28 !h-28"
               />
               <a
                 v-if="entity.url"
@@ -141,7 +152,10 @@ watchEffect(async () => {
           v-if="enableVaultTypeDisplay"
           label="Vault type"
         >
-          <VaultTypeBadges :vault-address="vault.address" />
+          <VaultTypeBadges
+            :vault="vault"
+            nudge
+          />
         </VaultOverviewLabelValue>
         <VaultOverviewLabelValue label="Can be borrowed">
           <div class="flex items-center gap-8">

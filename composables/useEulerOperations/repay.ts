@@ -1,19 +1,27 @@
 import type { Address, Hash } from 'viem'
 import { maxUint256 } from 'viem'
 import { adjustForInterest } from './helpers'
+import { hasPreExistingVaultDeposit } from './preExistingDeposit'
 import type { OperationsContext, OperationHelpers } from './types'
 import { evcDisableCollateralAbi, evcDisableControllerAbi } from '~/abis/evc'
-import { vaultRepayAbi, vaultRepayWithSharesAbi, vaultRedeemAbi, vaultSkimAbi, vaultTransferFromMaxAbi, vaultWithdrawAbi, vaultConvertToAssetsAbi } from '~/abis/vault'
-import { erc20BalanceOfAbi } from '~/abis/erc20'
+import { vaultRepayAbi, vaultRepayWithSharesAbi, vaultRedeemAbi, vaultSkimAbi, vaultTransferFromMaxAbi, vaultWithdrawAbi } from '~/abis/vault'
 import { SaHooksBuilder } from '~/entities/saHooksSDK'
 import { convertSaHooksToEVCCalls, type EVCCall } from '~/utils/evc-converter'
-import { logWarn } from '~/utils/errorHandling'
 import type { TxPlan } from '~/entities/txPlan'
+import { isEVKVault, type Vault, type SecuritizeVault } from '~/entities/vault'
 
 export const createRepayBuilders = (
   ctx: OperationsContext,
   helpers: OperationHelpers,
 ) => {
+  // Only EVK collaterals expose `transferFromMax`. Non-EVK collaterals (e.g.
+  // securitize) would revert the sweep step — and with it the whole atomic
+  // batch. Lives here rather than at callsites so every builder that closes
+  // a sub-account gets it for free.
+  const isSweepable = (addr: string): boolean => {
+    const v = ctx.registryGetVault(addr as Address) as Vault | SecuritizeVault | undefined
+    return !!v && isEVKVault(v)
+  }
   const buildRepayPlan = async (
     borrowVaultAddress: string,
     borrowAssetAddress: string,
@@ -98,7 +106,9 @@ export const createRepayBuilders = (
     hooks.addContractInterface(evcAddress, evcDisableCollateralAbi)
 
     for (const collateralAddr of collateralAddrs) {
-      hooks.addContractInterface(collateralAddr, vaultTransferFromMaxAbi)
+      if (isSweepable(collateralAddr)) {
+        hooks.addContractInterface(collateralAddr, vaultTransferFromMaxAbi)
+      }
     }
 
     const evcCalls: EVCCall[] = []
@@ -134,7 +144,7 @@ export const createRepayBuilders = (
       }
       evcCalls.push(disableCollateralCall)
 
-      if (!isMainAccount) {
+      if (!isMainAccount && isSweepable(collateralAddr)) {
         const transferCall: EVCCall = {
           targetContract: collateralAddr,
           onBehalfOfAccount: subAccountAddr,
@@ -169,7 +179,9 @@ export const createRepayBuilders = (
     const evcAddress = ctx.eulerCoreAddresses.value.evc as Address
 
     const hooks = new SaHooksBuilder()
-    hooks.addContractInterface(vaultAddr, vaultTransferFromMaxAbi)
+    if (isSweepable(vaultAddr)) {
+      hooks.addContractInterface(vaultAddr, vaultTransferFromMaxAbi)
+    }
     hooks.addContractInterface(evcAddress, evcDisableCollateralAbi)
 
     const evcCalls: EVCCall[] = []
@@ -183,7 +195,7 @@ export const createRepayBuilders = (
       userAddr,
     })
 
-    if (subAccountAddr.toLowerCase() !== userAddr.toLowerCase()) {
+    if (subAccountAddr.toLowerCase() !== userAddr.toLowerCase() && isSweepable(vaultAddr)) {
       const transferCall: EVCCall = {
         targetContract: vaultAddr,
         onBehalfOfAccount: subAccountAddr,
@@ -314,28 +326,12 @@ export const createRepayBuilders = (
     const savingsSubAccountAddr = savingsSubAccount as Address
     const borrowSubAccountAddr = borrowSubAccount as Address
 
-    // Pre-flight: read pre-existing deposit in borrow vault
-    let preExistingBorrowDeposit = 0n
-    try {
-      const balanceOfResult = await ctx.rpcProvider.readContract({
-        address: borrowVaultAddr,
-        abi: erc20BalanceOfAbi,
-        functionName: 'balanceOf',
-        args: [borrowSubAccountAddr],
-      }) as bigint
-      if (balanceOfResult > 0n) {
-        const assetsResult = await ctx.rpcProvider.readContract({
-          address: borrowVaultAddr,
-          abi: vaultConvertToAssetsAbi,
-          functionName: 'convertToAssets',
-          args: [balanceOfResult],
-        }) as bigint
-        preExistingBorrowDeposit = assetsResult
-      }
-    }
-    catch (err) {
-      logWarn('buildSavingsFullRepayPlan', err)
-    }
+    const hasPreExistingBorrowDeposit = await hasPreExistingVaultDeposit(
+      ctx,
+      borrowVaultAddr,
+      borrowSubAccountAddr,
+      'buildSavingsFullRepayPlan',
+    )
 
     const sameVault = savingsVaultAddr.toLowerCase() === borrowVaultAddr.toLowerCase()
     const collateralAddresses = enabledCollaterals || []
@@ -352,7 +348,9 @@ export const createRepayBuilders = (
     }
     hooks.addContractInterface(evcAddress, evcDisableCollateralAbi)
     for (const collateralAddr of collateralAddresses) {
-      hooks.addContractInterface(collateralAddr as Address, vaultTransferFromMaxAbi)
+      if (isSweepable(collateralAddr)) {
+        hooks.addContractInterface(collateralAddr as Address, vaultTransferFromMaxAbi)
+      }
     }
 
     const evcCalls: EVCCall[] = []
@@ -387,18 +385,22 @@ export const createRepayBuilders = (
         value: 0n,
         data: hooks.getDataForCall(borrowVaultAddr, 'repayWithShares', [maxUint256, borrowSubAccountAddr]) as Hash,
       })
-      evcCalls.push({
-        targetContract: borrowVaultAddr,
-        onBehalfOfAccount: borrowSubAccountAddr,
-        value: 0n,
-        data: hooks.getDataForCall(borrowVaultAddr, 'redeem', [maxUint256, savingsVaultAddr, borrowSubAccountAddr]) as Hash,
-      })
-      evcCalls.push({
-        targetContract: savingsVaultAddr,
-        onBehalfOfAccount: savingsSubAccountAddr,
-        value: 0n,
-        data: hooks.getDataForCall(savingsVaultAddr, 'skim', [preExistingBorrowDeposit, savingsSubAccountAddr]) as Hash,
-      })
+      // Only sweep the repay cushion when the borrow vault did not already hold shares.
+      // Otherwise redeem(max) would also migrate the user's pre-existing borrow-vault deposit.
+      if (!hasPreExistingBorrowDeposit) {
+        evcCalls.push({
+          targetContract: borrowVaultAddr,
+          onBehalfOfAccount: borrowSubAccountAddr,
+          value: 0n,
+          data: hooks.getDataForCall(borrowVaultAddr, 'redeem', [maxUint256, savingsVaultAddr, borrowSubAccountAddr]) as Hash,
+        })
+        evcCalls.push({
+          targetContract: savingsVaultAddr,
+          onBehalfOfAccount: savingsSubAccountAddr,
+          value: 0n,
+          data: hooks.getDataForCall(savingsVaultAddr, 'skim', [maxUint256, savingsSubAccountAddr]) as Hash,
+        })
+      }
     }
 
     // Disable controller (no more debt)
@@ -423,6 +425,7 @@ export const createRepayBuilders = (
     const isMainAccount = borrowSubAccountAddr.toLowerCase() === userAddr.toLowerCase()
     if (!isMainAccount) {
       for (const collateralAddr of collateralAddresses) {
+        if (!isSweepable(collateralAddr)) continue
         evcCalls.push({
           targetContract: collateralAddr as Address,
           onBehalfOfAccount: borrowSubAccountAddr,

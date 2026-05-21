@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { getAddress, formatUnits, type Address, zeroAddress } from 'viem'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -9,20 +8,18 @@ import { getProjectedRates, getCurrentLiquidationLTV, type SecuritizeVault, type
 import { isSecuritizeVault } from '~/entities/vault/factory'
 import { getHookDisabledWarning, getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { collectPythFeedIds } from '~/entities/oracle'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import { fetchBackendPrice } from '~/services/pricing/backendClient'
 import type { TxPlan } from '~/entities/txPlan'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
+import { isVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
-import { computeQuoteSlippage } from '~/utils/swapQuotes'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
 import SecuritizeVaultOverview from '~/components/entities/vault/overview/SecuritizeVaultOverview.vue'
-import { formatNumber, compactNumber, formatSmartAmount } from '~/utils/string-utils'
+import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
@@ -72,8 +69,15 @@ const { buildSupplyPlan, buildSwapAndSupplyPlan, executeTxPlan } = useEulerOpera
 const { getVault, getSecuritizeVault, getEscrowVault, updateVault, isEscrowLoadedOnce } = useVaults()
 const { isReady: isLabelsReady } = useEulerLabels()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
-const { isConnected, address } = useAccount()
+const { isConnected, address } = useWagmi()
 const { chainId } = useEulerAddresses()
+const shareLinkQuery = computed(() => {
+  const network = route.query.network
+
+  return {
+    network: Array.isArray(network) ? network[0] ?? chainId.value : network ?? chainId.value,
+  }
+})
 const { fetchSingleBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
 const vaultAddress = route.params.vault as string
@@ -90,8 +94,6 @@ const isEstimatesLoading = ref(false)
 const amount = ref('')
 const plan = ref<TxPlan | null>(null)
 const estimateSupplyAPY = ref(0n)
-const monthlyEarnings = ref(0)
-const monthlyEarningsUsd = ref(0)
 
 // Swap & deposit state
 const selectedAsset = ref<VaultAsset | undefined>()
@@ -121,6 +123,7 @@ const {
   selectedProvider: swapSelectedProvider,
   selectedQuote: swapSelectedQuote,
   effectiveQuote: swapEffectiveQuote,
+  effectiveQuoteFetchedAt: swapEffectiveQuoteFetchedAt,
   providersCount: _swapProvidersCount,
   isLoading: isSwapQuoteLoading,
   quoteError: swapQuoteError,
@@ -129,9 +132,11 @@ const {
   reset: resetSwapQuoteState,
   requestQuotes: requestSwapQuotes,
   selectProvider: selectSwapQuote,
-} = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max' })
-const swapQuoteSlippage = computed(() => computeQuoteSlippage(swapEffectiveQuote.value))
-
+} = useSwapQuotesParallel({
+  amountField: 'amountOut',
+  compare: 'max',
+  buildTxPlanForQuote: quote => buildSwapSupplyPlanFromQuote(quote, { includePermit2Call: false }),
+})
 // Vault data - only one will be populated based on type
 const evkVault: Ref<Vault | undefined> = ref(undefined)
 const securitizeVault: Ref<SecuritizeVault | undefined> = ref(undefined)
@@ -297,10 +302,15 @@ const isSubmitDisabled = computed(() => {
   return false
 })
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vaultAddress))
-const isSwapRestricted = computed(() => needsSwap.value && isVaultRestrictedByCountry(vaultAddress))
-const reviewSupplyDisabled = computed(() => isGeoBlocked.value || isSwapRestricted.value || isSubmitDisabled.value)
+const isSwapRestricted = computed(() => needsSwap.value && isVaultRestrictedByCountry(vaultAddress, { counterpart: selectedAsset.value }))
+// Swap-deposit source: user is giving up the selected asset (reducing exposure),
+// so only hard-block applies. Soft-restrict intentionally does not apply here.
+// Pass the asset object so symbol/name pattern rules also apply.
+const isSourceAssetBlocked = computed(() => needsSwap.value && isAssetBlockedByCountry(selectedAsset.value))
+const reviewSupplyDisabled = computed(() => isGeoBlocked.value || isSwapRestricted.value || isSourceAssetBlocked.value || isSubmitDisabled.value)
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isSourceAssetBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
   if (isSwapRestricted.value) return { message: 'Swap deposits are not available in your region', variant: 'warning' }
   if (evkVault.value && isOpDisabled(evkVault.value, OP_DEPOSIT)) return { message: 'Deposits are currently disabled for this vault', variant: 'warning' }
   if (isSupplyCapReached.value) return { message: 'Supply cap has been reached', variant: 'warning' }
@@ -404,7 +414,7 @@ const buildSwapSupplyPlanFromQuote = async (quote: SwapApiQuote, options: { incl
 
 const submit = async () => {
   if (isOperationBlocked.value) return
-  if (isPreparing.value || isGeoBlocked.value || isSwapRestricted.value) return
+  if (isPreparing.value || isGeoBlocked.value || isSwapRestricted.value || isSourceAssetBlocked.value) return
   isPreparing.value = true
   try {
     await guardWithPriceImpact(async () => {
@@ -456,8 +466,10 @@ const submit = async () => {
           asset: reviewAsset,
           amount: amount.value,
           plan: plan.value || undefined,
+          quoteFetchedAt: needsSwap.value ? swapEffectiveQuoteFetchedAt.value : null,
           swapToAsset: needsSwap.value ? asset.value : undefined,
           swapToAmount: needsSwap.value ? swapEstimatedOutput.value : undefined,
+          swapMode: needsSwap.value ? SwapperMode.EXACT_IN : undefined,
           submittingLabel: 'Submitting...',
           onConfirm: async () => {
             await send()
@@ -540,20 +552,9 @@ const updateEstimates = useDebounceFn(async () => {
         const rawAPY = projected?.supplyAPY ?? evkVault.value.interestRateInfo.supplyAPY
         estimateSupplyAPY.value = rawAPY + valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
       }
-
-      const supplyAmount = needsSwap.value
-        ? nanoToValue(BigInt(swapEffectiveQuote.value?.amountOut || 0), Number(evkVault.value.decimals))
-        : +(amount.value || 0)
-      monthlyEarnings.value = supplyAmount <= 0
-        ? 0
-        : supplyAmount * (nanoToValue(estimateSupplyAPY.value, 27) / 12)
     }
     else {
       estimateSupplyAPY.value = valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
-      const supplyAmount = +(amount.value || 0)
-      monthlyEarnings.value = supplyAmount <= 0
-        ? 0
-        : supplyAmount * (nanoToValue(estimateSupplyAPY.value, 27) / 12)
     }
   }
   catch (e) {
@@ -567,16 +568,14 @@ const updateEstimates = useDebounceFn(async () => {
   }
 }, 500)
 
-const onSupplyInfoIconClick = () => {
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY: baseSupplyApy.value,
-      intrinsicAPY: intrinsicApy.value,
-      intrinsicApyInfo: getIntrinsicApyInfo(asset.value?.address),
-      campaigns: getSupplyRewardCampaigns(vaultAddress),
-    },
-  })
-}
+const supplyApyModalData = computed(() => ({
+  props: {
+    lendingAPY: baseSupplyApy.value,
+    intrinsicAPY: intrinsicApy.value,
+    intrinsicApyInfo: getIntrinsicApyInfo(asset.value?.address),
+    campaigns: getSupplyRewardCampaigns(vaultAddress),
+  },
+}))
 
 // Swap quote helpers
 const swapEstimatedOutput = computed(() => {
@@ -593,11 +592,25 @@ const swapInputDisplay = computed(() => {
   return `${formatSmartAmount(formatUnits(amountIn, Number(selectedAsset.value.decimals)))} ${selectedAsset.value.symbol}`
 })
 
+const swapInputExactDisplay = computed(() => {
+  if (!swapEffectiveQuote.value || !selectedAsset.value) return ''
+  const amountIn = BigInt(swapEffectiveQuote.value.amountIn || 0)
+  if (amountIn <= 0n) return ''
+  return `${formatUnits(amountIn, Number(selectedAsset.value.decimals))} ${selectedAsset.value.symbol}`
+})
+
 const swapOutputDisplay = computed(() => {
   if (!swapEffectiveQuote.value || !asset.value) return ''
   const amountOut = BigInt(swapEffectiveQuote.value.amountOut || 0)
   if (amountOut <= 0n) return ''
   return `${formatSmartAmount(formatUnits(amountOut, Number(asset.value.decimals)))} ${asset.value.symbol}`
+})
+
+const swapOutputExactDisplay = computed(() => {
+  if (!swapEffectiveQuote.value || !asset.value) return ''
+  const amountOut = BigInt(swapEffectiveQuote.value.amountOut || 0)
+  if (amountOut <= 0n) return ''
+  return `${formatUnits(amountOut, Number(asset.value.decimals))} ${asset.value.symbol}`
 })
 
 const swapRoutedVia = computed(() => {
@@ -611,8 +624,14 @@ const { priceImpact: swapPriceImpact } = useSwapPriceImpact({
   toVault: evkVault,
 })
 
+const shouldGateUnknownPriceImpact = computed(() =>
+  needsSwap.value
+  && swapEffectiveQuote.value !== null
+  && swapPriceImpact.value === null,
+)
 const { guardWithPriceImpact } = usePriceImpactGate({
   directPriceImpact: swapPriceImpact,
+  shouldGateUnknown: shouldGateUnknownPriceImpact,
 })
 
 const swapRouteItems = computed(() => {
@@ -675,6 +694,7 @@ const openSwapTokenSelector = () => {
       currentAssetAddress: selectedAsset.value?.address || asset.value?.address,
       onSelect: onSelectSwapAsset,
       allowNativeCurrency: true,
+      pairedAsset: asset.value,
     },
   })
 }
@@ -700,7 +720,7 @@ watch(selectedAsset, async () => {
       ? resolveWrappedNativeAddress(chainId.value!) || selectedAsset.value.address
       : selectedAsset.value.address
     const priceData = await fetchBackendPrice(priceAddr as Address)
-    swapAssetUsdPrice.value = priceData?.price
+    swapAssetUsdPrice.value = priceData?.priceUsd
   }
   else {
     swapAssetUsdPrice.value = undefined
@@ -744,15 +764,6 @@ watch(swapEffectiveQuote, () => {
   }
 })
 
-// Update USD value when monthlyEarnings or vault changes
-watchEffect(async () => {
-  if (!vault.value || !monthlyEarnings.value) {
-    monthlyEarningsUsd.value = 0
-    return
-  }
-  monthlyEarningsUsd.value = await getAssetUsdValueOrZero(monthlyEarnings.value, vault.value, 'off-chain')
-})
-
 watch(amount, async () => {
   clearSimulationError()
   if (!isVaultLoaded.value) {
@@ -784,15 +795,26 @@ watch(address, () => {
         fallback="/lend"
       />
       <!-- Vault header -->
-      <VaultLabelsAndAssets
+      <div
         v-if="asset && (vault || securitizeVault)"
-        back
-        back-fallback="/lend"
         class="mb-24"
-        :vault="(vault || securitizeVault)!"
-        :assets="assets"
-        size="large"
-      />
+      >
+        <VaultLabelsAndAssets
+          back
+          back-fallback="/lend"
+          :vault="(vault || securitizeVault)!"
+          :assets="assets"
+          size="large"
+        >
+          <UiShareLinkButton
+            class="-ml-4 !w-24 !h-24"
+            :path="`/lend/${(vault || securitizeVault)!.address}`"
+            :query="shareLinkQuery"
+            label="Copy vault link"
+            variant="ghost"
+          />
+        </VaultLabelsAndAssets>
+      </div>
 
       <div class="flex gap-32">
         <div class="hidden laptop:!block laptop:flex-[55] min-w-0">
@@ -821,11 +843,16 @@ watch(address, () => {
             >
               <p class="text-h3 text-content-tertiary flex items-center gap-4">
                 Supply APY
-                <SvgIcon
-                  class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-                  name="info-circle"
-                  @click="onSupplyInfoIconClick"
-                />
+                <UiModalPreviewTrigger
+                  :component="VaultSupplyApyModal"
+                  :modal-data="supplyApyModalData"
+                  aria-label="Show supply APY breakdown"
+                >
+                  <SvgIcon
+                    class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                    name="info-circle"
+                  />
+                </UiModalPreviewTrigger>
               </p>
 
               <p class="flex items-center gap-4 text-h3">
@@ -834,12 +861,17 @@ watch(address, () => {
                   class="mr-4"
                   :vault="vault"
                 />
-                <SvgIcon
+                <UiModalPreviewTrigger
                   v-if="hasRewards"
-                  class="!w-24 !h-24 text-accent-600 cursor-pointer"
-                  name="sparks"
-                  @click="onSupplyInfoIconClick"
-                />
+                  :component="VaultSupplyApyModal"
+                  :modal-data="supplyApyModalData"
+                  aria-label="Show supply APY rewards breakdown"
+                >
+                  <SvgIcon
+                    class="!w-24 !h-24 text-accent-600 cursor-pointer"
+                    name="sparks"
+                  />
+                </UiModalPreviewTrigger>
                 <span>
                   {{ supplyAPYDisplay }}%
                 </span>
@@ -897,16 +929,17 @@ watch(address, () => {
               >
                 <SwapDetailsSummary
                   :input-display="swapInputDisplay"
+                  :input-exact-display="swapInputExactDisplay"
                   :output-display="swapOutputDisplay"
+                  :output-exact-display="swapOutputExactDisplay"
                   :price-impact="swapPriceImpact"
                   :slippage="swapSlippage"
-                  :quote-slippage="swapQuoteSlippage"
                   :routed-via="swapRoutedVia"
                   @open-slippage-settings="openSlippageSettings"
                 />
               </VaultFormInfoBlock>
 
-              <UiToast
+              <UiAlert
                 v-if="swapQuoteError"
                 title="Swap quote"
                 variant="warning"
@@ -915,28 +948,35 @@ watch(address, () => {
               />
             </template>
 
-            <UiToast
+            <UiAlert
               v-if="isGeoBlocked"
               title="Region restricted"
               description="This operation is not available in your region. You can still withdraw existing deposits."
               variant="warning"
               size="compact"
             />
-            <UiToast
-              v-if="!isGeoBlocked && isSwapRestricted"
+            <UiAlert
+              v-if="!isGeoBlocked && isSourceAssetBlocked"
+              title="Asset restricted"
+              description="Paying with this asset is not available in your region. Pick a different token."
+              variant="warning"
+              size="compact"
+            />
+            <UiAlert
+              v-if="!isGeoBlocked && !isSourceAssetBlocked && isSwapRestricted"
               title="Swap restricted"
               description="Swapping into this vault is not available in your region. You can deposit the vault's underlying asset directly."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-show="errorText"
               title="Error"
               variant="error"
               :description="errorText || ''"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="simulationError"
               title="Error"
               variant="error"
@@ -944,7 +984,7 @@ watch(address, () => {
               size="compact"
             />
 
-            <UiToast
+            <UiAlert
               v-if="isUnknownSwapToken && needsSwap"
               title="Unknown token"
               description="This token is not on any recognized token list. It could be fraudulent or malicious. Verify the contract address before proceeding."
@@ -959,20 +999,6 @@ watch(address, () => {
               :loading="isEstimatesLoading"
               variant="card"
             >
-              <SummaryRow
-                label="Projected earnings per month"
-                align-top
-              >
-                <p class="text-content-tertiary">
-                  <span class="text-content-primary text-p2">{{ compactNumber(monthlyEarnings, 4) }}</span> {{
-                    asset.symbol
-                  }}
-                  <template v-if="features.hasPriceInfo && vault">
-                    ≈ ${{ compactNumber(monthlyEarningsUsd) }}
-                  </template>
-                </p>
-              </SummaryRow>
-
               <SummaryRow label="Supply APY">
                 <SummaryValue
                   :after="estimateSupplyAPYDisplay"

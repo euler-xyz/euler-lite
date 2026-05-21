@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { getAddress, type Address, zeroAddress } from 'viem'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { FixedPoint } from '~/utils/fixed-point'
@@ -17,7 +16,7 @@ import { useCollateralForm } from '~/composables/position/useCollateralForm'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const positionIndex = usePositionIndex()
-const { isConnected, address } = useAccount()
+const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { fetchSingleBalance } = useWallets()
 const { buildSupplyPlan, buildSwapAndSupplyPlan } = useEulerOperations()
@@ -164,6 +163,7 @@ useOperationGuard(computed(() => [form.collateralVault.value?.address].filter(Bo
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (form.isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (form.isInputAssetBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
   if (form.isSwapRestricted.value) return { message: 'Swapping into this vault is not available in your region', variant: 'warning' }
   if (form.estimatesError.value) return { message: form.estimatesError.value, variant: 'error' }
   if (form.simulationError.value) return { message: form.simulationError.value, variant: 'error' }
@@ -230,7 +230,7 @@ watch(selectedAsset, async () => {
       ? resolveWrappedNativeAddress(chainId.value!) || selectedAsset.value.address
       : selectedAsset.value.address
     const priceData = await fetchBackendPrice(priceAddr as Address)
-    swapAssetUsdPrice.value = priceData?.price
+    swapAssetUsdPrice.value = priceData?.priceUsd
   }
   else {
     swapAssetUsdPrice.value = undefined
@@ -317,16 +317,17 @@ watch(selectedAsset, async () => {
               >
                 <SwapDetailsSummary
                   :input-display="form.swapInputDisplay.value"
+                  :input-exact-display="form.swapInputExactDisplay.value"
                   :output-display="form.swapOutputDisplay.value"
+                  :output-exact-display="form.swapOutputExactDisplay.value"
                   :price-impact="form.swapPriceImpact.value"
                   :slippage="form.swapSlippage.value"
-                  :quote-slippage="form.swapQuoteSlippage.value"
                   :routed-via="form.swapRoutedVia.value"
                   @open-slippage-settings="form.openSlippageSettings"
                 />
               </VaultFormInfoBlock>
 
-              <UiToast
+              <UiAlert
                 v-if="form.swapQuoteError.value"
                 title="Swap quote"
                 variant="warning"
@@ -335,7 +336,7 @@ watch(selectedAsset, async () => {
               />
             </template>
 
-            <UiToast
+            <UiAlert
               v-if="isUnknownSwapToken && needsSwap"
               title="Unknown token"
               description="This token is not on any recognized token list. It could be fraudulent or malicious. Verify the contract address before proceeding."
@@ -343,28 +344,35 @@ watch(selectedAsset, async () => {
               size="compact"
             />
 
-            <UiToast
+            <UiAlert
               v-if="form.isGeoBlocked.value"
               title="Region restricted"
               description="This operation is not available in your region. You can still repay existing debt."
               variant="warning"
               size="compact"
             />
-            <UiToast
-              v-if="!form.isGeoBlocked.value && form.isSwapRestricted.value"
+            <UiAlert
+              v-if="!form.isGeoBlocked.value && form.isInputAssetBlocked.value"
+              title="Asset restricted"
+              description="Paying with this asset is not available in your region. Pick a different token."
+              variant="warning"
+              size="compact"
+            />
+            <UiAlert
+              v-if="!form.isGeoBlocked.value && !form.isInputAssetBlocked.value && form.isSwapRestricted.value"
               title="Swap restricted"
               description="Swapping into this vault is not available in your region. You can deposit the vault's underlying asset directly."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-show="form.estimatesError.value"
               title="Error"
               variant="error"
               :description="form.estimatesError.value"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="form.simulationError.value"
               title="Error"
               variant="error"

@@ -52,6 +52,12 @@ export interface CyclicalNoteInfo {
   secondaryDuration: bigint
   startTimestamp: bigint
 }
+export interface CyclicalNoteMonthlyInfo {
+  primaryRate: bigint
+  secondaryRate: bigint
+  cycleStartDay: bigint
+  secondaryDays: bigint
+}
 export interface VaultIRMInfo {
   interestRateModelInfo?: {
     interestRateModelType?: number
@@ -244,15 +250,19 @@ export interface EarnVault {
   }
 }
 
+export type CollateralOptionType = 'wallet' | 'saving' | 'vault' | 'escrow'
+
 export interface CollateralOption {
-  type: string
+  type: CollateralOptionType
   amount: number
   price: number
   apy?: number
+  showBalance?: boolean
   label?: string
   symbol?: string
   assetAddress?: string
   vaultAddress?: string
+  subAccount?: string
   disabled?: boolean
   tags?: string[]
 }

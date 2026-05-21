@@ -54,7 +54,7 @@ export const TTL_LIQUIDATION = -BigInt(1)
 export const TTL_ERROR = -BigInt(2)
 
 export { CACHE_TTL_15S_MS as DEFAULT_PRICE_CACHE_TTL_MS } from './tuning-constants'
-export const EXCLUDED_SWAP_PROVIDERS = new Set(['cow'])
+export const EXCLUDED_SWAP_PROVIDERS = new Set<string>([])
 export const SWAP_DEFAULT_DEADLINE_SECONDS = 1800
 export const SLIPPAGE_STORAGE_KEY = 'swap-slippage'
 export const PERMIT2_PREFERENCE_STORAGE_KEY = 'permit2-enabled'
@@ -72,6 +72,12 @@ export const EUR_ADDRESS: Address = '0x00000000000000000000000000000000000003d2'
 export const BTC_ADDRESS: Address = '0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB'
 export const ETH_ADDRESS: Address = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
 
+// Tokens that revert when changing a non-zero allowance to another non-zero value.
+// For these tokens, approve must be reset to 0 before setting a new value.
+export const APPROVE_RESET_REQUIRED_TOKENS = new Set<string>([
+  '0xdac17f958d2ee523a2206206994597c13d831ec7', // USDT on Ethereum
+])
+
 // ERC-20 allowance slot candidates checked during simulation state-override probing.
 // Sequential range (0..ALLOWANCE_MAX_SEQUENTIAL_SLOT) covers standard ERC-20 layouts
 // and OZ Upgradeable tokens where inherited contracts shift the base slot index.
@@ -87,6 +93,7 @@ export const INTEREST_RATE_MODEL_TYPE = {
   ADAPTIVE_CURVE: 2,
   KINKY: 3,
   FIXED_CYCLICAL_BINARY: 4,
+  FIXED_CYCLICAL_BINARY_MONTHLY: 5,
 } as const
 
 // EVK Vault.configFlags is a bitmask. CFG_DONT_SOCIALIZE_DEBT is the only
@@ -126,6 +133,13 @@ export const FIXED_CYCLICAL_BINARY_IRM_COMPONENTS = [
   { name: 'startTimestamp', type: 'uint256' },
 ] as const
 
+export const FIXED_CYCLICAL_BINARY_MONTHLY_IRM_COMPONENTS = [
+  { name: 'primaryRate', type: 'uint256' },
+  { name: 'secondaryRate', type: 'uint256' },
+  { name: 'cycleStartDay', type: 'uint256' },
+  { name: 'secondaryDays', type: 'uint256' },
+] as const
+
 export const ORACLE_DETAILED_INFO_COMPONENTS = [
   { name: 'oracle', type: 'address' },
   { name: 'name', type: 'string' },
@@ -162,7 +176,9 @@ export const PYTH_ORACLE_COMPONENTS = [
   { name: 'maxConfWidth', type: 'uint256' },
 ] as const
 
-export const SECONDS_IN_YEAR = 31_536_000
+// Gregorian year (365.2425 * 86400). Matches EVK/Lens SECONDS_PER_YEAR used by
+// on-chain APY math, so display values round-trip exactly with contract output.
+export const SECONDS_IN_YEAR = 31_556_952
 export const TARGET_TIME_AGO = 3600
 
 export const PERMIT2_TYPES = {

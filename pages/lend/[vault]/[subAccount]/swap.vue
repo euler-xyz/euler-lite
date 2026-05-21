@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { isAddress, getAddress, zeroAddress, type Address } from 'viem'
-import { type Vault, type SecuritizeVault, fetchSecuritizeVault } from '~/entities/vault'
+import { getCashLimitedWithdrawAmount, type Vault, type SecuritizeVault, fetchSecuritizeVault } from '~/entities/vault'
 import { isSecuritizeVault } from '~/entities/vault/factory'
 import { getSubAccountAddress } from '~/entities/account'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
-import { SwapperMode } from '~/entities/swap'
+import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import type { TxPlan } from '~/entities/txPlan'
 import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
@@ -17,7 +16,9 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 
 const route = useRoute()
 const { getVault } = useVaults()
-const { address } = useAccount()
+const { address } = useWagmi()
+const { isSpyMode, spyAddress } = useSpyMode()
+const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const { depositPositions } = useEulerAccount()
 const { buildSwapPlan, buildSameAssetSwapPlan } = useEulerOperations()
 const { withIntrinsicSupplyApy } = useIntrinsicApy()
@@ -25,8 +26,9 @@ const { getSupplyRewardApy } = useRewardsApy()
 
 const subAccountIndex = Number(route.params.subAccount)
 const subAccount = computed(() => {
-  if (!address.value || isNaN(subAccountIndex)) return undefined
-  return getSubAccountAddress(address.value, subAccountIndex)
+  const addr = effectiveAddress.value
+  if (!addr || isNaN(subAccountIndex)) return undefined
+  return getSubAccountAddress(addr, subAccountIndex)
 })
 
 // ── Vaults ───────────────────────────────────────────────────────────────
@@ -59,7 +61,11 @@ const savingPosition = computed(() => {
   ) || null
 })
 
-const balance = computed(() => savingPosition.value?.assets || 0n)
+const assetsBalance = computed(() => savingPosition.value?.assets || 0n)
+const balance = computed(() => getCashLimitedWithdrawAmount(
+  assetsBalance.value,
+  fromVault.value,
+))
 
 // ── Supply APY ───────────────────────────────────────────────────────────
 const fromSupplyApy = computed(() => {
@@ -84,15 +90,17 @@ const swap = useSwapPageLogic({
   displayAmountField: 'amountOut',
   quoteDiffPrefix: '-',
   redirectPath: '/portfolio/saving',
+  swapperMode: SwapperMode.EXACT_IN,
 
   buildQuoteRequest(amount) {
     if (!fromVault.value || !toVault.value) return null
+    const account = (subAccount.value || effectiveAddress.value || zeroAddress) as Address
     return {
       params: {
         tokenIn: fromVault.value.asset.address as Address,
         tokenOut: toVault.value.asset.address as Address,
-        accountIn: (address.value || zeroAddress) as Address,
-        accountOut: (address.value || zeroAddress) as Address,
+        accountIn: account,
+        accountOut: account,
         amount,
         vaultIn: fromVault.value.address as Address,
         receiver: toVault.value.address as Address,
@@ -105,22 +113,24 @@ const swap = useSwapPageLogic({
     }
   },
 
-  async buildPlan(): Promise<TxPlan> {
+  async buildPlan(quote?: SwapApiQuote): Promise<TxPlan> {
     if (isSameAsset.value) {
       if (!fromVault.value || !toVault.value) throw new Error('Vaults not loaded')
       const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
-      const isMax = balance.value > 0n && amount >= balance.value
+      const isMax = assetsBalance.value > 0n && amount >= assetsBalance.value
       return buildSameAssetSwapPlan({
         fromVaultAddress: fromVault.value.address,
         toVaultAddress: toVault.value.address,
         amount,
         isMax,
         maxShares: isMax ? savingPosition.value?.shares : undefined,
+        subAccount: subAccount.value,
       })
     }
-    if (!selectedQuote.value) throw new Error('No quote selected')
+    const swapQuote = quote || selectedQuote.value
+    if (!swapQuote) throw new Error('No quote selected')
     return buildSwapPlan({
-      quote: selectedQuote.value,
+      quote: swapQuote,
       swapperMode: SwapperMode.EXACT_IN,
       isRepay: false,
       requestedSlippage: slippage.value,
@@ -129,7 +139,11 @@ const swap = useSwapPageLogic({
     })
   },
 
-  getBalanceError: amountNano => balance.value < amountNano ? 'Not enough balance' : null,
+  getBalanceError: (amountNano) => {
+    if (assetsBalance.value < amountNano) return 'Not enough balance'
+    if (balance.value < amountNano) return 'Not enough liquidity in vault'
+    return null
+  },
   getGeoBlockedAddresses: () => [getVaultAddress()],
 })
 
@@ -139,7 +153,7 @@ const {
   isGeoBlocked, reviewSwapDisabled, reviewSwapLabel, simulationError,
   isQuoteLoading, quoteError, quotesStatusLabel, selectedProvider, selectedQuote,
   fromProduct, toProduct, currentPrice, swapSummary, priceImpact, routedVia,
-  quoteSlippage, swapRouteItems, swapRouteEmptyMessage,
+  swapRouteItems, swapRouteEmptyMessage,
   selectProvider, onFromInput, onToVaultChange, onRefreshQuotes, submit, openSlippageSettings,
 } = swap
 
@@ -256,28 +270,28 @@ watch([() => route.params.vault, () => route.query.to], () => {
               No asset swap options available
             </div>
 
-            <UiToast
+            <UiAlert
               v-if="isGeoBlocked"
               title="Region restricted"
               description="This operation is not available in your region. You can still withdraw existing deposits."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-show="errorText"
               title="Error"
               variant="error"
               :description="errorText || ''"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="sameVaultError"
               title="Error"
               variant="error"
               :description="sameVaultError"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="simulationError"
               title="Error"
               variant="error"
@@ -285,7 +299,7 @@ watch([() => route.params.vault, () => route.query.to], () => {
               size="compact"
             />
 
-            <UiToast
+            <UiAlert
               v-if="quoteError"
               title="Swap quote"
               variant="warning"
@@ -320,10 +334,11 @@ watch([() => route.params.vault, () => route.query.to], () => {
               </SummaryRow>
               <SwapDetailsSummary
                 :input-display="swapSummary?.from ?? null"
+                :input-exact-display="swapSummary?.fromExact ?? null"
                 :output-display="swapSummary?.to ?? null"
+                :output-exact-display="swapSummary?.toExact ?? null"
                 :price-impact="priceImpact"
                 :slippage="slippage"
-                :quote-slippage="quoteSlippage"
                 :routed-via="routedVia"
                 @open-slippage-settings="openSlippageSettings"
               />

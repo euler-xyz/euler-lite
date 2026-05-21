@@ -87,12 +87,20 @@ describe('GET /api/rewards/merkl', () => {
     const handler = (await import('~/server/api/rewards/merkl.get')).default
     const { event, headers } = makeEvent({ chainId: String(ENABLED_CHAIN_ID) })
     const res = await handler(event) as {
-      opportunities: { euler: unknown[], multilendborrow: unknown[], erc20logprocessor: unknown[] }
+      opportunities: {
+        euler: unknown[]
+        multilendborrow: unknown[]
+        erc20logprocessor: unknown[]
+        euler_borrow_from_collateral: unknown[]
+        euler_multi_borrow_from_collateral: unknown[]
+      }
     }
 
     expect(res.opportunities.euler).toEqual([])
     expect(res.opportunities.multilendborrow).toEqual([])
     expect(res.opportunities.erc20logprocessor).toEqual([])
+    expect(res.opportunities.euler_borrow_from_collateral).toEqual([])
+    expect(res.opportunities.euler_multi_borrow_from_collateral).toEqual([])
     expect(headers['cache-control']).toMatch(/max-age=30/)
     expect(consumeSpy).toHaveBeenCalledOnce()
   })

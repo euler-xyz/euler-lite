@@ -4,6 +4,7 @@ import type { Address, Hex } from 'viem'
 import type { Campaign } from '~/entities/brevis'
 import type { VaultAsset } from '~/entities/vault'
 import type { TxPlan } from '~/entities/txPlan'
+import type { SwapperMode } from '~/entities/swap'
 import type { EVCCall } from '~/utils/evc-converter'
 import { applyOperationGuards } from '~/utils/operationGuardRegistry'
 import { buildDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
@@ -11,6 +12,7 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber } from '~/utils/string-utils'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
+import { useAllowanceSlotResolution } from '~/composables/useEulerOperations/allowance'
 
 const emits = defineEmits(['close', 'confirm'])
 
@@ -21,7 +23,7 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, amount, onConfirm, plan, swapToAsset, swapToAmount, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel } = defineProps<{
+const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, amount, onConfirm, plan, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel, quoteFetchedAt } = defineProps<{
   type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
@@ -31,6 +33,11 @@ const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, 
   supplyingAmount?: number | string
   swapToAsset?: VaultAsset
   swapToAmount?: number | string
+  /** Swap mode behind this operation, when one is involved. Drives the
+   *  "Swap to repay" relabel and default estimated leg. */
+  swapMode?: SwapperMode
+  /** Display-side override for which swap amount should receive "~". */
+  swapEstimatedSide?: 'input' | 'output'
   campaignInfo?: Campaign
   reulUnlockInfo?: REULUnlockInfo
   onConfirm: () => void | Promise<void>
@@ -40,12 +47,15 @@ const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, 
   transferAmounts?: Record<string, string>
   /** Label shown on the button while executing */
   submittingLabel?: string
+  /** Milliseconds since epoch when the active swap quote was fetched */
+  quoteFetchedAt?: number | null
 }>()
 
 const { address: walletAddress, chainId: currentChainId } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { getVault } = useVaultRegistry()
 const { buildSimulationStateOverride } = useEulerOperations()
+const { isResolvingAllowanceSlotIndex } = useAllowanceSlotResolution()
 const { eulerCoreAddresses } = useEulerAddresses()
 const {
   isSimulating: isTenderlySimulating,
@@ -56,11 +66,26 @@ const {
   fetchEnabled: fetchTenderlyEnabled,
 } = useTenderlySimulation()
 
-const copied = ref(false)
 const tenderlyEnabled = ref(false)
+const { copied, copyToClipboard } = useClipboardCopy()
+const nowMs = ref(Date.now())
+const staleQuoteThresholdMs = 3 * 60 * 1000
+let nowTimer: ReturnType<typeof setInterval> | undefined
 
 fetchTenderlyEnabled().then((enabled) => {
   tenderlyEnabled.value = enabled
+})
+
+onMounted(() => {
+  nowTimer = setInterval(() => {
+    nowMs.value = Date.now()
+  }, 1000)
+})
+
+onUnmounted(() => {
+  if (nowTimer) {
+    clearInterval(nowTimer)
+  }
 })
 
 const handleTenderlySimulate = async () => {
@@ -111,9 +136,15 @@ const handleTenderlySimulate = async () => {
 }
 
 const internalSubmitting = ref(false)
+const isReviewActionBlocked = computed(() =>
+  internalSubmitting.value || isResolvingAllowanceSlotIndex.value,
+)
+const isTenderlyPreparing = computed(() =>
+  isTenderlySimulating.value || isResolvingAllowanceSlotIndex.value,
+)
 
 const handleConfirm = async () => {
-  if (internalSubmitting.value) return
+  if (isReviewActionBlocked.value) return
   const result = onConfirm()
   // If onConfirm returns a promise, keep the modal open with a loading state
   // and let the caller close it via modal.close(). Otherwise close immediately
@@ -138,7 +169,7 @@ const displaySteps = computed((): DisplayStep[] => {
   const ctx: StepDecodingContext = {
     type, asset, assetIconUrl, amount,
     supplyingAssetForBorrow, supplyingAmount,
-    swapToAsset, swapToAmount, transferAmounts,
+    swapToAsset, swapToAmount, swapMode, swapEstimatedSide, transferAmounts,
   }
 
   return buildDisplaySteps(plan, ctx, getVault, getAssetLogoUrl, hasPermit2Approval.value)
@@ -158,11 +189,7 @@ const copyCalldata = () => {
       value: step.value?.toString() || '0',
     }))
 
-    navigator.clipboard.writeText(JSON.stringify(calldataEntries, null, 2))
-    copied.value = true
-    setTimeout(() => {
-      copied.value = false
-    }, 2000)
+    copyToClipboard(JSON.stringify(calldataEntries, null, 2), 'calldata')
   }
   catch (err) {
     logWarn('OperationReviewModal/calldataCopy', err)
@@ -221,13 +248,18 @@ const hasTenderlyFailedSimulation = computed(() => {
   return !!(tenderlyUrl.value && tenderlyError.value)
 })
 
-const permit2DisclaimerText = 'You are granting the permit2 contract unlimited access to your tokens. This is a safe, one-time setup — permit2 (by Uniswap) is a widely trusted and audited contract that replaces repeated approval transactions with gasless signatures. Each future transaction still requires your explicit signature, limited in both amount and duration.'
+const isSwapQuoteStale = computed(() => {
+  return typeof quoteFetchedAt === 'number'
+    && nowMs.value - quoteFetchedAt > staleQuoteThresholdMs
+})
+
+const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract used to authorize future transfers with signatures. Each future transfer still requires your explicit signature and can be limited by amount and duration.'
 </script>
 
 <template>
   <BaseModalWrapper
     title="Transaction review"
-    @close="$emit('close')"
+    @close="!internalSubmitting && $emit('close')"
   >
     <div class="flex flex-col gap-24">
       <!-- Transaction Steps -->
@@ -251,7 +283,7 @@ const permit2DisclaimerText = 'You are granting the permit2 contract unlimited a
           @click="copyCalldata"
         >
           <SvgIcon
-            name="copy"
+            :name="copied ? 'check' : 'copy'"
             class="!w-16 !h-16"
           />
           {{ copied ? 'Copied!' : 'Copy calldata' }}
@@ -281,13 +313,13 @@ const permit2DisclaimerText = 'You are granting the permit2 contract unlimited a
           v-else-if="tenderlyEnabled"
           type="button"
           class="flex items-center gap-6 text-p3 text-content-primary hover:text-content-primary transition-colors"
-          :disabled="isTenderlySimulating"
+          :disabled="isTenderlyPreparing"
           @click="handleTenderlySimulate"
         >
           <SvgIcon
-            :name="isTenderlySimulating ? 'loading' : 'arrow-top-right'"
+            :name="isTenderlyPreparing ? 'loading' : 'arrow-top-right'"
             class="!w-16 !h-16"
-            :class="{ 'animate-spin': isTenderlySimulating }"
+            :class="{ 'animate-spin': isTenderlyPreparing }"
           />
           Simulate on Tenderly
         </button>
@@ -300,7 +332,7 @@ const permit2DisclaimerText = 'You are granting the permit2 contract unlimited a
       </p>
 
       <!-- Tenderly error -->
-      <UiToast
+      <UiAlert
         v-if="tenderlyError && !hasTenderlyFailedSimulation"
         title="Simulation failed"
         variant="warning"
@@ -308,22 +340,40 @@ const permit2DisclaimerText = 'You are granting the permit2 contract unlimited a
         size="compact"
       />
 
+      <div
+        v-if="isSwapQuoteStale"
+        class="flex items-start gap-8 rounded-12 bg-warning-100 p-12 text-warning-500"
+      >
+        <SvgIcon
+          name="warning-circle"
+          class="!w-16 !h-16 shrink-0 mt-1"
+        />
+        <p class="text-p4">
+          This swap quote is more than 3 minutes old. Consider refreshing quotes with the
+          <SvgIcon
+            name="refresh"
+            class="inline-block !w-14 !h-14 align-[-2px]"
+          />
+          icon before submitting to get the best execution price.
+        </p>
+      </div>
+
       <!-- Disclaimers -->
-      <UiToast
+      <UiAlert
         v-if="type === 'reward'"
         title="Disclaimer"
         variant="warning"
         :description="disclaimerText"
         size="compact"
       />
-      <UiToast
+      <UiAlert
         v-if="type === 'reul-unlock'"
         title="Important"
         variant="warning"
         :description="reulUnlockDisclaimerText"
         size="compact"
       />
-      <UiToast
+      <UiAlert
         v-if="hasPermit2Approval"
         title="Infinite approval"
         variant="info"
@@ -336,8 +386,8 @@ const permit2DisclaimerText = 'You are granting the permit2 contract unlimited a
         variant="primary"
         size="xlarge"
         rounded
-        :disabled="isSpyMode || internalSubmitting"
-        :loading="internalSubmitting"
+        :disabled="isSpyMode || isReviewActionBlocked"
+        :loading="isReviewActionBlocked"
         @click="handleConfirm"
       >
         {{ isSpyMode ? 'Spy mode (read-only)' : (internalSubmitting && submittingLabel ? submittingLabel : btnLabel) }}

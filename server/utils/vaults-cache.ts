@@ -47,14 +47,10 @@ interface EulerChainEntry {
 interface EulerLabelProduct {
   vaults?: string[]
   deprecatedVaults?: string[]
-  /** If true, every vault in the product is excluded from the snapshot — mirrors isVaultNotExplorable on the client. */
-  notExplorable?: boolean
 }
 
 interface EarnVaultEntry {
   address: string
-  /** If true, the entry is excluded from the snapshot — mirrors isEarnVaultNotExplorable on the client. */
-  notExplorable?: boolean
 }
 
 const getChainConfig = async (chainId: number): Promise<EulerChainEntry | undefined> => {
@@ -69,7 +65,11 @@ const getChainConfig = async (chainId: number): Promise<EulerChainEntry | undefi
  *   - earnVaults: the earn-vaults.json list (array of addresses)
  *
  * Does NOT extract entities/points/descriptions — those are UI-only and the
- * loader doesn't care about them.
+ * loader doesn't care about them. The snapshot is the substrate for both the
+ * UI (which filters notExplorable at render time) and the public is-known /
+ * metadata endpoints (which need to surface every labelled vault), so this
+ * step does NOT honour notExplorable. Individual lens reverts (e.g. decommissioned
+ * vaults) are tolerated by fetchBatch's per-item retry path.
  */
 const getLabels = async (chainId: number) => {
   const [products, earn] = await Promise.all([
@@ -83,24 +83,18 @@ const getLabels = async (chainId: number) => {
     }).catch(() => [] as Array<string | EarnVaultEntry>),
   ])
 
-  // products.json shape: { [productKey]: { vaults: ["0x…"], deprecatedVaults: [...], notExplorable? } }
-  // Verified set = union of vaults + deprecatedVaults across all products, EXCEPT products
-  // flagged notExplorable (mirrors the client's explorableVaultAddresses filter in loadVaults).
-  // Skipping them matters because the lens calls `getVaultInfoFull` against every address
-  // in the list — notExplorable entries include decommissioned vaults whose lens calls revert.
   const verifiedSet = new Set<string>()
   for (const product of Object.values(products)) {
-    if (product.notExplorable === true) continue
     product.vaults?.forEach(addr => verifiedSet.add(addr))
     product.deprecatedVaults?.forEach(addr => verifiedSet.add(addr))
   }
 
-  // earn-vaults.json: array of { address, ... } entries, or (legacy) bare strings.
-  // Skip entries marked notExplorable (deprecated earn vaults whose lens calls would revert).
+  // Filter so downstream consumers (the loader, fetchEarnVaults) always get
+  // a string[] — a malformed entry whose `address` is missing or non-string
+  // would otherwise crash the lens batch.
   const earnVaults: string[] = earn.flatMap((entry) => {
     if (typeof entry === 'string') return [entry]
-    if (entry.notExplorable === true) return []
-    return [entry.address]
+    return typeof entry?.address === 'string' ? [entry.address] : []
   })
 
   return {
@@ -139,7 +133,7 @@ export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot>
     // Errors bubble up to callers (warm-cache plugin or /api/vaults handler),
     // both of which log with their own context. A middle-layer catch here
     // would double-log every failure.
-    const rpcUrl = process.env[`RPC_URL_HTTP_${chainId}`]
+    const rpcUrl = process.env[`RPC_URL_${chainId}`]
     if (!rpcUrl) throw new Error(`No RPC URL configured for chain ${chainId}`)
 
     const cfg = await getChainConfig(chainId)

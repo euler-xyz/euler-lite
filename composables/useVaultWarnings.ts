@@ -1,4 +1,4 @@
-import { getVaultUtilization, getSupplyCapPercentage, getBorrowCapPercentage, type Vault } from '~/entities/vault'
+import { getVaultUtilization, getSupplyCapPercentage, getBorrowCapPercentage, isCyclicalNoteVault, isEVKVault, type SecuritizeVault, type Vault } from '~/entities/vault'
 import {
   findBlockingDisabledOp,
   getOpMeta,
@@ -24,6 +24,7 @@ export interface VaultWarning {
   level: WarningLevel
   title: string
   message: string
+  tone?: 'success'
 }
 
 const UTILISATION_HIGH = 95
@@ -75,6 +76,11 @@ const utilisationMessages: Record<WarningContext, Record<'high' | 'critical', { 
   },
 }
 
+const targetUtilisationMessage = {
+  title: 'Target utilisation',
+  message: 'Cyclical Note markets are designed to run near full utilization. Withdrawal liquidity opens up at the end of each cycle, when borrowers are pushed to repay.',
+}
+
 const getUtilisationLevel = (utilisation: number): 'high' | 'critical' | null => {
   if (utilisation >= UTILISATION_CRITICAL) return 'critical'
   if (utilisation >= UTILISATION_HIGH) return 'high'
@@ -99,29 +105,43 @@ export const getUtilisationWarning = (
   const level = getUtilisationLevel(utilisation)
   if (!level) return null
 
+  if (context !== 'repay' && isCyclicalNoteVault(vault)) {
+    return { level: 'info', tone: 'success', ...targetUtilisationMessage }
+  }
+
   const { title, message } = utilisationMessages[context][level]
   return { level, title, message }
 }
 
-export const getSupplyCapWarning = (vault: Vault): VaultWarning | null => {
-  const percentage = getSupplyCapPercentage(vault)
+// Cap level only determines the message text, not the visual severity.
+// Reaching a cap means the vault is popular, not that something is wrong.
+const buildSupplyCapWarning = (noun: string, percentage: number): VaultWarning | null => {
   const level = getCapLevel(percentage)
   if (!level) return null
 
+  const Noun = noun[0].toUpperCase() + noun.slice(1)
   const title = percentage >= 100
-    ? 'Supply cap reached'
+    ? `${Noun} reached`
     : percentage >= CAP_CRITICAL
-      ? 'Supply cap nearly reached'
-      : 'Supply cap approaching limit'
+      ? `${Noun} nearly reached`
+      : `${Noun} approaching limit`
   const message = percentage >= 100
-    ? 'The supply cap has been reached. New deposits will fail.'
+    ? `The ${noun} has been reached. New deposits will fail.`
     : percentage >= CAP_CRITICAL
-      ? 'The supply cap is nearly reached. New deposits may be limited or fail.'
-      : 'The supply cap is approaching its limit. Available capacity for new deposits is limited.'
+      ? `The ${noun} is nearly reached. New deposits may be limited or fail.`
+      : `The ${noun} is approaching its limit. Available capacity for new deposits is limited.`
 
-  // Cap level only determines the message text, not the visual severity.
-  // Reaching a cap means the vault is popular, not that something is wrong.
   return { level: 'info', title, message }
+}
+
+export const getSupplyCapWarning = (vault: Vault): VaultWarning | null =>
+  buildSupplyCapWarning('supply cap', getSupplyCapPercentage(vault))
+
+export const getCollateralSupplyCapWarning = (
+  vault: Vault | SecuritizeVault,
+): VaultWarning | null => {
+  if (!isEVKVault(vault)) return null
+  return buildSupplyCapWarning('collateral supply cap', getSupplyCapPercentage(vault))
 }
 
 export const getIsSupplyCapReached = (vault: Vault): boolean => {

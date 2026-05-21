@@ -5,14 +5,16 @@ import { getSpecialAddressLabel } from '~/utils/special-addresses'
 
 const { vault } = defineProps<{ vault: Vault }>()
 
-const { borrowList } = useVaults()
 const { chainId } = useEulerAddresses()
+const { copyToClipboard, isCopied } = useClipboardCopy()
 
-const borrowCount = computed(() => {
-  return borrowList.value.filter(pair => pair.borrow.address === vault.address).length
-})
-
-const isBorrowable = computed(() => borrowCount.value > 0)
+// "Borrowable" = the vault has at least one collateral configured to allow
+// borrowing. Read from the vault's own LTV table rather than `borrowList`
+// membership so unverified (off-label) borrow vaults still surface their
+// debt-token / fee-receiver / oracle addresses.
+const isBorrowable = computed(() =>
+  vault.collateralLTVs.some(ltv => ltv.borrowLTV > 0n),
+)
 
 const vaultAddresesInfo = computed(() => {
   const baseAddresses = [
@@ -77,8 +79,8 @@ const shortenAddress = (address: string) => {
   return `${address.slice(0, 6)}...${address.slice(-4)}`
 }
 
-const onCopyClick = (address: string) => {
-  navigator.clipboard.writeText(address)
+const onCopyClick = (address: string, key = address) => {
+  copyToClipboard(address, key)
 }
 
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
@@ -119,11 +121,11 @@ const getExplorerAddressLink = (address: string) => getExplorerLink(address, cha
           </NuxtLink>
           <button
             class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary"
-            @click="onCopyClick(infoItem.address)"
+            @click="onCopyClick(infoItem.address, infoItem.title)"
           >
             <SvgIcon
               class="!w-18 !h-18"
-              name="copy"
+              :name="isCopied(infoItem.title) ? 'check' : 'copy'"
             />
           </button>
         </div>

@@ -2,7 +2,7 @@ import { createError, getQuery } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
-import { logWarn } from '~/server/utils/log'
+import { logger } from '~/server/utils/logger'
 
 const CACHE_TTL_MS = 300_000
 
@@ -54,7 +54,7 @@ export default defineEventHandler(async (event) => {
     return data
   }
   catch (err) {
-    logWarn('oracle-adapters', `Failed to fetch all.json for chain ${chainId}:`, err instanceof Error ? err.message : err)
+    logger.warn({ ctx: 'oracle-adapters', chainId, err }, 'fetch all.json failed')
 
     const stale = cache.getStale(key)
     if (stale !== undefined) return stale

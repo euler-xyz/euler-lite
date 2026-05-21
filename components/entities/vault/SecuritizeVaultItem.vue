@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import type { Vault, SecuritizeVault } from '~/entities/vault'
 import { formatAssetValue } from '~/services/pricing/priceProvider'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
@@ -7,11 +6,10 @@ import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/u
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 
-const { isConnected } = useAccount()
+const { isConnected } = useWagmi()
 const { vault } = defineProps<{ vault: SecuritizeVault }>()
 
 const vaultAddress = computed(() => vault.address)
@@ -38,7 +36,6 @@ const displayName = computed(() => product.name || vault.name)
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
 
 const { getBalance, isLoading: isBalancesLoading } = useWallets()
-const modal = useModal()
 const { withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 
@@ -57,18 +54,14 @@ const supplyApyWithRewards = computed(
   () => supplyApy.value + totalRewardsAPY.value,
 )
 
-const onSupplyInfoIconClick = (event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY: lendingAPY.value,
-      intrinsicAPY: getIntrinsicApy(vault.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
-      campaigns: getSupplyRewardCampaigns(vault.address),
-    },
-  })
-}
+const supplyApyModalData = computed(() => ({
+  props: {
+    lendingAPY: lendingAPY.value,
+    intrinsicAPY: getIntrinsicApy(vault.asset.address),
+    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    campaigns: getSupplyRewardCampaigns(vault.address),
+  },
+}))
 
 const statsGridCols = computed(() => {
   const cols: string[] = []
@@ -114,17 +107,7 @@ watchEffect(async () => {
             :is-unverified="isUnverified"
           />
           <GovernanceLimitedBadge v-if="isGovernanceLimited" />
-          <span
-            v-if="isGeoBlocked"
-            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-            title="This vault is not available in your region"
-          >
-            <SvgIcon
-              name="warning"
-              class="!w-14 !h-14"
-            />
-            Restricted
-          </span>
+          <RestrictedBadge v-if="isGeoBlocked" />
         </div>
         <div class="text-h5 text-content-primary">
           {{ vault.asset.symbol }}
@@ -133,19 +116,30 @@ watchEffect(async () => {
       <div class="flex flex-col items-end">
         <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
           Supply APY
-          <SvgIcon
-            class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-            name="info-circle"
-            @click="onSupplyInfoIconClick"
-          />
+          <UiModalPreviewTrigger
+            :component="VaultSupplyApyModal"
+            :modal-data="supplyApyModalData"
+            aria-label="Show supply APY breakdown"
+          >
+            <SvgIcon
+              class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+              name="info-circle"
+            />
+          </UiModalPreviewTrigger>
         </div>
         <div class="flex items-center">
           <div class="text-p2 flex items-center text-accent-600 font-semibold">
-            <SvgIcon
+            <UiModalPreviewTrigger
               v-if="hasRewards"
-              class="!w-20 !h-20 text-accent-500 mr-4"
-              name="sparks"
-            />
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY rewards breakdown"
+            >
+              <SvgIcon
+                class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
+                name="sparks"
+              />
+            </UiModalPreviewTrigger>
             {{ formatNumber(supplyApyWithRewards) }}%
           </div>
         </div>

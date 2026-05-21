@@ -2,6 +2,7 @@
 import AssetInput from '~/components/entities/asset/AssetInput.vue'
 import type { VaultAsset } from '~/entities/vault'
 import { useModal } from '~/components/ui/composables/useModal'
+import type { ToastVariant } from '~/components/ui/toast.types'
 import { AcknowledgeTermsModal } from '#components'
 
 const radioModel = ref('radio-test-1')
@@ -11,6 +12,7 @@ const switchModel = ref(false)
 const inputModel = ref('')
 const inputWithValueModel = ref('Example value')
 const inputErrorModel = ref('Error value')
+const alertVariants: ToastVariant[] = ['success', 'info', 'warning', 'error', 'neutral']
 const asset: VaultAsset = {
   name: 'Mock TON',
   decimals: 18n,
@@ -28,6 +30,35 @@ const openLegalModal = () => {
   <section>
     <div>
       <div class="p-16">
+        <h3 class="text-h3 mb-16">
+          Alert Variations
+        </h3>
+
+        <div class="grid grid-cols-2 gap-12 mb-32 mobile:grid-cols-1">
+          <div
+            v-for="variant in alertVariants"
+            :key="`normal-${variant}`"
+            class="flex flex-col gap-8"
+          >
+            <UiAlert
+              :variant="variant"
+              title="Link copied"
+              description="The share URL is ready to paste."
+            />
+            <UiAlert
+              :variant="variant"
+              title="Compact toast"
+              size="compact"
+            />
+            <UiAlert
+              :variant="variant"
+              title="Action available"
+              description="Review the transaction details before continuing."
+              action-text="Review"
+            />
+          </div>
+        </div>
+
         <h3 class="text-h3 mb-16">
           Input Components
         </h3>

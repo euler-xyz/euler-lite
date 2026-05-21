@@ -6,6 +6,7 @@ import { collectOracleAdapters, getChecksStatus, OracleAdapterCheckSeverity, typ
 import { getOracleProviderLogo } from '~/entities/oracle-providers'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { formatNumber } from '~/utils/string-utils'
+import { shouldInvertOraclePrice } from '~/utils/oracle-label'
 import { useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
 
 const props = defineProps<{
@@ -16,6 +17,7 @@ const props = defineProps<{
 const { oracleAdapters, loadOracleAdapter } = useEulerLabels()
 const { chainId } = useEulerAddresses()
 const { buildKnownSymbols, resolveSymbol: resolveTokenSymbol, shortenAddress } = useTokenSymbolResolver()
+const { copyToClipboard, isCopied } = useClipboardCopy()
 
 const sourceVaults = computed(() => {
   if (props.vaults?.length) {
@@ -93,6 +95,12 @@ const adapterViews = computed(() => adapters.value.map((adapter) => {
   const provider = meta?.provider || adapter.name
   const name = meta?.name || adapter.name
   const checks = meta?.checks
+  const invertPrice = shouldInvertOraclePrice({
+    metaBase: meta?.base,
+    metaQuote: meta?.quote,
+    callerBase: adapter.base,
+    callerQuote: adapter.quote,
+  })
 
   return {
     ...adapter,
@@ -101,8 +109,12 @@ const adapterViews = computed(() => adapters.value.map((adapter) => {
     methodology: meta?.methodology || (isERC4626 ? 'Exchange Rate' : undefined),
     logo: getOracleProviderLogo(provider, name),
     label: meta?.label
-      ? { primary: meta.label.split('(')[0].trimEnd(), suffix: meta.label.includes('(') ? meta.label.slice(meta.label.indexOf('(')).trim() : undefined }
+      ? {
+          primary: meta.label.split('(')[0].trimEnd(),
+          suffix: meta.label.includes('(') ? meta.label.slice(meta.label.indexOf('(')).trim() : undefined,
+        }
       : undefined,
+    invertPrice,
     checks,
     checksStatus: getChecksStatus(checks),
     failedChecks: checks?.filter(c => !c.pass) ?? [],
@@ -125,8 +137,8 @@ watch(
 
 const resolveSymbol = (address: string) => resolveTokenSymbol(address, knownSymbols.value)
 
-const onCopyClick = (address: string) => {
-  navigator.clipboard.writeText(address)
+const onCopyClick = (address: string, key = address) => {
+  copyToClipboard(address, key)
 }
 
 const getAdapterKey = (adapter: OracleAdapterEntry) => `${adapter.oracle.toLowerCase()}:${adapter.base.toLowerCase()}:${adapter.quote.toLowerCase()}`
@@ -144,11 +156,12 @@ const isAdapterPriceFailed = (adapter: OracleAdapterEntry) => {
   return !info?.success
 }
 
-const formatAdapterPrice = (adapter: OracleAdapterEntry) => {
+const formatAdapterPrice = (adapter: OracleAdapterEntry & { invertPrice: boolean }) => {
   const key = getAdapterKey(adapter)
   const info = adapterPrices.value.get(key)
   if (!info?.success) return '-'
-  return formatNumber(info.rate, 4)
+  const rate = adapter.invertPrice && info.rate > 0 ? 1 / info.rate : info.rate
+  return formatNumber(rate, 4)
 }
 
 const hoveredChecksAdapter = ref<(typeof adapterViews.value)[0] | null>(null)
@@ -340,11 +353,11 @@ const onTooltipMouseLeave = () => {
               :class="$style.copyBtn"
               class="text-content-muted"
               aria-label="Copy address"
-              @click="onCopyClick(adapter.oracle)"
+              @click="onCopyClick(adapter.oracle, getAdapterKey(adapter))"
             >
               <SvgIcon
                 class="!w-18 !h-18"
-                name="copy"
+                :name="isCopied(getAdapterKey(adapter)) ? 'check' : 'copy'"
               />
             </button>
           </div>

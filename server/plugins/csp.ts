@@ -64,9 +64,9 @@ function scanDynamicEnvUrls(): string[] {
   const urls: string[] = []
   for (const [key, value] of Object.entries(process.env)) {
     if (!value) continue
-    // RPC_URL_HTTP_<chainId> — wagmi uses these directly on the client
+    // RPC_URL_<chainId> — wagmi uses these directly on the client
     // NUXT_PUBLIC_SUBGRAPH_URI_<chainId> — client-side GraphQL queries
-    if (/^RPC_URL_HTTP_\d+$/.test(key) || /^NUXT_PUBLIC_SUBGRAPH_URI_\d+$/.test(key)) {
+    if (/^RPC_URL_\d+$/.test(key) || /^NUXT_PUBLIC_SUBGRAPH_URI_\d+$/.test(key)) {
       urls.push(value)
     }
   }
@@ -82,7 +82,7 @@ function scanDynamicEnvUrls(): string[] {
 function parseChainPublicRpcOrigins(): string[] {
   const origins = new Set<string>()
   for (const [key, value] of Object.entries(process.env)) {
-    const match = key.match(/^RPC_URL_HTTP_(\d+)$/)
+    const match = key.match(/^RPC_URL_(\d+)$/)
     // Require a non-empty value so empty placeholder env vars don't widen
     // connect-src for chains that chain-config.ts correctly treats as disabled.
     if (!match || !value) continue
@@ -103,7 +103,6 @@ function parseEnvOrigins(): { connect: string[] } {
   const connectVars = [
     env('EULER_API_URL', 'NUXT_PUBLIC_EULER_API_URL'),
     env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL'),
-    env('PRICE_API_URL', 'NUXT_PUBLIC_PRICE_API_URL'),
     // Pyth Hermes is proxied through /api/pyth/updates — no external origin needed
     // Dynamic per-chain URLs (RPC for wagmi, subgraph for GraphQL)
     ...scanDynamicEnvUrls(),
@@ -142,6 +141,9 @@ const CONNECT_SRC_BASE = [
   'https://cca-lite.coinbase.com',
   // External data APIs
   'https://api.fuul.xyz',
+  // CoW Protocol orderbook
+  'https://barn.api.cow.fi',
+  'https://api.cow.fi',
   // Reown AppKit SDK version check
   'https://registry.npmjs.org',
   // RPC providers (wildcard — operators configure per chain)

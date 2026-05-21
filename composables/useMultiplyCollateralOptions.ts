@@ -78,13 +78,13 @@ export const useMultiplyCollateralOptions = ({
     )
     return depositPositions.value
       .filter(position => position.assets > 0n && validCollaterals.has(getAddress(position.vault.address)))
-      .map(position => ({ vault: position.vault as Vault, assets: position.assets }))
+      .map(position => ({ vault: position.vault as Vault, assets: position.assets, subAccount: position.subAccount }))
   })
 
   const savingItems = useReactiveMap(
     savingItemsInput,
     [rewardsVersion, intrinsicVersion],
-    async ({ vault, assets }) => ({
+    async ({ vault, assets, subAccount }) => ({
       vault,
       option: await buildCollateralOption({
         vault, type: 'saving',
@@ -92,6 +92,7 @@ export const useMultiplyCollateralOptions = ({
         priceAmount: nanoToValue(assets, vault.asset.decimals),
         apy: computeSupplyApy(vault, withIntrinsicSupplyApy, getSupplyRewardApy),
         tagContext: 'supply-source',
+        subAccount,
       }),
     } as CollateralItem),
   )

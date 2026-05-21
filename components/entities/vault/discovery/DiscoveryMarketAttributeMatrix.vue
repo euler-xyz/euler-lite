@@ -5,18 +5,18 @@ import {
   type AttributeMatrixColumn,
   type AttributeRow,
   type VaultUsdCacheEntry,
+  type VaultApyCacheEntry,
   buildAttributeRowCells,
-  getAttributeRowColor,
   isVaultType,
 } from '~/utils/discoveryCalculations'
 import { getEntitiesByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
-import { useModal } from '~/components/ui/composables/useModal'
 import { VaultHooksInfoModal } from '#components'
 
 const props = defineProps<{
   data: AttributeMatrixData
   usdCache: Map<string, VaultUsdCacheEntry>
+  apyCache: Map<string, VaultApyCacheEntry>
   selectedHeader: { address: string, axis: 'row' | 'column' } | null
 }>()
 
@@ -24,43 +24,29 @@ defineEmits<{
   selectHeader: [address: string, axis: 'row' | 'column']
 }>()
 
-const modal = useModal()
+const { isVaultGovernorVerified } = useVaults()
 
 // Each AttributeRow renders as a *table column*; each vault renders as a *table row*.
-// We pre-compute one entry per attribute with the per-attribute cells (one per vault)
-// and the min/max range needed for the heatmap.
 interface AttributeColumn {
   attribute: AttributeRow
   cells: AttributeCell[] // index aligned to data.columns (vaults)
-  min: number
-  max: number
 }
 
 const attributeColumns = computed<AttributeColumn[]>(() =>
-  props.data.rows.map((attribute) => {
-    const cells = buildAttributeRowCells(attribute, props.data.columns, props.usdCache)
-    let min = Infinity
-    let max = -Infinity
-    for (const c of cells) {
-      if (c.numeric === undefined || !Number.isFinite(c.numeric)) continue
-      if (c.numeric < min) min = c.numeric
-      if (c.numeric > max) max = c.numeric
-    }
-    if (!Number.isFinite(min)) {
-      min = 0
-      max = 0
-    }
-    return { attribute, cells, min, max }
-  }),
+  props.data.rows.map(attribute => ({
+    attribute,
+    cells: buildAttributeRowCells(attribute, props.data.columns, props.usdCache, props.apyCache),
+  })),
 )
 
-const cellBgColor = (column: AttributeColumn, cell: AttributeCell): string =>
-  getAttributeRowColor(cell.numeric, column.min, column.max, column.attribute.direction)
+const getHooksModalData = (vault: AttributeMatrixColumn) => ({
+  props: {
+    vault: vault.vault,
+  },
+})
 
-const onHooksClick = (vault: AttributeMatrixColumn) => {
-  if (!isVaultType(vault.vault)) return
-  modal.open(VaultHooksInfoModal, { props: { vault: vault.vault } })
-}
+const canShowHooksModal = (vault: AttributeMatrixColumn, cell: AttributeCell) =>
+  cell.hookable && isVaultType(vault.vault)
 
 const entitiesFor = (vault: AttributeMatrixColumn) => getEntitiesByVault(vault.vault)
 
@@ -114,8 +100,10 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
                   && selectedHeader?.axis === 'row'
                   ? 'text-accent-500 !bg-accent-500/10'
                   : isVaultRowHighlighted(vault.address)
-                    ? 'text-content-primary !bg-white/[0.06]'
-                    : 'text-content-primary hover:bg-white/[0.04]'
+                    ? (vault.isExternal ? 'text-content-tertiary !bg-white/[0.06]' : 'text-content-primary !bg-white/[0.06]')
+                    : (vault.isExternal
+                      ? 'text-content-tertiary hover:bg-white/[0.04]'
+                      : 'text-content-primary hover:bg-white/[0.04]')
               "
               @click.stop="$emit('selectHeader', vault.address, 'row')"
             >
@@ -133,7 +121,6 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
               :key="col.attribute.id"
               class="text-center py-6 px-8 min-w-[80px] transition-colors border-b border-r border-white/[0.04]"
               :class="(isVaultRowHighlighted(vault.address) || isAttributeColumnHighlighted(col.attribute.id)) ? '!bg-white/[0.06]' : ''"
-              :style="{ backgroundColor: cellBgColor(col, col.cells[vaultIdx]) }"
               @mouseenter="hoveredCell = { vaultAddr: vault.address, attributeId: col.attribute.id }"
               @mouseleave="hoveredCell = null"
             >
@@ -153,9 +140,19 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
                 </div>
               </template>
 
-              <!-- governor: entity logos + names, or unknown chip -->
+              <!-- governor: same precedence as VaultOverviewBlockGeneral —
+                   unverified governor wins ("Unknown"), then entities, else
+                   "—". Escrow vaults pass `isVaultGovernorVerified` and have
+                   no labeled entities, so they fall through to "—". -->
               <template v-else-if="col.cells[vaultIdx].kind === 'governor'">
-                <template v-if="entitiesFor(vault).length">
+                <template v-if="!isVaultGovernorVerified(vault.vault)">
+                  <VaultTypeChip
+                    :vault="vault.vault"
+                    type="unknown"
+                    class="inline-flex !py-2 !px-6 !text-p5"
+                  />
+                </template>
+                <template v-else-if="entitiesFor(vault).length">
                   <div class="inline-flex items-center justify-center gap-6 flex-wrap">
                     <div
                       v-for="(entity, idx) in entitiesFor(vault)"
@@ -172,28 +169,26 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
                   </div>
                 </template>
                 <template v-else>
-                  <VaultTypeChip
-                    :vault="vault.vault"
-                    type="unknown"
-                    class="inline-flex !py-2 !px-6 !text-p5"
-                  />
+                  <span class="text-p5 text-content-secondary whitespace-nowrap">—</span>
                 </template>
               </template>
 
               <!-- hooks: text + optional clickable info icon -->
               <template v-else-if="col.cells[vaultIdx].kind === 'hooks'">
-                <button
-                  v-if="col.cells[vaultIdx].hookable"
-                  type="button"
-                  class="inline-flex items-center justify-center gap-4 text-p5 text-content-primary hover:text-accent-500 cursor-pointer transition-colors"
-                  @click.stop="onHooksClick(vault)"
+                <UiModalPreviewTrigger
+                  v-if="canShowHooksModal(vault, col.cells[vaultIdx])"
+                  :component="VaultHooksInfoModal"
+                  :modal-data="() => getHooksModalData(vault)"
+                  aria-label="Show hooked operations details"
                 >
-                  <span>{{ col.cells[vaultIdx].display }}</span>
-                  <SvgIcon
-                    name="info-circle"
-                    class="!w-12 !h-12 shrink-0"
-                  />
-                </button>
+                  <span class="inline-flex items-center justify-center gap-4 text-p5 text-content-primary hover:text-accent-500 cursor-pointer transition-colors">
+                    <span>{{ col.cells[vaultIdx].display }}</span>
+                    <SvgIcon
+                      name="info-circle"
+                      class="!w-12 !h-12 shrink-0"
+                    />
+                  </span>
+                </UiModalPreviewTrigger>
                 <span
                   v-else
                   class="text-p5 text-content-secondary"

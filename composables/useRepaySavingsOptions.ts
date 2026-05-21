@@ -7,11 +7,24 @@ import type { Vault } from '~/entities/vault'
 import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useReactiveMap } from '~/composables/useReactiveMap'
+import { computeSupplyApy } from '~/utils/collateralOptions'
 
 /**
  * Provides eligible savings positions that can be used to repay debt.
- * Only includes standard EVK vaults — Earn vaults have an incompatible ABI
- * and Securitize vaults have restricted withdrawals.
+ * Only includes standard EVK vaults.
+ *
+ * Earn vaults are excluded: they expose a MetaMorpho-style ABI that doesn't
+ * line up with the EVK withdraw/skim/repayWithShares dance the repay plans
+ * rely on.
+ *
+ * Securitize vaults are excluded because the repay plan would call
+ * `savingsVault.withdraw(amount, borrowVault, ...)` — pushing the underlying
+ * ERC-20 directly into the borrow vault. Securitize underlyings (tokenized
+ * RWAs) are themselves permissioned tokens whose transfer reverts unless the
+ * recipient is on a whitelist. The borrow vault isn't on that whitelist, so
+ * the withdraw step would revert at the ERC-20 transfer. It is not the
+ * missing `skim` that blocks this path — `skim` is called on the borrow
+ * vault (always EVK), not on the savings side.
  */
 export const useRepaySavingsOptions = () => {
   const { depositPositions } = useEulerAccount()
@@ -39,12 +52,11 @@ export const useRepaySavingsOptions = () => {
     savingsPositions,
     [rewardsVersion, intrinsicVersion],
     async (position) => {
-      const vault = position.vault
+      const vault = position.vault as Vault
       const amount = nanoToValue(position.assets, vault.asset.decimals)
-      const baseApy = nanoToValue(vault.interestRateInfo.supplyAPY || 0n, 25)
-      const apy = withIntrinsicSupplyApy(baseApy, vault.asset.address) + getSupplyRewardApy(vault.address)
+      const apy = computeSupplyApy(vault, withIntrinsicSupplyApy, getSupplyRewardApy)
       return {
-        type: 'vault' as const,
+        type: 'saving' as const,
         amount,
         price: await getAssetUsdValueOrZero(amount, vault, 'off-chain'),
         apy,
@@ -52,15 +64,24 @@ export const useRepaySavingsOptions = () => {
         assetAddress: vault.asset.address,
         label: getVaultProductName(vault.address) || vault.name,
         vaultAddress: vault.address,
+        subAccount: position.subAccount,
       }
     },
   )
 
-  const getSavingsPosition = (vaultAddress: string): AccountDepositPosition | undefined => {
-    const normalized = getAddress(vaultAddress)
-    return savingsPositions.value.find(
-      position => getAddress(position.vault.address) === normalized,
+  // When a sub-account is explicitly requested, require an exact match instead
+  // of falling back to the first matching vault — silently picking a different
+  // sub-account would route a repay against the wrong position.
+  const getSavingsPosition = (vaultAddress: string, subAccount?: string): AccountDepositPosition | undefined => {
+    const normalizedVault = getAddress(vaultAddress)
+    const matches = savingsPositions.value.filter(
+      position => getAddress(position.vault.address) === normalizedVault,
     )
+    if (subAccount) {
+      const normalizedSub = getAddress(subAccount)
+      return matches.find(p => getAddress(p.subAccount) === normalizedSub)
+    }
+    return matches[0]
   }
 
   return {

@@ -13,7 +13,24 @@ export const points = shallowReactive<Record<string, EulerLabelPointReward[]>>({
 export const earnVaults: Ref<string[]> = ref([]) // string of earn vault addresses
 export const earnVaultBlocks = shallowReactive<Record<string, string[]>>({}) // address (lowercase) -> blocked country codes
 export const earnVaultRestrictions = shallowReactive<Record<string, string[]>>({}) // address (lowercase) -> restricted country codes
-export const featuredEarnVaults: Set<string> = shallowReactive(new Set())
+export const assetBlocks = shallowReactive<Record<string, string[]>>({}) // asset address (lowercase) -> blocked country codes
+export const assetRestrictions = shallowReactive<Record<string, string[]>>({}) // asset address (lowercase) -> restricted country codes
+
+/**
+ * Compiled pattern rule derived from `EulerLabelAssetEntry` pattern fields.
+ * `symbolsLower` / `namesLower` are pre-lowercased sets; regex fields are
+ * pre-compiled with the `i` flag. Match is OR across populated fields.
+ */
+export type CompiledPatternRule = {
+  symbolsLower?: Set<string>
+  symbolRegex?: RegExp
+  namesLower?: Set<string>
+  nameRegex?: RegExp
+  block?: string[]
+  restricted?: string[]
+}
+export const assetPatternRules = shallowReactive<CompiledPatternRule[]>([])
+export const recentlyAddedEarnVaults: Set<string> = shallowReactive(new Set())
 export const deprecatedEarnVaults = shallowReactive<Record<string, string>>({}) // address (lowercase) -> deprecation reason
 export const earnVaultDescriptions = shallowReactive<Record<string, string>>({}) // address (lowercase) -> description
 export const earnVaultNotices = shallowReactive<Record<string, string>>({}) // address (lowercase) -> notice
@@ -30,3 +47,11 @@ export const loadingAdapters = new Set<string>()
 // concurrent callers share a request.
 export const bulkLoadedAdapterChains = new Map<number, number>()
 export const pendingBulkAdapterLoads = new Map<number, Promise<void>>()
+
+// Wrapper-asset address (lowercase) -> underlying ERC-4626 asset() address (lowercase).
+// Populated by the labels loader once per reload cycle by probing every
+// soft-restricted vault asset for an ERC-4626 underlying. Used by
+// `isAssetRestrictedByCountry`'s counterpart bypass: a soft-restricted output
+// is allowed when the operation is a technical wrap/unwrap rather than a new
+// acquisition of the restricted asset.
+export const wrapPairs = shallowReactive<Record<string, string>>({})
