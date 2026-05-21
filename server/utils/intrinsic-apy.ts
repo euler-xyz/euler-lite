@@ -15,7 +15,7 @@ import { intrinsicApySources } from '~/entities/custom'
 import { STABLEWATCH_SOURCE_URL } from '~/entities/constants'
 import type { IntrinsicApyInfo } from '~/entities/intrinsic-apy'
 import { createTtlCache } from '~/server/utils/cache'
-import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
+import { UPSTREAM_FETCH_TIMEOUT_MS, fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { createInFlightDedup, scheduleBackgroundRefresh } from '~/server/utils/in-flight'
 import { reportStatus } from '~/server/utils/log'
 import { logger } from '~/server/utils/logger'
@@ -41,6 +41,12 @@ const UPSTREAM_URLS = {
   accountable: 'https://yield.accountable.capital/api/loan/address',
   coinshift: 'https://uspc-nav.coinshift.xyz/api/nav/returns',
   yuzuDashboard: 'https://yuzu-accountable.yuzu.money/v1/dashboard',
+  hyperbeat: 'https://api.hyperbeat.org/api/v1/staking?address=0xCeaD893b162D38e714D82d06a7fe0b0dc3c38E0b',
+  kinetiq: 'https://api-v2.pendle.finance/core/v2/999/markets/0x31104779b2a07a273d6c662419377773083d0b2e/data',
+  lhype: 'https://app.loopingcollective.org/api/external/asset/lhype',
+  lsthype: 'https://api.hyperbeat.org/api/v1/vaults/apy/0x81e064d0eB539de7c3170EDF38C1A42CBd752A76',
+  noon: 'https://back.noon.capital/api/v1/protocol-metrics',
+  stakedHypefi: 'https://index.stakedhype.fi/graphql',
 } as const
 
 const PENDLE_API_BASE = 'https://api-v2.pendle.finance/core/v2'
@@ -48,8 +54,8 @@ const PENDLE_API_BASE = 'https://api-v2.pendle.finance/core/v2'
 const cache = createTtlCache<unknown>({ ttlMs: CACHE_TTL_MS, maxEntries: 200 })
 const upstreamInFlight = createInFlightDedup<string, unknown>()
 
-async function fetchJson(url: string): Promise<unknown> {
-  const resp = await fetchWithTimeout(url)
+async function fetchJson(url: string, init?: RequestInit): Promise<unknown> {
+  const resp = await fetchWithTimeout(url, UPSTREAM_FETCH_TIMEOUT_MS, init)
   if (!resp.ok) {
     // Strip query params to avoid leaking API keys (e.g. Stablewatch) into logs
     const safeUrl = url.split('?')[0]
@@ -76,11 +82,11 @@ async function fetchJson(url: string): Promise<unknown> {
  * chains hitting a shared upstream like defillama) collapse onto one
  * network round-trip.
  */
-function fetchUpstream<T = unknown>(key: string, url: string): Promise<T> {
+function fetchUpstream<T = unknown>(key: string, url: string, init?: RequestInit): Promise<T> {
   const fresh = cache.get(key)
   if (fresh !== undefined) return Promise.resolve(fresh as T)
 
-  return upstreamInFlight.run(key, () => fetchJson(url)
+  return upstreamInFlight.run(key, () => fetchJson(url, init)
     .then((data) => {
       cache.set(key, data)
       reportStatus('intrinsic-apy', `upstream:${key}`, 'ok')
@@ -455,6 +461,60 @@ async function extractYo(sources: YoSource[]): Promise<Array<[string, IntrinsicA
   return out
 }
 
+type ProviderAddressSource<P extends IntrinsicApySourceConfig['provider']> = {
+  provider: P
+  address: string
+  chainId: number
+}
+
+type ValantisSource = ProviderAddressSource<'valantis'>
+type StakedHypefiResponse = { data?: { statsAtRebases?: { apr?: string | number } } }
+
+export function extractStakedHypefiApy(data: StakedHypefiResponse): number {
+  return Number(data.data?.statsAtRebases?.apr ?? 0)
+}
+
+async function extractValantis(sources: ValantisSource[]): Promise<Array<[string, IntrinsicApyInfo]>> {
+  const data = await fetchUpstream<StakedHypefiResponse>('staked-hypefi', UPSTREAM_URLS.stakedHypefi, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: '{ statsAtRebases { apr } }' }),
+  })
+  const apy = extractStakedHypefiApy(data)
+  if (!Number.isFinite(apy) || apy <= 0) return []
+  return sources.map(s => [normalize(s.address), {
+    apy,
+    provider: 'VALANTIS',
+    source: UPSTREAM_URLS.stakedHypefi,
+  }])
+}
+
+type HyperbeatStakingResponse = {
+  data?: {
+    delegations?: Array<{
+      apr?: string | number
+      amount?: string | number
+      status?: string
+    }>
+  }
+}
+
+export function extractHyperbeatWeightedApr(data: HyperbeatStakingResponse): number {
+  let totalWeightedApr = 0
+  let totalAmount = 0
+
+  for (const delegation of data.data?.delegations ?? []) {
+    if (delegation.status !== 'active') continue
+    const amount = Number(delegation.amount ?? 0)
+    const apr = Number(delegation.apr ?? 0)
+    if (!Number.isFinite(amount) || !Number.isFinite(apr)) continue
+    totalWeightedApr += apr * amount
+    totalAmount += amount
+  }
+
+  return totalAmount > 0 ? totalWeightedApr / totalAmount : 0
+}
+
 /**
  * "Simple" providers share the shape: one static upstream URL, one scalar
  * APY extracted from the response, applied uniformly to every source in
@@ -491,7 +551,7 @@ async function extractSimple<S extends IntrinsicApySourceConfig, T>(
 }
 
 // Providers with dedicated extractors in the switch below.
-type ExplicitProvider = 'defillama' | 'pendle' | 'securitize' | 'stablewatch' | 'renzo' | 'midas' | 'yo' | 'infinifi' | 'accountable' | 'coinshift' | 'yuzu-dashboard'
+type ExplicitProvider = 'defillama' | 'pendle' | 'securitize' | 'stablewatch' | 'renzo' | 'midas' | 'yo' | 'infinifi' | 'accountable' | 'coinshift' | 'yuzu-dashboard' | 'valantis'
 // Every remaining provider must have an entry in SIMPLE_SPECS — enforced at the type level.
 type SimpleProvider = Exclude<IntrinsicApySourceConfig['provider'], ExplicitProvider>
 
@@ -542,6 +602,38 @@ const SIMPLE_SPECS = {
     sourceUrl: 'https://avantprotocol.com',
     extract: (d: { savusdApy?: number }) => Number(d.savusdApy ?? 0),
   },
+  hyperbeat: {
+    key: 'hyperbeat',
+    name: 'HYPERBEAT',
+    sourceUrl: UPSTREAM_URLS.hyperbeat,
+    extract: extractHyperbeatWeightedApr,
+  },
+  kinetiq: {
+    key: 'kinetiq',
+    name: 'KINETIQ',
+    sourceUrl: UPSTREAM_URLS.kinetiq,
+    extract: (d: { underlyingApy?: string | number }) => Number(d.underlyingApy ?? 0) * 100,
+  },
+  lhype: {
+    key: 'lhype',
+    name: 'LHYPE',
+    sourceUrl: UPSTREAM_URLS.lhype,
+    extract: (d: { result?: { reward_rate?: string | number }, success?: boolean }) =>
+      d.success === false ? 0 : Number(d.result?.reward_rate ?? 0),
+  },
+  lsthype: {
+    key: 'lsthype',
+    name: 'LSTHYPE',
+    sourceUrl: UPSTREAM_URLS.lsthype,
+    extract: (d: { success?: boolean, current_apy?: { apy_7d?: string | number } }) =>
+      d.success === false ? 0 : Number(d.current_apy?.apy_7d ?? 0),
+  },
+  noon: {
+    key: 'noon',
+    name: 'NOON',
+    sourceUrl: UPSTREAM_URLS.noon,
+    extract: (d: { apy?: string | number }) => Number(d.apy ?? 0),
+  },
 } satisfies Record<SimpleProvider, SimpleProviderSpecShape>
 
 async function extractForProvider(
@@ -560,6 +652,7 @@ async function extractForProvider(
     case 'accountable': return extractAccountable(sources as AccountableSource[])
     case 'coinshift': return extractCoinshift(sources as CoinshiftSource[])
     case 'yuzu-dashboard': return extractYuzuDashboard(sources as YuzuDashboardSource[])
+    case 'valantis': return extractValantis(sources as ValantisSource[])
     default: {
       const simpleProvider: SimpleProvider = provider
       const spec = SIMPLE_SPECS[simpleProvider]

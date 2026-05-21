@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { extractLatestYuzuApy } from '~/server/utils/intrinsic-apy'
+import {
+  extractHyperbeatWeightedApr,
+  extractLatestYuzuApy,
+  extractStakedHypefiApy,
+} from '~/server/utils/intrinsic-apy'
 
 describe('extractLatestYuzuApy', () => {
   it('uses the configured APY field from the latest date', () => {
@@ -29,5 +33,29 @@ describe('extractLatestYuzuApy', () => {
     ]
 
     expect(extractLatestYuzuApy(rows, 'yzprime_apy_7d')).toBeNull()
+  })
+})
+
+describe('HyperEVM intrinsic APY helpers', () => {
+  it('uses only active Hyperbeat delegations when computing weighted APR', () => {
+    expect(extractHyperbeatWeightedApr({
+      data: {
+        delegations: [
+          { status: 'active', apr: 2, amount: '100' },
+          { status: 'active', apr: 5, amount: '300' },
+          { status: 'inactive', apr: 99, amount: '900' },
+        ],
+      },
+    })).toBe(4.25)
+  })
+
+  it('reads stakedhype.fi APR from the GraphQL response shape', () => {
+    expect(extractStakedHypefiApy({
+      data: {
+        statsAtRebases: {
+          apr: 2.18,
+        },
+      },
+    })).toBe(2.18)
   })
 })

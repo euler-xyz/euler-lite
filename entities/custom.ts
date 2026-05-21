@@ -21,8 +21,22 @@ export type IntrinsicApySourceConfig
     | { provider: 'accountable', address: string, chainId: number, loanAddress: string }
     | { provider: 'coinshift', address: string, chainId: number, period: '7d' | '30d' | '90d' }
     | { provider: 'yuzu-dashboard', address: string, chainId: number, yuzuApyField: 'yzprime_apy_1d' | 'yzprime_apy_7d' | 'yzprime_apy_30d' }
+    | { provider: 'hyperbeat' | 'kinetiq' | 'lhype' | 'lsthype' | 'noon' | 'valantis', address: string, chainId: number }
 
 export const intrinsicApySources: readonly IntrinsicApySourceConfig[] = [
+  // HyperEVM (999)
+  { provider: 'valantis', chainId: 999, address: '0x94e8396e0869c9f2200760af0621afd240e1cf38' }, // wstHYPE
+  { provider: 'kinetiq', chainId: 999, address: '0xfd739d4e423301ce9385c1fb8850539d657c296d' }, // kHYPE
+  { provider: 'hyperbeat', chainId: 999, address: '0xd8fc8f0b03eba61f64d08b0bef69d80916e5dda9' }, // beHYPE
+  { provider: 'defillama', chainId: 999, address: '0x4de03ca1f02591b717495cfa19913ad56a2f5858', poolId: '88c6f0fd-5371-4b60-8032-ddf168b4bdd6', useSpotApy: true }, // hwHYPE
+  { provider: 'pendle', chainId: 999, address: '0xea84ca9849d9e76a78b91f221f84e9ca065fc9f5', pendleMarket: '0x31104779b2a07a273d6c662419377773083d0b2e' }, // PT-kHYPE-19MAR2026
+  { provider: 'lhype', chainId: 999, address: '0x5748ae796ae46a4f1348a1693de4b50560485562' }, // LHYPE
+  { provider: 'defillama', chainId: 999, address: '0x9b3a8f7cec208e247d97dee13313690977e24459', poolId: 'f65159b4-7bec-40c8-8f31-1fa2f5408738', useSpotApy: true }, // sUSDp
+  { provider: 'defillama', chainId: 999, address: '0xac962fa04bf91b7fd0dc0c5c32414e0ce3c51e03', poolId: '84e38fd1-024f-4107-a1fc-0ae8bfc1b195', useSpotApy: true }, // xHYPE
+  { provider: 'lsthype', chainId: 999, address: '0x81e064d0eb539de7c3170edf38c1a42cbd752a76' }, // lstHYPE
+  { provider: 'noon', chainId: 999, address: '0x34a2798d47b238a7cba9d87d49618dee6c4d999f' }, // sUSN
+  { provider: 'defillama', chainId: 999, address: '0x34c07f50c4f55b322e85deeb265d278e6af112e4', poolId: '570ddae7-acae-4277-905b-278cd994b08d', useSpotApy: true }, // syzUSD
+
   // DefiLlama pools — Ethereum (1)
   { provider: 'coinshift', chainId: 1, address: '0xbF4e3fbE8B60062A00C7a6B1D97d0d49c2971A19', period: '7d' },
   { provider: 'defillama', chainId: 1, address: '0x0655977FEb2f289A4aB78af67BAB0d17aAb84367', poolId: '5fd328af-4203-471b-bd16-1705c726d926' },
