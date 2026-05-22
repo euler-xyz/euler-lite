@@ -1,40 +1,15 @@
 <script setup lang="ts">
-import { type AnyBorrowVaultPair, getCurrentLiquidationLTV, isLiquidationLTVRamping } from '~/entities/vault'
+import type { AnyBorrowVaultPair } from '~/entities/vault'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated } from '~/utils/eulerLabelsUtils'
-import { getCollateralOraclePrice, getAssetOraclePrice } from '~/services/pricing/priceProvider'
-import { formatNumber, formatSignificant } from '~/utils/string-utils'
+import { getCollateralOraclePrice, getAssetOraclePrice, formatAssetValue } from '~/services/pricing/priceProvider'
+import { formatNumber, formatSignificant, formatCompactUsdValue, compactNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
-import { type AccountBorrowPosition, getPositionRampConfig } from '~/entities/account'
-import type { LTVRampConfig } from '~/entities/vault/ltv'
-import { VaultNetApyPairModal, VaultMaxRoeModal, VaultRampDownModal, VaultSupplyApyModal, VaultBorrowApyModal } from '#components'
+import type { AccountBorrowPosition } from '~/entities/account'
+import { VaultNetApyPairModal, VaultMaxRoeModal, VaultSupplyApyModal, VaultBorrowApyModal } from '#components'
 
 const { pair } = defineProps<{ pair: AnyBorrowVaultPair | AccountBorrowPosition }>()
-
-// `BorrowVaultPair` carries ramp fields flat on the pair, with `liquidationLTV`
-// meaning the post-ramp target. `AccountBorrowPosition` exposes them via
-// `targetLiquidationLTV` + friends — `position.liquidationLTV` is the live
-// effective value from the lens. Normalise to a single `LTVRampConfig` shape
-// here so the helpers and modal don't need to know which type they got.
-const isAccountPosition = (p: typeof pair): p is AccountBorrowPosition => 'targetLiquidationLTV' in p
-const rampConfig = computed<LTVRampConfig | null>(() => {
-  if (isAccountPosition(pair)) {
-    if (pair.rampDuration === 0n && pair.targetTimestamp === 0n) return null
-    return getPositionRampConfig(pair)
-  }
-  if ('initialLiquidationLTV' in pair) return pair as LTVRampConfig
-  return null
-})
-const currentLiquidationLTV = computed(() => {
-  // For an account position the lens already gives the live effective value;
-  // for a market pair we interpolate from the ramp config so the modal and the
-  // row stay in sync as time advances.
-  if (isAccountPosition(pair)) return pair.liquidationLTV
-  if (rampConfig.value) return getCurrentLiquidationLTV(rampConfig.value)
-  return pair.liquidationLTV
-})
-const isRamping = computed(() => !!rampConfig.value && isLiquidationLTVRamping(rampConfig.value))
 
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, getLoopingRewardCampaigns, hasSupplyRewards, hasBorrowRewards, hasLoopingRewards } = useRewardsApy()
@@ -92,6 +67,23 @@ const price = computed(() => {
   return nanoToValue(collateralPrice.amountOutMid, 18) / nanoToValue(borrowPrice.amountOutMid, 18)
 })
 
+const availableLiquidityDisplay = ref({ amount: '-', symbol: '', usd: '' })
+const formatLiquidityAmount = (amount: number) => {
+  if (!Number.isFinite(amount)) return '-'
+  if (Math.abs(amount) >= 10_000) return compactNumber(amount, 2, 0)
+  return formatNumber(amount, 1, 0)
+}
+
+watchEffect(async () => {
+  const liquidity = pair.borrow.supply >= pair.borrow.borrow ? pair.borrow.supply - pair.borrow.borrow : 0n
+  const price = await formatAssetValue(liquidity, pair.borrow, 'off-chain')
+  availableLiquidityDisplay.value = {
+    amount: price.hasPrice ? formatLiquidityAmount(price.assetAmount) : price.display,
+    symbol: price.hasPrice ? price.assetSymbol : '',
+    usd: price.hasPrice ? formatCompactUsdValue(price.usdValue) : '',
+  }
+})
+
 const supplyApyModalData = computed(() => ({
   props: {
     lendingAPY: baseSupplyApy.value,
@@ -136,18 +128,14 @@ const maxRoeModalData = computed(() => ({
     collateralAddress: pair.collateral.address,
   },
 }))
-
-const rampDownModalData = computed(() => ({
-  props: rampConfig.value ?? {},
-}))
 </script>
 
 <template>
-  <div class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card">
+  <div class="bg-surface-secondary rounded-xl flex flex-col gap-20 p-20 shadow-card">
     <p class="text-h3 text-content-primary">
       Overview
     </p>
-    <div class="flex flex-col gap-20">
+    <div class="flex flex-col gap-16">
       <div
         v-if="isDeprecated"
         class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
@@ -176,87 +164,88 @@ const rampDownModalData = computed(() => ({
           </p>
         </div>
       </div>
-      <div class="grid grid-cols-2 gap-x-32 gap-y-24">
-        <VaultOverviewLabelValue label="Price">
-          <template v-if="price !== null">
-            {{ formatSignificant(priceInvert.invertValue(price), 4) }}
-            <span class="text-content-tertiary">{{ priceInvert.displaySymbol }}</span>
-            <button
-              type="button"
-              aria-label="Invert price display"
-              class="ml-4 text-content-tertiary hover:text-content-primary transition-colors inline-flex"
-              @click.stop="priceInvert.toggle"
-            >
-              <SvgIcon
-                name="swap-horizontal"
-                class="!w-12 !h-12"
-              />
-            </button>
-          </template>
-          <template v-else>
-            <span class="flex items-center text-warning-500">
-              <SvgIcon
-                name="warning"
-                class="mr-2 !w-20 !h-20"
-              />
-              Unknown
-            </span>
-          </template>
-        </VaultOverviewLabelValue>
-        <VaultOverviewLabelValue
-          v-if="isBorrowable"
-          label="Max multiplier"
-          :value="`${formatNumber(maxMultiplier, 2, 2)}x`"
-        />
-        <VaultOverviewLabelValue>
-          <template #label>
-            <span class="flex items-center gap-4">
-              Supply APY
-              <UiModalPreviewTrigger
-                :component="VaultSupplyApyModal"
-                :modal-data="supplyApyModalData"
-                aria-label="Show supply APY breakdown"
-              >
+      <div class="grid grid-cols-1 laptop:grid-cols-6 gap-x-32 gap-y-16">
+        <div class="flex flex-col gap-6 laptop:col-span-2">
+          <div class="text-p3 text-content-tertiary">
+            Price
+          </div>
+          <div class="text-p2 font-semibold text-content-primary">
+            <template v-if="price !== null">
+              {{ formatSignificant(priceInvert.invertValue(price), 4) }}
+              <span class="mt-2 flex items-center gap-4 text-p3 font-normal text-content-tertiary">
+                {{ priceInvert.displaySymbol }}
+                <button
+                  type="button"
+                  aria-label="Invert price display"
+                  class="text-content-tertiary hover:text-content-primary transition-colors inline-flex"
+                  @click.stop="priceInvert.toggle"
+                >
+                  <SvgIcon
+                    name="swap-horizontal"
+                    class="!w-14 !h-14"
+                  />
+                </button>
+              </span>
+            </template>
+            <template v-else>
+              <span class="flex items-center text-warning-500">
                 <SvgIcon
-                  class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-                  name="info-circle"
+                  name="warning"
+                  class="mr-4 !w-20 !h-20"
                 />
-              </UiModalPreviewTrigger>
-            </span>
-          </template>
-          <span class="flex items-center gap-4">
-            <VaultPoints :vault="pair.collateral" />
+                Unknown
+              </span>
+            </template>
+          </div>
+        </div>
+        <div class="flex flex-col gap-6 laptop:col-span-2">
+          <div class="text-p3 text-content-tertiary">
+            Available liquidity
+          </div>
+          <div class="flex flex-col gap-2">
+            <div class="flex items-baseline gap-4 text-p2 font-semibold text-content-primary">
+              {{ availableLiquidityDisplay.amount }}
+              <span
+                v-if="availableLiquidityDisplay.symbol"
+                class="text-p3 text-content-tertiary"
+              >
+                {{ availableLiquidityDisplay.symbol }}
+              </span>
+            </div>
+            <div
+              v-if="availableLiquidityDisplay.usd"
+              class="text-p3 text-content-muted"
+            >
+              {{ availableLiquidityDisplay.usd }}
+            </div>
+          </div>
+        </div>
+
+        <div class="h-px bg-line-subtle my-4 laptop:col-span-6" />
+
+        <div class="flex items-center gap-8 text-h6 uppercase text-content-secondary laptop:col-span-6">
+          <SvgIcon
+            name="arrow-big"
+            class="!w-16 !h-16"
+          />
+          Borrow
+        </div>
+
+        <div class="flex flex-col gap-6 laptop:col-span-2">
+          <div class="flex items-center gap-4 text-p3 text-content-tertiary">
+            Borrow APY
             <UiModalPreviewTrigger
-              v-if="hasSupplyRewards(pair.collateral.address)"
-              :component="VaultSupplyApyModal"
-              :modal-data="supplyApyModalData"
-              aria-label="Show supply APY rewards breakdown"
+              :component="VaultBorrowApyModal"
+              :modal-data="borrowApyModalData"
+              aria-label="Show borrow APY breakdown"
             >
               <SvgIcon
-                class="!w-20 !h-20 text-accent-500 cursor-pointer"
-                name="sparks"
+                class="!w-18 !h-18 text-content-muted cursor-pointer hover:text-content-secondary"
+                name="info-circle"
               />
             </UiModalPreviewTrigger>
-            {{ formatNumber(supplyApyWithRewards) }}%
-          </span>
-        </VaultOverviewLabelValue>
-        <VaultOverviewLabelValue>
-          <template #label>
-            <span class="flex items-center gap-4">
-              Borrow APY
-              <UiModalPreviewTrigger
-                :component="VaultBorrowApyModal"
-                :modal-data="borrowApyModalData"
-                aria-label="Show borrow APY breakdown"
-              >
-                <SvgIcon
-                  class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-                  name="info-circle"
-                />
-              </UiModalPreviewTrigger>
-            </span>
-          </template>
-          <span class="flex items-center gap-4">
+          </div>
+          <div class="flex items-center gap-4 text-p2 font-semibold text-content-primary">
             <UiModalPreviewTrigger
               v-if="hasBorrowRewards(pair.borrow.address, pair.collateral.address)"
               :component="VaultBorrowApyModal"
@@ -269,25 +258,55 @@ const rampDownModalData = computed(() => ({
               />
             </UiModalPreviewTrigger>
             {{ formatNumber(borrowApyWithRewards) }}%
-          </span>
-        </VaultOverviewLabelValue>
-        <VaultOverviewLabelValue>
-          <template #label>
-            <span class="flex items-center gap-4">
-              Net APY
-              <UiModalPreviewTrigger
-                :component="VaultNetApyPairModal"
-                :modal-data="netApyModalData"
-                aria-label="Show net APY breakdown"
-              >
-                <SvgIcon
-                  class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-                  name="info-circle"
-                />
-              </UiModalPreviewTrigger>
-            </span>
-          </template>
-          <span class="flex items-center gap-4">
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-6 laptop:col-span-2">
+          <div class="flex items-center gap-4 text-p3 text-content-tertiary">
+            Collateral APY
+            <UiModalPreviewTrigger
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show collateral APY breakdown"
+            >
+              <SvgIcon
+                class="!w-18 !h-18 text-content-muted cursor-pointer hover:text-content-secondary"
+                name="info-circle"
+              />
+            </UiModalPreviewTrigger>
+          </div>
+          <div class="flex items-center gap-4 text-p2 font-semibold text-content-primary">
+            <VaultPoints :vault="pair.collateral" />
+            <UiModalPreviewTrigger
+              v-if="hasSupplyRewards(pair.collateral.address)"
+              :component="VaultSupplyApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show collateral APY rewards breakdown"
+            >
+              <SvgIcon
+                class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                name="sparks"
+              />
+            </UiModalPreviewTrigger>
+            {{ formatNumber(supplyApyWithRewards) }}%
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-6 laptop:col-span-2">
+          <div class="flex items-center gap-4 text-p3 text-content-tertiary">
+            Net APY
+            <UiModalPreviewTrigger
+              :component="VaultNetApyPairModal"
+              :modal-data="netApyModalData"
+              aria-label="Show net APY breakdown"
+            >
+              <SvgIcon
+                class="!w-18 !h-18 text-content-muted cursor-pointer hover:text-content-secondary"
+                name="info-circle"
+              />
+            </UiModalPreviewTrigger>
+          </div>
+          <div class="flex items-center gap-4 text-p2 font-semibold text-content-primary">
             <UiModalPreviewTrigger
               v-if="hasSupplyRewards(pair.collateral.address) || hasBorrowRewards(pair.borrow.address, pair.collateral.address) || hasLoopingRewards(pair.borrow.address, pair.collateral.address)"
               :component="VaultNetApyPairModal"
@@ -300,11 +319,37 @@ const rampDownModalData = computed(() => ({
               />
             </UiModalPreviewTrigger>
             {{ formatNumber(netApy) }}%
-          </span>
-        </VaultOverviewLabelValue>
-        <VaultOverviewLabelValue v-if="isBorrowable">
-          <template #label>
-            <span class="flex items-center gap-4">
+          </div>
+        </div>
+
+        <div
+          v-if="isBorrowable"
+          class="h-px bg-line-subtle my-4 laptop:col-span-6"
+        />
+
+        <div
+          v-if="isBorrowable"
+          class="flex items-center gap-8 text-h6 uppercase text-accent-500 laptop:col-span-6"
+        >
+          <SvgIcon
+            name="multiply"
+            class="!w-16 !h-16"
+          />
+          Multiply
+        </div>
+
+        <template v-if="isBorrowable">
+          <div class="flex flex-col gap-6 laptop:col-span-2">
+            <div class="text-p3 text-content-tertiary">
+              Max multiplier
+            </div>
+            <div class="text-p2 font-semibold text-content-primary">
+              {{ formatNumber(maxMultiplier, 2, 2) }}x
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-6 laptop:col-span-2">
+            <div class="flex items-center gap-4 text-p3 text-content-tertiary">
               Max ROE
               <UiModalPreviewTrigger
                 :component="VaultMaxRoeModal"
@@ -312,63 +357,27 @@ const rampDownModalData = computed(() => ({
                 aria-label="Show max ROE breakdown"
               >
                 <SvgIcon
-                  class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                  class="!w-18 !h-18 text-content-muted cursor-pointer hover:text-content-secondary"
                   name="info-circle"
                 />
               </UiModalPreviewTrigger>
-            </span>
-          </template>
-          <span class="flex items-center gap-4">
-            <UiModalPreviewTrigger
-              v-if="hasSupplyRewards(pair.collateral.address) || hasBorrowRewards(pair.borrow.address, pair.collateral.address) || hasLoopingRewards(pair.borrow.address, pair.collateral.address)"
-              :component="VaultMaxRoeModal"
-              :modal-data="maxRoeModalData"
-              aria-label="Show max ROE rewards breakdown"
-            >
-              <SvgIcon
-                class="!w-20 !h-20 text-accent-500 cursor-pointer"
-                name="sparks"
-              />
-            </UiModalPreviewTrigger>
-            {{ formatNumber(maxRoe) }}%
-          </span>
-        </VaultOverviewLabelValue>
-        <VaultOverviewLabelValue
-          label="Max LTV"
-          :value="`${formatNumber(nanoToValue(pair.borrowLTV, 2), 2)}%`"
-        />
-        <VaultOverviewLabelValue>
-          <template #label>
-            <span class="flex items-center gap-4">
-              Liquidation LTV
+            </div>
+            <div class="flex items-center gap-4 text-p2 font-semibold text-content-primary">
               <UiModalPreviewTrigger
-                v-if="isRamping"
-                :component="VaultRampDownModal"
-                :modal-data="rampDownModalData"
-                aria-label="Show liquidation LTV ramp-down details"
+                v-if="hasSupplyRewards(pair.collateral.address) || hasBorrowRewards(pair.borrow.address, pair.collateral.address) || hasLoopingRewards(pair.borrow.address, pair.collateral.address)"
+                :component="VaultMaxRoeModal"
+                :modal-data="maxRoeModalData"
+                aria-label="Show max ROE rewards breakdown"
               >
                 <SvgIcon
-                  class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-                  name="info-circle"
+                  class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                  name="sparks"
                 />
               </UiModalPreviewTrigger>
-            </span>
-          </template>
-          <span class="flex items-center gap-4">
-            <UiModalPreviewTrigger
-              v-if="isRamping"
-              :component="VaultRampDownModal"
-              :modal-data="rampDownModalData"
-              aria-label="Show liquidation LTV ramp-down details"
-            >
-              <SvgIcon
-                name="arrow-top-right"
-                class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
-              />
-            </UiModalPreviewTrigger>
-            {{ `${formatNumber(nanoToValue(currentLiquidationLTV, 2), 2)}%` }}
-          </span>
-        </VaultOverviewLabelValue>
+              {{ formatNumber(maxRoe) }}%
+            </div>
+          </div>
+        </template>
       </div>
     </div>
   </div>
