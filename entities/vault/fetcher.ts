@@ -468,7 +468,12 @@ export const fetchVaults = async function* (
       // per vault in the batch (was the root cause of the 568-line BetterStack incident).
       if (failedAddresses.length > 0 && !hasTransportError) {
         logger.warn(
-          { ctx: 'vault/fetchBatch', chainId: ctx.chainId, failedCount: failedAddresses.length },
+          {
+            ctx: 'vault/fetchBatch',
+            chainId: ctx.chainId,
+            failedCount: failedAddresses.length,
+            failedAddressSample: failedAddresses.slice(0, 3),
+          },
           `retrying ${failedAddresses.length} failed vaults individually`,
         )
         const retryResults = await Promise.all(
