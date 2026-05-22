@@ -28,6 +28,7 @@ const nameToChainId = new Map<string, number>()
 for (const [key, chain] of Object.entries(allChains)) {
   if (!isAppKitNetwork(chain)) continue
   const id = chain.id as number
+  if (chainMap.get(id) !== chain) continue
   nameToChainId.set(key.toLowerCase(), id)
   if (typeof chain.name === 'string') {
     const nameSlug = chain.name.toLowerCase().replace(/\s+/g, '-')

@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   getChainById,
+  getChainIdByName,
   getDefiLlamaChainName,
   getKnownChainIds,
   getNetworksByChainIds,
   getUnknownChainIds,
   isKnownChainId,
+  parseChainId,
 } from '~/entities/chainRegistry'
 
 describe('chainRegistry', () => {
@@ -22,6 +24,16 @@ describe('chainRegistry', () => {
     expect(chain?.nativeCurrency.symbol).toBe('HYPE')
     expect(chain?.rpcUrls.default.http).toContain('https://rpc.hyperliquid.xyz/evm')
     expect(getDefiLlamaChainName(999)).toBe('Hyperliquid')
+  })
+
+  it('keeps reverse slug lookup pinned to canonical chain ID collisions', () => {
+    expect(getChainIdByName('hyperEvm')).toBe(999)
+    expect(getChainIdByName('hyperliquid')).toBe(999)
+    expect(parseChainId('HyperEVM')).toBe(999)
+
+    expect(getChainIdByName('wanchainTestnet')).toBeUndefined()
+    expect(getChainIdByName('zoraTestnet')).toBeUndefined()
+    expect(parseChainId('zora-goerli-testnet')).toBeNull()
   })
 
   it('partitions known and unknown chain IDs', () => {
