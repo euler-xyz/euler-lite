@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { getCurrentLiquidationLTV, isLiquidationLTVRamping } from '~/entities/vault'
 import type { AnyBorrowVaultPair } from '~/entities/vault'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated } from '~/utils/eulerLabelsUtils'
@@ -6,10 +7,36 @@ import { getCollateralOraclePrice, getAssetOraclePrice, formatAssetValue } from 
 import { formatNumber, formatSignificant, formatCompactUsdValue, compactNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
+import { getPositionRampConfig } from '~/entities/account'
 import type { AccountBorrowPosition } from '~/entities/account'
-import { VaultNetApyPairModal, VaultMaxRoeModal, VaultSupplyApyModal, VaultBorrowApyModal } from '#components'
+import type { LTVRampConfig } from '~/entities/vault/ltv'
+import { VaultNetApyPairModal, VaultMaxRoeModal, VaultSupplyApyModal, VaultBorrowApyModal, VaultRampDownModal } from '#components'
 
 const { pair } = defineProps<{ pair: AnyBorrowVaultPair | AccountBorrowPosition }>()
+
+// `BorrowVaultPair` carries ramp fields flat on the pair, with `liquidationLTV`
+// meaning the post-ramp target. `AccountBorrowPosition` exposes them via
+// `targetLiquidationLTV` + friends — `position.liquidationLTV` is the live
+// effective value from the lens. Normalise to a single `LTVRampConfig` shape
+// here so the helpers and modal don't need to know which type they got.
+const isAccountPosition = (p: typeof pair): p is AccountBorrowPosition => 'targetLiquidationLTV' in p
+const rampConfig = computed<LTVRampConfig | null>(() => {
+  if (isAccountPosition(pair)) {
+    if (pair.rampDuration === 0n && pair.targetTimestamp === 0n) return null
+    return getPositionRampConfig(pair)
+  }
+  if ('initialLiquidationLTV' in pair) return pair as LTVRampConfig
+  return null
+})
+const currentLiquidationLTV = computed(() => {
+  // For an account position the lens already gives the live effective value;
+  // for a market pair we interpolate from the ramp config so the modal and the
+  // row stay in sync as time advances.
+  if (isAccountPosition(pair)) return pair.liquidationLTV
+  if (rampConfig.value) return getCurrentLiquidationLTV(rampConfig.value)
+  return pair.liquidationLTV
+})
+const isRamping = computed(() => !!rampConfig.value && isLiquidationLTVRamping(rampConfig.value))
 
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, getLoopingRewardCampaigns, hasSupplyRewards, hasBorrowRewards, hasLoopingRewards } = useRewardsApy()
@@ -128,6 +155,10 @@ const maxRoeModalData = computed(() => ({
     collateralAddress: pair.collateral.address,
   },
 }))
+
+const rampDownModalData = computed(() => ({
+  props: rampConfig.value ?? {},
+}))
 </script>
 
 <template>
@@ -218,6 +249,37 @@ const maxRoeModalData = computed(() => ({
             >
               {{ availableLiquidityDisplay.usd }}
             </div>
+          </div>
+        </div>
+        <div class="flex flex-col gap-6 laptop:col-span-2">
+          <div class="flex items-center gap-4 text-p3 text-content-tertiary">
+            Max / Liq. LTV
+            <UiModalPreviewTrigger
+              v-if="isRamping"
+              :component="VaultRampDownModal"
+              :modal-data="rampDownModalData"
+              aria-label="Show liquidation LTV ramp-down details"
+            >
+              <SvgIcon
+                class="!w-18 !h-18 text-content-muted cursor-pointer hover:text-content-secondary"
+                name="info-circle"
+              />
+            </UiModalPreviewTrigger>
+          </div>
+          <div class="flex items-center gap-4 text-p2 font-semibold text-content-primary">
+            {{ formatNumber(nanoToValue(pair.borrowLTV, 2), 2) }}% /
+            <UiModalPreviewTrigger
+              v-if="isRamping"
+              :component="VaultRampDownModal"
+              :modal-data="rampDownModalData"
+              aria-label="Show liquidation LTV ramp-down details"
+            >
+              <SvgIcon
+                name="arrow-top-right"
+                class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
+              />
+            </UiModalPreviewTrigger>
+            {{ formatNumber(nanoToValue(currentLiquidationLTV, 2), 2) }}%
           </div>
         </div>
 
