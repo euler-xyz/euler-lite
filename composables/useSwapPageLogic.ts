@@ -1,5 +1,5 @@
 import type { SecuritizeCollateralVault, EVault, TransactionPlan, SwapQuote, SwapperMode } from '@eulerxyz/euler-v2-sdk'
-import { getAddress, formatUnits } from 'viem'
+import { getAddress, formatUnits, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { OperationReviewModal, SlippageSettingsModal } from '#components'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -7,6 +7,8 @@ import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, getVaultTags } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
+import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
+import { useFreshAccount } from '~/composables/useFreshAccount'
 import { getQuoteAmount, type SwapQuoteAmountField, type SwapQuoteCompare } from '~/utils/swapQuotes'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import type { SwapQuoteInput } from '~/composables/useSwapApi'
@@ -93,10 +95,16 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const router = useRouter()
   const route = useRoute()
   const { isConnected } = useWagmi()
-  const { executePlan } = useEulerTx()
+  const { executePlan, prefetchPluginData } = useEulerTx()
   const modal = useModal()
   const { error: showError } = useToast()
   const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
+  const { account: freshAccount } = useFreshAccount()
+  // Debt-swap / collateral-swap pages don't consume the user's wallet ERC20
+  // balance — the source is an existing position. Safe to skip balance
+  // overrides (no balanceOf RPC + no balance-slot probing per estimate).
+  const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
+  const buildSwapStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
 
   // ── State ──────────────────────────────────────────────────────────────
   const isLoading = ref(false)
@@ -133,6 +141,10 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     // its own buildPlan. We just forward the candidate quote so the parallel
     // engine can build a plan per quote for gas estimation.
     buildTxPlanForQuote: () => buildPlan(),
+    getStateOverrideOptions: () => buildSwapStateOverrideOptions(),
+    // Sweep-scoped prefetch — Pyth Hermes / keyring vault gating resolved once
+    // per fetch instead of per-quote.
+    prefetchPluginData: (plan, _account) => prefetchPluginData(plan, { account: freshAccount.value }),
   })
   // ── Vault products & price invert ──────────────────────────────────────
   const fromProduct = useEulerProductOfVault(computed(() => fromVault.value?.address || ''))
@@ -208,6 +220,28 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     ? [vaultOptions, fromVault, targetVaultAddress] as const
     : [vaultOptions, fromVault] as const
   watch(syncWatchSources, () => syncToVault(), { immediate: true })
+
+  // Pre-prime ERC20 slot hints for the assets on either side of the swap. One
+  // probe per token, owner-/spender-agnostic; the SDK reuses the result on
+  // every estimate/sim/prepare from this page.
+  watch(
+    [fromVault, toVault],
+    ([from, to]) => {
+      const tokens: Address[] = []
+      const seen = new Set<string>()
+      const push = (addr?: string) => {
+        if (!addr) return
+        const key = addr.toLowerCase()
+        if (seen.has(key)) return
+        seen.add(key)
+        tokens.push(addr as Address)
+      }
+      push(from?.asset?.address)
+      push(to?.asset?.address)
+      if (tokens.length) void primeSlotHintsFor(tokens)
+    },
+    { immediate: true },
+  )
 
   // ── Same vault / same asset ────────────────────────────────────────────
   const isSameVault = computed(() => isSameVaultCheck(fromVault.value, toVault.value))
@@ -470,7 +504,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
         }
 
         if (plan.value) {
-          const ok = await runSimulation(plan.value)
+          const ok = await runSimulation(plan.value, buildSwapStateOverrideOptions())
           if (!ok) return
         }
 

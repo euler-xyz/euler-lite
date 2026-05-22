@@ -101,6 +101,33 @@ Transformers receive and return SDK `TransactionPlan` values. For example, `util
 
 Copy calldata includes approval transactions, encoded EVC batches, and direct contract calls. Permit2 signatures are shown in the review steps but are not copyable calldata until the wallet signs them.
 
+## Simulation Performance Tuning
+
+For fan-out flows (per-quote estimate sweeps, leverage explorers) and heavy single-shot flows, Lite threads two SDK helpers through `useEulerTx` and `useTransactionPlanSimulation` so the per-call RPC + plugin cost collapses to roughly "local plan assembly":
+
+- `composables/useStateOverrideOptions.ts` (`buildStateOverrideOptions` + `primeSlotHintsFor`) — wraps the SDK's `SimulationStateOverrideOptions` for the page. `buildStateOverrideOptions({ noBalanceOverride })` snapshots the wallet balances the form already holds, attaches pre-fetched ERC20 slot hints, and (when the form validates "Not enough balance" up front) tells the SDK to skip balance overrides entirely. `primeSlotHintsFor(tokens)` fires `fetchErc20SlotHints` once per relevant token; subsequent simulate/estimate/prepare calls skip `eth_createAccessList` discovery.
+- `prefetchPluginData(plan, …)` on `useEulerTx` — resolves the plugin pipeline's prefetch payload (Pyth Hermes pull, Keyring credential check) for one representative plan. Pass it into every `prepareTransactionPlan` / simulate / estimate in the sweep so plugins do zero per-quote network I/O.
+
+Wired into:
+
+- `useSwapQuotesParallel` consumers — every quote in the sweep reuses one prefetch + one slot-hint set + the wallet snapshot:
+  - `composables/borrow/useMultiplyForm.ts`
+  - `composables/borrow/useBorrowForm.ts`
+  - `composables/position/useCollateralForm.ts`
+  - `composables/useSwapPageLogic.ts`
+  - `pages/lend/[vault]/index.vue` (deposit-with-swap)
+- Heavy single-shot `runSimulation` / `runPreparedSimulation` call-sites pass `buildStateOverrideOptions({ noBalanceOverride })` directly:
+  - `composables/repay/useWalletSwapRepay.ts`
+  - `composables/repay/useCollateralSwapRepay.ts`
+  - `pages/lend/[vault]/index.vue` (final pre-review simulation)
+  - `composables/borrow/useMultiplyForm.ts` (Review-time prepared simulation)
+
+`noBalanceOverride: true` is only safe when the operation either doesn't consume wallet ERC20 (collateral-swap repay, debt swap) or the form already gates submit on wallet balance (multiply, borrow, lend deposit, wallet-swap repay's EXACT_IN). Withdraw mode on `useCollateralForm` keeps the override but skips the balance branch by binding `noBalanceOverride` to `mode === 'supply'`.
+
+`primeSlotHintsFor` is owner-/spender-agnostic; the SDK caches results in a module-scope `slotHintsCache` keyed on chain id + token, so a successful probe in one page warms the cache for every other page in the session.
+
+See the SDK side: `packages/euler-v2-sdk/docs/simulations-and-state-overrides.md` (performance tuning section) and `packages/euler-v2-sdk/docs/execution-service.md` (prefetching plugin data).
+
 ## Swap Quotes
 
 `useSwapApi()` fetches swap quotes and normalizes the backend token shape into the SDK `SwapQuote` shape at the API boundary. Downstream planners pass `SwapApiQuote` directly into SDK planner methods.
@@ -123,6 +150,7 @@ Lite still uses `utils/pyth.ts` for read-path lens simulations and visible vault
 |------|---------|
 | `composables/useEulerTx.ts` | Page-facing SDK planning, simulation preparation, and execution wrapper |
 | `composables/useTransactionPlanSimulation.ts` | Simulation state and error formatting for forms |
+| `composables/useStateOverrideOptions.ts` | `SimulationStateOverrideOptions` builder + per-token slot-hint priming |
 | `components/entities/operation/OperationReviewModal.vue` | Prepared-plan review, calldata copy, and Tenderly simulation |
 | `utils/stepDecoding.ts` | SDK plan item decoding for review display |
 | `utils/operationGuardRegistry.ts` | Guard transformer and blocker registry |

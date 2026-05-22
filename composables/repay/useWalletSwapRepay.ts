@@ -1,5 +1,6 @@
 import { getProjectedRates, getNetAPY } from '~/utils/vault/apy'
-import type { EVault, SecuritizeCollateralVault, PortfolioBorrowPosition, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, SecuritizeCollateralVault, PortfolioBorrowPosition, VaultEntity, TransactionPlan, SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
+import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import type { VaultAsset } from '~/types/asset'
 import { getAssetUsdValue, getAssetUsdValueOrZero, getTokenUsdValue } from '~/utils/sdk-prices'
 import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
@@ -35,7 +36,7 @@ interface UseWalletSwapRepayOptions {
   isPreparing: Ref<boolean>
   slippage: Readonly<Ref<number>>
   clearSimulationError: () => void
-  runSimulation: (plan: TransactionPlan) => Promise<boolean>
+  runSimulation: (plan: TransactionPlan, stateOverrideOptions?: SimulationStateOverrideOptions) => Promise<boolean>
   netAPY: Ref<number>
   collateralSupplyApy: ComputedRef<number>
   borrowApy: ComputedRef<number>
@@ -67,6 +68,12 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const { planSwapAndRepay, executePlan } = useEulerTx()
+  // EXACT_IN validates wallet balance up front (`isSubmitDisabled` line ~306);
+  // TARGET_DEBT lets the simulator surface real wallet insufficiency rather
+  // than forging it. Skip balance overrides + keep slot hints + wallet
+  // snapshot for fast allowance derivation.
+  const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
+  const buildRepayStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
   const { chainId } = useEulerAddresses()
   const { isConnected, address } = useWagmi()
   const { fetchSingleBalance } = useWallets()
@@ -651,6 +658,28 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     requestQuote()
   })
 
+  // Pre-prime ERC20 slot hints for the assets touched by this tab. One-shot
+  // probe per token; reused by every estimate/sim on this page.
+  watch(
+    [selectedAsset, borrowVault, collateralVault],
+    ([selected, borrow, collateral]) => {
+      const tokens: Address[] = []
+      const seen = new Set<string>()
+      const push = (addr?: string) => {
+        if (!addr || isNativeCurrencyAddress(addr)) return
+        const key = addr.toLowerCase()
+        if (seen.has(key)) return
+        seen.add(key)
+        tokens.push(addr as Address)
+      }
+      push(selected?.address)
+      push(borrow?.asset?.address)
+      push(collateral?.asset?.address)
+      if (tokens.length) void primeSlotHintsFor(tokens)
+    },
+    { immediate: true },
+  )
+
   // --- Watch quote changes → sync opposite field + estimates ---
   watch([quotes.effectiveQuote, direction], () => {
     if (formTab.value !== 'wallet' || !needsSwap.value) return
@@ -731,7 +760,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
       if (!plan.value) return
 
-      const ok = await runSimulation(plan.value)
+      const ok = await runSimulation(plan.value, buildRepayStateOverrideOptions())
       if (!ok) return
 
       // For review modal: show input token as primary asset, borrow asset as swap target

@@ -9,6 +9,8 @@ import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-in
 import { isVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
+import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
+import { useFreshAccount } from '~/composables/useFreshAccount'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
@@ -65,7 +67,13 @@ const { error } = useToast()
 const reviewSupplyLabel = 'Review Supply'
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
-const { planDeposit, planDepositWithSwap, executePlan } = useEulerTx()
+const { planDeposit, planDepositWithSwap, executePlan, prefetchPluginData } = useEulerTx()
+const { account: freshAccount } = useFreshAccount()
+// Page validates "Not enough balance" up front (see `errorText` / `isSubmitDisabled`),
+// so the simulator never needs to forge wallet balances — `noBalanceOverride: true`
+// skips per-call balanceOf + slot probing.
+const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
+const buildLendStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
 const { getVault, getSecuritizeVault, getEscrowVault, updateVault, isEscrowLoadedOnce } = useVaults()
 const { isReady: isLabelsReady } = useEulerLabels()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
@@ -129,6 +137,8 @@ const {
   amountField: 'amountOut',
   compare: 'max',
   buildTxPlanForQuote: quote => buildSwapSupplyPlanFromQuote(quote),
+  getStateOverrideOptions: () => buildLendStateOverrideOptions(),
+  prefetchPluginData: (plan, _account) => prefetchPluginData(plan, { account: freshAccount.value }),
 })
 // Vault data - only one will be populated based on type
 const eVault: Ref<EVault | undefined> = ref(undefined)
@@ -437,7 +447,7 @@ const submit = async () => {
       }
 
       if (plan.value) {
-        const ok = await runSimulation(plan.value)
+        const ok = await runSimulation(plan.value, buildLendStateOverrideOptions())
         if (!ok) {
           return
         }
@@ -680,6 +690,28 @@ const onRefreshSwapQuotes = () => {
 }
 
 // Fetch selected asset balance and USD price when it changes
+// Pre-prime ERC20 slot hints for vault asset + pay-with asset. One probe per
+// token, owner-/spender-agnostic; later estimate/sim calls skip access-list
+// discovery.
+watch(
+  [asset, selectedAsset],
+  ([vaultAsset, payWith]) => {
+    const tokens: Address[] = []
+    const seen = new Set<string>()
+    const push = (addr?: string) => {
+      if (!addr || isNativeCurrencyAddress(addr)) return
+      const key = addr.toLowerCase()
+      if (seen.has(key)) return
+      seen.add(key)
+      tokens.push(addr as Address)
+    }
+    push(vaultAsset?.address)
+    push(payWith?.address)
+    if (tokens.length) void primeSlotHintsFor(tokens)
+  },
+  { immediate: true },
+)
+
 watch(selectedAsset, async () => {
   fetchSelectedAssetBalance()
   if (needsSwap.value && amount.value) {

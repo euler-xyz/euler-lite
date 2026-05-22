@@ -1,12 +1,6 @@
 import { QueryClient } from '@tanstack/vue-query'
 import { serializeQueryArgs, type BuildQueryFn, type EulerSDKQueryName } from '@eulerxyz/euler-v2-sdk'
-import { FORM_STALE_TIMES, STALE_TIMES } from '~/utils/sdk-query-policy'
-
-const SECOND = 1_000
-
-// Non-listed queries fall through to this default. Exercised by the cache
-// test's "unknown query name" path. Policy table doc lists the data classes.
-const DEFAULT_STALE_TIME_MS = 5 * SECOND
+import { DEFAULT_STALE_TIME_MS, FORM_STALE_TIMES, STALE_TIMES } from '~/utils/sdk-query-policy'
 
 export const sdkQueryClient = new QueryClient()
 

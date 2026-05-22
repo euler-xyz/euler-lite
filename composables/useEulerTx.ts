@@ -3,6 +3,8 @@ import type {
   Account,
   CollateralShareSource,
   IHasVaultAddress,
+  PluginPrefetchData,
+  SimulationStateOverrideOptions,
   PlanBorrowArgs,
   PlanDepositArgs,
   PlanRedeemArgs,
@@ -36,6 +38,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
 import { waitForSubgraphBlock } from '~/utils/subgraph'
+import { profAsync } from '~/utils/profiler'
 
 const OKX_POST_APPROVE_DELAY_MS = 3000
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
@@ -97,6 +100,10 @@ export interface PlanBorrowInput {
   borrowAccount: Address
   receiver?: Address
   skipCleanup?: boolean
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
+  /** Caller has already attached the borrow sub-account snapshot to `account`; skip the per-plan refresh. */
+  subAccountSnapshotApplied?: boolean
   collateral?: {
     vault: Address
     amount: bigint
@@ -170,6 +177,10 @@ export interface PlanSwapAndBorrowInput {
   receiver?: Address
   wrappedNativeInfo?: WrappedNativeInfo
   skipCleanup?: boolean
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
+  /** Caller has already attached the borrow sub-account snapshot to `account`; skip the per-plan refresh. */
+  subAccountSnapshotApplied?: boolean
 }
 
 export interface PlanSwapAndRepayInput {
@@ -232,6 +243,10 @@ export interface PlanMultiplyWithSwapInput {
   swapQuote: SwapQuote
   swapperMode?: SwapperMode
   skipCleanup?: boolean
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
+  /** Caller has already attached the receiver sub-account snapshot to `account`; skip the per-plan refresh. */
+  subAccountSnapshotApplied?: boolean
 }
 
 export interface PlanMultiplySameAssetInput {
@@ -245,6 +260,10 @@ export interface PlanMultiplySameAssetInput {
   liabilityAmount: bigint
   receiver: Address
   skipCleanup?: boolean
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
+  /** Caller has already attached the receiver sub-account snapshot to `account`; skip the per-plan refresh. */
+  subAccountSnapshotApplied?: boolean
 }
 
 export interface PlanTransferInput {
@@ -284,6 +303,10 @@ export interface PlanMultiplyInput {
   swapQuote?: SwapQuote
   swapperMode?: SwapperMode
   skipCleanup?: boolean
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
+  /** Caller has already attached the receiver sub-account snapshot to `account`; skip the per-plan refresh. */
+  subAccountSnapshotApplied?: boolean
 }
 
 export interface PlanRepayFromSourceInput {
@@ -391,12 +414,21 @@ export const useEulerTx = () => {
   const freshPlanContext = async (preloaded?: Account<IHasVaultAddress>) => {
     const owner = requireOwner()
     const cid = requireChainId()
-    const sdk = await getEulerSdkFresh()
+    const sdk = await profAsync('sdk', 'getEulerSdkFresh', () => getEulerSdkFresh())
     if (preloaded) return { sdk, account: preloaded }
-    const fetched = await sdk.accountService.fetchAccount(cid, owner)
+    const fetched = await profAsync('sdk', 'fetchAccount', () => sdk.accountService.fetchAccount(cid, owner))
     return { sdk, account: fetched.result }
   }
 
+  // Refresh the sub-account's position list at plan time. The Account snapshot
+  // we plan against (whether freshly fetched or carried over from
+  // `useFreshAccount`) reflects the last portfolio refresh — it can include a
+  // stale controller flag on the receiver sub-account (e.g. a controller that
+  // was disabled after the snapshot was taken). The SDK planners read
+  // `isControllerEnabled` to decide whether to emit `enableController` items,
+  // so a stale flag here means the plan skips the enable and the EVC batch
+  // reverts. Re-fetching the sub-account snapshot lets `setSubAccount` overwrite
+  // those flags with on-chain truth. Mirrors prod's pre-plan refresh.
   const attachSubAccountSnapshot = async (
     sdk: Awaited<ReturnType<typeof getEulerSdkFresh>>,
     account: Account<IHasVaultAddress>,
@@ -406,12 +438,12 @@ export const useEulerTx = () => {
     const vaults = [
       ...new Set(existingSubAccount?.positions.map(position => getAddress(position.vaultAddress)) ?? []),
     ]
-    const fetched = await sdk.accountService.fetchSubAccount(
+    const fetched = await profAsync('sdk', 'fetchSubAccount', () => sdk.accountService.fetchSubAccount(
       account.chainId,
       getAddress(subAccount),
       vaults,
       SUB_ACCOUNT_SNAPSHOT_FETCH_OPTIONS,
-    )
+    ), { vaults: vaults.length })
     fetched.errors.forEach(issue => logWarn('useEulerTx/attachSubAccountSnapshot', issue))
     if (fetched.result) {
       account.setSubAccount(
@@ -469,8 +501,10 @@ export const useEulerTx = () => {
 
   const planBorrow = async (input: PlanBorrowInput): Promise<TransactionPlan> => {
     const owner = requireOwner()
-    const { sdk, account } = await freshPlanContext()
-    await attachSubAccountSnapshot(sdk, account, input.borrowAccount)
+    const { sdk, account } = await freshPlanContext(input.account)
+    if (!input.subAccountSnapshotApplied) {
+      await attachSubAccountSnapshot(sdk, account, input.borrowAccount)
+    }
     const args: PlanBorrowArgs = {
       account,
       vault: input.vaultAddress,
@@ -566,9 +600,11 @@ export const useEulerTx = () => {
   }
 
   const planSwapAndBorrow = async (input: PlanSwapAndBorrowInput): Promise<TransactionPlan> => {
-    const { sdk, account } = await freshPlanContext()
+    const { sdk, account } = await freshPlanContext(input.account)
     const borrowAccount = input.borrowAccount ?? input.swapQuote.accountOut
-    await attachSubAccountSnapshot(sdk, account, borrowAccount)
+    if (!input.subAccountSnapshotApplied) {
+      await attachSubAccountSnapshot(sdk, account, borrowAccount)
+    }
     const args: PlanSwapAndBorrowFromWalletArgs = {
       account,
       swapQuote: input.swapQuote,
@@ -660,25 +696,31 @@ export const useEulerTx = () => {
   }
 
   const planMultiplyWithSwap = async (input: PlanMultiplyWithSwapInput): Promise<TransactionPlan> => {
-    const { sdk, account } = await freshPlanContext()
-    await attachSubAccountSnapshot(sdk, account, input.swapQuote.accountIn)
-    const args: PlanMultiplyWithSwapArgs = {
-      account,
-      collateralVault: input.collateralVault,
-      collateralAmount: input.collateralAmount,
-      collateralAsset: input.collateralAsset,
-      collateralShareSource: input.collateralShareSource,
-      collateralWrappedNativeInfo: input.collateralWrappedNativeInfo,
-      swapQuote: input.swapQuote,
-      swapperMode: input.swapperMode,
-      skipCleanup: input.skipCleanup,
-    }
-    return sdk.executionService.planMultiplyWithSwap(args)
+    return profAsync('sdk', 'planMultiplyWithSwap.total', async () => {
+      const { sdk, account } = await profAsync('sdk', 'planMultiplyWithSwap.freshPlanContext', () => freshPlanContext(input.account))
+      if (!input.subAccountSnapshotApplied) {
+        await profAsync('sdk', 'planMultiplyWithSwap.attachSubAccount', () => attachSubAccountSnapshot(sdk, account, input.swapQuote.accountIn))
+      }
+      const args: PlanMultiplyWithSwapArgs = {
+        account,
+        collateralVault: input.collateralVault,
+        collateralAmount: input.collateralAmount,
+        collateralAsset: input.collateralAsset,
+        collateralShareSource: input.collateralShareSource,
+        collateralWrappedNativeInfo: input.collateralWrappedNativeInfo,
+        swapQuote: input.swapQuote,
+        swapperMode: input.swapperMode,
+        skipCleanup: input.skipCleanup,
+      }
+      return profAsync('sdk', 'planMultiplyWithSwap.sdkCall', async () => sdk.executionService.planMultiplyWithSwap(args))
+    })
   }
 
   const planMultiplySameAsset = async (input: PlanMultiplySameAssetInput): Promise<TransactionPlan> => {
-    const { sdk, account } = await freshPlanContext()
-    await attachSubAccountSnapshot(sdk, account, input.receiver)
+    const { sdk, account } = await freshPlanContext(input.account)
+    if (!input.subAccountSnapshotApplied) {
+      await attachSubAccountSnapshot(sdk, account, input.receiver)
+    }
     const args: PlanMultiplySameAssetArgs = {
       account,
       collateralVault: input.collateralVault,
@@ -734,6 +776,8 @@ export const useEulerTx = () => {
         swapQuote: input.swapQuote,
         swapperMode: input.swapperMode,
         skipCleanup: input.skipCleanup,
+        account: input.account,
+        subAccountSnapshotApplied: input.subAccountSnapshotApplied,
       })
     }
     return planMultiplySameAsset({
@@ -747,6 +791,8 @@ export const useEulerTx = () => {
       liabilityAmount: input.liabilityAmount,
       receiver: input.receiver,
       skipCleanup: input.skipCleanup,
+      account: input.account,
+      subAccountSnapshotApplied: input.subAccountSnapshotApplied,
     })
   }
 
@@ -857,7 +903,7 @@ export const useEulerTx = () => {
   // inspect `result.canExecute` and format failures via `formatSimulationFailure`
   // (see utils/tx-errors). Throwing here would flatten the SDK's chained
   // DecodedSmartContractError + insufficiency diagnostics into a bare string.
-  const simulatePlan = async (plan: TransactionPlan) => {
+  const simulatePlan = async (plan: TransactionPlan, stateOverrideOptions?: SimulationStateOverrideOptions) => {
     const owner = requireOwner()
     const cid = requireChainId()
     // Simulate via the fresh SDK so the internal state-override / batch
@@ -869,7 +915,7 @@ export const useEulerTx = () => {
       cid,
       owner,
       plan,
-      { stateOverrides: true },
+      { stateOverrides: true, stateOverrideOptions },
     )
     return result
   }
@@ -880,35 +926,59 @@ export const useEulerTx = () => {
    * internal plugin pipeline — net effect: plugin reads (TOS / Keyring / Pyth)
    * run exactly once per Review click instead of three times.
    *
-   * Uses the **fast** SDK so the plugin's vault/account/oracle-adapter reads
-   * hit the shared QueryClient cache populated by `useFreshAccount` at mount
-   * and refreshed by `invalidateSdkQueries(INVALIDATE_AFTER_TX)` post-tx.
-   * Time-sensitive Pyth/balance/allowance queries keep their short stale times
-   * either way.
+   * Pass `prefetch` (from `prefetchPluginData`) to short-circuit the plugin's
+   * per-call I/O — Pyth Hermes pull, keyring vault-config reads etc. — so
+   * per-quote prepare in a sweep is cheap.
    */
   const prepareTransactionPlan = async (
     plan: TransactionPlan,
-    options?: { account?: Account<IHasVaultAddress> },
+    options?: {
+      account?: Account<IHasVaultAddress>
+      prefetch?: PluginPrefetchData
+    },
   ): Promise<TransactionPlanPrepared> => {
-    const owner = requireOwner()
-    const cid = requireChainId()
-    const sdk = await getEulerSdk()
-    return sdk.executionService.prepareTransactionPlan({
-      plan,
-      chainId: cid,
-      account: options?.account ?? owner,
-      usePermit2: permit2Enabled.value,
+    return profAsync('sdk', 'prepareTransactionPlan', async () => {
+      const owner = requireOwner()
+      const cid = requireChainId()
+      const sdk = await getEulerSdk()
+      return sdk.executionService.prepareTransactionPlan({
+        plan,
+        chainId: cid,
+        account: options?.account ?? owner,
+        usePermit2: permit2Enabled.value,
+        prefetch: options?.prefetch,
+      })
     })
   }
 
-  const simulatePreparedPlan = async (prepared: TransactionPlanPrepared) => {
-    // Same rationale as prepareTransactionPlan: route through fast SDK so the
-    // simulate-internal vault-type lookups + state-override reads hit cache.
-    // The actual EVC batch eth_call (queryBatchSimulation) is still effectively
-    // uncached because its cache key includes the plan's encoded calldata.
-    const sdk = await getEulerSdk()
-    return sdk.executionService.simulatePreparedTransactionPlan(prepared, {
-      stateOverrides: true,
+  /**
+   * Resolve each plugin's prefetch payload for a representative plan once per
+   * form-load. Pass the returned record to prepare/simulate/estimate via the
+   * `prefetch` option so per-quote calls skip Hermes / keyring reads.
+   */
+  const prefetchPluginData = async (
+    plan: TransactionPlan,
+    options?: { account?: Account<IHasVaultAddress> },
+  ): Promise<PluginPrefetchData> => {
+    return profAsync('sdk', 'prefetchPluginData', async () => {
+      const owner = requireOwner()
+      const cid = requireChainId()
+      const sdk = await getEulerSdk()
+      return sdk.executionService.prefetchPluginDataForPlan(
+        plan,
+        options?.account ?? owner,
+        cid,
+      )
+    })
+  }
+
+  const simulatePreparedPlan = async (prepared: TransactionPlanPrepared, stateOverrideOptions?: SimulationStateOverrideOptions) => {
+    return profAsync('sdk', 'simulatePreparedTransactionPlan', async () => {
+      const sdk = await getEulerSdk()
+      return sdk.executionService.simulatePreparedTransactionPlan(prepared, {
+        stateOverrides: true,
+        stateOverrideOptions,
+      })
     })
   }
 
@@ -1009,7 +1079,23 @@ export const useEulerTx = () => {
     return result
   }
 
+  /**
+   * Attach a fresh snapshot of a sub-account onto a pre-loaded Account. Call
+   * once per form interaction (after the receiver/borrow sub-account is known
+   * and before fanning out per-quote plan builds) to amortise what would
+   * otherwise be N `fetchSubAccount` round-trips. Per-quote planners then pass
+   * `subAccountSnapshotApplied: true` to skip the inner refresh.
+   */
+  const preloadSubAccountSnapshot = async (
+    account: Account<IHasVaultAddress>,
+    subAccount: Address,
+  ) => {
+    const sdk = await getEulerSdkFresh()
+    await attachSubAccountSnapshot(sdk, account, subAccount)
+  }
+
   return {
+    preloadSubAccountSnapshot,
     planDeposit,
     planWithdraw,
     planRedeem,
@@ -1039,6 +1125,7 @@ export const useEulerTx = () => {
     planWithdrawOrRedeem,
     simulatePlan,
     prepareTransactionPlan,
+    prefetchPluginData,
     simulatePreparedPlan,
     executePlan,
     executePreparedPlan,

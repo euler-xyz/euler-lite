@@ -52,6 +52,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Two-instance SDK split (`getEulerSdk` fast / `getEulerSdkFresh` plan-time)
 - Backend selection via `enableV3Backend` (V3 adapters vs onchain/subgraph/direct)
 - Unified `SDK_QUERY_POLICY` — `staleTimeMs` / `formStaleTimeMs` / `invalidateAfterTx`
+- Post-tx portfolio refresh through the fresh SDK path
 - Same-origin proxies wired into SDK config (labels, Merkl, Fuul, Incentra, subgraph)
 
 ### 🗄️ [Server-Side Caching](./server-side-caching.md)

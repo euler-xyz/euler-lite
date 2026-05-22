@@ -1,5 +1,5 @@
 import type { Address, PublicClient } from 'viem'
-import type { SwapProviderExtraData, SwapQuote, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { PluginPrefetchData, SwapProviderExtraData, SwapQuote, TransactionPlan, TransactionPlanPrepared, SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
 import type { SwapQuoteInput } from '~/composables/useSwapApi'
 import {
   getQuoteAmount,
@@ -19,6 +19,7 @@ import { getTokenUsdValue } from '~/utils/sdk-prices'
 import { resolveWrappedNativeAddress } from '~/utils/native-currency'
 import { shouldDiscardQuoteOnEstimateGasError } from '~/utils/tx-errors'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
+import { profAsync, profMark } from '~/utils/profiler'
 
 type SwapQuotesParallelOptions = {
   amountField: SwapQuoteAmountField
@@ -28,6 +29,16 @@ type SwapQuotesParallelOptions = {
   /** Build a TransactionPlan from a quote so the composable can run gas
    *  estimation and discard quotes that fail with swapper/verifier reverts. */
   buildTxPlanForQuote?: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
+  /** Forwarded to `sdk.executionService.estimateGasForTransactionPlan` so the
+   *  per-quote estimate can skip balance overrides, reuse the wallet snapshot
+   *  the form already holds, and take precomputed storage-slot hints. */
+  getStateOverrideOptions?: () => SimulationStateOverrideOptions | undefined
+  /** Resolve the form-level plugin prefetch payload from a representative
+   *  plan. Called at most once per sweep against the first arriving quote's
+   *  plan; the result is cached and passed to `prepareTransactionPlan` for
+   *  every subsequent quote so per-quote prepare doesn't re-do Hermes /
+   *  keyring / vault-meta lookups. */
+  prefetchPluginData?: (plan: TransactionPlan, account: Address) => Promise<PluginPrefetchData>
 }
 
 type SwapQuotesRequestOptions = {
@@ -55,7 +66,10 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     address.value ?? (isSpyMode.value ? (spyAddress.value as Address | undefined) : undefined),
   )
 
-  const quoteCards = ref<SwapQuoteCard[]>([])
+  // shallowRef avoids Vue's deep-unwrap walking into the SDK's
+  // TransactionPlan / TransactionPlanPrepared types (recursive unions that
+  // confuse vue-tsc's structural matcher).
+  const quoteCards = shallowRef<SwapQuoteCard[]>([])
   const selectedProvider = ref<string | null>(null)
   const providersCount = ref(0)
   const providersFetchedCount = ref(0)
@@ -66,6 +80,10 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   // Remembered across re-fetches so the user's manual route choice survives
   // a quote refresh even if the provider list temporarily shrinks.
   let userSelectedProvider: string | null = null
+  // Per-sweep promise for the plugin prefetch (Pyth Hermes / keyring vault
+  // gating). First quote to need it computes; subsequent ones await. Reset on
+  // each new sweep so a fresh asset selection re-resolves.
+  let sweepPrefetchPromise: Promise<PluginPrefetchData | undefined> | null = null
   const guard = createRaceGuard()
 
   const sortedQuoteCards = computed(() =>
@@ -167,17 +185,57 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     return getTokenUsdValue(gasCostNative, nativeDecimals, wrappedNativeAddress, null)
   }
 
-  // Estimate gas via the SDK's executionService.estimateGasForTransactionPlan.
-  // CoW plans are intent-based and have no on-chain batch — short-circuit
-  // before calling the SDK helper (which asserts no CoW items).
-  const estimateTxPlanGas = async (plan: TransactionPlan, account: Address): Promise<bigint> => {
-    if (!chainId.value) throw new Error('estimateTxPlanGas: no chainId')
+  // Resolve the sweep-scoped prefetch on demand: first caller initialises the
+  // promise; later callers await the same result. Errors degrade gracefully —
+  // a failed prefetch falls back to the plugin's live-fetch path.
+  const ensureSweepPrefetch = (plan: TransactionPlan, account: Address) => {
+    if (!options.prefetchPluginData) return Promise.resolve<PluginPrefetchData | undefined>(undefined)
+    if (!sweepPrefetchPromise) {
+      sweepPrefetchPromise = options
+        .prefetchPluginData(plan, account)
+        .then(result => result as PluginPrefetchData | undefined)
+        .catch((err) => {
+          logWarn('useSwapQuotesParallel/prefetch', err)
+          return undefined
+        })
+    }
+    return sweepPrefetchPromise
+  }
+
+  // Prepare per-quote: prepareTransactionPlan once with the form's prefetch
+  // (Pyth Hermes updates + keyring gating already resolved), then estimate gas
+  // off the prepared envelope. Each quote has unique swap calldata, so prepare
+  // must run per quote; with prefetch threaded in, the prepare cost collapses
+  // to "local plan assembly" — no Hermes / keyring / vault-meta refetch.
+  const preparePlanForQuote = async (
+    plan: TransactionPlan,
+    account: Address,
+    prefetch: PluginPrefetchData | undefined,
+  ): Promise<TransactionPlanPrepared> => {
+    if (!chainId.value) throw new Error('preparePlanForQuote: no chainId')
     const sdk = await getEulerSdkFresh()
-    // stateOverrides:true mirrors the simulate path — derives fake balances,
-    // allowances and approvals from the plan so estimation works for accounts
-    // that haven't pre-approved (every spy-mode account, every fresh wallet
-    // building a plan against a new sub-account).
-    return sdk.executionService.estimateGasForTransactionPlan(chainId.value, account, plan, { stateOverrides: true })
+    return profAsync('quote', 'prepareTransactionPlan', () =>
+      sdk.executionService.prepareTransactionPlan({
+        plan,
+        chainId: chainId.value!,
+        account,
+        prefetch,
+      }),
+    )
+  }
+
+  // stateOverrides:true mirrors the simulate path — derives fake balances,
+  // allowances and approvals from the plan so estimation works for accounts
+  // that haven't pre-approved (every spy-mode account, every fresh wallet
+  // building a plan against a new sub-account).
+  const estimateTxPlanGas = async (prepared: TransactionPlanPrepared): Promise<bigint> => {
+    const sdk = await getEulerSdkFresh()
+    return profAsync('quote', 'estimateGasForPreparedTransactionPlan', () =>
+      sdk.executionService.estimateGasForPreparedTransactionPlan(prepared, {
+        stateOverrides: true,
+        stateOverrideOptions: options.getStateOverrideOptions?.(),
+      }),
+    )
   }
 
   const enrichQuoteCard = async (
@@ -209,10 +267,14 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     }
 
     let gas: bigint
+    let plan: TransactionPlan
+    let prepared: TransactionPlanPrepared
     try {
       const account = (params.origin || effectiveOwner.value || quote.accountIn) as Address
-      const plan = await options.buildTxPlanForQuote(quote, provider)
-      gas = await estimateTxPlanGas(plan, account)
+      plan = await profAsync(`quote:${provider}`, 'buildTxPlanForQuote', () => options.buildTxPlanForQuote!(quote, provider))
+      const prefetch = await profAsync(`quote:${provider}`, 'sweepPrefetch', () => ensureSweepPrefetch(plan, account))
+      prepared = await profAsync(`quote:${provider}`, 'prepareTxPlan', () => preparePlanForQuote(plan, account, prefetch))
+      gas = await profAsync(`quote:${provider}`, 'estimateTxPlanGas', () => estimateTxPlanGas(prepared))
     }
     catch (err) {
       if (shouldDiscardQuoteOnEstimateGasError(err)) {
@@ -231,7 +293,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
 
     const gasPrice = await gasPricePromise
     if (!gasPrice) {
-      return { provider, quote, amountUsd: await amountUsdPromise }
+      return { provider, quote, amountUsd: await amountUsdPromise, plan, preparedPlan: prepared }
     }
 
     const gasCostNative = gas * gasPrice
@@ -245,6 +307,8 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
       amountUsd,
       gasCostNative,
       gasCostUsd,
+      plan,
+      preparedPlan: prepared,
     }
   }
 
@@ -259,6 +323,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
       quoteAbort.abort()
       quoteAbort = null
     }
+    sweepPrefetchPromise = null
     guard.next()
     isLoading.value = false
   }
@@ -271,6 +336,19 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     if (isLoading.value && next.length > 0) {
       isLoading.value = false
     }
+  }
+
+  /**
+   * Merge an update into the card for `provider` in-place. Used by callers
+   * to attach lazily-built artefacts (e.g. a prepared envelope) without
+   * replacing the rest of the card data. No-op if the card no longer exists
+   * (race against `reset()` or a new sweep).
+   */
+  const patchCard = (provider: string, patch: Partial<SwapQuoteCard>) => {
+    const next = quoteCards.value.map(card =>
+      card.provider === provider ? { ...card, ...patch } : card,
+    )
+    quoteCards.value = sortQuoteCards(next, options.amountField, options.compare)
   }
 
   const getProviderExtraData = (
@@ -306,6 +384,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     const controller = new AbortController()
     quoteAbort = controller
     const gen = guard.next()
+    sweepPrefetchPromise = null
 
     isLoading.value = true
     quoteCards.value = []
@@ -355,16 +434,18 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
       const gasPricePromise = fetchGasPrice()
 
       const fetchProviderQuote = async (provider: string) => {
+        const flow = `quote:${provider}`
+        profMark(flow, 'start')
         try {
           const providerParams = {
             ...params,
             ...getProviderParams(provider, requestOptions),
           }
-          const data = await getSwapQuotes({
+          const data = await profAsync(flow, 'getSwapQuotes', () => getSwapQuotes({
             ...providerParams,
             provider,
             providerExtraData: getProviderExtraData(provider, providerParams, requestOptions),
-          }, { signal: controller.signal })
+          }, { signal: controller.signal }))
 
           if (guard.isStale(gen)) {
             return
@@ -372,11 +453,12 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
 
           const best = pickBestQuote(data, options.amountField, options.compare)
           if (best) {
-            const card = await enrichQuoteCard(provider, best, providerParams, client, gasPricePromise)
+            const card = await profAsync(flow, 'enrichQuoteCard.total', () => enrichQuoteCard(provider, best, providerParams, client, gasPricePromise))
             if (guard.isStale(gen) || !card) {
               return
             }
             upsertQuote(card)
+            profMark(flow, 'done')
           }
         }
         catch (err) {
@@ -460,8 +542,10 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     bestAmount,
     selectedProvider,
     selectedQuote,
+    selectedQuoteCard,
     selectedQuoteFetchedAt,
     effectiveQuote,
+    effectiveQuoteCard,
     effectiveQuoteFetchedAt,
     providersCount,
     providersFetchedCount,
@@ -472,5 +556,6 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     reset,
     requestQuotes,
     selectProvider,
+    patchCard,
   }
 }

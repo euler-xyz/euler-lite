@@ -33,6 +33,13 @@ const hiddenDepositCount = computed(() =>
 const positionGuard = createRaceGuard()
 const refreshCoordinator = createAddressRefreshCoordinator(() => positionGuard.next())
 
+type PortfolioRefreshSource = 'fast' | 'fresh'
+
+interface PortfolioRefreshOptions {
+  source?: PortfolioRefreshSource
+  preempt?: boolean
+}
+
 const usdWadToNumber = (value: bigint | number | undefined): number => {
   if (value === undefined) return 0
   return typeof value === 'bigint' ? Number(formatUnits(value, 18)) : value
@@ -91,13 +98,20 @@ export const useEulerAccount = () => {
     isDepositsLoading.value = true
   }
 
-  const fetchAndUpdatePortfolio = async (walletAddress: string) => {
+  const fetchAndUpdatePortfolio = async (
+    walletAddress: string,
+    refreshOptions: PortfolioRefreshOptions = {},
+  ) => {
+    if (refreshOptions.preempt) {
+      positionGuard.next()
+      refreshCoordinator.reset()
+    }
+
     const refreshToken = refreshCoordinator.begin(walletAddress)
     if (!refreshToken) return
+    const gen = positionGuard.current()
 
     try {
-      const gen = positionGuard.current()
-
       if (!walletAddress) {
         portfolio.value = undefined
         allPortfolio.value = undefined
@@ -106,8 +120,10 @@ export const useEulerAccount = () => {
         return
       }
 
-      const { getEulerSdk } = useEulerSdk()
-      const sdk = await getEulerSdk()
+      const { getEulerSdk, getEulerSdkFresh } = useEulerSdk()
+      const sdk = refreshOptions.source === 'fresh'
+        ? await getEulerSdkFresh()
+        : await getEulerSdk()
       const options = isShowAllPositions.value
         ? undefined
         : { positionFilter: buildVisiblePortfolioPositionFilter() }
@@ -132,6 +148,7 @@ export const useEulerAccount = () => {
       markLoaded()
     }
     catch (error) {
+      if (positionGuard.isStale(gen)) return
       logWarn('useEulerAccount/fetchAndUpdatePortfolio', error)
       portfolioDiagnostics.value = [{
         code: 'SOURCE_UNAVAILABLE',
@@ -146,7 +163,7 @@ export const useEulerAccount = () => {
       markLoaded()
     }
     finally {
-      await refreshCoordinator.finish(refreshToken, () => fetchAndUpdatePortfolio(walletAddress))
+      await refreshCoordinator.finish(refreshToken, () => fetchAndUpdatePortfolio(walletAddress, refreshOptions))
     }
   }
 
@@ -224,8 +241,9 @@ export const useEulerAccount = () => {
   const refreshAllPositions = async (
     _lensAddresses?: EulerLensAddresses,
     walletAddress = portfolioAddress.value,
+    refreshOptions?: PortfolioRefreshOptions,
   ) => {
-    await fetchAndUpdatePortfolio(walletAddress)
+    await fetchAndUpdatePortfolio(walletAddress, refreshOptions)
   }
 
   return {

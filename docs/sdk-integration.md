@@ -25,7 +25,7 @@ The app exposes two SDK instances, both produced by the same factory in `composa
 
   Cache wrapper is `sdkBuildQuery`, which applies `STALE_TIMES` (the per-query stale times from `SDK_QUERY_POLICY`). UI surfaces — vault lists, portfolio display, prices, rewards — consume this instance.
 
-- **`getEulerSdkFresh()` — form-time / plan-time instance.** Pinned to on-chain / direct / subgraph adapters regardless of `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` or `enableV3Backend`. Cache wrapper is `sdkFreshBuildQuery`, which applies `FORM_STALE_TIMES` — pre-resolved `formStaleTimeMs ?? staleTimeMs` per row, so plan-critical reads (`queryEVCAccountInfo`, `queryVaultAccountInfo`, `queryEVaultInfoFull`, `queryEulerEarnVaultInfoFull`, `queryBatchSimulation`, balance/allowance probes, Pyth update data) are forced to `staleTime: 0`. Catalogue / labels / prices fall through to the same row's `staleTimeMs` and continue to hit the shared cache. `composables/useEulerTx.ts` consumes this instance through a small `freshPlanContext()` helper which also fetches a live `Account` so planner entity math reflects the latest block.
+- **`getEulerSdkFresh()` — form-time / plan-time instance.** Pinned to on-chain / direct / subgraph adapters regardless of `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` or `enableV3Backend`. Cache wrapper is `sdkFreshBuildQuery`, which applies `FORM_STALE_TIMES` — pre-resolved `formStaleTimeMs ?? staleTimeMs` per row. Entries that must be live for account discovery, such as `queryAccountVaults`, use `formStaleTimeMs: 0`; plan-critical account/vault reads use shorter form-time windows than browsing reads. Catalogue / labels / prices fall through to the configured stale-time value and continue to hit the shared cache. `composables/useEulerTx.ts` consumes this instance through a small `freshPlanContext()` helper which also fetches a live `Account` so planner entity math reflects the latest block.
 
 Both instances share the same `QueryClient`, so a refetch driven by the fresh instance writes back to the cache that the fast instance reads from. A subsequent UI render will see the just-refreshed value within its own staleness window.
 
@@ -103,7 +103,7 @@ The full object is serialized into `staticCacheKey`, so any change produces a ne
 interface SdkQueryPolicyEntry {
   staleTimeMs: number              // QueryClient stale time on the browsing SDK
   formStaleTimeMs?: number         // override on the plan-time SDK; defaults to staleTimeMs
-  invalidateAfterTx?: boolean      // explicitly evicted at form mount + post-tx
+  invalidateAfterTx?: boolean      // invalidated after successful tx
 }
 ```
 
@@ -115,15 +115,17 @@ export const SDK_QUERY_POLICY = {
   queryDeployments:    { staleTimeMs: 5 * MINUTE },
   queryABI:            { staleTimeMs: Infinity },
 
-  // Plan-critical chain reads
-  queryEVaultInfoFull: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: 0, invalidateAfterTx: true },
-  queryEVCAccountInfo: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: 0, invalidateAfterTx: true },
+  // Account/vault reads
+  queryAccountVaults:  { staleTimeMs: DEFAULT_STALE_TIME_MS, formStaleTimeMs: 0, invalidateAfterTx: true },
+  queryEVaultInfoFull: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
+  queryEVCAccountInfo: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
+  queryV3AccountPositions: { staleTimeMs: DEFAULT_STALE_TIME_MS, invalidateAfterTx: true },
 
   // Time-sensitive
-  queryPythUpdateData: { staleTimeMs: 10 * SECOND, formStaleTimeMs: 0 },
+  queryPythUpdateData: { staleTimeMs: 15 * SECOND },
 
   // Balances
-  queryBalanceOf:      { staleTimeMs: 5 * SECOND,  formStaleTimeMs: 0 },
+  queryBalanceOf:      { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND },
 }
 ```
 
@@ -141,11 +143,11 @@ export const INVALIDATE_AFTER_TX: readonly EulerSDKQueryName[]               // 
 
 | field | scope | runtime effect |
 |---|---|---|
-| `staleTimeMs` | browsing SDK | `QueryClient.fetchQuery({ staleTime: STALE_TIMES[name] ?? 5_000 })`. Cached entries younger than this are returned without re-invoking the SDK. |
+| `staleTimeMs` | browsing SDK | `QueryClient.fetchQuery({ staleTime: STALE_TIMES[name] ?? DEFAULT_STALE_TIME_MS })`. Cached entries younger than this are returned without re-invoking the SDK. |
 | `formStaleTimeMs` | plan-time SDK | Same mechanism but on the fresh SDK's wrapper. Setting `0` forces re-fetch on every plan-time call regardless of cache age. |
-| `invalidateAfterTx` | shared QueryClient | Names listed get evicted via `invalidateSdkQueries(INVALIDATE_AFTER_TX)` at form mount and after every successful tx, so the next browsing read re-fetches. |
+| `invalidateAfterTx` | shared QueryClient | Names listed are invalidated via `invalidateSdkQueries(INVALIDATE_AFTER_TX)` after every successful tx, so matching cache entries are stale and active matches refetch. |
 
-`formStaleTimeMs` and `invalidateAfterTx` look redundant but cover different scopes — `formStaleTimeMs` only affects the plan-time SDK's per-fetch behaviour, while `invalidateAfterTx` evicts entries from the shared cache so the browsing SDK's *next* read re-fetches too. Some queries need only one (V3-only plan reads, Pyth simulation, etc.); some need both.
+`formStaleTimeMs` and `invalidateAfterTx` cover different scopes — `formStaleTimeMs` only affects the plan-time SDK per-fetch behaviour, while `invalidateAfterTx` marks entries stale in the shared cache so the next matching read re-fetches too. Some queries need only one (V3-only plan reads, Pyth simulation, etc.); some need both.
 
 ## Runtime: `sdk-query-cache.ts`
 
@@ -160,7 +162,7 @@ export const sdkFreshBuildQuery = buildSdkQuery(FORM_STALE_TIMES)
 export const invalidateSdkQueries = (queryNames: EulerSDKQueryName[]) => { … }
 ```
 
-`buildSdkQuery(staleTimes)` returns a `BuildQueryFn` that wraps each SDK `query*` method with a `QueryClient.fetchQuery({ queryKey: ['sdk', queryName, serializedArgs], queryFn, staleTime: staleTimes[queryName] ?? 5_000 })` call. Non-listed queries fall through to the 5-second default — exercised by `tests/utils/sdk-query-cache.test.ts`.
+`buildSdkQuery(staleTimes)` returns a `BuildQueryFn` that wraps each SDK `query*` method with a `QueryClient.fetchQuery({ queryKey: ['sdk', queryName, serializedArgs], queryFn, staleTime: staleTimes[queryName] ?? DEFAULT_STALE_TIME_MS })` call. Non-listed queries fall through to `DEFAULT_STALE_TIME_MS`.
 
 Key properties:
 
@@ -170,12 +172,21 @@ Key properties:
 
 ### Invalidation
 
-`invalidateSdkQueries(queryNames)` walks the QueryClient and drops any cache key whose `queryName` matches. Two callers:
+`invalidateSdkQueries(queryNames)` walks the QueryClient and invalidates any cache key whose `queryName` matches. Two callers:
 
 - `composables/useEulerTx.ts:finalizeExecution` — fires after every successful tx with `[...INVALIDATE_AFTER_TX]`.
 - `composables/cowswap/useCowSwapExecutionCore.ts` — same, post-CoW-swap settlement.
 
-Both import `INVALIDATE_AFTER_TX` directly from `~/utils/sdk-query-policy`. Most plan-time freshness should come from `formStaleTimeMs: 0`, not manual invalidation.
+Both import `INVALIDATE_AFTER_TX` directly from `~/utils/sdk-query-policy`. Post-tx invalidation covers both fast V3 account positions (`queryV3AccountPositions`) and fresh/onchain account-vault discovery (`queryAccountVaults`).
+
+### Post-Tx Portfolio Refresh
+
+`composables/useEulerTx.ts:finalizeExecution` invalidates `INVALIDATE_AFTER_TX` and calls `triggerPortfolioRefresh()`. The shared `portfolioRefreshCounter` drives two refreshes:
+
+- `composables/useFreshAccount.ts` reloads the plan-time account snapshot. It races the fast SDK and fresh SDK account reads; fast can fill an empty ref, but the fresh result always wins for the current load cursor.
+- `pages/portfolio.vue` calls `updatePositions({ portfolioSource: 'fresh', preemptPortfolio: true })`. That calls `refreshAllPositions(..., { source: 'fresh', preempt: true })`, so `composables/useEulerAccount.ts` loads the visible portfolio through `getEulerSdkFresh()` for the post-tx refresh. `preempt: true` advances the position race guard and resets the refresh coordinator so preempted fast portfolio reads cannot write stale portfolio data or diagnostics over the fresh result.
+
+Normal portfolio page activation and 60-second polling call `updatePositions()` without options, so routine browsing still uses the fast SDK path.
 
 ## Plan-Time Fresh Fetch
 
@@ -191,9 +202,9 @@ const freshPlanContext = async () => {
 }
 ```
 
-All ~20 plan builders call `freshPlanContext()` and pass `account` into the SDK. `simulatePlan`, `executePlan`, and `preparePlanForReview` use `getEulerSdkFresh()` directly so approval resolution and simulation see the same fresh state.
+Plan builders call `freshPlanContext()` or receive a preloaded account from `useFreshAccount()` and pass that `account` into the SDK. `simulatePlan` and transaction execution use `getEulerSdkFresh()` directly. Prepared-plan review uses the fast SDK so plugin and vault metadata reads can hit the shared cache populated by `useFreshAccount()`.
 
-The fresh `Account` snapshot gives planners correct entity math at the moment of plan construction; the zero-`formStaleTimeMs` rows ensure subsequent SDK reads inside the planner (simulate batches, pyth updates, allowance checks) also reflect the latest block.
+The fresh `Account` snapshot gives planners correct entity math at the moment of plan construction. Rows with shorter form-time windows keep subsequent SDK reads inside the planner bounded to the freshness required by that data class.
 
 ## Where to Extend
 

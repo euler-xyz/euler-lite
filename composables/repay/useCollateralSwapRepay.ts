@@ -1,4 +1,5 @@
-import type { Account, EVault, IHasVaultAddress, SecuritizeCollateralVault, PortfolioBorrowPosition, SwapQuote, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { Account, EVault, IHasVaultAddress, SecuritizeCollateralVault, PortfolioBorrowPosition, SwapQuote, VaultEntity, TransactionPlan, SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
+import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import type { Ref, ComputedRef } from 'vue'
@@ -41,7 +42,7 @@ interface UseCollateralSwapRepayOptions {
   isPreparing: Ref<boolean>
   slippage: Readonly<Ref<number>>
   clearSimulationError: () => void
-  runSimulation: (plan: TransactionPlan) => Promise<boolean>
+  runSimulation: (plan: TransactionPlan, stateOverrideOptions?: SimulationStateOverrideOptions) => Promise<boolean>
   getCurrentDebt: () => bigint
   isEligibleForLiquidation: ComputedRef<boolean>
 }
@@ -67,6 +68,11 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const { error } = useToast()
   const { isConnected, address } = useWagmi()
   const { planRepayFromSource, executePlan } = useEulerTx()
+  // Collateral-swap repay consumes vault collateral, not wallet ERC20 — safe to
+  // skip balance overrides. Slot hints + wallet snapshot still help allowance
+  // overrides without firing the balance branch.
+  const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
+  const buildRepayStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
   const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig, chainId: currentChainId } = useEulerAddresses()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { refreshAllPositions } = useEulerAccount()
@@ -368,6 +374,27 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     void updateSourceBalance()
   }, { immediate: true })
 
+  // Pre-prime ERC20 slot hints for the source/borrow assets touched here. The
+  // probe is owner-/spender-agnostic and reused across estimate/sim calls.
+  watch(
+    [sourceVault, borrowVault],
+    ([source, borrow]) => {
+      const tokens: Address[] = []
+      const seen = new Set<string>()
+      const push = (addr?: string) => {
+        if (!addr) return
+        const key = addr.toLowerCase()
+        if (seen.has(key)) return
+        seen.add(key)
+        tokens.push(addr as Address)
+      }
+      push(source?.asset?.address)
+      push(borrow?.asset?.address)
+      if (tokens.length) void primeSlotHintsFor(tokens)
+    },
+    { immediate: true },
+  )
+
   // --- Build / Submit / Send ---
   async function buildRepayPlan(quote?: SwapQuote): Promise<TransactionPlan> {
     if (!position.value || !borrowVault.value || !sourceVault.value) {
@@ -566,7 +593,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       }
 
       if (plan.value) {
-        const ok = await runSimulation(plan.value)
+        const ok = await runSimulation(plan.value, buildRepayStateOverrideOptions())
         if (!ok) return
       }
 

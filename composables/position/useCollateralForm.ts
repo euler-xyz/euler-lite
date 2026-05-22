@@ -8,6 +8,8 @@ import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
+import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
+import { useFreshAccount } from '~/composables/useFreshAccount'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import type { SwapQuoteInput } from '~/composables/useSwapApi'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
@@ -117,7 +119,16 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const submitLabel = options.reviewLabel
-  const { executePlan, executePreparedPlan, prepareTransactionPlan } = useEulerTx()
+  const { executePlan, executePreparedPlan, prepareTransactionPlan, prefetchPluginData } = useEulerTx()
+  const { account: freshAccount } = useFreshAccount()
+  // `effectiveBalance` is form-validated in `isSubmitDisabled`. In supply mode that
+  // is the wallet ERC20 balance, so `noBalanceOverride: true` saves a balanceOf
+  // RPC per estimate/sim. In withdraw mode the operation doesn't need wallet
+  // ERC20 balance, but slot hints + wallet snapshot still help allowance
+  // overrides.
+  const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
+  const buildCollateralStateOverrideOptions = () =>
+    buildStateOverrideOptions({ noBalanceOverride: options.mode === 'supply' })
   const { isConnected, address } = useWagmi()
   const { isSpyMode } = useSpyMode()
   const { finalizeTxAndRedirect } = useTxFinalization()
@@ -172,6 +183,10 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     amountField: 'amountOut',
     compare: 'max',
     buildTxPlanForQuote: quote => buildCollateralSwapPlanFromQuote(quote),
+    getStateOverrideOptions: () => buildCollateralStateOverrideOptions(),
+    // Sweep-scoped plugin prefetch — Hermes pull + keyring read happen once per
+    // sweep instead of once per quote.
+    prefetchPluginData: (plan, _account) => prefetchPluginData(plan, { account: freshAccount.value }),
   })
 
   async function buildCollateralSwapPlanFromQuote(quote: SwapQuote): Promise<TransactionPlan> {
@@ -680,7 +695,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
           const rawPlan = await buildRawPlan()
           plan.value = rawPlan
           if (rawPlan && options.usePreparedPipeline) {
-            preparedPlan.value = await prepareTransactionPlan(rawPlan)
+            preparedPlan.value = await prepareTransactionPlan(rawPlan, { account: freshAccount.value })
           }
         }
         catch (e) {
@@ -698,11 +713,11 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
         if (options.usePreparedPipeline) {
           if (!preparedPlan.value) return
-          const ok = await runPreparedSimulation(preparedPlan.value)
+          const ok = await runPreparedSimulation(preparedPlan.value, buildCollateralStateOverrideOptions())
           if (!ok) return
         }
         else if (plan.value) {
-          const ok = await runSimulation(plan.value)
+          const ok = await runSimulation(plan.value, buildCollateralStateOverrideOptions())
           if (!ok) return
         }
 
@@ -776,6 +791,31 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       isSubmitting.value = false
     }
   }
+
+  // Pre-prime ERC20 slot hints for the assets this form touches (collateral,
+  // borrow, pay-with/output). One probe per token, owner-/spender-agnostic;
+  // keeps state-override derivation off the access-list path for the lifetime
+  // of the form.
+  watch(
+    [collateralVault, borrowVault, () => options.effectiveAsset.value, () => options.getSwapOutputAsset()],
+    ([collateral, borrow, effective, swapOut]) => {
+      const tokens: Address[] = []
+      const seen = new Set<string>()
+      const push = (addr?: string) => {
+        if (!addr) return
+        const key = addr.toLowerCase()
+        if (seen.has(key)) return
+        seen.add(key)
+        tokens.push(addr as Address)
+      }
+      push(collateral?.asset?.address)
+      push(borrow?.asset?.address)
+      push(effective?.address)
+      push(swapOut?.address)
+      if (tokens.length) void primeSlotHintsFor(tokens)
+    },
+    { immediate: true },
+  )
 
   // --- Common watchers ---
   watch(isPositionsLoaded, (val) => {

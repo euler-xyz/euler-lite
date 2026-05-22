@@ -9,7 +9,8 @@ import type { EulerSDKQueryName } from '@eulerxyz/euler-v2-sdk'
  *   - `staleTimeMs` (required): the QueryClient stale time used by the
  *     browsing SDK instance (`getEulerSdk()`). Entries younger than this are
  *     served from cache; older ones trigger a re-fetch. Matches TanStack
- *     Query's `staleTime` semantics.
+ *     Query's `staleTime` semantics. Current SDK query names are listed here;
+ *     future unlisted names fall through to `DEFAULT_STALE_TIME_MS`.
  *
  *   - `formStaleTimeMs` (optional): override on the plan-time/form SDK
  *     instance (`getEulerSdkFresh()`). When forms construct a transaction
@@ -25,28 +26,23 @@ import type { EulerSDKQueryName } from '@eulerxyz/euler-v2-sdk'
  *
  * Stale-time classes (organising the rows below):
  *
- *   - **Static catalogue / metadata** (deployments, ABIs, labels, oracle
- *     adapter lists, verified-vault arrays): 5 min — these almost never
- *     change.
+ *   - **Default / low-volatility reads** (deployments, labels, oracle adapter
+ *     lists, verified-vault arrays, reward campaign metadata, V3 list pages):
+ *     5 min.
  *   - **Plan-critical chain reads** (vault info, account info, vault
- *     factory/type lookups): 5 min on the browsing SDK + 0 on the plan-time
+ *     factory/type lookups): 5 min on the browsing SDK + 1 min on the plan-time
  *     SDK + invalidate-after-tx. The bumped 5-min stale lets the Pyth
  *     plugin's `populateCollaterals` and simulate's `fetchVaultTypes` hit
  *     cache on Review-clicks; the post-tx invalidation makes display refresh
  *     after a deposit/borrow.
- *   - **Pricing / APY** (assetPriceInfo, rewards, intrinsicApy): 1 min —
- *     fresh enough for display, cheap to fetch.
- *   - **Time-sensitive** (Pyth update data + fee, simulate batch): 10 s on
- *     the browsing SDK + 0 on plan-time. Pyth payloads have a real on-chain
+ *   - **Pricing / APY** (assetPriceInfo, rewards breakdown, intrinsicApy):
+ *     1 min. `queryV3Price` uses 30 s.
+ *   - **Time-sensitive** (block reads, swap quotes, Pyth update data + fee,
+ *     simulate batch): short cache windows. Pyth payloads have a real on-chain
  *     validity window (~60 s); caching longer would make tx revert at
  *     execute.
- *   - **Balances / allowances**: 5 s on the browsing SDK + 0 on plan-time.
- *     Short enough that an external wallet change is picked up within ~5 s
- *     without explicit invalidation.
- *
- * Queries not listed here fall through to a 5-second default in
- * `sdk-query-cache.ts`'s `buildSdkQuery`. That fallback is exercised by
- * `tests/utils/sdk-query-cache.test.ts`.
+ *   - **Balances / allowances**: short plan-time windows so external wallet
+ *     changes are picked up without explicit invalidation.
  */
 export interface SdkQueryPolicyEntry {
   staleTimeMs: number
@@ -56,6 +52,8 @@ export interface SdkQueryPolicyEntry {
 
 const SECOND = 1_000
 const MINUTE = 60 * SECOND
+
+export const DEFAULT_STALE_TIME_MS = 5 * MINUTE
 
 export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyEntry>> = {
   // === Catalogue / metadata: nearly static ===
@@ -68,35 +66,62 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   queryEulerLabelsEarnVaults: { staleTimeMs: 5 * MINUTE },
   queryEulerLabelsAssets: { staleTimeMs: 5 * MINUTE },
   queryOracleAdapters: { staleTimeMs: 5 * MINUTE },
-  queryEVaultVerifiedArray: { staleTimeMs: 5 * MINUTE, invalidateAfterTx: true },
-  queryEulerEarnVerifiedArray: { staleTimeMs: 5 * MINUTE, invalidateAfterTx: true },
   queryV3VaultResolve: { staleTimeMs: 5 * MINUTE },
 
+  // === Default / low-volatility reads: 5-minute cache ===
+  queryAccountVaults: { staleTimeMs: DEFAULT_STALE_TIME_MS, formStaleTimeMs: 0, invalidateAfterTx: true },
+  queryBrevisCampaigns: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryBrevisUserProofs: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryEVaultVerifiedArray: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryEulerEarnConvertToAssets: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryEulerEarnVerifiedArray: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryFuulClaimChecks: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryFuulIncentives: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryFuulTotals: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryKeyringAddress: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryKeyringCheckCredential: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryKeyringPolicyId: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryMerklOpportunities: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryMerklUserRewards: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  querySecuritizeVaultGovernorAdmin: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  querySecuritizeVaultSupplyCapResolved: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  querySwapProviders: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryV3EVaultList: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryV3EulerEarnList: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryV3IntrinsicApysPage: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryV3RewardsApyPage: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryVaultInfoERC4626: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+
   // === Plan-critical chain reads ===
-  queryEVaultInfoFull: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: 0, invalidateAfterTx: true },
-  queryEulerEarnVaultInfoFull: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: 0, invalidateAfterTx: true },
+  queryEVaultInfoFull: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
+  queryEulerEarnVaultInfoFull: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
+  queryV3AccountPositions: { staleTimeMs: DEFAULT_STALE_TIME_MS, invalidateAfterTx: true },
   queryV3EVaultDetail: { staleTimeMs: 5 * MINUTE, invalidateAfterTx: true },
   queryV3EulerEarnDetail: { staleTimeMs: 5 * MINUTE, invalidateAfterTx: true },
-  queryEVCAccountInfo: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: 0, invalidateAfterTx: true },
-  queryVaultAccountInfo: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: 0, invalidateAfterTx: true },
+  queryEVCAccountInfo: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
+  queryVaultAccountInfo: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryVaultFactories: { staleTimeMs: 5 * MINUTE, invalidateAfterTx: true },
 
   // === Pricing / APY: display-side, 1-min cache ===
   queryAssetPriceInfo: { staleTimeMs: MINUTE },
   queryV3RewardsBreakdown: { staleTimeMs: MINUTE },
   queryV3IntrinsicApy: { staleTimeMs: MINUTE },
+  queryV3Price: { staleTimeMs: 30 * SECOND },
 
-  // === Time-sensitive (Pyth + simulation): short cache, always-fresh in form context ===
-  queryBatchSimulation: { staleTimeMs: 10 * SECOND, formStaleTimeMs: 0 },
-  queryPythUpdateData: { staleTimeMs: 10 * SECOND, formStaleTimeMs: 0 },
-  queryPythUpdateFee: { staleTimeMs: 10 * SECOND, formStaleTimeMs: 0 },
+  // === Time-sensitive (Pyth + simulation): short cache ===
+  queryBlock: { staleTimeMs: 5 * SECOND },
+  queryBlockNumber: { staleTimeMs: 5 * SECOND },
+  querySwapQuotes: { staleTimeMs: 5 * SECOND },
+  queryBatchSimulation: { staleTimeMs: 15 * SECOND },
+  queryPythUpdateData: { staleTimeMs: 15 * SECOND },
+  queryPythUpdateFee: { staleTimeMs: 15 * SECOND },
 
   // === Balances / allowances: short cache, always-fresh in form context ===
-  queryNativeBalance: { staleTimeMs: 5 * SECOND, formStaleTimeMs: 0 },
-  queryTokenBalances: { staleTimeMs: 5 * SECOND },
-  queryBalanceOf: { staleTimeMs: 5 * SECOND, formStaleTimeMs: 0 },
-  queryAllowance: { staleTimeMs: 5 * SECOND, formStaleTimeMs: 0 },
-  queryPermit2Allowance: { staleTimeMs: 5 * SECOND, formStaleTimeMs: 0 },
+  queryNativeBalance: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND },
+  queryTokenBalances: { staleTimeMs: MINUTE * SECOND, formStaleTimeMs: 15 * SECOND },
+  queryBalanceOf: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND },
+  queryAllowance: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND },
+  queryPermit2Allowance: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND },
 }
 
 const policyEntries = (): [EulerSDKQueryName, SdkQueryPolicyEntry][] =>

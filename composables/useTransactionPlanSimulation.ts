@@ -1,4 +1,4 @@
-import type { TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import type { SimulationStateOverrideOptions, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { formatSimulationFailure, getTxErrorMessage } from '~/utils/tx-errors'
 
 export const useTransactionPlanSimulation = () => {
@@ -28,11 +28,11 @@ export const useTransactionPlanSimulation = () => {
     return true
   }
 
-  const runSimulation = async (plan: TransactionPlan) => {
+  const runSimulation = async (plan: TransactionPlan, stateOverrideOptions?: SimulationStateOverrideOptions) => {
     clearSimulationError()
     isSimulating.value = true
     try {
-      return handleResult(await simulatePlan(plan))
+      return handleResult(await simulatePlan(plan, stateOverrideOptions))
     }
     catch (e) {
       // Transport / wagmi / SDK-side errors (RPC down, signTypedData rejected, etc.)
@@ -44,11 +44,11 @@ export const useTransactionPlanSimulation = () => {
     }
   }
 
-  const runPreparedSimulation = async (prepared: TransactionPlanPrepared) => {
+  const runPreparedSimulation = async (prepared: TransactionPlanPrepared, stateOverrideOptions?: SimulationStateOverrideOptions) => {
     clearSimulationError()
     isSimulating.value = true
     try {
-      return handleResult(await simulatePreparedPlan(prepared))
+      return handleResult(await simulatePreparedPlan(prepared, stateOverrideOptions))
     }
     catch (e) {
       simulationError.value = await getTxErrorMessage(e)

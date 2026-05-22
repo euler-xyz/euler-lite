@@ -91,14 +91,19 @@ const netAssetValueDisplay = computed(() => {
   return formatCompactUsdValue(total)
 })
 
-const updatePositions = async () => {
+const updatePositions = async (
+  options: { portfolioSource?: 'fast' | 'fresh', preemptPortfolio?: boolean } = {},
+) => {
   const targetAddress = isSpyMode.value ? spyAddress.value : address.value
   if (!targetAddress) return
   // Refresh the rich portfolio snapshot (drives the UI on this page) and the
   // plan-time Account snapshot in parallel. The two write into disjoint stores,
   // so the calls are independent.
   refreshFreshAccount()
-  await refreshAllPositions(eulerLensAddresses.value, targetAddress)
+  await refreshAllPositions(eulerLensAddresses.value, targetAddress, {
+    source: options.portfolioSource,
+    preempt: options.preemptPortfolio,
+  })
 }
 
 onActivated(async () => {
@@ -115,7 +120,7 @@ onDeactivated(() => {
 })
 
 watch(portfolioRefreshCounter, () => {
-  updatePositions()
+  updatePositions({ portfolioSource: 'fresh', preemptPortfolio: true })
 })
 watch(showAllLabelEntries, (showAll) => {
   isShowAllPositions.value = showAll

@@ -23,6 +23,8 @@ import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { getPlanHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { getVaultTags, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
+import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
+import { useFreshAccount } from '~/composables/useFreshAccount'
 
 export interface UseBorrowFormOptions {
   pair: Ref<AnyBorrowVaultPair | undefined>
@@ -76,12 +78,19 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   const modal = useModal()
   const { error } = useToast()
-  const { planBorrow, planSwapAndBorrow, executePlan } = useEulerTx()
+  const { planBorrow, planSwapAndBorrow, executePlan, prefetchPluginData } = useEulerTx()
   const { address, isConnected } = useWagmi()
   const { isSpyMode } = useSpyMode()
   const { chainId } = useEulerAddresses()
   const { fetchSingleBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
+  const { account: freshAccount } = useFreshAccount()
+  // Form validates "Not enough balance" up front (see `errorText` / `isSubmitDisabled`),
+  // so the simulator never needs to forge wallet balances — `noBalanceOverride: true`
+  // skips per-call balanceOf + slot probing. Slot hints + wallet snapshot are still
+  // passed so allowance overrides take the same fast path.
+  const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
+  const buildBorrowStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
 
   const {
     runSimulation: runBorrowSimulation,
@@ -115,6 +124,11 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     amountField: 'amountOut',
     compare: 'max',
     buildTxPlanForQuote: quote => buildSwapBorrowPlanFromQuote(quote),
+    getStateOverrideOptions: () => buildBorrowStateOverrideOptions(),
+    // First quote in each sweep resolves the plugin prefetch (Pyth Hermes /
+    // keyring vault gating); subsequent quotes reuse it so per-quote prepare
+    // skips Hermes pulls and keyring reads.
+    prefetchPluginData: (plan, _account) => prefetchPluginData(plan, { account: freshAccount.value }),
   })
   // --- Form state ---
   const ltv = ref(0)
@@ -659,7 +673,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         }
 
         if (plan.value) {
-          const ok = await runBorrowSimulation(plan.value)
+          const ok = await runBorrowSimulation(plan.value, buildBorrowStateOverrideOptions())
           if (!ok) {
             return
           }
@@ -735,7 +749,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       }
 
       if (plan.value) {
-        const ok = await runBorrowSimulation(plan.value)
+        const ok = await runBorrowSimulation(plan.value, buildBorrowStateOverrideOptions())
         if (!ok) {
           return
         }
@@ -839,6 +853,29 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       borrowSelectedAssetBalance.value = 0n
     }
   }
+
+  // Pre-prime slot hints for assets this form touches (collateral, borrow,
+  // selected pay-with token). Hits run once per token; the SDK module-scope
+  // cache keeps subsequent prepares/estimates free of access-list discovery.
+  watch(
+    [collateralVault, borrowVault, borrowSelectedAsset],
+    ([collateral, borrow, selected]) => {
+      const tokens: Address[] = []
+      const seen = new Set<string>()
+      const push = (addr?: string) => {
+        if (!addr || isNativeCurrencyAddress(addr)) return
+        const key = addr.toLowerCase()
+        if (seen.has(key)) return
+        seen.add(key)
+        tokens.push(addr as Address)
+      }
+      push(collateral?.asset?.address)
+      push(borrow?.asset?.address)
+      push(selected?.address)
+      if (tokens.length) void primeSlotHintsFor(tokens)
+    },
+    { immediate: true },
+  )
 
   // --- Watchers ---
   watch([collateralAmount, borrowAmount], () => {

@@ -370,7 +370,7 @@ const resolveGroupTVL = async (group: MarketGroup): Promise<MarketGroup> => {
 export const useMarketGroups = () => {
   const { getAll } = useVaultRegistry()
   const { products, entities, isReady: labelsReady } = useEulerLabels()
-  const { isVaultGovernorVerified, isCollateralResolved } = useVaults()
+  const { isVaultGovernorVerified, isCollateralResolved, isReady: vaultsReady } = useVaults()
   const showAllLabelEntries = useShowAllLabelEntries()
 
   /** Every loaded vault, including non-explorable ones (used for collateral lookups) */
@@ -386,6 +386,13 @@ export const useMarketGroups = () => {
 
   /** Synchronous market groups (metrics without TVL) */
   const marketGroupsSync = computed((): MarketGroup[] => {
+    // Gate on vaultsReady so the first TVL resolution sees populated
+    // marketPriceUsd values. Otherwise hydrateFromServer's atomic
+    // registrySetMany triggers a resolve pass before populateMarketPrices
+    // has run, every group gets totalTVL=0, and the explore page's
+    // "Active" sort falls back to label/discovery order — causing a
+    // visible reorder once the second resolve commits real TVLs.
+    if (!vaultsReady.value) return []
     const vaults = allVaults.value
     if (vaults.length === 0) return []
 
