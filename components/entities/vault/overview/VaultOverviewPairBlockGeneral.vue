@@ -302,94 +302,96 @@ const rampDownModalData = computed(() => ({
           Borrow
         </div>
 
-        <div class="flex flex-col gap-6 laptop:col-span-3">
-          <div class="flex items-center gap-4 text-p3 text-content-tertiary">
-            Borrow APY
-            <UiModalPreviewTrigger
-              :component="VaultBorrowApyModal"
-              :modal-data="borrowApyModalData"
-              aria-label="Show borrow APY breakdown"
-            >
-              <SvgIcon
-                class="!w-18 !h-18 text-content-muted cursor-pointer hover:text-content-secondary"
-                name="info-circle"
-              />
-            </UiModalPreviewTrigger>
+        <div class="grid grid-cols-1 laptop:grid-cols-3 gap-x-32 gap-y-16 laptop:col-span-8">
+          <div class="flex flex-col gap-6">
+            <div class="flex items-center gap-4 text-p3 text-content-tertiary">
+              Borrow APY
+              <UiModalPreviewTrigger
+                :component="VaultBorrowApyModal"
+                :modal-data="borrowApyModalData"
+                aria-label="Show borrow APY breakdown"
+              >
+                <SvgIcon
+                  class="!w-18 !h-18 text-content-muted cursor-pointer hover:text-content-secondary"
+                  name="info-circle"
+                />
+              </UiModalPreviewTrigger>
+            </div>
+            <div class="flex items-center gap-4 text-p2 font-semibold text-content-primary">
+              <UiModalPreviewTrigger
+                v-if="hasBorrowRewards(pair.borrow.address, pair.collateral.address)"
+                :component="VaultBorrowApyModal"
+                :modal-data="borrowApyModalData"
+                aria-label="Show borrow APY rewards breakdown"
+              >
+                <SvgIcon
+                  class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                  name="sparks"
+                />
+              </UiModalPreviewTrigger>
+              {{ formatNumber(borrowApyWithRewards) }}%
+            </div>
           </div>
-          <div class="flex items-center gap-4 text-p2 font-semibold text-content-primary">
-            <UiModalPreviewTrigger
-              v-if="hasBorrowRewards(pair.borrow.address, pair.collateral.address)"
-              :component="VaultBorrowApyModal"
-              :modal-data="borrowApyModalData"
-              aria-label="Show borrow APY rewards breakdown"
-            >
-              <SvgIcon
-                class="!w-20 !h-20 text-accent-500 cursor-pointer"
-                name="sparks"
-              />
-            </UiModalPreviewTrigger>
-            {{ formatNumber(borrowApyWithRewards) }}%
-          </div>
-        </div>
 
-        <div class="flex flex-col gap-6 laptop:col-span-2">
-          <div class="flex items-center gap-4 text-p3 text-content-tertiary">
-            Collateral APY
-            <UiModalPreviewTrigger
-              :component="VaultSupplyApyModal"
-              :modal-data="supplyApyModalData"
-              aria-label="Show collateral APY breakdown"
-            >
-              <SvgIcon
-                class="!w-18 !h-18 text-content-muted cursor-pointer hover:text-content-secondary"
-                name="info-circle"
-              />
-            </UiModalPreviewTrigger>
+          <div class="flex flex-col gap-6">
+            <div class="flex items-center gap-4 text-p3 text-content-tertiary">
+              Collateral APY
+              <UiModalPreviewTrigger
+                :component="VaultSupplyApyModal"
+                :modal-data="supplyApyModalData"
+                aria-label="Show collateral APY breakdown"
+              >
+                <SvgIcon
+                  class="!w-18 !h-18 text-content-muted cursor-pointer hover:text-content-secondary"
+                  name="info-circle"
+                />
+              </UiModalPreviewTrigger>
+            </div>
+            <div class="flex items-center gap-4 text-p2 font-semibold text-content-primary">
+              <VaultPoints :vault="pair.collateral" />
+              <UiModalPreviewTrigger
+                v-if="hasSupplyRewards(pair.collateral.address)"
+                :component="VaultSupplyApyModal"
+                :modal-data="supplyApyModalData"
+                aria-label="Show collateral APY rewards breakdown"
+              >
+                <SvgIcon
+                  class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                  name="sparks"
+                />
+              </UiModalPreviewTrigger>
+              {{ formatNumber(supplyApyWithRewards) }}%
+            </div>
           </div>
-          <div class="flex items-center gap-4 text-p2 font-semibold text-content-primary">
-            <VaultPoints :vault="pair.collateral" />
-            <UiModalPreviewTrigger
-              v-if="hasSupplyRewards(pair.collateral.address)"
-              :component="VaultSupplyApyModal"
-              :modal-data="supplyApyModalData"
-              aria-label="Show collateral APY rewards breakdown"
-            >
-              <SvgIcon
-                class="!w-20 !h-20 text-accent-500 cursor-pointer"
-                name="sparks"
-              />
-            </UiModalPreviewTrigger>
-            {{ formatNumber(supplyApyWithRewards) }}%
-          </div>
-        </div>
 
-        <div class="flex flex-col gap-6 laptop:col-span-3">
-          <div class="flex items-center gap-4 text-p3 text-content-tertiary">
-            Net APY
-            <UiModalPreviewTrigger
-              :component="VaultNetApyPairModal"
-              :modal-data="netApyModalData"
-              aria-label="Show net APY breakdown"
-            >
-              <SvgIcon
-                class="!w-18 !h-18 text-content-muted cursor-pointer hover:text-content-secondary"
-                name="info-circle"
-              />
-            </UiModalPreviewTrigger>
-          </div>
-          <div class="flex items-center gap-4 text-p2 font-semibold text-content-primary">
-            <UiModalPreviewTrigger
-              v-if="hasSupplyRewards(pair.collateral.address) || hasBorrowRewards(pair.borrow.address, pair.collateral.address) || hasLoopingRewards(pair.borrow.address, pair.collateral.address)"
-              :component="VaultNetApyPairModal"
-              :modal-data="netApyModalData"
-              aria-label="Show net APY rewards breakdown"
-            >
-              <SvgIcon
-                class="!w-20 !h-20 text-accent-500 cursor-pointer"
-                name="sparks"
-              />
-            </UiModalPreviewTrigger>
-            {{ formatNumber(netApy) }}%
+          <div class="flex flex-col gap-6">
+            <div class="flex items-center gap-4 text-p3 text-content-tertiary">
+              Net APY
+              <UiModalPreviewTrigger
+                :component="VaultNetApyPairModal"
+                :modal-data="netApyModalData"
+                aria-label="Show net APY breakdown"
+              >
+                <SvgIcon
+                  class="!w-18 !h-18 text-content-muted cursor-pointer hover:text-content-secondary"
+                  name="info-circle"
+                />
+              </UiModalPreviewTrigger>
+            </div>
+            <div class="flex items-center gap-4 text-p2 font-semibold text-content-primary">
+              <UiModalPreviewTrigger
+                v-if="hasSupplyRewards(pair.collateral.address) || hasBorrowRewards(pair.borrow.address, pair.collateral.address) || hasLoopingRewards(pair.borrow.address, pair.collateral.address)"
+                :component="VaultNetApyPairModal"
+                :modal-data="netApyModalData"
+                aria-label="Show net APY rewards breakdown"
+              >
+                <SvgIcon
+                  class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                  name="sparks"
+                />
+              </UiModalPreviewTrigger>
+              {{ formatNumber(netApy) }}%
+            </div>
           </div>
         </div>
 
