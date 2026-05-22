@@ -251,42 +251,44 @@ const rampDownModalData = computed(() => ({
             </div>
           </div>
         </div>
-        <div class="flex flex-col gap-6 laptop:col-span-2">
-          <div class="text-p3 text-content-tertiary">
-            Max LTV
+        <div class="grid grid-cols-2 gap-x-16 laptop:col-span-4">
+          <div class="flex flex-col gap-6">
+            <div class="text-p3 text-content-tertiary">
+              Max LTV
+            </div>
+            <div class="text-p2 font-semibold text-content-primary">
+              {{ formatNumber(nanoToValue(pair.borrowLTV, 2), 2) }}%
+            </div>
           </div>
-          <div class="text-p2 font-semibold text-content-primary">
-            {{ formatNumber(nanoToValue(pair.borrowLTV, 2), 2) }}%
-          </div>
-        </div>
-        <div class="flex flex-col gap-6 laptop:col-span-2">
-          <div class="flex items-center gap-4 text-p3 text-content-tertiary">
-            Liquidation LTV
-            <UiModalPreviewTrigger
-              v-if="isRamping"
-              :component="VaultRampDownModal"
-              :modal-data="rampDownModalData"
-              aria-label="Show liquidation LTV ramp-down details"
-            >
-              <SvgIcon
-                class="!w-18 !h-18 text-content-muted cursor-pointer hover:text-content-secondary"
-                name="info-circle"
-              />
-            </UiModalPreviewTrigger>
-          </div>
-          <div class="flex items-center gap-4 text-p2 font-semibold text-content-primary">
-            <UiModalPreviewTrigger
-              v-if="isRamping"
-              :component="VaultRampDownModal"
-              :modal-data="rampDownModalData"
-              aria-label="Show liquidation LTV ramp-down details"
-            >
-              <SvgIcon
-                name="arrow-top-right"
-                class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
-              />
-            </UiModalPreviewTrigger>
-            {{ formatNumber(nanoToValue(currentLiquidationLTV, 2), 2) }}%
+          <div class="flex flex-col gap-6">
+            <div class="flex items-center gap-4 text-p3 text-content-tertiary">
+              Liquidation LTV
+              <UiModalPreviewTrigger
+                v-if="isRamping"
+                :component="VaultRampDownModal"
+                :modal-data="rampDownModalData"
+                aria-label="Show liquidation LTV ramp-down details"
+              >
+                <SvgIcon
+                  class="!w-18 !h-18 text-content-muted cursor-pointer hover:text-content-secondary"
+                  name="info-circle"
+                />
+              </UiModalPreviewTrigger>
+            </div>
+            <div class="flex items-center gap-4 text-p2 font-semibold text-content-primary">
+              <UiModalPreviewTrigger
+                v-if="isRamping"
+                :component="VaultRampDownModal"
+                :modal-data="rampDownModalData"
+                aria-label="Show liquidation LTV ramp-down details"
+              >
+                <SvgIcon
+                  name="arrow-top-right"
+                  class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
+                />
+              </UiModalPreviewTrigger>
+              {{ formatNumber(nanoToValue(currentLiquidationLTV, 2), 2) }}%
+            </div>
           </div>
         </div>
 
