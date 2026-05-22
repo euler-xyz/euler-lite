@@ -302,8 +302,8 @@ const rampDownModalData = computed(() => ({
           Borrow
         </div>
 
-        <div class="grid grid-cols-1 laptop:grid-cols-3 gap-x-32 gap-y-16 laptop:col-span-8">
-          <div class="flex flex-col gap-6">
+        <div class="grid grid-cols-1 laptop:grid-cols-8 gap-x-32 gap-y-16 laptop:col-span-8">
+          <div class="flex flex-col gap-6 laptop:col-span-2">
             <div class="flex items-center gap-4 text-p3 text-content-tertiary">
               Borrow APY
               <UiModalPreviewTrigger
@@ -333,7 +333,7 @@ const rampDownModalData = computed(() => ({
             </div>
           </div>
 
-          <div class="flex flex-col gap-6">
+          <div class="flex flex-col gap-6 laptop:col-span-2">
             <div class="flex items-center gap-4 text-p3 text-content-tertiary">
               Collateral APY
               <UiModalPreviewTrigger
@@ -364,7 +364,7 @@ const rampDownModalData = computed(() => ({
             </div>
           </div>
 
-          <div class="flex flex-col gap-6">
+          <div class="flex flex-col gap-6 laptop:col-span-2">
             <div class="flex items-center gap-4 text-p3 text-content-tertiary">
               Net APY
               <UiModalPreviewTrigger
