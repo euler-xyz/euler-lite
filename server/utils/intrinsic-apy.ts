@@ -46,7 +46,7 @@ const UPSTREAM_URLS = {
   lhype: 'https://app.loopingcollective.org/api/external/asset/lhype',
   lsthype: 'https://api.hyperbeat.org/api/v1/vaults/apy/0x81e064d0eB539de7c3170EDF38C1A42CBd752A76',
   noon: 'https://back.noon.capital/api/v1/protocol-metrics',
-  stakedHypefi: 'https://index.stakedhype.fi/graphql',
+  valantis: 'https://analytics-v3.valantis-analytics.xyz/sthype/apr',
 } as const
 
 const PENDLE_API_BASE = 'https://api-v2.pendle.finance/core/v2'
@@ -62,6 +62,15 @@ async function fetchJson(url: string, init?: RequestInit): Promise<unknown> {
     throw new Error(`${safeUrl} returned ${resp.status}`)
   }
   return resp.json()
+}
+
+async function fetchText(url: string, init?: RequestInit): Promise<string> {
+  const resp = await fetchWithTimeout(url, UPSTREAM_FETCH_TIMEOUT_MS, init)
+  if (!resp.ok) {
+    const safeUrl = url.split('?')[0]
+    throw new Error(`${safeUrl} returned ${resp.status}`)
+  }
+  return resp.text()
 }
 
 /**
@@ -104,6 +113,30 @@ function fetchUpstream<T = unknown>(key: string, url: string, init?: RequestInit
         `upstream ${key} failed (${msg}); no stale entry`)
       throw err
     })) as Promise<T>
+}
+
+function fetchUpstreamText(key: string, url: string, init?: RequestInit): Promise<string> {
+  const fresh = cache.get(key)
+  if (fresh !== undefined) return Promise.resolve(fresh as string)
+
+  return upstreamInFlight.run(key, () => fetchText(url, init)
+    .then((data) => {
+      cache.set(key, data)
+      reportStatus('intrinsic-apy', `upstream:${key}`, 'ok')
+      return data
+    })
+    .catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err)
+      const stale = cache.getStale(key)
+      if (stale !== undefined) {
+        reportStatus('intrinsic-apy', `upstream:${key}`, `failed-stale:${msg}`,
+          `upstream ${key} failed (${msg}); serving stale`)
+        return stale as string
+      }
+      reportStatus('intrinsic-apy', `upstream:${key}`, `failed:${msg}`,
+        `upstream ${key} failed (${msg}); no stale entry`)
+      throw err
+    })) as Promise<string>
 }
 
 /**
@@ -468,24 +501,19 @@ type ProviderAddressSource<P extends IntrinsicApySourceConfig['provider']> = {
 }
 
 type ValantisSource = ProviderAddressSource<'valantis'>
-type StakedHypefiResponse = { data?: { statsAtRebases?: { apr?: string | number } } }
 
-export function extractStakedHypefiApy(data: StakedHypefiResponse): number {
-  return Number(data.data?.statsAtRebases?.apr ?? 0)
+export function extractValantisApy(data: string | number): number {
+  return Number(data)
 }
 
 async function extractValantis(sources: ValantisSource[]): Promise<Array<[string, IntrinsicApyInfo]>> {
-  const data = await fetchUpstream<StakedHypefiResponse>('staked-hypefi', UPSTREAM_URLS.stakedHypefi, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query: '{ statsAtRebases { apr } }' }),
-  })
-  const apy = extractStakedHypefiApy(data)
+  const data = await fetchUpstreamText('valantis', UPSTREAM_URLS.valantis)
+  const apy = extractValantisApy(data)
   if (!Number.isFinite(apy) || apy <= 0) return []
   return sources.map(s => [normalize(s.address), {
     apy,
     provider: 'VALANTIS',
-    source: UPSTREAM_URLS.stakedHypefi,
+    source: UPSTREAM_URLS.valantis,
   }])
 }
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   extractHyperbeatWeightedApr,
   extractLatestYuzuApy,
-  extractStakedHypefiApy,
+  extractValantisApy,
 } from '~/server/utils/intrinsic-apy'
 
 describe('extractLatestYuzuApy', () => {
@@ -49,13 +49,7 @@ describe('HyperEVM intrinsic APY helpers', () => {
     })).toBe(4.25)
   })
 
-  it('reads stakedhype.fi APR from the GraphQL response shape', () => {
-    expect(extractStakedHypefiApy({
-      data: {
-        statsAtRebases: {
-          apr: 2.18,
-        },
-      },
-    })).toBe(2.18)
+  it('reads Valantis stHYPE APR from a raw numeric response', () => {
+    expect(extractValantisApy('2.38')).toBe(2.38)
   })
 })
