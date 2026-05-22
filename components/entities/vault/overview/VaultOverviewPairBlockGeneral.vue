@@ -195,7 +195,7 @@ const rampDownModalData = computed(() => ({
           </p>
         </div>
       </div>
-      <div class="grid grid-cols-1 laptop:grid-cols-6 gap-x-32 gap-y-16">
+      <div class="grid grid-cols-1 laptop:grid-cols-8 gap-x-32 gap-y-16">
         <div class="flex flex-col gap-6 laptop:col-span-2">
           <div class="text-p3 text-content-tertiary">
             Price
@@ -252,8 +252,16 @@ const rampDownModalData = computed(() => ({
           </div>
         </div>
         <div class="flex flex-col gap-6 laptop:col-span-2">
+          <div class="text-p3 text-content-tertiary">
+            Max LTV
+          </div>
+          <div class="text-p2 font-semibold text-content-primary">
+            {{ formatNumber(nanoToValue(pair.borrowLTV, 2), 2) }}%
+          </div>
+        </div>
+        <div class="flex flex-col gap-6 laptop:col-span-2">
           <div class="flex items-center gap-4 text-p3 text-content-tertiary">
-            Max / Liq. LTV
+            Liquidation LTV
             <UiModalPreviewTrigger
               v-if="isRamping"
               :component="VaultRampDownModal"
@@ -267,7 +275,6 @@ const rampDownModalData = computed(() => ({
             </UiModalPreviewTrigger>
           </div>
           <div class="flex items-center gap-4 text-p2 font-semibold text-content-primary">
-            {{ formatNumber(nanoToValue(pair.borrowLTV, 2), 2) }}% /
             <UiModalPreviewTrigger
               v-if="isRamping"
               :component="VaultRampDownModal"
@@ -283,9 +290,9 @@ const rampDownModalData = computed(() => ({
           </div>
         </div>
 
-        <div class="h-px bg-line-subtle my-4 laptop:col-span-6" />
+        <div class="h-px bg-line-subtle my-4 laptop:col-span-8" />
 
-        <div class="flex items-center gap-8 text-h6 uppercase text-content-secondary laptop:col-span-6">
+        <div class="flex items-center gap-8 text-h6 uppercase text-content-secondary laptop:col-span-8">
           <SvgIcon
             name="arrow-big"
             class="!w-16 !h-16"
@@ -293,7 +300,7 @@ const rampDownModalData = computed(() => ({
           Borrow
         </div>
 
-        <div class="flex flex-col gap-6 laptop:col-span-2">
+        <div class="flex flex-col gap-6 laptop:col-span-3">
           <div class="flex items-center gap-4 text-p3 text-content-tertiary">
             Borrow APY
             <UiModalPreviewTrigger
@@ -354,7 +361,7 @@ const rampDownModalData = computed(() => ({
           </div>
         </div>
 
-        <div class="flex flex-col gap-6 laptop:col-span-2">
+        <div class="flex flex-col gap-6 laptop:col-span-3">
           <div class="flex items-center gap-4 text-p3 text-content-tertiary">
             Net APY
             <UiModalPreviewTrigger
@@ -386,12 +393,12 @@ const rampDownModalData = computed(() => ({
 
         <div
           v-if="isBorrowable"
-          class="h-px bg-line-subtle my-4 laptop:col-span-6"
+          class="h-px bg-line-subtle my-4 laptop:col-span-8"
         />
 
         <div
           v-if="isBorrowable"
-          class="flex items-center gap-8 text-h6 uppercase text-accent-500 laptop:col-span-6"
+          class="flex items-center gap-8 text-h6 uppercase text-accent-500 laptop:col-span-8"
         >
           <SvgIcon
             name="multiply"
