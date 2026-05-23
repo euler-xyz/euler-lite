@@ -58,6 +58,7 @@ const effectiveType = computed(() => isVerified.value ? type : 'unknown')
 
 const tone = computed(() => {
   if (isWarning.value) return 'danger'
+  if (type === 'securitize') return 'accent'
   if (type === 'governed' || type === 'ungoverned' || type === 'managed') return 'governance'
   return 'neutral'
 })

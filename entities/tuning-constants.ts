@@ -9,7 +9,11 @@ export const POLL_INTERVAL_60S_MS = 60_000
 // ── RPC Batch Sizes ───────────────────────────────────────
 export const BATCH_SIZE_RPC_CALLS = 5
 export const BATCH_SIZE_VAULT_FETCH = 25
+export const BATCH_SIZE_VAULT_FETCH_HYPEREVM = 15
 export const BATCH_SIZE_PARALLEL_ROUNDS = 5
+
+export const getVaultFetchBatchSize = (chainId: number): number =>
+  chainId === 999 ? BATCH_SIZE_VAULT_FETCH_HYPEREVM : BATCH_SIZE_VAULT_FETCH
 
 // ── Request Batching Delays ───────────────────────────────
 export const BATCH_DELAY_COLLECT_MS = 100
