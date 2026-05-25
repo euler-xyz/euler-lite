@@ -1552,7 +1552,7 @@
           "label": "Select savings repay tab",
           "tab": "From savings",
           "waitFor": [
-            "[data-id=\"asset-input\"][data-label=\"Savings to use\"]",
+            "[data-id=\"asset-input\"][data-label=\"Debt to repay\"]",
             "button:has-text(\"Review Repay\")"
           ],
           "settleMs": 1500,
@@ -1560,8 +1560,8 @@
         },
         {
           "type": "fillAsset",
-          "label": "Enter savings repay amount",
-          "assetLabel": "Savings to use",
+          "label": "Enter savings repay debt amount",
+          "assetLabel": "Debt to repay",
           "value": "1",
           "settleMs": 3000,
           "captureTagsAfter": true
@@ -1863,7 +1863,7 @@
         {
           "type": "click",
           "label": "Select executable debt swap route",
-          "selector": "[data-id=\"swap-route-list-item\"][data-provider=\"magpie\"], [data-id=\"swap-route-list-item\"][data-provider=\"nordstern\"]",
+          "selector": "[data-id=\"swap-route-list-item\"][data-provider=\"magpie\"]",
           "waitFor": [
             "[data-id=\"swap-route-list-item\"][data-selected=\"true\"]"
           ],
