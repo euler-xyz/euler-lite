@@ -10,6 +10,15 @@ const chainMap = new Map<number, AppKitNetwork>(
     .map((chain): [number, AppKitNetwork] => [chain.id as number, chain]),
 )
 
+// Some upstream exports share historical chain IDs. Keep app lookups pointed at
+// the supported mainnet definitions when a known collision exists.
+for (const key of ['hyperEvm'] as const) {
+  const chain = (allChains as Record<string, unknown>)[key]
+  if (isAppKitNetwork(chain)) {
+    chainMap.set(chain.id as number, chain)
+  }
+}
+
 // Reverse lookup: chain slug → chainId. Built from both the export key
 // (e.g. `monad`, `swellchain`) and the chain's `name` field (e.g. `Monad`,
 // `Swellchain`) — both lowercased. Used to redirect legacy URLs that pass
@@ -19,6 +28,7 @@ const nameToChainId = new Map<string, number>()
 for (const [key, chain] of Object.entries(allChains)) {
   if (!isAppKitNetwork(chain)) continue
   const id = chain.id as number
+  if (chainMap.get(id) !== chain) continue
   nameToChainId.set(key.toLowerCase(), id)
   if (typeof chain.name === 'string') {
     const nameSlug = chain.name.toLowerCase().replace(/\s+/g, '-')
@@ -93,6 +103,7 @@ const DEFI_LLAMA_NAMES: ReadonlyMap<number, string> = new Map([
   [80094, 'Berachain'],
   [8453, 'Base'],
   [9745, 'Plasma'],
+  [999, 'Hyperliquid'],
 ])
 
 export const getDefiLlamaChainName = (chainId: number): string | undefined =>

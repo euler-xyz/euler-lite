@@ -46,6 +46,8 @@ const isAllowedPath = (path: string): boolean => {
   return ALLOWED_PATH_PREFIXES.includes(head)
 }
 
+const isUserRewardsPath = (path: string): boolean => /^users\/[A-Za-z0-9]+\/rewards$/.test(path)
+
 export default defineEventHandler(async (event) => {
   const method = getMethod(event).toUpperCase()
   if (!ALLOWED_METHODS.has(method)) {
@@ -68,7 +70,12 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'Merkl path not allowed' })
   }
 
-  const target = `${MERKL_UPSTREAM_BASE}/${rest}${requestUrl.search}`
+  const targetUrl = new URL(`${MERKL_UPSTREAM_BASE}/${rest}`)
+  requestUrl.searchParams.forEach((value, key) => targetUrl.searchParams.append(key, value))
+  if (isUserRewardsPath(rest) && !targetUrl.searchParams.has('type')) {
+    targetUrl.searchParams.set('type', 'TOKEN')
+  }
+  const target = targetUrl.toString()
 
   let upstream: Response
   try {

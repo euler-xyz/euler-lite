@@ -281,14 +281,14 @@ watch(amount, () => {
               maxable
             />
 
-            <UiToast
+            <UiAlert
               v-show="estimatesError"
               title="Error"
               variant="error"
               :description="estimatesError"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="simulationError"
               title="Error"
               variant="error"

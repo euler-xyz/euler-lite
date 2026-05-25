@@ -3,6 +3,12 @@ import { fetchErc20SlotHints, type SlotHints, type SimulationStateOverrideOption
 import { getEulerSdk } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
 
+const pendingStateOverrideHintResolutions = ref(0)
+
+export const useStateOverrideResolution = () => ({
+  isResolvingStateOverrideHints: computed(() => pendingStateOverrideHintResolutions.value > 0),
+})
+
 /**
  * Builds `SimulationStateOverrideOptions` to pass into the SDK's
  * `simulateTransactionPlan` / `estimateGasForTransactionPlan` / `prepareTransactionPlan`
@@ -52,19 +58,25 @@ export const useStateOverrideOptions = () => {
       const provider = sdk.providerService?.getProvider(cid)
       if (!provider) return
       const next: SlotHints = { ...slotHints.value }
-      await Promise.all(tokens.map(async (rawToken) => {
-        try {
-          const token = getAddress(rawToken)
-          const hint = await fetchErc20SlotHints(provider, token, {
-            allowanceSpender: permit2Address,
-          })
-          next[token] = hint
-        }
-        catch (e) {
-          logWarn('useStateOverrideOptions/primeSlotHintsFor', e)
-        }
-      }))
-      slotHints.value = next
+      pendingStateOverrideHintResolutions.value += 1
+      try {
+        await Promise.all(tokens.map(async (rawToken) => {
+          try {
+            const token = getAddress(rawToken)
+            const hint = await fetchErc20SlotHints(provider, token, {
+              allowanceSpender: permit2Address,
+            })
+            next[token] = hint
+          }
+          catch (e) {
+            logWarn('useStateOverrideOptions/primeSlotHintsFor', e)
+          }
+        }))
+        slotHints.value = next
+      }
+      finally {
+        pendingStateOverrideHintResolutions.value = Math.max(0, pendingStateOverrideHintResolutions.value - 1)
+      }
     }
     catch (e) {
       logWarn('useStateOverrideOptions/primeSlotHintsFor', e)

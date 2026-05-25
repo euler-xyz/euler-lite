@@ -438,6 +438,11 @@ const multipliedPriceImpact = computed(() =>
 const { guardWithPriceImpact } = usePriceImpactGate({
   directPriceImpact: multiplyPriceImpact,
   multipliedPriceImpact,
+  shouldGateUnknown: computed(() =>
+    !multiplyIsSameAsset.value
+    && multiplyEffectiveQuote.value !== null
+    && multiplyPriceImpact.value === null,
+  ),
 })
 const multiplyRoutedVia = computed(() => {
   if (!multiplySelectedProvider.value) return isMultiplyQuoteLoading.value ? null : 'Not selected'
@@ -852,28 +857,28 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
               :readonly="true"
             />
 
-            <UiToast
+            <UiAlert
               v-if="isGeoBlocked"
               title="Region restricted"
               description="This operation is not available in your region. You can still repay existing debt."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="!isGeoBlocked && isMultiplyRestricted"
               title="Asset restricted"
               description="Multiply is not available for this pair in your region."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-show="multiplyErrorText"
               title="Error"
               variant="error"
               :description="multiplyErrorText || ''"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="multiplySimulationError"
               title="Error"
               variant="error"
@@ -881,7 +886,7 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
               size="compact"
             />
 
-            <UiToast
+            <UiAlert
               v-if="multiplyQuoteError"
               title="Swap quote"
               variant="warning"

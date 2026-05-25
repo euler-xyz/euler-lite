@@ -1,6 +1,6 @@
 import { getProjectedRates, getNetAPY } from '~/utils/vault/apy'
-import type { EVault, SecuritizeCollateralVault, TransactionPlan, TransactionPlanPrepared, SwapperMode, SwapQuote } from '@eulerxyz/euler-v2-sdk'
-import { isEVault } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, SecuritizeCollateralVault, TransactionPlan, TransactionPlanPrepared, SwapQuote } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { getAssetUsdValueOrZero, getCollateralUsdValueOrZero } from '~/utils/sdk-prices'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
@@ -373,8 +373,14 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     toVault: computed(() => options.mode === 'supply' ? collateralVault.value as EVault | SecuritizeCollateralVault : null),
   })
 
+  const shouldGateUnknownPriceImpact = computed(() =>
+    options.needsSwap.value
+    && swapEffectiveQuote.value !== null
+    && swapPriceImpact.value === null,
+  )
   const { guardWithPriceImpact } = usePriceImpactGate({
     directPriceImpact: swapPriceImpact,
+    shouldGateUnknown: shouldGateUnknownPriceImpact,
   })
 
   const swapRouteItems = computed(() => {

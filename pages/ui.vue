@@ -12,7 +12,7 @@ const switchModel = ref(false)
 const inputModel = ref('')
 const inputWithValueModel = ref('Example value')
 const inputErrorModel = ref('Error value')
-const toastVariants: ToastVariant[] = ['success', 'info', 'warning', 'error', 'neutral']
+const alertVariants: ToastVariant[] = ['success', 'info', 'warning', 'error', 'neutral']
 const asset: VaultAsset = {
   name: 'Mock TON',
   decimals: 18,
@@ -31,32 +31,30 @@ const openLegalModal = () => {
     <div>
       <div class="p-16">
         <h3 class="text-h3 mb-16">
-          Toast Variations
+          Alert Variations
         </h3>
 
         <div class="grid grid-cols-2 gap-12 mb-32 mobile:grid-cols-1">
           <div
-            v-for="variant in toastVariants"
+            v-for="variant in alertVariants"
             :key="`normal-${variant}`"
             class="flex flex-col gap-8"
           >
-            <UiToast
+            <UiAlert
               :variant="variant"
               title="Link copied"
               description="The share URL is ready to paste."
-              :persistent="false"
             />
-            <UiToast
+            <UiAlert
               :variant="variant"
               title="Compact toast"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               :variant="variant"
               title="Action available"
               description="Review the transaction details before continuing."
               action-text="Review"
-              :persistent="false"
             />
           </div>
         </div>

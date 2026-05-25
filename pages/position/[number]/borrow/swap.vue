@@ -359,7 +359,7 @@ const onToVaultChange = (selectedIndex: number) => {
               class="opacity-60 pointer-events-none"
             />
 
-            <UiToast
+            <UiAlert
               title="Full amount required"
               description="The entire debt amount must be swapped at once. Only one debt is allowed per sub-account."
               variant="info"
@@ -402,7 +402,7 @@ const onToVaultChange = (selectedIndex: number) => {
               </div>
             </div>
 
-            <UiToast
+            <UiAlert
               v-if="!toVault && !isLoading && !isPositionsLoading"
               title="No refinance options"
               description="There are no other vaults that accept this collateral to swap your debt to."
@@ -410,35 +410,35 @@ const onToVaultChange = (selectedIndex: number) => {
               size="compact"
             />
 
-            <UiToast
+            <UiAlert
               v-if="isGeoBlocked"
               title="Region restricted"
               description="This operation is not available in your region. You can still repay existing debt."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-show="errorText"
               title="Error"
               variant="error"
               :description="errorText || ''"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="sameVaultError"
               title="Error"
               variant="error"
               :description="sameVaultError"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="healthError"
               title="Unhealthy position"
               variant="error"
               :description="healthError"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="simulationError"
               title="Error"
               variant="error"
@@ -446,7 +446,7 @@ const onToVaultChange = (selectedIndex: number) => {
               size="compact"
             />
 
-            <UiToast
+            <UiAlert
               v-if="quoteError && !isSameAsset"
               title="Swap quote"
               variant="warning"

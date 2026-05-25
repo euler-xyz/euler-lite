@@ -246,8 +246,12 @@ const { priceImpact: swapPriceImpact } = useSwapPriceImpact({
   fromVault: vault,
 })
 
+const shouldGateUnknownPriceImpact = computed(() =>
+  swapEffectiveQuote.value !== null && swapPriceImpact.value === null,
+)
 const { guardWithPriceImpact } = usePriceImpactGate({
   directPriceImpact: swapPriceImpact,
+  shouldGateUnknown: shouldGateUnknownPriceImpact,
 })
 
 const swapRouteItems = computed(() => {
@@ -637,7 +641,7 @@ watch(swapSelectedQuote, () => {
                 />
               </VaultFormInfoBlock>
 
-              <UiToast
+              <UiAlert
                 v-if="swapQuoteError"
                 title="Swap quote"
                 variant="warning"
@@ -646,14 +650,14 @@ watch(swapSelectedQuote, () => {
               />
             </template>
 
-            <UiToast
+            <UiAlert
               v-if="isUnknownSwapToken && needsSwap"
               title="Unknown token"
               description="This token is not on any recognized token list. It could be fraudulent or malicious. Verify the contract address before proceeding."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="isOutputAssetBlocked || isOutputAssetRestricted"
               title="Asset restricted"
               description="Receiving this asset is not available in your region. Pick a different token."
@@ -661,14 +665,14 @@ watch(swapSelectedQuote, () => {
               size="compact"
             />
 
-            <UiToast
+            <UiAlert
               v-show="estimatesError"
               title="Error"
               variant="error"
               :description="estimatesError"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="simulationError"
               title="Error"
               variant="error"

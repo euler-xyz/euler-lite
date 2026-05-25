@@ -164,6 +164,11 @@ const walletSwap = useWalletSwapRepay({
 
 const { guardWithPriceImpact: guardWithWalletSwapPriceImpact } = usePriceImpactGate({
   directPriceImpact: walletSwap.swapPriceImpact,
+  shouldGateUnknown: computed(() =>
+    walletSwap.needsSwap.value
+    && walletSwap.quotes.selectedQuote.value !== null
+    && walletSwap.swapPriceImpact.value === null,
+  ),
 })
 
 const isWalletSwapRestricted = computed(() =>
@@ -215,9 +220,19 @@ const savings = useSavingsRepay({
 
 const { guardWithPriceImpact: guardWithCollateralPriceImpact } = usePriceImpactGate({
   directPriceImpact: collateral.priceImpact,
+  shouldGateUnknown: computed(() =>
+    !collateral.isSameAsset.value
+    && collateral.quotes.selectedQuote.value !== null
+    && collateral.priceImpact.value === null,
+  ),
 })
 const { guardWithPriceImpact: guardWithSavingsPriceImpact } = usePriceImpactGate({
   directPriceImpact: savings.priceImpact,
+  shouldGateUnknown: computed(() =>
+    !savings.isSameAsset.value
+    && savings.quotes.selectedQuote.value !== null
+    && savings.priceImpact.value === null,
+  ),
 })
 
 // --- Form tabs ---
@@ -412,7 +427,7 @@ watch(formTab, () => {
           :list="formTabs"
         />
 
-        <UiToast
+        <UiAlert
           v-if="activeHookWarning"
           :title="activeHookWarning.title"
           :description="activeHookWarning.message"
@@ -528,42 +543,42 @@ watch(formTab, () => {
                 @refresh="walletSwap.onRefreshSwapQuotes"
               />
 
-              <UiToast
+              <UiAlert
                 v-if="isPayWithAssetBlocked"
                 title="Asset restricted"
                 description="Paying with this asset is not available in your region. Pick a different asset."
                 variant="warning"
                 size="compact"
               />
-              <UiToast
+              <UiAlert
                 v-if="!isPayWithAssetBlocked && isWalletSwapRestricted"
                 title="Swap restricted"
                 description="Swapping into this vault is not available in your region. You can repay with the vault's underlying asset directly."
                 variant="warning"
                 size="compact"
               />
-              <UiToast
+              <UiAlert
                 v-if="walletSwap.needsSwap.value && !isWalletSwapRestricted && !isPayWithAssetBlocked && walletSwap.disabledReason.value"
                 title="Error"
                 variant="error"
                 :description="walletSwap.disabledReason.value"
                 size="compact"
               />
-              <UiToast
+              <UiAlert
                 v-show="walletSwap.needsSwap.value ? walletSwap.estimatesError.value : wallet.estimatesError.value"
                 title="Error"
                 variant="error"
                 :description="walletSwap.needsSwap.value ? walletSwap.estimatesError.value : wallet.estimatesError.value"
                 size="compact"
               />
-              <UiToast
+              <UiAlert
                 v-if="walletSwap.needsSwap.value && walletSwap.quotes.quoteError.value"
                 title="Swap quote"
                 variant="warning"
                 :description="walletSwap.quotes.quoteError.value"
                 size="compact"
               />
-              <UiToast
+              <UiAlert
                 v-if="simulationError"
                 title="Error"
                 variant="error"
@@ -662,7 +677,7 @@ watch(formTab, () => {
         <template v-else-if="formTab === 'collateral'">
           <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
             <div class="flex flex-col gap-16 w-full">
-              <UiToast
+              <UiAlert
                 v-if="isEligibleForLiquidation"
                 title="Position in violation"
                 variant="warning"
@@ -717,28 +732,28 @@ watch(formTab, () => {
                 @refresh="collateral.onRefreshQuotes"
               />
 
-              <UiToast
+              <UiAlert
                 v-if="collateral.quotes.quoteError.value && !collateral.isSameAsset.value"
                 title="Swap quote"
                 variant="warning"
                 :description="collateral.quotes.quoteError.value"
                 size="compact"
               />
-              <UiToast
+              <UiAlert
                 v-if="collateral.isRepayExceedsDebt.value"
                 title="Error"
                 variant="error"
                 :description="collateral.disabledReason.value"
                 size="compact"
               />
-              <UiToast
+              <UiAlert
                 v-if="!collateral.isRepayExceedsDebt.value && collateral.disabledReason.value"
                 title="Cannot submit"
                 variant="warning"
                 :description="collateral.disabledReason.value"
                 size="compact"
               />
-              <UiToast
+              <UiAlert
                 v-if="simulationError"
                 title="Error"
                 variant="error"
@@ -897,28 +912,28 @@ watch(formTab, () => {
                 @refresh="savings.onRefreshQuotes"
               />
 
-              <UiToast
+              <UiAlert
                 v-if="savings.quotes.quoteError.value && !savings.isSameAsset.value"
                 title="Swap quote"
                 variant="warning"
                 :description="savings.quotes.quoteError.value"
                 size="compact"
               />
-              <UiToast
+              <UiAlert
                 v-if="savings.isRepayExceedsDebt.value"
                 title="Error"
                 variant="error"
                 :description="savings.disabledReason.value"
                 size="compact"
               />
-              <UiToast
+              <UiAlert
                 v-if="!savings.isRepayExceedsDebt.value && savings.disabledReason.value"
                 title="Cannot submit"
                 variant="warning"
                 :description="savings.disabledReason.value"
                 size="compact"
               />
-              <UiToast
+              <UiAlert
                 v-if="simulationError"
                 title="Error"
                 variant="error"
