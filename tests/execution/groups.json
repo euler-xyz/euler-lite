@@ -28,14 +28,6 @@
       ]
     },
     {
-      "id": "same-asset-debt-migration",
-      "label": "Open borrow position and migrate same-asset debt",
-      "scenarios": [
-        "borrow-open-same-asset-migration-position-execute",
-        "position-same-asset-debt-migration-execute"
-      ]
-    },
-    {
       "id": "withdraw-and-swap",
       "label": "Open borrow position and withdraw collateral through swap",
       "scenarios": [

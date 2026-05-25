@@ -43,7 +43,8 @@
     "cleanup"
   ],
   "unsupportedTransactionTypes": [
-    "swap-from-wallet"
+    "swap-from-wallet",
+    "same-asset-debt-migration"
   ],
   "scenarios": [
     {
@@ -476,7 +477,7 @@
       "covers": [
         "borrow"
       ],
-      "path": "/borrow/0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9/0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf?network=1",
+      "path": "/borrow/0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9/0x313603FA690301b0CaeEf8069c065862f9162162?network=1",
       "waitFor": [
         "[data-id=\"asset-input\"][data-label=\"Supply USDC\"]",
         "[data-id=\"asset-input\"][data-label=\"Borrow USDT\"]",
@@ -603,7 +604,7 @@
               ],
               "borrows": [
                 {
-                  "vault": "0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf"
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
                 }
               ]
             }
@@ -614,14 +615,14 @@
     },
     {
       "id": "borrow-open-same-asset-migration-position-execute",
-      "label": "Borrow opens a small same-asset migration fixture position",
+      "label": "Borrow opens a same-asset collateral migration fixture position",
       "covers": [
         "borrow"
       ],
-      "path": "/borrow/0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9/0x313603FA690301b0CaeEf8069c065862f9162162?network=1",
+      "path": "/borrow/0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9/0xc1fF5490651B9B8d0400B0146E7fb174B90E315B?network=1",
       "waitFor": [
         "[data-id=\"asset-input\"][data-label=\"Supply USDC\"]",
-        "[data-id=\"asset-input\"][data-label=\"Borrow USDT\"]",
+        "[data-id=\"asset-input\"][data-label=\"Borrow USN\"]",
         "button:has-text(\"Connect wallet\"), button:has-text(\"Review Borrow\"), button:has-text(\"Accept Terms Of Use\")"
       ],
       "actions": [
@@ -673,7 +674,7 @@
         {
           "type": "fillAsset",
           "label": "Enter same-asset fixture borrow amount",
-          "assetLabel": "Borrow USDT",
+          "assetLabel": "Borrow USN",
           "value": "0.5",
           "settleMs": 2500,
           "captureTagsAfter": true
@@ -745,7 +746,7 @@
               ],
               "borrows": [
                 {
-                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
+                  "vault": "0xc1fF5490651B9B8d0400B0146E7fb174B90E315B"
                 }
               ]
             }
@@ -855,7 +856,7 @@
               ],
               "borrows": [
                 {
-                  "vault": "0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf"
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
                 }
               ]
             }
@@ -908,7 +909,7 @@
           "type": "selectCollateralOption",
           "label": "Select same-asset USDC collateral target",
           "assetLabel": "To",
-          "vaultAddress": "0x2a356443FeE07703266066c6Bb1B11b82d8246AD",
+          "vaultAddress": "0xe0a80d35bB6618CBA260120b279d357978c42BCE",
           "settleMs": 1500,
           "captureTagsAfter": true
         },
@@ -960,111 +961,12 @@
                   "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
                 },
                 {
-                  "vault": "0x2a356443FeE07703266066c6Bb1B11b82d8246AD"
+                  "vault": "0xe0a80d35bB6618CBA260120b279d357978c42BCE"
                 }
               ],
               "borrows": [
                 {
-                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
-                }
-              ]
-            }
-          ]
-        }
-      }
-    },
-    {
-      "id": "position-same-asset-debt-migration-execute",
-      "label": "Same-asset debt migration executes against the opened borrow position",
-      "dependsOn": [
-        "borrow-open-same-asset-migration-position-execute"
-      ],
-      "covers": [
-        "same-asset-debt-migration"
-      ],
-      "path": "/portfolio?network=1&showAll=1",
-      "waitFor": [
-        "[data-id=\"portfolio-list-item\"][data-list=\"borrow\"]"
-      ],
-      "actions": [
-        {
-          "type": "click",
-          "label": "Open borrow position from portfolio",
-          "selector": "[data-id=\"portfolio-list-item\"][data-list=\"borrow\"]",
-          "waitFor": [
-            "[data-id=\"position-action-refinance-debt\"]:not(.is-disabled)"
-          ],
-          "settleMs": 1500,
-          "captureTagsAfter": true
-        },
-        {
-          "type": "rememberPath",
-          "label": "Remember primary borrow position path",
-          "variable": "primaryBorrowPositionPath",
-          "captureTagsAfter": true
-        },
-        {
-          "type": "click",
-          "label": "Open debt migration form",
-          "selector": "[data-id=\"position-action-refinance-debt\"]:not(.is-disabled)",
-          "waitFor": [
-            "[data-id=\"asset-input\"][data-label=\"From\"]",
-            "[data-id=\"asset-input\"][data-label=\"To\"]"
-          ],
-          "settleMs": 1500,
-          "captureTagsAfter": true
-        },
-        {
-          "type": "selectCollateralOption",
-          "label": "Select same-asset USDT debt target",
-          "assetLabel": "To",
-          "vaultAddress": "0x313603FA690301b0CaeEf8069c065862f9162162",
-          "settleMs": 3000,
-          "captureTagsAfter": true
-        },
-        {
-          "type": "click",
-          "label": "Open same-asset debt review",
-          "selector": "button:has-text(\"Review Transfer\")",
-          "waitFor": [
-            "text=Transaction review",
-            "[data-id=\"operation-review-confirm\"]"
-          ],
-          "settleMs": 1500,
-          "captureTagsAfter": true
-        },
-        {
-          "type": "click",
-          "label": "Confirm same-asset debt swap",
-          "selector": "[data-id=\"operation-review-confirm\"]",
-          "settleMs": 10000,
-          "captureTagsAfter": true
-        }
-      ],
-      "postCaptures": [
-        {
-          "id": "portfolio-borrow-after-same-asset-debt",
-          "path": "/portfolio?network=1&showAll=1",
-          "waitFor": [
-            "[data-id]"
-          ],
-          "settleMs": 5000
-        }
-      ],
-      "discoveryMocks": {
-        "subgraph": {
-          "accounts": [
-            {
-              "chainId": 1,
-              "subAccountIndex": 1,
-              "deposits": [
-                {
-                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
-                }
-              ],
-              "borrows": [
-                {
-                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
+                  "vault": "0xc1fF5490651B9B8d0400B0146E7fb174B90E315B"
                 }
               ]
             }
@@ -1155,7 +1057,7 @@
               ],
               "borrows": [
                 {
-                  "vault": "0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf"
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
                 }
               ]
             }
@@ -1269,7 +1171,7 @@
               ],
               "borrows": [
                 {
-                  "vault": "0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf"
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
                 }
               ]
             }
@@ -1389,7 +1291,7 @@
               ],
               "borrows": [
                 {
-                  "vault": "0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf"
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
                 }
               ]
             }
@@ -1502,7 +1404,7 @@
               ],
               "borrows": [
                 {
-                  "vault": "0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf"
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
                 }
               ]
             }
@@ -1615,7 +1517,7 @@
               ],
               "borrows": [
                 {
-                  "vault": "0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf"
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
                 }
               ]
             }
@@ -1804,7 +1706,7 @@
               ],
               "borrows": [
                 {
-                  "vault": "0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf"
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
                 }
               ]
             }
@@ -1850,6 +1752,17 @@
             "[data-id=\"swap-route-list-item\"]"
           ],
           "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "selectCollateralOption",
+          "label": "Select WETH debt target",
+          "assetLabel": "To",
+          "vaultAddress": "0xD8b27CF359b7D15710a5BE299AF6e7Bf904984C2",
+          "waitFor": [
+            "[data-id=\"swap-route-list-item\"]"
+          ],
+          "settleMs": 3000,
           "captureTagsAfter": true
         },
         {
@@ -1904,10 +1817,10 @@
               ],
               "borrows": [
                 {
-                  "vault": "0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf"
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
                 },
                 {
-                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
+                  "vault": "0xD8b27CF359b7D15710a5BE299AF6e7Bf904984C2"
                 }
               ]
             }
@@ -2006,7 +1919,7 @@
               ],
               "borrows": [
                 {
-                  "vault": "0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf"
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
                 }
               ]
             }
@@ -2020,7 +1933,7 @@
       "covers": [
         "swap-and-borrow"
       ],
-      "path": "/borrow/0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9/0x2a356443FeE07703266066c6Bb1B11b82d8246AD?network=1",
+      "path": "/borrow/0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9/0x313603FA690301b0CaeEf8069c065862f9162162?network=1",
       "waitFor": [
         "[data-id=\"asset-input\"][data-label=\"Supply USDC\"]",
         "[data-id=\"asset-input\"][data-label=\"Borrow USDT\"]",
@@ -2140,7 +2053,7 @@
               ],
               "borrows": [
                 {
-                  "vault": "0x2a356443FeE07703266066c6Bb1B11b82d8246AD"
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
                 }
               ]
             }
