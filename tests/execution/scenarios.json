@@ -387,70 +387,29 @@
       "id": "lend-supply-usdt-for-repay-source",
       "label": "Seed USDT savings for repay-from-deposit",
       "covers": [],
-      "path": "/lend/0x313603FA690301b0CaeEf8069c065862f9162162?network=1",
+      "path": "/portfolio?network=1&showAll=1",
       "waitFor": [
-        "[data-id=\"asset-input\"][data-label=\"Supply amount\"]",
-        "button:has-text(\"Review Supply\"), button:has-text(\"Accept Terms Of Use\")"
+        "[data-id=\"portfolio-list-item\"][data-list=\"borrow\"]"
       ],
       "actions": [
         {
-          "type": "click",
-          "label": "Open Terms of Use modal (if shown)",
-          "selector": "button:has-text(\"Accept Terms Of Use\")",
-          "optional": true,
-          "probeMs": 3000,
-          "waitFor": [
-            "text=Acknowledge terms",
-            "button:has-text(\"Accept\")"
-          ],
-          "settleMs": 750,
-          "captureTagsAfter": true
-        },
-        {
-          "type": "click",
-          "label": "Accept Terms of Use (if modal open)",
-          "selector": "button:has-text(\"Accept\"):not(:has-text(\"Terms\"))",
-          "optional": true,
-          "probeMs": 2000,
-          "waitFor": [
-            "button:has-text(\"Review Supply\")"
-          ],
-          "settleMs": 1500,
-          "captureTagsAfter": true
-        },
-        {
-          "type": "fillAsset",
-          "label": "Enter USDT saving amount",
-          "assetLabel": "Supply amount",
-          "value": "4",
-          "settleMs": 1500,
-          "captureTagsAfter": true
-        },
-        {
-          "type": "click",
-          "label": "Open USDT supply review",
-          "selector": "button:has-text(\"Review Supply\")",
-          "waitFor": [
-            "text=Transaction review",
-            "[data-id=\"operation-review-confirm\"]"
-          ],
-          "settleMs": 1500,
-          "captureTagsAfter": true
-        },
-        {
-          "type": "click",
-          "label": "Confirm USDT supply",
-          "selector": "[data-id=\"operation-review-confirm\"]",
-          "settleMs": 10000,
+          "type": "seedVaultDeposit",
+          "label": "Seed USDT savings on borrow subaccount",
+          "assetAddress": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+          "vaultAddress": "0x313603FA690301b0CaeEf8069c065862f9162162",
+          "amount": "4",
+          "decimals": 6,
+          "subAccountIndex": 1,
+          "settleMs": 5000,
           "captureTagsAfter": true
         }
       ],
       "postCaptures": [
         {
           "id": "portfolio-saving-after-usdt-seed",
-          "path": "/portfolio/saving?network=1",
+          "path": "/portfolio/saving?network=1&showAll=1",
           "waitFor": [
-            "[data-id]"
+            "[data-id=\"portfolio-list-item\"][data-list=\"lend\"][data-vault-address=\"0x313603fa690301b0caeef8069c065862f9162162\"]"
           ],
           "settleMs": 5000
         }
@@ -460,16 +419,23 @@
           "accounts": [
             {
               "chainId": 1,
+              "subAccountIndex": 1,
               "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                },
                 {
                   "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
                 }
               ],
-              "borrows": []
+              "borrows": [
+                {
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
+                }
+              ]
             }
           ]
-        },
-        "activation": "afterFirstTransaction"
+        }
       }
     },
     {
@@ -1584,7 +1550,8 @@
               "chainId": 1,
               "deposits": [
                 {
-                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162",
+                  "subAccountIndex": 1
                 },
                 {
                   "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9",

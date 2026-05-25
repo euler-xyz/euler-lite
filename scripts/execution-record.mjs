@@ -37,6 +37,20 @@ const MAX_CAPTURED_SWAP_BODY_CHARS = 1_500_000
 const MAX_CAPTURED_API_BODY_CHARS = 250_000
 const MAX_CAPTURED_RPC_BODY_CHARS = 20_000
 const DEFAULT_VIDEO_TAIL_MS = 2_500
+const EVaultDepositAbi = [
+  {
+    type: 'function',
+    name: 'deposit',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'assets', type: 'uint256' },
+      { name: 'receiver', type: 'address' },
+    ],
+    outputs: [
+      { name: 'shares', type: 'uint256' },
+    ],
+  },
+]
 
 const args = parseArgs(process.argv.slice(2))
 
@@ -191,6 +205,7 @@ async function main() {
         outputDir,
         variables: run.variables,
         videoTailMs,
+        fixture,
       })
 
       if (!args['keep-open']) {
@@ -1198,7 +1213,7 @@ function shouldCaptureUrl(rawUrl) {
   }
 }
 
-async function runScenario({ page, appUrl, defaults, scenario, outputDir, variables, videoTailMs }) {
+async function runScenario({ page, appUrl, defaults, scenario, outputDir, variables, videoTailMs, fixture }) {
   const result = {
     id: scenario.id,
     label: scenario.label,
@@ -1217,7 +1232,7 @@ async function runScenario({ page, appUrl, defaults, scenario, outputDir, variab
     }
 
     for (const action of scenario.actions ?? []) {
-      const actionResult = await performAction(page, action, variables, defaults)
+      const actionResult = await performAction(page, action, variables, defaults, fixture)
       result.actions.push(actionResult)
       if (action.captureTagsAfter) {
         result.captures.push({
@@ -1301,7 +1316,7 @@ async function waitForSelectors(page, selectors, timeoutMs = 30_000) {
   }
 }
 
-async function performAction(page, action, variables, defaults = {}) {
+async function performAction(page, action, variables, defaults = {}, fixture) {
   const startedAt = Date.now()
   const label = action.label ?? action.type
   const timeout = Number(action.timeoutMs ?? defaults.actionTimeoutMs ?? 30_000)
@@ -1398,6 +1413,11 @@ async function performAction(page, action, variables, defaults = {}) {
       await waitForSelectors(page, action.waitFor, timeout)
       if (action.settleMs) await page.waitForTimeout(Number(action.settleMs))
     }
+    else if (action.type === 'seedVaultDeposit') {
+      await seedVaultDeposit(page, action, fixture)
+      await waitForSelectors(page, action.waitFor, timeout)
+      if (action.settleMs) await page.waitForTimeout(Number(action.settleMs))
+    }
     else if (action.type === 'selectSwapToken') {
       const trigger = action.triggerSelector
         ? page.locator(action.triggerSelector).nth(Number(action.triggerIndex ?? 0))
@@ -1427,11 +1447,10 @@ async function performAction(page, action, variables, defaults = {}) {
       }
       const trigger = page.locator(`[data-id="asset-input"][data-label=${cssString(assetLabel)}] [data-id="asset-input-asset-selector"]`).nth(Number(action.triggerIndex ?? 0))
       await waitForOptional(trigger, action)
-      await trigger.click({ timeout })
 
       const search = action.search ?? action.vaultAddress ?? action.assetAddress ?? action.symbol
       const searchInput = page.locator('input[placeholder="Search by name or symbol"]').first()
-      await searchInput.waitFor({ state: 'visible', timeout })
+      await clickUntilVisible(page, trigger, searchInput, timeout, Number(action.modalProbeMs ?? 1500))
       if (search && !String(search).startsWith('0x')) {
         await searchInput.fill('', { timeout }).catch(() => null)
         await searchInput.type(String(search), { delay: Number(action.delayMs ?? 20), timeout })
@@ -1530,6 +1549,78 @@ async function waitForOptional(locator, action) {
     if (action.optional) throw error
     throw error
   }
+}
+
+async function seedVaultDeposit(page, action, fixture) {
+  if (!fixture?.wallet?.address) {
+    throw new Error('seedVaultDeposit requires a fixture wallet')
+  }
+
+  const wallet = getAddress(fixture.wallet.address)
+  const assetAddress = getAddress(action.assetAddress)
+  const vaultAddress = getAddress(action.vaultAddress)
+  const amount = parseUnits(String(action.amount), Number(action.decimals ?? 18))
+  const receiver = resolveMockSubAccount(
+    { subAccount: action.subAccount, subAccountIndex: action.subAccountIndex },
+    wallet,
+  )
+  const resetApprovalData = encodeFunctionData({
+    abi: erc20Abi,
+    functionName: 'approve',
+    args: [vaultAddress, 0n],
+  })
+  const approveData = encodeFunctionData({
+    abi: erc20Abi,
+    functionName: 'approve',
+    args: [vaultAddress, amount],
+  })
+  const depositData = encodeFunctionData({
+    abi: EVaultDepositAbi,
+    functionName: 'deposit',
+    args: [amount, receiver],
+  })
+
+  await page.evaluate(async ({ assetAddress, vaultAddress, resetApprovalData, approveData, depositData }) => {
+    if (!window.ethereum?.request) {
+      throw new Error('Stub wallet unavailable')
+    }
+
+    await window.ethereum.request({
+      method: 'eth_sendTransaction',
+      params: [{ to: assetAddress, data: resetApprovalData, value: '0x0' }],
+    })
+    await window.ethereum.request({
+      method: 'eth_sendTransaction',
+      params: [{ to: assetAddress, data: approveData, value: '0x0' }],
+    })
+    await window.ethereum.request({
+      method: 'eth_sendTransaction',
+      params: [{ to: vaultAddress, data: depositData, value: '0x0' }],
+    })
+  }, { assetAddress, vaultAddress, resetApprovalData, approveData, depositData })
+}
+
+async function clickUntilVisible(page, trigger, target, timeout, probeMs) {
+  const startedAt = Date.now()
+  let lastError
+
+  while (Date.now() - startedAt < timeout) {
+    try {
+      if (await target.isVisible().catch(() => false)) return
+      const remaining = Math.max(1, timeout - (Date.now() - startedAt))
+      await trigger.click({ timeout: Math.min(5000, remaining) })
+      await target.waitFor({ state: 'visible', timeout: Math.min(probeMs, Math.max(1, timeout - (Date.now() - startedAt))) })
+      return
+    }
+    catch (error) {
+      lastError = error
+      if (Date.now() - startedAt >= timeout) break
+      await page.waitForTimeout(Math.min(500, Math.max(1, timeout - (Date.now() - startedAt))))
+    }
+  }
+
+  if (lastError) throw lastError
+  await target.waitFor({ state: 'visible', timeout: 1 })
 }
 
 async function captureVisibleTags(page) {
