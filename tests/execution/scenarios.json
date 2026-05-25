@@ -53,6 +53,21 @@
         "supply"
       ],
       "path": "/lend/0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9?network=1",
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": []
+            }
+          ]
+        }
+      },
       "waitFor": [
         "[data-id=\"asset-input\"][data-label=\"Supply amount\"]",
         "button:has-text(\"Connect wallet\"), button:has-text(\"Review Supply\"), button:has-text(\"Accept Terms Of Use\")"
@@ -119,20 +134,10 @@
           "label": "Confirm supply",
           "selector": "[data-id=\"operation-review-confirm\"]",
           "waitFor": [
-            "[data-id=\"portfolio-list-item\"][data-list=\"lend\"]"
+            "[data-id=\"portfolio-list-item\"][data-list=\"lend\"][data-vault-address=\"0x797dd80692c3b2dadabce8e30c07fde5307d48a9\"]"
           ],
           "settleMs": 5000,
           "captureTagsAfter": true
-        }
-      ],
-      "postCaptures": [
-        {
-          "id": "portfolio-saving-after-supply",
-          "path": "/portfolio/saving?network=1",
-          "waitFor": [
-            "[data-id=\"portfolio-list-item\"][data-list=\"lend\"]"
-          ],
-          "settleMs": 5000
         }
       ]
     },
@@ -197,7 +202,22 @@
           ],
           "settleMs": 5000
         }
-      ]
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": []
+            }
+          ]
+        }
+      }
     },
     {
       "id": "lend-supply-with-swap-execute",
@@ -265,7 +285,22 @@
           ],
           "settleMs": 5000
         }
-      ]
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": []
+            }
+          ]
+        }
+      }
     },
     {
       "id": "lend-redeem-execute",
@@ -327,7 +362,22 @@
           ],
           "settleMs": 5000
         }
-      ]
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": []
+            }
+          ]
+        }
+      }
     },
     {
       "id": "lend-supply-usdt-for-repay-source",
@@ -400,7 +450,22 @@
           ],
           "settleMs": 5000
         }
-      ]
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "deposits": [
+                {
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
+                }
+              ],
+              "borrows": []
+            }
+          ]
+        }
+      }
     },
     {
       "id": "borrow-open-position-execute",
@@ -521,7 +586,27 @@
           ],
           "settleMs": 5000
         }
-      ]
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "subAccountIndex": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": [
+                {
+                  "vault": "0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf"
+                }
+              ]
+            }
+          ]
+        }
+      }
     },
     {
       "id": "borrow-open-same-asset-migration-position-execute",
@@ -642,7 +727,27 @@
           ],
           "settleMs": 5000
         }
-      ]
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "subAccountIndex": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": [
+                {
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
+                }
+              ]
+            }
+          ]
+        }
+      }
     },
     {
       "id": "position-multiply-with-swap-execute",
@@ -731,7 +836,27 @@
           ],
           "settleMs": 5000
         }
-      ]
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "subAccountIndex": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": [
+                {
+                  "vault": "0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf"
+                }
+              ]
+            }
+          ]
+        }
+      }
     },
     {
       "id": "position-same-asset-collateral-migration-execute",
@@ -818,7 +943,30 @@
           ],
           "settleMs": 5000
         }
-      ]
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "subAccountIndex": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                },
+                {
+                  "vault": "0x2a356443FeE07703266066c6Bb1B11b82d8246AD"
+                }
+              ],
+              "borrows": [
+                {
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
+                }
+              ]
+            }
+          ]
+        }
+      }
     },
     {
       "id": "position-same-asset-debt-migration-execute",
@@ -897,7 +1045,27 @@
           ],
           "settleMs": 5000
         }
-      ]
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "subAccountIndex": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": [
+                {
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
+                }
+              ]
+            }
+          ]
+        }
+      }
     },
     {
       "id": "position-withdraw-and-swap-execute",
@@ -968,7 +1136,27 @@
           ],
           "settleMs": 5000
         }
-      ]
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "subAccountIndex": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": [
+                {
+                  "vault": "0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf"
+                }
+              ]
+            }
+          ]
+        }
+      }
     },
     {
       "id": "position-swap-collateral-execute",
@@ -1059,7 +1247,30 @@
           ],
           "settleMs": 5000
         }
-      ]
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "subAccountIndex": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                },
+                {
+                  "vault": "0xD8b27CF359b7D15710a5BE299AF6e7Bf904984C2"
+                }
+              ],
+              "borrows": [
+                {
+                  "vault": "0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf"
+                }
+              ]
+            }
+          ]
+        }
+      }
     },
     {
       "id": "position-swap-and-repay-wallet-execute",
@@ -1159,7 +1370,27 @@
           ],
           "settleMs": 5000
         }
-      ]
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "subAccountIndex": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": [
+                {
+                  "vault": "0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf"
+                }
+              ]
+            }
+          ]
+        }
+      }
     },
     {
       "id": "position-repay-collateral-swap-execute",
@@ -1252,7 +1483,27 @@
           ],
           "settleMs": 5000
         }
-      ]
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "subAccountIndex": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": [
+                {
+                  "vault": "0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf"
+                }
+              ]
+            }
+          ]
+        }
+      }
     },
     {
       "id": "position-repay-from-deposit-execute",
@@ -1336,7 +1587,36 @@
           ],
           "settleMs": 5000
         }
-      ]
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "deposits": [
+                {
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
+                }
+              ],
+              "borrows": []
+            },
+            {
+              "chainId": 1,
+              "subAccountIndex": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": [
+                {
+                  "vault": "0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf"
+                }
+              ]
+            }
+          ]
+        }
+      }
     },
     {
       "id": "lend-redeem-and-swap-execute",
@@ -1417,7 +1697,22 @@
           ],
           "settleMs": 5000
         }
-      ]
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": []
+            }
+          ]
+        }
+      }
     },
     {
       "id": "position-repay-wallet-execute",
@@ -1490,7 +1785,27 @@
           ],
           "settleMs": 5000
         }
-      ]
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "subAccountIndex": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": [
+                {
+                  "vault": "0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf"
+                }
+              ]
+            }
+          ]
+        }
+      }
     },
     {
       "id": "position-swap-debt-execute",
@@ -1570,7 +1885,30 @@
           ],
           "settleMs": 5000
         }
-      ]
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "subAccountIndex": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": [
+                {
+                  "vault": "0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf"
+                },
+                {
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
+                }
+              ]
+            }
+          ]
+        }
+      }
     },
     {
       "id": "position-repay-wallet-max-cleanup-execute",
@@ -1649,7 +1987,27 @@
           ],
           "settleMs": 5000
         }
-      ]
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "subAccountIndex": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": [
+                {
+                  "vault": "0xC11d6b78D8c609A6cbf66E89DBfea06b011B0AEf"
+                }
+              ]
+            }
+          ]
+        }
+      }
     },
     {
       "id": "borrow-swap-and-borrow-execute",
@@ -1763,7 +2121,27 @@
           ],
           "settleMs": 5000
         }
-      ]
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "subAccountIndex": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": [
+                {
+                  "vault": "0x2a356443FeE07703266066c6Bb1B11b82d8246AD"
+                }
+              ]
+            }
+          ]
+        }
+      }
     },
     {
       "id": "borrow-multiply-same-asset-execute",
@@ -1858,7 +2236,27 @@
           ],
           "settleMs": 5000
         }
-      ]
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "subAccountIndex": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": [
+                {
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
+                }
+              ]
+            }
+          ]
+        }
+      }
     }
   ]
 }

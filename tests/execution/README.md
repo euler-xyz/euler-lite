@@ -20,16 +20,14 @@ Start Anvil at the pinned fixture block:
 anvil --fork-url "$FORK_RPC_URL" --fork-block-number 25159633 --auto-impersonate --port 8545
 ```
 
-Start Lite with the fork as chain 1. Wallet reads, transactions, and browser
-vault data go through the fork RPC:
+Start Lite with the fork as chain 1. Wallet reads and transactions go through
+the fork RPC; regular vault reads use the default fallback adapter chain
+(V3 primary, on-chain secondary):
 
 ```sh
 RPC_URL_1=http://127.0.0.1:8545 \
 SWAP_API_URL=https://swap-dev.euler.finance \
 NUXT_PUBLIC_SWAP_API_URL=https://swap-dev.euler.finance \
-NUXT_PUBLIC_BROWSER_VAULT_SOURCE=onchain \
-SERVER_VAULT_CACHE_SOURCE=onchain \
-DISABLE_SERVER_VAULT_CACHE=true \
 NUXT_PUBLIC_EXECUTION_RECORD_SDK_QUERIES=true \
 npm run dev -- --host 127.0.0.1 --port 3001
 ```
@@ -55,7 +53,11 @@ transaction-type coverage, so a focused group can exit nonzero even when every
 scenario in that group passes.
 
 Scenario-specific discovery mocks belong in `tests/execution/scenarios.json`
-with the scenario that needs them.
+with the scenario that needs them. Use `discoveryMocks.subgraph.accounts` to
+declare indexed account rows that the fork cannot produce on demand; each entry
+lists the owner account plus the sub-account/vault pairs to expose as deposits
+or borrows. Use `subAccountIndex` for borrow positions when the UI path is
+`/position/{index}`.
 
 Validate the fixture and scenario coverage without connecting to Anvil or the
 app:

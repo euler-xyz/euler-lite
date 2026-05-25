@@ -153,6 +153,8 @@ async function main() {
     await installVaultSnapshotRoute(context, vaultSnapshot)
     await installV3VaultResolveRoute(context, vaultSnapshot)
     await installSwapApiRoute(context, swapApiUrl)
+    let activeScenario = null
+    await installScenarioSubgraphDiscoveryRoute(context, fixture, () => activeScenario)
     await context.route('**/api/screen-address', route => route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -160,6 +162,7 @@ async function main() {
     }))
 
     for (const scenario of scenarios) {
+      activeScenario = scenario
       console.log(`[execution-record] ▶ ${scenario.id} — ${scenario.label ?? ''}`)
       const page = await context.newPage()
       attachNetworkRecorder(page, run.network)
@@ -211,6 +214,7 @@ async function main() {
 
       run.scenarios.push(scenarioResult)
     }
+    activeScenario = null
   }
   finally {
     if (!args['keep-open']) {
@@ -834,6 +838,162 @@ async function installSwapApiRoute(context, swapApiUrl) {
       body,
     })
   })
+}
+
+async function installScenarioSubgraphDiscoveryRoute(context, fixture, getScenario) {
+  await context.route(/\/api\/proxy\/subgraph\/\d+(?:\?|$)/, async (route) => {
+    const scenario = getScenario()
+    const mocks = scenarioSubgraphAccounts(scenario, fixture)
+    if (!mocks.length) {
+      return route.fallback()
+    }
+
+    const request = route.request()
+    if (request.method().toUpperCase() === 'OPTIONS') {
+      return route.fulfill({
+        status: 204,
+        headers: {
+          'access-control-allow-origin': '*',
+          'access-control-allow-methods': 'POST, OPTIONS',
+          'access-control-allow-headers': '*',
+        },
+      })
+    }
+
+    if (request.method().toUpperCase() !== 'POST') {
+      return route.fallback()
+    }
+
+    const url = new URL(request.url())
+    const chainId = Number(url.pathname.match(/\/api\/proxy\/subgraph\/(\d+)/)?.[1])
+    if (!Number.isInteger(chainId)) {
+      return route.fallback()
+    }
+
+    let body
+    try {
+      body = request.postDataJSON()
+    }
+    catch {
+      return route.fallback()
+    }
+
+    const response = buildSubgraphDiscoveryMockResponse({ body, chainId, mocks })
+    if (!response) {
+      return route.fallback()
+    }
+
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: {
+        'access-control-allow-origin': '*',
+        'cache-control': 'no-store',
+        'x-execution-mock': 'subgraph-discovery',
+      },
+      body: JSON.stringify(response),
+    })
+  })
+}
+
+function scenarioSubgraphAccounts(scenario, fixture) {
+  const configured = scenario?.discoveryMocks?.subgraph?.accounts
+    ?? scenario?.subgraphMocks
+    ?? []
+  if (!Array.isArray(configured) || configured.length === 0) return []
+
+  const fixtureWallet = fixture?.wallet?.address ? getAddress(fixture.wallet.address) : undefined
+  return configured.map((item) => {
+    const account = item.account ? getAddress(item.account) : fixtureWallet
+    if (!account && !item.id) {
+      throw new Error(`Subgraph discovery mock in ${scenario.id} requires account or id`)
+    }
+    const defaultSubAccount = resolveMockSubAccount(item, account)
+    return {
+      chainId: Number(item.chainId ?? fixture.chainId),
+      id: String(item.id ?? addressPrefix(account)).toLowerCase(),
+      deposits: encodeTrackingEntries(item.deposits ?? [], defaultSubAccount),
+      borrows: encodeTrackingEntries(item.borrows ?? [], defaultSubAccount),
+    }
+  })
+}
+
+function buildSubgraphDiscoveryMockResponse({ body, chainId, mocks }) {
+  const query = String(body?.query ?? '')
+  if (query.includes('_meta')) {
+    return {
+      data: {
+        _meta: {
+          block: {
+            number: Number.MAX_SAFE_INTEGER,
+          },
+        },
+      },
+    }
+  }
+
+  const index = new Map(
+    mocks
+      .filter(item => item.chainId === chainId)
+      .map(item => [item.id, item]),
+  )
+
+  if (body?.operationName === 'AccountVaults' || query.includes('trackingActiveAccounts')) {
+    const ids = Array.isArray(body?.variables?.ids) ? body.variables.ids : []
+    return {
+      data: {
+        trackingActiveAccounts: ids
+          .map(id => index.get(String(id).toLowerCase()))
+          .filter(Boolean)
+          .map(item => ({
+            id: item.id,
+            deposits: item.deposits,
+            borrows: item.borrows,
+          })),
+      },
+    }
+  }
+
+  if (body?.operationName === 'AccountPositions' || query.includes('trackingActiveAccount')) {
+    const id = String(body?.variables?.id ?? query.match(/trackingActiveAccount\s*\(\s*id:\s*"([^"]+)"/)?.[1] ?? '').toLowerCase()
+    const item = id ? index.get(id) : undefined
+    return {
+      data: {
+        trackingActiveAccount: item
+          ? {
+              id: item.id,
+              deposits: item.deposits,
+              borrows: item.borrows,
+            }
+          : null,
+      },
+    }
+  }
+
+  return null
+}
+
+function encodeTrackingEntries(entries, defaultSubAccount) {
+  return entries.map((entry) => {
+    if (typeof entry === 'string') return entry.toLowerCase()
+    const subAccount = resolveMockSubAccount(entry, defaultSubAccount)
+    const vault = getAddress(entry.vault ?? entry.vaultAddress)
+    return `${subAccount.toLowerCase()}${vault.toLowerCase().slice(2)}`
+  })
+}
+
+function resolveMockSubAccount(item, fallback) {
+  if (item?.subAccount) return getAddress(item.subAccount)
+  if (item?.account) return getAddress(item.account)
+  if (item?.subAccountIndex !== undefined) {
+    const index = BigInt(item.subAccountIndex)
+    return getAddress(`0x${(BigInt(getAddress(fallback)) ^ index).toString(16).padStart(40, '0')}`)
+  }
+  return getAddress(fallback)
+}
+
+function addressPrefix(address) {
+  return getAddress(address).toLowerCase().slice(0, 40)
 }
 
 async function handleWalletRpc({ payload, chainId, account, walletClient, anvilRpcUrl }) {
