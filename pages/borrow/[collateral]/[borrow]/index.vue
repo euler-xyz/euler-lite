@@ -187,10 +187,20 @@ const multiply = useMultiplyForm({
 const { guardWithPriceImpact: guardWithMultiplyPriceImpact } = usePriceImpactGate({
   directPriceImpact: multiply.multiplyPriceImpact,
   multipliedPriceImpact: multiply.multipliedPriceImpact,
+  shouldGateUnknown: computed(() =>
+    !multiply.multiplyIsSameAsset.value
+    && multiply.multiplyEffectiveQuote.value !== null
+    && multiply.multiplyPriceImpact.value === null,
+  ),
 })
 
 const { guardWithPriceImpact: guardWithBorrowSwapPriceImpact } = usePriceImpactGate({
   directPriceImpact: borrow.borrowSwapPriceImpact,
+  shouldGateUnknown: computed(() =>
+    borrow.borrowNeedsSwap.value
+    && borrow.borrowSwapEffectiveQuote.value !== null
+    && borrow.borrowSwapPriceImpact.value === null,
+  ),
 })
 
 // --- Submit disabled ---
@@ -599,7 +609,7 @@ watch(formTab, () => {
                     />
                   </VaultFormInfoBlock>
 
-                  <UiToast
+                  <UiAlert
                     v-if="borrow.borrowSwapQuoteError.value"
                     title="Swap quote"
                     variant="warning"
@@ -608,7 +618,7 @@ watch(formTab, () => {
                   />
                 </template>
 
-                <UiToast
+                <UiAlert
                   v-if="borrow.isUnknownBorrowSwapToken.value && borrow.borrowNeedsSwap.value"
                   title="Unknown token"
                   description="This token is not on any recognized token list. It could be fraudulent or malicious. Verify the contract address before proceeding."
@@ -635,49 +645,49 @@ watch(formTab, () => {
                   @input="borrow.onBorrowInput"
                 />
 
-                <UiToast
+                <UiAlert
                   v-if="isGeoBlocked"
                   title="Region restricted"
                   description="This operation is not available in your region. You can still repay existing debt."
                   variant="warning"
                   size="compact"
                 />
-                <UiToast
+                <UiAlert
                   v-if="isPairFullyRestricted"
                   title="Region restricted"
                   description="This pair is not available in your region."
                   variant="warning"
                   size="compact"
                 />
-                <UiToast
+                <UiAlert
                   v-if="!isGeoBlocked && !isPairFullyRestricted && isBorrowRestricted"
                   title="Asset restricted"
                   description="Borrowing this asset is not available in your region."
                   variant="warning"
                   size="compact"
                 />
-                <UiToast
+                <UiAlert
                   v-if="!isGeoBlocked && !isPairFullyRestricted && !isBorrowRestricted && borrow.isBorrowPayWithBlocked.value"
                   title="Asset restricted"
                   description="Paying with this asset is not available in your region. Pick a different token."
                   variant="warning"
                   size="compact"
                 />
-                <UiToast
+                <UiAlert
                   v-if="!isGeoBlocked && !isPairFullyRestricted && !isBorrowRestricted && !borrow.isBorrowPayWithBlocked.value && borrow.isBorrowSwapRestricted.value"
                   title="Swap restricted"
                   description="Swapping into this collateral vault is not available in your region. You can provide the vault's underlying asset directly."
                   variant="warning"
                   size="compact"
                 />
-                <UiToast
+                <UiAlert
                   v-show="borrow.errorText.value"
                   title="Error"
                   variant="error"
                   :description="borrow.errorText.value || ''"
                   size="compact"
                 />
-                <UiToast
+                <UiAlert
                   v-if="borrow.borrowSimulationError.value"
                   title="Error"
                   variant="error"
@@ -798,35 +808,35 @@ watch(formTab, () => {
                       :readonly="true"
                     />
 
-                    <UiToast
+                    <UiAlert
                       v-if="isGeoBlocked"
                       title="Region restricted"
                       description="This operation is not available in your region. You can still repay existing debt."
                       variant="warning"
                       size="compact"
                     />
-                    <UiToast
+                    <UiAlert
                       v-if="isPairFullyRestricted"
                       title="Region restricted"
                       description="This pair is restricted in your region."
                       variant="warning"
                       size="compact"
                     />
-                    <UiToast
+                    <UiAlert
                       v-if="!isGeoBlocked && !isPairFullyRestricted && isMultiplyRestricted"
                       title="Asset restricted"
                       description="Multiply is not available for this pair in your region."
                       variant="warning"
                       size="compact"
                     />
-                    <UiToast
+                    <UiAlert
                       v-show="multiply.multiplyErrorText.value"
                       title="Error"
                       variant="error"
                       :description="multiply.multiplyErrorText.value || ''"
                       size="compact"
                     />
-                    <UiToast
+                    <UiAlert
                       v-if="multiply.multiplySimulationError.value"
                       title="Error"
                       variant="error"
@@ -834,7 +844,7 @@ watch(formTab, () => {
                       size="compact"
                     />
 
-                    <UiToast
+                    <UiAlert
                       v-if="multiply.multiplyQuoteError.value"
                       title="Swap quote"
                       variant="warning"

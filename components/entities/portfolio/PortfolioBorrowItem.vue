@@ -460,27 +460,6 @@ const openPositionInformationModal = () => {
         />
         <PortfolioNotice :notice="borrowNotice" />
         <VaultWarningBanner :warnings="[utilisationWarning]" />
-        <UiToast
-          v-if="rampStatus.isRamping && rampStatus.willBeLiquidated && !hasQueryFailure"
-          title="Liquidation LTV ramping down"
-          :description="`Your position is projected to become liquidatable ${forcedLiquidationRelative || 'before the ramp ends'} — consider closing or reducing debt.`"
-          variant="error"
-          size="compact"
-        />
-        <UiToast
-          v-else-if="rampStatus.isRamping && hasQueryFailure"
-          title="Liquidation LTV ramping down"
-          :description="`Ends ${rampEndsRelative}. Oracle pricing is currently unavailable, so we can't tell whether your position will remain safe.`"
-          variant="warning"
-          size="compact"
-        />
-        <UiToast
-          v-else-if="rampStatus.isRamping"
-          title="Liquidation LTV ramping down"
-          :description="`Ends ${rampEndsRelative}. Your position is currently safe at the post-ramp threshold.`"
-          variant="warning"
-          size="compact"
-        />
         <div
           v-if="hasQueryFailure"
           class="flex items-center gap-6 text-warning-500 text-p4"
@@ -491,6 +470,27 @@ const openPositionInformationModal = () => {
           />
           Oracle pricing unavailable. Some details may be missing.
         </div>
+        <UiAlert
+          v-if="rampStatus.isRamping && rampStatus.willBeLiquidated && !hasQueryFailure"
+          title="Liquidation LTV ramping down"
+          :description="`Your position is projected to become liquidatable ${forcedLiquidationRelative || 'before the ramp ends'} — consider closing or reducing debt.`"
+          variant="error"
+          size="compact"
+        />
+        <UiAlert
+          v-else-if="rampStatus.isRamping && hasQueryFailure"
+          title="Liquidation LTV ramping down"
+          :description="`Ends ${rampEndsRelative}. Oracle pricing is currently unavailable, so we can't tell whether your position will remain safe.`"
+          variant="warning"
+          size="compact"
+        />
+        <UiAlert
+          v-else-if="rampStatus.isRamping"
+          title="Liquidation LTV ramping down"
+          :description="`Ends ${rampEndsRelative}. Your position is currently safe at the post-ramp threshold.`"
+          variant="warning"
+          size="compact"
+        />
         <div class="flex justify-between">
           <div class="text-content-tertiary text-p3">
             Net asset value

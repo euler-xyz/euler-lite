@@ -7,10 +7,19 @@ const { pair } = defineProps<{ pair: AnyBorrowVaultPair | PortfolioBorrowPositio
 
 const collateralVault = computed(() => getPairCollateralVault(pair))
 const borrowVault = computed(() => getPairBorrowVault(pair))
+const collateralBadges = useVaultTypeBadges(collateralVault)
+const borrowBadges = useVaultTypeBadges(borrowVault)
+
+const showVaultTypesSummary = computed(() =>
+  collateralBadges.hasSummaryBadges.value || borrowBadges.hasSummaryBadges.value,
+)
 </script>
 
 <template>
-  <div class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card">
+  <div
+    v-if="showVaultTypesSummary"
+    class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card"
+  >
     <p class="text-h3 text-content-primary">
       Vault types
     </p>
@@ -29,6 +38,7 @@ const borrowVault = computed(() => getPairBorrowVault(pair))
           :vault="collateralVault"
           layout="stacked"
           size="large"
+          summary-only
         />
       </div>
 
@@ -48,6 +58,7 @@ const borrowVault = computed(() => getPairBorrowVault(pair))
           :vault="borrowVault"
           layout="stacked"
           size="large"
+          summary-only
         />
       </div>
     </div>

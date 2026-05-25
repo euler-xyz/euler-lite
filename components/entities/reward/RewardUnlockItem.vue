@@ -213,7 +213,7 @@ const onUnlockClick = async () => {
       >
         Unlock
       </UiButton>
-      <UiToast
+      <UiAlert
         v-if="simulationError"
         class="mt-12"
         title="Error"

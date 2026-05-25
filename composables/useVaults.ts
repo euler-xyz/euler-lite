@@ -474,17 +474,17 @@ const decodeArgs = (entry: SerialisedVault): Record<string, unknown> | undefined
 
 const instantiateEvk = (entry: SerialisedVault): Hydrated<EVaultClass> | undefined => {
   const args = decodeArgs(entry)
-  return args ? { vault: new EVault(args as IEVault), args } : undefined
+  return args ? { vault: new EVault(args as unknown as IEVault), args } : undefined
 }
 
 const instantiateEarn = (entry: SerialisedVault): Hydrated<EulerEarnClass> | undefined => {
   const args = decodeArgs(entry)
-  return args ? { vault: new EulerEarn(args as IEulerEarn), args } : undefined
+  return args ? { vault: new EulerEarn(args as unknown as IEulerEarn), args } : undefined
 }
 
 const instantiateSecuritize = (entry: SerialisedVault): Hydrated<SecuritizeCollateralVaultClass> | undefined => {
   const args = decodeArgs(entry)
-  return args ? { vault: new SecuritizeCollateralVault(args as ISecuritizeCollateralVault), args } : undefined
+  return args ? { vault: new SecuritizeCollateralVault(args as unknown as ISecuritizeCollateralVault), args } : undefined
 }
 
 /**

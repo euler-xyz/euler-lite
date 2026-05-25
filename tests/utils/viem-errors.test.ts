@@ -209,6 +209,33 @@ describe('classifyViemError', () => {
     expect(out.kind).toBe('rpc-rate-limited')
   })
 
+  it('classifies Execution reverted from a bare RpcRequestError as contract-revert before the -32000 code fallback', () => {
+    const err = new RpcRequestError({
+      body: { method: 'eth_call' },
+      error: { code: -32000, message: 'Execution reverted for an unknown reason.' },
+      url: 'https://rpc.example',
+    })
+    const out = classifyViemError(err)
+    expect(out.kind).toBe('contract-revert')
+    expect(out.isTransport).toBe(false)
+  })
+
+  it('classifies Execution reverted from a CallExecutionError-wrapped RpcRequestError as contract-revert', () => {
+    const inner = new RpcRequestError({
+      body: { method: 'eth_call' },
+      error: { code: -32000, message: 'Execution reverted for an unknown reason.' },
+      url: 'https://rpc.example',
+    })
+    const wrapped = new CallExecutionError(inner, {
+      account: undefined,
+      data: '0xdeadbeef',
+      to: '0x0000000000000000000000000000000000000000',
+    })
+    const out = classifyViemError(wrapped)
+    expect(out.kind).toBe('contract-revert')
+    expect(out.isTransport).toBe(false)
+  })
+
   it('refines an unrecognised wrapper with code -32005 to rate-limited via code fallback', () => {
     // Synthesise an Error whose name is not in the table, but whose `code`
     // is recognisable. This is the class of upstream that previously read

@@ -1,7 +1,8 @@
-import { buildEulerSDK, createKeyringPlugin, createPythPlugin } from '@eulerxyz/euler-v2-sdk'
+import { buildEulerSDK, createKeyringPlugin, createPythPlugin, IntrinsicApyService, IntrinsicApyV3Adapter } from '@eulerxyz/euler-v2-sdk'
 import type { BuildQueryFn, EulerSDK, EulerSDKConfig } from '@eulerxyz/euler-v2-sdk'
 import { sdkBuildQuery, sdkFreshBuildQuery } from '~/utils/sdk-query-cache'
 import { createLiteTosPlugin } from '~/utils/sdk-tos'
+import { createYuzuIntrinsicApyService } from '~/utils/yuzu-intrinsic-apy'
 
 // sdk-keyring is loaded dynamically below to avoid a static import cycle:
 // useEulerSdk -> sdk-keyring -> eulerLabelsUtils -> useEulerLabels ->
@@ -162,7 +163,7 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
     // resolve v3-only utility endpoints (tokenlist) when adapters that fall
     // back to v3 internally are encountered. The per-service adapter flags are
     // what actually steer reads through the fallback chain vs straight onchain.
-    ...(v3ApiUrl ? { v3ApiUrl, tokenlistApiBaseUrl: v3ApiUrl } : {}),
+    ...(v3ApiUrl ? { v3ApiUrl, tokenlistApiBaseUrl: v3ApiUrl, intrinsicApyV3ApiUrl: v3ApiUrl } : {}),
     deploymentsUrl: buildAppApiPath('/api/euler-chains'),
     // Labels always go through the local /api/labels proxy. Server-side env
     // (`NUXT_PUBLIC_CONFIG_LABELS_BASE_URL`/`*_REPO`) controls where the proxy
@@ -246,10 +247,20 @@ const buildInstance = async ({ backend, buildQuery }: InstanceBuildArgs): Promis
   const config: EulerSDKConfig = { ...staticConfig, rpcUrls }
   const { buildSdkKeyringHookTargets, getSdkKeyringCredential } = await loadSdkKeyringModule()
   const keyringHookTargets = buildSdkKeyringHookTargets()
+  const intrinsicApyService = createYuzuIntrinsicApyService(
+    new IntrinsicApyService(
+      new IntrinsicApyV3Adapter(
+        { endpoint: config.intrinsicApyV3ApiUrl ?? config.v3ApiUrl ?? buildV3ProxyApiPath() },
+        buildQuery,
+      ),
+    ),
+    buildAppApiPath('/api/proxy/intrinsic-apy-overrides'),
+  )
 
   const sdk = await buildEulerSDK({
     config,
     buildQuery,
+    servicesOverrides: { intrinsicApyService },
     plugins: [
       createPythPlugin({ buildQuery, fetchFn: pythProxyFetch }),
       createKeyringPlugin({

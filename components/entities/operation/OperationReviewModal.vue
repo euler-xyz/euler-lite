@@ -8,6 +8,7 @@ import { getEulerSdk } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber } from '~/utils/string-utils'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
+import { useStateOverrideResolution } from '~/composables/useStateOverrideOptions'
 
 const emits = defineEmits(['close', 'confirm'])
 
@@ -49,6 +50,7 @@ const { address: walletAddress, chainId: currentChainId } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { getVault } = useVaultRegistry()
 const { prepareTransactionPlan } = useEulerTx()
+const { isResolvingStateOverrideHints } = useStateOverrideResolution()
 const {
   isSimulating: isTenderlySimulating,
   simulationError: tenderlyError,
@@ -187,8 +189,7 @@ const handleTenderlySimulate = async () => {
 const internalSubmitting = ref(false)
 
 const handleConfirm = async () => {
-  if (!reviewPlan.value || prepareError.value || isPreparingPlan.value) return
-  if (internalSubmitting.value) return
+  if (isConfirmDisabled.value) return
   const result = onConfirm()
   if (result && typeof (result as Promise<void>).then === 'function') {
     internalSubmitting.value = true
@@ -320,10 +321,11 @@ const isSwapQuoteStale = computed(() => {
 })
 
 const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract used to authorize future transfers with signatures. Each future transfer still requires your explicit signature and can be limited by amount and duration.'
-const isConfirmDisabled = computed(() => isSpyMode.value || internalSubmitting.value || isPreparingPlan.value || !!prepareError.value || !reviewPlan.value?.length)
+const isConfirmDisabled = computed(() => isSpyMode.value || internalSubmitting.value || isPreparingPlan.value || isResolvingStateOverrideHints.value || !!prepareError.value || !reviewPlan.value?.length)
+const isTenderlyPreparing = computed(() => isTenderlySimulating.value || isResolvingStateOverrideHints.value)
 const confirmLabel = computed(() => {
   if (isSpyMode.value) return 'Spy mode (read-only)'
-  if (isPreparingPlan.value) return 'Preparing...'
+  if (isPreparingPlan.value || isResolvingStateOverrideHints.value) return 'Preparing...'
   return internalSubmitting.value && submittingLabel ? submittingLabel : btnLabel.value
 })
 </script>
@@ -383,13 +385,13 @@ const confirmLabel = computed(() => {
           v-else-if="tenderlyEnabled"
           type="button"
           class="flex items-center gap-6 text-p3 text-content-primary hover:text-content-primary transition-colors"
-          :disabled="isTenderlySimulating"
+          :disabled="isTenderlyPreparing"
           @click="handleTenderlySimulate"
         >
           <SvgIcon
-            :name="isTenderlySimulating ? 'loading' : 'arrow-top-right'"
+            :name="isTenderlyPreparing ? 'loading' : 'arrow-top-right'"
             class="!w-16 !h-16"
-            :class="{ 'animate-spin': isTenderlySimulating }"
+            :class="{ 'animate-spin': isTenderlyPreparing }"
           />
           Simulate on Tenderly
         </button>
@@ -401,14 +403,14 @@ const confirmLabel = computed(() => {
         Copied calldata does not contain the permit() call. It is only known after the permit2 message is signed.
       </p>
 
-      <UiToast
+      <UiAlert
         v-if="tenderlyError && !hasTenderlyFailedSimulation"
         title="Simulation failed"
         variant="warning"
         :description="tenderlyError"
         size="compact"
       />
-      <UiToast
+      <UiAlert
         v-if="prepareError"
         title="Preparation failed"
         variant="error"
@@ -434,21 +436,21 @@ const confirmLabel = computed(() => {
         </p>
       </div>
 
-      <UiToast
+      <UiAlert
         v-if="type === 'reward'"
         title="Disclaimer"
         variant="warning"
         :description="disclaimerText"
         size="compact"
       />
-      <UiToast
+      <UiAlert
         v-if="type === 'reul-unlock'"
         title="Important"
         variant="warning"
         :description="reulUnlockDisclaimerText"
         size="compact"
       />
-      <UiToast
+      <UiAlert
         v-if="hasPermit2Approval"
         title="Infinite approval"
         variant="info"
@@ -463,7 +465,7 @@ const confirmLabel = computed(() => {
         size="xlarge"
         rounded
         :disabled="isConfirmDisabled"
-        :loading="internalSubmitting || isPreparingPlan"
+        :loading="internalSubmitting || isPreparingPlan || isResolvingStateOverrideHints"
         @click="handleConfirm"
       >
         {{ confirmLabel }}
