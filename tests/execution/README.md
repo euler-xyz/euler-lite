@@ -12,6 +12,9 @@ validation. `swap-from-wallet` is listed as unsupported because Lite has no
 regular wallet-to-wallet swap screen. `same-asset-debt-migration` is listed as
 unsupported because the current active mainnet product labels do not expose two
 same-asset debt vaults against one collateral vault at the pinned fork block.
+`multiply-same-asset` is listed as unsupported because the current active
+mainnet product labels do not expose a supported same-asset multiply market at
+the pinned fork block.
 Live fork recording requires a running Anvil fork, a Lite dev server pointed at
 that fork, and a funded `FORK_RPC_URL`.
 

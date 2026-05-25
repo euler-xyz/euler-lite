@@ -21,17 +21,17 @@
     },
     {
       "id": "same-asset-collateral-migration",
-      "label": "Open borrow position and migrate same-asset collateral",
+      "label": "Supply and rebalance savings to a same-asset vault",
       "scenarios": [
-        "borrow-open-same-asset-migration-position-execute",
+        "lend-supply-execute",
         "position-same-asset-collateral-migration-execute"
       ]
     },
     {
       "id": "withdraw-and-swap",
-      "label": "Open borrow position and withdraw collateral through swap",
+      "label": "Supply and withdraw savings through swap",
       "scenarios": [
-        "borrow-open-position-execute",
+        "lend-supply-execute",
         "position-withdraw-and-swap-execute"
       ]
     },
@@ -88,7 +88,7 @@
       "id": "swap-debt",
       "label": "Open borrow position and swap debt",
       "scenarios": [
-        "borrow-open-position-execute",
+        "borrow-open-weth-debt-position-execute",
         "position-swap-debt-execute"
       ]
     },
@@ -105,13 +105,6 @@
       "label": "Open borrow position with swapped collateral",
       "scenarios": [
         "borrow-swap-and-borrow-execute"
-      ]
-    },
-    {
-      "id": "multiply-same-asset",
-      "label": "Open same-asset multiply position",
-      "scenarios": [
-        "borrow-multiply-same-asset-execute"
       ]
     }
   ]

@@ -44,7 +44,8 @@
   ],
   "unsupportedTransactionTypes": [
     "swap-from-wallet",
-    "same-asset-debt-migration"
+    "same-asset-debt-migration",
+    "multiply-same-asset"
   ],
   "scenarios": [
     {
@@ -614,6 +615,148 @@
       }
     },
     {
+      "id": "borrow-open-weth-debt-position-execute",
+      "label": "Borrow opens a WETH debt fixture position",
+      "covers": [
+        "borrow"
+      ],
+      "path": "/borrow/0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9/0xD8b27CF359b7D15710a5BE299AF6e7Bf904984C2?network=1",
+      "waitFor": [
+        "[data-id=\"asset-input\"][data-label=\"Supply USDC\"]",
+        "[data-id=\"asset-input\"][data-label=\"Borrow WETH\"]",
+        "button:has-text(\"Connect wallet\"), button:has-text(\"Review Borrow\"), button:has-text(\"Accept Terms Of Use\")"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "label": "Connect stub wallet",
+          "selector": "button:has-text(\"Connect wallet\")",
+          "optional": true,
+          "probeMs": 3000,
+          "waitFor": [
+            "button:has-text(\"Review Borrow\")"
+          ],
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Open Terms of Use modal (if shown)",
+          "selector": "button:has-text(\"Accept Terms Of Use\")",
+          "optional": true,
+          "probeMs": 3000,
+          "waitFor": [
+            "text=Acknowledge terms",
+            "button:has-text(\"Accept\")"
+          ],
+          "settleMs": 750,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Accept Terms of Use (if modal open)",
+          "selector": "button:has-text(\"Accept\"):not(:has-text(\"Terms\"))",
+          "optional": true,
+          "probeMs": 2000,
+          "waitFor": [
+            "button:has-text(\"Review Borrow\")"
+          ],
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "fillAsset",
+          "label": "Enter WETH debt fixture collateral amount",
+          "assetLabel": "Supply USDC",
+          "value": "100",
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "fillAsset",
+          "label": "Enter WETH debt fixture borrow amount",
+          "assetLabel": "Borrow WETH",
+          "value": "0.005",
+          "settleMs": 2500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Open Terms of Use modal after WETH debt amounts (if shown)",
+          "selector": "button:has-text(\"Accept Terms Of Use\")",
+          "optional": true,
+          "probeMs": 3000,
+          "waitFor": [
+            "text=Acknowledge terms",
+            "button:has-text(\"Accept\")"
+          ],
+          "settleMs": 750,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Accept Terms of Use after WETH debt amounts (if modal open)",
+          "selector": "button:has-text(\"Accept\"):not(:has-text(\"Terms\"))",
+          "optional": true,
+          "probeMs": 2000,
+          "waitFor": [
+            "button:has-text(\"Review Borrow\")"
+          ],
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Open WETH debt fixture borrow review",
+          "selector": "button:has-text(\"Review Borrow\")",
+          "waitFor": [
+            "text=Transaction review",
+            "[data-id=\"operation-review-confirm\"]"
+          ],
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Confirm WETH debt fixture borrow",
+          "selector": "[data-id=\"operation-review-confirm\"]",
+          "settleMs": 10000,
+          "captureTagsAfter": true
+        }
+      ],
+      "postCaptures": [
+        {
+          "id": "portfolio-borrow-after-weth-debt-fixture-borrow",
+          "path": "/portfolio?network=1&showAll=1",
+          "waitFor": [
+            "[data-id]"
+          ],
+          "settleMs": 5000
+        }
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "subAccountIndex": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": [
+                {
+                  "vault": "0xD8b27CF359b7D15710a5BE299AF6e7Bf904984C2"
+                }
+              ]
+            }
+          ]
+        },
+        "activation": "afterFirstTransaction"
+      }
+    },
+    {
       "id": "borrow-open-same-asset-migration-position-execute",
       "label": "Borrow opens a same-asset collateral migration fixture position",
       "covers": [
@@ -866,64 +1009,31 @@
     },
     {
       "id": "position-same-asset-collateral-migration-execute",
-      "label": "Same-asset collateral migration executes against the opened borrow position",
+      "label": "Same-asset savings rebalance executes against the supplied position",
       "dependsOn": [
-        "borrow-open-same-asset-migration-position-execute"
+        "lend-supply-execute"
       ],
       "covers": [
         "same-asset-collateral-migration"
       ],
-      "path": "/portfolio?network=1&showAll=1",
+      "path": "/lend/0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9/0/swap?to=0xe0a80d35bB6618CBA260120b279d357978c42BCE&network=1",
       "waitFor": [
-        "[data-id=\"portfolio-list-item\"][data-list=\"borrow\"]"
+        "[data-id=\"asset-input\"][data-label=\"From\"]",
+        "[data-id=\"asset-input\"][data-label=\"To\"]",
+        "button:has-text(\"Review Transfer\")"
       ],
       "actions": [
         {
-          "type": "click",
-          "label": "Open borrow position from portfolio",
-          "selector": "[data-id=\"portfolio-list-item\"][data-list=\"borrow\"]",
-          "waitFor": [
-            "[data-id=\"position-action-swap-collateral\"]:not(.is-disabled)"
-          ],
-          "settleMs": 1500,
-          "captureTagsAfter": true
-        },
-        {
-          "type": "rememberPath",
-          "label": "Remember primary borrow position path",
-          "variable": "primaryBorrowPositionPath",
-          "captureTagsAfter": true
-        },
-        {
-          "type": "click",
-          "label": "Open collateral migration form",
-          "selector": "[data-id=\"position-action-swap-collateral\"]:not(.is-disabled)",
-          "waitFor": [
-            "[data-id=\"asset-input\"][data-label=\"From\"]",
-            "[data-id=\"asset-input\"][data-label=\"To\"]"
-          ],
-          "settleMs": 1500,
-          "captureTagsAfter": true
-        },
-        {
-          "type": "selectCollateralOption",
-          "label": "Select same-asset USDC collateral target",
-          "assetLabel": "To",
-          "vaultAddress": "0xe0a80d35bB6618CBA260120b279d357978c42BCE",
-          "settleMs": 1500,
-          "captureTagsAfter": true
-        },
-        {
           "type": "fillAsset",
-          "label": "Enter same-asset collateral amount",
+          "label": "Enter same-asset rebalance amount",
           "assetLabel": "From",
-          "value": "1",
+          "value": "0.25",
           "settleMs": 3000,
           "captureTagsAfter": true
         },
         {
           "type": "click",
-          "label": "Open same-asset collateral review",
+          "label": "Open same-asset rebalance review",
           "selector": "button:has-text(\"Review Transfer\")",
           "waitFor": [
             "text=Transaction review",
@@ -934,7 +1044,7 @@
         },
         {
           "type": "click",
-          "label": "Confirm same-asset collateral transfer",
+          "label": "Confirm same-asset rebalance transfer",
           "selector": "[data-id=\"operation-review-confirm\"]",
           "settleMs": 10000,
           "captureTagsAfter": true
@@ -942,8 +1052,8 @@
       ],
       "postCaptures": [
         {
-          "id": "portfolio-borrow-after-same-asset-collateral",
-          "path": "/portfolio?network=1&showAll=1",
+          "id": "portfolio-saving-after-same-asset-rebalance",
+          "path": "/portfolio/saving?network=1",
           "waitFor": [
             "[data-id]"
           ],
@@ -955,7 +1065,6 @@
           "accounts": [
             {
               "chainId": 1,
-              "subAccountIndex": 1,
               "deposits": [
                 {
                   "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
@@ -964,11 +1073,7 @@
                   "vault": "0xe0a80d35bB6618CBA260120b279d357978c42BCE"
                 }
               ],
-              "borrows": [
-                {
-                  "vault": "0xc1fF5490651B9B8d0400B0146E7fb174B90E315B"
-                }
-              ]
+              "borrows": []
             }
           ]
         }
@@ -976,14 +1081,14 @@
     },
     {
       "id": "position-withdraw-and-swap-execute",
-      "label": "Withdraw and swap executes against the opened borrow position",
+      "label": "Withdraw and swap executes against the supplied saving position",
       "dependsOn": [
-        "borrow-open-position-execute"
+        "lend-supply-execute"
       ],
       "covers": [
         "withdraw-and-swap"
       ],
-      "path": "/position/1/withdraw?collateral=0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9&network=1",
+      "path": "/lend/0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9/0/withdraw?network=1",
       "waitFor": [
         "[data-id=\"asset-input\"][data-label=\"Withdraw amount\"]",
         "button:has-text(\"Review Withdraw\")"
@@ -1001,7 +1106,7 @@
           "type": "fillAsset",
           "label": "Enter withdraw swap amount",
           "assetLabel": "Withdraw amount",
-          "value": "1",
+          "value": "0.25",
           "settleMs": 6000,
           "captureTagsAfter": true
         },
@@ -1036,8 +1141,8 @@
       ],
       "postCaptures": [
         {
-          "id": "portfolio-borrow-after-withdraw-swap",
-          "path": "/portfolio?network=1&showAll=1",
+          "id": "portfolio-saving-after-withdraw-swap",
+          "path": "/portfolio/saving?network=1",
           "waitFor": [
             "[data-id]"
           ],
@@ -1049,17 +1154,12 @@
           "accounts": [
             {
               "chainId": 1,
-              "subAccountIndex": 1,
               "deposits": [
                 {
                   "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
                 }
               ],
-              "borrows": [
-                {
-                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
-                }
-              ]
+              "borrows": []
             }
           ]
         }
@@ -1354,8 +1454,8 @@
         },
         {
           "type": "click",
-          "label": "Select best collateral repay swap route",
-          "selector": "[data-id=\"swap-route-list-item\"]",
+          "label": "Select executable collateral repay swap route",
+          "selector": "[data-id=\"swap-route-list-item\"][data-provider=\"magpie\"], [data-id=\"swap-route-list-item\"][data-provider=\"nordstern\"]",
           "waitFor": [
             "[data-id=\"swap-route-list-item\"][data-selected=\"true\"]"
           ],
@@ -1503,21 +1603,16 @@
               "deposits": [
                 {
                   "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
-                }
-              ],
-              "borrows": []
-            },
-            {
-              "chainId": 1,
-              "subAccountIndex": 1,
-              "deposits": [
+                },
                 {
-                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9",
+                  "subAccountIndex": 1
                 }
               ],
               "borrows": [
                 {
-                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162",
+                  "subAccountIndex": 1
                 }
               ]
             }
@@ -1718,7 +1813,7 @@
       "id": "position-swap-debt-execute",
       "label": "Swap debt executes against the opened borrow position",
       "dependsOn": [
-        "borrow-open-position-execute"
+        "borrow-open-weth-debt-position-execute"
       ],
       "covers": [
         "swap-debt"
@@ -1756,9 +1851,9 @@
         },
         {
           "type": "selectCollateralOption",
-          "label": "Select WETH debt target",
+          "label": "Select USDT debt target",
           "assetLabel": "To",
-          "vaultAddress": "0xD8b27CF359b7D15710a5BE299AF6e7Bf904984C2",
+          "vaultAddress": "0x313603FA690301b0CaeEf8069c065862f9162162",
           "waitFor": [
             "[data-id=\"swap-route-list-item\"]"
           ],
@@ -1768,7 +1863,7 @@
         {
           "type": "click",
           "label": "Select executable debt swap route",
-          "selector": "[data-id=\"swap-route-list-item\"][data-provider=\"magpie\"]",
+          "selector": "[data-id=\"swap-route-list-item\"][data-provider=\"magpie\"], [data-id=\"swap-route-list-item\"][data-provider=\"nordstern\"]",
           "waitFor": [
             "[data-id=\"swap-route-list-item\"][data-selected=\"true\"]"
           ],
@@ -1817,10 +1912,10 @@
               ],
               "borrows": [
                 {
-                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
+                  "vault": "0xD8b27CF359b7D15710a5BE299AF6e7Bf904984C2"
                 },
                 {
-                  "vault": "0xD8b27CF359b7D15710a5BE299AF6e7Bf904984C2"
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
                 }
               ]
             }
