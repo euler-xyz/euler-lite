@@ -457,6 +457,8 @@ const confirmLabel = computed(() => {
       />
 
       <UiButton
+        data-id="operation-review-confirm"
+        :data-operation-type="type"
         variant="primary"
         size="xlarge"
         rounded

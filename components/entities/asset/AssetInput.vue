@@ -186,6 +186,19 @@ const openChooseCollateralModal = () => {
 
 <template>
   <div
+    data-id="asset-input"
+    :data-label="label ?? ''"
+    :data-desc="desc ?? ''"
+    :data-asset-symbol="asset.symbol"
+    :data-asset-address="asset.address"
+    :data-asset-decimals="String(asset.decimals)"
+    :data-vault-address="vault?.address ?? ''"
+    :data-balance="(balance ?? 0n).toString()"
+    :data-selected-source="selectedSource ?? ''"
+    :data-selected-sub-account="selectedSubAccount ?? ''"
+    :data-selected-vault-address="selectedVaultAddress ?? ''"
+    :data-readonly="readonly ? 'true' : 'false'"
+    :data-maxable="maxable ? 'true' : 'false'"
     class="flex flex-col gap-12 p-16 rounded-16 border transition-all duration-200"
     :class="[
       isFocused
@@ -211,6 +224,11 @@ const openChooseCollateralModal = () => {
       <input
         ref="inputEl"
         v-text-fit
+        data-id="asset-input-field"
+        :data-label="label ?? ''"
+        :data-asset-symbol="asset.symbol"
+        :data-asset-address="asset.address"
+        :data-readonly="readonly ? 'true' : 'false'"
         :value="model"
         class="text-h1 text-content-primary w-full min-w-0 h-40 outline-none placeholder:text-content-tertiary"
         type="text"
@@ -226,6 +244,11 @@ const openChooseCollateralModal = () => {
       >
 
       <div
+        data-id="asset-input-asset-selector"
+        :data-label="label ?? ''"
+        :data-asset-symbol="asset.symbol"
+        :data-asset-address="asset.address"
+        :data-swappable="swappable ? 'true' : 'false'"
         class="bg-card text-p3 font-semibold gap-8 flex items-center justify-center px-12 min-h-36 py-6 rounded-[40px] whitespace-nowrap cursor-pointer shrink-0"
         @click="swappable ? emits('click-asset') : openChooseCollateralModal()"
       >
@@ -277,7 +300,13 @@ const openChooseCollateralModal = () => {
         v-if="maxable"
         :loading="balanceLoading ?? false"
       >
-        <p @click="setMax">
+        <p
+          data-id="asset-input-max"
+          :data-label="label ?? ''"
+          :data-asset-symbol="asset.symbol"
+          :data-asset-address="asset.address"
+          @click="setMax"
+        >
           <UiExactAmount
             class="text-content-tertiary"
             :exact="formatExactAmount(balance ?? 0n, asset?.decimals ?? 18n, asset.symbol)"

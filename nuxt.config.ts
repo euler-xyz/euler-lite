@@ -167,6 +167,7 @@ export default defineNuxtConfig({
       // Adapter chain for the browser "fast" SDK. fallback (default) | onchain | v3.
       // Maps to NUXT_PUBLIC_BROWSER_VAULT_SOURCE.
       browserVaultSource: '',
+      executionRecordSdkQueries: '',
       swapApiUrl: '',
       sentryDsn: '', // set via NUXT_PUBLIC_SENTRY_DSN
     },

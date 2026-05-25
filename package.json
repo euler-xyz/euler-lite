@@ -16,6 +16,8 @@
     "parity:sdk-diagnostics": "node scripts/parity-sdk-diagnostics.mjs",
     "parity:public-endpoints": "node scripts/public-endpoint-parity.mjs",
     "parity:overlay": "node scripts/parity-overlay.mjs",
+    "execution:record": "node scripts/execution-record.mjs",
+    "execution:suite": "node scripts/execution-suite.mjs",
     "test": "vitest",
     "test:run": "vitest run",
     "typecheck": "nuxt typecheck",

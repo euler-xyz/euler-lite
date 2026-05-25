@@ -1036,6 +1036,7 @@ watch([isConnected, isSpyMode, address], () => {
               @click.stop
             >
               <UiButton
+                data-id="position-action-multiply"
                 size="medium"
                 variant="primary"
                 rounded
@@ -1045,6 +1046,7 @@ watch([isConnected, isSpyMode, address], () => {
                 Multiply
               </UiButton>
               <UiButton
+                data-id="position-action-borrow"
                 size="medium"
                 variant="primary-stroke"
                 rounded
@@ -1054,6 +1056,7 @@ watch([isConnected, isSpyMode, address], () => {
                 Borrow
               </UiButton>
               <UiButton
+                data-id="position-action-repay"
                 size="medium"
                 variant="primary-stroke"
                 rounded
@@ -1062,6 +1065,7 @@ watch([isConnected, isSpyMode, address], () => {
                 Repay
               </UiButton>
               <UiButton
+                data-id="position-action-refinance-debt"
                 size="medium"
                 variant="primary-stroke"
                 rounded
@@ -1232,6 +1236,8 @@ watch([isConnected, isSpyMode, address], () => {
                 @click.stop
               >
                 <UiButton
+                  data-id="position-action-supply"
+                  :data-vault-address="collateral.vault.address.toLowerCase()"
                   size="medium"
                   variant="primary"
                   rounded
@@ -1241,6 +1247,8 @@ watch([isConnected, isSpyMode, address], () => {
                   Supply
                 </UiButton>
                 <UiButton
+                  data-id="position-action-withdraw"
+                  :data-vault-address="collateral.vault.address.toLowerCase()"
                   size="medium"
                   variant="primary-stroke"
                   rounded
@@ -1250,6 +1258,8 @@ watch([isConnected, isSpyMode, address], () => {
                   Withdraw
                 </UiButton>
                 <UiButton
+                  data-id="position-action-swap-collateral"
+                  :data-vault-address="collateral.vault.address.toLowerCase()"
                   size="medium"
                   variant="primary-stroke"
                   rounded
@@ -1264,6 +1274,8 @@ watch([isConnected, isSpyMode, address], () => {
                 @click.stop
               >
                 <UiButton
+                  data-id="position-action-disable-collateral"
+                  :data-vault-address="collateral.vault.address.toLowerCase()"
                   size="medium"
                   variant="primary"
                   rounded

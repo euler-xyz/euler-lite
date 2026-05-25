@@ -777,9 +777,9 @@ watch(amount, async () => {
   updateEstimates()
 })
 
-watch(address, () => {
-  fetchBalance()
-  fetchSelectedAssetBalance()
+watch([address, isConnected, chainId, () => asset.value?.address], () => {
+  void fetchBalance()
+  void fetchSelectedAssetBalance()
 })
 </script>
 

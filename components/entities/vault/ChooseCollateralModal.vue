@@ -69,6 +69,15 @@ const handleClose = () => {
       <div
         v-for="{ option, idx } in filteredOptions"
         :key="`options-${idx}`"
+        data-id="collateral-option"
+        :data-option-index="String(idx)"
+        :data-option-label="getOptionLabel(option)"
+        :data-option-symbol="getOptionSymbol(option)"
+        :data-option-type="getOptionType(option)"
+        :data-option-asset-address="option.assetAddress?.toLowerCase() ?? ''"
+        :data-option-vault-address="option.vaultAddress?.toLowerCase() ?? ''"
+        :data-option-sub-account="option.subAccount?.toLowerCase() ?? ''"
+        :data-option-disabled="option.disabled ? 'true' : 'false'"
         class="flex items-center py-12 px-16 rounded-16"
         :class="[
           option.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
