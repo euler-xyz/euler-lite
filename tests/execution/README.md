@@ -57,7 +57,9 @@ with the scenario that needs them. Use `discoveryMocks.subgraph.accounts` to
 declare indexed account rows that the fork cannot produce on demand; each entry
 lists the owner account plus the sub-account/vault pairs to expose as deposits
 or borrows. Use `subAccountIndex` for borrow positions when the UI path is
-`/position/{index}`.
+`/position/{index}`. Scenarios that start from a transaction form can set
+`discoveryMocks.activation` to `afterFirstTransaction` so the synthetic rows
+only appear after execution begins.
 
 Validate the fixture and scenario coverage without connecting to Anvil or the
 app:

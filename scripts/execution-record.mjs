@@ -148,13 +148,19 @@ async function main() {
           }
         : {}),
     })
+    const activeScenarioState = {
+      scenario: null,
+      successfulWalletTransactions: 0,
+    }
+
     await context.addInitScript(installSdkQueryRecorder)
-    await installWalletStub(context, fixture, anvilRpcUrl, run.walletRequests)
+    await installWalletStub(context, fixture, anvilRpcUrl, run.walletRequests, () => {
+      activeScenarioState.successfulWalletTransactions += 1
+    })
     await installVaultSnapshotRoute(context, vaultSnapshot)
     await installV3VaultResolveRoute(context, vaultSnapshot)
     await installSwapApiRoute(context, swapApiUrl)
-    let activeScenario = null
-    await installScenarioSubgraphDiscoveryRoute(context, fixture, () => activeScenario)
+    await installScenarioSubgraphDiscoveryRoute(context, fixture, () => activeScenarioState)
     await context.route('**/api/screen-address', route => route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -162,7 +168,8 @@ async function main() {
     }))
 
     for (const scenario of scenarios) {
-      activeScenario = scenario
+      activeScenarioState.scenario = scenario
+      activeScenarioState.successfulWalletTransactions = 0
       console.log(`[execution-record] ▶ ${scenario.id} — ${scenario.label ?? ''}`)
       const page = await context.newPage()
       attachNetworkRecorder(page, run.network)
@@ -214,7 +221,8 @@ async function main() {
 
       run.scenarios.push(scenarioResult)
     }
-    activeScenario = null
+    activeScenarioState.scenario = null
+    activeScenarioState.successfulWalletTransactions = 0
   }
   finally {
     if (!args['keep-open']) {
@@ -557,7 +565,7 @@ function toQuantity(value) {
   return `0x${bigint.toString(16)}`
 }
 
-async function installWalletStub(context, fixture, anvilRpcUrl, walletRequests) {
+async function installWalletStub(context, fixture, anvilRpcUrl, walletRequests, onTransactionSuccess) {
   const chainId = Number(fixture.chainId)
   const account = privateKeyToAccount(fixture.wallet.privateKey)
   const walletClient = createWalletClient({ account, chain: mainnet, transport: http(anvilRpcUrl) })
@@ -594,6 +602,7 @@ async function installWalletStub(context, fixture, anvilRpcUrl, walletRequests) 
           result: sanitizeForJson(result),
           receipt: sanitizeForJson(receipt),
         })
+        onTransactionSuccess?.({ hash: result, receipt })
         return result
       }
 
@@ -842,7 +851,11 @@ async function installSwapApiRoute(context, swapApiUrl) {
 
 async function installScenarioSubgraphDiscoveryRoute(context, fixture, getScenario) {
   await context.route(/\/api\/proxy\/subgraph\/\d+(?:\?|$)/, async (route) => {
-    const scenario = getScenario()
+    const scenarioState = getScenario()
+    const scenario = scenarioState?.scenario ?? scenarioState
+    if (!isScenarioSubgraphDiscoveryActive(scenarioState)) {
+      return route.fallback()
+    }
     const mocks = scenarioSubgraphAccounts(scenario, fixture)
     if (!mocks.length) {
       return route.fallback()
@@ -894,6 +907,15 @@ async function installScenarioSubgraphDiscoveryRoute(context, fixture, getScenar
       body: JSON.stringify(response),
     })
   })
+}
+
+function isScenarioSubgraphDiscoveryActive(scenarioState) {
+  const scenario = scenarioState?.scenario ?? scenarioState
+  const activation = scenario?.discoveryMocks?.activation
+  if (activation === 'afterFirstTransaction') {
+    return Number(scenarioState?.successfulWalletTransactions ?? 0) > 0
+  }
+  return true
 }
 
 function scenarioSubgraphAccounts(scenario, fixture) {
