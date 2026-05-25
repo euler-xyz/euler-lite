@@ -1522,36 +1522,18 @@
       "covers": [
         "repay-from-deposit"
       ],
-      "path": "/portfolio?network=1&showAll=1",
+      "path": "/position/1/repay?network=1&showAll=1",
       "waitFor": [
-        "[data-id=\"portfolio-list-item\"][data-list=\"borrow\"]"
+        "[data-id=\"tab\"][data-value=\"From savings\"]",
+        "[data-id=\"asset-input\"][data-label=\"Debt to repay\"]"
       ],
       "actions": [
-        {
-          "type": "click",
-          "label": "Open borrow position from portfolio",
-          "selector": "[data-id=\"portfolio-list-item\"][data-list=\"borrow\"]",
-          "waitFor": [
-            "[data-id=\"position-action-repay\"]"
-          ],
-          "settleMs": 1500,
-          "captureTagsAfter": true
-        },
-        {
-          "type": "click",
-          "label": "Open repay form",
-          "selector": "[data-id=\"position-action-repay\"]",
-          "waitFor": [
-            "[data-id=\"tab\"][data-value=\"From savings\"]"
-          ],
-          "settleMs": 1500,
-          "captureTagsAfter": true
-        },
         {
           "type": "clickTab",
           "label": "Select savings repay tab",
           "tab": "From savings",
           "waitFor": [
+            "[data-id=\"asset-input\"][data-label=\"Savings to use\"]",
             "[data-id=\"asset-input\"][data-label=\"Debt to repay\"]",
             "button:has-text(\"Review Repay\")"
           ],
@@ -1843,8 +1825,7 @@
           "selector": "[data-id=\"position-action-refinance-debt\"]:not(.is-disabled)",
           "waitFor": [
             "[data-id=\"asset-input\"][data-label=\"From\"]",
-            "[data-id=\"asset-input\"][data-label=\"To\"]",
-            "[data-id=\"swap-route-list-item\"]"
+            "[data-id=\"asset-input\"][data-label=\"To\"]"
           ],
           "settleMs": 1500,
           "captureTagsAfter": true

@@ -197,14 +197,13 @@ const swap = useSwapPageLogic({
   buildQuoteRequest(amount) {
     if (!fromVault.value || !toVault.value || !position.value) return null
     if (amount > currentDebt.value) return null
-    const accountIn = (address.value || zeroAddress) as Address
-    const accountOut = (position.value.subAccount || accountIn) as Address
+    const liabilityAccount = (position.value.subAccount || address.value || zeroAddress) as Address
     return {
       params: {
         tokenIn: toVault.value.asset.address as Address,
         tokenOut: fromVault.value.asset.address as Address,
-        accountIn,
-        accountOut,
+        accountIn: liabilityAccount,
+        accountOut: liabilityAccount,
         amount,
         vaultIn: toVault.value.address as Address,
         receiver: fromVault.value.address as Address,
