@@ -41,7 +41,9 @@
     "multiply-same-asset",
     "transfer",
     "reul-unlock",
-    "cleanup"
+    "cleanup",
+    "earn-supply",
+    "earn-withdraw"
   ],
   "unsupportedTransactionTypes": [
     "swap-from-wallet",
@@ -2306,6 +2308,180 @@
           "settleMs": 5000
         }
       ]
+    },
+    {
+      "id": "earn-supply-execute",
+      "label": "EulerEarn supply executes on fork",
+      "covers": [
+        "earn-supply"
+      ],
+      "path": "/earn/0x3B4802FDb0E5d74aA37d58FD77d63e93d4f9A4AF?network=1",
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "deposits": [
+                {
+                  "vault": "0x3B4802FDb0E5d74aA37d58FD77d63e93d4f9A4AF"
+                }
+              ],
+              "borrows": []
+            }
+          ]
+        },
+        "activation": "afterFirstTransaction"
+      },
+      "waitFor": [
+        "[data-id=\"asset-input\"][data-label=\"Supply amount\"]",
+        "button:has-text(\"Connect wallet\"), button:has-text(\"Review Supply\"), button:has-text(\"Accept Terms Of Use\")"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "label": "Connect stub wallet",
+          "selector": "button:has-text(\"Connect wallet\")",
+          "optional": true,
+          "probeMs": 3000,
+          "waitFor": [
+            "button:has-text(\"Review Supply\")"
+          ],
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "fillAsset",
+          "label": "Enter earn supply amount",
+          "assetLabel": "Supply amount",
+          "value": "1",
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Open Terms of Use modal (if shown)",
+          "selector": "button:has-text(\"Accept Terms Of Use\")",
+          "optional": true,
+          "probeMs": 3000,
+          "waitFor": [
+            "text=Acknowledge terms",
+            "button:has-text(\"Accept\")"
+          ],
+          "settleMs": 750,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Accept Terms of Use (if modal open)",
+          "selector": "button:has-text(\"Accept\"):not(:has-text(\"Terms\"))",
+          "optional": true,
+          "probeMs": 2000,
+          "waitFor": [
+            "button:has-text(\"Review Supply\")"
+          ],
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Open transaction review",
+          "selector": "button:has-text(\"Review Supply\")",
+          "waitFor": [
+            "text=Transaction review",
+            "[data-id=\"operation-review-confirm\"]"
+          ],
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Confirm earn supply",
+          "selector": "[data-id=\"operation-review-confirm\"]",
+          "waitFor": [
+            "[data-id=\"portfolio-list-item\"][data-list=\"earn\"][data-vault-address=\"0x3b4802fdb0e5d74aa37d58fd77d63e93d4f9a4af\"]"
+          ],
+          "settleMs": 6000,
+          "captureTagsAfter": true
+        }
+      ]
+    },
+    {
+      "id": "earn-withdraw-execute",
+      "label": "EulerEarn withdraw executes from an existing saving position",
+      "dependsOn": [
+        "earn-supply-execute"
+      ],
+      "covers": [
+        "earn-withdraw"
+      ],
+      "path": "/portfolio/saving?network=1",
+      "waitFor": [
+        "[data-id=\"portfolio-list-item\"][data-list=\"earn\"][data-vault-address=\"0x3b4802fdb0e5d74aa37d58fd77d63e93d4f9a4af\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "label": "Open earn withdraw form from saving position",
+          "selector": "[data-id=\"portfolio-list-item\"][data-list=\"earn\"][data-vault-address=\"0x3b4802fdb0e5d74aa37d58fd77d63e93d4f9a4af\"] a:has-text(\"Withdraw\")",
+          "waitFor": [
+            "[data-id=\"asset-input\"][data-label=\"Withdraw amount\"]",
+            "button:has-text(\"Review Withdraw\")"
+          ],
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "fillAsset",
+          "label": "Enter earn withdraw amount",
+          "assetLabel": "Withdraw amount",
+          "value": "0.25",
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Open earn withdraw review",
+          "selector": "button:has-text(\"Review Withdraw\")",
+          "waitFor": [
+            "text=Transaction review",
+            "[data-id=\"operation-review-confirm\"]"
+          ],
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Confirm earn withdraw",
+          "selector": "[data-id=\"operation-review-confirm\"]",
+          "settleMs": 8000,
+          "captureTagsAfter": true
+        }
+      ],
+      "postCaptures": [
+        {
+          "id": "portfolio-saving-after-earn-withdraw",
+          "path": "/portfolio/saving?network=1",
+          "waitFor": [
+            "[data-id]"
+          ],
+          "settleMs": 5000
+        }
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "deposits": [
+                {
+                  "vault": "0x3B4802FDb0E5d74aA37d58FD77d63e93d4f9A4AF"
+                }
+              ],
+              "borrows": []
+            }
+          ]
+        }
+      }
     }
   ]
 }

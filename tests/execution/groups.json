@@ -120,6 +120,14 @@
       "scenarios": [
         "reul-unlock-partial-execute"
       ]
+    },
+    {
+      "id": "earn-supply-withdraw",
+      "label": "Supply to and withdraw from a EulerEarn vault",
+      "scenarios": [
+        "earn-supply-execute",
+        "earn-withdraw-execute"
+      ]
     }
   ]
 }
