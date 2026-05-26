@@ -14,7 +14,7 @@ Euler Lite provides all the core functionality of Euler Finance in a customizabl
 - **Node.js** 24+ (recommended: 24.14.1)
 - **npm** package manager
 - **Git**
-- A **Reown Project ID** (formerly WalletConnect) - get one at [reown.com](https://reown.com/)
+- A **Reown Project ID** for AppKit wallet connections - get one at [reown.com](https://reown.com/)
 
 ## Quick Start
 
@@ -38,20 +38,21 @@ cp .env.example .env
 
 | Variable                             | Description                                                 |
 | ------------------------------------ | ----------------------------------------------------------- |
-| `APPKIT_PROJECT_ID`                  | Reown (WalletConnect) project ID                            |
+| `APPKIT_PROJECT_ID` or `NUXT_PUBLIC_APP_KIT_PROJECT_ID` | Reown (WalletConnect) project ID                |
 | `NUXT_PUBLIC_APP_URL`                | Your app's public URL                                       |
 | `RPC_URL_<chainId>`                  | RPC endpoint per chain (e.g. `RPC_URL_1` for Ethereum)      |
 | `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` | Subgraph URI per chain                                      |
 
 #### API URLs
 
-| Variable          | Default                       | Description                           |
-| ----------------- | ----------------------------- | ------------------------------------- |
-| `EULER_API_URL`   | —                             | Euler API (tokens, prices, logos)     |
-| `SWAP_API_URL`    | —                             | Euler swap API                        |
-| `PYTH_HERMES_URL` | `https://hermes.pyth.network` | Pyth oracle endpoint (server-only, proxied via `/api/pyth/updates`) |
+| Variable     | Default                       | Description                           |
+| ------------ | ----------------------------- | ------------------------------------- |
+| `V3_API_URL` | `https://v3.euler.finance`    | Euler V3 upstream used by the server `/api/v3` proxy |
+| `EULER_SDK_V3_API_KEY` | —                  | Optional server-side V3 API key forwarded by `/api/v3` as `X-API-Key` |
+| `SWAP_API_URL` or `NUXT_PUBLIC_SWAP_API_URL` | —           | Euler swap API                        |
+| `PYTH_HERMES_URL` or `NUXT_PUBLIC_PYTH_HERMES_URL` | `https://hermes.pyth.network` | Pyth oracle endpoint (proxied via `/api/pyth/updates`) |
 
-> **Doppler compatibility:** If your secret manager injects `NUXT_PUBLIC_*` prefixed names (e.g. `NUXT_PUBLIC_EULER_API_URL`), the app accepts both forms automatically.
+> **Doppler compatibility:** If your secret manager injects `NUXT_PUBLIC_*` prefixed URL names (e.g. `NUXT_PUBLIC_V3_API_URL`), the server accepts those forms automatically. V3 API keys should use server-side names such as `EULER_SDK_V3_API_KEY`.
 
 #### Branding & Feature Flags
 
@@ -151,29 +152,9 @@ The app logo is rendered by `components/base/LogoBrand.vue`. By default it displ
 
 To use a custom logo, set the `LOGO_URL` environment variable (or `NUXT_PUBLIC_CONFIG_LOGO_URL`). If the custom logo fails to load, the app falls back to the default Euler logo.
 
-#### Theme Hue (`entities/custom.ts`)
+#### Intrinsic APY Sources
 
-The `themeHue` value (0-360) provides an additional runtime hue shift:
-
-```typescript
-export const themeHue = 150; // Change to shift brand palette
-```
-
-#### Intrinsic APY Sources (`entities/custom.ts`)
-
-Configure which tokens show DeFiLlama base APY:
-
-```typescript
-export const intrinsicApySources = [
-  { symbol: "steth", project: "lido" },
-  { symbol: "wsteth", sourceSymbol: "steth", project: "lido" },
-  // Add your tokens here
-] as const;
-```
-
-- `symbol` — vault asset symbol (case-insensitive)
-- `project` — DefiLlama project slug (from https://yields.llama.fi/pools)
-- `sourceSymbol` — optional; use when the vault asset is wrapped but APY is tied to another symbol
+Intrinsic APY is populated by the Euler V2 SDK through the V3 backend and exposed on fetched vault entities as `intrinsicApy`. Lite enables this in `utils/sdk-fetch-options.ts`; provider coverage is configured upstream in V3. See [Intrinsic APY](./docs/intrinsic-apy.md) for the current data flow.
 
 #### Favicon
 
@@ -184,7 +165,7 @@ Replace the favicon files in `public/favicons/`:
 
 #### Token Icons
 
-Token icons are resolved from a unified server-side token list that aggregates three sources: Euler API, Uniswap, and DefiLlama. All sources are fetched in parallel with 5-minute caching and stale-fallback resilience. Euler API entries take priority for vault assets.
+Token icons are resolved from a unified server-side token list that aggregates the Euler SDK token list, DefiLlama, Uniswap, and Merkl. All sources are fetched in parallel with 5-minute caching and stale-fallback resilience. Euler SDK entries take priority for vault assets.
 
 To override an icon for a specific token, add a file to `assets/tokens/`:
 
@@ -197,7 +178,7 @@ assets/tokens/
 The resolution order in `getAssetLogoUrl(address, symbol)`:
 
 1. Local override in `assets/tokens/<symbol>.png`
-2. `logoURI` from the unified token list (Euler API > DefiLlama > Uniswap)
+2. `logoURI` from the unified token list (Euler SDK token list > DefiLlama > Uniswap > Merkl)
 3. Empty string (component shows initials fallback)
 
 #### EulerEarn Vaults
@@ -259,8 +240,9 @@ To run without Doppler, override the `CMD` and pass env vars directly:
 
 ```bash
 docker run -p 3000:3000 \
-  -e EULER_API_URL=https://your-euler-api.com \
-  -e SWAP_API_URL=https://your-swap-api.com \
+  -e V3_API_URL=https://v3.euler.finance \
+  -e EULER_SDK_V3_API_KEY=your-v3-api-key \
+  -e SWAP_API_URL=https://swap.euler.finance \
   -e APPKIT_PROJECT_ID=your-project-id \
   -e RPC_URL_1=https://your-rpc.com \
   -e NUXT_PUBLIC_SUBGRAPH_URI_1=https://your-subgraph.com \
@@ -283,11 +265,13 @@ composables/
   useChainConfig.ts        # Dynamic chain derivation from env vars
   useEulerConfig.ts        # Aggregated config for Euler services
   useTokenList.ts          # Unified token list and icon resolution
-  useEulerOperations.ts    # Operation builders (deposit, borrow, etc.)
+  useEulerTx.ts            # SDK TransactionPlan builders, simulation, and execution
 entities/
-  custom.ts                # Theme hue and intrinsic APY sources
-  vault.ts                 # Vault types and fetching
-  account.ts               # Position types
+  account.ts               # Account and position helpers
+  chainRegistry.ts         # Supported-chain lookup helpers
+  constants.ts             # Shared protocol/API constants
+utils/
+  vault/                   # Vault classification, APY, LTV, and verification helpers
 pages/                     # Nuxt pages/routes
 plugins/
   00.wagmi.ts              # Wagmi/Reown wallet configuration
@@ -320,7 +304,7 @@ Before deploying:
 
 - [ ] Copied `.env.example` to `.env` and filled in values
 - [ ] Set `APPKIT_PROJECT_ID` and `NUXT_PUBLIC_APP_URL`
-- [ ] Set `EULER_API_URL`, `SWAP_API_URL`
+- [ ] Set `V3_API_URL`, optional `EULER_SDK_V3_API_KEY`, and `SWAP_API_URL`
 - [ ] Added at least one `RPC_URL_<chainId>` with matching `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`
 - [ ] Configured branding via `NUXT_PUBLIC_CONFIG_*` env vars (title, description, logo, social links, social share image)
 - [ ] Customized theme colors in `assets/styles/variables.scss` (THEME CONFIGURATION section)
@@ -331,8 +315,8 @@ Before deploying:
 
 ### Token logos not loading
 
-- Verify `EULER_API_URL` is set correctly. If using Doppler, ensure the env var name matches (`EULER_API_URL` or `NUXT_PUBLIC_EULER_API_URL`).
-- Token data is fetched server-side via `/api/token-list` which aggregates Euler API, DefiLlama, and Uniswap sources with fallback. Check server logs for upstream failures.
+- Verify `V3_API_URL` is set correctly. If the V3 deployment requires authentication, verify `EULER_SDK_V3_API_KEY` is set. If using Doppler, ensure the URL env var name matches (`V3_API_URL`, `EULER_SDK_V3_API_URL`, or `NUXT_PUBLIC_V3_API_URL`).
+- Token data is fetched server-side via `/api/token-list` which aggregates Euler V3, DefiLlama, Uniswap, and Merkl sources with fallback. Check server logs for upstream failures.
 
 ### Build Errors
 

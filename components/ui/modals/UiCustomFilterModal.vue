@@ -96,6 +96,7 @@ const close = () => {
 <template>
   <BaseModalWrapper
     class="custom-filter-modal"
+    data-id="custom-filter-modal"
     title="Add filter"
     @close="close"
   >
@@ -111,6 +112,10 @@ const close = () => {
             :key="option.key"
             type="button"
             class="custom-filter-modal__metric-row"
+            data-id="custom-filter-metric"
+            :data-key="option.key"
+            data-field="metric"
+            :data-value="option.label"
             :class="{ 'custom-filter-modal__metric-row--active': selectedMetric === option.key }"
             @click="selectedMetric = option.key"
           >
@@ -128,6 +133,10 @@ const close = () => {
         <div class="flex gap-8">
           <button
             class="custom-filter-modal__operator-btn"
+            data-id="custom-filter-operator"
+            data-key="gt"
+            data-field="operator"
+            data-value="Greater than"
             :class="{ 'custom-filter-modal__operator-btn--active': selectedOperator === 'gt' }"
             @click="selectedOperator = 'gt'"
           >
@@ -135,6 +144,10 @@ const close = () => {
           </button>
           <button
             class="custom-filter-modal__operator-btn"
+            data-id="custom-filter-operator"
+            data-key="lt"
+            data-field="operator"
+            data-value="Less than"
             :class="{ 'custom-filter-modal__operator-btn--active': selectedOperator === 'lt' }"
             @click="selectedOperator = 'lt'"
           >

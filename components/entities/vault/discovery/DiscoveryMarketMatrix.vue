@@ -1,36 +1,17 @@
 <script setup lang="ts">
-import type { CSSProperties } from 'vue'
-import type { Address } from 'viem'
-import type { MarketGroup } from '~/entities/lend-discovery'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
-import { nanoToValue } from '~/utils/crypto-utils'
+import { isEVault, type SecuritizeCollateralVault, type OracleAdapterEntry, type EVault } from '@eulerxyz/euler-v2-sdk'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
-import {
-  findVault,
-  formatMetricValue,
-  getCellBgColor,
-  isLiquidationLTVRamping,
-  getCurrentLiquidationLTV,
-  getVaultUtilization,
-  isVaultType,
-  isMatrixCompatibleVault,
-  type CollateralMatrixData,
-  type MatrixCell,
-  type DotMetric,
-  type EnhancedCellApys,
-} from '~/utils/discoveryCalculations'
-import {
-  collectOracleAdapters,
-  getChecksStatus,
-  OracleAdapterCheckSeverity,
-  type OracleAdapterEntry,
-  type OracleAdapterCheck,
-} from '~/entities/oracle'
+import { findVault, formatMetricValue, getCellBgColor, isMatrixCompatibleVault, type CollateralMatrixData, type MatrixCell, type DotMetric, type EnhancedCellApys } from '~/utils/discoveryCalculations'
+import { getChecksStatus, OracleAdapterCheckSeverity, type OracleAdapterCheck } from '~/entities/oracle'
 import { getOracleProviderLogo } from '~/entities/oracle-providers'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { truncate, formatNumber } from '~/utils/string-utils'
 import { shouldInvertOraclePrice } from '~/utils/oracle-label'
 import { useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
+import type { MarketGroup } from '~/entities/lend-discovery'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import type { Address } from 'viem'
+import type { CSSProperties } from 'vue'
 
 const props = defineProps<{
   market: MarketGroup
@@ -45,7 +26,8 @@ defineEmits<{
   selectHeader: [address: string, axis: 'row' | 'column']
 }>()
 
-const { withIntrinsicSupplyApy, withIntrinsicBorrowApy } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const {
   getBorrowRewardApy,
   getSupplyRewardApy,
@@ -83,8 +65,8 @@ const computeEnhancedApys = (
   let supplyApy = 0
   let supplyRewards = 0
   if (collateral) {
-    const base = nanoToValue(collateral.interestRateInfo.supplyAPY, 25)
-    supplyApy = withIntrinsicSupplyApy(base, collateral.asset.address)
+    const base = getVaultSupplyApy(collateral)
+    supplyApy = withVaultIntrinsicApy(base, collateral, enableIntrinsicApy.value)
     supplyRewards = getSupplyRewardApy(collateral.address)
   }
 
@@ -92,10 +74,10 @@ const computeEnhancedApys = (
   let utilization = 0
   let borrowRewards = 0
   if (liability) {
-    const base = nanoToValue(liability.interestRateInfo.borrowAPY, 25)
-    borrowApy = withIntrinsicBorrowApy(base, liability.asset.address)
+    const base = getVaultBorrowApy(liability)
+    borrowApy = withVaultIntrinsicApy(base, liability, enableIntrinsicApy.value)
     borrowRewards = getBorrowRewardApy(liability.address, collateral?.address)
-    utilization = getVaultUtilization(liability)
+    utilization = isEVault(liability) ? liability.utilization : 0
   }
 
   const loopingRewards = liability ? getLoopingRewardApy(liability.address, collateral?.address) : 0
@@ -122,9 +104,9 @@ const getCellMetricValue = (
 ): number => {
   switch (props.dotMetric) {
     case 'bltv':
-      return Number(nanoToValue(cell.ltv.borrowLTV, 2))
+      return Number(ltvToPercent(cell.ltv.borrowLTV))
     case 'lltv':
-      return Number(nanoToValue(getCurrentLiquidationLTV(cell.ltv), 2))
+      return Number(ltvToPercent(cell.ltv.currentLiquidationLTV))
     case 'multiplier':
       return getMaxMultiplier(cell.ltv.borrowLTV)
     case 'net-apy':
@@ -170,15 +152,17 @@ const metricRange = computed((): { min: number, max: number } => {
 
 // ── Oracle metric: per-cell adapter list + tooltip ────────────────────────────
 
+const getCollateralOracleAdapters = (
+  liability: EVault,
+  collateral: EVault | SecuritizeCollateralVault,
+) =>
+  liability.collaterals.find(item =>
+    item.address.toLowerCase() === collateral.address.toLowerCase(),
+  )?.oracleAdapters ?? []
+
 const cellOracleAdapters = computed((): Map<string, OracleAdapterEntry[]> => {
   const result = new Map<string, OracleAdapterEntry[]>()
   if (props.dotMetric !== 'oracle') return result
-
-  // Skip the ERC4626 wrapper adapter for any address that already appears
-  // as a collateral row — the matrix already names the collateral, so the
-  // wrapper-to-underlying hop is noise in the cell.
-  const skipERC4626Bases = new Set<string>()
-  for (const row of props.matrix.rows) skipERC4626Bases.add(row.address.toLowerCase())
 
   for (const [colAddr, rowCells] of props.matrix.cells) {
     for (const [liabAddr] of rowCells) {
@@ -186,16 +170,8 @@ const cellOracleAdapters = computed((): Map<string, OracleAdapterEntry[]> => {
       const liability = findVault(props.market, liabAddr)
       if (!collateral || !liability) continue
       if (!isMatrixCompatibleVault(collateral)) continue
-      if (!isVaultType(liability) || !liability.oracleDetailedInfo) continue
-      // The borrow vault's oracle resolves the collateral *vault* (eToken)
-      // address against its unit of account — not the collateral's underlying
-      // asset. Mirrors VaultOverviewBlockOracleAdapters' collateralVaults path.
-      const adapters = collectOracleAdapters(liability.oracleDetailedInfo, 3, {
-        base: collateral.address as Address,
-        quote: liability.unitOfAccount as Address,
-        leafOnly: true,
-        skipERC4626Bases,
-      })
+      if (!isEVault(liability)) continue
+      const adapters = getCollateralOracleAdapters(liability, collateral)
       if (adapters.length) result.set(`${colAddr}:${liabAddr}`, adapters)
     }
   }
@@ -210,12 +186,8 @@ const columnAssetOracleAdapters = computed((): Map<string, OracleAdapterEntry[]>
   if (props.dotMetric !== 'oracle') return result
   for (const col of props.matrix.columns) {
     const liability = findVault(props.market, col.address)
-    if (!liability || !isVaultType(liability) || !liability.oracleDetailedInfo) continue
-    const adapters = collectOracleAdapters(liability.oracleDetailedInfo, 3, {
-      base: liability.asset.address as Address,
-      quote: liability.unitOfAccount as Address,
-      leafOnly: true,
-    })
+    if (!liability || !isEVault(liability)) continue
+    const adapters = liability.debtPricingOracleAdapters
     if (adapters.length) result.set(col.address, adapters)
   }
   return result
@@ -295,8 +267,8 @@ const TOOLTIP_WIDTH = 360
 
 interface TooltipContext {
   view: AdapterView
-  sourceVault: Vault
-  collateralVault: Vault | SecuritizeVault | null
+  sourceVault: EVault
+  collateralVault: EVault | SecuritizeCollateralVault | null
 }
 
 const tooltipContext = ref<TooltipContext | null>(null)
@@ -327,21 +299,21 @@ const allOracleAdapters = computed<OracleAdapterEntry[]>(() => {
   return [...seen.values()]
 })
 
-const oraclePriceSourceVaults = computed<Vault[]>(() => {
+const oraclePriceSourceVaults = computed<EVault[]>(() => {
   if (props.dotMetric !== 'oracle') return []
-  const seen = new Map<string, Vault>()
+  const seen = new Map<string, EVault>()
   for (const col of props.matrix.columns) {
     const liability = findVault(props.market, col.address)
-    if (liability && isVaultType(liability)) {
+    if (liability && isEVault(liability)) {
       seen.set(liability.address.toLowerCase(), liability)
     }
   }
   return [...seen.values()]
 })
 
-const oraclePriceCollateralVaults = computed<(Vault | SecuritizeVault)[]>(() => {
+const oraclePriceCollateralVaults = computed<(EVault | SecuritizeCollateralVault)[]>(() => {
   if (props.dotMetric !== 'oracle') return []
-  const seen = new Map<string, Vault | SecuritizeVault>()
+  const seen = new Map<string, EVault | SecuritizeCollateralVault>()
   for (const row of props.matrix.rows) {
     const v = findVault(props.market, row.address)
     if (v && isMatrixCompatibleVault(v)) {
@@ -409,7 +381,7 @@ const onCellAdapterClick = (
   }
   const liability = findVault(props.market, liabilityAddr)
   const collateral = findVault(props.market, collateralAddr)
-  if (!liability || !isVaultType(liability)) return
+  if (!liability || !isEVault(liability)) return
   positionTooltip(event)
   tooltipContext.value = {
     view,
@@ -428,7 +400,7 @@ const onAssetAdapterClick = (
     return
   }
   const liability = findVault(props.market, liabilityAddr)
-  if (!liability || !isVaultType(liability)) return
+  if (!liability || !isEVault(liability)) return
   positionTooltip(event)
   tooltipContext.value = {
     view,
@@ -454,7 +426,16 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
 </script>
 
 <template>
-  <div class="px-16 pb-12 flex items-center justify-center">
+  <div
+    class="px-16 pb-12 flex items-center justify-center"
+    data-id="collateral-matrix"
+    data-list="collateral-matrix"
+    :data-key="market.id"
+    :data-market-id="market.id"
+    :data-field="dotMetric"
+    :data-row-count="matrix.rows.length"
+    :data-column-count="matrix.columns.length"
+  >
     <div
       class="relative max-h-[50vh] overflow-auto rounded-8 border border-line-subtle px-12 pb-12 pt-0"
     >
@@ -473,6 +454,11 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
               v-for="col in matrix.columns"
               :key="col.address"
               class="text-center text-p4 font-medium py-6 px-8 whitespace-nowrap bg-surface border-b border-r border-white/[0.04] cursor-pointer transition-colors"
+              data-id="collateral-matrix-column"
+              data-list="collateral-matrix-column"
+              :data-key="col.address"
+              :data-market-id="market.id"
+              :data-vault-address="col.address"
               :class="
                 selectedHeader?.address === col.address
                   && selectedHeader?.axis === 'column'
@@ -497,9 +483,19 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
           <tr
             v-for="row in matrix.rows"
             :key="row.address"
+            data-id="collateral-matrix-row"
+            data-list="collateral-matrix-row"
+            :data-key="row.address"
+            :data-market-id="market.id"
+            :data-vault-address="row.address"
           >
             <td
               class="text-p4 font-medium py-6 pr-10 pl-6 whitespace-nowrap sticky left-0 z-10 bg-surface border-b border-r border-white/[0.04] cursor-pointer transition-colors"
+              data-id="collateral-matrix-row-header"
+              data-list="collateral-matrix-row-header"
+              :data-key="row.address"
+              :data-market-id="market.id"
+              :data-vault-address="row.address"
               :class="
                 selectedHeader?.address === row.address
                   && selectedHeader?.axis === 'row'
@@ -525,6 +521,15 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
               v-for="col in matrix.columns"
               :key="col.address"
               class="text-center py-6 px-8 min-w-[56px] transition-colors border-b border-r border-white/[0.04]"
+              data-id="collateral-matrix-cell"
+              data-list="collateral-matrix-cell"
+              :data-key="`${row.address}:${col.address}`"
+              :data-market-id="market.id"
+              :data-collateral-address="row.address"
+              :data-borrow-address="col.address"
+              :data-field="dotMetric"
+              :data-present="!!matrix.cells.get(row.address)?.get(col.address)"
+              :data-value="matrix.cells.get(row.address)?.get(col.address) ? getCellMetricValue(matrix.cells.get(row.address)!.get(col.address)!, row.address, col.address) : undefined"
               :class="[
                 selectedCell?.collateralAddr === row.address
                   && selectedCell?.liabilityAddr === col.address
@@ -585,6 +590,12 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                     :key="adapter.oracle"
                     type="button"
                     class="relative inline-flex items-center justify-center cursor-pointer"
+                    data-id="oracle-adapter"
+                    :data-key="`${col.address}:${adapter.oracle}:${adapter.base}:${adapter.quote}`"
+                    :data-borrow-address="col.address"
+                    :data-oracle-address="adapter.oracle"
+                    :data-base-address="adapter.base"
+                    :data-quote-address="adapter.quote"
                     :title="adapter.provider"
                     @click.stop="onAssetAdapterClick(adapter, $event, col.address)"
                   >
@@ -623,6 +634,13 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                       :key="adapter.oracle"
                       type="button"
                       class="relative inline-flex items-center justify-center cursor-pointer"
+                      data-id="oracle-adapter"
+                      :data-key="`${row.address}:${col.address}:${adapter.oracle}:${adapter.base}:${adapter.quote}`"
+                      :data-collateral-address="row.address"
+                      :data-borrow-address="col.address"
+                      :data-oracle-address="adapter.oracle"
+                      :data-base-address="adapter.base"
+                      :data-quote-address="adapter.quote"
                       :title="adapter.provider"
                       @click.stop="onCellAdapterClick(adapter, $event, row.address, col.address)"
                     >
@@ -660,9 +678,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                   <SvgIcon
                     v-if="
                       dotMetric === 'lltv'
-                        && isLiquidationLTVRamping(
-                          matrix.cells.get(row.address)!.get(col.address)!.ltv,
-                        )
+                        && matrix.cells.get(row.address)!.get(col.address)!.ltv.isLiquidationLTVRamping
                     "
                     name="arrow-top-right"
                     class="!w-10 !h-10 text-warning-500 shrink-0 rotate-180"

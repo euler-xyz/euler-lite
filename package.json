@@ -10,6 +10,14 @@
     "preview": "nuxt preview",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "parity:compare": "node scripts/parity-compare.mjs",
+    "parity:full": "node scripts/parity-compare.mjs --scenarios tests/parity/full-run.scenarios.json --rate-limit-retries 3",
+    "parity:links": "node scripts/parity-links.mjs",
+    "parity:sdk-diagnostics": "node scripts/parity-sdk-diagnostics.mjs",
+    "parity:public-endpoints": "node scripts/public-endpoint-parity.mjs",
+    "parity:overlay": "node scripts/parity-overlay.mjs",
+    "execution:record": "node scripts/execution-record.mjs",
+    "execution:suite": "node scripts/execution-suite.mjs",
     "test": "vitest",
     "test:run": "vitest run",
     "typecheck": "nuxt typecheck",
@@ -24,6 +32,7 @@
     ]
   },
   "dependencies": {
+    "@eulerxyz/euler-v2-sdk": "0.2.8-beta",
     "@floating-ui/vue": "1.1.11",
     "@gvade/nuxt3-svg-sprite": "1.0.3",
     "@keyringnetwork/keyring-connect-sdk": "3.2.0",
@@ -54,6 +63,7 @@
     "@types/luxon": "3.7.1",
     "eslint": "9.39.4",
     "lint-staged": "16.4.0",
+    "playwright": "1.59.1",
     "sass": "1.99.0",
     "simple-git-hooks": "2.13.1",
     "tailwindcss": "3.4.19",
@@ -62,6 +72,7 @@
     "vue-tsc": "3.2.8"
   },
   "overrides": {
+    "@wagmi/connectors": "8.0.9",
     "serialize-javascript": "7.0.4",
     "unhead": "2.1.12"
   },

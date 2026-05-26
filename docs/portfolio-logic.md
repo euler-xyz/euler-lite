@@ -9,15 +9,15 @@ Every on-chain deposit a user holds falls into one of three categories:
 | Category | Description | Data Source |
 |----------|-------------|-------------|
 | **Borrow Position** | A deposit used as collateral backing a loan | Subgraph `borrows` + AccountLens |
-| **Deposit Position (Deposit/Earn)** | A standalone deposit not used as collateral (includes both EVK and EulerEarn vaults) | Subgraph `deposits` + AccountLens |
+| **Savings (Deposit/Earn)** | A standalone deposit not used as collateral (includes both EVK and EulerEarn vaults) | Subgraph `deposits` + AccountLens |
 
-Deposit positions are stored in a single `depositPositions` array. The UI splits them into "Curated lending" (earn vaults) and "Direct lending" (EVK/securitize vaults) using `isEarnVault()` from the vault registry.
+Savings positions are stored in a single `depositPositions` array. The UI splits them into "Curated lending" (earn vaults) and "Direct lending" (EVK/securitize vaults) using `isEarnVault()` from the vault registry.
 
 Portfolio cards can display operational **portfolio notices** from the labels system (e.g. migration announcements, temporary pauses). Notices are resolved via `getVaultNotice()` which checks earn vault notices, vault overrides, and product-level `portfolioNotice` in priority order. On borrow cards, collateral and borrow notices are shown separately with deduplication when both vaults share the same product-level notice.
 
 ### How Categorization Works
 
-Categorization depends on a strict loading order: **borrows first, then standalone deposits**.
+Categorization depends on a strict loading order: **borrows first, then savings**.
 
 #### Step 1: Load Borrow Positions
 
@@ -58,9 +58,9 @@ borrow entry (from subgraph)
   +-- Include as borrow position
 ```
 
-After processing all entries, a `collateralUsageSet` is built containing every `"subAccount:collateralVaultAddress"` pair. This is the key data structure that enables the deposit/position split — deposits that appear in this set are shown under their borrow position rather than as standalone deposit positions.
+The SDK portfolio model handles the savings/borrow split directly: deposits used as collateral are represented through borrow positions, while standalone deposits are returned in `portfolio.savings`.
 
-#### Step 2: Load Deposit Positions
+#### Step 2: Load Savings Positions
 
 `updateSavingsPositions()` makes a **single** subgraph query for deposits and processes all vault types (EVK, securitize, and earn) in one pass:
 
@@ -77,9 +77,6 @@ Entries are processed in batches of 5 for performance. For each deposit entry:
 ```
 deposit entry
   |
-  |-- Is (subAccount:vaultAddress) in collateralUsageSet?
-  |     YES -> skip (this deposit is collateral, shown under borrow position)
-  |
   |-- Resolve vault via getOrFetch (handles all vault types uniformly)
   |     NOT FOUND -> skip
   |
@@ -89,7 +86,7 @@ deposit entry
   |-- Does accountLens return shares > 0?
   |     NO  -> skip
   |
-  +-- Include as deposit position (in depositPositions array)
+  +-- Include as savings position (in depositPositions array)
 ```
 
 The UI then filters the unified `depositPositions` array:
@@ -99,25 +96,29 @@ The UI then filters the unified `depositPositions` array:
 ### Position Types
 
 ```typescript
-interface AccountBorrowPosition {
-  borrow: Vault               // The liability (borrow) vault
-  collateral: Vault            // The primary collateral vault
-  collaterals: string[]        // All collateral addresses with value
+interface PortfolioBorrowPosition {
+  borrow: AccountPosition      // The liability (borrow) position
+  collaterals: AccountPosition[] // Collateral positions backing the debt
+  collateral?: AccountPosition // The primary collateral position
+  borrowVault?: Vault          // Populated liability vault
+  collateralVault?: Vault      // Populated primary collateral vault
+  collateralVaults: string[]   // All collateral addresses with value
   subAccount: string           // EVC sub-account address
-  health: bigint               // Health factor (1e18 scale)
-  userLTV: bigint              // Current loan-to-value ratio
+  healthFactor?: bigint        // Health factor (1e18 scale)
+  userLTV?: bigint             // Current loan-to-value ratio
   borrowed: bigint             // Liability amount in borrow asset
   supplied: bigint             // Collateral amount in collateral asset
-  price: bigint                // Liquidation price in USD
-  borrowLTV: bigint            // Maximum borrow LTV
-  liquidationLTV: bigint       // Liquidation threshold LTV
-  liabilityValue: bigint       // Liability value in UoA
-  collateralValueLiquidation: bigint // Collateral value at liquidation LTV
-  timeToLiquidation: bigint    // Seconds until liquidation (MAX_UINT = safe)
+  primaryCollateralLiquidationPrice: bigint // Primary collateral liquidation price in USD
+  liquidatable: boolean        // Liability liquidation value exceeds collateral
+  borrowLTV?: number           // Maximum borrow LTV
+  liquidationLTV?: number      // Pair liquidation threshold LTV
+  accountLiquidationLTV?: number // Account liquidation threshold LTV
+  timeToLiquidation?: DaysToLiquidation
 }
 
-interface AccountDepositPosition {
-  vault: Vault | SecuritizeVault | EarnVault  // Any standalone deposit vault type
+interface PortfolioSavingsPosition {
+  position: AccountPosition
+  vault?: Vault | SecuritizeVault | EarnVault // Any savings vault type
   subAccount: string           // EVC sub-account address
   shares: bigint               // Vault share balance
   assets: bigint               // Equivalent asset amount
@@ -143,7 +144,7 @@ Lens contracts are read-only helpers deployed on every Euler chain. They aggrega
 
 ### VaultLens: `getVaultInfoFull`
 
-Returns the complete state of an EVK vault in a single call:
+Returns the complete state of an EVault in a single call:
 
 - **Basic info**: name, symbol, decimals, totalAssets, totalShares, supply/borrow caps
 - **`liabilityPriceInfo`**: The vault asset's price in the vault's unit of account (UoA). Contains `amountOutMid`, `amountOutAsk`, `amountOutBid` scaled in the **UoA token's native decimals** (`unitOfAccountDecimals`) — not always 18. The USD-magic UoA address (`0x…0348`) is treated as 18 decimals on-chain, which is why USD-denominated vaults look like 18-decimal fixed-point. Conversion to USD must divide by `10^unitOfAccountDecimals`, not by `1e18`.
@@ -174,7 +175,7 @@ utilsLens.getAssetPriceInfo(assetAddress, USD_ADDRESS)
 
 Used for two purposes:
 1. **`assetPriceInfo`** on earn/escrow/securitize vaults (direct USD pricing, bypassing oracle router).
-2. **`unitOfAccountPriceInfo`** on regular EVK vaults (converting UoA to USD).
+2. **`unitOfAccountPriceInfo`** on regular EVaults (converting UoA to USD).
 
 ### Batch Optimization
 
@@ -191,73 +192,30 @@ During vault loading (`fetchVaults`), vaults are batched in groups of ~25 per RP
 
 ## Pricing Architecture
 
-The pricing system (`services/pricing/priceProvider.ts`) is a 3-layer architecture. For full details see [pricing-system.md](./pricing-system.md).
+Pricing is SDK-backed. Lite keeps compatibility helpers in `utils/sdk-prices.ts`. For full details see [pricing-system.md](./pricing-system.md).
 
-### Layer 1: Raw Oracle Prices (Unit of Account)
+Raw oracle calculations use SDK helpers such as `getAssetOraclePrice()` and `getCollateralOraclePrice()`. Display USD values use SDK precomputed market fields:
 
-Always on-chain. No backend fallback.
+| UI value | SDK-backed source |
+|----------|-------------------|
+| Vault asset USD price | `vault.marketPriceUsd` |
+| Borrow-context collateral USD price | `borrowVault.collaterals[].marketPriceUsd` |
+| Borrowed position value | `position.borrow.borrowedValueUsd` |
+| Total borrow-position collateral value | `position.totalCollateralValueUsd` |
+| Per-collateral borrow-position value | `position.borrow.liquidity.collaterals[].valueUsd` |
+| Borrow-position Net APY | `position.netApy` |
+| Borrow-position ROE | `position.roe` |
 
-| Function | Input | Output |
-|----------|-------|--------|
-| `getAssetOraclePrice(vault)` | EVK vault | Asset price in vault's UoA |
-| `getCollateralOraclePrice(liabilityVault, collateralVault)` | Borrow + collateral vault | Collateral asset price in borrow vault's UoA |
-
-**Collateral pricing** always uses the borrow (liability) vault's oracle, not the collateral vault's oracle. The borrow vault stores `collateralPrices[]` which are share prices. These are converted to asset prices:
-
-```
-assetPrice = sharePrice * (totalShares / totalAssets)
-```
-
-For empty vaults (both zero), the ERC-4626 standard defines a 1:1 ratio.
-
-### Layer 2: USD Prices
-
-Adds USD conversion. Supports `'on-chain'` and `'off-chain'` price sources.
-
-| Function | Notes |
-|----------|-------|
-| `getAssetUsdPrice(vault, source)` | Off-chain tries backend first |
-| `getCollateralUsdPrice(liabilityVault, collateralVault, source)` | Always uses liability vault's oracle |
-
-**Vault type routing** determines how the USD price is calculated:
-
-```
-Is vault earn/escrow/securitize?
-  YES -> Use assetPriceInfo (UtilsLens, already in USD)
-  NO  -> oraclePrice (Layer 1) * unitOfAccountUsdRate
-```
-
-The UoA-to-USD rate is fetched once per vault during loading and cached on the vault object as `unitOfAccountPriceInfo`. For vaults where the UoA is already USD (common case), the rate is 1.0.
-
-### Layer 3: USD Values
-
-Combines a token amount with a USD price:
-
-```typescript
-getAssetUsdValue(amount, vault, source)      // amount * assetUsdPrice
-getCollateralUsdValue(amount, liabilityVault, collateralVault, source)
-```
-
-### Backend Price Client
-
-The backend (`services/pricing/backendClient.ts`) provides off-chain prices from the Euler indexer:
-
-- **Endpoint**: `GET /v3/prices?chainId={id}&addresses={addr1,addr2,...}`
-- **Response**: `{ data: [{ chainId, address, symbol, priceUsd, source, timestamp }], meta }`
-- **Batching**: Requests within a 100ms window are combined into a single HTTP call
-- **Cache**: 60-second TTL per asset per chain
-
-The backend is a **soft fallback** - on-chain pricing is always available. The backend is preferred for display-only values (portfolio totals) because it avoids the latency of multiple RPC calls.
+Portfolio borrow cards use the SDK portfolio position fields directly for collateral value, debt value, NAV, Net APY, and ROE.
 
 ### Total Portfolio Value Calculation
 
 ```
 totalSuppliedValue = sum of:
-  - deposit positions (all types): getAssetUsdValue(assets, vault, 'off-chain')
-  - borrow collateral: getCollateralUsdValue(supplied, borrowVault, collateralVault, 'off-chain')
+  - SDK totalSuppliedValueUsd
 
 totalBorrowedValue = sum of:
-  - borrow positions:  getAssetUsdValue(borrowed, borrowVault, 'off-chain')
+  - SDK totalBorrowedValueUsd
 ```
 
 Both are computed reactively and update when position data changes.
@@ -308,29 +266,29 @@ This is a `staticCall` - no transaction is sent, no gas is spent, and the state 
 
 `fetchPythUpdateData()` fetches price update payloads from the Pyth Hermes API with two optimizations:
 
-- **Request batching**: Multiple calls within a 100ms window are grouped by endpoint, with all unique feed IDs combined into a single HTTP request.
+- **Request batching**: Multiple calls within a 50ms window are grouped by endpoint, with all unique feed IDs combined into a single HTTP request.
 - **Caching**: Results are cached for 15 seconds to avoid redundant network requests when multiple vaults share the same Pyth feeds.
 
 ### Where Pyth Simulation Is Used
 
-**Bulk vault fetching** (`entities/vault/fetcher.ts: fetchVaults`):
+**Bulk vault fetching** (SDK vault services via `useVaults`):
 1. Batch-fetch vaults via `batchLensCalls()` (fast path).
 2. Collect all Pyth-enabled vaults via `collectPythFeedIds()`.
 3. Batch re-fetch all Pyth vaults in a single `batchSimulation` via `executeBatchLensWithPythSimulation()`.
 4. Replace vault data with simulation results (contains fresh prices in `liabilityPriceInfo` and `collateralPrices[]`).
 
-**Single vault fetching** (`entities/vault/fetcher.ts: fetchVault`):
+**Single vault fetching** (SDK vault services via `useVaultRegistry`/`useVaults`):
 1. Call `vaultLens.getVaultInfoFull()` normally (fast path).
 2. If Pyth detected: re-query with `fetchVaultWithPythSimulation()` → `executeLensWithPythSimulation()`.
 3. Replace vault data with simulation result.
 
-**Borrow position loading** (`composables/useEulerAccount.ts: updateBorrowPositions`):
-1. Pre-fetch the borrow vault to check for Pyth oracles.
-2. If Pyth detected: call `executeLensWithPythSimulation()` with `accountLens.getVaultAccountInfo()` to get liquidity info with fresh prices.
-3. Additionally, re-fetch the borrow vault itself (`fetchVault`) to get fresh collateral prices for display.
+**Borrow position loading** (`composables/useEulerAccount.ts`):
+1. Call `sdk.portfolioService.fetchPortfolio(..., { populateAll: true })`.
+2. Read portfolio positions from SDK `Portfolio` and keep SDK diagnostics beside the portfolio for UI warnings.
+3. Transaction paths use SDK `TransactionPlan` processing for Pyth updates before execution.
 
-**Transaction building** (`utils/pyth.ts: buildPythUpdateCalls`):
-When submitting transactions that interact with Pyth-priced vaults, Pyth update calls are prepended to the EVC batch so prices are fresh when the vault reads them.
+**Transaction building** (`useEulerTx.ts` + SDK Pyth plugins):
+SDK `TransactionPlan` simulation and execution run through the SDK plugin pipeline, which prepends Pyth update batch items when a planned operation needs fresh Pyth prices.
 
 ### Design Decisions
 
@@ -367,10 +325,10 @@ When submitting transactions that interact with Pyth-priced vaults, Pyth update 
               | deposits)            |
               v                      v
           +-----------------------------+
-          | priceProvider (3-layer)     |
-          |  Layer 1: Oracle (UoA)      |
-          |  Layer 2: USD conversion    |
-          |  Layer 3: USD values        |
+          | SDK pricing fields          |
+          |  Raw oracle helpers         |
+          |  marketPriceUsd fields      |
+          |  position USD aggregates    |
           +-----------------------------+
               |
               v

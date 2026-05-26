@@ -1,7 +1,7 @@
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
-import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import type { Vault } from '~/entities/vault'
+
 import { buildCollateralOption, computeBorrowApy } from '~/utils/collateralOptions'
 import { useReactiveMap } from '~/composables/useReactiveMap'
 
@@ -9,12 +9,14 @@ export const useSwapDebtOptions = ({
   collateralVault,
   currentBorrowVault,
 }: {
-  collateralVault: Ref<Vault | undefined>
-  currentBorrowVault?: Ref<Vault | undefined>
+  collateralVault: Ref<EVault | undefined>
+  currentBorrowVault?: Ref<EVault | undefined>
 }) => {
-  const { getVerifiedEvkVaults } = useVaultRegistry()
-  const { withIntrinsicBorrowApy, version: intrinsicVersion } = useIntrinsicApy()
-  const { getBorrowRewardApy, version: rewardsVersion } = useRewardsApy()
+  const { getVerifiedEVaults } = useVaultRegistry()
+  const { settings } = useUserSettings()
+  const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
+  const enableRewardsApy = computed(() => settings.value.enableRewardsApy)
+  const { viewer } = useApyVisibility()
 
   const borrowVaults = computed(() => {
     const collateral = collateralVault.value
@@ -27,12 +29,12 @@ export const useSwapDebtOptions = ({
       ? getAddress(currentBorrowVault.value.address)
       : null
 
-    return getVerifiedEvkVaults().filter((vault) => {
-      if (!vault.collateralLTVs?.length) {
+    return getVerifiedEVaults().filter((vault) => {
+      if (!vault.collaterals?.length) {
         return false
       }
-      const hasCollateral = vault.collateralLTVs.some(ltv =>
-        getAddress(ltv.collateral) === collateralAddress && ltv.borrowLTV > 0n,
+      const hasCollateral = vault.collaterals.some(ltv =>
+        getAddress(ltv.address) === collateralAddress && ltv.borrowLTV > 0,
       )
       if (!hasCollateral) {
         return false
@@ -40,15 +42,23 @@ export const useSwapDebtOptions = ({
       if (currentBorrowAddress && getAddress(vault.address) === currentBorrowAddress) {
         return false
       }
-      return vault.supply > 0n && vault.borrowCap > 0n && vault.totalCash > 0n
+      return vault.totalAssets > 0n && vault.caps.borrowCap > 0n && vault.availableLiquidity > 0n
     })
   })
 
   const borrowOptions = useReactiveMap(
     borrowVaults,
-    [rewardsVersion, intrinsicVersion],
+    [viewer, enableIntrinsicApy, enableRewardsApy],
     async (vault) => {
-      const apy = computeBorrowApy(vault, withIntrinsicBorrowApy, getBorrowRewardApy, collateralVault?.value?.address)
+      const apy = computeBorrowApy(
+        vault,
+        viewer.value,
+        {
+          enableIntrinsicApy: enableIntrinsicApy.value,
+          enableRewardsApy: enableRewardsApy.value,
+        },
+        collateralVault?.value?.address,
+      )
       return buildCollateralOption({ vault, type: 'vault', amount: 0, priceAmount: 0, apy, tagContext: 'swap-target', showBalance: false })
     },
   )

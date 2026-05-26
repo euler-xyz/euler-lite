@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import { shallowRef } from 'vue'
 import { zeroAddress } from 'viem'
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
-import type { Vault } from '~/entities/vault'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { useVaultTypeBadges } from '~/composables/useVaultTypeBadges'
 
 const state = vi.hoisted(() => ({
@@ -31,9 +31,24 @@ vi.mock('~/utils/eulerLabelsUtils', () => ({
   isVaultKeyring: (address: string) => state.keyringVaults.has(address.toLowerCase()),
 }))
 
+vi.mock('~/composables/useVaultRegistry', () => ({
+  useVaultRegistry: () => ({
+    getVaultCategory: () => 'evk',
+    isVerifiedVault: (address: string) => state.verifiedVaults.has(address.toLowerCase()),
+  }),
+}))
+
 const verifiedGovernor = '0x1000000000000000000000000000000000000001'
 
-const makeVault = (overrides: Partial<Vault> = {}): Vault => ({
+const makeInterestRateModel = (type: typeof INTEREST_RATE_MODEL_TYPE[keyof typeof INTEREST_RATE_MODEL_TYPE]): EVault['interestRateModel'] => ({
+  address: '0x9000000000000000000000000000000000000009',
+  type,
+  data: null,
+  params: null,
+} as unknown as EVault['interestRateModel'])
+
+const makeVault = (overrides: Partial<EVault> & { verified?: boolean } = {}): EVault => ({
+  type: 'EVault',
   address: '0x2000000000000000000000000000000000000002',
   asset: {
     address: '0x3000000000000000000000000000000000000003',
@@ -42,14 +57,10 @@ const makeVault = (overrides: Partial<Vault> = {}): Vault => ({
     symbol: 'WETH',
   },
   governorAdmin: verifiedGovernor,
-  irmInfo: {
-    interestRateModelInfo: {
-      interestRateModelType: INTEREST_RATE_MODEL_TYPE.KINK,
-    },
-  },
+  interestRateModel: makeInterestRateModel(INTEREST_RATE_MODEL_TYPE.KINK),
   verified: true,
   ...overrides,
-} as Vault)
+} as unknown as EVault)
 
 const setupVaultsMock = () => {
   ;(globalThis as unknown as { useVaults: unknown }).useVaults = () => ({
@@ -60,7 +71,7 @@ const setupVaultsMock = () => {
   })
 }
 
-const verify = (vault: Vault) => {
+const verify = (vault: EVault) => {
   state.verifiedVaults.add(vault.address.toLowerCase())
   if (vault.governorAdmin) state.entityGovernors.add(vault.governorAdmin.toLowerCase())
 }
@@ -80,7 +91,7 @@ describe('useVaultTypeBadges', () => {
     const vault = makeVault()
     verify(vault)
 
-    const { badges, governanceType, hasSummaryBadges, summaryBadges } = useVaultTypeBadges(ref(vault))
+    const { badges, governanceType, hasSummaryBadges, summaryBadges } = useVaultTypeBadges(shallowRef(vault))
 
     expect(governanceType.value).toBe('governed')
     expect(badges.value).toEqual(['governed'])
@@ -93,7 +104,7 @@ describe('useVaultTypeBadges', () => {
     verify(vault)
     state.keyringVaults.add(vault.address.toLowerCase())
 
-    const { badges, hasSummaryBadges, summaryBadges } = useVaultTypeBadges(ref(vault))
+    const { badges, hasSummaryBadges, summaryBadges } = useVaultTypeBadges(shallowRef(vault))
 
     expect(badges.value).toEqual(['governed', 'private'])
     expect(summaryBadges.value).toEqual(['private'])
@@ -105,13 +116,11 @@ describe('useVaultTypeBadges', () => {
     INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY_MONTHLY,
   ])('summarizes verified cyclical IRM type %s as cyclical note', (interestRateModelType) => {
     const vault = makeVault({
-      irmInfo: {
-        interestRateModelInfo: { interestRateModelType },
-      },
+      interestRateModel: makeInterestRateModel(interestRateModelType),
     })
     verify(vault)
 
-    const { badges, summaryBadges } = useVaultTypeBadges(ref(vault))
+    const { badges, summaryBadges } = useVaultTypeBadges(shallowRef(vault))
 
     expect(badges.value).toEqual(['governed', 'cyclicalNote'])
     expect(summaryBadges.value).toEqual(['cyclicalNote'])
@@ -119,13 +128,11 @@ describe('useVaultTypeBadges', () => {
 
   it('does not treat KINKY IRM as cyclical note', () => {
     const vault = makeVault({
-      irmInfo: {
-        interestRateModelInfo: { interestRateModelType: INTEREST_RATE_MODEL_TYPE.KINKY },
-      },
+      interestRateModel: makeInterestRateModel(INTEREST_RATE_MODEL_TYPE.KINKY),
     })
     verify(vault)
 
-    const { badges, summaryBadges } = useVaultTypeBadges(ref(vault))
+    const { badges, summaryBadges } = useVaultTypeBadges(shallowRef(vault))
 
     expect(badges.value).toEqual(['governed'])
     expect(summaryBadges.value).toEqual([])
@@ -133,15 +140,11 @@ describe('useVaultTypeBadges', () => {
 
   it('summarizes unverified or unrecognized vaults as unknown only', () => {
     const vault = makeVault({
-      irmInfo: {
-        interestRateModelInfo: {
-          interestRateModelType: INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY,
-        },
-      },
+      interestRateModel: makeInterestRateModel(INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY),
       verified: false,
     })
 
-    const { badges, governanceType, summaryBadges } = useVaultTypeBadges(ref(vault))
+    const { badges, governanceType, summaryBadges } = useVaultTypeBadges(shallowRef(vault))
 
     expect(governanceType.value).toBe('unknown')
     expect(badges.value).toEqual(['unknown'])
@@ -150,16 +153,12 @@ describe('useVaultTypeBadges', () => {
 
   it('renders failed verification as unknown even when the governor has a label entity', () => {
     const vault = makeVault({
-      irmInfo: {
-        interestRateModelInfo: {
-          interestRateModelType: INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY,
-        },
-      },
+      interestRateModel: makeInterestRateModel(INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY),
       verified: false,
     })
     state.entityGovernors.add(vault.governorAdmin.toLowerCase())
 
-    const { badges, governanceType, summaryBadges, summaryGovernanceType } = useVaultTypeBadges(ref(vault))
+    const { badges, governanceType, summaryBadges, summaryGovernanceType } = useVaultTypeBadges(shallowRef(vault))
 
     expect(governanceType.value).toBe('governed')
     expect(badges.value).toEqual(['governed'])
@@ -175,7 +174,7 @@ describe('useVaultTypeBadges', () => {
     state.verifiedVaults.add(vault.address.toLowerCase())
     state.governanceLimitedVaults.add(vault.address.toLowerCase())
 
-    const { badges, governanceType, hasSummaryBadges, summaryBadges } = useVaultTypeBadges(ref(vault))
+    const { badges, governanceType, hasSummaryBadges, summaryBadges } = useVaultTypeBadges(shallowRef(vault))
 
     expect(governanceType.value).toBe('ungoverned')
     expect(badges.value).toEqual(['ungoverned', 'governanceLimited'])

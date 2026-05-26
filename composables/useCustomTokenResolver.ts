@@ -1,6 +1,7 @@
+import type { VaultAsset } from '~/types/asset'
 import { isAddress, type Address } from 'viem'
 import { erc20SymbolAbi, erc20DecimalsAbi, erc20NameAbi } from '~/abis/erc20'
-import type { VaultAsset } from '~/entities/vault'
+
 import { createRaceGuard } from '~/utils/race-guard'
 
 export const useCustomTokenResolver = () => {
@@ -52,7 +53,7 @@ export const useCustomTokenResolver = () => {
       }
 
       const symbol = symbolResult as string
-      const decimals = BigInt(decimalsResult as number)
+      const decimals = decimalsResult as number
       const name = (nameResult as string) || symbol
 
       customToken.value = { address: input, symbol, decimals, name }

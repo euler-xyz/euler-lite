@@ -6,6 +6,9 @@ import { resetCountryCache } from '~/services/country'
 import { screenAddress } from '~/services/trm'
 import { getDefaultPageRoute } from '~/entities/menu'
 
+// Module-scoped so every useAddressScreen() consumer sees the same screening
+// verdict — otherwise each composable instance would carry its own pending
+// state and downstream gates (useWagmi.isAddressScreened) could disagree.
 const blockedAddress = ref<string | null>(null)
 const isScreening = ref(false)
 const screenedAddress = ref<string | null>(null)

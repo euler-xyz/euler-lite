@@ -1,6 +1,6 @@
-import { getAddress, type Address } from 'viem'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
-import { collectPythFeedIds } from '~/entities/oracle'
+import type { SecuritizeCollateralVault, EVault } from '@eulerxyz/euler-v2-sdk'
+import { collectPythFeedsFromAdapters } from '@eulerxyz/euler-v2-sdk'
+import { type Address, getAddress } from 'viem'
 
 /** Decoded shape of the AccountLiquidityInfo struct from the Euler lens */
 export interface LensLiquidityInfo {
@@ -92,15 +92,10 @@ export const resolvePositionCollaterals = (liquidityInfo: LensLiquidityInfo, fal
     || liquidityInfo?.collateralValuesLiquidation
     || liquidityInfo?.collateralValuesBorrowing
 
-  // Sort by value descending so the largest collateral is treated as primary
   if (infoCollaterals.length && Array.isArray(values) && values.length === infoCollaterals.length) {
-    const ranked = infoCollaterals
-      .map((addr, idx) => ({ addr, value: toBigInt(values[idx]) }))
-      .filter(({ value }) => value > 0n)
-      .sort((a, b) => (a.value === b.value ? 0 : a.value > b.value ? -1 : 1))
-      .map(({ addr }) => addr)
-    if (ranked.length) {
-      return ranked
+    const withValue = infoCollaterals.filter((_: string, idx: number) => toBigInt(values[idx]) > 0n)
+    if (withValue.length) {
+      return withValue
     }
   }
 
@@ -118,8 +113,8 @@ export const resolvePositionCollaterals = (liquidityInfo: LensLiquidityInfo, fal
  * Always returns true if Pyth oracles are detected, because Pyth prices
  * are only valid for ~2 minutes and require continuous updates.
  */
-export const hasPythOracles = (vault: Vault | SecuritizeVault): boolean => {
-  if ('type' in vault && vault.type === 'securitize') return false
-  const feeds = collectPythFeedIds((vault as Vault).oracleDetailedInfo)
+export const hasPythOracles = (vault: EVault | SecuritizeCollateralVault): boolean => {
+  if (!('oracle' in vault)) return false
+  const feeds = collectPythFeedsFromAdapters(vault.oracle.adapters)
   return feeds.length > 0
 }

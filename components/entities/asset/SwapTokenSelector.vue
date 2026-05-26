@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { getAddress, isAddress, zeroAddress, type Address } from 'viem'
-import type { VaultAsset } from '~/entities/vault'
+import type { VaultAsset } from '~/types/asset'
+import { getAddress, type Address, zeroAddress, isAddress } from 'viem'
+
 import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
@@ -232,6 +233,13 @@ const handleSelectCustomToken = () => {
         <div
           v-for="opt in filteredOptions"
           :key="opt.asset.address"
+          data-id="swap-token-option"
+          :data-token-name="opt.asset.name"
+          :data-token-symbol="opt.asset.symbol"
+          :data-token-address="opt.asset.address.toLowerCase()"
+          :data-token-source="opt.source"
+          :data-token-balance="opt.balance.toString()"
+          :data-token-disabled="rowGeo(opt.asset.address).disabled ? 'true' : 'false'"
           class="flex items-center py-12 px-16 rounded-16"
           :class="[
             rowGeo(opt.asset.address).disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
@@ -279,6 +287,13 @@ const handleSelectCustomToken = () => {
         <!-- Custom token: resolved -->
         <div
           v-else-if="isUnknownAddress && customToken"
+          data-id="swap-token-option"
+          :data-token-name="customToken.name"
+          :data-token-symbol="customToken.symbol"
+          :data-token-address="customToken.address.toLowerCase()"
+          data-token-source="custom"
+          :data-token-balance="customTokenBalance.toString()"
+          :data-token-disabled="customTokenGeo.disabled ? 'true' : 'false'"
           class="flex items-center py-12 px-16 rounded-16 hover:bg-surface-secondary"
           :class="customTokenGeo.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'"
           @click="handleSelectCustomToken"

@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import { getAddress, maxUint256, type Address } from 'viem'
-import { logWarn } from '~/utils/errorHandling'
-import type { SecuritizeVault, Vault, VaultCollateralLTV } from '~/entities/vault'
+import type { EVault, EVaultCollateral, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
 import { getProductByVault, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -10,29 +8,35 @@ import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { autoLink } from '~/utils/autoLink'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { getSpecialAddressLabel } from '~/utils/special-addresses'
-import { formatAssetValue } from '~/services/pricing/priceProvider'
+import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, compactNumber, formatUsdValue, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
+import { normalizeAddress } from '~/utils/normalizeAddress'
+import { useModal } from '~/components/ui/composables/useModal'
 import { VaultSupplyApyModal } from '#components'
+import { getAddress, type Address, maxUint256 } from 'viem'
+import { logWarn } from '~/utils/errorHandling'
+import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 
-const { vault } = defineProps<{ vault: SecuritizeVault, desktopOverview?: boolean }>()
+const { vault } = defineProps<{ vault: SecuritizeCollateralVault, desktopOverview?: boolean }>()
 const route = useRoute()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
 const { client: rpcClient } = useRpcClient()
 const { chainId } = useEulerAddresses()
-const { copyToClipboard, isCopied } = useClipboardCopy()
-const { isVaultGovernorVerified } = useVaults()
-const { getEvkVaults } = useVaultRegistry()
-const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const { borrowList: _borrowList, isVaultGovernorVerified } = useVaults()
+const { getEVaults } = useVaultRegistry()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
+const modal = useModal()
 const { getSupplyRewardApy, getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
 const vaultAddress = computed(() => getAddress(vault.address))
 const product = useEulerProductOfVault(vaultAddress)
 const description = computed(() => {
   return product.vaultOverrides?.[vaultAddress.value]?.description ?? product.description
 })
-const entities = useEulerEntitiesOfVault(vault as unknown as Vault)
-const isGovernorVerified = computed(() => isVaultGovernorVerified(vault as unknown as Vault))
+const entities = useEulerEntitiesOfVault(vault as unknown as EVault)
+const isGovernorVerified = computed(() => isVaultGovernorVerified(vault as unknown as EVault))
 const isGovernanceLimited = computed(() => product.isGovernanceLimited && isGovernorVerified.value)
 const marketProductKey = computed(() => getProductKeyByVault(vault.address))
 const marketProductName = computed(() => getProductByVault(vault.address).name)
@@ -48,7 +52,7 @@ const shortenAddress = (address: string) => {
 }
 
 const onCopyClick = (address: string) => {
-  copyToClipboard(address)
+  navigator.clipboard.writeText(address)
 }
 
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
@@ -56,15 +60,15 @@ const getExplorerAddressLink = (address: string) => getExplorerLink(address, cha
 // Count markets where this can be borrowed (securitize vaults cannot be borrow destinations)
 const borrowCount = computed(() => 0)
 
-// Find EVK vaults where this securitize vault can be used as collateral
+// Find EVaults where this securitize vault can be used as collateral
 const borrowMarkets = computed(() => {
   const markets: Array<{
-    borrowVault: Vault
-    ltv: VaultCollateralLTV
+    borrowVault: EVault
+    ltv: EVaultCollateral
   }> = []
 
-  getEvkVaults().forEach((v) => {
-    const ltv = v.collateralLTVs.find(l => l.collateral === vault.address && l.borrowLTV > 0n)
+  getEVaults().forEach((v) => {
+    const ltv = v.collaterals.find(l => normalizeAddress(l.address) === vaultAddress.value && l.borrowLTV > 0)
     if (ltv) {
       markets.push({ borrowVault: v, ltv })
     }
@@ -77,17 +81,20 @@ const collateralCount = computed(() => borrowMarkets.value.length)
 
 // Supply APY calculation (intrinsic + rewards, no base interest for securitize vaults)
 const rewardSupplyAPY = computed(() => getSupplyRewardApy(vault.address))
-const intrinsicApy = computed(() => getIntrinsicApy(vault.asset.address))
+const intrinsicApy = computed(() => getVaultIntrinsicApy(vault, enableIntrinsicApy.value))
 const supplyApyWithRewards = computed(() => intrinsicApy.value + rewardSupplyAPY.value)
 
-const supplyApyModalData = computed(() => ({
-  props: {
-    lendingAPY: 0, // Securitize vaults don't have interest rates
-    intrinsicAPY: intrinsicApy.value,
-    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
-    campaigns: getSupplyRewardCampaigns(vault.address),
-  },
-}))
+const onSupplyInfoIconClick = () => {
+  modal.open(VaultSupplyApyModal, {
+    props: {
+      lendingAPY: 0, // Securitize vaults don't have interest rates
+      intrinsicAPY: intrinsicApy.value,
+      intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
+      campaigns: getSupplyRewardCampaigns(vault.address),
+      rewardVaultAddress: vault.address,
+    },
+  })
+}
 
 // Risk parameters - fetch share token exchange rate (ERC4626 standard)
 const shareTokenExchangeRate: Ref<bigint | undefined> = ref()
@@ -105,7 +112,7 @@ const loadRiskParameters = async () => {
         stateMutability: 'view',
       }] as const,
       functionName: 'convertToAssets',
-      args: [1n * 10n ** vault.decimals],
+      args: [1n * 10n ** BigInt(vault.shares.decimals)],
     }) as bigint
   }
   catch (e) {
@@ -299,17 +306,13 @@ const supplyCapPercentageDisplay = computed(() => {
             Supply APY
           </template>
           <span class="flex items-center gap-4">
-            <UiModalPreviewTrigger
+            <SvgIcon
               v-if="hasSupplyRewards(vault.address)"
-              :component="VaultSupplyApyModal"
-              :modal-data="supplyApyModalData"
-              aria-label="Show supply APY rewards breakdown"
-            >
-              <SvgIcon
-                class="!w-20 !h-20 text-accent-500 cursor-pointer"
-                name="sparks"
-              />
-            </UiModalPreviewTrigger>
+              class="!w-20 !h-20 text-accent-500 cursor-pointer"
+              name="sparks"
+              data-modal-trigger="supply-apy"
+              @click="onSupplyInfoIconClick"
+            />
             {{ formatNumber(supplyApyWithRewards) }}%
           </span>
         </VaultOverviewLabelValue>
@@ -382,7 +385,7 @@ const supplyCapPercentageDisplay = computed(() => {
             >
               <SvgIcon
                 class="!w-18 !h-18"
-                :name="isCopied(vault.asset.address) ? 'check' : 'copy'"
+                name="copy"
               />
             </button>
           </div>
@@ -405,31 +408,31 @@ const supplyCapPercentageDisplay = computed(() => {
             >
               <SvgIcon
                 class="!w-18 !h-18"
-                :name="isCopied(vault.address) ? 'check' : 'copy'"
+                name="copy"
               />
             </button>
           </div>
         </VaultOverviewLabelValue>
         <VaultOverviewLabelValue
-          v-if="vault.governorAdmin && vault.governorAdmin !== '0x0000000000000000000000000000000000000000'"
+          v-if="vault.governor && vault.governor !== '0x0000000000000000000000000000000000000000'"
           label="Risk manager"
           orientation="horizontal"
         >
           <div class="flex gap-4 items-center">
             <NuxtLink
-              :to="getExplorerAddressLink(vault.governorAdmin)"
+              :to="getExplorerAddressLink(vault.governor)"
               class="text-accent-600 underline cursor-pointer hover:text-accent-500"
               target="_blank"
             >
-              {{ getSpecialAddressLabel(vault.governorAdmin) || shortenAddress(vault.governorAdmin) }}
+              {{ getSpecialAddressLabel(vault.governor) || shortenAddress(vault.governor) }}
             </NuxtLink>
             <button
               class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary"
-              @click="onCopyClick(vault.governorAdmin)"
+              @click="onCopyClick(vault.governor)"
             >
               <SvgIcon
                 class="!w-18 !h-18"
-                :name="isCopied(vault.governorAdmin) ? 'check' : 'copy'"
+                name="copy"
               />
             </button>
           </div>

@@ -1,148 +1,230 @@
-import { getAddress } from 'viem'
-import { watch, computed } from 'vue'
-import { useDebounceFn } from '@vueuse/core'
-import { useAccountPositions } from './useAccountPositions'
-import { useAccountValues } from './useAccountValues'
-import { useAccountPortfolioMetrics } from './useAccountPortfolioMetrics'
+import { formatUnits, getAddress, type Address } from 'viem'
+import { watch, computed, ref, shallowRef, type Ref } from 'vue'
+import { accountDiagnosticOwner, dataIssueLocation, type DataIssue, type Portfolio, type PortfolioBorrowPosition, type PortfolioPositionFilter, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import type { EulerLensAddresses } from '~/composables/useEulerAddresses'
-import type { AccountBorrowPosition } from '~/entities/account'
+import { useVaults } from '~/composables/useVaults'
+import { useWallets } from '~/composables/useWallets'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createAddressRefreshCoordinator } from '~/utils/address-refresh-coordinator'
-import { fetchAccountPositions, type SubgraphPositionEntry } from '~/utils/subgraph'
 import { logWarn } from '~/utils/errorHandling'
+import { createRaceGuard } from '~/utils/race-guard'
 
-const {
-  allBorrowPositions,
-  depositPositions,
-  borrowPositions,
-  isPositionsLoading,
-  isPositionsLoaded,
-  isDepositsLoading,
-  isDepositsLoaded,
-  isShowAllPositions,
-  hiddenBorrowCount,
-  hiddenDepositCount,
-  positionGuard,
-  unresolvedBorrowCount,
-  unresolvedDepositCount,
-  updateBorrowPositions,
-  updateSavingsPositions,
-  clearPositions,
-  beginRefreshCycle,
-  finalizeRefreshCycle,
-} = useAccountPositions()
+const portfolio: Ref<Portfolio<VaultEntity> | undefined> = shallowRef()
+const allPortfolio: Ref<Portfolio<VaultEntity> | undefined> = shallowRef()
+const portfolioDiagnostics = shallowRef<DataIssue[]>([])
 
+const isPositionsLoading = ref(true)
+const isPositionsLoaded = ref(false)
+const isDepositsLoading = ref(true)
+const isDepositsLoaded = ref(false)
+const isShowAllPositions = ref(false)
+
+const borrowPositions = computed(() => portfolio.value?.borrows ?? [])
+const depositPositions = computed(() => portfolio.value?.savings ?? [])
+const allBorrowPositions = computed(() => allPortfolio.value?.borrows ?? borrowPositions.value)
+const allDepositPositions = computed(() => allPortfolio.value?.savings ?? depositPositions.value)
+const hiddenBorrowCount = computed(() =>
+  Math.max(0, allBorrowPositions.value.length - borrowPositions.value.length),
+)
+const hiddenDepositCount = computed(() =>
+  Math.max(0, allDepositPositions.value.length - depositPositions.value.length),
+)
+
+const positionGuard = createRaceGuard()
 const refreshCoordinator = createAddressRefreshCoordinator(() => positionGuard.next())
 
-const {
-  totalSuppliedValue,
-  totalSuppliedValueInfo,
-  totalBorrowedValue,
-  totalBorrowedValueInfo,
-} = useAccountValues()
+type PortfolioRefreshSource = 'fast' | 'fresh'
+
+interface PortfolioRefreshOptions {
+  source?: PortfolioRefreshSource
+  preempt?: boolean
+}
+
+const usdWadToNumber = (value: bigint | number | undefined): number => {
+  if (value === undefined) return 0
+  return typeof value === 'bigint' ? Number(formatUnits(value, 18)) : value
+}
+
+const buildVisiblePortfolioPositionFilter = (): PortfolioPositionFilter<VaultEntity> => {
+  const { verifiedVaultAddresses, earnVaults } = useEulerLabels()
+  const { escrowAddresses, getEscrowVaults } = useVaultRegistry()
+
+  const visibleVaults = new Set<string>()
+  for (const vault of verifiedVaultAddresses.value) visibleVaults.add(getAddress(vault).toLowerCase())
+  for (const vault of earnVaults.value) visibleVaults.add(getAddress(vault).toLowerCase())
+  for (const vault of escrowAddresses.value) visibleVaults.add(getAddress(vault).toLowerCase())
+  for (const vault of getEscrowVaults()) visibleVaults.add(getAddress(vault.address).toLowerCase())
+
+  return (position, { account }) => {
+    if (!visibleVaults.has(getAddress(position.vaultAddress).toLowerCase())) {
+      return false
+    }
+
+    if (position.borrowed === 0n) return true
+
+    const collateralAddresses = position.liquidity?.collaterals.map(collateral => collateral.address)
+      ?? account.getSubAccount(position.account)?.enabledCollaterals
+      ?? []
+
+    return collateralAddresses.every(collateral =>
+      visibleVaults.has(getAddress(collateral).toLowerCase()),
+    )
+  }
+}
 
 export const useEulerAccount = () => {
   const { isLoaded: isBalancesLoaded } = useWallets()
-  const { eulerLensAddresses, isReady: isEulerLensAddressesReady, chainId } = useEulerAddresses()
+  const { isReady: isLabelsReady } = useEulerLabels()
+  const { isReady: isVaultsReady } = useVaults()
+  const { isReady: isEulerAddressesReady, chainId } = useEulerAddresses()
   const { address } = useWagmi()
   const { spyAddress } = useSpyMode()
   const portfolioAddress = computed(() => normalizeAddressOrEmpty(spyAddress.value) || normalizeAddressOrEmpty(address.value))
 
-  const updatePositions = async () => {
-    const targetAddress = portfolioAddress.value
-    const refreshToken = refreshCoordinator.begin(targetAddress)
-    if (!refreshToken) return
-    try {
-      beginRefreshCycle()
-      const gen = positionGuard.current()
-      const { SUBGRAPH_URL } = useEulerConfig()
-
-      // Fetch both borrow and deposit entries in a single subgraph query
-      const { borrows: borrowEntries, deposits: depositEntries } = targetAddress
-        ? await fetchAccountPositions(SUBGRAPH_URL, targetAddress)
-        : { borrows: [] as SubgraphPositionEntry[], deposits: [] as SubgraphPositionEntry[] }
-
-      // Discard if chain switched during subgraph fetch
-      if (positionGuard.isStale(gen)) return
-
-      // Borrow positions must be loaded first so deposits can filter against them
-      await updateBorrowPositions(
-        eulerLensAddresses.value,
-        targetAddress,
-        borrowEntries,
-      )
-      await updateSavingsPositions(
-        eulerLensAddresses.value,
-        targetAddress,
-        depositEntries,
-        false,
-        gen,
-      )
-      if (!positionGuard.isStale(gen)) finalizeRefreshCycle()
-    }
-    catch (error) {
-      logWarn('useEulerAccount/updatePositions', error)
-      isPositionsLoading.value = false
-      isPositionsLoaded.value = true
-      isDepositsLoading.value = false
-      isDepositsLoaded.value = true
-    }
-    finally {
-      await refreshCoordinator.finish(refreshToken, updatePositions)
-    }
+  const markLoaded = () => {
+    isPositionsLoading.value = false
+    isPositionsLoaded.value = true
+    isDepositsLoading.value = false
+    isDepositsLoaded.value = true
   }
 
-  const debouncedUpdatePositions = useDebounceFn(() => {
-    if (isBalancesLoaded.value && isEulerLensAddressesReady.value) {
-      updatePositions()
-    }
-  }, 100)
-
-  watch([isBalancesLoaded, isEulerLensAddressesReady], () => {
-    debouncedUpdatePositions()
-  }, { immediate: true })
-
-  // Refresh positions when wallet address changes (e.g. spy mode exit)
-  watch(portfolioAddress, (newAddress, oldAddress) => {
-    if (newAddress !== oldAddress) {
-      // Invalidate in-flight fetches so they discard stale results
-      positionGuard.next()
-      refreshCoordinator.reset()
-
-      // Clear stale data and reset loading state so UI shows loader
-      clearPositions()
-      isPositionsLoaded.value = false
-      isPositionsLoading.value = true
-      isDepositsLoaded.value = false
-      isDepositsLoading.value = true
-      totalSuppliedValue.value = 0
-      totalBorrowedValue.value = 0
-
-      debouncedUpdatePositions()
-    }
-  })
-
-  // Portfolio ROE/APY — must be called in setup context
-  const { portfolioRoe, portfolioNetApy } = useAccountPortfolioMetrics()
-
-  // Clear stale positions and invalidate in-flight fetches on chain change
-  watch(chainId, () => {
-    positionGuard.next()
-    refreshCoordinator.reset()
-    clearPositions()
+  const resetLoadingState = () => {
+    portfolio.value = undefined
+    allPortfolio.value = undefined
+    portfolioDiagnostics.value = []
     isPositionsLoaded.value = false
     isPositionsLoading.value = true
     isDepositsLoaded.value = false
     isDepositsLoading.value = true
-    totalSuppliedValue.value = 0
-    totalBorrowedValue.value = 0
+  }
+
+  const fetchAndUpdatePortfolio = async (
+    walletAddress: string,
+    refreshOptions: PortfolioRefreshOptions = {},
+  ) => {
+    if (refreshOptions.preempt) {
+      positionGuard.next()
+      refreshCoordinator.reset()
+    }
+
+    const refreshToken = refreshCoordinator.begin(walletAddress)
+    if (!refreshToken) return
+    const gen = positionGuard.current()
+
+    try {
+      if (!walletAddress) {
+        portfolio.value = undefined
+        allPortfolio.value = undefined
+        portfolioDiagnostics.value = []
+        markLoaded()
+        return
+      }
+
+      const { getEulerSdk, getEulerSdkFresh } = useEulerSdk()
+      // Portfolio reads default to the fresh (onchain) instance so positions,
+      // balances and health always reflect the latest block. Callers can opt
+      // back into the cached V3-backed instance with `source: 'fast'`.
+      const sdk = refreshOptions.source === 'fast'
+        ? await getEulerSdk()
+        : await getEulerSdkFresh()
+      const options = isShowAllPositions.value
+        ? undefined
+        : { positionFilter: buildVisiblePortfolioPositionFilter() }
+      const fetched = await sdk.portfolioService.fetchPortfolio(
+        chainId.value,
+        getAddress(walletAddress) as Address,
+        options,
+      )
+      fetched.errors.forEach(issue => logWarn('useEulerAccount/fetchPortfolio', issue))
+
+      if (positionGuard.isStale(gen)) return
+
+      const nextAllPortfolio = isShowAllPositions.value
+        ? fetched.result
+        : sdk.portfolioService.buildPortfolio(fetched.result.account)
+
+      if (positionGuard.isStale(gen)) return
+
+      portfolio.value = fetched.result
+      allPortfolio.value = nextAllPortfolio
+      portfolioDiagnostics.value = fetched.errors
+      markLoaded()
+    }
+    catch (error) {
+      if (positionGuard.isStale(gen)) return
+      logWarn('useEulerAccount/fetchAndUpdatePortfolio', error)
+      portfolioDiagnostics.value = [{
+        code: 'SOURCE_UNAVAILABLE',
+        severity: 'error',
+        message: 'Failed to load portfolio data.',
+        locations: [
+          dataIssueLocation(accountDiagnosticOwner(chainId.value, getAddress(walletAddress) as Address)),
+        ],
+        source: 'portfolioService',
+        originalValue: error instanceof Error ? error.message : String(error),
+      }]
+      markLoaded()
+    }
+    finally {
+      await refreshCoordinator.finish(refreshToken, () => fetchAndUpdatePortfolio(walletAddress, refreshOptions))
+    }
+  }
+
+  const maybeUpdatePositions = () => {
+    if (isBalancesLoaded.value && isEulerAddressesReady.value && isLabelsReady.value && isVaultsReady.value) {
+      void fetchAndUpdatePortfolio(portfolioAddress.value)
+    }
+  }
+
+  watch([isBalancesLoaded, isEulerAddressesReady, isLabelsReady, isVaultsReady], () => {
+    maybeUpdatePositions()
+  }, { immediate: true })
+
+  watch(portfolioAddress, (newAddress, oldAddress) => {
+    if (newAddress !== oldAddress) {
+      positionGuard.next()
+      refreshCoordinator.reset()
+      resetLoadingState()
+      maybeUpdatePositions()
+    }
   })
 
-  /**
-   * Find a borrow position by its subaccount index.
-   * The subaccount index is derived from: ownerAddress XOR subAccountAddress
-   */
-  const getPositionBySubAccountIndex = (subAccountIndex: number): AccountBorrowPosition | undefined => {
+  watch(isShowAllPositions, () => {
+    positionGuard.next()
+    refreshCoordinator.reset()
+    resetLoadingState()
+    maybeUpdatePositions()
+  })
+
+  const portfolioRoe = computed(() => portfolio.value?.roe ?? 0)
+  const portfolioNetApy = computed(() => portfolio.value?.netApy ?? 0)
+  const totalSuppliedValue = computed(() => usdWadToNumber(portfolio.value?.totalSuppliedValueUsd))
+  const totalBorrowedValue = computed(() => usdWadToNumber(portfolio.value?.totalBorrowedValueUsd))
+  const netAssetMarketValue = computed(() => usdWadToNumber(portfolio.value?.netAssetValueUsd))
+  const totalSuppliedValueInfo = computed(() => ({
+    total: totalSuppliedValue.value,
+    hasMissingPrices: portfolio.value?.totalSuppliedValueUsd === undefined
+      && (depositPositions.value.length > 0 || borrowPositions.value.length > 0),
+  }))
+  const totalBorrowedValueInfo = computed(() => ({
+    total: totalBorrowedValue.value,
+    hasMissingPrices: portfolio.value?.totalBorrowedValueUsd === undefined
+      && borrowPositions.value.length > 0,
+  }))
+  const netAssetMarketValueInfo = computed(() => ({
+    total: netAssetMarketValue.value,
+    hasMissingPrices: portfolio.value?.netAssetValueUsd === undefined
+      && (depositPositions.value.length > 0 || borrowPositions.value.length > 0),
+  }))
+
+  watch(chainId, () => {
+    positionGuard.next()
+    refreshCoordinator.reset()
+    resetLoadingState()
+    maybeUpdatePositions()
+  })
+
+  const getPositionBySubAccountIndex = (subAccountIndex: number): PortfolioBorrowPosition<VaultEntity> | undefined => {
     const owner = portfolioAddress.value || address.value
     if (!owner) return undefined
 
@@ -159,47 +241,19 @@ export const useEulerAccount = () => {
     })
   }
 
-  /**
-   * Refresh all positions (borrows + savings) by fetching entries from subgraph.
-   * Used by portfolio page for periodic refresh.
-   */
   const refreshAllPositions = async (
-    lensAddresses: EulerLensAddresses,
-    walletAddress: string,
+    _lensAddresses?: EulerLensAddresses,
+    walletAddress = portfolioAddress.value,
+    refreshOptions?: PortfolioRefreshOptions,
   ) => {
-    const refreshToken = refreshCoordinator.begin(walletAddress)
-    if (!refreshToken) return
-    try {
-      beginRefreshCycle()
-      const gen = positionGuard.current()
-      const { SUBGRAPH_URL } = useEulerConfig()
-      const { borrows: borrowEntries, deposits: depositEntries } = walletAddress
-        ? await fetchAccountPositions(SUBGRAPH_URL, walletAddress)
-        : { borrows: [] as SubgraphPositionEntry[], deposits: [] as SubgraphPositionEntry[] }
-
-      if (positionGuard.isStale(gen)) return
-
-      await updateBorrowPositions(lensAddresses, walletAddress, borrowEntries)
-      await updateSavingsPositions(lensAddresses, walletAddress, depositEntries, false, gen)
-      if (!positionGuard.isStale(gen)) finalizeRefreshCycle()
-    }
-    catch (error) {
-      logWarn('useEulerAccount/refreshAllPositions', error)
-      isPositionsLoading.value = false
-      isPositionsLoaded.value = true
-      isDepositsLoading.value = false
-      isDepositsLoaded.value = true
-    }
-    finally {
-      await refreshCoordinator.finish(refreshToken, () => refreshAllPositions(lensAddresses, walletAddress))
-    }
+    await fetchAndUpdatePortfolio(walletAddress, refreshOptions)
   }
 
   return {
+    portfolio,
+    portfolioDiagnostics,
     borrowPositions,
     depositPositions,
-    unresolvedBorrowCount,
-    unresolvedDepositCount,
     isPositionsLoading,
     isPositionsLoaded,
     isDepositsLoading,
@@ -214,6 +268,8 @@ export const useEulerAccount = () => {
     totalSuppliedValueInfo,
     totalBorrowedValue,
     totalBorrowedValueInfo,
+    netAssetMarketValue,
+    netAssetMarketValueInfo,
     portfolioRoe,
     portfolioNetApy,
   }

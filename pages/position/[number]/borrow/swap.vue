@@ -1,40 +1,39 @@
 <script setup lang="ts">
-import { formatUnits, zeroAddress, type Address } from 'viem'
-import type { AccountBorrowPosition } from '~/entities/account'
-import type { Vault, VaultAsset } from '~/entities/vault'
-import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
+import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { useSwapDebtOptions } from '~/composables/useSwapDebtOptions'
-import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
-import type { TxPlan } from '~/entities/txPlan'
-import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
+import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { formatUnits, zeroAddress, type Address } from 'viem'
 
 const route = useRoute()
 const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = useEulerAccount()
-const { buildSwapPlan, buildSameAssetDebtSwapPlan } = useEulerOperations()
-const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
+const { planDebtChange } = useEulerTx()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 
 const positionIndex = usePositionIndex()
 
 // ── Position & vaults ────────────────────────────────────────────────────
-const position: Ref<AccountBorrowPosition | null> = ref(null)
+const position: Ref<PortfolioBorrowPosition<VaultEntity> | null> = ref(null)
 
 const pairAssetsLabel = usePositionPairLabel(position)
-const fromVault = computed(() => position.value?.borrow)
-const collateralVault = computed(() => position.value?.collateral)
-const toVault: Ref<Vault | undefined> = ref()
+const fromVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
+const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() => position.value ? position.value.collateralVault as EVault | SecuritizeCollateralVault | undefined : undefined)
+const toVault: Ref<EVault | undefined> = ref()
 useOperationGuard(computed(() => [fromVault.value?.address, toVault.value?.address, collateralVault.value?.address].filter(Boolean)))
 
 const { borrowOptions, borrowVaults } = useSwapDebtOptions({
-  collateralVault: computed(() => collateralVault.value as Vault | undefined),
-  currentBorrowVault: computed(() => fromVault.value as Vault | undefined),
+  collateralVault: computed(() => collateralVault.value as EVault | undefined),
+  currentBorrowVault: computed(() => fromVault.value as EVault | undefined),
 })
 
 const currentDebt = computed(() => position.value?.borrowed || 0n)
@@ -47,7 +46,7 @@ const setFromAmountToMax = () => {
     fromAmount.value = ''
     return
   }
-  const exact = formatUnits(currentDebt.value, Number(fromVault.value.decimals))
+  const exact = formatUnits(currentDebt.value, Number(fromVault.value.shares.decimals))
   const [intPart, decPart = ''] = exact.split('.')
   const sigDigitsInInt = intPart.replace(/^0+/, '').length
   if (sigDigitsInInt >= 6) {
@@ -74,18 +73,18 @@ const currentLiqDisplaySymbol = computed(() => {
 
 const collateralSupplyApy = computed(() => {
   if (!collateralVault.value) return null
-  const base = nanoToValue(collateralVault.value.interestRateInfo.supplyAPY || 0n, 25)
-  return withIntrinsicSupplyApy(base, collateralVault.value.asset.address) + getSupplyRewardApy(collateralVault.value.address)
+  const base = getVaultSupplyApy(collateralVault.value)
+  return withVaultIntrinsicApy(base, collateralVault.value, enableIntrinsicApy.value) + getSupplyRewardApy(collateralVault.value.address)
 })
 const fromBorrowApy = computed(() => {
   if (!fromVault.value) return null
-  const base = nanoToValue(fromVault.value.interestRateInfo.borrowAPY || 0n, 25)
-  return withIntrinsicBorrowApy(base, fromVault.value.asset.address) - getBorrowRewardApy(fromVault.value.address, collateralVault.value?.address)
+  const base = getVaultBorrowApy(fromVault.value)
+  return withVaultIntrinsicApy(base, fromVault.value, enableIntrinsicApy.value) - getBorrowRewardApy(fromVault.value.address, collateralVault.value?.address)
 })
 const toBorrowApy = computed(() => {
   if (!toVault.value) return null
-  const base = nanoToValue(toVault.value.interestRateInfo.borrowAPY || 0n, 25)
-  return withIntrinsicBorrowApy(base, toVault.value.asset.address) - getBorrowRewardApy(toVault.value.address, collateralVault.value?.address)
+  const base = getVaultBorrowApy(toVault.value)
+  return withVaultIntrinsicApy(base, toVault.value, enableIntrinsicApy.value) - getBorrowRewardApy(toVault.value.address, collateralVault.value?.address)
 })
 
 const supplyValueUsd = ref<number | null>(null)
@@ -118,28 +117,38 @@ const priceRatio = computed(() => {
 })
 const collateralAmount = computed(() => {
   if (!collateralVault.value || !position.value) return null
-  return nanoToValue(position.value.supplied, collateralVault.value.decimals)
+  return nanoToValue(position.value.supplied, collateralVault.value.shares.decimals)
 })
 const nextBorrowAmount = computed(() => {
   if (!quote.value || !toVault.value) return null
-  return nanoToValue(BigInt(quote.value.amountIn), toVault.value.decimals)
+  return nanoToValue(BigInt(quote.value.amountIn), toVault.value.shares.decimals)
 })
 
-const currentLtv = computed(() => position.value ? nanoToValue(position.value.userLTV, 18) : null)
-const _currentLiquidationLtv = computed(() => position.value ? nanoToValue(position.value.liquidationLTV, 2) : null)
+const currentLtv = computed(() => {
+  const ltv = position.value?.userLTV ?? position.value?.currentLTV
+  return ltv === undefined ? null : nanoToValue(ltv, 18)
+})
+const _currentLiquidationLtv = computed(() => {
+  if (!position.value) return null
+  const liquidationLTV = getBorrowPositionEffectiveLiquidationLTV(position.value)
+  return liquidationLTV === undefined ? null : ltvToPercent(liquidationLTV)
+})
 const nextLiquidationLtv = computed(() => {
   if (!toVault.value || !collateralVault.value) return null
-  const match = toVault.value.collateralLTVs.find(
-    ltv => normalizeAddress(ltv.collateral) === normalizeAddress(collateralVault.value?.address),
+  const match = toVault.value.collaterals.find(
+    ltv => normalizeAddress(ltv.address) === normalizeAddress(collateralVault.value?.address),
   )
-  return match ? nanoToValue(match.liquidationLTV, 2) : null
+  return match ? ltvToPercent(match.liquidationLTV) : null
 })
 const nextLtv = computed(() => {
   if (!nextBorrowAmount.value || !collateralAmount.value || !priceRatio.value) return null
   if (priceRatio.value <= 0 || collateralAmount.value <= 0) return null
   return (nextBorrowAmount.value / (collateralAmount.value * priceRatio.value)) * 100
 })
-const currentHealth = computed(() => position.value ? nanoToValue(position.value.health, 18) : null)
+const currentHealth = computed(() => {
+  const health = position.value?.healthFactor
+  return health === undefined ? null : nanoToValue(health, 18)
+})
 const nextHealth = computed(() => {
   if (!nextLiquidationLtv.value || !nextLtv.value) return null
   if (nextLtv.value <= 0) return null
@@ -188,14 +197,13 @@ const swap = useSwapPageLogic({
   buildQuoteRequest(amount) {
     if (!fromVault.value || !toVault.value || !position.value) return null
     if (amount > currentDebt.value) return null
-    const accountIn = (address.value || zeroAddress) as Address
-    const accountOut = (position.value.subAccount || accountIn) as Address
+    const liabilityAccount = (position.value.subAccount || address.value || zeroAddress) as Address
     return {
       params: {
         tokenIn: toVault.value.asset.address as Address,
         tokenOut: fromVault.value.asset.address as Address,
-        accountIn,
-        accountOut,
+        accountIn: liabilityAccount,
+        accountOut: liabilityAccount,
         amount,
         vaultIn: toVault.value.address as Address,
         receiver: fromVault.value.address as Address,
@@ -208,30 +216,18 @@ const swap = useSwapPageLogic({
     }
   },
 
-  async buildPlan(quote?: SwapApiQuote): Promise<TxPlan> {
+  async buildPlan(): Promise<TransactionPlan> {
     if (!fromVault.value || !toVault.value) throw new Error('Vaults not loaded')
-    if (isSameAsset.value) {
-      const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
-      return buildSameAssetDebtSwapPlan({
-        oldVaultAddress: fromVault.value.address,
-        newVaultAddress: toVault.value.address,
-        amount,
-        subAccount: position.value?.subAccount || address.value!,
-        enabledCollaterals: position.value?.collaterals,
-      })
-    }
-    const swapQuote = quote || selectedQuote.value
-    if (!swapQuote) throw new Error('No quote selected')
-    return buildSwapPlan({
-      quote: swapQuote,
+    if (!isSameAsset.value && !selectedQuote.value) throw new Error('No quote selected')
+    const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
+    return planDebtChange({
+      oldLiabilityVault: fromVault.value.address as Address,
+      newLiabilityVault: toVault.value.address as Address,
+      liabilityAccount: (position.value?.subAccount || address.value!) as Address,
+      liabilityAmount: amount,
+      newLiabilityAsset: toVault.value.asset.address as Address,
+      swapQuote: isSameAsset.value ? undefined : selectedQuote.value!,
       swapperMode: SwapperMode.TARGET_DEBT,
-      isRepay: true,
-      requestedSlippage: slippage.value,
-      isDebtSwap: true,
-      targetDebt: 0n,
-      currentDebt: currentDebt.value,
-      liabilityVault: fromVault.value.address,
-      enabledCollaterals: position.value?.collaterals,
     })
   },
 
@@ -345,7 +341,7 @@ const onToVaultChange = (selectedIndex: number) => {
       <template v-if="fromVault">
         <VaultLabelsAndAssets
           :vault="fromVault"
-          :assets="[fromVault.asset] as VaultAsset[]"
+          :assets="[fromVault.asset]"
           :assets-label="pairAssetsLabel"
           size="large"
         />
@@ -551,9 +547,7 @@ const onToVaultChange = (selectedIndex: number) => {
             <SwapDetailsSummary
               v-if="!isSameAsset"
               :input-display="swapSummary?.from ?? null"
-              :input-exact-display="swapSummary?.fromExact ?? null"
               :output-display="swapSummary?.to ?? null"
-              :output-exact-display="swapSummary?.toExact ?? null"
               :price-impact="priceImpact"
               :slippage="slippage"
               :routed-via="routedVia"

@@ -1,11 +1,12 @@
 import { zeroAddress } from 'viem'
+import { isEVault, type EulerEarn, type EVault, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import type { Ref } from 'vue'
-import type { EarnVault, SecuritizeVault, Vault } from '~/entities/vault'
-import { isCyclicalNoteVault } from '~/entities/vault'
+import { isCyclicalNoteVault } from '~/utils/vault/classification'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { getEntitiesByEarnVault, getEntitiesByVault, isVaultKeyring } from '~/utils/eulerLabelsUtils'
+import { useVaultRegistry } from '~/composables/useVaultRegistry'
 
-type VaultTypeBadgeVault = EarnVault | SecuritizeVault | Vault
+type VaultTypeBadgeVault = EVault | EulerEarn | SecuritizeCollateralVault
 
 export type VaultGovernanceBadge = 'governed' | 'managed' | 'escrow' | 'ungoverned' | 'unknown'
 export type VaultTypeBadge = VaultGovernanceBadge | 'securitize' | 'private' | 'governanceLimited' | 'cyclicalNote'
@@ -13,21 +14,23 @@ export type VaultTypeSummaryBadge = Extract<VaultTypeBadge, 'cyclicalNote' | 'pr
 
 export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
   const { isVaultGovernorVerified, isEarnVaultOwnerVerified } = useVaults()
+  const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
 
   const addressRef = computed(() => vault.value.address)
   const product = useEulerProductOfVault(addressRef)
 
-  const isEarn = computed(() => 'type' in vault.value && vault.value.type === 'earn')
-  const isSecuritize = computed(() => 'type' in vault.value && vault.value.type === 'securitize')
+  const isEarn = computed(() => vault.value.type === 'EulerEarn')
+  const isSecuritize = computed(() => vault.value.type === 'SecuritizeCollateral')
 
   const entities = computed(() => {
-    if (isEarn.value) return getEntitiesByEarnVault(vault.value as EarnVault)
-    return getEntitiesByVault(vault.value as Vault | SecuritizeVault)
+    if (isEarn.value) return getEntitiesByEarnVault(vault.value as EulerEarn)
+    return getEntitiesByVault(vault.value as EVault | SecuritizeCollateralVault)
   })
 
   const isVerified = computed(() => {
-    if (isEarn.value) return isEarnVaultOwnerVerified(vault.value as EarnVault)
-    return isVaultGovernorVerified(vault.value as Vault | SecuritizeVault)
+    if (isEarn.value) return isEarnVaultOwnerVerified(vault.value as EulerEarn)
+    if (isSecuritize.value) return isVerifiedVault(vault.value.address)
+    return isVaultGovernorVerified(vault.value as EVault)
   })
 
   const governanceType = computed<VaultGovernanceBadge>(() => {
@@ -35,10 +38,12 @@ export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
       return entities.value.length ? 'managed' : 'unknown'
     }
 
-    const v = vault.value as Vault | SecuritizeVault
-    if ('vaultCategory' in v && v.vaultCategory === 'escrow') return 'escrow'
-    if (!v.governorAdmin) return 'unknown'
-    if (v.governorAdmin.toLowerCase() === zeroAddress) return 'ungoverned'
+    if (isEVault(vault.value) && getVaultCategory(vault.value.address) === 'escrow') return 'escrow'
+    const governor = isSecuritize.value
+      ? (vault.value as SecuritizeCollateralVault).governor
+      : (vault.value as EVault).governorAdmin
+    if (!governor) return 'unknown'
+    if (governor.toLowerCase() === zeroAddress) return 'ungoverned'
     return entities.value.length ? 'governed' : 'unknown'
   })
 
@@ -47,8 +52,8 @@ export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
   )
 
   const isCyclicalNote = computed(() => {
-    if (isEarn.value || isSecuritize.value) return false
-    return isCyclicalNoteVault(vault.value as Vault)
+    if (!isEVault(vault.value)) return false
+    return isCyclicalNoteVault(vault.value)
   })
 
   const badges = computed<VaultTypeBadge[]>(() => {

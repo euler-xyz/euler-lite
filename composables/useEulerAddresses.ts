@@ -1,3 +1,4 @@
+import type { Deployment } from '@eulerxyz/euler-v2-sdk'
 import { logWarn } from '~/utils/errorHandling'
 
 export type EulerLensAddresses = {
@@ -16,70 +17,8 @@ export type EulerTokenAddresses = {
   seUSD: string | undefined
 } | null
 
-interface EulerChainConfig {
-  chainId: number
-  name: string
-  viemName?: string
-  safeBaseUrl?: string
-  safeAddressPrefix?: string
-  status: string
-  addresses: {
-    lensAddrs: {
-      accountLens: string
-      eulerEarnVaultLens: string
-      irmLens: string
-      oracleLens: string
-      utilsLens: string
-      vaultLens: string
-    }
-    coreAddrs: {
-      balanceTracker: string
-      eVaultFactory: string
-      eVaultImplementation: string
-      eulerEarnFactory: string
-      evc: string
-      permit2: string
-      protocolConfig: string
-      sequenceRegistry: string
-    }
-    tokenAddrs?: {
-      EUL?: string
-      rEUL?: string
-      eUSD?: string
-      seUSD?: string
-    }
-    eulerSwapAddrs?: {
-      eulerSwapV1Periphery?: string
-      eulerSwapV2Periphery?: string
-    }
-    peripheryAddrs: {
-      adaptiveCurveIRMFactory: string
-      capRiskStewardFactory?: string
-      escrowedCollateralPerspective: string
-      eulerEarnFactoryPerspective: string
-      eulerEarnGovernedPerspective: string
-      eulerUngoverned0xPerspective: string
-      eulerUngovernedNzxPerspective: string
-      evkFactoryPerspective: string
-      externalVaultRegistry: string
-      feeFlowController: string
-      governedPerspective: string
-      governorAccessControlEmergencyFactory: string
-      irmRegistry: string
-      kinkIRMFactory: string
-      kinkyIRMFactory?: string
-      oracleAdapterRegistry: string
-      oracleRouterFactory: string
-      swapVerifier: string
-      securitizeFactory?: string
-      swapper: string
-      termsOfUseSigner: string
-    }
-  }
-}
-
 const allowedChainIds = ref<number[]>([])
-const eulerChainsConfig = ref<EulerChainConfig[]>([])
+const eulerChainsConfig = ref<Deployment[]>([])
 const isLoading = ref(false)
 const chainId = ref<number>(0)
 const error = ref<string | null>(null)
@@ -114,12 +53,11 @@ export const useEulerAddresses = () => {
     error.value = null
 
     try {
-      const response = await fetch('/api/euler-chains')
-      if (!response.ok) {
-        throw new Error(`Failed to fetch Euler config: ${response.statusText}`)
-      }
-
-      const data: EulerChainConfig[] = await response.json()
+      const { getEulerSdk } = await import('~/composables/useEulerSdk')
+      const sdk = await getEulerSdk()
+      const data = sdk.deploymentService
+        .getDeploymentChainIds()
+        .map(chainId => sdk.deploymentService.getDeployment(chainId))
       const filteredData = data.filter(chain => allowedChainIds.value.includes(chain.chainId))
 
       if (!filteredData.length) {
@@ -193,31 +131,30 @@ export const useEulerAddresses = () => {
   const eulerPeripheryAddresses = computed(() => {
     const config = getCurrentChainConfig.value
     if (!config) return null
+    const peripheryAddrs = config.addresses.peripheryAddrs ?? {}
 
     return {
-      adaptiveCurveIRMFactory: config.addresses.peripheryAddrs.adaptiveCurveIRMFactory,
-      capRiskStewardFactory: config.addresses.peripheryAddrs.capRiskStewardFactory,
-      escrowedCollateralPerspective: config.addresses.peripheryAddrs.escrowedCollateralPerspective,
-      eulerEarnFactoryPerspective: config.addresses.peripheryAddrs.eulerEarnFactoryPerspective,
-      eulerEarnGovernedPerspective: config.addresses.peripheryAddrs.eulerEarnGovernedPerspective,
-      eulerUngoverned0xPerspective: config.addresses.peripheryAddrs.eulerUngoverned0xPerspective,
-      eulerUngovernedNzxPerspective: config.addresses.peripheryAddrs.eulerUngovernedNzxPerspective,
-      evkFactoryPerspective: config.addresses.peripheryAddrs.evkFactoryPerspective,
-      externalVaultRegistry: config.addresses.peripheryAddrs.externalVaultRegistry,
-      feeFlowController: config.addresses.peripheryAddrs.feeFlowController,
-      governedPerspective: config.addresses.peripheryAddrs.governedPerspective,
-      governorAccessControlEmergencyFactory: config.addresses.peripheryAddrs.governorAccessControlEmergencyFactory,
-      irmRegistry: config.addresses.peripheryAddrs.irmRegistry,
-      kinkIRMFactory: config.addresses.peripheryAddrs.kinkIRMFactory,
-      kinkyIRMFactory: config.addresses.peripheryAddrs.kinkyIRMFactory,
-      oracleAdapterRegistry: config.addresses.peripheryAddrs.oracleAdapterRegistry,
-      oracleRouterFactory: config.addresses.peripheryAddrs.oracleRouterFactory,
-      securitizeFactory: config.addresses.peripheryAddrs.securitizeFactory,
-      swapVerifier: config.addresses.peripheryAddrs.swapVerifier,
-      swapper: config.addresses.peripheryAddrs.swapper,
-      eulerSwapV1Periphery: config.addresses.eulerSwapAddrs?.eulerSwapV1Periphery,
-      eulerSwapV2Periphery: config.addresses.eulerSwapAddrs?.eulerSwapV2Periphery,
-      termsOfUseSigner: config.addresses.peripheryAddrs.termsOfUseSigner,
+      adaptiveCurveIRMFactory: peripheryAddrs.adaptiveCurveIRMFactory,
+      capRiskStewardFactory: peripheryAddrs.capRiskStewardFactory,
+      escrowedCollateralPerspective: peripheryAddrs.escrowedCollateralPerspective,
+      eulerEarnFactoryPerspective: peripheryAddrs.eulerEarnFactoryPerspective,
+      eulerEarnGovernedPerspective: peripheryAddrs.eulerEarnGovernedPerspective,
+      eulerUngoverned0xPerspective: peripheryAddrs.eulerUngoverned0xPerspective,
+      eulerUngovernedNzxPerspective: peripheryAddrs.eulerUngovernedNzxPerspective,
+      evkFactoryPerspective: peripheryAddrs.evkFactoryPerspective,
+      externalVaultRegistry: peripheryAddrs.externalVaultRegistry,
+      feeFlowController: peripheryAddrs.feeFlowController,
+      governedPerspective: peripheryAddrs.governedPerspective,
+      governorAccessControlEmergencyFactory: peripheryAddrs.governorAccessControlEmergencyFactory,
+      irmRegistry: peripheryAddrs.irmRegistry,
+      kinkIRMFactory: peripheryAddrs.kinkIRMFactory,
+      kinkyIRMFactory: peripheryAddrs.kinkyIRMFactory,
+      oracleAdapterRegistry: peripheryAddrs.oracleAdapterRegistry,
+      oracleRouterFactory: peripheryAddrs.oracleRouterFactory,
+      securitizeFactory: peripheryAddrs.securitizeFactory,
+      swapVerifier: peripheryAddrs.swapVerifier,
+      swapper: peripheryAddrs.swapper,
+      termsOfUseSigner: peripheryAddrs.termsOfUseSigner,
     }
   })
 

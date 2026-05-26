@@ -1,12 +1,11 @@
 import type { Ref, ComputedRef } from 'vue'
-import { erc20Abi, formatUnits, type Address } from 'viem'
+import { erc20Abi, formatUnits, maxUint256, type Address } from 'viem'
+import type { EVault, SwapQuote, Account, IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
+import type { CowSwapOpenPositionExecuteParams } from '~/composables/cowswap'
 import { logWarn } from '~/utils/errorHandling'
 import type { DisplayStep } from '~/utils/stepDecoding'
-import type { Vault } from '~/entities/vault'
-import type { SwapApiQuote } from '~/entities/swap'
 import {
   COWSWAP_ORDER_DEADLINE_SECONDS,
-  type CowSwapOpenPositionExecuteParams,
   getCowSwapQuoteOrderAmounts,
   getCowSwapChainConfig,
   isCowProvider,
@@ -17,10 +16,10 @@ import { useCowSwapOpenPositionExecution, useCowSwapOrderStatus, openCowSwapRevi
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { trimTrailingZeros } from '~/utils/string-utils'
-import { getNewSubAccount } from '~/entities/account'
-import type { EulerLensAddresses } from '~/composables/useEulerAddresses'
+import { getNewSubAccount } from '~/composables/useSubAccounts'
+import { prepareMooolerSound, playMooolerSound } from '~/utils/moooler-sound'
 
-const convertVaultSharesToAssets = (vault: Vault, sharesAmount: bigint): bigint => {
+const convertVaultSharesToAssets = (vault: EVault, sharesAmount: bigint): bigint => {
   if (sharesAmount <= 0n) return 0n
   if (vault.totalShares <= 0n) return sharesAmount
   return (sharesAmount * vault.totalAssets) / vault.totalShares
@@ -28,13 +27,13 @@ const convertVaultSharesToAssets = (vault: Vault, sharesAmount: bigint): bigint 
 
 interface UseMultiplyCowSwapOptions {
   multiplySelectedProvider: ComputedRef<string | null>
-  multiplyEffectiveQuote: ComputedRef<SwapApiQuote | null>
-  multiplySelectedQuote: ComputedRef<SwapApiQuote | null>
+  multiplyEffectiveQuote: ComputedRef<SwapQuote | null>
+  multiplySelectedQuote: ComputedRef<SwapQuote | null>
   multiplyEffectiveQuoteFetchedAt: ComputedRef<number | null>
   multiplySlippage: Readonly<Ref<number>>
-  multiplySupplyVault: ComputedRef<Vault | undefined>
-  multiplyLongVault: ComputedRef<Vault | undefined>
-  multiplyShortVault: ComputedRef<Vault | undefined>
+  multiplySupplyVault: ComputedRef<EVault | undefined>
+  multiplyLongVault: ComputedRef<EVault | undefined>
+  multiplyShortVault: ComputedRef<EVault | undefined>
   multiplySupplyProduct: ComputedRef<{ name: string }>
   multiplyShortProduct: ComputedRef<{ name: string }>
   multiplyInputAmount: Ref<string>
@@ -42,9 +41,6 @@ interface UseMultiplyCowSwapOptions {
   multiplyLongAmount: ComputedRef<string>
   multiplyDebtAmountNano: ComputedRef<bigint>
   multiplyErrorText: ComputedRef<string | null>
-  resolvePendingSubAccount: () => Promise<string>
-  refreshAllPositions: (lensAddresses: EulerLensAddresses, address: string) => void | Promise<void>
-  eulerLensAddresses: Ref<EulerLensAddresses>
 }
 
 export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
@@ -54,10 +50,11 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
   const { error } = useToast()
   const { client: rpcClient } = useRpcClient()
   const { chainId: currentChainId } = useEulerAddresses()
+  const { account: freshAccount } = useFreshAccount()
+  const { refreshAllPositions } = useEulerAccount()
 
   const cowSwapExecution = useCowSwapOpenPositionExecution()
-  const cowSwapOrderbookUrl = computed(() => getCowSwapChainConfig(currentChainId.value ?? 0)?.orderbookUrl)
-  const cowSwapOrderStatus = useCowSwapOrderStatus(cowSwapExecution.orderUid, cowSwapOrderbookUrl)
+  const cowSwapOrderStatus = useCowSwapOrderStatus(cowSwapExecution.orderUid, currentChainId)
 
   const isCowSwapProvider = computed(() =>
     isCowProvider(options.multiplySelectedProvider.value)
@@ -85,16 +82,15 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
   watch(() => cowSwapOrderStatus.orderStatus.value, (orderStatusVal) => {
     if (!orderStatusVal?.terminal) return
     if (orderStatusVal.type === 'traded' || orderStatusVal.type === 'fulfilled') {
-      options.refreshAllPositions(options.eulerLensAddresses.value, address.value || '')
+      playMooolerSound()
+      refreshAllPositions(undefined, address.value || '')
       modal.close()
       setTimeout(() => {
         router.replace('/portfolio')
         cowSwapExecution.reset()
       }, 400)
     }
-    else {
-      // Don't reset — leave terminal status visible in modal until user dismisses
-    }
+    // else: leave terminal status visible until user dismisses the modal.
   })
 
   const submitCowSwapMultiply = async () => {
@@ -109,10 +105,28 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     const quote = options.multiplySelectedQuote.value
     if (!quote) return
 
+    // CoW pre-flight: orders can't be simulated, so the multiply form's
+    // existing errorText already screens most failure modes — but it doesn't
+    // see the post-swap collateral amount that we're about to push into the
+    // long vault. Guard against exceeding the supply cap on the long side.
+    const longCap = longVault.caps?.supplyCap
+    if (typeof longCap === 'bigint' && longCap > 0n && longCap < maxUint256) {
+      const buyAmount = BigInt(quote.amountOut || '0')
+      if (longVault.totalAssets + buyAmount > longCap) {
+        error('Long vault supply cap would be exceeded')
+        return
+      }
+    }
+
     const chainId = currentChainId.value ?? 0
     if (!isCowSwapSupportedChain(chainId)) return
 
     if (!address.value) return
+
+    // Resolve the sub-account that the quote was scoped to. We pick a free
+    // sub-account with no conflicting controller for the borrow vault — this
+    // is the same selection the quote was built against. If the freshly
+    // selected one differs from the quote's account, the quote is stale.
     let subAccount: string
     try {
       subAccount = await getNewSubAccount(address.value, shortVault.address)
@@ -137,9 +151,18 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
       return
     }
 
+    const account = freshAccount.value
+    if (!account) {
+      error('Account not ready')
+      return
+    }
+
     const supplyAmountNano = valueToNano(options.multiplyInputAmount.value || '0', supplyVault.asset.decimals)
     const validTo = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
 
+    // For the review modal we still want to show CoW order amounts (sell/buy)
+    // even though `planOpenPositionWithCoW` derives them internally too — they
+    // need to be displayed before plan execution.
     const orderAmounts = getCowSwapQuoteOrderAmounts(quote, {
       slippage: options.multiplySlippage.value,
       slippageTarget: 'buyAmount',
@@ -152,25 +175,16 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
 
     const cowParams: CowSwapOpenPositionExecuteParams = {
       chainId,
-      sellToken: shortVault.asset.address as Address,
-      buyToken: longVault.address as Address,
-      sellAmount,
-      buyAmount,
-      quoteId: quote.providerData?.quoteId,
-      slippageBips: Math.round(options.multiplySlippage.value * 100),
+      account: account as Account<IHasVaultAddress>,
+      collateralVault: supplyVault.address as Address,
+      collateralAmount: supplyAmountNano,
+      collateralAsset: supplyVault.asset.address as Address,
+      swapQuote: quote,
+      slippage: options.multiplySlippage.value,
       validTo,
-      collateralToken: supplyVault.asset.address as Address,
-      wrapper: {
-        owner: address.value as Address,
-        account: subAccount as Address,
-        deadline: validTo,
-        collateralVault: supplyVault.address as Address,
-        borrowVault: shortVault.address as Address,
-        collateralAmount: supplyAmountNano,
-        borrowAmount: sellAmount,
-      },
     }
 
+    // Read allowances for review-modal sign-step display (USDT-style reset check).
     let collateralAllowance = 0n
     let sellTokenAllowance = 0n
     try {
@@ -195,7 +209,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
       }
     }
     catch {
-      // Default to showing approval steps
+      // Fall through — show approval steps by default.
     }
 
     const collateralAsset = supplyVault.asset
@@ -208,7 +222,8 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     const signSteps: DisplayStep[] = []
     let idx = 1
     const collateralApproval = buildApprovalSignSteps({
-      tokenAddress: supplyVault.asset.address,
+      chainId,
+      tokenAddress: supplyVault.asset.address as Address,
       currentAllowance: collateralAllowance,
       requiredAmount: supplyAmountNano,
       label: 'Approve for deposit',
@@ -219,7 +234,8 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     idx = collateralApproval.nextIndex
 
     const sellTokenApproval = buildApprovalSignSteps({
-      tokenAddress: shortVault.asset.address,
+      chainId,
+      tokenAddress: shortVault.asset.address as Address,
       currentAllowance: sellTokenAllowance,
       requiredAmount: sellAmount,
       label: 'Approve for swap',
@@ -245,11 +261,12 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     ]
 
     const walletWarningsDescription
-      = `The CoW order is signed with buy amounts in ${supplyVault.symbol} shares. `
+      = `The CoW order is signed with buy amounts in ${collateralAsset.symbol}-vault shares. `
         + `The amounts shown above are in ${collateralAsset.symbol} (underlying). `
         + 'The CoW order receiver is your sub-account, not your main wallet — your wallet may flag this as a mismatch. '
         + 'You can verify the first 19 bytes (38 hex chars after "0x") of the receiver match your wallet address.'
 
+    prepareMooolerSound()
     openCowSwapReviewModal(modal, {
       signSteps,
       wrapperSteps,

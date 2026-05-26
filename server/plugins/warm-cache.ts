@@ -1,70 +1,62 @@
 /**
  * Pre-populates the in-memory TTL caches for every proxy that serves
- * static/low-churn data (labels, token-list, intrinsic APY, euler-chains,
- * vaults snapshot, public reward campaigns).
+ * static/low-churn data (labels, token-list, euler-chains) and for the
+ * per-chain vault snapshot served at /api/vaults.
  *
  * Nitro's node-server preset calls `server.listen()` synchronously right
  * after firing plugins and does NOT await plugin promises, so warming
  * necessarily runs in the background. Caches are typically hot within
  * ~5 s of boot; users arriving before that pay the usual cold-upstream
- * latency for the specific endpoints they hit, same as today. The
- * periodic 5-min re-warm cycles with the TTL so reads against a healthy
- * warm pipeline always find a cached entry (refresh completes just as the
- * previous entry would otherwise expire).
+ * latency for the specific endpoints they hit. The periodic re-warm
+ * cycles align with the TTLs so reads against a healthy warm pipeline
+ * always find a cached entry (refresh completes just as the previous
+ * entry would otherwise expire).
  *
- * Warm-up structure (per cycle):
+ * Two timers, each with its own cadence:
  *
- *   • Global (parallel with the chain loop): /api/euler-chains and
- *     cross-chain `all/assets.json`.
- *   • Per-chain (serialized one chain at a time): labels, token-list,
- *     intrinsic-apy, vault-categories, Merkl opportunities × 5,
- *     Brevis campaigns, Fuul × 2, refreshChainVaults(chainId). Tasks
- *     within a single chain still run in parallel.
+ *   • Global cycle (5 min): /api/euler-chains once, cross-chain
+ *     `all/assets.json` once, then per-chain labels + token-list,
+ *     serialized across chains.
+ *   • Vaults cycle (1 min when V3 is configured, otherwise 5 min):
+ *     /api/vaults per chain, serialized.
  *
  * Serializing chains avoids a cold-start thundering herd (~250
  * simultaneous HTTPS requests across all chains × all providers) that
  * overshot the 10 s upstream timeout for slow first-hit DNS/TLS
- * handshakes. Cross-chain upstreams (defillama, stablewatch, etherfi,
- * etc.) dedupe via the in-flight cache, so chains 2..N hit warm cache
- * for those rather than refetching — sequential mode is therefore much
- * cheaper than N× the first chain's wall time.
+ * handshakes. Cross-chain upstreams (defillama, V3 prices, etc.) dedupe
+ * via the in-flight cache, so chains 2..N hit warm cache for those
+ * rather than refetching — sequential mode is therefore much cheaper
+ * than N× the first chain's wall time.
  *
  * Per-chain warms skip chains listed in `DEPRECATED_CHAINS`. Their data
  * is still served — the first visitor to a deprecated chain pays a
  * cold-upstream fetch, cached from then on under normal TTL behavior.
  *
- * `refreshChainVaults` internally $fetches /api/euler-chains and
- * /api/labels/*, and calls `getVaultCategories(chainId)` — those all
- * collapse onto the parallel warms via in-flight dedup at the cache layer,
- * so no duplicate upstream traffic.
- *
  * Merkl's /tokens/reward payload is fetched transitively by /api/token-list
- * (one of its sources). Merkl's ERC20LOGPROCESSOR refresh also calls
- * `getVaultCategories(chainId)` to filter by the chain earn set.
+ * (one of its sources).
  */
 import { LABEL_FILES, refreshLabelFile } from '../api/labels/[file].get'
 import { refreshEulerChains } from '../api/euler-chains.get'
 import { refreshTokenList } from '../api/token-list.get'
+import { refreshChainVaults } from '../utils/vaults-cache'
+import {
+  readDisableServerVaultCache,
+  readV3ApiUrl,
+  warnIfVaultSourceNeedsV3,
+} from '~/utils/api-url-env'
 import { getEnabledChainIds } from '~/utils/chain-env'
 import { parseDeprecatedChains } from '~/utils/parseDeprecatedChains'
 import { reportStatus } from '../utils/log'
 import { logger } from '~/server/utils/logger'
-import { refreshChainVaults } from '../utils/vaults-cache'
-import { refreshVaultCategories } from '../utils/vault-categories-store'
-import { refreshIntrinsicApyForChain } from '../utils/intrinsic-apy'
-import { refreshVerifiedAddressSet } from '../utils/verified-vaults'
-import { refreshChainVaultMetadata } from '../utils/vault-metadata'
-import {
-  type FuulProtocol,
-  refreshBrevisCampaigns,
-  refreshFuulProtocol,
-  refreshMerklType,
-} from '../utils/rewards-cache'
-import { MERKL_TYPES } from '~/entities/merkl'
 
 const REWARM_INTERVAL_MS = 5 * 60_000
 
-const FUUL_PROTOCOLS: FuulProtocol[] = ['euler', 'euler-looping']
+// Vaults snapshot gets a separate, faster timer when V3 is configured —
+// V3-backed refreshes are cheap (one batched POST per chain hitting V3's
+// own cache), so a 1-min rewarm keeps the snapshot tight without
+// hammering upstream. Without V3 the snapshot is built from heavier
+// onchain lens multicalls, so it rides the global 5-min interval.
+const VAULTS_REWARM_INTERVAL_MS = readV3ApiUrl() ? 60_000 : REWARM_INTERVAL_MS
 
 // Nitro dev mode re-imports server plugins across its double-init (Vite
 // client build + Nitro server build), which would fire two warm cycles
@@ -123,52 +115,17 @@ const warmLabels = (chainId: number): Promise<unknown>[] =>
 const warmTokenList = (chainId: number) =>
   reportWarm(`token-list chain=${chainId}`, refreshTokenList(chainId))
 
-const warmIntrinsicApy = (chainId: number) =>
-  reportWarm(`intrinsic-apy chain=${chainId}`, refreshIntrinsicApyForChain(chainId))
-
-const warmRewardCampaigns = (chainId: number): Promise<unknown>[] => [
-  ...MERKL_TYPES.map(type =>
-    reportWarm(`merkl/${type} chain=${chainId}`, refreshMerklType(chainId, type)),
-  ),
-  reportWarm(`brevis chain=${chainId}`, refreshBrevisCampaigns(chainId)),
-  ...FUUL_PROTOCOLS.map(protocol =>
-    reportWarm(`fuul/${protocol} chain=${chainId}`, refreshFuulProtocol(chainId, protocol)),
-  ),
-]
-
-const warmVaultCategories = (chainId: number) =>
-  reportWarm(`vault-categories chain=${chainId}`, refreshVaultCategories(chainId))
-
-// Direct call (no $fetch HTTP round-trip) so we get typed errors. Its internal
-// $fetches to /api/euler-chains + /api/labels/* collapse onto Stage A's
-// parallel warms via in-flight dedup at the cache layer, and its call to
-// getVaultCategories() joins the warmVaultCategories task above.
-const warmChainVaults = (chainId: number) =>
+// Per-chain consolidated vault snapshot served at /api/vaults?chainId=N.
+// Warmed so the first user navigation to /lend hydrates instantly from
+// cache instead of paying the full lens-multicall + intrinsic-APY fan-out.
+const warmVaults = (chainId: number) =>
   reportWarm(`vaults chain=${chainId}`, refreshChainVaults(chainId))
 
-// Public /api/public/is-known reads from this. Force-rebuilds the verified
-// set every cycle (5 min); without this warm, the bridge cache drifts on its
-// own 5-min clock and propagation lag can stretch to ~10 min in the worst
-// case. Its internal $fetches to /api/labels/* and call to refreshChainVaults
-// collapse onto the parallel warms via in-flight dedup.
-const warmVerifiedAddresses = (chainId: number) =>
-  reportWarm(`verified-vaults chain=${chainId}`, refreshVerifiedAddressSet(chainId))
-
-// Public /api/public/metadata reads from this. Same rationale as
-// verified-vaults — keeps the bridge cache continuously fresh so propagation
-// of label / on-chain changes stays at ~5 min.
-const warmVaultMetadata = (chainId: number) =>
-  reportWarm(`vault-metadata chain=${chainId}`, refreshChainVaultMetadata(chainId))
-
+// Labels + token-list — refresh at the global 5-min interval. Vaults run
+// on their own faster timer (see `warmVaultsForChains` below).
 const warmChainTasks = (chainId: number): Promise<unknown>[] => [
   ...warmLabels(chainId),
   warmTokenList(chainId),
-  warmIntrinsicApy(chainId),
-  warmVaultCategories(chainId),
-  ...warmRewardCampaigns(chainId),
-  warmChainVaults(chainId),
-  warmVerifiedAddresses(chainId),
-  warmVaultMetadata(chainId),
 ]
 
 // --- Orchestration ---
@@ -178,12 +135,20 @@ export default defineNitroPlugin(() => {
   if (g[WARM_LATCH_KEY]) return
   g[WARM_LATCH_KEY] = true
 
+  // One-time boot check: surface a misconfiguration (source needs V3 but
+  // no V3_API_URL set) before the first warm cycle starts producing noisy
+  // SDK errors. Caller-friendly: a single log line instead of one per
+  // failing SDK fetchVaults call.
+  warnIfVaultSourceNeedsV3()
+
   const enabledChainIds = getEnabledChainIds()
   const deprecatedChainIds = new Set(
     parseDeprecatedChains(process.env.DEPRECATED_CHAINS, new Set(enabledChainIds)),
   )
   const chainIds = enabledChainIds.filter(id => !deprecatedChainIds.has(id))
   if (chainIds.length === 0) return
+
+  const serverVaultCacheDisabled = readDisableServerVaultCache()
 
   const warmChainsSequentially = async () => {
     for (const chainId of chainIds) {
@@ -204,8 +169,42 @@ export default defineNitroPlugin(() => {
     }
   }
 
+  const warmVaultsForChains = async () => {
+    try {
+      // Sequential across chains: cross-chain upstreams (V3 prices,
+      // intrinsic APY) dedupe via their in-flight maps, so chains 2..N
+      // hit warm upstream caches rather than refetching.
+      for (const chainId of chainIds) {
+        await warmVaults(chainId)
+      }
+    }
+    catch (err) {
+      logger.warn({ ctx: 'warm-cache', err }, 'vaults warm cycle failed')
+    }
+  }
+
   warmAll()
 
-  const interval = setInterval(warmAll, REWARM_INTERVAL_MS)
-  interval.unref()
+  const globalInterval = setInterval(warmAll, REWARM_INTERVAL_MS)
+  globalInterval.unref()
+
+  // Vault snapshot cycle is opt-out via DISABLE_SERVER_VAULT_CACHE. When
+  // disabled, /api/vaults responds 503 and the browser falls through to
+  // its normal RPC pipeline — useful when the host can't afford the
+  // outbound V3/RPC fan-out the snapshot builder needs, or when running
+  // behind aggressive bot-management (CF) that throttles bursty
+  // origin-side traffic.
+  if (!serverVaultCacheDisabled) {
+    warmVaultsForChains()
+    // Run the vaults timer separately so its cadence can be faster than
+    // the global cycle when V3 is configured. When the two intervals are
+    // equal (no V3), the timers naturally double-warm at every cycle; the
+    // in-flight dedup inside refreshChainVaults collapses the concurrent
+    // calls onto a single upstream pass.
+    const vaultsInterval = setInterval(warmVaultsForChains, VAULTS_REWARM_INTERVAL_MS)
+    vaultsInterval.unref()
+  }
+  else {
+    logger.info({ ctx: 'warm-cache' }, 'vault snapshot cycle disabled via DISABLE_SERVER_VAULT_CACHE')
+  }
 })

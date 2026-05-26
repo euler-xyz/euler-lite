@@ -67,6 +67,8 @@ watch(() => props.selected, (val) => {
 <template>
   <BaseModalWrapper
     class="ui-select-modal"
+    data-id="select-modal"
+    :data-modal-title="title || 'Select options'"
     :title="title || 'Select options'"
     :full="false"
     @close="close"
@@ -83,6 +85,10 @@ watch(() => props.selected, (val) => {
           v-for="opt in filteredOptions"
           :key="opt.value"
           class="ui-select-modal__row"
+          data-id="select-modal-option"
+          :data-key="opt.value"
+          data-field="option"
+          :data-value="opt.value"
           @click="toggleOption(opt.value)"
         >
           <div class="ui-select-modal__asset">

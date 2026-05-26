@@ -1,39 +1,34 @@
 <script setup lang="ts">
-import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal, VaultSupplyApyModal, VaultUnverifiedDisclaimerModal } from '#components'
-import { useToast } from '~/components/ui/composables/useToast'
-import type { EarnVault, VaultAsset } from '~/entities/vault'
-import type { TxPlan } from '~/entities/txPlan'
+import type { VaultAsset } from '~/types/asset'
+import type { TransactionPlan, EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
+import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
 import { formatNumber } from '~/utils/string-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { useModal } from '~/components/ui/composables/useModal'
+import { useToast } from '~/components/ui/composables/useToast'
+import type { Address } from 'viem'
+import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultSupplyApyModal } from '#components'
 
 const router = useRouter()
 const route = useRoute()
 const modal = useModal()
 const { error } = useToast()
-const { buildSupplyPlan, executeTxPlan } = useEulerOperations()
+const { planDeposit, executePlan } = useEulerTx()
 const { getEarnVault, updateEarnVault } = useVaults()
-const { chainId } = useEulerAddresses()
-const shareLinkQuery = computed(() => {
-  const network = route.query.network
-
-  return {
-    network: Array.isArray(network) ? network[0] ?? chainId.value : network ?? chainId.value,
-  }
-})
 const { isReady: isLabelsReady } = useEulerLabels()
 const { isConnected, address } = useWagmi()
 const { fetchSingleBalance } = useWallets()
-const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
+const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const vaultAddress = route.params.vault as string
 useOperationGuard([vaultAddress])
 const { name } = useEulerProductOfVault(vaultAddress)
-const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 
 const isLoading = ref(false)
@@ -41,8 +36,8 @@ const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const isEstimatesLoading = ref(false)
 const amount = ref('')
-const plan = ref<TxPlan | null>(null)
-const vault: Ref<EarnVault | undefined> = ref(undefined)
+const plan = ref<TransactionPlan | null>(null)
+const vault: Ref<EulerEarn | undefined> = ref(undefined)
 const asset: Ref<VaultAsset | undefined> = ref(undefined)
 const estimateSupplyAPY = ref(0)
 const balance = ref(0n)
@@ -70,7 +65,7 @@ const fetchBalance = async () => {
     // Fetch fresh underlying asset balance for this specific vault
     await fetchBalance()
 
-    if (!vault.value?.verified) {
+    if (!useVaultRegistry().isVerifiedVault(vault.value.address)) {
       modal.open(VaultUnverifiedDisclaimerModal, {
         isNotClosable: true,
         props: {
@@ -107,10 +102,10 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 })
 const totalRewardsAPY = computed(() => getSupplyRewardApy(vaultAddress))
 const hasRewards = computed(() => hasSupplyRewards(vaultAddress))
-const intrinsicApy = computed(() => getIntrinsicApy(vault.value?.asset.address))
+const intrinsicApy = computed(() => getVaultIntrinsicApy(vault.value, enableIntrinsicApy.value))
 const supplyAPYDisplay = computed(() => {
   if (!vault.value) return '0.00'
-  return formatNumber(nanoToValue(vault.value!.interestRateInfo.supplyAPY, 25) + totalRewardsAPY.value)
+  return formatNumber(getVaultSupplyApy(vault.value) + totalRewardsAPY.value)
 })
 const estimateSupplyAPYDisplay = computed(() => {
   return formatNumber(estimateSupplyAPY.value)
@@ -125,13 +120,11 @@ const submit = async () => {
     }
 
     try {
-      plan.value = await buildSupplyPlan(
-        vaultAddress,
-        asset.value.address,
-        valueToNano(amount.value || '0', asset.value.decimals),
-        undefined,
-        { includePermit2Call: false },
-      )
+      plan.value = await planDeposit({
+        vaultAddress: vaultAddress as Address,
+        assetAddress: asset.value.address as Address,
+        amount: valueToNano(amount.value || '0', asset.value.decimals),
+      })
     }
     catch (e) {
       console.warn('[OperationReviewModal] failed to build plan', e)
@@ -168,8 +161,12 @@ const send = async () => {
     if (!asset.value?.address) {
       return
     }
-    const txPlan = await buildSupplyPlan(vaultAddress, asset.value.address, valueToNano(amount.value || '0', asset.value.decimals), undefined, { includePermit2Call: true })
-    await executeTxPlan(txPlan)
+    const txPlan = plan.value ?? await planDeposit({
+      vaultAddress: vaultAddress as Address,
+      assetAddress: asset.value.address as Address,
+      amount: valueToNano(amount.value || '0', asset.value.decimals),
+    })
+    await executePlan(txPlan)
 
     modal.close()
     await updateEstimates()
@@ -190,7 +187,7 @@ const updateEstimates = async () => {
   try {
     await updateEarnVault(vault.value.address)
     if (!asset.value?.address) return
-    estimateSupplyAPY.value = nanoToValue(vault.value.interestRateInfo.supplyAPY, 25) + totalRewardsAPY.value
+    estimateSupplyAPY.value = getVaultSupplyApy(vault.value) + totalRewardsAPY.value
   }
   catch (e) {
     logWarn('earn-supply/estimates', e)
@@ -199,18 +196,21 @@ const updateEstimates = async () => {
     isEstimatesLoading.value = false
   }
 }
-const supplyApyModalData = computed(() => ({
-  props: {
-    lendingAPY: nanoToValue(vault.value!.interestRateInfo.supplyAPY, 25),
-    intrinsicAPY: intrinsicApy.value,
-    intrinsicApyInfo: getIntrinsicApyInfo(vault.value?.asset.address),
-    campaigns: getSupplyRewardCampaigns(vaultAddress),
-    baseApyAverageLabel: '1h',
-  },
-}))
+const onSupplyInfoIconClick = () => {
+  modal.open(VaultSupplyApyModal, {
+    props: {
+      lendingAPY: getVaultSupplyApy(vault.value),
+      intrinsicAPY: intrinsicApy.value,
+      intrinsicApyInfo: getVaultIntrinsicApyInfo(vault.value, enableIntrinsicApy.value),
+      campaigns: getSupplyRewardCampaigns(vaultAddress),
+      rewardVaultAddress: vaultAddress,
+      baseApyAverageLabel: '1h',
+    },
+  })
+}
 
 // Initialize estimateSupplyAPY after vault is loaded
-estimateSupplyAPY.value = nanoToValue(vault.value?.interestRateInfo.supplyAPY ?? 0n, 25) + totalRewardsAPY.value
+estimateSupplyAPY.value = getVaultSupplyApy(vault.value) + totalRewardsAPY.value
 
 watch(amount, () => {
   clearSimulationError()
@@ -235,32 +235,21 @@ watch(address, () => {
         class="hidden tablet:inline-flex tablet:absolute tablet:top-8 tablet:right-full tablet:mr-12"
         fallback="/earn"
       />
-      <div
+      <VaultLabelsAndAssets
         v-if="asset"
+        back
+        back-fallback="/earn"
         class="mb-24"
-      >
-        <VaultLabelsAndAssets
-          back
-          back-fallback="/earn"
-          :vault="vault"
-          :assets="assets"
-          size="large"
-        >
-          <UiShareLinkButton
-            class="-ml-4 !w-24 !h-24"
-            :path="`/earn/${vault.address}`"
-            :query="shareLinkQuery"
-            label="Copy vault link"
-            variant="ghost"
-          />
-        </VaultLabelsAndAssets>
-      </div>
+        :vault="vault"
+        :assets="assets"
+        size="large"
+      />
 
       <div class="flex gap-32">
         <div class="hidden laptop:!block laptop:flex-[55] min-w-0">
           <VaultOverviewEarn
             v-if="vault"
-            :vault="vault as EarnVault"
+            :vault="vault as EulerEarn"
             desktop-overview
             @vault-click="(address: string) => router.push({ path: `/lend/${address}`, query: { network: route.query.network } })"
           />
@@ -279,33 +268,23 @@ watch(address, () => {
                 <span class="inline-flex items-center rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5">
                   1h
                 </span>
-                <UiModalPreviewTrigger
-                  :component="VaultSupplyApyModal"
-                  :modal-data="supplyApyModalData"
-                  aria-label="Show supply APY breakdown"
-                >
-                  <SvgIcon
-                    class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-                    name="info-circle"
-                  />
-                </UiModalPreviewTrigger>
+                <SvgIcon
+                  class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                  name="info-circle"
+                  @click="onSupplyInfoIconClick"
+                />
               </p>
 
               <p class="flex items-center gap-4 text-h3">
                 <VaultPoints
                   :vault="vault"
                 />
-                <UiModalPreviewTrigger
+                <SvgIcon
                   v-if="hasRewards"
-                  :component="VaultSupplyApyModal"
-                  :modal-data="supplyApyModalData"
-                  aria-label="Show supply APY rewards breakdown"
-                >
-                  <SvgIcon
-                    class="!w-24 !h-24 text-accent-500 cursor-pointer"
-                    name="sparks"
-                  />
-                </UiModalPreviewTrigger>
+                  class="!w-24 !h-24 text-accent-500 cursor-pointer"
+                  name="sparks"
+                  @click="onSupplyInfoIconClick"
+                />
                 <span>
                   {{ supplyAPYDisplay }}%
                 </span>

@@ -1,44 +1,30 @@
 <script setup lang="ts">
-import { formatNumber } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
-import { getCurrentLiquidationLTV, isLiquidationLTVRamping, getRampTimeRemaining } from '~/entities/vault'
+import type { SecuritizeCollateralVault, EVaultCollateral, EVault } from '@eulerxyz/euler-v2-sdk'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
+import { formatNumber } from '~/utils/string-utils'
 
 const emits = defineEmits(['close'])
 const router = useRouter()
 const route = useRoute()
-const { vault } = defineProps<{ vault: Vault }>()
+const { vault } = defineProps<{ vault: EVault }>()
 const { get: registryGet } = useVaultRegistry()
 
 const allCollateralPairs = computed(() => {
   const pairs: Array<{
-    collateral: Vault | SecuritizeVault
-    borrowLTV: bigint
-    liquidationLTV: bigint
-    initialLiquidationLTV: bigint
-    targetTimestamp: bigint
-    rampDuration: bigint
+    collateral: EVault | SecuritizeCollateralVault
+    ltv: EVaultCollateral
   }> = []
 
-  vault.collateralLTVs.forEach((ltv) => {
-    if (getCurrentLiquidationLTV(ltv) <= 0n) return
+  vault.collaterals.forEach((ltv) => {
+    if (ltv.currentLiquidationLTV <= 0) return
 
-    const pairData = {
-      borrowLTV: ltv.borrowLTV,
-      liquidationLTV: ltv.liquidationLTV,
-      initialLiquidationLTV: ltv.initialLiquidationLTV,
-      targetTimestamp: ltv.targetTimestamp,
-      rampDuration: ltv.rampDuration,
-    }
-
-    const collateralEntry = registryGet(ltv.collateral)
+    const collateralEntry = registryGet(ltv.address)
     if (collateralEntry) {
-      pairs.push({ collateral: collateralEntry.vault as Vault | SecuritizeVault, ...pairData })
+      pairs.push({ collateral: collateralEntry.vault as EVault | SecuritizeCollateralVault, ltv })
     }
   })
 
-  return pairs.sort((a, b) => (b.borrowLTV > a.borrowLTV ? 1 : b.borrowLTV < a.borrowLTV ? -1 : 0))
+  return pairs.sort((a, b) => (b.ltv.borrowLTV > a.ltv.borrowLTV ? 1 : b.ltv.borrowLTV < a.ltv.borrowLTV ? -1 : 0))
 })
 
 const formatTimeRemaining = (seconds: bigint): string => {
@@ -89,19 +75,19 @@ const onCollateralClick = (address: string) => {
           <VaultOverviewLabelValue
             label="Max LTV"
             orientation="horizontal"
-            :value="`${formatNumber(nanoToValue(pair.borrowLTV, 2), 2)}%`"
+            :value="`${formatNumber(ltvToPercent(pair.ltv.borrowLTV), 2)}%`"
           />
           <VaultOverviewLabelValue orientation="horizontal">
             <template #label>
               <span class="flex items-center gap-4">
                 Liquidation LTV
                 <span
-                  v-if="isLiquidationLTVRamping(pair)"
+                  v-if="pair.ltv.isLiquidationLTVRamping"
                   @click.stop.prevent
                 >
                   <UiFootnote
                     title="LTV Ramping"
-                    :text="`The Liquidation LTV for this collateral is currently being reduced. Target Liquidation LTV: ${formatNumber(nanoToValue(pair.liquidationLTV, 2), 2)}%. Time remaining: ${formatTimeRemaining(getRampTimeRemaining(pair))}.`"
+                    :text="`The Liquidation LTV for this collateral is currently being reduced. Target Liquidation LTV: ${formatNumber(ltvToPercent(pair.ltv.liquidationLTV), 2)}%. Time remaining: ${formatTimeRemaining(pair.ltv.rampTimeRemaining)}.`"
                     class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
                   />
                 </span>
@@ -109,12 +95,12 @@ const onCollateralClick = (address: string) => {
             </template>
             <div class="flex items-center gap-4">
               <SvgIcon
-                v-if="isLiquidationLTVRamping(pair)"
+                v-if="pair.ltv.isLiquidationLTVRamping"
                 name="arrow-top-right"
                 class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180"
                 title="Liquidation LTV ramping down"
               />
-              <span>{{ `${formatNumber(nanoToValue(getCurrentLiquidationLTV(pair), 2), 2)}%` }}</span>
+              <span>{{ `${formatNumber(ltvToPercent(pair.ltv.currentLiquidationLTV), 2)}%` }}</span>
             </div>
           </VaultOverviewLabelValue>
         </div>

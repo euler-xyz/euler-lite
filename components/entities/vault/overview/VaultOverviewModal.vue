@@ -1,14 +1,15 @@
 <script setup lang="ts">
+import { isSecuritizeCollateralVault, type EulerEarn, type SecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { getAddress } from 'viem'
-import type { AnyBorrowVaultPair, EarnVault, SecuritizeVault, Vault } from '~/entities/vault'
 
-import type { AccountBorrowPosition } from '~/entities/account'
+import { getPairBorrowVault, getPairCollateralVault } from '~/utils/borrow-pair'
 
 const emits = defineEmits(['close'])
 const router = useRouter()
 const route = useRoute()
 
-const { pair, vault, earnVault, extraVault, securitizeVault, collateralVaults, title = 'Market information' } = defineProps<{ pair?: AnyBorrowVaultPair | AccountBorrowPosition, vault?: Vault, earnVault?: EarnVault, extraVault?: Vault, securitizeVault?: SecuritizeVault, collateralVaults?: (Vault | SecuritizeVault)[], title?: string }>()
+const { pair, vault, earnVault, extraVault, securitizeVault, collateralVaults, title = 'Market information' } = defineProps<{ pair?: AnyBorrowVaultPair | PortfolioBorrowPosition<VaultEntity>, vault?: EVault, earnVault?: EulerEarn, extraVault?: EVault, securitizeVault?: SecuritizeCollateralVault, collateralVaults?: (EVault | SecuritizeCollateralVault)[], title?: string }>()
 
 const tab = ref()
 const normalizeAddress = (address?: string) => {
@@ -30,13 +31,13 @@ const tabs = computed(() => {
     {
       label: 'Position details',
       value: undefined,
-      assets: [pair.collateral.asset, pair.borrow.asset],
+      assets: [getPairCollateralVault(pair).asset, getPairBorrowVault(pair).asset],
     },
   ]
   if (extraVault) {
     const extraAddress = normalizeAddress(extraVault.address)
-    const collateralAddress = normalizeAddress(pair.collateral.address)
-    const borrowAddress = normalizeAddress(pair.borrow.address)
+    const collateralAddress = normalizeAddress(getPairCollateralVault(pair).address)
+    const borrowAddress = normalizeAddress(getPairBorrowVault(pair).address)
     if (extraAddress && extraAddress !== collateralAddress && extraAddress !== borrowAddress) {
       list.push({
         label: extraVault.asset.symbol,
@@ -46,7 +47,7 @@ const tabs = computed(() => {
     }
   }
 
-  const collaterals = collateralVaults?.length ? collateralVaults : [pair.collateral]
+  const collaterals = collateralVaults?.length ? collateralVaults : [getPairCollateralVault(pair)]
   collaterals.forEach((vault, index) => {
     list.push({
       label: vault.asset.symbol,
@@ -56,9 +57,9 @@ const tabs = computed(() => {
   })
 
   list.push({
-    label: pair.borrow.asset.symbol,
+    label: getPairBorrowVault(pair).asset.symbol,
     value: 'borrow',
-    assets: [pair.borrow.asset],
+    assets: [getPairBorrowVault(pair).asset],
   })
   return list
 })
@@ -75,9 +76,11 @@ watch(tabs, (next) => {
 const activeCollateralVault = computed(() => {
   if (!tab.value?.startsWith('collateral-')) return null
   const index = parseInt(tab.value.split('-')[1])
-  const collaterals = collateralVaults?.length ? collateralVaults : [pair?.collateral]
+  const collaterals = collateralVaults?.length ? collateralVaults : (pair ? [getPairCollateralVault(pair)] : [])
   return collaterals?.[index] ?? null
 })
+const isSecuritizeVault = (vault: EVault | SecuritizeCollateralVault | null | undefined): vault is SecuritizeCollateralVault =>
+  !!vault && isSecuritizeCollateralVault(vault)
 
 const navigateToBorrow = (collateralAddress: string, borrowVaultAddress: string) => {
   emits('close')
@@ -123,13 +126,13 @@ const navigateToBorrow = (collateralAddress: string, borrowVaultAddress: string)
             style="flex-grow: 1"
           />
           <SecuritizeVaultOverview
-            v-else-if="activeCollateralVault && 'type' in activeCollateralVault && activeCollateralVault.type === 'securitize'"
-            :vault="(activeCollateralVault as SecuritizeVault)"
+            v-else-if="isSecuritizeVault(activeCollateralVault)"
+            :vault="(activeCollateralVault as SecuritizeCollateralVault)"
           />
           <VaultOverview
             v-else-if="activeCollateralVault"
-            :vault="(activeCollateralVault as Vault)"
-            @vault-click="(address: string) => navigateToBorrow(address, (activeCollateralVault as Vault).address)"
+            :vault="(activeCollateralVault as EVault)"
+            @vault-click="(address: string) => navigateToBorrow(address, (activeCollateralVault as EVault).address)"
           />
           <VaultOverview
             v-else-if="tab === 'multiply-collateral' && extraVault"
@@ -138,8 +141,8 @@ const navigateToBorrow = (collateralAddress: string, borrowVaultAddress: string)
           />
           <VaultOverview
             v-else-if="tab === 'borrow'"
-            :vault="pair.borrow"
-            @vault-click="(address: string) => navigateToBorrow(address, pair!.borrow.address)"
+            :vault="getPairBorrowVault(pair)"
+            @vault-click="(address: string) => navigateToBorrow(address, getPairBorrowVault(pair!).address)"
           />
         </Transition>
       </template>
