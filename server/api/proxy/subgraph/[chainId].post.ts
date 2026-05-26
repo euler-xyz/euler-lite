@@ -15,9 +15,12 @@
  * requests still coalesce into one upstream round-trip without persisting.
  *
  * Upstream resolution order (first non-empty wins):
- *   1. `SUBGRAPH_URL_<chainId>` (server-only)
- *   2. `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` (legacy; also used client-side
- *      for `useEulerConfig().SUBGRAPH_URL`)
+ *   1. `SUBGRAPH_URL_<chainId>` (preferred, server-only)
+ *   2. `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` (legacy). The `NUXT_PUBLIC_` prefix
+ *      is now vestigial: the URL is resolved here server-side only and is no
+ *      longer exposed to the client (all subgraph traffic is proxied), so this
+ *      var can be renamed to `SUBGRAPH_URL_<chainId>` at the deploy's
+ *      convenience.
  *
  * If no upstream is configured for the chain, returns 404 so the caller
  * falls through to the SDK's onchain secondary.

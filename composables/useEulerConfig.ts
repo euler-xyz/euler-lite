@@ -6,8 +6,6 @@ import {
 export const useEulerConfig = () => {
   const envConfig = useEnvConfig()
   const { labelsRepo, labelsRepoBranch, labelsBaseUrl: configLabelsBaseUrl } = useDeployConfig()
-  const { subgraphUris } = useChainConfig()
-  const { chainId } = useEulerAddresses()
 
   const resolvedLabelsBaseUrl = (
     configLabelsBaseUrl
@@ -25,8 +23,5 @@ export const useEulerConfig = () => {
     // Runtime app config APIs
     SWAP_API_URL: envConfig.swapApiUrl,
     PYTH_HERMES_URL: envConfig.pythHermesUrl,
-
-    // Chain-specific (computed)
-    SUBGRAPH_URL: computed(() => subgraphUris[String(chainId.value)] || '').value,
   }
 }
