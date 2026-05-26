@@ -4,9 +4,15 @@
  * The SDK's vaultTypeSubgraphAdapter and accountVaultsSubgraphAdapter POST
  * GraphQL queries directly to per-chain URLs. With this proxy in place we
  * point both adapters at `/api/proxy/subgraph/{chainId}`, the handler
- * resolves the real upstream from env, forwards the GraphQL payload, and
- * TTL-caches the response keyed by (chainId + body hash) so concurrent
- * tabs share one upstream round-trip.
+ * resolves the real upstream from env and forwards the GraphQL payload.
+ *
+ * No server-side TTL cache: the subgraph serves freshness-critical
+ * wallet-specific data (account positions read right after a deposit/borrow),
+ * and caching it caused just-confirmed positions to stay hidden for up to a
+ * minute. Vault catalogue freshness is handled separately by the dedicated
+ * vault snapshot cache (`server/utils/vaults-cache.ts`) and the SDK's own
+ * client-side query cache. In-flight dedup is kept so concurrent identical
+ * requests still coalesce into one upstream round-trip without persisting.
  *
  * Upstream resolution order (first non-empty wins):
  *   1. `SUBGRAPH_URL_<chainId>` (server-only)
@@ -32,12 +38,12 @@ import {
   forwardProxied,
 } from '~/server/utils/external-proxy'
 
-// Subgraph queries are heavier than REST GETs; cache aggressively. Reads
-// don't include the connected wallet, so cross-tab sharing is safe.
-const CACHE_TTL_MS = 60_000
-const BROWSER_CACHE_CONTROL = 'public, max-age=30, stale-while-revalidate=30'
+const BROWSER_CACHE_CONTROL = 'no-store'
 
-const cache = createProxyCache(CACHE_TTL_MS)
+// `forwardProxied` requires a cache instance even when bypassed; this one is
+// never written to (every call passes `bypassCache: true`). In-flight dedup
+// still coalesces concurrent identical requests.
+const cache = createProxyCache(0)
 const inFlight = createProxyInFlight()
 
 const rateLimiter = createRateLimiter({
@@ -88,6 +94,7 @@ export default defineEventHandler(async (event) => {
       headers: { 'accept': 'application/json', 'content-type': 'application/json' },
       body,
       ctx: 'subgraph-proxy',
+      bypassCache: true,
     })
     setResponseStatus(event, res.status, res.statusText)
     setResponseHeaders(event, {

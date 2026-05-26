@@ -30,6 +30,14 @@ export interface ProxyForwardArgs {
   headers: Record<string, string>
   body?: string
   ctx: string
+  /**
+   * Skip the TTL cache for this request: don't read a cached response and
+   * don't store the result (in-flight dedup still applies). Use for
+   * wallet/account-specific reads where a stale cached body would mask
+   * just-confirmed on-chain state — e.g. a fresh deposit that the cached
+   * subgraph response predates.
+   */
+  bypassCache?: boolean
 }
 
 export interface ProxyForwardResult {
@@ -37,7 +45,7 @@ export interface ProxyForwardResult {
   statusText: string
   contentType: string
   body: string
-  cacheState: 'hit' | 'miss' | 'stale-fallback'
+  cacheState: 'hit' | 'miss' | 'stale-fallback' | 'bypass'
 }
 
 export function buildCacheKey(method: string, target: string, body?: string): string {
@@ -66,12 +74,14 @@ export function createProxyInFlight(): InFlightDedup<string, string> {
 }
 
 export async function forwardProxied(args: ProxyForwardArgs): Promise<ProxyForwardResult> {
-  const { cache, inFlight, method, target, headers, body, ctx } = args
+  const { cache, inFlight, method, target, headers, body, ctx, bypassCache } = args
   const cacheKey = buildCacheKey(method, target, body)
 
-  const cached = cache.get(cacheKey)
-  if (cached !== undefined) {
-    return { status: 200, statusText: 'OK', contentType: 'application/json', body: cached, cacheState: 'hit' }
+  if (!bypassCache) {
+    const cached = cache.get(cacheKey)
+    if (cached !== undefined) {
+      return { status: 200, statusText: 'OK', contentType: 'application/json', body: cached, cacheState: 'hit' }
+    }
   }
 
   try {
@@ -88,10 +98,10 @@ export async function forwardProxied(args: ProxyForwardArgs): Promise<ProxyForwa
         throw err
       }
       const text = await upstream.text()
-      cache.set(cacheKey, text)
+      if (!bypassCache) cache.set(cacheKey, text)
       return text
     })
-    return { status: 200, statusText: 'OK', contentType: 'application/json', body: fresh, cacheState: 'miss' }
+    return { status: 200, statusText: 'OK', contentType: 'application/json', body: fresh, cacheState: bypassCache ? 'bypass' : 'miss' }
   }
   catch (err) {
     const stale = cache.getStale(cacheKey)
