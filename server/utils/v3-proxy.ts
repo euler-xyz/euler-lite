@@ -1,20 +1,5 @@
 import { V3_API_PROXY_URL, readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
 
-const HOP_BY_HOP_REQUEST_HEADERS = new Set([
-  'connection',
-  'content-length',
-  'cookie',
-  'host',
-  'keep-alive',
-  'proxy-authenticate',
-  'proxy-authorization',
-  'te',
-  'trailer',
-  'transfer-encoding',
-  'upgrade',
-  'x-api-key',
-])
-
 const FORWARDED_RESPONSE_HEADERS = [
   'cache-control',
   'content-type',
@@ -22,16 +7,29 @@ const FORWARDED_RESPONSE_HEADERS = [
   'last-modified',
 ] as const
 
-export const ALLOWED_V3_PROXY_PATH_PREFIXES = [
-  '/v3/accounts',
-  '/v3/apys',
+const GET_ONLY_PATHS = new Set([
+  '/v3/apys/intrinsic',
+  '/v3/apys/rewards',
   '/v3/earn/vaults',
   '/v3/evk/vaults',
   '/v3/prices',
-  '/v3/resolve/vaults',
-  '/v3/rewards',
+  '/v3/rewards/breakdown',
   '/v3/tokens',
-] as const
+])
+
+const GET_ONLY_PATH_PATTERNS = [
+  /^\/v3\/accounts\/[^/]+\/positions$/,
+  /^\/v3\/earn\/vaults\/[^/]+\/[^/]+$/,
+]
+
+const POST_ONLY_PATHS = new Set([
+  '/v3/evk/vaults/batch',
+  '/v3/resolve/vaults',
+])
+
+type V3ProxyValidationResult
+  = | { ok: true }
+    | { ok: false, statusCode: number, statusMessage: string }
 
 const cleanBasePath = (pathname: string) => pathname.replace(/\/+$/, '')
 
@@ -42,8 +40,39 @@ export function getV3ProxyPath(requestUrl: URL): string {
 }
 
 export function isV3ProxyPathAllowed(pathname: string): boolean {
-  return ALLOWED_V3_PROXY_PATH_PREFIXES.some(prefix =>
-    pathname === prefix || pathname.startsWith(`${prefix}/`))
+  return (
+    GET_ONLY_PATHS.has(pathname)
+    || POST_ONLY_PATHS.has(pathname)
+    || GET_ONLY_PATH_PATTERNS.some(pattern => pattern.test(pathname))
+  )
+}
+
+const invalid = (statusCode: number, statusMessage: string): V3ProxyValidationResult => ({
+  ok: false,
+  statusCode,
+  statusMessage,
+})
+
+export function validateV3ProxyUrl(method: string, requestUrl: URL): V3ProxyValidationResult {
+  const normalizedMethod = method.toUpperCase()
+  const pathname = getV3ProxyPath(requestUrl)
+
+  if (!isV3ProxyPathAllowed(pathname)) {
+    return invalid(404, 'V3 path not allowed')
+  }
+
+  if (normalizedMethod === 'POST') {
+    if (!POST_ONLY_PATHS.has(pathname)) return invalid(405, 'Method not allowed')
+    return { ok: true }
+  }
+
+  if (normalizedMethod !== 'GET') {
+    return invalid(405, 'Method not allowed')
+  }
+
+  if (POST_ONLY_PATHS.has(pathname)) return invalid(405, 'Method not allowed')
+
+  return { ok: true }
 }
 
 export function buildV3ProxyTarget(requestUrl: URL, env: NodeJS.ProcessEnv = process.env): string {
@@ -57,19 +86,11 @@ export function buildV3ProxyTarget(requestUrl: URL, env: NodeJS.ProcessEnv = pro
 }
 
 export function buildV3ProxyRequestHeaders(
-  incomingHeaders: Record<string, string | undefined>,
+  method: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Headers {
-  const headers = new Headers()
-
-  for (const [key, value] of Object.entries(incomingHeaders)) {
-    if (!value) continue
-    const lower = key.toLowerCase()
-    if (HOP_BY_HOP_REQUEST_HEADERS.has(lower)) continue
-    if (lower.startsWith('cf-')) continue
-    if (lower.startsWith('x-forwarded-')) continue
-    headers.set(key, value)
-  }
+  const headers = new Headers({ accept: 'application/json' })
+  if (method.toUpperCase() === 'POST') headers.set('content-type', 'application/json')
 
   const apiKey = readV3ApiKey(env).trim()
   if (apiKey) headers.set('X-API-Key', apiKey)

@@ -1,22 +1,27 @@
 import {
   createError,
   getMethod,
-  getRequestHeaders,
   getRequestURL,
   readRawBody,
   setResponseHeaders,
   setResponseStatus,
 } from 'h3'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
+import { createRateLimiter } from '~/server/utils/rate-limit'
 import {
   buildV3ProxyRequestHeaders,
   buildV3ProxyTarget,
-  getV3ProxyPath,
-  isV3ProxyPathAllowed,
   readForwardedV3ResponseHeaders,
+  validateV3ProxyUrl,
 } from '~/server/utils/v3-proxy'
 
-const ALLOWED_METHODS = new Set(['GET', 'HEAD', 'POST'])
+const ALLOWED_METHODS = new Set(['GET', 'POST'])
+
+const rateLimiter = createRateLimiter({
+  max: 600,
+  windowMs: 60_000,
+  label: 'v3-proxy',
+})
 
 export default defineEventHandler(async (event) => {
   const method = getMethod(event).toUpperCase()
@@ -25,16 +30,15 @@ export default defineEventHandler(async (event) => {
   }
 
   const requestUrl = getRequestURL(event)
-  const proxyPath = getV3ProxyPath(requestUrl)
-  if (!isV3ProxyPathAllowed(proxyPath)) {
-    throw createError({ statusCode: 404, statusMessage: 'V3 path not allowed' })
+  const urlValidation = validateV3ProxyUrl(method, requestUrl)
+  if (!urlValidation.ok) {
+    throw createError({ statusCode: urlValidation.statusCode, statusMessage: urlValidation.statusMessage })
   }
+  rateLimiter.consume(event, method === 'POST' ? 5 : 1)
 
   const target = buildV3ProxyTarget(requestUrl)
-  const headers = buildV3ProxyRequestHeaders(getRequestHeaders(event))
-  const body = method === 'GET' || method === 'HEAD'
-    ? undefined
-    : await readRawBody(event)
+  const headers = buildV3ProxyRequestHeaders(method)
+  const body = method === 'POST' ? await readRawBody(event) : undefined
 
   const upstream = await fetchWithTimeout(target, undefined, {
     method,
@@ -45,7 +49,7 @@ export default defineEventHandler(async (event) => {
   setResponseStatus(event, upstream.status, upstream.statusText)
   setResponseHeaders(event, readForwardedV3ResponseHeaders(upstream.headers))
 
-  if (method === 'HEAD' || upstream.status === 204 || upstream.status === 304) {
+  if (upstream.status === 204 || upstream.status === 304) {
     return undefined
   }
 
