@@ -80,12 +80,19 @@ const inferEntryMetadata = (_vault: AnyVault, _type: VaultType, metadata?: Vault
 
 const set = (address: string, vault: AnyVault, type: VaultType, metadata?: VaultEntryMetadata): void => {
   const normalized = normalizeAddress(address)
+  // Preserve existing verification/category when the caller doesn't supply it.
+  // Refresh paths (updateVault, getBorrowVaultPair fallbacks) re-set a vault
+  // with no metadata; without this they'd downgrade an already-verified vault
+  // to verified:false, dropping it from getVerifiedEVaults() and the lists.
+  const existing = registry.value.get(normalized)
   const entryMetadata = inferEntryMetadata(vault, type, metadata)
+  const verified = entryMetadata.verified || existing?.verified || false
+  const vaultCategory = entryMetadata.vaultCategory ?? existing?.vaultCategory
   registry.value.set(normalized, {
     vault,
     type,
-    verified: entryMetadata.verified ?? false,
-    ...(entryMetadata.vaultCategory ? { vaultCategory: entryMetadata.vaultCategory } : {}),
+    verified,
+    ...(vaultCategory ? { vaultCategory } : {}),
   })
   registry.value = new Map(registry.value) // Trigger reactivity
   registryVersion.value++
