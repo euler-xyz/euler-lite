@@ -10,6 +10,7 @@ import { getEulerSdk } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber } from '~/utils/string-utils'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
+import { hasPermit2Signature, hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 
 const emits = defineEmits(['close', 'confirm'])
 
@@ -35,6 +36,7 @@ const { type, asset, assetIconUrl, amount, onConfirm, plan, swapToAsset, swapToA
 const { address: walletAddress, chainId: currentChainId } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { getVault } = useVaultRegistry()
+const { eulerCoreAddresses } = useEulerAddresses()
 const {
   isSimulating: isTenderlySimulating,
   simulationError: tenderlyError,
@@ -195,11 +197,10 @@ const disclaimerText = computed(() => {
 })
 
 const hasPermit2Approval = computed(() => {
-  return plan?.some(item => item.type === 'requiredApproval'
-    && item.resolved?.some(r => r.type === 'permit2')) ?? false
+  return hasPermit2TokenApproval(plan, eulerCoreAddresses.value?.permit2)
 })
 
-const usesPermit2 = computed(() => hasPermit2Approval.value)
+const usesPermit2 = computed(() => hasPermit2Signature(plan) || hasPermit2Approval.value)
 
 const hasTenderlyFailedSimulation = computed(() => {
   return !!(tenderlyUrl.value && tenderlyError.value)
