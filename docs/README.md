@@ -27,7 +27,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - 3-layer pricing architecture (oracle → USD → values)
 - On-chain vs off-chain price sources
 - Pyth oracle simulation for price reads
-- Intrinsic APY for yield-bearing assets (DefiLlama + Pendle)
+- SDK/V3-populated intrinsic APY for yield-bearing assets
 
 ### 📊 [Portfolio Logic](./portfolio-logic.md)
 
@@ -70,8 +70,8 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 
 ### 📈 [Intrinsic APY](./intrinsic-apy.md)
 
-- Multi-provider architecture (DefiLlama + Pendle)
-- Address-based lookup with TTL caching
+- SDK/V3 provider architecture
+- Vault-entity intrinsic APY fields and refresh cadence
 - Source attribution in APY modals
 - Adding new providers and tokens
 
@@ -84,7 +84,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 
 ### 🪙 [Token List](./token-list.md)
 
-- Three-source token list (Euler API, DefiLlama, Uniswap)
+- Four-source token list (Euler SDK, DefiLlama, Uniswap, Merkl reward tokens)
 - Parallel fetch via `Promise.allSettled` with per-source stale fallback
 - Pre-populated at server startup by `warm-cache.ts`
 - CSP considerations for logo URLs

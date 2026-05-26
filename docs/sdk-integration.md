@@ -78,7 +78,7 @@ The server-side snapshot builder has its own independent `SERVER_VAULT_CACHE_SOU
 
 | SDK field | Value | Backing endpoint |
 |-----------|-------|-----------------|
-| `v3ApiUrl`, `tokenlistApiBaseUrl` | `/api/v3` | V3 proxy (`server/api/v3/[...path].ts`) |
+| `v3ApiUrl`, `tokenlistApiBaseUrl` | `/api/v3` | V3 proxy with exact SDK browser endpoint allowlist (`server/api/v3/[...path].ts`) |
 | `deploymentsUrl` | `/api/euler-chains` | Local proxy |
 | `eulerLabelsBaseUrl` | `/api/labels` | Path-shape labels endpoint (see [server-side caching](./server-side-caching.md)) |
 | `rewardsMerklApiUrl` | `/api/proxy/merkl` | Merkl proxy |

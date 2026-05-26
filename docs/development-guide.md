@@ -79,8 +79,8 @@ External metadata (contract addresses, labels, oracle checks) is fetched through
 | `GET\|HEAD /api/proxy/merkl/:path` | `api.merkl.xyz/v4` (`opportunities`, `users`, `campaigns` allowlist) | 60 s | — |
 | `GET\|HEAD\|POST /api/proxy/fuul/:path` | `api.fuul.xyz/api/v1` (`incentives`, `totals`, `claim-checks`, `rewards` allowlist) | 30 s | `FUUL_API_URL`, `NUXT_PUBLIC_FUUL_API_URL` |
 | `GET\|HEAD\|POST /api/proxy/incentra/:path` | `incentra-prd.brevis.network` (`sdk/v1/`, `v1/` allowlist) | 30 s | `INCENTRA_API_URL`, `NUXT_PUBLIC_INCENTRA_API_URL` |
-| `POST /api/proxy/subgraph/:chainId` | Per-chain Goldsky subgraph | 30 s | `SUBGRAPH_URL_<chainId>` (server-only), or legacy `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` |
-| `* /api/v3/...path` | `V3_API_URL` (pass-through; supports the SDK's V3 batch endpoints) | none — V3 caches upstream | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL`, `EULER_SDK_V3_API_KEY` |
+| `POST /api/proxy/subgraph/:chainId` | Per-chain Goldsky subgraph | 30 s | `SUBGRAPH_URL_<chainId>` (server-only) or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` |
+| `GET\|POST /api/v3/...path` | Exact SDK-owned V3 endpoint allowlist (`tokens`, `prices`, APYs, rewards, account positions, vault reads, vault batch/resolve) | none — V3 caches upstream | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL`, `EULER_SDK_V3_API_KEY` |
 | `GET /api/pyth/updates?ids[]=...` | Pyth Hermes (`/v2/updates/price/latest`) | No cache | `PYTH_HERMES_URL` (server-only) |
 
 All endpoints use rate limiting and return stale cached data when upstream is unavailable (except `/api/pyth/updates` which requires real-time data and returns no-store cache headers). The shared caching utility is in `server/utils/cache.ts`; the per-host external proxies share `server/utils/external-proxy.ts`.

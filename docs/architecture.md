@@ -188,7 +188,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 ├─────────────────────────────────────────────────────────────────┤
 │                    External Services                            │
 │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐                │
-│  │ Euler API / │ │ EVM RPC     │ │ Merkl /     │                │
+│  │ Euler V3 /  │ │ EVM RPC     │ │ Merkl /     │                │
 │  │ Pyth Hermes │ │ (multi-     │ │ Brevis /    │                │
 │  │ / DefiLlama │ │  chain)     │ │ Fuul        │                │
 │  └─────────────┘ └─────────────┘ └─────────────┘                │
@@ -203,7 +203,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 |----------|-----|-------|
 | `/api/labels/{file}` | 5 min | Query-shape labels endpoint (`?chainId=N`); used internally by Lite helpers. 404 → empty shape; stale-fallback on upstream error |
 | `/api/labels/{chainId}/{file}` | 5 min | Path-shape labels endpoint matching the SDK's default `eulerLabelsBaseUrl` template; shares the underlying cache with the query-shape route |
-| `/api/token-list` | 5 min | Three sources merged via `Promise.allSettled`; per-source cache with stale fallback |
+| `/api/token-list` | 5 min | Four sources merged via `Promise.allSettled` (Euler SDK, DefiLlama, Uniswap, Merkl); per-source cache with stale fallback |
 | `/api/oracle-adapter` | 5 min | Lazy per-address fetch |
 | `/api/euler-chains` | 5 min | Static chain-agnostic config from `euler-interfaces` repo |
 | `/api/vaults` | 2 min (V3) / 5 min (no V3) | Pre-computed chain vault snapshot. Handler is read-only — no request-triggered refresh; warm-cache rewrites at the same cadence as the TTL |
@@ -211,7 +211,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 | `/api/proxy/fuul/{path}` | 30 s | Same-origin proxy to Fuul; path allowlist; GET/HEAD/POST |
 | `/api/proxy/incentra/{path}` | 30 s | Same-origin proxy to Incentra/Brevis; path allowlist; GET/HEAD/POST |
 | `/api/proxy/subgraph/{chainId}` | 30 s | Same-origin proxy to per-chain Goldsky subgraph; POST only |
-| `/api/v3/{...path}` | request-scoped | Pass-through to the V3 backend; no TTL — V3 manages its own caching |
+| `/api/v3/{...path}` | request-scoped | Rate-limited proxy for the exact SDK browser V3 endpoint allowlist; no TTL — V3 manages its own caching |
 
 Every cacheable proxy above uses the same pattern: TTL cache for fresh hits, stale-cache fallback on upstream failure, and in-flight request deduplication so concurrent cache-miss callers (e.g. warm-cache racing real traffic) collapse onto a single upstream fetch per cache key. The in-flight dedup pattern itself is a shared util — `createInFlightDedup` / `scheduleBackgroundRefresh` in `server/utils/in-flight.ts`. The per-host proxies (`/api/proxy/{merkl,fuul,incentra,subgraph}`) share a common forwarder at `server/utils/external-proxy.ts`.
 

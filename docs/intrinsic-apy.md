@@ -99,6 +99,6 @@ Intrinsic APY values rotate when the V3 backend's source providers update — ty
 
 ## Adding a new provider
 
-V3 owns the provider list — Lite doesn't carry per-provider config anymore. Add the asset upstream in the V3 backend's intrinsic-APY adapter and it appears in `vault.intrinsicApy` here automatically the next time the snapshot warms.
+V3 owns the provider list. Add the asset upstream in the V3 backend's intrinsic-APY adapter and it appears in `vault.intrinsicApy` here automatically the next time the snapshot warms.
 
-If V3 doesn't yet cover a provider Lite needs, the workaround is to keep that provider's data flowing through some other channel (e.g. a custom field on the labels payload) and stitch it in client-side — but the long-term path is upstream into V3.
+If a provider needs Lite-specific handling before it is available in V3, keep the data on an explicit current data path such as a labels payload field and wire it into the vault display code with tests. The preferred durable path is upstream into V3.

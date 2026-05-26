@@ -11,13 +11,14 @@ Client (composables/useTokenList.ts)
   v
 Server (server/api/token-list.get.ts)
   |
-  +-- Euler API      ┐
-  +-- DefiLlama      │  Promise.allSettled — all three concurrent,
-  +-- Uniswap        ┘  bounded by 10s timeout each
+  +-- Euler SDK token list ┐
+  +-- DefiLlama            │  Promise.allSettled — all four concurrent,
+  +-- Uniswap              │  bounded by 10s timeout each
+  +-- Merkl reward-tokens  ┘
   |
   v
 Merge with deduplicateTokens()
-Priority: Euler API > DefiLlama > Uniswap > Merkl reward-tokens
+Priority: Euler SDK > DefiLlama > Uniswap > Merkl reward-tokens
 ```
 
 ## Server Endpoint
@@ -28,7 +29,7 @@ Four data sources, each with its own 5-minute TTL cache and in-flight request de
 
 | Source | Scope | Role |
 |--------|-------|------|
-| Euler API | Per-chain | Primary. Reliable logo URLs. |
+| Euler SDK token list | Per-chain | Primary. Reliable logo URLs and vault-relevant assets. |
 | DefiLlama | Per-chain | Supplemental. |
 | Uniswap | All chains | Supplemental. |
 | Merkl reward-tokens | Per-chain | Fallback. Fills in rEUL and other reward-specific tokens that rarely appear in general-purpose lists. This source has its own token-list cache and is warmed through `/api/token-list`. |
@@ -37,7 +38,7 @@ All four sources run concurrently via `Promise.allSettled`. Each fetcher has its
 
 **Startup warming**: `server/plugins/warm-cache.ts` calls `refreshTokenList(chainId)` directly every 5 minutes for each enabled chain. The direct refresh bypasses the handler's fresh-cache short-circuit and always fetches all four sources + rebuilds the merged cache, so the entry is rewritten while the previous one is still serving live traffic. User requests arriving during a refresh continue to read the still-fresh previous entry from `mergedCache`. Warming runs fire-and-forget (Nitro's node-server preset doesn't await plugin promises), so caches are typically hot within ~5 s of boot; users arriving before that pay the usual cold-upstream latency.
 
-**Deduplication**: tokens are merged with Euler taking priority. If the same `chainId:address` appears in multiple sources, the higher-priority entry wins. This ensures Euler's metadata (name, symbol, decimals, logo URL) takes precedence over supplemental sources.
+**Deduplication**: tokens are merged with the Euler SDK token list taking priority. If the same `chainId:address` appears in multiple sources, the higher-priority entry wins. This ensures Euler metadata (name, symbol, decimals, logo URL) takes precedence over supplemental sources.
 
 **Error contract**:
 
@@ -70,7 +71,7 @@ Singleton state with a `shallowRef` token map, keyed by normalized address.
 
 ## Loading Strategy
 
-The token list is loaded once per chain switch via `watch(chainId)` in `app.vue`. Because the server now awaits all three sources concurrently, a single client call returns the merged set — no second retry is needed. When the fetch completes, the `isTokenListLoaded` watcher refreshes wallet balances so any newly-discovered tokens are included.
+The token list is loaded once per chain switch via `watch(chainId)` in `app.vue`. The server awaits all four sources concurrently, so a single client call returns the merged set. When the fetch completes, the `isTokenListLoaded` watcher refreshes wallet balances so any newly-discovered tokens are included.
 
 ## CSP
 

@@ -20,7 +20,7 @@ This document covers the per-host proxies, the vault snapshot pipeline, the warm
 | `server/api/proxy/subgraph/[chainId].post.ts` | Proxies the per-chain Goldsky subgraph |
 | `server/api/labels/[file].get.ts` | Query-shape labels endpoint (`?chainId=X`) — used internally |
 | `server/api/labels/[chainId]/[file].get.ts` | Path-shape labels endpoint — matches the SDK's default URL template |
-| `server/api/v3/[...path].ts` | V3 backend proxy (`/api/v3` → `v3.euler.finance/v3`) |
+| `server/api/v3/[...path].ts` | Rate-limited V3 backend proxy for SDK browser endpoints (`/api/v3` → `v3.euler.finance/v3`) |
 | `server/api/vaults.get.ts` | Per-chain consolidated vault snapshot endpoint |
 | `server/utils/vaults-cache.ts` | `refreshChainVaults` + `vaultsCache` |
 | `server/utils/sdk-server.ts` | Lazy per-chain server-side SDK builder |
@@ -56,7 +56,7 @@ Cache key is `sha1(method + '\0' + target + '\0' + body)`. Concurrent misses sha
 |---|---|---|---|---|---|
 | `/api/proxy/fuul/{...}` | `api.fuul.xyz/api/v1` | `FUUL_API_URL` / `NUXT_PUBLIC_FUUL_API_URL` | `incentives`, `totals`, `claim-checks`, `rewards` | GET, HEAD, POST | `public, max-age=30, swr=30` |
 | `/api/proxy/incentra/{...}` | `incentra-prd.brevis.network` | `INCENTRA_API_URL` / `NUXT_PUBLIC_INCENTRA_API_URL` | `sdk/v1/`, `v1/` | GET, HEAD, POST | `public, max-age=30, swr=30` |
-| `/api/proxy/subgraph/{chainId}` | per-chain Goldsky URL | `SUBGRAPH_URL_<chainId>` (server-only) or legacy `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` | (POST only — chain-level guard) | POST | `public, max-age=30, swr=30` |
+| `/api/proxy/subgraph/{chainId}` | per-chain Goldsky URL | `SUBGRAPH_URL_<chainId>` (server-only) or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` | (POST only — chain-level guard) | POST | `public, max-age=30, swr=30` |
 | `/api/proxy/merkl/{...}` | `api.merkl.xyz/v4` | (none) | `opportunities`, `users`, `campaigns` | GET, HEAD | `public, max-age=60` |
 
 Each proxy carries a rate limiter (`createRateLimiter`) and returns 405 for disallowed methods, 404 for paths outside the allowlist, 502 on upstream errors when no stale entry exists. The `x-cache: hit | miss | stale-fallback` response header reports the cache state for observability.
@@ -71,10 +71,14 @@ Each proxy carries a rate limiter (`createRateLimiter`) and returns 405 for disa
 
 Two endpoints, same `refreshLabelFile` engine:
 
-- **`/api/labels/{file}?chainId=N`** (`[file].get.ts`) — query-shape, used by internal callers (`labels-helpers.ts`) that follow the old Lite convention.
+- **`/api/labels/{file}?chainId=N`** (`[file].get.ts`) — query-shape, used by internal callers (`labels-helpers.ts`).
 - **`/api/labels/{chainId}/{file}`** (`[chainId]/[file].get.ts`) — path-shape, matches the SDK's default `eulerLabelsBaseUrl` template (`${base}/{chainId}/{file}.json`). The SDK is pointed at `/api/labels`, default templates land here.
 
 Both endpoints share the same in-memory TTL cache. Upstream is resolved by `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` if set, else `NUXT_PUBLIC_CONFIG_LABELS_REPO` + `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` → GitHub raw.
+
+### V3 proxy
+
+`/api/v3/{...path}` forwards only the SDK browser endpoints Lite needs. It accepts `GET` for token, price, APY, reward, account-position, and vault-read endpoints, and `POST` for the SDK vault batch and vault resolve endpoints. The route consumes a local rate-limit budget before forwarding (`GET` costs 1, `POST` costs 5), injects the server-side V3 API key when configured, and forwards only fixed JSON headers to upstream. Query strings and JSON bodies are left for V3 to validate.
 
 ## Vault Snapshot Pipeline
 

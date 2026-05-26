@@ -33,7 +33,7 @@ For EVK / Securitize vaults, the same governor check applies to active and depre
 - absence of risk signals (oracle staleness, asset health, liquidity, market conditions)
 - visibility decisions (whether the vault is shown on lend / borrow / explore pages)
 
-The successor backend currently under development will expose these as separate fields (a configuration-safety layer and a risk-context layer). This endpoint deliberately does not encode them, and never will — when the migration happens, `is-known` will continue to mean exactly what it means today. Integrators that need additional signals should consume them from the dedicated endpoints once available.
+This endpoint deliberately does not encode configuration-safety or risk-context signals. Integrators that need those signals should consume dedicated risk or market-data endpoints instead of inferring them from `is-known`.
 
 See [vault-labels-and-verification.md](./vault-labels-and-verification.md) for how the label sources themselves are structured.
 
