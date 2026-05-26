@@ -9,13 +9,13 @@
  *   soft-restrict gate when `asset` and `counterpart` form a known wrap
  *   pair. Hard-block is never bypassed (covered by useGeoBlock.test.ts).
  *
- * Module state (country ref, assetRestrictions / wrapPairs) is shared across
+ * Module state (country ref, SDK label snapshot / wrapPairs) is shared across
  * imports — each test resets it explicitly.
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useGeoBlock, clearAssetGeoCache, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
+import { __setEulerLabelsDataForTest, getCurrentEulerLabelsData, getEulerLabelWrapPairs } from '~/composables/useEulerLabels'
 import { isWrapPair } from '~/utils/eulerLabelsUtils'
-import { assetRestrictions, wrapPairs } from '~/utils/eulerLabelsState'
 
 // Synthetic addresses — the bypass logic doesn't care about real tokens.
 const UNDERLYING = '0x0000000000000000000000000000000000000A11'
@@ -26,9 +26,22 @@ const setCountry = (code: string | null | undefined) => {
   useGeoBlock().country.value = code
 }
 
+const labelState = () => getCurrentEulerLabelsData()
+const assetRestrictions = new Proxy({} as Record<string, string[]>, {
+  get: (_, prop: string) => labelState().assetRestrictions[prop],
+  set: (_, prop: string, value: string[]) => {
+    labelState().assetRestrictions[prop] = value
+    return true
+  },
+  deleteProperty: (_, prop: string) => Reflect.deleteProperty(labelState().assetRestrictions, prop),
+  ownKeys: () => Reflect.ownKeys(labelState().assetRestrictions),
+  getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }),
+})
+const wrapPairs = getEulerLabelWrapPairs()
+
 const resetState = () => {
+  __setEulerLabelsDataForTest()
   setCountry(undefined)
-  for (const k of Object.keys(assetRestrictions)) Reflect.deleteProperty(assetRestrictions, k)
   for (const k of Object.keys(wrapPairs)) Reflect.deleteProperty(wrapPairs, k)
   clearAssetGeoCache()
 }

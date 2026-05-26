@@ -47,5 +47,5 @@ export async function fetchLabels<T>(
   return await $fetch<T>(`/api/labels/${file}`, {
     query: { chainId },
     headers: INTERNAL_FETCH_HEADERS,
-  })
+  }) as unknown as T
 }

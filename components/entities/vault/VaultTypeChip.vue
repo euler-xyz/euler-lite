@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import type { Vault, EarnVault, SecuritizeVault } from '~/entities/vault'
-import { getVaultTypeLabel, getVaultTypeDescription } from '~/entities/vault/descriptions'
+import type { EVault, EulerEarn, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import { getVaultTypeLabel, getVaultTypeDescription } from '~/utils/vault/descriptions'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultTypeInfoModal } from '#components'
 
 const { type, vault, size = 'small', block = false, as = 'span', nudge = false } = defineProps<{
   type: string
-  vault: Vault | EarnVault | SecuritizeVault
+  vault: EVault | EulerEarn | SecuritizeCollateralVault
   size?: 'small' | 'large'
   block?: boolean
   as?: 'button' | 'span'
@@ -23,11 +23,11 @@ const isVerified = computed(() => {
   }
 
   if (type === 'managed') {
-    return isEarnVaultOwnerVerified(vault as EarnVault)
+    return isEarnVaultOwnerVerified(vault as EulerEarn)
   }
 
   // governed, ungoverned, securitize
-  return isVaultGovernorVerified(vault as Vault)
+  return isVaultGovernorVerified(vault as EVault)
 })
 
 const isWarning = computed(() => !isVerified.value || type === 'unknown')

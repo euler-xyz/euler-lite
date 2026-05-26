@@ -1,16 +1,19 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  CONFIG_ROWS,
   STATS_ROWS,
   buildAttributeRowCells,
   buildVaultApyCache,
   getActiveExternalCollateral,
+  getAttributeMatrixColumns,
   getCollateralMatrix,
   isNodeRampingDown,
   type VaultApyCacheEntry,
   type VaultUsdCacheEntry,
 } from '~/utils/discoveryCalculations'
 import type { MarketGroup } from '~/entities/lend-discovery'
-import type { Vault, VaultCollateralLTV } from '~/entities/vault/types'
+import type { EVault, EVaultCollateral, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import { VaultRewardInfo } from '@eulerxyz/euler-v2-sdk'
 
 vi.mock('~/entities/euler/labels', () => ({
   getEulerLabelEntityLogo: () => undefined,
@@ -21,26 +24,72 @@ vi.mock('~/utils/eulerLabelsUtils', () => ({
   isVaultDeprecated: () => false,
 }))
 
-const nowSeconds = BigInt(Math.floor(Date.now() / 1000))
+vi.stubGlobal('useVaultRegistry', () => ({
+  getVaultCategory: () => undefined,
+}))
 
-const makeLtv = (overrides: Partial<VaultCollateralLTV> = {}): VaultCollateralLTV => ({
-  collateral: '0xCollateral',
-  borrowLTV: 0n,
-  liquidationLTV: 7000n,
-  initialLiquidationLTV: 8500n,
-  targetTimestamp: nowSeconds + 1000n,
-  rampDuration: 2000n,
+const makeLtv = (overrides: Partial<any> = {}): EVaultCollateral => ({
+  address: '0xCollateral',
+  borrowLTV: 0,
+  liquidationLTV: 0.7,
+  currentLiquidationLTV: 0.75,
+  isLiquidationLTVRamping: true,
+  rampTimeRemaining: 1000n,
+  oraclePriceRaw: {
+    amountIn: 0n,
+    amountOutMid: 0n,
+    amountOutBid: 0n,
+    amountOutAsk: 0n,
+    timestamp: 0,
+  },
   ...overrides,
-})
+}) as unknown as EVaultCollateral
 
-const makeVault = (address: string, collateralLTVs: VaultCollateralLTV[]): Vault =>
+const makeVault = (address: string, collaterals: EVaultCollateral[]): EVault =>
   ({
+    type: 'EVault',
     address,
-    collateralLTVs,
+    collaterals,
     asset: { address, symbol: 'TST' },
-  }) as unknown as Vault
+    totalAssets: 0n,
+    totalBorrowed: 0n,
+    caps: {
+      supplyCap: 0n,
+      borrowCap: 0n,
+      supplyCapUtilization: 0,
+      borrowCapUtilization: 0,
+    },
+    fees: {
+      interestFee: 0,
+    },
+    liquidation: {
+      maxLiquidationDiscount: 0,
+      socializeDebt: true,
+    },
+    hooks: {
+      hookedOperations: 0n,
+    },
+    interestRateModel: {
+      type: 0,
+      address: '0xIrm',
+    },
+    interestRates: {
+      supplyAPY: 0,
+      borrowAPY: 0,
+    },
+  }) as unknown as EVault
 
-const makeMarket = (vaults: Vault[], externalCollateral: Vault[] = []): MarketGroup =>
+const makeSecuritizeVault = (address: string): SecuritizeCollateralVault =>
+  ({
+    type: 'SecuritizeCollateral',
+    address,
+    asset: { address, symbol: 'NOTE' },
+  }) as unknown as SecuritizeCollateralVault
+
+const makeMarket = (
+  vaults: Array<EVault | SecuritizeCollateralVault>,
+  externalCollateral: Array<EVault | SecuritizeCollateralVault> = [],
+): MarketGroup =>
   ({
     vaults,
     externalCollateral,
@@ -48,7 +97,7 @@ const makeMarket = (vaults: Vault[], externalCollateral: Vault[] = []): MarketGr
 
 describe('isNodeRampingDown', () => {
   it('marks the vault whose own collateral LTV is ramping down after borrow LTV is zeroed', () => {
-    const borrowVault = makeVault('0xBorrow', [makeLtv({ collateral: '0xCollateral' })])
+    const borrowVault = makeVault('0xBorrow', [makeLtv({ address: '0xCollateral' })])
     const collateralVault = makeVault('0xCollateral', [])
     const market = makeMarket([borrowVault, collateralVault])
 
@@ -56,7 +105,7 @@ describe('isNodeRampingDown', () => {
   })
 
   it('does not mark a collateral vault just because another vault is ramping against it', () => {
-    const borrowVault = makeVault('0xBorrow', [makeLtv({ collateral: '0xCollateral' })])
+    const borrowVault = makeVault('0xBorrow', [makeLtv({ address: '0xCollateral' })])
     const collateralVault = makeVault('0xCollateral', [])
     const market = makeMarket([borrowVault, collateralVault])
 
@@ -66,11 +115,13 @@ describe('isNodeRampingDown', () => {
   it('does not mark completed or upward LTV changes as ramping down', () => {
     const vault = makeVault('0xBorrow', [
       makeLtv({
-        liquidationLTV: 9000n,
-        initialLiquidationLTV: 8500n,
+        liquidationLTV: 0.9,
+        currentLiquidationLTV: 0.9,
+        isLiquidationLTVRamping: false,
       }),
       makeLtv({
-        targetTimestamp: nowSeconds - 1n,
+        currentLiquidationLTV: 0.7,
+        isLiquidationLTVRamping: false,
       }),
     ])
     const market = makeMarket([vault])
@@ -81,7 +132,7 @@ describe('isNodeRampingDown', () => {
 
 describe('getCollateralMatrix', () => {
   it('keeps a vault as a matrix column while its liquidation LTV is still ramping down', () => {
-    const borrowVault = makeVault('0xBorrow', [makeLtv({ collateral: '0xCollateral', borrowLTV: 0n })])
+    const borrowVault = makeVault('0xBorrow', [makeLtv({ address: '0xCollateral', borrowLTV: 0 })])
     const collateralVault = makeVault('0xCollateral', [])
     const market = makeMarket([borrowVault, collateralVault])
 
@@ -95,11 +146,11 @@ describe('getCollateralMatrix', () => {
   it('drops a vault from matrix columns once all of its collateral relationships are fully ramped out', () => {
     const phasedOutVault = makeVault('0xBorrow', [
       makeLtv({
-        collateral: '0xCollateral',
-        borrowLTV: 0n,
-        liquidationLTV: 0n,
-        initialLiquidationLTV: 8500n,
-        targetTimestamp: nowSeconds - 1n,
+        address: '0xCollateral',
+        borrowLTV: 0,
+        liquidationLTV: 0,
+        currentLiquidationLTV: 0,
+        isLiquidationLTVRamping: false,
       }),
     ])
     const collateralVault = makeVault('0xCollateral', [])
@@ -107,28 +158,46 @@ describe('getCollateralMatrix', () => {
 
     expect(getCollateralMatrix(market)).toBeNull()
   })
+
+  it('includes Securitize member vaults referenced as collateral rows', () => {
+    const borrowVault = makeVault('0xBorrow', [
+      makeLtv({ address: '0xSecuritize', borrowLTV: 0.5 }),
+    ])
+    const securitizeVault = makeSecuritizeVault('0xSecuritize')
+    const market = makeMarket([borrowVault, securitizeVault])
+
+    const matrix = getCollateralMatrix(market)
+
+    expect(matrix).not.toBeNull()
+    expect(matrix!.rows).toContainEqual({
+      address: '0xsecuritize',
+      symbol: 'NOTE',
+      assetAddress: '0xSecuritize',
+      category: 'external',
+    })
+  })
 })
 
 describe('getActiveExternalCollateral', () => {
   it('keeps an external collateral vault visible while the borrow vault is ramping it out', () => {
     const borrowVault = makeVault('0xBorrow', [
-      makeLtv({ collateral: '0xExternal', borrowLTV: 0n }),
+      makeLtv({ address: '0xExternal', borrowLTV: 0 }),
     ])
     const externalVault = makeVault('0xExternal', [])
     const market = makeMarket([borrowVault], [externalVault])
 
     const active = getActiveExternalCollateral(market)
-    expect(active.map(v => (v as Vault).address)).toContain('0xExternal')
+    expect(active.map(v => (v as EVault).address)).toContain('0xExternal')
   })
 
   it('drops an external collateral once the relationship is fully ramped out', () => {
     const borrowVault = makeVault('0xBorrow', [
       makeLtv({
-        collateral: '0xExternal',
-        borrowLTV: 0n,
-        liquidationLTV: 0n,
-        initialLiquidationLTV: 8500n,
-        targetTimestamp: nowSeconds - 1n,
+        address: '0xExternal',
+        borrowLTV: 0,
+        liquidationLTV: 0,
+        currentLiquidationLTV: 0,
+        isLiquidationLTVRamping: false,
       }),
     ])
     const externalVault = makeVault('0xExternal', [])
@@ -139,19 +208,36 @@ describe('getActiveExternalCollateral', () => {
 })
 
 describe('attribute stats matrix', () => {
+  it('includes Securitize member vaults in attribute columns', () => {
+    const eVault = makeVault('0xBorrow', [])
+    const securitizeVault = makeSecuritizeVault('0xSecuritize')
+    const market = makeMarket([eVault, securitizeVault])
+
+    expect(getAttributeMatrixColumns(market).map(column => column.address)).toEqual([
+      '0xborrow',
+      '0xsecuritize',
+    ])
+  })
+
   it('emits numeric values and directional rows for heatmap rendering', () => {
     const vault = {
       ...makeVault('0xStats', []),
-      supply: 400n,
-      borrow: 500n,
+      totalCash: 500n,
+      totalBorrowed: 500n,
       totalAssets: 1000n,
-      supplyCap: 1000n,
-      borrowCap: 1000n,
-      interestRateInfo: {
-        supplyAPY: 5n * 10n ** 25n,
-        borrowAPY: 12n * 10n ** 25n,
+      availableLiquidity: 500n,
+      utilization: 50,
+      caps: {
+        supplyCap: 1000n,
+        borrowCap: 1000n,
+        supplyCapUtilization: 40,
+        borrowCapUtilization: 50,
       },
-    } as Vault
+      interestRates: {
+        supplyAPY: 5,
+        borrowAPY: 12,
+      },
+    } as unknown as EVault
     const usd: VaultUsdCacheEntry = {
       supply: '$1K',
       supplyUsd: 1000,
@@ -195,7 +281,7 @@ describe('attribute stats matrix', () => {
         supplyAPY: 0n,
         borrowAPY: 0n,
       },
-    } as Vault
+    } as unknown as EVault
     const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, vault, isExternal: false }]
     const usdCache = new Map<string, VaultUsdCacheEntry>()
     const apyCache = new Map<string, VaultApyCacheEntry>([
@@ -213,29 +299,81 @@ describe('attribute stats matrix', () => {
   })
 })
 
+describe('attribute config matrix', () => {
+  it('formats SDK fractional fee and liquidation discount values as percentages', () => {
+    const vault = {
+      ...makeVault('0xConfig', []),
+      caps: {
+        supplyCap: 1000n,
+        borrowCap: 1000n,
+      },
+      fees: {
+        interestFee: 0.1,
+      },
+      liquidation: {
+        maxLiquidationDiscount: 0.15,
+        socializeDebt: true,
+      },
+      interestRateModel: {
+        type: 0,
+        address: '0xIrm',
+      },
+    } as unknown as EVault
+    const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, vault, isExternal: false }]
+    const usdCache = new Map<string, VaultUsdCacheEntry>()
+    const byRow = new Map(CONFIG_ROWS.map(row => [
+      row.id,
+      buildAttributeRowCells(row, columns, usdCache)[0],
+    ]))
+
+    expect(byRow.get('interestFee')!.display).toBe('10.00%')
+    expect(byRow.get('maxLiqDiscount')!.display).toBe('15%')
+  })
+})
+
 describe('buildVaultApyCache', () => {
+  const settings = { enableIntrinsicApy: true, enableRewardsApy: true }
+  // 0.5% supply + 0.25% borrow campaigns expressed as VaultRewardInfo;
+  // c.apr is a decimal fraction, so 0.5% = 0.005.
+  const rewards = () => new VaultRewardInfo({
+    campaigns: [
+      {
+        campaignId: 'lend',
+        source: 'merkl',
+        action: 'LEND',
+        apr: 0.005,
+        rewardTokenSymbol: 'EUL',
+      },
+      {
+        campaignId: 'borrow',
+        source: 'merkl',
+        action: 'BORROW',
+        apr: 0.0025,
+        rewardTokenSymbol: 'EUL',
+      },
+    ] as never,
+  })
+
   it('folds intrinsic and reward APY into the per-vault entries', () => {
     const vault = {
       ...makeVault('0xPT', []),
-      interestRateInfo: {
-        supplyAPY: 4n * 10n ** 25n,
-        borrowAPY: 6n * 10n ** 25n,
+      interestRates: {
+        supplyAPY: 4,
+        borrowAPY: 6,
       },
-    } as Vault
+      intrinsicApy: { apy: 1, provider: 'test' },
+      rewards: rewards(),
+    } as unknown as EVault
     const market = makeMarket([vault])
 
-    const cache = buildVaultApyCache(
-      [market],
-      (apy, _addr) => apy + 1, // intrinsic supply contribution: +1
-      (apy, _addr) => apy + 2, // intrinsic borrow contribution: +2
-      _addr => 0.5, // supply rewards
-      _addr => 0.25, // general borrow rewards
-    )
+    const cache = buildVaultApyCache([market], undefined, settings)
 
     const entry = cache.get(vault.address.toLowerCase())
     expect(entry).toBeDefined()
-    expect(entry!.supplyApy).toBeCloseTo(4 + 1 + 0.5)
-    expect(entry!.borrowApy).toBeCloseTo(6 + 2 - 0.25)
+    // computeSupplyApyBreakdown: lending + intrinsic + rewards = base + (1 + base/100) * intrinsic + lendRewards
+    expect(entry!.supplyApy).toBeCloseTo(4 + (1 + 4 / 100) * 1 + 0.5)
+    // computeBorrowApy: base + (1 + base/100) * intrinsic - borrowRewards
+    expect(entry!.borrowApy).toBeCloseTo(6 + (1 + 6 / 100) * 1 - 0.25)
   })
 
   it('caches external-collateral vaults so attribute matrix externals match the per-vault card', () => {
@@ -244,24 +382,20 @@ describe('buildVaultApyCache', () => {
     // Stats column would silently fall back to raw IRM for externals.
     const externalVault = {
       ...makeVault('0xExternalApy', []),
-      interestRateInfo: {
-        supplyAPY: 3n * 10n ** 25n,
-        borrowAPY: 5n * 10n ** 25n,
+      interestRates: {
+        supplyAPY: 3,
+        borrowAPY: 5,
       },
-    } as Vault
+      intrinsicApy: { apy: 1, provider: 'test' },
+      rewards: rewards(),
+    } as unknown as EVault
     const market = makeMarket([], [externalVault])
 
-    const cache = buildVaultApyCache(
-      [market],
-      (apy, _addr) => apy + 1,
-      (apy, _addr) => apy + 2,
-      _addr => 0.5,
-      _addr => 0.25,
-    )
+    const cache = buildVaultApyCache([market], undefined, settings)
 
     const entry = cache.get(externalVault.address.toLowerCase())
     expect(entry).toBeDefined()
-    expect(entry!.supplyApy).toBeCloseTo(3 + 1 + 0.5)
-    expect(entry!.borrowApy).toBeCloseTo(5 + 2 - 0.25)
+    expect(entry!.supplyApy).toBeCloseTo(3 + (1 + 3 / 100) * 1 + 0.5)
+    expect(entry!.borrowApy).toBeCloseTo(5 + (1 + 5 / 100) * 1 - 0.25)
   })
 })

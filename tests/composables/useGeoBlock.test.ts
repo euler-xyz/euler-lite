@@ -12,10 +12,11 @@
  * - "Regex patterns never scan unbounded input." — MAX_REGEX_INPUT_LEN ReDoS guard.
  * - "Cache can't serve a decision against rules that have been cleared."
  *
- * The module state (country ref, assetBlocks / assetRestrictions / assetPatternRules)
- * is shared across imports — each test resets it explicitly in beforeEach.
+ * The country ref and current SDK labels snapshot are shared across imports —
+ * each test resets them explicitly in beforeEach.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import type { EulerLabelAssetPatternRule } from '@eulerxyz/euler-v2-sdk'
 import {
   useGeoBlock,
   clearAssetGeoCache,
@@ -24,11 +25,7 @@ import {
   isVaultBlockedByCountry,
   isVaultRestrictedByCountry,
 } from '~/composables/useGeoBlock'
-import {
-  assetBlocks,
-  assetRestrictions,
-  assetPatternRules,
-} from '~/utils/eulerLabelsState'
+import { __setEulerLabelsDataForTest, getCurrentEulerLabelsData } from '~/composables/useEulerLabels'
 
 // Mock the vault registry before the module under test imports it.
 // The registry is consulted by isVaultBlockedByCountry / isVaultRestrictedByCountry
@@ -43,14 +40,44 @@ vi.mock('~/composables/useVaultRegistry', () => ({
 const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
 const WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
 
+const labelState = () => getCurrentEulerLabelsData()
+const assetBlocks = new Proxy({} as Record<string, string[]>, {
+  get: (_, prop: string) => labelState().assetBlocks[prop],
+  set: (_, prop: string, value: string[]) => {
+    labelState().assetBlocks[prop] = value
+    return true
+  },
+  deleteProperty: (_, prop: string) => Reflect.deleteProperty(labelState().assetBlocks, prop),
+  ownKeys: () => Reflect.ownKeys(labelState().assetBlocks),
+  getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }),
+})
+const assetRestrictions = new Proxy({} as Record<string, string[]>, {
+  get: (_, prop: string) => labelState().assetRestrictions[prop],
+  set: (_, prop: string, value: string[]) => {
+    labelState().assetRestrictions[prop] = value
+    return true
+  },
+  deleteProperty: (_, prop: string) => Reflect.deleteProperty(labelState().assetRestrictions, prop),
+  ownKeys: () => Reflect.ownKeys(labelState().assetRestrictions),
+  getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }),
+})
+const assetPatternRules = new Proxy([] as EulerLabelAssetPatternRule[], {
+  get: (_, prop: string) => {
+    const value = (labelState().assetPatternRules as unknown as Record<string, unknown>)[prop]
+    return typeof value === 'function' ? value.bind(labelState().assetPatternRules) : value
+  },
+  set: (_, prop: string, value: EulerLabelAssetPatternRule | number) => {
+    ;(labelState().assetPatternRules as unknown as Record<string, unknown>)[prop] = value
+    return true
+  },
+})
+
 const setCountry = (code: string | null | undefined) => {
   useGeoBlock().country.value = code
 }
 
 const resetState = () => {
-  for (const k of Object.keys(assetBlocks)) Reflect.deleteProperty(assetBlocks, k)
-  for (const k of Object.keys(assetRestrictions)) Reflect.deleteProperty(assetRestrictions, k)
-  assetPatternRules.length = 0
+  __setEulerLabelsDataForTest()
   clearAssetGeoCache()
   getVaultMock.mockReset()
 }

@@ -1,23 +1,21 @@
 <script setup lang="ts">
-import type { CSSProperties } from 'vue'
-import type { Address } from 'viem'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
-import { collectOracleAdapters, getChecksStatus, OracleAdapterCheckSeverity, type OracleAdapterEntry, type OracleAdapterMeta } from '~/entities/oracle'
+import type { SecuritizeCollateralVault, EVault, OracleAdapterEntry } from '@eulerxyz/euler-v2-sdk'
+import { getChecksStatus, OracleAdapterCheckSeverity, type OracleAdapterMeta } from '~/entities/oracle'
 import { getOracleProviderLogo } from '~/entities/oracle-providers'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { formatNumber } from '~/utils/string-utils'
 import { shouldInvertOraclePrice } from '~/utils/oracle-label'
 import { useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
+import type { CSSProperties } from 'vue'
 
 const props = defineProps<{
-  vault?: Vault
-  vaults?: Vault[]
-  collateralVaults?: (Vault | SecuritizeVault)[]
+  vault?: EVault
+  vaults?: EVault[]
+  collateralVaults?: (EVault | SecuritizeCollateralVault)[]
 }>()
 const { oracleAdapters, loadOracleAdapter } = useEulerLabels()
 const { chainId } = useEulerAddresses()
 const { buildKnownSymbols, resolveSymbol: resolveTokenSymbol, shortenAddress } = useTokenSymbolResolver()
-const { copyToClipboard, isCopied } = useClipboardCopy()
 
 const sourceVaults = computed(() => {
   if (props.vaults?.length) {
@@ -31,33 +29,21 @@ const sourceVaults = computed(() => {
   return []
 })
 
-const skipERC4626Bases = computed(() => {
-  const bases = new Set<string>()
-  props.collateralVaults?.forEach((vault) => {
-    bases.add(vault.address.toLowerCase())
-  })
-  return bases
-})
+const getCollateralAdapters = (vault: EVault, collateralVault: EVault | SecuritizeCollateralVault) =>
+  vault.collaterals.find(collateral =>
+    collateral.address.toLowerCase() === collateralVault.address.toLowerCase(),
+  )?.oracleAdapters ?? []
 
 const adapters = computed(() => {
   const entries: OracleAdapterEntry[] = []
   const deduped = new Map<string, OracleAdapterEntry>()
 
   sourceVaults.value.forEach((vault) => {
-    entries.push(...collectOracleAdapters(vault.oracleDetailedInfo, 3, {
-      base: vault.asset.address as Address,
-      quote: vault.unitOfAccount as Address,
-      leafOnly: true,
-    }))
+    entries.push(...vault.debtPricingOracleAdapters)
 
     if (props.collateralVaults?.length) {
       props.collateralVaults.forEach((collateralVault) => {
-        entries.push(...collectOracleAdapters(vault.oracleDetailedInfo, 3, {
-          base: collateralVault.address as Address,
-          quote: vault.unitOfAccount as Address,
-          leafOnly: true,
-          skipERC4626Bases: skipERC4626Bases.value,
-        }))
+        entries.push(...getCollateralAdapters(vault, collateralVault))
       })
     }
   })
@@ -77,8 +63,8 @@ const knownSymbols = computed(() => {
 
   sourceVaults.value.forEach((vault) => {
     map.set(vault.asset.address.toLowerCase(), vault.asset.symbol)
-    if (vault.unitOfAccountSymbol) {
-      map.set(vault.unitOfAccount.toLowerCase(), vault.unitOfAccountSymbol)
+    if (vault.unitOfAccount) {
+      map.set(vault.unitOfAccount.address.toLowerCase(), vault.unitOfAccount.symbol)
     }
   })
 
@@ -137,8 +123,8 @@ watch(
 
 const resolveSymbol = (address: string) => resolveTokenSymbol(address, knownSymbols.value)
 
-const onCopyClick = (address: string, key = address) => {
-  copyToClipboard(address, key)
+const onCopyClick = (address: string) => {
+  navigator.clipboard.writeText(address)
 }
 
 const getAdapterKey = (adapter: OracleAdapterEntry) => `${adapter.oracle.toLowerCase()}:${adapter.base.toLowerCase()}:${adapter.quote.toLowerCase()}`
@@ -353,11 +339,11 @@ const onTooltipMouseLeave = () => {
               :class="$style.copyBtn"
               class="text-content-muted"
               aria-label="Copy address"
-              @click="onCopyClick(adapter.oracle, getAdapterKey(adapter))"
+              @click="onCopyClick(adapter.oracle)"
             >
               <SvgIcon
                 class="!w-18 !h-18"
-                :name="isCopied(getAdapterKey(adapter)) ? 'check' : 'copy'"
+                name="copy"
               />
             </button>
           </div>

@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import type { EarnVault } from '~/entities/vault'
-import { formatAssetValue } from '~/services/pricing/priceProvider'
+import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
-import { VaultSupplyApyModal } from '#components'
+import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
+import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 
-const { vault } = defineProps<{ vault: EarnVault }>()
+const { vault } = defineProps<{ vault: EulerEarn }>()
 
-const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
 
 const rewardSupplyAPY = computed(() => getSupplyRewardApy(vault.address))
@@ -28,10 +29,11 @@ watchEffect(async () => {
 
 const supplyApyModalData = computed(() => ({
   props: {
-    lendingAPY: nanoToValue(vault.interestRateInfo.supplyAPY, 25),
-    intrinsicAPY: getIntrinsicApy(vault.asset.address),
-    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    lendingAPY: getVaultSupplyApy(vault),
+    intrinsicAPY: getVaultIntrinsicApy(vault, enableIntrinsicApy.value),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
     campaigns: getSupplyRewardCampaigns(vault.address),
+    rewardVaultAddress: vault.address,
     baseApyAverageLabel: '1h',
   },
 }))
@@ -74,9 +76,10 @@ const supplyApyModalData = computed(() => ({
             <SvgIcon
               class="!w-20 !h-20 text-accent-500 cursor-pointer"
               name="sparks"
+              data-modal-trigger="supply-apy"
             />
           </UiModalPreviewTrigger>
-          {{ formatNumber(nanoToValue(vault.interestRateInfo.supplyAPY, 25) + rewardSupplyAPY) }}%
+          {{ formatNumber(getVaultSupplyApy(vault) + rewardSupplyAPY) }}%
         </span>
       </VaultOverviewLabelValue>
     </div>

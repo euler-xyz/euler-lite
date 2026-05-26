@@ -1,25 +1,28 @@
 <script setup lang="ts">
-import { getVaultUtilization, type Vault } from '~/entities/vault'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
-import { formatAssetValue } from '~/services/pricing/priceProvider'
+import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
-import { VaultSupplyApyModal, VaultBorrowApyModal } from '#components'
+import { VaultSupplyApyModal, VaultBorrowApyModal, UiModalPreviewTrigger } from '#components'
+import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 
-const { vault } = defineProps<{ vault: Vault }>()
+const { vault } = defineProps<{ vault: EVault }>()
 
-const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, hasSupplyRewards, hasBorrowRewards } = useRewardsApy()
-const isBorrowable = computed(() => vault.collateralLTVs.some(ltv => ltv.borrowLTV > 0n))
+const isBorrowable = computed(() => vault.collaterals.some(ltv => ltv.borrowLTV > 0))
 
-const supplyApyWithRewards = computed(() => withIntrinsicSupplyApy(
-  nanoToValue(vault.interestRateInfo.supplyAPY, 25),
-  vault.asset.address,
+const supplyApyWithRewards = computed(() => withVaultIntrinsicApy(
+  getVaultSupplyApy(vault),
+  vault,
+  enableIntrinsicApy.value,
 ) + getSupplyRewardApy(vault.address))
 // Vault overview shows generic borrow rewards (no specific collateral context available here)
-const borrowApyWithRewards = computed(() => withIntrinsicBorrowApy(
-  nanoToValue(vault.interestRateInfo.borrowAPY, 25),
-  vault.asset.address,
+const borrowApyWithRewards = computed(() => withVaultIntrinsicApy(
+  getVaultBorrowApy(vault),
+  vault,
+  enableIntrinsicApy.value,
 ) - getBorrowRewardApy(vault.address))
 
 const supplyRewardInfo = computed(() => getSupplyRewardCampaigns(vault.address))
@@ -27,23 +30,25 @@ const borrowRewardInfo = computed(() => getBorrowRewardCampaigns(vault.address))
 
 const supplyApyModalData = computed(() => ({
   props: {
-    lendingAPY: nanoToValue(vault.interestRateInfo.supplyAPY, 25),
-    intrinsicAPY: getIntrinsicApy(vault.asset.address),
-    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    lendingAPY: getVaultSupplyApy(vault),
+    intrinsicAPY: getVaultIntrinsicApy(vault, enableIntrinsicApy.value),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
     campaigns: supplyRewardInfo.value,
+    rewardVaultAddress: vault.address,
   },
 }))
 
 const borrowApyModalData = computed(() => ({
   props: {
-    borrowingAPY: nanoToValue(vault.interestRateInfo.borrowAPY, 25),
-    intrinsicAPY: getIntrinsicApy(vault.asset.address),
-    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    borrowingAPY: getVaultBorrowApy(vault),
+    intrinsicAPY: getVaultIntrinsicApy(vault, enableIntrinsicApy.value),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
     campaigns: borrowRewardInfo.value,
+    rewardVaultAddress: vault.address,
   },
 }))
 
-const utilization = computed(() => getVaultUtilization(vault))
+const utilization = computed(() => vault.utilization)
 const utilisationWarning = computed(() => getUtilisationWarning(vault, 'general'))
 
 const totalSupplyDisplay = ref('-')
@@ -51,17 +56,17 @@ const totalBorrowedDisplay = ref('-')
 const availableLiquidityDisplay = ref('-')
 
 watchEffect(async () => {
-  const price = await formatAssetValue(vault.supply, vault, 'off-chain')
+  const price = await formatAssetValue(vault.totalAssets, vault, 'off-chain')
   totalSupplyDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
 })
 
 watchEffect(async () => {
-  const price = await formatAssetValue(vault.borrow, vault, 'off-chain')
+  const price = await formatAssetValue(vault.totalBorrowed, vault, 'off-chain')
   totalBorrowedDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
 })
 
 watchEffect(async () => {
-  const liquidity = vault.supply >= vault.borrow ? vault.supply - vault.borrow : 0n
+  const liquidity = vault.availableLiquidity
   const price = await formatAssetValue(liquidity, vault, 'off-chain')
   availableLiquidityDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
 })
@@ -102,8 +107,9 @@ watchEffect(async () => {
               aria-label="Show supply APY breakdown"
             >
               <SvgIcon
-                class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                class="!w-20 !h-20 text-content-muted hover:text-content-secondary cursor-pointer"
                 name="info-circle"
+                data-modal-trigger="supply-apy"
               />
             </UiModalPreviewTrigger>
           </span>
@@ -118,6 +124,7 @@ watchEffect(async () => {
             <SvgIcon
               class="!w-20 !h-20 text-accent-500 cursor-pointer"
               name="sparks"
+              data-modal-trigger="supply-apy"
             />
           </UiModalPreviewTrigger>
           {{ formatNumber(supplyApyWithRewards) }}%
@@ -136,8 +143,9 @@ watchEffect(async () => {
               aria-label="Show borrow APY breakdown"
             >
               <SvgIcon
-                class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                class="!w-20 !h-20 text-content-muted hover:text-content-secondary cursor-pointer"
                 name="info-circle"
+                data-modal-trigger="borrow-apy"
               />
             </UiModalPreviewTrigger>
           </span>
@@ -152,6 +160,7 @@ watchEffect(async () => {
             <SvgIcon
               class="!w-20 !h-20 text-accent-500 cursor-pointer"
               name="sparks"
+              data-modal-trigger="borrow-apy"
             />
           </UiModalPreviewTrigger>
           {{ formatNumber(borrowApyWithRewards) }}%

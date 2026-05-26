@@ -1,9 +1,6 @@
-import type { Ref, ComputedRef } from 'vue'
-import { formatUnits, zeroAddress, type Address } from 'viem'
-import { previewWithdraw, type Vault, type SecuritizeVault } from '~/entities/vault'
-import { getAssetUsdValue } from '~/services/pricing/priceProvider'
-import type { AccountBorrowPosition } from '~/entities/account'
-import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
+import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, SwapQuote, TransactionPlan, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { getAssetUsdValue } from '~/utils/sdk-prices'
+import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { COWSWAP_ORDER_DEADLINE_SECONDS, COWSWAP_PROVIDER_EXTRA_DATA, buildClosePositionQuoteAppData, getCowSwapChainConfig } from '~/entities/cowswap'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
 import { valueToNano } from '~/utils/crypto-utils'
@@ -11,6 +8,8 @@ import { trimTrailingZeros } from '~/utils/string-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { amountToPercent, percentToAmountNano } from '~/utils/repayUtils'
 import { createRaceGuard } from '~/utils/race-guard'
+import { type Address, formatUnits, zeroAddress } from 'viem'
+import type { Ref, ComputedRef } from 'vue'
 
 interface QuoteAccounts {
   accountIn: Address
@@ -18,11 +17,11 @@ interface QuoteAccounts {
 }
 
 export interface UseRepaySwapCoreOptions {
-  position: Ref<AccountBorrowPosition | undefined>
-  borrowVault: ComputedRef<AccountBorrowPosition['borrow'] | undefined>
-  sourceVault: Ref<Vault | undefined>
-  sourceAssets: Readonly<Ref<bigint>>
-  sourceShares: Readonly<Ref<bigint>>
+  position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
+  borrowVault: ComputedRef<EVault | undefined>
+  sourceVault: Ref<EVault | undefined>
+  sourceAssets?: Readonly<Ref<bigint>>
+  sourceShares?: Readonly<Ref<bigint>>
   sourceBalance: ComputedRef<bigint>
   formTab: Ref<string>
   formTabName: string
@@ -32,7 +31,7 @@ export interface UseRepaySwapCoreOptions {
   getQuoteAccounts: () => QuoteAccounts
   onQuoteReceived?: (amountOut: bigint, direction: SwapperMode) => boolean
   includeCowSwap?: boolean
-  buildTxPlanForQuote?: (quote: SwapApiQuote, provider: string) => Promise<import('~/entities/txPlan').TxPlan>
+  buildTxPlanForQuote?: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
 }
 
 export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
@@ -220,12 +219,12 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     requestQuote()
   }
 
-  const onSourceVaultChange = (selectedIndex: number, vaultList: Ref<(Vault | SecuritizeVault)[]>) => {
+  const onSourceVaultChange = (selectedIndex: number, vaultList: Ref<(EVault | SecuritizeCollateralVault)[]>) => {
     clearSimulationError()
     const nextVault = vaultList.value[selectedIndex]
     if (!nextVault) return
     if (!sourceVault.value || normalizeAddressOrEmpty(sourceVault.value.address) !== normalizeAddressOrEmpty(nextVault.address)) {
-      sourceVault.value = nextVault as Vault
+      sourceVault.value = nextVault as EVault
       amount.value = ''
       debtAmount.value = ''
       quotes.reset()
@@ -290,18 +289,27 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     quotes.selectProvider(provider)
   }
 
+  // Compute the source-vault shares amount we expect to spend for the CoW
+  // close-position appData. Falls back to a preview-withdraw if our cached
+  // sourceShares value is missing.
   const getClosePositionQuoteCollateralAmount = async (): Promise<bigint> => {
     if (!sourceVault.value || sourceBalance.value <= 0n) return 0n
 
-    if (sourceBalance.value < sourceAssets.value) {
-      const withdrawShares = await previewWithdraw(sourceVault.value.address, sourceBalance.value)
-      return sourceShares.value > 0n && withdrawShares > sourceShares.value
-        ? sourceShares.value
+    const sharesValue = sourceShares?.value ?? 0n
+    const assetsValue = sourceAssets?.value ?? 0n
+
+    if (sourceBalance.value < assetsValue) {
+      // Cash-limited withdraw — need to convert the balance to shares.
+      const previewWithdraw = (sourceVault.value as EVault).previewWithdraw?.bind(sourceVault.value)
+      const withdrawShares = previewWithdraw ? previewWithdraw(sourceBalance.value) : sourceBalance.value
+      return sharesValue > 0n && withdrawShares > sharesValue
+        ? sharesValue
         : withdrawShares
     }
 
-    if (sourceShares.value > 0n) return sourceShares.value
-    return previewWithdraw(sourceVault.value.address, sourceBalance.value)
+    if (sharesValue > 0n) return sharesValue
+    const previewWithdraw = (sourceVault.value as EVault).previewWithdraw?.bind(sourceVault.value)
+    return previewWithdraw ? previewWithdraw(sourceBalance.value) : sourceBalance.value
   }
 
   // --- Quote request ---
@@ -384,9 +392,13 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
       return
     }
     const targetDebt = parsedAmount >= currentDebt ? 0n : currentDebt - parsedAmount
+    // For the CoW close-position path the quote API needs the wrapper-encoded
+    // appData hash so the CoW order can be tied to the EVC permit at execution
+    // time. Stamp it here only when the chain has CoW deployed; the parallel
+    // quote engine forwards it as `providerExtraData` for CoW providers.
     const quoteDeadline = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
     const cowProviderExtraData = { ...COWSWAP_PROVIDER_EXTRA_DATA.closePosition }
-    const chainConfig = getCowSwapChainConfig(chainId.value ?? 0)
+    const chainConfig = options.includeCowSwap ? getCowSwapChainConfig(chainId.value ?? 0) : undefined
     if (chainConfig) {
       const sourceSharesAmount = await getClosePositionQuoteCollateralAmount()
       cowProviderExtraData.appData = buildClosePositionQuoteAppData(
@@ -443,12 +455,15 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     }
   })
 
-  watch([sourceVault, sourceBalance, sourceShares, slippage], () => {
-    clearSimulationError()
-    if (amount.value || debtAmount.value) {
-      requestQuote()
-    }
-  })
+  watch(
+    [sourceVault, sourceBalance, () => sourceShares?.value, slippage],
+    () => {
+      clearSimulationError()
+      if (amount.value || debtAmount.value) {
+        requestQuote()
+      }
+    },
+  )
 
   watch(debtAmount, () => {
     if (formTab.value !== formTabName) return

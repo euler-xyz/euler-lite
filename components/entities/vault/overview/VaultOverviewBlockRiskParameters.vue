@@ -1,63 +1,63 @@
 <script setup lang="ts">
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { maxUint256, type Address } from 'viem'
+import { vaultConvertToAssetsAbi } from '~/abis/vault'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { vaultConvertToAssetsAbi } from '~/abis/vault'
-import { type Vault, getSupplyCapPercentage, getBorrowCapPercentage } from '~/entities/vault'
-import { CFG_DONT_SOCIALIZE_DEBT } from '~/entities/constants'
-import { formatAssetValue } from '~/services/pricing/priceProvider'
-import {
-  decodeHookedOps,
-  formatHookedOpsSummary,
-  isHookDisabling,
-  isVaultEffectivelyPaused,
-} from '~/utils/vault-hooks'
+
+import { formatAssetValue } from '~/utils/sdk-prices'
+import { formatHookedOpsSummary, getHookedOperationMetas, getVaultHookedOperations, hasAnyHookedOperation, isHookDisabling, isVaultEffectivelyPaused } from '~/utils/vault-hooks'
+import { useModal } from '~/components/ui/composables/useModal'
 import { VaultHooksInfoModal } from '#components'
 
-const { vault } = defineProps<{ vault: Vault }>()
+const { vault } = defineProps<{ vault: EVault }>()
+
+const modal = useModal()
 
 const { client: rpcClient } = useRpcClient()
+const { getVaultCategory } = useVaultRegistry()
 
 const shareTokenExchangeRate: Ref<bigint | undefined> = ref()
 
-// "Borrowable" = the vault has at least one collateral configured to allow
-// borrowing. Read from the vault's own LTV table rather than `borrowList`
-// membership so unverified (off-label) borrow vaults still expose their
-// borrow-side risk parameters.
-const isBorrowable = computed(() =>
-  vault.collateralLTVs.some(ltv => ltv.borrowLTV > 0n),
-)
+const isBorrowable = computed(() => vault.isBorrowable)
 
-const supplyCapPercentageDisplay = computed(() => getSupplyCapPercentage(vault))
-const borrowCapPercentageDisplay = computed(() => getBorrowCapPercentage(vault))
-const showShareTokenExchangeRate = computed(() => vault.vaultCategory !== 'escrow' && (vault.borrowCap !== 0n || vault.borrow > 0n))
+const supplyCapPercentageDisplay = computed(() => vault.caps.supplyCapUtilization)
+const borrowCapPercentageDisplay = computed(() => vault.caps.borrowCapUtilization)
+const hookedOperations = computed(() => getVaultHookedOperations(vault))
+const maxLiquidationDiscountPercent = computed(() => {
+  return vault.liquidation.maxLiquidationDiscount * 100
+})
+const showShareTokenExchangeRate = computed(() =>
+  getVaultCategory(vault.address) !== 'escrow'
+  && (vault.caps.borrowCap !== 0n || vault.totalBorrowed > 0n),
+)
 
 const supplyCapDisplay = ref('-')
 const borrowCapDisplay = ref('-')
 
 watchEffect(async () => {
-  if (vault.supplyCap >= maxUint256) {
+  if (vault.caps.supplyCap >= maxUint256) {
     supplyCapDisplay.value = '∞'
     return
   }
-  if (vault.supplyCap === 0n) {
+  if (vault.caps.supplyCap === 0n) {
     supplyCapDisplay.value = '$0'
     return
   }
-  const price = await formatAssetValue(vault.supplyCap, vault, 'off-chain')
+  const price = await formatAssetValue(vault.caps.supplyCap, vault, 'off-chain')
   supplyCapDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
 })
 
 watchEffect(async () => {
-  if (vault.borrowCap >= maxUint256) {
+  if (vault.caps.borrowCap >= maxUint256) {
     borrowCapDisplay.value = '∞'
     return
   }
-  if (vault.borrowCap === 0n) {
+  if (vault.caps.borrowCap === 0n) {
     borrowCapDisplay.value = '$0'
     return
   }
-  const price = await formatAssetValue(vault.borrowCap, vault, 'off-chain')
+  const price = await formatAssetValue(vault.caps.borrowCap, vault, 'off-chain')
   borrowCapDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
 })
 
@@ -69,29 +69,31 @@ const load = async () => {
     address: vault.address as Address,
     abi: vaultConvertToAssetsAbi,
     functionName: 'convertToAssets',
-    args: [1n * 10n ** vault.decimals],
+    args: [1n * 10n ** BigInt(vault.shares.decimals)],
   }) as bigint
 }
 
 load()
 
-const hookedUserOps = computed(() => decodeHookedOps(vault.hookedOps))
+const hookedUserOps = computed(() => getHookedOperationMetas(hookedOperations.value))
 
 const hooksRowLabel = computed(() =>
   isHookDisabling(vault) ? 'Disabled operations' : 'Hooked operations',
 )
 
 const hooksRowValue = computed(() => {
-  if (vault.hookedOps === 0n) return 'None'
+  if (!hasAnyHookedOperation(hookedOperations.value)) return 'None'
   if (isVaultEffectivelyPaused(vault)) return 'Paused'
   return formatHookedOpsSummary(hookedUserOps.value)
 })
 
-const showHooksInfoIcon = computed(() => vault.hookedOps !== 0n)
+const showHooksInfoIcon = computed(() => hasAnyHookedOperation(hookedOperations.value))
 
-const hooksModalData = computed(() => ({
-  props: { vault },
-}))
+const openHooksModal = () => {
+  modal.open(VaultHooksInfoModal, {
+    props: { vault },
+  })
+}
 </script>
 
 <template>
@@ -102,7 +104,7 @@ const hooksModalData = computed(() => ({
     <div class="flex flex-col items-start gap-24">
       <VaultOverviewLabelValue
         v-if="isBorrowable"
-        :value="`0-${vault.maxLiquidationDiscount / 100n}%`"
+        :value="`0-${maxLiquidationDiscountPercent}%`"
         orientation="horizontal"
       >
         <template #label>
@@ -123,10 +125,10 @@ const hooksModalData = computed(() => ({
         <div class="flex gap-4 items-center">
           <span>
             {{ supplyCapDisplay }}
-            <span v-if="vault.supplyCap < maxUint256">({{ compactNumber(supplyCapPercentageDisplay, 2) }}%)</span>
+            <span v-if="vault.caps.supplyCap < maxUint256">({{ compactNumber(supplyCapPercentageDisplay, 2) }}%)</span>
           </span>
           <UiRadialProgress
-            v-if="vault.supplyCap < maxUint256"
+            v-if="vault.caps.supplyCap < maxUint256"
             :value="supplyCapPercentageDisplay"
             :max="100"
           />
@@ -140,10 +142,10 @@ const hooksModalData = computed(() => ({
         <div class="flex gap-4 items-center">
           <span>
             {{ borrowCapDisplay }}
-            <span v-if="vault.borrowCap < maxUint256">({{ compactNumber(borrowCapPercentageDisplay, 2) }}%)</span>
+            <span v-if="vault.caps.borrowCap < maxUint256">({{ compactNumber(borrowCapPercentageDisplay, 2) }}%)</span>
           </span>
           <UiRadialProgress
-            v-if="vault.borrowCap < maxUint256"
+            v-if="vault.caps.borrowCap < maxUint256"
             :value="borrowCapPercentageDisplay"
             :max="100"
           />
@@ -155,7 +157,7 @@ const hooksModalData = computed(() => ({
         orientation="horizontal"
       >
         <template v-if="shareTokenExchangeRate !== undefined">
-          {{ formatNumber(nanoToValue(shareTokenExchangeRate, vault.decimals), 6, 2) }}
+          {{ formatNumber(nanoToValue(shareTokenExchangeRate, vault.asset.decimals), 6, 2) }}
         </template>
         <template v-else>
           -
@@ -163,7 +165,7 @@ const hooksModalData = computed(() => ({
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue
         v-if="isBorrowable"
-        :value="(vault.configFlags & CFG_DONT_SOCIALIZE_DEBT) === 0n ? 'Yes' : 'No'"
+        :value="vault.liquidation.socializeDebt ? 'Yes' : 'No'"
         orientation="horizontal"
       >
         <template #label>
@@ -180,24 +182,25 @@ const hooksModalData = computed(() => ({
       <VaultOverviewLabelValue
         v-if="isBorrowable"
         label="Interest fee"
-        :value="`${formatNumber(nanoToValue(vault.interestFee, 2))}%`"
+        :value="`${formatNumber(vault.fees.interestFee * 100)}%`"
         orientation="horizontal"
       />
       <VaultOverviewLabelValue orientation="horizontal">
         <template #label>
           <span class="flex items-center gap-4">
             {{ hooksRowLabel }}
-            <UiModalPreviewTrigger
+            <button
               v-if="showHooksInfoIcon"
-              :component="VaultHooksInfoModal"
-              :modal-data="hooksModalData"
+              type="button"
               :aria-label="`${hooksRowLabel} details`"
+              class="inline-flex shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 focus-visible:rounded"
+              @click="openHooksModal"
             >
               <SvgIcon
-                class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+                class="!w-16 !h-16"
                 name="info-circle"
               />
-            </UiModalPreviewTrigger>
+            </button>
           </span>
         </template>
         {{ hooksRowValue }}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeProducts } from '~/utils/eulerLabelsUtils'
+import { __setEulerLabelsDataForTest } from '~/composables/useEulerLabels'
+import { getActiveProductVaultAddresses, normalizeProducts } from '~/utils/eulerLabelsUtils'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 
 describe('normalizeProducts', () => {
@@ -18,5 +19,28 @@ describe('normalizeProducts', () => {
     })
 
     expect(products.test.recentlyAddedVaults).toEqual([normalizeAddress(lowerAddress)])
+  })
+})
+
+describe('getActiveProductVaultAddresses', () => {
+  it('returns active product vaults without deprecated-only entries', () => {
+    const active = '0x0000000000000000000000000000000000000101'
+    const deprecated = '0x0000000000000000000000000000000000000102'
+
+    __setEulerLabelsDataForTest({
+      products: {
+        test: {
+          name: 'Test',
+          description: '',
+          entity: [],
+          url: '',
+          vaults: [normalizeAddress(active)],
+          deprecatedVaults: [normalizeAddress(deprecated)],
+        },
+      },
+      verifiedVaultAddresses: [normalizeAddress(active), normalizeAddress(deprecated)],
+    })
+
+    expect(getActiveProductVaultAddresses()).toEqual([normalizeAddress(active)])
   })
 })

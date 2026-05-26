@@ -1,33 +1,30 @@
 <script setup lang="ts">
-import { FixedPoint } from '~/utils/fixed-point'
-import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal } from '#components'
-import { useToast } from '~/components/ui/composables/useToast'
-import {
-  convertSharesToAssets,
-  getCashLimitedWithdrawAmount,
-  type EarnVault,
-  type VaultAsset,
-} from '~/entities/vault'
-import { getSubAccountAddress } from '~/entities/account'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import type { TxPlan } from '~/entities/txPlan'
+import type { VaultAsset } from '~/types/asset'
+import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
+import type { TransactionPlan, EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { formatNumber, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { useModal } from '~/components/ui/composables/useModal'
+import { useToast } from '~/components/ui/composables/useToast'
+import { getSubAccountAddress } from '@eulerxyz/euler-v2-sdk'
+import { getAddress } from 'viem'
+import { OperationReviewModal } from '#components'
+import { FixedPoint } from '~/utils/fixed-point'
+import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 
 const router = useRouter()
 const route = useRoute()
 const modal = useModal()
 const { error } = useToast()
-const { buildWithdrawPlan, buildRedeemPlan, executeTxPlan } = useEulerOperations()
+const { planWithdrawOrRedeem, executePlan } = useEulerTx()
 const { getEarnVault } = useVaults()
 const { isConnected, address } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const { fetchVaultShareBalance } = useWallets()
-const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
+const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const { getSupplyRewardApy } = useRewardsApy()
 const vaultAddress = route.params.vault as string
 useOperationGuard([vaultAddress])
@@ -35,7 +32,7 @@ const subAccountIndex = Number(route.params.subAccount)
 const subAccount = computed(() => {
   const addr = effectiveAddress.value
   if (!addr || isNaN(subAccountIndex)) return undefined
-  return getSubAccountAddress(addr, subAccountIndex)
+  return getSubAccountAddress(getAddress(addr), subAccountIndex)
 })
 
 const isLoading = ref(false)
@@ -43,8 +40,8 @@ const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const isEstimatesLoading = ref(false)
 const amount = ref('')
-const plan = ref<TxPlan | null>(null)
-const vault: Ref<EarnVault | undefined> = ref()
+const plan = ref<TransactionPlan | null>(null)
+const vault: Ref<EulerEarn | undefined> = ref()
 const asset: Ref<VaultAsset | undefined> = ref()
 const assetsBalance = ref(0n)
 const sharesBalance = ref(0n)
@@ -84,7 +81,7 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 })
 const supplyAPYDisplay = computed(() => {
   if (!vault.value) return '0.00'
-  return formatNumber(nanoToValue(vault.value.interestRateInfo.supplyAPY, 25) + rewardApy.value)
+  return formatNumber(getVaultSupplyApy(vault.value) + rewardApy.value)
 })
 const estimateSupplyAPYDisplay = computed(() => {
   return formatNumber(estimateSupplyAPY.value + rewardApy.value)
@@ -94,7 +91,7 @@ const load = async () => {
   isLoading.value = true
   try {
     vault.value = await getEarnVault(vaultAddress)
-    estimateSupplyAPY.value = nanoToValue(vault.value?.interestRateInfo.supplyAPY ?? 0n, 25)
+    estimateSupplyAPY.value = getVaultSupplyApy(vault.value)
     asset.value = vault.value?.asset
 
     // Fetch fresh share balance and convert to assets
@@ -119,17 +116,13 @@ const fetchShareBalance = async () => {
 }
 
 const updateBalance = async () => {
-  if ((!isConnected.value && !isSpyMode.value) || sharesBalance.value === 0n) {
+  if (!vault.value || (!isConnected.value && !isSpyMode.value) || sharesBalance.value === 0n) {
     assetsBalance.value = 0n
     delta.value = 0n
     return
   }
 
-  // Convert shares to assets
-  assetsBalance.value = await convertSharesToAssets(
-    vaultAddress,
-    sharesBalance.value,
-  )
+  assetsBalance.value = vault.value.convertToAssets(sharesBalance.value)
   delta.value = assetsBalance.value
 }
 const submit = async () => {
@@ -144,9 +137,13 @@ const submit = async () => {
     const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
 
     try {
-      plan.value = isMax
-        ? await buildRedeemPlan(vaultAddress, amountFixed.value.value, sharesBalance.value, isMax, subAccount.value)
-        : await buildWithdrawPlan(vaultAddress, amountFixed.value.value, subAccount.value)
+      plan.value = await planWithdrawOrRedeem({
+        vaultAddress: vaultAddress as `0x${string}`,
+        owner: (subAccount.value ?? effectiveAddress.value!) as `0x${string}`,
+        isMax,
+        shares: sharesBalance.value,
+        assets: amountFixed.value.value,
+      })
     }
     catch (e) {
       console.warn('[OperationReviewModal] failed to build plan', e)
@@ -185,11 +182,8 @@ const send = async () => {
       return
     }
 
-    const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
-    const txPlan = isMax
-      ? await buildRedeemPlan(vaultAddress, amountFixed.value.value, sharesBalance.value, isMax, subAccount.value)
-      : await buildWithdrawPlan(vaultAddress, amountFixed.value.value, subAccount.value)
-    await executeTxPlan(txPlan)
+    if (!plan.value) return
+    await executePlan(plan.value)
 
     modal.close()
     setTimeout(() => {
@@ -216,12 +210,12 @@ const updateEstimates = () => {
       throw new Error('Not enough liquidity in vault')
     }
     delta.value = assetsBalance.value - amountFixed.value.value
-    estimateSupplyAPY.value = nanoToValue(vault.value.interestRateInfo.supplyAPY, 25)
+    estimateSupplyAPY.value = getVaultSupplyApy(vault.value)
   }
   catch (e) {
     logWarn('earn-withdraw/estimates', e)
     delta.value = assetsBalance.value || 0n
-    estimateSupplyAPY.value = nanoToValue(vault.value.interestRateInfo.supplyAPY, 25)
+    estimateSupplyAPY.value = getVaultSupplyApy(vault.value)
     estimatesError.value = (e as { message: string }).message
   }
   isEstimatesLoading.value = false

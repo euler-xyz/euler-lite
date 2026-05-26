@@ -1,20 +1,22 @@
 <script setup lang="ts">
-import type { EarnVault } from '~/entities/vault'
-import { formatAssetValue } from '~/services/pricing/priceProvider'
+import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
+
+import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault, useEulerEntitiesOfEarnVault } from '~/composables/useEulerLabels'
-import { isVaultRecentlyAdded, getEarnVaultDescription } from '~/utils/eulerLabelsUtils'
+import { isVaultFeatured, getEarnVaultDescription } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
+import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
-import { VaultSupplyApyModal } from '#components'
+import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
 
 const { isConnected } = useWagmi()
-const { vault } = defineProps<{ vault: EarnVault }>()
+const { vault } = defineProps<{ vault: EulerEarn }>()
 const product = useEulerProductOfVault(vault.address)
 const { enableEntityBranding } = useDeployConfig()
 const { isEarnVaultOwnerVerified } = useVaults()
+const { isVerifiedVault } = useVaultRegistry()
 const entities = useEulerEntitiesOfEarnVault(vault)
 const isOwnerVerified = computed(() => isEarnVaultOwnerVerified(vault))
 const entityName = computed(() => {
@@ -28,7 +30,8 @@ const entityLogos = computed(() => {
   return entities.map(e => getEulerLabelEntityLogo(e.logo))
 })
 const { getBalance, isLoading: isBalancesLoading } = useWallets()
-const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 
 const balance = computed(() =>
@@ -37,9 +40,9 @@ const balance = computed(() =>
 const totalRewardsAPY = computed(() => getSupplyRewardApy(vault.address))
 const hasRewards = computed(() => hasSupplyRewards(vault.address))
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
-const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address))
-const isUnverified = computed(() => !vault.verified)
-const displayName = computed(() => product.name || vault.name)
+const isFeatured = computed(() => isVaultFeatured(vault.address))
+const isUnverified = computed(() => !isVerifiedVault(vault.address))
+const displayName = computed(() => product.name || vault.shares.name)
 const description = computed(() => getEarnVaultDescription(vault.address))
 
 const prices = ref<{ totalSupply: string, liquidity: string, walletBalance: string }>({
@@ -74,10 +77,11 @@ const statsGridCols = computed(() => {
 
 const supplyApyModalData = computed(() => ({
   props: {
-    lendingAPY: nanoToValue(vault.interestRateInfo.supplyAPY, 25),
-    intrinsicAPY: getIntrinsicApy(vault.asset.address),
-    intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
+    lendingAPY: getVaultSupplyApy(vault),
+    intrinsicAPY: getVaultIntrinsicApy(vault, enableIntrinsicApy.value),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
     campaigns: getSupplyRewardCampaigns(vault.address),
+    rewardVaultAddress: vault.address,
     baseApyAverageLabel: '1h',
   },
 }))
@@ -88,6 +92,10 @@ const supplyApyModalData = computed(() => ({
     class="block no-underline bg-surface rounded-xl border border-line-default shadow-card transition-all duration-default ease-default hover:shadow-card-hover hover:border-line-emphasis"
     :class="isGeoBlocked ? 'opacity-50' : ''"
     :to="{ path: `/earn/${vault.address}`, query: { network: $route.query.network } }"
+    data-id="vault-list-item"
+    data-list="earn"
+    :data-key="vault.address.toLowerCase()"
+    :data-vault-address="vault.address.toLowerCase()"
   >
     <div class="flex py-16 px-16 pb-12 border-b border-line-subtle">
       <AssetAvatar
@@ -95,30 +103,46 @@ const supplyApyModalData = computed(() => ({
         size="40"
       />
       <div class="flex-grow ml-12">
-        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-8">
+        <div
+          class="text-content-tertiary text-p3 mb-4 flex items-center gap-8"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="name"
+          :data-value="displayName"
+        >
           <VaultDisplayName
             :name="displayName"
             :is-unverified="isUnverified"
           />
           <span
-            v-if="isRecentlyAdded"
+            v-if="isFeatured"
             class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5"
-            title="Recently added vault"
+            title="Featured Vault"
           >
             <SvgIcon
               name="star"
               class="!w-14 !h-14"
             />
-            Recently added
+            Featured
           </span>
           <RestrictedBadge v-if="isGeoBlocked" />
         </div>
-        <div class="text-h5 text-content-primary">
+        <div
+          class="text-h5 text-content-primary"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="asset-symbol"
+          :data-value="vault.asset.symbol"
+        >
           {{ vault.asset.symbol }}
         </div>
         <div
           v-if="description"
           class="text-p3 text-content-tertiary mt-4 line-clamp-1"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="description"
+          :data-value="description"
         >
           {{ description }}
         </div>
@@ -137,10 +161,17 @@ const supplyApyModalData = computed(() => ({
             <SvgIcon
               class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
               name="info-circle"
+              data-modal-trigger="supply-apy"
             />
           </UiModalPreviewTrigger>
         </div>
-        <div class="text-p2 flex items-center text-accent-600">
+        <div
+          class="text-p2 flex items-center text-accent-600"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="supply-apy"
+          :data-value="getVaultSupplyApy(vault) + totalRewardsAPY"
+        >
           <div class="mr-6">
             <VaultPoints :vault="vault" />
           </div>
@@ -153,9 +184,10 @@ const supplyApyModalData = computed(() => ({
             <SvgIcon
               class="!w-20 !h-20 text-accent-600 mr-4 cursor-pointer"
               name="sparks"
+              data-modal-trigger="supply-apy"
             />
           </UiModalPreviewTrigger>
-          {{ formatNumber(nanoToValue(vault.interestRateInfo.supplyAPY, 25) + totalRewardsAPY) }}%
+          {{ formatNumber(getVaultSupplyApy(vault) + totalRewardsAPY) }}%
         </div>
       </div>
     </div>
@@ -167,7 +199,7 @@ const supplyApyModalData = computed(() => ({
         v-if="enableEntityBranding"
         class="flex-1 mobile:!hidden"
       >
-        <div class="text-content-tertiary text-p3 mb-4">Curator</div>
+        <div class="text-content-tertiary text-p3 mb-4">Capital allocator</div>
         <div
           v-if="!isOwnerVerified"
           class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
@@ -187,7 +219,13 @@ const supplyApyModalData = computed(() => ({
             :label="entityName"
             :src="entityLogos"
           />
-          <span class="text-p2 text-content-primary truncate">{{ entityName }}</span>
+          <span
+            class="text-p2 text-content-primary truncate"
+            data-id="data-point"
+            :data-key="vault.address.toLowerCase()"
+            data-field="capital-allocator"
+            :data-value="entityName"
+          >{{ entityName }}</span>
         </div>
         <div
           v-else
@@ -196,7 +234,13 @@ const supplyApyModalData = computed(() => ({
       </div>
       <div class="flex-1 flex flex-col items-center mobile:items-start">
         <div class="text-content-tertiary text-p3 mb-4">Total supply</div>
-        <div class="text-p2 text-content-primary">
+        <div
+          class="text-p2 text-content-primary"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="total-supply"
+          :data-value="prices.totalSupply"
+        >
           {{ prices.totalSupply }}
         </div>
       </div>
@@ -204,7 +248,13 @@ const supplyApyModalData = computed(() => ({
         <div class="text-content-tertiary text-p3 mb-4">
           Available liquidity
         </div>
-        <div class="text-p2 text-content-primary">
+        <div
+          class="text-p2 text-content-primary"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="available-liquidity"
+          :data-value="prices.liquidity"
+        >
           {{ prices.liquidity }}
         </div>
       </div>
@@ -215,7 +265,13 @@ const supplyApyModalData = computed(() => ({
         <div class="text-content-tertiary text-p3 mb-4">
           Allocates into
         </div>
-        <div class="text-p2 text-content-primary">
+        <div
+          class="text-p2 text-content-primary"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="allocates-into"
+          :data-value="vault.strategies.length"
+        >
           {{ vault.strategies.length }} {{ vault.strategies.length === 1 ? 'strategy' : 'strategies' }}
         </div>
       </div>
@@ -226,7 +282,13 @@ const supplyApyModalData = computed(() => ({
             :loading="isBalancesLoading"
             style="width: 70px; height: 20px"
           >
-            <div class="text-p2 text-content-primary">
+            <div
+              class="text-p2 text-content-primary"
+              data-id="data-point"
+              :data-key="vault.address.toLowerCase()"
+              data-field="wallet-balance"
+              :data-value="prices.walletBalance"
+            >
               {{ prices.walletBalance }}
             </div>
           </BaseLoadableContent>
@@ -239,7 +301,7 @@ const supplyApyModalData = computed(() => ({
         class="flex w-full justify-between"
       >
         <div class="flex-1">
-          <div class="text-content-tertiary text-p3">Curator</div>
+          <div class="text-content-tertiary text-p3">Capital allocator</div>
         </div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
           <div

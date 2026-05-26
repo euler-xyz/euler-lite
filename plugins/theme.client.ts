@@ -1,5 +1,5 @@
-import { themeHue } from '~/entities/custom'
-
+// Base hue for the app theme in degrees (0-360). Change to shift the brand palette.
+const themeHue = 150
 const defaultHue = 211
 const normalizeHue = (hue: number) => ((hue % 360) + 360) % 360
 

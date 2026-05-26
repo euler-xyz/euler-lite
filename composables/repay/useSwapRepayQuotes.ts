@@ -1,6 +1,6 @@
 import type { Ref } from 'vue'
-import type { SwapApiQuote } from '~/entities/swap'
-import { SwapperMode } from '~/entities/swap'
+import type { SwapQuote, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 
 /**
@@ -10,7 +10,7 @@ import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 export const useSwapRepayQuotes = (options: {
   direction: Ref<SwapperMode>
   includeCowSwap?: boolean
-  buildTxPlanForQuote?: (quote: SwapApiQuote, provider: string) => Promise<import('~/entities/txPlan').TxPlan>
+  buildTxPlanForQuote?: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
 }) => {
   const { direction, includeCowSwap, buildTxPlanForQuote } = options
 

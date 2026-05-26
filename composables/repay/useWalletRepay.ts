@@ -1,34 +1,35 @@
+import { getProjectedRates, getNetAPY } from '~/utils/vault/apy'
+import { isEVault, type SecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type VaultEntity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import type { Ref, ComputedRef } from 'vue'
+import { maxUint256, type Address } from 'viem'
+import { useModal } from '~/components/ui/composables/useModal'
+import { useToast } from '~/components/ui/composables/useToast'
+import { OperationReviewModal } from '#components'
+import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import { formatUnits } from 'viem'
 import { FixedPoint } from '~/utils/fixed-point'
 import { logWarn } from '~/utils/errorHandling'
 import { createRaceGuard } from '~/utils/race-guard'
 import { getTotalCollateralValue } from '~/utils/position-estimates'
-import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal } from '#components'
-import { useToast } from '~/components/ui/composables/useToast'
-import { getNetAPY, getProjectedRates } from '~/entities/vault'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import type { AccountBorrowPosition } from '~/entities/account'
-import type { TxPlan } from '~/entities/txPlan'
-import { valueToNano } from '~/utils/crypto-utils'
+import { valueToNano, nanoToValue } from '~/utils/crypto-utils'
 import { trimTrailingZeros } from '~/utils/string-utils'
 import { amountToPercent, percentToAmountNano } from '~/utils/repayUtils'
 import { findBlockingDisabledOp, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
-import { isEVKVault, type Vault, type SecuritizeVault } from '~/entities/vault'
+import { getBorrowPositionEffectiveLiquidationLTV, decimalLtvToBps } from '~/utils/ltv'
+import { getVaultBorrowApy } from '~/utils/vault-display'
 
 interface UseWalletRepayOptions {
-  position: Ref<AccountBorrowPosition | undefined>
-  borrowVault: ComputedRef<AccountBorrowPosition['borrow'] | undefined>
-  collateralVault: ComputedRef<AccountBorrowPosition['collateral'] | undefined>
+  position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
+  borrowVault: ComputedRef<EVault | undefined>
+  collateralVault: ComputedRef<EVault | SecuritizeCollateralVault | undefined>
   formTab: Ref<string>
   walletBalance: Ref<bigint>
-  plan: Ref<TxPlan | null>
+  plan: Ref<TransactionPlan | null>
   isSubmitting: Ref<boolean>
   isPreparing: Ref<boolean>
   clearSimulationError: () => void
-  runSimulation: (plan: TxPlan) => Promise<boolean>
+  runSimulation: (plan: TransactionPlan) => Promise<boolean>
   netAPY: Ref<number>
   collateralSupplyApy: ComputedRef<number>
   borrowApy: ComputedRef<number>
@@ -59,7 +60,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
 
   const modal = useModal()
   const { error } = useToast()
-  const { buildRepayPlan, buildFullRepayPlan, executeTxPlan } = useEulerOperations()
+  const { planRepayFromWallet, executePlan } = useEulerTx()
   const { isConnected } = useWagmi()
   const { finalizeTxAndRedirect } = useTxFinalization()
 
@@ -70,17 +71,17 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   const _estimateUserLTV = ref(0n)
   const _estimateHealth = ref(0n)
   const estimateNetAPY = computed(() => hasEstimate.value ? _estimateNetAPY.value : netAPY.value)
-  const estimateUserLTV = computed(() => hasEstimate.value ? _estimateUserLTV.value : (position.value?.userLTV ?? 0n))
-  const estimateHealth = computed(() => hasEstimate.value ? _estimateHealth.value : (position.value?.health ?? 0n))
+  const estimateUserLTV = computed(() => hasEstimate.value ? _estimateUserLTV.value : (position.value ? position.value.userLTV : 0n))
+  const estimateHealth = computed(() => hasEstimate.value ? _estimateHealth.value : (position.value ? position.value.healthFactor ?? 0n : 0n))
   const estimatesError = ref('')
   const isEstimatesLoading = ref(false)
 
   const amountFixed = computed(() => FixedPoint.fromValue(
-    valueToNano(amount.value || '0', borrowVault.value?.decimals),
-    Number(borrowVault.value?.decimals),
+    valueToNano(amount.value || '0', borrowVault.value?.asset.decimals),
+    Number(borrowVault.value?.asset.decimals),
   ))
-  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, position.value?.borrow.decimals || 18))
-  const suppliedFixed = computed(() => FixedPoint.fromValue(position.value?.supplied || 0n, position.value?.collateral.decimals || 18))
+  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, borrowVault.value?.shares.decimals || 18))
+  const suppliedFixed = computed(() => FixedPoint.fromValue(position.value?.supplied || 0n, collateralVault.value?.shares.decimals || 18))
   const priceFixed = computed(() => {
     const ratio = oraclePriceRatio.value
     if (ratio && Number.isFinite(ratio) && ratio > 0) {
@@ -107,13 +108,16 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     // time even though the user intends to repay in full.
     const isFullRepay = amountNano > 0n && (amountNano >= currentDebt || walletRepayPercent.value >= 100)
     if (isFullRepay) {
-      const collAddrs = position.value?.collaterals ?? (collateralVault.value ? [collateralVault.value.address] : [])
+      const collAddrs = position.value
+        ? position.value.collateralVaults
+        : (collateralVault.value ? [collateralVault.value.address] : [])
       for (const addr of collAddrs) {
-        const v = registryGetVault(addr) as Vault | SecuritizeVault | undefined
-        // Only EVK collaterals are swept via transferFromMax in
-        // buildFullRepayPlan — non-EVK (e.g. securitize) are filtered out
-        // by the builder, so don't surface a transfer-op warning for them.
-        if (v && isEVKVault(v)) steps.push({ vault: v, op: OP_TRANSFER })
+        const v = registryGetVault(addr)
+        // Only EVK collaterals get swept via transferFromMax; securitize
+        // vaults don't implement it and the SDK's appendMaxRepayCleanup
+        // skips them. Mirror that here so the OP_TRANSFER warning surface
+        // doesn't claim a transfer that won't happen.
+        if (v && isEVault(v)) steps.push({ vault: v, op: OP_TRANSFER })
       }
     }
     return steps
@@ -139,22 +143,12 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       const shouldFullRepay = amountNano >= currentDebt || walletRepayPercent.value >= 100
 
       try {
-        plan.value = shouldFullRepay
-          ? await buildFullRepayPlan(
-              borrowVault.value.address,
-              borrowVault.value.asset.address,
-              amountNano,
-              position.value.subAccount,
-              position.value.collaterals ?? [collateralVault.value.address],
-              { includePermit2Call: false },
-            )
-          : await buildRepayPlan(
-              borrowVault.value.address,
-              borrowVault.value.asset.address,
-              amountNano,
-              position.value.subAccount,
-              { includePermit2Call: false },
-            )
+        plan.value = await planRepayFromWallet({
+          liabilityVault: borrowVault.value.address as Address,
+          liabilityAmount: shouldFullRepay ? maxUint256 : amountNano,
+          receiver: position.value.subAccount as Address,
+          cleanupOnMax: shouldFullRepay,
+        })
       }
       catch (e) {
         logWarn('walletRepay/buildPlan', e)
@@ -169,7 +163,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       modal.open(OperationReviewModal, {
         props: {
           type: 'repay',
-          asset: position.value!.borrow.asset,
+          asset: borrowVault.value.asset,
           amount: amount.value,
           plan: plan.value || undefined,
           subAccount: position.value?.subAccount,
@@ -194,23 +188,13 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       const amountNano = valueToNano(amount.value, borrowVault.value.asset.decimals)
       const currentDebt = position.value.borrowed || 0n
       const isFullRepay = amountNano >= currentDebt || walletRepayPercent.value >= 100
-      const txPlan = isFullRepay
-        ? await buildFullRepayPlan(
-            borrowVault.value.address,
-            borrowVault.value.asset.address,
-            amountNano,
-            position.value.subAccount,
-            position.value.collaterals ?? [collateralVault.value.address],
-            { includePermit2Call: true },
-          )
-        : await buildRepayPlan(
-            borrowVault.value.address,
-            borrowVault.value.asset.address,
-            amountNano,
-            position.value.subAccount,
-            { includePermit2Call: true },
-          )
-      await executeTxPlan(txPlan)
+      const txPlan = await planRepayFromWallet({
+        liabilityVault: borrowVault.value.address as Address,
+        liabilityAmount: isFullRepay ? maxUint256 : amountNano,
+        receiver: position.value.subAccount as Address,
+        cleanupOnMax: isFullRepay,
+      })
+      await executePlan(txPlan)
       await finalizeTxAndRedirect()
     }
     catch (e) {
@@ -227,7 +211,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     estimatesError.value = ''
     if (!position.value || !collateralVault.value || !borrowVault.value) return
     try {
-      if (walletBalance.value < valueToNano(amount.value, borrowVault.value.decimals)) {
+      if (walletBalance.value < valueToNano(amount.value, borrowVault.value.shares.decimals)) {
         throw new Error('Not enough balance')
       }
       if (borrowedFixed.value.lt(amountFixed.value)) {
@@ -247,12 +231,19 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
         : (borrowedFixed.value.sub(amountFixed.value))
             .div(collateralValue)
             .mul(FixedPoint.fromValue(100n, 0))
+      const effectiveLiquidationLtv = getBorrowPositionEffectiveLiquidationLTV(position.value!)
+      if (effectiveLiquidationLtv === undefined) throw new Error('Liquidation LTV unavailable')
+      const liquidationLtv = decimalLtvToBps(effectiveLiquidationLtv)
       const healthFixed = (userLtvFixed.isZero() || userLtvFixed.isNegative())
         ? null
-        : FixedPoint.fromValue(position.value!.liquidationLTV, 2).div(userLtvFixed)
+        : FixedPoint.fromValue(liquidationLtv, 2).div(userLtvFixed)
       _estimateUserLTV.value = userLtvFixed.toScaledBigint(18)
       _estimateHealth.value = healthFixed ? healthFixed.toScaledBigint(18) : 10n ** 36n
       hasEstimate.value = true
+
+      if (userLtvFixed.gte(FixedPoint.fromValue(liquidationLtv, 2))) {
+        throw new Error('Not enough liquidity for the vault, LTV is too large')
+      }
     }
     catch (e: unknown) {
       logWarn('walletRepay/syncEstimates', e)
@@ -269,14 +260,14 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     }
     const gen = asyncEstimatesGuard.next()
     try {
-      const repayNano = valueToNano(amount.value, borrowVault.value.decimals)
+      const repayNano = valueToNano(amount.value, borrowVault.value.shares.decimals)
       const remainingBorrow = (position.value.borrowed || 0n) - repayNano
 
       const [projected, supplyUsd, borrowUsd] = await Promise.all([
         getProjectedRates(
           borrowVault.value.address,
-          borrowVault.value.interestRateInfo.cash,
-          borrowVault.value.interestRateInfo.borrows,
+          borrowVault.value.totalCash,
+          borrowVault.value.totalBorrowed,
           repayNano,
           -repayNano,
         ),
@@ -287,7 +278,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       if (asyncEstimatesGuard.isStale(gen)) return
 
       const projectedBorrowApy = projected
-        ? borrowApy.value + (nanoToValue(projected.borrowAPY, 25) - nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25))
+        ? borrowApy.value + (nanoToValue(projected.borrowAPY, 25) - getVaultBorrowApy(borrowVault.value))
         : borrowApy.value
 
       _estimateNetAPY.value = getNetAPY(

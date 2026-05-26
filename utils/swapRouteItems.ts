@@ -1,5 +1,5 @@
 import { formatUnits } from 'viem'
-import type { SwapApiQuote } from '~/entities/swap'
+import type { SwapQuote } from '@eulerxyz/euler-v2-sdk'
 import {
   getQuoteCardAmount,
   getQuoteCardScore,
@@ -26,7 +26,7 @@ export type SwapRouteItem = {
 
 export function buildSwapRouteItems(params: {
   quoteCards: SwapQuoteCard[]
-  getQuoteDiffPct: (quote: SwapApiQuote) => number | null
+  getQuoteDiffPct: (quote: SwapQuote) => number | null
   decimals: number
   symbol: string
   formatAmount: (raw: string) => string

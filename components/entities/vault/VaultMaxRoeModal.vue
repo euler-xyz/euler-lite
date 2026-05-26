@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import { DateTime } from 'luxon'
 import { formatNumber } from '~/utils/string-utils'
-import type { RewardCampaign } from '~/entities/reward-campaign'
-import { PROVIDER_LABELS, PROVIDER_LOGOS } from '~/entities/reward-campaign'
+import { PROVIDER_LABELS, PROVIDER_LOGOS, rewardCampaignDisplays } from '~/entities/reward-campaign'
 
 const emits = defineEmits(['close'])
 const {
@@ -30,22 +28,6 @@ const {
 
 const { getLoopingRewardApy, getLoopingRewardCampaigns, getSupplyRewardApy, getBorrowRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns } = useRewardsApy()
 
-const mapCampaigns = (campaigns: RewardCampaign[]) => {
-  const now = Math.floor(Date.now() / 1000)
-  return campaigns
-    .filter(c => c.endTimestamp > now || c.endTimestamp === 0)
-    .map(c => ({
-      apr: c.apr,
-      endDate: c.endTimestamp > 0 ? DateTime.fromSeconds(c.endTimestamp) : null,
-      rewardToken: c.rewardToken || { symbol: 'Unknown', icon: '' },
-      source: c.provider,
-      sourceUrl: c.sourceUrl,
-      minMultiplier: c.minMultiplier,
-      maxMultiplier: c.maxMultiplier,
-    }))
-    .sort((a, b) => a.rewardToken.symbol.localeCompare(b.rewardToken.symbol))
-}
-
 const loopingRewardAPR = computed(() =>
   borrowVaultAddress && collateralAddress
     ? getLoopingRewardApy(borrowVaultAddress, collateralAddress)
@@ -54,17 +36,17 @@ const loopingRewardAPR = computed(() =>
 
 const loopingCampaigns = computed(() => {
   if (!borrowVaultAddress || !collateralAddress) return []
-  return mapCampaigns(getLoopingRewardCampaigns(borrowVaultAddress, collateralAddress))
+  return rewardCampaignDisplays(getLoopingRewardCampaigns(borrowVaultAddress, collateralAddress), 'looping')
 })
 
 const supplyCampaigns = computed(() => {
   if (!collateralAddress) return []
-  return mapCampaigns(getSupplyRewardCampaigns(collateralAddress))
+  return rewardCampaignDisplays(getSupplyRewardCampaigns(collateralAddress), 'supply')
 })
 
 const borrowCampaigns = computed(() => {
   if (!borrowVaultAddress || !collateralAddress) return []
-  return mapCampaigns(getBorrowRewardCampaigns(borrowVaultAddress, collateralAddress))
+  return rewardCampaignDisplays(getBorrowRewardCampaigns(borrowVaultAddress, collateralAddress), 'borrow')
 })
 
 const supplyRewardAPY = computed(() =>
@@ -162,7 +144,7 @@ const handleClose = () => {
         </div>
         <div
           v-for="campaign in supplyCampaigns"
-          :key="`supply-${campaign.rewardToken.symbol}-${campaign.source}`"
+          :key="campaign.id"
           class="flex justify-between items-center mt-12"
         >
           <div class="flex">
@@ -234,7 +216,7 @@ const handleClose = () => {
         </div>
         <div
           v-for="campaign in borrowCampaigns"
-          :key="`borrow-${campaign.rewardToken.symbol}-${campaign.source}`"
+          :key="campaign.id"
           class="flex justify-between items-center mt-12"
         >
           <div class="flex">
@@ -293,8 +275,8 @@ const handleClose = () => {
             </div>
           </div>
           <div
-            v-for="(campaign, idx) in loopingCampaigns"
-            :key="idx"
+            v-for="campaign in loopingCampaigns"
+            :key="campaign.id"
             class="mt-12"
           >
             <div class="flex justify-between items-center">

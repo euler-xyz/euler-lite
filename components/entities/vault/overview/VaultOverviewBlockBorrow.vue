@@ -1,30 +1,29 @@
 <script setup lang="ts">
-import { formatNumber } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
-import type { LTVRampConfig } from '~/entities/vault/ltv'
-import {
-  getCollateralExposurePairs,
-  getCurrentLiquidationLTV,
-  isLiquidationLTVRamping,
-} from '~/entities/vault'
+import type { SecuritizeCollateralVault, EVaultCollateral, EVault } from '@eulerxyz/euler-v2-sdk'
+import { getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
+import { useModal } from '~/components/ui/composables/useModal'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { logWarn } from '~/utils/errorHandling'
 import { VaultRampDownModal } from '#components'
+import { formatNumber } from '~/utils/string-utils'
+
+const modal = useModal()
 
 const emits = defineEmits<{
   'vault-click': [address: string]
 }>()
-const { vault } = defineProps<{ vault: Vault }>()
+const { vault } = defineProps<{ vault: EVault }>()
 const { get: registryGet } = useVaultRegistry()
 
 const onCollateralClick = (address: string) => {
   emits('vault-click', address)
 }
 
-const getRampDownModalData = (pair: LTVRampConfig) => ({
-  props: pair,
-})
+const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
+  modal.open(VaultRampDownModal, {
+    props: pair,
+  })
+}
 
 // Module-scope dedupe so we warn at most once per (vault, missing-collateral)
 // pair across recomputes and SFC instances. Mirrors the dedupe in
@@ -43,11 +42,11 @@ const allCollateralPairs = computed(() =>
           warnedUnresolved.add(key)
           logWarn(
             'vault-overview/missing-collateral',
-            `Vault ${vault.address} references unresolved collateral ${addr}`,
+            `EVault ${vault.address} references unresolved collateral ${addr}`,
           )
         }
       }
-      return entry?.vault as Vault | SecuritizeVault | undefined
+      return entry?.vault as EVault | SecuritizeCollateralVault | undefined
     },
   ),
 )
@@ -88,7 +87,7 @@ const allCollateralPairs = computed(() =>
           <VaultOverviewLabelValue
             label="Max LTV"
             orientation="horizontal"
-            :value="`${formatNumber(nanoToValue(pair.borrowLTV, 2), 2)}%`"
+            :value="`${formatNumber(ltvToPercent(pair.ltv.borrowLTV), 2)}%`"
           />
           <VaultOverviewLabelValue
             orientation="horizontal"
@@ -96,32 +95,23 @@ const allCollateralPairs = computed(() =>
             <template #label>
               <span class="flex items-center gap-4">
                 Liquidation LTV
-                <UiModalPreviewTrigger
-                  v-if="isLiquidationLTVRamping(pair)"
-                  :component="VaultRampDownModal"
-                  :modal-data="() => getRampDownModalData(pair)"
-                  aria-label="Show liquidation LTV ramp-down details"
-                >
-                  <SvgIcon
-                    class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-                    name="info-circle"
-                  />
-                </UiModalPreviewTrigger>
+                <SvgIcon
+                  v-if="pair.ltv.isLiquidationLTVRamping"
+                  class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                  name="info-circle"
+                  @click.stop.prevent="onRampDownInfoIconClick($event, pair.ltv)"
+                />
               </span>
             </template>
             <span class="flex items-center gap-4">
-              <UiModalPreviewTrigger
-                v-if="isLiquidationLTVRamping(pair)"
-                :component="VaultRampDownModal"
-                :modal-data="() => getRampDownModalData(pair)"
-                aria-label="Show liquidation LTV ramp-down details"
-              >
-                <SvgIcon
-                  name="arrow-top-right"
-                  class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
-                />
-              </UiModalPreviewTrigger>
-              {{ `${formatNumber(nanoToValue(getCurrentLiquidationLTV(pair), 2), 2)}%` }}
+              <SvgIcon
+                v-if="pair.ltv.isLiquidationLTVRamping"
+                name="arrow-top-right"
+                class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
+                title="Liquidation LTV ramping down"
+                @click.stop.prevent="onRampDownInfoIconClick($event, pair.ltv)"
+              />
+              {{ `${formatNumber(ltvToPercent(pair.ltv.currentLiquidationLTV), 2)}%` }}
             </span>
           </VaultOverviewLabelValue>
         </div>

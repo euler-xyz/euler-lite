@@ -118,7 +118,15 @@ watch(model, () => {
 </script>
 
 <template>
-  <div class="ui-range">
+  <div
+    class="ui-range"
+    data-id="ui-range"
+    :data-label="label ?? ''"
+    :data-value="String(model)"
+    :data-min="String(min)"
+    :data-max="String(max)"
+    :data-step="String(step)"
+  >
     <div
       v-if="label"
       class="ui-range__top"
@@ -133,6 +141,8 @@ watch(model, () => {
     <div class="ui-range__wrap">
       <div
         ref="trackEl"
+        data-id="ui-range-track"
+        :data-label="label ?? ''"
         class="ui-range__track"
         @click="onClickTrack"
       >
@@ -153,6 +163,9 @@ watch(model, () => {
         <div
           v-for="(tick, idx) in ticks"
           :key="`step-${idx}`"
+          data-id="ui-range-step"
+          :data-label="label ?? ''"
+          :data-value="String(tick)"
           class="ui-range__step"
           @click="model = tick; render()"
         >

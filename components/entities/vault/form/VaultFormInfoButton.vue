@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import type { BorrowVaultPair, EarnVault, SecuritizeVault, Vault } from '~/entities/vault'
+import type { BorrowVaultPair } from '~/types/borrow-pair'
+import { isSecuritizeCollateralVault, type EulerEarn, type SecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { VaultOverviewModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
-import type { AccountBorrowPosition } from '~/entities/account'
 
-const { vault, pair, earnVault, extraVault } = defineProps<{ vault?: Vault | SecuritizeVault, pair?: BorrowVaultPair | AccountBorrowPosition, earnVault?: EarnVault, extraVault?: Vault, disabled?: boolean }>()
+const { vault, pair, earnVault, extraVault } = defineProps<{ vault?: EVault | SecuritizeCollateralVault, pair?: BorrowVaultPair | PortfolioBorrowPosition<VaultEntity>, earnVault?: EulerEarn, extraVault?: EVault, disabled?: boolean }>()
 const modal = useModal()
 
-const isSecuritize = (v: Vault | SecuritizeVault | undefined): v is SecuritizeVault =>
-  !!v && 'type' in v && v.type === 'securitize'
+const isSecuritize = (v: EVault | SecuritizeCollateralVault | undefined): v is SecuritizeCollateralVault =>
+  !!v && isSecuritizeCollateralVault(v)
 
 const onClick = () => {
   modal.open(VaultOverviewModal, {

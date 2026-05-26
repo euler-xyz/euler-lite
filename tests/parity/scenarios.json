@@ -1,0 +1,445 @@
+{
+  "version": 1,
+  "defaults": {
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "localStorage": {
+      "is-onboarding-completed": "true",
+      "migration-announcement-seen": "true"
+    },
+    "waitFor": [
+      "[data-id]"
+    ],
+    "settleMs": 1000
+  },
+  "scenarios": [
+    {
+      "id": "lend-list-mainnet",
+      "label": "Mainnet lend list and vault detail pages",
+      "path": "/lend?network=1",
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"lend\"]"
+      ],
+      "follow": [
+        {
+          "id": "lend-vault-detail",
+          "label": "Lend vault details",
+          "selector": "[data-id=\"vault-list-item\"][data-list=\"lend\"]",
+          "waitFor": [
+            "[data-id=\"vault-header\"]",
+            "[data-id=\"data-point\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "earn-list-mainnet",
+      "label": "Mainnet earn list and vault detail pages",
+      "path": "/earn?network=1",
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"earn\"]"
+      ],
+      "follow": [
+        {
+          "id": "earn-vault-detail",
+          "label": "Earn vault details",
+          "selector": "[data-id=\"vault-list-item\"][data-list=\"earn\"]",
+          "waitFor": [
+            "[data-id=\"vault-header\"]",
+            "[data-id=\"data-point\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "borrow-list-mainnet",
+      "label": "Mainnet borrow pair list and detail pages",
+      "path": "/borrow?network=1",
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"borrow-pair\"]"
+      ],
+      "follow": [
+        {
+          "id": "borrow-pair-detail",
+          "label": "Borrow pair details",
+          "selector": "[data-id=\"vault-list-item\"][data-list=\"borrow-pair\"]",
+          "waitFor": [
+            "[data-id=\"vault-header\"]",
+            "[data-id=\"data-point\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "explore-list-mainnet",
+      "label": "Mainnet explore market list",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ]
+    },
+    {
+      "id": "explore-graph-mainnet",
+      "label": "Mainnet explore graph view",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "label": "Expand first market",
+          "selector": "[data-id=\"discovery-market-card\"]",
+          "waitFor": [
+            "[data-id=\"discovery-graph\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "explore-matrix-stats-mainnet",
+      "label": "Mainnet explore matrix dropdown: Stats",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "label": "Expand first market",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          ],
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+        },
+        {
+          "type": "click",
+          "label": "Open matrix view",
+          "selector": "css=button:has-text(\"Matrix\")",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+          ]
+        },
+        {
+          "type": "click",
+          "label": "Open matrix dropdown",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "waitFor": [
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"stats\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Stats\")"
+          ],
+          "waitForData": false
+        },
+        {
+          "type": "click",
+          "label": "Select Stats",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"stats\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Stats\")",
+          "waitFor": [
+            "[data-id=\"attribute-matrix\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "explore-matrix-config-mainnet",
+      "label": "Mainnet explore matrix dropdown: Configuration",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          ],
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+        },
+        {
+          "type": "click",
+          "selector": "css=button:has-text(\"Matrix\")",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+          ]
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "waitFor": [
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"config\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Configuration\")"
+          ],
+          "waitForData": false
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"config\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Configuration\")",
+          "waitFor": [
+            "[data-id=\"attribute-matrix\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "explore-matrix-oracles-mainnet",
+      "label": "Mainnet explore matrix dropdown: Oracles",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          ],
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+        },
+        {
+          "type": "click",
+          "selector": "css=button:has-text(\"Matrix\")",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+          ]
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "waitFor": [
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"oracle\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Oracles\")"
+          ],
+          "waitForData": false
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"oracle\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Oracles\")",
+          "waitFor": [
+            "[data-id=\"collateral-matrix\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "explore-matrix-net-apy-mainnet",
+      "label": "Mainnet explore matrix dropdown: Net APY",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          ],
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+        },
+        {
+          "type": "click",
+          "selector": "css=button:has-text(\"Matrix\")",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+          ]
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "waitFor": [
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"net-apy\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Net APY\")"
+          ],
+          "waitForData": false
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"net-apy\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Net APY\")",
+          "waitFor": [
+            "[data-id=\"collateral-matrix\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "explore-matrix-roe-mainnet",
+      "label": "Mainnet explore matrix dropdown: Max ROE",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          ],
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+        },
+        {
+          "type": "click",
+          "selector": "css=button:has-text(\"Matrix\")",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+          ]
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "waitFor": [
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"roe\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Max ROE\")"
+          ],
+          "waitForData": false
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"roe\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Max ROE\")",
+          "waitFor": [
+            "[data-id=\"collateral-matrix\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "explore-matrix-multiplier-mainnet",
+      "label": "Mainnet explore matrix dropdown: Multiplier",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          ],
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+        },
+        {
+          "type": "click",
+          "selector": "css=button:has-text(\"Matrix\")",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+          ]
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "waitFor": [
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"multiplier\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Multiplier\")"
+          ],
+          "waitForData": false
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"multiplier\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Multiplier\")",
+          "waitFor": [
+            "[data-id=\"collateral-matrix\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "explore-matrix-borrow-ltv-mainnet",
+      "label": "Mainnet explore matrix dropdown: Borrow LTV",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          ],
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+        },
+        {
+          "type": "click",
+          "selector": "css=button:has-text(\"Matrix\")",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+          ]
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "waitFor": [
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"bltv\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Borrow LTV\")"
+          ],
+          "waitForData": false
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"bltv\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Borrow LTV\")",
+          "waitFor": [
+            "[data-id=\"collateral-matrix\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "explore-matrix-liquidation-ltv-mainnet",
+      "label": "Mainnet explore matrix dropdown: Liquidation LTV",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          ],
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+        },
+        {
+          "type": "click",
+          "selector": "css=button:has-text(\"Matrix\")",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+          ]
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "waitFor": [
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"lltv\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Liquidation LTV\")"
+          ],
+          "waitForData": false
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"lltv\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Liquidation LTV\")",
+          "waitFor": [
+            "[data-id=\"collateral-matrix\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "portfolio-spy-mainnet",
+      "label": "Mainnet portfolio spy overview",
+      "path": "/portfolio?network=1&spy=${PARITY_SPY_ADDRESS}",
+      "skipUnlessEnv": "PARITY_SPY_ADDRESS",
+      "waitFor": [
+        "[data-id=\"portfolio-list\"]",
+        "[data-id=\"data-point\"]"
+      ]
+    },
+    {
+      "id": "portfolio-spy-rewards-mainnet",
+      "label": "Mainnet portfolio spy rewards",
+      "path": "/portfolio/rewards?network=1&spy=${PARITY_SPY_ADDRESS}",
+      "skipUnlessEnv": "PARITY_SPY_ADDRESS",
+      "waitFor": [
+        "[data-id]"
+      ]
+    }
+  ]
+}

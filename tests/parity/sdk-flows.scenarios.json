@@ -1,0 +1,169 @@
+{
+  "version": 1,
+  "defaults": {
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "localStorage": {
+      "is-onboarding-completed": "true",
+      "migration-announcement-seen": "true"
+    },
+    "waitFor": [
+      "[data-id]"
+    ],
+    "settleMs": 1000
+  },
+  "scenarios": [
+    {
+      "id": "sdk-earn-supply-review",
+      "label": "Earn vault supply (SDK) → review modal",
+      "description": "Earn supply: spy that holds USDC; first USDC EulerEarn vault; ToU accept; enter 1; click Review Supply; wait on SDK review modal.",
+      "path": "/earn?network=1&spy=0x28C6c06298d514Db089934071355E5743bf21d60",
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"earn\"]",
+        "[data-id=\"vault-list-item\"][data-list=\"earn\"]"
+      ],
+      "settleMs": 2000,
+      "actions": [
+        {
+          "type": "click",
+          "label": "Open first USDC earn vault",
+          "selector": "[data-id=\"vault-list-item\"][data-list=\"earn\"]:has-text(\"USDC\")",
+          "waitFor": [
+            "[data-id=\"vault-header\"]",
+            "input[placeholder=\"0.00\"]"
+          ],
+          "settleMs": 2000
+        },
+        {
+          "type": "click",
+          "label": "Acknowledge unverified vault (if shown)",
+          "selector": "button:has-text(\"Yes\")",
+          "optional": true,
+          "probeMs": 2000,
+          "settleMs": 750
+        },
+        {
+          "type": "click",
+          "label": "Open Terms of Use modal (if shown)",
+          "selector": "button:has-text(\"Accept Terms Of Use\")",
+          "optional": true,
+          "probeMs": 3000,
+          "waitFor": [
+            "button:has-text(\"Accept\")"
+          ],
+          "settleMs": 750
+        },
+        {
+          "type": "click",
+          "label": "Accept Terms of Use (if modal open)",
+          "selector": "button:has-text(\"Accept\"):not(:has-text(\"Terms\"))",
+          "optional": true,
+          "probeMs": 2000,
+          "settleMs": 750
+        },
+        {
+          "type": "fill",
+          "label": "Enter supply amount",
+          "selector": "input[placeholder=\"0.00\"]",
+          "value": "1",
+          "settleMs": 1000
+        },
+        {
+          "type": "click",
+          "label": "Click Review Supply",
+          "selector": "button:has-text(\"Review Supply\")",
+          "waitFor": [
+            "text=Transaction review"
+          ],
+          "settleMs": 2000
+        },
+        {
+          "type": "wait",
+          "label": "Hold on review modal for inspection",
+          "ms": 8000
+        }
+      ]
+    },
+    {
+      "id": "sdk-lend-supply-review",
+      "label": "Lend vault supply (SDK) → review modal",
+      "description": "Lend supply: spy that holds USDC; first USDC EVault on the lend list; ToU accept; enter 1; click Review Supply; wait on SDK review modal.",
+      "path": "/lend?network=1&spy=0x28C6c06298d514Db089934071355E5743bf21d60",
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"lend\"]",
+        "[data-id=\"vault-list-item\"][data-list=\"lend\"]"
+      ],
+      "settleMs": 2000,
+      "actions": [
+        {
+          "type": "click",
+          "label": "Open first USDC lend vault",
+          "selector": "[data-id=\"vault-list-item\"][data-list=\"lend\"]:has-text(\"USDC\")",
+          "waitFor": [
+            "[data-id=\"vault-header\"]",
+            "input[placeholder=\"0.00\"]"
+          ],
+          "settleMs": 2000
+        },
+        {
+          "type": "click",
+          "label": "Acknowledge unverified vault (if shown)",
+          "selector": "button:has-text(\"Yes\")",
+          "optional": true,
+          "probeMs": 2000,
+          "settleMs": 750
+        },
+        {
+          "type": "click",
+          "label": "Open Terms of Use modal (if shown)",
+          "selector": "button:has-text(\"Accept Terms Of Use\")",
+          "optional": true,
+          "probeMs": 3000,
+          "waitFor": [
+            "button:has-text(\"Accept\")"
+          ],
+          "settleMs": 750
+        },
+        {
+          "type": "click",
+          "label": "Accept Terms of Use (if modal open)",
+          "selector": "button:has-text(\"Accept\"):not(:has-text(\"Terms\"))",
+          "optional": true,
+          "probeMs": 2000,
+          "settleMs": 750
+        },
+        {
+          "type": "fill",
+          "label": "Enter supply amount",
+          "selector": "input[placeholder=\"0.00\"]",
+          "value": "1",
+          "settleMs": 1000
+        },
+        {
+          "type": "click",
+          "label": "Click Review Supply",
+          "selector": "button:has-text(\"Review Supply\")",
+          "waitFor": [
+            "text=Transaction review"
+          ],
+          "settleMs": 2000
+        },
+        {
+          "type": "wait",
+          "label": "Hold on review modal for inspection",
+          "ms": 8000
+        }
+      ]
+    },
+    {
+      "id": "sdk-portfolio-smoke",
+      "label": "Portfolio (SDK plumbing smoke)",
+      "description": "Lands on the portfolio for a spy with positions, exercises the SDK portfolio/account fetch path used by every planner. Doesn't open a modal — purely validates that useEulerAccount + useEulerSdk + portfolioService still produce data after the migration.",
+      "path": "/portfolio?network=1&showAll=true&spy=0x75cFE4ef963232ae8313aC33e21fC39241338618",
+      "settleMs": 4000,
+      "actions": []
+    }
+  ]
+}

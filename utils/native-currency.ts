@@ -1,7 +1,7 @@
 import { getAddress, zeroAddress, type Address } from 'viem'
 import { getChainById } from '~/entities/chainRegistry'
+import type { VaultAsset } from '~/types/asset'
 import { useTokenList } from '~/composables/useTokenList'
-import type { VaultAsset } from '~/entities/vault'
 
 export const isNativeCurrencyAddress = (address: string): boolean => {
   try {

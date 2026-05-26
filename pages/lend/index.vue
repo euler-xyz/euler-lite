@@ -1,46 +1,47 @@
 <script setup lang="ts">
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { useVaults } from '~/composables/useVaults'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
-import { getVaultUtilization } from '~/entities/vault'
-import type { Vault } from '~/entities/vault'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultRecentlyAdded, isVaultDeprecated, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
+
+import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
+import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
-import { nanoToValue } from '~/utils/crypto-utils'
 import { isOpDisabled, OP_DEPOSIT } from '~/utils/vault-hooks'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 
 defineOptions({
   name: 'LendPage',
 })
 
-const { borrowList, isEVKUpdating } = useVaults()
-const { getVerifiedEvkVaults } = useVaultRegistry()
+const { borrowList, isEVaultUpdating } = useVaults()
+const { getVerifiedEVaults } = useVaultRegistry()
 const { chainId } = useEulerAddresses()
 const showAllLabelEntries = useShowAllLabelEntries()
-const list = computed(() => getVerifiedEvkVaults(showAllLabelEntries.value))
+const list = computed(() => getVerifiedEVaults(showAllLabelEntries.value))
 
 const isPricesReady = ref(false)
-const isLoading = computed(() => isEVKUpdating.value || !isPricesReady.value)
+const isLoading = computed(() => isEVaultUpdating.value || !isPricesReady.value)
 const { isSlow } = useSlowLoading(isLoading)
 const { entities } = useEulerLabels()
-const { withIntrinsicSupplyApy } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, version: rewardsVersion } = useRewardsApy()
 const { getBalance } = useWallets()
 
 const { enableEntityBranding } = useDeployConfig()
 
-const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<Vault>((vault) => {
+const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<EVault>((vault) => {
   const product = applyVaultOverrides(getProductByVault(vault.address), vault.address)
   return [
     vault.asset.symbol,
     vault.asset.name,
-    vault.name,
+    vault.shares.name,
     product.name,
     product.description,
     ...getEntitiesByVault(vault).map(e => e.name),
@@ -67,9 +68,9 @@ const vaultUsdValues = ref<Map<string, number>>(new Map())
 const vaultLiquidityUsd = ref<Map<string, number>>(new Map())
 const vaultWalletUsd = ref<Map<string, number>>(new Map())
 
-const getVaultSupplyApy = (vault: Vault): number => {
-  const baseApy = nanoToValue(vault.interestRateInfo.supplyAPY, 25)
-  return withIntrinsicSupplyApy(baseApy, vault.asset.address) + getSupplyRewardApy(vault.address)
+const getDisplayedVaultSupplyApy = (vault: EVault): number => {
+  const baseApy = getVaultSupplyApy(vault)
+  return withVaultIntrinsicApy(baseApy, vault, enableIntrinsicApy.value) + getSupplyRewardApy(vault.address)
 }
 
 const {
@@ -78,7 +79,7 @@ const {
   clearCustomFilters,
   openCustomFilterModal,
   matchesCustomFilters,
-} = useCustomFilters<Vault>(
+} = useCustomFilters<EVault>(
   [
     { key: 'totalSupply', label: 'Total supply', shortLabel: 'Total supply', unit: 'usd' },
     { key: 'liquidity', label: 'Available liquidity', shortLabel: 'Avail. liquidity', unit: 'usd' },
@@ -91,8 +92,8 @@ const {
       case 'totalSupply': return vaultUsdValues.value.get(vault.address) ?? 0
       case 'liquidity': return vaultLiquidityUsd.value.get(vault.address) ?? 0
       case 'inWallet': return vaultWalletUsd.value.get(vault.address) ?? 0
-      case 'supplyApy': return getVaultSupplyApy(vault)
-      case 'utilization': return getVaultUtilization(vault)
+      case 'supplyApy': return getDisplayedVaultSupplyApy(vault)
+      case 'utilization': return vault.utilization
       default: return 0
     }
   },
@@ -138,7 +139,7 @@ const fetchLendPrices = useDebounceFn(async () => {
     await Promise.all(
       vaults.map(async (vault) => {
         const walletBalance = getBalance(vault.asset.address as `0x${string}`)
-        const liquidity = vault.supply >= vault.borrow ? vault.supply - vault.borrow : 0n
+        const liquidity = vault.availableLiquidity
         const [totalSupply, liquidityUsd, wallet] = await Promise.all([
           getAssetUsdValueOrZero(vault.totalAssets, vault, 'off-chain'),
           getAssetUsdValueOrZero(liquidity, vault, 'off-chain'),
@@ -222,10 +223,10 @@ const filteredList = computed(() => {
     .filter(matchesCustomFilters)
 })
 
-const applyRecentlyAddedSort = <T extends { address: string }>(sorted: T[]): T[] => {
+const applyFeaturedSort = <T extends { address: string }>(sorted: T[]): T[] => {
   return [...sorted].sort((a, b) => {
-    const af = isVaultRecentlyAdded(a.address) ? 1 : 0
-    const bf = isVaultRecentlyAdded(b.address) ? 1 : 0
+    const af = isVaultFeatured(a.address) ? 1 : 0
+    const bf = isVaultFeatured(b.address) ? 1 : 0
     return bf - af
   })
 }
@@ -239,27 +240,27 @@ const applyDeprecatedSort = <T extends { address: string }>(sorted: T[]): T[] =>
 }
 
 const sortedList = computed(() => {
-  let sorted: Vault[]
+  let sorted: EVault[]
   switch (sortBy.value) {
     case 'Total Supply':
-      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: Vault, b: Vault) => {
+      sorted = applyFeaturedSort([...filteredList.value].sort((a: EVault, b: EVault) => {
         const aValue = vaultUsdValues.value.get(a.address) ?? 0
         const bValue = vaultUsdValues.value.get(b.address) ?? 0
         return bValue - aValue
       }))
       break
     case 'Supply APY':
-      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: Vault, b: Vault) => {
-        return Number(b.interestRateInfo.supplyAPY) - Number(a.interestRateInfo.supplyAPY)
+      sorted = applyFeaturedSort([...filteredList.value].sort((a: EVault, b: EVault) => {
+        return Number(getDisplayedVaultSupplyApy(b)) - Number(getDisplayedVaultSupplyApy(a))
       }))
       break
     case 'Utilization':
-      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: Vault, b: Vault) => {
-        return getVaultUtilization(b) - getVaultUtilization(a)
+      sorted = applyFeaturedSort([...filteredList.value].sort((a: EVault, b: EVault) => {
+        return b.utilization - a.utilization
       }))
       break
     default:
-      sorted = applyRecentlyAddedSort([...filteredList.value])
+      sorted = applyFeaturedSort([...filteredList.value])
   }
   const directed = sortDir.value === 'asc' ? [...sorted].reverse() : sorted
   return applyDeprecatedSort(directed)

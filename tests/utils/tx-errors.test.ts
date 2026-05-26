@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { afterEach, describe, it, expect } from 'vitest'
 import { ContractFunctionRevertedError, encodeAbiParameters, type Hex } from 'viem'
 import { getTxErrorCode, getTxErrorMessage, shouldDiscardQuoteOnEstimateGasError } from '~/utils/tx-errors'
+import { clearOperationMeta, setOperationMeta } from '~/utils/operationGuardRegistry'
 
 const buildRevertError = (raw: Hex) =>
   new ContractFunctionRevertedError({
@@ -28,31 +29,31 @@ describe('tx-errors: Swapper_SwapError decoding', () => {
     expect(getTxErrorCode(err)).toBe('Swapper_SwapError')
   })
 
-  it('returns a slippage-mentioning message for Swapper_SwapError', () => {
+  it('returns a slippage-mentioning message for Swapper_SwapError', async () => {
     const err = buildRevertError(encodeSwapperSwapError('0xdeadbeef'))
-    expect(getTxErrorMessage(err)).toMatch(/slippage/i)
+    expect(await getTxErrorMessage(err)).toMatch(/slippage/i)
   })
 
-  it('hints to try a different swap provider for Swapper_SwapError', () => {
+  it('hints to try a different swap provider for Swapper_SwapError', async () => {
     const err = buildRevertError(encodeSwapperSwapError('0xdeadbeef'))
-    expect(getTxErrorMessage(err)).toMatch(/swap provider/i)
+    expect(await getTxErrorMessage(err)).toMatch(/swap provider/i)
   })
 
-  it('appends the inner Error(string) reason when present', () => {
+  it('appends the inner Error(string) reason when present', async () => {
     const inner = encodeErrorString('Too little received')
     const err = buildRevertError(encodeSwapperSwapError(inner))
-    expect(getTxErrorMessage(err)).toMatch(/\(Too little received\)$/)
+    expect(await getTxErrorMessage(err)).toMatch(/\(Too little received\)$/)
   })
 
-  it('appends a known custom error name as the inner reason', () => {
+  it('appends a known custom error name as the inner reason', async () => {
     // 0xea8e4eb5 = NotAuthorized (present in ERROR_SIGNATURE_MAP)
     const err = buildRevertError(encodeSwapperSwapError('0xea8e4eb5'))
-    expect(getTxErrorMessage(err)).toMatch(/\(NotAuthorized\)$/)
+    expect(await getTxErrorMessage(err)).toMatch(/\(NotAuthorized\)$/)
   })
 
-  it('omits the inner reason suffix when inner bytes are unrecognised', () => {
+  it('omits the inner reason suffix when inner bytes are unrecognised', async () => {
     const err = buildRevertError(encodeSwapperSwapError('0xdeadbeef'))
-    expect(getTxErrorMessage(err)).not.toMatch(/\(.*\)$/)
+    expect(await getTxErrorMessage(err)).not.toMatch(/\(.*\)$/)
   })
 })
 
@@ -70,5 +71,26 @@ describe('shouldDiscardQuoteOnEstimateGasError', () => {
   it('keeps quotes for other estimation failures', () => {
     const err = new Error('execution reverted: E_InsufficientCash')
     expect(shouldDiscardQuoteOnEstimateGasError(err)).toBe(false)
+  })
+})
+
+describe('tx-errors: Keyring fee context', () => {
+  afterEach(() => {
+    clearOperationMeta('keyring')
+  })
+
+  it('uses operation metadata for Keyring credential fee balance errors', async () => {
+    setOperationMeta('keyring', {
+      credentialCost: 1_000_000_000_000_000,
+      chainId: 1,
+    })
+
+    expect(await getTxErrorMessage(new Error('insufficient funds for gas * price + value'))).toContain('Keyring credential fee')
+  })
+
+  it('falls back to the generic balance error without Keyring metadata', async () => {
+    expect(await getTxErrorMessage(new Error('insufficient funds for gas * price + value'))).toBe(
+      'Insufficient balance to cover gas fees and transaction value.',
+    )
   })
 })

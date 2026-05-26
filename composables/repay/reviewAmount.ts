@@ -1,7 +1,7 @@
 import { formatUnits } from 'viem'
-import type { SwapApiQuote } from '~/entities/swap'
-import { SwapperMode } from '~/entities/swap'
-import { getSwapInputAmount } from '~/composables/useEulerOperations/swaps/verify'
+import type { SwapQuote } from '@eulerxyz/euler-v2-sdk'
+import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
+import { getSwapInputAmount } from '~/utils/swapQuotes'
 import { trimTrailingZeros } from '~/utils/string-utils'
 
 export const getRepaySwapReviewInputAmount = ({
@@ -11,7 +11,7 @@ export const getRepaySwapReviewInputAmount = ({
   swapperMode,
 }: {
   amount: string
-  quote?: SwapApiQuote | null
+  quote?: SwapQuote | null
   sourceDecimals: bigint | number
   swapperMode: SwapperMode
 }): string => {

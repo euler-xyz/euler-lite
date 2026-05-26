@@ -1,18 +1,10 @@
 <script setup lang="ts">
 import type { MarketGroup, MiniDiagramData } from '~/entities/lend-discovery'
+import { isCyclicalNoteVault } from '~/utils/vault/classification'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { isVaultDeprecated, isVaultKeyring } from '~/utils/eulerLabelsUtils'
 import { stringToColor } from '~/utils/string-utils'
-import {
-  getEnlargedDiagram,
-  getArrow,
-  getLabelPosition,
-  getGraphConnectedAddresses,
-  isNodeRampingDown,
-  isExternalCollateral,
-  findVault,
-} from '~/utils/discoveryCalculations'
-import { isCyclicalNoteVault } from '~/entities/vault'
+import { getEnlargedDiagram, getArrow, getLabelPosition, getGraphConnectedAddresses, isNodeRampingDown, isExternalCollateral, findVault } from '~/utils/discoveryCalculations'
 
 const props = defineProps<{
   market: MarketGroup
@@ -52,7 +44,14 @@ const isNodeCyclicalNote = (address: string): boolean => {
     v-for="(enlarged, enlargedIdx) in [getEnlargedDiagram(diagram)]"
     :key="'edata-' + enlargedIdx"
   >
-    <div class="px-16 pb-12 flex items-center justify-center">
+    <div
+      class="px-16 pb-12 flex items-center justify-center"
+      data-id="discovery-graph"
+      data-list="discovery-graph"
+      :data-key="market.id"
+      :data-node-count="enlarged.nodes.length"
+      :data-edge-count="enlarged.edges.length"
+    >
       <svg
         class="h-auto max-w-full"
         :style="{ width: `${Math.min(enlarged.viewWidth * 1.5, 900)}px` }"
@@ -72,6 +71,13 @@ const isNodeCyclicalNote = (address: string): boolean => {
             "
           >
             <line
+              data-id="discovery-graph-edge"
+              data-list="discovery-graph-edge"
+              :data-key="`${edge.from.address}:${edge.to.address}`"
+              :data-market-id="market.id"
+              :data-from-address="edge.from.address"
+              :data-to-address="edge.to.address"
+              :data-mutual="edge.mutual"
               :x1="edge.from.x"
               :y1="edge.from.y"
               :x2="
@@ -112,6 +118,13 @@ const isNodeCyclicalNote = (address: string): boolean => {
             />
             <template v-if="edge.mutual">
               <line
+                data-id="discovery-graph-edge"
+                data-list="discovery-graph-edge"
+                :data-key="`${edge.to.address}:${edge.from.address}`"
+                :data-market-id="market.id"
+                :data-from-address="edge.to.address"
+                :data-to-address="edge.from.address"
+                data-mutual="true"
                 :x1="edge.to.x"
                 :y1="edge.to.y"
                 :x2="
@@ -155,6 +168,13 @@ const isNodeCyclicalNote = (address: string): boolean => {
           <!-- Default state or dimmed -->
           <line
             v-else
+            data-id="discovery-graph-edge"
+            data-list="discovery-graph-edge"
+            :data-key="`${edge.from.address}:${edge.to.address}`"
+            :data-market-id="market.id"
+            :data-from-address="edge.from.address"
+            :data-to-address="edge.to.address"
+            :data-mutual="edge.mutual"
             :x1="edge.from.x"
             :y1="edge.from.y"
             :x2="edge.to.x"
@@ -174,6 +194,13 @@ const isNodeCyclicalNote = (address: string): boolean => {
           v-for="node in enlarged.nodes"
           :key="node.address"
           :class="node.hasVaultData === false ? 'cursor-default' : 'cursor-pointer'"
+          data-id="discovery-graph-node"
+          data-list="discovery-graph-node"
+          :data-key="node.address"
+          :data-market-id="market.id"
+          :data-vault-address="node.address"
+          :data-asset-address="node.assetAddress"
+          :data-symbol="node.assetSymbol"
           :opacity="isGraphNodeHighlighted(node.address) ? 1 : 0.25"
           style="transition: opacity 0.2s"
           @click.stop="node.hasVaultData !== false && $emit('selectNode', node.address)"

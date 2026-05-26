@@ -5,18 +5,11 @@ import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { createInFlightDedup } from '~/server/utils/in-flight'
 import { reportStatus } from '~/server/utils/log'
 import { MERKL_API_BASE_URL } from '~/entities/constants'
+import { buildEulerSDK, type EulerSDK, type TokenListItem } from '@eulerxyz/euler-v2-sdk'
+import { readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
 
 const CACHE_TTL_MS = 300_000
 const DEFILLAMA_DEFAULT_URL = 'https://d3g10bzo9rdluh.cloudfront.net'
-
-interface EulerApiToken {
-  chainId: number
-  address: string
-  name: string
-  symbol: string
-  decimals: number
-  logoURI: string
-}
 
 interface TokenEntry {
   chainId: number
@@ -27,13 +20,18 @@ interface TokenEntry {
   logoURI?: string
 }
 
+type QueryTokenList = (url: string) => Promise<TokenListItem[]>
+type ConfigurableTokenlistService = EulerSDK['tokenlistService'] & {
+  setQueryTokenList?: (fn: QueryTokenList) => void
+}
+
 const rateLimiter = createRateLimiter({
   max: 1000,
   windowMs: 60_000,
   label: 'token-list',
 })
 
-const eulerApiCache = createTtlCache<TokenEntry[]>({ ttlMs: CACHE_TTL_MS })
+const eulerSdkCache = createTtlCache<TokenEntry[]>({ ttlMs: CACHE_TTL_MS })
 const uniswapCache = createTtlCache<TokenEntry[]>({ ttlMs: CACHE_TTL_MS })
 const defillamaCache = createTtlCache<TokenEntry[]>({ ttlMs: CACHE_TTL_MS })
 const merklCache = createTtlCache<TokenEntry[]>({ ttlMs: CACHE_TTL_MS })
@@ -52,69 +50,101 @@ const merklInFlight = createInFlightDedup<string, TokenEntry[]>()
 const mergedCache = createTtlCache<TokenEntry[]>({ ttlMs: CACHE_TTL_MS, maxEntries: 50 })
 const mergedInFlight = createInFlightDedup<string, TokenEntry[]>()
 
-function refreshEulerApi(chainId: number): Promise<TokenEntry[]> {
-  const key = String(chainId)
-  const baseUrl = process.env.EULER_API_URL || process.env.NUXT_PUBLIC_EULER_API_URL
-  if (!baseUrl) return Promise.resolve([])
+let sdkPromise: Promise<EulerSDK> | undefined
 
-  const PAGE_LIMIT = 100
-  // Hard cap on iterations: 100 pages × 100 tokens = 10k tokens. Far above any
-  // realistic chain's token count, so hitting this cap means upstream metadata
-  // is broken (e.g. meta.hasMore stuck at true with empty data).
-  const MAX_PAGES = 100
-
-  return eulerInFlight.run(key, async () => {
-    const allTokens: EulerApiToken[] = []
-    let offset = 0
-
-    for (let pageNum = 0; pageNum < MAX_PAGES; pageNum++) {
-      // type=base restores the v1-style catalog (vault underlying assets only).
-      // Without it the v3 API also returns eTokens (vault shares) and dTokens
-      // (debt tokens), which leak into the "pay with" picker and bloat the
-      // wallet-balance RPC fan-out by ~7x on mainnet.
-      const resp = await fetchWithTimeout(
-        `${baseUrl}/v3/tokens?chainId=${chainId}&limit=${PAGE_LIMIT}&offset=${offset}&type=base`,
-      )
-      if (!resp.ok) throw new Error(`Euler API returned ${resp.status}`)
-
-      const body = await resp.json()
-      const page: EulerApiToken[] = Array.isArray(body.data) ? body.data : []
-      allTokens.push(...page)
-      offset += PAGE_LIMIT
-
-      // Stop on empty or short page: backend always returns up to PAGE_LIMIT
-      // when more data exists, so a short page is authoritatively the last one.
-      if (page.length < PAGE_LIMIT) break
-
-      const total = typeof body.meta?.total === 'number' ? body.meta.total : undefined
-      if (total != null && offset >= total) break
-      if (body.meta?.hasMore === false) break
-    }
-
-    const tokens: TokenEntry[] = allTokens.map(t => ({
-      chainId: t.chainId,
-      address: t.address,
-      name: t.name,
-      symbol: t.symbol,
-      decimals: t.decimals,
-      logoURI: t.logoURI || undefined,
-    }))
-    eulerApiCache.set(key, tokens)
-    reportStatus('token-list', `euler-api:${chainId}`, 'ok')
-    return tokens
-  })
-    .catch((err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err)
-      reportStatus('token-list', `euler-api:${chainId}`, `failed:${msg}`,
-        `Euler API fetch failed for chain ${chainId}: ${msg}`)
-      return eulerApiCache.getStale(key) || []
-    })
+type TokenListPage = TokenListItem[] | {
+  data?: TokenListItem[]
+  meta?: {
+    total?: number
+    limit?: number
+    offset?: number
+  }
 }
 
-function fetchEulerApi(chainId: number): Promise<TokenEntry[]> {
-  const cached = eulerApiCache.get(String(chainId))
+function setSearchParam(url: string, key: string, value: string): string {
+  const parsed = new URL(url)
+  parsed.searchParams.set(key, value)
+  return parsed.toString()
+}
+
+async function fetchEulerSdkTokenListPage(url: string, apiKey: string): Promise<TokenListPage> {
+  const resp = await fetchWithTimeout(url, undefined, {
+    headers: apiKey ? { 'X-API-Key': apiKey } : undefined,
+  })
+  if (!resp.ok) throw new Error(`Euler SDK token list upstream returned ${resp.status}`)
+  return await resp.json() as TokenListPage
+}
+
+async function queryEulerSdkTokenList(url: string, apiKey: string): Promise<TokenListItem[]> {
+  const firstPage = await fetchEulerSdkTokenListPage(url, apiKey)
+  if (Array.isArray(firstPage)) return firstPage
+
+  const firstData = Array.isArray(firstPage.data) ? firstPage.data : []
+  const tokens = [...firstData]
+  const total = Number(firstPage.meta?.total)
+  const limit = Number(firstPage.meta?.limit)
+  const firstOffset = Number(firstPage.meta?.offset ?? 0)
+  if (!Number.isFinite(total) || !Number.isFinite(limit) || limit <= 0 || firstOffset + firstData.length >= total) {
+    return tokens
+  }
+
+  for (let offset = firstOffset + limit; offset < total; offset += limit) {
+    const page = await fetchEulerSdkTokenListPage(setSearchParam(url, 'offset', String(offset)), apiKey)
+    if (Array.isArray(page)) throw new Error('Euler SDK token list pagination returned an array page')
+    if (Array.isArray(page.data)) tokens.push(...page.data)
+  }
+
+  return tokens
+}
+
+const getSdk = () => {
+  const v3ApiUrl = readResolvedV3ApiUrl()
+  const v3ApiKey = readV3ApiKey().trim()
+  sdkPromise ??= buildEulerSDK({
+    config: {
+      v3ApiUrl,
+      tokenlistApiBaseUrl: v3ApiUrl,
+      ...(v3ApiKey ? { v3ApiKey } : {}),
+    },
+  }).then((sdk) => {
+    const tokenlistService = sdk.tokenlistService as ConfigurableTokenlistService
+    tokenlistService.setQueryTokenList?.((url: string) => queryEulerSdkTokenList(url, v3ApiKey))
+    return sdk
+  })
+  return sdkPromise
+}
+
+const toTokenEntry = (token: TokenListItem): TokenEntry => ({
+  chainId: token.chainId,
+  address: token.address,
+  name: token.name,
+  symbol: token.symbol,
+  decimals: token.decimals,
+  logoURI: token.logoURI || undefined,
+})
+
+function refreshEulerSdkTokenList(chainId: number): Promise<TokenEntry[]> {
+  const key = String(chainId)
+
+  return eulerInFlight.run(key, () => getSdk()
+    .then(async (sdk) => {
+      const tokens = (await sdk.tokenlistService.loadTokenlist(chainId)).map(toTokenEntry)
+      eulerSdkCache.set(key, tokens)
+      reportStatus('token-list', `euler-sdk:${chainId}`, 'ok')
+      return tokens
+    })
+    .catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err)
+      reportStatus('token-list', `euler-sdk:${chainId}`, `failed:${msg}`,
+        `Euler SDK token list failed for chain ${chainId}: ${msg}`)
+      return eulerSdkCache.getStale(key) || []
+    }))
+}
+
+function fetchEulerSdkTokenList(chainId: number): Promise<TokenEntry[]> {
+  const cached = eulerSdkCache.get(String(chainId))
   if (cached) return Promise.resolve(cached)
-  return refreshEulerApi(chainId)
+  return refreshEulerSdkTokenList(chainId)
 }
 
 function refreshUniswap(): Promise<TokenEntry[]> {
@@ -267,7 +297,7 @@ const mergeSources = (
   const defillama = defillamaResult.status === 'fulfilled' ? defillamaResult.value : []
   const merkl = merklResult.status === 'fulfilled' ? merklResult.value : []
 
-  // Priority: Euler API > DefiLlama > Uniswap > Merkl rewards. Merkl sits
+  // Priority: Euler SDK token list > DefiLlama > Uniswap > Merkl rewards. Merkl sits
   // last so it only fills in tokens the general sources don't know about,
   // without overriding authoritative metadata for tokens (like EUL) that
   // are in multiple lists.
@@ -283,7 +313,7 @@ const buildMergedTokens = async (chainId: number): Promise<TokenEntry[]> => {
   // doesn't kill the merge). Bounded by the slowest cold-fetch (10s
   // timeout); warm-cache path is a Map lookup.
   const [eulerResult, uniswapResult, defillamaResult, merklResult] = await Promise.allSettled([
-    fetchEulerApi(chainId),
+    fetchEulerSdkTokenList(chainId),
     fetchUniswap(),
     fetchDefillama(chainId),
     fetchMerkl(chainId),
@@ -305,7 +335,7 @@ export function refreshTokenList(chainId: number): Promise<TokenEntry[]> {
   const key = String(chainId)
   return mergedInFlight.run(key, async () => {
     const results = await Promise.allSettled([
-      refreshEulerApi(chainId),
+      refreshEulerSdkTokenList(chainId),
       refreshUniswap(),
       refreshDefillama(chainId),
       refreshMerkl(chainId),

@@ -1,4 +1,4 @@
-<script setup lang="ts">
+<!-- <script setup lang="ts">
 const { unresolvedBorrowCount, unresolvedDepositCount } = useEulerAccount()
 
 const dismissed = ref(false)
@@ -67,4 +67,4 @@ const message = computed(() => {
   opacity: 0;
   transform: translateY(-4px);
 }
-</style>
+</style> -->

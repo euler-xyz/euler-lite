@@ -1,25 +1,24 @@
 <script setup lang="ts">
-import type { EarnVault } from '~/entities/vault'
+import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { formatTtl } from '~/utils/crypto-utils'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { getSpecialAddressLabel } from '~/utils/special-addresses'
 
-const { vault } = defineProps<{ vault: EarnVault }>()
+const { vault } = defineProps<{ vault: EulerEarn }>()
 const { chainId } = useEulerAddresses()
-const { copyToClipboard, isCopied } = useClipboardCopy()
 
 const vaultAddressesInfo = computed(() => ([
   {
     title: `Owner`,
-    address: vault.owner,
+    address: vault.governance.owner,
   },
   {
     title: `Curator`,
-    address: vault.curator,
+    address: vault.governance.curator,
   },
   {
     title: `Guardian`,
-    address: vault.guardian,
+    address: vault.governance.guardian,
   },
 ]))
 
@@ -28,17 +27,17 @@ const shortenAddress = (address: string) => {
 }
 
 const timelockDisplay = computed(() => {
-  if (vault.timelock === 0n) {
+  if (vault.governance.timelock === 0) {
     return '0 days'
   }
 
-  const timelockInSeconds = vault.timelock
-  const timelockInDays = timelockInSeconds / 86400n
+  const timelockInSeconds = vault.governance.timelock
+  const timelockInDays = BigInt(Math.floor(timelockInSeconds / 86400))
   return formatTtl(timelockInDays)?.display || 'Unknown'
 })
 
-const onCopyClick = (address: string, key = address) => {
-  copyToClipboard(address, key)
+const onCopyClick = (address: string) => {
+  navigator.clipboard.writeText(address)
 }
 
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
@@ -66,11 +65,11 @@ const getExplorerAddressLink = (address: string) => getExplorerLink(address, cha
           </NuxtLink>
           <button
             class="text-neutral-400 cursor-pointer outline-none hover:text-neutral-600 active:text-neutral-700"
-            @click="onCopyClick(infoItem.address, infoItem.title)"
+            @click="onCopyClick(infoItem.address)"
           >
             <SvgIcon
               class="!w-18 !h-18"
-              :name="isCopied(infoItem.title) ? 'check' : 'copy'"
+              name="copy"
             />
           </button>
         </div>

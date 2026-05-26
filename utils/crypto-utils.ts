@@ -33,6 +33,10 @@ export const valueToNano = (src: number | string, decimals: number | bigint = 9)
   return parseUnits(value, decimalsNumber)
 }
 
+export const ltvToPercent = (src: bigint | number) => {
+  return typeof src === 'number' ? src * 100 : nanoToValue(src, 2)
+}
+
 export interface FormatTtlResult {
   display: string
   type: 'success' | 'error' | 'warning' | 'info'
@@ -103,7 +107,7 @@ export function formatTtlRelative(ttl?: bigint): string {
   return result.display
 }
 
-export const roundAndCompactTokens = (amount: bigint, decimals: bigint): string => {
+export const roundAndCompactTokens = (amount: bigint, decimals: number | bigint): string => {
   if (amount === 0n) {
     return '0'
   }

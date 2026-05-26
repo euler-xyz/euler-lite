@@ -1,13 +1,13 @@
-import { getAddress, type Address } from 'viem'
-import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
-import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import type { CollateralOption, Vault } from '~/entities/vault'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { buildCollateralOption, computeSupplyApy } from '~/utils/collateralOptions'
 import { useReactiveMap } from '~/composables/useReactiveMap'
 import { shouldIncludeWalletCollateral } from '~/utils/collateralFilters'
+import type { CollateralOption } from '~/types/collateral-option'
+import { getAddress, type Address } from 'viem'
+import { useVaultRegistry } from '~/composables/useVaultRegistry'
 
 type CollateralItem = {
-  vault: Vault
+  vault: EVault
   option: CollateralOption
 }
 
@@ -15,14 +15,20 @@ export const useMultiplyCollateralOptions = ({
   primaryCollateralVault,
   liabilityVault,
 }: {
-  primaryCollateralVault: Ref<Vault | undefined>
-  liabilityVault?: Ref<Vault | undefined>
+  primaryCollateralVault: Ref<EVault | undefined>
+  liabilityVault?: Ref<EVault | undefined>
 }) => {
   const { getVault } = useVaultRegistry()
   const { getBalance } = useWallets()
   const { depositPositions } = useEulerAccount()
-  const { withIntrinsicSupplyApy, version: intrinsicVersion } = useIntrinsicApy()
-  const { getSupplyRewardApy, version: rewardsVersion } = useRewardsApy()
+  const { settings } = useUserSettings()
+  const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
+  const enableRewardsApy = computed(() => settings.value.enableRewardsApy)
+  const { viewer } = useApyVisibility()
+  const visibilitySettings = computed(() => ({
+    enableIntrinsicApy: enableIntrinsicApy.value,
+    enableRewardsApy: enableRewardsApy.value,
+  }))
 
   const primaryCollateralAddress = computed(() => {
     const primary = primaryCollateralVault.value
@@ -35,11 +41,11 @@ export const useMultiplyCollateralOptions = ({
       return []
     }
 
-    const items: { vault: Vault, balance: bigint }[] = []
-    liability.collateralLTVs
-      .filter(ltv => ltv.borrowLTV > 0n)
+    const items: { vault: EVault, balance: bigint }[] = []
+    liability.collaterals
+      .filter(ltv => ltv.borrowLTV > 0)
       .forEach((ltv) => {
-        const vault = getVault(ltv.collateral) as Vault | undefined
+        const vault = getVault(ltv.address) as EVault | undefined
         if (!vault) return
 
         const balance = getBalance(vault.asset.address as Address)
@@ -57,14 +63,14 @@ export const useMultiplyCollateralOptions = ({
 
   const walletItems = useReactiveMap(
     walletItemsInput,
-    [rewardsVersion, intrinsicVersion],
+    [viewer, enableIntrinsicApy, enableRewardsApy],
     async ({ vault, balance }) => ({
       vault,
       option: await buildCollateralOption({
         vault, type: 'wallet',
         amount: nanoToValue(balance, vault.asset.decimals),
         priceAmount: nanoToValue(balance, vault.asset.decimals),
-        apy: computeSupplyApy(vault, withIntrinsicSupplyApy, getSupplyRewardApy),
+        apy: computeSupplyApy(vault, viewer.value, visibilitySettings.value),
         tagContext: 'supply-source',
       }),
     } as CollateralItem),
@@ -74,23 +80,30 @@ export const useMultiplyCollateralOptions = ({
     const liability = liabilityVault?.value
     if (!liability) return []
     const validCollaterals = new Set(
-      liability.collateralLTVs.filter(ltv => ltv.borrowLTV > 0n).map(ltv => getAddress(ltv.collateral)),
+      liability.collaterals.filter(ltv => ltv.borrowLTV > 0).map(ltv => getAddress(ltv.address)),
     )
+    // Enumerate one entry per (vault × sub-account) so a user with savings of
+    // the same vault in multiple sub-accounts gets distinct options.
     return depositPositions.value
-      .filter(position => position.assets > 0n && validCollaterals.has(getAddress(position.vault.address)))
-      .map(position => ({ vault: position.vault as Vault, assets: position.assets, subAccount: position.subAccount }))
+      .map(position => ({ position, vault: position.vault as EVault | undefined }))
+      .filter(({ position, vault }) => !!vault && position.assets > 0n && validCollaterals.has(getAddress(vault.address)))
+      .map(({ position, vault }) => ({
+        vault: vault!,
+        assets: position.assets,
+        subAccount: position.subAccount as string,
+      }))
   })
 
   const savingItems = useReactiveMap(
     savingItemsInput,
-    [rewardsVersion, intrinsicVersion],
+    [viewer, enableIntrinsicApy, enableRewardsApy],
     async ({ vault, assets, subAccount }) => ({
       vault,
       option: await buildCollateralOption({
         vault, type: 'saving',
         amount: nanoToValue(assets, vault.asset.decimals),
         priceAmount: nanoToValue(assets, vault.asset.decimals),
-        apy: computeSupplyApy(vault, withIntrinsicSupplyApy, getSupplyRewardApy),
+        apy: computeSupplyApy(vault, viewer.value, visibilitySettings.value),
         tagContext: 'supply-source',
         subAccount,
       }),
@@ -107,7 +120,7 @@ export const useMultiplyCollateralOptions = ({
     return combinedItems.value.map(item => item.option)
   })
 
-  const collateralVaults = computed<Vault[]>(() => {
+  const collateralVaults = computed<EVault[]>(() => {
     return combinedItems.value.map(item => item.vault)
   })
 

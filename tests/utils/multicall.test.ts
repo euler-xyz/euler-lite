@@ -1,13 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
+import type { PublicClient } from 'viem'
 import { batchLensCalls } from '~/utils/multicall'
 
 const clientCall = vi.fn()
 
-vi.mock('~/utils/public-client', () => ({
-  getPublicClient: () => ({
-    call: clientCall,
-  }),
-}))
+const provider = { call: clientCall } as unknown as PublicClient
 
 const abi = [{
   type: 'function',
@@ -31,11 +28,11 @@ describe('batchLensCalls', () => {
     clientCall.mockRejectedValue({ message: 'fetch failed' })
 
     const results = await batchLensCalls(
+      provider,
       '0x0000000000000000000000000000000000000001',
       '0x0000000000000000000000000000000000000002',
       abi,
       calls,
-      'https://rpc.example',
     )
 
     expect(results).toEqual([
