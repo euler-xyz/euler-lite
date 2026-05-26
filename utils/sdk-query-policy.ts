@@ -118,7 +118,7 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
 
   // === Balances / allowances: short cache, always-fresh in form context ===
   queryNativeBalance: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND },
-  queryTokenBalances: { staleTimeMs: MINUTE * SECOND, formStaleTimeMs: 15 * SECOND },
+  queryTokenBalances: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND },
   queryBalanceOf: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND },
   queryAllowance: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND },
   queryPermit2Allowance: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND },
