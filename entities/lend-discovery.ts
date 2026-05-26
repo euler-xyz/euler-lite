@@ -57,8 +57,6 @@ export interface MarketGroupMetrics {
   assetSymbols: string[]
   /** Whether the group contains any recently added vaults */
   hasRecentlyAdded: boolean
-  /** Whether the group contains any featured vaults */
-  hasFeatured: boolean
 }
 
 // -- Curator Grouping (for Heatmap/Treemap views) --

@@ -6,7 +6,7 @@ import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
-import { getProductByVault, applyVaultOverrides, getEntitiesByEarnVault, isVaultFeatured, isVaultDeprecated, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getEntitiesByEarnVault, isVaultRecentlyAdded, isVaultDeprecated, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
@@ -161,10 +161,10 @@ const filteredList = computed(() => {
     .filter(matchesCustomFilters)
 })
 
-const applyFeaturedSort = <T extends { address: string }>(sorted: T[]): T[] => {
+const applyRecentlyAddedSort = <T extends { address: string }>(sorted: T[]): T[] => {
   return [...sorted].sort((a, b) => {
-    const af = isVaultFeatured(a.address) ? 1 : 0
-    const bf = isVaultFeatured(b.address) ? 1 : 0
+    const af = isVaultRecentlyAdded(a.address) ? 1 : 0
+    const bf = isVaultRecentlyAdded(b.address) ? 1 : 0
     return bf - af
   })
 }
@@ -181,26 +181,26 @@ const sortedList = computed(() => {
   let sorted: EulerEarn[]
   switch (sortBy.value) {
     case 'Total Supply':
-      sorted = applyFeaturedSort([...filteredList.value].sort((a: EulerEarn, b: EulerEarn) => {
+      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EulerEarn, b: EulerEarn) => {
         const aValue = vaultTotalSupplyUsd.value.get(a.address) ?? 0
         const bValue = vaultTotalSupplyUsd.value.get(b.address) ?? 0
         return bValue - aValue
       }))
       break
     case 'Supply APY':
-      sorted = applyFeaturedSort([...filteredList.value].sort((a: EulerEarn, b: EulerEarn) => {
+      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EulerEarn, b: EulerEarn) => {
         return Number(getVaultSupplyApy(b)) - Number(getVaultSupplyApy(a))
       }))
       break
     case 'Liquidity':
-      sorted = applyFeaturedSort([...filteredList.value].sort((a: EulerEarn, b: EulerEarn) => {
+      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EulerEarn, b: EulerEarn) => {
         const aValue = vaultLiquidityUsd.value.get(a.address) ?? 0
         const bValue = vaultLiquidityUsd.value.get(b.address) ?? 0
         return bValue - aValue
       }))
       break
     default:
-      sorted = applyFeaturedSort([...filteredList.value])
+      sorted = applyRecentlyAddedSort([...filteredList.value])
   }
   const directed = sortDir.value === 'asc' ? [...sorted].reverse() : sorted
   return applyDeprecatedSort(directed)

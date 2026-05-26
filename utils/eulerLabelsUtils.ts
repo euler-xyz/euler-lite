@@ -20,7 +20,6 @@ import {
   isEulerLabelEarnVaultNotExplorable,
   isEulerLabelProductKeyring,
   isEulerLabelVaultDeprecated,
-  isEulerLabelVaultFeatured,
   isEulerLabelVaultKeyring,
   isEulerLabelVaultNotExplorable,
   isEulerLabelVaultNotExplorableBorrow,
@@ -93,9 +92,6 @@ export const getAssetRestricted = (assetAddress: string): string[] | undefined =
 
 export const getAssetPatternRules = (): EulerLabelAssetPatternRule[] =>
   labels().assetPatternRules
-
-export const isVaultFeatured = (vaultAddress: string): boolean =>
-  isEulerLabelVaultFeatured(labels(), vaultAddress)
 
 export const isVaultRecentlyAdded = (vaultAddress: string): boolean => {
   const normalized = normalizeAddress(vaultAddress)

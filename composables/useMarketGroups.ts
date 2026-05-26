@@ -5,7 +5,7 @@ import type { EulerLabelEntity, EulerLabelProduct } from '~/entities/euler/label
 import type { MarketGroup, MarketGroupMetrics, CuratorGroup } from '~/entities/lend-discovery'
 import type { AnyVault } from '~/composables/useVaultRegistry'
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
-import { isVaultNotExplorable, isVaultFeatured, isVaultRecentlyAdded, isVaultDeprecated, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
+import { isVaultNotExplorable, isVaultRecentlyAdded, isVaultDeprecated, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 import { isLiveCollateralEdge } from '~/utils/vault/ltv'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import { liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
@@ -268,7 +268,6 @@ const computeMetricsSync = (vaults: AnyVault[]): MarketGroupMetrics => {
   let borrowableCount = 0
   let totalUtilization = 0
   const assetSymbols = new Set<string>()
-  let hasFeatured = false
   let hasRecentlyAdded = false
 
   for (const vault of vaults) {
@@ -279,7 +278,6 @@ const computeMetricsSync = (vaults: AnyVault[]): MarketGroupMetrics => {
     assetSymbols.add(symbol)
 
     const addr = getVaultAddress(vault)
-    if (addr && isVaultFeatured(addr)) hasFeatured = true
     if (addr && isVaultRecentlyAdded(addr)) hasRecentlyAdded = true
 
     if (isBorrowableVault(vault)) {
@@ -307,7 +305,6 @@ const computeMetricsSync = (vaults: AnyVault[]): MarketGroupMetrics => {
     averageUtilization: borrowableCount > 0 ? totalUtilization / borrowableCount : 0,
     assetSymbols: [...assetSymbols],
     hasRecentlyAdded,
-    hasFeatured,
   }
 }
 
