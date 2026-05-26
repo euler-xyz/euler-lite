@@ -12,38 +12,18 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { Address } from 'viem'
-import { getTxErrorMessage } from '~/utils/tx-errors'
 import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultSupplyApyModal } from '#components'
 
 const router = useRouter()
 const route = useRoute()
 const modal = useModal()
 const { error } = useToast()
-const { planDeposit, simulatePlan, executePlan } = useEulerTx()
+const { planDeposit, executePlan } = useEulerTx()
 const { getEarnVault, updateEarnVault } = useVaults()
 const { isReady: isLabelsReady } = useEulerLabels()
 const { isConnected, address } = useWagmi()
 const { fetchSingleBalance } = useWallets()
-const simulationError = ref('')
-const isSimulating = ref(false)
-const clearSimulationError = () => {
-  simulationError.value = ''
-}
-const runSimulation = async (p: TransactionPlan) => {
-  clearSimulationError()
-  isSimulating.value = true
-  try {
-    await simulatePlan(p)
-    return true
-  }
-  catch (e) {
-    simulationError.value = await getTxErrorMessage(e)
-    return false
-  }
-  finally {
-    isSimulating.value = false
-  }
-}
+const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const vaultAddress = route.params.vault as string
 useOperationGuard([vaultAddress])
 const { name } = useEulerProductOfVault(vaultAddress)
