@@ -18,7 +18,7 @@ import {
 const ALLOWED_METHODS = new Set(['GET', 'POST'])
 
 const rateLimiter = createRateLimiter({
-  max: 600,
+  max: 10_000,
   windowMs: 60_000,
   label: 'v3-proxy',
 })

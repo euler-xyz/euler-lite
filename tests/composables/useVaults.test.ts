@@ -10,6 +10,9 @@ const LABELED_EVAULT = '0x0000000000000000000000000000000000000101'
 const DYNAMIC_EVAULT = '0x0000000000000000000000000000000000000102'
 const ESCROW_EVAULT = '0x0000000000000000000000000000000000000103'
 const DEPRECATED_EVAULT = '0x0000000000000000000000000000000000000104'
+const VISIBLE_WETH_EVAULT = '0xD8b27CF359b7D15710a5BE299AF6e7Bf904984C2'
+const HIDDEN_WETH_LENDING_EVAULT = '0x2ff5F1Ca35f5100226ac58E1BFE5aac56919443B'
+const HIDDEN_TELOSC_WORMHOLE_EVAULT = '0x2e6Dff8907aFdA5D62A278e21B2e65c8595D746E'
 
 const makeVault = (address: string): EVault => ({
   address: getAddress(address),
@@ -67,6 +70,58 @@ describe('useVaults EVault verification metadata', () => {
     const registry = useVaultRegistry()
     expect(registry.get(LABELED_EVAULT)?.verified).toBe(true)
     expect(registry.getVerifiedEVaults().map(vault => vault.address)).toEqual([getAddress(LABELED_EVAULT)])
+  })
+
+  it('hides not-explorable deprecated WETH lend vaults unless showAll is enabled', () => {
+    __setEulerLabelsDataForTest({
+      products: {
+        'euler-prime': {
+          name: 'Euler Prime',
+          description: '',
+          entity: 'euler',
+          url: '',
+          vaults: [getAddress(VISIBLE_WETH_EVAULT)],
+          deprecatedVaults: [],
+        },
+        'origin-arm-weth': {
+          name: 'Origin stETH ARM / WETH',
+          description: '',
+          entity: 'alphagrowth',
+          url: '',
+          vaults: [],
+          deprecatedVaults: [getAddress(HIDDEN_WETH_LENDING_EVAULT)],
+          notExplorable: true,
+        },
+        'telosc-wormhole': {
+          name: 'TelosC Wormhole',
+          description: '',
+          entity: 'telosc',
+          url: '',
+          vaults: [],
+          deprecatedVaults: [getAddress(HIDDEN_TELOSC_WORMHOLE_EVAULT)],
+          notExplorable: true,
+        },
+      },
+    })
+
+    const registry = useVaultRegistry()
+    registry.setMany(
+      [VISIBLE_WETH_EVAULT, HIDDEN_WETH_LENDING_EVAULT, HIDDEN_TELOSC_WORMHOLE_EVAULT].map(address => ({
+        address,
+        vault: makeVault(address),
+        type: 'evk' as const,
+        verified: true,
+      })),
+    )
+
+    expect(registry.getVerifiedEVaults().map(vault => vault.address)).toEqual([
+      getAddress(VISIBLE_WETH_EVAULT),
+    ])
+    expect(registry.getVerifiedEVaults(true).map(vault => vault.address)).toEqual([
+      getAddress(VISIBLE_WETH_EVAULT),
+      getAddress(HIDDEN_WETH_LENDING_EVAULT),
+      getAddress(HIDDEN_TELOSC_WORMHOLE_EVAULT),
+    ])
   })
 
   it('marks all label-loaded EVaults verified, including deprecated label entries', async () => {

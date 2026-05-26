@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   consume: vi.fn(),
   fetchWithTimeout: vi.fn(),
+  rateLimiterConfigs: [] as Array<{ max: number, windowMs: number, label: string }>,
 }))
 
 vi.mock('h3', () => ({
@@ -25,7 +26,10 @@ vi.mock('~/server/utils/fetchWithTimeout', () => ({
 }))
 
 vi.mock('~/server/utils/rate-limit', () => ({
-  createRateLimiter: () => ({ consume: mocks.consume }),
+  createRateLimiter: (config: { max: number, windowMs: number, label: string }) => {
+    mocks.rateLimiterConfigs.push(config)
+    return { consume: mocks.consume }
+  },
 }))
 
 type TestEvent = H3Event & {
@@ -63,6 +67,14 @@ describe('/api/v3 proxy route', () => {
   afterEach(() => {
     delete process.env.EULER_SDK_V3_API_KEY
     vi.clearAllMocks()
+  })
+
+  it('uses the same app-server rate-limit budget as the RPC proxy', () => {
+    expect(mocks.rateLimiterConfigs).toContainEqual({
+      max: 10_000,
+      windowMs: 60_000,
+      label: 'v3-proxy',
+    })
   })
 
   it('rate limits and forwards allowed POST requests with fixed server headers', async () => {
