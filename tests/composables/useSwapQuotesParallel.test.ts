@@ -44,6 +44,10 @@ describe('useSwapQuotesParallel', () => {
       chain: ref({ nativeCurrency: { decimals: 18 } }),
     }))
     vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
+    vi.stubGlobal('useSpyMode', () => ({
+      isSpyMode: ref(false),
+      spyAddress: ref(null),
+    }))
   })
 
   it('keeps effectiveQuote stable when selecting the current best provider', async () => {

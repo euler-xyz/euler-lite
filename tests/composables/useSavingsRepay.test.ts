@@ -165,6 +165,10 @@ describe('useSavingsRepay', () => {
       isConnected: ref(true),
       chain: ref({ nativeCurrency: { decimals: 18 } }),
     }))
+    vi.stubGlobal('useSpyMode', () => ({
+      isSpyMode: ref(false),
+      spyAddress: ref(null),
+    }))
   })
 
   afterEach(() => {

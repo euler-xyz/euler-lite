@@ -12,6 +12,7 @@ Last refreshed against the legacy worktree pinned at `HEAD` of
 - **20** plan paths verified byte-equal post-approval-expansion
 - **4** plan paths with documented intentional batch-shape divergences
 - **3** plan paths SDK-only, with no legacy counterpart to compare against
+- **1** current-behavior regression for sub-account selection and stale-controller cleanup
 
 ## Covered (byte-equal parity, 20 tests)
 
@@ -108,6 +109,17 @@ the SDK's stand-alone cleanup builder one-to-one.
 Legacy's `buildSwapAndSupplyPlan` only accepts the `SkimMin` (deposit) variant
 of a wallet swap. The wallet-to-wallet path with `transferOutputToReceiver`
 is SDK-introduced.
+
+## Current-Behavior Regression (1)
+
+### `planBorrow` with stale controller on selected sub-account
+The `0xcfe5660d6c55906EC8C488A466bd4f77F77eec88` scenario seeds the account
+state used by current borrow flows: the next selected sub-account is
+`0xcfe5660D6c55906Ec8c488A466bd4F77f77eeC8A`, carries stale controller
+`0xD8b27CF359b7D15710a5BE299AF6e7Bf904984C2`, and has two enabled collateral
+flags. The SDK borrow plan disables the stale controller and keeps collateral
+cleanup out of this path; borrow cleanup is controller-scoped so the new wallet
+collateral deposit can proceed in the same batch.
 
 ## Combined helpers in `useEulerTx`
 

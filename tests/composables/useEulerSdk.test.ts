@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ref, type Ref } from 'vue'
+import { computed, ref, type Ref } from 'vue'
 
 type MockSdk = {
   id: string
@@ -56,9 +56,22 @@ const importUseEulerSdk = async (
   vi.resetModules()
   vi.doMock('@eulerxyz/euler-v2-sdk', () => ({
     buildEulerSDK,
+    createKeyringPlugin: vi.fn(() => ({ name: 'keyring' })),
     createPythPlugin: vi.fn(() => ({ name: 'pyth' })),
+    IntrinsicApyService: class IntrinsicApyService {
+      constructor(readonly adapter: unknown) {}
+    },
+    IntrinsicApyV3Adapter: class IntrinsicApyV3Adapter {
+      constructor(readonly config: unknown, readonly buildQuery: unknown) {}
+    },
   }))
-  vi.stubGlobal('useEulerAddresses', () => ({ allowedChainIds: chainIds }))
+  vi.stubGlobal('useEulerAddresses', () => ({
+    allowedChainIds: chainIds,
+    chainId: computed(() => chainIds.value[0] ?? 1),
+  }))
+  vi.stubGlobal('useVaultRegistry', () => ({
+    getAll: () => [],
+  }))
   vi.stubGlobal('useEnvConfig', () => ({
     v3ApiUrl: '',
     enableV3Backend: true,
@@ -91,11 +104,11 @@ describe('useEulerSdk', () => {
     const { getEulerSdk } = await importUseEulerSdk(chainIds, buildEulerSDK)
 
     const firstBuild = getEulerSdk()
-    expect(buildEulerSDK).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(buildEulerSDK).toHaveBeenCalledTimes(1))
 
     chainIds.value = [2]
     const secondBuild = getEulerSdk()
-    expect(buildEulerSDK).toHaveBeenCalledTimes(2)
+    await vi.waitFor(() => expect(buildEulerSDK).toHaveBeenCalledTimes(2))
 
     builds[1].resolve(sdkB)
     await expect(secondBuild).resolves.toBe(sdkB)
@@ -131,7 +144,7 @@ describe('useEulerSdk', () => {
       v3ApiUrl: '/api/v3',
       tokenlistApiBaseUrl: '/api/v3',
       deploymentsUrl: '/api/euler-chains',
-      eulerLabelsBaseUrl: 'https://labels.example.test',
+      eulerLabelsBaseUrl: '/api/labels',
       oracleAdaptersBaseUrl: 'https://oracles.example.test/data',
     })
     expect(options.rpcUrls).toBeUndefined()
@@ -140,7 +153,7 @@ describe('useEulerSdk', () => {
     expect(options.oracleAdapterServiceConfig).toBeUndefined()
   })
 
-  it('delegates SDK-owned defaults to the SDK', async () => {
+  it('uses Lite proxy defaults when runtime URLs are empty', async () => {
     const chainIds = ref([1])
     const sdk = createMockSdk('defaults')
     const buildEulerSDK = vi.fn().mockResolvedValue(sdk)
@@ -156,18 +169,30 @@ describe('useEulerSdk', () => {
     await expect(getEulerSdk()).resolves.toBe(sdk)
 
     const options = buildEulerSDK.mock.calls[0]?.[0] as BuildEulerSDKOptions
-    expect(options.config).toEqual({
+    expect(options.config).toMatchObject({
       rpcUrls: {
         1: '/api/rpc/1',
       },
       v3ApiUrl: '/api/v3',
       tokenlistApiBaseUrl: '/api/v3',
+      intrinsicApyV3ApiUrl: '/api/v3',
       deploymentsUrl: '/api/euler-chains',
-      accountServiceAdapter: 'v3',
-      eVaultServiceAdapter: 'v3',
-      eulerEarnServiceAdapter: 'v3',
-      vaultTypeAdapter: 'v3',
-      rewardsServiceAdapter: 'v3',
+      eulerLabelsBaseUrl: '/api/labels',
+      rewardsMerklApiUrl: '/api/proxy/merkl',
+      rewardsBrevisApiUrl: '/api/proxy/incentra/sdk/v1/eulerCampaigns',
+      rewardsBrevisProofsApiUrl: '/api/proxy/incentra/v1/getMerkleProofsBatch',
+      rewardsFuulApiUrl: '/api/proxy/fuul',
+      accountVaultsSubgraphUrls: {
+        1: '/api/proxy/subgraph/1',
+      },
+      vaultTypeSubgraphUrls: {
+        1: '/api/proxy/subgraph/1',
+      },
+      accountServiceAdapter: 'fallback',
+      eVaultServiceAdapter: 'fallback',
+      eulerEarnServiceAdapter: 'fallback',
+      vaultTypeAdapter: 'fallback',
+      rewardsServiceAdapter: 'fallback',
     })
   })
 
