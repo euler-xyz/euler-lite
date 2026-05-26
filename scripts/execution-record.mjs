@@ -575,6 +575,82 @@ async function waitForReceipt(anvilRpcUrl, hash) {
   throw new Error(`Timed out waiting for receipt ${hash}`)
 }
 
+async function collectRevertDiagnostics({ anvilRpcUrl, hash, receipt, tx }) {
+  const callTx = {
+    from: tx.from,
+    to: tx.to,
+    data: tx.data,
+    value: tx.value ?? '0x0',
+  }
+  const blockTag = receipt?.blockNumber ?? 'latest'
+
+  const [ethCall, trace] = await Promise.all([
+    rpcDiagnostic(anvilRpcUrl, 'eth_call', [callTx, blockTag]),
+    rpcDiagnostic(anvilRpcUrl, 'debug_traceTransaction', [
+      hash,
+      {
+        tracer: 'callTracer',
+        tracerConfig: {
+          onlyTopCall: false,
+        },
+      },
+    ]),
+  ])
+
+  return {
+    ethCall,
+    trace: summarizeCallTrace(trace),
+  }
+}
+
+async function rpcDiagnostic(url, method, params) {
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method, params }),
+    })
+    const json = await response.json()
+    if (json.error) {
+      return { ok: false, error: sanitizeForJson(json.error) }
+    }
+    return { ok: true, result: sanitizeForJson(json.result) }
+  }
+  catch (error) {
+    return { ok: false, error: sanitizeForJson(error) }
+  }
+}
+
+function summarizeCallTrace(trace) {
+  if (!trace?.ok) return trace
+  return {
+    ok: true,
+    result: summarizeCallTraceNode(trace.result),
+  }
+}
+
+function summarizeCallTraceNode(node, depth = 0) {
+  if (!node || typeof node !== 'object') return node
+  const summarized = {
+    type: node.type,
+    from: node.from,
+    to: node.to,
+    value: node.value,
+    gas: node.gas,
+    gasUsed: node.gasUsed,
+    error: node.error,
+    revertReason: node.revertReason,
+    input: typeof node.input === 'string' ? `${node.input.slice(0, 138)}${node.input.length > 138 ? '...' : ''}` : node.input,
+    output: typeof node.output === 'string' ? `${node.output.slice(0, 514)}${node.output.length > 514 ? '...' : ''}` : node.output,
+  }
+  const calls = Array.isArray(node.calls) ? node.calls : []
+  if (calls.length && depth < 4) {
+    summarized.calls = calls.slice(0, 12).map(call => summarizeCallTraceNode(call, depth + 1))
+    if (calls.length > 12) summarized.callsTruncated = calls.length - 12
+  }
+  return summarized
+}
+
 function toQuantity(value) {
   const bigint = typeof value === 'bigint' ? value : BigInt(value)
   return `0x${bigint.toString(16)}`
@@ -602,11 +678,18 @@ async function installWalletStub(context, fixture, anvilRpcUrl, walletRequests, 
         const receipt = await waitForReceipt(anvilRpcUrl, result)
         if (receipt.status !== '0x1') {
           const error = new Error(`Transaction ${result} reverted with receipt status ${receipt.status}`)
+          const diagnostics = await collectRevertDiagnostics({
+            anvilRpcUrl,
+            hash: result,
+            receipt,
+            tx: payload?.params?.[0] ?? {},
+          })
           walletRequests.push({
             ...record,
             status: 'error',
             result: sanitizeForJson(result),
             receipt: sanitizeForJson(receipt),
+            diagnostics: sanitizeForJson(diagnostics),
             error: sanitizeForJson(error),
           })
           throw error
@@ -1966,6 +2049,7 @@ function walletErrorsForScenario(walletRequests, scenario) {
       recordedAt: item.recordedAt,
       result: item.result,
       receiptStatus: item.receipt?.status,
+      diagnostics: item.diagnostics,
       error: item.error?.message ?? item.error,
     }))
 }

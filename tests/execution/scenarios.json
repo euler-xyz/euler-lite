@@ -1185,7 +1185,7 @@
         {
           "type": "click",
           "label": "Select executable collateral swap route",
-          "selector": "[data-id=\"swap-route-list-item\"][data-provider=\"magpie\"]",
+          "selector": "[data-id=\"swap-route-list-item\"]",
           "waitFor": [
             "[data-id=\"swap-route-list-item\"][data-selected=\"true\"]"
           ],
