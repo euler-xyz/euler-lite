@@ -11,7 +11,7 @@ import {
 } from '~/utils/yuzu-intrinsic-apy'
 
 const ALLOWED_METHODS = new Set(['GET', 'HEAD'])
-const PENDLE_STALE_MS = 7 * 24 * 60 * 60 * 1000
+const PENDLE_STALE_MS = 2 * 60 * 60 * 1000
 
 const URLS = {
   defillama: 'https://yields.llama.fi/pools',
