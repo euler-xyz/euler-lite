@@ -74,7 +74,7 @@ const getType = (address: string): VaultType | undefined => {
 
 // Register a vault
 const inferEntryMetadata = (_vault: AnyVault, _type: VaultType, metadata?: VaultEntryMetadata): VaultEntryMetadata => ({
-  verified: metadata?.verified ?? false,
+  verified: metadata?.verified,
   vaultCategory: metadata?.vaultCategory,
 })
 
@@ -86,7 +86,7 @@ const set = (address: string, vault: AnyVault, type: VaultType, metadata?: Vault
   // to verified:false, dropping it from getVerifiedEVaults() and the lists.
   const existing = registry.value.get(normalized)
   const entryMetadata = inferEntryMetadata(vault, type, metadata)
-  const verified = entryMetadata.verified || existing?.verified || false
+  const verified = entryMetadata.verified ?? existing?.verified ?? false
   const vaultCategory = entryMetadata.vaultCategory ?? existing?.vaultCategory
   registry.value.set(normalized, {
     vault,

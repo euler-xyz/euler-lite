@@ -103,4 +103,18 @@ describe('useVaults EVault verification metadata', () => {
     expect(registry.get(ESCROW_EVAULT)?.vaultCategory).toBe('escrow')
     expect(registry.getVerifiedEVaults().map(vault => vault.address)).toEqual([getAddress(ESCROW_EVAULT)])
   })
+
+  it('preserves registry verification only when refresh metadata omits it', () => {
+    const registry = useVaultRegistry()
+    registry.set(LABELED_EVAULT, makeVault(LABELED_EVAULT), 'evk', { verified: true, vaultCategory: 'escrow' })
+
+    registry.set(LABELED_EVAULT, makeVault(LABELED_EVAULT), 'evk')
+    expect(registry.get(LABELED_EVAULT)?.verified).toBe(true)
+    expect(registry.get(LABELED_EVAULT)?.vaultCategory).toBe('escrow')
+
+    registry.set(LABELED_EVAULT, makeVault(LABELED_EVAULT), 'evk', { verified: false, vaultCategory: 'standard' })
+    expect(registry.get(LABELED_EVAULT)?.verified).toBe(false)
+    expect(registry.get(LABELED_EVAULT)?.vaultCategory).toBe('standard')
+    expect(registry.getVerifiedEVaults()).toEqual([])
+  })
 })
