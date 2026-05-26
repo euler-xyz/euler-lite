@@ -7,6 +7,7 @@ import { useWallets } from '~/composables/useWallets'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createAddressRefreshCoordinator } from '~/utils/address-refresh-coordinator'
 import { logWarn } from '~/utils/errorHandling'
+import { isVisiblePortfolioPosition } from '~/utils/portfolioVisibility'
 import { createRaceGuard } from '~/utils/race-guard'
 
 const portfolio: Ref<Portfolio<VaultEntity> | undefined> = shallowRef()
@@ -55,21 +56,7 @@ const buildVisiblePortfolioPositionFilter = (): PortfolioPositionFilter<VaultEnt
   for (const vault of escrowAddresses.value) visibleVaults.add(getAddress(vault).toLowerCase())
   for (const vault of getEscrowVaults()) visibleVaults.add(getAddress(vault.address).toLowerCase())
 
-  return (position, { account }) => {
-    if (!visibleVaults.has(getAddress(position.vaultAddress).toLowerCase())) {
-      return false
-    }
-
-    if (position.borrowed === 0n) return true
-
-    const collateralAddresses = position.liquidity?.collaterals.map(collateral => collateral.address)
-      ?? account.getSubAccount(position.account)?.enabledCollaterals
-      ?? []
-
-    return collateralAddresses.every(collateral =>
-      visibleVaults.has(getAddress(collateral).toLowerCase()),
-    )
-  }
+  return (position, { account }) => isVisiblePortfolioPosition(position, account, visibleVaults)
 }
 
 export const useEulerAccount = () => {
