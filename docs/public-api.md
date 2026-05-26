@@ -282,6 +282,6 @@ curl 'https://<host>/api/public/metadata?chainId=1'
 - Handlers: `server/api/public/is-known.get.ts`, `server/api/public/metadata.get.ts`
 - Verified-set builder + cache: `server/utils/verified-vaults.ts`
 - Metadata builder + cache: `server/utils/vault-metadata.ts`
-- Shared verification rule (also used by the client UI): `entities/vault/governor-verification.ts`
+- Shared verification rule (also used by the client UI): `utils/vault/governor-verification.ts`
 - CORS bypass for the `/api/public/` prefix lives in `server/middleware/cors.ts`.
 - Escrow vaults are read via an `eth_call` to `escrowedCollateralPerspective.verifiedArray()`. The perspective address is looked up from `EulerChains.json` (served by `/api/euler-chains`), and the RPC endpoint is taken from `RPC_URL_<chainId>`. Products and earn-vault label files are fetched via internal self-calls to `/api/labels/<file>` to reuse the labels endpoint's own cache and validation. Entity logo URLs are composed from `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` (or the `REPO`/`REPO_BRANCH` fallback) so they match the URL the app itself renders.

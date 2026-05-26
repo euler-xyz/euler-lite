@@ -40,6 +40,7 @@
     "multiply-with-swap",
     "multiply-same-asset",
     "transfer",
+    "reul-unlock",
     "cleanup"
   ],
   "unsupportedTransactionTypes": [
@@ -2220,6 +2221,48 @@
         },
         "activation": "afterFirstTransaction"
       }
+    },
+    {
+      "id": "reul-unlock-execute",
+      "label": "Unlock matured rEUL by impersonating an existing holder",
+      "covers": [
+        "reul-unlock"
+      ],
+      "impersonate": "0x3c4f406b5491df6a69d1e127cb40606bb881db6e",
+      "path": "/portfolio/rewards?network=1",
+      "waitFor": [
+        "[data-id=\"reward-unlock-list-item\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "label": "Open rEUL unlock review",
+          "selector": "[data-id=\"reward-unlock-list-item\"] button:has-text(\"Unlock\")",
+          "waitFor": [
+            "text=Transaction review",
+            "[data-id=\"operation-review-confirm\"]"
+          ],
+          "settleMs": 4000,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Confirm rEUL unlock",
+          "selector": "[data-id=\"operation-review-confirm\"]",
+          "settleMs": 12000,
+          "captureTagsAfter": true
+        }
+      ],
+      "postCaptures": [
+        {
+          "id": "portfolio-rewards-after-reul-unlock",
+          "path": "/portfolio/rewards?network=1",
+          "waitFor": [
+            "[data-id]"
+          ],
+          "settleMs": 5000
+        }
+      ]
     }
   ]
 }

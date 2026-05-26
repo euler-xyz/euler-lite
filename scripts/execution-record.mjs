@@ -170,7 +170,7 @@ async function main() {
     await context.addInitScript(installSdkQueryRecorder)
     await installWalletStub(context, fixture, anvilRpcUrl, run.walletRequests, () => {
       activeScenarioState.successfulWalletTransactions += 1
-    })
+    }, () => activeScenarioState)
     await installVaultSnapshotRoute(context, vaultSnapshot)
     await installV3VaultResolveRoute(context, vaultSnapshot)
     await installSwapApiRoute(context, swapApiUrl)
@@ -656,10 +656,11 @@ function toQuantity(value) {
   return `0x${bigint.toString(16)}`
 }
 
-async function installWalletStub(context, fixture, anvilRpcUrl, walletRequests, onTransactionSuccess) {
+async function installWalletStub(context, fixture, anvilRpcUrl, walletRequests, onTransactionSuccess, getActiveState) {
   const chainId = Number(fixture.chainId)
   const account = privateKeyToAccount(fixture.wallet.privateKey)
   const walletClient = createWalletClient({ account, chain: mainnet, transport: http(anvilRpcUrl) })
+  const fundedImpersonations = new Set()
 
   if (getAddress(account.address) !== getAddress(fixture.wallet.address)) {
     throw new Error(`Fixture wallet address ${fixture.wallet.address} does not match private key ${account.address}`)
@@ -667,13 +668,26 @@ async function installWalletStub(context, fixture, anvilRpcUrl, walletRequests, 
 
   await context.exposeBinding('__EULER_STUB_WALLET_RPC__', async (_source, payload) => {
     const method = payload?.method
+    // Scenarios may connect AS an existing on-chain holder instead of the
+    // fixture wallet (e.g. to exercise rEUL unlock against real locks). Anvil
+    // runs with --auto-impersonate, so transactions from that holder execute
+    // without its private key. Resolve the active address per request because a
+    // single wallet stub is shared across every scenario in the run.
+    const impersonate = getActiveState?.()?.scenario?.impersonate
+      ? getAddress(getActiveState().scenario.impersonate)
+      : null
     const record = {
       recordedAt: new Date().toISOString(),
       method,
       params: sanitizeForJson(payload?.params),
     }
     try {
-      const result = await handleWalletRpc({ payload, chainId, account, walletClient, anvilRpcUrl })
+      if (impersonate && method === 'eth_sendTransaction' && !fundedImpersonations.has(impersonate)) {
+        // Ensure the impersonated holder can cover gas on the fork.
+        await rpc(anvilRpcUrl, 'anvil_setBalance', [impersonate, toQuantity(parseEther('1000'))]).catch(() => null)
+        fundedImpersonations.add(impersonate)
+      }
+      const result = await handleWalletRpc({ payload, chainId, account, walletClient, anvilRpcUrl, impersonate })
       if (method === 'eth_sendTransaction') {
         const receipt = await waitForReceipt(anvilRpcUrl, result)
         if (receipt.status !== '0x1') {
@@ -733,7 +747,7 @@ async function installWalletStub(context, fixture, anvilRpcUrl, walletRequests, 
           emit('chainChanged', params?.[0]?.chainId ?? chainIdHex)
         }
         if (method === 'eth_requestAccounts') {
-          emit('accountsChanged', [address])
+          emit('accountsChanged', Array.isArray(result) && result.length ? result : [address])
         }
         return result
       },
@@ -1116,13 +1130,13 @@ function addressPrefix(address) {
   return getAddress(address).toLowerCase().slice(0, 40)
 }
 
-async function handleWalletRpc({ payload, chainId, account, walletClient, anvilRpcUrl }) {
+async function handleWalletRpc({ payload, chainId, account, walletClient, anvilRpcUrl, impersonate }) {
   const method = payload?.method
   const params = payload?.params ?? []
   switch (method) {
     case 'eth_accounts':
     case 'eth_requestAccounts':
-      return [account.address]
+      return [impersonate ?? account.address]
     case 'eth_chainId':
       return toQuantity(BigInt(chainId))
     case 'net_version':
@@ -1139,11 +1153,22 @@ async function handleWalletRpc({ payload, chainId, account, walletClient, anvilR
     case 'wallet_requestPermissions':
       return [{ parentCapability: 'eth_accounts' }]
     case 'eth_sendTransaction':
+      // When impersonating, send the raw transaction straight to anvil with the
+      // holder as `from`; --auto-impersonate executes it without a signature.
+      if (impersonate) {
+        return rpc(anvilRpcUrl, 'eth_sendTransaction', [{ ...(params?.[0] ?? {}), from: impersonate }])
+      }
       return sendTransaction(walletClient, params?.[0] ?? {})
     case 'eth_signTypedData_v4':
+      if (impersonate) {
+        throw new Error(`Cannot sign typed data while impersonating ${impersonate}: this flow requires a private key the harness does not hold`)
+      }
       return signTypedData(account, params?.[1])
     case 'personal_sign':
     case 'eth_sign':
+      if (impersonate) {
+        throw new Error(`Cannot sign messages while impersonating ${impersonate}: this flow requires a private key the harness does not hold`)
+      }
       return signMessage(account, params)
     default:
       return rpc(anvilRpcUrl, method, params)

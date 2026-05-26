@@ -106,6 +106,13 @@
       "scenarios": [
         "borrow-swap-and-borrow-execute"
       ]
+    },
+    {
+      "id": "reul-unlock",
+      "label": "Unlock matured rEUL as an impersonated holder",
+      "scenarios": [
+        "reul-unlock-execute"
+      ]
     }
   ]
 }

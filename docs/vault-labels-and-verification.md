@@ -244,7 +244,7 @@ Oracle adapter metadata is loaded lazily from the [oracle-checks](https://github
 
 The `useEulerLabels` composable builds a set of verified vault addresses from the labels data: a vault address is added if it appears in any product's `vaults` or `deprecatedVaults` array. This drives the `vault.verified` flag — a precondition for governor verification, but not the full verdict.
 
-The full "is this vault verified?" verdict (used by the UI to render markets, and by the `/api/public/is-known` endpoint) additionally requires the on-chain governor to match a declared entity address. See `entities/vault/governor-verification.ts` for the shared rule, and the "Programmatic verification lookup" section below for the public endpoint.
+The full "is this vault verified?" verdict (used by the UI to render markets, and by the `/api/public/is-known` endpoint) additionally requires the on-chain governor to match a declared entity address. See `utils/vault/governor-verification.ts` for the shared rule, and the "Programmatic verification lookup" section below for the public endpoint.
 
 ### Ungoverned vaults
 
