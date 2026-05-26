@@ -2,6 +2,7 @@ import { V3_API_PROXY_URL, readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/ap
 
 const FORWARDED_RESPONSE_HEADERS = [
   'cache-control',
+  'cf-ray',
   'content-type',
   'etag',
   'last-modified',

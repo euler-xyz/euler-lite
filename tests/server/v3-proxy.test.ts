@@ -86,11 +86,13 @@ describe('v3 proxy utilities', () => {
     const headers = new Headers({
       'content-type': 'application/json',
       'cache-control': 'public, max-age=30',
+      'cf-ray': 'example-ray',
       'set-cookie': 'sid=secret',
     })
 
     expect(readForwardedV3ResponseHeaders(headers)).toEqual({
       'cache-control': 'public, max-age=30',
+      'cf-ray': 'example-ray',
       'content-type': 'application/json',
     })
   })
