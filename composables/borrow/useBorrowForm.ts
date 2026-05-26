@@ -1,6 +1,6 @@
 import type { VaultAsset } from '~/types/asset'
 import type { CollateralOption } from '~/types/collateral-option'
-import { isEVault, type EVault, type TransactionPlan, SwapperMode, type SwapQuote } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, type EVault, type PortfolioSavingsPosition, type TransactionPlan, SwapperMode, type SwapQuote, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getProjectedRates, getNetAPY } from '~/utils/vault/apy'
 import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
@@ -32,10 +32,8 @@ export interface UseBorrowFormOptions {
   collateralVault: ComputedRef<EVault | undefined>
   formTab: Ref<'borrow' | 'multiply'>
 
-  savingCollateral: ComputedRef<{ assets: bigint, subAccount?: string, shares: bigint } | undefined>
+  savingPositions: ComputedRef<PortfolioSavingsPosition<VaultEntity>[]>
   balance: Ref<bigint>
-  savingBalance: Ref<bigint>
-  savingAssets: Ref<bigint>
 
   resolvePendingSubAccount: () => Promise<string>
 
@@ -59,10 +57,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     borrowVault,
     collateralVault,
     formTab: _formTab,
-    savingCollateral,
+    savingPositions,
     balance,
-    savingBalance,
-    savingAssets,
     resolvePendingSubAccount,
     collateralSupplyApy,
     borrowApy,
@@ -145,6 +141,27 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const isEstimatesLoading = ref(false)
   const plan = ref<TransactionPlan | null>(null)
 
+  const normalizeAddress = (addr?: string) => {
+    if (!addr) return ''
+    try {
+      return getAddress(addr).toLowerCase()
+    }
+    catch {
+      return ''
+    }
+  }
+
+  const savingCollateral = computed<PortfolioSavingsPosition<VaultEntity> | undefined>(() => {
+    const positions = savingPositions.value
+    if (!positions.length) return undefined
+    const selected = selectedSavingSubAccount.value
+    if (selected) {
+      return positions.find(position => normalizeAddress(position.subAccount) === normalizeAddress(selected))
+    }
+    return [...positions].sort((a, b) => (b.assets > a.assets ? 1 : b.assets < a.assets ? -1 : 0))[0]
+  })
+  const savingAssets = computed(() => savingCollateral.value?.assets || 0n)
+
   // Estimates
   const health = ref<number | undefined>()
   const netAPY = ref<number | undefined>()
@@ -182,21 +199,13 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   // Reactive collateral option prices
   const walletCollateralPriceUsd = ref(0)
-  const savingCollateralPriceUsd = ref(0)
 
   watchEffect(async () => {
     if (!collateralVault.value) {
       walletCollateralPriceUsd.value = 0
-      savingCollateralPriceUsd.value = 0
       return
     }
     walletCollateralPriceUsd.value = await getAssetUsdValueOrZero(balance.value, collateralVault.value, 'off-chain')
-    if (savingCollateral.value) {
-      savingCollateralPriceUsd.value = await getAssetUsdValueOrZero(savingCollateral.value.assets, collateralVault.value, 'off-chain')
-    }
-    else {
-      savingCollateralPriceUsd.value = 0
-    }
   })
 
   // --- Computed: math ---
@@ -325,29 +334,32 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const collateralOptions = computed(() => {
     const vaultAddr = collateralVault.value?.address || ''
     const { tags, disabled } = getVaultTags(vaultAddr)
+    const decimals = collateralVault.value?.asset.decimals
+    const assetAddress = collateralVault.value?.asset.address
 
     const opts: CollateralOption[] = [
       {
         type: 'wallet',
-        amount: nanoToValue(balance.value, collateralVault.value?.asset.decimals),
+        amount: nanoToValue(balance.value, decimals),
         price: walletCollateralPriceUsd.value,
         apy: collateralSupplyApyWithRewards.value,
-        assetAddress: collateralVault.value?.asset.address,
+        assetAddress,
         vaultAddress: vaultAddr,
         tags,
         disabled,
       },
     ]
 
-    if (savingCollateral.value) {
+    for (const position of savingPositions.value) {
+      const amount = nanoToValue(position.assets, decimals)
       opts.push({
         type: 'saving',
-        amount: nanoToValue(savingCollateral.value.assets, collateralVault.value?.asset.decimals),
-        price: savingCollateralPriceUsd.value,
+        amount,
+        price: collateralUnitPrice.value !== undefined ? amount * collateralUnitPrice.value : 0,
         apy: collateralSupplyApyWithRewards.value,
-        assetAddress: collateralVault.value?.asset.address,
-        vaultAddress: vaultAddr,
-        subAccount: savingCollateral.value.subAccount,
+        assetAddress,
+        vaultAddress: position.vault?.address || vaultAddr,
+        subAccount: position.subAccount,
         tags,
         disabled,
       })
@@ -377,6 +389,9 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     }
     if (borrowNeedsSwap.value && !borrowSwapQuoteCards.value.length && +collateralAmount.value > 0) {
       return isBorrowSwapQuoteLoading.value ? null : 'No swap quote available'
+    }
+    if (isSavingCollateral.value && !savingCollateral.value) {
+      return 'Savings position not found'
     }
     return null
   })
@@ -408,6 +423,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
     if (findBlockingDisabledOp(borrowPlannedOps.value)) return true
+    if (isSavingCollateral.value && !savingCollateral.value) return true
     if (borrowActiveBalance.value < valueToNano(collateralAmount.value, borrowActiveAssetDecimals.value)) return true
     if (!(+collateralAmount.value)) return true
     if ((borrowVault.value?.availableLiquidity ?? 0n) < valueToNano(borrowAmount.value, borrowVault.value?.asset.decimals)) return true
@@ -705,10 +721,16 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       const collateralAmountNano = valueToNano(collateralAmount.value || '0', collateralVault.value?.asset.decimals)
       const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value?.asset.decimals)
       let collateralAmountForPlan = collateralAmountNano
+      let selectedSavingsCollateral: PortfolioSavingsPosition<VaultEntity> | undefined
 
       if (isSavingCollateral.value) {
-        if (savingCollateral.value?.assets === collateralAmountNano) {
-          collateralAmountForPlan = savingBalance.value
+        selectedSavingsCollateral = savingCollateral.value
+        if (!selectedSavingsCollateral) {
+          plan.value = null
+          return
+        }
+        if (selectedSavingsCollateral.assets === collateralAmountNano) {
+          collateralAmountForPlan = selectedSavingsCollateral.shares
         }
         else {
           collateralAmountForPlan = collateralVault.value.convertToShares(collateralAmountNano)
@@ -726,7 +748,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
                 vault: collateralVault.value.address as Address,
                 amount: collateralAmountForPlan,
                 source: 'savings',
-                from: savingCollateral.value?.subAccount as Address,
+                from: selectedSavingsCollateral!.subAccount as Address,
               },
             })
           : await planBorrow({
@@ -796,9 +818,14 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       else {
         // Standard borrow path
         let collateralAmountForPlan = collateralAmountFixed.value.toFormat({ decimals: Number(collateralVault.value.shares.decimals) }).value
+        let selectedSavingsCollateral: PortfolioSavingsPosition<VaultEntity> | undefined
         if (isSavingCollateral.value) {
-          if (savingCollateral.value?.assets === collateralAmountForPlan) {
-            collateralAmountForPlan = savingBalance.value
+          selectedSavingsCollateral = savingCollateral.value
+          if (!selectedSavingsCollateral) {
+            throw new Error('Savings position not found')
+          }
+          if (selectedSavingsCollateral.assets === collateralAmountForPlan) {
+            collateralAmountForPlan = selectedSavingsCollateral.shares
           }
           else {
             collateralAmountForPlan = collateralVault.value.convertToShares(collateralAmountForPlan)
@@ -815,7 +842,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
                 vault: collateralVault.value.address as Address,
                 amount: collateralAmountForPlan,
                 source: 'savings',
-                from: savingCollateral.value?.subAccount as Address,
+                from: selectedSavingsCollateral!.subAccount as Address,
               },
             })
           : await planBorrow({
@@ -888,12 +915,6 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       isEstimatesLoading.value = true
     }
     updateAsyncEstimates()
-  })
-
-  watch(savingCollateral, (val) => {
-    if (val?.assets && !savingAssets.value) {
-      savingAssets.value = val.assets
-    }
   })
 
   watch(borrowSelectedAsset, async () => {
@@ -975,6 +996,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     collateralAmount,
     isSavingCollateral,
     selectedSavingSubAccount,
+    savingCollateral,
+    savingAssets,
     isSubmitting,
     isPreparing,
     isEstimatesLoading,

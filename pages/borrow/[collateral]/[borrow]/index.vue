@@ -42,7 +42,7 @@ const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { eulerLensAddresses: _eulerLensAddresses } = useEulerAddresses()
-const { fetchSingleBalance, fetchVaultShareBalance } = useWallets()
+const { fetchSingleBalance } = useWallets()
 const openSlippageSettings = () => {
   modal.open(SlippageSettingsModal)
 }
@@ -53,8 +53,6 @@ useOperationGuard([collateralAddress, borrowAddress])
 
 // --- Shared state ---
 const balance = ref(0n)
-const savingBalance = ref(0n)
-const savingAssets = ref(0n)
 const tab = ref()
 const formTab = ref<'borrow' | 'multiply'>('borrow')
 const pendingSubAccount = ref<string | null>(null)
@@ -127,23 +125,12 @@ const isPairFullyRestricted = computed(() =>
   !isGeoBlocked.value && isVaultRestrictedByCountry(collateralAddress) && isVaultRestrictedByCountry(borrowAddress))
 
 // --- Savings collateral ---
-// Page-level selection so `borrow.selectedSavingSubAccount` (set when the user
-// picks a row in AssetInput) feeds back into which savings position we resolve.
-// Falls back to the largest-asset match when the user hasn't picked yet, so the
-// default chip shows a meaningful balance without silently picking the wrong row
-// when multiple positions are present.
-const savingCollateral = computed(() => {
-  const matches = depositPositions.value.filter(position => position.vault?.address === route.params.collateral)
-  if (matches.length === 0) return undefined
-  const selected = borrow?.selectedSavingSubAccount?.value
-  if (selected) {
-    const exact = matches.find(p => p.subAccount?.toLowerCase() === selected.toLowerCase())
-    if (exact) return exact
-  }
-  if (matches.length === 1) return matches[0]
-  // Pick the largest-asset match as the default so the displayed balance is the
-  // most useful one; user can override via the chooser.
-  return [...matches].sort((a, b) => (b.assets > a.assets ? 1 : -1))[0]
+const savingPositions = computed(() => {
+  const normalizedCollateral = normalizeAddress(collateralAddress)
+  return depositPositions.value.filter(position =>
+    position.assets > 0n
+    && normalizeAddress(position.vault?.address) === normalizedCollateral,
+  )
 })
 
 // --- Product labels ---
@@ -156,10 +143,8 @@ const borrow = useBorrowForm({
   borrowVault: borrowVault as ComputedRef<EVault | undefined>,
   collateralVault: collateralVault as ComputedRef<EVault | undefined>,
   formTab,
-  savingCollateral: savingCollateral as ComputedRef<{ assets: bigint, subAccount?: string, shares: bigint } | undefined>,
+  savingPositions,
   balance,
-  savingBalance,
-  savingAssets,
   resolvePendingSubAccount,
   collateralSupplyApy,
   borrowApy,
@@ -281,7 +266,6 @@ watch(tabs, (next) => {
 const updateBalance = async () => {
   if (!isConnected.value && !isSpyMode.value) {
     balance.value = 0n
-    savingBalance.value = 0n
     multiply.multiplyAssetBalance.value = 0n
     return
   }
@@ -291,16 +275,6 @@ const updateBalance = async () => {
   }
   else {
     balance.value = 0n
-  }
-
-  if (collateralVault.value?.address) {
-    savingBalance.value = await fetchVaultShareBalance(
-      collateralVault.value.address,
-      savingCollateral.value?.subAccount,
-    )
-  }
-  else {
-    savingBalance.value = 0n
   }
 
   await Promise.all([
