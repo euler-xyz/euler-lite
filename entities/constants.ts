@@ -35,17 +35,6 @@ export const ERROR_SIGNATURE_MAP: Record<string, string> = {
   ...EVC_ERROR_SIGNATURES,
 }
 
-export const NON_BLOCKING_SIMULATION_ERRORS = new Set([
-  'E_TransferFromFailed',
-  'INSUFFICIENT_ALLOWANCE',
-  'E_InsufficientAllowance',
-  'TRANSFER_FROM_FAILED',
-  'TRANSFER_FAILED',
-  'SAFE_TRANSFER_FAILED',
-  'SAFE_TRANSFER_FROM_FAILED',
-  '0x9773bb71',
-])
-
 export const TTL_INFINITY = BigInt(
   '0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
 )

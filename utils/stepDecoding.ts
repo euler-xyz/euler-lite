@@ -231,18 +231,29 @@ const resolveBatchItemAssetInfo = (
   }
 
   if (label === 'Transfer' || label === 'Transfer to account' || label === 'Transfer from wallet') {
+    // transferFromMax(address,address) ("Transfer to account") has no amount
+    // argument — its second calldata slot is the recipient address, not a
+    // uint256. Decoding it as an amount would render a garbage number, so show
+    // the known sweep amount (or "remaining") instead.
+    const isMaxTransfer = label === 'Transfer to account'
+    const fallbackAmount = isMaxTransfer
+      ? ctx.transferAmounts?.[targetContract.toLowerCase()] ?? 'remaining'
+      : undefined
     try {
       const targetVault = getVault(getAddress(targetContract))
       if (targetVault?.asset) {
-        const raw = decodeSecondUint256(data)
-        const amount = raw !== undefined && raw > 0n
-          ? formatUnits(raw, Number(targetVault.asset.decimals))
-          : undefined
+        let amount = fallbackAmount
+        if (!isMaxTransfer) {
+          const raw = decodeSecondUint256(data)
+          amount = raw !== undefined && raw > 0n
+            ? formatUnits(raw, Number(targetVault.asset.decimals))
+            : undefined
+        }
         return { symbol: targetVault.asset.symbol, address: targetVault.asset.address, amount }
       }
     }
     catch { /* ignore */ }
-    return { symbol: ctx.asset.symbol, address: ctx.asset.address }
+    return { symbol: ctx.asset.symbol, address: ctx.asset.address, amount: fallbackAmount }
   }
 
   if (label === 'Borrow' || label === 'Repay') {

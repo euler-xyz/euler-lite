@@ -54,6 +54,21 @@ type CurrentCycle = {
   preStartTimestamp: bigint | null
 }
 
+const MIN_MONTHLY_CYCLE_START_DAY = 1n
+const MAX_MONTHLY_CYCLE_START_DAY = 31n
+
+const getUTCMonthDayCount = (year: number, month: number): number => {
+  return new Date(Date.UTC(year, month + 1, 0)).getUTCDate()
+}
+
+// The contract treats a start day beyond a short month's length as that month's
+// last day, so clamp instead of letting Date.UTC silently roll into the next
+// month (e.g. day 31 in February would become March 3).
+const getMonthlyCycleBoundaryMs = (year: number, month: number, startDay: number): number => {
+  const effectiveStartDay = Math.min(startDay, getUTCMonthDayCount(year, month))
+  return Date.UTC(year, month, effectiveStartDay)
+}
+
 // Both cyclical IRM variants are normalised into the same shape so the
 // progress/phase/tick logic below is variant-agnostic. The Monthly variant
 // derives the current cycle from UTC calendar dates, matching the contract.
@@ -61,17 +76,25 @@ const currentCycle = computed((): CurrentCycle | null => {
   if (isMonthly.value) {
     const m = monthlyInfo.value
     if (!m) return null
+    if (
+      m.cycleStartDay < MIN_MONTHLY_CYCLE_START_DAY
+      || m.cycleStartDay > MAX_MONTHLY_CYCLE_START_DAY
+    ) {
+      return null
+    }
     const d = new Date(now.value.getTime())
     const y = d.getUTCFullYear()
     const mo = d.getUTCMonth()
-    const day = d.getUTCDate()
     const startDay = Number(m.cycleStartDay)
-    const cycleStartMs = day >= startDay
-      ? Date.UTC(y, mo, startDay)
-      : Date.UTC(y, mo - 1, startDay)
-    const cycleEndMs = day >= startDay
-      ? Date.UTC(y, mo + 1, startDay)
-      : Date.UTC(y, mo, startDay)
+    const currentMonthBoundaryMs = getMonthlyCycleBoundaryMs(y, mo, startDay)
+    const isAfterCurrentMonthBoundary = d.getTime() >= currentMonthBoundaryMs
+    const cycleStartMs = isAfterCurrentMonthBoundary
+      ? currentMonthBoundaryMs
+      : getMonthlyCycleBoundaryMs(y, mo - 1, startDay)
+    const cycleEndMs = isAfterCurrentMonthBoundary
+      ? getMonthlyCycleBoundaryMs(y, mo + 1, startDay)
+      : currentMonthBoundaryMs
+    if (!Number.isFinite(cycleStartMs) || !Number.isFinite(cycleEndMs)) return null
     const startSec = BigInt(Math.floor(cycleStartMs / 1000))
     const endSec = BigInt(Math.floor(cycleEndMs / 1000))
     const secondaryDurationSec = m.secondaryDays * 86_400n

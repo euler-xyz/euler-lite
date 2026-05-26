@@ -324,7 +324,7 @@ The Nuxt server layer (`server/api/`) proxies requests to external services (RPC
 | **Geo-blocking** (`server/middleware/geo-gate.ts`) | Blocks sanctioned countries via Cloudflare `CF-IPCountry`; fails closed (HTTP 451) if country is undetermined in prod |
 | **RPC method whitelist** (`server/api/rpc/[chainId].ts`) | Only 15 safe read-only methods are proxied |
 | **Rate limiting** (`server/utils/rate-limit.ts`) | Per-IP cost-based budgets (see below); fails closed (HTTP 403) if `CF-Connecting-IP` is absent in prod |
-| **Swap verifier validation** (`utils/swap-validation.ts`) | Validates swap verifier addresses against known config |
+| **Swap quote contract validation** (`@eulerxyz/euler-v2-sdk` `swapService`) | Validates each fetched quote's swapper and verifier addresses against the chain's canonical deployment allowlist |
 
 #### Rate Limiting
 

@@ -1,7 +1,7 @@
 import { BaseError, ContractFunctionRevertedError, decodeAbiParameters, formatUnits, type Hex } from 'viem'
 import { decodeSmartContractErrors } from '@eulerxyz/euler-v2-sdk'
 import type { DecodedSmartContractError, SimulateBatchResult, SimulationInsufficientRequirement, VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import { ERROR_MESSAGE_MAP, ERROR_SIGNATURE_MAP, NON_BLOCKING_SIMULATION_ERRORS } from '~/entities/constants'
+import { ERROR_MESSAGE_MAP, ERROR_SIGNATURE_MAP } from '~/entities/constants'
 import { getOperationMeta } from '~/utils/operationGuardRegistry'
 import { getChainById } from '~/entities/chainRegistry'
 
@@ -119,11 +119,6 @@ export const getTxErrorCode = (error: unknown) => {
 export const shouldDiscardQuoteOnEstimateGasError = (error: unknown) => {
   const code = extractErrorCode(error)
   return code === 'Swapper_SwapError' || code?.startsWith('SwapVerifier_') === true
-}
-
-export const isNonBlockingSimulationError = (error: unknown) => {
-  const code = extractErrorCode(error)
-  return code ? NON_BLOCKING_SIMULATION_ERRORS.has(code) : false
 }
 
 const isInsufficientBalanceError = (error: unknown): boolean => {
