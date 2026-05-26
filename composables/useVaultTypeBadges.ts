@@ -13,8 +13,8 @@ export type VaultTypeBadge = VaultGovernanceBadge | 'securitize' | 'private' | '
 export type VaultTypeSummaryBadge = Extract<VaultTypeBadge, 'cyclicalNote' | 'private' | 'unknown'>
 
 export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
-  const { isVaultGovernorVerified, isEarnVaultOwnerVerified } = useVaults()
-  const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
+  const { isVaultGovernorVerified, isSecuritizeGovernorVerified, isEarnVaultOwnerVerified } = useVaults()
+  const { getVaultCategory } = useVaultRegistry()
 
   const addressRef = computed(() => vault.value.address)
   const product = useEulerProductOfVault(addressRef)
@@ -29,7 +29,7 @@ export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
 
   const isVerified = computed(() => {
     if (isEarn.value) return isEarnVaultOwnerVerified(vault.value as EulerEarn)
-    if (isSecuritize.value) return isVerifiedVault(vault.value.address)
+    if (isSecuritize.value) return isSecuritizeGovernorVerified(vault.value as SecuritizeCollateralVault)
     return isVaultGovernorVerified(vault.value as EVault)
   })
 
