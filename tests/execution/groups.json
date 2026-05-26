@@ -113,6 +113,13 @@
       "scenarios": [
         "reul-unlock-execute"
       ]
+    },
+    {
+      "id": "reul-unlock-partial",
+      "label": "Early-unlock a partially-vested rEUL lock and show the burn warning",
+      "scenarios": [
+        "reul-unlock-partial-execute"
+      ]
     }
   ]
 }

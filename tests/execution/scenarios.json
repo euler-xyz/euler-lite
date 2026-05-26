@@ -2263,6 +2263,49 @@
           "settleMs": 5000
         }
       ]
+    },
+    {
+      "id": "reul-unlock-partial-execute",
+      "label": "Early-unlock a partially-vested rEUL lock (burn warning) for a multi-lock holder",
+      "covers": [
+        "reul-unlock"
+      ],
+      "impersonate": "0xeac6a75e19beb1283352d24c0311de865a867dab",
+      "path": "/portfolio/rewards?network=1",
+      "waitFor": [
+        "[data-id=\"reward-unlock-list-item\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "label": "Open early-unlock review for the partially-vested lock",
+          "selector": "[data-id=\"reward-unlock-list-item\"][data-timestamp=\"1772150400\"] button:has-text(\"Unlock\")",
+          "waitFor": [
+            "text=Transaction review",
+            "[data-id=\"operation-review-confirm\"]",
+            ".ui-alert--warning:has-text(\"permanently burned\")"
+          ],
+          "settleMs": 4000,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Confirm early rEUL unlock (accepts the burn)",
+          "selector": "[data-id=\"operation-review-confirm\"]",
+          "settleMs": 12000,
+          "captureTagsAfter": true
+        }
+      ],
+      "postCaptures": [
+        {
+          "id": "portfolio-rewards-after-reul-partial-unlock",
+          "path": "/portfolio/rewards?network=1",
+          "waitFor": [
+            "[data-id]"
+          ],
+          "settleMs": 5000
+        }
+      ]
     }
   ]
 }
