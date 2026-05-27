@@ -169,6 +169,9 @@ export const isVaultKeyring = (vaultAddress: string): boolean =>
 export const isProductKeyring = (productKey: string): boolean =>
   productHasTag((labels().products[productKey] as EulerLabelProduct | undefined) ?? eulerLabelProductEmpty, 'keyring')
 
+export const isVaultAccessControlled = (vaultAddress: string): boolean =>
+  productHasTag(getProductByVault(vaultAddress), 'access control')
+
 export const getEntitiesByVault = (vault: { governorAdmin?: string, governor?: string }): EulerLabelEntity[] =>
   getEulerLabelEntitiesByVault(labels(), vault) as EulerLabelEntity[]
 

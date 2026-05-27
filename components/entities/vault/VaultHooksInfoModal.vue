@@ -11,7 +11,7 @@ import {
 } from '~/utils/vault-hooks'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { getSpecialAddressLabel } from '~/utils/special-addresses'
-import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
+import { isVaultAccessControlled, isVaultKeyring } from '~/utils/eulerLabelsUtils'
 import { truncate } from '~/utils/string-utils'
 
 const emits = defineEmits<{ close: [] }>()
@@ -62,8 +62,17 @@ const hookTargetLink = computed(() => getExplorerLink(hookTarget.value, chainId.
 
 const hookTargetLabel = computed(() => {
   if (isVaultKeyring(vault.address)) return 'Keyring (identity verification)'
+  if (isVaultAccessControlled(vault.address)) return 'Access control (allowlist)'
   return 'Third-party hook contract'
 })
+
+// Extra explanation shown for permissioned vaults that gate operations behind
+// an on-chain allowlist (access-control hook target).
+const hookTargetNote = computed(() =>
+  isVaultAccessControlled(vault.address)
+    ? 'This vault is permissioned: the operations below can only be performed by addresses that the vault manager has added to an on-chain allowlist. If your address is not whitelisted, those operations will revert. Access is granted by the manager — there is no self-service verification.'
+    : '',
+)
 
 const onCopyClick = (address: string) => {
   navigator.clipboard.writeText(address).catch(() => {})
@@ -111,6 +120,12 @@ const handleClose = () => {
           />
         </button>
       </div>
+      <p
+        v-if="hookTargetNote"
+        class="text-p3 text-content-tertiary"
+      >
+        {{ hookTargetNote }}
+      </p>
     </div>
 
     <div

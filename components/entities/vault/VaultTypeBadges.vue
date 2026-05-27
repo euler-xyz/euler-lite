@@ -51,6 +51,13 @@ const showGovernanceType = computed(() => hasVisibleBadge(visibleGovernanceType.
       :as="tagElement"
       :nudge="nudge"
     />
+    <AccessControlBadge
+      v-if="hasVisibleBadge('accessControl')"
+      :size="size"
+      :block="isStacked"
+      :as="tagElement"
+      :nudge="nudge"
+    />
     <GovernanceLimitedBadge
       v-if="hasVisibleBadge('governanceLimited')"
       :size="size"
