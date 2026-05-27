@@ -3,6 +3,8 @@
 // Concurrent spans (parallel quotes) share a `flow` tag so timings can be
 // reassembled offline. No-op outside the browser to keep SSR untouched.
 
+import { profOptIn } from './debug-flags'
+
 declare global {
   interface Window {
     __EULER_PROF__?: {
@@ -18,7 +20,9 @@ const ensureStore = () => {
   if (!isBrowser) return null
   const w = window
   if (!w.__EULER_PROF__) {
-    w.__EULER_PROF__ = { enabled: true, events: [] }
+    // Off on regular runs; opt in with `?prof` / `localStorage.euler_prof=1`
+    // (or flip `window.__EULER_PROF__.enabled` in DevTools).
+    w.__EULER_PROF__ = { enabled: profOptIn, events: [] }
   }
   return w.__EULER_PROF__
 }
