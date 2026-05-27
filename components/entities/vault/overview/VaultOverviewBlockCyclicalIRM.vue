@@ -324,7 +324,7 @@ const formatDuration = (seconds: bigint): string => {
     >
       <div>
         <p class="mb-10 text-p2 text-content-tertiary">
-          Fixed period
+          Fixed rate period
         </p>
         <dl class="flex flex-col">
           <div class="cyclical-irm-row">
