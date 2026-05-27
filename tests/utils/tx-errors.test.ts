@@ -1,6 +1,6 @@
 import { afterEach, describe, it, expect } from 'vitest'
 import { ContractFunctionRevertedError, encodeAbiParameters, type Hex } from 'viem'
-import { getTxErrorCode, getTxErrorMessage, shouldDiscardQuoteOnEstimateGasError } from '~/utils/tx-errors'
+import { formatSimulationFailure, getTxErrorCode, getTxErrorMessage, shouldDiscardQuoteOnEstimateGasError } from '~/utils/tx-errors'
 import { clearOperationMeta, setOperationMeta } from '~/utils/operationGuardRegistry'
 
 const buildRevertError = (raw: Hex) =>
@@ -71,6 +71,37 @@ describe('shouldDiscardQuoteOnEstimateGasError', () => {
   it('keeps quotes for other estimation failures', () => {
     const err = new Error('execution reverted: E_InsufficientCash')
     expect(shouldDiscardQuoteOnEstimateGasError(err)).toBe(false)
+  })
+})
+
+describe('formatSimulationFailure: friendly message mapping', () => {
+  const decodedEntry = (signature: string) => ({ signature, params: [] })
+
+  it('maps an account status check E_AccountLiquidity to its friendly copy', () => {
+    const result = {
+      accountStatusErrors: [{
+        account: '0x2222222222222222222222222222222222222222',
+        decoded: [decodedEntry('E_AccountLiquidity()')],
+      }],
+    } as never
+    expect(formatSimulationFailure(result)).toBe('Account liquidity too low for this action.')
+  })
+
+  it('maps a failed batch item E_AccountLiquidity to its friendly copy', () => {
+    const result = {
+      failedBatchItems: [{ index: 0, decodedError: [decodedEntry('E_AccountLiquidity()')] }],
+    } as never
+    expect(formatSimulationFailure(result)).toBe('Account liquidity too low for this action.')
+  })
+
+  it('falls back to the decoded signature when the error name is unmapped', () => {
+    const result = {
+      accountStatusErrors: [{
+        account: '0x2222222222222222222222222222222222222222',
+        decoded: [decodedEntry('E_SomethingUnmapped()')],
+      }],
+    } as never
+    expect(formatSimulationFailure(result)).toContain('E_SomethingUnmapped()')
   })
 })
 
