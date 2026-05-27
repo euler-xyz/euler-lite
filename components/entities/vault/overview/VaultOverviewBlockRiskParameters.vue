@@ -8,6 +8,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatHookedOpsSummary, getHookedOperationMetas, getVaultHookedOperations, hasAnyHookedOperation, isHookDisabling, isVaultEffectivelyPaused } from '~/utils/vault-hooks'
 import { useModal } from '~/components/ui/composables/useModal'
+import { isVaultBorrowable } from '~/utils/vault/classification'
 import { VaultHooksInfoModal } from '#components'
 
 const { vault } = defineProps<{ vault: EVault }>()
@@ -19,7 +20,9 @@ const { getVaultCategory } = useVaultRegistry()
 
 const shareTokenExchangeRate: Ref<bigint | undefined> = ref()
 
-const isBorrowable = computed(() => vault.isBorrowable)
+// Borrow-side risk params stay visible while debt is being wound down — not
+// just while new borrows are allowed (see isVaultBorrowable).
+const isBorrowable = computed(() => isVaultBorrowable(vault))
 
 const supplyCapPercentageDisplay = computed(() => vault.caps.supplyCapUtilization)
 const borrowCapPercentageDisplay = computed(() => vault.caps.borrowCapUtilization)

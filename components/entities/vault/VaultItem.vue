@@ -12,7 +12,7 @@ import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { VaultSupplyApyModal, VaultCollateralExposureModal, UiModalPreviewTrigger } from '#components'
-import { isCyclicalNoteVault } from '~/utils/vault/classification'
+import { isCyclicalNoteVault, isVaultBorrowable } from '~/utils/vault/classification'
 import { getAddress } from 'viem'
 
 const { isConnected } = useWagmi()
@@ -37,7 +37,7 @@ const entityLogos = computed(() => {
   return entities.map(e => getEulerLabelEntityLogo(e.logo))
 })
 const isEscrow = computed(() => getVaultCategory(vault.address) === 'escrow')
-const isBorrowable = computed(() => !isEscrow.value && vault.collaterals.some(ltv => ltv.borrowLTV > 0))
+const isBorrowable = computed(() => isVaultBorrowable(vault))
 const displayName = computed(() => {
   if (isEscrow.value) return 'Escrowed collateral'
   return product.name || vault.shares.name

@@ -1,7 +1,27 @@
 import { describe, it, expect } from 'vitest'
 import type { EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
-import { isCyclicalNoteVault } from '~/utils/vault/classification'
+import { isCyclicalNoteVault, isVaultBorrowable } from '~/utils/vault/classification'
+
+const makeBorrowableInput = (
+  isBorrowable: boolean,
+  totalBorrowed: bigint,
+): Pick<EVault, 'isBorrowable' | 'totalBorrowed'> =>
+  ({ isBorrowable, totalBorrowed } as Pick<EVault, 'isBorrowable' | 'totalBorrowed'>)
+
+describe('isVaultBorrowable', () => {
+  it('is true when the SDK reports the vault as borrowable', () => {
+    expect(isVaultBorrowable(makeBorrowableInput(true, 0n))).toBe(true)
+  })
+
+  it('is true on residual debt even when the SDK reports not borrowable', () => {
+    expect(isVaultBorrowable(makeBorrowableInput(false, 1n))).toBe(true)
+  })
+
+  it('is false when not borrowable and there is no outstanding debt', () => {
+    expect(isVaultBorrowable(makeBorrowableInput(false, 0n))).toBe(false)
+  })
+})
 
 describe('isCyclicalNoteVault', () => {
   it('returns true for EVaults using the fixed cyclical IRM', () => {
