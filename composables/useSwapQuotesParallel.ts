@@ -245,22 +245,20 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     client: PublicClient | null,
     gasPricePromise: Promise<bigint | undefined>,
   ): Promise<SwapQuoteCard | null> => {
-    const amountUsdPromise = getAmountUsd(quote).catch(() => undefined)
-
     // CoW intents settle off-chain — gas cost is genuinely zero from the
     // user's perspective. Mark the card so the route selector renders
-    // "Gasless" and the ranking treats it as a real zero rather than a
-    // missing estimate.
+    // "Gasless". Do not block route visibility on auxiliary USD pricing.
     if (isCowProviderOrQuote(provider, quote)) {
       return {
         provider,
         quote,
-        amountUsd: await amountUsdPromise,
         gasCostNative: 0n,
         gasCostUsd: 0,
         isGasless: true,
       }
     }
+
+    const amountUsdPromise = getAmountUsd(quote).catch(() => undefined)
 
     if (!client || !options.buildTxPlanForQuote) {
       return { provider, quote, amountUsd: await amountUsdPromise }
