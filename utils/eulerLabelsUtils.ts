@@ -18,10 +18,8 @@ import {
   getEulerLabelVaultRestricted,
   isEulerLabelEarnVaultDeprecated,
   isEulerLabelEarnVaultNotExplorable,
-  isEulerLabelProductKeyring,
   isEulerLabelVaultDeprecated,
   isEulerLabelVaultFeatured,
-  isEulerLabelVaultKeyring,
   isEulerLabelVaultNotExplorable,
   isEulerLabelVaultNotExplorableBorrow,
   isEulerLabelVaultNotExplorableLend,
@@ -162,11 +160,14 @@ export const isVaultNotExplorableLend = (vaultAddress: string): boolean =>
 export const isVaultNotExplorableBorrow = (vaultAddress: string): boolean =>
   isEulerLabelVaultNotExplorableBorrow(labels(), vaultAddress)
 
+const productHasTag = (product: EulerLabelProduct, tag: string): boolean =>
+  product.tags?.includes(tag) ?? false
+
 export const isVaultKeyring = (vaultAddress: string): boolean =>
-  isEulerLabelVaultKeyring(labels(), vaultAddress)
+  productHasTag(getProductByVault(vaultAddress), 'keyring')
 
 export const isProductKeyring = (productKey: string): boolean =>
-  isEulerLabelProductKeyring(labels(), productKey)
+  productHasTag((labels().products[productKey] as EulerLabelProduct | undefined) ?? eulerLabelProductEmpty, 'keyring')
 
 export const getEntitiesByVault = (vault: { governorAdmin?: string, governor?: string }): EulerLabelEntity[] =>
   getEulerLabelEntitiesByVault(labels(), vault) as EulerLabelEntity[]
