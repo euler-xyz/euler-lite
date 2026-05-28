@@ -19,7 +19,7 @@ export const shouldHideDisplayedVaultStep = (
   && step.base.toLowerCase() === collateralVault.address.toLowerCase()
 
 export const getDebtOracleRouteSteps = (vault: EVault): OracleRouteStep[] =>
-  vault.debtPricingOracleRoute!.steps
+  vault.debtPricingOracleRoute?.steps ?? []
 
 export const getCollateralOracleRouteSteps = (
   liability: EVault,
@@ -29,7 +29,7 @@ export const getCollateralOracleRouteSteps = (
     item.address.toLowerCase() === collateralVault.address.toLowerCase(),
   )
 
-  return collateral!.oracleRoute!.steps
+  return (collateral?.oracleRoute?.steps ?? [])
     .filter(step => !shouldHideDisplayedVaultStep(step, collateralVault))
 }
 
