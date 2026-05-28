@@ -13,8 +13,6 @@ import { VaultHooksInfoModal } from '#components'
 
 const { vault } = defineProps<{ vault: EVault }>()
 
-const modal = useModal()
-
 const { client: rpcClient } = useRpcClient()
 const { getVaultCategory } = useVaultRegistry()
 
@@ -92,11 +90,9 @@ const hooksRowValue = computed(() => {
 
 const showHooksInfoIcon = computed(() => hasAnyHookedOperation(hookedOperations.value))
 
-const openHooksModal = () => {
-  modal.open(VaultHooksInfoModal, {
-    props: { vault },
-  })
-}
+const hooksModalData = computed(() => ({
+  props: { vault },
+}))
 </script>
 
 <template>
@@ -192,18 +188,17 @@ const openHooksModal = () => {
         <template #label>
           <span class="flex items-center gap-4">
             {{ hooksRowLabel }}
-            <button
+            <UiModalPreviewTrigger
               v-if="showHooksInfoIcon"
-              type="button"
+              :component="VaultHooksInfoModal"
+              :modal-data="hooksModalData"
               :aria-label="`${hooksRowLabel} details`"
-              class="inline-flex shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 focus-visible:rounded"
-              @click="openHooksModal"
             >
               <SvgIcon
-                class="!w-16 !h-16"
+                class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                 name="info-circle"
               />
-            </button>
+            </UiModalPreviewTrigger>
           </span>
         </template>
         {{ hooksRowValue }}
