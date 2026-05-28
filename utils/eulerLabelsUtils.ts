@@ -20,6 +20,7 @@ import {
   isEulerLabelEarnVaultNotExplorable,
   isEulerLabelProductKeyring,
   isEulerLabelVaultDeprecated,
+  isEulerLabelVaultAccessControlled,
   isEulerLabelVaultKeyring,
   isEulerLabelVaultNotExplorable,
   isEulerLabelVaultNotExplorableBorrow,
@@ -163,6 +164,9 @@ export const isVaultKeyring = (vaultAddress: string): boolean =>
 
 export const isProductKeyring = (productKey: string): boolean =>
   isEulerLabelProductKeyring(labels(), productKey)
+
+export const isVaultAccessControlled = (vaultAddress: string): boolean =>
+  isEulerLabelVaultAccessControlled(labels(), vaultAddress)
 
 export const getEntitiesByVault = (vault: { governorAdmin?: string, governor?: string }): EulerLabelEntity[] =>
   getEulerLabelEntitiesByVault(labels(), vault) as EulerLabelEntity[]

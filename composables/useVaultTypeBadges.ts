@@ -3,14 +3,14 @@ import { isEVault, type EulerEarn, type EVault, type SecuritizeCollateralVault }
 import type { Ref } from 'vue'
 import { isCyclicalNoteVault } from '~/utils/vault/classification'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { getEntitiesByEarnVault, getEntitiesByVault, isVaultKeyring } from '~/utils/eulerLabelsUtils'
+import { getEntitiesByEarnVault, getEntitiesByVault, isVaultAccessControlled, isVaultKeyring } from '~/utils/eulerLabelsUtils'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 
 type VaultTypeBadgeVault = EVault | EulerEarn | SecuritizeCollateralVault
 
 export type VaultGovernanceBadge = 'governed' | 'managed' | 'escrow' | 'ungoverned' | 'unknown'
-export type VaultTypeBadge = VaultGovernanceBadge | 'securitize' | 'private' | 'governanceLimited' | 'cyclicalNote'
-export type VaultTypeSummaryBadge = Extract<VaultTypeBadge, 'cyclicalNote' | 'private' | 'unknown'>
+export type VaultTypeBadge = VaultGovernanceBadge | 'securitize' | 'private' | 'accessControl' | 'governanceLimited' | 'cyclicalNote'
+export type VaultTypeSummaryBadge = Extract<VaultTypeBadge, 'cyclicalNote' | 'private' | 'accessControl' | 'unknown'>
 
 export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
   const { isVaultGovernorVerified, isSecuritizeGovernorVerified, isEarnVaultOwnerVerified } = useVaults()
@@ -61,6 +61,7 @@ export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
 
     if (isVerified.value && isSecuritize.value) result.push('securitize')
     if (isVerified.value && isVaultKeyring(vault.value.address)) result.push('private')
+    if (isVerified.value && isVaultAccessControlled(vault.value.address)) result.push('accessControl')
     if (isGovernanceLimited.value) result.push('governanceLimited')
     if (isVerified.value && isCyclicalNote.value) result.push('cyclicalNote')
 
@@ -72,6 +73,7 @@ export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
 
     if (!isVerified.value || governanceType.value === 'unknown') result.push('unknown')
     if (badges.value.includes('private')) result.push('private')
+    if (badges.value.includes('accessControl')) result.push('accessControl')
     if (badges.value.includes('cyclicalNote')) result.push('cyclicalNote')
 
     return result
