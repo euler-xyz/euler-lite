@@ -105,7 +105,7 @@ export const extractVaultOverrides = (raw: Record<string, unknown>): Record<stri
     if (Array.isArray(entry.restricted)) override.restricted = entry.restricted.filter((v): v is string => typeof v === 'string')
     if (typeof entry.notExplorableLend === 'boolean') override.notExplorableLend = entry.notExplorableLend
     if (typeof entry.notExplorableBorrow === 'boolean') override.notExplorableBorrow = entry.notExplorableBorrow
-    if (typeof entry.keyring === 'boolean') override.keyring = entry.keyring
+    if (Array.isArray(entry.tags)) override.tags = entry.tags.filter((v): v is string => typeof v === 'string')
     if (Object.keys(override).length > 0) {
       overrides[normalizeAddress(key)] = override
     }
@@ -330,16 +330,19 @@ export const isVaultNotExplorableBorrow = (vaultAddress: string): boolean => {
   return override?.notExplorableBorrow === true
 }
 
+const productHasTag = (product: EulerLabelProduct | undefined, tag: string): boolean =>
+  product?.tags?.includes(tag) ?? false
+
+const vaultOverrideHasTag = (product: EulerLabelProduct | undefined, vaultAddress: string, tag: string): boolean =>
+  product?.vaultOverrides?.[normalizeAddress(vaultAddress)]?.tags?.includes(tag) ?? false
+
 export const isVaultKeyring = (vaultAddress: string): boolean => {
   const product = getProductByVault(vaultAddress)
-  if (product.keyring === true) return true
-  const override = product.vaultOverrides?.[normalizeAddress(vaultAddress)]
-  return override?.keyring === true
+  return productHasTag(product, 'keyring') || vaultOverrideHasTag(product, vaultAddress, 'keyring')
 }
 
-export const isProductKeyring = (productKey: string): boolean => {
-  return products[productKey]?.keyring === true
-}
+export const isProductKeyring = (productKey: string): boolean =>
+  productHasTag(products[productKey], 'keyring')
 
 // Widened to Vault | SecuritizeVault — both expose governorAdmin: string and
 // the helper only reads that one field. Callers from the discovery matrix
