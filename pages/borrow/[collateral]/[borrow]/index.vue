@@ -4,6 +4,7 @@ import type { VaultAsset } from '~/types/asset'
 import type { CollateralOption } from '~/types/collateral-option'
 import { collectPythFeedsFromAdapters, isEVault, type EVault, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { getAssetOraclePrice, getCollateralShareOraclePrice } from '~/utils/sdk-prices'
+import { getCollateralOracleRouteSteps, getDebtOracleRouteSteps, getOracleRouteAdapters } from '~/utils/oracle-route-steps'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { getNewSubAccount } from '~/composables/useSubAccounts'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
@@ -294,11 +295,21 @@ const onSubmit = async () => {
 }
 
 // --- Pyth oracle refresh logic ---
-const hasPythOracles = (vault: EVault | undefined): boolean => {
-  if (!vault) return false
-  const feeds = collectPythFeedsFromAdapters(vault.oracle.adapters)
+const hasPythOracleRouteSteps = (steps: ReturnType<typeof getDebtOracleRouteSteps>): boolean => {
+  const feeds = collectPythFeedsFromAdapters(getOracleRouteAdapters(steps))
   return feeds.length > 0
 }
+
+const hasBorrowPythOracles = (vault: EVault | undefined): boolean =>
+  !!vault && hasPythOracleRouteSteps(getDebtOracleRouteSteps(vault))
+
+const hasCollateralPythOracles = (
+  borrowVault: EVault | undefined,
+  collateralVault: EVault | SecuritizeCollateralVault | undefined,
+): boolean =>
+  !!borrowVault
+  && !!collateralVault
+  && hasPythOracleRouteSteps(getCollateralOracleRouteSteps(borrowVault, collateralVault))
 
 const hasBorrowPriceFailure = (vault: EVault | undefined): boolean => {
   if (!vault) return false
@@ -321,11 +332,15 @@ const hasCollateralPriceFailure = (bVault: EVault | undefined, collAddr: string 
 }
 
 const needsRefresh = (vault: EVault | undefined): boolean => {
-  return hasPythOracles(vault) || hasBorrowPriceFailure(vault)
+  return hasBorrowPythOracles(vault) || hasBorrowPriceFailure(vault)
 }
 
-const needsRefreshForCollateral = (bVault: EVault | undefined, collAddr: string | undefined): boolean => {
-  return hasPythOracles(bVault) || hasCollateralPriceFailure(bVault, collAddr)
+const needsRefreshForCollateral = (
+  bVault: EVault | undefined,
+  collateralVault: EVault | SecuritizeCollateralVault | undefined,
+): boolean => {
+  return hasCollateralPythOracles(bVault, collateralVault)
+    || hasCollateralPriceFailure(bVault, collateralVault?.address)
 }
 
 const refreshedVaultAddresses = new Set<string>()
@@ -349,9 +364,7 @@ watch(pair, async (val) => {
 
   let current = val
   const borrowAddr = current.borrow.address.toLowerCase()
-  const collAddr = current.collateral.address
-
-  const borrowNeedsRefresh = needsRefresh(current.borrow) || needsRefreshForCollateral(current.borrow, collAddr)
+  const borrowNeedsRefresh = needsRefresh(current.borrow) || needsRefreshForCollateral(current.borrow, current.collateral)
 
   if (borrowNeedsRefresh && !refreshedVaultAddresses.has(borrowAddr)) {
     refreshedVaultAddresses.add(borrowAddr)

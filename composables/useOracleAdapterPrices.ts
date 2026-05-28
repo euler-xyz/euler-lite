@@ -2,7 +2,8 @@ import {
   collectPythFeedsFromAdapters,
   type SecuritizeCollateralVault,
   type EVault,
-  type OracleAdapterEntry,
+  type OracleRouteAdapterStep,
+  type OracleRouteStep,
 } from '@eulerxyz/euler-v2-sdk'
 import { buildPythBatchItemsFromFeeds } from '~/utils/pyth'
 import { nanoToValue } from '~/utils/crypto-utils'
@@ -24,7 +25,8 @@ export type AdapterPriceInfo = {
 
 type OracleAdapterQuoteRequest = {
   kind: 'erc4626-convertToAssets' | 'oracle-getQuote'
-  adapter: OracleAdapterEntry
+  step: OracleRouteStep
+  key: string
   target: Address
   amountIn: bigint
   base: Address
@@ -32,8 +34,11 @@ type OracleAdapterQuoteRequest = {
   quoteDecimals: number
 }
 
-const getOracleAdapterKey = (adapter: OracleAdapterEntry) =>
-  `${adapter.oracle.toLowerCase()}:${adapter.base.toLowerCase()}:${adapter.quote.toLowerCase()}`
+export const getOracleRouteStepKey = (step: Pick<OracleRouteStep, 'kind' | 'oracle' | 'base' | 'quote'>) =>
+  `${step.kind}:${step.oracle.toLowerCase()}:${step.base.toLowerCase()}:${step.quote.toLowerCase()}`
+
+const isAdapterStep = (step: OracleRouteStep): step is OracleRouteAdapterStep =>
+  step.kind === 'adapter'
 
 const buildKnownDecimals = (
   sourceVaults: EVault[],
@@ -72,14 +77,14 @@ const buildKnownDecimals = (
 }
 
 const findUnknownDecimalsAddresses = (
-  adapters: OracleAdapterEntry[],
+  steps: OracleRouteStep[],
   knownDecimals: Map<string, number>,
 ): string[] => {
   const unknown = new Set<string>()
 
-  adapters.forEach((adapter) => {
-    const base = adapter.base.toLowerCase()
-    const quote = adapter.quote.toLowerCase()
+  steps.forEach((step) => {
+    const base = step.base.toLowerCase()
+    const quote = step.quote.toLowerCase()
     if (!knownDecimals.has(base)) unknown.add(base)
     if (!knownDecimals.has(quote)) unknown.add(quote)
   })
@@ -138,22 +143,23 @@ const fetchMissingDecimals = async (
 }
 
 const buildPriceQueryItems = (
-  adapters: OracleAdapterEntry[],
+  steps: OracleRouteStep[],
   decimals: Map<string, number>,
 ): { quoteRequests: OracleAdapterQuoteRequest[], items: BatchItem[] } => {
   const quoteRequests: OracleAdapterQuoteRequest[] = []
-  for (const adapter of adapters) {
-    const baseDecimals = decimals.get(adapter.base.toLowerCase())
-    const quoteDecimals = decimals.get(adapter.quote.toLowerCase())
+  for (const step of steps) {
+    const baseDecimals = decimals.get(step.base.toLowerCase())
+    const quoteDecimals = decimals.get(step.quote.toLowerCase())
     if (baseDecimals === undefined || quoteDecimals === undefined) continue
 
     quoteRequests.push({
-      kind: adapter.name === 'ERC4626Vault' ? 'erc4626-convertToAssets' : 'oracle-getQuote',
-      adapter,
-      target: adapter.oracle,
+      kind: step.kind === 'vault' ? 'erc4626-convertToAssets' : 'oracle-getQuote',
+      step,
+      key: getOracleRouteStepKey(step),
+      target: step.oracle,
       amountIn: 10n ** BigInt(baseDecimals),
-      base: adapter.base,
-      quote: adapter.quote,
+      base: step.base,
+      quote: step.quote,
       quoteDecimals,
     })
   }
@@ -186,11 +192,10 @@ const decodePriceResults = (
   const prices = new Map<string, AdapterPriceInfo>()
 
   quoteRequests.forEach((request, i) => {
-    const key = getOracleAdapterKey(request.adapter)
     const res = results[i]
 
     if (!res?.success) {
-      prices.set(key, { rate: 0, success: false })
+      prices.set(request.key, { rate: 0, success: false })
       return
     }
 
@@ -211,10 +216,10 @@ const decodePriceResults = (
       const outAmount = decoded as bigint
       const rate = nanoToValue(outAmount, request.quoteDecimals)
 
-      prices.set(key, { rate, success: true })
+      prices.set(request.key, { rate, success: true })
     }
     catch {
-      prices.set(key, { rate: 0, success: false })
+      prices.set(request.key, { rate: 0, success: false })
     }
   })
 
@@ -222,7 +227,7 @@ const decodePriceResults = (
 }
 
 export const useOracleAdapterPrices = (
-  adapters: ComputedRef<OracleAdapterEntry[]>,
+  steps: ComputedRef<OracleRouteStep[]>,
   sourceVaults: ComputedRef<EVault[]>,
   collateralVaults: ComputedRef<(EVault | SecuritizeCollateralVault)[]>,
 ) => {
@@ -233,9 +238,9 @@ export const useOracleAdapterPrices = (
   const { chainId, eulerCoreAddresses } = useEulerAddresses()
 
   const fetchPrices = async () => {
-    const adapterList = adapters.value
+    const stepList = steps.value
     const evcAddress = eulerCoreAddresses.value?.evc
-    if (!adapterList.length || !evcAddress || !chainId.value) {
+    if (!stepList.length || !evcAddress || !chainId.value) {
       prices.value = new Map()
       return
     }
@@ -251,7 +256,7 @@ export const useOracleAdapterPrices = (
       const knownDecimals = buildKnownDecimals(sourceVaults.value, collateralVaults.value)
 
       // 2. Find unknown decimals
-      const unknownAddresses = findUnknownDecimalsAddresses(adapterList, knownDecimals)
+      const unknownAddresses = findUnknownDecimalsAddresses(stepList, knownDecimals)
 
       // 3. Fetch missing decimals if needed
       if (unknownAddresses.length) {
@@ -260,6 +265,7 @@ export const useOracleAdapterPrices = (
       }
 
       // 4. Build Pyth update batch items for the adapters being quoted
+      const adapterList = stepList.filter(isAdapterStep).map(step => step.adapter)
       const { items: pythItems } = await buildPythBatchItemsFromFeeds(
         collectPythFeedsFromAdapters(adapterList),
         provider,
@@ -267,7 +273,7 @@ export const useOracleAdapterPrices = (
       )
 
       // 5. Build price query batch items (skipping adapters with unknown decimals)
-      const { quoteRequests, items: priceItems } = buildPriceQueryItems(adapterList, knownDecimals)
+      const { quoteRequests, items: priceItems } = buildPriceQueryItems(stepList, knownDecimals)
 
       // 6. Execute single batchSimulation
       const allItems = [...pythItems, ...priceItems]
@@ -283,8 +289,8 @@ export const useOracleAdapterPrices = (
     }
   }
 
-  watch(adapters, async () => {
-    if (!adapters.value.length) {
+  watch(steps, async () => {
+    if (!steps.value.length) {
       prices.value = new Map()
       return
     }
