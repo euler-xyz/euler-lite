@@ -79,6 +79,13 @@ const { isReady: isLabelsReady } = useEulerLabels()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
 const { isConnected, address } = useWagmi()
 const { chainId } = useEulerAddresses()
+const shareLinkQuery = computed(() => {
+  const network = route.query.network
+
+  return {
+    network: Array.isArray(network) ? network[0] ?? chainId.value : network ?? chainId.value,
+  }
+})
 const { fetchSingleBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const vaultAddress = route.params.vault as string
@@ -125,6 +132,7 @@ const {
   selectedProvider: swapSelectedProvider,
   selectedQuote: swapSelectedQuote,
   effectiveQuote: swapEffectiveQuote,
+  effectiveQuoteFetchedAt: swapEffectiveQuoteFetchedAt,
   providersCount: _swapProvidersCount,
   isLoading: isSwapQuoteLoading,
   quoteError: swapQuoteError,
@@ -464,6 +472,7 @@ const submit = async () => {
           asset: reviewAsset,
           amount: amount.value,
           plan: plan.value || undefined,
+          quoteFetchedAt: needsSwap.value ? swapEffectiveQuoteFetchedAt.value : null,
           swapToAsset: needsSwap.value ? asset.value : undefined,
           swapToAmount: needsSwap.value ? swapEstimatedOutput.value : undefined,
           swapMode: needsSwap.value ? SwapperMode.EXACT_IN : undefined,
@@ -567,17 +576,15 @@ const updateEstimates = useDebounceFn(async () => {
   }
 }, 500)
 
-const onSupplyInfoIconClick = () => {
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY: baseSupplyApy.value,
-      intrinsicAPY: intrinsicApy.value,
-      intrinsicApyInfo: getVaultIntrinsicApyInfo(vault.value, enableIntrinsicApy.value),
-      campaigns: getSupplyRewardCampaigns(vaultAddress),
-      rewardVaultAddress: vaultAddress,
-    },
-  })
-}
+const supplyApyModalData = computed(() => ({
+  props: {
+    lendingAPY: baseSupplyApy.value,
+    intrinsicAPY: intrinsicApy.value,
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(vault.value, enableIntrinsicApy.value),
+    campaigns: getSupplyRewardCampaigns(vaultAddress),
+    rewardVaultAddress: vaultAddress,
+  },
+}))
 
 // Swap quote helpers
 const swapEstimatedOutput = computed(() => {
@@ -594,11 +601,25 @@ const swapInputDisplay = computed(() => {
   return `${formatSmartAmount(formatUnits(amountIn, Number(selectedAsset.value.decimals)))} ${selectedAsset.value.symbol}`
 })
 
+const swapInputExactDisplay = computed(() => {
+  if (!swapEffectiveQuote.value || !selectedAsset.value) return ''
+  const amountIn = BigInt(swapEffectiveQuote.value.amountIn || 0)
+  if (amountIn <= 0n) return ''
+  return `${formatUnits(amountIn, Number(selectedAsset.value.decimals))} ${selectedAsset.value.symbol}`
+})
+
 const swapOutputDisplay = computed(() => {
   if (!swapEffectiveQuote.value || !asset.value) return ''
   const amountOut = BigInt(swapEffectiveQuote.value.amountOut || 0)
   if (amountOut <= 0n) return ''
   return `${formatSmartAmount(formatUnits(amountOut, Number(asset.value.decimals)))} ${asset.value.symbol}`
+})
+
+const swapOutputExactDisplay = computed(() => {
+  if (!swapEffectiveQuote.value || !asset.value) return ''
+  const amountOut = BigInt(swapEffectiveQuote.value.amountOut || 0)
+  if (amountOut <= 0n) return ''
+  return `${formatUnits(amountOut, Number(asset.value.decimals))} ${asset.value.symbol}`
 })
 
 const swapRoutedVia = computed(() => {
@@ -803,15 +824,26 @@ watch([address, isConnected, chainId, () => asset.value?.address], () => {
         fallback="/lend"
       />
       <!-- Vault header -->
-      <VaultLabelsAndAssets
+      <div
         v-if="asset && (vault || securitizeVault)"
-        back
-        back-fallback="/lend"
         class="mb-24"
-        :vault="(vault || securitizeVault)!"
-        :assets="assets"
-        size="large"
-      />
+      >
+        <VaultLabelsAndAssets
+          back
+          back-fallback="/lend"
+          :vault="(vault || securitizeVault)!"
+          :assets="assets"
+          size="large"
+        >
+          <UiShareLinkButton
+            class="-ml-4 !w-24 !h-24"
+            :path="`/lend/${(vault || securitizeVault)!.address}`"
+            :query="shareLinkQuery"
+            label="Copy vault link"
+            variant="ghost"
+          />
+        </VaultLabelsAndAssets>
+      </div>
 
       <div class="flex gap-32">
         <div class="hidden laptop:!block laptop:flex-[55] min-w-0">
@@ -840,11 +872,16 @@ watch([address, isConnected, chainId, () => asset.value?.address], () => {
             >
               <p class="text-h3 text-content-tertiary flex items-center gap-4">
                 Supply APY
-                <SvgIcon
-                  class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-                  name="info-circle"
-                  @click="onSupplyInfoIconClick"
-                />
+                <UiModalPreviewTrigger
+                  :component="VaultSupplyApyModal"
+                  :modal-data="supplyApyModalData"
+                  aria-label="Show supply APY breakdown"
+                >
+                  <SvgIcon
+                    class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                    name="info-circle"
+                  />
+                </UiModalPreviewTrigger>
               </p>
 
               <p class="flex items-center gap-4 text-h3">
@@ -853,12 +890,17 @@ watch([address, isConnected, chainId, () => asset.value?.address], () => {
                   class="mr-4"
                   :vault="vault"
                 />
-                <SvgIcon
+                <UiModalPreviewTrigger
                   v-if="hasRewards"
-                  class="!w-24 !h-24 text-accent-600 cursor-pointer"
-                  name="sparks"
-                  @click="onSupplyInfoIconClick"
-                />
+                  :component="VaultSupplyApyModal"
+                  :modal-data="supplyApyModalData"
+                  aria-label="Show supply APY rewards breakdown"
+                >
+                  <SvgIcon
+                    class="!w-24 !h-24 text-accent-600 cursor-pointer"
+                    name="sparks"
+                  />
+                </UiModalPreviewTrigger>
                 <span>
                   {{ supplyAPYDisplay }}%
                 </span>
@@ -916,7 +958,9 @@ watch([address, isConnected, chainId, () => asset.value?.address], () => {
               >
                 <SwapDetailsSummary
                   :input-display="swapInputDisplay"
+                  :input-exact-display="swapInputExactDisplay"
                   :output-display="swapOutputDisplay"
+                  :output-exact-display="swapOutputExactDisplay"
                   :price-impact="swapPriceImpact"
                   :slippage="swapSlippage"
                   :routed-via="swapRoutedVia"
