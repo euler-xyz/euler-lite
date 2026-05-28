@@ -344,6 +344,11 @@ export const isVaultKeyring = (vaultAddress: string): boolean => {
 export const isProductKeyring = (productKey: string): boolean =>
   productHasTag(products[productKey], 'keyring')
 
+export const isVaultAccessControlled = (vaultAddress: string): boolean => {
+  const product = getProductByVault(vaultAddress)
+  return productHasTag(product, 'access control') || vaultOverrideHasTag(product, vaultAddress, 'access control')
+}
+
 // Widened to Vault | SecuritizeVault — both expose governorAdmin: string and
 // the helper only reads that one field. Callers from the discovery matrix
 // pass either type without casting.
