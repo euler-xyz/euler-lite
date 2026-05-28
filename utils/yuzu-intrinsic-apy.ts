@@ -1,15 +1,7 @@
 import type { Address } from 'viem'
 import type { ERC4626Vault, IIntrinsicApyService, IntrinsicApyInfo } from '@eulerxyz/euler-v2-sdk'
 
-export const YUZU_CHAIN_ID = 143
-export const YUZU_ASSET_ADDRESS = '0xc9ea90692757831d98Ac629F2A0140E02b80A7DA' as Address
 const OVERRIDE_CACHE_TTL_MS = 5 * 60 * 1000
-
-export type YuzuApyField = 'yzprime_apy_1d' | 'yzprime_apy_7d' | 'yzprime_apy_30d'
-export type YuzuDashboardTimelineRow = {
-  date?: string
-  ts?: string | number
-} & Partial<Record<YuzuApyField, string | number | null>>
 
 export type HyperbeatStakingResponse = {
   data?: {
@@ -24,42 +16,6 @@ export type HyperbeatStakingResponse = {
 export type IntrinsicApyOverrideRow = IntrinsicApyInfo & {
   chainId: number
   address: Address
-}
-
-const yuzuDateValue = (date?: string): number => {
-  if (!date) return Number.NEGATIVE_INFINITY
-  const parsed = Date.parse(`${date}T00:00:00Z`)
-  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY
-}
-
-const yuzuTimestampValue = (ts?: string | number): number => {
-  const parsed = Number(ts)
-  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY
-}
-
-export const extractLatestYuzuApy = (
-  rows: readonly YuzuDashboardTimelineRow[] | undefined,
-  field: YuzuApyField,
-): number | null => {
-  let latest: YuzuDashboardTimelineRow | undefined
-  for (const row of rows ?? []) {
-    if (!row) continue
-    if (!latest) {
-      latest = row
-      continue
-    }
-    const rowDate = yuzuDateValue(row.date)
-    const latestDate = yuzuDateValue(latest.date)
-    if (
-      rowDate > latestDate
-      || (rowDate === latestDate && yuzuTimestampValue(row.ts) > yuzuTimestampValue(latest.ts))
-    ) {
-      latest = row
-    }
-  }
-
-  const apy = Number(latest?.[field])
-  return Number.isFinite(apy) ? apy : null
 }
 
 export const extractValantisApy = (data: string | number): number => Number(data)
