@@ -24,9 +24,10 @@ import type {
   IntrinsicApyInfo,
   IPriceService,
   IRewardsService,
+  RewardCampaign,
   ServiceResult,
-  VaultRewardInfo,
 } from '@eulerxyz/euler-v2-sdk'
+import { VaultRewardInfo } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
 
 /**
@@ -116,7 +117,15 @@ export const buildSnapshotRewardsService = (
     vaultAddress: Address,
   ): Promise<VaultRewardInfo | undefined> {
     const args = snapshot.get(vaultAddress.toLowerCase())
-    return args?.rewards as VaultRewardInfo | undefined
+    // The decoded snapshot is plain JSON ({ campaigns: [...] }) — class
+    // methods don't survive serialisation. Rehydrate into a real
+    // VaultRewardInfo so consumers can call getActiveCampaigns() etc.
+    // (the eligibility predicate is lost on the wire and defaults until
+    // the silent RPC refresh replaces this instance).
+    const rewards = args?.rewards as { campaigns?: RewardCampaign[] } | undefined
+    if (!rewards) return undefined
+    if (rewards instanceof VaultRewardInfo) return rewards
+    return new VaultRewardInfo({ campaigns: rewards.campaigns ?? [] })
   },
 
   fetchChainRewards: notImplemented('fetchChainRewards'),

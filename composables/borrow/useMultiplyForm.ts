@@ -68,7 +68,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const { error } = useToast()
   const { planMultiply, prepareTransactionPlan, prefetchPluginData, executePlan, preloadSubAccountSnapshot } = useEulerTx()
   const { isConnected, address } = useWagmi()
-  const { isSpyMode } = useSpyMode()
+  const { isSpyMode, spyAddress } = useSpyMode()
   // Shared, race-replace fresh Account snapshot. Threaded into every per-quote
   // planMultiply call and the submit-time planMultiply call so we don't pay
   // `accountService.fetchAccount` (~2.5s) N+1 times per quote sweep.
@@ -730,18 +730,19 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     const cowProviderExtraData = { ...COWSWAP_PROVIDER_EXTRA_DATA.openPosition }
     let cowAccount: Address | null = null
     const chainConfig = getCowSwapChainConfig(chainId.value ?? 0)
-    if (chainConfig && address.value) {
+    const cowOwner = (isSpyMode.value ? spyAddress.value : address.value) as Address | undefined
+    if (chainConfig && cowOwner) {
       try {
-        cowAccount = await getNewSubAccount(address.value, multiplyShortVault.value.address) as Address
+        cowAccount = await getNewSubAccount(cowOwner, multiplyShortVault.value.address) as Address
       }
       catch (e) {
         logWarn('multiply/cowswap/resolveQuoteSubaccount', e)
       }
     }
-    if (chainConfig && cowAccount) {
+    if (chainConfig && cowAccount && cowOwner) {
       cowProviderExtraData.appData = buildOpenPositionQuoteAppData(
         {
-          owner: (address.value || zeroAddress) as Address,
+          owner: cowOwner,
           account: cowAccount,
           deadline: quoteDeadline,
           collateralVault: multiplySupplyVault.value.address as Address,
@@ -1011,6 +1012,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           asset: multiplyShortVault.value.asset,
           amount: multiplyShortAmount.value || formatUnits(debtAmount, Number(multiplyShortVault.value.asset.decimals)),
           prepared: preparedMultiplyPlan.value || undefined,
+          quoteFetchedAt: quote ? multiplyEffectiveQuoteFetchedAt.value : null,
           supplyingAssetForBorrow: multiplySupplyVault.value.asset,
           supplyingAmount: multiplyInputAmount.value,
           swapToAsset: quote ? multiplyLongVault.value.asset : undefined,

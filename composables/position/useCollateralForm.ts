@@ -171,6 +171,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     selectedProvider: swapSelectedProvider,
     selectedQuote: swapSelectedQuote,
     effectiveQuote: swapEffectiveQuote,
+    effectiveQuoteFetchedAt: swapEffectiveQuoteFetchedAt,
     providersCount: swapProvidersCount,
     isLoading: isSwapQuoteLoading,
     quoteError: swapQuoteError,
@@ -353,12 +354,28 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     return `${formatSmartAmount(formatUnits(amountIn, tokenIn.decimals))} ${tokenIn.symbol}`
   })
 
+  const swapInputExactDisplay = computed(() => {
+    if (!swapEffectiveQuote.value) return ''
+    const amountIn = BigInt(swapEffectiveQuote.value.amountIn || 0)
+    if (amountIn <= 0n) return ''
+    const tokenIn = swapEffectiveQuote.value.tokenIn
+    return `${formatUnits(amountIn, tokenIn.decimals)} ${tokenIn.symbol}`
+  })
+
   const swapOutputDisplay = computed(() => {
     const outputAsset = options.getSwapOutputAsset()
     if (!swapEffectiveQuote.value || !outputAsset) return ''
     const amountOut = BigInt(swapEffectiveQuote.value.amountOut || 0)
     if (amountOut <= 0n) return ''
     return `${formatSmartAmount(formatUnits(amountOut, Number(outputAsset.decimals)))} ${outputAsset.symbol}`
+  })
+
+  const swapOutputExactDisplay = computed(() => {
+    const outputAsset = options.getSwapOutputAsset()
+    if (!swapEffectiveQuote.value || !outputAsset) return ''
+    const amountOut = BigInt(swapEffectiveQuote.value.amountOut || 0)
+    if (amountOut <= 0n) return ''
+    return `${formatUnits(amountOut, Number(outputAsset.decimals))} ${outputAsset.symbol}`
   })
 
   const swapRoutedVia = computed(() => {
@@ -736,6 +753,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
             amount: amount.value,
             plan: options.usePreparedPipeline ? undefined : (plan.value || undefined),
             prepared: options.usePreparedPipeline ? (preparedPlan.value || undefined) : undefined,
+            quoteFetchedAt: options.needsSwap.value ? swapEffectiveQuoteFetchedAt.value : null,
             subAccount: position.value?.subAccount,
             hasBorrows: (position.value?.borrowed || 0n) > 0n,
             swapToAsset: options.needsSwap.value ? options.getSwapToAsset() : undefined,
@@ -802,26 +820,43 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   // borrow, pay-with/output). One probe per token, owner-/spender-agnostic;
   // keeps state-override derivation off the access-list path for the lifetime
   // of the form.
-  watch(
-    [collateralVault, borrowVault, () => options.effectiveAsset.value, () => options.getSwapOutputAsset()],
-    ([collateral, borrow, effective, swapOut]) => {
-      const tokens: Address[] = []
-      const seen = new Set<string>()
-      const push = (addr?: string) => {
-        if (!addr) return
-        const key = addr.toLowerCase()
-        if (seen.has(key)) return
-        seen.add(key)
-        tokens.push(addr as Address)
-      }
-      push(collateral?.asset?.address)
-      push(borrow?.asset?.address)
-      push(effective?.address)
-      push(swapOut?.address)
-      if (tokens.length) void primeSlotHintsFor(tokens)
-    },
-    { immediate: true },
-  )
+  const primeFormSlotHints = () => {
+    const tokens: Address[] = []
+    const seen = new Set<string>()
+    const push = (addr?: string) => {
+      if (!addr) return
+      const key = addr.toLowerCase()
+      if (seen.has(key)) return
+      seen.add(key)
+      tokens.push(addr as Address)
+    }
+    push(collateralVault.value?.asset?.address)
+    push(borrowVault.value?.asset?.address)
+    push(options.effectiveAsset.value?.address)
+    push(options.getSwapOutputAsset()?.address)
+    if (tokens.length) void primeSlotHintsFor(tokens)
+  }
+
+  // Register the priming watcher AFTER the synchronous construction path.
+  // Consumers pass `effectiveAsset`/`getSwapOutputAsset` that close over the
+  // `form` object returned by this composable (e.g. `effectiveAsset: () =>
+  // form.asset.value`). Vue's `watch` evaluates its source getters once,
+  // synchronously, at registration time (independent of `immediate`) to capture
+  // baseline values — so listing those getters as sources here, while still on
+  // the right-hand side of `const form = useCollateralForm(...)`, dereferences
+  // `form` in its temporal dead zone and throws. Defer to a microtask (form is
+  // assigned by then) and re-run inside the captured effect scope so the watcher
+  // is still tied to the component lifecycle and auto-disposed on unmount.
+  const scope = getCurrentScope()
+  void Promise.resolve().then(() => {
+    const register = () => watch(
+      [collateralVault, borrowVault, () => options.effectiveAsset.value, () => options.getSwapOutputAsset()],
+      primeFormSlotHints,
+      { immediate: true },
+    )
+    if (scope) scope.run(register)
+    else register()
+  })
 
   // --- Common watchers ---
   watch(isPositionsLoaded, (val) => {
@@ -914,7 +949,9 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     swapQuotesStatusLabel,
     swapEstimatedOutput,
     swapInputDisplay,
+    swapInputExactDisplay,
     swapOutputDisplay,
+    swapOutputExactDisplay,
     swapRoutedVia,
     swapPriceImpact,
     swapRouteItems,

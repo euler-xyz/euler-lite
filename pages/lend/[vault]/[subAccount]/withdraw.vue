@@ -24,6 +24,7 @@ import { getAddress, formatUnits, zeroAddress, type Address } from 'viem'
 import { SwapTokenSelector, SlippageSettingsModal, OperationReviewModal } from '#components'
 import { FixedPoint } from '~/utils/fixed-point'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
+import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 
 const router = useRouter()
 const route = useRoute()
@@ -445,6 +446,19 @@ const send = async () => {
 
     if (!preparedPlan.value) return
     await executePreparedPlan(preparedPlan.value)
+
+    // The form stays mounted after the tx, but wallet-balance reads aren't
+    // auto-invalidated post-tx (sdk-query-policy: queryTokenBalances /
+    // queryBalanceOf carry a 1-min browsing stale time and no invalidateAfterTx),
+    // and `assetsBalance`/`sharesBalance` are one-shot refs set at load. Evict the
+    // balance queries and re-read so "Available for withdraw" reflects the new
+    // balance instead of the pre-withdraw amount.
+    await invalidateSdkQueries(['queryTokenBalances', 'queryBalanceOf', 'queryNativeBalance'])
+    await fetchShareBalance()
+    await updateBalance()
+    amount.value = ''
+    preparedPlan.value = null
+    resetSwapQuoteState()
 
     modal.close()
     setTimeout(() => {

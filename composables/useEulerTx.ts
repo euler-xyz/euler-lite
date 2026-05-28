@@ -33,11 +33,12 @@ import type {
 } from '@eulerxyz/euler-v2-sdk'
 import { useConfig, useSendTransaction, useSignTypedData } from '@wagmi/vue'
 import { getAccount } from '@wagmi/vue/actions'
-import { getEulerSdk, getEulerSdkFresh } from '~/composables/useEulerSdk'
+import { getEulerSdk, getEulerSdkFresh, buildSubgraphProxyApiPath } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
 import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
 import { waitForSubgraphBlock } from '~/utils/subgraph'
+import { POST_TX_REFRESH_DELAY_MS } from '~/entities/tuning-constants'
 import { profAsync } from '~/utils/profiler'
 
 const OKX_POST_APPROVE_DELAY_MS = 3000
@@ -375,7 +376,6 @@ export const useEulerTx = () => {
   const { address: walletAddress, chainId: wagmiChainId } = useWagmi()
   const { isSpyMode, spyAddress } = useSpyMode()
   const { permit2Enabled } = usePermit2Preference()
-  const { SUBGRAPH_URL } = useEulerConfig()
   const { sendTransactionAsync } = useSendTransaction()
   const { signTypedDataAsync } = useSignTypedData()
   const config = useConfig()
@@ -1002,6 +1002,23 @@ export const useEulerTx = () => {
     return send
   }
 
+  const runPostTxSubgraphSync = async (cid: number, targetBlock: bigint) => {
+    // Poll the SDK's subgraph proxy (not a separately-resolved upstream) so the
+    // head we wait on is the same one serving queryAccountVaults.
+    const caughtUp = await waitForSubgraphBlock(buildSubgraphProxyApiPath(cid), targetBlock)
+    if (!caughtUp) {
+      logWarn('useEulerTx/subgraphPoll', new Error(`subgraph did not catch up to block ${targetBlock} in time`))
+    }
+    // Re-trigger the portfolio refetch once more, after a short delay, regardless
+    // of `caughtUp`. Even once the head advances, Goldsky may serve the actual
+    // queryAccountVaults read from a replica that lags the one we polled; a
+    // spaced refetch absorbs that without waiting for the 60s page poll. On
+    // timeout this is a best-effort nudge for a late-arriving index.
+    await new Promise(resolve => setTimeout(resolve, POST_TX_REFRESH_DELAY_MS))
+    void invalidateSdkQueries([...INVALIDATE_AFTER_TX])
+    triggerPortfolioRefresh()
+  }
+
   const finalizeExecution = (result: { receipts: TransactionReceipt[] }) => {
     let lastReceipt: TransactionReceipt | undefined
     if (result.receipts.length) {
@@ -1014,14 +1031,9 @@ export const useEulerTx = () => {
     // portfolio page renders; the two are complementary.
     void invalidateSdkQueries([...INVALIDATE_AFTER_TX])
     triggerPortfolioRefresh()
-    if (lastReceipt && SUBGRAPH_URL) {
-      void waitForSubgraphBlock(SUBGRAPH_URL, lastReceipt.blockNumber)
-        .then((caughtUp) => {
-          if (caughtUp) {
-            void invalidateSdkQueries([...INVALIDATE_AFTER_TX])
-            triggerPortfolioRefresh()
-          }
-        })
+    const cid = chainId.value
+    if (lastReceipt && cid) {
+      void runPostTxSubgraphSync(cid, lastReceipt.blockNumber)
         .catch(err => logWarn('useEulerTx/subgraphPoll', err))
     }
   }

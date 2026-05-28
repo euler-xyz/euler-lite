@@ -5,13 +5,12 @@ import { createRateLimiter } from '~/server/utils/rate-limit'
 import { logger } from '~/server/utils/logger'
 import {
   extractHyperbeatWeightedApr,
-  extractLatestYuzuApy,
   extractValantisApy,
   type IntrinsicApyOverrideRow,
 } from '~/utils/yuzu-intrinsic-apy'
 
 const ALLOWED_METHODS = new Set(['GET', 'HEAD'])
-const PENDLE_STALE_MS = 7 * 24 * 60 * 60 * 1000
+const PENDLE_STALE_MS = 2 * 60 * 60 * 1000
 
 const URLS = {
   defillama: 'https://yields.llama.fi/pools',
@@ -22,7 +21,6 @@ const URLS = {
   noon: 'https://back.noon.capital/api/v1/protocol-metrics',
   pendleKHype: 'https://api-v2.pendle.finance/core/v2/999/markets/0x31104779b2a07a273d6c662419377773083d0b2e/data',
   valantis: 'https://analytics-v3.valantis-analytics.xyz/sthype/apr',
-  yuzuDashboard: 'https://yuzu-accountable.yuzu.money/v1/dashboard',
 } as const
 
 const rateLimiter = createRateLimiter({
@@ -37,6 +35,12 @@ const hyperevmDefillamaSources = [
   { address: '0xac962fa04bf91b7fd0dc0c5c32414e0ce3c51e03', poolId: '84e38fd1-024f-4107-a1fc-0ae8bfc1b195' },
   { address: '0x34c07f50c4f55b322e85deeb265d278e6af112e4', poolId: '570ddae7-acae-4277-905b-278cd994b08d' },
 ] as const
+
+const monadDefillamaSources = [
+  { address: '0xc9ea90692757831d98Ac629F2A0140E02b80A7DA', poolId: '18147bfe-ee41-4762-9a95-c0ff28215798' }, // yzPrime
+] as const
+
+type DefillamaSource = { address: string, poolId: string }
 
 const json = async <T>(url: string): Promise<T> => {
   const response = await fetchWithTimeout(url, undefined, { headers: { accept: 'application/json' } })
@@ -74,19 +78,12 @@ const safe = async <T>(label: string, fn: () => Promise<T | null>): Promise<T | 
 const formatDefiLlamaProject = (project?: string) =>
   project ? `${project.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')} via DefiLlama` : 'DefiLlama'
 
-const fetchYuzu = async (): Promise<IntrinsicApyOverrideRow[]> => {
-  const data = await json<{ data?: { reserves?: { timeline?: Array<Record<string, unknown>> } } }>(URLS.yuzuDashboard)
-  const apy = extractLatestYuzuApy(data.data?.reserves?.timeline, 'yzprime_apy_7d')
-  const result = row(143, '0xc9ea90692757831d98Ac629F2A0140E02b80A7DA', apy ?? 0, 'Yuzu', URLS.yuzuDashboard)
-  return result ? [result] : []
-}
-
-const fetchHyperevmDefillama = async (): Promise<IntrinsicApyOverrideRow[]> => {
+const fetchDefillama = async (chainId: number, sources: readonly DefillamaSource[]): Promise<IntrinsicApyOverrideRow[]> => {
   const data = await json<{ data?: Array<{ pool?: string, project?: string, apy?: number | null }> }>(URLS.defillama)
   const pools = new Map((data.data ?? []).filter(p => p.pool).map(p => [p.pool!, p]))
-  return hyperevmDefillamaSources.flatMap((source) => {
+  return sources.flatMap((source) => {
     const pool = pools.get(source.poolId)
-    const result = row(999, source.address, pool?.apy ?? 0, formatDefiLlamaProject(pool?.project), `https://defillama.com/yields/pool/${source.poolId}`)
+    const result = row(chainId, source.address, pool?.apy ?? 0, formatDefiLlamaProject(pool?.project), `https://defillama.com/yields/pool/${source.poolId}`)
     return result ? [result] : []
   })
 }
@@ -116,10 +113,14 @@ const fetchHyperevm = async (): Promise<IntrinsicApyOverrideRow[]> => {
       const stale = !data.timestamp || Date.now() - new Date(data.timestamp).getTime() > PENDLE_STALE_MS
       return row(999, '0xea84ca9849d9e76a78b91f221f84e9ca065fc9f5', stale ? 0 : (data.impliedApy ?? 0) * 100, 'Pendle', 'https://app.pendle.finance/trade/markets')
     }),
-    safe('defillama', fetchHyperevmDefillama),
+    safe('defillama', () => fetchDefillama(999, hyperevmDefillamaSources)),
   ])
 
   return items.flatMap(item => Array.isArray(item) ? item : item ? [item] : [])
+}
+
+const fetchMonad = async (): Promise<IntrinsicApyOverrideRow[]> => {
+  return await fetchDefillama(143, monadDefillamaSources)
 }
 
 export default defineEventHandler(async (event) => {
@@ -141,7 +142,7 @@ export default defineEventHandler(async (event) => {
   })
 
   if (method === 'HEAD') return undefined
-  if (chainId === 143) return await fetchYuzu()
+  if (chainId === 143) return await fetchMonad()
   if (chainId === 999) return await fetchHyperevm()
   return []
 })

@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { isEVault, type SecuritizeCollateralVault, type OracleAdapterEntry, type EVault } from '@eulerxyz/euler-v2-sdk'
+import {
+  isEVault,
+  type SecuritizeCollateralVault,
+  type OracleRouteStep,
+  type EVault,
+} from '@eulerxyz/euler-v2-sdk'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import { findVault, formatMetricValue, getCellBgColor, isMatrixCompatibleVault, type CollateralMatrixData, type MatrixCell, type DotMetric, type EnhancedCellApys } from '~/utils/discoveryCalculations'
 import { getChecksStatus, OracleAdapterCheckSeverity, type OracleAdapterCheck } from '~/entities/oracle'
@@ -7,7 +12,8 @@ import { getOracleProviderLogo } from '~/entities/oracle-providers'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { truncate, formatNumber } from '~/utils/string-utils'
 import { shouldInvertOraclePrice } from '~/utils/oracle-label'
-import { useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
+import { getOracleRouteStepKey, useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
+import { getCollateralOracleRouteSteps, getDebtOracleRouteSteps, isOracleAdapterRouteStep } from '~/utils/oracle-route-steps'
 import type { MarketGroup } from '~/entities/lend-discovery'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import type { Address } from 'viem'
@@ -152,16 +158,15 @@ const metricRange = computed((): { min: number, max: number } => {
 
 // ── Oracle metric: per-cell adapter list + tooltip ────────────────────────────
 
-const getCollateralOracleAdapters = (
+const getCollateralOracleSteps = (
   liability: EVault,
   collateral: EVault | SecuritizeCollateralVault,
-) =>
-  liability.collaterals.find(item =>
-    item.address.toLowerCase() === collateral.address.toLowerCase(),
-  )?.oracleAdapters ?? []
+) => {
+  return getCollateralOracleRouteSteps(liability, collateral)
+}
 
-const cellOracleAdapters = computed((): Map<string, OracleAdapterEntry[]> => {
-  const result = new Map<string, OracleAdapterEntry[]>()
+const cellOracleSteps = computed((): Map<string, OracleRouteStep[]> => {
+  const result = new Map<string, OracleRouteStep[]>()
   if (props.dotMetric !== 'oracle') return result
 
   for (const [colAddr, rowCells] of props.matrix.cells) {
@@ -171,8 +176,8 @@ const cellOracleAdapters = computed((): Map<string, OracleAdapterEntry[]> => {
       if (!collateral || !liability) continue
       if (!isMatrixCompatibleVault(collateral)) continue
       if (!isEVault(liability)) continue
-      const adapters = getCollateralOracleAdapters(liability, collateral)
-      if (adapters.length) result.set(`${colAddr}:${liabAddr}`, adapters)
+      const steps = getCollateralOracleSteps(liability, collateral)
+      if (steps.length) result.set(`${colAddr}:${liabAddr}`, steps)
     }
   }
   return result
@@ -181,14 +186,14 @@ const cellOracleAdapters = computed((): Map<string, OracleAdapterEntry[]> => {
 // Per-borrow-vault asset oracle: resolves the borrow vault's own asset against
 // its unit of account. Same set repeated across every cell in a column, so we
 // surface it once as a header row instead.
-const columnAssetOracleAdapters = computed((): Map<string, OracleAdapterEntry[]> => {
-  const result = new Map<string, OracleAdapterEntry[]>()
+const columnAssetOracleSteps = computed((): Map<string, OracleRouteStep[]> => {
+  const result = new Map<string, OracleRouteStep[]>()
   if (props.dotMetric !== 'oracle') return result
   for (const col of props.matrix.columns) {
     const liability = findVault(props.market, col.address)
     if (!liability || !isEVault(liability)) continue
-    const adapters = liability.debtPricingOracleAdapters
-    if (adapters.length) result.set(col.address, adapters)
+    const steps = getDebtOracleRouteSteps(liability)
+    if (steps.length) result.set(col.address, steps)
   }
   return result
 })
@@ -208,6 +213,8 @@ watch(
 )
 
 interface AdapterView {
+  key: string
+  kind: OracleRouteStep['kind']
   oracle: Address
   name: string
   base: Address
@@ -223,21 +230,22 @@ interface AdapterView {
   failedChecks: OracleAdapterCheck[]
 }
 
-const enrichAdapter = (adapter: OracleAdapterEntry): AdapterView => {
-  const meta = oracleAdapters[adapter.oracle.toLowerCase()]
-  const isERC4626 = adapter.name === 'ERC4626Vault'
-  const provider = meta?.provider || adapter.name
-  const name = meta?.name || adapter.name
+const enrichStep = (step: OracleRouteStep): AdapterView => {
+  const meta = isOracleAdapterRouteStep(step) ? oracleAdapters[step.oracle.toLowerCase()] : undefined
+  const provider = meta?.provider || step.name
+  const name = meta?.name || step.name
   const checks = meta?.checks
   return {
-    oracle: adapter.oracle,
+    key: getOracleRouteStepKey(step),
+    kind: step.kind,
+    oracle: step.oracle,
     name,
-    base: adapter.base,
-    quote: adapter.quote,
+    base: step.base,
+    quote: step.quote,
     metaBase: meta?.base,
     metaQuote: meta?.quote,
     provider,
-    methodology: meta?.methodology || (isERC4626 ? 'Exchange Rate' : undefined),
+    methodology: meta?.methodology || (step.kind === 'vault' ? 'Exchange Rate' : undefined),
     logo: getOracleProviderLogo(provider, name),
     label: meta?.label
       ? {
@@ -252,15 +260,15 @@ const enrichAdapter = (adapter: OracleAdapterEntry): AdapterView => {
 }
 
 const getCellAdapterViews = (collateralAddr: string, liabilityAddr: string): AdapterView[] => {
-  const list = cellOracleAdapters.value.get(`${collateralAddr}:${liabilityAddr}`)
+  const list = cellOracleSteps.value.get(`${collateralAddr}:${liabilityAddr}`)
   if (!list) return []
-  return list.map(enrichAdapter)
+  return list.map(enrichStep)
 }
 
 const getColumnAssetAdapterViews = (liabilityAddr: string): AdapterView[] => {
-  const list = columnAssetOracleAdapters.value.get(liabilityAddr)
+  const list = columnAssetOracleSteps.value.get(liabilityAddr)
   if (!list) return []
-  return list.map(enrichAdapter)
+  return list.map(enrichStep)
 }
 
 const TOOLTIP_WIDTH = 360
@@ -275,27 +283,22 @@ const tooltipContext = ref<TooltipContext | null>(null)
 const tooltipAdapter = computed(() => tooltipContext.value?.view ?? null)
 const tooltipStyle = ref<CSSProperties>({})
 
-// Single matrix-wide price fetch — when oracle mode is active we
-// dedup-collect every adapter currently shown (per-pair + per-column-asset)
-// and run them through one batchSimulation. The tooltip then reads its
-// price from the same map, and every logo can show a warning marker if
-// its getQuote reverted.
-const adapterKeyOf = (a: OracleAdapterEntry) =>
-  `${a.oracle.toLowerCase()}:${a.base.toLowerCase()}:${a.quote.toLowerCase()}`
-
-const allOracleAdapters = computed<OracleAdapterEntry[]>(() => {
+// Single matrix-wide price fetch: in oracle mode we dedup every route step
+// currently shown, run one batchSimulation, and let tooltips read the results
+// from the same map.
+const allOracleSteps = computed<OracleRouteStep[]>(() => {
   if (props.dotMetric !== 'oracle') return []
-  const seen = new Map<string, OracleAdapterEntry>()
-  const ingest = (lists: Iterable<OracleAdapterEntry[]>) => {
+  const seen = new Map<string, OracleRouteStep>()
+  const ingest = (lists: Iterable<OracleRouteStep[]>) => {
     for (const list of lists) {
-      for (const a of list) {
-        const key = adapterKeyOf(a)
-        if (!seen.has(key)) seen.set(key, a)
+      for (const step of list) {
+        const key = getOracleRouteStepKey(step)
+        if (!seen.has(key)) seen.set(key, step)
       }
     }
   }
-  ingest(cellOracleAdapters.value.values())
-  ingest(columnAssetOracleAdapters.value.values())
+  ingest(cellOracleSteps.value.values())
+  ingest(columnAssetOracleSteps.value.values())
   return [...seen.values()]
 })
 
@@ -324,23 +327,21 @@ const oraclePriceCollateralVaults = computed<(EVault | SecuritizeCollateralVault
 })
 
 const { prices: oraclePrices, isLoading: oraclePricesLoading } = useOracleAdapterPrices(
-  allOracleAdapters,
+  allOracleSteps,
   oraclePriceSourceVaults,
   oraclePriceCollateralVaults,
 )
 
-const isAdapterPriceFailed = (adapter: { oracle: string, base: string, quote: string }): boolean => {
+const isAdapterPriceFailed = (adapter: { key: string }): boolean => {
   if (oraclePricesLoading.value) return false
-  const key = `${adapter.oracle.toLowerCase()}:${adapter.base.toLowerCase()}:${adapter.quote.toLowerCase()}`
-  const info = oraclePrices.value.get(key)
+  const info = oraclePrices.value.get(adapter.key)
   return info ? !info.success : false
 }
 
 const tooltipPriceText = computed((): string | null => {
   const ctx = tooltipContext.value
   if (!ctx) return null
-  const key = `${ctx.view.oracle.toLowerCase()}:${ctx.view.base.toLowerCase()}:${ctx.view.quote.toLowerCase()}`
-  const info = oraclePrices.value.get(key)
+  const info = oraclePrices.value.get(ctx.view.key)
   if (!info?.success) return null
   const invert = shouldInvertOraclePrice({
     metaBase: ctx.view.metaBase,
@@ -375,7 +376,7 @@ const onCellAdapterClick = (
   collateralAddr: string,
   liabilityAddr: string,
 ) => {
-  if (tooltipContext.value?.view.oracle === view.oracle) {
+  if (tooltipContext.value?.view.key === view.key) {
     closeTooltip()
     return
   }
@@ -395,7 +396,7 @@ const onAssetAdapterClick = (
   event: MouseEvent,
   liabilityAddr: string,
 ) => {
-  if (tooltipContext.value?.view.oracle === view.oracle) {
+  if (tooltipContext.value?.view.key === view.key) {
     closeTooltip()
     return
   }
@@ -587,11 +588,11 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                 <div class="inline-flex items-center justify-center gap-4 flex-wrap">
                   <button
                     v-for="adapter in getColumnAssetAdapterViews(col.address)"
-                    :key="adapter.oracle"
+                    :key="adapter.key"
                     type="button"
                     class="relative inline-flex items-center justify-center cursor-pointer"
                     data-id="oracle-adapter"
-                    :data-key="`${col.address}:${adapter.oracle}:${adapter.base}:${adapter.quote}`"
+                    :data-key="`${col.address}:${adapter.key}`"
                     :data-borrow-address="col.address"
                     :data-oracle-address="adapter.oracle"
                     :data-base-address="adapter.base"
@@ -631,11 +632,11 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                   <div class="inline-flex items-center justify-center gap-4 flex-wrap">
                     <button
                       v-for="adapter in getCellAdapterViews(row.address, col.address)"
-                      :key="adapter.oracle"
+                      :key="adapter.key"
                       type="button"
                       class="relative inline-flex items-center justify-center cursor-pointer"
                       data-id="oracle-adapter"
-                      :data-key="`${row.address}:${col.address}:${adapter.oracle}:${adapter.base}:${adapter.quote}`"
+                      :data-key="`${row.address}:${col.address}:${adapter.key}`"
                       :data-collateral-address="row.address"
                       :data-borrow-address="col.address"
                       :data-oracle-address="adapter.oracle"

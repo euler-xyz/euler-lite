@@ -3,7 +3,7 @@ import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
 
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault, useEulerEntitiesOfEarnVault } from '~/composables/useEulerLabels'
-import { isVaultFeatured, getEarnVaultDescription } from '~/utils/eulerLabelsUtils'
+import { isVaultRecentlyAdded, getEarnVaultDescription } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
@@ -40,7 +40,7 @@ const balance = computed(() =>
 const totalRewardsAPY = computed(() => getSupplyRewardApy(vault.address))
 const hasRewards = computed(() => hasSupplyRewards(vault.address))
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
-const isFeatured = computed(() => isVaultFeatured(vault.address))
+const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address))
 const isUnverified = computed(() => !isVerifiedVault(vault.address))
 const displayName = computed(() => product.name || vault.shares.name)
 const description = computed(() => getEarnVaultDescription(vault.address))
@@ -115,15 +115,15 @@ const supplyApyModalData = computed(() => ({
             :is-unverified="isUnverified"
           />
           <span
-            v-if="isFeatured"
+            v-if="isRecentlyAdded"
             class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5"
-            title="Featured Vault"
+            title="Recently added vault"
           >
             <SvgIcon
               name="star"
               class="!w-14 !h-14"
             />
-            Featured
+            Recently added
           </span>
           <RestrictedBadge v-if="isGeoBlocked" />
         </div>

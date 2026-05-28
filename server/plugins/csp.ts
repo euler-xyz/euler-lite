@@ -59,14 +59,16 @@ function env(...keys: string[]): string | undefined {
   return undefined
 }
 
-/** Scan process.env for dynamic RPC / subgraph URL env vars. */
+/** Scan process.env for dynamic RPC URL env vars. */
 function scanDynamicEnvUrls(): string[] {
   const urls: string[] = []
   for (const [key, value] of Object.entries(process.env)) {
     if (!value) continue
-    // RPC_URL_<chainId> — wagmi uses these directly on the client
-    // NUXT_PUBLIC_SUBGRAPH_URI_<chainId> — client-side GraphQL queries
-    if (/^RPC_URL_\d+$/.test(key) || /^NUXT_PUBLIC_SUBGRAPH_URI_\d+$/.test(key)) {
+    // RPC_URL_<chainId> — wagmi uses these directly on the client.
+    // Subgraph URLs are intentionally absent: all subgraph traffic is
+    // same-origin via /api/proxy/subgraph/{chainId}, so no connect-src is
+    // needed for the upstream.
+    if (/^RPC_URL_\d+$/.test(key)) {
       urls.push(value)
     }
   }

@@ -1,13 +1,10 @@
 <script setup lang="ts">
 import type { SecuritizeCollateralVault, EVaultCollateral, EVault } from '@eulerxyz/euler-v2-sdk'
 import { getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
-import { useModal } from '~/components/ui/composables/useModal'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { logWarn } from '~/utils/errorHandling'
 import { VaultRampDownModal } from '#components'
 import { formatNumber } from '~/utils/string-utils'
-
-const modal = useModal()
 
 const emits = defineEmits<{
   'vault-click': [address: string]
@@ -19,11 +16,9 @@ const onCollateralClick = (address: string) => {
   emits('vault-click', address)
 }
 
-const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
-  modal.open(VaultRampDownModal, {
-    props: pair,
-  })
-}
+const getRampDownModalData = (ltv: EVaultCollateral) => ({
+  props: ltv,
+})
 
 // Module-scope dedupe so we warn at most once per (vault, missing-collateral)
 // pair across recomputes and SFC instances. Mirrors the dedupe in
@@ -95,22 +90,31 @@ const allCollateralPairs = computed(() =>
             <template #label>
               <span class="flex items-center gap-4">
                 Liquidation LTV
-                <SvgIcon
+                <UiModalPreviewTrigger
                   v-if="pair.ltv.isLiquidationLTVRamping"
-                  class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-                  name="info-circle"
-                  @click.stop.prevent="onRampDownInfoIconClick($event, pair.ltv)"
-                />
+                  :component="VaultRampDownModal"
+                  :modal-data="() => getRampDownModalData(pair.ltv)"
+                  aria-label="Show liquidation LTV ramp-down details"
+                >
+                  <SvgIcon
+                    class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                    name="info-circle"
+                  />
+                </UiModalPreviewTrigger>
               </span>
             </template>
             <span class="flex items-center gap-4">
-              <SvgIcon
+              <UiModalPreviewTrigger
                 v-if="pair.ltv.isLiquidationLTVRamping"
-                name="arrow-top-right"
-                class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
-                title="Liquidation LTV ramping down"
-                @click.stop.prevent="onRampDownInfoIconClick($event, pair.ltv)"
-              />
+                :component="VaultRampDownModal"
+                :modal-data="() => getRampDownModalData(pair.ltv)"
+                aria-label="Show liquidation LTV ramp-down details"
+              >
+                <SvgIcon
+                  name="arrow-top-right"
+                  class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
+                />
+              </UiModalPreviewTrigger>
               {{ `${formatNumber(ltvToPercent(pair.ltv.currentLiquidationLTV), 2)}%` }}
             </span>
           </VaultOverviewLabelValue>

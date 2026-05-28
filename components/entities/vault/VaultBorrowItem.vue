@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { isCyclicalNoteVault } from '~/utils/vault/classification'
-import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
+import { getUtilisationWarning, getBorrowCapWarning, getCollateralSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { getVaultAvailableLiquidity, getVaultUtilization } from '~/utils/vault-display'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isVaultFeatured, isVaultKeyring, getEntitiesByVault } from '~/utils/eulerLabelsUtils'
+import { isVaultRecentlyAdded, isVaultKeyring, getEntitiesByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { VaultBorrowApyModal, VaultMaxRoeModal, VaultNetApyPairModal, VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
@@ -92,7 +92,7 @@ const isPairEffectivelyBlocked = computed(() => {
     && isVaultRestrictedByCountry(pair.collateral.address)
 })
 
-const isFeatured = computed(() => isVaultFeatured(pair.collateral.address) || isVaultFeatured(pair.borrow.address))
+const isRecentlyAdded = computed(() => isVaultRecentlyAdded(pair.collateral.address) || isVaultRecentlyAdded(pair.borrow.address))
 const isKeyring = computed(() => isVaultKeyring(pair.collateral.address) || isVaultKeyring(pair.borrow.address))
 const isCyclicalNote = computed(() => isCyclicalNoteVault(pair.borrow))
 
@@ -159,6 +159,7 @@ const maxLTV = computed(() => formatNumber(ltvToPercent(pair.ltv.borrowLTV), 2))
 const utilization = computed(() => getVaultUtilization(pair.borrow))
 const utilisationWarning = computed(() => getUtilisationWarning(pair.borrow, 'borrow'))
 const borrowCapInfo = computed(() => getBorrowCapWarning(pair.borrow))
+const supplyCapInfo = computed(() => getCollateralSupplyCapWarning(pair.collateral))
 
 const liquidityDisplay = ref('-')
 
@@ -266,19 +267,19 @@ const linkPath = computed(() => ({
               :is-unverified="isAnyUnverified"
             />
             <span
-              v-if="isFeatured"
+              v-if="isRecentlyAdded"
               class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5"
-              title="Featured Vault"
+              title="Recently added vault"
             >
               <SvgIcon
                 name="star"
                 class="!w-14 !h-14"
               />
-              Featured
+              Recently added
             </span>
-            <KeyringBadge v-if="isKeyring" />
+            <KeyringBadge v-if="isKeyring && !isAnyGovernorUnverified" />
             <GovernanceLimitedBadge v-if="isAnyGovernanceLimited" />
-            <CyclicalNoteBadge v-if="isCyclicalNote" />
+            <CyclicalNoteBadge v-if="isCyclicalNote && !isAnyGovernorUnverified" />
             <RestrictedBadge
               v-if="isGeoBlocked"
               variant="blocked"
@@ -474,7 +475,7 @@ const linkPath = computed(() => ({
         <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
           Available liquidity
           <VaultWarningIcon
-            :warning="borrowCapInfo"
+            :warning="[borrowCapInfo, supplyCapInfo]"
             tooltip-placement="top-start"
           />
         </div>

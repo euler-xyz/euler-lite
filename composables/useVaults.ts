@@ -1061,6 +1061,19 @@ export const useVaults = () => {
     )
   }
 
+  // Check if securitize vault's on-chain governor matches any of the product's
+  // declared entities. Mirrors the server (server/utils/verified-vaults.ts),
+  // which runs securitize through the same governor rule rather than trusting
+  // bare list membership. The SDK securitize type exposes `governor` (not
+  // `governorAdmin`); the shared rule reads `governorAdmin ?? governor`.
+  const isSecuritizeGovernorVerified = (vault: SecuritizeCollateralVault): boolean => {
+    const { isVerifiedVault } = useVaultRegistry()
+    return verifyVaultGovernor(
+      Object.assign(vault, { verified: isVerifiedVault(vault.address) }),
+      buildVerificationLabels(),
+    )
+  }
+
   // Check if earn vault's on-chain owner matches any of the product's declared entities
   const isEarnVaultOwnerVerified = (earnVault: EulerEarn): boolean => {
     const { isVerifiedVault } = useVaultRegistry()
@@ -1110,6 +1123,7 @@ export const useVaults = () => {
     // Verification
     isSecuritizeVault,
     isVaultGovernorVerified,
+    isSecuritizeGovernorVerified,
     isEarnVaultOwnerVerified,
 
     // Business logic computed (kept for complex queries)

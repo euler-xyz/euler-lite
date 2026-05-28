@@ -2,7 +2,7 @@
 import type { VaultAsset } from '~/types/asset'
 import { getAddress, type Address, zeroAddress, isAddress } from 'viem'
 
-import { formatNumber } from '~/utils/string-utils'
+import { formatNumber, truncate } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
 
@@ -259,6 +259,12 @@ const handleSelectCustomToken = () => {
             <div class="text-h5 flex items-center">
               {{ opt.asset.symbol }}
               <span
+                class="ml-6 text-content-tertiary text-p5 font-normal"
+                :title="opt.asset.address"
+              >
+                {{ truncate(opt.asset.address) }}
+              </span>
+              <span
                 v-if="rowGeo(opt.asset.address).showChip"
                 class="ml-6 inline-flex items-center rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
               >
@@ -316,8 +322,14 @@ const handleSelectCustomToken = () => {
                 Restricted
               </span>
             </div>
-            <div class="text-h5">
+            <div class="text-h5 flex items-center">
               {{ customToken.symbol }}
+              <span
+                class="ml-6 text-content-tertiary text-p5 font-normal"
+                :title="customToken.address"
+              >
+                {{ truncate(customToken.address) }}
+              </span>
             </div>
           </div>
           <div class="text-right">

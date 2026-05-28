@@ -175,6 +175,21 @@ const formatDecodedChain = (chain: readonly DecodedSmartContractError[]): string
   return inner === outer ? inner : `${inner}  (wrapped by ${outer})`
 }
 
+// If any error in the decoded chain maps to a known user-facing message,
+// prefer that friendly copy (e.g. "Account liquidity too low for this
+// action.") over the raw signature dump the SDK gives us. This keeps the
+// SDK simulation path in parity with the thrown-error path (getTxErrorMessage),
+// which already resolves names through ERROR_MESSAGE_MAP.
+const friendlyMessageFromChain = (
+  chain: readonly DecodedSmartContractError[],
+): string | undefined => {
+  for (const entry of chain) {
+    const name = entry.signature.split('(')[0]
+    if (name && ERROR_MESSAGE_MAP[name]) return ERROR_MESSAGE_MAP[name]
+  }
+  return undefined
+}
+
 const formatInsufficiency = (
   label: string,
   reqs: SimulationInsufficientRequirement[] | undefined,
@@ -196,12 +211,16 @@ export const formatSimulationFailure = <T extends VaultEntity>(
   // 1. Per-batch-item revert: SDK has already attempted to decode the chain.
   const firstFailed = result.failedBatchItems?.[0]
   if (firstFailed) {
+    const friendly = friendlyMessageFromChain(firstFailed.decodedError)
+    if (friendly) return friendly
     const decoded = formatDecodedChain(firstFailed.decodedError)
     return decoded || `Batch item ${firstFailed.index} failed`
   }
 
   // 2. EVC-level simulation error (couldn't decode the batch at all).
   if (result.simulationError) {
+    const friendly = friendlyMessageFromChain(result.simulationError.decoded)
+    if (friendly) return friendly
     const decoded = formatDecodedChain(result.simulationError.decoded)
     return decoded || 'EVC simulation reverted'
   }
@@ -209,6 +228,8 @@ export const formatSimulationFailure = <T extends VaultEntity>(
   // 3. Post-batch account / vault status check failures.
   const acctErr = result.accountStatusErrors?.[0]
   if (acctErr) {
+    const friendly = friendlyMessageFromChain(acctErr.decoded)
+    if (friendly) return friendly
     const decoded = formatDecodedChain(acctErr.decoded)
     return decoded
       ? `Account check ${shortenAddress(acctErr.account)}: ${decoded}`
@@ -216,6 +237,8 @@ export const formatSimulationFailure = <T extends VaultEntity>(
   }
   const vaultErr = result.vaultStatusErrors?.[0]
   if (vaultErr) {
+    const friendly = friendlyMessageFromChain(vaultErr.decoded)
+    if (friendly) return friendly
     const decoded = formatDecodedChain(vaultErr.decoded)
     return decoded
       ? `Vault check ${shortenAddress(vaultErr.vault)}: ${decoded}`

@@ -117,9 +117,12 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   queryPythUpdateFee: { staleTimeMs: 15 * SECOND },
 
   // === Balances / allowances: short cache, always-fresh in form context ===
-  queryNativeBalance: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND },
-  queryTokenBalances: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND },
-  queryBalanceOf: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND },
+  // Balance reads are marked `invalidateAfterTx` so that post-tx wallet refreshes
+  // (useWallets.updateBalances, fetchSingleBalance, fetchVaultShareBalance) read
+  // the new on-chain state instead of the 60-second browsing-SDK cache.
+  queryNativeBalance: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND, invalidateAfterTx: true },
+  queryTokenBalances: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND, invalidateAfterTx: true },
+  queryBalanceOf: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND, invalidateAfterTx: true },
   queryAllowance: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND },
   queryPermit2Allowance: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND },
 }
