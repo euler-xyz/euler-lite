@@ -199,6 +199,12 @@ load()
               >
                 <VaultWarningIcon :warning="row.hookWarning" />
               </span>
+              <span @click.stop.prevent>
+                <VaultTypeBadges
+                  :vault="row.vault"
+                  summary-only
+                />
+              </span>
             </VaultLabelsAndAssets>
           </template>
           <template v-else>
