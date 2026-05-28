@@ -1012,6 +1012,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           asset: multiplyShortVault.value.asset,
           amount: multiplyShortAmount.value || formatUnits(debtAmount, Number(multiplyShortVault.value.asset.decimals)),
           prepared: preparedMultiplyPlan.value || undefined,
+          quoteFetchedAt: quote ? multiplyEffectiveQuoteFetchedAt.value : null,
           supplyingAssetForBorrow: multiplySupplyVault.value.asset,
           supplyingAmount: multiplyInputAmount.value,
           swapToAsset: quote ? multiplyLongVault.value.asset : undefined,
