@@ -6,6 +6,7 @@ import type { Vault } from '~/entities/vault'
 import { useVaultTypeBadges } from '~/composables/useVaultTypeBadges'
 
 const state = vi.hoisted(() => ({
+  accessControlVaults: new Set<string>(),
   earnOwners: new Set<string>(),
   entityGovernors: new Set<string>(),
   governanceLimitedVaults: new Set<string>(),
@@ -29,6 +30,7 @@ vi.mock('~/utils/eulerLabelsUtils', () => ({
   getEntitiesByVault: (vault: { governorAdmin?: string }) =>
     vault.governorAdmin && state.entityGovernors.has(vault.governorAdmin.toLowerCase()) ? [{}] : [],
   isVaultKeyring: (address: string) => state.keyringVaults.has(address.toLowerCase()),
+  isVaultAccessControlled: (address: string) => state.accessControlVaults.has(address.toLowerCase()),
 }))
 
 const verifiedGovernor = '0x1000000000000000000000000000000000000001'
@@ -67,6 +69,7 @@ const verify = (vault: Vault) => {
 
 describe('useVaultTypeBadges', () => {
   beforeEach(() => {
+    state.accessControlVaults.clear()
     state.earnOwners.clear()
     state.entityGovernors.clear()
     state.governanceLimitedVaults.clear()
@@ -97,6 +100,18 @@ describe('useVaultTypeBadges', () => {
 
     expect(badges.value).toEqual(['governed', 'private'])
     expect(summaryBadges.value).toEqual(['private'])
+    expect(hasSummaryBadges.value).toBe(true)
+  })
+
+  it('summarizes verified access-controlled vaults as accessControl', () => {
+    const vault = makeVault()
+    verify(vault)
+    state.accessControlVaults.add(vault.address.toLowerCase())
+
+    const { badges, hasSummaryBadges, summaryBadges } = useVaultTypeBadges(ref(vault))
+
+    expect(badges.value).toEqual(['governed', 'accessControl'])
+    expect(summaryBadges.value).toEqual(['accessControl'])
     expect(hasSummaryBadges.value).toBe(true)
   })
 
