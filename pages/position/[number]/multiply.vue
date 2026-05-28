@@ -179,11 +179,7 @@ const multiplyCurrentMultiple = computed(() => {
   }
   const ltvValue = position.value.userLTV ?? position.value.currentLTV
   if (ltvValue === undefined) return 1
-  const ltvPercent = nanoToValue(ltvValue, 18)
-  if (!Number.isFinite(ltvPercent) || ltvPercent <= 0) {
-    return 1
-  }
-  const ltv = ltvPercent / 100
+  const ltv = nanoToValue(ltvValue, 18)
   if (!Number.isFinite(ltv) || ltv <= 0) {
     return 1
   }
@@ -322,7 +318,7 @@ const multiplyCurrentLtv = computed(() => {
     return null
   }
   const ltv = position.value.userLTV ?? position.value.currentLTV
-  return ltv === undefined ? null : nanoToValue(ltv, 18)
+  return ltv === undefined ? null : ltvToPercent(nanoToValue(ltv, 18))
 })
 const multiplyNextLtv = computed(() => {
   if (nextBorrowValueUsd.value === null || nextSupplyValueUsd.value === null) {

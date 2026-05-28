@@ -6,7 +6,7 @@ import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVau
 import { getAssetUsdPrice, getCollateralUsdPrice, getCollateralUsdValue, toUsdAmount, type UsdAmount } from '~/utils/sdk-prices'
 import { getBorrowPositionEffectiveLiquidationLTV, getBorrowPositionTimeToLiquidation } from '~/utils/ltv'
 import { maxUint256 } from 'viem'
-import { formatTtl, nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
+import { formatTtl, ltvToPercent, nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { formatNumber, formatHealthScore, formatUsdValue, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { getVaultNotice } from '~/utils/eulerLabelsUtils'
@@ -85,7 +85,7 @@ const effectiveLiquidationLTVPercent = computed(() => {
 })
 const positionLTVValue = computed(() => position.value?.userLTV ?? position.value?.currentLTV)
 const positionLTVPercent = computed(() =>
-  positionLTVValue.value === undefined ? null : nanoToValue(positionLTVValue.value, 18),
+  positionLTVValue.value === undefined ? null : ltvToPercent(nanoToValue(positionLTVValue.value, 18)),
 )
 const positionHealthValue = computed(() => position.value?.healthFactor)
 const positionHealthScore = computed(() =>

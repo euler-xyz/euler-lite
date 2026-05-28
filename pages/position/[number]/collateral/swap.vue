@@ -469,7 +469,7 @@ const borrowAmount = computed(() => {
 
 const currentLtv = computed(() => {
   const ltv = position.value?.userLTV ?? position.value?.currentLTV
-  return ltv === undefined ? null : nanoToValue(ltv, 18)
+  return ltv === undefined ? null : ltvToPercent(nanoToValue(ltv, 18))
 })
 const fromLiquidationLtv = computed(() => {
   if (!borrowVault.value || !fromVault.value) return null

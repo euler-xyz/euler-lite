@@ -597,7 +597,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     }
     catch (e: unknown) {
       logWarn('collateral/syncEstimates', e)
-      estimateUserLTV.value = position.value!.userLTV ?? position.value!.currentLTV ?? 0n
+      estimateUserLTV.value = (position.value!.userLTV ?? position.value!.currentLTV ?? 0n) * 100n
       estimateHealth.value = position.value!.healthFactor ?? 0n
       estimatesError.value = (e as { message: string }).message
     }
@@ -668,7 +668,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       await loadSelectedCollateral()
       await options.onAfterLoad?.()
       estimateNetAPY.value = netAPY.value
-      estimateUserLTV.value = position.value!.userLTV ?? position.value!.currentLTV ?? 0n
+      estimateUserLTV.value = (position.value!.userLTV ?? position.value!.currentLTV ?? 0n) * 100n
       estimateHealth.value = position.value!.healthFactor ?? 0n
     }
     catch (e) {
@@ -869,7 +869,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     await loadSelectedCollateral()
     await options.onAfterLoad?.()
     estimateNetAPY.value = netAPY.value
-    estimateUserLTV.value = position.value ? position.value.userLTV ?? position.value.currentLTV ?? 0n : 0n
+    estimateUserLTV.value = position.value ? (position.value.userLTV ?? position.value.currentLTV ?? 0n) * 100n : 0n
     estimateHealth.value = position.value ? position.value.healthFactor ?? 0n : 0n
   })
 

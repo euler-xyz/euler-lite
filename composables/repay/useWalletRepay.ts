@@ -71,7 +71,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   const _estimateUserLTV = ref(0n)
   const _estimateHealth = ref(0n)
   const estimateNetAPY = computed(() => hasEstimate.value ? _estimateNetAPY.value : netAPY.value)
-  const estimateUserLTV = computed(() => hasEstimate.value ? _estimateUserLTV.value : (position.value ? position.value.userLTV : 0n))
+  const estimateUserLTV = computed(() => hasEstimate.value ? _estimateUserLTV.value : (position.value ? (position.value.userLTV ?? 0n) * 100n : 0n))
   const estimateHealth = computed(() => hasEstimate.value ? _estimateHealth.value : (position.value ? position.value.healthFactor ?? 0n : 0n))
   const estimatesError = ref('')
   const isEstimatesLoading = ref(false)

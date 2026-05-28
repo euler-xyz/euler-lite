@@ -631,7 +631,7 @@ watch(formTab, () => {
               </SummaryRow>
               <SummaryRow label="LTV">
                 <SummaryValue
-                  :before="formatNumber(nanoToValue(position.userLTV ?? position.currentLTV ?? 0n, 18))"
+                  :before="formatNumber(ltvToPercent(nanoToValue(position.userLTV ?? position.currentLTV ?? 0n, 18)))"
                   :after="formatNumber(nanoToValue((walletSwap.needsSwap.value ? walletSwap.estimateUserLTV.value : wallet.estimateUserLTV.value) ?? 0n, 18))"
                   suffix="%"
                 />

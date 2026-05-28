@@ -185,7 +185,7 @@ const load = async () => {
     isLoading.value = false
     return
   }
-  userLTV.value = Number(formatNumber(nanoToValue(positionLtv, 18)))
+  userLTV.value = Number(formatNumber(ltvToPercent(nanoToValue(positionLtv, 18))))
   currentUserLTV.value = userLTV.value
   ltv.value = userLTV.value
   try {
@@ -199,10 +199,10 @@ const load = async () => {
     // Fetch fresh underlying asset balance for this specific vault
     await updateBalance()
     // Compute current position values for before→after display
-    const currentLtvFloat = nanoToValue(positionLtv, 18)
-    currentHealth.value = currentLtvFloat <= 0
+    const currentLtvPercent = ltvToPercent(nanoToValue(positionLtv, 18))
+    currentHealth.value = currentLtvPercent <= 0
       ? Infinity
-      : ltvToPercent(pair.value!.ltv.liquidationLTV) / currentLtvFloat
+      : ltvToPercent(pair.value!.ltv.liquidationLTV) / currentLtvPercent
     currentLiquidationPrice.value = currentHealth.value < 0.1 ? Infinity : priceFixed.value.toUnsafeFloat() / currentHealth.value
     const [collUsd, borUsd] = await Promise.all([
       getAssetUsdValueOrZero(position.value!.supplied || 0, collateralVault.value!, 'off-chain'),
