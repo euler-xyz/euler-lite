@@ -5,13 +5,14 @@ import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { VaultSupplyApyModal, VaultBorrowApyModal, UiModalPreviewTrigger } from '#components'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
+import { isVaultBorrowable } from '~/utils/vault/classification'
 
 const { vault } = defineProps<{ vault: EVault }>()
 
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, hasSupplyRewards, hasBorrowRewards } = useRewardsApy()
-const isBorrowable = computed(() => vault.collaterals.some(ltv => ltv.borrowLTV > 0))
+const isBorrowable = computed(() => isVaultBorrowable(vault))
 
 const supplyApyWithRewards = computed(() => withVaultIntrinsicApy(
   getVaultSupplyApy(vault),

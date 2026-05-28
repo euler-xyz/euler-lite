@@ -7,6 +7,7 @@ import type { AnyVault } from '~/composables/useVaultRegistry'
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import { isVaultNotExplorable, isVaultFeatured, isVaultRecentlyAdded, isVaultDeprecated, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 import { isLiveCollateralEdge } from '~/utils/vault/ltv'
+import { isVaultBorrowable } from '~/utils/vault/classification'
 import { liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
 
 // -- Helpers --
@@ -14,12 +15,8 @@ import { liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
 const hasGovernorAdmin = (vault: AnyVault): vault is EVault =>
   isEVault(vault) && 'governorAdmin' in vault
 
-const isBorrowableVault = (vault: AnyVault): boolean => {
-  if (!isEVault(vault)) return false
-  const { getVaultCategory } = useVaultRegistry()
-  if (getVaultCategory(vault.address) === 'escrow') return false
-  return vault.collaterals.some(ltv => ltv.borrowLTV > 0)
-}
+const isBorrowableVault = (vault: AnyVault): boolean =>
+  isEVault(vault) && isVaultBorrowable(vault)
 
 const getCollateralAddresses = (vault: AnyVault): string[] => {
   if (!isEVault(vault)) return []

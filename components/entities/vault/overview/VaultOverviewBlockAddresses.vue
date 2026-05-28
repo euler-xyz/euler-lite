@@ -3,12 +3,15 @@ import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { getSpecialAddressLabel } from '~/utils/special-addresses'
 import { getVaultHookTarget } from '~/utils/vault-hooks'
+import { isVaultBorrowable } from '~/utils/vault/classification'
 
 const { vault } = defineProps<{ vault: EVault }>()
 
 const { chainId } = useEulerAddresses()
 
-const isBorrowable = computed(() => vault.isBorrowable)
+// Surface borrow-side addresses while debt is being wound down, not only while
+// new borrows are allowed (see isVaultBorrowable).
+const isBorrowable = computed(() => isVaultBorrowable(vault))
 
 const interestRateModelAddress = computed(() =>
   vault.interestRateModel.address,
