@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { isCyclicalNoteVault } from '~/utils/vault/classification'
-import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
+import { getUtilisationWarning, getBorrowCapWarning, getCollateralSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
@@ -159,6 +159,7 @@ const maxLTV = computed(() => formatNumber(ltvToPercent(pair.ltv.borrowLTV), 2))
 const utilization = computed(() => getVaultUtilization(pair.borrow))
 const utilisationWarning = computed(() => getUtilisationWarning(pair.borrow, 'borrow'))
 const borrowCapInfo = computed(() => getBorrowCapWarning(pair.borrow))
+const supplyCapInfo = computed(() => getCollateralSupplyCapWarning(pair.collateral))
 
 const liquidityDisplay = ref('-')
 
@@ -276,9 +277,9 @@ const linkPath = computed(() => ({
               />
               Recently added
             </span>
-            <KeyringBadge v-if="isKeyring" />
+            <KeyringBadge v-if="isKeyring && !isAnyGovernorUnverified" />
             <GovernanceLimitedBadge v-if="isAnyGovernanceLimited" />
-            <CyclicalNoteBadge v-if="isCyclicalNote" />
+            <CyclicalNoteBadge v-if="isCyclicalNote && !isAnyGovernorUnverified" />
             <RestrictedBadge
               v-if="isGeoBlocked"
               variant="blocked"
@@ -474,7 +475,7 @@ const linkPath = computed(() => ({
         <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
           Available liquidity
           <VaultWarningIcon
-            :warning="borrowCapInfo"
+            :warning="[borrowCapInfo, supplyCapInfo]"
             tooltip-placement="top-start"
           />
         </div>

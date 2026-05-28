@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import type { SecuritizeCollateralVault, KinkIRMInfo, AdaptiveCurveIRMInfo, KinkyIRMInfo, EVault } from '@eulerxyz/euler-v2-sdk'
+import {
+  adaptiveRateAtTargetToBorrowSPY,
+  type AdaptiveCurveIRMInfo,
+  type EVault,
+  type KinkIRMInfo,
+  type KinkyIRMInfo,
+  type SecuritizeCollateralVault,
+} from '@eulerxyz/euler-v2-sdk'
 import { hasCollateralExposure } from '~/utils/vault/collateral-exposure'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { eulerUtilsLensABI, eulerVaultLensABI } from '~/entities/euler/abis'
@@ -239,9 +246,12 @@ const parseAPY = (apy: bigint): number => {
 // uses, so Min/Max rate cells match on-chain accrual for large rates instead
 // of silently collapsing to APR.
 const fetchAdaptiveBorrowAPY = async (wadPerSec: bigint): Promise<number | null> => {
+  const borrowSPY = adaptiveRateAtTargetToBorrowSPY(wadPerSec)
+  if (borrowSPY === null) return null
+
   const utilsLens = eulerLensAddresses.value?.utilsLens
-  if (!utilsLens || wadPerSec === 0n) {
-    return wadPerSec === 0n ? 0 : null
+  if (!utilsLens || borrowSPY === 0n) {
+    return borrowSPY === 0n ? 0 : null
   }
   try {
     const client = rpcClient.value!
@@ -250,7 +260,7 @@ const fetchAdaptiveBorrowAPY = async (wadPerSec: bigint): Promise<number | null>
       abi: eulerUtilsLensABI as Abi,
       functionName: 'computeAPYs',
       // cash/borrows don't influence borrowAPY; interestFee only affects supplyAPY.
-      args: [wadPerSec, 1n, 0n, 0n],
+      args: [borrowSPY, 1n, 0n, 0n],
     }) as readonly [bigint, bigint]
     const [borrowAPY] = result
     return Number(formatUnits(borrowAPY, 27)) * 100
