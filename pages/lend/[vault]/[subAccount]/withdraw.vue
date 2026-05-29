@@ -32,7 +32,7 @@ const modal = useModal()
 const { error } = useToast()
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
-const { planWithdrawOrRedeem, prepareTransactionPlan, executePreparedPlan } = useEulerTx()
+const { planWithdrawOrRedeem, prepareTransactionPlan, executePreparedPlan, prefetchPluginData } = useEulerTx()
 const { account: cachedAccount } = useFreshAccount()
 const { getVault, getSecuritizeVault: _getSecuritizeVault, getEscrowVault: _getEscrowVault } = useVaults()
 const { isConnected, address } = useWagmi()
@@ -112,6 +112,7 @@ const {
   amountField: 'amountOut',
   compare: 'max',
   buildTxPlanForQuote: quote => buildSwapWithdrawPlanFromQuote(quote),
+  prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
 })
 const rewardApy = computed(() => getSupplyRewardApy(vault.value?.address || ''))
 const amountFixed = computed(() => {

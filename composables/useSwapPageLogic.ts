@@ -8,7 +8,6 @@ import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, getVaultTags } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
-import { useFreshAccount } from '~/composables/useFreshAccount'
 import { getQuoteAmount, type SwapQuoteAmountField, type SwapQuoteCompare } from '~/utils/swapQuotes'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import type { SwapQuoteInput } from '~/composables/useSwapApi'
@@ -41,7 +40,7 @@ export interface UseSwapPageLogicOptions {
    */
   buildQuoteRequest: (amount: bigint) => { params: SwapQuoteInput } | null
   /** Build the TransactionPlan for the current swap (same-asset or quote-based). Must throw on failure. */
-  buildPlan: () => Promise<TransactionPlan>
+  buildPlan: (quote?: SwapQuote) => Promise<TransactionPlan>
   /** Page-specific balance validation error. Receives the parsed nano amount. */
   getBalanceError: (amountNano: bigint) => string | null
   /** Vault addresses to check for geo-blocking */
@@ -99,7 +98,6 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const modal = useModal()
   const { error: showError } = useToast()
   const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
-  const { account: freshAccount } = useFreshAccount()
   // Debt-swap / collateral-swap pages don't consume the user's wallet ERC20
   // balance — the source is an existing position. Safe to skip balance
   // overrides (no balanceOf RPC + no balance-slot probing per estimate).
@@ -140,11 +138,11 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     // Each call site already encodes the same-asset vs swap-quote branch in
     // its own buildPlan. We just forward the candidate quote so the parallel
     // engine can build a plan per quote for gas estimation.
-    buildTxPlanForQuote: () => buildPlan(),
+    buildTxPlanForQuote: quote => buildPlan(quote),
     getStateOverrideOptions: () => buildSwapStateOverrideOptions(),
     // Sweep-scoped prefetch — Pyth Hermes / keyring vault gating resolved once
     // per fetch instead of per-quote.
-    prefetchPluginData: (plan, _account) => prefetchPluginData(plan, { account: freshAccount.value }),
+    prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
   })
   // ── Vault products & price invert ──────────────────────────────────────
   const fromProduct = useEulerProductOfVault(computed(() => fromVault.value?.address || ''))

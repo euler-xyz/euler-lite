@@ -41,6 +41,7 @@ interface UseMultiplyCowSwapOptions {
   multiplyLongAmount: ComputedRef<string>
   multiplyDebtAmountNano: ComputedRef<bigint>
   multiplyErrorText: ComputedRef<string | null>
+  account: ComputedRef<Account<IHasVaultAddress> | undefined>
 }
 
 export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
@@ -50,7 +51,6 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
   const { error } = useToast()
   const { client: rpcClient } = useRpcClient()
   const { chainId: currentChainId } = useEulerAddresses()
-  const { account: freshAccount } = useFreshAccount()
   const { refreshAllPositions } = useEulerAccount()
 
   const cowSwapExecution = useCowSwapOpenPositionExecution()
@@ -151,7 +151,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
       return
     }
 
-    const account = freshAccount.value
+    const account = options.account.value
     if (!account) {
       error('Account not ready')
       return

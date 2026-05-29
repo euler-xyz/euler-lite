@@ -1,5 +1,5 @@
 import { getProjectedRates, getNetAPY } from '~/utils/vault/apy'
-import { isEVault, SwapperMode, type EVault, type SecuritizeCollateralVault, type PortfolioBorrowPosition, type VaultEntity, type TransactionPlan, type SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, SwapperMode, type Account, type EVault, type IHasVaultAddress, type SecuritizeCollateralVault, type PortfolioBorrowPosition, type SwapQuote, type VaultEntity, type TransactionPlan, type SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import type { VaultAsset } from '~/types/asset'
 import { getAssetUsdValue, getAssetUsdValueOrZero, getTokenUsdValue } from '~/utils/sdk-prices'
@@ -66,7 +66,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
   const modal = useModal()
   const { error } = useToast()
-  const { planSwapAndRepay, executePlan } = useEulerTx()
+  const { planSwapAndRepay, executePlan, prefetchPluginData } = useEulerTx()
   // EXACT_IN validates wallet balance up front (`isSubmitDisabled` line ~306);
   // TARGET_DEBT lets the simulator surface real wallet insufficiency rather
   // than forging it. Skip balance overrides + keep slot hints + wallet
@@ -75,6 +75,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const buildRepayStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
   const { chainId } = useEulerAddresses()
   const { isConnected, address } = useWagmi()
+  const { portfolio } = useEulerAccount()
+  const planAccount = computed(() => portfolio.value?.account as Account<IHasVaultAddress> | undefined)
   const { fetchSingleBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { getVault: registryGetVault } = useVaultRegistry()
@@ -92,6 +94,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const quotes = useSwapRepayQuotes({
     direction,
     buildTxPlanForQuote: quote => buildRepayPlan(quote),
+    prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
+    getPlanAccount: () => planAccount.value,
   })
   // --- Derived ---
   const needsSwap = computed(() => {
@@ -203,7 +207,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const _estimateUserLTV = ref(0n)
   const _estimateHealth = ref(0n)
   const estimateNetAPY = computed(() => hasEstimate.value ? _estimateNetAPY.value : netAPY.value)
-  const estimateUserLTV = computed(() => hasEstimate.value ? _estimateUserLTV.value : (position.value ? position.value.userLTV : 0n))
+  const estimateUserLTV = computed(() => hasEstimate.value ? _estimateUserLTV.value : (position.value ? (position.value.userLTV ?? 0n) * 100n : 0n))
   const estimateHealth = computed(() => hasEstimate.value ? _estimateHealth.value : (position.value ? position.value.healthFactor ?? 0n : 0n))
   const estimatesError = ref('')
   const isEstimatesLoading = ref(false)
@@ -710,7 +714,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   })
 
   // --- Build plan ---
-  async function buildRepayPlan(quote?: import('@eulerxyz/euler-v2-sdk').SwapQuote): Promise<TransactionPlan> {
+  async function buildRepayPlan(quote?: SwapQuote): Promise<TransactionPlan> {
     const swapQuote = quote || quotes.selectedQuote.value
     if (!position.value || !borrowVault.value || !collateralVault.value || !swapQuote || !selectedAsset.value) {
       throw new Error('Missing data for swap repay plan')
@@ -736,6 +740,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       wrappedNativeInfo: isNative && wrappedAddress
         ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
         : undefined,
+      account: planAccount.value,
     })
   }
 

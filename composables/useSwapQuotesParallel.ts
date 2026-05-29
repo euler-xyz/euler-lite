@@ -1,5 +1,14 @@
 import type { Address, PublicClient } from 'viem'
-import type { PluginPrefetchData, SwapProviderExtraData, SwapQuote, TransactionPlan, TransactionPlanPrepared, SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
+import type {
+  Account,
+  IHasVaultAddress,
+  PluginPrefetchData,
+  SimulationStateOverrideOptions,
+  SwapProviderExtraData,
+  SwapQuote,
+  TransactionPlan,
+  TransactionPlanPrepared,
+} from '@eulerxyz/euler-v2-sdk'
 import type { SwapQuoteInput } from '~/composables/useSwapApi'
 import {
   getQuoteAmount,
@@ -21,6 +30,8 @@ import { shouldDiscardQuoteOnEstimateGasError } from '~/utils/tx-errors'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { profAsync, profMark } from '~/utils/profiler'
 
+export type SwapQuotePlanAccount = Account<IHasVaultAddress> | Address
+
 type SwapQuotesParallelOptions = {
   amountField: SwapQuoteAmountField
   compare: SwapQuoteCompare
@@ -38,7 +49,9 @@ type SwapQuotesParallelOptions = {
    *  plan; the result is cached and passed to `prepareTransactionPlan` for
    *  every subsequent quote so per-quote prepare doesn't re-do Hermes /
    *  keyring / vault-meta lookups. */
-  prefetchPluginData?: (plan: TransactionPlan, account: Address) => Promise<PluginPrefetchData>
+  prefetchPluginData?: (plan: TransactionPlan, account: SwapQuotePlanAccount) => Promise<PluginPrefetchData>
+  /** Optional already-loaded Account for SDK plan/plugin processing. */
+  getPlanAccount?: () => SwapQuotePlanAccount | undefined
 }
 
 type SwapQuotesRequestOptions = {
@@ -188,7 +201,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   // Resolve the sweep-scoped prefetch on demand: first caller initialises the
   // promise; later callers await the same result. Errors degrade gracefully —
   // a failed prefetch falls back to the plugin's live-fetch path.
-  const ensureSweepPrefetch = (plan: TransactionPlan, account: Address) => {
+  const ensureSweepPrefetch = (plan: TransactionPlan, account: SwapQuotePlanAccount) => {
     if (!options.prefetchPluginData) return Promise.resolve<PluginPrefetchData | undefined>(undefined)
     if (!sweepPrefetchPromise) {
       sweepPrefetchPromise = options
@@ -202,14 +215,12 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     return sweepPrefetchPromise
   }
 
-  // Prepare per-quote: prepareTransactionPlan once with the form's prefetch
-  // (Pyth Hermes updates + keyring gating already resolved), then estimate gas
-  // off the prepared envelope. Each quote has unique swap calldata, so prepare
-  // must run per quote; with prefetch threaded in, the prepare cost collapses
-  // to "local plan assembly" — no Hermes / keyring / vault-meta refetch.
+  // Prepare per-quote from already-prefetched data. Each quote has unique swap
+  // calldata, so plugin processing still materialises a per-quote plan, but the
+  // sweep-level prefetch keeps Hermes/keyring work out of the per-quote path.
   const preparePlanForQuote = async (
     plan: TransactionPlan,
-    account: Address,
+    account: SwapQuotePlanAccount,
     prefetch: PluginPrefetchData | undefined,
   ): Promise<TransactionPlanPrepared> => {
     if (!chainId.value) throw new Error('preparePlanForQuote: no chainId')
@@ -268,7 +279,8 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     let plan: TransactionPlan
     let prepared: TransactionPlanPrepared
     try {
-      const account = (params.origin || effectiveOwner.value || quote.accountIn) as Address
+      const fallbackAccount = (params.origin || effectiveOwner.value || quote.accountIn) as Address
+      const account = options.getPlanAccount?.() ?? fallbackAccount
       plan = await profAsync(`quote:${provider}`, 'buildTxPlanForQuote', () => options.buildTxPlanForQuote!(quote, provider))
       const prefetch = await profAsync(`quote:${provider}`, 'sweepPrefetch', () => ensureSweepPrefetch(plan, account))
       prepared = await profAsync(`quote:${provider}`, 'prepareTxPlan', () => preparePlanForQuote(plan, account, prefetch))

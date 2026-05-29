@@ -199,9 +199,10 @@ const swap = useSwapPageLogic({
     }
   },
 
-  async buildPlan(): Promise<TransactionPlan> {
+  async buildPlan(quote?: SwapQuote): Promise<TransactionPlan> {
     if (!fromVault.value || !toVault.value || !position.value) throw new Error('Vaults or position not loaded')
-    if (!isSameAsset.value && !selectedQuote.value) throw new Error('No quote selected')
+    const swapQuote = quote ?? selectedQuote.value
+    if (!isSameAsset.value && !swapQuote) throw new Error('No quote selected')
     const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
     return planCollateralChange({
       fromVault: fromVault.value.address as Address,
@@ -212,7 +213,7 @@ const swap = useSwapPageLogic({
       isMax: isMaxSwap.value,
       enableCollateralTo: true,
       disableCollateralFrom: isMaxSwap.value,
-      swapQuote: isSameAsset.value ? undefined : selectedQuote.value!,
+      swapQuote: isSameAsset.value ? undefined : swapQuote!,
       swapperMode: SwapperMode.EXACT_IN,
     })
   },
@@ -469,7 +470,7 @@ const borrowAmount = computed(() => {
 
 const currentLtv = computed(() => {
   const ltv = position.value?.userLTV ?? position.value?.currentLTV
-  return ltv === undefined ? null : nanoToValue(ltv, 18)
+  return ltv === undefined ? null : ltvToPercent(nanoToValue(ltv, 18))
 })
 const fromLiquidationLtv = computed(() => {
   if (!borrowVault.value || !fromVault.value) return null

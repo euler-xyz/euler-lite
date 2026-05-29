@@ -1,5 +1,5 @@
 import { formatUnits, getAddress, type Address } from 'viem'
-import { watch, computed, ref, shallowRef, type Ref } from 'vue'
+import { watch, computed, effectScope, onScopeDispose, ref, shallowRef, type EffectScope, type Ref, type WatchStopHandle } from 'vue'
 import { accountDiagnosticOwner, dataIssueLocation, type DataIssue, type Portfolio, type PortfolioBorrowPosition, type PortfolioPositionFilter, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import type { EulerLensAddresses } from '~/composables/useEulerAddresses'
 import { useVaults } from '~/composables/useVaults'
@@ -33,6 +33,9 @@ const hiddenDepositCount = computed(() =>
 
 const positionGuard = createRaceGuard()
 const refreshCoordinator = createAddressRefreshCoordinator(() => positionGuard.next())
+let consumerCount = 0
+let watcherScope: EffectScope | undefined
+let stopWatchers: WatchStopHandle[] = []
 
 type PortfolioRefreshSource = 'fast' | 'fresh'
 
@@ -163,25 +166,54 @@ export const useEulerAccount = () => {
     }
   }
 
-  watch([isBalancesLoaded, isEulerAddressesReady, isLabelsReady, isVaultsReady], () => {
-    maybeUpdatePositions()
-  }, { immediate: true })
+  const startWatchers = () => {
+    if (stopWatchers.length) return
 
-  watch(portfolioAddress, (newAddress, oldAddress) => {
-    if (newAddress !== oldAddress) {
-      positionGuard.next()
-      refreshCoordinator.reset()
-      resetLoadingState()
-      maybeUpdatePositions()
-    }
-  })
+    watcherScope = effectScope(true)
+    watcherScope.run(() => {
+      stopWatchers = [
+        watch([isBalancesLoaded, isEulerAddressesReady, isLabelsReady, isVaultsReady], () => {
+          maybeUpdatePositions()
+        }, { immediate: true }),
 
-  watch(isShowAllPositions, () => {
-    positionGuard.next()
-    refreshCoordinator.reset()
-    resetLoadingState()
-    maybeUpdatePositions()
-  })
+        watch(portfolioAddress, (newAddress, oldAddress) => {
+          if (newAddress !== oldAddress) {
+            positionGuard.next()
+            refreshCoordinator.reset()
+            resetLoadingState()
+            maybeUpdatePositions()
+          }
+        }),
+
+        watch(isShowAllPositions, () => {
+          positionGuard.next()
+          refreshCoordinator.reset()
+          resetLoadingState()
+          maybeUpdatePositions()
+        }),
+
+        watch(chainId, () => {
+          positionGuard.next()
+          refreshCoordinator.reset()
+          resetLoadingState()
+          maybeUpdatePositions()
+        }),
+      ]
+    })
+  }
+
+  const releaseWatchers = () => {
+    consumerCount = Math.max(0, consumerCount - 1)
+    if (consumerCount > 0) return
+    stopWatchers.forEach(stopWatcher => stopWatcher())
+    stopWatchers = []
+    watcherScope?.stop()
+    watcherScope = undefined
+  }
+
+  consumerCount += 1
+  startWatchers()
+  onScopeDispose(releaseWatchers)
 
   const portfolioRoe = computed(() => portfolio.value?.roe ?? 0)
   const portfolioNetApy = computed(() => portfolio.value?.netApy ?? 0)
@@ -203,13 +235,6 @@ export const useEulerAccount = () => {
     hasMissingPrices: portfolio.value?.netAssetValueUsd === undefined
       && (depositPositions.value.length > 0 || borrowPositions.value.length > 0),
   }))
-
-  watch(chainId, () => {
-    positionGuard.next()
-    refreshCoordinator.reset()
-    resetLoadingState()
-    maybeUpdatePositions()
-  })
 
   const getPositionBySubAccountIndex = (subAccountIndex: number): PortfolioBorrowPosition<VaultEntity> | undefined => {
     const owner = portfolioAddress.value || address.value

@@ -369,7 +369,7 @@ watch(selectedOutputAsset, () => {
             </SummaryRow>
             <SummaryRow label="LTV">
               <SummaryValue
-                :before="formatNumber(nanoToValue(form.position.value.userLTV ?? form.position.value.currentLTV ?? 0n, 18))"
+                :before="formatNumber(ltvToPercent(nanoToValue(form.position.value.userLTV ?? form.position.value.currentLTV ?? 0n, 18)))"
                 :after="formatNumber(nanoToValue(form.estimateUserLTV.value, 18))"
                 suffix="%"
               />

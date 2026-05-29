@@ -8,27 +8,13 @@ import { logWarn } from '~/utils/errorHandling'
  * Account-fetch options sized for plan-time consumers:
  * - `populateVaults: true` so the Pyth plugin's `resolveAccount` short-circuits
  *   on `account.populated.vaults` and skips its own fetchAccount round-trip.
- * - `vaultFetchOptions.populateCollaterals: true` so each populated vault's
- *   per-collateral `oracleAdapters` lands in the shared QueryClient cache.
- *   That's what lets the Pyth plugin's `collectHealthCheckFeeds` call
- *   (`vaultMetaService.fetchVaults(controllers, { populateCollaterals: true })`)
- *   serve from cache on Review-click instead of paying ~600ms of subgraph +
- *   on-chain reads to decide whether any adapter is Pyth-typed.
- * - All other populate steps off — labels, intrinsic APY, rewards, market prices
- *   are display-side concerns the planners don't need.
+ * - Vault metadata is populated with the SDK defaults; labels, intrinsic APY,
+ *   rewards, and market prices are display-side concerns the planners don't need.
  */
 const PLAN_ACCOUNT_FETCH_OPTIONS: AccountFetchOptions = {
   populateVaults: true,
   populateMarketPrices: false,
   populateUserRewards: false,
-  vaultFetchOptions: {
-    populateAll: false,
-    populateMarketPrices: false,
-    populateCollaterals: true,
-    populateRewards: false,
-    populateIntrinsicApy: false,
-    populateLabels: false,
-  },
 }
 
 /**

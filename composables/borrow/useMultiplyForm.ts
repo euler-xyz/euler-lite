@@ -1,4 +1,4 @@
-import type { EVault, SwapQuote, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import type { Account, EVault, IHasVaultAddress, SwapQuote, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { type ProjectedRates, getProjectedRates } from '~/utils/vault/apy'
 import { getAssetUsdValue, getAssetUsdValueOrZero, getAssetOraclePrice, getCollateralOraclePrice, getCollateralShareOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
@@ -34,7 +34,6 @@ import {
   isCowProviderOrQuote,
 } from '~/entities/cowswap'
 import { getNewSubAccount } from '~/composables/useSubAccounts'
-import { useFreshAccount } from '~/composables/useFreshAccount'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 
 export interface UseMultiplyFormOptions {
@@ -69,16 +68,13 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const { planMultiply, prepareTransactionPlan, prefetchPluginData, executePlan, preloadSubAccountSnapshot } = useEulerTx()
   const { isConnected, address } = useWagmi()
   const { isSpyMode, spyAddress } = useSpyMode()
-  // Shared, race-replace fresh Account snapshot. Threaded into every per-quote
-  // planMultiply call and the submit-time planMultiply call so we don't pay
-  // `accountService.fetchAccount` (~2.5s) N+1 times per quote sweep.
-  const { account: freshAccount } = useFreshAccount()
   // State-override knobs: skip balance probing (form validates "Not enough
   // balance"), pass current wallet snapshot, and pre-prime slot hints when the
   // relevant assets resolve.
   const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
   const buildMultiplyStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
-  const { depositPositions } = useEulerAccount()
+  const { depositPositions, portfolio } = useEulerAccount()
+  const planAccount = computed(() => portfolio.value?.account as Account<IHasVaultAddress> | undefined)
   const { chainId } = useEulerAddresses()
   const { fetchSingleBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
@@ -121,10 +117,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     includeCowSwap: true,
     buildTxPlanForQuote: quote => buildMultiplyPlanFromQuote(quote),
     getStateOverrideOptions: () => buildMultiplyStateOverrideOptions(),
-    // First quote in each sweep computes the plugin prefetch (Pyth Hermes
-    // updates + keyring vault gating) from its plan; the rest of the sweep
-    // reuses it. The Account is shared too so resolveAccount short-circuits.
-    prefetchPluginData: (plan, _account) => prefetchPluginData(plan, { account: freshAccount.value }),
+    // First quote in each sweep computes plugin prefetch (Pyth Hermes updates
+    // + keyring vault gating) from its plan; the rest of the sweep reuses it.
+    getPlanAccount: () => planAccount.value,
+    prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
   })
 
   async function buildMultiplyPlanFromQuote(quote: SwapQuote): Promise<TransactionPlan> {
@@ -145,6 +141,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       : undefined
     const collateralAmount = isMultiplySavingCollateral.value ? 0n : supplyAmountNano
     const receiver = (quote.accountIn || address.value || zeroAddress) as Address
+    const account = planAccount.value
     return planMultiply({
       collateralVault: multiplySupplyVault.value.address as Address,
       collateralAmount,
@@ -156,10 +153,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       receiver,
       swapQuote: quote,
       swapperMode: SwapperMode.EXACT_IN,
-      account: freshAccount.value,
-      // Snapshot already refreshed on freshAccount in requestMultiplyQuote
-      // for this sweep's sub-account; skip the per-plan re-fetch.
-      subAccountSnapshotApplied: true,
+      account,
+      subAccountSnapshotApplied: Boolean(account),
     })
   }
   // --- Form state ---
@@ -710,12 +705,9 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       return
     }
 
-    // Refresh the receiver sub-account snapshot on freshAccount once per sweep.
-    // Per-quote plan builds then pass `subAccountSnapshotApplied: true` and skip
-    // the inner re-fetch — collapses N (60–500ms) hits to one.
-    if (freshAccount.value) {
+    if (planAccount.value) {
       try {
-        await profAsync('multiplyForm', 'requestQuote.preloadSubAccountSnapshot', () => preloadSubAccountSnapshot(freshAccount.value!, account))
+        await profAsync('multiplyForm', 'requestQuote.preloadSubAccountSnapshot', () => preloadSubAccountSnapshot(planAccount.value!, account))
       }
       catch (e) {
         logWarn('multiply/preloadSubAccountSnapshot', e)
@@ -876,6 +868,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     multiplyLongAmount: computed(() => multiplyLongAmount.value),
     multiplyDebtAmountNano: computed(() => multiplyDebtAmountNano.value),
     multiplyErrorText,
+    account: planAccount,
   })
   const { cowSwapExecution, cowSwapOrderStatus, cowSwapStatusLabel, submitCowSwapMultiply } = cowSwap
 
@@ -958,12 +951,9 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           && quote.accountIn?.toLowerCase() === subAccount.toLowerCase()
           ? multiplySelectedQuoteCard.value
           : null
-        // Refresh the sub-account snapshot once for the Review path too, in
-        // case the user clicked Review without a recent quote sweep (e.g.
-        // same-asset multiply path where no swap quotes fire).
-        if (freshAccount.value) {
+        if (planAccount.value) {
           try {
-            await preloadSubAccountSnapshot(freshAccount.value, subAccount as Address)
+            await preloadSubAccountSnapshot(planAccount.value, subAccount as Address)
           }
           catch (e) {
             logWarn('multiply/review/preloadSubAccountSnapshot', e)
@@ -977,6 +967,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         else {
           // Reuse the raw plan from the selected quote card when possible.
           const cachedPlan = matchingCard?.plan
+          const account = planAccount.value
           multiplyPlan.value = cachedPlan ?? await profAsync('review', 'planMultiply', () => planMultiply({
             collateralVault: multiplySupplyVault.value!.address as Address,
             collateralAmount,
@@ -988,10 +979,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
             receiver: subAccount as Address,
             swapQuote: quote ?? undefined,
             swapperMode: SwapperMode.EXACT_IN,
-            account: freshAccount.value,
-            subAccountSnapshotApplied: true,
+            account,
+            subAccountSnapshotApplied: Boolean(account),
           }))
-          preparedMultiplyPlan.value = await profAsync('review', 'prepareTransactionPlan', () => prepareTransactionPlan(multiplyPlan.value!))
+          preparedMultiplyPlan.value = await profAsync('review', 'prepareTransactionPlan', () => prepareTransactionPlan(multiplyPlan.value!, { account }))
         }
       }
       catch (e) {

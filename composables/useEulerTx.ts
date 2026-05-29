@@ -48,6 +48,7 @@ const SUB_ACCOUNT_SNAPSHOT_FETCH_OPTIONS = {
   populateMarketPrices: false,
   populateUserRewards: false,
 } as const
+type PrefetchPluginAccount = Account<IHasVaultAddress> | Address
 
 const isOkxWallet = async (connector?: { id?: string, name?: string, getProvider?: () => Promise<unknown> }) => {
   if (!connector) return false
@@ -134,12 +135,16 @@ export interface PlanRepayFromDepositInput {
   fromVault: Address
   fromAccount: Address
   cleanupOnMax?: boolean
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
 }
 
 export interface PlanRepayWithSwapInput {
   swapQuote: SwapQuote
   cleanupOnMax?: boolean
   swapperMode?: SwapperMode
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
 }
 
 export interface PlanDepositWithSwapInput {
@@ -193,6 +198,8 @@ export interface PlanSwapAndRepayInput {
   isMax?: boolean
   cleanupOnMax?: boolean
   wrappedNativeInfo?: WrappedNativeInfo
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
 }
 
 export interface PlanWithdrawAndSwapInput {
@@ -322,6 +329,8 @@ export interface PlanRepayFromSourceInput {
   swapQuote?: SwapQuote
   swapperMode?: SwapperMode
   cleanupOnMax?: boolean
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
 }
 
 export interface PlanCollateralChangeInput {
@@ -530,7 +539,7 @@ export const useEulerTx = () => {
   }
 
   const planRepayFromDeposit = async (input: PlanRepayFromDepositInput): Promise<TransactionPlan> => {
-    const { sdk, account } = await freshPlanContext()
+    const { sdk, account } = await freshPlanContext(input.account)
     const args: PlanRepayFromDepositArgs = {
       account,
       liabilityVault: input.liabilityVault,
@@ -544,7 +553,7 @@ export const useEulerTx = () => {
   }
 
   const planRepayWithSwap = async (input: PlanRepayWithSwapInput): Promise<TransactionPlan> => {
-    const { sdk, account } = await freshPlanContext()
+    const { sdk, account } = await freshPlanContext(input.account)
     const args: PlanRepayWithSwapArgs = {
       account,
       swapQuote: input.swapQuote,
@@ -622,7 +631,7 @@ export const useEulerTx = () => {
   }
 
   const planSwapAndRepay = async (input: PlanSwapAndRepayInput): Promise<TransactionPlan> => {
-    const { sdk, account } = await freshPlanContext()
+    const { sdk, account } = await freshPlanContext(input.account)
     const args: PlanSwapAndRepayFromWalletArgs = {
       account,
       swapQuote: input.swapQuote,
@@ -802,6 +811,7 @@ export const useEulerTx = () => {
         swapQuote: input.swapQuote,
         swapperMode: input.swapperMode,
         cleanupOnMax: input.cleanupOnMax,
+        account: input.account,
       })
     }
     return planRepayFromDeposit({
@@ -811,6 +821,7 @@ export const useEulerTx = () => {
       fromVault: input.fromVault,
       fromAccount: input.fromAccount,
       cleanupOnMax: input.cleanupOnMax,
+      account: input.account,
     })
   }
 
@@ -958,7 +969,7 @@ export const useEulerTx = () => {
    */
   const prefetchPluginData = async (
     plan: TransactionPlan,
-    options?: { account?: Account<IHasVaultAddress> },
+    options?: { account?: PrefetchPluginAccount },
   ): Promise<PluginPrefetchData> => {
     return profAsync('sdk', 'prefetchPluginData', async () => {
       const owner = requireOwner()

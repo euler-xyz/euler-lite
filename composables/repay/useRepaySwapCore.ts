@@ -1,8 +1,9 @@
-import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, SwapQuote, TransactionPlan, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import type { SecuritizeCollateralVault, EVault, PluginPrefetchData, PortfolioBorrowPosition, SwapQuote, TransactionPlan, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { COWSWAP_ORDER_DEADLINE_SECONDS, COWSWAP_PROVIDER_EXTRA_DATA, buildClosePositionQuoteAppData, getCowSwapChainConfig } from '~/entities/cowswap'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
+import type { SwapQuotePlanAccount } from '~/composables/useSwapQuotesParallel'
 import { valueToNano } from '~/utils/crypto-utils'
 import { trimTrailingZeros } from '~/utils/string-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
@@ -31,7 +32,9 @@ export interface UseRepaySwapCoreOptions {
   getQuoteAccounts: () => QuoteAccounts
   onQuoteReceived?: (amountOut: bigint, direction: SwapperMode) => boolean
   includeCowSwap?: boolean
-  buildTxPlanForQuote?: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
+  buildTxPlanForQuote: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
+  prefetchPluginData?: (plan: TransactionPlan, account: SwapQuotePlanAccount) => Promise<PluginPrefetchData>
+  getPlanAccount?: () => SwapQuotePlanAccount | undefined
 }
 
 export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
@@ -64,6 +67,8 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     direction,
     includeCowSwap: options.includeCowSwap,
     buildTxPlanForQuote: options.buildTxPlanForQuote,
+    prefetchPluginData: options.prefetchPluginData,
+    getPlanAccount: options.getPlanAccount,
   })
 
   // --- Derived ---

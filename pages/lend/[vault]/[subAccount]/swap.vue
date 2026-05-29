@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { SecuritizeCollateralVault, EVault, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { SecuritizeCollateralVault, EVault, SwapQuote, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getSubAccountAddress, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { isSecuritizeVault } from '~/utils/vault/categories'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
@@ -15,6 +15,8 @@ import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 const route = useRoute()
 const { getVault, getSecuritizeVault } = useVaults()
 const { address } = useWagmi()
+const { isSpyMode, spyAddress } = useSpyMode()
+const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const { depositPositions } = useEulerAccount()
 const { planCollateralChange } = useEulerTx()
 const { settings } = useUserSettings()
@@ -23,8 +25,9 @@ const { getSupplyRewardApy } = useRewardsApy()
 
 const subAccountIndex = Number(route.params.subAccount)
 const subAccount = computed(() => {
-  if (!address.value || isNaN(subAccountIndex)) return undefined
-  return getSubAccountAddress(getAddress(address.value), subAccountIndex)
+  const addr = effectiveAddress.value
+  if (!addr || isNaN(subAccountIndex)) return undefined
+  return getSubAccountAddress(getAddress(addr), subAccountIndex)
 })
 
 // ── Vaults ───────────────────────────────────────────────────────────────
@@ -90,12 +93,13 @@ const swap = useSwapPageLogic({
 
   buildQuoteRequest(amount) {
     if (!fromVault.value || !toVault.value) return null
+    const account = (subAccount.value ?? effectiveAddress.value ?? zeroAddress) as Address
     return {
       params: {
         tokenIn: fromVault.value.asset.address as Address,
         tokenOut: toVault.value.asset.address as Address,
-        accountIn: (address.value || zeroAddress) as Address,
-        accountOut: (address.value || zeroAddress) as Address,
+        accountIn: account,
+        accountOut: account,
         amount,
         vaultIn: fromVault.value.address as Address,
         receiver: toVault.value.address as Address,
@@ -108,20 +112,23 @@ const swap = useSwapPageLogic({
     }
   },
 
-  async buildPlan(): Promise<TransactionPlan> {
+  async buildPlan(quote?: SwapQuote): Promise<TransactionPlan> {
     if (!fromVault.value || !toVault.value) throw new Error('Vaults not loaded')
     const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
     const isMax = assetsBalance.value > 0n && amount >= assetsBalance.value
-    if (!isSameAsset.value && !selectedQuote.value) throw new Error('No quote selected')
+    const swapQuote = quote ?? selectedQuote.value
+    if (!isSameAsset.value && !swapQuote) throw new Error('No quote selected')
+    const positionAccount = subAccount.value ?? effectiveAddress.value
+    if (!positionAccount) throw new Error('Account not loaded')
     return planCollateralChange({
       fromVault: fromVault.value.address as Address,
       toVault: toVault.value.address as Address,
       amount,
-      positionAccount: (subAccount.value ?? address.value!) as Address,
+      positionAccount: positionAccount as Address,
       toAsset: toVault.value.asset.address as Address,
       isMax,
       maxShares: isMax ? savingPosition.value?.shares : undefined,
-      swapQuote: isSameAsset.value ? undefined : selectedQuote.value!,
+      swapQuote: isSameAsset.value ? undefined : swapQuote!,
       swapperMode: SwapperMode.EXACT_IN,
     })
   },

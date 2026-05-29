@@ -1,4 +1,4 @@
-import type { EVault, SecuritizeCollateralVault, PortfolioBorrowPosition, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { Account, EVault, IHasVaultAddress, SecuritizeCollateralVault, PortfolioBorrowPosition, SwapQuote, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import type { Ref, ComputedRef } from 'vue'
@@ -62,7 +62,9 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const { isConnected, address } = useWagmi()
-  const { planRepayFromSource, executePlan } = useEulerTx()
+  const { planRepayFromSource, executePlan, prefetchPluginData } = useEulerTx()
+  const { portfolio } = useEulerAccount()
+  const planAccount = computed(() => portfolio.value?.account as Account<IHasVaultAddress> | undefined)
   const { getVault: registryGetVault } = useVaultRegistry()
   const { finalizeTxAndRedirect } = useTxFinalization()
 
@@ -107,6 +109,9 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     slippage,
     clearSimulationError,
     getCurrentDebt,
+    buildTxPlanForQuote: quote => buildRepayPlan(quote),
+    prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
+    getPlanAccount: () => planAccount.value,
     getQuoteAccounts: () => {
       const savingsPos = sourceVault.value ? getSavingsPosition(sourceVault.value.address, selectedSavingSubAccount.value) : undefined
       const savingsSubAccount = (savingsPos?.subAccount || address.value || zeroAddress) as Address
@@ -270,7 +275,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   })
 
   // --- Build / Submit / Send ---
-  const buildRepayPlan = async (): Promise<TransactionPlan> => {
+  const buildRepayPlan = async (quote?: SwapQuote): Promise<TransactionPlan> => {
     if (!position.value || !borrowVault.value || !sourceVault.value) {
       throw new Error('Position or vaults not loaded')
     }
@@ -283,6 +288,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     let isFullRepay: boolean
     let liabilityAmount = 0n
     let swapMode: SwapperMode | undefined
+    let swapQuote: SwapQuote | undefined
 
     if (core.isSameAsset.value) {
       const debtNano = core.debtAmount.value
@@ -293,7 +299,8 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
       liabilityAmount = isFullRepay ? maxUint256 : debtNano
     }
     else {
-      if (!core.quotes.selectedQuote.value) {
+      swapQuote = quote ?? core.quotes.selectedQuote.value ?? undefined
+      if (!swapQuote) {
         throw new Error('No quote selected')
       }
       swapMode = core.direction.value
@@ -312,9 +319,10 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
       receiver: position.value.subAccount as Address,
       fromVault: sourceVault.value.address as Address,
       fromAccount: savingsPos.subAccount as Address,
-      swapQuote: core.isSameAsset.value ? undefined : core.quotes.selectedQuote.value!,
+      swapQuote: core.isSameAsset.value ? undefined : swapQuote,
       swapperMode: swapMode,
       cleanupOnMax: isFullRepay,
+      account: planAccount.value,
     })
   }
 

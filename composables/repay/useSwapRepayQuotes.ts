@@ -1,7 +1,7 @@
 import type { Ref } from 'vue'
-import type { SwapQuote, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { PluginPrefetchData, SwapQuote, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
-import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
+import { useSwapQuotesParallel, type SwapQuotePlanAccount } from '~/composables/useSwapQuotesParallel'
 
 /**
  * Wraps two useSwapQuotesParallel instances (exact-in + target-debt) and provides
@@ -10,12 +10,14 @@ import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 export const useSwapRepayQuotes = (options: {
   direction: Ref<SwapperMode>
   includeCowSwap?: boolean
-  buildTxPlanForQuote?: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
+  buildTxPlanForQuote: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
+  prefetchPluginData?: (plan: TransactionPlan, account: SwapQuotePlanAccount) => Promise<PluginPrefetchData>
+  getPlanAccount?: () => SwapQuotePlanAccount | undefined
 }) => {
-  const { direction, includeCowSwap, buildTxPlanForQuote } = options
+  const { direction, includeCowSwap, buildTxPlanForQuote, prefetchPluginData, getPlanAccount } = options
 
-  const exactInQuotes = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max', includeCowSwap, buildTxPlanForQuote })
-  const targetDebtQuotes = useSwapQuotesParallel({ amountField: 'amountIn', compare: 'min', includeCowSwap, buildTxPlanForQuote })
+  const exactInQuotes = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max', includeCowSwap, buildTxPlanForQuote, prefetchPluginData, getPlanAccount })
+  const targetDebtQuotes = useSwapQuotesParallel({ amountField: 'amountIn', compare: 'min', includeCowSwap, buildTxPlanForQuote, prefetchPluginData, getPlanAccount })
 
   const isExactIn = computed(() => direction.value === SwapperMode.EXACT_IN)
 

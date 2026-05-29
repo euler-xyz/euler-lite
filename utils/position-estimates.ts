@@ -16,7 +16,7 @@ export function getTotalCollateralValue(position: PortfolioBorrowPosition<VaultE
   if (userLtvValue === undefined) return null
   const userLtv = nanoToValue(userLtvValue, 18)
   if (userLtv <= 0 || borrowed <= 0) return null
-  return borrowed / userLtv * 100
+  return borrowed / userLtv
 }
 
 /**

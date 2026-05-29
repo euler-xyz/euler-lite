@@ -67,7 +67,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const modal = useModal()
   const { error } = useToast()
   const { isConnected, address } = useWagmi()
-  const { planRepayFromSource, executePlan } = useEulerTx()
+  const { planRepayFromSource, executePlan, prefetchPluginData } = useEulerTx()
   // Collateral-swap repay consumes vault collateral, not wallet ERC20 — safe to
   // skip balance overrides. Slot hints + wallet snapshot still help allowance
   // overrides without firing the balance branch.
@@ -75,8 +75,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const buildRepayStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
   const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig, chainId: currentChainId } = useEulerAddresses()
   const { finalizeTxAndRedirect } = useTxFinalization()
-  const { refreshAllPositions } = useEulerAccount()
-  const { account: freshAccount } = useFreshAccount()
+  const { refreshAllPositions, portfolio } = useEulerAccount()
+  const planAccount = computed(() => portfolio.value?.account as Account<IHasVaultAddress> | undefined)
   const { client: rpcClient } = useRpcClient()
   const { settings } = useUserSettings()
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -141,6 +141,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     getCurrentDebt,
     includeCowSwap: true,
     buildTxPlanForQuote: quote => buildRepayPlan(quote),
+    prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
+    getPlanAccount: () => planAccount.value,
     getQuoteAccounts: () => {
       const subAccount = (position.value?.subAccount || address.value || zeroAddress) as Address
       return { accountIn: subAccount, accountOut: subAccount }
@@ -438,6 +440,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       swapQuote: core.isSameAsset.value ? undefined : (quote || core.quotes.selectedQuote.value!),
       swapperMode: swapMode,
       cleanupOnMax: isFullRepay,
+      account: planAccount.value,
     })
   }
 
@@ -452,7 +455,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     const chainConfig = getCowSwapChainConfig(chainId)
     if (!chainConfig) return
 
-    const sdkAccount = freshAccount.value
+    const sdkAccount = planAccount.value
     if (!sdkAccount) {
       error('Account not ready')
       return
