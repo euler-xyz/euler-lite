@@ -198,6 +198,8 @@ export interface PlanSwapAndRepayInput {
   isMax?: boolean
   cleanupOnMax?: boolean
   wrappedNativeInfo?: WrappedNativeInfo
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
 }
 
 export interface PlanWithdrawAndSwapInput {
@@ -629,7 +631,7 @@ export const useEulerTx = () => {
   }
 
   const planSwapAndRepay = async (input: PlanSwapAndRepayInput): Promise<TransactionPlan> => {
-    const { sdk, account } = await freshPlanContext()
+    const { sdk, account } = await freshPlanContext(input.account)
     const args: PlanSwapAndRepayFromWalletArgs = {
       account,
       swapQuote: input.swapQuote,
