@@ -128,7 +128,7 @@ export const intrinsicApySources: readonly IntrinsicApySourceConfig[] = [
   // DefiLlama pools — Base (8453)
   { provider: 'defillama', chainId: 8453, address: '0x1Bc71130A0e39942a7658878169764Bbd8A45993', poolId: '33c732f6-a78d-41da-af5b-ccd9fa5e52d5' },
   { provider: 'defillama', chainId: 8453, address: '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22', poolId: '0f45d730-b279-4629-8e11-ccb5cc3038b4' },
-  { provider: 'defillama', chainId: 8453, address: '0x401e8E12bDe318772b73709D8101e76E8586c124', poolId: '61813eeb-ed26-44ee-bb0b-059f0faa1dcf' },
+  { provider: 'defillama', chainId: 8453, address: '0xAAA0008C8CF3A7Dca931adaF04336A5D808C82Cc', poolId: '61813eeb-ed26-44ee-bb0b-059f0faa1dcf' },
   { provider: 'defillama', chainId: 8453, address: '0x7FcD174E80f264448ebeE8c88a7C4476AAF58Ea6', poolId: 'f388573e-5c0f-4dac-9f70-116a4aabaf17' },
   { provider: 'defillama', chainId: 8453, address: '0xB6fe221Fe9EeF5aBa221c348bA20A1Bf5e73624c', poolId: 'd4b3c522-6127-4b89-bedf-83641cdcd2eb' },
   { provider: 'defillama', chainId: 8453, address: '0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452', poolId: '747c1d2a-c668-4682-b9f9-296708a3dd90' },
