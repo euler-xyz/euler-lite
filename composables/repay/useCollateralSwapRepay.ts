@@ -75,8 +75,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const buildRepayStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
   const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig, chainId: currentChainId } = useEulerAddresses()
   const { finalizeTxAndRedirect } = useTxFinalization()
-  const { refreshAllPositions } = useEulerAccount()
-  const { account: freshAccount } = useFreshAccount()
+  const { refreshAllPositions, portfolio } = useEulerAccount()
+  const planAccount = computed(() => portfolio.value?.account as Account<IHasVaultAddress> | undefined)
   const { client: rpcClient } = useRpcClient()
   const { settings } = useUserSettings()
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -142,6 +142,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     includeCowSwap: true,
     buildTxPlanForQuote: quote => buildRepayPlan(quote),
     prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
+    getPlanAccount: () => planAccount.value,
     getQuoteAccounts: () => {
       const subAccount = (position.value?.subAccount || address.value || zeroAddress) as Address
       return { accountIn: subAccount, accountOut: subAccount }
@@ -439,6 +440,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       swapQuote: core.isSameAsset.value ? undefined : (quote || core.quotes.selectedQuote.value!),
       swapperMode: swapMode,
       cleanupOnMax: isFullRepay,
+      account: planAccount.value,
     })
   }
 
@@ -453,7 +455,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     const chainConfig = getCowSwapChainConfig(chainId)
     if (!chainConfig) return
 
-    const sdkAccount = freshAccount.value
+    const sdkAccount = planAccount.value
     if (!sdkAccount) {
       error('Account not ready')
       return

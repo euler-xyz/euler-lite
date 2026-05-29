@@ -1,9 +1,9 @@
 import { computed, ref, shallowRef, watch, watchEffect } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { EVault, PortfolioBorrowPosition, PortfolioSavingsPosition, SwapQuote, TransactionPlan, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import type { Account, EVault, IHasVaultAddress, PortfolioBorrowPosition, PortfolioSavingsPosition, SwapQuote, TransactionPlan, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
 
-const { USER, VAULT, sameVault, borrowVault, mocks } = vi.hoisted(() => {
+const { USER, VAULT, sameVault, borrowVault, planAccount, mocks } = vi.hoisted(() => {
   const USER = '0x0000000000000000000000000000000000000001'
   const VAULT = '0x0000000000000000000000000000000000000002'
   const ASSET = '0x0000000000000000000000000000000000000003'
@@ -45,9 +45,11 @@ const { USER, VAULT, sameVault, borrowVault, mocks } = vi.hoisted(() => {
     VAULT,
     sameVault,
     borrowVault,
+    planAccount: { chainId: 1 } as Account<IHasVaultAddress>,
     mocks: {
       swapQuoteOptions: [] as Array<{
         buildTxPlanForQuote?: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
+        getPlanAccount?: () => Account<IHasVaultAddress> | string | undefined
       }>,
       getSavingsPosition: vi.fn(),
       planRepayFromSource: vi.fn(),
@@ -199,7 +201,10 @@ describe('useSavingsRepay', () => {
       executePlan: vi.fn(),
       prefetchPluginData: vi.fn(),
     }))
-    vi.stubGlobal('useEulerAccount', () => ({ refreshAllPositions: vi.fn() }))
+    vi.stubGlobal('useEulerAccount', () => ({
+      refreshAllPositions: vi.fn(),
+      portfolio: shallowRef({ account: planAccount }),
+    }))
     vi.stubGlobal('useEulerAddresses', () => ({ eulerLensAddresses: ref({}) }))
     vi.stubGlobal('useVaultRegistry', () => ({ getVault: vi.fn() }))
     vi.stubGlobal('useTxFinalization', () => ({ finalizeTxAndRedirect: vi.fn() }))
@@ -283,7 +288,9 @@ describe('useSavingsRepay', () => {
       liabilityVault: borrowVault.address,
       receiver: USER,
       swapQuote: quote,
+      account: planAccount,
     }))
+    expect(mocks.swapQuoteOptions[0]?.getPlanAccount?.()).toBe(planAccount)
     expect(plan).toEqual({ type: 'repay-plan' })
   })
 })

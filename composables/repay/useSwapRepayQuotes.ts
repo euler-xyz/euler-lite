@@ -12,11 +12,12 @@ export const useSwapRepayQuotes = (options: {
   includeCowSwap?: boolean
   buildTxPlanForQuote: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
   prefetchPluginData?: (plan: TransactionPlan, account: SwapQuotePlanAccount) => Promise<PluginPrefetchData>
+  getPlanAccount?: () => SwapQuotePlanAccount | undefined
 }) => {
-  const { direction, includeCowSwap, buildTxPlanForQuote, prefetchPluginData } = options
+  const { direction, includeCowSwap, buildTxPlanForQuote, prefetchPluginData, getPlanAccount } = options
 
-  const exactInQuotes = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max', includeCowSwap, buildTxPlanForQuote, prefetchPluginData })
-  const targetDebtQuotes = useSwapQuotesParallel({ amountField: 'amountIn', compare: 'min', includeCowSwap, buildTxPlanForQuote, prefetchPluginData })
+  const exactInQuotes = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max', includeCowSwap, buildTxPlanForQuote, prefetchPluginData, getPlanAccount })
+  const targetDebtQuotes = useSwapQuotesParallel({ amountField: 'amountIn', compare: 'min', includeCowSwap, buildTxPlanForQuote, prefetchPluginData, getPlanAccount })
 
   const isExactIn = computed(() => direction.value === SwapperMode.EXACT_IN)
 

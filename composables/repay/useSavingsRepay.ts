@@ -1,4 +1,4 @@
-import type { EVault, SecuritizeCollateralVault, PortfolioBorrowPosition, SwapQuote, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { Account, EVault, IHasVaultAddress, SecuritizeCollateralVault, PortfolioBorrowPosition, SwapQuote, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import type { Ref, ComputedRef } from 'vue'
@@ -63,6 +63,8 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   const { error } = useToast()
   const { isConnected, address } = useWagmi()
   const { planRepayFromSource, executePlan, prefetchPluginData } = useEulerTx()
+  const { portfolio } = useEulerAccount()
+  const planAccount = computed(() => portfolio.value?.account as Account<IHasVaultAddress> | undefined)
   const { getVault: registryGetVault } = useVaultRegistry()
   const { finalizeTxAndRedirect } = useTxFinalization()
 
@@ -109,6 +111,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     getCurrentDebt,
     buildTxPlanForQuote: quote => buildRepayPlan(quote),
     prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
+    getPlanAccount: () => planAccount.value,
     getQuoteAccounts: () => {
       const savingsPos = sourceVault.value ? getSavingsPosition(sourceVault.value.address, selectedSavingSubAccount.value) : undefined
       const savingsSubAccount = (savingsPos?.subAccount || address.value || zeroAddress) as Address
@@ -319,6 +322,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
       swapQuote: core.isSameAsset.value ? undefined : swapQuote,
       swapperMode: swapMode,
       cleanupOnMax: isFullRepay,
+      account: planAccount.value,
     })
   }
 

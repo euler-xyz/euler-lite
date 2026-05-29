@@ -34,6 +34,7 @@ export interface UseRepaySwapCoreOptions {
   includeCowSwap?: boolean
   buildTxPlanForQuote: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
   prefetchPluginData?: (plan: TransactionPlan, account: SwapQuotePlanAccount) => Promise<PluginPrefetchData>
+  getPlanAccount?: () => SwapQuotePlanAccount | undefined
 }
 
 export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
@@ -67,6 +68,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     includeCowSwap: options.includeCowSwap,
     buildTxPlanForQuote: options.buildTxPlanForQuote,
     prefetchPluginData: options.prefetchPluginData,
+    getPlanAccount: options.getPlanAccount,
   })
 
   // --- Derived ---
