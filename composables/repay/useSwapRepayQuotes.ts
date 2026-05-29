@@ -10,7 +10,7 @@ import { useSwapQuotesParallel, type SwapQuotePlanAccount } from '~/composables/
 export const useSwapRepayQuotes = (options: {
   direction: Ref<SwapperMode>
   includeCowSwap?: boolean
-  buildTxPlanForQuote?: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
+  buildTxPlanForQuote: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
   prefetchPluginData?: (plan: TransactionPlan, account: SwapQuotePlanAccount) => Promise<PluginPrefetchData>
 }) => {
   const { direction, includeCowSwap, buildTxPlanForQuote, prefetchPluginData } = options

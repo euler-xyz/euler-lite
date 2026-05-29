@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, SwapQuote, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { useSwapDebtOptions } from '~/composables/useSwapDebtOptions'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
@@ -216,9 +216,10 @@ const swap = useSwapPageLogic({
     }
   },
 
-  async buildPlan(): Promise<TransactionPlan> {
+  async buildPlan(quote?: SwapQuote): Promise<TransactionPlan> {
     if (!fromVault.value || !toVault.value) throw new Error('Vaults not loaded')
-    if (!isSameAsset.value && !selectedQuote.value) throw new Error('No quote selected')
+    const swapQuote = quote ?? selectedQuote.value
+    if (!isSameAsset.value && !swapQuote) throw new Error('No quote selected')
     const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
     return planDebtChange({
       oldLiabilityVault: fromVault.value.address as Address,
@@ -226,7 +227,7 @@ const swap = useSwapPageLogic({
       liabilityAccount: (position.value?.subAccount || address.value!) as Address,
       liabilityAmount: amount,
       newLiabilityAsset: toVault.value.asset.address as Address,
-      swapQuote: isSameAsset.value ? undefined : selectedQuote.value!,
+      swapQuote: isSameAsset.value ? undefined : swapQuote!,
       swapperMode: SwapperMode.TARGET_DEBT,
     })
   },

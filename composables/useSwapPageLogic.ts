@@ -40,7 +40,7 @@ export interface UseSwapPageLogicOptions {
    */
   buildQuoteRequest: (amount: bigint) => { params: SwapQuoteInput } | null
   /** Build the TransactionPlan for the current swap (same-asset or quote-based). Must throw on failure. */
-  buildPlan: () => Promise<TransactionPlan>
+  buildPlan: (quote?: SwapQuote) => Promise<TransactionPlan>
   /** Page-specific balance validation error. Receives the parsed nano amount. */
   getBalanceError: (amountNano: bigint) => string | null
   /** Vault addresses to check for geo-blocking */
@@ -138,7 +138,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     // Each call site already encodes the same-asset vs swap-quote branch in
     // its own buildPlan. We just forward the candidate quote so the parallel
     // engine can build a plan per quote for gas estimation.
-    buildTxPlanForQuote: () => buildPlan(),
+    buildTxPlanForQuote: quote => buildPlan(quote),
     getStateOverrideOptions: () => buildSwapStateOverrideOptions(),
     // Sweep-scoped prefetch — Pyth Hermes / keyring vault gating resolved once
     // per fetch instead of per-quote.

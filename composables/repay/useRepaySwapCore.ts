@@ -32,7 +32,7 @@ export interface UseRepaySwapCoreOptions {
   getQuoteAccounts: () => QuoteAccounts
   onQuoteReceived?: (amountOut: bigint, direction: SwapperMode) => boolean
   includeCowSwap?: boolean
-  buildTxPlanForQuote?: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
+  buildTxPlanForQuote: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
   prefetchPluginData?: (plan: TransactionPlan, account: SwapQuotePlanAccount) => Promise<PluginPrefetchData>
 }
 
