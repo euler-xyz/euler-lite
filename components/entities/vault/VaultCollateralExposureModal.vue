@@ -80,17 +80,19 @@ const onCollateralClick = (address: string) => {
         @click="onCollateralClick(pair.collateral.address)"
       >
         <div class="px-16 pt-16 pb-12 border-b border-line-subtle">
-          <VaultLabelsAndAssets
-            :vault="pair.collateral"
-            :assets="[pair.collateral.asset]"
-          >
-            <span @click.stop.prevent>
-              <VaultTypeBadges
-                :vault="pair.collateral"
-                summary-only
-              />
-            </span>
-          </VaultLabelsAndAssets>
+          <div class="min-w-0">
+            <VaultLabelsAndAssets
+              class="min-w-0"
+              :vault="pair.collateral"
+              :assets="[pair.collateral.asset]"
+            />
+            <VaultTypeBadges
+              class="mt-8 w-full justify-end"
+              :vault="pair.collateral"
+              summary-only
+              @click.stop.prevent
+            />
+          </div>
         </div>
         <div class="flex flex-col gap-12 px-16 pt-12 pb-16">
           <VaultOverviewLabelValue

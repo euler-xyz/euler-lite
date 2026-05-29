@@ -181,79 +181,85 @@ load()
         @click="onExposureClick(row.exposure.info.vault)"
       >
         <div
-          class="px-16 pt-16 pb-12 border-b border-line-subtle flex items-center justify-between"
+          class="px-16 pt-16 pb-12 border-b border-line-subtle"
         >
-          <template v-if="row.vault">
-            <VaultLabelsAndAssets
-              :vault="row.vault"
-              :assets="[{
-                address: row.exposure.info.asset,
-                decimals: row.exposure.info.assetDecimals,
-                name: row.exposure.info.assetName,
-                symbol: row.exposure.info.assetSymbol,
-              }]"
-            >
-              <span
-                v-if="row.hookWarning"
-                @click.stop.prevent
-              >
-                <VaultWarningIcon :warning="row.hookWarning" />
-              </span>
-              <span @click.stop.prevent>
-                <VaultTypeBadges
+          <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-x-16 gap-y-8">
+            <template v-if="row.vault">
+              <div class="min-w-0 self-center row-span-2">
+                <VaultLabelsAndAssets
+                  class="min-w-0"
                   :vault="row.vault"
-                  summary-only
+                  :assets="[{
+                    address: row.exposure.info.asset,
+                    decimals: row.exposure.info.assetDecimals,
+                    name: row.exposure.info.assetName,
+                    symbol: row.exposure.info.assetSymbol,
+                  }]"
+                >
+                  <span
+                    v-if="row.hookWarning"
+                    @click.stop.prevent
+                  >
+                    <VaultWarningIcon :warning="row.hookWarning" />
+                  </span>
+                </VaultLabelsAndAssets>
+              </div>
+            </template>
+            <template v-else>
+              <div class="flex items-center gap-12 self-center">
+                <AssetAvatar
+                  :asset="{ address: row.exposure.info.asset, symbol: row.exposure.info.assetSymbol }"
+                  size="40"
                 />
-              </span>
-            </VaultLabelsAndAssets>
-          </template>
-          <template v-else>
-            <div class="flex items-center gap-12">
-              <AssetAvatar
-                :asset="{ address: row.exposure.info.asset, symbol: row.exposure.info.assetSymbol }"
-                size="40"
-              />
-              <div>
-                <div class="text-content-tertiary text-p3">
-                  {{ row.exposure.info.vaultName }}
-                </div>
-                <div class="text-h5 text-content-primary">
-                  {{ row.exposure.info.assetSymbol }}
+                <div>
+                  <div class="text-content-tertiary text-p3">
+                    {{ row.exposure.info.vaultName }}
+                  </div>
+                  <div class="text-h5 text-content-primary">
+                    {{ row.exposure.info.assetSymbol }}
+                  </div>
                 </div>
               </div>
+            </template>
+            <div
+              v-if="row.vault"
+              class="flex flex-col items-end shrink-0 justify-self-end"
+            >
+              <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+                Supply APY
+                <UiModalPreviewTrigger
+                  :component="VaultSupplyApyModal"
+                  :modal-data="() => getStrategySupplyApyModalData(row.vault)"
+                  aria-label="Show supply APY breakdown"
+                >
+                  <SvgIcon
+                    class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+                    name="info-circle"
+                  />
+                </UiModalPreviewTrigger>
+              </div>
+              <div class="text-p2 flex items-center text-accent-600 font-semibold">
+                <UiModalPreviewTrigger
+                  v-if="hasSupplyRewards(row.vault.address)"
+                  :component="VaultSupplyApyModal"
+                  :modal-data="() => getStrategySupplyApyModalData(row.vault)"
+                  aria-label="Show supply APY rewards breakdown"
+                >
+                  <SvgIcon
+                    class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
+                    name="sparks"
+                  />
+                </UiModalPreviewTrigger>
+                {{ formatNumber(getStrategySupplyApy(row.vault)) }}%
+              </div>
             </div>
-          </template>
-          <div
-            v-if="row.vault"
-            class="flex flex-col items-end shrink-0"
-          >
-            <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-              Supply APY
-              <UiModalPreviewTrigger
-                :component="VaultSupplyApyModal"
-                :modal-data="() => getStrategySupplyApyModalData(row.vault)"
-                aria-label="Show supply APY breakdown"
-              >
-                <SvgIcon
-                  class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-                  name="info-circle"
-                />
-              </UiModalPreviewTrigger>
-            </div>
-            <div class="text-p2 flex items-center text-accent-600 font-semibold">
-              <UiModalPreviewTrigger
-                v-if="hasSupplyRewards(row.vault.address)"
-                :component="VaultSupplyApyModal"
-                :modal-data="() => getStrategySupplyApyModalData(row.vault)"
-                aria-label="Show supply APY rewards breakdown"
-              >
-                <SvgIcon
-                  class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
-                  name="sparks"
-                />
-              </UiModalPreviewTrigger>
-              {{ formatNumber(getStrategySupplyApy(row.vault)) }}%
-            </div>
+            <VaultTypeBadges
+              v-if="row.vault"
+              class="justify-end justify-self-end"
+              :vault="row.vault"
+              summary-only
+              @click.stop.prevent
+            />
           </div>
         </div>
         <div class="flex flex-col gap-12 px-16 pt-12 pb-16">
