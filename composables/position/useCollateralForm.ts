@@ -9,7 +9,6 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
-import { useFreshAccount } from '~/composables/useFreshAccount'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import type { SwapQuoteInput } from '~/composables/useSwapApi'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
@@ -107,9 +106,6 @@ export interface UseCollateralFormOptions {
    * `executePreparedPlan` on confirm. Plugin reads (TOS / Keyring / Pyth) run
    * exactly once per Review click — no in-modal preparation spinner.
    *
-   * Callers should also pass their cached account into their `buildDirectPlan`/
-   * `buildSwapPlan` closures (via the SDK planner's optional `account` arg) so
-   * the per-click `freshPlanContext.fetchAccount` round-trip is skipped.
    */
   usePreparedPipeline?: boolean
 }
@@ -120,7 +116,6 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const { error } = useToast()
   const submitLabel = options.reviewLabel
   const { executePlan, executePreparedPlan, prepareTransactionPlan, prefetchPluginData } = useEulerTx()
-  const { account: freshAccount } = useFreshAccount()
   // `effectiveBalance` is form-validated in `isSubmitDisabled`. In supply mode that
   // is the wallet ERC20 balance, so `noBalanceOverride: true` saves a balanceOf
   // RPC per estimate/sim. In withdraw mode the operation doesn't need wallet
@@ -187,7 +182,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     getStateOverrideOptions: () => buildCollateralStateOverrideOptions(),
     // Sweep-scoped plugin prefetch — Hermes pull + keyring read happen once per
     // sweep instead of once per quote.
-    prefetchPluginData: (plan, _account) => prefetchPluginData(plan, { account: freshAccount.value }),
+    prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
   })
 
   async function buildCollateralSwapPlanFromQuote(quote: SwapQuote): Promise<TransactionPlan> {
@@ -718,7 +713,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
           const rawPlan = await buildRawPlan()
           plan.value = rawPlan
           if (rawPlan && options.usePreparedPipeline) {
-            preparedPlan.value = await prepareTransactionPlan(rawPlan, { account: freshAccount.value })
+            preparedPlan.value = await prepareTransactionPlan(rawPlan)
           }
         }
         catch (e) {

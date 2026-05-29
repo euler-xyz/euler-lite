@@ -31,10 +31,9 @@ import type { EulerSDKQueryName } from '@eulerxyz/euler-v2-sdk'
  *     5 min.
  *   - **Plan-critical chain reads** (vault info, account info, vault
  *     factory/type lookups): 5 min on the browsing SDK + 1 min on the plan-time
- *     SDK + invalidate-after-tx. The bumped 5-min stale lets the Pyth
- *     plugin's `populateCollaterals` and simulate's `fetchVaultTypes` hit
- *     cache on Review-clicks; the post-tx invalidation makes display refresh
- *     after a deposit/borrow.
+ *     SDK + invalidate-after-tx. The bumped 5-min stale lets quote plugins
+ *     and simulate's `fetchVaultTypes` hit cache on Review-clicks; the post-tx
+ *     invalidation makes display refresh after a deposit/borrow.
  *   - **Pricing / APY** (assetPriceInfo, rewards breakdown, intrinsicApy):
  *     1 min. `queryV3Price` uses 30 s.
  *   - **Time-sensitive** (block reads, swap quotes, Pyth update data + fee,
@@ -69,7 +68,6 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   queryV3VaultResolve: { staleTimeMs: 5 * MINUTE },
 
   // === Default / low-volatility reads: 5-minute cache ===
-  queryAccountVaults: { staleTimeMs: DEFAULT_STALE_TIME_MS, formStaleTimeMs: 0, invalidateAfterTx: true },
   queryBrevisCampaigns: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryBrevisUserProofs: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryEVaultVerifiedArray: { staleTimeMs: DEFAULT_STALE_TIME_MS },
@@ -93,6 +91,7 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   queryVaultInfoERC4626: { staleTimeMs: DEFAULT_STALE_TIME_MS },
 
   // === Plan-critical chain reads ===
+  queryAccountVaults: { staleTimeMs: DEFAULT_STALE_TIME_MS, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryEVaultInfoFull: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryEulerEarnVaultInfoFull: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryV3AccountPositions: { staleTimeMs: DEFAULT_STALE_TIME_MS, invalidateAfterTx: true },
@@ -113,8 +112,8 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   queryBlockNumber: { staleTimeMs: 5 * SECOND },
   querySwapQuotes: { staleTimeMs: 5 * SECOND },
   queryBatchSimulation: { staleTimeMs: 15 * SECOND },
-  queryPythUpdateData: { staleTimeMs: 15 * SECOND },
-  queryPythUpdateFee: { staleTimeMs: 15 * SECOND },
+  queryPythUpdateData: { staleTimeMs: 30 * SECOND },
+  queryPythUpdateFee: { staleTimeMs: 30 * SECOND },
 
   // === Balances / allowances: short cache, always-fresh in form context ===
   // Balance reads are marked `invalidateAfterTx` so that post-tx wallet refreshes

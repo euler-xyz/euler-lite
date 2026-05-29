@@ -8,7 +8,6 @@ import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, getVaultTags } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
-import { useFreshAccount } from '~/composables/useFreshAccount'
 import { getQuoteAmount, type SwapQuoteAmountField, type SwapQuoteCompare } from '~/utils/swapQuotes'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import type { SwapQuoteInput } from '~/composables/useSwapApi'
@@ -99,7 +98,6 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const modal = useModal()
   const { error: showError } = useToast()
   const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
-  const { account: freshAccount } = useFreshAccount()
   // Debt-swap / collateral-swap pages don't consume the user's wallet ERC20
   // balance — the source is an existing position. Safe to skip balance
   // overrides (no balanceOf RPC + no balance-slot probing per estimate).
@@ -144,7 +142,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     getStateOverrideOptions: () => buildSwapStateOverrideOptions(),
     // Sweep-scoped prefetch — Pyth Hermes / keyring vault gating resolved once
     // per fetch instead of per-quote.
-    prefetchPluginData: (plan, _account) => prefetchPluginData(plan, { account: freshAccount.value }),
+    prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
   })
   // ── Vault products & price invert ──────────────────────────────────────
   const fromProduct = useEulerProductOfVault(computed(() => fromVault.value?.address || ''))

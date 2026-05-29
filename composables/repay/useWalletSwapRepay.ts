@@ -66,7 +66,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
   const modal = useModal()
   const { error } = useToast()
-  const { planSwapAndRepay, executePlan } = useEulerTx()
+  const { planSwapAndRepay, executePlan, prefetchPluginData } = useEulerTx()
   // EXACT_IN validates wallet balance up front (`isSubmitDisabled` line ~306);
   // TARGET_DEBT lets the simulator surface real wallet insufficiency rather
   // than forging it. Skip balance overrides + keep slot hints + wallet
@@ -92,6 +92,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const quotes = useSwapRepayQuotes({
     direction,
     buildTxPlanForQuote: quote => buildRepayPlan(quote),
+    prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
   })
   // --- Derived ---
   const needsSwap = computed(() => {

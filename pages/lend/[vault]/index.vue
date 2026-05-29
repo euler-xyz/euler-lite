@@ -10,7 +10,6 @@ import { isVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCo
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
-import { useFreshAccount } from '~/composables/useFreshAccount'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
@@ -68,7 +67,6 @@ const reviewSupplyLabel = 'Review Supply'
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
 const { planDeposit, planDepositWithSwap, executePlan, prefetchPluginData } = useEulerTx()
-const { account: freshAccount } = useFreshAccount()
 // Page validates "Not enough balance" up front (see `errorText` / `isSubmitDisabled`),
 // so the simulator never needs to forge wallet balances — `noBalanceOverride: true`
 // skips per-call balanceOf + slot probing.
@@ -146,7 +144,7 @@ const {
   compare: 'max',
   buildTxPlanForQuote: quote => buildSwapSupplyPlanFromQuote(quote),
   getStateOverrideOptions: () => buildLendStateOverrideOptions(),
-  prefetchPluginData: (plan, _account) => prefetchPluginData(plan, { account: freshAccount.value }),
+  prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
 })
 // Vault data - only one will be populated based on type
 const eVault: Ref<EVault | undefined> = ref(undefined)

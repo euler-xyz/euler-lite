@@ -24,7 +24,6 @@ import { getPlanHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning,
 import { getVaultTags, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
-import { useFreshAccount } from '~/composables/useFreshAccount'
 
 export interface UseBorrowFormOptions {
   pair: Ref<AnyBorrowVaultPair | undefined>
@@ -80,7 +79,6 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const { chainId } = useEulerAddresses()
   const { fetchSingleBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
-  const { account: freshAccount } = useFreshAccount()
   // Form validates "Not enough balance" up front (see `errorText` / `isSubmitDisabled`),
   // so the simulator never needs to forge wallet balances — `noBalanceOverride: true`
   // skips per-call balanceOf + slot probing. Slot hints + wallet snapshot are still
@@ -125,7 +123,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     // First quote in each sweep resolves the plugin prefetch (Pyth Hermes /
     // keyring vault gating); subsequent quotes reuse it so per-quote prepare
     // skips Hermes pulls and keyring reads.
-    prefetchPluginData: (plan, _account) => prefetchPluginData(plan, { account: freshAccount.value }),
+    prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
   })
   // --- Form state ---
   const ltv = ref(0)

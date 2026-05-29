@@ -48,6 +48,7 @@ const SUB_ACCOUNT_SNAPSHOT_FETCH_OPTIONS = {
   populateMarketPrices: false,
   populateUserRewards: false,
 } as const
+type PrefetchPluginAccount = Account<IHasVaultAddress> | Address
 
 const isOkxWallet = async (connector?: { id?: string, name?: string, getProvider?: () => Promise<unknown> }) => {
   if (!connector) return false
@@ -958,7 +959,7 @@ export const useEulerTx = () => {
    */
   const prefetchPluginData = async (
     plan: TransactionPlan,
-    options?: { account?: Account<IHasVaultAddress> },
+    options?: { account?: PrefetchPluginAccount },
   ): Promise<PluginPrefetchData> => {
     return profAsync('sdk', 'prefetchPluginData', async () => {
       const owner = requireOwner()

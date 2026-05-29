@@ -29,7 +29,7 @@ const { error } = useToast()
 const { address, isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
-const { planMultiply, prepareTransactionPlan, executePreparedPlan } = useEulerTx()
+const { planMultiply, prepareTransactionPlan, executePreparedPlan, prefetchPluginData } = useEulerTx()
 const { eulerLensAddresses } = useEulerAddresses()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { settings } = useUserSettings()
@@ -84,6 +84,7 @@ const {
   amountField: 'amountOut',
   compare: 'max',
   buildTxPlanForQuote: quote => buildMultiplyPlanFromQuote(quote),
+  prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
 })
 const multiplyLongVault = computed<EVault | undefined>(() => {
   const vault = position.value ? position.value.collateralVault : undefined

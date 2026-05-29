@@ -11,6 +11,7 @@ type SdkQueryRecord = {
   args: readonly unknown[]
   status: 'success' | 'error'
   durationMs: number
+  stack?: string
   result?: unknown
   error?: unknown
 }
@@ -28,6 +29,7 @@ const buildSdkQuery = (staleTimes: Partial<Record<EulerSDKQueryName, number>>): 
       }
 
       const startedAt = queryTimerNow()
+      const stack = captureSdkQueryStack()
       try {
         const result = await sdkQueryClient.fetchQuery({
           queryKey: ['sdk', queryName, serializedArgs],
@@ -39,11 +41,11 @@ const buildSdkQuery = (staleTimes: Partial<Record<EulerSDKQueryName, number>>): 
         })
 
         const value = result === null ? undefined : result
-        recordSdkQueryIfRequested({ queryName, serializedArgs, args, status: 'success', durationMs: queryTimerElapsed(startedAt), result: value })
+        recordSdkQueryIfRequested({ queryName, serializedArgs, args, status: 'success', durationMs: queryTimerElapsed(startedAt), stack, result: value })
         return value
       }
       catch (error) {
-        recordSdkQueryIfRequested({ queryName, serializedArgs, args, status: 'error', durationMs: queryTimerElapsed(startedAt), error })
+        recordSdkQueryIfRequested({ queryName, serializedArgs, args, status: 'error', durationMs: queryTimerElapsed(startedAt), stack, error })
         throw error
       }
     }) as typeof fn
@@ -85,6 +87,11 @@ const queryTimerNow = () => (
 )
 
 const queryTimerElapsed = (startedAt: number) => Math.round(queryTimerNow() - startedAt)
+
+const captureSdkQueryStack = () => {
+  if (!isSdkQueryRecordingRequested()) return undefined
+  return new Error().stack
+}
 
 /** Browsing SDK wrapper — used by `getEulerSdk()` for UI surfaces. */
 export const sdkBuildQuery = buildSdkQuery(STALE_TIMES)

@@ -67,7 +67,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const modal = useModal()
   const { error } = useToast()
   const { isConnected, address } = useWagmi()
-  const { planRepayFromSource, executePlan } = useEulerTx()
+  const { planRepayFromSource, executePlan, prefetchPluginData } = useEulerTx()
   // Collateral-swap repay consumes vault collateral, not wallet ERC20 — safe to
   // skip balance overrides. Slot hints + wallet snapshot still help allowance
   // overrides without firing the balance branch.
@@ -141,6 +141,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     getCurrentDebt,
     includeCowSwap: true,
     buildTxPlanForQuote: quote => buildRepayPlan(quote),
+    prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
     getQuoteAccounts: () => {
       const subAccount = (position.value?.subAccount || address.value || zeroAddress) as Address
       return { accountIn: subAccount, accountOut: subAccount }
