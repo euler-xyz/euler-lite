@@ -100,17 +100,9 @@ const supplyApyModalData = computed(() => ({
             :name="displayName"
             :is-unverified="isUnverified"
           />
-          <span
+          <RecentlyAddedBadge
             v-if="isRecentlyAdded"
-            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5"
-            title="Recently added vault"
-          >
-            <SvgIcon
-              name="star"
-              class="!w-14 !h-14"
-            />
-            Recently added
-          </span>
+          />
           <RestrictedBadge v-if="isGeoBlocked" />
         </div>
         <div class="text-h5 text-content-primary">

@@ -14,6 +14,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { isOpDisabled, OP_DEPOSIT } from '~/utils/vault-hooks'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
+import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
 
 defineOptions({
   name: 'LendPage',
@@ -224,9 +225,12 @@ const filteredList = computed(() => {
 
 const applyRecentlyAddedSort = <T extends { address: string }>(sorted: T[]): T[] => {
   return [...sorted].sort((a, b) => {
-    const af = isVaultRecentlyAdded(a.address) ? 1 : 0
-    const bf = isVaultRecentlyAdded(b.address) ? 1 : 0
-    return bf - af
+    return compareRecentlyAddedBoost(
+      isVaultRecentlyAdded(a.address),
+      vaultLiquidityUsd.value.get(a.address) ?? 0,
+      isVaultRecentlyAdded(b.address),
+      vaultLiquidityUsd.value.get(b.address) ?? 0,
+    )
   })
 }
 
