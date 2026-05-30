@@ -260,21 +260,16 @@ const linkPath = computed(() => ({
         />
         <div class="flex-grow ml-12">
           <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-8">
-            <VaultDisplayName
-              :name="pairName"
-              :is-unverified="isAnyUnverified"
-            />
-            <span
-              v-if="isRecentlyAdded"
-              class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5"
-              title="Recently added vault"
-            >
-              <SvgIcon
-                name="star"
-                class="!w-14 !h-14"
+            <span class="min-w-0">
+              <VaultDisplayName
+                :name="pairName"
+                :is-unverified="isAnyUnverified"
               />
-              Recently added
             </span>
+            <RecentlyAddedBadge
+              v-if="isRecentlyAdded"
+              class="mobile:hidden"
+            />
             <KeyringBadge v-if="isKeyring && !isAnyGovernorUnverified" />
             <GovernanceLimitedBadge v-if="isAnyGovernanceLimited" />
             <CyclicalNoteBadge v-if="isCyclicalNote && !isAnyGovernorUnverified" />
@@ -297,10 +292,16 @@ const linkPath = computed(() => ({
               Deprecated
             </span>
           </div>
-          <div class="text-h5 text-content-primary">
-            {{
-              [pair.collateral.asset.symbol, pair.borrow.asset.symbol].join("/")
-            }}
+          <div class="text-h5 text-content-primary flex items-center gap-8">
+            <span>
+              {{
+                [pair.collateral.asset.symbol, pair.borrow.asset.symbol].join("/")
+              }}
+            </span>
+            <RecentlyAddedBadge
+              v-if="isRecentlyAdded"
+              class="hidden mobile:inline-flex shrink-0"
+            />
           </div>
         </div>
       </div>

@@ -11,6 +11,7 @@ import { useVaultSearch } from '~/composables/useVaultSearch'
 import { isOpDisabled, OP_BORROW, OP_DEPOSIT, OP_TRANSFER } from '~/utils/vault-hooks'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
+import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
 
 const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy } = useRewardsApy()
@@ -312,9 +313,12 @@ const isPairRecentlyAdded = (pair: AnyBorrowVaultPair) =>
 
 const applyRecentlyAddedPairSort = (sorted: AnyBorrowVaultPair[]): AnyBorrowVaultPair[] => {
   return [...sorted].sort((a, b) => {
-    const af = isPairRecentlyAdded(a) ? 1 : 0
-    const bf = isPairRecentlyAdded(b) ? 1 : 0
-    return bf - af
+    return compareRecentlyAddedBoost(
+      isPairRecentlyAdded(a),
+      pairLiquidityUsd.value.get(getPairKey(a)) ?? 0,
+      isPairRecentlyAdded(b),
+      pairLiquidityUsd.value.get(getPairKey(b)) ?? 0,
+    )
   })
 }
 

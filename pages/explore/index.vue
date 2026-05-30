@@ -12,6 +12,7 @@ import type { Vault } from '~/entities/vault'
 import { isVaultType, getVaultAddress, getVaultAssetSymbol, getVaultAssetAddress } from '~/utils/discoveryCalculations'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import type { FilterOptionEntry } from '~/utils/buildTvlSortedOptions'
+import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
 
 defineOptions({
   name: 'ExplorePage',
@@ -182,9 +183,12 @@ const filteredMarkets = computed(() => {
 
 const applyRecentlyAddedSort = (sorted: MarketGroup[]): MarketGroup[] => {
   return [...sorted].sort((a, b) => {
-    const af = a.metrics.hasRecentlyAdded ? 1 : 0
-    const bf = b.metrics.hasRecentlyAdded ? 1 : 0
-    return bf - af
+    return compareRecentlyAddedBoost(
+      a.metrics.hasRecentlyAdded,
+      a.metrics.totalAvailableLiquidity,
+      b.metrics.hasRecentlyAdded,
+      b.metrics.totalAvailableLiquidity,
+    )
   })
 }
 
