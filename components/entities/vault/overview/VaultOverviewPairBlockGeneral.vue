@@ -191,87 +191,86 @@ const rampDownModalData = computed(() => ({
           </p>
         </div>
       </div>
-      <div class="grid grid-cols-1 laptop:grid-cols-8 gap-x-32 gap-y-16">
-        <div class="flex flex-col gap-6 laptop:col-span-2">
-          <div class="text-p3 text-content-tertiary">
-            Price
-          </div>
-          <div class="text-p2 font-semibold text-content-primary">
-            <template v-if="price !== null">
-              {{ formatSignificant(priceInvert.invertValue(price), 4) }}
-              <span class="mt-2 flex items-center gap-4 text-p3 font-normal text-content-tertiary">
-                {{ priceInvert.displaySymbol }}
-                <button
-                  type="button"
-                  aria-label="Invert price display"
-                  class="text-content-tertiary hover:text-content-primary transition-colors inline-flex"
-                  @click.stop="priceInvert.toggle"
-                >
-                  <SvgIcon
-                    name="swap-horizontal"
-                    class="!w-14 !h-14"
-                  />
-                </button>
-              </span>
-            </template>
-            <template v-else>
-              <span class="flex items-center text-warning-500">
-                <SvgIcon
-                  name="warning"
-                  class="mr-4 !w-20 !h-20"
-                />
-                Unknown
-              </span>
-            </template>
-          </div>
-        </div>
-        <div class="flex flex-col gap-6 laptop:col-span-2">
-          <div class="text-p3 text-content-tertiary">
-            Available liquidity
-          </div>
-          <div class="flex flex-col gap-2">
-            <div class="flex items-baseline gap-4 text-p2 font-semibold text-content-primary">
-              {{ availableLiquidityDisplay.amount }}
-              <span
-                v-if="availableLiquidityDisplay.symbol"
-                class="text-p3 text-content-tertiary"
-              >
-                {{ availableLiquidityDisplay.symbol }}
-              </span>
-            </div>
-            <div
-              v-if="availableLiquidityDisplay.usd"
-              class="text-p3 text-content-muted"
-            >
-              {{ availableLiquidityDisplay.usd }}
-            </div>
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-x-16 laptop:col-span-4">
+      <div class="flex flex-col gap-20">
+        <div class="grid grid-cols-1 laptop:grid-cols-4 gap-x-20 gap-y-16">
           <div class="flex flex-col gap-6">
-            <div class="text-p3 text-content-tertiary">
-              Max LTV
+            <div class="text-[12px] leading-[16px] text-content-tertiary">
+              Price
             </div>
-            <div class="text-p2 font-semibold text-content-primary">
+            <div class="text-[20px] leading-[28px] font-semibold tabular-nums text-content-primary">
+              <template v-if="price !== null">
+                {{ formatSignificant(priceInvert.invertValue(price), 4) }}
+                <span class="mt-2 flex items-center gap-4 text-p3 font-normal text-content-tertiary">
+                  {{ priceInvert.displaySymbol }}
+                  <button
+                    type="button"
+                    aria-label="Invert price display"
+                    class="text-content-tertiary hover:text-content-primary transition-colors inline-flex"
+                    @click.stop="priceInvert.toggle"
+                  >
+                    <SvgIcon
+                      name="swap-horizontal"
+                      class="!w-14 !h-14"
+                    />
+                  </button>
+                </span>
+              </template>
+              <template v-else>
+                <span class="flex items-center text-warning-500">
+                  <SvgIcon
+                    name="warning"
+                    class="mr-4 !w-20 !h-20"
+                  />
+                  Unknown
+                </span>
+              </template>
+            </div>
+          </div>
+          <div class="flex flex-col gap-6">
+            <div class="text-[12px] leading-[16px] text-content-tertiary">
+              Available liquidity
+            </div>
+            <div class="flex flex-col gap-2">
+              <div class="flex items-baseline gap-4 text-[20px] leading-[28px] font-semibold tabular-nums text-content-primary">
+                {{ availableLiquidityDisplay.amount }}
+                <span
+                  v-if="availableLiquidityDisplay.symbol"
+                  class="text-p3 text-content-tertiary"
+                >
+                  {{ availableLiquidityDisplay.symbol }}
+                </span>
+              </div>
+              <div
+                v-if="availableLiquidityDisplay.usd"
+                class="text-p3 text-content-muted"
+              >
+                {{ availableLiquidityDisplay.usd }}
+              </div>
+            </div>
+          </div>
+          <div class="flex flex-col gap-6">
+            <div class="flex items-center gap-4 text-[12px] leading-[16px] text-content-tertiary">
+              Max LTV
+              <UiFootnote
+                title="Max LTV"
+                text="The maximum loan-to-value allowed for this collateral and borrow pair before new borrowing is restricted."
+                tooltip-placement="top-start"
+              />
+            </div>
+            <div class="text-[20px] leading-[28px] font-semibold tabular-nums text-content-primary">
               {{ pairBorrowLTVPercent === null ? '-' : `${formatNumber(pairBorrowLTVPercent, 2)}%` }}
             </div>
           </div>
           <div class="flex flex-col gap-6">
-            <div class="flex items-center gap-4 text-p3 text-content-tertiary">
+            <div class="flex items-center gap-4 text-[12px] leading-[16px] text-content-tertiary">
               Liquidation LTV
-              <UiModalPreviewTrigger
-                v-if="isRamping"
-                :component="VaultRampDownModal"
-                :modal-data="rampDownModalData"
-                aria-label="Show liquidation LTV ramp-down details"
-              >
-                <SvgIcon
-                  class="!w-18 !h-18 text-content-muted cursor-pointer hover:text-content-secondary"
-                  name="info-circle"
-                />
-              </UiModalPreviewTrigger>
+              <UiFootnote
+                title="Liquidation LTV"
+                text="The loan-to-value where the position becomes eligible for liquidation. If this value is ramping, the current value can change over time."
+                tooltip-placement="top-start"
+              />
             </div>
-            <div class="flex items-center gap-4 text-p2 font-semibold text-content-primary">
+            <div class="flex items-center gap-4 text-[20px] leading-[28px] font-semibold tabular-nums text-content-primary">
               <UiModalPreviewTrigger
                 v-if="isRamping"
                 :component="VaultRampDownModal"
@@ -288,19 +287,19 @@ const rampDownModalData = computed(() => ({
           </div>
         </div>
 
-        <div class="h-px bg-line-subtle my-4 laptop:col-span-8" />
+        <div class="h-px bg-line-subtle" />
 
-        <div class="flex items-center gap-8 text-h6 uppercase text-content-secondary laptop:col-span-8">
+        <div class="flex items-center gap-6 text-[11px] leading-[16px] tracking-[0.08em] uppercase text-content-tertiary">
           <SvgIcon
-            name="arrow-big"
-            class="!w-16 !h-16"
+            name="arrow-down"
+            class="!w-14 !h-14 opacity-85"
           />
           Borrow
         </div>
 
-        <div class="grid grid-cols-1 laptop:grid-cols-8 gap-x-32 gap-y-16 laptop:col-span-8">
-          <div class="flex flex-col gap-6 laptop:col-span-2">
-            <div class="flex items-center gap-4 text-p3 text-content-tertiary">
+        <div class="grid grid-cols-1 laptop:grid-cols-3 gap-x-20 gap-y-16">
+          <div class="flex flex-col gap-6">
+            <div class="flex items-center gap-4 text-[12px] leading-[16px] text-content-tertiary">
               Borrow APY
               <UiModalPreviewTrigger
                 :component="VaultBorrowApyModal"
@@ -314,7 +313,7 @@ const rampDownModalData = computed(() => ({
                 />
               </UiModalPreviewTrigger>
             </div>
-            <div class="flex items-center gap-4 text-p2 font-semibold text-content-primary">
+            <div class="flex items-center gap-4 text-[20px] leading-[28px] font-semibold tabular-nums text-content-primary">
               <UiModalPreviewTrigger
                 v-if="hasBorrowRewards(borrowVault.address, collateralVault.address)"
                 :component="VaultBorrowApyModal"
@@ -331,8 +330,8 @@ const rampDownModalData = computed(() => ({
             </div>
           </div>
 
-          <div class="flex flex-col gap-6 laptop:col-span-2">
-            <div class="flex items-center gap-4 text-p3 text-content-tertiary">
+          <div class="flex flex-col gap-6">
+            <div class="flex items-center gap-4 text-[12px] leading-[16px] text-content-tertiary">
               Collateral APY
               <UiModalPreviewTrigger
                 :component="VaultSupplyApyModal"
@@ -346,7 +345,7 @@ const rampDownModalData = computed(() => ({
                 />
               </UiModalPreviewTrigger>
             </div>
-            <div class="flex items-center gap-4 text-p2 font-semibold text-content-primary">
+            <div class="flex items-center gap-4 text-[20px] leading-[28px] font-semibold tabular-nums text-content-primary">
               <VaultPoints :vault="collateralVault" />
               <UiModalPreviewTrigger
                 v-if="hasSupplyRewards(collateralVault.address)"
@@ -364,8 +363,8 @@ const rampDownModalData = computed(() => ({
             </div>
           </div>
 
-          <div class="flex flex-col gap-6 laptop:col-span-2">
-            <div class="flex items-center gap-4 text-p3 text-content-tertiary">
+          <div class="flex flex-col gap-6">
+            <div class="flex items-center gap-4 text-[12px] leading-[16px] text-content-tertiary">
               Net APY
               <UiModalPreviewTrigger
                 :component="VaultNetApyPairModal"
@@ -379,7 +378,7 @@ const rampDownModalData = computed(() => ({
                 />
               </UiModalPreviewTrigger>
             </div>
-            <div class="flex items-center gap-4 text-p2 font-semibold text-content-primary">
+            <div class="flex items-center gap-4 text-[20px] leading-[28px] font-semibold tabular-nums text-accent-500">
               <UiModalPreviewTrigger
                 v-if="hasSupplyRewards(collateralVault.address) || hasBorrowRewards(borrowVault.address, collateralVault.address) || hasLoopingRewards(borrowVault.address, collateralVault.address)"
                 :component="VaultNetApyPairModal"
@@ -399,32 +398,35 @@ const rampDownModalData = computed(() => ({
 
         <div
           v-if="isBorrowable"
-          class="h-px bg-line-subtle my-4 laptop:col-span-8"
+          class="h-px bg-line-subtle"
         />
 
         <div
           v-if="isBorrowable"
-          class="flex items-center gap-8 text-h6 uppercase text-accent-500 laptop:col-span-8"
+          class="flex items-center gap-6 text-[11px] leading-[16px] tracking-[0.08em] uppercase text-content-tertiary"
         >
           <SvgIcon
             name="multiply"
-            class="!w-16 !h-16"
+            class="!w-14 !h-14 opacity-85"
           />
           Multiply
         </div>
 
-        <template v-if="isBorrowable">
-          <div class="flex flex-col gap-6 laptop:col-span-2">
-            <div class="text-p3 text-content-tertiary">
+        <div
+          v-if="isBorrowable"
+          class="grid grid-cols-1 laptop:grid-cols-3 gap-x-20 gap-y-16"
+        >
+          <div class="flex flex-col gap-6">
+            <div class="text-[12px] leading-[16px] text-content-tertiary">
               Max multiplier
             </div>
-            <div class="text-p2 font-semibold text-content-primary">
+            <div class="text-[20px] leading-[28px] font-semibold tabular-nums text-content-primary">
               {{ pairBorrowLTVPercent === null ? '-' : `${formatNumber(maxMultiplier, 2, 2)}x` }}
             </div>
           </div>
 
-          <div class="flex flex-col gap-6 laptop:col-span-2">
-            <div class="flex items-center gap-4 text-p3 text-content-tertiary">
+          <div class="flex flex-col gap-6">
+            <div class="flex items-center gap-4 text-[12px] leading-[16px] text-content-tertiary">
               Max ROE
               <UiModalPreviewTrigger
                 :component="VaultMaxRoeModal"
@@ -438,7 +440,7 @@ const rampDownModalData = computed(() => ({
                 />
               </UiModalPreviewTrigger>
             </div>
-            <div class="flex items-center gap-4 text-p2 font-semibold text-content-primary">
+            <div class="flex items-center gap-4 text-[20px] leading-[28px] font-semibold tabular-nums text-accent-500">
               <UiModalPreviewTrigger
                 v-if="hasSupplyRewards(collateralVault.address) || hasBorrowRewards(borrowVault.address, collateralVault.address) || hasLoopingRewards(borrowVault.address, collateralVault.address)"
                 :component="VaultMaxRoeModal"
@@ -454,7 +456,7 @@ const rampDownModalData = computed(() => ({
               {{ formatNumber(maxRoe) }}%
             </div>
           </div>
-        </template>
+        </div>
       </div>
     </div>
   </div>
