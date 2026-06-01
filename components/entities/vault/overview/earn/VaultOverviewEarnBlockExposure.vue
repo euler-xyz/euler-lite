@@ -250,6 +250,12 @@ load()
               </UiModalPreviewTrigger>
               {{ formatNumber(getStrategySupplyApy(row.vault)) }}%
             </div>
+            <VaultTypeBadges
+              class="justify-end mt-8"
+              :vault="row.vault"
+              summary-only
+              @click.stop.prevent
+            />
           </div>
         </div>
         <div class="flex flex-col gap-12 px-16 pt-12 pb-16">

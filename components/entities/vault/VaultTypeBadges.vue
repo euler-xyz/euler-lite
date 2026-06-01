@@ -19,10 +19,12 @@ const visibleBadges = computed(() => summaryOnly ? summaryBadges.value : badges.
 const visibleGovernanceType = computed(() => summaryOnly ? summaryGovernanceType.value : governanceType.value)
 const hasVisibleBadge = (badge: VaultTypeBadge): boolean => visibleBadges.value.includes(badge)
 const showGovernanceType = computed(() => hasVisibleBadge(visibleGovernanceType.value))
+const hasAnyBadge = computed(() => visibleBadges.value.length > 0)
 </script>
 
 <template>
   <div
+    v-if="hasAnyBadge"
     class="flex gap-8"
     :class="isStacked ? 'flex-col items-stretch' : 'items-center flex-wrap'"
   >
