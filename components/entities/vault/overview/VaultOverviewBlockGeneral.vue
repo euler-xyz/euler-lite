@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
+import type { Component } from 'vue'
 
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerEntitiesOfVault, useEulerProductOfVault } from '~/composables/useEulerLabels'
@@ -9,6 +10,8 @@ import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { autoLink } from '~/utils/autoLink'
 import { normalizeAddress } from '~/utils/normalizeAddress'
+import type { VaultTypeBadge } from '~/composables/useVaultTypeBadges'
+import { AccessControlBadge, CyclicalNoteBadge, GovernanceLimitedBadge, KeyringBadge } from '#components'
 
 const { vault } = defineProps<{ vault: EVault }>()
 const route = useRoute()
@@ -17,9 +20,13 @@ const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enab
 const { isVaultGovernorVerified } = useVaults()
 const { getEVaults } = useVaultRegistry()
 
+type VaultPropertyBadge = Extract<VaultTypeBadge, 'private' | 'accessControl' | 'governanceLimited' | 'cyclicalNote'>
+
 const vaultAddress = computed(() => getAddress(vault.address))
+const vaultRef = computed(() => vault)
 const product = useEulerProductOfVault(vaultAddress)
 const entities = useEulerEntitiesOfVault(vault)
+const { badges, governanceType } = useVaultTypeBadges(vaultRef)
 const marketProductKey = computed(() => getProductKeyByVault(vault.address))
 const marketProductName = computed(() => getProductByVault(vault.address).name)
 const description = computed(() => {
@@ -48,6 +55,46 @@ const collateralCount = computed(() => {
 const borrowCount = computed(() => {
   return vault.collaterals.filter(ltv => ltv.borrowLTV > 0).length
 })
+
+const propertyBadgeDetails: Record<VaultPropertyBadge, {
+  component: Component
+  description: string
+  label: string
+}> = {
+  private: {
+    component: KeyringBadge,
+    description: 'Vault operations require identity verification before interacting.',
+    label: 'Private',
+  },
+  accessControl: {
+    component: AccessControlBadge,
+    description: 'Some vault operations are permissioned; approved addresses can perform gated actions.',
+    label: 'Access control',
+  },
+  governanceLimited: {
+    component: GovernanceLimitedBadge,
+    description: 'Risk parameters are adjustable, but this vault has limited ongoing risk management.',
+    label: 'Limited risk management',
+  },
+  cyclicalNote: {
+    component: CyclicalNoteBadge,
+    description: 'Interest accrues against a calendar-aligned monthly term that rolls over automatically.',
+    label: 'Cyclical note',
+  },
+}
+
+const propertyBadgeOrder: VaultPropertyBadge[] = ['private', 'accessControl', 'governanceLimited', 'cyclicalNote']
+const propertyBadges = computed(() =>
+  propertyBadgeOrder
+    .filter(badge => badges.value.includes(badge))
+    .map(badge => propertyBadgeDetails[badge]),
+)
+
+const hasPropertiesDetails = computed(() =>
+  !!marketProductName.value
+  || enableEntityBrandingDisplay
+  || propertyBadges.value.length > 0,
+)
 
 const priceDisplay = ref('-')
 
@@ -88,73 +135,20 @@ watchEffect(async () => {
         v-html="autoLink(description)"
       />
       <!-- eslint-enable vue/no-v-html -->
-      <div class="grid grid-cols-2 gap-x-32 gap-y-24">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-32 gap-y-24">
         <VaultOverviewLabelValue
           label="Price"
           :value="priceDisplay"
         />
-        <VaultOverviewLabelValue label="Market">
-          <NuxtLink
-            v-if="marketProductKey"
-            :to="{ name: 'explore-market', params: { market: marketProductKey }, query: { network: route.query.network } }"
-            class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
-          >
-            {{ marketProductName }}
-          </NuxtLink>
-          <template v-else>
-            {{ marketProductName || '-' }}
-          </template>
-        </VaultOverviewLabelValue>
-        <VaultOverviewLabelValue
-          v-if="enableEntityBrandingDisplay"
-          label="Risk manager"
-        >
-          <VaultTypeChip
-            v-if="!isGovernorVerified"
-            :vault="vault"
-            type="unknown"
-            nudge
-            class="w-fit"
-          />
-          <div
-            v-else-if="entities.length"
-            class="flex flex-col gap-8"
-          >
-            <div
-              v-for="(entity, idx) in entities"
-              :key="idx"
-              class="flex items-center gap-8"
-              :class="{ 'opacity-20': isGovernanceLimited }"
-            >
-              <BaseAvatar
-                :label="entity.name"
-                :src="getEulerLabelEntityLogo(entity.logo)"
-                class="!w-28 !h-28"
-              />
-              <a
-                v-if="entity.url"
-                :href="entity.url"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
-              >{{ entity.name }}</a>
-              <span
-                v-else
-                class="text-p2 text-content-primary"
-              >{{ entity.name }}</span>
-            </div>
-          </div>
-          <div v-else>
-            -
-          </div>
-        </VaultOverviewLabelValue>
         <VaultOverviewLabelValue
           v-if="enableVaultTypeDisplay"
           label="Vault type"
         >
-          <VaultTypeBadges
+          <VaultTypeChip
             :vault="vault"
+            :type="governanceType"
             nudge
+            class="w-fit"
           />
         </VaultOverviewLabelValue>
         <VaultOverviewLabelValue label="Can be borrowed">
@@ -173,6 +167,93 @@ watchEffect(async () => {
             </span>
           </div>
         </VaultOverviewLabelValue>
+      </div>
+      <div
+        v-if="hasPropertiesDetails"
+        class="flex flex-col gap-20 pt-8"
+      >
+        <div class="flex items-center gap-12">
+          <p class="text-p4 uppercase tracking-[0.14em] text-content-muted whitespace-nowrap">
+            Types & properties
+          </p>
+          <div class="h-2 flex-1 bg-[var(--border-subtle)] opacity-70" />
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-32 gap-y-24">
+          <VaultOverviewLabelValue label="Market">
+            <div class="flex min-h-28 items-center">
+              <NuxtLink
+                v-if="marketProductKey"
+                :to="{ name: 'explore-market', params: { market: marketProductKey }, query: { network: route.query.network } }"
+                class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
+              >
+                {{ marketProductName }}
+              </NuxtLink>
+              <template v-else>
+                {{ marketProductName || '-' }}
+              </template>
+            </div>
+          </VaultOverviewLabelValue>
+          <VaultOverviewLabelValue
+            v-if="enableEntityBrandingDisplay"
+            label="Risk manager"
+          >
+            <VaultTypeChip
+              v-if="!isGovernorVerified"
+              :vault="vault"
+              type="unknown"
+              nudge
+              class="w-fit"
+            />
+            <div
+              v-else-if="entities.length"
+              class="flex flex-col gap-8"
+            >
+              <div
+                v-for="(entity, idx) in entities"
+                :key="idx"
+                class="flex items-center gap-8"
+                :class="{ 'opacity-20': isGovernanceLimited }"
+              >
+                <BaseAvatar
+                  :label="entity.name"
+                  :src="getEulerLabelEntityLogo(entity.logo)"
+                  class="!w-28 !h-28"
+                />
+                <a
+                  v-if="entity.url"
+                  :href="entity.url"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
+                >{{ entity.name }}</a>
+                <span
+                  v-else
+                  class="text-p2 text-content-primary"
+                >{{ entity.name }}</span>
+              </div>
+            </div>
+            <div v-else>
+              -
+            </div>
+          </VaultOverviewLabelValue>
+        </div>
+        <div
+          v-if="propertyBadges.length"
+          class="flex flex-col"
+        >
+          <div
+            v-for="property in propertyBadges"
+            :key="property.label"
+            class="flex w-full flex-col items-start gap-8 border-t border-[var(--border-subtle)] py-16 first:border-t-0 first:pt-0 last:pb-0"
+          >
+            <component
+              :is="property.component"
+            />
+            <span class="text-p3 text-content-tertiary">
+              {{ property.description }}
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   </div>
