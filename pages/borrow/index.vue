@@ -14,6 +14,7 @@ import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { getVaultAvailableLiquidity, getVaultUtilization } from '~/utils/vault-display'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
 
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -314,9 +315,12 @@ const isPairRecentlyAdded = (pair: AnyBorrowVaultPair) =>
 
 const applyRecentlyAddedPairSort = (sorted: AnyBorrowVaultPair[]): AnyBorrowVaultPair[] => {
   return [...sorted].sort((a, b) => {
-    const af = isPairRecentlyAdded(a) ? 1 : 0
-    const bf = isPairRecentlyAdded(b) ? 1 : 0
-    return bf - af
+    return compareRecentlyAddedBoost(
+      isPairRecentlyAdded(a),
+      pairLiquidityUsd.value.get(getPairKey(a)) ?? 0,
+      isPairRecentlyAdded(b),
+      pairLiquidityUsd.value.get(getPairKey(b)) ?? 0,
+    )
   })
 }
 

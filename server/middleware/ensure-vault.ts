@@ -42,9 +42,10 @@ export default defineEventHandler(async (event) => {
   const query = url.searchParams.toString()
   const redirectUrl = `/${section}${query ? `?${query}` : ''}`
 
-  // Validate addresses are well-formed
+  // Validate addresses are well-formed. Use the non-strict check so valid
+  // addresses with non-canonical checksum casing do not get bounced.
   for (const addr of addresses) {
-    if (!isAddress(addr)) {
+    if (!isAddress(addr, { strict: false })) {
       return sendRedirect(event, redirectUrl, 302)
     }
   }
