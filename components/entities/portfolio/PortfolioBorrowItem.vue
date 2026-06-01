@@ -39,7 +39,7 @@ const modal = useModal()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, getEligibleLoopingRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, getLoopingRewardCampaigns, hasSupplyRewards, hasBorrowRewards, isLoopingEligible } = useRewardsApy()
-const { viewer, visibleTotal } = useApyVisibility()
+const { viewer, visibleBreakdown, visibleTotal } = useApyVisibility()
 
 const borrowVault = computed(() => position.borrowVault as EVault)
 const collateralVault = computed(() => position.collateralVault as EVault | SecuritizeCollateralVault)
@@ -230,6 +230,8 @@ const netAssetValueDisplay = computed(() => {
 
 const apyBreakdown = computed(() => position.getApyBreakdown({ viewer: viewer.value }))
 const roeBreakdown = computed(() => position.getRoeBreakdown({ viewer: viewer.value }))
+const netApyBreakdown = computed(() => visibleBreakdown(apyBreakdown.value))
+const visibleRoeBreakdown = computed(() => visibleBreakdown(roeBreakdown.value))
 const netAPY = computed(() => visibleTotal(apyBreakdown.value))
 const roe = computed(() => visibleTotal(roeBreakdown.value))
 
@@ -248,6 +250,7 @@ const actualMultiplier = computed(() => position.multiplier ?? 0)
 
 const netApyModalData = computed(() => ({
   props: {
+    apyBreakdown: netApyBreakdown.value,
     supplyUSD: collateralValue.value.usd,
     borrowUSD: borrowedValue.value.usd,
     baseSupplyAPY: baseSupplyApy.value,
@@ -267,6 +270,7 @@ const netApyModalData = computed(() => ({
 
 const roeModalData = computed(() => ({
   props: {
+    roeBreakdown: visibleRoeBreakdown.value,
     roe: roe.value ?? 0,
     multiplier: Number.isFinite(actualMultiplier.value) ? actualMultiplier.value : 0,
     supplyAPY: collateralSupplyApy.value,
