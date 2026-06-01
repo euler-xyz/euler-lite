@@ -1010,10 +1010,9 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           swapToAmount: quote ? multiplyLongAmount.value : undefined,
           swapMode: quote ? SwapperMode.EXACT_IN : undefined,
           subAccount,
-          onConfirm: () => {
-            setTimeout(() => {
-              sendMultiply()
-            }, 400)
+          submittingLabel: 'Submitting...',
+          onConfirm: async () => {
+            await sendMultiply()
           },
         },
       })
