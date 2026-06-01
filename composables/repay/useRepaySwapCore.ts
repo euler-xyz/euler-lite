@@ -3,7 +3,7 @@ import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { COWSWAP_ORDER_DEADLINE_SECONDS, COWSWAP_PROVIDER_EXTRA_DATA, buildClosePositionQuoteAppData, getCowSwapChainConfig } from '~/entities/cowswap'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
-import type { SwapQuotePlanAccount } from '~/composables/useSwapQuotesParallel'
+import type { SwapQuotePlanAccount, SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
 import { valueToNano } from '~/utils/crypto-utils'
 import { trimTrailingZeros } from '~/utils/string-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
@@ -32,7 +32,7 @@ export interface UseRepaySwapCoreOptions {
   getQuoteAccounts: () => QuoteAccounts
   onQuoteReceived?: (amountOut: bigint, direction: SwapperMode) => boolean
   includeCowSwap?: boolean
-  buildTxPlanForQuote: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
+  buildTxPlanForQuote: (quote: SwapQuote, provider: string, context: SwapQuotePlanContext) => Promise<TransactionPlan>
   prefetchPluginData?: (plan: TransactionPlan, account: SwapQuotePlanAccount) => Promise<PluginPrefetchData>
   getPlanAccount?: () => SwapQuotePlanAccount | undefined
 }

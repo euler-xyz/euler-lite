@@ -27,6 +27,7 @@ const _route = useRoute()
 const modal = useModal()
 const { error } = useToast()
 const { planBorrow, executePlan } = useEulerTx()
+const { account: planAccount } = usePlanAccount()
 const { getBorrowVaultPair } = useVaults()
 const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
@@ -249,6 +250,7 @@ const submit = async () => {
         vaultAddress: borrowVault.value.address as Address,
         amount: valueToNano(borrowAmount.value || '0', borrowVault.value.shares.decimals),
         borrowAccount: position.value!.subAccount as Address,
+        account: planAccount.value,
       })
     }
     catch (e) {
@@ -292,6 +294,7 @@ const send = async () => {
       vaultAddress: borrowVault.value.address as Address,
       amount: borrowAmountFixed.value.toFormat({ decimals: Number(borrowVault.value.shares.decimals) }).value,
       borrowAccount: position.value.subAccount as Address,
+      account: planAccount.value,
     })
     await executePlan(txPlan)
 

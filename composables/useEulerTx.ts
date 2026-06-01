@@ -75,6 +75,8 @@ export interface PlanDepositInput {
   receiver?: Address
   enableCollateral?: boolean
   wrappedNativeInfo?: WrappedNativeInfo
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
 }
 
 export interface PlanWithdrawInput {
@@ -126,6 +128,8 @@ export interface PlanRepayFromWalletInput {
   liabilityAmount: bigint
   receiver: Address
   cleanupOnMax?: boolean
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
 }
 
 export interface PlanRepayFromDepositInput {
@@ -153,6 +157,8 @@ export interface PlanDepositWithSwapInput {
   tokenIn: Address
   enableCollateral?: boolean
   wrappedNativeInfo?: WrappedNativeInfo
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
 }
 
 export interface PlanSwapFromWalletInput {
@@ -160,16 +166,22 @@ export interface PlanSwapFromWalletInput {
   amount: bigint
   tokenIn: Address
   wrappedNativeInfo?: WrappedNativeInfo
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
 }
 
 export interface PlanSwapCollateralInput {
   swapQuote: SwapQuote
   swapperMode?: SwapperMode
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
 }
 
 export interface PlanSwapDebtInput {
   swapQuote: SwapQuote
   swapperMode?: SwapperMode
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
 }
 
 export interface PlanSwapAndBorrowInput {
@@ -229,6 +241,8 @@ export interface PlanMigrateSameAssetCollateralInput {
   maxShares?: bigint
   enableCollateralTo?: boolean
   disableCollateralFrom?: boolean
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
 }
 
 export interface PlanMigrateSameAssetDebtInput {
@@ -240,6 +254,8 @@ export interface PlanMigrateSameAssetDebtInput {
   newLiabilityAsset: Address
   sweepExcess?: boolean
   transferRemainingSharesToOwner?: boolean
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
 }
 
 export interface PlanMultiplyWithSwapInput {
@@ -281,10 +297,14 @@ export interface PlanTransferInput {
   amount: bigint
   enableCollateralTo?: boolean
   disableCollateralFrom?: boolean
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
 }
 
 export interface PlanCleanupInput {
   subAccount: Address
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
 }
 
 // ---------------------------------------------------------------------------
@@ -348,6 +368,8 @@ export interface PlanCollateralChangeInput {
   // Swap path
   swapQuote?: SwapQuote
   swapperMode?: SwapperMode
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
 }
 
 export interface PlanDebtChangeInput {
@@ -363,6 +385,8 @@ export interface PlanDebtChangeInput {
   // Swap path
   swapQuote?: SwapQuote
   swapperMode?: SwapperMode
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
 }
 
 export interface PlanWithdrawOrRedeemInput {
@@ -465,7 +489,7 @@ export const useEulerTx = () => {
 
   const planDeposit = async (input: PlanDepositInput): Promise<TransactionPlan> => {
     const owner = requireOwner()
-    const { sdk, account } = await freshPlanContext()
+    const { sdk, account } = await freshPlanContext(input.account)
     const args: PlanDepositArgs = {
       account,
       vault: input.vaultAddress,
@@ -527,7 +551,7 @@ export const useEulerTx = () => {
   }
 
   const planRepayFromWallet = async (input: PlanRepayFromWalletInput): Promise<TransactionPlan> => {
-    const { sdk, account } = await freshPlanContext()
+    const { sdk, account } = await freshPlanContext(input.account)
     const args: PlanRepayFromWalletArgs = {
       account,
       liabilityVault: input.liabilityVault,
@@ -564,7 +588,7 @@ export const useEulerTx = () => {
   }
 
   const planDepositWithSwap = async (input: PlanDepositWithSwapInput): Promise<TransactionPlan> => {
-    const { sdk, account } = await freshPlanContext()
+    const { sdk, account } = await freshPlanContext(input.account)
     const args: PlanDepositWithSwapFromWalletArgs = {
       account,
       swapQuote: input.swapQuote,
@@ -577,7 +601,7 @@ export const useEulerTx = () => {
   }
 
   const planSwapFromWallet = async (input: PlanSwapFromWalletInput): Promise<TransactionPlan> => {
-    const { sdk, account } = await freshPlanContext()
+    const { sdk, account } = await freshPlanContext(input.account)
     const args: PlanSwapFromWalletArgs = {
       account,
       swapQuote: input.swapQuote,
@@ -589,7 +613,7 @@ export const useEulerTx = () => {
   }
 
   const planSwapCollateral = async (input: PlanSwapCollateralInput): Promise<TransactionPlan> => {
-    const { sdk, account } = await freshPlanContext()
+    const { sdk, account } = await freshPlanContext(input.account)
     const args: PlanSwapCollateralArgs = {
       account,
       swapQuote: input.swapQuote,
@@ -599,7 +623,7 @@ export const useEulerTx = () => {
   }
 
   const planSwapDebt = async (input: PlanSwapDebtInput): Promise<TransactionPlan> => {
-    const { sdk, account } = await freshPlanContext()
+    const { sdk, account } = await freshPlanContext(input.account)
     const args: PlanSwapDebtArgs = {
       account,
       swapQuote: input.swapQuote,
@@ -671,7 +695,7 @@ export const useEulerTx = () => {
   }
 
   const planMigrateSameAssetCollateral = async (input: PlanMigrateSameAssetCollateralInput): Promise<TransactionPlan> => {
-    const { sdk, account } = await freshPlanContext()
+    const { sdk, account } = await freshPlanContext(input.account)
     const args: PlanMigrateSameAssetCollateralArgs = {
       account,
       fromVault: input.fromVault,
@@ -689,7 +713,7 @@ export const useEulerTx = () => {
   }
 
   const planMigrateSameAssetDebt = async (input: PlanMigrateSameAssetDebtInput): Promise<TransactionPlan> => {
-    const { sdk, account } = await freshPlanContext()
+    const { sdk, account } = await freshPlanContext(input.account)
     const args: PlanMigrateSameAssetDebtArgs = {
       account,
       oldLiabilityVault: input.oldLiabilityVault,
@@ -747,7 +771,7 @@ export const useEulerTx = () => {
   }
 
   const planTransfer = async (input: PlanTransferInput): Promise<TransactionPlan> => {
-    const { sdk, account } = await freshPlanContext()
+    const { sdk, account } = await freshPlanContext(input.account)
     const args: PlanTransferArgs = {
       account,
       vault: input.vaultAddress,
@@ -761,7 +785,7 @@ export const useEulerTx = () => {
   }
 
   const planCleanup = async (input: PlanCleanupInput): Promise<TransactionPlan> => {
-    const { sdk, account } = await freshPlanContext()
+    const { sdk, account } = await freshPlanContext(input.account)
     return sdk.executionService.planCleanup({
       account,
       subAccount: input.subAccount,
@@ -830,6 +854,7 @@ export const useEulerTx = () => {
       return planSwapCollateral({
         swapQuote: input.swapQuote,
         swapperMode: input.swapperMode,
+        account: input.account,
       })
     }
     return planMigrateSameAssetCollateral({
@@ -843,6 +868,7 @@ export const useEulerTx = () => {
       maxShares: input.maxShares,
       enableCollateralTo: input.enableCollateralTo,
       disableCollateralFrom: input.disableCollateralFrom,
+      account: input.account,
     })
   }
 
@@ -851,6 +877,7 @@ export const useEulerTx = () => {
       return planSwapDebt({
         swapQuote: input.swapQuote,
         swapperMode: input.swapperMode,
+        account: input.account,
       })
     }
     return planMigrateSameAssetDebt({
@@ -862,6 +889,7 @@ export const useEulerTx = () => {
       newLiabilityAsset: input.newLiabilityAsset,
       sweepExcess: input.sweepExcess,
       transferRemainingSharesToOwner: input.transferRemainingSharesToOwner,
+      account: input.account,
     })
   }
 
@@ -944,7 +972,7 @@ export const useEulerTx = () => {
   const prepareTransactionPlan = async (
     plan: TransactionPlan,
     options?: {
-      account?: Account<IHasVaultAddress>
+      account?: PrefetchPluginAccount
       prefetch?: PluginPrefetchData
     },
   ): Promise<TransactionPlanPrepared> => {

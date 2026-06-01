@@ -19,6 +19,7 @@ const route = useRoute()
 const modal = useModal()
 const { error } = useToast()
 const { planDeposit, executePlan } = useEulerTx()
+const { account: planAccount } = usePlanAccount()
 const { getEarnVault, updateEarnVault } = useVaults()
 const { isReady: isLabelsReady } = useEulerLabels()
 const { isConnected, address } = useWagmi()
@@ -132,6 +133,7 @@ const submit = async () => {
         vaultAddress: vaultAddress as Address,
         assetAddress: asset.value.address as Address,
         amount: valueToNano(amount.value || '0', asset.value.decimals),
+        account: planAccount.value,
       })
     }
     catch (e) {
@@ -173,6 +175,7 @@ const send = async () => {
       vaultAddress: vaultAddress as Address,
       assetAddress: asset.value.address as Address,
       amount: valueToNano(amount.value || '0', asset.value.decimals),
+      account: planAccount.value,
     })
     await executePlan(txPlan)
 

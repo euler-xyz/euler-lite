@@ -29,7 +29,8 @@ const { error } = useToast()
 const { address, isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
-const { planMultiply, prepareTransactionPlan, executePreparedPlan, prefetchPluginData } = useEulerTx()
+const { planMultiply, prepareTransactionPlan, executePreparedPlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
+const { account: planAccount } = usePlanAccount()
 const { eulerLensAddresses } = useEulerAddresses()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { settings } = useUserSettings()
@@ -83,7 +84,8 @@ const {
 } = useSwapQuotesParallel({
   amountField: 'amountOut',
   compare: 'max',
-  buildTxPlanForQuote: quote => buildMultiplyPlanFromQuote(quote),
+  buildTxPlanForQuote: (quote, _provider, context) => buildMultiplyPlanFromQuote(quote, context.account),
+  getPlanAccount: () => planAccount.value,
   prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
 })
 const multiplyLongVault = computed<EVault | undefined>(() => {
@@ -503,7 +505,28 @@ const onRefreshMultiplyQuotes = () => {
   requestMultiplyQuote()
 }
 
-async function buildMultiplyPlanFromQuote(quote: SwapQuote): Promise<TransactionPlan> {
+let multiplySubAccountSnapshotKey: string | null = null
+let multiplySubAccountSnapshotPromise: Promise<boolean> | null = null
+const ensureMultiplySubAccountSnapshot = (subAccount: Address): Promise<boolean> => {
+  const account = planAccount.value
+  if (!account) return Promise.resolve(false)
+  const key = `${account.chainId}:${normalizeAddress(subAccount)}`
+  if (multiplySubAccountSnapshotKey !== key) {
+    multiplySubAccountSnapshotKey = key
+    multiplySubAccountSnapshotPromise = null
+  }
+  if (!multiplySubAccountSnapshotPromise) {
+    multiplySubAccountSnapshotPromise = preloadSubAccountSnapshot(account, subAccount)
+      .then(() => true)
+      .catch((e) => {
+        console.warn('[Multiply] failed to preload sub-account snapshot', e)
+        return false
+      })
+  }
+  return multiplySubAccountSnapshotPromise
+}
+
+async function buildMultiplyPlanFromQuote(quote: SwapQuote, account = planAccount.value): Promise<TransactionPlan> {
   if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
     throw new Error('Multiply vaults not loaded')
   }
@@ -511,6 +534,7 @@ async function buildMultiplyPlanFromQuote(quote: SwapQuote): Promise<Transaction
   if (!subAccount) throw new Error('Sub-account not resolved')
   const debtAmount = multiplyDebtAmountNano.value
   if (debtAmount <= 0n) throw new Error('Debt amount not set')
+  const subAccountSnapshotApplied = await ensureMultiplySubAccountSnapshot(subAccount as Address)
   return planMultiply({
     collateralVault: multiplySupplyVault.value.address as Address,
     collateralAmount: 0n,
@@ -521,6 +545,8 @@ async function buildMultiplyPlanFromQuote(quote: SwapQuote): Promise<Transaction
     receiver: subAccount as Address,
     swapQuote: quote,
     swapperMode: SwapperMode.EXACT_IN,
+    account,
+    subAccountSnapshotApplied,
   })
 }
 
@@ -550,6 +576,7 @@ const requestMultiplyQuote = useDebounceFn(async () => {
     multiplyQuoteError.value = 'Unable to resolve position'
     return
   }
+  await ensureMultiplySubAccountSnapshot(subAccount as Address)
 
   setMultiplyAmounts(null, null)
   const requestParams = {
@@ -608,6 +635,8 @@ const submitMultiply = async () => {
       }
 
       try {
+        const account = planAccount.value
+        const subAccountSnapshotApplied = await ensureMultiplySubAccountSnapshot(subAccount as Address)
         plan.value = await planMultiply({
           collateralVault: multiplySupplyVault.value.address as Address,
           collateralAmount: 0n,
@@ -618,8 +647,10 @@ const submitMultiply = async () => {
           receiver: subAccount as Address,
           swapQuote: quote ?? undefined,
           swapperMode: SwapperMode.EXACT_IN,
+          account,
+          subAccountSnapshotApplied,
         })
-        preparedPlan.value = await prepareTransactionPlan(plan.value)
+        preparedPlan.value = await prepareTransactionPlan(plan.value, { account })
       }
       catch (e) {
         console.warn('[Multiply] failed to build plan', e)

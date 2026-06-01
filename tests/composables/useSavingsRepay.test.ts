@@ -48,7 +48,7 @@ const { USER, VAULT, sameVault, borrowVault, planAccount, mocks } = vi.hoisted((
     planAccount: { chainId: 1 } as Account<IHasVaultAddress>,
     mocks: {
       swapQuoteOptions: [] as Array<{
-        buildTxPlanForQuote?: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
+        buildTxPlanForQuote?: (quote: SwapQuote, provider: string, context: { account?: Account<IHasVaultAddress> }) => Promise<TransactionPlan>
         getPlanAccount?: () => Account<IHasVaultAddress> | string | undefined
       }>,
       getSavingsPosition: vi.fn(),
@@ -141,7 +141,7 @@ vi.mock('~/composables/useRepaySavingsOptions', () => ({
 
 vi.mock('~/composables/useSwapQuotesParallel', () => ({
   useSwapQuotesParallel: (options: {
-    buildTxPlanForQuote?: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
+    buildTxPlanForQuote?: (quote: SwapQuote, provider: string, context: { account?: Account<IHasVaultAddress> }) => Promise<TransactionPlan>
   }) => {
     mocks.swapQuoteOptions.push(options)
     return {
@@ -201,9 +201,8 @@ describe('useSavingsRepay', () => {
       executePlan: vi.fn(),
       prefetchPluginData: vi.fn(),
     }))
-    vi.stubGlobal('useEulerAccount', () => ({
-      refreshAllPositions: vi.fn(),
-      portfolio: shallowRef({ account: planAccount }),
+    vi.stubGlobal('usePlanAccount', () => ({
+      account: shallowRef(planAccount),
     }))
     vi.stubGlobal('useEulerAddresses', () => ({ eulerLensAddresses: ref({}) }))
     vi.stubGlobal('useVaultRegistry', () => ({ getVault: vi.fn() }))
@@ -280,7 +279,7 @@ describe('useSavingsRepay', () => {
     repay.initVault()
 
     const quote = { amountIn: '100', amountOut: '200' } as SwapQuote
-    const plan = await mocks.swapQuoteOptions[0]?.buildTxPlanForQuote?.(quote, 'provider')
+    const plan = await mocks.swapQuoteOptions[0]?.buildTxPlanForQuote?.(quote, 'provider', { account: planAccount })
 
     expect(mocks.planRepayFromSource).toHaveBeenCalledWith(expect.objectContaining({
       fromVault: VAULT,

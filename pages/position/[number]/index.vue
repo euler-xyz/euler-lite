@@ -28,6 +28,7 @@ const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, hasSupplyRewards, hasBorrowRewards, getSupplyRewardCampaigns, getBorrowRewardCampaigns } = useRewardsApy()
 const { planTransfer, executePlan } = useEulerTx()
+const { account: planAccount } = usePlanAccount()
 const {
   runSimulation: runDisableCollateralSimulation,
   simulationError: disableCollateralSimulationError,
@@ -554,6 +555,7 @@ const disableCollateral = async (vault: EVault) => {
         to: owner,
         amount: maxUint256,
         disableCollateralFrom: true,
+        account: planAccount.value,
       })
     }
     catch (e) {
@@ -598,6 +600,7 @@ const send = async (collateralAddress: string) => {
       to: owner,
       amount: maxUint256,
       disableCollateralFrom: true,
+      account: planAccount.value,
     })
     await executePlan(txPlan)
 

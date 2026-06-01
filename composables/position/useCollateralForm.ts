@@ -1,5 +1,5 @@
 import { getProjectedRates, getNetAPY } from '~/utils/vault/apy'
-import type { EVault, SecuritizeCollateralVault, TransactionPlan, TransactionPlanPrepared, SwapQuote } from '@eulerxyz/euler-v2-sdk'
+import type { Account, EVault, IHasVaultAddress, SecuritizeCollateralVault, TransactionPlan, TransactionPlanPrepared, SwapQuote } from '@eulerxyz/euler-v2-sdk'
 import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { getAssetUsdValueOrZero, getCollateralUsdValueOrZero } from '~/utils/sdk-prices'
@@ -70,6 +70,7 @@ export interface UseCollateralFormOptions {
     assetAddress: string
     amountNano: bigint
     subAccount?: string
+    account?: Account<IHasVaultAddress>
   }) => Promise<TransactionPlan>
 
   buildSwapPlan: (quote: SwapQuote, ctx: {
@@ -77,6 +78,7 @@ export interface UseCollateralFormOptions {
     amountNano: bigint
     slippage: number
     subAccount?: string
+    account?: Account<IHasVaultAddress>
   }) => Promise<TransactionPlan>
 
   requestSwapQuoteParams: (ctx: {
@@ -116,6 +118,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const { error } = useToast()
   const submitLabel = options.reviewLabel
   const { executePlan, executePreparedPlan, prepareTransactionPlan, prefetchPluginData } = useEulerTx()
+  const usePreparedPipeline = options.usePreparedPipeline ?? true
   // `effectiveBalance` is form-validated in `isSubmitDisabled`. In supply mode that
   // is the wallet ERC20 balance, so `noBalanceOverride: true` saves a balanceOf
   // RPC per estimate/sim. In withdraw mode the operation doesn't need wallet
@@ -126,6 +129,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     buildStateOverrideOptions({ noBalanceOverride: options.mode === 'supply' })
   const { isConnected, address } = useWagmi()
   const { isSpyMode } = useSpyMode()
+  const { account: planAccount } = usePlanAccount()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const positionIndex = usePositionIndex()
   const { isPositionsLoaded, getPositionBySubAccountIndex } = useEulerAccount()
@@ -165,6 +169,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     sortedQuoteCards: swapQuoteCardsSorted,
     selectedProvider: swapSelectedProvider,
     selectedQuote: swapSelectedQuote,
+    selectedQuoteCard: swapSelectedQuoteCard,
     effectiveQuote: swapEffectiveQuote,
     effectiveQuoteFetchedAt: swapEffectiveQuoteFetchedAt,
     providersCount: swapProvidersCount,
@@ -178,14 +183,16 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   } = useSwapQuotesParallel({
     amountField: 'amountOut',
     compare: 'max',
-    buildTxPlanForQuote: quote => buildCollateralSwapPlanFromQuote(quote),
+    buildTxPlanForQuote: (quote, _provider, context) => buildCollateralSwapPlanFromQuote(quote, context.account),
+    getPlanAccount: () => planAccount.value,
     getStateOverrideOptions: () => buildCollateralStateOverrideOptions(),
     // Sweep-scoped plugin prefetch — Hermes pull + keyring read happen once per
     // sweep instead of once per quote.
     prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
+    prepareTransactionPlan: (plan, account, prefetch) => prepareTransactionPlan(plan, { account, prefetch }),
   })
 
-  async function buildCollateralSwapPlanFromQuote(quote: SwapQuote): Promise<TransactionPlan> {
+  async function buildCollateralSwapPlanFromQuote(quote: SwapQuote, account = planAccount.value): Promise<TransactionPlan> {
     if (!collateralVault.value?.address || !asset.value?.address) {
       throw new Error('Collateral vault not loaded')
     }
@@ -194,6 +201,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       amountNano: valueToNano(amount.value || '0', asset.value.decimals),
       slippage: swapSlippage.value,
       subAccount: position.value?.subAccount,
+      account,
     })
   }
   // --- Position/vault computeds ---
@@ -683,6 +691,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
         amountNano: valueToNano(amount.value || '0', asset.value.decimals),
         slippage: swapSlippage.value,
         subAccount: position.value?.subAccount,
+        account: planAccount.value,
       })
     }
     return options.buildDirectPlan({
@@ -690,7 +699,18 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       assetAddress: asset.value.address,
       amountNano: valueToNano(amount.value || '0', asset.value.decimals),
       subAccount: position.value?.subAccount,
+      account: planAccount.value,
     })
+  }
+
+  const getSelectedPreparedSwapPlan = () => {
+    if (!options.needsSwap.value || !swapSelectedQuote.value) return null
+    const card = swapSelectedQuoteCard.value
+    if (!card?.preparedPlan || card.quote !== swapSelectedQuote.value) return null
+    return {
+      plan: card.plan ?? card.preparedPlan.plan,
+      prepared: card.preparedPlan as TransactionPlanPrepared,
+    }
   }
 
   // --- Submit ---
@@ -710,17 +730,24 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
         plan.value = null
         preparedPlan.value = null
         try {
-          const rawPlan = await buildRawPlan()
-          plan.value = rawPlan
-          if (rawPlan && options.usePreparedPipeline) {
-            preparedPlan.value = await prepareTransactionPlan(rawPlan)
+          const preparedSwapPlan = usePreparedPipeline ? getSelectedPreparedSwapPlan() : null
+          if (preparedSwapPlan) {
+            plan.value = preparedSwapPlan.plan
+            preparedPlan.value = preparedSwapPlan.prepared
+          }
+          else {
+            const rawPlan = await buildRawPlan()
+            plan.value = rawPlan
+            if (rawPlan && usePreparedPipeline) {
+              preparedPlan.value = await prepareTransactionPlan(rawPlan, { account: planAccount.value })
+            }
           }
         }
         catch (e) {
           logWarn(`collateral/${options.mode}/buildPlan`, e)
           plan.value = null
           preparedPlan.value = null
-          if (options.usePreparedPipeline) {
+          if (usePreparedPipeline) {
             // In the prepared pipeline, opening the modal with no envelope
             // would show "Transaction plan is unavailable" — surface the real
             // error inline instead.
@@ -729,7 +756,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
           }
         }
 
-        if (options.usePreparedPipeline) {
+        if (usePreparedPipeline) {
           if (!preparedPlan.value) return
           const ok = await runPreparedSimulation(preparedPlan.value, buildCollateralStateOverrideOptions())
           if (!ok) return
@@ -746,8 +773,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
             type: reviewType,
             asset: reviewAsset,
             amount: amount.value,
-            plan: options.usePreparedPipeline ? undefined : (plan.value || undefined),
-            prepared: options.usePreparedPipeline ? (preparedPlan.value || undefined) : undefined,
+            plan: usePreparedPipeline ? undefined : (plan.value || undefined),
+            prepared: usePreparedPipeline ? (preparedPlan.value || undefined) : undefined,
             quoteFetchedAt: options.needsSwap.value ? swapEffectiveQuoteFetchedAt.value : null,
             subAccount: position.value?.subAccount,
             hasBorrows: (position.value?.borrowed || 0n) > 0n,
@@ -773,13 +800,12 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       isSubmitting.value = true
       if (!asset.value?.address || !collateralVault.value?.address) return
 
-      if (options.usePreparedPipeline) {
+      if (usePreparedPipeline) {
         if (!preparedPlan.value) return
         await executePreparedPlan(preparedPlan.value)
       }
       else {
-        // Legacy path rebuilds the plan at send time. Migrated forms should
-        // adopt `usePreparedPipeline` to reuse the envelope created in submit().
+        // Explicit legacy opt-out rebuilds the plan at send time.
         let txPlan: TransactionPlan
         if (options.needsSwap.value && (swapSelectedQuote.value || swapEffectiveQuote.value)) {
           const quote = swapSelectedQuote.value || swapEffectiveQuote.value!
@@ -788,6 +814,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
             amountNano: valueToNano(amount.value || '0', asset.value.decimals),
             slippage: swapSlippage.value,
             subAccount: position.value?.subAccount,
+            account: planAccount.value,
           })
         }
         else {
@@ -796,6 +823,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
             assetAddress: asset.value.address,
             amountNano: valueToNano(amount.value || '0', asset.value.decimals),
             subAccount: position.value?.subAccount,
+            account: planAccount.value,
           })
         }
         await executePlan(txPlan)

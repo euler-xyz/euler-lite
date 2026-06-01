@@ -84,25 +84,25 @@ const form = useCollateralForm({
     }
   },
 
-  buildDirectPlan: async ({ vaultAddress, amountNano, subAccount }) => {
+  buildDirectPlan: async ({ vaultAddress, amountNano, subAccount, account }) => {
     const owner = (subAccount ?? address.value) as Address
     return planWithdraw({
       vaultAddress: vaultAddress as Address,
       assets: amountNano,
       owner,
       // Skip planner's freshPlanContext fetch; reuse the race-replace snapshot.
-      account: cachedAccount.value,
+      account: account ?? cachedAccount.value,
     })
   },
 
-  buildSwapPlan: async (quote: SwapQuote, { vaultAddress, amountNano, subAccount }) => {
+  buildSwapPlan: async (quote: SwapQuote, { vaultAddress, amountNano, subAccount, account }) => {
     const owner = (subAccount ?? address.value) as Address
     return planWithdrawAndSwap({
       swapQuote: quote,
       vaultAddress: vaultAddress as Address,
       assets: amountNano,
       owner,
-      account: cachedAccount.value,
+      account: account ?? cachedAccount.value,
     })
   },
 

@@ -1,4 +1,4 @@
-import type { Account, EVault, IHasVaultAddress, SwapQuote, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, SwapQuote, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { type ProjectedRates, getProjectedRates } from '~/utils/vault/apy'
 import { getAssetUsdValue, getAssetUsdValueOrZero, getAssetOraclePrice, getCollateralOraclePrice, getCollateralShareOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
@@ -73,8 +73,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   // relevant assets resolve.
   const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
   const buildMultiplyStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
-  const { depositPositions, portfolio } = useEulerAccount()
-  const planAccount = computed(() => portfolio.value?.account as Account<IHasVaultAddress> | undefined)
+  const { depositPositions } = useEulerAccount()
+  const { account: planAccount } = usePlanAccount()
   const { chainId } = useEulerAddresses()
   const { fetchSingleBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
@@ -115,7 +115,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     amountField: 'amountOut',
     compare: 'max',
     includeCowSwap: true,
-    buildTxPlanForQuote: quote => buildMultiplyPlanFromQuote(quote),
+    buildTxPlanForQuote: (quote, _provider, context) => buildMultiplyPlanFromQuote(quote, context.account),
     getStateOverrideOptions: () => buildMultiplyStateOverrideOptions(),
     // First quote in each sweep computes plugin prefetch (Pyth Hermes updates
     // + keyring vault gating) from its plan; the rest of the sweep reuses it.
@@ -123,7 +123,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
   })
 
-  async function buildMultiplyPlanFromQuote(quote: SwapQuote): Promise<TransactionPlan> {
+  async function buildMultiplyPlanFromQuote(quote: SwapQuote, account = planAccount.value): Promise<TransactionPlan> {
     if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
       throw new Error('Multiply vaults not loaded')
     }
@@ -141,7 +141,6 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       : undefined
     const collateralAmount = isMultiplySavingCollateral.value ? 0n : supplyAmountNano
     const receiver = (quote.accountIn || address.value || zeroAddress) as Address
-    const account = planAccount.value
     return planMultiply({
       collateralVault: multiplySupplyVault.value.address as Address,
       collateralAmount,
@@ -1010,10 +1009,9 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           swapToAmount: quote ? multiplyLongAmount.value : undefined,
           swapMode: quote ? SwapperMode.EXACT_IN : undefined,
           subAccount,
-          onConfirm: () => {
-            setTimeout(() => {
-              sendMultiply()
-            }, 400)
+          submittingLabel: 'Submitting...',
+          onConfirm: async () => {
+            await sendMultiply()
           },
         },
       })

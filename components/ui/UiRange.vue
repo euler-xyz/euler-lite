@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useResizeObserver } from '@vueuse/core'
+import { snapRangeValue } from '~/utils/range'
 
 const {
   min = 0,
@@ -46,12 +47,10 @@ const ticks = computed(() => {
     roundTick(max),
   ]
 })
-const invStep = computed(() => 1.0 / step)
-
 const update = (x: number) => {
   const p = x / trackBox!.width
   const v = p * (max - min) + min
-  model.value = min + Math.round((v - min) * invStep.value) / invStep.value
+  model.value = snapRangeValue(v, min, max, step)
 }
 const render = async () => {
   await nextTick()

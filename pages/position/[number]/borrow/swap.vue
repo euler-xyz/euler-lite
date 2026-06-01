@@ -8,6 +8,7 @@ import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/stri
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
+import type { SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { formatUnits, zeroAddress, type Address } from 'viem'
 
@@ -16,6 +17,7 @@ const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = useEulerAccount()
 const { planDebtChange } = useEulerTx()
+const { account: planAccount } = usePlanAccount()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
@@ -193,10 +195,12 @@ const swap = useSwapPageLogic({
   sameAssetModalType: 'swap',
   swapperMode: SwapperMode.TARGET_DEBT,
   reviewSwapEstimatedSide: 'output',
+  getPlanAccount: () => planAccount.value,
 
   buildQuoteRequest(amount) {
     if (!fromVault.value || !toVault.value || !position.value) return null
-    if (amount > currentDebt.value) return null
+    const debtAmount = currentDebt.value
+    if (amount > debtAmount) return null
     const liabilityAccount = (position.value.subAccount || address.value || zeroAddress) as Address
     return {
       params: {
@@ -204,19 +208,19 @@ const swap = useSwapPageLogic({
         tokenOut: fromVault.value.asset.address as Address,
         accountIn: liabilityAccount,
         accountOut: liabilityAccount,
-        amount,
+        amount: debtAmount,
         vaultIn: toVault.value.address as Address,
         receiver: fromVault.value.address as Address,
         slippage: slippage.value,
         swapperMode: SwapperMode.TARGET_DEBT,
         isRepay: true,
         targetDebt: 0n,
-        currentDebt: currentDebt.value,
+        currentDebt: debtAmount,
       },
     }
   },
 
-  async buildPlan(quote?: SwapQuote): Promise<TransactionPlan> {
+  async buildPlan(quote?: SwapQuote, context?: SwapQuotePlanContext): Promise<TransactionPlan> {
     if (!fromVault.value || !toVault.value) throw new Error('Vaults not loaded')
     const swapQuote = quote ?? selectedQuote.value
     if (!isSameAsset.value && !swapQuote) throw new Error('No quote selected')
@@ -225,10 +229,11 @@ const swap = useSwapPageLogic({
       oldLiabilityVault: fromVault.value.address as Address,
       newLiabilityVault: toVault.value.address as Address,
       liabilityAccount: (position.value?.subAccount || address.value!) as Address,
-      liabilityAmount: amount,
+      liabilityAmount: isSameAsset.value ? undefined : amount,
       newLiabilityAsset: toVault.value.asset.address as Address,
       swapQuote: isSameAsset.value ? undefined : swapQuote!,
       swapperMode: SwapperMode.TARGET_DEBT,
+      account: context?.account ?? planAccount.value,
     })
   },
 

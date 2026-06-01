@@ -67,6 +67,7 @@ const reviewSupplyLabel = 'Review Supply'
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
 const { planDeposit, planDepositWithSwap, executePlan, prefetchPluginData } = useEulerTx()
+const { account: planAccount } = usePlanAccount()
 // Page validates "Not enough balance" up front (see `errorText` / `isSubmitDisabled`),
 // so the simulator never needs to forge wallet balances — `noBalanceOverride: true`
 // skips per-call balanceOf + slot probing.
@@ -142,7 +143,8 @@ const {
 } = useSwapQuotesParallel({
   amountField: 'amountOut',
   compare: 'max',
-  buildTxPlanForQuote: quote => buildSwapSupplyPlanFromQuote(quote),
+  buildTxPlanForQuote: (quote, _provider, context) => buildSwapSupplyPlanFromQuote(quote, context.account),
+  getPlanAccount: () => planAccount.value,
   getStateOverrideOptions: () => buildLendStateOverrideOptions(),
   prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
 })
@@ -400,7 +402,7 @@ const load = async () => {
   }
 }
 
-const buildSwapSupplyPlanFromQuote = async (quote: SwapQuote): Promise<TransactionPlan> => {
+const buildSwapSupplyPlanFromQuote = async (quote: SwapQuote, account = planAccount.value): Promise<TransactionPlan> => {
   if (!selectedAsset.value) {
     throw new Error('No selected asset')
   }
@@ -417,6 +419,7 @@ const buildSwapSupplyPlanFromQuote = async (quote: SwapQuote): Promise<Transacti
     wrappedNativeInfo: isNative && wrappedAddress
       ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
       : undefined,
+    account,
   })
 }
 
@@ -444,6 +447,7 @@ const submit = async () => {
             wrappedNativeInfo: isNativeWrap.value && wrappedAddr
               ? { wrappedTokenAddress: wrappedAddr, nativeAmount: supplyAmount }
               : undefined,
+            account: planAccount.value,
           })
         }
       }
@@ -511,6 +515,7 @@ const send = async () => {
         wrappedNativeInfo: isNativeWrap.value && wrappedAddr
           ? { wrappedTokenAddress: wrappedAddr, nativeAmount: supplyAmount }
           : undefined,
+        account: planAccount.value,
       })
     }
     await executePlan(txPlan)
