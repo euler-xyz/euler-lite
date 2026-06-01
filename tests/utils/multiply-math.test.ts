@@ -11,16 +11,16 @@ describe('computeMaxMultiplier', () => {
     expect(computeMaxMultiplier(0)).toBe(1)
   })
 
-  it('returns 2 for LTV 50%', () => {
-    expect(computeMaxMultiplier(50)).toBe(2)
+  it('uses the SDK safety margin for LTV 50%', () => {
+    expect(computeMaxMultiplier(50)).toBe(1.99)
   })
 
-  it('returns 5 for LTV 80%', () => {
-    expect(computeMaxMultiplier(80)).toBe(5)
+  it('uses the SDK safety margin for LTV 80%', () => {
+    expect(computeMaxMultiplier(80)).toBe(4.99)
   })
 
-  it('returns 10 for LTV 90%', () => {
-    expect(computeMaxMultiplier(90)).toBe(10)
+  it('uses the SDK safety margin for LTV 90%', () => {
+    expect(computeMaxMultiplier(90)).toBe(9.99)
   })
 
   it('returns 1 for LTV >= 99%', () => {
@@ -40,11 +40,15 @@ describe('computeMaxMultiplier', () => {
     expect(computeMaxMultiplier(Infinity)).toBe(1)
   })
 
-  it('floors to 2 decimal places', () => {
-    // LTV 75% → 1/(1-0.75) = 4.0
-    expect(computeMaxMultiplier(75)).toBe(4)
-    // LTV 60% → 1/(1-0.6) = 2.5
-    expect(computeMaxMultiplier(60)).toBe(2.5)
+  it('floors to 2 decimal places after applying the safety margin', () => {
+    // LTV 75% -> 1/(1-0.75) - 0.005 = 3.995, floored to 3.99.
+    expect(computeMaxMultiplier(75)).toBe(3.99)
+    // LTV 60% -> 1/(1-0.6) - 0.005 = 2.495, floored to 2.49.
+    expect(computeMaxMultiplier(60)).toBe(2.49)
+  })
+
+  it('does not round non-tenth max multipliers up', () => {
+    expect(computeMaxMultiplier(83)).toBe(5.87)
   })
 
   it('handles very small LTV', () => {
@@ -53,8 +57,8 @@ describe('computeMaxMultiplier', () => {
   })
 
   it('handles LTV just below 99%', () => {
-    // LTV 98% → 1/(1-0.98) = 50, round(50 * 100) / 100 = 50
-    expect(computeMaxMultiplier(98)).toBe(50)
+    // LTV 98% -> 1/(1-0.98) - 0.005 = 49.995, floored to 49.99.
+    expect(computeMaxMultiplier(98)).toBe(49.99)
   })
 })
 
