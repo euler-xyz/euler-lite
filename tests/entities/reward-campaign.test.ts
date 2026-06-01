@@ -1,64 +1,53 @@
 import { describe, expect, it } from 'vitest'
-import { isCampaignEligibleForAddress, type RewardCampaign } from '~/entities/reward-campaign'
+import { isCampaignEligibleForAddress } from '~/entities/reward-campaign'
 
-const USER = '0xAaAa00000000000000000000000000000000aAaA'
-const OTHER = '0xBbBb00000000000000000000000000000000bBbB'
-
-const makeCampaign = (overrides: Partial<RewardCampaign> = {}): RewardCampaign => ({
-  vault: '0xvault',
-  type: 'euler_lend',
-  apr: 1,
-  provider: 'merkl',
-  endTimestamp: 0,
-  ...overrides,
-})
+const USER = '0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa'
+const OTHER = '0xBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBb'
 
 describe('isCampaignEligibleForAddress', () => {
-  it('passes a plain campaign for a connected wallet', () => {
-    expect(isCampaignEligibleForAddress(makeCampaign(), USER)).toBe(true)
+  it('returns true when no user address is supplied (headline APR stays visible)', () => {
+    expect(isCampaignEligibleForAddress({}, undefined)).toBe(true)
+    expect(isCampaignEligibleForAddress({ whitelist: [USER.toLowerCase()] }, null)).toBe(true)
+    expect(isCampaignEligibleForAddress({ blacklist: [USER.toLowerCase()] }, '')).toBe(true)
   })
 
-  it('passes a plain campaign for an unidentified visitor', () => {
-    expect(isCampaignEligibleForAddress(makeCampaign(), undefined)).toBe(true)
-    expect(isCampaignEligibleForAddress(makeCampaign(), null)).toBe(true)
-    expect(isCampaignEligibleForAddress(makeCampaign(), '')).toBe(true)
+  it('returns true when neither whitelist nor blacklist is present', () => {
+    expect(isCampaignEligibleForAddress({}, USER)).toBe(true)
   })
 
-  it('admits an address on the whitelist (case-insensitive)', () => {
-    const c = makeCampaign({ whitelist: [USER.toLowerCase()] })
-    expect(isCampaignEligibleForAddress(c, USER)).toBe(true)
-  })
-
-  it('rejects an address absent from the whitelist', () => {
-    const c = makeCampaign({ whitelist: [OTHER.toLowerCase()] })
-    expect(isCampaignEligibleForAddress(c, USER)).toBe(false)
-  })
-
-  it('passes an unidentified visitor unconditionally', () => {
-    const whitelistOnly = makeCampaign({ whitelist: [USER.toLowerCase()] })
-    const blacklistOnly = makeCampaign({ blacklist: [USER.toLowerCase()] })
-    for (const addr of [undefined, null, '']) {
-      expect(isCampaignEligibleForAddress(whitelistOnly, addr)).toBe(true)
-      expect(isCampaignEligibleForAddress(blacklistOnly, addr)).toBe(true)
-    }
-  })
-
-  it('treats an empty whitelist as "no restriction"', () => {
-    const c = makeCampaign({ whitelist: [] })
-    expect(isCampaignEligibleForAddress(c, USER)).toBe(true)
-    expect(isCampaignEligibleForAddress(c, undefined)).toBe(true)
-  })
-
-  it('rejects an address on the blacklist (case-insensitive)', () => {
-    const c = makeCampaign({ blacklist: [USER.toLowerCase()] })
-    expect(isCampaignEligibleForAddress(c, USER)).toBe(false)
-  })
-
-  it('whitelist takes precedence over blacklist', () => {
-    const c = makeCampaign({
-      whitelist: [USER.toLowerCase()],
-      blacklist: [USER.toLowerCase()],
+  describe('whitelist semantics', () => {
+    it('returns true when the user is on a non-empty whitelist', () => {
+      expect(isCampaignEligibleForAddress({ whitelist: [USER.toLowerCase()] }, USER)).toBe(true)
     })
-    expect(isCampaignEligibleForAddress(c, USER)).toBe(true)
+
+    it('returns false when the user is not on a non-empty whitelist', () => {
+      expect(isCampaignEligibleForAddress({ whitelist: [OTHER.toLowerCase()] }, USER)).toBe(false)
+    })
+
+    it('treats an empty whitelist as absent (does not exclude everyone)', () => {
+      expect(isCampaignEligibleForAddress({ whitelist: [] }, USER)).toBe(true)
+    })
+
+    it('whitelist membership overrides blacklist membership', () => {
+      expect(isCampaignEligibleForAddress({
+        whitelist: [USER.toLowerCase()],
+        blacklist: [USER.toLowerCase()],
+      }, USER)).toBe(true)
+    })
+  })
+
+  describe('blacklist semantics', () => {
+    it('returns false when the user is on the blacklist (and no whitelist is set)', () => {
+      expect(isCampaignEligibleForAddress({ blacklist: [USER.toLowerCase()] }, USER)).toBe(false)
+    })
+
+    it('returns true when the user is not on the blacklist', () => {
+      expect(isCampaignEligibleForAddress({ blacklist: [OTHER.toLowerCase()] }, USER)).toBe(true)
+    })
+  })
+
+  it('matches addresses case-insensitively (stored lowercase, user may be mixed-case)', () => {
+    expect(isCampaignEligibleForAddress({ blacklist: [USER.toLowerCase()] }, USER)).toBe(false)
+    expect(isCampaignEligibleForAddress({ whitelist: [USER.toLowerCase()] }, USER.toUpperCase())).toBe(true)
   })
 })

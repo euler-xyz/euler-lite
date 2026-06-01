@@ -1,3 +1,5 @@
+import { getMaxMultiplier as sdkGetMaxMultiplier } from '@eulerxyz/euler-v2-sdk'
+
 /**
  * Pure math functions for the multiply/leverage form.
  * Extracted from composables/borrow/useMultiplyForm.ts for testability.
@@ -53,15 +55,14 @@ export const computeLeverageDebt = (params: LeverageDebtParams): bigint => {
 /**
  * Calculate the maximum leverage multiplier from a borrow LTV percentage.
  *
- * Formula: 1 / (1 - ltvDecimal), floored to 2 decimal places.
+ * Uses the SDK's safety margin and flooring logic.
  * Returns 1 (no leverage) for invalid or extreme LTV values.
  */
 export const computeMaxMultiplier = (ltvPercent: number): number => {
   if (!ltvPercent || !Number.isFinite(ltvPercent)) return 1
   const ltv = ltvPercent / 100
   if (ltv <= 0 || ltv >= 0.99) return 1
-  const max = 1 / (1 - ltv)
-  return Math.max(1, Math.round(max * 100) / 100)
+  return sdkGetMaxMultiplier(ltv)
 }
 
 /**

@@ -1,185 +1,236 @@
 /**
- * Server-side cache for the /api/vaults snapshot endpoint.
+ * Per-chain vault snapshot cache.
  *
- * - The cache itself is a plain TTL store. The 5 min TTL is a safety floor:
- *   the warm-cache plugin rewrites every entry every 5 min via a direct
- *   `refreshChainVaults()` call (force-refresh), so in steady state the
- *   cache is always "fresh" from the handler's point of view. If warm-cache
- *   stalls for multiple cycles, stale entries are still servable (via
- *   .getStale up to the staleness ceiling) until the handler falls back
- *   to a synchronous cold-path refresh.
- * - refreshChainVaults() is the only write path. In-flight dedup collapses
- *   concurrent calls (warm-cache + a cold client request arriving together)
- *   onto a single upstream pass.
+ * Single refresh path (`refreshChainVaults`) used by:
+ *   - `server/plugins/warm-cache.ts` — every 5 min, force-refreshes each
+ *     enabled chain's entry so steady-state reads always hit fresh cache.
+ *   - `server/api/vaults.get.ts` — cold-path fallback when the cache is
+ *     empty (before the first warm cycle completes). Steady state: the
+ *     handler is a pure read.
+ *
+ * Snapshot semantics:
+ *   - Snapshot is a wire-shape payload with bigints replaced by
+ *     `{ __bi: "<decimal>" }` tags (see `utils/snapshot-codec.ts`). The
+ *     browser hydrates by `new EVault(args)` etc., restoring class methods.
+ *   - Cross-references (`collateral.vault`, `strategy.vault`) are NOT
+ *     populated server-side. The client's two-pass hydrate restores them
+ *     via a registry-backed `IVaultMetaService` stub, preserving object
+ *     identity for Vue reactivity.
+ *   - Stale ceiling 30 min: if the warm cycle stalls and a refresh fails,
+ *     `vaultsCache.getStale` lets the handler serve the last-known good
+ *     payload up to that ceiling; past that the cold path retries.
  */
+import {
+  StandardEVaultPerspectives,
+  VaultType,
+  type EulerSDK,
+  type VaultFetchOptions,
+} from '@eulerxyz/euler-v2-sdk'
+import { getAddress, type Address } from 'viem'
 import { createTtlCache } from './cache'
-import { createInFlightDedup } from './in-flight'
-import { getVaultCategories } from './vault-categories-store'
-import { INTERNAL_FETCH_HEADERS } from './internal-headers'
-import { loadChainSnapshot, serialiseSnapshot } from '~/entities/vault'
-import type { FetchVaultContext, SerialisedSnapshot } from '~/entities/vault'
+import { createInFlightDedup } from '~/utils/in-flight'
+import { logger } from './logger'
+import { reportStatus } from './log'
+import { getServerSdk } from './sdk-server'
+import {
+  LABEL_FILES,
+  refreshLabelFile,
+  type LabelFile,
+} from '~/server/api/labels/[file].get'
+import { encodeBigints } from '~/utils/snapshot-codec'
+import { readV3ApiUrl } from '~/utils/api-url-env'
+import type {
+  SerialisedSnapshot,
+  SerialisedVault,
+  SerialisedVaultKind,
+} from '~/utils/snapshot-types'
 
-const TTL_MS = 5 * 60_000
+// With V3 configured the SDK falls back through V3's batched endpoints —
+// each refresh is cheap, so we can afford a tighter cache TTL and rewarm
+// cadence (see `server/plugins/warm-cache.ts:VAULTS_REWARM_INTERVAL_MS`).
+// Without V3, the snapshot is built from onchain lens multicalls which
+// are heavier; the 5-min TTL keeps the cost bounded.
+const CACHE_TTL_MS = readV3ApiUrl() ? 2 * 60_000 : 5 * 60_000
+
+export const SNAPSHOT_CACHE_TTL_MS = CACHE_TTL_MS
+
+export type { SerialisedSnapshot, SerialisedVault, SerialisedVaultKind }
 
 export const vaultsCache = createTtlCache<SerialisedSnapshot>({
-  ttlMs: TTL_MS,
-  maxEntries: 100,
+  ttlMs: CACHE_TTL_MS,
+  maxEntries: 64,
 })
 
 const inFlight = createInFlightDedup<number, SerialisedSnapshot>()
 
-interface EulerChainEntry {
-  chainId: number
-  addresses: {
-    lensAddrs: {
-      vaultLens: string
-      eulerEarnVaultLens: string
-      utilsLens: string
-    }
-    coreAddrs: { evc: string }
-    peripheryAddrs: {
-      escrowedCollateralPerspective?: string
-      securitizeFactory?: string
-    }
+const tryChecksum = (addr: string): Address | undefined => {
+  try {
+    return getAddress(addr)
+  }
+  catch {
+    return undefined
   }
 }
 
-interface EulerLabelProduct {
-  vaults?: string[]
-  deprecatedVaults?: string[]
+const uniqueAddresses = (addresses: Iterable<string>): Address[] => {
+  const result = new Map<string, Address>()
+  for (const a of addresses) {
+    const checksummed = tryChecksum(a)
+    if (checksummed) result.set(checksummed.toLowerCase(), checksummed)
+  }
+  return [...result.values()]
 }
 
-interface EarnVaultEntry {
-  address: string
+interface LabelProduct { vaults?: string[], deprecatedVaults?: string[] }
+interface EarnVaultEntry { address?: string }
+
+const fetchLabel = async <T>(scope: number | 'all', file: LabelFile, fallback: T): Promise<T> => {
+  try {
+    return (await refreshLabelFile(scope, file)) as T
+  }
+  catch (err) {
+    logger.warn({ ctx: 'vaults-cache', scope, file, err }, 'failed to fetch label')
+    return fallback
+  }
 }
 
-const getChainConfig = async (chainId: number): Promise<EulerChainEntry | undefined> => {
-  const chains = await $fetch<EulerChainEntry[]>('/api/euler-chains', { headers: INTERNAL_FETCH_HEADERS })
-  return chains.find(c => c.chainId === chainId)
-}
-
-/**
- * Distil the label payloads needed by the loader. Mirrors the subset of
- * useEulerLabels that feeds into the vault-loading pipeline:
- *   - verifiedVaultAddresses: union of every `vaults[chainId]` array across all products
- *   - earnVaults: the earn-vaults.json list (array of addresses)
- *
- * Does NOT extract entities/points/descriptions — those are UI-only and the
- * loader doesn't care about them. The snapshot is the substrate for both the
- * UI (which filters notExplorable at render time) and the public is-known /
- * metadata endpoints (which need to surface every labelled vault), so this
- * step does NOT honour notExplorable. Individual lens reverts (e.g. decommissioned
- * vaults) are tolerated by fetchBatch's per-item retry path.
- */
 const getLabels = async (chainId: number) => {
   const [products, earn] = await Promise.all([
-    $fetch<Record<string, EulerLabelProduct>>('/api/labels/products.json', {
-      query: { chainId },
-      headers: INTERNAL_FETCH_HEADERS,
-    }).catch(() => ({} as Record<string, EulerLabelProduct>)),
-    $fetch<Array<string | EarnVaultEntry>>('/api/labels/earn-vaults.json', {
-      query: { chainId },
-      headers: INTERNAL_FETCH_HEADERS,
-    }).catch(() => [] as Array<string | EarnVaultEntry>),
+    fetchLabel<Record<string, LabelProduct>>(chainId, 'products.json', {}),
+    fetchLabel<Array<string | EarnVaultEntry>>(chainId, 'earn-vaults.json', []),
   ])
-
-  const verifiedSet = new Set<string>()
+  const verified = new Set<string>()
   for (const product of Object.values(products)) {
-    product.vaults?.forEach(addr => verifiedSet.add(addr))
-    product.deprecatedVaults?.forEach(addr => verifiedSet.add(addr))
+    product.vaults?.forEach(addr => verified.add(addr))
+    product.deprecatedVaults?.forEach(addr => verified.add(addr))
   }
-
-  // Filter so downstream consumers (the loader, fetchEarnVaults) always get
-  // a string[] — a malformed entry whose `address` is missing or non-string
-  // would otherwise crash the lens batch.
   const earnVaults: string[] = earn.flatMap((entry) => {
     if (typeof entry === 'string') return [entry]
     return typeof entry?.address === 'string' ? [entry.address] : []
   })
-
   return {
-    verifiedVaultAddresses: [...verifiedSet],
-    earnVaults,
+    verifiedVaultAddresses: uniqueAddresses(verified),
+    earnVaults: uniqueAddresses(earnVaults),
   }
 }
 
-/**
- * Split verified addresses into EVK vs Securitize using the chain-wide
- * vault categorization. Labels tell us WHICH vaults to include in the
- * snapshot; categorization tells us WHICH LENS to use for each. Addresses
- * missing from the categorization (e.g. brand-new deployments the subgraph
- * hasn't picked up yet) default to EVK since the VaultLens handles any
- * ERC-4626 + EVK-compatible deployment.
- */
-const splitVerifiedByCategory = (
-  verifiedAddresses: string[],
-  securitizeSet: Set<string>,
-): { evkVaultAddresses: string[], securitizeVaultAddresses: string[] } => {
-  const evkVaultAddresses: string[] = []
-  const securitizeVaultAddresses: string[] = []
-  for (const addr of verifiedAddresses) {
-    if (securitizeSet.has(addr.toLowerCase())) securitizeVaultAddresses.push(addr)
-    else evkVaultAddresses.push(addr)
+const partitionVerified = async (
+  sdk: EulerSDK,
+  chainId: number,
+  verifiedAddrs: Address[],
+  earnAddrs: Address[],
+): Promise<{ evkAddrs: Address[], securitizeAddrs: Address[], earnAddrs: Address[] }> => {
+  const candidates = uniqueAddresses([...verifiedAddrs, ...earnAddrs])
+  const types = candidates.length
+    ? await sdk.vaultMetaService.fetchVaultTypes(chainId, candidates)
+    : {}
+  const earnSet = new Set(earnAddrs.map(a => a.toLowerCase()))
+  const evkAddrs: Address[] = []
+  const securitizeAddrs: Address[] = []
+  const earnAddrsOut: Address[] = []
+  for (const address of candidates) {
+    const lower = address.toLowerCase()
+    const type = types[address] ?? types[address.toLowerCase() as Address]
+    if (type === VaultType.SecuritizeCollateral) securitizeAddrs.push(address)
+    else if (type === VaultType.EulerEarn || earnSet.has(lower)) earnAddrsOut.push(address)
+    else evkAddrs.push(address)
   }
-  return { evkVaultAddresses, securitizeVaultAddresses }
+  return { evkAddrs, securitizeAddrs, earnAddrs: earnAddrsOut }
 }
 
+const fetchEscrowAddrs = async (sdk: EulerSDK, chainId: number): Promise<Address[]> => {
+  try {
+    const list = await sdk.eVaultService.fetchVerifiedVaultAddresses(
+      chainId,
+      [StandardEVaultPerspectives.ESCROW],
+    )
+    return uniqueAddresses(list)
+  }
+  catch (err) {
+    logger.warn({ ctx: 'vaults-cache', chainId, err }, 'failed to fetch escrow addresses')
+    return []
+  }
+}
+
+const wrapVault = (kind: SerialisedVaultKind) => (v: unknown): SerialisedVault => ({
+  kind,
+  data: v,
+})
+
 /**
- * The single refresh path. Called by the warm-cache plugin on a 5-min
- * schedule, and also by the /api/vaults handler as a cold-path fallback.
+ * Single refresh path. Force-runs by warm-cache; falls back as cold path
+ * for the handler when the cache is genuinely empty. Concurrent calls
+ * collapse via in-flight dedup so a warm-cycle refresh and a cold-path
+ * request arriving together share one upstream pass.
  */
 export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot> =>
   inFlight.run(chainId, async () => {
-    // Errors bubble up to callers (warm-cache plugin or /api/vaults handler),
-    // both of which log with their own context. A middle-layer catch here
-    // would double-log every failure.
-    const rpcUrl = process.env[`RPC_URL_${chainId}`]
-    if (!rpcUrl) throw new Error(`No RPC URL configured for chain ${chainId}`)
-
-    const cfg = await getChainConfig(chainId)
-    if (!cfg) throw new Error(`No euler-chains entry for chain ${chainId}`)
-
-    // Labels (what to include) + categories (how to categorize) run in parallel.
-    const [labels, categories] = await Promise.all([
-      getLabels(chainId),
-      getVaultCategories(chainId),
-    ])
-
-    const securitizeSet = new Set(categories.securitize.map(a => a.toLowerCase()))
-    const { evkVaultAddresses, securitizeVaultAddresses }
-      = splitVerifiedByCategory(labels.verifiedVaultAddresses, securitizeSet)
-
-    const ctx: FetchVaultContext = {
+    const sdk = await getServerSdk(chainId)
+    const labels = await getLabels(chainId)
+    const escrowAddrs = await fetchEscrowAddrs(sdk, chainId)
+    const { evkAddrs, securitizeAddrs, earnAddrs } = await partitionVerified(
+      sdk,
       chainId,
-      rpcUrl,
-      lensAddresses: {
-        vaultLens: cfg.addresses.lensAddrs.vaultLens,
-        eulerEarnVaultLens: cfg.addresses.lensAddrs.eulerEarnVaultLens,
-        utilsLens: cfg.addresses.lensAddrs.utilsLens,
-      },
-      coreAddresses: { evc: cfg.addresses.coreAddrs.evc },
-      peripheryAddresses: {
-        escrowedCollateralPerspective: cfg.addresses.peripheryAddrs.escrowedCollateralPerspective,
-      },
-      // Server skips Pyth simulation in v1: the client's post-hydration
-      // RPC refresh handles Pyth-fresh prices. See plan "Pyth on server: skip in v1".
-      pythHermesUrl: undefined,
-      verifiedVaultAddresses: labels.verifiedVaultAddresses,
-      earnVaultAddresses: labels.earnVaults,
+      labels.verifiedVaultAddresses,
+      labels.earnVaults,
+    )
+
+    // populateCollaterals / populateStrategyVaults DISABLED — deferred to
+    // the client's two-pass hydrate so we don't ship duplicated EVault
+    // instances inlined per collateral.
+    const opts: VaultFetchOptions = {
+      populateMarketPrices: true,
+      populateRewards: true,
+      populateIntrinsicApy: true,
+      populateCollaterals: false,
+      populateStrategyVaults: false,
     }
 
-    const snap = await loadChainSnapshot({
-      chainId,
-      ctx,
-      evkVaultAddresses,
-      securitizeVaultAddresses,
-      escrowAddresses: categories.escrow,
-      // Server doesn't honour nonExplorable filters — UI-only concerns.
-      // The snapshot contains all verified vaults; the client applies UI
-      // filters at render time.
-    })
+    const empty = { result: [] as unknown[], errors: [] as unknown[] }
+    const [evk, earn, securitize, escrow] = await Promise.all([
+      evkAddrs.length
+        ? sdk.eVaultService.fetchVaults(chainId, evkAddrs, opts)
+        : empty,
+      earnAddrs.length
+        ? sdk.eulerEarnService.fetchVaults(chainId, earnAddrs, opts)
+        : empty,
+      securitizeAddrs.length
+        ? sdk.securitizeVaultService.fetchVaults(chainId, securitizeAddrs, {
+            populateMarketPrices: true,
+            populateRewards: true,
+            populateIntrinsicApy: true,
+          })
+        : empty,
+      escrowAddrs.length
+        ? sdk.eVaultService.fetchVaults(chainId, escrowAddrs, opts)
+        : empty,
+    ])
 
-    const serialised = serialiseSnapshot(snap)
-    vaultsCache.set(String(chainId), serialised)
-    return serialised
+    for (const { errors, ctx } of [
+      { errors: evk.errors, ctx: 'evk' },
+      { errors: earn.errors, ctx: 'earn' },
+      { errors: securitize.errors, ctx: 'securitize' },
+      { errors: escrow.errors, ctx: 'escrow' },
+    ] as const) {
+      for (const issue of errors as unknown[]) {
+        logger.warn({ ctx: 'vaults-cache', chainId, kind: ctx, issue }, 'sdk fetch issue')
+      }
+    }
+
+    const payload: SerialisedSnapshot = encodeBigints({
+      chainId,
+      fetchedAt: Date.now(),
+      evkVaults: (evk.result as unknown[]).filter(Boolean).map(wrapVault('evk')),
+      earnVaults: (earn.result as unknown[]).filter(Boolean).map(wrapVault('earn')),
+      securitizeVaults: (securitize.result as unknown[]).filter(Boolean).map(wrapVault('securitize')),
+      escrowVaults: (escrow.result as unknown[]).filter(Boolean).map(wrapVault('escrow')),
+    }) as SerialisedSnapshot
+
+    vaultsCache.set(String(chainId), payload)
+    reportStatus('vaults-cache', `chain=${chainId}`, 'ok')
+    return payload
   })
+
+// silence unused: LABEL_FILES is re-exported by callers via the labels
+// endpoint module, importing here keeps the file dependency edge explicit.
+void LABEL_FILES

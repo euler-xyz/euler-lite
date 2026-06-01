@@ -9,7 +9,11 @@ export const POLL_INTERVAL_60S_MS = 60_000
 // ── RPC Batch Sizes ───────────────────────────────────────
 export const BATCH_SIZE_RPC_CALLS = 5
 export const BATCH_SIZE_VAULT_FETCH = 25
+export const BATCH_SIZE_VAULT_FETCH_HYPEREVM = 15
 export const BATCH_SIZE_PARALLEL_ROUNDS = 5
+
+export const getVaultFetchBatchSize = (chainId: number): number =>
+  chainId === 999 ? BATCH_SIZE_VAULT_FETCH_HYPEREVM : BATCH_SIZE_VAULT_FETCH
 
 // ── Request Batching Delays ───────────────────────────────
 export const BATCH_DELAY_COLLECT_MS = 100
@@ -52,6 +56,11 @@ export const SUBGRAPH_BLOCK_POLL_INTERVAL_MS = 1_000
  * back on the immediate triggerPortfolioRefresh + the 60s portfolio page
  * poll to eventually reconcile state. */
 export const SUBGRAPH_BLOCK_CATCHUP_TIMEOUT_MS = 30_000
+/** Delay (ms) after the subgraph catch-up before the final portfolio refetch.
+ * Goldsky fans reads across replicas, so the head can advance (and the sync
+ * gate pass) while the replica serving queryAccountVaults still lags a beat.
+ * One spaced refetch absorbs that without waiting for the 60s page poll. */
+export const POST_TX_REFRESH_DELAY_MS = 5_000
 
 // ── Basis Points ──────────────────────────────────────────
 export const BPS_BASE = 10_000n

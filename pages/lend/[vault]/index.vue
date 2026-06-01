@@ -1,20 +1,15 @@
 <script setup lang="ts">
-import { getAddress, formatUnits, type Address, zeroAddress } from 'viem'
-import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
-import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal, VaultSupplyApyModal, VaultUnverifiedDisclaimerModal, SwapTokenSelector, SlippageSettingsModal } from '#components'
-import { useToast } from '~/components/ui/composables/useToast'
-import { getProjectedRates, getCurrentLiquidationLTV, type SecuritizeVault, type Vault, type VaultAsset } from '~/entities/vault'
-import { isSecuritizeVault } from '~/entities/vault/factory'
+import { collectPythFeedsFromAdapters, isSecuritizeCollateralVault, type EVault, type SecuritizeCollateralVault, type TransactionPlan, type SwapQuote, SwapperMode } from '@eulerxyz/euler-v2-sdk'
+import type { VaultAsset } from '~/types/asset'
+import { isSecuritizeVault } from '~/utils/vault/categories'
 import { getHookDisabledWarning, getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
-import { collectPythFeedIds } from '~/entities/oracle'
-import { fetchBackendPrice } from '~/services/pricing/backendClient'
-import type { TxPlan } from '~/entities/txPlan'
+import { getAssetOraclePrice, getTokenUsdPrice } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
+import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
-import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
+import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
@@ -26,6 +21,12 @@ import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { createRaceGuard } from '~/utils/race-guard'
 import { isOpDisabled, OP_DEPOSIT } from '~/utils/vault-hooks'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { useModal } from '~/components/ui/composables/useModal'
+import { useToast } from '~/components/ui/composables/useToast'
+import { getAddress, type Address, formatUnits, zeroAddress } from 'viem'
+import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultSupplyApyModal, SwapTokenSelector, SlippageSettingsModal } from '#components'
+import { getProjectedRates } from '~/utils/vault/apy'
+import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 
 // Type definitions for vault display
 type VaultType = 'evk' | 'securitize'
@@ -65,7 +66,13 @@ const { error } = useToast()
 const reviewSupplyLabel = 'Review Supply'
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
-const { buildSupplyPlan, buildSwapAndSupplyPlan, executeTxPlan } = useEulerOperations()
+const { planDeposit, planDepositWithSwap, executePlan, prefetchPluginData } = useEulerTx()
+const { account: planAccount } = usePlanAccount()
+// Page validates "Not enough balance" up front (see `errorText` / `isSubmitDisabled`),
+// so the simulator never needs to forge wallet balances — `noBalanceOverride: true`
+// skips per-call balanceOf + slot probing.
+const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
+const buildLendStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
 const { getVault, getSecuritizeVault, getEscrowVault, updateVault, isEscrowLoadedOnce } = useVaults()
 const { isReady: isLabelsReady } = useEulerLabels()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
@@ -79,11 +86,12 @@ const shareLinkQuery = computed(() => {
   }
 })
 const { fetchSingleBalance } = useWallets()
-const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
+const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const vaultAddress = route.params.vault as string
 useOperationGuard([vaultAddress])
 const { name } = useEulerProductOfVault(vaultAddress)
-const { getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 
 // State
@@ -92,8 +100,8 @@ const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const isEstimatesLoading = ref(false)
 const amount = ref('')
-const plan = ref<TxPlan | null>(null)
-const estimateSupplyAPY = ref(0n)
+const plan = ref<TransactionPlan | null>(null)
+const estimateSupplyAPY = ref(0)
 
 // Swap & deposit state
 const selectedAsset = ref<VaultAsset | undefined>()
@@ -116,7 +124,7 @@ const isNativeWrap = computed(() => {
 })
 const { slippage: swapSlippage } = useSlippage({
   fromSymbol: () => selectedAsset.value?.symbol,
-  toSymbol: () => evkVault.value?.asset.symbol || securitizeVault.value?.asset.symbol,
+  toSymbol: () => eVault.value?.asset.symbol || securitizeVault.value?.asset.symbol,
 })
 const {
   sortedQuoteCards: swapQuoteCardsSorted,
@@ -135,32 +143,35 @@ const {
 } = useSwapQuotesParallel({
   amountField: 'amountOut',
   compare: 'max',
-  buildTxPlanForQuote: quote => buildSwapSupplyPlanFromQuote(quote, { includePermit2Call: false }),
+  buildTxPlanForQuote: (quote, _provider, context) => buildSwapSupplyPlanFromQuote(quote, context.account),
+  getPlanAccount: () => planAccount.value,
+  getStateOverrideOptions: () => buildLendStateOverrideOptions(),
+  prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
 })
 // Vault data - only one will be populated based on type
-const evkVault: Ref<Vault | undefined> = ref(undefined)
-const securitizeVault: Ref<SecuritizeVault | undefined> = ref(undefined)
+const eVault: Ref<EVault | undefined> = ref(undefined)
+const securitizeVault: Ref<SecuritizeCollateralVault | undefined> = ref(undefined)
 const balance = ref(0n)
 
 // Check if vault uses Pyth oracles (requires fresh prices)
-const hasPythOracles = (v: Vault | undefined): boolean => {
+const hasPythOracles = (v: EVault | undefined): boolean => {
   if (!v) return false
-  const feeds = collectPythFeedIds(v.oracleDetailedInfo)
+  const feeds = collectPythFeedsFromAdapters(v.oracle.adapters)
   return feeds.length > 0
 }
 
 // Check if vault has price failure (0n is valid - very small price)
-const hasPriceFailure = (v: Vault | undefined): boolean => {
+const hasPriceFailure = (v: EVault | undefined): boolean => {
   if (!v) return false
+  const price = getAssetOraclePrice(v)
   return (
-    v.liabilityPriceInfo?.queryFailure
-    || v.liabilityPriceInfo?.amountOutMid === undefined
-    || v.liabilityPriceInfo?.amountOutMid === null
+    price?.amountOutMid === undefined
+    || price?.amountOutMid === null
   )
 }
 
 // Check if vault needs refresh (Pyth detected OR price failure)
-const needsRefresh = (v: Vault | undefined): boolean => {
+const needsRefresh = (v: EVault | undefined): boolean => {
   return hasPythOracles(v) || hasPriceFailure(v)
 }
 
@@ -184,7 +195,7 @@ const needsRefresh = (v: Vault | undefined): boolean => {
       // Fast path: vault already in registry
       const registryEntry = registryGet(normalizedAddress)
       if (registryEntry?.type === 'evk') {
-        evkVault.value = registryEntry.vault as Vault
+        eVault.value = registryEntry.vault as EVault
       }
       else {
         // Wait for labels (so `verified` is set correctly) AND for the escrow
@@ -195,23 +206,23 @@ const needsRefresh = (v: Vault | undefined): boolean => {
         ])
         const entryAfterLoad = registryGet(normalizedAddress)
         if (entryAfterLoad?.type === 'evk') {
-          evkVault.value = entryAfterLoad.vault as Vault
+          eVault.value = entryAfterLoad.vault as EVault
         }
         else if (isKnownEscrowAddress(normalizedAddress)) {
-          evkVault.value = await getEscrowVault(vaultAddress) as Vault
+          eVault.value = await getEscrowVault(vaultAddress) as EVault
         }
         else {
-          evkVault.value = await getVault(vaultAddress)
+          eVault.value = await getVault(vaultAddress)
         }
       }
 
       // Load any collateral vaults that aren't already in registry
-      if (evkVault.value) {
+      if (eVault.value) {
         const { has: registryHas } = useVaultRegistry()
 
-        const collateralAddresses = evkVault.value.collateralLTVs
-          .filter(ltv => getCurrentLiquidationLTV(ltv) > 0n)
-          .map(ltv => ltv.collateral)
+        const collateralAddresses = eVault.value.collaterals
+          .filter(ltv => ltv.currentLiquidationLTV > 0)
+          .map(ltv => ltv.address)
 
         // Check and load missing collaterals in parallel
         await Promise.all(
@@ -237,18 +248,18 @@ const needsRefresh = (v: Vault | undefined): boolean => {
       }
     }
     catch (e) {
-      // If EVK vault load fails, try as securitize vault
-      console.warn('[lend] EVK vault load failed, trying securitize:', e)
+      // If EVault load fails, try as securitize vault
+      console.warn('[lend] EVault load failed, trying securitize:', e)
       securitizeVault.value = await getSecuritizeVault(vaultAddress)
     }
   }
 
-  // Refresh EVK vault if it uses Pyth oracles or has price failure
+  // Refresh EVault if it uses Pyth oracles or has price failure
   // Pyth prices are only valid for ~2 minutes, so always refresh when Pyth is detected
-  if (evkVault.value && needsRefresh(evkVault.value)) {
+  if (eVault.value && needsRefresh(eVault.value)) {
     const refreshedVault = await updateVault(vaultAddress)
-    if (!('type' in refreshedVault && refreshedVault.type === 'securitize')) {
-      evkVault.value = refreshedVault as Vault
+    if (!isSecuritizeCollateralVault(refreshedVault)) {
+      eVault.value = refreshedVault as EVault
     }
   }
 
@@ -262,11 +273,11 @@ const features = computed(() => VAULT_FEATURES[vaultType.value])
 const vaultType = computed<VaultType>(() => securitizeVault.value ? 'securitize' : 'evk')
 
 // Unified accessors - these provide a common interface regardless of vault type
-const _vaultName = computed(() => evkVault.value?.name || securitizeVault.value?.name || '')
-const asset = computed(() => evkVault.value?.asset || securitizeVault.value?.asset)
+const _vaultName = computed(() => eVault.value?.shares.name ?? securitizeVault.value?.shares.name ?? '')
+const asset = computed(() => eVault.value?.asset || securitizeVault.value?.asset)
 
-// For components that need the EVK Vault type (VaultLabelsAndAssets, VaultPoints, etc.)
-const vault = computed(() => evkVault.value)
+// For components that need the EVault type (VaultLabelsAndAssets, VaultPoints, etc.)
+const vault = computed(() => eVault.value)
 
 const fetchBalance = async () => {
   if (!asset.value?.address) {
@@ -290,11 +301,11 @@ const errorText = computed(() => {
   }
   return null
 })
-const isSupplyCapReached = computed(() => evkVault.value ? getIsSupplyCapReached(evkVault.value) : false)
+const isSupplyCapReached = computed(() => eVault.value ? getIsSupplyCapReached(eVault.value) : false)
 const assets = computed(() => [asset.value!])
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value) return false
-  if (evkVault.value && isOpDisabled(evkVault.value, OP_DEPOSIT)) return true
+  if (eVault.value && isOpDisabled(eVault.value, OP_DEPOSIT)) return true
   if (activeBalance.value < valueToNano(amount.value, activeAsset.value?.decimals)) return true
   if (isLoading.value || !(+amount.value)) return true
   if (needsSwap.value && !swapSelectedQuote.value) return true
@@ -302,7 +313,7 @@ const isSubmitDisabled = computed(() => {
   return false
 })
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vaultAddress))
-const isSwapRestricted = computed(() => needsSwap.value && isVaultRestrictedByCountry(vaultAddress, { counterpart: selectedAsset.value }))
+const isSwapRestricted = computed(() => needsSwap.value && isVaultRestrictedByCountry(vaultAddress))
 // Swap-deposit source: user is giving up the selected asset (reducing exposure),
 // so only hard-block applies. Soft-restrict intentionally does not apply here.
 // Pass the asset object so symbol/name pattern rules also apply.
@@ -312,7 +323,7 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
   if (isSourceAssetBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
   if (isSwapRestricted.value) return { message: 'Swap deposits are not available in your region', variant: 'warning' }
-  if (evkVault.value && isOpDisabled(evkVault.value, OP_DEPOSIT)) return { message: 'Deposits are currently disabled for this vault', variant: 'warning' }
+  if (eVault.value && isOpDisabled(eVault.value, OP_DEPOSIT)) return { message: 'Deposits are currently disabled for this vault', variant: 'warning' }
   if (isSupplyCapReached.value) return { message: 'Supply cap has been reached', variant: 'warning' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
   if (needsSwap.value && isSwapQuoteLoading.value && +amount.value > 0) return { message: 'Fetching swap quotes...', variant: 'warning' }
@@ -321,38 +332,39 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 })
 const totalRewardsAPY = computed(() => getSupplyRewardApy(vaultAddress))
 const hasRewards = computed(() => hasSupplyRewards(vaultAddress))
-const intrinsicApy = computed(() => getIntrinsicApy(asset.value?.address))
+const intrinsicApy = computed(() => getVaultIntrinsicApy(vault.value, enableIntrinsicApy.value))
 
 const baseSupplyApy = computed(() => {
   if (!features.value.hasInterestRate) return 0
-  if (!evkVault.value) return 0
-  return nanoToValue(evkVault.value.interestRateInfo.supplyAPY, 25)
+  if (!eVault.value) return 0
+  return getVaultSupplyApy(eVault.value)
 })
 const supplyApyWithIntrinsic = computed(() => baseSupplyApy.value + intrinsicApy.value)
 const supplyAPYDisplay = computed(() => {
-  if (!evkVault.value && !securitizeVault.value) return '0.00'
+  if (!eVault.value && !securitizeVault.value) return '0.00'
   return formatNumber(supplyApyWithIntrinsic.value + totalRewardsAPY.value)
 })
 const estimateSupplyAPYDisplay = computed(() => {
-  return formatNumber(nanoToValue(estimateSupplyAPY.value, 25))
+  return formatNumber(estimateSupplyAPY.value)
 })
 
 // Vault warnings for lend context
 const lendWarnings = computed(() => {
-  if (!evkVault.value) return []
+  if (!eVault.value) return []
   return [
-    getHookDisabledWarning(evkVault.value, OP_DEPOSIT),
-    getUtilisationWarning(evkVault.value, 'lend'),
-    getSupplyCapWarning(evkVault.value),
+    getHookDisabledWarning(eVault.value, OP_DEPOSIT),
+    getUtilisationWarning(eVault.value, 'lend'),
+    getSupplyCapWarning(eVault.value),
   ]
 })
 
 // Check if vault data is loaded
-const isVaultLoaded = computed(() => !!evkVault.value || !!securitizeVault.value)
+const isVaultLoaded = computed(() => !!eVault.value || !!securitizeVault.value)
 
 // Check if vault is verified - both EVK and securitize vaults have verified field
 const isVaultVerified = computed(() => {
-  return evkVault.value?.verified ?? securitizeVault.value?.verified ?? true
+  const address = eVault.value?.address ?? securitizeVault.value?.address
+  return address ? useVaultRegistry().isVerifiedVault(address) : true
 })
 
 const load = async () => {
@@ -361,12 +373,12 @@ const load = async () => {
     // Fetch fresh underlying asset balance for this specific vault
     await fetchBalance()
 
-    if (features.value.hasInterestRate && evkVault.value) {
-      estimateSupplyAPY.value = evkVault.value.interestRateInfo.supplyAPY + valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
+    if (features.value.hasInterestRate && eVault.value) {
+      estimateSupplyAPY.value = getVaultSupplyApy(eVault.value) + totalRewardsAPY.value + intrinsicApy.value
     }
     else {
       // For vaults without interest rate info, just use rewards
-      estimateSupplyAPY.value = valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
+      estimateSupplyAPY.value = totalRewardsAPY.value + intrinsicApy.value
     }
 
     // Show warning modal for any unverified vault
@@ -390,7 +402,7 @@ const load = async () => {
   }
 }
 
-const buildSwapSupplyPlanFromQuote = async (quote: SwapApiQuote, options: { includePermit2Call?: boolean } = {}): Promise<TxPlan> => {
+const buildSwapSupplyPlanFromQuote = async (quote: SwapQuote, account = planAccount.value): Promise<TransactionPlan> => {
   if (!selectedAsset.value) {
     throw new Error('No selected asset')
   }
@@ -400,15 +412,14 @@ const buildSwapSupplyPlanFromQuote = async (quote: SwapApiQuote, options: { incl
   if (isNative && !wrappedAddress) {
     throw new Error('Wrapped native token not found')
   }
-  return buildSwapAndSupplyPlan({
-    inputTokenAddress: (wrappedAddress || selectedAsset.value.address) as Address,
-    inputAmount,
-    quote,
-    requestedSlippage: swapSlippage.value,
-    includePermit2Call: options.includePermit2Call,
+  return planDepositWithSwap({
+    swapQuote: quote,
+    amount: inputAmount,
+    tokenIn: (wrappedAddress || selectedAsset.value.address) as Address,
     wrappedNativeInfo: isNative && wrappedAddress
       ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
       : undefined,
+    account,
   })
 }
 
@@ -424,23 +435,20 @@ const submit = async () => {
 
       try {
         if (needsSwap.value && swapEffectiveQuote.value) {
-          plan.value = await buildSwapSupplyPlanFromQuote(swapEffectiveQuote.value, { includePermit2Call: false })
+          plan.value = await buildSwapSupplyPlanFromQuote(swapEffectiveQuote.value)
         }
         else {
           const supplyAmount = valueToNano(amount.value || '0', asset.value.decimals)
           const wrappedAddr = isNativeWrap.value ? resolveWrappedNativeAddress(chainId.value!) : null
-          plan.value = await buildSupplyPlan(
-            vaultAddress,
-            asset.value.address,
-            supplyAmount,
-            undefined,
-            {
-              includePermit2Call: false,
-              wrappedNativeInfo: isNativeWrap.value && wrappedAddr
-                ? { wrappedTokenAddress: wrappedAddr, nativeAmount: supplyAmount }
-                : undefined,
-            },
-          )
+          plan.value = await planDeposit({
+            vaultAddress: vaultAddress as Address,
+            assetAddress: asset.value.address as Address,
+            amount: supplyAmount,
+            wrappedNativeInfo: isNativeWrap.value && wrappedAddr
+              ? { wrappedTokenAddress: wrappedAddr, nativeAmount: supplyAmount }
+              : undefined,
+            account: planAccount.value,
+          })
         }
       }
       catch (e) {
@@ -449,7 +457,7 @@ const submit = async () => {
       }
 
       if (plan.value) {
-        const ok = await runSimulation(plan.value)
+        const ok = await runSimulation(plan.value, buildLendStateOverrideOptions())
         if (!ok) {
           return
         }
@@ -490,7 +498,7 @@ const send = async () => {
       return
     }
 
-    let txPlan: TxPlan
+    let txPlan: TransactionPlan
     if (needsSwap.value && swapSelectedQuote.value) {
       txPlan = await buildSwapSupplyPlanFromQuote(swapSelectedQuote.value)
     }
@@ -500,14 +508,17 @@ const send = async () => {
     else {
       const supplyAmount = valueToNano(amount.value || '0', asset.value.decimals)
       const wrappedAddr = isNativeWrap.value ? resolveWrappedNativeAddress(chainId.value!) : null
-      txPlan = await buildSupplyPlan(vaultAddress, asset.value.address, supplyAmount, undefined, {
-        includePermit2Call: true,
+      txPlan = await planDeposit({
+        vaultAddress: vaultAddress as Address,
+        assetAddress: asset.value.address as Address,
+        amount: supplyAmount,
         wrappedNativeInfo: isNativeWrap.value && wrappedAddr
           ? { wrappedTokenAddress: wrappedAddr, nativeAmount: supplyAmount }
           : undefined,
+        account: planAccount.value,
       })
     }
-    await executeTxPlan(txPlan)
+    await executePlan(txPlan)
 
     modal.close()
     await updateEstimates()
@@ -530,31 +541,31 @@ const updateEstimates = useDebounceFn(async () => {
   if (!isVaultLoaded.value) return
   const gen = estimatesGuard.next()
   try {
-    if (features.value.hasInterestRate && evkVault.value) {
+    if (features.value.hasInterestRate && eVault.value) {
       // When swapping, use the swap output amount (vault-asset denominated)
       const supplyNano = needsSwap.value
         ? BigInt(swapEffectiveQuote.value?.amountOut || 0)
-        : valueToNano(amount.value, evkVault.value.decimals)
+        : valueToNano(amount.value, eVault.value.shares.decimals)
 
       if (needsSwap.value && !supplyNano) {
         // No swap quote yet — skip projection, keep current rate
-        estimateSupplyAPY.value = evkVault.value.interestRateInfo.supplyAPY + valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
+        estimateSupplyAPY.value = getVaultSupplyApy(eVault.value) + totalRewardsAPY.value + intrinsicApy.value
       }
       else {
         const projected = await getProjectedRates(
-          evkVault.value.address,
-          evkVault.value.interestRateInfo.cash,
-          evkVault.value.interestRateInfo.borrows,
+          eVault.value.address,
+          eVault.value.totalCash,
+          eVault.value.totalBorrowed,
           supplyNano,
           0n,
         )
         if (estimatesGuard.isStale(gen)) return
-        const rawAPY = projected?.supplyAPY ?? evkVault.value.interestRateInfo.supplyAPY
-        estimateSupplyAPY.value = rawAPY + valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
+        const rawAPY = projected ? nanoToValue(projected.supplyAPY, 25) : getVaultSupplyApy(eVault.value)
+        estimateSupplyAPY.value = rawAPY + totalRewardsAPY.value + intrinsicApy.value
       }
     }
     else {
-      estimateSupplyAPY.value = valueToNano(totalRewardsAPY.value + intrinsicApy.value, 25)
+      estimateSupplyAPY.value = totalRewardsAPY.value + intrinsicApy.value
     }
   }
   catch (e) {
@@ -572,8 +583,9 @@ const supplyApyModalData = computed(() => ({
   props: {
     lendingAPY: baseSupplyApy.value,
     intrinsicAPY: intrinsicApy.value,
-    intrinsicApyInfo: getIntrinsicApyInfo(asset.value?.address),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(vault.value, enableIntrinsicApy.value),
     campaigns: getSupplyRewardCampaigns(vaultAddress),
+    rewardVaultAddress: vaultAddress,
   },
 }))
 
@@ -621,7 +633,7 @@ const swapRoutedVia = computed(() => {
 
 const { priceImpact: swapPriceImpact } = useSwapPriceImpact({
   quote: swapEffectiveQuote,
-  toVault: evkVault,
+  toVault: eVault,
 })
 
 const shouldGateUnknownPriceImpact = computed(() =>
@@ -694,7 +706,6 @@ const openSwapTokenSelector = () => {
       currentAssetAddress: selectedAsset.value?.address || asset.value?.address,
       onSelect: onSelectSwapAsset,
       allowNativeCurrency: true,
-      pairedAsset: asset.value,
     },
   })
 }
@@ -709,6 +720,28 @@ const onRefreshSwapQuotes = () => {
 }
 
 // Fetch selected asset balance and USD price when it changes
+// Pre-prime ERC20 slot hints for vault asset + pay-with asset. One probe per
+// token, owner-/spender-agnostic; later estimate/sim calls skip access-list
+// discovery.
+watch(
+  [asset, selectedAsset],
+  ([vaultAsset, payWith]) => {
+    const tokens: Address[] = []
+    const seen = new Set<string>()
+    const push = (addr?: string) => {
+      if (!addr || isNativeCurrencyAddress(addr)) return
+      const key = addr.toLowerCase()
+      if (seen.has(key)) return
+      seen.add(key)
+      tokens.push(addr as Address)
+    }
+    push(vaultAsset?.address)
+    push(payWith?.address)
+    if (tokens.length) void primeSlotHintsFor(tokens)
+  },
+  { immediate: true },
+)
+
 watch(selectedAsset, async () => {
   fetchSelectedAssetBalance()
   if (needsSwap.value && amount.value) {
@@ -719,8 +752,7 @@ watch(selectedAsset, async () => {
     const priceAddr = isNativeCurrencyAddress(selectedAsset.value.address)
       ? resolveWrappedNativeAddress(chainId.value!) || selectedAsset.value.address
       : selectedAsset.value.address
-    const priceData = await fetchBackendPrice(priceAddr as Address)
-    swapAssetUsdPrice.value = priceData?.priceUsd
+    swapAssetUsdPrice.value = await getTokenUsdPrice(priceAddr as Address)
   }
   else {
     swapAssetUsdPrice.value = undefined
@@ -775,9 +807,9 @@ watch(amount, async () => {
   updateEstimates()
 })
 
-watch(address, () => {
-  fetchBalance()
-  fetchSelectedAssetBalance()
+watch([address, isConnected, chainId, () => asset.value?.address], () => {
+  void fetchBalance()
+  void fetchSelectedAssetBalance()
 })
 </script>
 
@@ -818,7 +850,7 @@ watch(address, () => {
 
       <div class="flex gap-32">
         <div class="hidden laptop:!block laptop:flex-[55] min-w-0">
-          <!-- EVK Vault Overview -->
+          <!-- EVault Overview -->
           <VaultOverview
             v-if="features.hasOverview && vault && vaultType === 'evk'"
             :vault="vault"

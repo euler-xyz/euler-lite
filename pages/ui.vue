@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import AssetInput from '~/components/entities/asset/AssetInput.vue'
-import type { VaultAsset } from '~/entities/vault'
+import type { VaultAsset } from '~/types/asset'
 import { useModal } from '~/components/ui/composables/useModal'
 import type { ToastVariant } from '~/components/ui/toast.types'
 import { AcknowledgeTermsModal } from '#components'
@@ -15,7 +15,7 @@ const inputErrorModel = ref('Error value')
 const alertVariants: ToastVariant[] = ['success', 'info', 'warning', 'error', 'neutral']
 const asset: VaultAsset = {
   name: 'Mock TON',
-  decimals: 18n,
+  decimals: 18,
   symbol: 'mTON',
   address: '0xc981cd0aC047D1Bc55aF4B6A9cF7fA82465363D0',
 }

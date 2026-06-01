@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import type { AnyVault } from '~/composables/useVaultRegistry'
+import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import type { VaultTypeBadge } from '~/composables/useVaultTypeBadges'
 
 const { vault, layout = 'inline', size = 'small', nudge = false, summaryOnly = false } = defineProps<{
-  vault: AnyVault
+  vault: EVault | EulerEarn | SecuritizeCollateralVault
   layout?: 'inline' | 'stacked'
   size?: 'small' | 'large'
   nudge?: boolean
@@ -19,10 +19,12 @@ const visibleBadges = computed(() => summaryOnly ? summaryBadges.value : badges.
 const visibleGovernanceType = computed(() => summaryOnly ? summaryGovernanceType.value : governanceType.value)
 const hasVisibleBadge = (badge: VaultTypeBadge): boolean => visibleBadges.value.includes(badge)
 const showGovernanceType = computed(() => hasVisibleBadge(visibleGovernanceType.value))
+const hasAnyBadge = computed(() => visibleBadges.value.length > 0)
 </script>
 
 <template>
   <div
+    v-if="hasAnyBadge"
     class="flex gap-8"
     :class="isStacked ? 'flex-col items-stretch' : 'items-center flex-wrap'"
   >
@@ -46,6 +48,13 @@ const showGovernanceType = computed(() => hasVisibleBadge(visibleGovernanceType.
     />
     <KeyringBadge
       v-if="hasVisibleBadge('private')"
+      :size="size"
+      :block="isStacked"
+      :as="tagElement"
+      :nudge="nudge"
+    />
+    <AccessControlBadge
+      v-if="hasVisibleBadge('accessControl')"
       :size="size"
       :block="isStacked"
       :as="tagElement"

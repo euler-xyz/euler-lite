@@ -1,25 +1,13 @@
 <script setup lang="ts">
-import { getAddress, formatUnits, type Address, zeroAddress } from 'viem'
-import { FixedPoint } from '~/utils/fixed-point'
-import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal, SwapTokenSelector, SlippageSettingsModal } from '#components'
-import { useToast } from '~/components/ui/composables/useToast'
-import {
-  convertSharesToAssets,
-  fetchSecuritizeVault,
-  type Vault,
-  type SecuritizeVault,
-  type VaultAsset,
-  getCashLimitedWithdrawAmount,
-  getProjectedRates,
-} from '~/entities/vault'
-import { isSecuritizeVault } from '~/entities/vault/factory'
-import { getSubAccountAddress } from '~/entities/account'
+import { getSubAccountAddress, isSecuritizeCollateralVault, type EVault, type SecuritizeCollateralVault, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import type { VaultAsset } from '~/types/asset'
+import { getProjectedRates } from '~/utils/vault/apy'
+import { isSecuritizeVault } from '~/utils/vault/categories'
 import { getHookDisabledWarning, getUtilisationWarning } from '~/composables/useVaultWarnings'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import type { TxPlan } from '~/entities/txPlan'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
-import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
+import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatNumber, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
@@ -29,6 +17,14 @@ import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { isOpDisabled, OP_REDEEM, OP_WITHDRAW } from '~/utils/vault-hooks'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
+import { useModal } from '~/components/ui/composables/useModal'
+import { useToast } from '~/components/ui/composables/useToast'
+import { getTxErrorMessage } from '~/utils/tx-errors'
+import { getAddress, formatUnits, zeroAddress, type Address } from 'viem'
+import { SwapTokenSelector, SlippageSettingsModal, OperationReviewModal } from '#components'
+import { FixedPoint } from '~/utils/fixed-point'
+import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
+import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 
 const router = useRouter()
 const route = useRoute()
@@ -36,22 +32,24 @@ const modal = useModal()
 const { error } = useToast()
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
-const { buildWithdrawPlan, buildRedeemPlan, buildWithdrawAndSwapPlan, buildRedeemAndSwapPlan, executeTxPlan } = useEulerOperations()
+const { planWithdrawOrRedeem, prepareTransactionPlan, executePreparedPlan, prefetchPluginData } = useEulerTx()
+const { account: cachedAccount } = useFreshAccount()
 const { getVault, getSecuritizeVault: _getSecuritizeVault, getEscrowVault: _getEscrowVault } = useVaults()
 const { isConnected, address } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const { fetchVaultShareBalance } = useWallets()
-const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
+const { runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const { getSupplyRewardApy } = useRewardsApy()
-const { withIntrinsicSupplyApy } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const vaultAddress = route.params.vault as string
 useOperationGuard([vaultAddress])
 const subAccountIndex = Number(route.params.subAccount)
 const subAccount = computed(() => {
   const addr = effectiveAddress.value
   if (!addr || isNaN(subAccountIndex)) return undefined
-  return getSubAccountAddress(addr, subAccountIndex)
+  return getSubAccountAddress(getAddress(addr), subAccountIndex)
 })
 
 const isLoading = ref(false)
@@ -59,24 +57,26 @@ const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const isEstimatesLoading = ref(false)
 const amount = ref('')
-const plan = ref<TxPlan | null>(null)
-const vault: Ref<Vault | SecuritizeVault | undefined> = ref()
+// `shallowRef` so Vue doesn't deep-unwrap the envelope's Account entity
+// (the Account class has private brand members that drop on UnwrapRef).
+const preparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
+const vault: Ref<EVault | SecuritizeCollateralVault | undefined> = ref()
 const asset: Ref<VaultAsset | undefined> = ref()
 
 // Check if vault is securitize (for things like supply/borrow which securitize doesn't have)
-const isSecuritizeVaultType = computed(() => vault.value && 'type' in vault.value && vault.value.type === 'securitize')
+const isSecuritizeVaultType = computed(() => !!vault.value && isSecuritizeCollateralVault(vault.value))
 
 const withdrawWarnings = computed(() => {
   if (!vault.value || isSecuritizeVaultType.value) return []
   return [
-    getHookDisabledWarning(vault.value as Vault, effectiveWithdrawOp.value),
-    getUtilisationWarning(vault.value as Vault, 'lend'),
+    getHookDisabledWarning(vault.value as EVault, effectiveWithdrawOp.value),
+    getUtilisationWarning(vault.value as EVault, 'lend'),
   ]
 })
 const assetsBalance = ref(0n)
 const sharesBalance = ref(0n)
 const delta = ref(0n)
-const estimateSupplyAPY = ref(0n)
+const estimateSupplyAPY = ref<number | bigint>(0)
 const estimatesError = ref('')
 
 // Withdraw & swap state
@@ -111,7 +111,9 @@ const {
 } = useSwapQuotesParallel({
   amountField: 'amountOut',
   compare: 'max',
-  buildTxPlanForQuote: quote => buildSwapWithdrawPlanFromQuote(quote),
+  buildTxPlanForQuote: (quote, _provider, context) => buildSwapWithdrawPlanFromQuote(quote, context.account),
+  getPlanAccount: () => cachedAccount.value,
+  prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
 })
 const rewardApy = computed(() => getSupplyRewardApy(vault.value?.address || ''))
 const amountFixed = computed(() => {
@@ -136,7 +138,7 @@ const isOutputAssetRestricted = computed(() =>
 )
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value) return false
-  if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return true
+  if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as EVault, effectiveWithdrawOp.value)) return true
   if (isOutputAssetBlocked.value || isOutputAssetRestricted.value) return true
   if (withdrawableAssets.value < amountFixed.value.value) return true
   if (isLoading.value || amountFixed.value.isZero() || amountFixed.value.isNegative()) return true
@@ -146,7 +148,7 @@ const isSubmitDisabled = computed(() => {
 })
 const reviewWithdrawDisabled = isSubmitDisabled
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as Vault, effectiveWithdrawOp.value)) return { message: 'Withdrawals are currently disabled for this vault', variant: 'warning' }
+  if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as EVault, effectiveWithdrawOp.value)) return { message: 'Withdrawals are currently disabled for this vault', variant: 'warning' }
   if (isOutputAssetBlocked.value || isOutputAssetRestricted.value) return { message: 'Receiving this asset is not available in your region', variant: 'warning' }
   if (estimatesError.value) return { message: estimatesError.value, variant: 'error' }
   if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return { message: 'Insufficient balance', variant: 'error' }
@@ -157,11 +159,14 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 })
 const supplyAPYDisplay = computed(() => {
   if (!vault.value) return '0.00'
-  const base = withIntrinsicSupplyApy(nanoToValue(vault.value.interestRateInfo.supplyAPY, 25), vault.value.asset.address)
+  const base = withVaultIntrinsicApy(getVaultSupplyApy(vault.value), vault.value, enableIntrinsicApy.value)
   return formatNumber(base + rewardApy.value)
 })
 const estimateSupplyAPYDisplay = computed(() => {
-  const base = withIntrinsicSupplyApy(nanoToValue(estimateSupplyAPY.value, 25), vault.value?.asset.address)
+  const estimate = typeof estimateSupplyAPY.value === 'bigint'
+    ? nanoToValue(estimateSupplyAPY.value, 25)
+    : estimateSupplyAPY.value
+  const base = withVaultIntrinsicApy(estimate, vault.value, enableIntrinsicApy.value)
   return formatNumber(base + rewardApy.value)
 })
 
@@ -178,9 +183,9 @@ watchEffect(async () => {
     deltaUsd.value = 0
     return
   }
-  assetsBalanceUsd.value = await getAssetUsdValueOrZero(assetsBalance.value, vault.value as Vault, 'off-chain')
-  withdrawableAssetsUsd.value = await getAssetUsdValueOrZero(withdrawableAssets.value, vault.value as Vault, 'off-chain')
-  deltaUsd.value = await getAssetUsdValueOrZero(delta.value, vault.value as Vault, 'off-chain')
+  assetsBalanceUsd.value = await getAssetUsdValueOrZero(assetsBalance.value, vault.value as EVault, 'off-chain')
+  withdrawableAssetsUsd.value = await getAssetUsdValueOrZero(withdrawableAssets.value, vault.value as EVault, 'off-chain')
+  deltaUsd.value = await getAssetUsdValueOrZero(delta.value, vault.value as EVault, 'off-chain')
 })
 
 // Swap quote helpers
@@ -219,6 +224,20 @@ const swapOutputExactDisplay = computed(() => {
   return `${formatUnits(amountOut, Number(selectedOutputAsset.value.decimals))} ${selectedOutputAsset.value.symbol}`
 })
 
+async function buildSwapWithdrawPlanFromQuote(quote: import('@eulerxyz/euler-v2-sdk').SwapQuote, account = cachedAccount.value) {
+  if (!asset.value) throw new Error('Asset not loaded')
+  const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value.decimals).lte(amountFixed.value)
+  return planWithdrawOrRedeem({
+    vaultAddress: vaultAddress as Address,
+    owner: (subAccount.value ?? effectiveAddress.value!) as Address,
+    isMax,
+    shares: sharesBalance.value,
+    assets: amountFixed.value.value,
+    swapQuote: quote,
+    account,
+  })
+}
+
 const swapRoutedVia = computed(() => {
   if (!swapSelectedProvider.value) return 'Not selected'
   if (!swapEffectiveQuote.value?.route?.length) return null
@@ -248,25 +267,6 @@ const swapRouteItems = computed(() => {
     formatAmount: formatSmartAmount,
   })
 })
-
-async function buildSwapWithdrawPlanFromQuote(quote: SwapApiQuote): Promise<TxPlan> {
-  const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
-  return isMax
-    ? buildRedeemAndSwapPlan({
-        vaultAddress: vaultAddress as Address,
-        sharesAmount: sharesBalance.value,
-        quote,
-        requestedSlippage: swapSlippage.value,
-        subAccount: subAccount.value,
-      })
-    : buildWithdrawAndSwapPlan({
-        vaultAddress: vaultAddress as Address,
-        assetsAmount: amountFixed.value.value,
-        quote,
-        requestedSlippage: swapSlippage.value,
-        subAccount: subAccount.value,
-      })
-}
 
 const requestSwapQuote = useDebounceFn(async () => {
   swapQuoteError.value = null
@@ -337,12 +337,12 @@ const load = async () => {
     // Check if securitize vault first
     const isSecuritize = await isSecuritizeVault(vaultAddress)
     if (isSecuritize) {
-      vault.value = await fetchSecuritizeVault(vaultAddress, buildFetchContext())
-      estimateSupplyAPY.value = 0n // Securitize vaults don't have interest rate
+      vault.value = await _getSecuritizeVault(vaultAddress)
+      estimateSupplyAPY.value = 0 // Securitize vaults don't have interest rate
     }
     else {
       vault.value = await getVault(vaultAddress)
-      estimateSupplyAPY.value = (vault.value as Vault).interestRateInfo.supplyAPY
+      estimateSupplyAPY.value = getVaultSupplyApy(vault.value as EVault)
     }
 
     asset.value = vault.value?.asset
@@ -367,17 +367,13 @@ const fetchShareBalance = async () => {
   sharesBalance.value = await fetchVaultShareBalance(vault.value.address, subAccount.value)
 }
 const updateBalance = async () => {
-  if ((!isConnected.value && !isSpyMode.value) || sharesBalance.value === 0n) {
+  if (!vault.value || (!isConnected.value && !isSpyMode.value) || sharesBalance.value === 0n) {
     assetsBalance.value = 0n
     delta.value = 0n
     return
   }
 
-  // Convert shares to assets
-  assetsBalance.value = await convertSharesToAssets(
-    vaultAddress,
-    sharesBalance.value,
-  )
+  assetsBalance.value = vault.value.convertToAssets(sharesBalance.value)
   delta.value = assetsBalance.value
 }
 const submit = async () => {
@@ -392,44 +388,33 @@ const submit = async () => {
 
       const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
 
+      preparedPlan.value = null
       try {
-        if (needsSwap.value && swapSelectedQuote.value) {
-          if (isMax) {
-            plan.value = await buildRedeemAndSwapPlan({
-              vaultAddress: vaultAddress as Address,
-              sharesAmount: sharesBalance.value,
-              quote: swapSelectedQuote.value,
-              requestedSlippage: swapSlippage.value,
-              subAccount: subAccount.value,
-            })
-          }
-          else {
-            plan.value = await buildWithdrawAndSwapPlan({
-              vaultAddress: vaultAddress as Address,
-              assetsAmount: amountFixed.value.value,
-              quote: swapSelectedQuote.value,
-              requestedSlippage: swapSlippage.value,
-              subAccount: subAccount.value,
-            })
-          }
-        }
-        else {
-          plan.value = isMax
-            ? await buildRedeemPlan(vaultAddress, amountFixed.value.value, sharesBalance.value, isMax, subAccount.value)
-            : await buildWithdrawPlan(vaultAddress, amountFixed.value.value, subAccount.value)
-        }
+        const rawPlan = await planWithdrawOrRedeem({
+          vaultAddress: vaultAddress as Address,
+          owner: (subAccount.value ?? effectiveAddress.value!) as Address,
+          isMax,
+          shares: sharesBalance.value,
+          assets: amountFixed.value.value,
+          swapQuote: needsSwap.value ? (swapSelectedQuote.value ?? undefined) : undefined,
+          // Pass the race-replaced cached Account so planWithdraw/planRedeem
+          // skip the per-click freshPlanContext.fetchAccount round-trip.
+          account: cachedAccount.value,
+        })
+        // Run plugins + approval resolution ONCE so simulate/execute (and the
+        // modal's display steps) all see the same enriched plan. Without this
+        // the SDK would re-run plugins inside simulate, the modal, and execute.
+        preparedPlan.value = await prepareTransactionPlan(rawPlan, { account: cachedAccount.value })
       }
       catch (e) {
-        console.warn('[lend/withdraw] failed to build plan', e)
-        plan.value = null
+        console.warn('[lend/withdraw] failed to build/prepare plan', e)
+        simulationError.value = await getTxErrorMessage(e)
+        return
       }
 
-      if (plan.value) {
-        const ok = await runSimulation(plan.value)
-        if (!ok) {
-          return
-        }
-      }
+      // `preparedPlan.value` is non-null here — the try block either set it or returned.
+      const ok = await runPreparedSimulation(preparedPlan.value!)
+      if (!ok) return
 
       const reviewType = needsSwap.value ? 'swap-withdraw' as const : 'withdraw' as const
       modal.open(OperationReviewModal, {
@@ -437,7 +422,7 @@ const submit = async () => {
           type: reviewType,
           asset: asset.value,
           amount: amount.value,
-          plan: plan.value || undefined,
+          prepared: preparedPlan.value!,
           quoteFetchedAt: needsSwap.value ? swapEffectiveQuoteFetchedAt.value : null,
           swapToAsset: needsSwap.value ? selectedOutputAsset.value : undefined,
           swapToAmount: needsSwap.value ? swapEstimatedOutput.value : undefined,
@@ -461,36 +446,21 @@ const send = async () => {
       return
     }
 
-    const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
-    let txPlan: TxPlan
+    if (!preparedPlan.value) return
+    await executePreparedPlan(preparedPlan.value)
 
-    if (needsSwap.value && swapSelectedQuote.value) {
-      const quote = swapSelectedQuote.value
-      if (isMax) {
-        txPlan = await buildRedeemAndSwapPlan({
-          vaultAddress: vaultAddress as Address,
-          sharesAmount: sharesBalance.value,
-          quote,
-          requestedSlippage: swapSlippage.value,
-          subAccount: subAccount.value,
-        })
-      }
-      else {
-        txPlan = await buildWithdrawAndSwapPlan({
-          vaultAddress: vaultAddress as Address,
-          assetsAmount: amountFixed.value.value,
-          quote,
-          requestedSlippage: swapSlippage.value,
-          subAccount: subAccount.value,
-        })
-      }
-    }
-    else {
-      txPlan = isMax
-        ? await buildRedeemPlan(vaultAddress, amountFixed.value.value, sharesBalance.value, isMax, subAccount.value)
-        : await buildWithdrawPlan(vaultAddress, amountFixed.value.value, subAccount.value)
-    }
-    await executeTxPlan(txPlan)
+    // The form stays mounted after the tx, but wallet-balance reads aren't
+    // auto-invalidated post-tx (sdk-query-policy: queryTokenBalances /
+    // queryBalanceOf carry a 1-min browsing stale time and no invalidateAfterTx),
+    // and `assetsBalance`/`sharesBalance` are one-shot refs set at load. Evict the
+    // balance queries and re-read so "Available for withdraw" reflects the new
+    // balance instead of the pre-withdraw amount.
+    await invalidateSdkQueries(['queryTokenBalances', 'queryBalanceOf', 'queryNativeBalance'])
+    await fetchShareBalance()
+    await updateBalance()
+    amount.value = ''
+    preparedPlan.value = null
+    resetSwapQuoteState()
 
     modal.close()
     setTimeout(() => {
@@ -536,22 +506,22 @@ const updateAsyncEstimates = useDebounceFn(async () => {
   }
   const gen = estimatesGuard.next()
   try {
-    const v = vault.value as Vault
-    const amountNano = valueToNano(amount.value, v.decimals)
+    const v = vault.value as EVault
+    const amountNano = valueToNano(amount.value, v.shares.decimals)
     const projected = await getProjectedRates(
       v.address,
-      v.interestRateInfo.cash,
-      v.interestRateInfo.borrows,
+      v.totalCash,
+      v.totalBorrowed,
       -amountNano,
       0n,
     )
     if (estimatesGuard.isStale(gen)) return
-    estimateSupplyAPY.value = projected?.supplyAPY ?? v.interestRateInfo.supplyAPY
+    estimateSupplyAPY.value = projected?.supplyAPY ?? getVaultSupplyApy(v)
   }
   catch (e) {
     if (estimatesGuard.isStale(gen)) return
     logWarn('lend-withdraw/asyncEstimates', e)
-    estimateSupplyAPY.value = (vault.value as Vault)?.interestRateInfo.supplyAPY || 0n
+    estimateSupplyAPY.value = getVaultSupplyApy(vault.value as EVault)
   }
   finally {
     if (!estimatesGuard.isStale(gen)) {
@@ -633,7 +603,7 @@ watch(swapSelectedQuote, () => {
               v-model="amount"
               label="Withdraw amount"
               :asset="asset"
-              :vault="(vault as Vault)"
+              :vault="(vault as EVault)"
               :balance="withdrawableAssets"
               maxable
             />

@@ -21,7 +21,7 @@ export type EulerLabelVaultOverride = {
   restricted?: string[]
   notExplorableLend?: boolean
   notExplorableBorrow?: boolean
-  keyring?: boolean
+  tags?: string[]
 }
 
 export type EulerLabelProduct = {
@@ -38,7 +38,9 @@ export type EulerLabelProduct = {
   block?: string[]
   recentlyAddedVaults?: string[]
   vaultOverrides?: Record<string, EulerLabelVaultOverride>
-  keyring?: boolean
+  // Freeform classification tags, e.g. 'keyring' or 'access control'. Replaces
+  // the former `keyring` boolean.
+  tags?: string[]
 }
 
 export type EulerLabelEarnVaultEntry = {

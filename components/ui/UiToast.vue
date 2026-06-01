@@ -117,7 +117,6 @@ if (!props.persistent && props.duration > 0) {
   align-items: stretch;
   width: 100%;
   min-width: min(220px, 100%);
-  max-width: 320px;
   color: var(--ui-toast-neutral-text-color);
   background-color: var(--ui-toast-background-color);
   border: 1px solid var(--ui-toast-neutral-border-color);
@@ -230,12 +229,13 @@ if (!props.persistent && props.duration > 0) {
 
   &__body {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     width: 100%;
   }
 
   &__icon {
     flex-shrink: 0;
+    margin-top: 1px;
   }
 
   &__content {
@@ -243,7 +243,6 @@ if (!props.persistent && props.duration > 0) {
     flex-direction: column;
     flex: 1;
     min-width: 0;
-    align-self: center;
     gap: 2px;
   }
 

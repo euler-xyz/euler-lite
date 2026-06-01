@@ -1,89 +1,104 @@
 # Intrinsic APY
 
-Intrinsic APY represents yield that is native to the underlying asset itself, independent of the Euler lending market. For example, wstETH earns staking yield from Lido, sDAI earns the DAI Savings Rate, and Pendle PT tokens earn implied yield from the fixed-rate market.
+Intrinsic APY is yield native to the underlying asset — independent of the Euler lending market. Examples: wstETH earns staking yield from Lido, sDAI earns the DAI Savings Rate, Pendle PT tokens earn implied yield from the fixed-rate market.
 
-Euler Lite adds this intrinsic yield on top of the vault's lending/borrowing APY so users see the total effective return.
+Euler Lite compounds this intrinsic yield onto the vault's lending/borrowing APY so users see the total effective return.
 
 ## Architecture
 
-All provider fetching, filtering, and APY extraction happens **server-side**. The client issues one parameter-less request per chain and receives a flat `{ [lowercaseAddress]: { apy, provider, source? } }` map. No giant upstream payloads hit the wire, and the client carries no provider-specific code.
+Intrinsic APY data is **populated onto the vault entity by the SDK at fetch time**. Every vault that goes through `eVaultService.fetchVaults` (or `eulerEarnService.fetchVaults`, `securitizeVaultService.fetchVaults`) carries an `intrinsicApy?: IntrinsicApyInfo` field. Lite reads it directly off the entity — no separate request from the browser, no address-keyed lookup table.
+
+The SDK's `intrinsicApyService` is what actually pulls the data from V3 (`/v3/apys/intrinsic`), which in turn aggregates DefiLlama, Pendle, Securitize, Stablewatch, Ether.fi, Puffer, Spark, Treehouse, Ondo, Renzo, Midas, Yo, and more. Toggle is `populateIntrinsicApy: true` in the fetch options.
 
 ```text
-┌──────────────────────────────┐
-│    useIntrinsicApy()         │  Client composable
-│  - TTL cache (5 min)         │  Single GET /api/intrinsic-apy?chainId=X
-│  - address → info lookup     │
-│  - chain-switch invalidation │
-└──────────────┬───────────────┘
-               │  GET /api/intrinsic-apy?chainId=X
-               ▼
-┌──────────────────────────────┐
-│  /api/intrinsic-apy.get.ts   │  Thin HTTP handler
-│   rate-limit, chain-id check │
-└──────────────┬───────────────┘
-               ▼
-┌──────────────────────────────┐
-│  server/utils/intrinsic-apy  │  Orchestrator
-│  - filter intrinsicApySources│
-│    by chain → group by       │
-│    provider → run extractor  │
-│  - cache upstream JSON for   │
-│    5 min, in-flight dedup    │
-│  - merge [address, info] into│
-│    a single flat map         │
-└──────────────┬───────────────┘
-               │  fanout over providers
-   ┌───────────┼──────────────┬───────────────┐
-   ▼           ▼              ▼               ▼
-DefiLlama   Pendle (per-   Securitize     Stablewatch,
-yields      market API)   (per-symbol)    Renzo, Midas,
-            per-chain                     Yo, Ether.fi,
-                                          Puffer, Spark,
-                                          Treehouse, Ondo,
-                                          Benqi, Avant …
+┌───────────────────────────────────────────────────────────────────┐
+│                       Lite call sites                              │
+│  withVaultIntrinsicApy(base, vault, enabled)                       │
+│  getVaultIntrinsicApy(vault, enabled)                              │
+│  getVaultIntrinsicApyInfo(vault, enabled)                          │
+└───────────────────────────────────┬───────────────────────────────┘
+                                    │ reads vault.intrinsicApy
+                                    ▼
+┌───────────────────────────────────────────────────────────────────┐
+│                     SDK-owned EVault / EulerEarn                    │
+│            intrinsicApy?: { apy, provider, source? }                │
+└───────────────────────────────────┬───────────────────────────────┘
+                                    │ populated by
+                                    ▼
+┌───────────────────────────────────────────────────────────────────┐
+│   sdk.eVaultService.fetchVaults(chainId, addrs, {                  │
+│     populateIntrinsicApy: true, …                                  │
+│   })                                                                │
+│   sdk.intrinsicApyService.fetchChainIntrinsicApys(chainId)          │
+└───────────────────────────────────┬───────────────────────────────┘
+                                    │ V3 batched/paginated reads via
+                                    │  /api/v3/v3/apys/intrinsic
+                                    ▼
+                              euler v3 backend
+                       (DefiLlama, Pendle, Securitize, …)
 ```
 
-## Data flow
+## Where it's populated
 
-1. Client hits `GET /api/intrinsic-apy?chainId=X`.
-2. Server filters `intrinsicApySources` to entries where `chainId === X` and groups by provider.
-3. Each provider's extractor fetches its upstream(s) (cached per-URL with 5 min TTL and in-flight dedup) and returns `[lowercaseAddress, IntrinsicApyInfo][]`.
-4. Extractors are composed via `Promise.allSettled` — one provider failing never kills the response.
-5. Results are merged into `Record<lowercaseAddress, IntrinsicApyInfo>` and returned.
+`utils/sdk-fetch-options.ts:liteVaultFetchOptions` enables intrinsic APY for every Lite vault fetch:
 
-### Server entry point
+```ts
+export const liteVaultFetchOptions = {
+  populateMarketPrices: true,
+  populateCollaterals: true,
+  populateStrategyVaults: true,
+  populateRewards: true,
+  populateIntrinsicApy: true,   // ← here
+  eVaultFetchOptions: {
+    populateMarketPrices: true,
+    populateCollaterals: true,
+    populateRewards: true,
+    populateIntrinsicApy: true,
+  },
+}
 
-`server/utils/intrinsic-apy.ts` exports `getIntrinsicApyForChain(chainId)`. The HTTP handler is a thin wrapper that does request validation + rate-limiting; all the interesting code is in the util.
-
-### Upstream caching
-
-Every upstream URL is cached under its own key in a shared TTL cache (5 min). Shared upstreams (e.g. `/defillama` global pools list, a pendle market used across chains) are fetched once and reused across every chain request in the TTL window. In-flight dedup collapses concurrent callers onto a single network round-trip per key.
-
-### Warm-cache
-
-`server/plugins/warm-cache.ts` calls `refreshIntrinsicApyForChain(chainId)` directly every 5 minutes for each enabled chain — not via HTTP. The direct call bypasses the handler's fresh-cache short-circuit and always forces a re-merge, so the cache entry is overwritten while the previous one is still within its TTL window. User requests arriving during a refresh continue to read the still-fresh old entry from `mergedCache`. If a request lands in the narrow gap where the old entry has just expired but the new one hasn't landed yet, the handler's SWR path (`getStale()` + `scheduleBackgroundRefresh`) serves the stale entry immediately rather than awaiting the in-flight orchestration.
-
-## Client types (`entities/intrinsic-apy.ts`)
-
-```typescript
-interface IntrinsicApyInfo {
-  readonly apy: number        // percentage (e.g. 3.5 = 3.5%)
-  readonly provider: string   // human-readable (e.g. "Lido via DefiLlama", "Pendle")
-  readonly source?: string    // URL to verify the APY
+export const liteSecuritizeVaultFetchOptions = {
+  populateMarketPrices: true,
+  populateRewards: true,
+  populateIntrinsicApy: true,
 }
 ```
 
-The client never imports provider-specific types. The endpoint's response shape (`Record<string, IntrinsicApyInfo>`) is the entire client contract.
+These options flow into every place the registry is filled: `composables/useVaults.ts` for the chain-wide pass, `composables/useVaultRegistry.ts:getOrFetch` for lazy resolution, and `server/utils/vaults-cache.ts` for the warm snapshot pipeline.
 
-## Source config
+## Helpers
 
-`entities/custom.ts` exports `intrinsicApySources: readonly IntrinsicApySourceConfig[]`. Each entry ties a vault address to a provider-specific lookup key (pool ID for DefiLlama, market address for Pendle, symbol for Securitize, etc.). This single config drives both the source list the client reasons about and the extraction the server performs.
+`utils/vault-intrinsic-apy.ts` exposes three pure functions:
 
-To add a new APY source, append an entry to `intrinsicApySources` — no server or client code changes required as long as the provider is already supported.
+```ts
+import type { IntrinsicApyInfo } from '@eulerxyz/euler-v2-sdk'
+
+export const EMPTY_INTRINSIC_APY: IntrinsicApyInfo = { apy: 0, provider: '' }
+
+export function getVaultIntrinsicApyInfo(vault, enabled): IntrinsicApyInfo
+export function getVaultIntrinsicApy(vault, enabled): number
+export function withVaultIntrinsicApy(baseApy: number, vault, enabled: boolean): number
+```
+
+- `enabled` is the per-user toggle from `useUserSettings().settings.value.enableIntrinsicApy`. When false, the helpers return zero (or `baseApy` for `withVaultIntrinsicApy`).
+- `withVaultIntrinsicApy` applies the canonical compound formula `base + (1 + base/100) * intrinsic`. Same formula for supply and borrow; the role lives at the call site (e.g. `borrowApy - rewards` vs `supplyApy + rewards`).
+- `getVaultIntrinsicApyInfo` returns the full info object including `provider` and `source` for use in APY-breakdown modals.
+
+The SDK exposes an equivalent on its side: `computeSupplyApyBreakdown(vault)` returns `{ lending, intrinsicApy, rewards, total }` with the compounding pre-applied. Use whichever fits the call site; both produce the same numbers for supply.
+
+## User toggle
+
+`composables/useUserSettings.ts` defines `enableIntrinsicApy: boolean` (default `true`). The toggle lives in `components/entities/settings/SettingsModal.vue`. Every call site that displays intrinsic APY reads the flag and passes it into the helper, so toggling off reverts displays to base APY without rebuilding the registry.
+
+## Data refresh cadence
+
+Intrinsic APY values rotate when the V3 backend's source providers update — typically once per epoch / once per day for slow-moving assets, more often for staked-token rates. The data is part of the vault entity, so it refreshes whenever the vault entity does:
+
+- **Snapshot pipeline** (`server/utils/vaults-cache.ts`): rewarmed every minute when V3 is configured, every 5 min otherwise. See [server-side caching](./server-side-caching.md).
+- **In-session refresh**: the browsing SDK's QueryClient cache for `queryEVaultInfoFull` is 5 min stale. Subsequent vault reads (e.g. lazy resolution of an off-label vault) re-fetch through the SDK and update `vault.intrinsicApy` in place.
 
 ## Adding a new provider
 
-1. Add the new `provider` variant to `IntrinsicApySourceConfig` in `entities/custom.ts`.
-2. Add an upstream URL entry to `UPSTREAM_URLS` in `server/utils/intrinsic-apy.ts`.
-3. Implement the extraction function (mirror the existing `extract*` functions). If the provider has a single URL with a scalar APY applied uniformly to every source, add it to `SIMPLE_SPECS` instead — no new function needed.
-4. Wire it up in the `extractForProvider` switch.
+V3 owns the provider list. Add the asset upstream in the V3 backend's intrinsic-APY adapter and it appears in `vault.intrinsicApy` here automatically the next time the snapshot warms.
+
+If a provider needs Lite-specific handling before it is available in V3, keep the data on an explicit current data path such as a labels payload field and wire it into the vault display code with tests. The preferred durable path is upstream into V3.

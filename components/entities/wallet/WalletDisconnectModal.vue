@@ -8,13 +8,12 @@ const { address } = useWagmi()
 const { disconnect } = useDisconnect()
 const { chainId } = useEulerAddresses()
 const { isSpyMode, spyAddress, clearSpyMode } = useSpyMode()
-const { copyToClipboard, isCopied } = useClipboardCopy()
 
 const displayAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const explorerLink = computed(() => getExplorerLink(displayAddress.value, chainId.value, true))
 
 const onCopyAddressClick = () => {
-  copyToClipboard(displayAddress.value || '')
+  navigator.clipboard.writeText(displayAddress.value || '')
 }
 
 const onDisconnectClick = () => {
@@ -43,7 +42,7 @@ const onDisconnectClick = () => {
         <UiButton
           variant="primary-stroke"
           size="medium"
-          :icon="isCopied(displayAddress || '') ? 'check' : 'copy'"
+          icon="copy"
           icon-only
           @click="onCopyAddressClick"
         />

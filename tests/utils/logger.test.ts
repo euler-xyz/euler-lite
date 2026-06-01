@@ -154,12 +154,24 @@ describe('shared logger — Node branch (JSON to stdout)', () => {
 describe('shared logger — browser branch (console)', () => {
   const consoleSpies: Record<string, ReturnType<typeof vi.spyOn>> = {}
   let originalWindow: unknown
+  const setBrowserWindow = (
+    options: { search?: string, verboseStorage?: string | null } = {},
+  ) => {
+    const { search = '', verboseStorage = null } = options
+    ;(globalThis as { window?: unknown }).window = {
+      location: { search },
+      localStorage: {
+        getItem: vi.fn((key: string) => key === 'euler_verbose' ? verboseStorage : null),
+      },
+    }
+  }
 
   beforeEach(() => {
     originalWindow = (globalThis as { window?: unknown }).window
-    ;(globalThis as { window?: unknown }).window = {} // simulate browser
+    setBrowserWindow()
     consoleSpies.warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     consoleSpies.info = vi.spyOn(console, 'info').mockImplementation(() => {})
+    consoleSpies.error = vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.resetModules()
   })
 
@@ -169,13 +181,38 @@ describe('shared logger — browser branch (console)', () => {
     Object.values(consoleSpies).forEach(s => s.mockRestore())
   })
 
-  it('emits via console.* with a `[ctx]` prefix and a fields object', async () => {
+  it('suppresses warn/info by default but keeps error/fatal visible', async () => {
+    const { logger } = await import('~/utils/logger')
+    logger.warn({ ctx: 'vault/test', chainId: 8453 }, 'hello')
+    logger.info({ ctx: 'vault/test', chainId: 8453 }, 'info')
+    logger.error({ ctx: 'vault/test', chainId: 8453 }, 'boom')
+
+    expect(consoleSpies.warn).not.toHaveBeenCalled()
+    expect(consoleSpies.info).not.toHaveBeenCalled()
+    expect(consoleSpies.error).toHaveBeenCalledTimes(1)
+    const call = consoleSpies.error.mock.calls.at(-1)!
+    expect(call[0]).toBe('[vault/test] (chainId=8453)')
+    expect(call[1]).toBe('boom')
+    expect(call[2]).toMatchObject({ ctx: 'vault/test', chainId: 8453 })
+  })
+
+  it('emits lower-level logs when opted in with ?verbose', async () => {
+    setBrowserWindow({ search: '?verbose' })
+    vi.resetModules()
     const { logger } = await import('~/utils/logger')
     logger.warn({ ctx: 'vault/test', chainId: 8453 }, 'hello')
     const call = consoleSpies.warn.mock.calls.at(-1)!
     expect(call[0]).toBe('[vault/test] (chainId=8453)')
     expect(call[1]).toBe('hello')
     expect(call[2]).toMatchObject({ ctx: 'vault/test', chainId: 8453 })
+  })
+
+  it('emits lower-level logs when opted in through localStorage', async () => {
+    setBrowserWindow({ verboseStorage: '1' })
+    vi.resetModules()
+    const { logger } = await import('~/utils/logger')
+    logger.warn({ ctx: 'vault/test', chainId: 8453 }, 'hello')
+    expect(consoleSpies.warn).toHaveBeenCalledTimes(1)
   })
 })
 

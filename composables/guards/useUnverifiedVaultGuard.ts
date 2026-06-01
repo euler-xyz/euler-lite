@@ -1,6 +1,5 @@
 import { computed, provide, reactive, ref, watch, onUnmounted, type ComputedRef } from 'vue'
 import { normalizeAddress } from '~/utils/normalizeAddress'
-import { verifiedVaultAddresses, earnVaults } from '~/utils/eulerLabelsState'
 import { registerOperationBlocker, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
 
 export interface UnverifiedVaultGuardState {
@@ -10,6 +9,7 @@ export interface UnverifiedVaultGuardState {
 
 export const useUnverifiedVaultGuard = (vaultAddresses: ComputedRef<string[]>) => {
   const { isKnownEscrowAddress } = useVaultRegistry()
+  const { verifiedVaultAddresses, earnVaults } = useEulerLabels()
 
   const sessionAccepted = ref(false)
 

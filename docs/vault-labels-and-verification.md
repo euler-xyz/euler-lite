@@ -244,19 +244,19 @@ Oracle adapter metadata is loaded lazily from the [oracle-checks](https://github
 
 The `useEulerLabels` composable builds a set of verified vault addresses from the labels data: a vault address is added if it appears in any product's `vaults` or `deprecatedVaults` array. This drives the `vault.verified` flag — a precondition for governor verification, but not the full verdict.
 
-The full "is this vault verified?" verdict (used by the UI to render markets, and by the `/api/public/is-known` endpoint) additionally requires the on-chain governor to match a declared entity address. See `entities/vault/governor-verification.ts` for the shared rule, and the "Programmatic verification lookup" section below for the public endpoint.
+The full "is this vault verified?" verdict (used by the UI to render markets, and by the `/api/public/is-known` endpoint) additionally requires the on-chain governor to match a declared entity address. See `utils/vault/governor-verification.ts` for the shared rule, and the "Programmatic verification lookup" section below for the public endpoint.
 
 ### Ungoverned vaults
 
 Vaults with `governorAdmin = address(0)` are supported via an **artificial entity** convention: declare an `ungoverned` entity in `entities.json` whose `addresses` map contains the zero address, then list ungoverned vaults under a product that declares `entity: ["ungoverned"]`. The shared governor rule then matches the vault's zero `governorAdmin` against the artificial entity, no special-case code path needed. The UI shows the "Ungoverned" governance type chip independently of entity matching (driven by `governorAdmin === zeroAddress` directly).
 
-This keeps the bridge endpoints forward-compatible with the successor backend, which treats ungoverned vaults the same way for verification purposes while sourcing the "ungoverned" presentation signal from the on-chain governor value.
+This keeps the bridge endpoint verification aligned with the UI: label/entity matching proves the vault is governed by the declared entity, while the "Ungoverned" presentation signal comes directly from the on-chain `governorAdmin` value.
 
 ### How `vault.verified` Is Set
 
 | Vault Source | Verification Method |
 |-------------|---------------------|
-| **EVK vaults** | Address appears in `verifiedVaultAddresses` from labels |
+| **EVaults** | Address appears in `verifiedVaultAddresses` from labels |
 | **Earn vaults** | Default repo: loaded from `eulerEarnGovernedPerspective` on-chain. Alternative repos: verified if in `earnVaults` from labels |
 | **Escrow vaults** | Loaded from `escrowedCollateralPerspective` on-chain (always verified) |
 | **Securitize vaults** | Address appears in `verifiedVaultAddresses` from labels |
@@ -273,7 +273,7 @@ Two on-chain perspective contracts provide additional verification:
 
 ### Categories
 
-Every EVK vault belongs to one of two categories:
+Every EVault belongs to one of two categories:
 
 | Category | Description |
 |----------|-------------|
@@ -290,26 +290,24 @@ The vault type determines how the vault is fetched and displayed:
 | `'earn'` | EulerEarn aggregator vault (yield optimization) |
 | `'securitize'` | Securitize vault (ERC-4626 without borrowing) |
 
-Type is detected via `/api/vault-categories`, which categorizes every vault on the chain using the subgraph's factory field plus an on-chain check against `EscrowedCollateralPerspective`.
+Type is detected through SDK vault metadata and Lite UI categorization helpers in `utils/vault/categories.ts`: `vaultMetaService.fetchVaultType(s)` classifies EVault, EulerEarn, and Securitize vaults, while `eVaultService.fetchVerifiedVaultAddresses(...ESCROW)` provides escrow membership.
 
-### Vault Categorization Endpoint
+### SDK Vault Categorization
 
-Type detection (`entities/vault/factory.ts`) goes through `GET /api/vault-categories?chainId=X`, which returns the full chain's vault set grouped by category:
+The client keeps an in-session categorization cache with this shape:
 
 ```ts
 {
   evk: string[]        // EVK-family vaults; INCLUDES every escrow address
   earn: string[]       // EulerEarn aggregator vaults
   securitize: string[] // Securitize vaults
-  escrow: string[]     // subset of evk that is in EscrowedCollateralPerspective
+  escrow: string[]     // subset of evk from the SDK escrow verified array
 }
 ```
 
-The server pages through the subgraph's `vaults` query (up to 10k addresses per chain) and merges in the escrow perspective via a single RPC call to `verifiedArray()`. Categorization is cached for 5 min; warm-cache keeps it fresh ahead of the TTL so fresh-deployed vaults are picked up within one cycle.
+For per-address lookups during direct navigation to a not-yet-cached vault, `fetchVaultCategory(address)` checks the SDK escrow verified array first, then asks `vaultMetaService.fetchVaultType` for the vault type.
 
-For per-address lookups during direct navigation to a not-yet-indexed vault, the endpoint also accepts `&address=0x…` and returns `{ category: 'evk' | 'earn' | 'securitize' | 'escrow' | null }`. The per-address fallback runs a single-address subgraph query; it does NOT include the escrow perspective check (that requires the full refresh), so callers that need escrow precision should rely on the full categorization or a local `isInEscrowPerspective` probe as a safety net.
-
-**Important: labels remain authoritative for which vaults are _shown_.** The categorization endpoint says "what category each vault is"; `products.json` / `earn-vaults.json` still say "which vaults to include in lists". The two are composed in `useVaults.loadVaults`: labels select the set, categorization picks the right lens per address.
+**Important: labels remain authoritative for which vaults are _shown_.** SDK categorization says "what category each vault is"; `products.json` / `earn-vaults.json` still say "which vaults to include in lists". The two are composed in `useVaults.loadVaults`: labels select the set, categorization picks the right lens per address.
 
 ## Discovery Page Filtering
 
@@ -380,9 +378,8 @@ These labels appear in address fields across all vault overview types (EVK, Earn
 | File | Purpose |
 |------|---------|
 | `entities/euler/labels.ts` | TypeScript type definitions for all label types |
-| `utils/eulerLabelsState.ts` | Reactive state stores (products, entities, points, earn vaults) |
-| `utils/eulerLabelsUtils.ts` | Normalization, extraction, lookup, and helper functions |
-| `composables/useEulerLabels.ts` | Label fetching, caching, and reactive composables |
+| `utils/eulerLabelsUtils.ts` | Lookup and helper functions backed by the current SDK label snapshot |
+| `composables/useEulerLabels.ts` | SDK-backed label loading and reactive composables |
 | `composables/useVaultRegistry.ts` | Vault registry with type detection and unknown resolution |
 | `composables/useGeoBlock.ts` | Geo-blocking logic using label block/restricted fields |
 

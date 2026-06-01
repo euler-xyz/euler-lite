@@ -1,16 +1,16 @@
-import { ref, watch, onUnmounted, type Ref } from 'vue'
+import { onUnmounted, ref, watch, type Ref } from 'vue'
 import {
-  type CowSwapOrderStatus,
-  type CowSwapOrderUid,
   COWSWAP_ORDER_POLL_INTERVAL_MS,
   COWSWAP_ORDER_POLL_MAX_DURATION_MS,
+  type CowSwapOrderStatus,
+  type CowSwapOrderUid,
   fetchCowSwapOrderStatus,
 } from '~/entities/cowswap'
 import { logWarn } from '~/utils/errorHandling'
 
 export const useCowSwapOrderStatus = (
   orderUid: Ref<CowSwapOrderUid | undefined>,
-  orderbookUrl: Ref<string | undefined>,
+  chainId: Ref<number | undefined>,
 ) => {
   const orderStatus = ref<CowSwapOrderStatus | null>(null)
   const isPolling = ref(false)
@@ -28,8 +28,8 @@ export const useCowSwapOrderStatus = (
 
   const poll = async () => {
     const uid = orderUid.value
-    const url = orderbookUrl.value
-    if (!uid || !url) {
+    const cid = chainId.value
+    if (!uid || !cid) {
       stopPolling()
       return
     }
@@ -40,7 +40,7 @@ export const useCowSwapOrderStatus = (
     }
 
     try {
-      const result = await fetchCowSwapOrderStatus(uid, url)
+      const result = await fetchCowSwapOrderStatus({ orderUid: uid, chainId: cid })
       orderStatus.value = result
 
       if (result.terminal) {
@@ -63,9 +63,9 @@ export const useCowSwapOrderStatus = (
   }
 
   watch(
-    () => [orderUid.value, orderbookUrl.value] as const,
-    ([uid, url]) => {
-      if (uid && url) {
+    () => [orderUid.value, chainId.value] as const,
+    ([uid, cid]) => {
+      if (uid && cid) {
         startPolling()
       }
       else {

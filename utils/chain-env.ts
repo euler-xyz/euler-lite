@@ -6,12 +6,15 @@
  * (e.g. `useChainConfig` on the server branch) import from a single
  * source of truth. The convention is:
  *   - `RPC_URL_<chainId>` — enables a chain (presence, not value, matters)
- *   - `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` — subgraph URL for that chain
+ *
+ * The per-chain subgraph URL (`SUBGRAPH_URL_<chainId>`, legacy
+ * `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`) is resolved server-side only, inside
+ * `server/api/proxy/subgraph/[chainId].post.ts`; it is never shipped to the
+ * client, so there is no scanner for it here.
  */
 import { getKnownChainIds } from '~/entities/chainRegistry'
 
 const RPC_URL_KEY = /^RPC_URL_(\d+)$/
-const SUBGRAPH_URI_KEY = /^NUXT_PUBLIC_SUBGRAPH_URI_(\d+)$/
 
 export interface ChainEnvIssues {
   emptyRpcUrlChainIds: number[]
@@ -73,15 +76,4 @@ export function getChainEnvIssues(env: NodeJS.ProcessEnv = process.env): ChainEn
     emptyRpcUrlChainIds: uniqueSorted(emptyRpcUrlChainIds),
     malformedRpcUrlChainIds: uniqueSorted(malformedRpcUrlChainIds),
   }
-}
-
-export function getSubgraphUris(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  const uris: Record<string, string> = {}
-  for (const [key, value] of Object.entries(env)) {
-    const match = key.match(SUBGRAPH_URI_KEY)
-    if (match && value) {
-      uris[match[1]] = value
-    }
-  }
-  return uris
 }

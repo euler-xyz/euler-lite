@@ -6,6 +6,9 @@ import { isAbortError } from '~/utils/errorHandling'
 const ALLOWED_METHODS = new Set([
   'eth_call',
   'eth_estimateGas',
+  // SDK state-override derivation uses createAccessList to find touched
+  // storage slots (approval/balance overrides for simulate + estimate).
+  'eth_createAccessList',
   'eth_getTransactionReceipt',
   'eth_getTransactionByHash',
   'eth_blockNumber',

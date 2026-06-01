@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { getAddress, zeroAddress } from 'viem'
-import type { VaultAsset } from '~/entities/vault'
+import type { VaultAsset } from '~/types/asset'
+
 import { logWarn } from '~/utils/errorHandling'
 import { CACHE_TTL_5MIN_MS } from '~/entities/tuning-constants'
 import { getChainById } from '~/entities/chainRegistry'
@@ -153,7 +154,7 @@ const toVaultAsset = (entry: TokenListEntry): VaultAsset => ({
   name: entry.name,
   symbol: entry.symbol,
   address: getAddress(entry.address),
-  decimals: BigInt(entry.decimals),
+  decimals: entry.decimals,
 })
 
 const tokenIconOverrides = new Map(

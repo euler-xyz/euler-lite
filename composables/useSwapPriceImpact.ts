@@ -1,13 +1,12 @@
-import type { Ref } from 'vue'
-import type { SwapApiQuote } from '~/entities/swap'
-import type { Vault, SecuritizeVault, EarnVault } from '~/entities/vault'
-import { getTokenUsdValue } from '~/services/pricing/priceProvider'
+import type { SecuritizeCollateralVault, EulerEarn, EVault, SwapQuote } from '@eulerxyz/euler-v2-sdk'
+import { getTokenUsdValue } from '~/utils/sdk-prices'
 import { createRaceGuard } from '~/utils/race-guard'
+import type { Ref } from 'vue'
 
-type AnyVault = Vault | SecuritizeVault | EarnVault
+type AnyVault = EVault | SecuritizeCollateralVault | EulerEarn
 
 export const useSwapPriceImpact = (options: {
-  quote: Ref<SwapApiQuote | null>
+  quote: Ref<SwapQuote | null>
   fromVault?: Ref<AnyVault | null | undefined>
   toVault?: Ref<AnyVault | null | undefined>
 }) => {
@@ -28,12 +27,8 @@ export const useSwapPriceImpact = (options: {
       return
     }
 
-    const tokenInAddr = q.tokenIn.address || q.tokenIn.addressInfo
-    const tokenOutAddr = q.tokenOut.address || q.tokenOut.addressInfo
-    if (!tokenInAddr || !tokenOutAddr) {
-      priceImpact.value = null
-      return
-    }
+    const tokenInAddr = q.tokenIn.address
+    const tokenOutAddr = q.tokenOut.address
 
     const gen = guard.next()
     const [inUsd, outUsd] = await Promise.all([

@@ -1,6 +1,5 @@
 import { getRequestURL, sendRedirect } from 'h3'
 import { isAddress } from 'viem'
-import { getVaultCategory } from '../utils/vault-categories-store'
 
 /**
  * Vault route patterns:
@@ -43,25 +42,15 @@ export default defineEventHandler(async (event) => {
   const query = url.searchParams.toString()
   const redirectUrl = `/${section}${query ? `?${query}` : ''}`
 
-  // Validate addresses are well-formed
+  // Validate addresses are well-formed. Use the non-strict check so valid
+  // addresses with non-canonical checksum casing do not get bounced.
   for (const addr of addresses) {
-    if (!isAddress(addr)) {
+    if (!isAddress(addr, { strict: false })) {
       return sendRedirect(event, redirectUrl, 302)
     }
   }
 
-  // Resolve chain from ?network= query param
-  const networkParam = url.searchParams.get('network')
-  const chainId = networkParam ? parseInt(networkParam, 10) : NaN
-  if (!chainId || isNaN(chainId)) {
-    return
-  }
-
-  // Check each vault address exists in the factory
-  for (const addr of addresses) {
-    const category = await getVaultCategory(chainId, addr)
-    if (!category) {
-      return sendRedirect(event, redirectUrl, 302)
-    }
-  }
+  // Existence/type validation is SDK-backed on the client. Server middleware
+  // only rejects malformed route addresses so direct navigation does not keep
+  // a duplicate vault-classification fetch path alive.
 })

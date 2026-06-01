@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { getSubAccountIndex } from '~/entities/account'
+import { getSubAccountId as getSubAccountIndex } from '@eulerxyz/euler-v2-sdk'
+import { getAddress } from 'viem'
+import type { CollateralOption } from '~/types/collateral-option'
 import { getVaultProductName } from '~/utils/eulerLabelsUtils'
-import type { CollateralOption } from '~/entities/vault'
+
 import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
 
 const emits = defineEmits(['close'])
@@ -42,7 +44,7 @@ const getSubAccountLabel = (option: CollateralOption) => {
   if (!option.subAccount) return ''
   if (!ownerAddress.value) return shortenAddress(option.subAccount)
   try {
-    return `Position ${getSubAccountIndex(ownerAddress.value, option.subAccount)}`
+    return `Position ${getSubAccountIndex(getAddress(ownerAddress.value), getAddress(option.subAccount))}`
   }
   catch {
     return shortenAddress(option.subAccount)
@@ -90,6 +92,15 @@ const handleClose = () => {
       <div
         v-for="{ option, idx } in filteredOptions"
         :key="`options-${idx}`"
+        data-id="collateral-option"
+        :data-option-index="String(idx)"
+        :data-option-label="getOptionLabel(option)"
+        :data-option-symbol="getOptionSymbol(option)"
+        :data-option-type="getOptionType(option)"
+        :data-option-asset-address="option.assetAddress?.toLowerCase() ?? ''"
+        :data-option-vault-address="option.vaultAddress?.toLowerCase() ?? ''"
+        :data-option-sub-account="option.subAccount?.toLowerCase() ?? ''"
+        :data-option-disabled="option.disabled ? 'true' : 'false'"
         class="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-10 py-12 px-16 rounded-16"
         :class="[
           option.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',

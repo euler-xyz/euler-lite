@@ -1,34 +1,39 @@
 <script setup lang="ts">
-import { getAddress } from 'viem'
-import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
-import { type AnyBorrowVaultPair, type Vault, getVaultUtilization, isCyclicalNoteVault } from '~/entities/vault'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
+import { isCyclicalNoteVault } from '~/utils/vault/classification'
 import { getUtilisationWarning, getBorrowCapWarning, getCollateralSupplyCapWarning } from '~/composables/useVaultWarnings'
-import { formatAssetValue } from '~/services/pricing/priceProvider'
+import { formatAssetValue } from '~/utils/sdk-prices'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
+import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
+import { getVaultAvailableLiquidity, getVaultUtilization } from '~/utils/vault-display'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isVaultRecentlyAdded, isVaultKeyring, getEntitiesByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
-import { VaultBorrowApyModal, VaultMaxRoeModal, VaultNetApyPairModal, VaultSupplyApyModal } from '#components'
+import { VaultBorrowApyModal, VaultMaxRoeModal, VaultNetApyPairModal, VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
+import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
+import { getAddress } from 'viem'
+import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 
 const { pair } = defineProps<{ pair: AnyBorrowVaultPair }>()
 const { enableEntityBranding } = useDeployConfig()
 const { isVaultGovernorVerified } = useVaults()
+const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
+const pairKey = computed(() => `${pair.collateral.address.toLowerCase()}:${pair.borrow.address.toLowerCase()}`)
 
 const isAnyGovernorUnverified = computed(() => {
   const borrowUnverified = !isVaultGovernorVerified(pair.borrow)
   const collateralUnverified = 'governorAdmin' in pair.collateral
-    ? !isVaultGovernorVerified(pair.collateral as Vault)
+    ? !isVaultGovernorVerified(pair.collateral as EVault)
     : false
   return borrowUnverified || collateralUnverified
 })
 
 const entityDisplay = computed(() => {
   const borrowEntities = getEntitiesByVault(pair.borrow)
-  // Collateral may be SecuritizeVault but getEntitiesByVault only needs governorAdmin
+  // Collateral may be SecuritizeCollateralVault but getEntitiesByVault only needs governorAdmin
   const collateralEntities = 'governorAdmin' in pair.collateral
-    ? getEntitiesByVault(pair.collateral as Vault)
+    ? getEntitiesByVault(pair.collateral as EVault)
     : []
   // Deduplicate by name
   const seen = new Set<string>()
@@ -49,8 +54,8 @@ const entityDisplay = computed(() => {
   }
 })
 
-const { withIntrinsicBorrowApy, withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo }
-  = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getBorrowRewardApy, getSupplyRewardApy, getLoopingRewardApy, hasSupplyRewards, hasBorrowRewards, hasLoopingRewards, getBorrowRewardCampaigns, getSupplyRewardCampaigns, getLoopingRewardCampaigns } = useRewardsApy()
 
 const collateralProduct = useEulerProductOfVault(
@@ -65,15 +70,12 @@ const isAnyGovernanceLimited = computed(() =>
 )
 
 const isEscrowCollateral = computed(
-  () =>
-    'vaultCategory' in pair.collateral
-    && pair.collateral.vaultCategory === 'escrow',
+  () => getVaultCategory(pair.collateral.address) === 'escrow',
 )
 
 const isAnyUnverified = computed(() => {
-  const collateralUnverified
-    = 'verified' in pair.collateral && !pair.collateral.verified
-  const borrowUnverified = 'verified' in pair.borrow && !pair.borrow.verified
+  const collateralUnverified = !isVerifiedVault(pair.collateral.address)
+  const borrowUnverified = !isVerifiedVault(pair.borrow.address)
   return collateralUnverified || borrowUnverified
 })
 
@@ -106,8 +108,8 @@ const pairName = computed(() => {
   // Handle escrow collateral specially
   const collateralName = isEscrowCollateral.value
     ? 'Escrowed collateral'
-    : collateralProduct.name || pair.collateral.name
-  const borrowName = borrowProduct.name || pair.borrow.name
+    : collateralProduct.name || pair.collateral.shares.name
+  const borrowName = borrowProduct.name || pair.borrow.shares.name
 
   if (collateralName === borrowName) {
     return collateralName
@@ -130,19 +132,14 @@ const hasAnyRewards = computed(() =>
   hasSupplyRewards(pair.collateral.address) || hasBorrowApyRewards.value || hasLoopingRewards(pair.borrow.address, pair.collateral.address),
 )
 const supplyApy = computed(() => {
-  const interestRateInfo
-    = 'interestRateInfo' in pair.collateral
-      ? pair.collateral.interestRateInfo
-      : null
-  const baseApy = interestRateInfo
-    ? nanoToValue(interestRateInfo.supplyAPY, 25)
-    : 0
-  return withIntrinsicSupplyApy(baseApy, pair.collateral.asset.address)
+  const baseApy = getVaultSupplyApy(pair.collateral)
+  return withVaultIntrinsicApy(baseApy, pair.collateral, enableIntrinsicApy.value)
 })
 const borrowApy = computed(() =>
-  withIntrinsicBorrowApy(
-    nanoToValue(pair.borrow.interestRateInfo.borrowAPY, 25),
-    pair.borrow.asset.address,
+  withVaultIntrinsicApy(
+    getVaultBorrowApy(pair.borrow),
+    pair.borrow,
+    enableIntrinsicApy.value,
   ),
 )
 const supplyApyWithRewards = computed(
@@ -151,14 +148,14 @@ const supplyApyWithRewards = computed(
 const borrowApyWithRewards = computed(
   () => borrowApy.value - borrowRewardsAPY.value,
 )
-const maxMultiplier = computed(() => getMaxMultiplier(pair.borrowLTV))
+const maxMultiplier = computed(() => getMaxMultiplier(pair.ltv.borrowLTV))
 const netApy = computed(
   () => supplyApyWithRewards.value - borrowApyWithRewards.value + loopingRewardsAPY.value,
 )
 const maxRoe = computed(() =>
   getMaxRoe(maxMultiplier.value, supplyApyWithRewards.value, borrowApyWithRewards.value, loopingRewardsAPY.value),
 )
-const maxLTV = computed(() => formatNumber(nanoToValue(pair.borrowLTV, 2), 2))
+const maxLTV = computed(() => formatNumber(ltvToPercent(pair.ltv.borrowLTV), 2))
 const utilization = computed(() => getVaultUtilization(pair.borrow))
 const utilisationWarning = computed(() => getUtilisationWarning(pair.borrow, 'borrow'))
 const borrowCapInfo = computed(() => getBorrowCapWarning(pair.borrow))
@@ -167,56 +164,50 @@ const supplyCapInfo = computed(() => getCollateralSupplyCapWarning(pair.collater
 const liquidityDisplay = ref('-')
 
 watchEffect(async () => {
-  const liquidity = pair.borrow.supply - pair.borrow.borrow
-  const price = await formatAssetValue(liquidity, pair.borrow, 'off-chain')
+  const liquidity = getVaultAvailableLiquidity(pair.borrow)
+  const price = await formatAssetValue(liquidity, pair.borrow, 'on-chain')
   liquidityDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
 })
 
 const borrowApyModalData = computed(() => ({
   props: {
-    borrowingAPY: nanoToValue(pair.borrow.interestRateInfo.borrowAPY, 25),
-    intrinsicAPY: getIntrinsicApy(pair.borrow.asset.address),
-    intrinsicApyInfo: getIntrinsicApyInfo(pair.borrow.asset.address),
+    borrowingAPY: getVaultBorrowApy(pair.borrow),
+    intrinsicAPY: getVaultIntrinsicApy(pair.borrow, enableIntrinsicApy.value),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(pair.borrow, enableIntrinsicApy.value),
     campaigns: getBorrowRewardCampaigns(pair.borrow.address, pair.collateral.address),
+    rewardVaultAddress: pair.borrow.address,
   },
 }))
 
 const supplyApyModalData = computed(() => {
   const baseSupply = 'interestRateInfo' in pair.collateral
-    ? nanoToValue(pair.collateral.interestRateInfo.supplyAPY, 25)
+    ? getVaultSupplyApy(pair.collateral as EVault)
     : 0
-
   return {
     props: {
       lendingAPY: baseSupply,
-      intrinsicAPY: getIntrinsicApy(pair.collateral.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(pair.collateral.asset.address),
+      intrinsicAPY: getVaultIntrinsicApy(pair.collateral, enableIntrinsicApy.value),
+      intrinsicApyInfo: getVaultIntrinsicApyInfo(pair.collateral, enableIntrinsicApy.value),
       campaigns: getSupplyRewardCampaigns(pair.collateral.address),
+      rewardVaultAddress: pair.collateral.address,
     },
   }
 })
 
-const netApyModalData = computed(() => {
-  const baseSupply = 'interestRateInfo' in pair.collateral
-    ? nanoToValue(pair.collateral.interestRateInfo.supplyAPY, 25)
-    : 0
-  const baseBorrow = nanoToValue(pair.borrow.interestRateInfo.borrowAPY, 25)
-
-  return {
-    props: {
-      supplyAPY: baseSupply,
-      borrowAPY: baseBorrow,
-      intrinsicSupplyAPY: getIntrinsicApy(pair.collateral.asset.address),
-      intrinsicBorrowAPY: getIntrinsicApy(pair.borrow.asset.address),
-      supplyRewardAPY: supplyRewardsAPY.value || null,
-      borrowRewardAPY: borrowRewardsAPY.value || null,
-      loopingRewardAPY: loopingRewardsAPY.value || null,
-      supplyCampaigns: getSupplyRewardCampaigns(pair.collateral.address),
-      borrowCampaigns: getBorrowRewardCampaigns(pair.borrow.address, pair.collateral.address),
-      loopingCampaigns: getLoopingRewardCampaigns(pair.borrow.address, pair.collateral.address),
-    },
-  }
-})
+const netApyModalData = computed(() => ({
+  props: {
+    supplyAPY: getVaultSupplyApy(pair.collateral),
+    borrowAPY: getVaultBorrowApy(pair.borrow),
+    intrinsicSupplyAPY: getVaultIntrinsicApy(pair.collateral, enableIntrinsicApy.value),
+    intrinsicBorrowAPY: getVaultIntrinsicApy(pair.borrow, enableIntrinsicApy.value),
+    supplyRewardAPY: supplyRewardsAPY.value || null,
+    borrowRewardAPY: borrowRewardsAPY.value || null,
+    loopingRewardAPY: loopingRewardsAPY.value || null,
+    supplyCampaigns: getSupplyRewardCampaigns(pair.collateral.address),
+    borrowCampaigns: getBorrowRewardCampaigns(pair.borrow.address, pair.collateral.address),
+    loopingCampaigns: getLoopingRewardCampaigns(pair.borrow.address, pair.collateral.address),
+  },
+}))
 
 const maxRoeModalData = computed(() => ({
   props: {
@@ -224,7 +215,7 @@ const maxRoeModalData = computed(() => ({
     maxMultiplier: maxMultiplier.value,
     supplyAPY: supplyApyWithRewards.value,
     borrowAPY: borrowApyWithRewards.value,
-    borrowLTV: nanoToValue(pair.borrowLTV, 2),
+    borrowLTV: ltvToPercent(pair.ltv.borrowLTV),
     borrowVaultAddress: pair.borrow.address,
     collateralAddress: pair.collateral.address,
   },
@@ -242,6 +233,11 @@ const linkPath = computed(() => ({
   <NuxtLink
     :to="linkPath"
     class="grid gap-x-16 mobile:block no-underline text-content-primary bg-surface rounded-12 border border-line-default shadow-card hover:shadow-card-hover hover:border-line-emphasis transition-all"
+    data-id="vault-list-item"
+    data-list="borrow-pair"
+    :data-key="pairKey"
+    :data-collateral-address="pair.collateral.address.toLowerCase()"
+    :data-borrow-address="pair.borrow.address.toLowerCase()"
     :class="[
       enableEntityBranding ? '' : 'grid-cols-6',
       (isGeoBlocked || isPairEffectivelyBlocked) ? 'opacity-50' : '',
@@ -259,22 +255,21 @@ const linkPath = computed(() => ({
           size="40"
         />
         <div class="flex-grow ml-12">
-          <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-8">
+          <div
+            class="text-content-tertiary text-p3 mb-4 flex items-center gap-8"
+            data-id="data-point"
+            :data-key="pairKey"
+            data-field="name"
+            :data-value="pairName"
+          >
             <VaultDisplayName
               :name="pairName"
               :is-unverified="isAnyUnverified"
             />
-            <span
+            <RecentlyAddedBadge
               v-if="isRecentlyAdded"
-              class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5"
-              title="Recently added vault"
-            >
-              <SvgIcon
-                name="star"
-                class="!w-14 !h-14"
-              />
-              Recently added
-            </span>
+              class="mobile:hidden"
+            />
             <KeyringBadge v-if="isKeyring && !isAnyGovernorUnverified" />
             <GovernanceLimitedBadge v-if="isAnyGovernanceLimited" />
             <CyclicalNoteBadge v-if="isCyclicalNote && !isAnyGovernorUnverified" />
@@ -297,10 +292,22 @@ const linkPath = computed(() => ({
               Deprecated
             </span>
           </div>
-          <div class="text-h5 text-content-primary">
-            {{
-              [pair.collateral.asset.symbol, pair.borrow.asset.symbol].join("/")
-            }}
+          <div
+            class="text-h5 text-content-primary flex items-center gap-8"
+            data-id="data-point"
+            :data-key="pairKey"
+            data-field="asset-symbols"
+            :data-value="[pair.collateral.asset.symbol, pair.borrow.asset.symbol].join('/')"
+          >
+            <span>
+              {{
+                [pair.collateral.asset.symbol, pair.borrow.asset.symbol].join("/")
+              }}
+            </span>
+            <RecentlyAddedBadge
+              v-if="isRecentlyAdded"
+              class="hidden mobile:inline-flex shrink-0"
+            />
           </div>
         </div>
       </div>
@@ -315,10 +322,17 @@ const linkPath = computed(() => ({
             <SvgIcon
               class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
               name="info-circle"
+              data-modal-trigger="borrow-apy"
             />
           </UiModalPreviewTrigger>
         </div>
-        <div class="text-p2 flex items-center text-accent-600 font-semibold">
+        <div
+          class="text-p2 flex items-center text-accent-600 font-semibold"
+          data-id="data-point"
+          :data-key="pairKey"
+          data-field="borrow-apy"
+          :data-value="borrowApyWithRewards"
+        >
           <UiModalPreviewTrigger
             v-if="hasBorrowApyRewards"
             :component="VaultBorrowApyModal"
@@ -328,6 +342,7 @@ const linkPath = computed(() => ({
             <SvgIcon
               class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
               name="sparks"
+              data-modal-trigger="borrow-apy"
             />
           </UiModalPreviewTrigger>
           {{ formatNumber(borrowApyWithRewards) }}%
@@ -343,10 +358,17 @@ const linkPath = computed(() => ({
               <SvgIcon
                 class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                 name="info-circle"
+                data-modal-trigger="max-roe"
               />
             </UiModalPreviewTrigger>
           </div>
-          <div class="text-p2 text-accent-600 font-semibold flex items-center">
+          <div
+            class="text-p2 text-accent-600 font-semibold flex items-center"
+            data-id="data-point"
+            :data-key="pairKey"
+            data-field="max-roe"
+            :data-value="maxRoe"
+          >
             <UiModalPreviewTrigger
               v-if="hasAnyRewards"
               :component="VaultMaxRoeModal"
@@ -356,6 +378,7 @@ const linkPath = computed(() => ({
               <SvgIcon
                 class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
                 name="sparks"
+                data-modal-trigger="max-roe"
               />
             </UiModalPreviewTrigger>
             {{ formatNumber(maxRoe, 2, 2) }}%
@@ -373,10 +396,17 @@ const linkPath = computed(() => ({
             <SvgIcon
               class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
               name="info-circle"
+              data-modal-trigger="max-roe"
             />
           </UiModalPreviewTrigger>
         </div>
-        <div class="text-p2 text-accent-600 font-semibold flex items-center">
+        <div
+          class="text-p2 text-accent-600 font-semibold flex items-center"
+          data-id="data-point"
+          :data-key="pairKey"
+          data-field="max-roe"
+          :data-value="maxRoe"
+        >
           <UiModalPreviewTrigger
             v-if="hasAnyRewards"
             :component="VaultMaxRoeModal"
@@ -386,6 +416,7 @@ const linkPath = computed(() => ({
             <SvgIcon
               class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
               name="sparks"
+              data-modal-trigger="max-roe"
             />
           </UiModalPreviewTrigger>
           {{ formatNumber(maxRoe, 2, 2) }}%
@@ -423,7 +454,13 @@ const linkPath = computed(() => ({
             :label="entityDisplay.name"
             :src="entityDisplay.logos"
           />
-          <span class="text-p2 text-content-primary truncate">{{ entityDisplay.name }}</span>
+          <span
+            class="text-p2 text-content-primary truncate"
+            data-id="data-point"
+            :data-key="pairKey"
+            data-field="risk-manager"
+            :data-value="entityDisplay.name"
+          >{{ entityDisplay.name }}</span>
         </div>
         <div
           v-else
@@ -441,7 +478,13 @@ const linkPath = computed(() => ({
             tooltip-placement="top-start"
           />
         </div>
-        <div class="text-p2 text-content-primary">
+        <div
+          class="text-p2 text-content-primary"
+          data-id="data-point"
+          :data-key="pairKey"
+          data-field="available-liquidity"
+          :data-value="liquidityDisplay"
+        >
           {{ liquidityDisplay }}
         </div>
       </div>
@@ -456,10 +499,17 @@ const linkPath = computed(() => ({
             <SvgIcon
               class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
               name="info-circle"
+              data-modal-trigger="supply-apy"
             />
           </UiModalPreviewTrigger>
         </div>
-        <div class="text-p2 text-content-primary flex items-center justify-center">
+        <div
+          class="text-p2 text-content-primary flex items-center justify-center"
+          data-id="data-point"
+          :data-key="pairKey"
+          data-field="supply-apy"
+          :data-value="supplyApyWithRewards"
+        >
           <VaultPoints
             class="mr-4"
             :vault="pair.collateral"
@@ -473,6 +523,7 @@ const linkPath = computed(() => ({
             <SvgIcon
               class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
               name="sparks"
+              data-modal-trigger="supply-apy"
             />
           </UiModalPreviewTrigger>
           {{ formatNumber(supplyApyWithRewards, 2, 2) }}%
@@ -489,10 +540,17 @@ const linkPath = computed(() => ({
             <SvgIcon
               class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
               name="info-circle"
+              data-modal-trigger="net-apy"
             />
           </UiModalPreviewTrigger>
         </div>
-        <div class="text-p2 text-content-primary flex items-center justify-center">
+        <div
+          class="text-p2 text-content-primary flex items-center justify-center"
+          data-id="data-point"
+          :data-key="pairKey"
+          data-field="net-apy"
+          :data-value="netApy"
+        >
           <UiModalPreviewTrigger
             v-if="hasAnyRewards"
             :component="VaultNetApyPairModal"
@@ -502,6 +560,7 @@ const linkPath = computed(() => ({
             <SvgIcon
               class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
               name="sparks"
+              data-modal-trigger="net-apy"
             />
           </UiModalPreviewTrigger>
           {{ formatNumber(netApy, 2, 2) }}%
@@ -509,13 +568,25 @@ const linkPath = computed(() => ({
       </div>
       <div class="py-12 pb-12 text-center mobile:!hidden">
         <div class="text-content-tertiary text-p3 mb-4">Max multiplier</div>
-        <div class="text-p2 text-content-primary">
+        <div
+          class="text-p2 text-content-primary"
+          data-id="data-point"
+          :data-key="pairKey"
+          data-field="max-multiplier"
+          :data-value="maxMultiplier"
+        >
           {{ formatNumber(maxMultiplier, 2, 2) }}x
         </div>
       </div>
       <div class="py-12 pb-12 text-center mobile:!hidden">
         <div class="text-content-tertiary text-p3 mb-4">Max LTV</div>
-        <div class="text-p2 text-content-primary">
+        <div
+          class="text-p2 text-content-primary"
+          data-id="data-point"
+          :data-key="pairKey"
+          data-field="max-ltv"
+          :data-value="maxLTV"
+        >
           {{ compactNumber(maxLTV, 2, 2) }}%
         </div>
       </div>
@@ -529,7 +600,13 @@ const linkPath = computed(() => ({
             :value="utilization"
             :max="100"
           />
-          <div class="text-p2 text-content-primary">
+          <div
+            class="text-p2 text-content-primary"
+            data-id="data-point"
+            :data-key="pairKey"
+            data-field="utilization"
+            :data-value="utilization"
+          >
             {{ compactNumber(utilization, 2, 2) }}%
           </div>
         </div>
@@ -596,6 +673,7 @@ const linkPath = computed(() => ({
               <SvgIcon
                 class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                 name="info-circle"
+                data-modal-trigger="supply-apy"
               />
             </UiModalPreviewTrigger>
           </div>
@@ -611,6 +689,7 @@ const linkPath = computed(() => ({
             <SvgIcon
               class="!w-20 !h-20 text-accent-500 cursor-pointer"
               name="sparks"
+              data-modal-trigger="supply-apy"
             />
           </UiModalPreviewTrigger>
           <div class="text-p2 text-content-primary">
@@ -630,6 +709,7 @@ const linkPath = computed(() => ({
               <SvgIcon
                 class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                 name="info-circle"
+                data-modal-trigger="net-apy"
               />
             </UiModalPreviewTrigger>
           </div>
@@ -644,6 +724,7 @@ const linkPath = computed(() => ({
             <SvgIcon
               class="!w-20 !h-20 text-accent-500 cursor-pointer"
               name="sparks"
+              data-modal-trigger="net-apy"
             />
           </UiModalPreviewTrigger>
           <div class="text-p2 text-content-primary">

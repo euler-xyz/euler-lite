@@ -27,6 +27,10 @@ function initializeWagmi() {
   const { screenConnectedAddress, resetScreeningCache, isAddressScreened } = useAddressScreen()
 
   const chainId = computed(() => wagmiChain.value?.id)
+
+  // Route internal wagmi reads through the screened address so wallet-tied
+  // queries (ENS, native balance) don't surface for an address whose
+  // screening verdict isn't in yet.
   const screenedWagmiAddress: ComputedRef<Address | undefined> = computed(() =>
     isAddressScreened(wagmiAddress.value) ? (wagmiAddress.value || undefined) : undefined,
   )
@@ -117,6 +121,9 @@ export const useWagmi = () => {
     connectBaseAppInjectedWallet,
     isAddressScreened,
   } = cachedWagmiData
+  // Fail closed: a connected address only becomes user-visible once screening
+  // returns a non-restricted verdict. Consumers that read `address`/`isConnected`
+  // automatically see the gated state without each having to import useAddressScreen.
   const address: ComputedRef<Address | undefined> = computed(() =>
     isAddressScreened(wagmiAddress.value) ? (wagmiAddress.value || undefined) : undefined,
   )

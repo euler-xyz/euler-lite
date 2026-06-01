@@ -1,7 +1,15 @@
 import type { Address, PublicClient } from 'viem'
-import type { SwapApiProviderExtraData, SwapApiQuote } from '~/entities/swap'
-import type { SwapApiRequestInput } from '~/composables/useSwapApi'
-import type { TxPlan } from '~/entities/txPlan'
+import type {
+  Account,
+  IHasVaultAddress,
+  PluginPrefetchData,
+  SimulationStateOverrideOptions,
+  SwapProviderExtraData,
+  SwapQuote,
+  TransactionPlan,
+  TransactionPlanPrepared,
+} from '@eulerxyz/euler-v2-sdk'
+import type { SwapQuoteInput } from '~/composables/useSwapApi'
 import {
   getQuoteAmount,
   getQuoteCardScore,
@@ -16,32 +24,77 @@ import {
 import { createRaceGuard } from '~/utils/race-guard'
 import { isAbortError, logWarn } from '~/utils/errorHandling'
 import { isCowProvider, isCowProviderOrQuote } from '~/entities/cowswap'
-import { getTokenUsdValue } from '~/services/pricing/priceProvider'
+import { getTokenUsdValue } from '~/utils/sdk-prices'
 import { resolveWrappedNativeAddress } from '~/utils/native-currency'
 import { shouldDiscardQuoteOnEstimateGasError } from '~/utils/tx-errors'
+import { getEulerSdkFresh } from '~/composables/useEulerSdk'
+import { profAsync, profMark } from '~/utils/profiler'
+
+export type SwapQuotePlanAccount = Account<IHasVaultAddress> | Address
+export type SwapQuotePlanContext = {
+  account?: Account<IHasVaultAddress>
+}
 
 type SwapQuotesParallelOptions = {
   amountField: SwapQuoteAmountField
   compare: SwapQuoteCompare
+  /** Surface CoW Protocol as a quote source (Ethereum mainnet etc.). */
   includeCowSwap?: boolean
-  buildTxPlanForQuote?: (quote: SwapApiQuote, provider: string) => Promise<TxPlan>
+  /** Build a TransactionPlan from a quote so the composable can run gas
+   *  estimation and discard quotes that fail with swapper/verifier reverts. */
+  buildTxPlanForQuote?: (quote: SwapQuote, provider: string, context: SwapQuotePlanContext) => Promise<TransactionPlan>
+  /** Forwarded to `sdk.executionService.estimateGasForTransactionPlan` so the
+   *  per-quote estimate can skip balance overrides, reuse the wallet snapshot
+   *  the form already holds, and take precomputed storage-slot hints. */
+  getStateOverrideOptions?: () => SimulationStateOverrideOptions | undefined
+  /** Resolve the form-level plugin prefetch payload from a representative
+   *  plan. Called at most once per sweep against the first arriving quote's
+   *  plan; the result is cached and passed to `prepareTransactionPlan` for
+   *  every subsequent quote so per-quote prepare doesn't re-do Hermes /
+   *  keyring / vault-meta lookups. */
+  prefetchPluginData?: (plan: TransactionPlan, account: SwapQuotePlanAccount) => Promise<PluginPrefetchData>
+  /** App-level prepare hook. Lets callers reuse the same Permit2 / plugin
+   *  configuration as Review-click preparation while still doing it at
+   *  quote-estimation time. */
+  prepareTransactionPlan?: (
+    plan: TransactionPlan,
+    account: SwapQuotePlanAccount,
+    prefetch: PluginPrefetchData | undefined,
+  ) => Promise<TransactionPlanPrepared>
+  /** Optional already-loaded Account for SDK plan/plugin processing. */
+  getPlanAccount?: () => SwapQuotePlanAccount | undefined
 }
 
 type SwapQuotesRequestOptions = {
   providers?: string[]
   errorMessage?: string
-  providerExtraData?: Partial<Record<string, SwapApiProviderExtraData>>
-  providerParams?: Partial<Record<string, Partial<SwapApiRequestInput>>>
+  /** Per-provider overrides for the SDK's `providerExtraData` field — e.g.
+   *  the CoW wrapper type ('openPosition' / 'closePosition' / 'collateralSwap'). */
+  providerExtraData?: Partial<Record<string, SwapProviderExtraData>>
+  /** Per-provider overrides for individual request fields — e.g. CoW needing
+   *  a different `accountIn`/`accountOut` than the EVC batch path. */
+  providerParams?: Partial<Record<string, Partial<SwapQuoteInput>>>
 }
 
 export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   const { getSwapQuotes, getSwapProviders } = useSwapApi()
   const { client: rpcClient } = useRpcClient()
   const { address, chain } = useWagmi()
+  const { isSpyMode, spyAddress } = useSpyMode()
   const { chainId } = useEulerAddresses()
-  const { estimateTxPlanGas } = useEulerOperations()
+  const { account: defaultPlanAccount } = usePlanAccount()
+  // Spy mode has no connected wallet — fall through to the spied owner so
+  // estimate/simulate calls have a real EOA as `from`. Without this the
+  // estimate runs as `quote.accountIn` (a fresh sub-account) and EVC.batch
+  // reverts with `EVC_NotAuthorized()` before state overrides can help.
+  const effectiveOwner = computed<Address | undefined>(() =>
+    address.value ?? (isSpyMode.value ? (spyAddress.value as Address | undefined) : undefined),
+  )
 
-  const quoteCards = ref<SwapQuoteCard[]>([])
+  // shallowRef avoids Vue's deep-unwrap walking into the SDK's
+  // TransactionPlan / TransactionPlanPrepared types (recursive unions that
+  // confuse vue-tsc's structural matcher).
+  const quoteCards = shallowRef<SwapQuoteCard[]>([])
   const selectedProvider = ref<string | null>(null)
   const providersCount = ref(0)
   const providersFetchedCount = ref(0)
@@ -49,7 +102,13 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   const quoteError = ref<string | null>(null)
 
   let quoteAbort: AbortController | null = null
+  // Remembered across re-fetches so the user's manual route choice survives
+  // a quote refresh even if the provider list temporarily shrinks.
   let userSelectedProvider: string | null = null
+  // Per-sweep promise for the plugin prefetch (Pyth Hermes / keyring vault
+  // gating). First quote to need it computes; subsequent ones await. Reset on
+  // each new sweep so a fresh asset selection re-resolves.
+  let sweepPrefetchPromise: Promise<PluginPrefetchData | undefined> | null = null
   const guard = createRaceGuard()
 
   const sortedQuoteCards = computed(() =>
@@ -97,7 +156,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   // Locate the card corresponding to a quote. Uses referential identity first
   // (fast path for untransformed quotes) and falls back to matching amount /
   // token fields so transformed quotes (e.g. CoW share→underlying) still hit.
-  const findCardForQuote = (quote: SwapApiQuote): SwapQuoteCard | undefined => {
+  const findCardForQuote = (quote: SwapQuote): SwapQuoteCard | undefined => {
     const byRef = quoteCards.value.find(c => c.quote === quote)
     if (byRef) return byRef
     return quoteCards.value.find(c =>
@@ -108,7 +167,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     )
   }
 
-  const getQuoteDiffPctFor = (quote: SwapApiQuote) => {
+  const getQuoteDiffPctFor = (quote: SwapQuote) => {
     const best = sortedQuoteCards.value[0]
     if (!best) return null
 
@@ -132,12 +191,18 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     )
   }
 
-  const getQuotePricingToken = (quote: SwapApiQuote) =>
+  const getQuotePricingToken = (quote: SwapQuote) =>
     options.amountField === 'amountIn' ? quote.tokenIn : quote.tokenOut
 
-  const getAmountUsd = async (quote: SwapApiQuote): Promise<number | undefined> => {
+  const getPlanAccount = (fallback: Address): SwapQuotePlanAccount =>
+    options.getPlanAccount?.() ?? defaultPlanAccount.value ?? fallback
+
+  const getPlanContext = (account: SwapQuotePlanAccount): SwapQuotePlanContext =>
+    typeof account === 'string' ? {} : { account }
+
+  const getAmountUsd = async (quote: SwapQuote): Promise<number | undefined> => {
     const token = getQuotePricingToken(quote)
-    if (!token.address) return undefined
+    if (!token?.address) return undefined
     const amount = getQuoteAmount(quote, options.amountField)
     if (amount <= 0n) return undefined
     return getTokenUsdValue(amount, token.decimals, token.address, null)
@@ -151,35 +216,96 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     return getTokenUsdValue(gasCostNative, nativeDecimals, wrappedNativeAddress, null)
   }
 
+  // Resolve the sweep-scoped prefetch on demand: first caller initialises the
+  // promise; later callers await the same result. Errors degrade gracefully —
+  // a failed prefetch falls back to the plugin's live-fetch path.
+  const ensureSweepPrefetch = (plan: TransactionPlan, account: SwapQuotePlanAccount) => {
+    if (!options.prefetchPluginData) return Promise.resolve<PluginPrefetchData | undefined>(undefined)
+    if (!sweepPrefetchPromise) {
+      sweepPrefetchPromise = options
+        .prefetchPluginData(plan, account)
+        .then(result => result as PluginPrefetchData | undefined)
+        .catch((err) => {
+          logWarn('useSwapQuotesParallel/prefetch', err)
+          return undefined
+        })
+    }
+    return sweepPrefetchPromise
+  }
+
+  // Prepare per-quote from already-prefetched data. Each quote has unique swap
+  // calldata, so plugin processing still materialises a per-quote plan, but the
+  // sweep-level prefetch keeps Hermes/keyring work out of the per-quote path.
+  const preparePlanForQuote = async (
+    plan: TransactionPlan,
+    account: SwapQuotePlanAccount,
+    prefetch: PluginPrefetchData | undefined,
+  ): Promise<TransactionPlanPrepared> => {
+    if (options.prepareTransactionPlan) {
+      return options.prepareTransactionPlan(plan, account, prefetch)
+    }
+    if (!chainId.value) throw new Error('preparePlanForQuote: no chainId')
+    const sdk = await getEulerSdkFresh()
+    return profAsync('quote', 'prepareTransactionPlan', () =>
+      sdk.executionService.prepareTransactionPlan({
+        plan,
+        chainId: chainId.value!,
+        account,
+        prefetch,
+      }),
+    )
+  }
+
+  // stateOverrides:true mirrors the simulate path — derives fake balances,
+  // allowances and approvals from the plan so estimation works for accounts
+  // that haven't pre-approved (every spy-mode account, every fresh wallet
+  // building a plan against a new sub-account).
+  const estimateTxPlanGas = async (prepared: TransactionPlanPrepared): Promise<bigint> => {
+    const sdk = await getEulerSdkFresh()
+    return profAsync('quote', 'estimateGasForPreparedTransactionPlan', () =>
+      sdk.executionService.estimateGasForPreparedTransactionPlan(prepared, {
+        stateOverrides: true,
+        stateOverrideOptions: options.getStateOverrideOptions?.(),
+      }),
+    )
+  }
+
   const enrichQuoteCard = async (
     provider: string,
-    quote: SwapApiQuote,
-    params: SwapApiRequestInput,
+    quote: SwapQuote,
+    params: SwapQuoteInput,
     client: PublicClient | null,
     gasPricePromise: Promise<bigint | undefined>,
   ): Promise<SwapQuoteCard | null> => {
-    const amountUsdPromise = getAmountUsd(quote).catch(() => undefined)
-
+    // CoW intents settle off-chain — gas cost is genuinely zero from the
+    // user's perspective. Mark the card so the route selector renders
+    // "Gasless". Do not block route visibility on auxiliary USD pricing.
     if (isCowProviderOrQuote(provider, quote)) {
       return {
         provider,
         quote,
-        amountUsd: await amountUsdPromise,
         gasCostNative: 0n,
         gasCostUsd: 0,
         isGasless: true,
       }
     }
 
+    const amountUsdPromise = getAmountUsd(quote).catch(() => undefined)
+
     if (!client || !options.buildTxPlanForQuote) {
       return { provider, quote, amountUsd: await amountUsdPromise }
     }
 
     let gas: bigint
+    let plan: TransactionPlan
+    let prepared: TransactionPlanPrepared
     try {
-      const account = (params.origin || address.value || quote.accountIn) as Address
-      const plan = await options.buildTxPlanForQuote(quote, provider)
-      gas = await estimateTxPlanGas(plan, account)
+      const fallbackAccount = (params.origin || effectiveOwner.value || quote.accountIn) as Address
+      const account = getPlanAccount(fallbackAccount)
+      plan = await profAsync(`quote:${provider}`, 'buildTxPlanForQuote', () => options.buildTxPlanForQuote!(quote, provider, getPlanContext(account)))
+      const prefetch = await profAsync(`quote:${provider}`, 'sweepPrefetch', () => ensureSweepPrefetch(plan, account))
+      prepared = await profAsync(`quote:${provider}`, 'prepareTxPlan', () => preparePlanForQuote(plan, account, prefetch))
+      gas = await profAsync(`quote:${provider}`, 'estimateTxPlanGas', () => estimateTxPlanGas(prepared))
     }
     catch (err) {
       if (shouldDiscardQuoteOnEstimateGasError(err)) {
@@ -198,7 +324,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
 
     const gasPrice = await gasPricePromise
     if (!gasPrice) {
-      return { provider, quote, amountUsd: await amountUsdPromise }
+      return { provider, quote, amountUsd: await amountUsdPromise, plan, preparedPlan: prepared }
     }
 
     const gasCostNative = gas * gasPrice
@@ -212,6 +338,8 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
       amountUsd,
       gasCostNative,
       gasCostUsd,
+      plan,
+      preparedPlan: prepared,
     }
   }
 
@@ -226,6 +354,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
       quoteAbort.abort()
       quoteAbort = null
     }
+    sweepPrefetchPromise = null
     guard.next()
     isLoading.value = false
   }
@@ -240,9 +369,22 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     }
   }
 
+  /**
+   * Merge an update into the card for `provider` in-place. Used by callers
+   * to attach lazily-built artefacts (e.g. a prepared envelope) without
+   * replacing the rest of the card data. No-op if the card no longer exists
+   * (race against `reset()` or a new sweep).
+   */
+  const patchCard = (provider: string, patch: Partial<SwapQuoteCard>) => {
+    const next = quoteCards.value.map(card =>
+      card.provider === provider ? { ...card, ...patch } : card,
+    )
+    quoteCards.value = sortQuoteCards(next, options.amountField, options.compare)
+  }
+
   const getProviderExtraData = (
     provider: string,
-    params: SwapApiRequestInput,
+    params: SwapQuoteInput,
     requestOptions: SwapQuotesRequestOptions,
   ) => {
     const normalizedProvider = provider.toLowerCase()
@@ -262,7 +404,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   }
 
   const requestQuotes = async (
-    params: SwapApiRequestInput,
+    params: SwapQuoteInput,
     requestOptions: SwapQuotesRequestOptions = {},
   ) => {
     quoteError.value = null
@@ -273,6 +415,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     const controller = new AbortController()
     quoteAbort = controller
     const gen = guard.next()
+    sweepPrefetchPromise = null
 
     isLoading.value = true
     quoteCards.value = []
@@ -322,16 +465,18 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
       const gasPricePromise = fetchGasPrice()
 
       const fetchProviderQuote = async (provider: string) => {
+        const flow = `quote:${provider}`
+        profMark(flow, 'start')
         try {
           const providerParams = {
             ...params,
             ...getProviderParams(provider, requestOptions),
           }
-          const data = await getSwapQuotes({
+          const data = await profAsync(flow, 'getSwapQuotes', () => getSwapQuotes({
             ...providerParams,
             provider,
             providerExtraData: getProviderExtraData(provider, providerParams, requestOptions),
-          }, { signal: controller.signal })
+          }, { signal: controller.signal }))
 
           if (guard.isStale(gen)) {
             return
@@ -339,11 +484,12 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
 
           const best = pickBestQuote(data, options.amountField, options.compare)
           if (best) {
-            const card = await enrichQuoteCard(provider, best, providerParams, client, gasPricePromise)
+            const card = await profAsync(flow, 'enrichQuoteCard.total', () => enrichQuoteCard(provider, best, providerParams, client, gasPricePromise))
             if (guard.isStale(gen) || !card) {
               return
             }
             upsertQuote(card)
+            profMark(flow, 'done')
           }
         }
         catch (err) {
@@ -427,8 +573,10 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     bestAmount,
     selectedProvider,
     selectedQuote,
+    selectedQuoteCard,
     selectedQuoteFetchedAt,
     effectiveQuote,
+    effectiveQuoteCard,
     effectiveQuoteFetchedAt,
     providersCount,
     providersFetchedCount,
@@ -439,5 +587,6 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     reset,
     requestQuotes,
     selectProvider,
+    patchCard,
   }
 }
