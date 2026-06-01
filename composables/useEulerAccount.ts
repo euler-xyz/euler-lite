@@ -10,7 +10,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { isVisiblePortfolioPosition } from '~/utils/portfolioVisibility'
 import { createRaceGuard } from '~/utils/race-guard'
 
-const portfolio: Ref<Portfolio<VaultEntity> | undefined> = shallowRef()
+const visiblePortfolio: Ref<Portfolio<VaultEntity> | undefined> = shallowRef()
 const allPortfolio: Ref<Portfolio<VaultEntity> | undefined> = shallowRef()
 const portfolioDiagnostics = shallowRef<DataIssue[]>([])
 
@@ -20,6 +20,7 @@ const isDepositsLoading = ref(true)
 const isDepositsLoaded = ref(false)
 const isShowAllPositions = ref(false)
 
+const portfolio = computed(() => isShowAllPositions.value ? allPortfolio.value : visiblePortfolio.value)
 const borrowPositions = computed(() => portfolio.value?.borrows ?? [])
 const depositPositions = computed(() => portfolio.value?.savings ?? [])
 const allBorrowPositions = computed(() => allPortfolio.value?.borrows ?? borrowPositions.value)
@@ -79,7 +80,7 @@ export const useEulerAccount = () => {
   }
 
   const resetLoadingState = () => {
-    portfolio.value = undefined
+    visiblePortfolio.value = undefined
     allPortfolio.value = undefined
     portfolioDiagnostics.value = []
     isPositionsLoaded.value = false
@@ -103,7 +104,7 @@ export const useEulerAccount = () => {
 
     try {
       if (!walletAddress) {
-        portfolio.value = undefined
+        visiblePortfolio.value = undefined
         allPortfolio.value = undefined
         portfolioDiagnostics.value = []
         markLoaded()
@@ -117,26 +118,23 @@ export const useEulerAccount = () => {
       const sdk = refreshOptions.source === 'fast'
         ? await getEulerSdk()
         : await getEulerSdkFresh()
-      const options = isShowAllPositions.value
-        ? undefined
-        : { positionFilter: buildVisiblePortfolioPositionFilter() }
       const fetched = await sdk.portfolioService.fetchPortfolio(
         chainId.value,
         getAddress(walletAddress) as Address,
-        options,
       )
       fetched.errors.forEach(issue => logWarn('useEulerAccount/fetchPortfolio', issue))
 
       if (positionGuard.isStale(gen)) return
 
-      const nextAllPortfolio = isShowAllPositions.value
-        ? fetched.result
-        : sdk.portfolioService.buildPortfolio(fetched.result.account)
+      const nextAllPortfolio = fetched.result
+      const nextVisiblePortfolio = sdk.portfolioService.buildPortfolio(fetched.result.account, {
+        positionFilter: buildVisiblePortfolioPositionFilter(),
+      })
 
       if (positionGuard.isStale(gen)) return
 
-      portfolio.value = fetched.result
       allPortfolio.value = nextAllPortfolio
+      visiblePortfolio.value = nextVisiblePortfolio
       portfolioDiagnostics.value = fetched.errors
       markLoaded()
     }
@@ -183,13 +181,6 @@ export const useEulerAccount = () => {
             resetLoadingState()
             maybeUpdatePositions()
           }
-        }),
-
-        watch(isShowAllPositions, () => {
-          positionGuard.next()
-          refreshCoordinator.reset()
-          resetLoadingState()
-          maybeUpdatePositions()
         }),
 
         watch(chainId, () => {
