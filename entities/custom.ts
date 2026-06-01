@@ -133,6 +133,7 @@ export const intrinsicApySources: readonly IntrinsicApySourceConfig[] = [
   { provider: 'defillama', chainId: 8453, address: '0xB6fe221Fe9EeF5aBa221c348bA20A1Bf5e73624c', poolId: 'd4b3c522-6127-4b89-bedf-83641cdcd2eb' },
   { provider: 'defillama', chainId: 8453, address: '0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452', poolId: '747c1d2a-c668-4682-b9f9-296708a3dd90' },
   { provider: 'defillama', chainId: 8453, address: '0xEDfa23602D0EC14714057867A78d01e94176BEA0', poolId: '33c732f6-a78d-41da-af5b-ccd9fa5e52d5' },
+  { provider: 'noon', chainId: 8453, address: '0x34a2798d47b238a7cba9d87d49618dee6c4d999f' }, // sUSN
 
   // DefiLlama pools — Plasma (9745)
   { provider: 'defillama', chainId: 9745, address: '0x6eAf19b2FC24552925dB245F9Ff613157a7dbb4C', poolId: 'b7daea94-6378-4eeb-8d10-52beebadf77b' },
@@ -184,6 +185,7 @@ export const intrinsicApySources: readonly IntrinsicApySourceConfig[] = [
   { provider: 'pendle', address: '0x928FB6ED39100a92B2480f5cbB93453f98D9F4cE', chainId: 1, pendleMarket: '0x9EaAedA23177B7168c55a3A0F937f67919733449' }, // PT-cUSD-23JUL2026
   { provider: 'pendle', address: '0x2d3C279E5FcDF5b793c0a75ed90738D7369B0b83', chainId: 1, pendleMarket: '0xaC24A6f0068d9701EAEa76AB0B418021017F8D59' }, // PT-stcUSD-23JUL2026
   { provider: 'pendle', address: '0x3de0ff76E8b528C092d47b9DaC775931cef80F49', chainId: 1, pendleMarket: '0x8dAe8ECe668cf80d348873F23D456448E8694883' }, // PT-sUSDE-7MAY2026
+  { provider: 'pendle', address: '0x4ad88F62310D377c60F6B0c25Bde8011f315EeA7', chainId: 1, pendleMarket: '0x84183d35960914bad14fa272372861664df329e2' }, // PT-STRCx-27AUG2026
 
   // Pendle PTs — Arbitrum (42161)
   { provider: 'pendle', address: '0x1cdDE40e29dA213f42a7fa109ccadca372d9ee1b', chainId: 42161, pendleMarket: '0x8A8A557b90eC79496a18a1f9C9DA8Bbd7DB86Fd3' }, // PT-USDai-18JUN2026
