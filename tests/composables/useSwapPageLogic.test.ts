@@ -1,13 +1,24 @@
-import { computed, ref, shallowRef } from 'vue'
+import { computed, ref, shallowRef, type Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SwapperMode, type EVault, type SecuritizeCollateralVault, type SwapQuote, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 
 const { captured, useSwapQuotesParallelMock } = vi.hoisted(() => ({
   captured: {
+    planAccount: { chainId: 1 },
     swapOptions: null as null | {
-      buildTxPlanForQuote: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
+      buildTxPlanForQuote: (quote: SwapQuote, provider: string, context: { account?: unknown }) => Promise<TransactionPlan>
+      prepareTransactionPlan?: (plan: TransactionPlan, account: unknown, prefetch: unknown) => Promise<unknown>
     },
+    selectedQuote: null as unknown as Ref<SwapQuote | null>,
+    selectedQuoteCard: null as unknown as Ref<unknown>,
+    modalOpen: vi.fn(),
+    modalClose: vi.fn(),
+    executePlan: vi.fn(),
+    executePreparedPlan: vi.fn(),
+    prepareTransactionPlan: vi.fn(),
+    runSimulation: vi.fn(),
+    runPreparedSimulation: vi.fn(),
   },
   useSwapQuotesParallelMock: vi.fn(),
 }))
@@ -19,8 +30,8 @@ vi.mock('#components', () => ({
 
 vi.mock('~/components/ui/composables/useModal', () => ({
   useModal: () => ({
-    open: vi.fn(),
-    close: vi.fn(),
+    open: captured.modalOpen,
+    close: captured.modalClose,
   }),
 }))
 
@@ -89,13 +100,22 @@ describe('useSwapPageLogic', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     captured.swapOptions = null
+    captured.selectedQuote = ref<SwapQuote | null>(null)
+    captured.selectedQuoteCard = ref<unknown>(null)
+    captured.prepareTransactionPlan.mockReset()
+    captured.prepareTransactionPlan.mockImplementation(async plan => ({ __prepared: true, plan }))
+    captured.runSimulation.mockReset()
+    captured.runSimulation.mockResolvedValue(true)
+    captured.runPreparedSimulation.mockReset()
+    captured.runPreparedSimulation.mockResolvedValue(true)
     useSwapQuotesParallelMock.mockImplementation((options) => {
       captured.swapOptions = options
       return {
         sortedQuoteCards: ref([]),
         selectedProvider: ref(null),
-        selectedQuote: ref(null),
-        effectiveQuote: ref(null),
+        selectedQuote: captured.selectedQuote,
+        selectedQuoteCard: captured.selectedQuoteCard,
+        effectiveQuote: captured.selectedQuote,
         effectiveQuoteFetchedAt: ref(null),
         providersCount: ref(0),
         isLoading: ref(false),
@@ -114,11 +134,17 @@ describe('useSwapPageLogic', () => {
       isConnected: ref(true),
     }))
     vi.stubGlobal('useEulerTx', () => ({
-      executePlan: vi.fn(),
+      executePlan: captured.executePlan,
+      executePreparedPlan: captured.executePreparedPlan,
+      prepareTransactionPlan: captured.prepareTransactionPlan,
       prefetchPluginData: vi.fn(),
     }))
+    vi.stubGlobal('usePlanAccount', () => ({
+      account: ref(captured.planAccount),
+    }))
     vi.stubGlobal('useTransactionPlanSimulation', () => ({
-      runSimulation: vi.fn(async () => true),
+      runSimulation: captured.runSimulation,
+      runPreparedSimulation: captured.runPreparedSimulation,
       simulationError: ref(null),
       clearSimulationError: vi.fn(),
     }))
@@ -130,6 +156,7 @@ describe('useSwapPageLogic', () => {
       toggle: vi.fn(),
     }))
     vi.stubGlobal('useDebounceFn', (fn: unknown) => fn)
+    vi.stubGlobal('formatSmartAmount', (value: string) => value)
   })
 
   afterEach(() => {
@@ -149,7 +176,7 @@ describe('useSwapPageLogic', () => {
       'USDC',
     ))
     const toVaultRef = shallowRef<EVault | undefined>(toVault)
-    const buildPlan = vi.fn(async (quote?: SwapQuote) => ({ quote }) as unknown as TransactionPlan)
+    const buildPlan = vi.fn(async (quote?: SwapQuote, context?: { account?: unknown }) => ({ quote, context }) as unknown as TransactionPlan)
 
     useSwapPageLogic({
       amountField: 'amountOut',
@@ -169,9 +196,130 @@ describe('useSwapPageLogic', () => {
     })
 
     const quote = { amountIn: '100', amountOut: '200' } as SwapQuote
-    const plan = await captured.swapOptions?.buildTxPlanForQuote(quote, 'provider')
+    const context = { account: captured.planAccount }
+    const plan = await captured.swapOptions?.buildTxPlanForQuote(quote, 'provider', context)
+    const prefetch = { pyth: { entries: [] } }
+    await captured.swapOptions?.prepareTransactionPlan?.(plan!, '0x0000000000000000000000000000000000000007', prefetch)
 
-    expect(buildPlan).toHaveBeenCalledWith(quote)
-    expect(plan).toEqual({ quote })
+    expect(buildPlan).toHaveBeenCalledWith(quote, context)
+    expect(captured.prepareTransactionPlan).toHaveBeenCalledWith(plan, {
+      account: '0x0000000000000000000000000000000000000007',
+      prefetch,
+    })
+    expect(plan).toEqual({ quote, context })
+  })
+
+  it('uses the selected quote card prepared plan for review and confirm', async () => {
+    const toVault = makeVault(
+      '0x0000000000000000000000000000000000000002',
+      '0x0000000000000000000000000000000000000003',
+      'WETH',
+    )
+    const fromVault = shallowRef<EVault | SecuritizeCollateralVault | undefined>(makeVault(
+      '0x0000000000000000000000000000000000000004',
+      '0x0000000000000000000000000000000000000005',
+      'USDC',
+    ))
+    const toVaultRef = shallowRef<EVault | undefined>(toVault)
+    const buildPlan = vi.fn(async () => ({ type: 'rebuilt' }) as unknown as TransactionPlan)
+    const quote = { amountIn: '100', amountOut: '200' } as SwapQuote
+    const prepared = {
+      __prepared: true,
+      plan: [{ type: 'evcBatch', items: [] }],
+      chainId: 1,
+      account: '0x0000000000000000000000000000000000000007',
+    }
+
+    captured.selectedQuote.value = quote
+    captured.selectedQuoteCard.value = {
+      provider: 'provider',
+      quote,
+      plan: { type: 'quote-plan' },
+      preparedPlan: prepared,
+    }
+
+    const swap = useSwapPageLogic({
+      amountField: 'amountOut',
+      compare: 'max',
+      fromVault,
+      toVault: toVaultRef,
+      balance: computed(() => 1000n),
+      vaultOptions: computed(() => [toVault]),
+      displayAmountField: 'amountOut',
+      quoteDiffPrefix: '-',
+      buildQuoteRequest: () => null,
+      buildPlan,
+      getBalanceError: () => null,
+      getGeoBlockedAddresses: () => [],
+      redirectPath: '/portfolio/saving',
+      swapperMode: SwapperMode.EXACT_IN,
+    })
+
+    await swap.submit()
+
+    expect(buildPlan).not.toHaveBeenCalled()
+    expect(captured.prepareTransactionPlan).not.toHaveBeenCalled()
+    expect(captured.runPreparedSimulation).toHaveBeenCalledWith(prepared, {})
+    expect(captured.modalOpen).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      props: expect.objectContaining({
+        prepared,
+        plan: undefined,
+      }),
+    }))
+
+    const modalArgs = captured.modalOpen.mock.calls.at(-1)?.[1]
+    await modalArgs.props.onConfirm()
+
+    expect(captured.executePreparedPlan).toHaveBeenCalledWith(prepared)
+    expect(captured.executePlan).not.toHaveBeenCalled()
+  })
+
+  it('prepares a rebuilt plan once and reuses it for confirm when no quote prepared plan is available', async () => {
+    const toVault = makeVault(
+      '0x0000000000000000000000000000000000000002',
+      '0x0000000000000000000000000000000000000003',
+      'WETH',
+    )
+    const fromVault = shallowRef<EVault | SecuritizeCollateralVault | undefined>(makeVault(
+      '0x0000000000000000000000000000000000000004',
+      '0x0000000000000000000000000000000000000005',
+      'USDC',
+    ))
+    const toVaultRef = shallowRef<EVault | undefined>(toVault)
+    const rawPlan = { type: 'raw-plan' } as unknown as TransactionPlan
+    const prepared = { __prepared: true, plan: rawPlan, chainId: 1, account: '0x0000000000000000000000000000000000000007' }
+    const buildPlan = vi.fn(async () => rawPlan)
+    captured.prepareTransactionPlan.mockResolvedValueOnce(prepared)
+    captured.selectedQuote.value = { amountIn: '100', amountOut: '200' } as SwapQuote
+    captured.selectedQuoteCard.value = null
+
+    const swap = useSwapPageLogic({
+      amountField: 'amountOut',
+      compare: 'max',
+      fromVault,
+      toVault: toVaultRef,
+      balance: computed(() => 1000n),
+      vaultOptions: computed(() => [toVault]),
+      displayAmountField: 'amountOut',
+      quoteDiffPrefix: '-',
+      buildQuoteRequest: () => null,
+      buildPlan,
+      getBalanceError: () => null,
+      getGeoBlockedAddresses: () => [],
+      redirectPath: '/portfolio/saving',
+      swapperMode: SwapperMode.EXACT_IN,
+    })
+
+    await swap.submit()
+    const modalArgs = captured.modalOpen.mock.calls.at(-1)?.[1]
+    await modalArgs.props.onConfirm()
+
+    expect(buildPlan).toHaveBeenCalledTimes(1)
+    expect(captured.prepareTransactionPlan).toHaveBeenCalledTimes(1)
+    expect(buildPlan).toHaveBeenCalledWith(undefined, { account: captured.planAccount })
+    expect(captured.prepareTransactionPlan).toHaveBeenCalledWith(rawPlan, { account: captured.planAccount })
+    expect(captured.runPreparedSimulation).toHaveBeenCalledWith(prepared, {})
+    expect(captured.executePreparedPlan).toHaveBeenCalledWith(prepared)
+    expect(captured.executePlan).not.toHaveBeenCalled()
   })
 })

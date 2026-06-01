@@ -1,9 +1,9 @@
 import { computed, ref, shallowRef, watch, watchEffect, type Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { EVault, PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import type { Account, EVault, IHasVaultAddress, PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useBorrowForm } from '~/composables/borrow/useBorrowForm'
 
-const { USER, SUB_ACCOUNT_A, SUB_ACCOUNT_B, VAULT, vault, mocks } = vi.hoisted(() => {
+const { USER, SUB_ACCOUNT_A, SUB_ACCOUNT_B, VAULT, vault, planAccount, mocks } = vi.hoisted(() => {
   const USER = '0x0000000000000000000000000000000000000001'
   const SUB_ACCOUNT_A = '0x0000000000000000000000000000000000000011'
   const SUB_ACCOUNT_B = '0x0000000000000000000000000000000000000022'
@@ -34,10 +34,12 @@ const { USER, SUB_ACCOUNT_A, SUB_ACCOUNT_B, VAULT, vault, mocks } = vi.hoisted((
     SUB_ACCOUNT_B,
     VAULT,
     vault,
+    planAccount: { chainId: 1 } as Account<IHasVaultAddress>,
     mocks: {
       planBorrow: vi.fn(),
       executePlan: vi.fn(),
       prefetchPluginData: vi.fn(),
+      preloadSubAccountSnapshot: vi.fn(),
       fetchSingleBalance: vi.fn(async () => 0n),
       runSimulation: vi.fn(),
     },
@@ -184,6 +186,7 @@ const makeForm = (positions: Ref<PortfolioSavingsPosition<VaultEntity>[]>) => {
 describe('useBorrowForm savings collateral', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.preloadSubAccountSnapshot.mockResolvedValue(undefined)
     vi.stubGlobal('ref', ref)
     vi.stubGlobal('computed', computed)
     vi.stubGlobal('watch', watch)
@@ -194,6 +197,10 @@ describe('useBorrowForm savings collateral', () => {
       planSwapAndBorrow: vi.fn(),
       executePlan: mocks.executePlan,
       prefetchPluginData: mocks.prefetchPluginData,
+      preloadSubAccountSnapshot: mocks.preloadSubAccountSnapshot,
+    }))
+    vi.stubGlobal('usePlanAccount', () => ({
+      account: shallowRef(planAccount),
     }))
     vi.stubGlobal('useWagmi', () => ({
       address: ref(USER),

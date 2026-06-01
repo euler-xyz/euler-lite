@@ -61,6 +61,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const { planRepayFromWallet, executePlan } = useEulerTx()
+  const { account: planAccount } = usePlanAccount()
   const { isConnected } = useWagmi()
   const { finalizeTxAndRedirect } = useTxFinalization()
 
@@ -148,6 +149,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
           liabilityAmount: shouldFullRepay ? maxUint256 : amountNano,
           receiver: position.value.subAccount as Address,
           cleanupOnMax: shouldFullRepay,
+          account: planAccount.value,
         })
       }
       catch (e) {
@@ -193,6 +195,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
         liabilityAmount: isFullRepay ? maxUint256 : amountNano,
         receiver: position.value.subAccount as Address,
         cleanupOnMax: isFullRepay,
+        account: planAccount.value,
       })
       await executePlan(txPlan)
       await finalizeTxAndRedirect()

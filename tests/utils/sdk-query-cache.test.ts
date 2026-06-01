@@ -23,6 +23,22 @@ describe('sdkBuildQuery', () => {
     expect(query).toHaveBeenCalledTimes(1)
   })
 
+  it('shares one in-flight SDK query for equivalent concurrent arguments', async () => {
+    let resolveQuery: (value: string) => void = () => {}
+    const pending = new Promise<string>((resolve) => {
+      resolveQuery = resolve
+    })
+    const query = vi.fn(async (_arg: { vault: string }) => pending)
+    const wrapped = sdkBuildQuery('queryVaultAccountInfo', query, {})
+
+    const first = wrapped({ vault: '0x0000000000000000000000000000000000000001' })
+    const second = wrapped({ vault: '0x0000000000000000000000000000000000000001' })
+
+    expect(query).toHaveBeenCalledTimes(1)
+    resolveQuery('ok')
+    await expect(Promise.all([first, second])).resolves.toEqual(['ok', 'ok'])
+  })
+
   it('uses SDK-provided cache keys when query metadata supplies one', async () => {
     const query = vi.fn(async (_assets: string[]) => 'ok')
     const wrapped = sdkBuildQuery('queryPythUpdateData', query, {}, {

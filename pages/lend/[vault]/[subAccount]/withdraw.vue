@@ -111,7 +111,8 @@ const {
 } = useSwapQuotesParallel({
   amountField: 'amountOut',
   compare: 'max',
-  buildTxPlanForQuote: quote => buildSwapWithdrawPlanFromQuote(quote),
+  buildTxPlanForQuote: (quote, _provider, context) => buildSwapWithdrawPlanFromQuote(quote, context.account),
+  getPlanAccount: () => cachedAccount.value,
   prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
 })
 const rewardApy = computed(() => getSupplyRewardApy(vault.value?.address || ''))
@@ -223,7 +224,7 @@ const swapOutputExactDisplay = computed(() => {
   return `${formatUnits(amountOut, Number(selectedOutputAsset.value.decimals))} ${selectedOutputAsset.value.symbol}`
 })
 
-async function buildSwapWithdrawPlanFromQuote(quote: import('@eulerxyz/euler-v2-sdk').SwapQuote) {
+async function buildSwapWithdrawPlanFromQuote(quote: import('@eulerxyz/euler-v2-sdk').SwapQuote, account = cachedAccount.value) {
   if (!asset.value) throw new Error('Asset not loaded')
   const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value.decimals).lte(amountFixed.value)
   return planWithdrawOrRedeem({
@@ -233,7 +234,7 @@ async function buildSwapWithdrawPlanFromQuote(quote: import('@eulerxyz/euler-v2-
     shares: sharesBalance.value,
     assets: amountFixed.value.value,
     swapQuote: quote,
-    account: cachedAccount.value,
+    account,
   })
 }
 

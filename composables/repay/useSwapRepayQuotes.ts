@@ -1,7 +1,7 @@
 import type { Ref } from 'vue'
 import type { PluginPrefetchData, SwapQuote, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
-import { useSwapQuotesParallel, type SwapQuotePlanAccount } from '~/composables/useSwapQuotesParallel'
+import { useSwapQuotesParallel, type SwapQuotePlanAccount, type SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
 
 /**
  * Wraps two useSwapQuotesParallel instances (exact-in + target-debt) and provides
@@ -10,7 +10,7 @@ import { useSwapQuotesParallel, type SwapQuotePlanAccount } from '~/composables/
 export const useSwapRepayQuotes = (options: {
   direction: Ref<SwapperMode>
   includeCowSwap?: boolean
-  buildTxPlanForQuote: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
+  buildTxPlanForQuote: (quote: SwapQuote, provider: string, context: SwapQuotePlanContext) => Promise<TransactionPlan>
   prefetchPluginData?: (plan: TransactionPlan, account: SwapQuotePlanAccount) => Promise<PluginPrefetchData>
   getPlanAccount?: () => SwapQuotePlanAccount | undefined
 }) => {

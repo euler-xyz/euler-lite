@@ -11,6 +11,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import type { DisplayStep } from '~/utils/stepDecoding'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
+import type { SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { erc20Abi, formatUnits, getAddress, maxUint256, zeroAddress, type Address, type Abi } from 'viem'
 import { eulerAccountLensABI } from '~/entities/euler/abis'
@@ -127,6 +128,7 @@ const getSwapCollateralSharesAmountIn = (assetAmount: bigint): bigint => {
 
 const { chainId: currentChainId } = useEulerAddresses()
 const { account: freshAccount } = useFreshAccount()
+const { account: planAccount } = usePlanAccount()
 const cowModal = useModal()
 const cowSwapExecution = useCowSwapCollateralSwapExecution()
 const cowSwapOrderStatus = useCowSwapOrderStatus(
@@ -148,6 +150,7 @@ const swap = useSwapPageLogic({
   redirectPath: '/portfolio',
   targetVaultAddress,
   swapperMode: SwapperMode.EXACT_IN,
+  getPlanAccount: () => planAccount.value,
 
   buildQuoteRequest(amount) {
     if (!fromVault.value || !toVault.value || !position.value) return null
@@ -199,7 +202,7 @@ const swap = useSwapPageLogic({
     }
   },
 
-  async buildPlan(quote?: SwapQuote): Promise<TransactionPlan> {
+  async buildPlan(quote?: SwapQuote, context?: SwapQuotePlanContext): Promise<TransactionPlan> {
     if (!fromVault.value || !toVault.value || !position.value) throw new Error('Vaults or position not loaded')
     const swapQuote = quote ?? selectedQuote.value
     if (!isSameAsset.value && !swapQuote) throw new Error('No quote selected')
@@ -215,6 +218,7 @@ const swap = useSwapPageLogic({
       disableCollateralFrom: isMaxSwap.value,
       swapQuote: isSameAsset.value ? undefined : swapQuote!,
       swapperMode: SwapperMode.EXACT_IN,
+      account: context?.account ?? planAccount.value,
     })
   },
 

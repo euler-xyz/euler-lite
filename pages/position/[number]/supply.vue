@@ -83,7 +83,7 @@ const form = useCollateralForm({
     }
   },
 
-  buildDirectPlan: async ({ vaultAddress, assetAddress, amountNano, subAccount }) => {
+  buildDirectPlan: async ({ vaultAddress, assetAddress, amountNano, subAccount, account }) => {
     const wrappedAddr = isNativeWrap.value ? resolveWrappedNativeAddress(chainId.value!) : null
     if (isNativeWrap.value && !wrappedAddr) {
       throw new Error('Wrapped native token not found')
@@ -96,10 +96,11 @@ const form = useCollateralForm({
       wrappedNativeInfo: isNativeWrap.value && wrappedAddr
         ? { wrappedTokenAddress: wrappedAddr, nativeAmount: amountNano }
         : undefined,
+      account,
     })
   },
 
-  buildSwapPlan: async (quote: SwapQuote) => {
+  buildSwapPlan: async (quote: SwapQuote, { account }) => {
     if (!selectedAsset.value || !form.collateralVault.value) {
       throw new Error('No selected asset or vault')
     }
@@ -116,6 +117,7 @@ const form = useCollateralForm({
       wrappedNativeInfo: isNative && wrappedAddress
         ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
         : undefined,
+      account,
     })
   },
 

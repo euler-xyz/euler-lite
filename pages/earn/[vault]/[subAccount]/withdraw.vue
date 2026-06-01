@@ -19,6 +19,7 @@ const route = useRoute()
 const modal = useModal()
 const { error } = useToast()
 const { planWithdrawOrRedeem, executePlan } = useEulerTx()
+const { account: planAccount } = usePlanAccount()
 const { getEarnVault } = useVaults()
 const { isConnected, address } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
@@ -143,6 +144,7 @@ const submit = async () => {
         isMax,
         shares: sharesBalance.value,
         assets: amountFixed.value.value,
+        account: planAccount.value,
       })
     }
     catch (e) {

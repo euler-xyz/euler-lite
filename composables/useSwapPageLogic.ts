@@ -1,4 +1,4 @@
-import type { SecuritizeCollateralVault, EVault, TransactionPlan, SwapQuote, SwapperMode } from '@eulerxyz/euler-v2-sdk'
+import type { SecuritizeCollateralVault, EVault, TransactionPlan, TransactionPlanPrepared, SwapQuote, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, formatUnits, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { OperationReviewModal, SlippageSettingsModal } from '#components'
@@ -6,7 +6,7 @@ import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, getVaultTags } from '~/composables/useGeoBlock'
-import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
+import { useSwapQuotesParallel, type SwapQuotePlanAccount, type SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import { getQuoteAmount, type SwapQuoteAmountField, type SwapQuoteCompare } from '~/utils/swapQuotes'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
@@ -40,7 +40,7 @@ export interface UseSwapPageLogicOptions {
    */
   buildQuoteRequest: (amount: bigint) => { params: SwapQuoteInput } | null
   /** Build the TransactionPlan for the current swap (same-asset or quote-based). Must throw on failure. */
-  buildPlan: (quote?: SwapQuote) => Promise<TransactionPlan>
+  buildPlan: (quote?: SwapQuote, context?: SwapQuotePlanContext) => Promise<TransactionPlan>
   /** Page-specific balance validation error. Receives the parsed nano amount. */
   getBalanceError: (amountNano: bigint) => string | null
   /** Vault addresses to check for geo-blocking */
@@ -63,6 +63,8 @@ export interface UseSwapPageLogicOptions {
   reviewSwapEstimatedSide?: 'input' | 'output'
   /** Include CowSwap provider in swap quotes (Ethereum mainnet etc.) */
   includeCowSwap?: boolean
+  /** Optional already-loaded Account for SDK plan/plugin processing. */
+  getPlanAccount?: () => SwapQuotePlanAccount | undefined
 }
 
 export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
@@ -87,6 +89,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     swapperMode,
     reviewSwapEstimatedSide,
     includeCowSwap,
+    getPlanAccount,
   } = options
 
   const otherAmountField: SwapQuoteAmountField = displayAmountField === 'amountIn' ? 'amountOut' : 'amountIn'
@@ -94,10 +97,11 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const router = useRouter()
   const route = useRoute()
   const { isConnected } = useWagmi()
-  const { executePlan, prefetchPluginData } = useEulerTx()
+  const { executePlan, executePreparedPlan, prepareTransactionPlan, prefetchPluginData } = useEulerTx()
   const modal = useModal()
   const { error: showError } = useToast()
-  const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
+  const { runSimulation, runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
+  const { account: defaultPlanAccount } = usePlanAccount()
   // Debt-swap / collateral-swap pages don't consume the user's wallet ERC20
   // balance — the source is an existing position. Safe to skip balance
   // overrides (no balanceOf RPC + no balance-slot probing per estimate).
@@ -109,6 +113,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const isSubmitting = ref(false)
   const isPreparing = ref(false)
   const plan = ref<TransactionPlan | null>(null)
+  const preparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
   const fromAmount = ref('')
   const toAmount = ref('')
   const { slippage } = useSlippage({
@@ -121,6 +126,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     sortedQuoteCards: quoteCardsSorted,
     selectedProvider,
     selectedQuote,
+    selectedQuoteCard,
     effectiveQuote,
     effectiveQuoteFetchedAt,
     providersCount,
@@ -138,11 +144,13 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     // Each call site already encodes the same-asset vs swap-quote branch in
     // its own buildPlan. We just forward the candidate quote so the parallel
     // engine can build a plan per quote for gas estimation.
-    buildTxPlanForQuote: quote => buildPlan(quote),
+    buildTxPlanForQuote: (quote, _provider, context) => buildPlan(quote, context),
+    getPlanAccount: () => getPlanAccount?.() ?? defaultPlanAccount.value,
     getStateOverrideOptions: () => buildSwapStateOverrideOptions(),
     // Sweep-scoped prefetch — Pyth Hermes / keyring vault gating resolved once
     // per fetch instead of per-quote.
     prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
+    prepareTransactionPlan: (plan, account, prefetch) => prepareTransactionPlan(plan, { account, prefetch }),
   })
   // ── Vault products & price invert ──────────────────────────────────────
   const fromProduct = useEulerProductOfVault(computed(() => fromVault.value?.address || ''))
@@ -487,6 +495,22 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     modal.open(SlippageSettingsModal)
   }
 
+  const getSelectedPreparedQuotePlan = () => {
+    if (isSameAsset.value || !selectedQuote.value) return null
+    const card = selectedQuoteCard.value
+    if (!card?.preparedPlan || card.quote !== selectedQuote.value) return null
+    return {
+      plan: card.plan ?? card.preparedPlan.plan,
+      prepared: card.preparedPlan as TransactionPlanPrepared,
+    }
+  }
+
+  const currentPlanAccount = () => getPlanAccount?.() ?? defaultPlanAccount.value
+  const currentPlanContext = (): SwapQuotePlanContext => {
+    const account = currentPlanAccount()
+    return typeof account === 'string' ? {} : { account }
+  }
+
   // ── Submit flow ────────────────────────────────────────────────────────
   const submit = async () => {
     if (isOperationBlocked.value) return
@@ -497,17 +521,32 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
         if (isSubmitting.value || !fromVault.value) return
         if (!isSameAsset.value && !selectedQuote.value) return
 
+        preparedPlan.value = null
+        plan.value = null
         try {
-          plan.value = await buildPlan()
+          const preparedQuotePlan = getSelectedPreparedQuotePlan()
+          if (preparedQuotePlan) {
+            plan.value = preparedQuotePlan.plan
+            preparedPlan.value = preparedQuotePlan.prepared
+          }
+          else {
+            plan.value = await buildPlan(undefined, currentPlanContext())
+            preparedPlan.value = await prepareTransactionPlan(plan.value, { account: currentPlanAccount() })
+          }
         }
         catch (e) {
           logWarn('swap/buildPlan', e)
           showError('Failed to build transaction')
           plan.value = null
+          preparedPlan.value = null
           return
         }
 
-        if (plan.value) {
+        if (preparedPlan.value) {
+          const ok = await runPreparedSimulation(preparedPlan.value, buildSwapStateOverrideOptions())
+          if (!ok) return
+        }
+        else if (plan.value) {
           const ok = await runSimulation(plan.value, buildSwapStateOverrideOptions())
           if (!ok) return
         }
@@ -522,7 +561,8 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
             swapToAmount: showSwapAmounts ? toAmount.value : undefined,
             swapMode: showSwapAmounts ? swapperMode : undefined,
             swapEstimatedSide: showSwapAmounts ? reviewSwapEstimatedSide : undefined,
-            plan: plan.value || undefined,
+            plan: preparedPlan.value ? undefined : (plan.value || undefined),
+            prepared: preparedPlan.value || undefined,
             quoteFetchedAt: !isSameAsset.value ? effectiveQuoteFetchedAt.value : null,
             onConfirm: async () => {
               await send()
@@ -543,8 +583,13 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
 
     isSubmitting.value = true
     try {
-      const txPlan = await buildPlan()
-      await executePlan(txPlan)
+      if (preparedPlan.value) {
+        await executePreparedPlan(preparedPlan.value)
+      }
+      else {
+        const txPlan = await buildPlan(undefined, currentPlanContext())
+        await executePlan(txPlan)
+      }
       modal.close()
       setTimeout(() => {
         router.replace({ path: redirectPath, query: { network: route.query.network } })

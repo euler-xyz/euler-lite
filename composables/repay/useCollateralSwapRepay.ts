@@ -1,4 +1,4 @@
-import type { Account, EVault, IHasVaultAddress, SecuritizeCollateralVault, PortfolioBorrowPosition, SwapQuote, VaultEntity, TransactionPlan, SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, SecuritizeCollateralVault, PortfolioBorrowPosition, SwapQuote, VaultEntity, TransactionPlan, SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
@@ -75,8 +75,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const buildRepayStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
   const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig, chainId: currentChainId } = useEulerAddresses()
   const { finalizeTxAndRedirect } = useTxFinalization()
-  const { refreshAllPositions, portfolio } = useEulerAccount()
-  const planAccount = computed(() => portfolio.value?.account as Account<IHasVaultAddress> | undefined)
+  const { refreshAllPositions } = useEulerAccount()
+  const { account: planAccount } = usePlanAccount()
   const { client: rpcClient } = useRpcClient()
   const { settings } = useUserSettings()
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -140,7 +140,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     clearSimulationError,
     getCurrentDebt,
     includeCowSwap: true,
-    buildTxPlanForQuote: quote => buildRepayPlan(quote),
+    buildTxPlanForQuote: (quote, _provider, context) => buildRepayPlan(quote, context.account),
     prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
     getPlanAccount: () => planAccount.value,
     getQuoteAccounts: () => {
@@ -398,7 +398,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   )
 
   // --- Build / Submit / Send ---
-  async function buildRepayPlan(quote?: SwapQuote): Promise<TransactionPlan> {
+  async function buildRepayPlan(quote?: SwapQuote, account = planAccount.value): Promise<TransactionPlan> {
     if (!position.value || !borrowVault.value || !sourceVault.value) {
       throw new Error('Position or vaults not loaded')
     }
@@ -440,7 +440,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       swapQuote: core.isSameAsset.value ? undefined : (quote || core.quotes.selectedQuote.value!),
       swapperMode: swapMode,
       cleanupOnMax: isFullRepay,
-      account: planAccount.value,
+      account,
     })
   }
 
@@ -485,7 +485,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
     const cowParams: CowSwapClosePositionExecuteParams = {
       chainId,
-      account: sdkAccount as Account<IHasVaultAddress>,
+      account: sdkAccount,
       swapQuote: quote,
       swapperMode: swapMode,
       slippage: slippage.value,

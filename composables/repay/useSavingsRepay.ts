@@ -1,4 +1,4 @@
-import type { Account, EVault, IHasVaultAddress, SecuritizeCollateralVault, PortfolioBorrowPosition, SwapQuote, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, SecuritizeCollateralVault, PortfolioBorrowPosition, SwapQuote, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import type { Ref, ComputedRef } from 'vue'
@@ -63,8 +63,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   const { error } = useToast()
   const { isConnected, address } = useWagmi()
   const { planRepayFromSource, executePlan, prefetchPluginData } = useEulerTx()
-  const { portfolio } = useEulerAccount()
-  const planAccount = computed(() => portfolio.value?.account as Account<IHasVaultAddress> | undefined)
+  const { account: planAccount } = usePlanAccount()
   const { getVault: registryGetVault } = useVaultRegistry()
   const { finalizeTxAndRedirect } = useTxFinalization()
 
@@ -109,7 +108,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     slippage,
     clearSimulationError,
     getCurrentDebt,
-    buildTxPlanForQuote: quote => buildRepayPlan(quote),
+    buildTxPlanForQuote: (quote, _provider, context) => buildRepayPlan(quote, context.account),
     prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
     getPlanAccount: () => planAccount.value,
     getQuoteAccounts: () => {
@@ -275,7 +274,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   })
 
   // --- Build / Submit / Send ---
-  const buildRepayPlan = async (quote?: SwapQuote): Promise<TransactionPlan> => {
+  const buildRepayPlan = async (quote?: SwapQuote, account = planAccount.value): Promise<TransactionPlan> => {
     if (!position.value || !borrowVault.value || !sourceVault.value) {
       throw new Error('Position or vaults not loaded')
     }
@@ -322,7 +321,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
       swapQuote: core.isSameAsset.value ? undefined : swapQuote,
       swapperMode: swapMode,
       cleanupOnMax: isFullRepay,
-      account: planAccount.value,
+      account,
     })
   }
 

@@ -6,6 +6,7 @@ import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
+import type { SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
@@ -19,6 +20,7 @@ const { isSpyMode, spyAddress } = useSpyMode()
 const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const { depositPositions } = useEulerAccount()
 const { planCollateralChange } = useEulerTx()
+const { account: planAccount } = usePlanAccount()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy } = useRewardsApy()
@@ -90,6 +92,7 @@ const swap = useSwapPageLogic({
   quoteDiffPrefix: '-',
   redirectPath: '/portfolio/saving',
   swapperMode: SwapperMode.EXACT_IN,
+  getPlanAccount: () => planAccount.value,
 
   buildQuoteRequest(amount) {
     if (!fromVault.value || !toVault.value) return null
@@ -112,7 +115,7 @@ const swap = useSwapPageLogic({
     }
   },
 
-  async buildPlan(quote?: SwapQuote): Promise<TransactionPlan> {
+  async buildPlan(quote?: SwapQuote, context?: SwapQuotePlanContext): Promise<TransactionPlan> {
     if (!fromVault.value || !toVault.value) throw new Error('Vaults not loaded')
     const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
     const isMax = assetsBalance.value > 0n && amount >= assetsBalance.value
@@ -130,6 +133,7 @@ const swap = useSwapPageLogic({
       maxShares: isMax ? savingPosition.value?.shares : undefined,
       swapQuote: isSameAsset.value ? undefined : swapQuote!,
       swapperMode: SwapperMode.EXACT_IN,
+      account: context?.account ?? planAccount.value,
     })
   },
 

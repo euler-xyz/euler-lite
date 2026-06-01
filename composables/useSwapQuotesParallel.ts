@@ -31,6 +31,9 @@ import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { profAsync, profMark } from '~/utils/profiler'
 
 export type SwapQuotePlanAccount = Account<IHasVaultAddress> | Address
+export type SwapQuotePlanContext = {
+  account?: Account<IHasVaultAddress>
+}
 
 type SwapQuotesParallelOptions = {
   amountField: SwapQuoteAmountField
@@ -39,7 +42,7 @@ type SwapQuotesParallelOptions = {
   includeCowSwap?: boolean
   /** Build a TransactionPlan from a quote so the composable can run gas
    *  estimation and discard quotes that fail with swapper/verifier reverts. */
-  buildTxPlanForQuote?: (quote: SwapQuote, provider: string) => Promise<TransactionPlan>
+  buildTxPlanForQuote?: (quote: SwapQuote, provider: string, context: SwapQuotePlanContext) => Promise<TransactionPlan>
   /** Forwarded to `sdk.executionService.estimateGasForTransactionPlan` so the
    *  per-quote estimate can skip balance overrides, reuse the wallet snapshot
    *  the form already holds, and take precomputed storage-slot hints. */
@@ -50,6 +53,14 @@ type SwapQuotesParallelOptions = {
    *  every subsequent quote so per-quote prepare doesn't re-do Hermes /
    *  keyring / vault-meta lookups. */
   prefetchPluginData?: (plan: TransactionPlan, account: SwapQuotePlanAccount) => Promise<PluginPrefetchData>
+  /** App-level prepare hook. Lets callers reuse the same Permit2 / plugin
+   *  configuration as Review-click preparation while still doing it at
+   *  quote-estimation time. */
+  prepareTransactionPlan?: (
+    plan: TransactionPlan,
+    account: SwapQuotePlanAccount,
+    prefetch: PluginPrefetchData | undefined,
+  ) => Promise<TransactionPlanPrepared>
   /** Optional already-loaded Account for SDK plan/plugin processing. */
   getPlanAccount?: () => SwapQuotePlanAccount | undefined
 }
@@ -71,6 +82,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   const { address, chain } = useWagmi()
   const { isSpyMode, spyAddress } = useSpyMode()
   const { chainId } = useEulerAddresses()
+  const { account: defaultPlanAccount } = usePlanAccount()
   // Spy mode has no connected wallet — fall through to the spied owner so
   // estimate/simulate calls have a real EOA as `from`. Without this the
   // estimate runs as `quote.accountIn` (a fresh sub-account) and EVC.batch
@@ -182,6 +194,12 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   const getQuotePricingToken = (quote: SwapQuote) =>
     options.amountField === 'amountIn' ? quote.tokenIn : quote.tokenOut
 
+  const getPlanAccount = (fallback: Address): SwapQuotePlanAccount =>
+    options.getPlanAccount?.() ?? defaultPlanAccount.value ?? fallback
+
+  const getPlanContext = (account: SwapQuotePlanAccount): SwapQuotePlanContext =>
+    typeof account === 'string' ? {} : { account }
+
   const getAmountUsd = async (quote: SwapQuote): Promise<number | undefined> => {
     const token = getQuotePricingToken(quote)
     if (!token?.address) return undefined
@@ -223,6 +241,9 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     account: SwapQuotePlanAccount,
     prefetch: PluginPrefetchData | undefined,
   ): Promise<TransactionPlanPrepared> => {
+    if (options.prepareTransactionPlan) {
+      return options.prepareTransactionPlan(plan, account, prefetch)
+    }
     if (!chainId.value) throw new Error('preparePlanForQuote: no chainId')
     const sdk = await getEulerSdkFresh()
     return profAsync('quote', 'prepareTransactionPlan', () =>
@@ -280,8 +301,8 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     let prepared: TransactionPlanPrepared
     try {
       const fallbackAccount = (params.origin || effectiveOwner.value || quote.accountIn) as Address
-      const account = options.getPlanAccount?.() ?? fallbackAccount
-      plan = await profAsync(`quote:${provider}`, 'buildTxPlanForQuote', () => options.buildTxPlanForQuote!(quote, provider))
+      const account = getPlanAccount(fallbackAccount)
+      plan = await profAsync(`quote:${provider}`, 'buildTxPlanForQuote', () => options.buildTxPlanForQuote!(quote, provider, getPlanContext(account)))
       const prefetch = await profAsync(`quote:${provider}`, 'sweepPrefetch', () => ensureSweepPrefetch(plan, account))
       prepared = await profAsync(`quote:${provider}`, 'prepareTxPlan', () => preparePlanForQuote(plan, account, prefetch))
       gas = await profAsync(`quote:${provider}`, 'estimateTxPlanGas', () => estimateTxPlanGas(prepared))

@@ -1,5 +1,5 @@
 import { getProjectedRates, getNetAPY } from '~/utils/vault/apy'
-import { isEVault, SwapperMode, type Account, type EVault, type IHasVaultAddress, type SecuritizeCollateralVault, type PortfolioBorrowPosition, type SwapQuote, type VaultEntity, type TransactionPlan, type SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, SwapperMode, type EVault, type SecuritizeCollateralVault, type PortfolioBorrowPosition, type SwapQuote, type VaultEntity, type TransactionPlan, type SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import type { VaultAsset } from '~/types/asset'
 import { getAssetUsdValue, getAssetUsdValueOrZero, getTokenUsdValue } from '~/utils/sdk-prices'
@@ -75,8 +75,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const buildRepayStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
   const { chainId } = useEulerAddresses()
   const { isConnected, address } = useWagmi()
-  const { portfolio } = useEulerAccount()
-  const planAccount = computed(() => portfolio.value?.account as Account<IHasVaultAddress> | undefined)
+  const { account: planAccount } = usePlanAccount()
   const { fetchSingleBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { getVault: registryGetVault } = useVaultRegistry()
@@ -93,7 +92,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   // --- Swap quotes (dual-direction) ---
   const quotes = useSwapRepayQuotes({
     direction,
-    buildTxPlanForQuote: quote => buildRepayPlan(quote),
+    buildTxPlanForQuote: (quote, _provider, context) => buildRepayPlan(quote, context.account),
     prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
     getPlanAccount: () => planAccount.value,
   })
@@ -714,7 +713,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   })
 
   // --- Build plan ---
-  async function buildRepayPlan(quote?: SwapQuote): Promise<TransactionPlan> {
+  async function buildRepayPlan(quote?: SwapQuote, account = planAccount.value): Promise<TransactionPlan> {
     const swapQuote = quote || quotes.selectedQuote.value
     if (!position.value || !borrowVault.value || !collateralVault.value || !swapQuote || !selectedAsset.value) {
       throw new Error('Missing data for swap repay plan')
@@ -740,7 +739,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       wrappedNativeInfo: isNative && wrappedAddress
         ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
         : undefined,
-      account: planAccount.value,
+      account,
     })
   }
 
