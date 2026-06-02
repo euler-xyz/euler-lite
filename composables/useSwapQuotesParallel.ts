@@ -39,7 +39,7 @@ type SwapQuotesParallelOptions = {
   amountField: SwapQuoteAmountField
   compare: SwapQuoteCompare
   /** Surface CoW Protocol as a quote source (Ethereum mainnet etc.). */
-  includeCowSwap?: boolean
+  includeCowSwap?: boolean | (() => boolean)
   /** Build a TransactionPlan from a quote so the composable can run gas
    *  estimation and discard quotes that fail with swapper/verifier reverts. */
   buildTxPlanForQuote?: (quote: SwapQuote, provider: string, context: SwapQuotePlanContext) => Promise<TransactionPlan>
@@ -199,6 +199,11 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
 
   const getPlanContext = (account: SwapQuotePlanAccount): SwapQuotePlanContext =>
     typeof account === 'string' ? {} : { account }
+
+  const shouldIncludeCowSwap = (): boolean | undefined =>
+    typeof options.includeCowSwap === 'function'
+      ? options.includeCowSwap()
+      : options.includeCowSwap
 
   const getAmountUsd = async (quote: SwapQuote): Promise<number | undefined> => {
     const token = getQuotePricingToken(quote)
@@ -428,7 +433,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     providersCount.value = 0
 
     try {
-      const providers = requestOptions.providers ?? await getSwapProviders({ includeCowSwap: options.includeCowSwap })
+      const providers = requestOptions.providers ?? await getSwapProviders({ includeCowSwap: shouldIncludeCowSwap() })
       if (guard.isStale(gen)) {
         return
       }

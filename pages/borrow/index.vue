@@ -368,7 +368,7 @@ const sortedBorrowList = computed(() => {
       break
     case 'Borrow APY':
       sorted = applyRecentlyAddedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
-        return Number(getVaultBorrowApy(a.borrow)) - Number(getVaultBorrowApy(b.borrow))
+        return getPairBorrowApy(a) - getPairBorrowApy(b)
       }))
       break
     case 'Supply APY':

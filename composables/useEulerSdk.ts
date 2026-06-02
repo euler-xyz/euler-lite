@@ -90,7 +90,8 @@ const buildV3ProxyApiPath = () => buildAppApiPath('/api/v3')
 // `server/api/proxy/{merkl,fuul,incentra,subgraph}/[...path].ts` and
 // `server/api/labels/[chainId]/[file].get.ts`.
 const buildMerklProxyApiPath = () => buildAppApiPath('/api/proxy/merkl')
-const buildFuulProxyApiPath = () => buildAppApiPath('/api/proxy/fuul')
+const buildFuulProxyApiPath = (path = '') =>
+  buildAppApiPath(`/api/proxy/fuul${path ? `/${path.replace(/^\/+/, '')}` : ''}`)
 const buildIncentraProxyApiPath = (path: string) =>
   buildAppApiPath(`/api/proxy/incentra/${path.replace(/^\/+/, '')}`)
 // Exported so post-tx subgraph polling (useEulerTx) hits the exact same
@@ -185,8 +186,15 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
           rewardsBrevisProofsApiUrl: buildIncentraProxyApiPath('v1/getMerkleProofsBatch'),
         }
       : { rewardsEnableBrevis: false }),
-    // Fuul: SDK appends `/incentives?...` itself, so just set the base URL.
-    ...(enableFuul ? { rewardsFuulApiUrl: buildFuulProxyApiPath() } : { rewardsEnableFuul: false }),
+    // Fuul: SDK appends `/incentives?...` to the base URL. Wallet-only
+    // totals and claim checks take endpoint-specific URLs.
+    ...(enableFuul
+      ? {
+          rewardsFuulApiUrl: buildFuulProxyApiPath(),
+          rewardsFuulTotalsUrl: buildFuulProxyApiPath('totals'),
+          rewardsFuulClaimChecksUrl: buildFuulProxyApiPath('claim-checks'),
+        }
+      : { rewardsEnableFuul: false }),
     // Goldsky subgraph: route every chain through `/api/proxy/subgraph/{id}`
     // so the browser never sees the upstream URL or hits api.goldsky.com
     // directly.

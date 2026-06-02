@@ -12,6 +12,7 @@ import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
+import { computeSupplyApy } from '~/utils/collateralOptions'
 
 defineOptions({
   name: 'EarnPage',
@@ -46,6 +47,11 @@ const selectedCollateral = ref<string[]>([])
 const selectedCurators = ref<string[]>([])
 const sortBy = ref<string>('Total Supply')
 const sortDir = ref<'desc' | 'asc'>('desc')
+const { settings } = useUserSettings()
+const { viewer } = useApyVisibility()
+
+const getDisplayedEarnSupplyApy = (vault: EulerEarn): number =>
+  computeSupplyApy(vault, viewer.value, settings.value)
 
 useUrlQuerySync([
   { ref: searchQuery, default: '', queryKey: 'search' },
@@ -189,7 +195,7 @@ const sortedList = computed(() => {
       break
     case 'Supply APY':
       sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EulerEarn, b: EulerEarn) => {
-        return Number(getVaultSupplyApy(b)) - Number(getVaultSupplyApy(a))
+        return getDisplayedEarnSupplyApy(b) - getDisplayedEarnSupplyApy(a)
       }))
       break
     case 'Liquidity':

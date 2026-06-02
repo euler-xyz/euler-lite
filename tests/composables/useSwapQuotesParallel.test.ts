@@ -135,4 +135,22 @@ describe('useSwapQuotesParallel', () => {
     })
     expect(otherCall.providerExtraData).toBeUndefined()
   })
+
+  it('evaluates callable includeCowSwap for each quote request', async () => {
+    let includeCowSwap = true
+    getSwapProviders.mockResolvedValue([])
+
+    const quotes = useSwapQuotesParallel({
+      amountField: 'amountOut',
+      compare: 'max',
+      includeCowSwap: () => includeCowSwap,
+    })
+
+    await quotes.requestQuotes(requestParams)
+    includeCowSwap = false
+    await quotes.requestQuotes(requestParams)
+
+    expect(getSwapProviders).toHaveBeenNthCalledWith(1, { includeCowSwap: true })
+    expect(getSwapProviders).toHaveBeenNthCalledWith(2, { includeCowSwap: false })
+  })
 })
