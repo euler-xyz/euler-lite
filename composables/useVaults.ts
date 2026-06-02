@@ -467,6 +467,13 @@ const isSerialisedSnapshot = (v: unknown): v is SerialisedSnapshot => {
 
 type Hydrated<V> = { vault: V, args: Record<string, unknown> }
 
+interface HydratedSnapshot {
+  evk: Hydrated<EVaultClass>[]
+  earn: Hydrated<EulerEarnClass>[]
+  securitize: Hydrated<SecuritizeCollateralVaultClass>[]
+  escrow: Hydrated<EVaultClass>[]
+}
+
 const decodeArgs = (entry: SerialisedVault): Record<string, unknown> | undefined => {
   const args = decodeBigints(entry.data) as Record<string, unknown>
   return args && typeof args === 'object' ? args : undefined
@@ -487,6 +494,60 @@ const instantiateSecuritize = (entry: SerialisedVault): Hydrated<SecuritizeColla
   return args ? { vault: new SecuritizeCollateralVault(args as unknown as ISecuritizeCollateralVault), args } : undefined
 }
 
+const markHydratedSnapshotReady = (targetChainId: number) => {
+  isEVaultLoading.value = false
+  isEVaultUpdating.value = false
+  isEarnLoading.value = false
+  isEarnUpdating.value = false
+  isSecuritizeLoading.value = false
+  isSecuritizeUpdating.value = false
+  isEscrowLoading.value = false
+  isEscrowUpdating.value = false
+  isEscrowLoadedOnce.value = true
+  isReady.value = true
+  loadedChainId.value = targetChainId
+}
+
+const enrichHydratedSnapshot = async (snapshot: HydratedSnapshot, generation: number) => {
+  const { evk, escrow, earn, securitize } = snapshot
+  if (loadGeneration.value !== generation) return
+
+  const registry = useVaultRegistry()
+  const meta = buildRegistryMetaService(registry)
+  await Promise.all([
+    ...evk.map(h => h.vault.populateCollaterals(meta)),
+    ...escrow.map(h => h.vault.populateCollaterals(meta)),
+    ...earn.map(h => h.vault.populateStrategyVaults(meta)),
+  ])
+  if (loadGeneration.value !== generation) return
+
+  const snapshotIndex: SnapshotArgsByAddress = buildSnapshotIndex([
+    ...evk, ...escrow, ...earn, ...securitize,
+  ].map(h => ({ address: h.vault.address, args: h.args })))
+  const priceStub = buildSnapshotPriceService(snapshotIndex)
+  const rewardsStub = buildSnapshotRewardsService(snapshotIndex)
+  const intrinsicApyService = new IntrinsicApyService(buildSnapshotIntrinsicApyAdapter(snapshotIndex))
+  const allHydrated = [...evk, ...escrow, ...earn, ...securitize]
+  await Promise.all([
+    ...allHydrated.map(h => h.vault.populateMarketPrices(priceStub)),
+    ...allHydrated.map(h => h.vault.populateRewards(rewardsStub)),
+    intrinsicApyService.populateIntrinsicApy(allHydrated.map(h => h.vault)),
+  ])
+}
+
+const scheduleHydratedSnapshotEnrichment = (snapshot: HydratedSnapshot, generation: number) => {
+  const run = () => {
+    void enrichHydratedSnapshot(snapshot, generation).catch(err => logWarn('useVaults/enrichHydratedSnapshot', err))
+  }
+
+  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+    window.requestIdleCallback(run, { timeout: 1_000 })
+    return
+  }
+
+  setTimeout(run, 0)
+}
+
 /**
  * Two-pass hydrate from the server snapshot at /api/vaults?chainId=N.
  *
@@ -494,13 +555,10 @@ const instantiateSecuritize = (entry: SerialisedVault): Hydrated<SecuritizeColla
  *         registry. Class methods are restored via the constructor; data
  *         fields come from the decoded snapshot.
  *
- * Pass 2: let the SDK wire cross-references by calling each vault's
- *         `populateCollaterals` / `populateStrategyVaults` with a
- *         registry-backed `IVaultMetaService` stub. Pure-memory work —
- *         no RPC, but it restores `collateral.vault` and
- *         `strategy.vault` instances pointing at the same EVault refs
- *         registered in pass 1 (preserving object identity for Vue
- *         reactivity).
+ * Pass 2: schedule SDK cross-reference and snapshot-backed enrichment work
+ *         after the registry is published. This restores `collateral.vault`,
+ *         strategy refs, market prices, rewards, and intrinsic APY without
+ *         holding the initial list render behind the extra in-memory pass.
  *
  * Returns true if the registry is populated and the UI can render
  * immediately. Returns false if the snapshot is too stale, the wire
@@ -553,49 +611,8 @@ const hydrateFromServer = async (targetChainId: number, generation: number): Pro
       ...securitize.map(h => ({ address: h.vault.address, vault: h.vault, type: 'securitize' as const, verified: true })),
     ])
 
-    // Pass 2a: registry-backed cross-ref wiring (collaterals/strategies).
-    const registry = useVaultRegistry()
-    const meta = buildRegistryMetaService(registry)
-    await Promise.all([
-      ...evk.map(h => h.vault.populateCollaterals(meta)),
-      ...escrow.map(h => h.vault.populateCollaterals(meta)),
-      ...earn.map(h => h.vault.populateStrategyVaults(meta)),
-    ])
-
-    // Pass 2b: drive the SDK's populate paths through snapshot-backed
-    // stubs so marketPriceUsd / rewards / intrinsicApy land on each
-    // instance. The constructors don't carry these across from args, so
-    // without this pass the first paint falls back to asset-denominated
-    // amounts until the silent RPC refresh runs.
-    //
-    // Order matters for EVault: populateMarketPrices reads collateral.vault
-    // for the per-collateral price loop, so it must run after pass 2a.
-    const snapshotIndex: SnapshotArgsByAddress = buildSnapshotIndex([
-      ...evk, ...escrow, ...earn, ...securitize,
-    ].map(h => ({ address: h.vault.address, args: h.args })))
-    const priceStub = buildSnapshotPriceService(snapshotIndex)
-    const rewardsStub = buildSnapshotRewardsService(snapshotIndex)
-    const intrinsicApyService = new IntrinsicApyService(buildSnapshotIntrinsicApyAdapter(snapshotIndex))
-    const allHydrated = [...evk, ...escrow, ...earn, ...securitize]
-    await Promise.all([
-      ...allHydrated.map(h => h.vault.populateMarketPrices(priceStub)),
-      ...allHydrated.map(h => h.vault.populateRewards(rewardsStub)),
-      intrinsicApyService.populateIntrinsicApy(allHydrated.map(h => h.vault)),
-    ])
-
-    // Clear loading/updating flags so the UI renders immediately. The
-    // subsequent silent RPC refresh runs without touching these flags.
-    isEVaultLoading.value = false
-    isEVaultUpdating.value = false
-    isEarnLoading.value = false
-    isEarnUpdating.value = false
-    isSecuritizeLoading.value = false
-    isSecuritizeUpdating.value = false
-    isEscrowLoading.value = false
-    isEscrowUpdating.value = false
-    isEscrowLoadedOnce.value = true
-    isReady.value = true
-    loadedChainId.value = targetChainId
+    markHydratedSnapshotReady(targetChainId)
+    scheduleHydratedSnapshotEnrichment({ evk, earn, securitize, escrow }, generation)
     return true
   }
   catch (err) {
