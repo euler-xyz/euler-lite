@@ -66,12 +66,13 @@ describe('isVaultRecentlyAdded', () => {
   })
 
   it('checks SDK Earn recently-added vaults', () => {
-    const address = '0x0000000000000000000000000000000000000202'
+    const lowerAddress = '0x8d3f9f9eb2f5e8b48efbb4074440d1e2a34bc365'
+    const checksummedAddress = normalizeAddress(lowerAddress)
 
     __setEulerLabelsDataForTest({
-      recentlyAddedEarnVaults: new Set([normalizeAddress(address)]),
+      recentlyAddedEarnVaults: new Set([lowerAddress]),
     })
 
-    expect(isVaultRecentlyAdded(address.toLowerCase())).toBe(true)
+    expect(isVaultRecentlyAdded(checksummedAddress)).toBe(true)
   })
 })
