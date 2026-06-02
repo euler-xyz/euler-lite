@@ -20,7 +20,8 @@ defineOptions({
 
 const { isEarnUpdating } = useVaults()
 const isPricesReady = ref(false)
-const isLoading = computed(() => isEarnUpdating.value || !isPricesReady.value)
+const { isReady: labelsReady } = useEulerLabels()
+const isLoading = computed(() => isEarnUpdating.value || !labelsReady.value || !isPricesReady.value)
 const { isSlow } = useSlowLoading(isLoading)
 const { getEarnVaults, isVerifiedVault } = useVaultRegistry()
 const { chainId } = useEulerAddresses()

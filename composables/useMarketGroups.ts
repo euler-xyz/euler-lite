@@ -386,7 +386,9 @@ export const useMarketGroups = () => {
     // has run, every group gets totalTVL=0, and the explore page's
     // "Active" sort falls back to label/discovery order — causing a
     // visible reorder once the second resolve commits real TVLs.
-    if (!vaultsReady.value) return []
+    // Labels also feed product grouping and the recently-added sort boost, so
+    // wait for them before publishing the first visible group list.
+    if (!vaultsReady.value || !labelsReady.value) return []
     const vaults = allVaults.value
     if (vaults.length === 0) return []
 
@@ -555,6 +557,7 @@ export const useMarketGroups = () => {
     marketGroups,
     marketGroupsSync,
     curatorGroups,
+    labelsReady,
     isResolvingTVL,
     getGroupForVault,
     fetchMarketGroupOnDemand,
