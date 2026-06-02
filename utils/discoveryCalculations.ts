@@ -12,6 +12,7 @@ import { formatHookedOpsSummary, getHookedOperationMetas, getVaultHookedOperatio
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
 import { getVaultBorrowApy, getVaultSupplyApy } from '~/utils/vault-display'
 import { computeSupplyApy, computeBorrowApy, type ApyVisibilitySettings } from '~/utils/collateralOptions'
+import { getMaxLiquidationDiscountDisplayPercent } from '~/utils/vault/liquidation'
 
 // ============================================================
 // Types & Constants
@@ -811,8 +812,8 @@ export const CONFIG_ROWS: AttributeRow[] = [
     label: 'Max liquidation discount',
     getValue: (vault) => {
       if (!isEVault(vault) || isEscrow(vault)) return NA_CELL
-      const pct = vault.liquidation.maxLiquidationDiscount * 100
-      return { display: `${pct}%`, kind: 'text' }
+      const pct = getMaxLiquidationDiscountDisplayPercent(vault)
+      return { display: `${formatNumber(pct, 2, 0)}%`, kind: 'text' }
     },
   },
   {
