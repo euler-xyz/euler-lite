@@ -8,7 +8,7 @@ import { isVaultDeprecated, getVaultNotice } from '~/utils/eulerLabelsUtils'
 
 import { VaultOverviewModal, VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
-import { formatNumber, formatCompactUsdValue, compactNumber, formatExactAmount } from '~/utils/string-utils'
+import { formatNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { roundAndCompactTokens } from '~/utils/crypto-utils'
 import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 
@@ -65,22 +65,6 @@ const updateHasPrice = async () => {
 
 watchEffect(() => {
   updateHasPrice()
-})
-
-const projectedEarningsPerMonth = ref('—')
-
-const updateProjectedEarningsPerMonth = async () => {
-  const price = await getAssetUsdValue(position.assets, vault.value, 'off-chain')
-  if (price === undefined || price === 0) {
-    projectedEarningsPerMonth.value = '—'
-    return
-  }
-  // Monthly earnings = (value * APY%) / 12
-  projectedEarningsPerMonth.value = compactNumber((price * supplyApyWithRewards.value) / 12 / 100)
-}
-
-watchEffect(() => {
-  updateProjectedEarningsPerMonth()
 })
 
 const supplyApyModalData = computed(() => ({
@@ -236,25 +220,6 @@ const onClick = () => {
             >
               ~ {{ roundAndCompactTokens(position.assets, vault.asset.decimals) }} {{ vault.asset.symbol }}
             </UiExactAmount>
-          </div>
-        </div>
-        <div
-          v-if="hasPrice"
-          class="flex justify-between"
-        >
-          <div class="text-content-tertiary text-p3">
-            Projected earnings per month
-          </div>
-          <div class="flex justify-between gap-8 text-right">
-            <div
-              class="text-content-primary text-p3"
-              data-id="data-point"
-              :data-key="positionKey"
-              data-field="projected-earnings-month"
-              :data-value="projectedEarningsPerMonth"
-            >
-              ${{ projectedEarningsPerMonth }}
-            </div>
           </div>
         </div>
         <div
