@@ -25,7 +25,7 @@ const subAccountIndex = computed(() => {
 
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
-const { getSupplyRewardCampaigns } = useRewardsApy()
+const { getSupplyRewardCampaignsFromVault } = useRewardsApy()
 const { viewer, visibleTotal } = useApyVisibility()
 
 const vault = computed(() => position.vault!)
@@ -87,7 +87,7 @@ const supplyApyModalData = computed(() => ({
     lendingAPY: getVaultSupplyApy(vault.value),
     intrinsicAPY: getVaultIntrinsicApy(vault.value, enableIntrinsicApy.value),
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault.value, enableIntrinsicApy.value),
-    campaigns: getSupplyRewardCampaigns(vault.value.address),
+    campaigns: getSupplyRewardCampaignsFromVault(vault.value),
     rewardVaultAddress: vault.value.address,
   },
 }))

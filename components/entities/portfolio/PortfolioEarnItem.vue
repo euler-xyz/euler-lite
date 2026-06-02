@@ -23,7 +23,7 @@ const subAccountIndex = computed(() => {
   return getSubAccountIndex(getAddress(ownerAddress.value), getAddress(position.subAccount))
 })
 
-const { getSupplyRewardCampaigns } = useRewardsApy()
+const { getSupplyRewardCampaignsFromVault } = useRewardsApy()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { viewer, visibleTotal } = useApyVisibility()
@@ -72,7 +72,7 @@ const supplyApyModalData = computed(() => ({
     lendingAPY: getVaultSupplyApy(vault.value),
     intrinsicAPY: getVaultIntrinsicApy(vault.value, enableIntrinsicApy.value),
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault.value, enableIntrinsicApy.value),
-    campaigns: getSupplyRewardCampaigns(vault.value.address),
+    campaigns: getSupplyRewardCampaignsFromVault(vault.value),
     rewardVaultAddress: vault.value.address,
     baseApyAverageLabel: '1h',
   },
