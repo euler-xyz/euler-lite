@@ -19,7 +19,7 @@ defineOptions({
   name: 'ExplorePage',
 })
 
-const { marketGroups, isResolvingTVL, labelsReady } = useMarketGroups()
+const { marketGroups, isResolvingTVL, isReady: marketGroupsReady } = useMarketGroups()
 const { getBestMaxROE } = useBestMaxROE(marketGroups)
 const { isEVaultUpdating, isEarnUpdating, isSecuritizeUpdating, isEscrowUpdating } = useVaults()
 const { chainId } = useEulerAddresses()
@@ -268,7 +268,7 @@ const sortedMarkets = computed(() => {
 
 const isLoading = computed(() =>
   isEVaultUpdating.value || isEarnUpdating.value || isSecuritizeUpdating.value || isEscrowUpdating.value
-  || !labelsReady.value || isResolvingTVL.value,
+  || !marketGroupsReady.value || isResolvingTVL.value,
 )
 const { isSlow } = useSlowLoading(isLoading)
 </script>

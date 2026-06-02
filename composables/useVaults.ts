@@ -59,6 +59,12 @@ const isEscrowLoadedOnce = ref(false)
 // post-hydration flash where unfetched collaterals look unrecognised.
 const isCollateralResolved = ref(false)
 
+// True once vault market-price fields are safe for consumers that sort or
+// aggregate from the SDK instances directly. Snapshot hydration publishes the
+// registry before this enrichment step, so it is intentionally stricter than
+// `isReady`.
+const isMarketDataResolved = ref(false)
+
 // Generation counter to invalidate stale in-flight operations after chain switch.
 // Incremented in resetVaultsState(); any async operation capturing an older generation
 // must stop registering vaults.
@@ -149,6 +155,7 @@ const resetVaultsState = () => {
   borrowPairCache.clear()
   isReady.value = false
   isCollateralResolved.value = false
+  isMarketDataResolved.value = false
   isEVaultLoading.value = true
   isEVaultUpdating.value = true
   isEarnLoading.value = true
@@ -537,7 +544,13 @@ const enrichHydratedSnapshot = async (snapshot: HydratedSnapshot, generation: nu
 
 const scheduleHydratedSnapshotEnrichment = (snapshot: HydratedSnapshot, generation: number) => {
   const run = () => {
-    void enrichHydratedSnapshot(snapshot, generation).catch(err => logWarn('useVaults/enrichHydratedSnapshot', err))
+    void enrichHydratedSnapshot(snapshot, generation)
+      .catch(err => logWarn('useVaults/enrichHydratedSnapshot', err))
+      .finally(() => {
+        if (loadGeneration.value === generation) {
+          isMarketDataResolved.value = true
+        }
+      })
   }
 
   if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
@@ -730,6 +743,7 @@ const loadVaults = async () => {
     // gating "unknown collateral" classification can now run without
     // misclassifying not-yet-hydrated lazy collateral references.
     isCollateralResolved.value = true
+    isMarketDataResolved.value = true
 
     // Clear flags AFTER all needed escrow vaults are loaded.
     // Silent mode skips EVault/Earn flags (already false from hydration) but
@@ -751,6 +765,7 @@ const loadVaults = async () => {
       // Unblock consumers so direct market pages can render their fallback
       // state instead of waiting forever on a failed sweep.
       isCollateralResolved.value = true
+      isMarketDataResolved.value = true
       isEVaultLoading.value = false
       isEVaultUpdating.value = false
       isEarnLoading.value = false
@@ -1104,6 +1119,7 @@ export const useVaults = () => {
     // State
     isReady,
     isCollateralResolved,
+    isMarketDataResolved,
     loadedChainId,
     isEVaultLoading,
     isEVaultUpdating,
