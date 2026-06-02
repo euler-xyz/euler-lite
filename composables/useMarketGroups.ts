@@ -364,8 +364,9 @@ const resolveGroupTVL = async (group: MarketGroup): Promise<MarketGroup> => {
 export const useMarketGroups = () => {
   const { getAll } = useVaultRegistry()
   const { products, entities, isReady: labelsReady } = useEulerLabels()
-  const { isVaultGovernorVerified, isCollateralResolved, isReady: vaultsReady } = useVaults()
+  const { isVaultGovernorVerified, isCollateralResolved, isMarketDataResolved, isReady: vaultsReady } = useVaults()
   const showAllLabelEntries = useShowAllLabelEntries()
+  const isReady = computed(() => labelsReady.value && vaultsReady.value && isMarketDataResolved.value)
 
   /** Every loaded vault, including non-explorable ones (used for collateral lookups) */
   const registryVaults = computed((): AnyVault[] => getAll().map(entry => entry.vault))
@@ -386,7 +387,11 @@ export const useMarketGroups = () => {
     // has run, every group gets totalTVL=0, and the explore page's
     // "Active" sort falls back to label/discovery order — causing a
     // visible reorder once the second resolve commits real TVLs.
-    if (!vaultsReady.value) return []
+    // Labels feed product grouping/recently-added boosting, and Explore's
+    // active sort uses SDK-backed market-price metrics. Wait for both before
+    // publishing the first visible group list so it doesn't sort once on
+    // placeholder $0 values and again when enrichment restores prices.
+    if (!isReady.value) return []
     const vaults = allVaults.value
     if (vaults.length === 0) return []
 
@@ -555,6 +560,7 @@ export const useMarketGroups = () => {
     marketGroups,
     marketGroupsSync,
     curatorGroups,
+    isReady,
     isResolvingTVL,
     getGroupForVault,
     fetchMarketGroupOnDemand,

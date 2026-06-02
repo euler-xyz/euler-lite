@@ -52,10 +52,10 @@ const { borrowList, isEVaultUpdating, isEscrowUpdating } = useVaults()
 const { chainId } = useEulerAddresses()
 
 const isPricesReady = ref(false)
-const isLoading = computed(() => isEVaultUpdating.value || isEscrowUpdating.value || !isPricesReady.value)
+const { entities, isReady: labelsReady } = useEulerLabels()
+const isLoading = computed(() => isEVaultUpdating.value || isEscrowUpdating.value || !labelsReady.value || !isPricesReady.value)
 const { isSlow } = useSlowLoading(isLoading)
 const { enableEntityBranding } = useDeployConfig()
-const { entities } = useEulerLabels()
 const showAllLabelEntries = useShowAllLabelEntries()
 
 const activeBorrowList = computed(() =>
