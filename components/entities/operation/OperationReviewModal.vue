@@ -138,7 +138,7 @@ watch(
       }
     }
     catch (err) {
-      logWarn('OperationReviewSdkModal/prepareTransactionPlan', err)
+      logWarn('OperationReviewModal/prepareTransactionPlan', err)
       if (requestId === prepareRequestId) {
         preparedPlan.value = undefined
         prepareError.value = 'Transaction preparation failed. Close this review and try again.'
@@ -184,7 +184,7 @@ const handleTenderlySimulate = async () => {
     })
   }
   catch (err) {
-    logWarn('OperationReviewSdkModal/tenderly', err)
+    logWarn('OperationReviewModal/tenderly', err)
   }
 }
 
@@ -260,7 +260,7 @@ const copyCalldata = async () => {
     copyToClipboard(JSON.stringify(entries, null, 2), 'calldata')
   }
   catch (err) {
-    logWarn('OperationReviewSdkModal/copyCalldata', err)
+    logWarn('OperationReviewModal/copyCalldata', err)
   }
 }
 
