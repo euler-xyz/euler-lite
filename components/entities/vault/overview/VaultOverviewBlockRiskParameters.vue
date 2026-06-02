@@ -8,6 +8,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatHookedOpsSummary, getHookedOperationMetas, getVaultHookedOperations, hasAnyHookedOperation, isHookDisabling, isVaultEffectivelyPaused } from '~/utils/vault-hooks'
 import { isVaultBorrowable } from '~/utils/vault/classification'
+import { formatLiquidationBonusRange } from '~/utils/vault/liquidation'
 import { VaultHooksInfoModal } from '#components'
 
 const { vault } = defineProps<{ vault: EVault }>()
@@ -24,9 +25,7 @@ const isBorrowable = computed(() => isVaultBorrowable(vault))
 const supplyCapPercentageDisplay = computed(() => vault.caps.supplyCapUtilization)
 const borrowCapPercentageDisplay = computed(() => vault.caps.borrowCapUtilization)
 const hookedOperations = computed(() => getVaultHookedOperations(vault))
-const maxLiquidationDiscountPercent = computed(() => {
-  return vault.liquidation.maxLiquidationDiscount * 100
-})
+const liquidationBonusRange = computed(() => formatLiquidationBonusRange(vault))
 const showShareTokenExchangeRate = computed(() =>
   getVaultCategory(vault.address) !== 'escrow'
   && (vault.caps.borrowCap !== 0n || vault.totalBorrowed > 0n),
@@ -102,7 +101,7 @@ const hooksModalData = computed(() => ({
     <div class="flex flex-col items-start gap-24">
       <VaultOverviewLabelValue
         v-if="isBorrowable"
-        :value="`0-${maxLiquidationDiscountPercent}%`"
+        :value="liquidationBonusRange"
         orientation="horizontal"
       >
         <template #label>
