@@ -177,8 +177,29 @@ export const isProductKeyring = (productKey: string): boolean =>
 export const isVaultAccessControlled = (vaultAddress: string): boolean =>
   isEulerLabelVaultAccessControlled(labels(), vaultAddress)
 
-export const getEntitiesByVault = (vault: { governorAdmin?: string, governor?: string }): EulerLabelEntity[] =>
+export type EulerLabelEntityVaultLike = {
+  address?: string
+  governorAdmin?: string
+  governor?: string
+}
+
+export const getEntitiesByVault = (vault: EulerLabelEntityVaultLike): EulerLabelEntity[] =>
   getEulerLabelEntitiesByVault(labels(), vault) as EulerLabelEntity[]
+
+export const getUniqueEntitiesByVaults = (vaults: EulerLabelEntityVaultLike[]): EulerLabelEntity[] => {
+  const seen = new Set<string>()
+  const entities: EulerLabelEntity[] = []
+
+  for (const vault of vaults) {
+    for (const entity of getEntitiesByVault(vault)) {
+      if (seen.has(entity.name)) continue
+      seen.add(entity.name)
+      entities.push(entity)
+    }
+  }
+
+  return entities
+}
 
 export const getEntitiesByEarnVault = (earnVault: EulerEarn): EulerLabelEntity[] =>
   getEulerLabelEntitiesByEarnVault(labels(), earnVault) as EulerLabelEntity[]

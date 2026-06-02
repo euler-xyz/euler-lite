@@ -149,7 +149,6 @@ export const getMarketEntities = (market: MarketGroup): { name: string, logos: s
   const seen = new Set<string>()
   const all: EulerLabelEntity[] = []
   for (const v of market.vaults) {
-    if (!isEVault(v)) continue
     for (const entity of getEntitiesByVault(v)) {
       if (seen.has(entity.name)) continue
       seen.add(entity.name)

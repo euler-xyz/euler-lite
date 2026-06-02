@@ -7,6 +7,7 @@ import {
   getActiveExternalCollateral,
   getAttributeMatrixColumns,
   getCollateralMatrix,
+  getMarketEntities,
   isNodeRampingDown,
   type VaultApyCacheEntry,
   type VaultUsdCacheEntry,
@@ -16,11 +17,15 @@ import type { EVault, EVaultCollateral, SecuritizeCollateralVault } from '@euler
 import { VaultRewardInfo } from '@eulerxyz/euler-v2-sdk'
 
 vi.mock('~/entities/euler/labels', () => ({
-  getEulerLabelEntityLogo: () => undefined,
+  getEulerLabelEntityLogo: (logo: string) => `/entities/${logo}`,
 }))
 
 vi.mock('~/utils/eulerLabelsUtils', () => ({
-  getEntitiesByVault: () => [],
+  getEntitiesByVault: (vault: { address?: string }) => {
+    if (vault.address === '0xBorrow') return [{ name: 'KPK', logo: 'kpk.svg' }]
+    if (vault.address === '0xSecuritize') return [{ name: 'Securitize', logo: 'securitize.png' }]
+    return []
+  },
   isVaultDeprecated: () => false,
 }))
 
@@ -296,6 +301,19 @@ describe('attribute stats matrix', () => {
     expect(byRow.get('supplyApy')!.display).toBe('5.31%')
     expect(byRow.get('borrowApy')!.numeric).toBeCloseTo(1.25)
     expect(byRow.get('borrowApy')!.display).toBe('1.25%')
+  })
+})
+
+describe('getMarketEntities', () => {
+  it('includes Securitize product members when deriving market risk managers', () => {
+    const borrowVault = makeVault('0xBorrow', [])
+    const securitizeVault = makeSecuritizeVault('0xSecuritize')
+    const market = makeMarket([borrowVault, securitizeVault])
+
+    expect(getMarketEntities(market)).toEqual({
+      name: 'KPK & Securitize',
+      logos: ['/entities/kpk.svg', '/entities/securitize.png'],
+    })
   })
 })
 
