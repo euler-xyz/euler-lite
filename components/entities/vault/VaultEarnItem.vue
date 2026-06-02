@@ -1,14 +1,13 @@
 <script setup lang="ts">
-import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import { computeSupplyApyBreakdown, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
 
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault, useEulerEntitiesOfEarnVault } from '~/composables/useEulerLabels'
 import { isVaultRecentlyAdded, getEarnVaultDescription } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
-import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
+import { getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { computeSupplyApy } from '~/utils/collateralOptions'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
 
@@ -39,8 +38,21 @@ const { hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 const balance = computed(() =>
   getBalance(vault.asset.address as `0x${string}`),
 )
-const visibleSupplyApy = computed(() => computeSupplyApy(vault, viewer.value, settings.value))
-const hasRewards = computed(() => hasSupplyRewards(vault.address))
+const supplyApyBreakdown = computed(() => computeSupplyApyBreakdown(vault, viewer.value))
+const visibleLendingApy = computed(() => supplyApyBreakdown.value?.lending ?? getVaultSupplyApy(vault))
+const visibleIntrinsicApy = computed(() => {
+  if (!enableIntrinsicApy.value) return 0
+  return supplyApyBreakdown.value?.intrinsicApy ?? 0
+})
+const visibleRewardsApy = computed(() => {
+  if (!settings.value.enableRewardsApy) return 0
+  return supplyApyBreakdown.value?.rewards ?? 0
+})
+const visibleSupplyApy = computed(() => {
+  const borrowing = supplyApyBreakdown.value?.borrowing ?? 0
+  return visibleLendingApy.value + borrowing + visibleIntrinsicApy.value + visibleRewardsApy.value
+})
+const hasRewards = computed(() => settings.value.enableRewardsApy && hasSupplyRewards(vault.address))
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
 const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address))
 const isUnverified = computed(() => !isVerifiedVault(vault.address))
@@ -79,10 +91,11 @@ const statsGridCols = computed(() => {
 
 const supplyApyModalData = computed(() => ({
   props: {
-    lendingAPY: getVaultSupplyApy(vault),
-    intrinsicAPY: getVaultIntrinsicApy(vault, enableIntrinsicApy.value),
+    lendingAPY: visibleLendingApy.value,
+    intrinsicAPY: visibleIntrinsicApy.value,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
-    campaigns: getSupplyRewardCampaigns(vault.address),
+    campaigns: settings.value.enableRewardsApy ? getSupplyRewardCampaigns(vault.address) : [],
+    totalSupplyAPY: visibleSupplyApy.value,
     rewardVaultAddress: vault.address,
     baseApyAverageLabel: '1h',
   },
