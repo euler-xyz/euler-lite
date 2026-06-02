@@ -1,10 +1,10 @@
-import type {
-  EVault,
-  OracleRouteAdapterStep,
-  OracleRouteStep,
-  SecuritizeCollateralVault,
+import {
   getOracleRouteAdapters as getSdkOracleRouteAdapters,
+  type EVault,
   type OracleAdapterEntry,
+  type OracleRouteAdapterStep,
+  type OracleRouteStep,
+  type SecuritizeCollateralVault,
 } from '@eulerxyz/euler-v2-sdk'
 
 export const isOracleAdapterRouteStep = (
