@@ -4,7 +4,7 @@ import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo }
 import { isSecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning, getBorrowCapWarning, type VaultWarning } from '~/composables/useVaultWarnings'
 import { getAssetUsdPrice, getCollateralUsdPrice, getCollateralUsdValue, toUsdAmount, type UsdAmount } from '~/utils/sdk-prices'
-import { getBorrowPositionEffectiveLiquidationLTV, getBorrowPositionTimeToLiquidation } from '~/utils/ltv'
+import { getBorrowPositionEffectiveLiquidationLTV, getBorrowPositionTimeToLiquidation, getBorrowPositionUserLTVPercent } from '~/utils/ltv'
 import { maxUint256 } from 'viem'
 import { formatTtl, ltvToPercent, nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { formatNumber, formatHealthScore, formatUsdValue, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
@@ -86,10 +86,17 @@ const effectiveLiquidationLTVPercent = computed(() => {
   const liquidationLTV = getBorrowPositionEffectiveLiquidationLTV(position.value)
   return liquidationLTV === undefined ? null : ltvToPercent(liquidationLTV)
 })
-const positionLTVValue = computed(() => position.value?.userLTV ?? position.value?.currentLTV)
-const positionLTVPercent = computed(() =>
-  positionLTVValue.value === undefined ? null : ltvToPercent(nanoToValue(positionLTVValue.value, 18)),
+const effectiveLiquidationLTVDisplay = computed(() =>
+  effectiveLiquidationLTVPercent.value === null ? '-' : `${effectiveLiquidationLTVPercent.value}%`,
 )
+const positionLTVPercent = computed(() => {
+  if (!position.value) return null
+  return getBorrowPositionUserLTVPercent(position.value) ?? null
+})
+const positionLTVDisplay = computed(() => {
+  if (positionLTVPercent.value === null) return ''
+  return Number.isFinite(positionLTVPercent.value) ? formatNumber(positionLTVPercent.value, 2) : '∞'
+})
 const positionHealthValue = computed(() => position.value?.healthFactor)
 const positionHealthScore = computed(() =>
   positionHealthValue.value === undefined ? null : nanoToValue(positionHealthValue.value, 18),
@@ -929,7 +936,7 @@ watch([isConnected, isSpyMode, address], () => {
             </div>
             <div class="text-content-primary text-p3 flex items-center gap-4">
               <span
-                v-if="hasQueryFailure || effectiveLiquidationLTVPercent === null"
+                v-if="hasQueryFailure || positionLTVPercent === null"
                 class="text-warning-500"
               >Unknown</span>
               <template v-else>
@@ -941,7 +948,7 @@ watch([isConnected, isSpyMode, address], () => {
                   title="Liquidation LTV ramping down"
                   @click.stop="openRampDownModal"
                 />
-                {{ formatNumber(positionLTVPercent ?? 0, 2) }}% / {{ effectiveLiquidationLTVPercent }}%
+                {{ positionLTVDisplay }}% / {{ effectiveLiquidationLTVDisplay }}
               </template>
             </div>
           </div>
