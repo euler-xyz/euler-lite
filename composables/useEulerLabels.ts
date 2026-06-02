@@ -38,7 +38,6 @@ const createEmptyEulerLabelsData = (): EulerLabelsData => ({
   earnVaultEntries: {},
   earnVaultBlocks: {},
   earnVaultRestrictions: {},
-  featuredEarnVaults: new Set(),
   deprecatedEarnVaults: {},
   earnVaultDescriptions: {},
   earnVaultNotices: {},
@@ -46,7 +45,7 @@ const createEmptyEulerLabelsData = (): EulerLabelsData => ({
   assetBlocks: {},
   assetRestrictions: {},
   assetPatternRules: [],
-})
+} as unknown as EulerLabelsData)
 
 const labelsData = shallowRef<EulerLabelsData>(createEmptyEulerLabelsData())
 const labelsChainId = ref<number | null>(null)
@@ -73,7 +72,6 @@ export const __setEulerLabelsDataForTest = (data: Partial<EulerLabelsData> = {})
   setLabelsData({
     ...createEmptyEulerLabelsData(),
     ...data,
-    featuredEarnVaults: data.featuredEarnVaults ?? new Set(),
     notExplorableEarnVaults: data.notExplorableEarnVaults ?? new Set(),
     assetPatternRules: data.assetPatternRules ?? [],
   }, null)
