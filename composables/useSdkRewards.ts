@@ -1,5 +1,21 @@
 import { getAddress, type Address } from 'viem'
-import type { TransactionPlan, UserReward } from '@eulerxyz/euler-v2-sdk'
+import type { EulerSDKQueryName, TransactionPlan, UserReward } from '@eulerxyz/euler-v2-sdk'
+import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
+
+const USER_REWARD_QUERY_NAMES: EulerSDKQueryName[] = [
+  'queryMerklUserRewards',
+  'queryBrevisCampaigns',
+  'queryBrevisUserProofs',
+  'queryFuulTotals',
+  'queryFuulClaimChecks',
+]
+const REWARD_CLAIM_REFRESH_RETRY_DELAYS_MS = [5_000, 30_000] as const
+
+type RefreshRewardsOptions = {
+  delayedRetry?: boolean
+}
+
+let delayedRefreshTimers: ReturnType<typeof setTimeout>[] = []
 
 export const useSdkRewards = () => {
   const { portfolio, isPositionsLoading, refreshAllPositions } = useEulerAccount()
@@ -21,8 +37,25 @@ export const useSdkRewards = () => {
     })
   }
 
-  const refreshRewards = async () => {
-    await refreshAllPositions()
+  const runRewardsRefresh = async () => {
+    await invalidateSdkQueries(USER_REWARD_QUERY_NAMES)
+    await refreshAllPositions(undefined, undefined, { source: 'fresh', preempt: true })
+  }
+
+  const queueDelayedRefresh = () => {
+    delayedRefreshTimers.forEach(timer => clearTimeout(timer))
+    delayedRefreshTimers = REWARD_CLAIM_REFRESH_RETRY_DELAYS_MS.map((delay) => {
+      const timer = setTimeout(() => {
+        delayedRefreshTimers = delayedRefreshTimers.filter(activeTimer => activeTimer !== timer)
+        void runRewardsRefresh()
+      }, delay)
+      return timer
+    })
+  }
+
+  const refreshRewards = async (options: RefreshRewardsOptions = {}) => {
+    await runRewardsRefresh()
+    if (options.delayedRetry) queueDelayedRefresh()
   }
 
   return {

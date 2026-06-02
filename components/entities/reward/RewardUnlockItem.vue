@@ -13,10 +13,10 @@ const modal = useModal()
 const { error } = useToast()
 const { isSpyMode } = useSpyMode()
 const { getTokenByAddress } = useTokenList()
-const { buildUnlockREULPlan, reulTokenContractAddress, loadREULLocksInfo } = useREULLocks()
+const { buildUnlockREULPlan, reulTokenContractAddress, refreshLocks } = useREULLocks()
 const { executePlan } = useEulerTx()
 const { chainId: siteChainId } = useEulerAddresses()
-const { chainId: walletChainId, switchChain, address: wagmiAddress } = useWagmi()
+const { chainId: walletChainId, switchChain } = useWagmi()
 const { runSimulation, simulationError } = useTransactionPlanSimulation()
 const { item } = defineProps<{ item: REULLock }>()
 const itemKey = computed(() => item.timestamp.toString())
@@ -72,9 +72,7 @@ const unlock = async () => {
     const unlockPlan = await buildUnlockREULPlan([item.timestamp])
     await executePlan(unlockPlan)
     modal.close()
-    if (wagmiAddress.value) {
-      loadREULLocksInfo(wagmiAddress.value, false)
-    }
+    await refreshLocks(false)
   }
   catch (e) {
     error('Transaction failed')
