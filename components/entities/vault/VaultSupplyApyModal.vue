@@ -5,11 +5,12 @@ import { PROVIDER_LABELS, PROVIDER_LOGOS, rewardCampaignAprPercent, rewardCampai
 import type { IntrinsicApyInfo } from '@eulerxyz/euler-v2-sdk'
 
 const emits = defineEmits(['close'])
-const { lendingAPY, intrinsicAPY, intrinsicApyInfo, campaigns, baseApyAverageLabel, rewardVaultAddress, inline = false, close = true } = defineProps<{
+const { lendingAPY, intrinsicAPY, intrinsicApyInfo, campaigns, totalSupplyAPY, baseApyAverageLabel, rewardVaultAddress, inline = false, close = true } = defineProps<{
   lendingAPY: number
   intrinsicAPY?: number
   intrinsicApyInfo?: IntrinsicApyInfo
   campaigns?: RewardCampaign[]
+  totalSupplyAPY?: number
   baseApyAverageLabel?: string
   rewardVaultAddress?: string
   inline?: boolean
@@ -24,7 +25,7 @@ const rewardsTotalAPY = computed(() => {
 
 const intrinsicApyValue = computed(() => intrinsicAPY ?? 0)
 const hasIntrinsicApy = computed(() => intrinsicApyValue.value > 0)
-const totalSupplyApy = computed(() => lendingAPY + intrinsicApyValue.value + (rewardsTotalAPY.value || 0))
+const totalSupplyApy = computed(() => totalSupplyAPY ?? lendingAPY + intrinsicApyValue.value + (rewardsTotalAPY.value || 0))
 
 const rewardsInfo = computed(() => {
   return rewardCampaignDisplays(campaigns, 'supply', rewardVaultAddress)
