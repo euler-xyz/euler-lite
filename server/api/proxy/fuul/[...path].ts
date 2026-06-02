@@ -27,18 +27,16 @@ import {
   createProxyInFlight,
   forwardProxied,
 } from '~/server/utils/external-proxy'
+import {
+  isAllowedFuulClaimChecksBody,
+  isAllowedFuulProxyRequest,
+} from '~/server/utils/rewards-proxy-allowlist'
 
 const PROXY_PREFIX = '/api/proxy/fuul/'
 
 const DEFAULT_FUUL_API_URL = 'https://api.fuul.xyz/api/v1'
 
 const FUUL_API_URL_ENV_KEYS = ['FUUL_API_URL', 'NUXT_PUBLIC_FUUL_API_URL'] as const
-
-const ALLOWED_METHODS = new Set(['GET', 'HEAD', 'POST'])
-
-// Paths under the upstream the SDK actually calls; gate everything else to
-// avoid an open proxy.
-const ALLOWED_PATH_HEADS = ['incentives', 'totals', 'claim-checks', 'rewards'] as const
 
 const CACHE_TTL_MS = 60_000
 const BROWSER_CACHE_CONTROL = 'public, max-age=30, stale-while-revalidate=30'
@@ -54,11 +52,6 @@ const rateLimiter = createRateLimiter({
 
 const stripLeadingSlash = (s: string): string => (s.startsWith('/') ? s.slice(1) : s)
 
-const isAllowedPath = (path: string): boolean => {
-  const head = path.split('/')[0]?.toLowerCase() ?? ''
-  return (ALLOWED_PATH_HEADS as readonly string[]).includes(head)
-}
-
 const readUpstreamBase = (): string => {
   for (const key of FUUL_API_URL_ENV_KEYS) {
     const v = process.env[key]
@@ -69,10 +62,9 @@ const readUpstreamBase = (): string => {
 
 export default defineEventHandler(async (event) => {
   const method = getMethod(event).toUpperCase()
-  if (!ALLOWED_METHODS.has(method)) {
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'POST') {
     throw createError({ statusCode: 405, statusMessage: 'Method not allowed' })
   }
-  await rateLimiter.consume(event)
 
   const requestUrl = getRequestURL(event)
   const idx = requestUrl.pathname.indexOf(PROXY_PREFIX)
@@ -80,12 +72,17 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'Not a fuul proxy path' })
   }
   const rest = stripLeadingSlash(requestUrl.pathname.slice(idx + PROXY_PREFIX.length))
-  if (!isAllowedPath(rest)) {
+  if (!isAllowedFuulProxyRequest(method, rest, requestUrl.searchParams)) {
     throw createError({ statusCode: 404, statusMessage: 'Fuul path not allowed' })
   }
 
   const target = `${readUpstreamBase()}/${rest}${requestUrl.search}`
   const body = method === 'POST' ? (await readRawBody(event))?.toString() : undefined
+  if (method === 'POST' && !isAllowedFuulClaimChecksBody(body)) {
+    throw createError({ statusCode: 400, statusMessage: 'Fuul request body not allowed' })
+  }
+
+  await rateLimiter.consume(event)
 
   try {
     const res = await forwardProxied({

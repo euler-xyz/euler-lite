@@ -1,6 +1,6 @@
 import { type Hex, type Address, encodeFunctionData, zeroAddress, type Abi, decodeFunctionResult, type PublicClient } from 'viem'
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
-import { collectPythFeedsFromAdapters, PythPluginAdapter } from '@eulerxyz/euler-v2-sdk'
+import { collectPythFeedsFromRouteSteps, PythPluginAdapter } from '@eulerxyz/euler-v2-sdk'
 import { PYTH_ABI } from '~/abis/pyth'
 import { DEFAULT_PRICE_CACHE_TTL_MS } from '~/entities/constants'
 import { CACHE_TTL_15S_MS, BATCH_DELAY_COLLECT_MS } from '~/entities/tuning-constants'
@@ -159,7 +159,12 @@ const priceToAmountOutMid = (price: { price: string, expo: number }): bigint => 
 const collectFeedsFromVault = (vault: EVault | undefined, _maxDepth: number): PythFeed[] => {
   if (!vault) return []
 
-  const feeds = collectPythFeedsFromAdapters(vault.oracle.adapters)
+  const feeds = [
+    ...collectPythFeedsFromRouteSteps(vault.debtPricingOracleRoute),
+    ...vault.collaterals.flatMap(collateral =>
+      collectPythFeedsFromRouteSteps(collateral.oracleRoute),
+    ),
+  ]
 
   const unique = new Map<string, PythFeed>()
   feeds.forEach((feed) => {
@@ -200,14 +205,14 @@ export const collectPythFeedsForHealthCheck = (
   const allFeeds: PythFeed[] = []
 
   // Feeds for liability asset pricing
-  allFeeds.push(...collectPythFeedsFromAdapters(liabilityVault.debtPricingOracleAdapters))
+  allFeeds.push(...collectPythFeedsFromRouteSteps(liabilityVault.debtPricingOracleRoute))
 
   // Feeds for each collateral vault pricing
   for (const collateralVaultAddress of collateralVaultAddresses) {
-    const feeds = collectPythFeedsFromAdapters(
+    const feeds = collectPythFeedsFromRouteSteps(
       liabilityVault.collaterals.find(collateral =>
         collateral.address.toLowerCase() === collateralVaultAddress.toLowerCase(),
-      )?.oracleAdapters ?? [],
+      )?.oracleRoute,
     )
     allFeeds.push(...feeds)
   }

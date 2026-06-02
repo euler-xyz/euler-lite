@@ -1,4 +1,4 @@
-import type { EVault, EVaultCollateralRamping, IHasVaultAddress, PortfolioBorrowPosition } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, EVaultCollateral, EVaultCollateralRamping, IHasVaultAddress, PortfolioBorrowPosition } from '@eulerxyz/euler-v2-sdk'
 
 const WAD = 10n ** 18n
 const BPS = 10000n
@@ -85,10 +85,10 @@ export const getRampStatus = (
 }
 
 /** Find the borrow-vault collateral edge matching a portfolio position's primary collateral. */
-const findCollateralEdge = (
+export const getPositionCollateralEdge = (
   borrowVault: EVault | undefined,
   collateralAddress: string | undefined,
-) => {
+): EVaultCollateral | undefined => {
   if (!borrowVault?.collaterals || !collateralAddress) return undefined
   const lower = collateralAddress.toLowerCase()
   return borrowVault.collaterals.find(c => c.address.toLowerCase() === lower)
@@ -106,7 +106,7 @@ export const getPositionRampStatus = (
   if (position.userLTV === undefined) {
     return { isRamping: false, willBeLiquidated: false, forcedLiquidationAt: null }
   }
-  const edge = findCollateralEdge(
+  const edge = getPositionCollateralEdge(
     position.borrowVault as EVault | undefined,
     position.collateralVault?.address,
   )
@@ -125,7 +125,7 @@ export const isPositionLiquidationLTVRamping = (
   position: PortfolioBorrowPosition<IHasVaultAddress>,
   nowSeconds?: bigint,
 ): boolean => {
-  const edge = findCollateralEdge(
+  const edge = getPositionCollateralEdge(
     position.borrowVault as EVault | undefined,
     position.collateralVault?.address,
   )
@@ -142,7 +142,7 @@ export const isPositionLiquidationLTVRamping = (
 export const getPositionRampTargetTimestamp = (
   position: PortfolioBorrowPosition<IHasVaultAddress>,
 ): bigint | null => {
-  const edge = findCollateralEdge(
+  const edge = getPositionCollateralEdge(
     position.borrowVault as EVault | undefined,
     position.collateralVault?.address,
   )

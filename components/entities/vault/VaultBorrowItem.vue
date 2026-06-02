@@ -7,41 +7,30 @@ import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { getVaultAvailableLiquidity, getVaultUtilization } from '~/utils/vault-display'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isVaultRecentlyAdded, isVaultKeyring, getEntitiesByVault } from '~/utils/eulerLabelsUtils'
+import { isVaultRecentlyAdded, isVaultKeyring, getUniqueEntitiesByVaults } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { VaultBorrowApyModal, VaultMaxRoeModal, VaultNetApyPairModal, VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
-import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
+import { isSecuritizeBorrowPair, type AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { getAddress } from 'viem'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 
 const { pair } = defineProps<{ pair: AnyBorrowVaultPair }>()
 const { enableEntityBranding } = useDeployConfig()
-const { isVaultGovernorVerified } = useVaults()
+const { isVaultGovernorVerified, isSecuritizeGovernorVerified } = useVaults()
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
 const pairKey = computed(() => `${pair.collateral.address.toLowerCase()}:${pair.borrow.address.toLowerCase()}`)
 
 const isAnyGovernorUnverified = computed(() => {
   const borrowUnverified = !isVaultGovernorVerified(pair.borrow)
-  const collateralUnverified = 'governorAdmin' in pair.collateral
-    ? !isVaultGovernorVerified(pair.collateral as EVault)
-    : false
+  const collateralUnverified = isSecuritizeBorrowPair(pair)
+    ? !isSecuritizeGovernorVerified(pair.collateral)
+    : !isVaultGovernorVerified(pair.collateral)
   return borrowUnverified || collateralUnverified
 })
 
 const entityDisplay = computed(() => {
-  const borrowEntities = getEntitiesByVault(pair.borrow)
-  // Collateral may be SecuritizeCollateralVault but getEntitiesByVault only needs governorAdmin
-  const collateralEntities = 'governorAdmin' in pair.collateral
-    ? getEntitiesByVault(pair.collateral as EVault)
-    : []
-  // Deduplicate by name
-  const seen = new Set<string>()
-  const all = [...collateralEntities, ...borrowEntities].filter((e) => {
-    if (seen.has(e.name)) return false
-    seen.add(e.name)
-    return true
-  })
+  const all = getUniqueEntitiesByVaults([pair.collateral, pair.borrow])
   if (all.length === 0) return { name: '', logos: [] }
   const name = all.length === 1
     ? all[0].name

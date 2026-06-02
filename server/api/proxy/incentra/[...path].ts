@@ -27,17 +27,13 @@ import {
   createProxyInFlight,
   forwardProxied,
 } from '~/server/utils/external-proxy'
+import { isAllowedIncentraProxyRequest } from '~/server/utils/rewards-proxy-allowlist'
 
 const PROXY_PREFIX = '/api/proxy/incentra/'
 
 const DEFAULT_INCENTRA_API_URL = 'https://incentra-prd.brevis.network'
 
 const INCENTRA_API_URL_ENV_KEYS = ['INCENTRA_API_URL', 'NUXT_PUBLIC_INCENTRA_API_URL'] as const
-
-const ALLOWED_METHODS = new Set(['GET', 'HEAD', 'POST'])
-
-// Only allow path heads the rewards adapter hits.
-const ALLOWED_PATH_PREFIXES = ['sdk/v1/', 'v1/'] as const
 
 const CACHE_TTL_MS = 60_000
 const BROWSER_CACHE_CONTROL = 'public, max-age=30, stale-while-revalidate=30'
@@ -53,9 +49,6 @@ const rateLimiter = createRateLimiter({
 
 const stripLeadingSlash = (s: string): string => (s.startsWith('/') ? s.slice(1) : s)
 
-const isAllowedPath = (path: string): boolean =>
-  ALLOWED_PATH_PREFIXES.some(p => path.startsWith(p))
-
 const readUpstreamBase = (): string => {
   for (const key of INCENTRA_API_URL_ENV_KEYS) {
     const v = process.env[key]
@@ -66,10 +59,9 @@ const readUpstreamBase = (): string => {
 
 export default defineEventHandler(async (event) => {
   const method = getMethod(event).toUpperCase()
-  if (!ALLOWED_METHODS.has(method)) {
+  if (method !== 'POST') {
     throw createError({ statusCode: 405, statusMessage: 'Method not allowed' })
   }
-  await rateLimiter.consume(event)
 
   const requestUrl = getRequestURL(event)
   const idx = requestUrl.pathname.indexOf(PROXY_PREFIX)
@@ -77,12 +69,14 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'Not an incentra proxy path' })
   }
   const rest = stripLeadingSlash(requestUrl.pathname.slice(idx + PROXY_PREFIX.length))
-  if (!isAllowedPath(rest)) {
+  if (!isAllowedIncentraProxyRequest(method, rest, requestUrl.searchParams)) {
     throw createError({ statusCode: 404, statusMessage: 'Incentra path not allowed' })
   }
 
   const target = `${readUpstreamBase()}/${rest}${requestUrl.search}`
   const body = method === 'POST' ? (await readRawBody(event))?.toString() : undefined
+
+  await rateLimiter.consume(event)
 
   try {
     const res = await forwardProxied({

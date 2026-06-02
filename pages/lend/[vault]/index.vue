@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { collectPythFeedsFromAdapters, isSecuritizeCollateralVault, type EVault, type SecuritizeCollateralVault, type TransactionPlan, type SwapQuote, SwapperMode } from '@eulerxyz/euler-v2-sdk'
+import { collectPythFeedsFromRouteSteps, isSecuritizeCollateralVault, type EVault, type SecuritizeCollateralVault, type TransactionPlan, type SwapQuote, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { isSecuritizeVault } from '~/utils/vault/categories'
 import { getHookDisabledWarning, getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
@@ -156,7 +156,12 @@ const balance = ref(0n)
 // Check if vault uses Pyth oracles (requires fresh prices)
 const hasPythOracles = (v: EVault | undefined): boolean => {
   if (!v) return false
-  const feeds = collectPythFeedsFromAdapters(v.oracle.adapters)
+  const feeds = [
+    ...collectPythFeedsFromRouteSteps(v.debtPricingOracleRoute),
+    ...v.collaterals.flatMap(collateral =>
+      collectPythFeedsFromRouteSteps(collateral.oracleRoute),
+    ),
+  ]
   return feeds.length > 0
 }
 

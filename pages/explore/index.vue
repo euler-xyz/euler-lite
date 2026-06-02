@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import type { MarketGroup } from '~/entities/lend-discovery'
-import { isEVault, type EVault } from '@eulerxyz/euler-v2-sdk'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useMarketGroups } from '~/composables/useMarketGroups'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
-import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getEntitiesByVault, getUniqueEntitiesByVaults, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useBestMaxROE } from '~/composables/useBestMaxROE'
 import { useVaultSearch } from '~/composables/useVaultSearch'
@@ -31,13 +30,13 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<MarketGroup>(
   group.curator?.name,
   ...group.metrics.assetSymbols,
   ...group.vaults.flatMap((vault) => {
-    const addr = isEVault(vault) ? vault.address : ''
+    const addr = getVaultAddress(vault)
     if (!addr) return []
     const product = applyVaultOverrides(getProductByVault(addr), addr)
     return [
       product.name,
       product.description,
-      ...getEntitiesByVault(vault as EVault).map(e => e.name),
+      ...getEntitiesByVault(vault).map(e => e.name),
     ]
   }),
 ])
@@ -135,14 +134,8 @@ const riskManagerOptions = computed(() => {
   const entries: FilterOptionEntry[] = []
   for (const group of marketGroups.value) {
     if (group.source !== 'product') continue
-    const seenInGroup = new Set<string>()
-    for (const vault of group.vaults) {
-      if (!isEVault(vault)) continue
-      for (const entity of getEntitiesByVault(vault)) {
-        if (seenInGroup.has(entity.name)) continue
-        seenInGroup.add(entity.name)
-        entries.push({ key: entity.name, label: entity.name, tvl: group.metrics.totalTVL, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined })
-      }
+    for (const entity of getUniqueEntitiesByVaults(group.vaults)) {
+      entries.push({ key: entity.name, label: entity.name, tvl: group.metrics.totalTVL, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined })
     }
   }
   return buildTvlSortedOptions(entries)
@@ -166,10 +159,7 @@ const matchesAssetFilter = (group: MarketGroup): boolean => {
 
 const matchesRiskManagerFilter = (group: MarketGroup): boolean => {
   if (!selectedRiskManagers.value.length) return true
-  return group.vaults.some((vault) => {
-    if (!isEVault(vault)) return false
-    return getEntitiesByVault(vault).some(e => selectedRiskManagers.value.includes(e.name))
-  })
+  return getUniqueEntitiesByVaults(group.vaults).some(e => selectedRiskManagers.value.includes(e.name))
 }
 
 const filteredMarkets = computed(() => {

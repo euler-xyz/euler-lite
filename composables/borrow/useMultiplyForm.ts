@@ -114,7 +114,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   } = useSwapQuotesParallel({
     amountField: 'amountOut',
     compare: 'max',
-    includeCowSwap: true,
+    includeCowSwap: () => !isMultiplySavingCollateral.value,
     buildTxPlanForQuote: (quote, _provider, context) => buildMultiplyPlanFromQuote(quote, context.account),
     getStateOverrideOptions: () => buildMultiplyStateOverrideOptions(),
     // First quote in each sweep computes plugin prefetch (Pyth Hermes updates
@@ -717,12 +717,13 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     // wrapper enables the borrow vault controller itself. Resolve it here so
     // the CoW quote is scoped to it; if unavailable we fall back to skipping
     // the CoW provider.
+    const shouldRequestCowSwap = !isMultiplySavingCollateral.value
     const quoteDeadline = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
     const cowProviderExtraData = { ...COWSWAP_PROVIDER_EXTRA_DATA.openPosition }
     let cowAccount: Address | null = null
     const chainConfig = getCowSwapChainConfig(chainId.value ?? 0)
     const cowOwner = (isSpyMode.value ? spyAddress.value : address.value) as Address | undefined
-    if (chainConfig && cowOwner) {
+    if (shouldRequestCowSwap && chainConfig && cowOwner) {
       try {
         cowAccount = await getNewSubAccount(cowOwner, multiplyShortVault.value.address) as Address
       }
@@ -730,7 +731,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         logWarn('multiply/cowswap/resolveQuoteSubaccount', e)
       }
     }
-    if (chainConfig && cowAccount && cowOwner) {
+    if (shouldRequestCowSwap && chainConfig && cowAccount && cowOwner) {
       cowProviderExtraData.appData = buildOpenPositionQuoteAppData(
         {
           owner: cowOwner,
@@ -763,8 +764,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     }
     await profAsync('multiplyForm', 'requestMultiplyQuotes.total', () => requestMultiplyQuotes(requestParams, {
       errorMessage: 'Unable to fetch swap quote. Multiply feature is not available for this asset.',
-      providerExtraData: cowAccount ? { cow: cowProviderExtraData } : undefined,
-      providerParams: cowAccount
+      providerExtraData: shouldRequestCowSwap && cowAccount ? { cow: cowProviderExtraData } : undefined,
+      providerParams: shouldRequestCowSwap && cowAccount
         ? { cow: { accountIn: cowAccount, accountOut: cowAccount } }
         : undefined,
     }))
@@ -875,6 +876,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const submitMultiply = async () => {
     if (isOperationBlocked.value) return
     if (isMultiplyPreparing.value || isGeoBlocked.value || isMultiplyRestricted.value) return
+    if (multiplyErrorText.value) return
 
     // CowSwap branch: skip plan building and simulation, go straight to the
     // CoW review modal which signs the EVC permit + order off-chain.

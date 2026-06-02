@@ -31,6 +31,12 @@ export const PROVIDER_LOGOS: Record<string, string> = {
   fuul: '/entities/fuul.png',
 }
 
+export const PROVIDER_SOURCE_URLS: Partial<Record<RewardCampaign['source'], string>> = {
+  merkl: 'https://app.merkl.xyz/?protocol=euler',
+  brevis: 'https://incentra.brevis.network/',
+  fuul: 'https://www.fuul.xyz/',
+}
+
 export const normalizeRewardEndTimestamp = (timestamp?: number): number => {
   if (!timestamp) return 0
   return timestamp > 1_000_000_000_000 ? Math.floor(timestamp / 1000) : timestamp
@@ -73,6 +79,9 @@ export const rewardCampaignToken = (campaign: RewardCampaign): RewardCampaignDis
   icon: campaign.rewardTokenIcon || '',
 })
 
+export const rewardCampaignSourceUrl = (campaign: RewardCampaign): string | undefined =>
+  campaign.sourceUrl || PROVIDER_SOURCE_URLS[campaign.source]
+
 export const rewardCampaignKey = (campaign: RewardCampaign, prefix?: string): string => {
   const parts = [
     prefix,
@@ -101,6 +110,7 @@ export const rewardCampaignDisplay = (
   vaultAddress?: string,
 ): RewardCampaignDisplay => {
   const endTimestamp = normalizeRewardEndTimestamp(campaign.endTimestamp)
+  const sourceUrl = rewardCampaignSourceUrl(campaign)
   return {
     id: rewardCampaignKey(campaign, prefix),
     parityKey: rewardCampaignParityKey(campaign, vaultAddress),
@@ -109,7 +119,7 @@ export const rewardCampaignDisplay = (
     rewardToken: rewardCampaignToken(campaign),
     source: campaign.source,
     isCollateralSpecific: campaign.action === 'BORROW_COLLATERAL',
-    ...(campaign.sourceUrl ? { sourceUrl: campaign.sourceUrl } : {}),
+    ...(sourceUrl ? { sourceUrl } : {}),
     ...(campaign.minMultiplier !== undefined ? { minMultiplier: campaign.minMultiplier } : {}),
     ...(campaign.maxMultiplier !== undefined ? { maxMultiplier: campaign.maxMultiplier } : {}),
   }

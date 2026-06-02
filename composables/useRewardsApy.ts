@@ -1,6 +1,10 @@
 import type { RewardCampaign, VaultRewardInfo } from '@eulerxyz/euler-v2-sdk'
 import { isCampaignEligibleForAddress, rewardCampaignAprPercent } from '~/entities/reward-campaign'
 
+type VaultWithRewards = {
+  rewards?: VaultRewardInfo
+}
+
 export const useRewardsApy = () => {
   const { settings } = useUserSettings()
   const { enableMerkl, enableIncentra, enableFuul } = useDeployConfig()
@@ -40,12 +44,20 @@ export const useRewardsApy = () => {
     return false
   }
 
-  const getCampaignsForVault = (vaultAddress: string): RewardCampaign[] => {
+  const getCampaignsFromRewards = (rewards: VaultRewardInfo | undefined): RewardCampaign[] => {
     if (!isEnabled.value) return []
     const addr = eligibilityAddress.value
-    return (getVaultRewards(vaultAddress)?.campaigns ?? [])
+    return (rewards?.getActiveCampaigns({ viewer: addr }) ?? [])
       .filter(isCampaignProviderEnabled)
       .filter(c => isCampaignEligibleForAddress(c, addr))
+  }
+
+  const getCampaignsForVault = (vaultAddress: string): RewardCampaign[] => {
+    return getCampaignsFromRewards(getVaultRewards(vaultAddress))
+  }
+
+  const getCampaignsForVaultEntity = (vault: VaultWithRewards | undefined): RewardCampaign[] => {
+    return getCampaignsFromRewards(vault?.rewards)
   }
 
   const isMatchingCollateral = (campaign: RewardCampaign, collateralAddress?: string): boolean =>
@@ -129,6 +141,11 @@ export const useRewardsApy = () => {
     return getCampaignsForVault(vaultAddress).filter(c => c.action === 'LEND')
   }
 
+  const getSupplyRewardCampaignsFromVault = (vault: VaultWithRewards | undefined): RewardCampaign[] => {
+    if (!isEnabled.value) return []
+    return getCampaignsForVaultEntity(vault).filter(c => c.action === 'LEND')
+  }
+
   const getBorrowRewardCampaigns = (borrowVaultAddress: string, collateralAddress?: string): RewardCampaign[] => {
     if (!isEnabled.value) return []
     return getCampaignsForVault(borrowVaultAddress).filter((c) => {
@@ -161,6 +178,7 @@ export const useRewardsApy = () => {
     hasLoopingRewards,
     isLoopingEligible,
     getSupplyRewardCampaigns,
+    getSupplyRewardCampaignsFromVault,
     getBorrowRewardCampaigns,
     getLoopingRewardCampaigns,
   }

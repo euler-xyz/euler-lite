@@ -35,6 +35,10 @@ import { normalizeAddress } from '~/utils/normalizeAddress'
 
 const labels = () => getCurrentEulerLabelsData()
 
+type EulerLabelsWithRecentlyAdded = ReturnType<typeof getCurrentEulerLabelsData> & {
+  recentlyAddedEarnVaults?: Set<string>
+}
+
 const MAX_REGEX_INPUT_LEN = 128
 
 export const patternRuleMatches = (
@@ -96,9 +100,14 @@ export const getAssetPatternRules = (): EulerLabelAssetPatternRule[] =>
 
 export const isVaultRecentlyAdded = (vaultAddress: string): boolean => {
   const normalized = normalizeAddress(vaultAddress)
-  return Object.values(labels().products).some(product =>
+  const currentLabels = labels() as EulerLabelsWithRecentlyAdded
+  const productRecentlyAdded = Object.values(currentLabels.products).some(product =>
     ((product as EulerLabelProduct).recentlyAddedVaults ?? []).some(address => normalizeAddress(address) === normalized),
   )
+  if (productRecentlyAdded) return true
+
+  const earnRecentlyAdded = currentLabels.recentlyAddedEarnVaults
+  return earnRecentlyAdded?.has(normalized) || earnRecentlyAdded?.has(normalized.toLowerCase()) || false
 }
 
 export const normalizeProducts = (data: Record<string, EulerLabelProduct>): { products: Record<string, EulerLabelProduct>, vaultAddresses: string[] } => {
@@ -168,8 +177,29 @@ export const isProductKeyring = (productKey: string): boolean =>
 export const isVaultAccessControlled = (vaultAddress: string): boolean =>
   isEulerLabelVaultAccessControlled(labels(), vaultAddress)
 
-export const getEntitiesByVault = (vault: { governorAdmin?: string, governor?: string }): EulerLabelEntity[] =>
+export type EulerLabelEntityVaultLike = {
+  address?: string
+  governorAdmin?: string
+  governor?: string
+}
+
+export const getEntitiesByVault = (vault: EulerLabelEntityVaultLike): EulerLabelEntity[] =>
   getEulerLabelEntitiesByVault(labels(), vault) as EulerLabelEntity[]
+
+export const getUniqueEntitiesByVaults = (vaults: EulerLabelEntityVaultLike[]): EulerLabelEntity[] => {
+  const seen = new Set<string>()
+  const entities: EulerLabelEntity[] = []
+
+  for (const vault of vaults) {
+    for (const entity of getEntitiesByVault(vault)) {
+      if (seen.has(entity.name)) continue
+      seen.add(entity.name)
+      entities.push(entity)
+    }
+  }
+
+  return entities
+}
 
 export const getEntitiesByEarnVault = (earnVault: EulerEarn): EulerLabelEntity[] =>
   getEulerLabelEntitiesByEarnVault(labels(), earnVault) as EulerLabelEntity[]

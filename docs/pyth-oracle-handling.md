@@ -13,7 +13,9 @@ Pyth is a pull-based oracle. A consumer supplies recent update data to `updatePr
 
 ## Feed Collection
 
-Vault entities expose SDK oracle adapter data. `utils/pyth.ts` uses `collectPythFeedsFromAdapters` from the SDK to collect feeds from those adapters.
+EVault entities expose selected SDK oracle routes. `utils/pyth.ts` uses
+`collectPythFeedsFromRouteSteps` from the SDK to collect feeds from the
+asset-to-UoA route and the collateral routes.
 
 Main helpers:
 

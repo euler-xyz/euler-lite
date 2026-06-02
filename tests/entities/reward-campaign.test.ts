@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { isCampaignEligibleForAddress } from '~/entities/reward-campaign'
+import { isCampaignEligibleForAddress, rewardCampaignDisplay } from '~/entities/reward-campaign'
+import type { RewardCampaign } from '~/entities/reward-campaign'
 
 const USER = '0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa'
 const OTHER = '0xBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBb'
@@ -49,5 +50,26 @@ describe('isCampaignEligibleForAddress', () => {
   it('matches addresses case-insensitively (stored lowercase, user may be mixed-case)', () => {
     expect(isCampaignEligibleForAddress({ blacklist: [USER.toLowerCase()] }, USER)).toBe(false)
     expect(isCampaignEligibleForAddress({ whitelist: [USER.toLowerCase()] }, USER.toUpperCase())).toBe(true)
+  })
+})
+
+describe('rewardCampaignDisplay', () => {
+  const baseCampaign: RewardCampaign = {
+    campaignId: 'campaign-1',
+    source: 'merkl',
+    action: 'LEND',
+    apr: 0.01,
+    rewardTokenSymbol: 'WMON',
+  }
+
+  it('falls back to the Merkl Euler opportunities page when sourceUrl is missing', () => {
+    expect(rewardCampaignDisplay(baseCampaign).sourceUrl).toBe('https://app.merkl.xyz/?protocol=euler')
+  })
+
+  it('keeps provider sourceUrl when the campaign supplies one', () => {
+    expect(rewardCampaignDisplay({
+      ...baseCampaign,
+      sourceUrl: 'https://app.merkl.xyz/opportunities/monad/EULER/example',
+    }).sourceUrl).toBe('https://app.merkl.xyz/opportunities/monad/EULER/example')
   })
 })

@@ -38,7 +38,6 @@ import { logWarn } from '~/utils/errorHandling'
 import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
 import { waitForSubgraphBlock } from '~/utils/subgraph'
-import { POST_TX_REFRESH_DELAY_MS } from '~/entities/tuning-constants'
 import { profAsync } from '~/utils/profiler'
 
 const OKX_POST_APPROVE_DELAY_MS = 3000
@@ -1047,13 +1046,8 @@ export const useEulerTx = () => {
     const caughtUp = await waitForSubgraphBlock(buildSubgraphProxyApiPath(cid), targetBlock)
     if (!caughtUp) {
       logWarn('useEulerTx/subgraphPoll', new Error(`subgraph did not catch up to block ${targetBlock} in time`))
+      return
     }
-    // Re-trigger the portfolio refetch once more, after a short delay, regardless
-    // of `caughtUp`. Even once the head advances, Goldsky may serve the actual
-    // queryAccountVaults read from a replica that lags the one we polled; a
-    // spaced refetch absorbs that without waiting for the 60s page poll. On
-    // timeout this is a best-effort nudge for a late-arriving index.
-    await new Promise(resolve => setTimeout(resolve, POST_TX_REFRESH_DELAY_MS))
     void invalidateSdkQueries([...INVALIDATE_AFTER_TX])
     triggerPortfolioRefresh()
   }

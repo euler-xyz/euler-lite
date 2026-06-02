@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { __setEulerLabelsDataForTest } from '~/composables/useEulerLabels'
-import { getActiveProductVaultAddresses, normalizeProducts } from '~/utils/eulerLabelsUtils'
+import { getActiveProductVaultAddresses, getUniqueEntitiesByVaults, isVaultRecentlyAdded, normalizeProducts } from '~/utils/eulerLabelsUtils'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 
 describe('normalizeProducts', () => {
@@ -42,5 +42,93 @@ describe('getActiveProductVaultAddresses', () => {
     })
 
     expect(getActiveProductVaultAddresses()).toEqual([normalizeAddress(active)])
+  })
+})
+
+describe('getUniqueEntitiesByVaults', () => {
+  it('resolves each vault through its own governor in a multi-entity product', () => {
+    const securitizeVault = normalizeAddress('0x0000000000000000000000000000000000001001')
+    const borrowVault = normalizeAddress('0x0000000000000000000000000000000000001002')
+    const securitizeGovernor = normalizeAddress('0x0000000000000000000000000000000000002001')
+    const kpkGovernor = normalizeAddress('0x0000000000000000000000000000000000002002')
+
+    __setEulerLabelsDataForTest({
+      products: {
+        test: {
+          name: 'Test',
+          description: '',
+          entity: ['kpk', 'securitize'],
+          url: '',
+          vaults: [securitizeVault, borrowVault],
+        },
+      },
+      entities: {
+        kpk: {
+          name: 'KPK',
+          logo: 'kpk.svg',
+          description: '',
+          url: '',
+          addresses: { [kpkGovernor]: 'KPK Safe' },
+          social: {
+            twitter: '',
+            youtube: '',
+            discord: '',
+            telegram: '',
+            github: '',
+          },
+        },
+        securitize: {
+          name: 'Securitize',
+          logo: 'securitize.png',
+          description: '',
+          url: '',
+          addresses: { [securitizeGovernor]: 'Securitize Governor' },
+          social: {
+            twitter: '',
+            youtube: '',
+            discord: '',
+            telegram: '',
+            github: '',
+          },
+        },
+      },
+    })
+
+    expect(getUniqueEntitiesByVaults([
+      { address: securitizeVault, governor: securitizeGovernor },
+      { address: borrowVault, governorAdmin: kpkGovernor },
+    ]).map(entity => entity.name)).toEqual(['Securitize', 'KPK'])
+  })
+})
+
+describe('isVaultRecentlyAdded', () => {
+  it('checks product recently-added vaults', () => {
+    const address = '0x0000000000000000000000000000000000000201'
+
+    __setEulerLabelsDataForTest({
+      products: {
+        test: {
+          name: 'Test',
+          description: '',
+          entity: [],
+          url: '',
+          vaults: [normalizeAddress(address)],
+          recentlyAddedVaults: [normalizeAddress(address)],
+        },
+      },
+    })
+
+    expect(isVaultRecentlyAdded(address)).toBe(true)
+  })
+
+  it('checks SDK Earn recently-added vaults', () => {
+    const lowerAddress = '0x8d3f9f9eb2f5e8b48efbb4074440d1e2a34bc365'
+    const checksummedAddress = normalizeAddress(lowerAddress)
+
+    __setEulerLabelsDataForTest({
+      recentlyAddedEarnVaults: new Set([lowerAddress]),
+    })
+
+    expect(isVaultRecentlyAdded(checksummedAddress)).toBe(true)
   })
 })

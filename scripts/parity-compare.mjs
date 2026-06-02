@@ -3409,7 +3409,6 @@ const ROUTE_VAULT_CONTEXT_FIELDS = new Set([
   'Oracle router',
   'Owner',
   'Price',
-  'Projected earnings per month',
   'Rate at kink',
   'Repayment APY',
   'Repayment window',

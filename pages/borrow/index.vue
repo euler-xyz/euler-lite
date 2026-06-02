@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
-import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultRecentlyAdded, isVaultDeprecated, isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getUniqueEntitiesByVaults, isVaultRecentlyAdded, isVaultDeprecated, isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
@@ -82,7 +82,7 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<AnyBorrowVaul
     pair.borrow.shares.name,
     product.name,
     product.description,
-    ...getEntitiesByVault(pair.borrow).map(e => e.name),
+    ...getUniqueEntitiesByVaults([pair.collateral, pair.borrow]).map(e => e.name),
   ]
 })
 
@@ -285,7 +285,7 @@ const riskManagerOptions = computed(() => {
   return buildTvlSortedOptions(activeBorrowList.value.flatMap((pair) => {
     const pairKey = getPairKey(pair)
     const pairTvl = (pairLiquidityUsd.value.get(pairKey) ?? 0) + (pairBorrowedUsd.value.get(pairKey) ?? 0)
-    return getEntitiesByVault(pair.borrow).map((entity) => {
+    return getUniqueEntitiesByVaults([pair.collateral, pair.borrow]).map((entity) => {
       const dedupKey = `${entity.name}:${pair.borrow.address}`
       const tvl = counted.has(dedupKey) ? 0 : pairTvl
       counted.add(dedupKey)
@@ -305,7 +305,7 @@ const filteredBorrowList = computed(() => {
     )
     .filter(pair => selectedMarkets.value.length ? selectedMarkets.value.includes(getProductByVault(pair.collateral.address).name) : true)
     .filter(pair => selectedRiskManagers.value.length
-      ? getEntitiesByVault(pair.borrow).some(e => selectedRiskManagers.value.includes(e.name))
+      ? getUniqueEntitiesByVaults([pair.collateral, pair.borrow]).some(e => selectedRiskManagers.value.includes(e.name))
       : true)
     .filter(matchesCustomFilters)
 })
@@ -372,7 +372,7 @@ const sortedBorrowList = computed(() => {
       break
     case 'Borrow APY':
       sorted = applyRecentlyAddedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
-        return Number(getVaultBorrowApy(a.borrow)) - Number(getVaultBorrowApy(b.borrow))
+        return getPairBorrowApy(a) - getPairBorrowApy(b)
       }))
       break
     case 'Supply APY':

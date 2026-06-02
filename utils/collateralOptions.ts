@@ -1,4 +1,4 @@
-import type { EVault, RewardCampaign, YieldApyBreakdown } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, IHasVaultAddress, RewardCampaign, YieldApyBreakdown } from '@eulerxyz/euler-v2-sdk'
 import { computeSupplyApyBreakdown } from '@eulerxyz/euler-v2-sdk'
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import type { CollateralOption } from '~/types/collateral-option'
@@ -26,7 +26,7 @@ function applyVisibility(
  * `computeSupplyApyBreakdown` + user-setting gates on intrinsic/rewards.
  */
 export function computeSupplyApy(
-  vault: EVault,
+  vault: IHasVaultAddress,
   viewer: string | undefined,
   settings: ApyVisibilitySettings,
 ): number {

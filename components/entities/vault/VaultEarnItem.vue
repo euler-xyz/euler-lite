@@ -8,6 +8,7 @@ import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
+import { computeSupplyApy } from '~/utils/collateralOptions'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
 
@@ -32,12 +33,13 @@ const entityLogos = computed(() => {
 const { getBalance, isLoading: isBalancesLoading } = useWallets()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
-const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
+const { viewer } = useApyVisibility()
+const { hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 
 const balance = computed(() =>
   getBalance(vault.asset.address as `0x${string}`),
 )
-const totalRewardsAPY = computed(() => getSupplyRewardApy(vault.address))
+const visibleSupplyApy = computed(() => computeSupplyApy(vault, viewer.value, settings.value))
 const hasRewards = computed(() => hasSupplyRewards(vault.address))
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
 const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address))
@@ -162,7 +164,7 @@ const supplyApyModalData = computed(() => ({
           data-id="data-point"
           :data-key="vault.address.toLowerCase()"
           data-field="supply-apy"
-          :data-value="getVaultSupplyApy(vault) + totalRewardsAPY"
+          :data-value="visibleSupplyApy"
         >
           <div class="mr-6">
             <VaultPoints :vault="vault" />
@@ -179,7 +181,7 @@ const supplyApyModalData = computed(() => ({
               data-modal-trigger="supply-apy"
             />
           </UiModalPreviewTrigger>
-          {{ formatNumber(getVaultSupplyApy(vault) + totalRewardsAPY) }}%
+          {{ formatNumber(visibleSupplyApy) }}%
         </div>
       </div>
     </div>

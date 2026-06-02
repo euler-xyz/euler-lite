@@ -23,6 +23,7 @@ import { formatNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import { getBorrowPositionEffectiveLiquidationLTV, getBorrowPositionUserLTVPercent } from '~/utils/ltv'
 
 const { position } = defineProps<{ position: PortfolioBorrowPosition<VaultEntity> }>()
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
@@ -52,10 +53,12 @@ const positionKey = computed(() =>
 const supplied = computed(() => position.supplied)
 const borrowed = computed(() => position.borrowed)
 const health = computed(() => position.healthFactor)
-const userLTVValue = computed(() => position.userLTV ?? position.currentLTV)
 const liquidationLTV = computed(() => getBorrowPositionEffectiveLiquidationLTV(position))
 const liquidationLTVPercent = computed(() =>
   liquidationLTV.value === undefined ? null : ltvToPercent(liquidationLTV.value),
+)
+const liquidationLTVDisplay = computed(() =>
+  liquidationLTVPercent.value === null ? '-' : `${liquidationLTVPercent.value}%`,
 )
 
 const { name: collateralProductName } = useEulerProductOfVault(primaryCollateralAddress)
@@ -241,9 +244,11 @@ const supplyCampaignsForModal = computed(() => getSupplyRewardCampaigns(collater
 const borrowCampaignsForModal = computed(() => getBorrowRewardCampaigns(borrowVault.value.address, collateralVault.value.address))
 const loopingCampaignsForModal = computed(() => getLoopingRewardCampaigns(borrowVault.value.address, collateralVault.value.address))
 
-const userLTV = computed(() =>
-  userLTVValue.value === undefined ? null : ltvToPercent(nanoToValue(userLTVValue.value, 18)),
-)
+const userLTV = computed(() => getBorrowPositionUserLTVPercent(position) ?? null)
+const userLTVDisplay = computed(() => {
+  if (userLTV.value === null) return ''
+  return Number.isFinite(userLTV.value) ? formatNumber(userLTV.value, 2) : '∞'
+})
 const actualMultiplier = computed(() => position.multiplier ?? 0)
 
 const netApyModalData = computed(() => ({
@@ -599,12 +604,13 @@ const openPositionInformationModal = () => {
           <div class="text-content-tertiary text-p3">
             Your LTV
           </div>
-          <template v-if="hasQueryFailure || liquidationLTVPercent === null || userLTV === null">
+          <template v-if="hasQueryFailure || userLTV === null">
             <span class="text-warning-500 text-p3">Unknown</span>
           </template>
           <template v-else>
             <div class="flex justify-between items-center gap-16">
               <UiProgress
+                v-if="liquidationLTVPercent !== null"
                 style="width: 111px"
                 :model-value="userLTV"
                 :max="liquidationLTVPercent"
@@ -617,9 +623,9 @@ const openPositionInformationModal = () => {
                   data-id="data-point"
                   :data-key="positionKey"
                   data-field="ltv"
-                  :data-value="`${userLTV}/${liquidationLTVPercent}`"
+                  :data-value="`${userLTV}/${liquidationLTVPercent ?? '-'}`"
                 >
-                  {{ formatNumber(userLTV, 2) }}/{{ liquidationLTVPercent }}%
+                  {{ userLTVDisplay }}/{{ liquidationLTVDisplay }}
                 </div>
               </div>
             </div>

@@ -1,5 +1,5 @@
 import type { SecuritizeCollateralVault, EVault } from '@eulerxyz/euler-v2-sdk'
-import { collectPythFeedsFromAdapters } from '@eulerxyz/euler-v2-sdk'
+import { collectPythFeedsFromRouteSteps } from '@eulerxyz/euler-v2-sdk'
 import { type Address, getAddress } from 'viem'
 
 /** Decoded shape of the AccountLiquidityInfo struct from the Euler lens */
@@ -119,7 +119,12 @@ export const resolvePositionCollaterals = (liquidityInfo: LensLiquidityInfo, fal
  * are only valid for ~2 minutes and require continuous updates.
  */
 export const hasPythOracles = (vault: EVault | SecuritizeCollateralVault): boolean => {
-  if (!('oracle' in vault)) return false
-  const feeds = collectPythFeedsFromAdapters(vault.oracle.adapters)
+  if (!('debtPricingOracleRoute' in vault)) return false
+  const feeds = [
+    ...collectPythFeedsFromRouteSteps(vault.debtPricingOracleRoute),
+    ...vault.collaterals.flatMap(collateral =>
+      collectPythFeedsFromRouteSteps(collateral.oracleRoute),
+    ),
+  ]
   return feeds.length > 0
 }

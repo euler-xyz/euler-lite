@@ -8,6 +8,7 @@ import {
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { logger } from '~/server/utils/logger'
+import { isAllowedMerklProxyRequest } from '~/server/utils/rewards-proxy-allowlist'
 
 /**
  * Server-side proxy for Merkl v4 opportunity / user-reward endpoints.
@@ -25,14 +26,6 @@ import { logger } from '~/server/utils/logger'
 const MERKL_UPSTREAM_BASE = 'https://api.merkl.xyz/v4'
 const ALLOWED_METHODS = new Set(['GET', 'HEAD'])
 
-// Only allow paths the rewards adapter actually hits. Anything else 404s so
-// the endpoint isn't a generic open proxy.
-const ALLOWED_PATH_PREFIXES = [
-  'opportunities',
-  'users',
-  'campaigns',
-]
-
 const rateLimiter = createRateLimiter({
   max: 600,
   windowMs: 60_000,
@@ -41,20 +34,13 @@ const rateLimiter = createRateLimiter({
 
 const stripLeadingSlash = (s: string): string => (s.startsWith('/') ? s.slice(1) : s)
 
-const isAllowedPath = (path: string): boolean => {
-  const head = path.split('/')[0]?.toLowerCase() ?? ''
-  return ALLOWED_PATH_PREFIXES.includes(head)
-}
-
-const isUserRewardsPath = (path: string): boolean => /^users\/[A-Za-z0-9]+\/rewards$/.test(path)
+const isUserRewardsPath = (path: string): boolean => /^users\/0x[a-fA-F0-9]{40}\/rewards$/.test(path.replace(/\/+$/, ''))
 
 export default defineEventHandler(async (event) => {
   const method = getMethod(event).toUpperCase()
   if (!ALLOWED_METHODS.has(method)) {
     throw createError({ statusCode: 405, statusMessage: 'Method not allowed' })
   }
-
-  await rateLimiter.consume(event)
 
   const requestUrl = getRequestURL(event)
   // Nuxt strips the catch-all prefix into `event.context.params.path` as an
@@ -66,9 +52,11 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'Not a merkl proxy path' })
   }
   const rest = stripLeadingSlash(requestUrl.pathname.slice(idx + prefix.length))
-  if (!isAllowedPath(rest)) {
+  if (!isAllowedMerklProxyRequest(method, rest, requestUrl.searchParams)) {
     throw createError({ statusCode: 404, statusMessage: 'Merkl path not allowed' })
   }
+
+  await rateLimiter.consume(event)
 
   const targetUrl = new URL(`${MERKL_UPSTREAM_BASE}/${rest}`)
   requestUrl.searchParams.forEach((value, key) => targetUrl.searchParams.append(key, value))

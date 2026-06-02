@@ -50,6 +50,10 @@ export interface StepDecodingContext {
 // Constants
 // ---------------------------------------------------------------------------
 
+const VERIFY_AMOUNT_MIN_AND_SKIM_SELECTOR = toFunctionSelector('function verifyAmountMinAndSkim(address,address,uint256,uint256)')
+const VERIFY_AMOUNT_MIN_AND_TRANSFER_SELECTOR = toFunctionSelector('function verifyAmountMinAndTransfer(address,address,uint256,uint256)')
+const VERIFY_DEBT_MAX_SELECTOR = toFunctionSelector('function verifyDebtMax(address,address,uint256,uint256)')
+
 const SELECTOR_LABELS: Record<string, string> = {
   [toFunctionSelector('function deposit(uint256,address)')]: 'Supply',
   [toFunctionSelector('function borrow(uint256,address)')]: 'Borrow',
@@ -66,9 +70,9 @@ const SELECTOR_LABELS: Record<string, string> = {
   [toFunctionSelector('function repayWithShares(uint256,address)')]: 'Repay',
   [toFunctionSelector('function signTermsOfUse(string,bytes32)')]: 'Sign terms of use',
   [toFunctionSelector('function multicall(bytes[])')]: 'Swap',
-  [toFunctionSelector('function verifyAmountMinAndSkim(address,address,uint256,uint256)')]: 'Verify min received',
-  [toFunctionSelector('function verifyAmountMinAndTransfer(address,address,uint256,uint256)')]: 'Verify min received',
-  [toFunctionSelector('function verifyDebtMax(address,address,uint256,uint256)')]: 'Verify max debt',
+  [VERIFY_AMOUNT_MIN_AND_SKIM_SELECTOR]: 'Verify min received',
+  [VERIFY_AMOUNT_MIN_AND_TRANSFER_SELECTOR]: 'Verify min received',
+  [VERIFY_DEBT_MAX_SELECTOR]: 'Verify max debt',
   [toFunctionSelector('function updatePriceFeeds(bytes[])')]: 'Update price feeds',
   [toFunctionSelector('function transferFromSender(address,uint256,address)')]: 'Transfer from wallet',
   [toFunctionSelector('function deposit()')]: 'Wrap native currency',
@@ -79,6 +83,11 @@ const MAX_UINT256 = 2n ** 256n - 1n
 const SHARES_AMOUNT_SELECTORS = new Set([
   toFunctionSelector('function redeem(uint256,address,address)'),
   toFunctionSelector('function repayWithShares(uint256,address)'),
+])
+const SWAP_VERIFIER_AMOUNT_SELECTORS = new Set([
+  VERIFY_AMOUNT_MIN_AND_SKIM_SELECTOR,
+  VERIFY_AMOUNT_MIN_AND_TRANSFER_SELECTOR,
+  VERIFY_DEBT_MAX_SELECTOR,
 ])
 
 export type SwapEstimatedSide = 'input' | 'output'
@@ -132,6 +141,16 @@ export const decodeSecondUint256 = (data: string): bigint | undefined => {
   }
 }
 
+const decodeThirdUint256 = (data: string): bigint | undefined => {
+  if (data.length < 202) return undefined
+  try {
+    return BigInt(`0x${data.slice(138, 202)}`)
+  }
+  catch {
+    return undefined
+  }
+}
+
 export const decodeFirstUint256 = (data: string): bigint | undefined => {
   if (data.length < 74) return undefined
   try {
@@ -166,6 +185,46 @@ const resolveAmountFromCalldata = (
   return { decoded: false }
 }
 
+const decodeFirstAddress = (data: string): string | undefined => {
+  if (data.length < 74) return undefined
+  try {
+    return getAddress(`0x${data.slice(34, 74)}`)
+  }
+  catch {
+    return undefined
+  }
+}
+
+const sameAddress = (a?: string, b?: string) => {
+  if (!a || !b) return false
+  try {
+    return getAddress(a) === getAddress(b)
+  }
+  catch {
+    return false
+  }
+}
+
+const resolveContextAssetByAddress = (
+  address: string,
+  ctx: StepDecodingContext,
+): StepDecodingContext['asset'] | StepDecodingContext['swapToAsset'] | undefined => {
+  if (sameAddress(address, ctx.asset.address)) return ctx.asset
+  if (ctx.swapToAsset && sameAddress(address, ctx.swapToAsset.address)) return ctx.swapToAsset
+  return undefined
+}
+
+const buildAssetInfo = (
+  asset: { symbol: string, address: string, decimals?: number | bigint },
+  rawAmount?: bigint,
+): StepAssetInfo => ({
+  symbol: asset.symbol,
+  address: asset.address,
+  amount: rawAmount !== undefined && asset.decimals !== undefined
+    ? formatUnits(rawAmount, Number(asset.decimals))
+    : undefined,
+})
+
 const getVaultAssetInfo = (
   data: string,
   targetContract: string,
@@ -180,6 +239,29 @@ const getVaultAssetInfo = (
   }
   catch { /* ignore */ }
   return undefined
+}
+
+const getSwapVerifierAssetInfo = (
+  data: string,
+  ctx: StepDecodingContext,
+  getVault: VaultLookup,
+): StepAssetInfo | undefined => {
+  const selector = data.slice(0, 10).toLowerCase() as `0x${string}`
+  if (!SWAP_VERIFIER_AMOUNT_SELECTORS.has(selector)) return undefined
+
+  const firstAddress = decodeFirstAddress(data)
+  if (!firstAddress) return undefined
+
+  const rawAmount = decodeThirdUint256(data)
+
+  if (selector === VERIFY_AMOUNT_MIN_AND_TRANSFER_SELECTOR) {
+    const asset = resolveContextAssetByAddress(firstAddress, ctx) ?? ctx.swapToAsset ?? ctx.asset
+    return buildAssetInfo(asset, rawAmount)
+  }
+
+  const vault = getVault(firstAddress)
+  const asset = vault?.asset ?? ctx.swapToAsset ?? ctx.asset
+  return buildAssetInfo(asset, rawAmount)
 }
 
 const resolveBatchItemAssetInfo = (
@@ -228,6 +310,10 @@ const resolveBatchItemAssetInfo = (
     const nativeSymbol = ctx.asset.symbol.startsWith('W') ? ctx.asset.symbol.slice(1) : ctx.asset.symbol
     const wrapAmount = value > 0n ? formatUnits(value, 18) : undefined
     return { symbol: nativeSymbol, address: zeroAddress, amount: wrapAmount }
+  }
+
+  if (label === 'Verify min received' || label === 'Verify max debt') {
+    return getSwapVerifierAssetInfo(data, ctx, getVault)
   }
 
   if (label === 'Transfer' || label === 'Transfer to account' || label === 'Transfer from wallet') {

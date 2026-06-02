@@ -56,12 +56,6 @@ export const SUBGRAPH_BLOCK_POLL_INTERVAL_MS = 1_000
  * back on the immediate triggerPortfolioRefresh + the 60s portfolio page
  * poll to eventually reconcile state. */
 export const SUBGRAPH_BLOCK_CATCHUP_TIMEOUT_MS = 30_000
-/** Delay (ms) after the subgraph catch-up before the final portfolio refetch.
- * Goldsky fans reads across replicas, so the head can advance (and the sync
- * gate pass) while the replica serving queryAccountVaults still lags a beat.
- * One spaced refetch absorbs that without waiting for the 60s page poll. */
-export const POST_TX_REFRESH_DELAY_MS = 5_000
-
 // ── Basis Points ──────────────────────────────────────────
 export const BPS_BASE = 10_000n
 /** BPS_BASE + 1: pads amounts by 0.01% to cover interest accrual */

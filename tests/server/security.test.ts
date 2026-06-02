@@ -57,6 +57,14 @@ describe('buildCsp', () => {
   it('locks base-uri to self (prevents base-tag hijack)', () => {
     expect(csp).toContain('base-uri \'self\'')
   })
+
+  it('allows SDK error signature decoding via Sourcify 4byte API', () => {
+    const connectSrc = csp
+      .split(';')
+      .map(d => d.trim())
+      .find(d => d.startsWith('connect-src'))
+    expect(connectSrc).toContain('https://api.4byte.sourcify.dev')
+  })
 })
 
 describe('applySecurityHeaders', () => {
