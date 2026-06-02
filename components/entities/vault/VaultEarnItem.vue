@@ -99,12 +99,12 @@ const supplyApyModalData = computed(() => ({
     :data-key="vault.address.toLowerCase()"
     :data-vault-address="vault.address.toLowerCase()"
   >
-    <div class="flex py-16 px-16 pb-12 border-b border-line-subtle">
+    <div class="flex items-start gap-12 py-16 px-16 pb-12 border-b border-line-subtle">
       <AssetAvatar
         :asset="vault.asset"
         size="40"
       />
-      <div class="flex-grow ml-12">
+      <div class="min-w-0 flex-1">
         <div
           class="text-content-tertiary text-p3 mb-4 flex items-center gap-8"
           data-id="data-point"
@@ -116,17 +116,9 @@ const supplyApyModalData = computed(() => ({
             :name="displayName"
             :is-unverified="isUnverified"
           />
-          <span
+          <RecentlyAddedBadge
             v-if="isRecentlyAdded"
-            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5"
-            title="Recently added vault"
-          >
-            <SvgIcon
-              name="star"
-              class="!w-14 !h-14"
-            />
-            Recently added
-          </span>
+          />
           <RestrictedBadge v-if="isGeoBlocked" />
         </div>
         <div
@@ -140,7 +132,7 @@ const supplyApyModalData = computed(() => ({
         </div>
         <div
           v-if="description"
-          class="text-p3 text-content-tertiary mt-4 line-clamp-1"
+          class="text-p3 text-content-tertiary mt-4 max-w-[85%] line-clamp-1 mobile:max-w-full"
           data-id="data-point"
           :data-key="vault.address.toLowerCase()"
           data-field="description"
@@ -149,7 +141,7 @@ const supplyApyModalData = computed(() => ({
           {{ description }}
         </div>
       </div>
-      <div class="flex flex-col items-end">
+      <div class="flex flex-col items-end shrink-0 ml-16">
         <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
           Supply APY
           <span class="inline-flex items-center rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5">

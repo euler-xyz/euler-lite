@@ -266,17 +266,10 @@ const linkPath = computed(() => ({
               :name="pairName"
               :is-unverified="isAnyUnverified"
             />
-            <span
+            <RecentlyAddedBadge
               v-if="isRecentlyAdded"
-              class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5"
-              title="Recently added vault"
-            >
-              <SvgIcon
-                name="star"
-                class="!w-14 !h-14"
-              />
-              Recently added
-            </span>
+              class="mobile:hidden"
+            />
             <KeyringBadge v-if="isKeyring && !isAnyGovernorUnverified" />
             <GovernanceLimitedBadge v-if="isAnyGovernanceLimited" />
             <CyclicalNoteBadge v-if="isCyclicalNote && !isAnyGovernorUnverified" />
@@ -300,15 +293,21 @@ const linkPath = computed(() => ({
             </span>
           </div>
           <div
-            class="text-h5 text-content-primary"
+            class="text-h5 text-content-primary flex items-center gap-8"
             data-id="data-point"
             :data-key="pairKey"
             data-field="asset-symbols"
             :data-value="[pair.collateral.asset.symbol, pair.borrow.asset.symbol].join('/')"
           >
-            {{
-              [pair.collateral.asset.symbol, pair.borrow.asset.symbol].join("/")
-            }}
+            <span>
+              {{
+                [pair.collateral.asset.symbol, pair.borrow.asset.symbol].join("/")
+              }}
+            </span>
+            <RecentlyAddedBadge
+              v-if="isRecentlyAdded"
+              class="hidden mobile:inline-flex shrink-0"
+            />
           </div>
         </div>
       </div>
