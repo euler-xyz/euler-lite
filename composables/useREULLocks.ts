@@ -4,34 +4,41 @@ import type { REULLock } from '~/entities/reul'
 import { getEulerSdk } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
 import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
+import { createRaceGuard } from '~/utils/race-guard'
 
 const isLoaded = ref(false)
 const isLocksLoading = ref(true)
 const locks: Ref<REULLock[]> = ref([])
 
 let interval: NodeJS.Timeout | null = null
+const lockGuard = createRaceGuard()
 
 export const useREULLocks = () => {
-  const { isConnected, address: wagmiAddress, chainId } = useWagmi()
-  const { eulerTokenAddresses } = useEulerAddresses()
+  const { isConnected, address: wagmiAddress, chainId: walletChainId } = useWagmi()
+  const { eulerTokenAddresses, chainId: addressesChainId } = useEulerAddresses()
   const { spyAddress } = useSpyMode()
 
   const effectiveAddress = computed(() => spyAddress.value || wagmiAddress.value || '')
   const isActive = computed(() => isConnected.value || Boolean(spyAddress.value))
+  const selectedChainId = computed(() => addressesChainId.value || walletChainId.value)
 
   const reulTokenContractAddress = computed(() => eulerTokenAddresses.value?.rEUL ?? '')
   const eulTokenContractAddress = computed(() => eulerTokenAddresses.value?.EUL ?? '')
   const addressesReady = computed(() => !!reulTokenContractAddress.value && !!eulTokenContractAddress.value)
 
   const loadREULLocksInfo = async (userAddress: string, isInitialLoading = true) => {
+    const gen = lockGuard.next()
     await until(addressesReady).toBeTruthy({ timeout: 10_000, throwOnTimeout: false })
-    if (!addressesReady.value || !chainId.value) {
-      isLocksLoading.value = false
+    if (lockGuard.isStale(gen)) return
+    const chainId = selectedChainId.value
+    if (!addressesReady.value || !chainId) {
+      if (!lockGuard.isStale(gen)) isLocksLoading.value = false
       return
     }
 
     try {
       if (!userAddress) {
+        if (lockGuard.isStale(gen)) return
         locks.value = []
         return
       }
@@ -40,22 +47,38 @@ export const useREULLocks = () => {
       }
 
       const sdk = await getEulerSdk()
-      locks.value = await sdk.reulLockService.fetchLocks({
-        chainId: chainId.value,
+      const nextLocks = await sdk.reulLockService.fetchLocks({
+        chainId,
         account: userAddress as Address,
         rEulAddress: reulTokenContractAddress.value as Address,
       })
+      if (lockGuard.isStale(gen)) return
+      locks.value = nextLocks
     }
     catch (e) {
+      if (lockGuard.isStale(gen)) return
       logWarn('reulLocks/fetch', e)
     }
     finally {
-      isLocksLoading.value = false
+      if (!lockGuard.isStale(gen)) {
+        isLocksLoading.value = false
+      }
     }
   }
 
-  watch([isActive, chainId], ([active, currentChainId], [_oldActive, oldChainId]) => {
+  const refreshLocks = async (isInitialLoading = false) => {
+    if (!effectiveAddress.value) {
+      lockGuard.next()
+      locks.value = []
+      isLocksLoading.value = false
+      return
+    }
+    await loadREULLocksInfo(effectiveAddress.value, isInitialLoading)
+  }
+
+  watch([isActive, selectedChainId], ([active, currentChainId], [_oldActive, oldChainId]) => {
     if (oldChainId && currentChainId !== oldChainId) {
+      lockGuard.next()
       isLoaded.value = false
       locks.value = []
     }
@@ -73,6 +96,7 @@ export const useREULLocks = () => {
       }, POLL_INTERVAL_60S_MS)
     }
     else if (!active) {
+      lockGuard.next()
       locks.value = []
       isLocksLoading.value = false
       if (interval) {
@@ -84,13 +108,15 @@ export const useREULLocks = () => {
 
   // Reload when the effective address changes (e.g. wallet switch, spy address resolves to owner)
   watch(effectiveAddress, (addr, oldAddr) => {
-    if (oldAddr && addr && addr !== oldAddr) {
+    if (addr && addr !== oldAddr) {
+      lockGuard.next()
       locks.value = []
       isLoaded.value = false
       loadREULLocksInfo(addr)
       isLoaded.value = true
     }
     else if (oldAddr && !addr) {
+      lockGuard.next()
       locks.value = []
     }
   })
@@ -106,13 +132,14 @@ export const useREULLocks = () => {
     if (!wagmiAddress.value) {
       throw new Error('Wallet not connected')
     }
-    if (!chainId.value) {
+    const chainId = selectedChainId.value
+    if (!chainId) {
       throw new Error('Chain not connected')
     }
 
     const sdk = await getEulerSdk()
     return sdk.reulLockService.buildUnlockPlan({
-      chainId: chainId.value,
+      chainId,
       account: wagmiAddress.value as Address,
       lockTimestamp: lockTimestamps[0] as bigint,
       rEulAddress: reulTokenContractAddress.value
@@ -127,6 +154,7 @@ export const useREULLocks = () => {
     reulTokenContractAddress,
     eulTokenContractAddress,
     loadREULLocksInfo: (address: string, isInitial?: boolean) => loadREULLocksInfo(address, isInitial),
+    refreshLocks,
     buildUnlockREULPlan,
   }
 }
