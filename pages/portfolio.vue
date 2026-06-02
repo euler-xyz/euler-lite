@@ -148,8 +148,6 @@ watch(showAllLabelEntries, (showAll) => {
 
     <PortfolioShowAllHint />
 
-    <PortfolioDiagnosticsBanner />
-
     <PortfolioRampingBanner />
 
     <div class="flex flex-col gap-16 mx-16 laptop:flex-row laptop:items-stretch">
