@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { __setEulerLabelsDataForTest } from '~/composables/useEulerLabels'
-import { getActiveProductVaultAddresses, normalizeProducts } from '~/utils/eulerLabelsUtils'
+import { getActiveProductVaultAddresses, isVaultRecentlyAdded, normalizeProducts } from '~/utils/eulerLabelsUtils'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 
 describe('normalizeProducts', () => {
@@ -42,5 +42,36 @@ describe('getActiveProductVaultAddresses', () => {
     })
 
     expect(getActiveProductVaultAddresses()).toEqual([normalizeAddress(active)])
+  })
+})
+
+describe('isVaultRecentlyAdded', () => {
+  it('checks product recently-added vaults', () => {
+    const address = '0x0000000000000000000000000000000000000201'
+
+    __setEulerLabelsDataForTest({
+      products: {
+        test: {
+          name: 'Test',
+          description: '',
+          entity: [],
+          url: '',
+          vaults: [normalizeAddress(address)],
+          recentlyAddedVaults: [normalizeAddress(address)],
+        },
+      },
+    })
+
+    expect(isVaultRecentlyAdded(address)).toBe(true)
+  })
+
+  it('checks SDK Earn recently-added vaults', () => {
+    const address = '0x0000000000000000000000000000000000000202'
+
+    __setEulerLabelsDataForTest({
+      recentlyAddedEarnVaults: new Set([normalizeAddress(address)]),
+    })
+
+    expect(isVaultRecentlyAdded(address.toLowerCase())).toBe(true)
   })
 })

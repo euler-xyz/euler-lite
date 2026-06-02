@@ -21,6 +21,15 @@ import { erc4626AssetAbi } from '~/abis/erc4626'
 import { buildBatchItem, evcBatchCall } from '~/utils/multicall'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 
+type EulerLabelProductCompat = EulerLabelProduct & {
+  recentlyAddedVaults?: string[]
+}
+
+type EulerLabelsDataCompat = Omit<EulerLabelsData, 'products'> & {
+  products: Record<string, EulerLabelProductCompat>
+  recentlyAddedEarnVaults?: Set<string>
+}
+
 const LABEL_QUERY_NAMES = [
   'queryEulerLabelsEntities',
   'queryEulerLabelsProducts',
@@ -38,6 +47,7 @@ const createEmptyEulerLabelsData = (): EulerLabelsData => ({
   earnVaultEntries: {},
   earnVaultBlocks: {},
   earnVaultRestrictions: {},
+  recentlyAddedEarnVaults: new Set(),
   deprecatedEarnVaults: {},
   earnVaultDescriptions: {},
   earnVaultNotices: {},
@@ -68,13 +78,14 @@ export const getEulerLabelsVersion = (): number => labelsVersion.value
 
 export const getEulerLabelWrapPairs = (): Record<string, string> => wrapPairs
 
-export const __setEulerLabelsDataForTest = (data: Partial<EulerLabelsData> = {}) => {
+export const __setEulerLabelsDataForTest = (data: Partial<EulerLabelsDataCompat> = {}) => {
   setLabelsData({
     ...createEmptyEulerLabelsData(),
     ...data,
+    recentlyAddedEarnVaults: data.recentlyAddedEarnVaults ?? new Set(),
     notExplorableEarnVaults: data.notExplorableEarnVaults ?? new Set(),
     assetPatternRules: data.assetPatternRules ?? [],
-  }, null)
+  } as unknown as EulerLabelsData, null)
   isReady.value = true
   isLoading.value = false
 }
