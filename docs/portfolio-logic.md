@@ -224,33 +224,20 @@ Both are computed reactively and update when position data changes.
 
 Pyth oracles are pull-based: prices must be explicitly pushed on-chain before they can be read. This fundamentally differs from push-based oracles (Chainlink) where prices are updated independently. Because Pyth prices expire after ~2 minutes, the app must update them before every read.
 
-### Detection: Recursive Oracle Traversal
+### Detection: Selected Oracle Routes
 
-`collectPythFeedIds()` (`entities/oracle.ts`) recursively walks the oracle configuration tree returned by VaultLens:
+SDK EVault entities expose selected oracle routes instead of the full recursive
+oracle tree. Lite collects Pyth feeds from `debtPricingOracleRoute.steps` and
+from each enabled collateral's `oracleRoute.steps`.
 
-```
-oracleDetailedInfo
-  |
-  |-- name === "EulerRouter"
-  |     Decode -> traverse fallbackOracleInfo + resolvedOraclesInfo[]
-  |
-  |-- name === "CrossAdapter"
-  |     Decode -> traverse oracleBaseCrossInfo + oracleCrossQuoteInfo
-  |
-  |-- name === "PythOracle"
-  |     Decode -> extract { pythAddress, feedId }
-  |
-  +-- Other adapters (Chainlink, etc.) -> ignored
-```
-
-The traversal is depth-limited (default 3) and deduplicates feeds by `pythAddress:feedId`.
+The collection deduplicates feeds by `pythAddress:feedId`.
 
 ### Fresh Price Injection via `batchSimulation`
 
 The core mechanism for getting fresh Pyth prices is `executeLensWithPythSimulation()` (`utils/pyth.ts`):
 
 ```
-1. Collect all Pyth feed IDs from the vault's oracle tree
+1. Collect Pyth feed IDs from the selected vault and collateral routes
 2. Fetch latest price data from Pyth Hermes API (/v2/updates/price/latest)
 3. Build batch items:
      [pythContract.updatePriceFeeds(data), ...,  lensContract.getVaultInfoFull(vault)]
@@ -273,7 +260,7 @@ This is a `staticCall` - no transaction is sent, no gas is spent, and the state 
 
 **Bulk vault fetching** (SDK vault services via `useVaults`):
 1. Batch-fetch vaults via `batchLensCalls()` (fast path).
-2. Collect all Pyth-enabled vaults via `collectPythFeedIds()`.
+2. Collect all Pyth-enabled vaults from selected SDK route steps.
 3. Batch re-fetch all Pyth vaults in a single `batchSimulation` via `executeBatchLensWithPythSimulation()`.
 4. Replace vault data with simulation results (contains fresh prices in `liabilityPriceInfo` and `collateralPrices[]`).
 
@@ -293,7 +280,7 @@ SDK `TransactionPlan` simulation and execution run through the SDK plugin pipeli
 ### Design Decisions
 
 1. **Always re-fetch with Pyth**: Even if the initial lens call succeeds, the prices may be stale. The system always re-queries with simulation when Pyth is detected.
-2. **Complete oracle traversal**: All Pyth feeds in the tree are updated (liability + all collaterals), not just the specific pair being queried. This ensures consistent pricing.
+2. **Route-scoped feed collection**: Pyth updates are built from the active liability route and enabled collateral routes, not from unrelated oracle branches.
 3. **Simulation, not transactions**: Using `batchSimulation` (staticCall) means no gas cost for price reads. Actual Pyth updates only happen when submitting real transactions.
 
 ## Data Flow Summary

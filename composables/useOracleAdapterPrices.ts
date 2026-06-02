@@ -1,8 +1,8 @@
 import {
   collectPythFeedsFromAdapters,
+  getOracleRouteAdapters,
   type SecuritizeCollateralVault,
   type EVault,
-  type OracleRouteAdapterStep,
   type OracleRouteStep,
 } from '@eulerxyz/euler-v2-sdk'
 import { buildPythBatchItemsFromFeeds } from '~/utils/pyth'
@@ -36,9 +36,6 @@ type OracleAdapterQuoteRequest = {
 
 export const getOracleRouteStepKey = (step: Pick<OracleRouteStep, 'kind' | 'oracle' | 'base' | 'quote'>) =>
   `${step.kind}:${step.oracle.toLowerCase()}:${step.base.toLowerCase()}:${step.quote.toLowerCase()}`
-
-const isAdapterStep = (step: OracleRouteStep): step is OracleRouteAdapterStep =>
-  step.kind === 'adapter'
 
 const buildKnownDecimals = (
   sourceVaults: EVault[],
@@ -265,7 +262,7 @@ export const useOracleAdapterPrices = (
       }
 
       // 4. Build Pyth update batch items for the adapters being quoted
-      const adapterList = stepList.filter(isAdapterStep).map(step => step.adapter)
+      const adapterList = getOracleRouteAdapters(stepList)
       const { items: pythItems } = await buildPythBatchItemsFromFeeds(
         collectPythFeedsFromAdapters(adapterList),
         provider,
