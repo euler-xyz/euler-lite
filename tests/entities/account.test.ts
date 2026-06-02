@@ -1,6 +1,6 @@
-import type { EVaultCollateralRamping } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, EVaultCollateral, EVaultCollateralRamping, IHasVaultAddress, PortfolioBorrowPosition } from '@eulerxyz/euler-v2-sdk'
 import { describe, expect, it } from 'vitest'
-import { getRampStatus, type PositionRampInput } from '~/entities/account'
+import { getPositionCollateralEdge, getPositionRampStatus, getRampStatus, type PositionRampInput } from '~/entities/account'
 
 const WAD = 10n ** 18n
 
@@ -21,6 +21,28 @@ const makeInput = (overrides: Partial<PositionRampInput> = {}): PositionRampInpu
   ramping: defaultRamping,
   ...overrides,
 })
+
+const makeCollateralEdge = (overrides: Partial<EVaultCollateral> = {}): EVaultCollateral => ({
+  address: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  borrowLTV: 0,
+  liquidationLTV: 0.8,
+  ramping: defaultRamping,
+  oraclePriceRaw: undefined,
+  currentLiquidationLTV: 0.85,
+  isLiquidationLTVRamping: true,
+  rampTimeRemaining: 500n,
+  ...overrides,
+} as EVaultCollateral)
+
+const makePosition = (
+  edge = makeCollateralEdge(),
+  overrides: Partial<PortfolioBorrowPosition<IHasVaultAddress>> = {},
+): PortfolioBorrowPosition<IHasVaultAddress> => ({
+  userLTV: pctWad(70),
+  borrowVault: { collaterals: [edge] } as EVault,
+  collateralVault: { address: edge.address.toUpperCase() } as IHasVaultAddress,
+  ...overrides,
+} as PortfolioBorrowPosition<IHasVaultAddress>)
 
 describe('getRampStatus — ramping detection', () => {
   it('detects in-flight ramp', () => {
@@ -91,5 +113,47 @@ describe('getRampStatus — forced-liquidation projection', () => {
     // forcedLiquidationAt projects to a timestamp <= now; caller treats it as "now".
     expect(status.forcedLiquidationAt).not.toBeNull()
     expect(status.forcedLiquidationAt!).toBeLessThanOrEqual(1500n)
+  })
+})
+
+describe('getPositionCollateralEdge', () => {
+  it('matches the primary collateral edge case-insensitively', () => {
+    const edge = makeCollateralEdge()
+    const position = makePosition(edge)
+
+    expect(
+      getPositionCollateralEdge(position.borrowVault as EVault, position.collateralVault?.address),
+    ).toBe(edge)
+  })
+
+  it('returns undefined when the borrow vault does not expose a matching collateral edge', () => {
+    const edge = makeCollateralEdge()
+    const position = makePosition(edge, {
+      borrowVault: { collaterals: [makeCollateralEdge({ address: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' })] } as EVault,
+    })
+
+    expect(
+      getPositionCollateralEdge(position.borrowVault as EVault, position.collateralVault?.address),
+    ).toBeUndefined()
+  })
+})
+
+describe('getPositionRampStatus', () => {
+  it('detects ramping SDK collateral edges from the position borrow vault', () => {
+    const status = getPositionRampStatus(makePosition(), 1500n)
+
+    expect(status).toEqual({ isRamping: true, willBeLiquidated: false, forcedLiquidationAt: null })
+  })
+
+  it('returns non-ramping when the matching collateral edge is missing', () => {
+    const position = makePosition(makeCollateralEdge(), {
+      collateralVault: { address: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' } as IHasVaultAddress,
+    })
+
+    expect(getPositionRampStatus(position, 1500n)).toEqual({
+      isRamping: false,
+      willBeLiquidated: false,
+      forcedLiquidationAt: null,
+    })
   })
 })

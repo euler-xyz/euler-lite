@@ -2,7 +2,7 @@
 import { getRoe, getNetAPY } from '~/utils/vault/apy'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isSecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import { getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
+import { getUtilisationWarning, getBorrowCapWarning, type VaultWarning } from '~/composables/useVaultWarnings'
 import { getAssetUsdPrice, getCollateralUsdPrice, getCollateralUsdValue, toUsdAmount, type UsdAmount } from '~/utils/sdk-prices'
 import { getBorrowPositionEffectiveLiquidationLTV, getBorrowPositionTimeToLiquidation } from '~/utils/ltv'
 import { maxUint256 } from 'viem'
@@ -10,7 +10,9 @@ import { formatTtl, ltvToPercent, nanoToValue, roundAndCompactTokens } from '~/u
 import { formatNumber, formatHealthScore, formatUsdValue, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { getVaultNotice } from '~/utils/eulerLabelsUtils'
-import { VaultOverviewModal, OperationReviewModal, VaultSupplyApyModal, VaultBorrowApyModal, VaultNetApyModal, PortfolioRoeModal } from '#components'
+import { getPositionCollateralEdge, getPositionRampStatus, getPositionRampTargetTimestamp } from '~/entities/account'
+import { DateTime } from 'luxon'
+import { VaultOverviewModal, OperationReviewModal, VaultSupplyApyModal, VaultBorrowApyModal, VaultNetApyModal, PortfolioRoeModal, VaultRampDownModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -180,10 +182,59 @@ const borrowApy = computed(() => withVaultIntrinsicApy(
 ))
 const borrowApyWithRewards = computed(() => borrowApy.value - borrowRewardAPY.value)
 
+const rampCollateralEdge = computed(() => {
+  if (!position.value) return undefined
+  return getPositionCollateralEdge(
+    position.value.borrowVault as EVault | undefined,
+    position.value.collateralVault?.address,
+  )
+})
+const rampStatus = computed(() =>
+  position.value ? getPositionRampStatus(position.value) : null,
+)
+const rampTargetTimestamp = computed(() =>
+  position.value ? getPositionRampTargetTimestamp(position.value) : null,
+)
+const rampEndsRelative = computed(() => {
+  const targetTimestamp = rampTargetTimestamp.value
+  if (!rampStatus.value?.isRamping || targetTimestamp === null) return ''
+  return DateTime.fromSeconds(Number(targetTimestamp))
+    .toRelative({ base: DateTime.now(), style: 'short' }) ?? ''
+})
+const forcedLiquidationRelative = computed(() => {
+  const at = rampStatus.value?.forcedLiquidationAt ?? null
+  if (at === null) return ''
+  return DateTime.fromSeconds(Number(at))
+    .toRelative({ base: DateTime.now(), style: 'short' }) ?? ''
+})
+const rampWarning = computed<VaultWarning | null>(() => {
+  if (!rampStatus.value?.isRamping) return null
+  if (rampStatus.value.willBeLiquidated && !hasQueryFailure.value) {
+    return {
+      level: 'critical',
+      title: 'Liquidation LTV ramping down',
+      message: `The liquidation LTV for this pair is being lowered. Your position is projected to become liquidatable ${forcedLiquidationRelative.value || 'before the ramp ends'}. Reduce your debt or add collateral to avoid liquidation.`,
+    }
+  }
+  if (hasQueryFailure.value) {
+    return {
+      level: 'high',
+      title: 'Liquidation LTV ramping down',
+      message: `The liquidation LTV for this pair is being lowered (ends ${rampEndsRelative.value}). Oracle pricing is currently unavailable, so we can't tell whether your position will remain safe.`,
+    }
+  }
+  return {
+    level: 'high',
+    title: 'Liquidation LTV ramping down',
+    message: `The liquidation LTV for this pair is being lowered (ends ${rampEndsRelative.value}). Your position is currently safe at the post-ramp threshold.`,
+  }
+})
+
 // Warnings for borrow vault
 const positionWarnings = computed(() => {
   if (!borrowVault.value) return []
   return [
+    rampWarning.value,
     getUtilisationWarning(borrowVault.value, 'borrow'),
     getBorrowCapWarning(borrowVault.value),
   ]
@@ -687,6 +738,12 @@ const openPairInfoModal = () => {
     },
   })
 }
+const openRampDownModal = () => {
+  if (!rampStatus.value?.isRamping || !rampCollateralEdge.value) return
+  modal.open(VaultRampDownModal, {
+    props: rampCollateralEdge.value,
+  })
+}
 watch([isConnected, isSpyMode, address], () => {
   load()
 }, { immediate: true })
@@ -860,15 +917,30 @@ watch([isConnected, isSpyMode, address], () => {
             </div>
           </div>
           <div class="flex justify-between gap-8 flex-wrap">
-            <div class="text-content-secondary text-p3">
+            <div class="text-content-secondary text-p3 flex items-center gap-4">
               Liquidation LTV
+              <SvgIcon
+                v-if="rampStatus?.isRamping"
+                class="!w-14 !h-14 cursor-pointer hover:opacity-80"
+                :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
+                name="info-circle"
+                @click.stop="openRampDownModal"
+              />
             </div>
-            <div class="text-content-primary text-p3">
+            <div class="text-content-primary text-p3 flex items-center gap-4">
               <span
                 v-if="hasQueryFailure || effectiveLiquidationLTVPercent === null"
                 class="text-warning-500"
               >Unknown</span>
               <template v-else>
+                <SvgIcon
+                  v-if="rampStatus?.isRamping"
+                  name="arrow-top-right"
+                  class="!w-12 !h-12 shrink-0 rotate-180 cursor-pointer"
+                  :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
+                  title="Liquidation LTV ramping down"
+                  @click.stop="openRampDownModal"
+                />
                 {{ formatNumber(positionLTVPercent ?? 0, 2) }}% / {{ effectiveLiquidationLTVPercent }}%
               </template>
             </div>
@@ -1248,10 +1320,25 @@ watch([isConnected, isSpyMode, address], () => {
                 v-if="!hasNoBorrow && isPrimaryCollateral(asPositionCollateralVault(collateral.vault))"
                 class="flex justify-between gap-8 flex-wrap mb-16"
               >
-                <div class="text-neutral-500 text-p3">
+                <div class="text-neutral-500 text-p3 flex items-center gap-4">
                   Liquidation LTV
+                  <SvgIcon
+                    v-if="rampStatus?.isRamping"
+                    class="!w-14 !h-14 cursor-pointer hover:opacity-80"
+                    :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
+                    name="info-circle"
+                    @click.stop="openRampDownModal"
+                  />
                 </div>
-                <div class="text-neutral-800 text-p3">
+                <div class="text-neutral-800 text-p3 flex items-center gap-4">
+                  <SvgIcon
+                    v-if="rampStatus?.isRamping"
+                    name="arrow-top-right"
+                    class="!w-12 !h-12 shrink-0 rotate-180 cursor-pointer"
+                    :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
+                    title="Liquidation LTV ramping down"
+                    @click.stop="openRampDownModal"
+                  />
                   {{ pairLiquidationLTVPercent === null ? '-' : `${formatNumber(pairLiquidationLTVPercent)}%` }}
                 </div>
               </div>
