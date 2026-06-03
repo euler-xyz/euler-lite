@@ -79,8 +79,7 @@ describe('useSdkRewards', () => {
       'queryMerklUserRewards',
       'queryBrevisCampaigns',
       'queryBrevisUserProofs',
-      'queryFuulTotals',
-      'queryFuulClaimChecks',
+      'queryFuulClaimableRewards',
     ])
     expect(refreshAllPositions).toHaveBeenCalledWith(undefined, undefined, { source: 'fresh', preempt: true })
     expect(invalidateSdkQueries.mock.invocationCallOrder[0]).toBeLessThan(
@@ -106,8 +105,7 @@ describe('useSdkRewards', () => {
       'queryMerklUserRewards',
       'queryBrevisCampaigns',
       'queryBrevisUserProofs',
-      'queryFuulTotals',
-      'queryFuulClaimChecks',
+      'queryFuulClaimableRewards',
     ])
     expect(refreshAllPositions).toHaveBeenLastCalledWith(undefined, undefined, { source: 'fresh', preempt: true })
   })

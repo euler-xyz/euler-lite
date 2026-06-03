@@ -19,8 +19,6 @@ type BuildEulerSDKOptions = {
     rewardsBrevisApiUrl?: string
     rewardsBrevisProofsApiUrl?: string
     rewardsFuulApiUrl?: string
-    rewardsFuulTotalsUrl?: string
-    rewardsFuulClaimChecksUrl?: string
     rewardsEnableMerkl?: boolean
     rewardsEnableBrevis?: boolean
     rewardsEnableFuul?: boolean
@@ -188,8 +186,6 @@ describe('useEulerSdk', () => {
       rewardsBrevisApiUrl: '/api/proxy/incentra/sdk/v1/eulerCampaigns',
       rewardsBrevisProofsApiUrl: '/api/proxy/incentra/v1/getMerkleProofsBatch',
       rewardsFuulApiUrl: '/api/proxy/fuul',
-      rewardsFuulTotalsUrl: '/api/proxy/fuul/totals',
-      rewardsFuulClaimChecksUrl: '/api/proxy/fuul/claim-checks',
       accountVaultsSubgraphUrls: {
         1: '/api/proxy/subgraph/1',
       },
