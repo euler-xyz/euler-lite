@@ -73,7 +73,7 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   queryEVaultVerifiedArray: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryEulerEarnConvertToAssets: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryEulerEarnVerifiedArray: { staleTimeMs: DEFAULT_STALE_TIME_MS },
-  ['queryFuulClaimableRewards' as EulerSDKQueryName]: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryFuulClaimableRewards: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryFuulIncentives: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryKeyringAddress: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryKeyringCheckCredential: { staleTimeMs: DEFAULT_STALE_TIME_MS },
