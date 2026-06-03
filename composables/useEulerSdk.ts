@@ -186,13 +186,11 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
           rewardsBrevisProofsApiUrl: buildIncentraProxyApiPath('v1/getMerkleProofsBatch'),
         }
       : { rewardsEnableBrevis: false }),
-    // Fuul: SDK appends `/incentives?...` to the base URL. Wallet-only
-    // totals and claim checks take endpoint-specific URLs.
+    // Fuul: SDK appends `/incentives?...` and `/claimable-rewards?...` to the
+    // base URL. The proxy keeps these reward reads same-origin and cached.
     ...(enableFuul
       ? {
           rewardsFuulApiUrl: buildFuulProxyApiPath(),
-          rewardsFuulTotalsUrl: buildFuulProxyApiPath('totals'),
-          rewardsFuulClaimChecksUrl: buildFuulProxyApiPath('claim-checks'),
         }
       : { rewardsEnableFuul: false }),
     // Goldsky subgraph: route every chain through `/api/proxy/subgraph/{id}`

@@ -15,8 +15,6 @@ const MERKL_PROTOCOL_SCOPED_TYPES = new Set([
   'EULER_MULTI_BORROW_FROM_COLLATERAL',
 ])
 
-type JsonRecord = Record<string, unknown>
-
 const normalizePath = (path: string): string =>
   path.replace(/^\/+/, '').replace(/\/+$/, '')
 
@@ -41,14 +39,6 @@ const getSingleParam = (params: URLSearchParams, key: string): string | undefine
 const hasPositiveChainId = (params: URLSearchParams): boolean =>
   POSITIVE_INTEGER_RE.test(getSingleParam(params, 'chainId') ?? '')
 
-const hasOnlyObjectKeys = (record: JsonRecord, allowed: readonly string[]): boolean => {
-  const allowedSet = new Set(allowed)
-  return Object.keys(record).every(key => allowedSet.has(key))
-}
-
-const isPlainJsonRecord = (value: unknown): value is JsonRecord =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-
 export const isAllowedFuulProxyRequest = (
   method: string,
   path: string,
@@ -65,34 +55,15 @@ export const isAllowedFuulProxyRequest = (
     return Boolean(protocol && FUUL_INCENTIVE_PROTOCOLS.has(protocol) && POSITIVE_INTEGER_RE.test(chainId ?? ''))
   }
 
-  if (normalizedPath === 'totals') {
+  if (normalizedPath === 'claimable-rewards') {
     if (normalizedMethod !== 'GET' && normalizedMethod !== 'HEAD') return false
-    if (!hasOnlySearchKeys(params, ['user_identifier', 'user_identifier_type'])) return false
-    return getSingleParam(params, 'user_identifier_type') === 'evm_address'
-      && EVM_ADDRESS_RE.test(getSingleParam(params, 'user_identifier') ?? '')
-  }
-
-  if (normalizedPath === 'claim-checks') {
-    return normalizedMethod === 'POST' && hasNoSearchParams(params)
+    if (!hasOnlySearchKeys(params, ['protocol', 'user_address', 'chain_id'])) return false
+    return getSingleParam(params, 'protocol') === 'euler'
+      && EVM_ADDRESS_RE.test(getSingleParam(params, 'user_address') ?? '')
+      && POSITIVE_INTEGER_RE.test(getSingleParam(params, 'chain_id') ?? '')
   }
 
   return false
-}
-
-export const isAllowedFuulClaimChecksBody = (body: string | undefined): boolean => {
-  if (!body) return false
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(body)
-  }
-  catch {
-    return false
-  }
-  if (!isPlainJsonRecord(parsed)) return false
-  if (!hasOnlyObjectKeys(parsed, ['userIdentifier', 'userIdentifierType'])) return false
-  return parsed.userIdentifierType === 'evm_address'
-    && typeof parsed.userIdentifier === 'string'
-    && EVM_ADDRESS_RE.test(parsed.userIdentifier)
 }
 
 export const isAllowedIncentraProxyRequest = (
