@@ -110,8 +110,8 @@ const checkMigrationAnnouncement = () => {
   })
 }
 
-await loadEulerConfig()
 checkOnboarding()
+void loadEulerConfig()
 // onMounted (not synchronous like checkOnboarding) because the modal system requires the DOM
 onMounted(checkMigrationAnnouncement)
 
