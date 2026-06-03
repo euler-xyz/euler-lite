@@ -1,15 +1,15 @@
 <script setup lang="ts">
+import type { MarketGroup } from '~/entities/lend-discovery'
+import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useMarketGroups } from '~/composables/useMarketGroups'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
-import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
-import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
+import { getProductByVault, applyVaultOverrides, getEntitiesByVault, getUniqueEntitiesByVaults, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useBestMaxROE } from '~/composables/useBestMaxROE'
 import { useVaultSearch } from '~/composables/useVaultSearch'
-import type { MarketGroup } from '~/entities/lend-discovery'
-import type { Vault } from '~/entities/vault'
-import { isVaultType, getVaultAddress, getVaultAssetSymbol, getVaultAssetAddress } from '~/utils/discoveryCalculations'
+
+import { getVaultAddress, getVaultAssetSymbol, getVaultAssetAddress } from '~/utils/discoveryCalculations'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import type { FilterOptionEntry } from '~/utils/buildTvlSortedOptions'
 import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
@@ -18,9 +18,9 @@ defineOptions({
   name: 'ExplorePage',
 })
 
-const { marketGroups, isResolvingTVL } = useMarketGroups()
+const { marketGroups, isResolvingTVL, isReady: marketGroupsReady } = useMarketGroups()
 const { getBestMaxROE } = useBestMaxROE(marketGroups)
-const { isEVKUpdating, isEarnUpdating, isSecuritizeUpdating, isEscrowUpdating } = useVaults()
+const { isEVaultUpdating, isEarnUpdating, isSecuritizeUpdating, isEscrowUpdating } = useVaults()
 const { chainId } = useEulerAddresses()
 const { entities } = useEulerLabels()
 const { enableEntityBranding } = useDeployConfig()
@@ -30,13 +30,13 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<MarketGroup>(
   group.curator?.name,
   ...group.metrics.assetSymbols,
   ...group.vaults.flatMap((vault) => {
-    const addr = isVaultType(vault) ? vault.address : ''
+    const addr = getVaultAddress(vault)
     if (!addr) return []
     const product = applyVaultOverrides(getProductByVault(addr), addr)
     return [
       product.name,
       product.description,
-      ...getEntitiesByVault(vault as Vault).map(e => e.name),
+      ...getEntitiesByVault(vault).map(e => e.name),
     ]
   }),
 ])
@@ -134,14 +134,8 @@ const riskManagerOptions = computed(() => {
   const entries: FilterOptionEntry[] = []
   for (const group of marketGroups.value) {
     if (group.source !== 'product') continue
-    const seenInGroup = new Set<string>()
-    for (const vault of group.vaults) {
-      if (!isVaultType(vault)) continue
-      for (const entity of getEntitiesByVault(vault)) {
-        if (seenInGroup.has(entity.name)) continue
-        seenInGroup.add(entity.name)
-        entries.push({ key: entity.name, label: entity.name, tvl: group.metrics.totalTVL, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined })
-      }
+    for (const entity of getUniqueEntitiesByVaults(group.vaults)) {
+      entries.push({ key: entity.name, label: entity.name, tvl: group.metrics.totalTVL, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined })
     }
   }
   return buildTvlSortedOptions(entries)
@@ -165,10 +159,7 @@ const matchesAssetFilter = (group: MarketGroup): boolean => {
 
 const matchesRiskManagerFilter = (group: MarketGroup): boolean => {
   if (!selectedRiskManagers.value.length) return true
-  return group.vaults.some((vault) => {
-    if (!isVaultType(vault)) return false
-    return getEntitiesByVault(vault).some(e => selectedRiskManagers.value.includes(e.name))
-  })
+  return getUniqueEntitiesByVaults(group.vaults).some(e => selectedRiskManagers.value.includes(e.name))
 }
 
 const filteredMarkets = computed(() => {
@@ -266,8 +257,8 @@ const sortedMarkets = computed(() => {
 })
 
 const isLoading = computed(() =>
-  isEVKUpdating.value || isEarnUpdating.value || isSecuritizeUpdating.value || isEscrowUpdating.value
-  || isResolvingTVL.value,
+  isEVaultUpdating.value || isEarnUpdating.value || isSecuritizeUpdating.value || isEscrowUpdating.value
+  || !marketGroupsReady.value || isResolvingTVL.value,
 )
 const { isSlow } = useSlowLoading(isLoading)
 </script>

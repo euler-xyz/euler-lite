@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AnyBorrowVaultPair } from '~/entities/vault'
+import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { LIST_INITIAL_BATCH_ROWS, LIST_ROW_HEIGHT_PX } from '~/entities/tuning-constants'
 
 const props = defineProps<{ items: AnyBorrowVaultPair[] }>()
@@ -42,7 +42,13 @@ const reservedSpacerPx = computed(() => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-8">
+  <div
+    class="flex flex-col gap-8"
+    data-id="vault-list"
+    data-list="borrow-pair"
+    :data-count="items.length"
+    :data-rendered-count="visibleItems.length"
+  >
     <VaultBorrowItem
       v-for="(pair, index) in visibleItems"
       :key="`${pair.collateral.address}-${pair.borrow.address}`"

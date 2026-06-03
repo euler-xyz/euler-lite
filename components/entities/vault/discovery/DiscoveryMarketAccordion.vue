@@ -1,11 +1,9 @@
 <script setup lang="ts">
-import { maxUint256 } from 'viem'
-import type { MarketGroup } from '~/entities/lend-discovery'
-import type { Vault, SecuritizeVault, AnyBorrowVaultPair } from '~/entities/vault'
+import { isEVault, type SecuritizeCollateralVault, type EVault } from '@eulerxyz/euler-v2-sdk'
+import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { formatCompactUsdValue } from '~/utils/string-utils'
-import { formatAssetValue } from '~/services/pricing/priceProvider'
+import { formatAssetValue } from '~/utils/sdk-prices'
 import {
-  isVaultType,
   getVaultAddress,
   getMiniDiagram,
   getCollateralMatrix,
@@ -25,6 +23,8 @@ import {
   type VaultUsdCacheEntry,
   type VaultApyCacheEntry,
 } from '~/utils/discoveryCalculations'
+import type { MarketGroup } from '~/entities/lend-discovery'
+import { maxUint256 } from 'viem'
 
 const props = defineProps<{
   markets: MarketGroup[]
@@ -108,19 +108,18 @@ const formatUsdOrDisplay = (p: { hasPrice: boolean, usdValue: number, display: s
 
 const loadVaultUsdValues = async (market: MarketGroup) => {
   const newEntries = new Map(vaultUsdCache.value)
-  const allVaults = [...market.vaults, ...market.externalCollateral.filter(isMatrixCompatibleVault)]
+  const allVaults = [...market.vaults, ...market.externalCollateral].filter(isMatrixCompatibleVault)
 
   await Promise.all(
     allVaults.map(async (vault) => {
       const addr = getVaultAddress(vault).toLowerCase()
       if (!addr || newEntries.has(addr)) return
       const totalAssets = 'totalAssets' in vault ? vault.totalAssets as bigint : 0n
-      const supply = 'supply' in vault ? vault.supply as bigint : totalAssets
-      const borrow = 'borrow' in vault ? vault.borrow as bigint : 0n
-      const supplyCapRaw = 'supplyCap' in vault ? vault.supplyCap as bigint : maxUint256
-      const borrowCapRaw = 'borrowCap' in vault ? vault.borrowCap as bigint : maxUint256
+      const borrow = 'totalBorrowed' in vault ? vault.totalBorrowed as bigint : 0n
+      const supplyCapRaw = 'caps' in vault ? vault.caps.supplyCap : ('supplyCap' in vault ? vault.supplyCap as bigint : maxUint256)
+      const borrowCapRaw = 'caps' in vault ? vault.caps.borrowCap : maxUint256
 
-      const liquidity = supply >= borrow ? supply - borrow : 0n
+      const liquidity = 'availableLiquidity' in vault ? vault.availableLiquidity : 0n
       const supplyCapHasPrice = supplyCapRaw > 0n && supplyCapRaw < maxUint256
       const borrowCapHasPrice = borrowCapRaw > 0n && borrowCapRaw < maxUint256
 
@@ -221,22 +220,19 @@ const attributeMatrixMap = computed((): Map<string, AttributeMatrixData> => {
 })
 
 // Stats matrix needs the same APY users see on per-vault cards (base IRM rate
-// folded with intrinsic + supply/borrow rewards). The composables fetch this
-// data asynchronously and bump `version` when it lands; the explicit reads
-// here re-trigger the computed so the cells refresh in place.
-const { withIntrinsicSupplyApy, withIntrinsicBorrowApy, version: intrinsicVersion } = useIntrinsicApy()
-const { getSupplyRewardApy, getBorrowRewardApy, version: rewardsVersion } = useRewardsApy()
+// folded with intrinsic + supply/borrow rewards). Viewer + settings are
+// reactive — touching them inside the computed re-runs the cache build when
+// the connected wallet changes or the user toggles intrinsic/rewards.
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
+const enableRewardsApy = computed(() => settings.value.enableRewardsApy)
+const { viewer } = useApyVisibility()
 
 const vaultApyCache = computed<Map<string, VaultApyCacheEntry>>(() => {
-  void intrinsicVersion.value
-  void rewardsVersion.value
-  return buildVaultApyCache(
-    props.markets,
-    withIntrinsicSupplyApy,
-    withIntrinsicBorrowApy,
-    getSupplyRewardApy,
-    getBorrowRewardApy,
-  )
+  return buildVaultApyCache(props.markets, viewer.value, {
+    enableIntrinsicApy: enableIntrinsicApy.value,
+    enableRewardsApy: enableRewardsApy.value,
+  })
 })
 
 // -- Cell selection state (matrix view) --
@@ -301,7 +297,7 @@ const onCellClick = (marketId: string, collateralAddr: string, liabilityAddr: st
 
 // -- Selection → vault resolution --
 
-const getSelectedLendVault = (market: MarketGroup): Vault | SecuritizeVault | null => {
+const getSelectedLendVault = (market: MarketGroup): EVault | SecuritizeCollateralVault | null => {
   if (!selectedCell.value || selectedCell.value.marketId !== market.id) return null
   return findVault(market, selectedCell.value.liabilityAddr)
 }
@@ -314,19 +310,15 @@ const getSelectedBorrowPair = (market: MarketGroup): AnyBorrowVaultPair | null =
   if (!cell) return null
   const collateral = findVault(market, selectedCell.value.collateralAddr)
   const borrow = findVault(market, selectedCell.value.liabilityAddr)
-  if (!collateral || !borrow || !isVaultType(borrow)) return null
+  if (!collateral || !borrow || !isEVault(borrow)) return null
   return {
     borrow,
     collateral,
-    borrowLTV: cell.ltv.borrowLTV,
-    liquidationLTV: cell.ltv.liquidationLTV,
-    initialLiquidationLTV: cell.ltv.initialLiquidationLTV,
-    targetTimestamp: cell.ltv.targetTimestamp,
-    rampDuration: cell.ltv.rampDuration,
+    ltv: cell.ltv,
   } as AnyBorrowVaultPair
 }
 
-const getMatrixHeaderVault = (market: MarketGroup): Vault | SecuritizeVault | null => {
+const getMatrixHeaderVault = (market: MarketGroup): EVault | SecuritizeCollateralVault | null => {
   if (!selectedMatrixHeader.value || selectedMatrixHeader.value.marketId !== market.id) return null
   return findVault(market, selectedMatrixHeader.value.address)
 }
@@ -342,18 +334,14 @@ const getMatrixHeaderBorrowPairs = (market: MarketGroup): AnyBorrowVaultPair[] =
   if (selectedMatrixHeader.value.axis === 'column') {
     for (const [collateralAddr, rowCells] of matrix.cells) {
       const cell = rowCells.get(addr)
-      if (!cell || cell.ltv.borrowLTV <= 0n) continue
+      if (!cell || cell.ltv.borrowLTV <= 0) continue
       const collateral = findVault(market, collateralAddr)
       const borrow = findVault(market, addr)
-      if (!collateral || !borrow || !isVaultType(borrow)) continue
+      if (!collateral || !borrow || !isEVault(borrow)) continue
       pairs.push({
         borrow,
         collateral,
-        borrowLTV: cell.ltv.borrowLTV,
-        liquidationLTV: cell.ltv.liquidationLTV,
-        initialLiquidationLTV: cell.ltv.initialLiquidationLTV,
-        targetTimestamp: cell.ltv.targetTimestamp,
-        rampDuration: cell.ltv.rampDuration,
+        ltv: cell.ltv,
       } as AnyBorrowVaultPair)
     }
   }
@@ -361,18 +349,14 @@ const getMatrixHeaderBorrowPairs = (market: MarketGroup): AnyBorrowVaultPair[] =
     const rowCells = matrix.cells.get(addr)
     if (!rowCells) return []
     for (const [liabilityAddr, cell] of rowCells) {
-      if (cell.ltv.borrowLTV <= 0n) continue
+      if (cell.ltv.borrowLTV <= 0) continue
       const collateral = findVault(market, addr)
       const borrow = findVault(market, liabilityAddr)
-      if (!collateral || !borrow || !isVaultType(borrow)) continue
+      if (!collateral || !borrow || !isEVault(borrow)) continue
       pairs.push({
         borrow,
         collateral,
-        borrowLTV: cell.ltv.borrowLTV,
-        liquidationLTV: cell.ltv.liquidationLTV,
-        initialLiquidationLTV: cell.ltv.initialLiquidationLTV,
-        targetTimestamp: cell.ltv.targetTimestamp,
-        rampDuration: cell.ltv.rampDuration,
+        ltv: cell.ltv,
       } as AnyBorrowVaultPair)
     }
   }
@@ -380,7 +364,7 @@ const getMatrixHeaderBorrowPairs = (market: MarketGroup): AnyBorrowVaultPair[] =
   return pairs
 }
 
-const getGraphSelectedVault = (market: MarketGroup): Vault | SecuritizeVault | null => {
+const getGraphSelectedVault = (market: MarketGroup): EVault | SecuritizeCollateralVault | null => {
   if (!selectedGraphNode.value || selectedGraphNode.value.marketId !== market.id) return null
   return findVault(market, selectedGraphNode.value.address)
 }
@@ -395,18 +379,14 @@ const getGraphBorrowPairs = (market: MarketGroup): AnyBorrowVaultPair[] => {
 
   for (const [collateralAddr, rowCells] of matrix.cells) {
     const cell = rowCells.get(selectedAddr)
-    if (!cell || cell.ltv.borrowLTV <= 0n) continue
+    if (!cell || cell.ltv.borrowLTV <= 0) continue
     const collateral = findVault(market, collateralAddr)
     const borrow = findVault(market, selectedAddr)
-    if (!collateral || !borrow || !isVaultType(borrow)) continue
+    if (!collateral || !borrow || !isEVault(borrow)) continue
     pairs.push({
       borrow,
       collateral,
-      borrowLTV: cell.ltv.borrowLTV,
-      liquidationLTV: cell.ltv.liquidationLTV,
-      initialLiquidationLTV: cell.ltv.initialLiquidationLTV,
-      targetTimestamp: cell.ltv.targetTimestamp,
-      rampDuration: cell.ltv.rampDuration,
+      ltv: cell.ltv,
     } as AnyBorrowVaultPair)
   }
 
@@ -444,11 +424,23 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-8">
+  <div
+    class="flex flex-col gap-8"
+    data-id="discovery-market-list"
+    data-list="discovery-market"
+    :data-count="markets.length"
+  >
     <article
       v-for="market in markets"
       :key="market.id"
       class="bg-surface rounded-12 border border-line-default shadow-card transition-all"
+      data-id="discovery-market-list-item"
+      data-list="discovery-market"
+      :data-key="market.id"
+      :data-market-id="market.id"
+      :data-vault-count="market.vaults.length"
+      :data-external-collateral-count="market.externalCollateral.length"
+      :data-pair-count="getMiniDiagram(market).pairCount"
       :class="isExpanded(market.id) ? 'shadow-card-hover border-line-emphasis' : 'hover:shadow-card-hover hover:border-line-emphasis'"
     >
       <!-- Collapsed Row Card -->
@@ -472,12 +464,12 @@ onMounted(() => {
                 :key="getVaultAddress(vault)"
               >
                 <VaultItem
-                  v-if="isVaultType(vault)"
+                  v-if="isEVault(vault)"
                   :vault="vault"
                 />
                 <SecuritizeVaultItem
                   v-else
-                  :vault="vault as SecuritizeVault"
+                  :vault="vault as SecuritizeCollateralVault"
                 />
               </template>
             </div>
@@ -490,6 +482,12 @@ onMounted(() => {
           <div
             v-if="matrix"
             class="border-t border-line-subtle"
+            data-id="discovery-market-expanded"
+            data-list="discovery-market-expanded"
+            :data-key="market.id"
+            :data-market-id="market.id"
+            :data-field="getExpandedView(market.id)"
+            :data-matrix-view="getMatrixView(market.id)"
             @click="selectedGraphNode?.marketId === market.id && (selectedGraphNode = null)"
           >
             <!-- Controls: view toggle + metric dropdown -->
@@ -501,6 +499,11 @@ onMounted(() => {
               <div class="flex rounded-[100px] border border-line-default overflow-hidden">
                 <button
                   class="flex items-center gap-4 min-h-36 py-6 px-12 cursor-pointer transition-all text-p3"
+                  data-id="discovery-view-toggle"
+                  data-list="discovery-view-toggle"
+                  :data-key="`${market.id}:graph`"
+                  :data-market-id="market.id"
+                  data-field="graph"
                   :class="getExpandedView(market.id) === 'graph'
                     ? 'bg-accent-300/20 text-accent-700 font-medium'
                     : 'bg-surface text-content-secondary hover:bg-surface-secondary'"
@@ -514,6 +517,11 @@ onMounted(() => {
                 </button>
                 <button
                   class="flex items-center gap-4 min-h-36 py-6 px-12 cursor-pointer transition-all text-p3 border-l border-line-default"
+                  data-id="discovery-view-toggle"
+                  data-list="discovery-view-toggle"
+                  :data-key="`${market.id}:matrix`"
+                  :data-market-id="market.id"
+                  data-field="matrix"
                   :class="getExpandedView(market.id) === 'matrix'
                     ? 'bg-accent-300/20 text-accent-700 font-medium'
                     : 'bg-surface text-content-secondary hover:bg-surface-secondary'"
@@ -538,6 +546,10 @@ onMounted(() => {
               >
                 <div
                   class="ui-select__field"
+                  data-id="discovery-matrix-view-select"
+                  :data-key="market.id"
+                  :data-market-id="market.id"
+                  :data-field="getMatrixView(market.id)"
                   @click.stop="toggleMatrixDropdown(market.id)"
                 >
                   <UiIcon
@@ -559,6 +571,11 @@ onMounted(() => {
                     v-for="option in MATRIX_VIEW_OPTIONS"
                     :key="option.id"
                     class="w-full text-left px-14 py-6 text-p3 cursor-pointer transition-colors"
+                    data-id="discovery-matrix-view-option"
+                    data-list="discovery-matrix-view-option"
+                    :data-key="`${market.id}:${option.id}`"
+                    :data-market-id="market.id"
+                    :data-field="option.id"
                     :class="getMatrixView(market.id) === option.id
                       ? 'text-accent-700 bg-accent-300/20 font-medium'
                       : 'text-content-secondary hover:bg-surface-secondary'"
@@ -603,6 +620,7 @@ onMounted(() => {
             <DiscoveryMarketAttributeMatrix
               v-else-if="attributeMatrixMap.get(market.id)"
               :data="attributeMatrixMap.get(market.id)!"
+              :view="getMatrixView(market.id)"
               :usd-cache="vaultUsdCache"
               :apy-cache="vaultApyCache"
               :selected-header="selectedMatrixHeader?.marketId === market.id ? { address: selectedMatrixHeader.address, axis: selectedMatrixHeader.axis } : null"
@@ -632,12 +650,12 @@ onMounted(() => {
                             Lend
                           </h4>
                           <VaultItem
-                            v-if="isVaultType(vault)"
+                            v-if="isEVault(vault)"
                             :vault="vault"
                           />
                           <SecuritizeVaultItem
                             v-else
-                            :vault="vault as SecuritizeVault"
+                            :vault="vault as SecuritizeCollateralVault"
                           />
                         </template>
                       </template>
@@ -668,12 +686,12 @@ onMounted(() => {
                             Lend
                           </h4>
                           <VaultItem
-                            v-if="isVaultType(lendVault)"
+                            v-if="isEVault(lendVault)"
                             :vault="lendVault"
                           />
                           <SecuritizeVaultItem
                             v-else
-                            :vault="lendVault as SecuritizeVault"
+                            :vault="lendVault as SecuritizeCollateralVault"
                           />
                         </template>
                       </template>
@@ -705,12 +723,12 @@ onMounted(() => {
                           Lend
                         </h4>
                         <VaultItem
-                          v-if="isVaultType(vault)"
+                          v-if="isEVault(vault)"
                           :vault="vault"
                         />
                         <SecuritizeVaultItem
                           v-else
-                          :vault="vault as SecuritizeVault"
+                          :vault="vault as SecuritizeCollateralVault"
                         />
                       </template>
                     </template>

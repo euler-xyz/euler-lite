@@ -1,13 +1,11 @@
+import type { EVault, PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 import { getVaultProductName } from '~/utils/eulerLabelsUtils'
-import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import type { AccountDepositPosition } from '~/entities/account'
-import type { Vault } from '~/entities/vault'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
+
+import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useReactiveMap } from '~/composables/useReactiveMap'
-import { computeSupplyApy } from '~/utils/collateralOptions'
 
 /**
  * Provides eligible savings positions that can be used to repay debt.
@@ -28,13 +26,16 @@ import { computeSupplyApy } from '~/utils/collateralOptions'
  */
 export const useRepaySavingsOptions = () => {
   const { depositPositions } = useEulerAccount()
-  const { isEvkVault } = useVaultRegistry()
-  const { withIntrinsicSupplyApy, version: intrinsicVersion } = useIntrinsicApy()
-  const { getSupplyRewardApy, version: rewardsVersion } = useRewardsApy()
+  const { isEVaultAddress } = useVaultRegistry()
+  const { settings } = useUserSettings()
+  const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
+  const enableRewardsApy = computed(() => settings.value.enableRewardsApy)
+  const { viewer, visibleTotal } = useApyVisibility()
 
   const savingsPositions = computed(() => {
     return depositPositions.value.filter((position) => {
-      if (!isEvkVault(position.vault.address)) {
+      const vault = position.vault
+      if (!vault || !isEVaultAddress(vault.address)) {
         return false
       }
       if (position.assets <= 0n) {
@@ -45,43 +46,56 @@ export const useRepaySavingsOptions = () => {
   })
 
   const savingsVaults = computed(() => {
-    return savingsPositions.value.map(position => position.vault as Vault)
+    return savingsPositions.value
+      .map(position => position.vault as EVault | undefined)
+      .filter((vault): vault is EVault => !!vault)
   })
 
   const savingsOptions = useReactiveMap(
     savingsPositions,
-    [rewardsVersion, intrinsicVersion],
+    [viewer, enableIntrinsicApy, enableRewardsApy],
     async (position) => {
-      const vault = position.vault as Vault
+      const vault = position.vault as EVault | undefined
+      if (!vault) {
+        throw new Error('Savings vault not resolved')
+      }
       const amount = nanoToValue(position.assets, vault.asset.decimals)
-      const apy = computeSupplyApy(vault, withIntrinsicSupplyApy, getSupplyRewardApy)
+      const apy = visibleTotal(position.getApyBreakdown({ viewer: viewer.value })) ?? 0
       return {
-        type: 'saving' as const,
+        type: 'vault' as const,
         amount,
         price: await getAssetUsdValueOrZero(amount, vault, 'off-chain'),
         apy,
         symbol: vault.asset.symbol,
         assetAddress: vault.asset.address,
-        label: getVaultProductName(vault.address) || vault.name,
+        label: getVaultProductName(vault.address) || vault.shares.name,
         vaultAddress: vault.address,
-        subAccount: position.subAccount,
+        subAccount: position.subAccount as string,
       }
     },
   )
 
-  // When a sub-account is explicitly requested, require an exact match instead
-  // of falling back to the first matching vault — silently picking a different
-  // sub-account would route a repay against the wrong position.
-  const getSavingsPosition = (vaultAddress: string, subAccount?: string): AccountDepositPosition | undefined => {
-    const normalizedVault = getAddress(vaultAddress)
+  /**
+   * Look up a savings position by vault + sub-account. Fail-closed when
+   * `subAccount` is omitted but the user has positions of the same vault in
+   * more than one sub-account — otherwise we'd silently default to the first
+   * match and the form would redeem from the wrong account.
+   */
+  const getSavingsPosition = (
+    vaultAddress: string,
+    subAccount?: string,
+  ): PortfolioSavingsPosition<VaultEntity> | undefined => {
+    const normalized = getAddress(vaultAddress)
     const matches = savingsPositions.value.filter(
-      position => getAddress(position.vault.address) === normalizedVault,
+      position => getAddress(position.vault?.address || '0x0000000000000000000000000000000000000000') === normalized,
     )
+    if (matches.length === 0) return undefined
     if (subAccount) {
-      const normalizedSub = getAddress(subAccount)
-      return matches.find(p => getAddress(p.subAccount) === normalizedSub)
+      const wantedSub = getAddress(subAccount)
+      return matches.find(p => getAddress(p.subAccount) === wantedSub)
     }
-    return matches[0]
+    // No sub-account specified: only safe to default-pick when there's exactly one match.
+    return matches.length === 1 ? matches[0] : undefined
   }
 
   return {

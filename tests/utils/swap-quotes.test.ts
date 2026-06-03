@@ -7,10 +7,10 @@ import {
   pickBestQuote,
   getQuoteDiffPct,
 } from '~/utils/swapQuotes'
-import type { SwapApiQuote } from '~/entities/swap'
+import type { SwapQuote } from '@eulerxyz/euler-v2-sdk'
 
-const makeQuote = (amountIn: string, amountOut: string): SwapApiQuote =>
-  ({ amountIn, amountOut }) as SwapApiQuote
+const makeQuote = (amountIn: string, amountOut: string): SwapQuote =>
+  ({ amountIn, amountOut }) as SwapQuote
 
 const makeCard = (provider: string, amountIn: string, amountOut: string) => ({
   provider,
@@ -34,12 +34,12 @@ describe('getQuoteAmount', () => {
   })
 
   it('returns 0n for non-numeric quote field', () => {
-    const quote = { amountIn: 'invalid', amountOut: '200' } as SwapApiQuote
+    const quote = { amountIn: 'invalid', amountOut: '200' } as SwapQuote
     expect(getQuoteAmount(quote, 'amountIn')).toBe(0n)
   })
 
   it('returns 0n for null field value', () => {
-    const quote = { amountIn: null, amountOut: '200' } as unknown as SwapApiQuote
+    const quote = { amountIn: null, amountOut: '200' } as unknown as SwapQuote
     expect(getQuoteAmount(quote, 'amountIn')).toBe(0n)
   })
 })

@@ -56,13 +56,20 @@ export default defineEventHandler(async (event) => {
 
   try {
     const resp = await fetchWithTimeout(url.toString())
-    if (!resp.ok) {
-      throw createError({ statusCode: resp.status, statusMessage: `Hermes returned ${resp.status}` })
-    }
-
     setResponseHeader(event, 'Cache-Control', 'no-store')
 
-    return await resp.json()
+    // Hermes returns 404 with a body listing the missing feed IDs when some
+    // (but not all) IDs are unknown — the SDK parses that body to retry with
+    // the remaining IDs. Forward 4xx responses verbatim so the SDK keeps its
+    // recovery path; only synthesize an error for 5xx / network failures.
+    if (!resp.ok && resp.status >= 500) {
+      throw createError({ statusCode: 502, statusMessage: `Hermes returned ${resp.status}` })
+    }
+
+    event.node.res.statusCode = resp.status
+    const contentType = resp.headers.get('content-type')
+    if (contentType) setResponseHeader(event, 'Content-Type', contentType)
+    return await resp.text()
   }
   catch (err) {
     if ((err as Record<string, unknown>).statusCode) throw err

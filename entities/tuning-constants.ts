@@ -56,7 +56,6 @@ export const SUBGRAPH_BLOCK_POLL_INTERVAL_MS = 1_000
  * back on the immediate triggerPortfolioRefresh + the 60s portfolio page
  * poll to eventually reconcile state. */
 export const SUBGRAPH_BLOCK_CATCHUP_TIMEOUT_MS = 30_000
-
 // ── Basis Points ──────────────────────────────────────────
 export const BPS_BASE = 10_000n
 /** BPS_BASE + 1: pads amounts by 0.01% to cover interest accrual */

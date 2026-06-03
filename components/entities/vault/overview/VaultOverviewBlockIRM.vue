@@ -1,40 +1,22 @@
 <script setup lang="ts">
-import { Line } from 'vue-chartjs'
 import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler,
-  type ChartOptions,
-  type ChartData,
-} from 'chart.js'
-import annotationPlugin from 'chartjs-plugin-annotation'
-import { formatUnits, zeroAddress, decodeAbiParameters, type Address, type Abi, type Hex } from 'viem'
-import { logWarn } from '~/utils/errorHandling'
-import { useModal } from '~/components/ui/composables/useModal'
-import {
-  INTEREST_RATE_MODEL_TYPE,
-  KINK_IRM_COMPONENTS,
-  ADAPTIVE_CURVE_IRM_COMPONENTS,
-  KINKY_IRM_COMPONENTS,
-  SECONDS_IN_YEAR,
-} from '~/entities/constants'
-import {
-  type Vault,
-  type SecuritizeVault,
-  type KinkIRMParams,
-  type AdaptiveCurveIRMParams,
-  type KinkyIRMParams,
-  getVaultUtilization,
-  hasCollateralExposure,
-} from '~/entities/vault'
+  adaptiveRateAtTargetToBorrowSPY,
+  type AdaptiveCurveIRMInfo,
+  type EVault,
+  type KinkIRMInfo,
+  type KinkyIRMInfo,
+  type SecuritizeCollateralVault,
+} from '@eulerxyz/euler-v2-sdk'
+import { hasCollateralExposure } from '~/utils/vault/collateral-exposure'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { eulerUtilsLensABI, eulerVaultLensABI } from '~/entities/euler/abis'
+import annotationPlugin from 'chartjs-plugin-annotation'
+import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler, type ChartData, type ChartOptions } from 'chart.js'
+import { zeroAddress, formatUnits, type Address, type Abi } from 'viem'
+import { INTEREST_RATE_MODEL_TYPE, SECONDS_IN_YEAR } from '~/entities/constants'
+import { Line } from 'vue-chartjs'
+import { logWarn } from '~/utils/errorHandling'
+import { useModal } from '~/components/ui/composables/useModal'
 import { UiFootnoteModal } from '#components'
 
 // Register Chart.js components
@@ -50,7 +32,7 @@ ChartJS.register(
   annotationPlugin,
 )
 
-const { vault } = defineProps<{ vault: Vault }>()
+const { vault } = defineProps<{ vault: EVault }>()
 
 const chartData = ref<ChartData<'line'> | null>(null)
 const chartOptions = ref<ChartOptions<'line'> | null>(null)
@@ -71,17 +53,19 @@ const modal = useModal()
 // the "Collateral exposure" block and correctly excludes collateral-only
 // vaults that may still carry a non-zero interestRateModelAddress.
 const hasValidIRM = computed(() => {
+  const interestRateModelAddress = vault.interestRateModel.address
   const hasExposure = hasCollateralExposure(
     vault,
-    addr => registryGet(addr)?.vault as Vault | SecuritizeVault | undefined,
+    addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
   )
   return hasExposure
-    && vault.interestRateModelAddress
-    && vault.interestRateModelAddress !== zeroAddress
+    && interestRateModelAddress
+    && interestRateModelAddress !== zeroAddress
 })
 
+// Gregorian-year seconds (centralised in entities/constants.ts; matches EVK
+// SECONDS_PER_YEAR so APY display rounds-trips with on-chain values).
 const MAX_UINT32 = 4_294_967_295
-const WAD_TO_SPY_SCALE = 10n ** 9n
 
 // Key borrow APY values derived from the chart data (populated in renderChart)
 const chartRateAtZero = ref<number | null>(null)
@@ -89,7 +73,7 @@ const chartRateAtKink = ref<number | null>(null)
 const chartRateAtMax = ref<number | null>(null)
 // Adaptive-only: APY bounds on rate-at-target, computed via UtilsLens.computeAPYs
 // so values match exactly what the vault will accrue (APR × year is the wrong
-// conversion — see AdaptiveCurveIRMParams, baseline uses daily compounding).
+// conversion — see AdaptiveCurveIRMInfo, baseline uses daily compounding).
 const adaptiveMinRateAPY = ref<number | null>(null)
 const adaptiveMaxRateAPY = ref<number | null>(null)
 
@@ -103,7 +87,7 @@ const formatWadPercent = (wad: bigint): string => {
   return `${percent.toFixed(2)}%`
 }
 
-const irmModelType = computed(() => Number(vault.irmInfo?.interestRateModelInfo?.interestRateModelType))
+const irmModelType = computed(() => Number(vault.interestRateModel.type))
 
 const irmTypeLabel = computed(() => {
   const type = irmModelType.value
@@ -115,48 +99,24 @@ const irmTypeLabel = computed(() => {
 })
 
 type DecodedIRMParams
-  = ({ type: 'kink' } & KinkIRMParams)
-    | ({ type: 'adaptive' } & AdaptiveCurveIRMParams)
-    | ({ type: 'kinky' } & KinkyIRMParams)
+  = ({ type: 'kink' } & KinkIRMInfo)
+    | ({ type: 'adaptive' } & AdaptiveCurveIRMInfo)
+    | ({ type: 'kinky' } & KinkyIRMInfo)
 
 const decodedIRMParams = computed<DecodedIRMParams | null>(() => {
-  const params = vault.irmInfo?.interestRateModelInfo?.interestRateModelParams
-  if (!params || params === '0x') return null
-
   const type = irmModelType.value
+  const data = vault.interestRateModel.data
+  if (!data) return null
 
   try {
     if (type === INTEREST_RATE_MODEL_TYPE.KINK) {
-      const [decoded] = decodeAbiParameters(
-        [{ type: 'tuple', components: [...KINK_IRM_COMPONENTS] }],
-        params as Hex,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- viem decode returns dynamic shape
-      ) as unknown as any[]
-      return { type: 'kink', baseRate: decoded.baseRate, slope1: decoded.slope1, slope2: decoded.slope2, kink: decoded.kink }
+      return { type: 'kink', ...data } as DecodedIRMParams
     }
     if (type === INTEREST_RATE_MODEL_TYPE.ADAPTIVE_CURVE) {
-      const [decoded] = decodeAbiParameters(
-        [{ type: 'tuple', components: [...ADAPTIVE_CURVE_IRM_COMPONENTS] }],
-        params as Hex,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- viem decode returns dynamic shape
-      ) as unknown as any[]
-      return {
-        type: 'adaptive',
-        targetUtilization: decoded.targetUtilization,
-        initialRateAtTarget: decoded.initialRateAtTarget,
-        minRateAtTarget: decoded.minRateAtTarget,
-        maxRateAtTarget: decoded.maxRateAtTarget,
-        curveSteepness: decoded.curveSteepness,
-        adjustmentSpeed: decoded.adjustmentSpeed,
-      }
+      return { type: 'adaptive', ...data } as DecodedIRMParams
     }
     if (type === INTEREST_RATE_MODEL_TYPE.KINKY) {
-      const [decoded] = decodeAbiParameters(
-        [{ type: 'tuple', components: [...KINKY_IRM_COMPONENTS] }],
-        params as Hex,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- viem decode returns dynamic shape
-      ) as unknown as any[]
-      return { type: 'kinky', baseRate: decoded.baseRate, slope: decoded.slope, shape: decoded.shape, kink: decoded.kink, cutoff: decoded.cutoff }
+      return { type: 'kinky', ...data } as DecodedIRMParams
     }
   }
   catch (e) {
@@ -281,17 +241,17 @@ const parseAPY = (apy: bigint): number => {
   return Number(formatUnits(apy, 27)) * 100
 }
 
-// Convert a WAD-scaled per-second adaptive rate into a properly-compounded
-// APY % by round-tripping through UtilsLens.computeAPYs. The lens expects the
-// 27-decimal borrowSPY scale returned by vault IRM queries, while adaptive IRM
-// params are decoded as 18-decimal WADs.
+// Convert a wad-scaled per-second rate into a properly-compounded APY % by
+// round-tripping through UtilsLens.computeAPYs — same math the vault itself
+// uses, so Min/Max rate cells match on-chain accrual for large rates instead
+// of silently collapsing to APR.
 const fetchAdaptiveBorrowAPY = async (wadPerSec: bigint): Promise<number | null> => {
+  const borrowSPY = adaptiveRateAtTargetToBorrowSPY(wadPerSec)
+  if (borrowSPY === null) return null
+
   const utilsLens = eulerLensAddresses.value?.utilsLens
-  if (wadPerSec < 0n) {
-    return null
-  }
-  if (!utilsLens || wadPerSec === 0n) {
-    return wadPerSec === 0n ? 0 : null
+  if (!utilsLens || borrowSPY === 0n) {
+    return borrowSPY === 0n ? 0 : null
   }
   try {
     const client = rpcClient.value!
@@ -300,7 +260,7 @@ const fetchAdaptiveBorrowAPY = async (wadPerSec: bigint): Promise<number | null>
       abi: eulerUtilsLensABI as Abi,
       functionName: 'computeAPYs',
       // cash/borrows don't influence borrowAPY; interestFee only affects supplyAPY.
-      args: [wadPerSec * WAD_TO_SPY_SCALE, 1n, 0n, 0n],
+      args: [borrowSPY, 1n, 0n, 0n],
     }) as readonly [bigint, bigint]
     const [borrowAPY] = result
     return Number(formatUnits(borrowAPY, 27)) * 100
@@ -420,7 +380,7 @@ const renderChart = async () => {
       : null
 
     // Current utilization
-    const currentUtilization = getVaultUtilization(vault)
+    const currentUtilization = vault.utilization
 
     // Set chart data
     chartData.value = {

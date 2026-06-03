@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import type { EarnVault, SecuritizeVault, Vault } from '~/entities/vault'
+import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultPointsModal } from '#components'
 
-const { vault } = defineProps<{ vault: Vault | EarnVault | SecuritizeVault }>()
+const { vault } = defineProps<{ vault: EVault | EulerEarn | SecuritizeCollateralVault }>()
 
 const points = useEulerPointsOfVault(vault.address)
 const modal = useModal()

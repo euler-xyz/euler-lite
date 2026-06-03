@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { MarketGroup } from '~/entities/lend-discovery'
 import { formatCompactUsdValue, formatNumber, stringToColor } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import {
   getMarketEntities,
@@ -13,7 +12,8 @@ import {
   type BestMaxRoeResult,
 } from '~/utils/discoveryCalculations'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
-import { VaultMaxRoeModal } from '#components'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import { VaultMaxRoeModal, UiModalPreviewTrigger } from '#components'
 
 const props = defineProps<{
   market: MarketGroup
@@ -24,7 +24,8 @@ defineEmits<{
   toggle: []
 }>()
 
-const { withIntrinsicSupplyApy, withIntrinsicBorrowApy } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getBorrowRewardApy, getSupplyRewardApy, getLoopingRewardApy } = useRewardsApy()
 const { products } = useEulerLabels()
 
@@ -50,16 +51,16 @@ const getBestMaxRoe = (market: MarketGroup): BestMaxRoeResult => {
   let bestCollateralAddress = ''
 
   for (const liability of borrowable) {
-    const borrowBase = nanoToValue(liability.interestRateInfo.borrowAPY, 25)
-    const borrowApy = withIntrinsicBorrowApy(borrowBase, liability.asset.address)
+    const borrowBase = getVaultBorrowApy(liability)
+    const borrowApy = withVaultIntrinsicApy(borrowBase, liability, enableIntrinsicApy.value)
 
-    for (const ltv of liability.collateralLTVs) {
-      if (ltv.borrowLTV === 0n) continue
-      const collateral = findVault(market, ltv.collateral)
+    for (const ltv of liability.collaterals) {
+      if (ltv.borrowLTV === 0) continue
+      const collateral = findVault(market, ltv.address)
       if (!collateral) continue
 
-      const supplyBase = nanoToValue(collateral.interestRateInfo.supplyAPY, 25)
-      const supplyApy = withIntrinsicSupplyApy(supplyBase, collateral.asset.address)
+      const supplyBase = getVaultSupplyApy(collateral)
+      const supplyApy = withVaultIntrinsicApy(supplyBase, collateral, enableIntrinsicApy.value)
       const supplyRewards = getSupplyRewardApy(collateral.address)
       const borrowRewards = getBorrowRewardApy(liability.address, collateral.address)
       const loopingRewards = getLoopingRewardApy(liability.address, collateral.address)
@@ -76,7 +77,7 @@ const getBestMaxRoe = (market: MarketGroup): BestMaxRoeResult => {
         bestMultiplier = multiplier
         bestSupplyAPY = supplyFinal
         bestBorrowAPY = borrowFinal
-        bestBorrowLTV = nanoToValue(ltv.borrowLTV, 2)
+        bestBorrowLTV = ltvToPercent(ltv.borrowLTV)
         bestBorrowVaultAddress = liability.address
         bestCollateralAddress = collateral.address
       }
@@ -114,6 +115,10 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
 <template>
   <button
     class="w-full text-left cursor-pointer p-16"
+    data-id="discovery-market-card"
+    :data-key="market.id"
+    :data-market-id="market.id"
+    :data-expanded="isExpanded"
     @click="$emit('toggle')"
   >
     <div class="flex items-center pb-12 border-b border-line-subtle">
@@ -132,7 +137,13 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
           class="flex-grow min-w-0"
           :class="marketEntities.logos.length > 0 ? 'ml-12' : ''"
         >
-          <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-8">
+          <div
+            class="text-content-tertiary text-p3 mb-4 flex items-center gap-8"
+            data-id="data-point"
+            :data-key="market.id"
+            data-field="market-entity"
+            :data-value="marketEntities.name || market.curator?.name || 'Ungrouped'"
+          >
             <span
               v-if="marketEntities.name"
               :class="{ 'opacity-20': isGovernanceLimited }"
@@ -148,12 +159,22 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
             />
             <GovernanceLimitedBadge v-if="isGovernanceLimited" />
           </div>
-          <div class="text-h5 text-content-primary">
+          <div
+            class="text-h5 text-content-primary"
+            data-id="data-point"
+            :data-key="market.id"
+            data-field="market-name"
+            :data-value="market.name"
+          >
             {{ market.name }}
           </div>
           <div
             v-if="getProductDescription(market)"
             class="text-p3 text-content-tertiary mt-4"
+            data-id="data-point"
+            :data-key="market.id"
+            data-field="market-description"
+            :data-value="getProductDescription(market)"
             :class="isExpanded ? '' : 'line-clamp-1'"
           >
             {{ getProductDescription(market) }}
@@ -165,8 +186,19 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
         :key="'counts-' + diagramIdx"
       >
         <div class="flex flex-col items-end shrink-0 ml-12 text-content-tertiary text-p3">
-          <span>{{ diagram.assetCount }} assets</span>
-          <span class="text-content-muted">{{ diagram.pairCount }} pairs</span>
+          <span
+            data-id="data-point"
+            :data-key="market.id"
+            data-field="asset-count"
+            :data-value="diagram.assetCount"
+          >{{ diagram.assetCount }} assets</span>
+          <span
+            class="text-content-muted"
+            data-id="data-point"
+            :data-key="market.id"
+            data-field="pair-count"
+            :data-value="diagram.pairCount"
+          >{{ diagram.pairCount }} pairs</span>
           <span
             v-if="getDeprecatedVaultCount(market) > 0"
             class="text-warning-500 text-p5 mt-4"
@@ -190,7 +222,13 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
           <div class="text-content-tertiary text-p3 mb-4">
             Total supply
           </div>
-          <div class="text-p2 text-content-primary">
+          <div
+            class="text-p2 text-content-primary"
+            data-id="data-point"
+            :data-key="market.id"
+            data-field="total-supply"
+            :data-value="market.metrics.totalTVL"
+          >
             {{ formatCompactUsdValue(market.metrics.totalTVL) }}
           </div>
         </div>
@@ -198,7 +236,13 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
           <div class="text-content-tertiary text-p3 mb-4">
             Total borrowed
           </div>
-          <div class="text-p2 text-content-primary">
+          <div
+            class="text-p2 text-content-primary"
+            data-id="data-point"
+            :data-key="market.id"
+            data-field="total-borrowed"
+            :data-value="market.metrics.totalBorrowed"
+          >
             {{ formatCompactUsdValue(market.metrics.totalBorrowed) }}
           </div>
         </div>
@@ -206,7 +250,13 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
           <div class="text-content-tertiary text-p3 mb-4">
             Available liquidity
           </div>
-          <div class="text-p2 text-content-primary">
+          <div
+            class="text-p2 text-content-primary"
+            data-id="data-point"
+            :data-key="market.id"
+            data-field="available-liquidity"
+            :data-value="market.metrics.totalAvailableLiquidity"
+          >
             {{ formatCompactUsdValue(market.metrics.totalAvailableLiquidity) }}
           </div>
         </div>
@@ -220,7 +270,7 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
                 Max ROE
                 <UiModalPreviewTrigger
                   :component="VaultMaxRoeModal"
-                  :modal-data="() => getMaxRoeModalData(bestRoe)"
+                  :modal-data="getMaxRoeModalData(bestRoe)"
                   aria-label="Show max ROE breakdown"
                 >
                   <SvgIcon
@@ -229,16 +279,22 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
                   />
                 </UiModalPreviewTrigger>
               </div>
-              <div class="text-p2 text-content-primary flex items-center gap-4 min-w-0">
+              <div
+                class="text-p2 text-content-primary flex items-center gap-4 min-w-0"
+                data-id="data-point"
+                :data-key="market.id"
+                data-field="best-max-roe"
+                :data-value="bestRoe.value"
+              >
                 <UiModalPreviewTrigger
                   v-if="bestRoe.hasRewards"
                   :component="VaultMaxRoeModal"
-                  :modal-data="() => getMaxRoeModalData(bestRoe)"
+                  :modal-data="getMaxRoeModalData(bestRoe)"
                   aria-label="Show max ROE rewards breakdown"
                 >
                   <SvgIcon
                     name="sparks"
-                    class="!w-20 !h-20 text-accent-500 shrink-0 cursor-pointer hover:text-accent-400 transition-colors"
+                    class="!w-20 !h-20 text-accent-500 shrink-0 hover:text-accent-400 transition-colors cursor-pointer"
                   />
                 </UiModalPreviewTrigger>
                 <span class="shrink-0">{{ formatNumber(bestRoe.value, 2, 2) }}%</span>
@@ -364,7 +420,7 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
             Max ROE
             <UiModalPreviewTrigger
               :component="VaultMaxRoeModal"
-              :modal-data="() => getMaxRoeModalData(bestRoe)"
+              :modal-data="getMaxRoeModalData(bestRoe)"
               aria-label="Show max ROE breakdown"
             >
               <SvgIcon
@@ -378,12 +434,12 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
               <UiModalPreviewTrigger
                 v-if="bestRoe.hasRewards"
                 :component="VaultMaxRoeModal"
-                :modal-data="() => getMaxRoeModalData(bestRoe)"
+                :modal-data="getMaxRoeModalData(bestRoe)"
                 aria-label="Show max ROE rewards breakdown"
               >
                 <SvgIcon
                   name="sparks"
-                  class="!w-20 !h-20 text-accent-500 shrink-0 cursor-pointer hover:text-accent-400 transition-colors"
+                  class="!w-20 !h-20 text-accent-500 shrink-0 hover:text-accent-400 transition-colors cursor-pointer"
                 />
               </UiModalPreviewTrigger>
               {{ formatNumber(bestRoe.value, 2, 2) }}%

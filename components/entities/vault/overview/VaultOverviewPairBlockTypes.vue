@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import type { AnyBorrowVaultPair } from '~/entities/vault'
-import type { AccountBorrowPosition } from '~/entities/account'
+import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
+import type { PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { getPairBorrowVault, getPairCollateralVault } from '~/utils/borrow-pair'
 
-const { pair } = defineProps<{ pair: AnyBorrowVaultPair | AccountBorrowPosition }>()
+const { pair } = defineProps<{ pair: AnyBorrowVaultPair | PortfolioBorrowPosition<VaultEntity> }>()
 
-const collateral = computed(() => pair.collateral)
-const borrow = computed(() => pair.borrow)
-const collateralBadges = useVaultTypeBadges(collateral)
-const borrowBadges = useVaultTypeBadges(borrow)
+const collateralVault = computed(() => getPairCollateralVault(pair))
+const borrowVault = computed(() => getPairBorrowVault(pair))
+const collateralBadges = useVaultTypeBadges(collateralVault)
+const borrowBadges = useVaultTypeBadges(borrowVault)
 const hasCollateralSummaryBadges = computed(() => collateralBadges.hasSummaryBadges.value)
 const hasBorrowSummaryBadges = computed(() => borrowBadges.hasSummaryBadges.value)
 
@@ -28,16 +29,16 @@ const showVaultTypesSummary = computed(() =>
       <div class="min-w-0 flex flex-col gap-12">
         <div class="flex items-center gap-8 min-w-0 pl-2">
           <AssetAvatar
-            :asset="pair.collateral.asset"
+            :asset="collateralVault.asset"
             size="20"
           />
           <span class="text-[14px] leading-none font-semibold text-content-primary truncate">
-            {{ pair.collateral.asset.symbol }}
+            {{ collateralVault.asset.symbol }}
           </span>
         </div>
         <VaultTypeBadges
           v-if="hasCollateralSummaryBadges"
-          :vault="pair.collateral"
+          :vault="collateralVault"
           layout="stacked"
           size="large"
           summary-only
@@ -59,16 +60,16 @@ const showVaultTypesSummary = computed(() =>
       <div class="min-w-0 flex flex-col gap-12">
         <div class="flex items-center gap-8 min-w-0 pl-2">
           <AssetAvatar
-            :asset="pair.borrow.asset"
+            :asset="borrowVault.asset"
             size="20"
           />
           <span class="text-[14px] leading-none font-semibold text-content-primary truncate">
-            {{ pair.borrow.asset.symbol }}
+            {{ borrowVault.asset.symbol }}
           </span>
         </div>
         <VaultTypeBadges
           v-if="hasBorrowSummaryBadges"
-          :vault="pair.borrow"
+          :vault="borrowVault"
           layout="stacked"
           size="large"
           summary-only

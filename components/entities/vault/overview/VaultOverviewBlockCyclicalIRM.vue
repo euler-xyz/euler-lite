@@ -1,66 +1,45 @@
 <script setup lang="ts">
-import { decodeAbiParameters, formatUnits, zeroAddress, type Hex } from 'viem'
-import {
-  FIXED_CYCLICAL_BINARY_IRM_COMPONENTS,
-  FIXED_CYCLICAL_BINARY_MONTHLY_IRM_COMPONENTS,
-  INTEREST_RATE_MODEL_TYPE,
-  SECONDS_IN_YEAR,
-} from '~/entities/constants'
-import type { Vault, SecuritizeVault, CyclicalNoteInfo, CyclicalNoteMonthlyInfo } from '~/entities/vault'
-import { hasCollateralExposure } from '~/entities/vault'
+import type {
+  SecuritizeCollateralVault,
+  FixedCyclicalBinaryIRMInfo,
+  FixedCyclicalBinaryMonthlyIRMInfo,
+  EVault,
+} from '@eulerxyz/euler-v2-sdk'
+import { hasCollateralExposure } from '~/utils/vault/collateral-exposure'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
+import { zeroAddress, formatUnits } from 'viem'
+import { INTEREST_RATE_MODEL_TYPE, SECONDS_IN_YEAR } from '~/entities/constants'
 
-const { vault } = defineProps<{ vault: Vault }>()
+const { vault } = defineProps<{ vault: EVault }>()
 
 const { get: registryGet } = useVaultRegistry()
 
 // Parent already gates rendering to cyclical IRM vaults via v-if,
 // so this component only checks collateral exposure and IRM address.
 const hasValidIRM = computed(() => {
+  const interestRateModelAddress = vault.interestRateModel.address
   const hasExposure = hasCollateralExposure(
     vault,
-    addr => registryGet(addr)?.vault as Vault | SecuritizeVault | undefined,
+    addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
   )
   return hasExposure
-    && vault.interestRateModelAddress
-    && vault.interestRateModelAddress !== zeroAddress
+    && interestRateModelAddress
+    && interestRateModelAddress !== zeroAddress
 })
 
-const irmType = computed(() => vault.irmInfo?.interestRateModelInfo?.interestRateModelType)
+const irmType = computed(() => vault.interestRateModel.type)
 const isMonthly = computed(() =>
   irmType.value === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY_MONTHLY,
 )
 
-const cyclicalInfo = computed((): CyclicalNoteInfo | null => {
+const cyclicalInfo = computed((): FixedCyclicalBinaryIRMInfo | null => {
   if (isMonthly.value) return null
-  const params = vault.irmInfo?.interestRateModelInfo?.interestRateModelParams
-  if (!params) return null
-  try {
-    const [decoded] = decodeAbiParameters(
-      [{ type: 'tuple', components: FIXED_CYCLICAL_BINARY_IRM_COMPONENTS }],
-      params as Hex,
-    )
-    return decoded as CyclicalNoteInfo
-  }
-  catch {
-    return null
-  }
+  return vault.interestRateModel.data as FixedCyclicalBinaryIRMInfo | null
 })
 
-const monthlyInfo = computed((): CyclicalNoteMonthlyInfo | null => {
+const monthlyInfo = computed((): FixedCyclicalBinaryMonthlyIRMInfo | null => {
   if (!isMonthly.value) return null
-  const params = vault.irmInfo?.interestRateModelInfo?.interestRateModelParams
-  if (!params) return null
-  try {
-    const [decoded] = decodeAbiParameters(
-      [{ type: 'tuple', components: FIXED_CYCLICAL_BINARY_MONTHLY_IRM_COMPONENTS }],
-      params as Hex,
-    )
-    return decoded as CyclicalNoteMonthlyInfo
-  }
-  catch {
-    return null
-  }
+  return vault.interestRateModel.data as FixedCyclicalBinaryMonthlyIRMInfo | null
 })
 
 const now = useNow({ interval: 1_000 })
@@ -82,6 +61,9 @@ const getUTCMonthDayCount = (year: number, month: number): number => {
   return new Date(Date.UTC(year, month + 1, 0)).getUTCDate()
 }
 
+// The contract treats a start day beyond a short month's length as that month's
+// last day, so clamp instead of letting Date.UTC silently roll into the next
+// month (e.g. day 31 in February would become March 3).
 const getMonthlyCycleBoundaryMs = (year: number, month: number, startDay: number): number => {
   const effectiveStartDay = Math.min(startDay, getUTCMonthDayCount(year, month))
   return Date.UTC(year, month, effectiveStartDay)
@@ -89,7 +71,7 @@ const getMonthlyCycleBoundaryMs = (year: number, month: number, startDay: number
 
 // Both cyclical IRM variants are normalised into the same shape so the
 // progress/phase/tick logic below is variant-agnostic. The Monthly variant
-// derives the current cycle from calendar dates (UTC), matching the contract.
+// derives the current cycle from UTC calendar dates, matching the contract.
 const currentCycle = computed((): CurrentCycle | null => {
   if (isMonthly.value) {
     const m = monthlyInfo.value
@@ -134,8 +116,8 @@ const currentCycle = computed((): CurrentCycle | null => {
   if (!info) return null
   const cycleLen = info.primaryDuration + info.secondaryDuration
   const nowSec = BigInt(Math.floor(now.value.getTime() / 1000))
-  const hasStarted = nowSec >= info.startTimestamp
-  const startSec = hasStarted && cycleLen > 0n
+  const hasStartedNow = nowSec >= info.startTimestamp
+  const startSec = hasStartedNow && cycleLen > 0n
     ? info.startTimestamp + ((nowSec - info.startTimestamp) / cycleLen) * cycleLen
     : info.startTimestamp
   return {
@@ -144,8 +126,8 @@ const currentCycle = computed((): CurrentCycle | null => {
     startSec,
     primaryDurationSec: info.primaryDuration,
     secondaryDurationSec: info.secondaryDuration,
-    hasStarted,
-    preStartTimestamp: hasStarted ? null : info.startTimestamp,
+    hasStarted: hasStartedNow,
+    preStartTimestamp: hasStartedNow ? null : info.startTimestamp,
   }
 })
 

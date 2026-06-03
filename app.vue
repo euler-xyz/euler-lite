@@ -25,9 +25,6 @@ const showAllLabelEntries = useShowAllLabelEntries()
 // subgraph + accountLens round-trip.
 useEulerAccount()
 
-// Initialize price backend (configures endpoint when chainId changes)
-usePriceBackend()
-
 const { theme } = useTheme()
 
 watch(theme, (newTheme) => {
@@ -113,8 +110,8 @@ const checkMigrationAnnouncement = () => {
   })
 }
 
-await loadEulerConfig()
 checkOnboarding()
+void loadEulerConfig()
 // onMounted (not synchronous like checkOnboarding) because the modal system requires the DOM
 onMounted(checkMigrationAnnouncement)
 

@@ -1,14 +1,15 @@
 <script setup lang="ts">
+import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
-import type { EarnVault } from '~/entities/vault'
-import { formatAssetValue } from '~/services/pricing/priceProvider'
+
+import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerEntitiesOfEarnVault, useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isEarnVaultDeprecated, getEarnVaultDeprecationReason, getEarnVaultDescription } from '~/utils/eulerLabelsUtils'
 import { autoLink } from '~/utils/autoLink'
 
-const { vault } = defineProps<{ vault: EarnVault }>()
+const { vault } = defineProps<{ vault: EulerEarn }>()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
 const { isEarnVaultOwnerVerified } = useVaults()
@@ -36,7 +37,11 @@ watchEffect(async () => {
 })
 
 const feeDisplay = computed(() => {
-  return `${compactNumber(nanoToValue(vault.performanceFee, 18) * 100, 2, 2)}%`
+  const performanceFee = Number(vault.performanceFee)
+
+  return Number.isFinite(performanceFee)
+    ? `${compactNumber(performanceFee * 100, 2, 2)}%`
+    : '-'
 })
 </script>
 

@@ -1,0 +1,67 @@
+import { getAddress, type Address } from 'viem'
+import type { EulerSDKQueryName, TransactionPlan, UserReward } from '@eulerxyz/euler-v2-sdk'
+import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
+
+const USER_REWARD_QUERY_NAMES: EulerSDKQueryName[] = [
+  'queryMerklUserRewards',
+  'queryBrevisCampaigns',
+  'queryBrevisUserProofs',
+  'queryFuulTotals',
+  'queryFuulClaimChecks',
+]
+const REWARD_CLAIM_REFRESH_RETRY_DELAYS_MS = [5_000, 30_000] as const
+
+type RefreshRewardsOptions = {
+  delayedRetry?: boolean
+}
+
+let delayedRefreshTimers: ReturnType<typeof setTimeout>[] = []
+
+export const useSdkRewards = () => {
+  const { portfolio, isPositionsLoading, refreshAllPositions } = useEulerAccount()
+  const { address: walletAddress } = useWagmi()
+
+  const rewards = computed<UserReward[]>(() => portfolio.value?.account.userRewards ?? [])
+  const isRewardsLoading = computed(() => isPositionsLoading.value)
+
+  const buildClaimRewardPlan = async (reward: UserReward): Promise<TransactionPlan> => {
+    if (!walletAddress.value) {
+      throw new Error('Wallet not connected')
+    }
+
+    const { getEulerSdk } = useEulerSdk()
+    const sdk = await getEulerSdk()
+    return sdk.rewardsService.buildClaimPlan({
+      reward,
+      account: getAddress(walletAddress.value) as Address,
+    })
+  }
+
+  const runRewardsRefresh = async () => {
+    await invalidateSdkQueries(USER_REWARD_QUERY_NAMES)
+    await refreshAllPositions(undefined, undefined, { source: 'fresh', preempt: true })
+  }
+
+  const queueDelayedRefresh = () => {
+    delayedRefreshTimers.forEach(timer => clearTimeout(timer))
+    delayedRefreshTimers = REWARD_CLAIM_REFRESH_RETRY_DELAYS_MS.map((delay) => {
+      const timer = setTimeout(() => {
+        delayedRefreshTimers = delayedRefreshTimers.filter(activeTimer => activeTimer !== timer)
+        void runRewardsRefresh()
+      }, delay)
+      return timer
+    })
+  }
+
+  const refreshRewards = async (options: RefreshRewardsOptions = {}) => {
+    await runRewardsRefresh()
+    if (options.delayedRetry) queueDelayedRefresh()
+  }
+
+  return {
+    rewards,
+    isRewardsLoading,
+    buildClaimRewardPlan,
+    refreshRewards,
+  }
+}

@@ -4,7 +4,7 @@ import { OperationReviewModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { REULLock } from '~/entities/reul'
-import type { TxPlan } from '~/entities/txPlan'
+import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
@@ -13,15 +13,17 @@ const modal = useModal()
 const { error } = useToast()
 const { isSpyMode } = useSpyMode()
 const { getTokenByAddress } = useTokenList()
-const { unlockREUL, buildUnlockREULPlan, reulTokenContractAddress, loadREULLocksInfo } = useREULLocks()
+const { buildUnlockREULPlan, reulTokenContractAddress, refreshLocks } = useREULLocks()
+const { executePlan } = useEulerTx()
 const { chainId: siteChainId } = useEulerAddresses()
-const { chainId: walletChainId, switchChain, address: wagmiAddress } = useWagmi()
-const { runSimulation, simulationError } = useTxPlanSimulation()
+const { chainId: walletChainId, switchChain } = useWagmi()
+const { runSimulation, simulationError } = useTransactionPlanSimulation()
 const { item } = defineProps<{ item: REULLock }>()
+const itemKey = computed(() => item.timestamp.toString())
 
 const isUnlocking = ref(false)
 const isPreparing = ref(false)
-const plan = ref<TxPlan | null>(null)
+const plan = ref<TransactionPlan | null>(null)
 
 // rEUL address is read from chain contract config (reulTokenContractAddress) —
 // the authoritative source. Its metadata (symbol, decimals, logo) is looked
@@ -67,11 +69,10 @@ const unlock = async () => {
   try {
     isUnlocking.value = true
 
-    await unlockREUL([item.timestamp])
+    const unlockPlan = await buildUnlockREULPlan([item.timestamp])
+    await executePlan(unlockPlan)
     modal.close()
-    if (wagmiAddress.value) {
-      loadREULLocksInfo(wagmiAddress.value, false)
-    }
+    await refreshLocks(false)
   }
   catch (e) {
     error('Transaction failed')
@@ -104,7 +105,7 @@ const onUnlockClick = async () => {
       }
     }
 
-    // Open the operation review modal (same pattern as Merkl/Brevis)
+    // Open the operation review modal (same pattern as reward claims)
     modal.open(OperationReviewModal, {
       props: {
         type: 'reul-unlock',
@@ -140,6 +141,10 @@ const onUnlockClick = async () => {
 <template>
   <div
     class="flex flex-col gap-12 bg-card rounded-16"
+    data-id="reward-unlock-list-item"
+    data-list="reul-unlock"
+    :data-key="itemKey"
+    :data-timestamp="item.timestamp.toString()"
   >
     <div
       class="flex justify-between items-center p-16 pb-12 border-b border-line-default"
@@ -152,10 +157,22 @@ const onUnlockClick = async () => {
         rEUL
       </h4>
       <div class="flex flex-col gap-8 ml-auto text-right">
-        <p class="text-p2">
+        <p
+          class="text-p2"
+          data-id="data-point"
+          :data-key="itemKey"
+          data-field="unlockable-amount"
+          :data-value="unlockableAmount"
+        >
           {{ reulToken ? `${formatNumber(unlockableAmount, 6)} rEUL` : '...' }}
         </p>
-        <p class="text-p3 text-content-primary">
+        <p
+          class="text-p3 text-content-primary"
+          data-id="data-point"
+          :data-key="itemKey"
+          data-field="locked-amount"
+          :data-value="amount"
+        >
           {{ reulToken ? `of ${formatNumber(amount, 6)} rEUL` : '...' }}
         </p>
       </div>
@@ -166,10 +183,21 @@ const onUnlockClick = async () => {
           Maturity date
         </div>
         <div class="text-right flex flex-col gap-4 text-p2">
-          <div>
+          <div
+            data-id="data-point"
+            :data-key="itemKey"
+            data-field="days-until-maturity"
+            :data-value="daysUntilMaturity"
+          >
             in {{ daysUntilMaturity }} days
           </div>
-          <div class="text-content-primary">
+          <div
+            class="text-content-primary"
+            data-id="data-point"
+            :data-key="itemKey"
+            data-field="maturity-date"
+            :data-value="formattedDate"
+          >
             {{ formattedDate }}
           </div>
         </div>

@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import type { EarnVault } from '~/entities/vault'
+import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
 }>()
-const { vault } = defineProps<{ vault: EarnVault, desktopOverview?: boolean }>()
+const { vault } = defineProps<{ vault: EulerEarn, desktopOverview?: boolean }>()
 </script>
 
 <template>

@@ -162,12 +162,16 @@ export default defineNuxtConfig({
       appKitProjectId: '',
       appUrl: '',
       pythHermesUrl: '',
-      eulerApiUrl: '',
+      v3ApiUrl: '',
+      enableV3Backend: '',
+      // Adapter chain for the browser "fast" SDK. fallback (default) | onchain | v3.
+      // Maps to NUXT_PUBLIC_BROWSER_VAULT_SOURCE.
+      browserVaultSource: '',
+      executionRecordSdkQueries: '',
       swapApiUrl: '',
       sentryDsn: '', // set via NUXT_PUBLIC_SENTRY_DSN
     },
   },
-
   sourcemap: {
     server: false,
     client: process.env.SENTRY_AUTH_TOKEN ? 'hidden' : false,
@@ -230,7 +234,21 @@ export default defineNuxtConfig({
 
   vite: {
     build: { target: 'esnext' },
-    optimizeDeps: { esbuildOptions: { target: 'esnext' } },
+    server: {
+      watch: {
+        ignored: [
+          '**/.parity/**',
+          '**/artifacts/**',
+          '**/.playwright-mcp/**',
+          '**/.nuxt/**',
+          '**/.output/**',
+        ],
+      },
+    },
+    optimizeDeps: {
+      include: ['@eulerxyz/euler-v2-sdk'],
+      esbuildOptions: { target: 'esnext' },
+    },
   },
 
   telemetry: false,

@@ -11,8 +11,15 @@ import { refreshVerifiedAddressSet } from './verified-vaults'
 import {
   resolveEarnGoverningEntityKeys,
   resolveGoverningEntityKeys,
-} from '~/entities/vault'
-import type { EarnVault, SecuritizeVault, Vault, VaultAsset } from '~/entities/vault'
+} from '~/utils/vault/governor-verification'
+import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+
+interface VaultAsset {
+  address: string
+  symbol: string
+  name: string
+  decimals: number
+}
 
 const CACHE_TTL_MS = 300_000
 const ESCROW_VAULT_NAME = 'Escrowed collateral'
@@ -109,8 +116,12 @@ function buildEntityInfo(entityKey: string, entities: Record<string, EntityEntry
   }
 }
 
+function vaultName(vault: EVault | SecuritizeCollateralVault | EulerEarn): string {
+  return strOrEmpty(vault.shares?.name) || strOrEmpty(vault.asset?.name)
+}
+
 function buildEvkMetadata(
-  vault: Vault | SecuritizeVault,
+  vault: EVault | SecuritizeCollateralVault,
   type: 'evk' | 'securitize',
   ctx: BuildContext,
 ): VaultMetadata | null {
@@ -122,7 +133,7 @@ function buildEvkMetadata(
   // the snapshot could leak one), render it the same way buildEscrowMetadata
   // would. Mirrors isVaultGovernorVerified's `vaultCategory === 'escrow'` guard.
   if (ctx.view.escrowAddresses.has(addr) || ('vaultCategory' in vault && vault.vaultCategory === 'escrow')) {
-    return buildEscrowMetadata(addr, vault as Vault, ctx)
+    return buildEscrowMetadata(addr, vault as EVault, ctx)
   }
 
   const verified = ctx.verifiedSet.has(addr)
@@ -150,7 +161,7 @@ function buildEvkMetadata(
     chainId: ctx.chainId,
     address: addr,
     type,
-    name: labelName ?? strOrEmpty(vault.name),
+    name: labelName ?? vaultName(vault),
     description,
     portfolioNotice,
     deprecationReason,
@@ -162,7 +173,7 @@ function buildEvkMetadata(
   }
 }
 
-function buildEarnMetadata(vault: EarnVault, ctx: BuildContext): VaultMetadata | null {
+function buildEarnMetadata(vault: EulerEarn, ctx: BuildContext): VaultMetadata | null {
   const addr = tryChecksum(vault.address)
   if (!addr) return null
 
@@ -187,7 +198,7 @@ function buildEarnMetadata(vault: EarnVault, ctx: BuildContext): VaultMetadata |
     chainId: ctx.chainId,
     address: addr,
     type: 'earn',
-    name: labelName ?? strOrEmpty(vault.name),
+    name: labelName ?? vaultName(vault),
     description,
     portfolioNotice,
     deprecationReason,
@@ -201,7 +212,7 @@ function buildEarnMetadata(vault: EarnVault, ctx: BuildContext): VaultMetadata |
 
 function buildEscrowMetadata(
   addr: Address,
-  vault: Vault | undefined,
+  vault: EVault | undefined,
   ctx: BuildContext,
 ): VaultMetadata {
   return {
@@ -240,7 +251,7 @@ function computeMetadata(ctx: BuildContext): Map<string, VaultMetadata> {
   // latter carries asset data for the referenced collateral vaults). Any
   // escrow address outside the snapshot subset gets a thin entry with
   // asset:null — known v1 limitation.
-  const escrowFromSnapshot = new Map<Address, Vault>()
+  const escrowFromSnapshot = new Map<Address, EVault>()
   for (const v of ctx.view.snapshot.escrowVaults) {
     const addr = tryChecksum(v.address)
     if (addr) escrowFromSnapshot.set(addr, v)

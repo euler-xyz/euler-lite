@@ -1,33 +1,45 @@
-import { getAddress } from 'viem'
+import type {
+  EulerEarn as EulerEarnClass,
+  SecuritizeCollateralVault as SecuritizeCollateralVaultClass,
+  EVault as EVaultClass,
+  IEulerEarn,
+  IEVault,
+  ISecuritizeCollateralVault,
+} from '@eulerxyz/euler-v2-sdk'
+import {
+  EVault,
+  EulerEarn,
+  IntrinsicApyService,
+  SecuritizeCollateralVault,
+} from '@eulerxyz/euler-v2-sdk'
+import { extractUnresolvedCollateralAddresses } from '~/utils/vault/collateral-discovery'
+import { isLiveCollateralEdge } from '~/utils/vault/ltv'
+import { fetchChainVaultCategories, fetchVaultCategory, isSecuritizeVault, resetVaultCategoryCache } from '~/utils/vault/categories'
+import { getProductByVault, getProductKeyByVault, isVaultNotExplorable, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
+import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
+import { getAddress, type Address } from 'viem'
 import { useVaultRegistry } from './useVaultRegistry'
 import { logWarn } from '~/utils/errorHandling'
 import {
-  type AnyBorrowVaultPair,
-  type ChainVaultsSnapshot,
-  type EarnVault,
-  type SecuritizeVault,
-  type SerialisedSnapshot,
+  isEarnVaultOwnerVerified as verifyEarnVaultOwner,
+  isVaultGovernorVerified as verifyVaultGovernor,
   type VerificationLabels,
-  deserialiseSnapshot,
-  fetchEarnVaults,
-  fetchVault,
-  fetchEarnVault,
-  fetchEscrowVault,
-  fetchSecuritizeVault,
-  fetchVaults,
-  clearPriceCaches,
-  extractUnresolvedCollateralAddresses,
-  isEarnVaultOwnerVerified as ruleIsEarnVaultOwnerVerified,
-  isLiveCollateralEdge,
-  isVaultGovernorVerified as ruleIsVaultGovernorVerified,
-  type Vault,
-} from '~/entities/vault'
-import { fetchChainVaultCategories, fetchVaultCategory, isSecuritizeVault, resetVaultCategoryCache } from '~/entities/vault/factory'
-import { getProductByVault, isVaultNotExplorable, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
+} from '~/utils/vault/governor-verification'
+import { liteSecuritizeVaultFetchOptions, liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
+import { decodeBigints } from '~/utils/snapshot-codec'
+import { buildRegistryMetaService } from '~/utils/sdk-vault-meta-stub'
+import {
+  buildSnapshotIndex,
+  buildSnapshotIntrinsicApyAdapter,
+  buildSnapshotPriceService,
+  buildSnapshotRewardsService,
+  type SnapshotArgsByAddress,
+} from '~/utils/sdk-snapshot-populate-stubs'
+import type { SerialisedSnapshot, SerialisedVault } from '~/utils/snapshot-types'
 
 const isReady = ref(false)
-const isEVKLoading = ref(false)
-const isEVKUpdating = ref(false)
+const isEVaultLoading = ref(false)
+const isEVaultUpdating = ref(false)
 const loadedChainId = ref<number | null>(null)
 
 const isEarnLoading = ref(false)
@@ -47,13 +59,25 @@ const isEscrowLoadedOnce = ref(false)
 // post-hydration flash where unfetched collaterals look unrecognised.
 const isCollateralResolved = ref(false)
 
+// True once vault market-price fields are safe for consumers that sort or
+// aggregate from the SDK instances directly. Snapshot hydration publishes the
+// registry before this enrichment step, so it is intentionally stricter than
+// `isReady`.
+const isMarketDataResolved = ref(false)
+
 // Generation counter to invalidate stale in-flight operations after chain switch.
 // Incremented in resetVaultsState(); any async operation capturing an older generation
 // must stop registering vaults.
 const loadGeneration = ref(0)
 
-const contextForGeneration = (gen: number) =>
-  buildFetchContext(() => loadGeneration.value !== gen)
+interface UpdateEVaultsOptions {
+  verifiedAddresses?: ReadonlySet<string>
+}
+
+const getSdkVaults = async () => {
+  const { getEulerSdk } = useEulerSdk()
+  return await getEulerSdk()
+}
 
 const showAllLabelEntries = ref(false)
 
@@ -65,9 +89,8 @@ const setShowAllLabelEntries = (enabled: boolean) => {
 // the registry are stable across batch updates for vaults NOT in the current
 // batch — registrySetMany only replaces entries for the addresses it receives.
 // So when `cached.borrow === borrowVault && cached.collateral === collateralVault`,
-// every scalar field on the pair is necessarily unchanged (the LTV subfields
-// live inside borrowVault.collateralLTVs, which is the same array when the
-// borrow vault ref hasn't been replaced). Reusing the cached pair lets
+// `cached.ltv` also points at the same SDK collateral edge inside
+// borrowVault.collaterals. Reusing the cached pair lets
 // Vue's shallow prop compare in VaultBorrowItem mark the bound `pair` as
 // unchanged for every pair whose vaults weren't in the current batch,
 // cutting the row-render cascade down to just the pairs that actually had
@@ -75,20 +98,29 @@ const setShowAllLabelEntries = (enabled: boolean) => {
 const borrowPairCache = new Map<string, AnyBorrowVaultPair>()
 
 const borrowList = computed((): AnyBorrowVaultPair[] => {
-  const { getVerifiedEvkVaults, getVault: registryGetVault } = useVaultRegistry()
+  const { getVerifiedEVaults, getVault: registryGetVault } = useVaultRegistry()
+  const { verifiedVaultAddresses } = useEulerLabels()
   const pairs: AnyBorrowVaultPair[] = []
-  const evkVaults = getVerifiedEvkVaults(showAllLabelEntries.value)
+  const vaultOrder = new Map(
+    verifiedVaultAddresses.value.map((address, index) => [address.toLowerCase(), index]),
+  )
+  const getVaultOrder = (address: string) => vaultOrder.get(address.toLowerCase()) ?? Number.MAX_SAFE_INTEGER
+  const eVaults = [...getVerifiedEVaults(showAllLabelEntries.value)]
+    .sort((a, b) => getVaultOrder(a.address) - getVaultOrder(b.address))
   const seenKeys = new Set<string>()
 
-  evkVaults.forEach((borrowVault) => {
-    borrowVault.collateralLTVs.forEach((ltv) => {
-      if (ltv.borrowLTV <= 0n) return
+  eVaults.forEach((borrowVault) => {
+    const collaterals = [...borrowVault.collaterals]
+      .sort((a, b) => getVaultOrder(a.address) - getVaultOrder(b.address))
 
-      const collateralVault = registryGetVault(ltv.collateral)
+    collaterals.forEach((ltv) => {
+      if (ltv.borrowLTV <= 0) return
+
+      const collateralVault = registryGetVault(ltv.address)
       if (!collateralVault) return
       if (!showAllLabelEntries.value && isVaultNotExplorable(collateralVault.address)) return
 
-      const key = `${borrowVault.address.toLowerCase()}:${ltv.collateral.toLowerCase()}`
+      const key = `${borrowVault.address.toLowerCase()}:${ltv.address.toLowerCase()}`
       seenKeys.add(key)
 
       const cached = borrowPairCache.get(key)
@@ -100,11 +132,7 @@ const borrowList = computed((): AnyBorrowVaultPair[] => {
       const pair = {
         borrow: borrowVault,
         collateral: collateralVault,
-        borrowLTV: ltv.borrowLTV,
-        liquidationLTV: ltv.liquidationLTV,
-        initialLiquidationLTV: ltv.initialLiquidationLTV,
-        targetTimestamp: ltv.targetTimestamp,
-        rampDuration: ltv.rampDuration,
+        ltv,
       } as AnyBorrowVaultPair
       borrowPairCache.set(key, pair)
       pairs.push(pair)
@@ -127,8 +155,9 @@ const resetVaultsState = () => {
   borrowPairCache.clear()
   isReady.value = false
   isCollateralResolved.value = false
-  isEVKLoading.value = true
-  isEVKUpdating.value = true
+  isMarketDataResolved.value = false
+  isEVaultLoading.value = true
+  isEVaultUpdating.value = true
   isEarnLoading.value = true
   isEarnUpdating.value = true
   isSecuritizeLoading.value = true
@@ -137,57 +166,66 @@ const resetVaultsState = () => {
   isEscrowLoadedOnce.value = false
   loadedChainId.value = null
   clear()
-  clearPriceCaches()
   resetVaultCategoryCache()
 }
 
-const updateEVKVaults = async (vaultAddresses: string[], generation?: number, silent = false) => {
-  const { setMany: registrySetMany, getVault: registryGetVault } = useVaultRegistry()
+const updateEVaults = async (vaultAddresses: string[], generation?: number, silent = false, options: UpdateEVaultsOptions = {}) => {
+  const { setMany: registrySetMany, get: registryGet, isKnownEscrowAddress } = useVaultRegistry()
   const gen = generation ?? loadGeneration.value
-  const ctx = contextForGeneration(gen)
 
   try {
     if (!silent) {
-      isEVKUpdating.value = true
-      isEVKLoading.value = true
+      isEVaultUpdating.value = true
+      isEVaultLoading.value = true
     }
 
-    for await (const result of fetchVaults(ctx, vaultAddresses)) {
-      if (loadGeneration.value !== gen) return
+    if (!vaultAddresses.length) {
+      if (!silent) isEVaultLoading.value = false
+      return
+    }
 
-      registrySetMany(result.vaults.map((vault) => {
-        const existing = registryGetVault(vault.address) as Vault | undefined
-        const vaultCategory = existing?.vaultCategory
-        const verified = vaultCategory === 'escrow' ? true : vault.verified
-        return {
-          address: vault.address,
-          vault: vaultCategory ? { ...vault, vaultCategory, verified } : vault,
-          type: 'evk' as const,
-        }
-      }))
+    const { chainId } = useEulerAddresses()
+    const sdk = await getSdkVaults()
+    const result = await sdk.eVaultService.fetchVaults(
+      chainId.value,
+      vaultAddresses.map(addr => getAddress(addr) as Address),
+      liteVaultFetchOptions,
+    )
+    if (loadGeneration.value !== gen) return
+    result.errors.forEach(issue => logWarn('useVaults/updateEVaults', issue))
 
-      if (!silent) {
-        isEVKLoading.value = false
+    registrySetMany((result.result.filter(Boolean) as EVault[]).map((vault) => {
+      const existing = registryGet(vault.address)
+      const vaultCategory = existing?.vaultCategory ?? (isKnownEscrowAddress(vault.address) ? 'escrow' : undefined)
+      const verified = vaultCategory === 'escrow' || existing?.verified === true || options.verifiedAddresses?.has(vault.address.toLowerCase()) === true
+      return {
+        address: vault.address,
+        vault,
+        type: 'evk' as const,
+        verified,
+        vaultCategory,
       }
+    }))
 
-      if (result.isFinished) {
-        break
-      }
+    if (!silent) {
+      isEVaultLoading.value = false
     }
   }
   catch (e) {
-    logWarn('useVaults/updateEVKVaults', e)
+    logWarn('useVaults/updateEVaults', e)
+    if (!silent && loadGeneration.value === gen) {
+      isEVaultLoading.value = false
+    }
   }
   finally {
     if (!silent && loadGeneration.value === gen) {
-      isEVKUpdating.value = false
+      isEVaultUpdating.value = false
     }
   }
 }
 const updateEarnVaults = async (vaultAddresses: string[], generation?: number, silent = false) => {
   const { setMany: registrySetMany } = useVaultRegistry()
   const gen = generation ?? loadGeneration.value
-  const ctx = contextForGeneration(gen)
 
   try {
     if (!silent) {
@@ -195,27 +233,36 @@ const updateEarnVaults = async (vaultAddresses: string[], generation?: number, s
       isEarnLoading.value = true
     }
 
-    for await (const result of fetchEarnVaults(ctx, vaultAddresses)) {
-      if (loadGeneration.value !== gen) return
+    if (!vaultAddresses.length) {
+      if (!silent) isEarnLoading.value = false
+      return
+    }
 
-      registrySetMany(result.vaults.map(vault => ({
-        address: vault.address,
-        vault,
-        type: 'earn' as const,
-      })))
+    const { chainId } = useEulerAddresses()
+    const sdk = await getSdkVaults()
+    const result = await sdk.eulerEarnService.fetchVaults(
+      chainId.value,
+      vaultAddresses.map(addr => getAddress(addr) as Address),
+      liteVaultFetchOptions,
+    )
+    if (loadGeneration.value !== gen) return
+    result.errors.forEach(issue => logWarn('useVaults/updateEarnVaults', issue))
 
-      if (!silent) {
-        isEarnLoading.value = false
-      }
+    registrySetMany((result.result.filter(Boolean) as EulerEarn[]).map(vault => ({
+      address: vault.address,
+      vault,
+      type: 'earn' as const,
+      verified: true,
+    })))
 
-      if (result.isFinished) {
-        break
-      }
+    if (!silent) {
+      isEarnLoading.value = false
     }
   }
   catch (e) {
     logWarn('useVaults/updateEarnVaults', e)
     if (!silent && loadGeneration.value === gen) {
+      isEarnLoading.value = false
       isEarnUpdating.value = false
     }
   }
@@ -223,20 +270,20 @@ const updateEarnVaults = async (vaultAddresses: string[], generation?: number, s
 }
 
 /**
- * Extract escrow vault addresses that are needed (used as collateral in EVK vaults
+ * Extract escrow vault addresses that are needed (used as collateral in EVaults
  * or as strategies in Earn vaults).
  */
 const extractNeededEscrowAddresses = (): string[] => {
-  const { getEvkVaults, getEarnVaults, isKnownEscrowAddress } = useVaultRegistry()
+  const { getEVaults, getEarnVaults, isKnownEscrowAddress } = useVaultRegistry()
   const needed = new Set<string>()
 
-  // 1. Escrow vaults used as collateral in EVK vaults — include any live edge,
+  // 1. Escrow vaults used as collateral in EVaults — include any live edge,
   //    not just borrowable ones, so escrows mid-liquidation-LTV-ramp (where
   //    borrowLTV is already 0) still get fetched and shown in discovery.
-  getEvkVaults().forEach((vault) => {
-    vault.collateralLTVs.forEach((ltv) => {
-      if (isLiveCollateralEdge(ltv) && isKnownEscrowAddress(ltv.collateral)) {
-        needed.add(getAddress(ltv.collateral))
+  getEVaults().forEach((vault) => {
+    vault.collaterals.forEach((ltv) => {
+      if (isLiveCollateralEdge(ltv) && isKnownEscrowAddress(ltv.address)) {
+        needed.add(getAddress(ltv.address))
       }
     })
   })
@@ -244,8 +291,8 @@ const extractNeededEscrowAddresses = (): string[] => {
   // 2. Escrow vaults used as strategies in Earn vaults
   getEarnVaults().forEach((earnVault) => {
     earnVault.strategies.forEach((strategyInfo) => {
-      if (isKnownEscrowAddress(strategyInfo.strategy)) {
-        needed.add(getAddress(strategyInfo.strategy))
+      if (isKnownEscrowAddress(strategyInfo.address)) {
+        needed.add(getAddress(strategyInfo.address))
       }
     })
   })
@@ -264,22 +311,27 @@ const fetchNeededEscrowVaults = async (addresses: string[], generation: number):
     return
   }
 
-  const ctx = contextForGeneration(generation)
-  const results = await Promise.allSettled(
-    addresses.map(addr => fetchEscrowVault(addr, ctx)),
+  const { chainId } = useEulerAddresses()
+  const sdk = await getSdkVaults()
+  const result = await sdk.eVaultService.fetchVaults(
+    chainId.value,
+    addresses.map(addr => getAddress(addr) as Address),
+    liteVaultFetchOptions,
   )
 
   if (loadGeneration.value !== generation) return
 
-  const entries: Array<{ address: string, vault: Vault, type: 'evk' }> = []
-  results.forEach((result) => {
-    if (result.status === 'fulfilled') {
-      entries.push({ address: result.value.address, vault: result.value, type: 'evk' })
-    }
-    else {
-      logWarn('useVaults/escrow', result.reason)
-    }
-  })
+  result.errors.forEach(issue => logWarn('useVaults/escrow', issue))
+  const entries = result.result
+    .filter(Boolean)
+    .map(vault => vault as EVault)
+    .map(vault => ({
+      address: vault.address,
+      vault,
+      type: 'evk' as const,
+      verified: true,
+      vaultCategory: 'escrow' as const,
+    }))
   registrySetMany(entries)
 }
 
@@ -287,24 +339,24 @@ const fetchNeededEscrowVaults = async (addresses: string[], generation: number):
  * Lazy-resolve collateral addresses that aren't covered by the bulk loaders.
  *
  * `fetchChainVaultCategories` already ran earlier in this `loadVaults` call
- * and populated the per-address category cache, so `fetchVaultCategory` is a
- * cache hit for every address indexed by the subgraph. We group addresses
- * by category and hand each group to the existing bulk loader for that type
- * (`updateEVKVaults` / `updateEarnVaults` / `updateSecuritizeVaults` /
+ * and populated the per-address category cache from SDK vault metadata. We
+ * group addresses by category and hand each group to the existing bulk loader
+ * for that type
+ * (`updateEVaults` / `updateEarnVaults` / `updateSecuritizeVaults` /
  * `fetchNeededEscrowVaults`) — same multicall batching, same registry-write
  * path, no parallel implementation. `silent=true` keeps loading flags
  * untouched since this runs after the initial reveal.
  *
- * Addresses the subgraph has not indexed (category === null) are skipped —
- * a probe-and-guess fallback would misidentify brand-new escrows as plain
- * EVK, and the next `loadVaults` cycle picks them up once the subgraph
- * catches up. The diagnostic warns in `useMarketGroups` and
+ * Addresses the SDK cannot classify (category === null) are skipped — a
+ * probe-and-guess fallback would misidentify brand-new escrows as plain EVault,
+ * and the next `loadVaults` cycle picks them up once SDK metadata catches up.
+ * The diagnostic warns in `useMarketGroups` and
  * `VaultOverviewBlockBorrow` surface the gap in the meantime.
  */
 const fetchUnresolvedCollaterals = async (addresses: string[], generation: number): Promise<void> => {
   if (!addresses.length || loadGeneration.value !== generation) return
 
-  const evkAddrs: string[] = []
+  const eVaultAddrs: string[] = []
   const earnAddrs: string[] = []
   const securitizeAddrs: string[] = []
   const escrowAddrs: string[] = []
@@ -316,7 +368,7 @@ const fetchUnresolvedCollaterals = async (addresses: string[], generation: numbe
         escrowAddrs.push(addr)
         break
       case 'evk':
-        evkAddrs.push(addr)
+        eVaultAddrs.push(addr)
         break
       case 'earn':
         earnAddrs.push(addr)
@@ -325,8 +377,8 @@ const fetchUnresolvedCollaterals = async (addresses: string[], generation: numbe
         securitizeAddrs.push(addr)
         break
       default:
-        // Subgraph hasn't indexed this address — skip and let the next
-        // loadVaults cycle pick it up once the category endpoint warms.
+        // SDK metadata has not classified this address — skip and let the next
+        // loadVaults cycle pick it up once metadata catches up.
         break
     }
   }))
@@ -335,7 +387,7 @@ const fetchUnresolvedCollaterals = async (addresses: string[], generation: numbe
 
   // Bulk loaders short-circuit on empty input, so call unconditionally.
   await Promise.all([
-    updateEVKVaults(evkAddrs, generation, true),
+    updateEVaults(eVaultAddrs, generation, true),
     updateEarnVaults(earnAddrs, generation, true),
     updateSecuritizeVaults(securitizeAddrs, generation, true),
     fetchNeededEscrowVaults(escrowAddrs, generation),
@@ -343,11 +395,15 @@ const fetchUnresolvedCollaterals = async (addresses: string[], generation: numbe
 }
 
 const resolveUnresolvedCollaterals = async (generation: number): Promise<void> => {
-  const { getEvkVaults, has: registryHas } = useVaultRegistry()
+  const { getEVaults, has: registryHas } = useVaultRegistry()
+  // Do not apply the explorable-product filter here. The matrix/group builders
+  // still exclude non-explorable vaults as market members, but they need live
+  // collateral references loaded in the registry so those vaults can render as
+  // external collateral rows.
   const unresolvedAddresses = extractUnresolvedCollateralAddresses(
-    getEvkVaults(),
+    getEVaults(),
     registryHas,
-  ).filter(addr => showAllLabelEntries.value || !isVaultNotExplorable(addr))
+  )
 
   await fetchUnresolvedCollaterals(unresolvedAddresses, generation)
 }
@@ -365,22 +421,26 @@ const updateSecuritizeVaults = async (securitizeAddresses: string[], generation:
       isSecuritizeLoading.value = true
     }
 
-    const ctx = contextForGeneration(generation)
-    const results = await Promise.allSettled(
-      securitizeAddresses.map(addr => fetchSecuritizeVault(addr, ctx)),
+    const { chainId } = useEulerAddresses()
+    const sdk = await getSdkVaults()
+    const result = await sdk.securitizeVaultService.fetchVaults(
+      chainId.value,
+      securitizeAddresses.map(addr => getAddress(addr) as Address),
+      liteSecuritizeVaultFetchOptions,
     )
 
     if (loadGeneration.value !== generation) return
 
-    const entries: Array<{ address: string, vault: SecuritizeVault, type: 'securitize' }> = []
-    results.forEach((result, index) => {
-      if (result.status === 'fulfilled') {
-        entries.push({ address: result.value.address, vault: result.value, type: 'securitize' })
-      }
-      else {
-        logWarn(`useVaults/updateSecuritizeVaults/${securitizeAddresses[index]}`, result.reason)
-      }
-    })
+    result.errors.forEach(issue => logWarn('useVaults/updateSecuritizeVaults', issue))
+    const entries = result.result
+      .filter(Boolean)
+      .map(vault => vault as SecuritizeCollateralVault)
+      .map(vault => ({
+        address: vault.address,
+        vault,
+        type: 'securitize' as const,
+        verified: true,
+      }))
     registrySetMany(entries)
   }
   catch (e) {
@@ -395,28 +455,15 @@ const updateSecuritizeVaults = async (securitizeAddresses: string[], generation:
 }
 
 /**
- * Hydrate the registry from the server-side snapshot endpoint.
- *
- * Returns true if hydration succeeded, false if the server endpoint failed
- * or was stale — the caller falls through to the full RPC pipeline in that
- * case. On success, isReady is flipped immediately so UI consumers unblock
- * without waiting on the full RPC refresh.
- *
- * Loading flags (isEVKLoading etc.) clear on hydration success because we
- * have valid data to render; updating flags (isEVKUpdating) stay true so the
- * subsequent RPC refresh can still signal "refresh in progress" to the UI.
+ * Reject snapshots older than this — indicates the warm-cache plugin
+ * has been stalled across multiple cycles. Falling through to a full
+ * RPC load is preferable to rendering ancient TVLs / rates.
  */
-/** Upper bound on snapshot age the client will hydrate from. Covers normal
- * warm-cache intervals (4 min) plus a couple of missed cycles. Older
- * snapshots are discarded and the RPC pipeline populates from scratch. */
-const MAX_HYDRATION_AGE_MS = 15 * 60_000
+const MAX_HYDRATION_AGE_MS = 6 * 60_000
 
-/** Narrow the opaque wire object to the ChainVaultsSnapshot shape before we
- * start trusting it for registry writes. A malformed server response would
- * otherwise crash at the first `.map()` call. */
-const isChainVaultsSnapshot = (v: unknown): v is ChainVaultsSnapshot => {
-  if (v === null || typeof v !== 'object') return false
-  const s = v as Record<string, unknown>
+const isSerialisedSnapshot = (v: unknown): v is SerialisedSnapshot => {
+  if (!v || typeof v !== 'object') return false
+  const s = v as Partial<SerialisedSnapshot>
   return typeof s.chainId === 'number'
     && typeof s.fetchedAt === 'number'
     && Array.isArray(s.evkVaults)
@@ -425,66 +472,160 @@ const isChainVaultsSnapshot = (v: unknown): v is ChainVaultsSnapshot => {
     && Array.isArray(s.escrowVaults)
 }
 
+type Hydrated<V> = { vault: V, args: Record<string, unknown> }
+
+interface HydratedSnapshot {
+  evk: Hydrated<EVaultClass>[]
+  earn: Hydrated<EulerEarnClass>[]
+  securitize: Hydrated<SecuritizeCollateralVaultClass>[]
+  escrow: Hydrated<EVaultClass>[]
+}
+
+const decodeArgs = (entry: SerialisedVault): Record<string, unknown> | undefined => {
+  const args = decodeBigints(entry.data) as Record<string, unknown>
+  return args && typeof args === 'object' ? args : undefined
+}
+
+const instantiateEvk = (entry: SerialisedVault): Hydrated<EVaultClass> | undefined => {
+  const args = decodeArgs(entry)
+  return args ? { vault: new EVault(args as unknown as IEVault), args } : undefined
+}
+
+const instantiateEarn = (entry: SerialisedVault): Hydrated<EulerEarnClass> | undefined => {
+  const args = decodeArgs(entry)
+  return args ? { vault: new EulerEarn(args as unknown as IEulerEarn), args } : undefined
+}
+
+const instantiateSecuritize = (entry: SerialisedVault): Hydrated<SecuritizeCollateralVaultClass> | undefined => {
+  const args = decodeArgs(entry)
+  return args ? { vault: new SecuritizeCollateralVault(args as unknown as ISecuritizeCollateralVault), args } : undefined
+}
+
+const markHydratedSnapshotReady = (targetChainId: number) => {
+  isEVaultLoading.value = false
+  isEVaultUpdating.value = false
+  isEarnLoading.value = false
+  isEarnUpdating.value = false
+  isSecuritizeLoading.value = false
+  isSecuritizeUpdating.value = false
+  isEscrowLoading.value = false
+  isEscrowUpdating.value = false
+  isEscrowLoadedOnce.value = true
+  isReady.value = true
+  loadedChainId.value = targetChainId
+}
+
+const enrichHydratedSnapshot = async (snapshot: HydratedSnapshot, generation: number) => {
+  const { evk, escrow, earn, securitize } = snapshot
+  if (loadGeneration.value !== generation) return
+
+  const registry = useVaultRegistry()
+  const meta = buildRegistryMetaService(registry)
+  await Promise.all([
+    ...evk.map(h => h.vault.populateCollaterals(meta)),
+    ...escrow.map(h => h.vault.populateCollaterals(meta)),
+    ...earn.map(h => h.vault.populateStrategyVaults(meta)),
+  ])
+  if (loadGeneration.value !== generation) return
+
+  const snapshotIndex: SnapshotArgsByAddress = buildSnapshotIndex([
+    ...evk, ...escrow, ...earn, ...securitize,
+  ].map(h => ({ address: h.vault.address, args: h.args })))
+  const priceStub = buildSnapshotPriceService(snapshotIndex)
+  const rewardsStub = buildSnapshotRewardsService(snapshotIndex)
+  const intrinsicApyService = new IntrinsicApyService(buildSnapshotIntrinsicApyAdapter(snapshotIndex))
+  const allHydrated = [...evk, ...escrow, ...earn, ...securitize]
+  await Promise.all([
+    ...allHydrated.map(h => h.vault.populateMarketPrices(priceStub)),
+    ...allHydrated.map(h => h.vault.populateRewards(rewardsStub)),
+    intrinsicApyService.populateIntrinsicApy(allHydrated.map(h => h.vault)),
+  ])
+}
+
+const scheduleHydratedSnapshotEnrichment = (snapshot: HydratedSnapshot, generation: number) => {
+  const run = () => {
+    void enrichHydratedSnapshot(snapshot, generation)
+      .catch(err => logWarn('useVaults/enrichHydratedSnapshot', err))
+      .finally(() => {
+        if (loadGeneration.value === generation) {
+          isMarketDataResolved.value = true
+        }
+      })
+  }
+
+  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+    window.requestIdleCallback(run, { timeout: 1_000 })
+    return
+  }
+
+  setTimeout(run, 0)
+}
+
+/**
+ * Two-pass hydrate from the server snapshot at /api/vaults?chainId=N.
+ *
+ * Pass 1: instantiate every vault as its SDK class and write to the
+ *         registry. Class methods are restored via the constructor; data
+ *         fields come from the decoded snapshot.
+ *
+ * Pass 2: schedule SDK cross-reference and snapshot-backed enrichment work
+ *         after the registry is published. This restores `collateral.vault`,
+ *         strategy refs, market prices, rewards, and intrinsic APY without
+ *         holding the initial list render behind the extra in-memory pass.
+ *
+ * Returns true if the registry is populated and the UI can render
+ * immediately. Returns false if the snapshot is too stale, the wire
+ * shape is malformed, or fetch failed — caller falls through to a
+ * full RPC load.
+ */
 const hydrateFromServer = async (targetChainId: number, generation: number): Promise<boolean> => {
   const { setMany: registrySetMany, setEscrowAddresses } = useVaultRegistry()
   try {
-    // Snapshot + categorization fetched in parallel. Both are warm-cached
-    // server-side so this is usually two fast hits. Categorization provides
-    // the escrow address set previously baked into the snapshot payload.
-    const [wire, categories] = await Promise.all([
-      $fetch<SerialisedSnapshot>('/api/vaults', { query: { chainId: targetChainId } }),
-      fetchChainVaultCategories(),
-    ])
+    const wire = await $fetch<SerialisedSnapshot>('/api/vaults', { query: { chainId: targetChainId } })
     if (loadGeneration.value !== generation) return false
 
-    const snap = deserialiseSnapshot(wire)
-    if (!isChainVaultsSnapshot(snap)) {
+    const snap = decodeBigints(wire) as SerialisedSnapshot
+    if (!isSerialisedSnapshot(snap)) {
       logWarn('useVaults/hydrateFromServer', 'server returned a malformed snapshot; falling back to RPC')
       return false
     }
     if (snap.chainId !== targetChainId) return false
     if (Date.now() - snap.fetchedAt > MAX_HYDRATION_AGE_MS) {
-      // Snapshot is older than MAX_HYDRATION_AGE_MS — indicates prolonged
-      // warm-cache failure. Reject rather than render stale prices/caps.
-      logWarn('useVaults/hydrateFromServer', `snapshot too stale (${Math.round((Date.now() - snap.fetchedAt) / 1000)}s old); falling back to RPC`)
+      logWarn(
+        'useVaults/hydrateFromServer',
+        `snapshot too stale (${Math.round((Date.now() - snap.fetchedAt) / 1000)}s old); falling back to RPC`,
+      )
       return false
     }
 
-    // Registry writes: match the type tags useVaults normally uses so that
-    // getType/getVault/isEscrowVault all work identically after hydration.
-    // Re-stamp vaultCategory='escrow' defensively on escrow vaults — the
-    // loader already sets it via fetchEscrowVault, but the registry write
-    // is our last chance to guarantee it for downstream `vaultCategory`
-    // consumers (VaultItem etc.).
-    registrySetMany(snap.evkVaults.map(vault => ({ address: vault.address, vault, type: 'evk' as const })))
-    registrySetMany(snap.escrowVaults.map(vault => ({
-      address: vault.address,
-      vault: { ...vault, vaultCategory: 'escrow' as const },
-      type: 'evk' as const,
-    })))
-    registrySetMany(snap.earnVaults.map(vault => ({ address: vault.address, vault, type: 'earn' as const })))
-    registrySetMany(snap.securitizeVaults.map(vault => ({ address: vault.address, vault, type: 'securitize' as const })))
-    // Seed escrow set from the categorization. UI routing (isKnownEscrowAddress)
-    // depends on this being populated at hydration time.
-    setEscrowAddresses(categories.escrow)
+    // Pass 1: instantiate + register. Keep the decoded args alongside each
+    // instance so the populate-stubs in pass 2 can read snapshot fields
+    // that the SDK constructors don't restore (marketPriceUsd, rewards,
+    // intrinsicApy, and per-collateral marketPriceUsd).
+    const isHydrated = <V>(h: Hydrated<V> | undefined): h is Hydrated<V> => h !== undefined
+    const evk = snap.evkVaults.map(instantiateEvk).filter(isHydrated)
+    const earn = snap.earnVaults.map(instantiateEarn).filter(isHydrated)
+    const securitize = snap.securitizeVaults.map(instantiateSecuritize).filter(isHydrated)
+    const escrow = snap.escrowVaults.map(instantiateEvk).filter(isHydrated)
 
-    // Clear both loading AND updating flags: the registry is fully populated
-    // from the snapshot, and the subsequent RPC refresh runs in silent mode
-    // so it won't re-toggle them. Consumers gating on isEVKUpdating
-    // (e.g. pages/lend) unblock immediately instead of waiting on the full
-    // RPC refresh.
-    isEVKLoading.value = false
-    isEVKUpdating.value = false
-    isEarnLoading.value = false
-    isEarnUpdating.value = false
-    isSecuritizeLoading.value = false
-    isSecuritizeUpdating.value = false
-    isEscrowLoading.value = false
-    isEscrowUpdating.value = false
-    isEscrowLoadedOnce.value = true
-    isReady.value = true
-    loadedChainId.value = targetChainId
+    const escrowAddrs: string[] = escrow.map(h => h.vault.address)
+    setEscrowAddresses(escrowAddrs)
 
+    registrySetMany([
+      ...evk.map(h => ({ address: h.vault.address, vault: h.vault, type: 'evk' as const, verified: true })),
+      ...escrow.map(h => ({
+        address: h.vault.address,
+        vault: h.vault,
+        type: 'evk' as const,
+        verified: true,
+        vaultCategory: 'escrow' as const,
+      })),
+      ...earn.map(h => ({ address: h.vault.address, vault: h.vault, type: 'earn' as const, verified: true })),
+      ...securitize.map(h => ({ address: h.vault.address, vault: h.vault, type: 'securitize' as const, verified: true })),
+    ])
+
+    markHydratedSnapshotReady(targetChainId)
+    scheduleHydratedSnapshotEnrichment({ evk, earn, securitize, escrow }, generation)
     return true
   }
   catch (err) {
@@ -502,17 +643,15 @@ const loadVaults = async () => {
   const generation = loadGeneration.value
   const startChainId = chainId.value
 
-  // Hydrate from server cache first. On failure we fall through and the
-  // RPC pipeline below populates from scratch.
+  // Phase 0: try to hydrate from the warm snapshot at /api/vaults. On
+  // success the registry is populated and the UI renders immediately;
+  // the subsequent RPC pipeline runs in *silent* mode so the per-category
+  // loading/updating flags stay false. On failure (stale, malformed, or
+  // network error) we fall through and the RPC pipeline drives the
+  // loading state normally.
   const hydrated = await hydrateFromServer(startChainId, generation)
   if (loadGeneration.value !== generation) return
 
-  // When hydrated, the RPC refresh below runs in *silent* mode: the UI
-  // already has valid data to render, so per-category loading/updating
-  // flags stay false (same semantics as the 60s polling refresh). Pages
-  // that gate content on isEVKUpdating / isEarnUpdating / etc unblock
-  // immediately. When hydration failed, the refresh runs non-silent so
-  // flags drive the loading state normally.
   const silent = hydrated
 
   // Filter out non-explorable vaults before any on-chain work
@@ -529,41 +668,38 @@ const loadVaults = async () => {
       isEscrowLoading.value = true
     }
 
-    // Phase 1: Fetch chain-wide vault categorization. The endpoint is
-    // CDN-cacheable and warm-cached server-side, so this is usually a
-    // ~50ms fetch. Addresses missing from the categorization (new
-    // deployments the subgraph hasn't indexed yet) default to EVK —
-    // the VaultLens handles any ERC-4626 + EVK-compatible vault.
+    // Phase 1: Fetch chain-wide vault categorization from SDK metadata.
+    // Addresses missing from the categorization default to EVault — the SDK
+    // EVault service handles any ERC-4626 + EVault-compatible vault.
     const categories = await fetchChainVaultCategories()
 
     if (loadGeneration.value !== generation) return
 
     const securitizeSet = new Set(categories.securitize.map(a => a.toLowerCase()))
-    const evkAddresses: string[] = []
+    const eVaultAddresses: string[] = []
     const securitizeAddresses: string[] = []
-
     explorableVaultAddresses.forEach((addr) => {
       if (securitizeSet.has(addr.toLowerCase())) {
         securitizeAddresses.push(addr)
       }
       else {
-        evkAddresses.push(addr)
+        eVaultAddresses.push(addr)
       }
     })
 
-    // Seed the registry's escrow set from the categorization. The catalog
-    // endpoint already reads EscrowedCollateralPerspective.verifiedArray()
-    // server-side, so no redundant client-side RPC call is needed.
+    // Seed the registry's escrow set from SDK-backed categorization. The SDK
+    // service reads the escrow verified array, so no duplicate local RPC check
+    // is needed here.
     setEscrowAddresses(categories.escrow)
 
-    // Phase 2: fetch EVK, Earn, Securitize in parallel; follow with escrow
-    // vault info once EVK collateralLTVs + Earn strategies are known (the
+    // Phase 2: fetch EVault, Earn, Securitize in parallel; follow with escrow
+    // vault info once EVault collaterals + Earn strategies are known (the
     // escrow subset referenced by them is what we need to fetch details for).
 
-    let evkResolve: () => void = () => {}
+    let eVaultResolve: () => void = () => {}
     let earnResolve: () => void = () => {}
-    const evkLoaded = new Promise<void>((resolve) => {
-      evkResolve = resolve
+    const eVaultLoaded = new Promise<void>((resolve) => {
+      eVaultResolve = resolve
     })
     const earnLoaded = new Promise<void>((resolve) => {
       earnResolve = resolve
@@ -575,11 +711,15 @@ const loadVaults = async () => {
         earnResolve()
       })(),
       (async () => {
-        await updateEVKVaults(evkAddresses, generation, silent)
-        evkResolve()
+        await updateEVaults(eVaultAddresses, generation, silent, {
+          verifiedAddresses: new Set(
+            eVaultAddresses.map(addr => addr.toLowerCase()),
+          ),
+        })
+        eVaultResolve()
       })(),
       updateSecuritizeVaults(securitizeAddresses, generation, silent),
-      Promise.all([evkLoaded, earnLoaded]).then(async () => {
+      Promise.all([eVaultLoaded, earnLoaded]).then(async () => {
         const neededEscrowAddresses = extractNeededEscrowAddresses()
         await fetchNeededEscrowVaults(neededEscrowAddresses, generation)
       }),
@@ -589,7 +729,7 @@ const loadVaults = async () => {
 
     // After bulk loaders + escrow lazy-fetch settle, sweep up any collateral
     // address referenced by a member vault that isn't yet in the registry.
-    // These are typically EVK vaults that exist on chain but aren't part of
+    // These are typically EVaults that exist on chain but aren't part of
     // any product label — without this, discovery views silently drop the
     // relationship. Single pass is enough: discovery views iterate only
     // member vaults, so a resolved off-label vault is a leaf in those views;
@@ -603,9 +743,10 @@ const loadVaults = async () => {
     // gating "unknown collateral" classification can now run without
     // misclassifying not-yet-hydrated lazy collateral references.
     isCollateralResolved.value = true
+    isMarketDataResolved.value = true
 
     // Clear flags AFTER all needed escrow vaults are loaded.
-    // Silent mode skips EVK/Earn flags (already false from hydration) but
+    // Silent mode skips EVault/Earn flags (already false from hydration) but
     // still clears escrow + securitize which were never touched during
     // the silent RPC refresh.
     if (!silent) {
@@ -624,8 +765,9 @@ const loadVaults = async () => {
       // Unblock consumers so direct market pages can render their fallback
       // state instead of waiting forever on a failed sweep.
       isCollateralResolved.value = true
-      isEVKLoading.value = false
-      isEVKUpdating.value = false
+      isMarketDataResolved.value = true
+      isEVaultLoading.value = false
+      isEVaultUpdating.value = false
       isEarnLoading.value = false
       isEarnUpdating.value = false
       isSecuritizeLoading.value = false
@@ -641,7 +783,7 @@ const loadVaults = async () => {
     }
   }
 }
-const getVault = async (address: string): Promise<Vault> => {
+const getVault = async (address: string): Promise<EVault> => {
   const { verifiedVaultAddresses } = useEulerLabels()
   const {
     getType,
@@ -657,10 +799,10 @@ const getVault = async (address: string): Promise<Vault> => {
     throw new Error('[getVault] Address is a securitize vault, use getSecuritizeVault instead')
   }
 
-  // If vault is already in registry as EVK, return it directly
+  // If vault is already in registry as an EVault, return it directly
   // This prevents overwriting escrow vaults (which have verified: true) with fetchVault results
   if (vaultType === 'evk') {
-    return registryGetVault(normalizedAddress) as Vault
+    return registryGetVault(normalizedAddress) as EVault
   }
 
   // If still no type info and address is in verifiedVaultAddresses but not in registry,
@@ -677,13 +819,13 @@ const getVault = async (address: string): Promise<Vault> => {
   }
 
   if (verifiedVaultAddresses.value.includes(normalizedAddress) && !isVaultNotExplorable(normalizedAddress)) {
-    await until(computed(() => registryGetVault(normalizedAddress))).toBeTruthy()
-    return registryGetVault(normalizedAddress) as Vault
+    await until(computed(() => Boolean(registryGetVault(normalizedAddress)))).toMatch(Boolean)
+    return registryGetVault(normalizedAddress) as EVault
   }
 
   // Unlabeled address — route through the registry's resolveUnknown path so
-  // we correctly detect escrow / securitize via subgraph factory lookup +
-  // escrow perspective check, instead of blindly calling the EVK lens.
+  // we correctly detect escrow / securitize via SDK metadata, instead of
+  // blindly calling the EVault service.
   // getOrFetch caches the result in the registry with the correct type tag.
   await registryGetOrFetch(normalizedAddress)
   const resolvedType = getType(normalizedAddress)
@@ -693,41 +835,39 @@ const getVault = async (address: string): Promise<Vault> => {
   if (resolvedType === 'earn') {
     throw new Error('[getVault] Address is an earn vault, use getEarnVault instead')
   }
-  return registryGetVault(normalizedAddress) as Vault
+  return registryGetVault(normalizedAddress) as EVault
 }
-const getEarnVault = async (address: string): Promise<EarnVault> => {
+const getEarnVault = async (address: string): Promise<EulerEarn> => {
   const { getVault: registryGetVault, set: registrySet } = useVaultRegistry()
   const normalizedAddress = getAddress(address)
   const { earnVaults } = useEulerLabels()
 
   if (earnVaults.value.includes(normalizedAddress) && !isEarnVaultNotExplorable(normalizedAddress)) {
-    await until(computed(() => registryGetVault(normalizedAddress))).toBeTruthy()
+    await until(computed(() => Boolean(registryGetVault(normalizedAddress)))).toMatch(Boolean)
   }
   else {
-    const vault = await fetchEarnVault(normalizedAddress, contextForGeneration(loadGeneration.value))
+    const vault = await useVaultRegistry().fetchVaultByType(normalizedAddress, 'earn') as EulerEarn
     registrySet(normalizedAddress, vault, 'earn')
     return vault
   }
 
-  return registryGetVault(normalizedAddress) as EarnVault
+  return registryGetVault(normalizedAddress) as EulerEarn
 }
-const updateVault = async (vaultAddress: string): Promise<Vault | SecuritizeVault> => {
+const updateVault = async (vaultAddress: string): Promise<EVault | SecuritizeCollateralVault> => {
   const { set: registrySet, isKnownEscrowAddress, getType } = useVaultRegistry()
   const address = getAddress(vaultAddress)
-  const ctx = contextForGeneration(loadGeneration.value)
+  const { fetchVaultByType } = useVaultRegistry()
 
   // Use appropriate fetch function based on vault type
   if (getType(address) === 'securitize') {
-    const vault = await fetchSecuritizeVault(address, ctx)
+    const vault = await fetchVaultByType(address, 'securitize') as SecuritizeCollateralVault
     registrySet(address, vault, 'securitize')
     return vault
   }
 
-  const vault = isKnownEscrowAddress(address)
-    ? await fetchEscrowVault(address, ctx)
-    : await fetchVault(address, ctx)
+  const vault = await fetchVaultByType(address, 'evk') as EVault
 
-  registrySet(address, vault, 'evk')
+  registrySet(address, vault, 'evk', isKnownEscrowAddress(address) ? { verified: true, vaultCategory: 'escrow' } : undefined)
   return vault
 }
 /**
@@ -735,11 +875,11 @@ const updateVault = async (vaultAddress: string): Promise<Vault | SecuritizeVaul
  * Used for periodic polling to keep interest rates, supply/borrow totals, and prices fresh.
  */
 const refreshVaults = async () => {
-  const { getEvkVaults, getEarnVaults, getSecuritizeVaults } = useVaultRegistry()
+  const { getEVaults, getEarnVaults, getSecuritizeVaults } = useVaultRegistry()
   const gen = loadGeneration.value
 
   try {
-    await updateEVKVaults(getEvkVaults().map(v => v.address), gen, true)
+    await updateEVaults(getEVaults().map(v => v.address), gen, true)
     if (loadGeneration.value !== gen) return
 
     await resolveUnresolvedCollaterals(gen)
@@ -762,15 +902,15 @@ const refreshVaults = async () => {
   await updateSecuritizeVaults(getSecuritizeVaults().map(v => v.address), gen, true)
 }
 
-const updateEarnVault = async (vaultAddress: string): Promise<EarnVault> => {
+const updateEarnVault = async (vaultAddress: string): Promise<EulerEarn> => {
   const { set: registrySet } = useVaultRegistry()
   const address = getAddress(vaultAddress)
-  const vault = await fetchEarnVault(address, contextForGeneration(loadGeneration.value))
+  const vault = await useVaultRegistry().fetchVaultByType(address, 'earn') as EulerEarn
   registrySet(address, vault, 'earn')
   return vault
 }
 
-const getEscrowVault = async (address: string): Promise<Vault> => {
+const getEscrowVault = async (address: string): Promise<EVault> => {
   const { getVault: registryGetVault, isEscrowVault: registryIsEscrow, isKnownEscrowAddress, set: registrySet } = useVaultRegistry()
   const normalizedAddress = getAddress(address)
 
@@ -782,42 +922,40 @@ const getEscrowVault = async (address: string): Promise<Vault> => {
   // Check if already in registry with full vault info
   const existingVault = registryGetVault(normalizedAddress)
   if (existingVault && registryIsEscrow(normalizedAddress)) {
-    return existingVault as Vault
+    return existingVault as EVault
   }
-
-  const ctx = contextForGeneration(loadGeneration.value)
 
   // If it's a known escrow address but not in registry (wasn't needed during initial load),
   // fetch on-demand
   if (isKnownEscrowAddress(normalizedAddress)) {
-    const vault = await fetchEscrowVault(normalizedAddress, ctx)
-    registrySet(normalizedAddress, vault, 'evk')
+    const vault = await useVaultRegistry().fetchVaultByType(normalizedAddress, 'evk') as EVault
+    registrySet(normalizedAddress, vault, 'evk', { verified: true, vaultCategory: 'escrow' })
     return vault
   }
 
   // Last resort: try fetching anyway (might be an escrow vault not in perspective yet)
-  const vault = await fetchEscrowVault(normalizedAddress, ctx)
+  const vault = await useVaultRegistry().fetchVaultByType(normalizedAddress, 'evk') as EVault
   registrySet(normalizedAddress, vault, 'evk')
   return vault
 }
 
-const updateEscrowVault = async (vaultAddress: string): Promise<Vault> => {
+const updateEscrowVault = async (vaultAddress: string): Promise<EVault> => {
   const { set: registrySet } = useVaultRegistry()
   const address = getAddress(vaultAddress)
-  const vault = await fetchEscrowVault(address, contextForGeneration(loadGeneration.value))
-  registrySet(address, vault, 'evk')
+  const vault = await useVaultRegistry().fetchVaultByType(address, 'evk') as EVault
+  registrySet(address, vault, 'evk', { verified: true, vaultCategory: 'escrow' })
   return vault
 }
 
-const getSecuritizeVault = async (address: string): Promise<SecuritizeVault> => {
+const getSecuritizeVault = async (address: string): Promise<SecuritizeCollateralVault> => {
   const normalizedAddress = getAddress(address)
   const { getVault: registryGetVault, getType, set: registrySet } = useVaultRegistry()
 
   if (getType(normalizedAddress) === 'securitize') {
-    return registryGetVault(normalizedAddress) as SecuritizeVault
+    return registryGetVault(normalizedAddress) as SecuritizeCollateralVault
   }
 
-  const vault = await fetchSecuritizeVault(normalizedAddress, contextForGeneration(loadGeneration.value))
+  const vault = await useVaultRegistry().fetchVaultByType(normalizedAddress, 'securitize') as SecuritizeCollateralVault
   registrySet(normalizedAddress, vault, 'securitize')
   return vault
 }
@@ -831,6 +969,7 @@ const getBorrowVaultPair = async (
     getType,
     isEscrowVault: registryIsEscrow,
     set: registrySet,
+    fetchVaultByType,
   } = useVaultRegistry()
   const collateralAddr = getAddress(collateralAddress)
   const borrowAddr = getAddress(borrowAddress)
@@ -842,12 +981,12 @@ const getBorrowVaultPair = async (
 
   const borrowType = getType(borrowAddr)
   if (borrowType === 'evk') {
-    const borrowVault = registryGetVault(borrowAddr) as Vault
+    const borrowVault = registryGetVault(borrowAddr) as EVault
     const collateralType = getType(collateralAddr)
 
     if (collateralType === 'evk' || collateralType === 'securitize') {
       const collateralVault = registryGetVault(collateralAddr)!
-      const ltv = borrowVault.collateralLTVs.find(c => c.collateral === collateralAddr)
+      const ltv = borrowVault.collaterals.find(c => getAddress(c.address) === collateralAddr)
 
       if (!ltv) {
         const vaultTypeLabel = collateralType === 'securitize' ? 'securitize vault' : (registryIsEscrow(collateralAddr) ? 'escrow vault' : 'vault')
@@ -857,55 +996,48 @@ const getBorrowVaultPair = async (
       return {
         borrow: borrowVault,
         collateral: collateralVault,
-        borrowLTV: ltv.borrowLTV,
-        liquidationLTV: ltv.liquidationLTV,
-        initialLiquidationLTV: ltv.initialLiquidationLTV,
-        targetTimestamp: ltv.targetTimestamp,
-        rampDuration: ltv.rampDuration,
+        ltv,
       } as AnyBorrowVaultPair
     }
   }
 
-  const ctx = contextForGeneration(loadGeneration.value)
-
   // Fallback: fetch borrow vault if not in registry
-  const borrowVault = await fetchVault(borrowAddr, ctx)
+  const borrowVault = await fetchVaultByType(borrowAddr, 'evk') as EVault
   if (!borrowVault) {
     throw '[getBorrowVaultPair]: Borrow vault not found'
   }
   registrySet(borrowAddr, borrowVault, 'evk')
 
-  const collateralLTV = borrowVault.collateralLTVs.find(c => c.collateral === collateralAddr)
+  const collateralLTV = borrowVault.collaterals.find(c => getAddress(c.address) === collateralAddr)
   if (!collateralLTV) {
     throw '[getBorrowVaultPair]: Collateral not configured for this borrow vault'
   }
 
   // Check collateral type from registry
   const collateralType = getType(collateralAddr)
-  let collateralVault: Vault | SecuritizeVault | undefined
+  let collateralVault: EVault | SecuritizeCollateralVault | undefined
 
   if (registryIsEscrow(collateralAddr)) {
     collateralVault = await getEscrowVault(collateralAddr)
   }
   else if (collateralType === 'securitize') {
-    collateralVault = registryGetVault(collateralAddr) as SecuritizeVault
+    collateralVault = registryGetVault(collateralAddr) as SecuritizeCollateralVault
   }
   else {
     try {
-      collateralVault = await fetchVault(collateralAddr, ctx)
+      collateralVault = await fetchVaultByType(collateralAddr, 'evk') as EVault
       registrySet(collateralAddr, collateralVault, 'evk')
     }
     catch {
       // Try escrow vault first
       try {
-        collateralVault = await fetchEscrowVault(collateralAddr, ctx)
-        registrySet(collateralAddr, collateralVault, 'evk')
+        collateralVault = await getEscrowVault(collateralAddr)
       }
       catch {
         // Check if it's a securitize vault
         const isSecuritize = await isSecuritizeVault(collateralAddr)
         if (isSecuritize) {
-          collateralVault = await fetchSecuritizeVault(collateralAddr, ctx)
+          collateralVault = await fetchVaultByType(collateralAddr, 'securitize') as SecuritizeCollateralVault
           // Add to registry so balances can be fetched
           registrySet(collateralAddr, collateralVault, 'securitize')
         }
@@ -927,50 +1059,70 @@ const getBorrowVaultPair = async (
   return {
     borrow: borrowVault,
     collateral: collateralVault,
-    borrowLTV: collateralLTV.borrowLTV,
-    liquidationLTV: collateralLTV.liquidationLTV,
-    initialLiquidationLTV: collateralLTV.initialLiquidationLTV,
-    targetTimestamp: collateralLTV.targetTimestamp,
-    rampDuration: collateralLTV.rampDuration,
+    ltv: collateralLTV,
   } as AnyBorrowVaultPair
 }
 
 export const useVaults = () => {
-  // Build the shared `VerificationLabels` shape once per useVaults() call.
-  // The closures read live from the reactive labels store, so the rule
-  // always sees current entities/products without rebuilding the shape on
-  // every call. Both isVaultGovernorVerified and isEarnVaultOwnerVerified
-  // delegate to entities/vault/governor-verification.ts.
-  const { entities } = useEulerLabels()
-  const verificationLabels: VerificationLabels = {
-    getDeclaredEntityKeys: (addr) => {
-      const product = getProductByVault(addr)
-      if (!product.name) return undefined
-      return Array.isArray(product.entity) ? product.entity : [product.entity].filter(Boolean)
-    },
-    hasEntityAddress: (key, address) => {
-      // Static type says addresses is non-null, but the label data flows
-      // through JSON from an external repo — a malformed entity entry can
-      // arrive without an `addresses` map, in which case `in` would throw
-      // and a single bad entry would break verification for every vault.
-      const entity = entities[key]
-      return !!entity?.addresses && address in entity.addresses
-    },
+  const buildVerificationLabels = (): VerificationLabels => {
+    const { entities } = useEulerLabels()
+    return {
+      getDeclaredEntityKeys: (vaultAddress) => {
+        const productKey = getProductKeyByVault(vaultAddress)
+        if (!productKey) return undefined
+        const product = getProductByVault(vaultAddress)
+        return Array.isArray(product.entity) ? product.entity : [product.entity].filter(Boolean)
+      },
+      hasEntityAddress: (entityKey, address) => {
+        const entity = entities[entityKey]
+        return !!entity && Object.keys(entity.addresses ?? {}).includes(address)
+      },
+    }
   }
 
-  const isVaultGovernorVerified = (vault: Vault | SecuritizeVault): boolean =>
-    ruleIsVaultGovernorVerified(vault, verificationLabels)
+  // Check if vault's on-chain governorAdmin matches any of the product's declared entities
+  const isVaultGovernorVerified = (vault: EVault): boolean => {
+    const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
+    const vaultCategory = getVaultCategory(vault.address)
+    return verifyVaultGovernor(
+      Object.assign(vault, {
+        verified: vaultCategory === 'escrow' || isVerifiedVault(vault.address),
+        vaultCategory,
+      }),
+      buildVerificationLabels(),
+    )
+  }
 
-  const isEarnVaultOwnerVerified = (earnVault: EarnVault): boolean =>
-    ruleIsEarnVaultOwnerVerified(earnVault, verificationLabels)
+  // Check if securitize vault's on-chain governor matches any of the product's
+  // declared entities. Mirrors the server (server/utils/verified-vaults.ts),
+  // which runs securitize through the same governor rule rather than trusting
+  // bare list membership. The SDK securitize type exposes `governor` (not
+  // `governorAdmin`); the shared rule reads `governorAdmin ?? governor`.
+  const isSecuritizeGovernorVerified = (vault: SecuritizeCollateralVault): boolean => {
+    const { isVerifiedVault } = useVaultRegistry()
+    return verifyVaultGovernor(
+      Object.assign(vault, { verified: isVerifiedVault(vault.address) }),
+      buildVerificationLabels(),
+    )
+  }
+
+  // Check if earn vault's on-chain owner matches any of the product's declared entities
+  const isEarnVaultOwnerVerified = (earnVault: EulerEarn): boolean => {
+    const { isVerifiedVault } = useVaultRegistry()
+    return verifyEarnVaultOwner(
+      Object.assign(earnVault, { verified: isVerifiedVault(earnVault.address) }),
+      buildVerificationLabels(),
+    )
+  }
 
   return {
     // State
     isReady,
     isCollateralResolved,
+    isMarketDataResolved,
     loadedChainId,
-    isEVKLoading,
-    isEVKUpdating,
+    isEVaultLoading,
+    isEVaultUpdating,
     isEarnLoading,
     isEarnUpdating,
     isSecuritizeLoading,
@@ -998,12 +1150,13 @@ export const useVaults = () => {
     refreshVaults,
 
     // Bulk updates (internal use)
-    updateEVKVaults,
+    updateEVaults,
     updateEarnVaults,
 
     // Verification
     isSecuritizeVault,
     isVaultGovernorVerified,
+    isSecuritizeGovernorVerified,
     isEarnVaultOwnerVerified,
 
     // Business logic computed (kept for complex queries)

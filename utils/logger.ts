@@ -1,4 +1,5 @@
 import { summarizeViemError } from './viem-errors'
+import { verboseLogsOptIn } from './debug-flags'
 
 /**
  * Shared structured logger.
@@ -158,7 +159,18 @@ const emitNode = (level: Level, fields: Fields, msg: string | undefined): void =
   process.stdout.write(line + '\n')
 }
 
+// On the client, regular runs only surface `error`/`fatal`. Lower levels —
+// including the per-issue SDK batch diagnostics that `useVaults` routes through
+// `logger.warn` — are dropped to keep the console quiet. Opt back in to the full
+// stream with `?verbose` / `localStorage.euler_verbose=1`. The Node path is
+// unaffected: server logs keep every level for BetterStack queries.
+const LEVEL_PRIORITY: Record<Level, number> = {
+  trace: 10, debug: 20, info: 30, warn: 40, error: 50, fatal: 60,
+}
+const BROWSER_MIN_LEVEL = verboseLogsOptIn ? LEVEL_PRIORITY.trace : LEVEL_PRIORITY.error
+
 const emitBrowser = (level: Level, fields: Fields, msg: string | undefined): void => {
+  if (LEVEL_PRIORITY[level] < BROWSER_MIN_LEVEL) return
   const method = consoleMethodFor(level)
   // Look up console.* at call time, not module load, so test spies and any
   // userland console replacement (Sentry breadcrumbs etc.) take effect.

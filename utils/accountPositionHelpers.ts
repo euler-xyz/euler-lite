@@ -1,6 +1,6 @@
-import { getAddress, type Address } from 'viem'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
-import { collectPythFeedIds } from '~/entities/oracle'
+import type { SecuritizeCollateralVault, EVault } from '@eulerxyz/euler-v2-sdk'
+import { collectPythFeedsFromRouteSteps } from '@eulerxyz/euler-v2-sdk'
+import { type Address, getAddress } from 'viem'
 
 /** Decoded shape of the AccountLiquidityInfo struct from the Euler lens */
 export interface LensLiquidityInfo {
@@ -118,8 +118,13 @@ export const resolvePositionCollaterals = (liquidityInfo: LensLiquidityInfo, fal
  * Always returns true if Pyth oracles are detected, because Pyth prices
  * are only valid for ~2 minutes and require continuous updates.
  */
-export const hasPythOracles = (vault: Vault | SecuritizeVault): boolean => {
-  if ('type' in vault && vault.type === 'securitize') return false
-  const feeds = collectPythFeedIds((vault as Vault).oracleDetailedInfo)
+export const hasPythOracles = (vault: EVault | SecuritizeCollateralVault): boolean => {
+  if (!('debtPricingOracleRoute' in vault)) return false
+  const feeds = [
+    ...collectPythFeedsFromRouteSteps(vault.debtPricingOracleRoute),
+    ...vault.collaterals.flatMap(collateral =>
+      collectPythFeedsFromRouteSteps(collateral.oracleRoute),
+    ),
+  ]
   return feeds.length > 0
 }

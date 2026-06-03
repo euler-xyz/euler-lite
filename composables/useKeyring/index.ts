@@ -10,6 +10,7 @@ import { keyringHookTargetAbi } from '~/abis/keyring'
 import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
 import { getPublicClient } from '~/utils/public-client'
 import { logWarn } from '~/utils/errorHandling'
+import { getVaultHookTarget } from '~/utils/vault-hooks'
 
 export { type CredentialData } from '@keyringnetwork/keyring-connect-sdk'
 
@@ -67,8 +68,8 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
   const hookTarget = computed((): Address | undefined => {
     if (!isKeyringVault.value) return undefined
     const vault = getVault(addressRef.value)
-    if (!vault || !('hookTarget' in vault)) return undefined
-    const ht = (vault as { hookTarget: string }).hookTarget as Address
+    if (!vault) return undefined
+    const ht = getVaultHookTarget(vault as never) as Address
     return ht !== zeroAddress ? ht : undefined
   })
 
@@ -309,6 +310,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
     expiration,
     policyId,
     keyringContractAddress,
+    hookTarget,
     credentialData,
     flowState,
     error,

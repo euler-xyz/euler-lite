@@ -1,23 +1,24 @@
 <script setup lang="ts">
-import type { Vault } from '~/entities/vault'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { getSpecialAddressLabel } from '~/utils/special-addresses'
+import { getVaultHookTarget } from '~/utils/vault-hooks'
+import { isVaultBorrowable } from '~/utils/vault/classification'
 
-const { vault } = defineProps<{ vault: Vault }>()
+const { vault } = defineProps<{ vault: EVault }>()
 
 const { chainId } = useEulerAddresses()
-const { copyToClipboard, isCopied } = useClipboardCopy()
 
-// "Borrowable" = the vault has at least one collateral configured to allow
-// borrowing. Read from the vault's own LTV table rather than `borrowList`
-// membership so unverified (off-label) borrow vaults still surface their
-// debt-token / fee-receiver / oracle addresses.
-const isBorrowable = computed(() =>
-  vault.collateralLTVs.some(ltv => ltv.borrowLTV > 0n),
+// Surface borrow-side addresses while debt is being wound down, not only while
+// new borrows are allowed (see isVaultBorrowable).
+const isBorrowable = computed(() => isVaultBorrowable(vault))
+
+const interestRateModelAddress = computed(() =>
+  vault.interestRateModel.address,
 )
 
 const vaultAddresesInfo = computed(() => {
-  const baseAddresses = [
+  const baseAddresses: Array<{ title: string, address?: string }> = [
     {
       title: `${vault.asset.symbol} token`,
       address: vault.asset.address,
@@ -48,19 +49,19 @@ const vaultAddresesInfo = computed(() => {
     baseAddresses.push(
       {
         title: `Fee receiver`,
-        address: vault.governorFeeReceiver,
+        address: vault.fees.governorFeeReceiver,
       },
       {
         title: `Oracle router`,
-        address: vault.oracle,
+        address: vault.oracle.oracle,
       },
       {
         title: `Unit of account`,
-        address: vault.unitOfAccount,
+        address: vault.unitOfAccount?.address,
       },
       {
         title: `Interest rate model`,
-        address: vault.interestRateModelAddress,
+        address: interestRateModelAddress.value,
       },
     )
   }
@@ -68,19 +69,19 @@ const vaultAddresesInfo = computed(() => {
   baseAddresses.push(
     {
       title: `Hook target`,
-      address: vault.hookTarget,
+      address: getVaultHookTarget(vault),
     },
   )
 
-  return baseAddresses
+  return baseAddresses.filter((item): item is { title: string, address: string } => Boolean(item.address))
 })
 
 const shortenAddress = (address: string) => {
   return `${address.slice(0, 6)}...${address.slice(-4)}`
 }
 
-const onCopyClick = (address: string, key = address) => {
-  copyToClipboard(address, key)
+const onCopyClick = (address: string) => {
+  navigator.clipboard.writeText(address)
 }
 
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
@@ -121,11 +122,11 @@ const getExplorerAddressLink = (address: string) => getExplorerLink(address, cha
           </NuxtLink>
           <button
             class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary"
-            @click="onCopyClick(infoItem.address, infoItem.title)"
+            @click="onCopyClick(infoItem.address)"
           >
             <SvgIcon
               class="!w-18 !h-18"
-              :name="isCopied(infoItem.title) ? 'check' : 'copy'"
+              name="copy"
             />
           </button>
         </div>

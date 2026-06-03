@@ -1,25 +1,24 @@
 <script setup lang="ts">
-import { getAddress, type Address, zeroAddress } from 'viem'
-import { FixedPoint } from '~/utils/fixed-point'
-import { getCashLimitedWithdrawAmount, type Vault, type VaultAsset } from '~/entities/vault'
+import type { VaultAsset } from '~/types/asset'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
-import {
-  getAssetOraclePrice,
-  getCollateralOraclePrice,
-  conservativePriceRatio,
-} from '~/services/pricing/priceProvider'
-import type { SwapApiQuote } from '~/entities/swap'
-import { SwapperMode } from '~/entities/swap'
+import { getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatio } from '~/utils/sdk-prices'
+import type { SwapQuote, EVault } from '@eulerxyz/euler-v2-sdk'
+import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useCollateralForm } from '~/composables/position/useCollateralForm'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
+import { getAddress, type Address, zeroAddress } from 'viem'
+import { FixedPoint } from '~/utils/fixed-point'
+import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 
 const positionIndex = usePositionIndex()
 const { address } = useWagmi()
-const { buildWithdrawPlan, buildWithdrawAndSwapPlan } = useEulerOperations()
+const { planWithdraw, planWithdrawAndSwap } = useEulerTx()
+const { account: cachedAccount } = useFreshAccount()
 const { refreshAllPositions } = useEulerAccount()
 const { eulerLensAddresses } = useEulerAddresses()
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
@@ -57,7 +56,9 @@ const form = useCollateralForm({
   },
 
   computeLiquidationPrice: (pos, borrowVault, collateralVault) => {
-    const health = nanoToValue(pos.health || 0n, 18)
+    const healthValue = pos.healthFactor
+    if (healthValue === undefined) return undefined
+    const health = nanoToValue(healthValue, 18)
     if (health < 1) return undefined
     const cp = borrowVault && collateralVault ? getCollateralOraclePrice(borrowVault, collateralVault) : undefined
     const bp = borrowVault ? getAssetOraclePrice(borrowVault) : undefined
@@ -71,7 +72,11 @@ const form = useCollateralForm({
       throw new Error('Not enough liquidity in your position')
     }
     if (!form.position.value) return
-    if (userLtvFixed.gte(FixedPoint.fromValue(form.position.value.liquidationLTV, 2))) {
+    const effectiveLiquidationLtv = getBorrowPositionEffectiveLiquidationLTV(form.position.value)
+    if (effectiveLiquidationLtv === undefined) {
+      throw new Error('Liquidation LTV unavailable')
+    }
+    if (userLtvFixed.gte(FixedPoint.fromValue(decimalLtvToBps(effectiveLiquidationLtv), 2))) {
       throw new Error('Not enough liquidity for the vault, LTV is too large')
     }
     if (cashLimitedCollateralAssets() < amountFixed.value) {
@@ -79,33 +84,25 @@ const form = useCollateralForm({
     }
   },
 
-  buildDirectPlan: async ({ vaultAddress, amountNano, subAccount }) => {
-    const hasBorrows = (form.position.value?.borrowed || 0n) > 0n
-    return buildWithdrawPlan(
-      vaultAddress,
-      amountNano,
-      subAccount,
-      {
-        includePythUpdate: hasBorrows,
-        liabilityVault: form.borrowVault.value?.address,
-        enabledCollaterals: form.position.value?.collaterals,
-      },
-    )
+  buildDirectPlan: async ({ vaultAddress, amountNano, subAccount, account }) => {
+    const owner = (subAccount ?? address.value) as Address
+    return planWithdraw({
+      vaultAddress: vaultAddress as Address,
+      assets: amountNano,
+      owner,
+      // Skip planner's freshPlanContext fetch; reuse the race-replace snapshot.
+      account: account ?? cachedAccount.value,
+    })
   },
 
-  buildSwapPlan: async (quote: SwapApiQuote, { vaultAddress, amountNano, slippage, subAccount }) => {
-    const hasBorrows = (form.position.value?.borrowed || 0n) > 0n
-    return buildWithdrawAndSwapPlan({
+  buildSwapPlan: async (quote: SwapQuote, { vaultAddress, amountNano, subAccount, account }) => {
+    const owner = (subAccount ?? address.value) as Address
+    return planWithdrawAndSwap({
+      swapQuote: quote,
       vaultAddress: vaultAddress as Address,
-      assetsAmount: amountNano,
-      quote,
-      requestedSlippage: slippage,
-      subAccount,
-      options: {
-        includePythUpdate: hasBorrows,
-        liabilityVault: form.borrowVault.value?.address,
-        enabledCollaterals: form.position.value?.collaterals,
-      },
+      assets: amountNano,
+      owner,
+      account: account ?? cachedAccount.value,
     })
   },
 
@@ -139,6 +136,7 @@ const form = useCollateralForm({
   onAfterSend: () => {
     refreshAllPositions(eulerLensAddresses.value, address.value as string)
   },
+  usePreparedPipeline: true,
 })
 useOperationGuard(computed(() => [form.collateralVault.value?.address, form.borrowVault.value?.address].filter(Boolean)))
 const withdrawableCollateralAssets = computed(() => cashLimitedCollateralAssets())
@@ -224,7 +222,7 @@ watch(selectedOutputAsset, () => {
               v-model="form.amount.value"
               label="Withdraw amount"
               :asset="form.asset.value"
-              :vault="(form.collateralVault.value as Vault)"
+              :vault="(form.collateralVault.value as EVault)"
               :balance="withdrawableCollateralAssets"
               maxable
             />
@@ -268,9 +266,7 @@ watch(selectedOutputAsset, () => {
               >
                 <SwapDetailsSummary
                   :input-display="form.swapInputDisplay.value"
-                  :input-exact-display="form.swapInputExactDisplay.value"
                   :output-display="form.swapOutputDisplay.value"
-                  :output-exact-display="form.swapOutputExactDisplay.value"
                   :price-impact="form.swapPriceImpact.value"
                   :slippage="form.swapSlippage.value"
                   :routed-via="form.swapRoutedVia.value"
@@ -373,14 +369,14 @@ watch(selectedOutputAsset, () => {
             </SummaryRow>
             <SummaryRow label="LTV">
               <SummaryValue
-                :before="formatNumber(nanoToValue(form.position.value.userLTV, 18))"
+                :before="formatNumber(ltvToPercent(nanoToValue(form.position.value.userLTV ?? form.position.value.currentLTV ?? 0n, 18)))"
                 :after="formatNumber(nanoToValue(form.estimateUserLTV.value, 18))"
                 suffix="%"
               />
             </SummaryRow>
             <SummaryRow label="Health score">
               <SummaryValue
-                :before="formatHealthScore(nanoToValue(form.position.value.health, 18))"
+                :before="formatHealthScore(nanoToValue(form.position.value.healthFactor ?? 0n, 18))"
                 :after="formatHealthScore(nanoToValue(form.estimateHealth.value, 18))"
               />
             </SummaryRow>

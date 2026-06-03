@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "name": "mainnet-prime-anvil",
+  "chainId": 1,
+  "forkBlockNumber": 25159633,
+  "anvil": {
+    "rpcUrl": "http://127.0.0.1:8545",
+    "startCommand": "anvil --fork-url \"$FORK_RPC_URL\" --fork-block-number 25159633 --auto-impersonate --port 8545"
+  },
+  "wallet": {
+    "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "privateKey": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    "ethBalance": "1000"
+  },
+  "tokens": [
+    {
+      "symbol": "USDC",
+      "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "decimals": 6,
+      "amount": "10000",
+      "whale": "0x28C6c06298d514Db089934071355E5743bf21d60"
+    },
+    {
+      "symbol": "USDT",
+      "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+      "decimals": 6,
+      "amount": "10000",
+      "whale": "0x83A32a54D31Ee4f1f9dFFAd2A63A6d214e469eC3"
+    },
+    {
+      "symbol": "WETH",
+      "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+      "decimals": 18,
+      "amount": "1000",
+      "whale": "0x4a18a50a8328b42773268B4b436254056b7d70CE"
+    }
+  ],
+  "vaults": {
+    "primeUsdc": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9",
+    "primeUsdt": "0x313603FA690301b0CaeEf8069c065862f9162162",
+    "primeWeth": "0xD8b27CF359b7D15710a5BE299AF6e7Bf904984C2"
+  }
+}

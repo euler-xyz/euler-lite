@@ -9,7 +9,7 @@ import { AcknowledgeTermsModal, VaultUnverifiedDisclaimerModal } from '#componen
 import type { KeyringFlowState, CredentialData } from '~/composables/useKeyring'
 import type { TosGuardState } from '~/composables/guards/useTosGuard'
 import type { UnverifiedVaultGuardState } from '~/composables/guards/useUnverifiedVaultGuard'
-import { useAllowanceSlotResolution } from '~/composables/useEulerOperations/allowance'
+import { useStateOverrideResolution } from '~/composables/useStateOverrideOptions'
 
 interface KeyringGuardState {
   needsVerification: boolean
@@ -26,7 +26,7 @@ const { isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { chainId: _chainId } = useEulerAddresses()
 const { chainId, switchChain, connect } = useWagmi()
-const { isResolvingAllowanceSlotIndex } = useAllowanceSlotResolution()
+const { isResolvingStateOverrideHints } = useStateOverrideResolution()
 const modal = useModal()
 
 const keyringGuard = inject<KeyringGuardState | null>('keyring-guard', null)
@@ -52,10 +52,10 @@ const needToSwitchChain = computed(() => {
 const hasActiveSession = computed(() => isConnected.value || isSpyMode.value)
 const _disabled = computed(() => {
   if (isOperationBlocked.value) return true
-  if (isResolvingAllowanceSlotIndex.value) return true
+  if (isResolvingStateOverrideHints.value) return true
   return props.disabled && !needToSwitchChain.value
 })
-const isLoading = computed(() => props.loading || isResolvingAllowanceSlotIndex.value)
+const isLoading = computed(() => props.loading || isResolvingStateOverrideHints.value)
 
 const GENERIC_DISABLED_REASON = 'Complete the form fields above to continue.'
 

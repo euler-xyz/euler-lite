@@ -1,23 +1,26 @@
 <script setup lang="ts">
-import type { CSSProperties } from 'vue'
-import type { Address } from 'viem'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
-import { collectOracleAdapters, getChecksStatus, OracleAdapterCheckSeverity, type OracleAdapterEntry, type OracleAdapterMeta } from '~/entities/oracle'
+import type {
+  SecuritizeCollateralVault,
+  EVault,
+  OracleRouteStep,
+} from '@eulerxyz/euler-v2-sdk'
+import { getChecksStatus, OracleAdapterCheckSeverity, type OracleAdapterMeta } from '~/entities/oracle'
 import { getOracleProviderLogo } from '~/entities/oracle-providers'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { formatNumber } from '~/utils/string-utils'
 import { shouldInvertOraclePrice } from '~/utils/oracle-label'
-import { useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
+import { getOracleRouteStepKey, useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
+import { getCollateralOracleRouteSteps, getDebtOracleRouteSteps, isOracleAdapterRouteStep } from '~/utils/oracle-route-steps'
+import type { CSSProperties } from 'vue'
 
 const props = defineProps<{
-  vault?: Vault
-  vaults?: Vault[]
-  collateralVaults?: (Vault | SecuritizeVault)[]
+  vault?: EVault
+  vaults?: EVault[]
+  collateralVaults?: (EVault | SecuritizeCollateralVault)[]
 }>()
 const { oracleAdapters, loadOracleAdapter } = useEulerLabels()
 const { chainId } = useEulerAddresses()
 const { buildKnownSymbols, resolveSymbol: resolveTokenSymbol, shortenAddress } = useTokenSymbolResolver()
-const { copyToClipboard, isCopied } = useClipboardCopy()
 
 const sourceVaults = computed(() => {
   if (props.vaults?.length) {
@@ -31,41 +34,28 @@ const sourceVaults = computed(() => {
   return []
 })
 
-const skipERC4626Bases = computed(() => {
-  const bases = new Set<string>()
-  props.collateralVaults?.forEach((vault) => {
-    bases.add(vault.address.toLowerCase())
-  })
-  return bases
-})
+const getCollateralRouteSteps = (vault: EVault, collateralVault: EVault | SecuritizeCollateralVault) => {
+  return getCollateralOracleRouteSteps(vault, collateralVault)
+}
 
-const adapters = computed(() => {
-  const entries: OracleAdapterEntry[] = []
-  const deduped = new Map<string, OracleAdapterEntry>()
+const routeSteps = computed(() => {
+  const entries: OracleRouteStep[] = []
+  const deduped = new Map<string, OracleRouteStep>()
 
   sourceVaults.value.forEach((vault) => {
-    entries.push(...collectOracleAdapters(vault.oracleDetailedInfo, 3, {
-      base: vault.asset.address as Address,
-      quote: vault.unitOfAccount as Address,
-      leafOnly: true,
-    }))
+    entries.push(...getDebtOracleRouteSteps(vault))
 
     if (props.collateralVaults?.length) {
       props.collateralVaults.forEach((collateralVault) => {
-        entries.push(...collectOracleAdapters(vault.oracleDetailedInfo, 3, {
-          base: collateralVault.address as Address,
-          quote: vault.unitOfAccount as Address,
-          leafOnly: true,
-          skipERC4626Bases: skipERC4626Bases.value,
-        }))
+        entries.push(...getCollateralRouteSteps(vault, collateralVault))
       })
     }
   })
 
-  entries.forEach((adapter) => {
-    const key = `${adapter.oracle.toLowerCase()}:${adapter.base.toLowerCase()}:${adapter.quote.toLowerCase()}`
+  entries.forEach((step) => {
+    const key = getOracleRouteStepKey(step)
     if (!deduped.has(key)) {
-      deduped.set(key, adapter)
+      deduped.set(key, step)
     }
   })
 
@@ -77,8 +67,8 @@ const knownSymbols = computed(() => {
 
   sourceVaults.value.forEach((vault) => {
     map.set(vault.asset.address.toLowerCase(), vault.asset.symbol)
-    if (vault.unitOfAccountSymbol) {
-      map.set(vault.unitOfAccount.toLowerCase(), vault.unitOfAccountSymbol)
+    if (vault.unitOfAccount) {
+      map.set(vault.unitOfAccount.address.toLowerCase(), vault.unitOfAccount.symbol)
     }
   })
 
@@ -89,24 +79,25 @@ const knownSymbols = computed(() => {
   return map
 })
 
-const adapterViews = computed(() => adapters.value.map((adapter) => {
-  const meta: OracleAdapterMeta | undefined = oracleAdapters[adapter.oracle.toLowerCase()]
-  const isERC4626 = adapter.name === 'ERC4626Vault'
-  const provider = meta?.provider || adapter.name
-  const name = meta?.name || adapter.name
+const adapterViews = computed(() => routeSteps.value.map((step) => {
+  const meta: OracleAdapterMeta | undefined = isOracleAdapterRouteStep(step)
+    ? oracleAdapters[step.oracle.toLowerCase()]
+    : undefined
+  const provider = meta?.provider || step.name
+  const name = meta?.name || step.name
   const checks = meta?.checks
   const invertPrice = shouldInvertOraclePrice({
     metaBase: meta?.base,
     metaQuote: meta?.quote,
-    callerBase: adapter.base,
-    callerQuote: adapter.quote,
+    callerBase: step.base,
+    callerQuote: step.quote,
   })
 
   return {
-    ...adapter,
+    ...step,
     name,
     provider,
-    methodology: meta?.methodology || (isERC4626 ? 'Exchange Rate' : undefined),
+    methodology: meta?.methodology || (step.kind === 'vault' ? 'Exchange Rate' : undefined),
     logo: getOracleProviderLogo(provider, name),
     label: meta?.label
       ? {
@@ -122,14 +113,14 @@ const adapterViews = computed(() => adapters.value.map((adapter) => {
 }))
 
 watch(
-  () => adapters.value,
-  async (adapterList) => {
-    if (!chainId.value || !adapterList.length) return
+  () => routeSteps.value,
+  async (stepList) => {
+    if (!chainId.value || !stepList.length) return
 
     await Promise.all(
-      adapterList
-        .filter(a => a.name !== 'ERC4626Vault')
-        .map(a => loadOracleAdapter(chainId.value, a.oracle)),
+      stepList
+        .filter(isOracleAdapterRouteStep)
+        .map(step => loadOracleAdapter(chainId.value, step.oracle)),
     )
   },
   { immediate: true },
@@ -137,27 +128,28 @@ watch(
 
 const resolveSymbol = (address: string) => resolveTokenSymbol(address, knownSymbols.value)
 
-const onCopyClick = (address: string, key = address) => {
-  copyToClipboard(address, key)
+const onCopyClick = (address: string) => {
+  navigator.clipboard.writeText(address)
 }
 
-const getAdapterKey = (adapter: OracleAdapterEntry) => `${adapter.oracle.toLowerCase()}:${adapter.base.toLowerCase()}:${adapter.quote.toLowerCase()}`
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
 
 const { prices: adapterPrices, isLoading: isPriceLoading } = useOracleAdapterPrices(
-  adapters,
+  routeSteps,
   sourceVaults,
   computed(() => props.collateralVaults ?? []),
 )
 
-const isAdapterPriceFailed = (adapter: OracleAdapterEntry) => {
-  const key = getAdapterKey(adapter)
+type RouteStepKeyInput = Pick<OracleRouteStep, 'kind' | 'oracle' | 'base' | 'quote'>
+
+const isAdapterPriceFailed = (adapter: RouteStepKeyInput) => {
+  const key = getOracleRouteStepKey(adapter)
   const info = adapterPrices.value.get(key)
   return !info?.success
 }
 
-const formatAdapterPrice = (adapter: OracleAdapterEntry & { invertPrice: boolean }) => {
-  const key = getAdapterKey(adapter)
+const formatAdapterPrice = (adapter: RouteStepKeyInput & { invertPrice: boolean }) => {
+  const key = getOracleRouteStepKey(adapter)
   const info = adapterPrices.value.get(key)
   if (!info?.success) return '-'
   const rate = adapter.invertPrice && info.rate > 0 ? 1 / info.rate : info.rate
@@ -325,7 +317,7 @@ const onTooltipMouseLeave = () => {
     >
       <div
         v-for="adapter in adapterViews"
-        :key="getAdapterKey(adapter)"
+        :key="getOracleRouteStepKey(adapter)"
         class="w-full rounded-xl bg-surface p-16 flex flex-col gap-12 border border-line-subtle"
       >
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-8">
@@ -353,11 +345,11 @@ const onTooltipMouseLeave = () => {
               :class="$style.copyBtn"
               class="text-content-muted"
               aria-label="Copy address"
-              @click="onCopyClick(adapter.oracle, getAdapterKey(adapter))"
+              @click="onCopyClick(adapter.oracle)"
             >
               <SvgIcon
                 class="!w-18 !h-18"
-                :name="isCopied(getAdapterKey(adapter)) ? 'check' : 'copy'"
+                name="copy"
               />
             </button>
           </div>

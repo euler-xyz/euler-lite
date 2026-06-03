@@ -43,10 +43,10 @@ export interface MarketGroupMetrics {
   totalAvailableLiquidity: number
   /** Sum of borrowed amounts in USD for borrowable vaults */
   totalBorrowed: number
-  /** Best supply APY across all vaults (raw bigint from IRM, 25 decimals) */
-  bestSupplyAPY: bigint
+  /** Best supply APY across all vaults, as a percentage value. */
+  bestSupplyAPY: number
   /** Best (lowest) borrow APY across borrowable vaults */
-  bestBorrowAPY: bigint
+  bestBorrowAPY: number
   /** Total number of vaults */
   vaultCount: number
   /** Vaults with utilization (non-escrow) */

@@ -1,38 +1,43 @@
 <script setup lang="ts">
-import { FixedPoint } from '~/utils/fixed-point'
-import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal } from '#components'
-import { useToast } from '~/components/ui/composables/useToast'
-import { type BorrowVaultPair, getNetAPY, getProjectedRates, type VaultAsset } from '~/entities/vault'
+import { getNetAPY, getProjectedRates } from '~/utils/vault/apy'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import type { VaultAsset } from '~/types/asset'
 import { getHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
 import { isOpDisabled, OP_BORROW } from '~/utils/vault-hooks'
-import { getAssetUsdValueOrZero, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatio } from '~/services/pricing/priceProvider'
+import { getAssetUsdValueOrZero, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatio } from '~/utils/sdk-prices'
 import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
-import type { AccountBorrowPosition } from '~/entities/account'
-import type { TxPlan } from '~/entities/txPlan'
+import type { PortfolioBorrowPosition, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { Address } from 'viem'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
-import { nanoToValue } from '~/utils/crypto-utils'
+import { ltvToPercent, nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { createRaceGuard } from '~/utils/race-guard'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { useModal } from '~/components/ui/composables/useModal'
+import { useToast } from '~/components/ui/composables/useToast'
+import type { BorrowVaultPair } from '~/types/borrow-pair'
+import { OperationReviewModal } from '#components'
+import { FixedPoint } from '~/utils/fixed-point'
 
 const router = useRouter()
 const _route = useRoute()
 const modal = useModal()
 const { error } = useToast()
-const { buildBorrowPlan, executeTxPlan } = useEulerOperations()
+const { planBorrow, executePlan } = useEulerTx()
+const { account: planAccount } = usePlanAccount()
 const { getBorrowVaultPair } = useVaults()
 const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, getPositionBySubAccountIndex } = useEulerAccount()
 const positionIndex = usePositionIndex()
 const { fetchSingleBalance } = useWallets()
-const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
+const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
-const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 
 const priceInvert = usePriceInvert(
   () => collateralVault.value?.asset.symbol,
@@ -48,12 +53,12 @@ const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const isBalanceLoading = ref(false)
 const isEstimatesLoading = ref(false)
-const plan = ref<TxPlan | null>(null)
+const plan = ref<TransactionPlan | null>(null)
 const pair: Ref<BorrowVaultPair | undefined> = ref()
 const health = ref()
 const netAPY = ref()
 const liquidationPrice = ref()
-const position: Ref<AccountBorrowPosition | undefined> = ref()
+const position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined> = ref()
 const userLTV = ref(0)
 const currentNetAPY = ref<number>()
 const currentHealth = ref<number>()
@@ -74,7 +79,7 @@ const errorText = computed(() => {
   if (additionalCollateralNeeded > 0n && balance.value < additionalCollateralNeeded) {
     return 'Not enough balance'
   }
-  else if ((borrowVault.value?.supply || 0n) < valueToNano(borrowAmount.value, borrowVault.value?.decimals)) {
+  else if ((borrowVault.value?.availableLiquidity ?? 0n) < valueToNano(borrowAmount.value, borrowVault.value?.asset.decimals)) {
     return 'Not enough liquidity in the vault'
   }
   return null
@@ -91,7 +96,7 @@ const isSubmitDisabled = computed(() => {
 
   return (additionalCollateralNeeded > 0n && balance.value < additionalCollateralNeeded)
     || isLoading.value || !(+collateralAmount.value)
-    || ((borrowVault.value?.supply || 0n) < valueToNano(borrowAmount.value, borrowVault.value?.decimals))
+    || ((borrowVault.value?.availableLiquidity ?? 0n) < valueToNano(borrowAmount.value, borrowVault.value?.asset.decimals))
 })
 const isGeoBlocked = computed(() => {
   const addresses: string[] = []
@@ -121,7 +126,7 @@ const borrowWarnings = computed(() => {
     getBorrowCapWarning(borrowVault.value),
   ]
 })
-const pairAssets = computed(() => [collateralVault.value?.asset, borrowVault.value?.asset])
+const pairAssets = computed<VaultAsset[]>(() => [collateralVault.value?.asset, borrowVault.value?.asset].filter((asset): asset is VaultAsset => !!asset))
 const pairAssetsLabel = usePositionPairLabel(position)
 const priceFixed = computed(() => {
   const collateralPrice = borrowVault.value && collateralVault.value
@@ -132,12 +137,13 @@ const priceFixed = computed(() => {
 })
 priceInvert.autoInvert(() => priceFixed.value.toUnsafeFloat())
 const borrowAmountFixed = computed(() => FixedPoint.fromValue(
-  valueToNano(borrowAmount.value || '0', borrowVault.value?.decimals),
-  Number(borrowVault.value?.decimals),
+  valueToNano(borrowAmount.value || '0', borrowVault.value?.asset.decimals),
+  Number(borrowVault.value?.asset.decimals),
 ))
 const ltvFixed = computed(() => {
   const fn = FixedPoint.fromValue(valueToNano(ltv.value, 4), 4)
-  if (fn.gte(FixedPoint.fromValue(pair.value?.borrowLTV || 0n, 2))) {
+  const maxLtv = FixedPoint.fromValue(valueToNano(ltvToPercent(pair.value?.ltv.borrowLTV ?? 0), 4), 4)
+  if (fn.gte(maxLtv)) {
     return fn.sub(FixedPoint.fromValue(100n, 4))
   }
   return fn
@@ -147,13 +153,15 @@ const _collateralProduct = useEulerProductOfVault(computed(() => collateralVault
 
 const collateralSupplyRewardApy = computed(() => getSupplyRewardApy(collateralVault.value?.address || ''))
 const borrowRewardApy = computed(() => getBorrowRewardApy(borrowVault.value?.address || '', collateralVault.value?.address || ''))
-const collateralSupplyApy = computed(() => withIntrinsicSupplyApy(
-  nanoToValue(collateralVault.value?.interestRateInfo.supplyAPY || 0n, 25),
-  collateralVault.value?.asset.address,
+const collateralSupplyApy = computed(() => withVaultIntrinsicApy(
+  getVaultSupplyApy(collateralVault.value),
+  collateralVault.value,
+  enableIntrinsicApy.value,
 ))
-const borrowApy = computed(() => withIntrinsicBorrowApy(
-  nanoToValue(borrowVault.value?.interestRateInfo.borrowAPY || 0n, 25),
-  borrowVault.value?.asset.address,
+const borrowApy = computed(() => withVaultIntrinsicApy(
+  getVaultBorrowApy(borrowVault.value),
+  borrowVault.value,
+  enableIntrinsicApy.value,
 ))
 
 const load = async () => {
@@ -167,9 +175,18 @@ const load = async () => {
     isLoading.value = false
     return
   }
-  const collateralAddress = position.value.collateral.address
-  const borrowAddress = position.value.borrow.address
-  userLTV.value = Number(formatNumber(nanoToValue(position.value.userLTV, 18)))
+  const collateralAddress = position.value.collateralVault?.address
+  const borrowAddress = position.value.borrowVault?.address
+  if (!collateralAddress || !borrowAddress) {
+    isLoading.value = false
+    return
+  }
+  const positionLtv = position.value.userLTV ?? position.value.currentLTV
+  if (positionLtv === undefined) {
+    isLoading.value = false
+    return
+  }
+  userLTV.value = Number(formatNumber(ltvToPercent(nanoToValue(positionLtv, 18))))
   currentUserLTV.value = userLTV.value
   ltv.value = userLTV.value
   try {
@@ -183,10 +200,10 @@ const load = async () => {
     // Fetch fresh underlying asset balance for this specific vault
     await updateBalance()
     // Compute current position values for before→after display
-    const currentLtvFloat = nanoToValue(position.value!.userLTV, 18)
-    currentHealth.value = currentLtvFloat <= 0
+    const currentLtvPercent = ltvToPercent(nanoToValue(positionLtv, 18))
+    currentHealth.value = currentLtvPercent <= 0
       ? Infinity
-      : (Number(pair.value?.liquidationLTV || 0n) / 100) / currentLtvFloat
+      : ltvToPercent(pair.value!.ltv.liquidationLTV) / currentLtvPercent
     currentLiquidationPrice.value = currentHealth.value < 0.1 ? Infinity : priceFixed.value.toUnsafeFloat() / currentHealth.value
     const [collUsd, borUsd] = await Promise.all([
       getAssetUsdValueOrZero(position.value!.supplied || 0, collateralVault.value!, 'off-chain'),
@@ -229,20 +246,12 @@ const submit = async () => {
     }
 
     try {
-      plan.value = await buildBorrowPlan(
-        collateralVault.value.address,
-        collateralVault.value.asset.address,
-        0n,
-        borrowVault.value.address,
-        valueToNano(borrowAmount.value || '0', borrowVault.value.decimals),
-        position.value?.subAccount,
-        {
-          includePermit2Call: false,
-          enabledCollaterals: position.value?.collaterals,
-          enabledController: position.value?.borrow.address,
-          acceptedCollaterals: borrowVault.value.collateralLTVs.filter(c => c.borrowLTV > 0n).map(c => c.collateral),
-        },
-      )
+      plan.value = await planBorrow({
+        vaultAddress: borrowVault.value.address as Address,
+        amount: valueToNano(borrowAmount.value || '0', borrowVault.value.shares.decimals),
+        borrowAccount: position.value!.subAccount as Address,
+        account: planAccount.value,
+      })
     }
     catch (e) {
       console.warn('[OperationReviewModal] failed to build plan', e)
@@ -281,21 +290,13 @@ const send = async () => {
     if (!collateralVault.value || !borrowVault.value || !position.value) {
       return
     }
-    const txPlan = await buildBorrowPlan(
-      collateralVault.value.address,
-      collateralVault.value.asset.address,
-      0n,
-      borrowVault.value.address,
-      borrowAmountFixed.value.toFormat({ decimals: Number(borrowVault.value.decimals) }).value,
-      position.value.subAccount,
-      {
-        includePermit2Call: true,
-        enabledCollaterals: position.value?.collaterals,
-        enabledController: position.value?.borrow.address,
-        acceptedCollaterals: borrowVault.value.collateralLTVs.filter(c => c.borrowLTV > 0n).map(c => c.collateral),
-      },
-    )
-    await executeTxPlan(txPlan)
+    const txPlan = await planBorrow({
+      vaultAddress: borrowVault.value.address as Address,
+      amount: borrowAmountFixed.value.toFormat({ decimals: Number(borrowVault.value.shares.decimals) }).value,
+      borrowAccount: position.value.subAccount as Address,
+      account: planAccount.value,
+    })
+    await executePlan(txPlan)
 
     modal.close()
     updateBalance()
@@ -324,7 +325,7 @@ const computedBorrowAmount = computed(() => {
   const currentLtvFP = FixedPoint.fromValue(valueToNano(currentUserLTV.value, 4), 4)
   if (currentLtvFP.isZero() || newLtvFP.lte(currentLtvFP)) return '0'
 
-  const borrowedFP = FixedPoint.fromValue(borrowed, Number(borrowVault.value.decimals))
+  const borrowedFP = FixedPoint.fromValue(borrowed, Number(borrowVault.value.shares.decimals))
   const delta = newLtvFP.subUnsafe(currentLtvFP)
   const additional = borrowedFP.mul(delta).div(currentLtvFP)
   if (additional.isZero() || additional.isNegative()) return '0'
@@ -343,7 +344,7 @@ const onBorrowInput = async () => {
   if (!position.value) return
   const totalCollateral = getTotalCollateralValue(position.value)
   if (!totalCollateral || totalCollateral <= 0) return
-  const totalBorrow = nanoToValue(position.value.borrowed, position.value.borrow.decimals || 18) + (+borrowAmount.value || 0)
+  const totalBorrow = nanoToValue(position.value.borrowed, borrowVault.value?.shares.decimals || 18) + (+borrowAmount.value || 0)
   ltv.value = +((totalBorrow / totalCollateral) * 100).toFixed(2)
 }
 const onLtvInput = () => {
@@ -355,7 +356,7 @@ const updateSyncEstimates = () => {
     const newLtvFloat = ltvFixed.value.toUnsafeFloat()
     health.value = newLtvFloat <= 0
       ? Infinity
-      : (Number(pair.value?.liquidationLTV || 0n) / 100) / newLtvFloat
+      : ltvToPercent(pair.value.ltv.liquidationLTV) / newLtvFloat
     liquidationPrice.value = health.value < 1 ? undefined : priceFixed.value.toUnsafeFloat() / health.value
   }
   catch (e) {
@@ -370,15 +371,15 @@ const updateAsyncEstimates = useDebounceFn(async () => {
   if (!pair.value || !borrowVault.value || !collateralVault.value) return
   const gen = asyncEstimatesGuard.next()
   try {
-    const additionalBorrowNano = valueToNano(borrowAmount.value || '0', borrowVault.value.decimals)
-    const existingBorrow = nanoToValue(position.value?.borrowed || 0n, borrowVault.value.decimals)
+    const additionalBorrowNano = valueToNano(borrowAmount.value || '0', borrowVault.value.shares.decimals)
+    const existingBorrow = nanoToValue(position.value?.borrowed || 0n, borrowVault.value.shares.decimals)
     const totalBorrow = existingBorrow + (+borrowAmount.value || 0)
 
     const [borrowProjected, collateralUsd, borrowUsd] = await Promise.all([
       getProjectedRates(
         borrowVault.value.address,
-        borrowVault.value.interestRateInfo.cash,
-        borrowVault.value.interestRateInfo.borrows,
+        borrowVault.value.totalCash,
+        borrowVault.value.totalBorrowed,
         -additionalBorrowNano,
         additionalBorrowNano,
       ),
@@ -389,7 +390,7 @@ const updateAsyncEstimates = useDebounceFn(async () => {
     if (asyncEstimatesGuard.isStale(gen)) return
 
     const projectedBorrowApy = borrowProjected
-      ? borrowApy.value + (nanoToValue(borrowProjected.borrowAPY, 25) - nanoToValue(borrowVault.value.interestRateInfo.borrowAPY, 25))
+      ? borrowApy.value + (nanoToValue(borrowProjected.borrowAPY, 25) - getVaultBorrowApy(borrowVault.value))
       : borrowApy.value
 
     netAPY.value = getNetAPY(
@@ -457,7 +458,7 @@ watch([collateralAmount, borrowAmount], async () => {
           v-if="collateralVault && borrowVault"
           :vault="collateralVault"
           :pair-vault="borrowVault"
-          :assets="pairAssets as VaultAsset[]"
+          :assets="pairAssets"
           :assets-label="pairAssetsLabel"
           size="large"
         />
@@ -478,7 +479,7 @@ watch([collateralAmount, borrowAmount], async () => {
               v-model="ltv"
               label="LTV"
               :step="0.1"
-              :max="Number(pair.borrowLTV / 100n)"
+              :max="ltvToPercent(pair.ltv.borrowLTV)"
               :min="userLTV"
               :number-filter="(n: number) => `${formatNumber(n, 2, 0)}%`"
               @update:model-value="onLtvInput"

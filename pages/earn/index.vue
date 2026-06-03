@@ -1,16 +1,18 @@
 <script setup lang="ts">
+import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { useVaults } from '~/composables/useVaults'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
-import type { EarnVault } from '~/entities/vault'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
+
+import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import { getProductByVault, applyVaultOverrides, getEntitiesByEarnVault, isVaultRecentlyAdded, isVaultDeprecated, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
+import { computeSupplyApy } from '~/utils/collateralOptions'
 import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
 
 defineOptions({
@@ -19,23 +21,24 @@ defineOptions({
 
 const { isEarnUpdating } = useVaults()
 const isPricesReady = ref(false)
-const isLoading = computed(() => isEarnUpdating.value || !isPricesReady.value)
+const { isReady: labelsReady } = useEulerLabels()
+const isLoading = computed(() => isEarnUpdating.value || !labelsReady.value || !isPricesReady.value)
 const { isSlow } = useSlowLoading(isLoading)
-const { getEarnVaults } = useVaultRegistry()
+const { getEarnVaults, isVerifiedVault } = useVaultRegistry()
 const { chainId } = useEulerAddresses()
 const showAllLabelEntries = useShowAllLabelEntries()
 const list = computed(() => getEarnVaults().filter(v =>
-  v.verified && (showAllLabelEntries.value || !isEarnVaultNotExplorable(v.address)),
+  isVerifiedVault(v.address) && (showAllLabelEntries.value || !isEarnVaultNotExplorable(v.address)),
 ))
 
 const { enableEntityBranding } = useDeployConfig()
 
-const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<EarnVault>((vault) => {
+const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<EulerEarn>((vault) => {
   const product = applyVaultOverrides(getProductByVault(vault.address), vault.address)
   return [
     vault.asset.symbol,
     vault.asset.name,
-    vault.name,
+    vault.shares.name,
     product.name,
     product.description,
     ...getEntitiesByEarnVault(vault).map(e => e.name),
@@ -46,13 +49,18 @@ const selectedCollateral = ref<string[]>([])
 const selectedCurators = ref<string[]>([])
 const sortBy = ref<string>('Total Supply')
 const sortDir = ref<'desc' | 'asc'>('desc')
+const { settings } = useUserSettings()
+const { viewer } = useApyVisibility()
+
+const getDisplayedEarnSupplyApy = (vault: EulerEarn): number =>
+  computeSupplyApy(vault, viewer.value, settings.value)
 
 useUrlQuerySync([
   { ref: searchQuery, default: '', queryKey: 'search' },
   { ref: sortBy, default: 'Total Supply', queryKey: 'sort' },
   { ref: sortDir, default: 'desc', queryKey: 'dir' },
   { ref: selectedCollateral, default: [], queryKey: 'vault' },
-  { ref: selectedCurators, default: [], queryKey: 'curator' },
+  { ref: selectedCurators, default: [], queryKey: 'allocator' },
 ])
 
 // Cache for USD values used in sorting (keyed by vault address)
@@ -111,7 +119,7 @@ const {
   clearCustomFilters,
   openCustomFilterModal,
   matchesCustomFilters,
-} = useCustomFilters<EarnVault>(
+} = useCustomFilters<EulerEarn>(
   [
     { key: 'totalSupply', label: 'Total supply', shortLabel: 'Total supply', unit: 'usd' },
     { key: 'liquidity', label: 'Available liquidity', shortLabel: 'Avail. liquidity', unit: 'usd' },
@@ -181,22 +189,22 @@ const applyDeprecatedSort = <T extends { address: string }>(sorted: T[]): T[] =>
 }
 
 const sortedList = computed(() => {
-  let sorted: EarnVault[]
+  let sorted: EulerEarn[]
   switch (sortBy.value) {
     case 'Total Supply':
-      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EarnVault, b: EarnVault) => {
+      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EulerEarn, b: EulerEarn) => {
         const aValue = vaultTotalSupplyUsd.value.get(a.address) ?? 0
         const bValue = vaultTotalSupplyUsd.value.get(b.address) ?? 0
         return bValue - aValue
       }))
       break
     case 'Supply APY':
-      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EarnVault, b: EarnVault) => {
-        return Number(b.interestRateInfo.supplyAPY) - Number(a.interestRateInfo.supplyAPY)
+      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EulerEarn, b: EulerEarn) => {
+        return getDisplayedEarnSupplyApy(b) - getDisplayedEarnSupplyApy(a)
       }))
       break
     case 'Liquidity':
-      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EarnVault, b: EarnVault) => {
+      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EulerEarn, b: EulerEarn) => {
         const aValue = vaultLiquidityUsd.value.get(a.address) ?? 0
         const bValue = vaultLiquidityUsd.value.get(b.address) ?? 0
         return bValue - aValue
@@ -214,7 +222,7 @@ const sortedList = computed(() => {
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
     <BasePageHeader
       title="Earn"
-      description="Explore curator-configured vaults that allocate supplied assets across multiple lending strategies."
+      description="One deposit, diversified yield. Curators allocate your capital across multiple lending strategies."
       class="mb-16"
       arrow-right
     />
@@ -244,9 +252,9 @@ const sortedList = computed(() => {
           :key="`curators-${chainId}`"
           v-model="selectedCurators"
           :options="curatorOptions"
-          placeholder="Curator"
-          title="Curator"
-          modal-input-placeholder="Search curator"
+          placeholder="Capital allocator"
+          title="Capital allocator"
+          modal-input-placeholder="Search allocator"
           icon="search-user"
         />
         <UiSelect

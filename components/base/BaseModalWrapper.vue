@@ -153,6 +153,7 @@ const dragStyle = computed(() => ({
           type="button"
           class="ui-button ui-button--medium ui-button--primary-stroke is-icon-only"
           name="cross"
+          data-modal-close
           aria-label="Close modal"
           @click="emit('close')"
         >

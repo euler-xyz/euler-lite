@@ -68,6 +68,10 @@ const open = () => {
   >
     <div
       class="ui-select__field"
+      data-id="filter-trigger"
+      :data-filter-title="title || placeholder || 'Select'"
+      :data-filter-placeholder="placeholder || 'Select'"
+      :data-selected-count="model.length"
       @click="open"
     >
       <UiIcon

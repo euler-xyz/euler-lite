@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import type { AnyVault } from '~/composables/useVaultRegistry'
+import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import type { VaultTypeBadge } from '~/composables/useVaultTypeBadges'
 
 const { vault, layout = 'inline', size = 'small', nudge = false, summaryOnly = false } = defineProps<{
-  vault: AnyVault
+  vault: EVault | EulerEarn | SecuritizeCollateralVault
   layout?: 'inline' | 'stacked'
   size?: 'small' | 'large'
   nudge?: boolean

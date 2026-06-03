@@ -56,6 +56,12 @@ export async function fetchAccountPositions(subgraphUrl: string, walletAddress: 
   }
 }
 
+/**
+ * Poll the subgraph until it has indexed `targetBlock`, returning whether it
+ * caught up before the timeout. `subgraphUrl` should be the SDK's subgraph
+ * proxy path (`/api/proxy/subgraph/{chainId}`) so the head measured here is the
+ * same one serving queryAccountVaults — not a separately-resolved upstream.
+ */
 export async function waitForSubgraphBlock(
   subgraphUrl: string,
   targetBlock: bigint,

@@ -1,33 +1,16 @@
-import type { ComputedRef } from 'vue'
-import { formatUnits, type Address, type Abi, zeroAddress } from 'viem'
-import { logWarn } from '~/utils/errorHandling'
-import { createRaceGuard } from '~/utils/race-guard'
-import { FixedPoint } from '~/utils/fixed-point'
-import { getTotalCollateralValue } from '~/utils/position-estimates'
-import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal, SwapTokenSelector, SlippageSettingsModal } from '#components'
-import { useToast } from '~/components/ui/composables/useToast'
-import { eulerAccountLensABI } from '~/entities/euler/abis'
-import {
-  getNetAPY,
-  getProjectedRates,
-  isEVKVault,
-  type Vault,
-  type SecuritizeVault,
-  type VaultAsset,
-} from '~/entities/vault'
-import {
-  getAssetUsdValueOrZero,
-  getCollateralUsdValueOrZero,
-} from '~/services/pricing/priceProvider'
-import type { TxPlan } from '~/entities/txPlan'
+import { getProjectedRates, getNetAPY } from '~/utils/vault/apy'
+import type { Account, EVault, IHasVaultAddress, SecuritizeCollateralVault, TransactionPlan, TransactionPlanPrepared, SwapQuote } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
+import type { VaultAsset } from '~/types/asset'
+import { getAssetUsdValueOrZero, getCollateralUsdValueOrZero } from '~/utils/sdk-prices'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
-import { SwapperMode, type SwapApiQuote } from '~/entities/swap'
+import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
-import type { SwapApiRequestInput } from '~/composables/useSwapApi'
+import type { SwapQuoteInput } from '~/composables/useSwapApi'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { useSwapPriceImpact } from '~/composables/useSwapPriceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -36,6 +19,18 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { isOpDisabled, OP_DEPOSIT, OP_WITHDRAW } from '~/utils/vault-hooks'
 import { getHookDisabledWarning } from '~/composables/useVaultWarnings'
+import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
+import { type Address, type Abi, formatUnits, zeroAddress } from 'viem'
+import { useModal } from '~/components/ui/composables/useModal'
+import { useToast } from '~/components/ui/composables/useToast'
+import { eulerAccountLensABI } from '~/entities/euler/abis'
+import { SwapTokenSelector, SlippageSettingsModal, OperationReviewModal } from '#components'
+import type { ComputedRef } from 'vue'
+import { logWarn } from '~/utils/errorHandling'
+import { createRaceGuard } from '~/utils/race-guard'
+import { FixedPoint } from '~/utils/fixed-point'
+import { getTotalCollateralValue } from '~/utils/position-estimates'
+import { getTxErrorMessage } from '~/utils/tx-errors'
 
 export interface UseCollateralFormOptions {
   mode: 'supply' | 'withdraw'
@@ -50,14 +45,14 @@ export interface UseCollateralFormOptions {
 
   computePriceFixed: (
     position: NonNullable<ReturnType<ReturnType<typeof useEulerAccount>['getPositionBySubAccountIndex']>>,
-    borrowVault?: Vault,
-    collateralVault?: Vault | SecuritizeVault,
+    borrowVault?: EVault,
+    collateralVault?: EVault | SecuritizeCollateralVault,
   ) => FixedPoint
 
   computeLiquidationPrice: (
     position: NonNullable<ReturnType<ReturnType<typeof useEulerAccount>['getPositionBySubAccountIndex']>>,
-    borrowVault?: Vault | undefined,
-    collateralVault?: Vault | SecuritizeVault,
+    borrowVault?: EVault | undefined,
+    collateralVault?: EVault | SecuritizeCollateralVault,
   ) => number | undefined
 
   validateEstimate: (ctx: {
@@ -75,16 +70,16 @@ export interface UseCollateralFormOptions {
     assetAddress: string
     amountNano: bigint
     subAccount?: string
-    includePermit2Call?: boolean
-  }) => Promise<TxPlan>
+    account?: Account<IHasVaultAddress>
+  }) => Promise<TransactionPlan>
 
-  buildSwapPlan: (quote: SwapApiQuote, ctx: {
+  buildSwapPlan: (quote: SwapQuote, ctx: {
     vaultAddress: string
     amountNano: bigint
     slippage: number
     subAccount?: string
-    includePermit2Call?: boolean
-  }) => Promise<TxPlan>
+    account?: Account<IHasVaultAddress>
+  }) => Promise<TransactionPlan>
 
   requestSwapQuoteParams: (ctx: {
     userAddr: Address
@@ -93,7 +88,7 @@ export interface UseCollateralFormOptions {
     slippage: number
     asset: VaultAsset
     vaultAddress: string
-  }) => SwapApiRequestInput | null
+  }) => SwapQuoteInput | null
 
   getSwapOutputAsset: () => VaultAsset | undefined
 
@@ -105,6 +100,16 @@ export interface UseCollateralFormOptions {
 
   onAfterLoad?: () => Promise<void> | void
   onAfterSend?: () => Promise<void> | void
+
+  /**
+   * When true, route plan construction through the prepared-envelope pipeline:
+   * builds the raw plan, runs {@link prepareTransactionPlan} once, simulates
+   * against the envelope, opens the modal with `prepared`, and uses
+   * `executePreparedPlan` on confirm. Plugin reads (TOS / Keyring / Pyth) run
+   * exactly once per Review click — no in-modal preparation spinner.
+   *
+   */
+  usePreparedPipeline?: boolean
 }
 
 export const useCollateralForm = (options: UseCollateralFormOptions) => {
@@ -112,15 +117,26 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const submitLabel = options.reviewLabel
-  const { executeTxPlan } = useEulerOperations()
+  const { executePlan, executePreparedPlan, prepareTransactionPlan, prefetchPluginData } = useEulerTx()
+  const usePreparedPipeline = options.usePreparedPipeline ?? true
+  // `effectiveBalance` is form-validated in `isSubmitDisabled`. In supply mode that
+  // is the wallet ERC20 balance, so `noBalanceOverride: true` saves a balanceOf
+  // RPC per estimate/sim. In withdraw mode the operation doesn't need wallet
+  // ERC20 balance, but slot hints + wallet snapshot still help allowance
+  // overrides.
+  const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
+  const buildCollateralStateOverrideOptions = () =>
+    buildStateOverrideOptions({ noBalanceOverride: options.mode === 'supply' })
   const { isConnected, address } = useWagmi()
   const { isSpyMode } = useSpyMode()
+  const { account: planAccount } = usePlanAccount()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const positionIndex = usePositionIndex()
   const { isPositionsLoaded, getPositionBySubAccountIndex } = useEulerAccount()
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
-  const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
-  const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
+  const { settings } = useUserSettings()
+  const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
+  const { runSimulation, runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
   const { isReady: isVaultsReady } = useVaults()
   const { getOrFetch } = useVaultRegistry()
   const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
@@ -132,12 +148,15 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const isPreparing = ref(false)
   const isEstimatesLoading = ref(false)
   const amount = ref('')
-  const plan = ref<TxPlan | null>(null)
+  const plan = ref<TransactionPlan | null>(null)
+  // `shallowRef` so Vue doesn't deep-unwrap the envelope's Account class
+  // entity — the class has private brand members that drop on UnwrapRef.
+  const preparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
   const estimateNetAPY = ref(0)
   const estimateUserLTV = ref(0n)
   const estimateHealth = ref(0n)
   const estimatesError = ref('')
-  const selectedCollateral = ref<Vault | SecuritizeVault | null>(null)
+  const selectedCollateral = ref<EVault | SecuritizeCollateralVault | null>(null)
   const selectedCollateralAssets = ref(0n)
   const lastCollateralAddress = ref('')
 
@@ -150,6 +169,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     sortedQuoteCards: swapQuoteCardsSorted,
     selectedProvider: swapSelectedProvider,
     selectedQuote: swapSelectedQuote,
+    selectedQuoteCard: swapSelectedQuoteCard,
     effectiveQuote: swapEffectiveQuote,
     effectiveQuoteFetchedAt: swapEffectiveQuoteFetchedAt,
     providersCount: swapProvidersCount,
@@ -163,13 +183,34 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   } = useSwapQuotesParallel({
     amountField: 'amountOut',
     compare: 'max',
-    buildTxPlanForQuote: quote => buildSwapTxPlanForQuote(quote, false),
+    buildTxPlanForQuote: (quote, _provider, context) => buildCollateralSwapPlanFromQuote(quote, context.account),
+    getPlanAccount: () => planAccount.value,
+    getStateOverrideOptions: () => buildCollateralStateOverrideOptions(),
+    // Sweep-scoped plugin prefetch — Hermes pull + keyring read happen once per
+    // sweep instead of once per quote.
+    prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
+    prepareTransactionPlan: (plan, account, prefetch) => prepareTransactionPlan(plan, { account, prefetch }),
   })
+
+  async function buildCollateralSwapPlanFromQuote(quote: SwapQuote, account = planAccount.value): Promise<TransactionPlan> {
+    if (!collateralVault.value?.address || !asset.value?.address) {
+      throw new Error('Collateral vault not loaded')
+    }
+    return options.buildSwapPlan(quote, {
+      vaultAddress: collateralVault.value.address,
+      amountNano: valueToNano(amount.value || '0', asset.value.decimals),
+      slippage: swapSlippage.value,
+      subAccount: position.value?.subAccount,
+      account,
+    })
+  }
   // --- Position/vault computeds ---
   const position = computed(() => getPositionBySubAccountIndex(+positionIndex))
   const isPositionLoaded = computed(() => !!position.value)
-  const collateralVault = computed(() => selectedCollateral.value || position.value?.collateral)
-  const borrowVault = computed(() => position.value?.borrow)
+  const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() =>
+    (selectedCollateral.value || (position.value ? position.value.collateralVault : undefined)) as EVault | SecuritizeCollateralVault | undefined,
+  )
+  const borrowVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
   const collateralAssets = computed(() => selectedCollateralAssets.value)
   const asset = computed(() => collateralVault.value?.asset)
 
@@ -183,19 +224,21 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const borrowRewardApy = computed(() => getBorrowRewardApy(borrowVault.value?.address || '', collateralVault.value?.address || ''))
   const collateralSupplyApy = computed(() => {
     if (!collateralVault.value) return 0
-    return withIntrinsicSupplyApy(
-      nanoToValue(collateralVault.value.interestRateInfo.supplyAPY || 0n, 25),
-      collateralVault.value?.asset.address,
+    return withVaultIntrinsicApy(
+      getVaultSupplyApy(collateralVault.value),
+      collateralVault.value,
+      enableIntrinsicApy.value,
     )
   })
-  const borrowApy = computed(() => withIntrinsicBorrowApy(
-    nanoToValue(borrowVault.value?.interestRateInfo.borrowAPY || 0n, 25),
-    borrowVault.value?.asset.address,
+  const borrowApy = computed(() => withVaultIntrinsicApy(
+    getVaultBorrowApy(borrowVault.value),
+    borrowVault.value,
+    enableIntrinsicApy.value,
   ))
 
   const getCollateralValueUsdLocal = async (amt: bigint) => {
     if (!borrowVault.value || !collateralVault.value) return 0
-    return getCollateralUsdValueOrZero(amt, borrowVault.value, collateralVault.value as Vault, 'off-chain')
+    return getCollateralUsdValueOrZero(amt, borrowVault.value, collateralVault.value as EVault, 'off-chain')
   }
 
   const netAPY = ref(0)
@@ -223,11 +266,11 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
   // --- FixedPoint computeds ---
   const amountFixed = computed(() => FixedPoint.fromValue(
-    valueToNano(amount.value || '0', collateralVault.value?.decimals),
-    Number(collateralVault.value?.decimals),
+    valueToNano(amount.value || '0', collateralVault.value?.asset.decimals),
+    Number(collateralVault.value?.asset.decimals),
   ))
-  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, position.value?.borrow.decimals || 18))
-  const suppliedFixed = computed(() => FixedPoint.fromValue(collateralAssets.value, collateralVault.value?.decimals || 18))
+  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, borrowVault.value?.shares.decimals || 18))
+  const suppliedFixed = computed(() => FixedPoint.fromValue(collateralAssets.value, collateralVault.value?.asset.decimals || 18))
   const priceFixed = computed(() => {
     if (!position.value) return FixedPoint.fromValue(0n, 18)
     return options.computePriceFixed(position.value, borrowVault.value, collateralVault.value)
@@ -255,7 +298,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       return
     }
 
-    const primaryAddress = normalizeAddressOrEmpty(position.value.collateral.address)
+    const primaryCollateral = position.value.collateralVault
+    const primaryAddress = normalizeAddressOrEmpty(primaryCollateral?.address)
     const targetAddress = normalizeAddressOrEmpty(getSelectedCollateralAddress()) || primaryAddress
 
     if (targetAddress !== lastCollateralAddress.value) {
@@ -272,7 +316,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
       await until(isVaultsReady).toBe(true)
 
-      const vault = await getOrFetch(targetAddress) as Vault | SecuritizeVault | undefined
+      const vault = await getOrFetch(targetAddress) as EVault | SecuritizeCollateralVault | undefined
       selectedCollateral.value = vault || null
 
       const lensAddress = eulerLensAddresses.value?.accountLens
@@ -291,7 +335,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     catch (e) {
       logWarn(`collateral/${options.mode}`, e)
       if (!selectedCollateral.value) {
-        selectedCollateral.value = position.value.collateral
+        selectedCollateral.value = primaryCollateral as EVault | SecuritizeCollateralVault | null
       }
     }
   }
@@ -345,8 +389,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
   const { priceImpact: swapPriceImpact } = useSwapPriceImpact({
     quote: swapEffectiveQuote,
-    fromVault: computed(() => options.mode === 'withdraw' ? collateralVault.value : null),
-    toVault: computed(() => options.mode === 'supply' ? collateralVault.value : null),
+    fromVault: computed(() => options.mode === 'withdraw' ? collateralVault.value as EVault | SecuritizeCollateralVault : null),
+    toVault: computed(() => options.mode === 'supply' ? collateralVault.value as EVault | SecuritizeCollateralVault : null),
   })
 
   const shouldGateUnknownPriceImpact = computed(() =>
@@ -470,14 +514,14 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const collateralOp = computed(() => options.mode === 'supply' ? OP_DEPOSIT : OP_WITHDRAW)
 
   const hookWarning = computed(() => {
-    // Securitize collateral doesn't implement hooks — skip non-EVK vaults.
-    if (!collateralVault.value || !isEVKVault(collateralVault.value)) return null
+    // Securitize collateral doesn't implement hooks — skip non-EVaults.
+    if (!collateralVault.value || !isEVault(collateralVault.value)) return null
     return getHookDisabledWarning(collateralVault.value, collateralOp.value)
   })
 
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value) return false
-    if (collateralVault.value && isEVKVault(collateralVault.value) && isOpDisabled(collateralVault.value, collateralOp.value)) return true
+    if (collateralVault.value && isEVault(collateralVault.value) && isOpDisabled(collateralVault.value, collateralOp.value)) return true
     if (options.effectiveBalance.value < valueToNano(amount.value, options.effectiveAsset.value?.decimals)) return true
     if (isLoading.value || !(+amount.value) || !!estimatesError.value || isEstimatesLoading.value) return true
     if (options.needsSwap.value && !swapSelectedQuote.value) return true
@@ -511,8 +555,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       const amountFl = amount18.toUnsafeFloat()
 
       // Only apply delta if this collateral is accepted by the controller (BLTV > 0)
-      const affectsLtv = borrowVault.value?.collateralLTVs.some(
-        ltv => ltv.collateral.toLowerCase() === collateralVault.value!.address.toLowerCase() && ltv.borrowLTV > 0n,
+      const affectsLtv = borrowVault.value?.collaterals.some(
+        ltv => ltv.address.toLowerCase() === collateralVault.value!.address.toLowerCase() && ltv.borrowLTV > 0,
       ) ?? false
 
       const collateralValueFl = totalValue !== null && priceFl > 0
@@ -547,14 +591,17 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       estimateUserLTV.value = userLtvFixed.value
       // liquidationLTV is in basis points (e.g. 8600 = 86%). Convert to 18-decimal
       // percentage (8600 * 10^16 = 86 * 10^18) to match userLtvFixed's 18 decimals.
+      const effectiveLiquidationLtv = getBorrowPositionEffectiveLiquidationLTV(position.value!)
+      if (effectiveLiquidationLtv === undefined) throw new Error('Liquidation LTV unavailable')
+      const liquidationLtvBps = decimalLtvToBps(effectiveLiquidationLtv)
       estimateHealth.value = (userLtvFixed.isZero() || userLtvFixed.isNegative())
         ? 0n
-        : FixedPoint.fromValue(position.value!.liquidationLTV * (10n ** 16n), 18).div(userLtvFixed).value
+        : FixedPoint.fromValue(liquidationLtvBps * (10n ** 16n), 18).div(userLtvFixed).value
     }
     catch (e: unknown) {
       logWarn('collateral/syncEstimates', e)
-      estimateUserLTV.value = position.value!.userLTV
-      estimateHealth.value = position.value!.health
+      estimateUserLTV.value = (position.value!.userLTV ?? position.value!.currentLTV ?? 0n) * 100n
+      estimateHealth.value = position.value!.healthFactor ?? 0n
       estimatesError.value = (e as { message: string }).message
     }
   }
@@ -567,14 +614,16 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     }
     const gen = asyncEstimatesGuard.next()
     try {
-      const amountNano = valueToNano(amount.value, collateralVault.value.decimals)
+      if (!isEVault(collateralVault.value)) return
+      const evault = collateralVault.value
+      const amountNano = valueToNano(amount.value, evault.asset.decimals)
       const cashDelta = options.mode === 'supply' ? amountNano : -amountNano
 
       const [projected, collateralUsd, borrowedUsd] = await Promise.all([
         getProjectedRates(
-          collateralVault.value.address,
-          collateralVault.value.interestRateInfo.cash,
-          collateralVault.value.interestRateInfo.borrows,
+          evault.address,
+          evault.totalCash,
+          evault.totalBorrowed,
           cashDelta,
           0n,
         ),
@@ -589,7 +638,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       if (asyncEstimatesGuard.isStale(gen)) return
 
       const projectedSupplyApy = projected
-        ? withIntrinsicSupplyApy(nanoToValue(projected.supplyAPY, 25), collateralVault.value?.asset.address)
+        ? withVaultIntrinsicApy(nanoToValue(projected.supplyAPY, 25), evault, enableIntrinsicApy.value)
         : collateralSupplyApy.value
 
       estimateNetAPY.value = getNetAPY(
@@ -622,8 +671,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       await loadSelectedCollateral()
       await options.onAfterLoad?.()
       estimateNetAPY.value = netAPY.value
-      estimateUserLTV.value = position.value!.userLTV
-      estimateHealth.value = position.value!.health
+      estimateUserLTV.value = (position.value!.userLTV ?? position.value!.currentLTV ?? 0n) * 100n
+      estimateHealth.value = position.value!.healthFactor ?? 0n
     }
     catch (e) {
       showError('Unable to load Vault')
@@ -634,17 +683,34 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     }
   }
 
-  async function buildSwapTxPlanForQuote(quote: SwapApiQuote, includePermit2Call: boolean): Promise<TxPlan> {
-    if (!collateralVault.value?.address || !asset.value?.address) {
-      throw new Error('Missing collateral vault or asset')
+  const buildRawPlan = async (): Promise<TransactionPlan | null> => {
+    if (!collateralVault.value?.address || !asset.value?.address) return null
+    if (options.needsSwap.value && swapEffectiveQuote.value) {
+      return options.buildSwapPlan(swapEffectiveQuote.value, {
+        vaultAddress: collateralVault.value.address,
+        amountNano: valueToNano(amount.value || '0', asset.value.decimals),
+        slippage: swapSlippage.value,
+        subAccount: position.value?.subAccount,
+        account: planAccount.value,
+      })
     }
-    return options.buildSwapPlan(quote, {
+    return options.buildDirectPlan({
       vaultAddress: collateralVault.value.address,
+      assetAddress: asset.value.address,
       amountNano: valueToNano(amount.value || '0', asset.value.decimals),
-      slippage: swapSlippage.value,
       subAccount: position.value?.subAccount,
-      includePermit2Call,
+      account: planAccount.value,
     })
+  }
+
+  const getSelectedPreparedSwapPlan = () => {
+    if (!options.needsSwap.value || !swapSelectedQuote.value) return null
+    const card = swapSelectedQuoteCard.value
+    if (!card?.preparedPlan || card.quote !== swapSelectedQuote.value) return null
+    return {
+      plan: card.plan ?? card.preparedPlan.plan,
+      prepared: card.preparedPlan as TransactionPlanPrepared,
+    }
   }
 
   // --- Submit ---
@@ -661,27 +727,42 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       await guardWithPriceImpact(async () => {
         if (!collateralVault.value?.address || !asset.value?.address) return
 
+        plan.value = null
+        preparedPlan.value = null
         try {
-          if (options.needsSwap.value && swapEffectiveQuote.value) {
-            plan.value = await buildSwapTxPlanForQuote(swapEffectiveQuote.value, false)
+          const preparedSwapPlan = usePreparedPipeline ? getSelectedPreparedSwapPlan() : null
+          if (preparedSwapPlan) {
+            plan.value = preparedSwapPlan.plan
+            preparedPlan.value = preparedSwapPlan.prepared
           }
           else {
-            plan.value = await options.buildDirectPlan({
-              vaultAddress: collateralVault.value.address,
-              assetAddress: asset.value.address,
-              amountNano: valueToNano(amount.value || '0', asset.value.decimals),
-              subAccount: position.value?.subAccount,
-              includePermit2Call: false,
-            })
+            const rawPlan = await buildRawPlan()
+            plan.value = rawPlan
+            if (rawPlan && usePreparedPipeline) {
+              preparedPlan.value = await prepareTransactionPlan(rawPlan, { account: planAccount.value })
+            }
           }
         }
         catch (e) {
           logWarn(`collateral/${options.mode}/buildPlan`, e)
           plan.value = null
+          preparedPlan.value = null
+          if (usePreparedPipeline) {
+            // In the prepared pipeline, opening the modal with no envelope
+            // would show "Transaction plan is unavailable" — surface the real
+            // error inline instead.
+            simulationError.value = await getTxErrorMessage(e)
+            return
+          }
         }
 
-        if (plan.value) {
-          const ok = await runSimulation(plan.value)
+        if (usePreparedPipeline) {
+          if (!preparedPlan.value) return
+          const ok = await runPreparedSimulation(preparedPlan.value, buildCollateralStateOverrideOptions())
+          if (!ok) return
+        }
+        else if (plan.value) {
+          const ok = await runSimulation(plan.value, buildCollateralStateOverrideOptions())
           if (!ok) return
         }
 
@@ -692,7 +773,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
             type: reviewType,
             asset: reviewAsset,
             amount: amount.value,
-            plan: plan.value || undefined,
+            plan: usePreparedPipeline ? undefined : (plan.value || undefined),
+            prepared: usePreparedPipeline ? (preparedPlan.value || undefined) : undefined,
             quoteFetchedAt: options.needsSwap.value ? swapEffectiveQuoteFetchedAt.value : null,
             subAccount: position.value?.subAccount,
             hasBorrows: (position.value?.borrowed || 0n) > 0n,
@@ -718,26 +800,34 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       isSubmitting.value = true
       if (!asset.value?.address || !collateralVault.value?.address) return
 
-      let txPlan: TxPlan
-      if (options.needsSwap.value && (swapSelectedQuote.value || swapEffectiveQuote.value)) {
-        const quote = swapSelectedQuote.value || swapEffectiveQuote.value!
-        txPlan = await options.buildSwapPlan(quote, {
-          vaultAddress: collateralVault.value.address,
-          amountNano: valueToNano(amount.value || '0', asset.value.decimals),
-          slippage: swapSlippage.value,
-          subAccount: position.value?.subAccount,
-        })
+      if (usePreparedPipeline) {
+        if (!preparedPlan.value) return
+        await executePreparedPlan(preparedPlan.value)
       }
       else {
-        txPlan = await options.buildDirectPlan({
-          vaultAddress: collateralVault.value.address,
-          assetAddress: asset.value.address,
-          amountNano: valueToNano(amount.value || '0', asset.value.decimals),
-          subAccount: position.value?.subAccount,
-          includePermit2Call: true,
-        })
+        // Explicit legacy opt-out rebuilds the plan at send time.
+        let txPlan: TransactionPlan
+        if (options.needsSwap.value && (swapSelectedQuote.value || swapEffectiveQuote.value)) {
+          const quote = swapSelectedQuote.value || swapEffectiveQuote.value!
+          txPlan = await options.buildSwapPlan(quote, {
+            vaultAddress: collateralVault.value.address,
+            amountNano: valueToNano(amount.value || '0', asset.value.decimals),
+            slippage: swapSlippage.value,
+            subAccount: position.value?.subAccount,
+            account: planAccount.value,
+          })
+        }
+        else {
+          txPlan = await options.buildDirectPlan({
+            vaultAddress: collateralVault.value.address,
+            assetAddress: asset.value.address,
+            amountNano: valueToNano(amount.value || '0', asset.value.decimals),
+            subAccount: position.value?.subAccount,
+            account: planAccount.value,
+          })
+        }
+        await executePlan(txPlan)
       }
-      await executeTxPlan(txPlan)
       await finalizeTxAndRedirect({ onAfterClose: options.onAfterSend })
     }
     catch (e) {
@@ -748,6 +838,48 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       isSubmitting.value = false
     }
   }
+
+  // Pre-prime ERC20 slot hints for the assets this form touches (collateral,
+  // borrow, pay-with/output). One probe per token, owner-/spender-agnostic;
+  // keeps state-override derivation off the access-list path for the lifetime
+  // of the form.
+  const primeFormSlotHints = () => {
+    const tokens: Address[] = []
+    const seen = new Set<string>()
+    const push = (addr?: string) => {
+      if (!addr) return
+      const key = addr.toLowerCase()
+      if (seen.has(key)) return
+      seen.add(key)
+      tokens.push(addr as Address)
+    }
+    push(collateralVault.value?.asset?.address)
+    push(borrowVault.value?.asset?.address)
+    push(options.effectiveAsset.value?.address)
+    push(options.getSwapOutputAsset()?.address)
+    if (tokens.length) void primeSlotHintsFor(tokens)
+  }
+
+  // Register the priming watcher AFTER the synchronous construction path.
+  // Consumers pass `effectiveAsset`/`getSwapOutputAsset` that close over the
+  // `form` object returned by this composable (e.g. `effectiveAsset: () =>
+  // form.asset.value`). Vue's `watch` evaluates its source getters once,
+  // synchronously, at registration time (independent of `immediate`) to capture
+  // baseline values — so listing those getters as sources here, while still on
+  // the right-hand side of `const form = useCollateralForm(...)`, dereferences
+  // `form` in its temporal dead zone and throws. Defer to a microtask (form is
+  // assigned by then) and re-run inside the captured effect scope so the watcher
+  // is still tied to the component lifecycle and auto-disposed on unmount.
+  const scope = getCurrentScope()
+  void Promise.resolve().then(() => {
+    const register = () => watch(
+      [collateralVault, borrowVault, () => options.effectiveAsset.value, () => options.getSwapOutputAsset()],
+      primeFormSlotHints,
+      { immediate: true },
+    )
+    if (scope) scope.run(register)
+    else register()
+  })
 
   // --- Common watchers ---
   watch(isPositionsLoaded, (val) => {
@@ -760,8 +892,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     await loadSelectedCollateral()
     await options.onAfterLoad?.()
     estimateNetAPY.value = netAPY.value
-    estimateUserLTV.value = position.value?.userLTV || 0n
-    estimateHealth.value = position.value?.health || 0n
+    estimateUserLTV.value = position.value ? (position.value.userLTV ?? position.value.currentLTV ?? 0n) * 100n : 0n
+    estimateHealth.value = position.value ? position.value.healthFactor ?? 0n : 0n
   })
 
   watch(amount, async () => {

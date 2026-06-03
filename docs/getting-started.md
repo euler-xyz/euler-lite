@@ -94,8 +94,9 @@ APPKIT_PROJECT_ID=your-project-id
 NUXT_PUBLIC_APP_URL=https://your-domain.com
 
 # API URLs
-EULER_API_URL=https://your-euler-api.com
-SWAP_API_URL=https://your-swap-api.com
+V3_API_URL=https://v3.euler.finance
+EULER_SDK_V3_API_KEY=your-v3-api-key # optional
+SWAP_API_URL=https://swap.euler.finance
 
 # Chain RPC endpoints (one per chain you want to enable)
 RPC_URL_1=https://your-ethereum-rpc.com
@@ -109,12 +110,6 @@ NUXT_PUBLIC_SUBGRAPH_URI_1=https://your-subgraph.com
 - **Purpose**: DeFi lending and borrowing protocol
 - **Integration**: Smart contract interactions via EVM (EVC, EVK)
 - **Data Source**: Vault information, interest rates, positions
-
-### Euler Indexer API
-
-- **Purpose**: Token metadata, logos, and indexing
-- **Integration**: REST API (`EULER_API_URL`)
-- **Data Source**: Token data per chain including `logoURI`
 
 ### Pyth Network
 

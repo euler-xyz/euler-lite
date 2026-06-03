@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import type { Vault } from '~/entities/vault'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import {
   areAllUserOpsHooked,
-  decodeHookedOps,
+  getHookedOperationMetas,
+  getVaultHookedOperations,
+  getVaultHookTarget,
   isHookDisabling,
   isOpHooked,
   OP_VAULT_STATUS_CHECK,
@@ -13,18 +15,19 @@ import { isVaultAccessControlled, isVaultKeyring } from '~/utils/eulerLabelsUtil
 import { truncate } from '~/utils/string-utils'
 
 const emits = defineEmits<{ close: [] }>()
-const { vault } = defineProps<{ vault: Vault }>()
+const { vault } = defineProps<{ vault: EVault }>()
 
 const { chainId } = useEulerAddresses()
-const { copyToClipboard, isCopied } = useClipboardCopy()
 
-// 'full'         — all user-facing ops are explicitly in the bitmap
+const hookedOperations = computed(() => getVaultHookedOperations(vault))
+
+// 'full'         — all user-facing operations are hooked
 // 'status-check' — only the vault-status check is disabled, which the EVC
 //                  calls at the end of every batch → every operation reverts
 // null           — not paused (either fully or at all)
 const pausedKind = computed((): 'full' | 'status-check' | null => {
   if (!isHookDisabling(vault)) return null
-  if (areAllUserOpsHooked(vault.hookedOps)) return 'full'
+  if (areAllUserOpsHooked(hookedOperations.value)) return 'full'
   if (isOpHooked(vault, OP_VAULT_STATUS_CHECK)) return 'status-check'
   return null
 })
@@ -49,11 +52,13 @@ const intro = computed(() => {
   return 'The following operations are routed through a hook contract, which may restrict or modify them.'
 })
 
-const ops = computed(() => decodeHookedOps(vault.hookedOps))
+const ops = computed(() => getHookedOperationMetas(hookedOperations.value))
 
 const hasHookTarget = computed(() => !isHookDisabling(vault))
 
-const hookTargetLink = computed(() => getExplorerLink(vault.hookTarget, chainId.value, true))
+const hookTarget = computed(() => getVaultHookTarget(vault))
+
+const hookTargetLink = computed(() => getExplorerLink(hookTarget.value, chainId.value, true))
 
 const hookTargetLabel = computed(() => {
   if (isVaultKeyring(vault.address)) return 'Keyring (identity verification)'
@@ -70,7 +75,7 @@ const hookTargetNote = computed(() =>
 )
 
 const onCopyClick = (address: string) => {
-  copyToClipboard(address).catch(() => {})
+  navigator.clipboard.writeText(address).catch(() => {})
 }
 
 const handleClose = () => {
@@ -101,17 +106,17 @@ const handleClose = () => {
           rel="noopener noreferrer"
           class="text-accent-600 underline cursor-pointer hover:text-accent-500"
         >
-          {{ getSpecialAddressLabel(vault.hookTarget) || truncate(vault.hookTarget) }}
+          {{ getSpecialAddressLabel(hookTarget) || truncate(hookTarget) }}
         </NuxtLink>
         <button
           type="button"
           aria-label="Copy hook target address"
           class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 focus-visible:rounded"
-          @click="onCopyClick(vault.hookTarget)"
+          @click="onCopyClick(hookTarget)"
         >
           <SvgIcon
             class="!w-18 !h-18"
-            :name="isCopied(vault.hookTarget) ? 'check' : 'copy'"
+            name="copy"
           />
         </button>
       </div>

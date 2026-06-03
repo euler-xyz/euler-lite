@@ -1,7 +1,6 @@
 import { formatUnits, getAddress, toFunctionSelector, zeroAddress } from 'viem'
-import type { TxPlan } from '~/entities/txPlan'
-import type { EVCCall } from '~/utils/evc-converter'
-import { SwapperMode } from '~/entities/swap'
+import { flattenBatchEntries, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,37 +29,30 @@ export interface DisplayStep {
 
 /** Structurally matches useVaultRegistry().getVault */
 export type VaultLookup = (address: string) => {
-  asset: { symbol: string, address: string, decimals: bigint }
+  asset: { symbol: string, address: string, decimals: number | bigint }
 } | undefined
 
-/** All prop-derived context needed by the decoding functions */
 export interface StepDecodingContext {
   type?: string
-  asset: { symbol: string, address: string, decimals?: bigint }
+  asset: { symbol: string, address: string, decimals?: number | bigint }
   assetIconUrl?: string
   amount: number | string
   supplyingAssetForBorrow?: { symbol: string, address: string }
   supplyingAmount?: number | string
-  swapToAsset?: { symbol: string, address: string, decimals: bigint }
+  swapToAsset?: { symbol: string, address: string, decimals: number | bigint }
   swapToAmount?: number | string
-  /**
-   * Mode of the swap behind this operation, when one is involved. Drives the
-   * "Swap to repay" relabel and the default estimated leg:
-   *   EXACT_IN     → output amount is an estimate
-   *   EXACT_OUT    → input amount is an estimate
-   *   TARGET_DEBT  → input amount is an estimate, label becomes "Swap to repay"
-   */
   swapMode?: SwapperMode
-  /** Display-side override for flows whose review order differs from swap input/output. */
   swapEstimatedSide?: 'input' | 'output'
   transferAmounts?: Record<string, string>
 }
 
 // ---------------------------------------------------------------------------
-// Constants (internal)
+// Constants
 // ---------------------------------------------------------------------------
 
-type SwapEstimatedSide = 'input' | 'output'
+const VERIFY_AMOUNT_MIN_AND_SKIM_SELECTOR = toFunctionSelector('function verifyAmountMinAndSkim(address,address,uint256,uint256)')
+const VERIFY_AMOUNT_MIN_AND_TRANSFER_SELECTOR = toFunctionSelector('function verifyAmountMinAndTransfer(address,address,uint256,uint256)')
+const VERIFY_DEBT_MAX_SELECTOR = toFunctionSelector('function verifyDebtMax(address,address,uint256,uint256)')
 
 const SELECTOR_LABELS: Record<string, string> = {
   [toFunctionSelector('function deposit(uint256,address)')]: 'Supply',
@@ -78,17 +70,29 @@ const SELECTOR_LABELS: Record<string, string> = {
   [toFunctionSelector('function repayWithShares(uint256,address)')]: 'Repay',
   [toFunctionSelector('function signTermsOfUse(string,bytes32)')]: 'Sign terms of use',
   [toFunctionSelector('function multicall(bytes[])')]: 'Swap',
-  [toFunctionSelector('function verifyAmountMinAndSkim(address,address,uint256,uint256)')]: 'Verify min received',
-  [toFunctionSelector('function verifyAmountMinAndTransfer(address,address,uint256,uint256)')]: 'Verify min received',
-  [toFunctionSelector('function verifyDebtMax(address,address,uint256,uint256)')]: 'Verify max debt',
+  [VERIFY_AMOUNT_MIN_AND_SKIM_SELECTOR]: 'Verify min received',
+  [VERIFY_AMOUNT_MIN_AND_TRANSFER_SELECTOR]: 'Verify min received',
+  [VERIFY_DEBT_MAX_SELECTOR]: 'Verify max debt',
   [toFunctionSelector('function updatePriceFeeds(bytes[])')]: 'Update price feeds',
   [toFunctionSelector('function transferFromSender(address,uint256,address)')]: 'Transfer from wallet',
   [toFunctionSelector('function deposit()')]: 'Wrap native currency',
+  [toFunctionSelector('function createCredential(address,uint256,uint256,uint256,uint256,bytes,bytes,bytes)')]: 'Identity verification',
 }
 
 const MAX_UINT256 = 2n ** 256n - 1n
+const SHARES_AMOUNT_SELECTORS = new Set([
+  toFunctionSelector('function redeem(uint256,address,address)'),
+  toFunctionSelector('function repayWithShares(uint256,address)'),
+])
+const SWAP_VERIFIER_AMOUNT_SELECTORS = new Set([
+  VERIFY_AMOUNT_MIN_AND_SKIM_SELECTOR,
+  VERIFY_AMOUNT_MIN_AND_TRANSFER_SELECTOR,
+  VERIFY_DEBT_MAX_SELECTOR,
+])
 
-const getDefaultSwapEstimatedSide = (swapMode: SwapperMode): SwapEstimatedSide => {
+export type SwapEstimatedSide = 'input' | 'output'
+
+export const getDefaultSwapEstimatedSide = (swapMode: SwapperMode): SwapEstimatedSide => {
   switch (swapMode) {
     case SwapperMode.EXACT_IN:
       return 'output'
@@ -102,15 +106,8 @@ const getDefaultSwapEstimatedSide = (swapMode: SwapperMode): SwapEstimatedSide =
   }
 }
 
-// Selectors where the first uint256 param is shares, not assets.
-// Decoding these as assets would show a wrong amount in the UI.
-const SHARES_AMOUNT_SELECTORS = new Set([
-  toFunctionSelector('function redeem(uint256,address,address)'),
-  toFunctionSelector('function repayWithShares(uint256,address)'),
-])
-
 // ---------------------------------------------------------------------------
-// Exported helpers
+// Helpers
 // ---------------------------------------------------------------------------
 
 export const decodeBatchItemLabel = (data: string): string => {
@@ -124,7 +121,6 @@ export const cleanStepLabel = (label: string): string => {
     .replace(/^Permit2\s+/i, '')
 }
 
-/** Extract the second address param from enableCollateral/enableController calldata */
 export const decodeVaultAddressFromData = (data: string): string | undefined => {
   if (data.length < 138) return undefined
   try {
@@ -145,6 +141,16 @@ export const decodeSecondUint256 = (data: string): bigint | undefined => {
   }
 }
 
+const decodeThirdUint256 = (data: string): bigint | undefined => {
+  if (data.length < 202) return undefined
+  try {
+    return BigInt(`0x${data.slice(138, 202)}`)
+  }
+  catch {
+    return undefined
+  }
+}
+
 export const decodeFirstUint256 = (data: string): bigint | undefined => {
   if (data.length < 74) return undefined
   try {
@@ -155,44 +161,19 @@ export const decodeFirstUint256 = (data: string): bigint | undefined => {
   }
 }
 
-export const getVaultAssetInfo = (
-  data: string,
-  targetContract: string,
-  getVault: VaultLookup,
-): StepAssetInfo | undefined => {
-  const vaultAddress = decodeVaultAddressFromData(data)
-  const vault = vaultAddress ? getVault(vaultAddress) : undefined
-  if (vault?.asset) return { symbol: vault.asset.symbol, address: vault.asset.address }
-
-  try {
-    const targetVault = getVault(getAddress(targetContract))
-    if (targetVault?.asset) return { symbol: targetVault.asset.symbol, address: targetVault.asset.address }
-  }
-  catch { /* ignore */ }
-
-  return undefined
-}
-
-export const resolveAmountFromCalldata = (
+const resolveAmountFromCalldata = (
   data: string,
   targetContract: string,
   getVault: VaultLookup,
 ): { decoded: boolean, amount?: string, isMax?: boolean } => {
   const selector = data.slice(0, 10).toLowerCase() as `0x${string}`
-
-  // For functions where the first param is shares (not assets),
-  // we can only reliably detect max (uint256.max). The raw share count
-  // cannot be formatted as assets without a conversion rate.
-  if (SHARES_AMOUNT_SELECTORS.has(selector)) {
-    const raw = decodeFirstUint256(data)
-    if (raw === MAX_UINT256) return { decoded: true, isMax: true }
-    return { decoded: false }
-  }
-
   const raw = decodeFirstUint256(data)
+
   if (raw === undefined) return { decoded: false }
   if (raw === MAX_UINT256) return { decoded: true, isMax: true }
   if (raw === 0n) return { decoded: true }
+  if (SHARES_AMOUNT_SELECTORS.has(selector)) return { decoded: false }
+
   try {
     const vault = getVault(getAddress(targetContract))
     if (vault?.asset?.decimals) {
@@ -200,154 +181,180 @@ export const resolveAmountFromCalldata = (
     }
   }
   catch { /* ignore */ }
+
   return { decoded: false }
 }
 
-// ---------------------------------------------------------------------------
-// Internal: per-step asset resolution (uses mutable cursor state)
-// ---------------------------------------------------------------------------
+const decodeFirstAddress = (data: string): string | undefined => {
+  if (data.length < 74) return undefined
+  try {
+    return getAddress(`0x${data.slice(34, 74)}`)
+  }
+  catch {
+    return undefined
+  }
+}
 
-const getAssetInfoForStep = (
+const sameAddress = (a?: string, b?: string) => {
+  if (!a || !b) return false
+  try {
+    return getAddress(a) === getAddress(b)
+  }
+  catch {
+    return false
+  }
+}
+
+const resolveContextAssetByAddress = (
+  address: string,
+  ctx: StepDecodingContext,
+): StepDecodingContext['asset'] | StepDecodingContext['swapToAsset'] | undefined => {
+  if (sameAddress(address, ctx.asset.address)) return ctx.asset
+  if (ctx.swapToAsset && sameAddress(address, ctx.swapToAsset.address)) return ctx.swapToAsset
+  return undefined
+}
+
+const buildAssetInfo = (
+  asset: { symbol: string, address: string, decimals?: number | bigint },
+  rawAmount?: bigint,
+): StepAssetInfo => ({
+  symbol: asset.symbol,
+  address: asset.address,
+  amount: rawAmount !== undefined && asset.decimals !== undefined
+    ? formatUnits(rawAmount, Number(asset.decimals))
+    : undefined,
+})
+
+const getVaultAssetInfo = (
+  data: string,
+  targetContract: string,
+  getVault: VaultLookup,
+): StepAssetInfo | undefined => {
+  const vaultAddress = decodeVaultAddressFromData(data)
+  const vault = vaultAddress ? getVault(vaultAddress) : undefined
+  if (vault?.asset) return { symbol: vault.asset.symbol, address: vault.asset.address }
+  try {
+    const targetVault = getVault(getAddress(targetContract))
+    if (targetVault?.asset) return { symbol: targetVault.asset.symbol, address: targetVault.asset.address }
+  }
+  catch { /* ignore */ }
+  return undefined
+}
+
+const getSwapVerifierAssetInfo = (
+  data: string,
+  ctx: StepDecodingContext,
+  getVault: VaultLookup,
+): StepAssetInfo | undefined => {
+  const selector = data.slice(0, 10).toLowerCase() as `0x${string}`
+  if (!SWAP_VERIFIER_AMOUNT_SELECTORS.has(selector)) return undefined
+
+  const firstAddress = decodeFirstAddress(data)
+  if (!firstAddress) return undefined
+
+  const rawAmount = decodeThirdUint256(data)
+
+  if (selector === VERIFY_AMOUNT_MIN_AND_TRANSFER_SELECTOR) {
+    const asset = resolveContextAssetByAddress(firstAddress, ctx) ?? ctx.swapToAsset ?? ctx.asset
+    return buildAssetInfo(asset, rawAmount)
+  }
+
+  const vault = getVault(firstAddress)
+  const asset = vault?.asset ?? ctx.swapToAsset ?? ctx.asset
+  return buildAssetInfo(asset, rawAmount)
+}
+
+const resolveBatchItemAssetInfo = (
   label: string,
   data: string,
   targetContract: string,
-  evcCall: EVCCall,
+  value: bigint,
   ctx: StepDecodingContext,
   getVault: VaultLookup,
-  usedSupply: { value: boolean },
-  usedBorrow: { value: boolean },
-  usedSwapTo: { value: boolean },
-  lastWithdrawAmount: { value: string | undefined },
 ): StepAssetInfo | undefined => {
-  if (label === 'Enable collateral' || label === 'Enable controller' || label === 'Disable collateral' || label === 'Disable controller') {
+  if (label === 'Enable collateral' || label === 'Enable controller'
+    || label === 'Disable collateral' || label === 'Disable controller') {
     return getVaultAssetInfo(data, targetContract, getVault)
   }
 
-  if (label === 'Supply' || label === 'Withdraw') {
-    if (ctx.type === 'borrow' && !usedSupply.value && label === 'Supply' && ctx.supplyingAssetForBorrow && ctx.supplyingAmount) {
-      usedSupply.value = true
-      return { symbol: ctx.supplyingAssetForBorrow.symbol, address: ctx.supplyingAssetForBorrow.address, amount: ctx.supplyingAmount }
-    }
-    const resolved = resolveAmountFromCalldata(data, targetContract, getVault)
-    const displayAmount = resolved.isMax ? 'remaining' : (resolved.decoded ? resolved.amount : ctx.amount)
-    if (label === 'Withdraw' && resolved.decoded && resolved.amount) {
-      lastWithdrawAmount.value = resolved.amount
-    }
-    return { symbol: ctx.asset.symbol, address: ctx.asset.address, amount: displayAmount }
-  }
-
-  if (label === 'Deposit') {
-    if (ctx.swapToAsset && ctx.swapToAmount) {
-      return { symbol: ctx.swapToAsset.symbol, address: ctx.swapToAsset.address, amount: ctx.swapToAmount }
-    }
+  if (label === 'Supply' || label === 'Deposit') {
     try {
       const targetVault = getVault(getAddress(targetContract))
       if (targetVault?.asset) {
         const resolved = resolveAmountFromCalldata(data, targetContract, getVault)
-        const displayAmount = resolved.decoded && !resolved.isMax && resolved.amount
-          ? resolved.amount
-          : 'remaining'
-        return { symbol: targetVault.asset.symbol, address: targetVault.asset.address, amount: displayAmount }
+        const amount = resolved.isMax
+          ? 'remaining'
+          : resolved.decoded && resolved.amount
+            ? resolved.amount
+            : label === 'Deposit'
+              ? ctx.swapToAmount ?? 'remaining'
+              : ctx.amount
+        return { symbol: targetVault.asset.symbol, address: targetVault.asset.address, amount }
       }
     }
     catch { /* ignore */ }
-    return { symbol: ctx.asset.symbol, address: ctx.asset.address, amount: 'remaining' }
+    return { symbol: ctx.asset.symbol, address: ctx.asset.address, amount: ctx.amount }
+  }
+
+  if (label === 'Withdraw') {
+    const resolved = resolveAmountFromCalldata(data, targetContract, getVault)
+    const amount = resolved.isMax
+      ? 'remaining'
+      : resolved.decoded && resolved.amount
+        ? resolved.amount
+        : ctx.amount
+    return { symbol: ctx.asset.symbol, address: ctx.asset.address, amount }
   }
 
   if (label === 'Wrap native currency') {
-    // In borrow flows, the wrap operates on the collateral asset, not the borrow asset
-    const wrapAsset = ctx.type === 'borrow' && ctx.supplyingAssetForBorrow
-      ? ctx.supplyingAssetForBorrow
-      : ctx.asset
-    // Derive native currency symbol by stripping the "W" prefix (e.g. WETH → ETH)
-    const nativeSymbol = wrapAsset.symbol.startsWith('W') ? wrapAsset.symbol.slice(1) : wrapAsset.symbol
-    // Native currencies always have 18 decimals
-    const wrapAmount = evcCall.value > 0n
-      ? formatUnits(evcCall.value, 18)
-      : undefined
+    const nativeSymbol = ctx.asset.symbol.startsWith('W') ? ctx.asset.symbol.slice(1) : ctx.asset.symbol
+    const wrapAmount = value > 0n ? formatUnits(value, 18) : undefined
     return { symbol: nativeSymbol, address: zeroAddress, amount: wrapAmount }
   }
 
-  if (label === 'Transfer' || label === 'Transfer to account') {
-    const knownAmount = label === 'Transfer to account' && ctx.transferAmounts
-      ? ctx.transferAmounts[targetContract.toLowerCase()]
+  if (label === 'Verify min received' || label === 'Verify max debt') {
+    return getSwapVerifierAssetInfo(data, ctx, getVault)
+  }
+
+  if (label === 'Transfer' || label === 'Transfer to account' || label === 'Transfer from wallet') {
+    // transferFromMax(address,address) ("Transfer to account") has no amount
+    // argument — its second calldata slot is the recipient address, not a
+    // uint256. Decoding it as an amount would render a garbage number, so show
+    // the known sweep amount (or "remaining") instead.
+    const isMaxTransfer = label === 'Transfer to account'
+    const fallbackAmount = isMaxTransfer
+      ? ctx.transferAmounts?.[targetContract.toLowerCase()] ?? 'remaining'
       : undefined
-    let transferAmount: string | undefined = knownAmount || (label === 'Transfer to account' ? 'remaining' : undefined)
     try {
       const targetVault = getVault(getAddress(targetContract))
-      if (targetVault?.asset) return { symbol: targetVault.asset.symbol, address: targetVault.asset.address, amount: transferAmount }
-    }
-    catch { /* ignore */ }
-    // For non-vault targets (e.g. WETH.transfer), decode amount from calldata
-    // In borrow flows, use collateral asset metadata
-    const transferAsset = ctx.type === 'borrow' && ctx.supplyingAssetForBorrow
-      ? ctx.supplyingAssetForBorrow
-      : ctx.asset
-    if (!transferAmount) {
-      const transferDecimals = transferAsset === ctx.asset && ctx.asset.decimals
-        ? Number(ctx.asset.decimals)
-        : 18 // wrapped native tokens always have 18 decimals
-      const raw = decodeSecondUint256(data)
-      if (raw !== undefined && raw > 0n) {
-        transferAmount = formatUnits(raw, transferDecimals)
+      if (targetVault?.asset) {
+        let amount = fallbackAmount
+        if (!isMaxTransfer) {
+          const raw = decodeSecondUint256(data)
+          amount = raw !== undefined && raw > 0n
+            ? formatUnits(raw, Number(targetVault.asset.decimals))
+            : undefined
+        }
+        return { symbol: targetVault.asset.symbol, address: targetVault.asset.address, amount }
       }
     }
-    return { symbol: transferAsset.symbol, address: transferAsset.address, amount: transferAmount }
+    catch { /* ignore */ }
+    return { symbol: ctx.asset.symbol, address: ctx.asset.address, amount: fallbackAmount }
   }
 
   if (label === 'Borrow' || label === 'Repay') {
     const vaultAsset = getVaultAssetInfo(data, targetContract, getVault)
-    const borrowAsset = vaultAsset || { symbol: ctx.asset.symbol, address: ctx.asset.address }
+    const base = vaultAsset || { symbol: ctx.asset.symbol, address: ctx.asset.address }
     const resolved = resolveAmountFromCalldata(data, targetContract, getVault)
-    if (resolved.decoded) {
-      const displayAmount = resolved.isMax ? 'max' : resolved.amount
-      return { ...borrowAsset, amount: displayAmount }
-    }
-    if (!usedBorrow.value) {
-      usedBorrow.value = true
-      return { ...borrowAsset, amount: ctx.amount }
-    }
+    const amount = resolved.isMax
+      ? 'max'
+      : resolved.decoded && resolved.amount
+        ? resolved.amount
+        : ctx.amount
+    return { ...base, amount }
   }
 
   if (label === 'Swap') {
-    return { symbol: ctx.asset.symbol, address: ctx.asset.address, amount: lastWithdrawAmount.value || ctx.amount }
-  }
-
-  if (label === 'Verify min received') {
-    if (ctx.swapToAsset && data.length >= 202) {
-      try {
-        const amountMinRaw = BigInt(`0x${data.slice(138, 202)}`)
-        const decoded = formatUnits(amountMinRaw, Number(ctx.swapToAsset.decimals))
-        usedSwapTo.value = true
-        return { symbol: ctx.swapToAsset.symbol, address: ctx.swapToAsset.address, amount: decoded }
-      }
-      catch { /* fall through */ }
-    }
-    return { symbol: ctx.asset.symbol, address: ctx.asset.address, amount: ctx.amount }
-  }
-
-  if (label === 'Verify max debt') {
-    if (data.length >= 202) {
-      try {
-        const debtVaultAddr = getAddress(`0x${data.slice(34, 74)}`)
-        const debtVault = getVault(debtVaultAddr)
-        if (debtVault?.asset) {
-          const maxDebt = BigInt(`0x${data.slice(138, 202)}`)
-          const debtAmount = maxDebt === MAX_UINT256
-            ? 'max'
-            : formatUnits(maxDebt, Number(debtVault.asset.decimals))
-          return { symbol: debtVault.asset.symbol, address: debtVault.asset.address, amount: debtAmount }
-        }
-      }
-      catch { /* fall through */ }
-    }
-    if (ctx.swapToAsset && ctx.swapToAmount) {
-      return { symbol: ctx.swapToAsset.symbol, address: ctx.swapToAsset.address, amount: ctx.swapToAmount }
-    }
-    return { symbol: ctx.asset.symbol, address: ctx.asset.address, amount: ctx.amount }
-  }
-
-  if (label === 'Transfer from wallet') {
     return { symbol: ctx.asset.symbol, address: ctx.asset.address, amount: ctx.amount }
   }
 
@@ -358,159 +365,137 @@ const getAssetInfoForStep = (
   return undefined
 }
 
-// ---------------------------------------------------------------------------
-// Main orchestrator
-// ---------------------------------------------------------------------------
-
-export function buildDisplaySteps(
-  plan: TxPlan,
+/**
+ * Convert an SDK TransactionPlan into the UI-facing DisplayStep[] consumed by
+ * OperationStepsList. Walks SDK plan items (`requiredApproval`, `evcBatch`,
+ * `contractCall`) and applies display conventions for the review modal.
+ */
+export function buildTransactionPlanDisplaySteps(
+  plan: TransactionPlan,
   ctx: StepDecodingContext,
   getVault: VaultLookup,
   getLogoUrl: (address: string, symbol: string) => string,
-  hasPermit2Approval: boolean,
 ): DisplayStep[] {
-  if (!plan.steps) return []
-
   const steps: DisplayStep[] = []
   let index = 0
-  const usedSupply = { value: false }
-  const usedBorrow = { value: false }
-  const usedSwapTo = { value: false }
-  const lastWithdrawAmount: { value: string | undefined } = { value: undefined }
+  let lastWithdrawAmount: string | undefined
+  let previousLabel = ''
 
-  for (const step of plan.steps) {
-    if (step.type === 'evc-batch') {
-      const batchItems = step.args?.[0] as EVCCall[] | undefined
-      if (batchItems?.length) {
-        const shouldInjectPermit2 = step.label?.includes('Permit2') && !hasPermit2Approval
-        const hasTermsOfUse = shouldInjectPermit2
-          && batchItems.some(item => decodeBatchItemLabel(item.data) === 'Sign terms of use')
-
-        if (shouldInjectPermit2 && !hasTermsOfUse) {
-          index++
-          const permitAsset = ctx.type === 'borrow' && ctx.supplyingAssetForBorrow
-            ? ctx.supplyingAssetForBorrow
-            : ctx.asset
+  for (const item of plan) {
+    if (item.type === 'requiredApproval') {
+      const resolved = item.resolved ?? []
+      for (const r of resolved) {
+        index++
+        if (r.type === 'approve') {
+          steps.push({
+            index,
+            label: 'Approve',
+            labelSuffix: 'for vault',
+            isSeparateTx: true,
+            assetInfo: { symbol: ctx.asset.symbol, address: ctx.asset.address },
+          })
+        }
+        else {
+          // permit2 signature (no on-chain tx; embedded into the next batch)
           steps.push({
             index,
             label: 'Sign permit2 message',
             isSeparateTx: false,
-            assetInfo: { symbol: permitAsset.symbol, address: permitAsset.address },
+            assetInfo: { symbol: ctx.asset.symbol, address: ctx.asset.address },
           })
-        }
-
-        let prevLabel = ''
-        for (const item of batchItems) {
-          index++
-          const label = decodeBatchItemLabel(item.data)
-          let stepAssetInfo = getAssetInfoForStep(label, item.data, item.targetContract, item, ctx, getVault, usedSupply, usedBorrow, usedSwapTo, lastWithdrawAmount)
-          const secondAsset = ctx.supplyingAssetForBorrow || ctx.swapToAsset
-          let toAssetInfo: StepAssetInfo | undefined
-          if (label === 'Wrap native currency') {
-            const wrapToAsset = ctx.type === 'borrow' && ctx.supplyingAssetForBorrow
-              ? ctx.supplyingAssetForBorrow
-              : ctx.asset
-            toAssetInfo = { symbol: wrapToAsset.symbol, address: wrapToAsset.address }
-          }
-          else if (label === 'Swap' && ctx.swapToAsset && ctx.swapToAmount) {
-            toAssetInfo = { symbol: ctx.swapToAsset.symbol, address: ctx.swapToAsset.address, amount: ctx.swapToAmount }
-          }
-          else if (label === 'Update price feeds' && stepAssetInfo && secondAsset && secondAsset.symbol !== ctx.asset.symbol) {
-            toAssetInfo = { symbol: secondAsset.symbol, address: secondAsset.address }
-          }
-          if (label === 'Swap' && (ctx.swapMode !== undefined || ctx.swapEstimatedSide)) {
-            const estimatedSide = ctx.swapEstimatedSide
-              ?? (ctx.swapMode !== undefined ? getDefaultSwapEstimatedSide(ctx.swapMode) : undefined)
-            if (estimatedSide === 'output' && toAssetInfo) {
-              toAssetInfo = { ...toAssetInfo, estimated: true }
-            }
-            else if (estimatedSide === 'input' && stepAssetInfo) {
-              stepAssetInfo = { ...stepAssetInfo, estimated: true }
-            }
-          }
-          const displayLabel = label === 'Transfer to account'
-            ? 'Transfer'
-            : label === 'Wrap native currency'
-              ? 'Wrap'
-              : label === 'Swap' && ctx.swapMode === SwapperMode.TARGET_DEBT
-                ? 'Swap to repay'
-                : label
-          const isWrapTransfer = label === 'Transfer' && prevLabel === 'Wrap native currency'
-          const batchLabelSuffix = label === 'Transfer to account'
-            ? 'to savings'
-            : isWrapTransfer
-              ? 'to wallet'
-              : undefined
-          steps.push({
-            index,
-            label: displayLabel,
-            labelSuffix: batchLabelSuffix,
-            isSeparateTx: false,
-            assetInfo: stepAssetInfo,
-            toAssetInfo,
-            iconOnly: label === 'Update price feeds',
-          })
-
-          prevLabel = label
-          if (hasTermsOfUse && label === 'Sign terms of use') {
-            index++
-            const permitAsset = ctx.type === 'borrow' && ctx.supplyingAssetForBorrow
-              ? ctx.supplyingAssetForBorrow
-              : ctx.asset
-            steps.push({
-              index,
-              label: 'Sign permit2 message',
-              isSeparateTx: false,
-              assetInfo: { symbol: permitAsset.symbol, address: permitAsset.address },
-            })
-          }
         }
       }
-      else {
+      continue
+    }
+
+    if (item.type === 'evcBatch') {
+      const batchItems = flattenBatchEntries(item.items)
+      for (const batchItem of batchItems) {
         index++
+        const label = decodeBatchItemLabel(batchItem.data)
+        let assetInfo = resolveBatchItemAssetInfo(
+          label,
+          batchItem.data,
+          batchItem.targetContract,
+          batchItem.value,
+          ctx,
+          getVault,
+        )
+        if (label === 'Withdraw' && assetInfo?.amount && assetInfo.amount !== 'remaining') {
+          lastWithdrawAmount = String(assetInfo.amount)
+        }
+        let toAssetInfo: StepAssetInfo | undefined
+        if (label === 'Wrap native currency') {
+          toAssetInfo = { symbol: ctx.asset.symbol, address: ctx.asset.address }
+        }
+        else if (label === 'Swap' && ctx.swapToAsset && ctx.swapToAmount) {
+          assetInfo = { symbol: ctx.asset.symbol, address: ctx.asset.address, amount: lastWithdrawAmount ?? ctx.amount }
+          toAssetInfo = { symbol: ctx.swapToAsset.symbol, address: ctx.swapToAsset.address, amount: ctx.swapToAmount }
+          const estimatedSide = ctx.swapEstimatedSide
+            ?? (ctx.swapMode !== undefined ? getDefaultSwapEstimatedSide(ctx.swapMode) : undefined)
+          if (estimatedSide === 'input') {
+            assetInfo = { ...assetInfo, estimated: true }
+          }
+          else if (estimatedSide === 'output') {
+            toAssetInfo = { ...toAssetInfo, estimated: true }
+          }
+        }
+        let displayLabel = label
+        if (label === 'Transfer to account') {
+          displayLabel = 'Transfer'
+        }
+        else if (label === 'Wrap native currency') {
+          displayLabel = 'Wrap'
+        }
+        else if (label === 'Swap' && ctx.swapMode === SwapperMode.TARGET_DEBT) {
+          displayLabel = 'Swap to repay'
+        }
+        const isWrapTransfer = label === 'Transfer' && previousLabel === 'Wrap native currency'
+        const labelSuffix = label === 'Transfer to account'
+          ? 'to savings'
+          : isWrapTransfer
+            ? 'to wallet'
+            : undefined
         steps.push({
           index,
-          label: cleanStepLabel(step.label || step.functionName),
+          label: displayLabel,
+          labelSuffix,
           isSeparateTx: false,
+          assetInfo,
+          toAssetInfo,
+          iconOnly: label === 'Update price feeds',
         })
+        previousLabel = label
       }
+      continue
     }
-    else {
+
+    if (item.type === 'contractCall') {
       index++
-      const isApproval = step.type === 'approve' || step.type === 'permit2-approve'
-      const approvalAsset = isApproval
-        ? (ctx.type === 'borrow' && ctx.supplyingAssetForBorrow ? ctx.supplyingAssetForBorrow : ctx.asset)
-        : undefined
-
-      const labelSuffix = step.type === 'approve'
-        ? 'for vault'
-        : step.type === 'permit2-approve'
-          ? 'for permit2'
-          : undefined
-
-      const isRewardOrUnlock = !isApproval && (ctx.type === 'reward' || ctx.type === 'brevis-reward' || ctx.type === 'reul-unlock')
+      const isRewardOrUnlock = ctx.type === 'reward'
+        || ctx.type === 'brevis-reward'
+        || ctx.type === 'fuul-reward'
+        || ctx.type === 'reul-unlock'
       const rewardIconUrl = ['EUL', 'rEUL'].includes(ctx.asset.symbol)
         ? getLogoUrl(ctx.asset.address, 'EUL')
         : ctx.assetIconUrl
-      const stepAsset: StepAssetInfo | undefined = isApproval
-        ? (approvalAsset ? { symbol: approvalAsset.symbol, address: approvalAsset.address } : undefined)
-        : isRewardOrUnlock
+      steps.push({
+        index,
+        label: cleanStepLabel(item.functionName),
+        isSeparateTx: true,
+        assetInfo: isRewardOrUnlock
           ? {
               symbol: ctx.asset.symbol,
               address: ctx.asset.address,
               amount: ctx.amount,
               iconUrl: rewardIconUrl,
             }
-          : undefined
-
-      steps.push({
-        index,
-        label: isApproval ? 'Approve' : cleanStepLabel(step.label || step.functionName),
-        labelSuffix,
-        isSeparateTx: isApproval,
-        assetInfo: stepAsset,
+          : undefined,
       })
+      continue
     }
+
+    // cowSwap items: skip silently; CoW flows surface their own UI.
   }
 
   return steps

@@ -1,4 +1,6 @@
 import type { Component, ComputedRef, Ref } from 'vue'
+import type { Address } from 'viem'
+import { requiresZeroApprovalReset } from '@eulerxyz/euler-v2-sdk'
 import { logWarn } from '~/utils/errorHandling'
 import type { DisplayStep, StepAssetInfo } from '~/utils/stepDecoding'
 import type { ModalData } from '~/components/ui/composables/useModal'
@@ -9,7 +11,6 @@ import type {
   CowSwapOrderStatus,
   CowSwapOrderUid,
 } from '~/entities/cowswap'
-import { APPROVE_RESET_REQUIRED_TOKENS } from '~/entities/constants'
 import { CowSwapReviewModal } from '#components'
 
 type CowSwapExecutionRef<TExecuteParams> = {
@@ -32,7 +33,8 @@ type CowSwapOrderStatusRef = {
  * a reset-to-zero before re-approving (e.g. USDT), prepends a "Reset approval" step.
  */
 export const buildApprovalSignSteps = (params: {
-  tokenAddress: string
+  chainId: number
+  tokenAddress: Address
   currentAllowance: bigint
   requiredAmount: bigint
   label: string
@@ -47,7 +49,7 @@ export const buildApprovalSignSteps = (params: {
   }
 
   const needsReset = params.currentAllowance > 0n
-    && APPROVE_RESET_REQUIRED_TOKENS.has(params.tokenAddress.toLowerCase())
+    && requiresZeroApprovalReset(params.chainId, params.tokenAddress)
 
   if (needsReset) {
     steps.push({

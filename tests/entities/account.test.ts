@@ -1,177 +1,159 @@
+import type { EVault, EVaultCollateral, EVaultCollateralRamping, IHasVaultAddress, PortfolioBorrowPosition } from '@eulerxyz/euler-v2-sdk'
 import { describe, expect, it } from 'vitest'
-import {
-  getFreeSubAccounts,
-  getPositionRampStatus,
-  getSubAccountAddress,
-  isBorrowControllerCompatible,
-  isPositionLiquidationLTVRamping,
-  selectBorrowCompatibleSubAccount,
-  type AccountBorrowPosition,
-} from '~/entities/account'
+import { getPositionCollateralEdge, getPositionRampStatus, getRampStatus, type PositionRampInput } from '~/entities/account'
 
-// Build a minimally-typed position; only the fields the helpers read matter.
-const makePosition = (overrides: Partial<AccountBorrowPosition> = {}): AccountBorrowPosition => ({
-  // ramp config (BPS): initial 90%, target 80%, ramps over 1000s ending at t=2000
-  initialLiquidationLTV: 9000n,
-  targetLiquidationLTV: 8000n,
-  targetTimestamp: 2000n,
+const WAD = 10n ** 18n
+
+// 70% as a WAD bigint (0.7 * 1e18).
+const pctWad = (percent: number): bigint =>
+  BigInt(Math.round(percent * Number(WAD) / 100))
+
+// Default ramp: target 80%, initial 90%, ends at t=2000, ramps over 1000s.
+const defaultRamping: EVaultCollateralRamping = {
+  initialLiquidationLTV: 0.9,
+  targetTimestamp: 2000,
   rampDuration: 1000n,
-  // userLTV uses scale 18, so 70% = 70e18
-  userLTV: 70n * 10n ** 18n,
-  liquidationLTV: 8500n, // mid-ramp effective (BPS)
-  // unused-by-helpers placeholders
-  borrow: {} as AccountBorrowPosition['borrow'],
-  collateral: {} as AccountBorrowPosition['collateral'],
-  subAccount: '0x',
-  health: 0n,
-  price: 0n,
-  supplied: 0n,
-  borrowed: 0n,
-  borrowLTV: 0n,
-  liabilityValueBorrowing: 0n,
-  liabilityValueLiquidation: 0n,
-  timeToLiquidation: 0n,
-  collateralValueLiquidation: 0n,
+}
+
+const makeInput = (overrides: Partial<PositionRampInput> = {}): PositionRampInput => ({
+  userLTV: pctWad(70),
+  liquidationLTV: 0.8,
+  ramping: defaultRamping,
   ...overrides,
 })
 
-describe('isPositionLiquidationLTVRamping', () => {
+const makeCollateralEdge = (overrides: Partial<EVaultCollateral> = {}): EVaultCollateral => ({
+  address: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  borrowLTV: 0,
+  liquidationLTV: 0.8,
+  ramping: defaultRamping,
+  oraclePriceRaw: undefined,
+  currentLiquidationLTV: 0.85,
+  isLiquidationLTVRamping: true,
+  rampTimeRemaining: 500n,
+  ...overrides,
+} as EVaultCollateral)
+
+const makePosition = (
+  edge = makeCollateralEdge(),
+  overrides: Partial<PortfolioBorrowPosition<IHasVaultAddress>> = {},
+): PortfolioBorrowPosition<IHasVaultAddress> => ({
+  userLTV: pctWad(70),
+  borrowVault: { collaterals: [edge] } as EVault,
+  collateralVault: { address: edge.address.toUpperCase() } as IHasVaultAddress,
+  ...overrides,
+} as PortfolioBorrowPosition<IHasVaultAddress>)
+
+describe('getRampStatus — ramping detection', () => {
   it('detects in-flight ramp', () => {
-    const p = makePosition()
-    expect(isPositionLiquidationLTVRamping(p, 1500n)).toBe(true)
+    const status = getRampStatus(makeInput(), 1500n)
+    expect(status.isRamping).toBe(true)
   })
 
-  it('reports complete after targetTimestamp', () => {
-    const p = makePosition()
-    expect(isPositionLiquidationLTVRamping(p, 2500n)).toBe(false)
+  it('reports not ramping after targetTimestamp', () => {
+    const status = getRampStatus(makeInput(), 2500n)
+    expect(status.isRamping).toBe(false)
   })
 
-  it('reports false when there is no ramp (target >= initial)', () => {
-    const p = makePosition({ initialLiquidationLTV: 8000n })
-    expect(isPositionLiquidationLTVRamping(p, 1500n)).toBe(false)
+  it('reports not ramping when there is no ramping config', () => {
+    const status = getRampStatus(makeInput({ ramping: undefined }), 1500n)
+    expect(status.isRamping).toBe(false)
+  })
+
+  it('reports not ramping when target >= initial (no actual decrease)', () => {
+    const status = getRampStatus(makeInput({
+      liquidationLTV: 0.9,
+      ramping: { ...defaultRamping, initialLiquidationLTV: 0.9 },
+    }), 1500n)
+    expect(status.isRamping).toBe(false)
+  })
+
+  it('reports not ramping when rampDuration is zero', () => {
+    const status = getRampStatus(makeInput({
+      ramping: { ...defaultRamping, rampDuration: 0n },
+    }), 1500n)
+    expect(status.isRamping).toBe(false)
   })
 })
 
-describe('getPositionRampStatus', () => {
+describe('getRampStatus — forced-liquidation projection', () => {
   it('returns no-danger when userLTV stays below the post-ramp target', () => {
-    const p = makePosition({ userLTV: 70n * 10n ** 18n }) // 70% < 80% target
-    const status = getPositionRampStatus(p, 1500n)
+    // 70% < 80% target
+    const status = getRampStatus(makeInput({ userLTV: pctWad(70) }), 1500n)
     expect(status).toEqual({ isRamping: true, willBeLiquidated: false, forcedLiquidationAt: null })
   })
 
   it('flags danger when userLTV is between target and initial', () => {
-    const p = makePosition({ userLTV: 85n * 10n ** 18n }) // 85% — crosses LLTV mid-ramp
-    const status = getPositionRampStatus(p, 1500n)
+    // 85% — crosses LLTV mid-ramp.
+    // Current effective LLTV at t=1500: 80% + (90% - 80%) * (2000-1500)/1000 = 85%.
+    // Crossing where effective(t) == 85%: t = 2000 - (85-80)*1000/(90-80) = 1500.
+    const status = getRampStatus(makeInput({ userLTV: pctWad(85) }), 1500n)
     expect(status.isRamping).toBe(true)
     expect(status.willBeLiquidated).toBe(true)
-    // current effective at t=1500 is (8000 + (9000-8000) * (2000-1500)/1000) = 8500
-    // crossing where effective(t) == 8500 happens at t = 2000 - (8500-8000)*1000/(9000-8000) = 1500
     expect(status.forcedLiquidationAt).toBe(1500n)
   })
 
   it('flags danger and returns targetTimestamp when userLTV is exactly the post-ramp target', () => {
-    const p = makePosition({ userLTV: 80n * 10n ** 18n })
-    const status = getPositionRampStatus(p, 1500n)
+    const status = getRampStatus(makeInput({ userLTV: pctWad(80) }), 1500n)
     expect(status.willBeLiquidated).toBe(true)
     expect(status.forcedLiquidationAt).toBe(2000n)
   })
 
   it('returns no-danger when ramp has already completed', () => {
-    const p = makePosition({ userLTV: 95n * 10n ** 18n })
-    const status = getPositionRampStatus(p, 2500n)
+    const status = getRampStatus(makeInput({ userLTV: pctWad(95) }), 2500n)
     expect(status.isRamping).toBe(false)
     expect(status.willBeLiquidated).toBe(false)
+    expect(status.forcedLiquidationAt).toBeNull()
   })
 
-  it('is robust to degenerate ramp (target equals initial)', () => {
-    const p = makePosition({ initialLiquidationLTV: 8000n, userLTV: 85n * 10n ** 18n })
-    const status = getPositionRampStatus(p, 1500n)
-    expect(status.isRamping).toBe(false)
-  })
-})
-
-describe('getFreeSubAccounts', () => {
-  it('returns free sub-accounts in index order', () => {
-    const owner = '0x1111111111111111111111111111111111111111'
-    const occupied = [
-      getSubAccountAddress(owner, 1),
-      getSubAccountAddress(owner, 3),
-    ]
-
-    const free = getFreeSubAccounts(owner, occupied)
-
-    expect(free[0]).toBe(getSubAccountAddress(owner, 2))
-    expect(free[1]).toBe(getSubAccountAddress(owner, 4))
+  it('returns danger when userLTV already exceeds the initial LLTV (cross is at or before now)', () => {
+    // 95% > 90% initial — already past current effective LLTV.
+    const status = getRampStatus(makeInput({ userLTV: pctWad(95) }), 1500n)
+    expect(status.willBeLiquidated).toBe(true)
+    // forcedLiquidationAt projects to a timestamp <= now; caller treats it as "now".
+    expect(status.forcedLiquidationAt).not.toBeNull()
+    expect(status.forcedLiquidationAt!).toBeLessThanOrEqual(1500n)
   })
 })
 
-describe('isBorrowControllerCompatible', () => {
-  const borrowVault = '0x2222222222222222222222222222222222222222'
+describe('getPositionCollateralEdge', () => {
+  it('matches the primary collateral edge case-insensitively', () => {
+    const edge = makeCollateralEdge()
+    const position = makePosition(edge)
 
-  it('accepts accounts without controllers', () => {
-    expect(isBorrowControllerCompatible([], borrowVault)).toBe(true)
-  })
-
-  it('accepts accounts controlled by the target borrow vault', () => {
-    expect(isBorrowControllerCompatible([borrowVault], borrowVault)).toBe(true)
-  })
-
-  it('rejects accounts controlled by a different vault', () => {
     expect(
-      isBorrowControllerCompatible(
-        ['0x3333333333333333333333333333333333333333'],
-        borrowVault,
-      ),
-    ).toBe(false)
+      getPositionCollateralEdge(position.borrowVault as EVault, position.collateralVault?.address),
+    ).toBe(edge)
   })
 
-  it('rejects accounts with mixed controllers', () => {
+  it('returns undefined when the borrow vault does not expose a matching collateral edge', () => {
+    const edge = makeCollateralEdge()
+    const position = makePosition(edge, {
+      borrowVault: { collaterals: [makeCollateralEdge({ address: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' })] } as EVault,
+    })
+
     expect(
-      isBorrowControllerCompatible(
-        [borrowVault, '0x3333333333333333333333333333333333333333'],
-        borrowVault,
-      ),
-    ).toBe(false)
+      getPositionCollateralEdge(position.borrowVault as EVault, position.collateralVault?.address),
+    ).toBeUndefined()
   })
 })
 
-describe('selectBorrowCompatibleSubAccount', () => {
-  const borrowVault = '0x2222222222222222222222222222222222222222'
+describe('getPositionRampStatus', () => {
+  it('detects ramping SDK collateral edges from the position borrow vault', () => {
+    const status = getPositionRampStatus(makePosition(), 1500n)
 
-  it('skips empty sub-accounts with an incompatible controller and picks the next compatible one', () => {
-    const selected = selectBorrowCompatibleSubAccount([
-      {
-        subAccount: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        enabledControllers: ['0x3333333333333333333333333333333333333333'],
-      },
-      {
-        subAccount: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-        enabledControllers: [],
-      },
-    ], borrowVault)
-
-    expect(selected).toBe('0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')
+    expect(status).toEqual({ isRamping: true, willBeLiquidated: false, forcedLiquidationAt: null })
   })
 
-  it('accepts a free sub-account already controlled by the target debt vault', () => {
-    const selected = selectBorrowCompatibleSubAccount([
-      {
-        subAccount: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        enabledControllers: [borrowVault],
-      },
-    ], borrowVault)
+  it('returns non-ramping when the matching collateral edge is missing', () => {
+    const position = makePosition(makeCollateralEdge(), {
+      collateralVault: { address: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' } as IHasVaultAddress,
+    })
 
-    expect(selected).toBe('0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
-  })
-
-  it('returns null when no compatible sub-account exists', () => {
-    const selected = selectBorrowCompatibleSubAccount([
-      {
-        subAccount: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        enabledControllers: ['0x3333333333333333333333333333333333333333'],
-      },
-    ], borrowVault)
-
-    expect(selected).toBeNull()
+    expect(getPositionRampStatus(position, 1500n)).toEqual({
+      isRamping: false,
+      willBeLiquidated: false,
+      forcedLiquidationAt: null,
+    })
   })
 })
