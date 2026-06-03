@@ -25,6 +25,7 @@ import { SwapTokenSelector, SlippageSettingsModal, OperationReviewModal } from '
 import { FixedPoint } from '~/utils/fixed-point'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
+import { createRaceGuard } from '~/utils/race-guard'
 
 const router = useRouter()
 const route = useRoute()
@@ -34,7 +35,7 @@ const { error } = useToast()
 useFullBalances()
 const { planWithdrawOrRedeem, prepareTransactionPlan, executePreparedPlan, prefetchPluginData } = useEulerTx()
 const { account: cachedAccount } = useFreshAccount()
-const { getVault, getSecuritizeVault: _getSecuritizeVault, getEscrowVault: _getEscrowVault } = useVaults()
+const { getVault, getSecuritizeVault: _getSecuritizeVault, getEscrowVault: _getEscrowVault, isMarketDataResolved } = useVaults()
 const { isConnected, address } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
@@ -174,18 +175,27 @@ const estimateSupplyAPYDisplay = computed(() => {
 const assetsBalanceUsd = ref(0)
 const withdrawableAssetsUsd = ref(0)
 const deltaUsd = ref(0)
+const usdPriceGuard = createRaceGuard()
 
 // Update USD prices when vault or amounts change
 watchEffect(async () => {
+  const gen = usdPriceGuard.next()
+  void isMarketDataResolved.value
   if (!vault.value || isSecuritizeVaultType.value) {
     assetsBalanceUsd.value = 0
     withdrawableAssetsUsd.value = 0
     deltaUsd.value = 0
     return
   }
-  assetsBalanceUsd.value = await getAssetUsdValueOrZero(assetsBalance.value, vault.value as EVault, 'off-chain')
-  withdrawableAssetsUsd.value = await getAssetUsdValueOrZero(withdrawableAssets.value, vault.value as EVault, 'off-chain')
-  deltaUsd.value = await getAssetUsdValueOrZero(delta.value, vault.value as EVault, 'off-chain')
+  const [nextAssetsBalanceUsd, nextWithdrawableAssetsUsd, nextDeltaUsd] = await Promise.all([
+    getAssetUsdValueOrZero(assetsBalance.value, vault.value as EVault, 'off-chain'),
+    getAssetUsdValueOrZero(withdrawableAssets.value, vault.value as EVault, 'off-chain'),
+    getAssetUsdValueOrZero(delta.value, vault.value as EVault, 'off-chain'),
+  ])
+  if (usdPriceGuard.isStale(gen)) return
+  assetsBalanceUsd.value = nextAssetsBalanceUsd
+  withdrawableAssetsUsd.value = nextWithdrawableAssetsUsd
+  deltaUsd.value = nextDeltaUsd
 })
 
 // Swap quote helpers

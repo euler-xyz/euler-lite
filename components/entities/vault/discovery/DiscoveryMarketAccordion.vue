@@ -31,6 +31,7 @@ const props = defineProps<{
   initialExpanded?: string[]
 }>()
 
+const { isMarketDataResolved } = useVaults()
 const route = useRoute()
 const { chainId } = useEulerAddresses()
 const shareLinkQuery = computed(() => {
@@ -106,14 +107,14 @@ const vaultUsdCache = ref<Map<string, VaultUsdCacheEntry>>(new Map())
 const formatUsdOrDisplay = (p: { hasPrice: boolean, usdValue: number, display: string }) =>
   p.hasPrice ? formatCompactUsdValue(p.usdValue) : p.display
 
-const loadVaultUsdValues = async (market: MarketGroup) => {
+const loadVaultUsdValues = async (market: MarketGroup, { force = false }: { force?: boolean } = {}) => {
   const newEntries = new Map(vaultUsdCache.value)
   const allVaults = [...market.vaults, ...market.externalCollateral].filter(isMatrixCompatibleVault)
 
   await Promise.all(
     allVaults.map(async (vault) => {
       const addr = getVaultAddress(vault).toLowerCase()
-      if (!addr || newEntries.has(addr)) return
+      if (!addr || (!force && newEntries.has(addr))) return
       const totalAssets = 'totalAssets' in vault ? vault.totalAssets as bigint : 0n
       const borrow = 'totalBorrowed' in vault ? vault.totalBorrowed as bigint : 0n
       const supplyCapRaw = 'caps' in vault ? vault.caps.supplyCap : ('supplyCap' in vault ? vault.supplyCap as bigint : maxUint256)
@@ -149,11 +150,21 @@ const loadVaultUsdValues = async (market: MarketGroup) => {
   vaultUsdCache.value = newEntries
 }
 
+const loadExpandedVaultUsdValues = async () => {
+  const expanded = props.markets.filter(market => isExpanded(market.id))
+  if (!expanded.length) return
+  await Promise.all(expanded.map(market => loadVaultUsdValues(market, { force: true })))
+}
+
 const onToggle = (market: MarketGroup) => {
   const wasExpanded = isExpanded(market.id)
   toggleExpand(market.id)
   if (!wasExpanded) loadVaultUsdValues(market)
 }
+
+watch([() => props.markets, isMarketDataResolved], () => {
+  void loadExpandedVaultUsdValues()
+})
 
 // -- Matrix view selector (single dropdown spans Stats, Configuration,
 // Oracles, and the four numeric pair metrics) --

@@ -19,7 +19,7 @@ defineOptions({
   name: 'EarnPage',
 })
 
-const { isEarnUpdating } = useVaults()
+const { isEarnUpdating, isMarketDataResolved } = useVaults()
 const isPricesReady = ref(false)
 const { isReady: labelsReady } = useEulerLabels()
 const isLoading = computed(() => isEarnUpdating.value || !labelsReady.value || !isPricesReady.value)
@@ -66,10 +66,12 @@ useUrlQuerySync([
 // Cache for USD values used in sorting (keyed by vault address)
 const vaultTotalSupplyUsd = ref<Map<string, number>>(new Map())
 const vaultLiquidityUsd = ref<Map<string, number>>(new Map())
+let priceLoadId = 0
 
 // Fetch USD values for all earn vaults. Debounced to collapse the bursts
 // of registry updates streamed during loadVaults's RPC refresh.
 const fetchEarnPrices = useDebounceFn(async () => {
+  const loadId = ++priceLoadId
   const vaults = list.value
   if (!vaults.length) {
     isPricesReady.value = true
@@ -89,11 +91,14 @@ const fetchEarnPrices = useDebounceFn(async () => {
         liquidityValues.set(vault.address, liquidity)
       }),
     )
+    if (loadId !== priceLoadId) return
     vaultTotalSupplyUsd.value = totalSupplyValues
     vaultLiquidityUsd.value = liquidityValues
   }
   finally {
-    isPricesReady.value = true
+    if (loadId === priceLoadId) {
+      isPricesReady.value = true
+    }
   }
 }, DEBOUNCE_LIST_PRICE_FETCH_MS)
 
@@ -109,6 +114,7 @@ onDeactivated(() => {
 
 watchEffect(() => {
   void list.value
+  void isMarketDataResolved.value
   if (!isActive.value) return
   fetchEarnPrices()
 })
