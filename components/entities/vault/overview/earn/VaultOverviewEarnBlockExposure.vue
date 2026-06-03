@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { isEVault, type EVault, type EulerEarnStrategyInfo, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
-import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
+import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { formatNumber, compactNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
@@ -77,13 +77,11 @@ const load = async () => {
 
 const loadExposureUsdPrices = async () => {
   const pricePromises = exposureList.value.map(async (exposure) => {
-    const exposureVault = getExposureVaultByAddress(exposure.address)
-    if (!exposureVault) return { key: exposure.address, allocationUsd: 0, capUsd: 0 }
     const [allocationUsd, capUsd] = await Promise.all([
-      getAssetUsdValueOrZero(exposure.allocatedAssets, exposureVault, 'off-chain'),
+      getAssetUsdValue(exposure.allocatedAssets, vault, 'off-chain'),
       isUnlimitedCap(exposure)
-        ? Promise.resolve(0)
-        : getAssetUsdValueOrZero(exposure.allocationCap.current, exposureVault, 'off-chain'),
+        ? Promise.resolve(undefined)
+        : getAssetUsdValue(exposure.allocationCap.current, vault, 'off-chain'),
     ])
     return { key: exposure.address, allocationUsd, capUsd }
   })
@@ -92,8 +90,8 @@ const loadExposureUsdPrices = async () => {
   const newPrices = new Map<string, number>()
   const newCapPrices = new Map<string, number>()
   results.forEach(({ key, allocationUsd, capUsd }) => {
-    newPrices.set(key, allocationUsd)
-    newCapPrices.set(key, capUsd)
+    if (allocationUsd !== undefined) newPrices.set(key, allocationUsd)
+    if (capUsd !== undefined) newCapPrices.set(key, capUsd)
   })
   exposureUsdPrices.value = newPrices
   exposureCapUsdPrices.value = newCapPrices
@@ -147,8 +145,7 @@ const getExposureUsdPrice = (exposure: typeof exposureList.value[0]) => {
 }
 
 const getExposureAssetAmount = (exposure: typeof exposureList.value[0]) => {
-  const strategyVault = exposure.vault as EVault | undefined ?? getExposureVaultByAddress(exposure.address)
-  return `${roundAndCompactTokens(exposure.allocatedAssets, strategyVault?.asset.decimals ?? 18)} ${strategyVault?.asset.symbol ?? ''}`
+  return `${roundAndCompactTokens(exposure.allocatedAssets, vault.asset.decimals)} ${vault.asset.symbol}`
 }
 
 load()
@@ -271,7 +268,7 @@ load()
               <span class="text-content-secondary">({{ compactNumber(getAllocationPercentage(row.exposure), 2) }}%)</span>
             </template>
             <template v-else>
-              <UiExactAmount :exact="formatExactAmount(row.exposure.allocatedAssets, row.vault?.asset.decimals ?? 18, row.vault?.asset.symbol)">
+              <UiExactAmount :exact="formatExactAmount(row.exposure.allocatedAssets, vault.asset.decimals, vault.asset.symbol)">
                 {{ getExposureAssetAmount(row.exposure) }}
               </UiExactAmount>
               <span class="text-content-secondary">({{ compactNumber(getAllocationPercentage(row.exposure), 2) }}%)</span>
@@ -314,8 +311,8 @@ load()
                 {{ formatCompactUsdValue(exposureCapUsdPrices.get(row.exposure.address) || 0) }}
               </template>
               <template v-else>
-                <UiExactAmount :exact="formatExactAmount(row.exposure.allocationCap.current, row.vault?.asset.decimals ?? 18, row.vault?.asset.symbol)">
-                  {{ roundAndCompactTokens(row.exposure.allocationCap.current, row.vault?.asset.decimals ?? 18) }} {{ row.vault?.asset.symbol }}
+                <UiExactAmount :exact="formatExactAmount(row.exposure.allocationCap.current, vault.asset.decimals, vault.asset.symbol)">
+                  {{ roundAndCompactTokens(row.exposure.allocationCap.current, vault.asset.decimals) }} {{ vault.asset.symbol }}
                 </UiExactAmount>
               </template>
             </span>
