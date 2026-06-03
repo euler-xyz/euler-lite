@@ -24,6 +24,7 @@ const chainId = ref<number>(0)
 const error = ref<string | null>(null)
 
 let initialized = false
+let pendingEulerConfigLoad: Promise<void> | undefined
 
 const initAllowedChainIds = () => {
   if (initialized) return
@@ -48,30 +49,41 @@ export const useEulerAddresses = () => {
 
   const loadEulerConfig = async () => {
     if (eulerChainsConfig.value.length > 0) return
+    if (pendingEulerConfigLoad) return pendingEulerConfigLoad
 
-    isLoading.value = true
-    error.value = null
+    const promise = (async () => {
+      isLoading.value = true
+      error.value = null
 
-    try {
-      const { getEulerSdk } = await import('~/composables/useEulerSdk')
-      const sdk = await getEulerSdk()
-      const data = sdk.deploymentService
-        .getDeploymentChainIds()
-        .map(chainId => sdk.deploymentService.getDeployment(chainId))
-      const filteredData = data.filter(chain => allowedChainIds.value.includes(chain.chainId))
+      try {
+        const { getEulerSdk } = await import('~/composables/useEulerSdk')
+        const sdk = await getEulerSdk()
+        const data = sdk.deploymentService
+          .getDeploymentChainIds()
+          .map(chainId => sdk.deploymentService.getDeployment(chainId))
+        const filteredData = data.filter(chain => allowedChainIds.value.includes(chain.chainId))
 
-      if (!filteredData.length) {
-        logWarn('useEulerAddresses', 'enabledChainIds did not match any remote chains, using full list')
+        if (!filteredData.length) {
+          logWarn('useEulerAddresses', 'enabledChainIds did not match any remote chains, using full list')
+        }
+
+        eulerChainsConfig.value = filteredData.length ? filteredData : data
       }
+      catch (err) {
+        error.value = err instanceof Error ? err.message : 'Unknown error'
+        logWarn('useEulerAddresses', err, { severity: 'error' })
+      }
+      finally {
+        isLoading.value = false
+      }
+    })()
 
-      eulerChainsConfig.value = filteredData.length ? filteredData : data
-    }
-    catch (err) {
-      error.value = err instanceof Error ? err.message : 'Unknown error'
-      logWarn('useEulerAddresses', err, { severity: 'error' })
+    pendingEulerConfigLoad = promise
+    try {
+      await promise
     }
     finally {
-      isLoading.value = false
+      if (pendingEulerConfigLoad === promise) pendingEulerConfigLoad = undefined
     }
   }
 
