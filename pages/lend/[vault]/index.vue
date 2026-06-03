@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { collectPythFeedsFromRouteSteps, isSecuritizeCollateralVault, type EVault, type SecuritizeCollateralVault, type TransactionPlan, type SwapQuote, SwapperMode } from '@eulerxyz/euler-v2-sdk'
+import { collectPythFeedsFromRouteSteps, isSecuritizeCollateralVault, type EVault, type PluginPrefetchData, type SecuritizeCollateralVault, type TransactionPlan, type TransactionPlanPrepared, type SwapQuote, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { isSecuritizeVault } from '~/utils/vault/categories'
 import { getHookDisabledWarning, getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
@@ -27,6 +27,7 @@ import { getAddress, type Address, formatUnits, zeroAddress } from 'viem'
 import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultSupplyApyModal, SwapTokenSelector, SlippageSettingsModal } from '#components'
 import { getProjectedRates } from '~/utils/vault/apy'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
+import { getTxErrorMessage } from '~/utils/tx-errors'
 
 // Type definitions for vault display
 type VaultType = 'evk' | 'securitize'
@@ -66,13 +67,15 @@ const { error } = useToast()
 const reviewSupplyLabel = 'Review Supply'
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
-const { planDeposit, planDepositWithSwap, executePlan, prefetchPluginData } = useEulerTx()
+const { planDeposit, planDepositWithSwap, prepareTransactionPlan, executePreparedPlan } = useEulerTx()
 const { account: planAccount } = usePlanAccount()
 // Page validates "Not enough balance" up front (see `errorText` / `isSubmitDisabled`),
 // so the simulator never needs to forge wallet balances — `noBalanceOverride: true`
 // skips per-call balanceOf + slot probing.
 const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
 const buildLendStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
+const lendPluginPrefetch: PluginPrefetchData = { pyth: { entries: [] } }
+const getLendPluginPrefetch = async (): Promise<PluginPrefetchData> => lendPluginPrefetch
 const { getVault, getSecuritizeVault, getEscrowVault, updateVault, isEscrowLoadedOnce } = useVaults()
 const { isReady: isLabelsReady } = useEulerLabels()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
@@ -86,7 +89,7 @@ const shareLinkQuery = computed(() => {
   }
 })
 const { fetchSingleBalance } = useWallets()
-const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
+const { runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const vaultAddress = route.params.vault as string
 useOperationGuard([vaultAddress])
 const { name } = useEulerProductOfVault(vaultAddress)
@@ -101,6 +104,7 @@ const isPreparing = ref(false)
 const isEstimatesLoading = ref(false)
 const amount = ref('')
 const plan = ref<TransactionPlan | null>(null)
+const preparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
 const estimateSupplyAPY = ref(0)
 
 // Swap & deposit state
@@ -146,22 +150,17 @@ const {
   buildTxPlanForQuote: (quote, _provider, context) => buildSwapSupplyPlanFromQuote(quote, context.account),
   getPlanAccount: () => planAccount.value,
   getStateOverrideOptions: () => buildLendStateOverrideOptions(),
-  prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
+  prefetchPluginData: getLendPluginPrefetch,
 })
 // Vault data - only one will be populated based on type
 const eVault: Ref<EVault | undefined> = ref(undefined)
 const securitizeVault: Ref<SecuritizeCollateralVault | undefined> = ref(undefined)
 const balance = ref(0n)
 
-// Check if vault uses Pyth oracles (requires fresh prices)
+// Check if the active debt-pricing route uses Pyth oracles (requires fresh prices)
 const hasPythOracles = (v: EVault | undefined): boolean => {
   if (!v) return false
-  const feeds = [
-    ...collectPythFeedsFromRouteSteps(v.debtPricingOracleRoute),
-    ...v.collaterals.flatMap(collateral =>
-      collectPythFeedsFromRouteSteps(collateral.oracleRoute),
-    ),
-  ]
+  const feeds = collectPythFeedsFromRouteSteps(v.debtPricingOracleRoute)
   return feeds.length > 0
 }
 
@@ -432,12 +431,14 @@ const submit = async () => {
   if (isOperationBlocked.value) return
   if (isPreparing.value || isGeoBlocked.value || isSwapRestricted.value || isSourceAssetBlocked.value) return
   isPreparing.value = true
+  clearSimulationError()
   try {
     await guardWithPriceImpact(async () => {
       if (!asset.value?.address) {
         return
       }
 
+      preparedPlan.value = null
       try {
         if (needsSwap.value && swapEffectiveQuote.value) {
           plan.value = await buildSwapSupplyPlanFromQuote(swapEffectiveQuote.value)
@@ -462,7 +463,19 @@ const submit = async () => {
       }
 
       if (plan.value) {
-        const ok = await runSimulation(plan.value, buildLendStateOverrideOptions())
+        try {
+          preparedPlan.value = await prepareTransactionPlan(plan.value, {
+            account: planAccount.value,
+            prefetch: lendPluginPrefetch,
+          })
+        }
+        catch (e) {
+          console.warn('[OperationReviewModal] failed to prepare plan', e)
+          simulationError.value = await getTxErrorMessage(e)
+          return
+        }
+
+        const ok = await runPreparedSimulation(preparedPlan.value, buildLendStateOverrideOptions())
         if (!ok) {
           return
         }
@@ -478,7 +491,7 @@ const submit = async () => {
           type: reviewType,
           asset: reviewAsset,
           amount: amount.value,
-          plan: plan.value || undefined,
+          prepared: preparedPlan.value || undefined,
           quoteFetchedAt: needsSwap.value ? swapEffectiveQuoteFetchedAt.value : null,
           swapToAsset: needsSwap.value ? asset.value : undefined,
           swapToAmount: needsSwap.value ? swapEstimatedOutput.value : undefined,
@@ -499,31 +512,11 @@ const submit = async () => {
 const send = async () => {
   try {
     isSubmitting.value = true
-    if (!asset.value?.address) {
-      return
+    if (!preparedPlan.value) {
+      throw new Error('Prepared supply plan is unavailable')
     }
 
-    let txPlan: TransactionPlan
-    if (needsSwap.value && swapSelectedQuote.value) {
-      txPlan = await buildSwapSupplyPlanFromQuote(swapSelectedQuote.value)
-    }
-    else if (needsSwap.value && swapEffectiveQuote.value) {
-      txPlan = await buildSwapSupplyPlanFromQuote(swapEffectiveQuote.value)
-    }
-    else {
-      const supplyAmount = valueToNano(amount.value || '0', asset.value.decimals)
-      const wrappedAddr = isNativeWrap.value ? resolveWrappedNativeAddress(chainId.value!) : null
-      txPlan = await planDeposit({
-        vaultAddress: vaultAddress as Address,
-        assetAddress: asset.value.address as Address,
-        amount: supplyAmount,
-        wrappedNativeInfo: isNativeWrap.value && wrappedAddr
-          ? { wrappedTokenAddress: wrappedAddr, nativeAmount: supplyAmount }
-          : undefined,
-        account: planAccount.value,
-      })
-    }
-    await executePlan(txPlan)
+    await executePreparedPlan(preparedPlan.value)
 
     modal.close()
     await updateEstimates()

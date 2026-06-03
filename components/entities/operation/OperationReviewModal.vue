@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
-import { encodeFunctionData, type Address, type Hex, type StateOverride } from 'viem'
-import { flattenBatchEntries, type SwapperMode, type EVCBatchItem, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import { encodeFunctionData, type Address } from 'viem'
+import { flattenBatchEntries, type SwapperMode, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getEulerSdk } from '~/composables/useEulerSdk'
@@ -10,6 +10,7 @@ import { formatNumber } from '~/utils/string-utils'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { useStateOverrideResolution } from '~/composables/useStateOverrideOptions'
 import { hasPermit2Signature, hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
+import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
 
 const emits = defineEmits(['close', 'confirm'])
 
@@ -73,6 +74,7 @@ let nowTimer: ReturnType<typeof setInterval> | undefined
 // raw-plan branch below can be deleted.
 const preparedPlan = shallowRef<TransactionPlan | undefined>()
 const prepareError = ref('')
+const tenderlyLocalError = ref('')
 const isPreparingPlan = ref(false)
 const reviewPlan = computed(() => preparedPlan.value)
 let prepareRequestId = 0
@@ -92,19 +94,6 @@ onUnmounted(() => {
     clearInterval(nowTimer)
   }
 })
-
-const findFirstEvcBatch = (p?: TransactionPlan) => p?.find(item => item.type === 'evcBatch')
-const toTenderlyStateOverrides = (overrides: StateOverride) =>
-  overrides.flatMap((entry) => {
-    if (!entry.stateDiff?.length) return []
-    return [{
-      address: entry.address,
-      stateDiff: entry.stateDiff.map(diff => ({
-        slot: diff.slot,
-        value: diff.value,
-      })),
-    }]
-  })
 
 watch(
   () => [prepared, plan, walletAddress.value, currentChainId.value] as const,
@@ -155,33 +144,26 @@ watch(
 
 const handleTenderlySimulate = async () => {
   const currentPlan = reviewPlan.value
-  if (!currentPlan || !walletAddress.value || !currentChainId.value) return
+  if (!currentPlan || !walletAddress.value) return
+  tenderlyLocalError.value = ''
   clearTenderly()
 
   try {
     const owner = walletAddress.value as Address
-    const batchItem = findFirstEvcBatch(currentPlan)
-    if (!batchItem || batchItem.type !== 'evcBatch') return
-
     const sdk = await getEulerSdk()
-    const items: EVCBatchItem[] = flattenBatchEntries(batchItem.items)
-    const evcAddress = sdk.deploymentService.getDeployment(currentChainId.value).addresses.coreAddrs.evc
-    const data = sdk.executionService.encodeBatch(items)
-    const value = items.reduce((sum, it) => sum + it.value, 0n)
-    const stateOverrides = await sdk.executionService.deriveStateOverrides(
-      currentChainId.value,
+    const payload = await buildTenderlySimulationPayload({
+      plan: currentPlan,
       owner,
-      currentPlan,
-    )
-
-    await tenderlySimulate({
       chainId: currentChainId.value,
-      from: owner,
-      to: evcAddress,
-      data: data as Hex,
-      value: value.toString(),
-      stateOverrides: toTenderlyStateOverrides(stateOverrides),
+      sdk,
     })
+
+    if (!payload) {
+      tenderlyLocalError.value = 'Tenderly simulation is not available for this transaction plan.'
+      return
+    }
+
+    await tenderlySimulate(payload)
   }
   catch (err) {
     logWarn('OperationReviewModal/tenderly', err)
@@ -315,6 +297,7 @@ const usesPermit2 = computed(() => hasPermit2Signature(reviewPlan.value) || hasP
 const hasTenderlyFailedSimulation = computed(() => {
   return !!(tenderlyUrl.value && tenderlyError.value)
 })
+const tenderlyDisplayError = computed(() => tenderlyLocalError.value || tenderlyError.value)
 
 const isSwapQuoteStale = computed(() => {
   return typeof quoteFetchedAt === 'number'
@@ -405,10 +388,10 @@ const confirmLabel = computed(() => {
       </p>
 
       <UiAlert
-        v-if="tenderlyError && !hasTenderlyFailedSimulation"
+        v-if="tenderlyDisplayError && !hasTenderlyFailedSimulation"
         title="Simulation failed"
         variant="warning"
-        :description="tenderlyError"
+        :description="tenderlyDisplayError"
         size="compact"
       />
       <UiAlert

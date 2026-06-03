@@ -68,7 +68,7 @@ const claim = async () => {
     }
     await executePlan(plan.value)
     modal.close()
-    await refreshRewards()
+    await refreshRewards({ delayedRetry: true })
   }
   catch (e) {
     error('Transaction failed')

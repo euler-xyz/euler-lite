@@ -22,7 +22,7 @@ const {
 } = useEulerAccount()
 const { refresh: refreshFreshAccount } = useFreshAccount()
 const { rewards } = useSdkRewards()
-const { locks } = useREULLocks()
+const { locks, refreshLocks } = useREULLocks()
 const { isConnected, address } = useWagmi()
 const { isLoaded: isBalancesLoaded, updateBalances } = useWallets()
 const { eulerLensAddresses } = useEulerAddresses()
@@ -121,6 +121,7 @@ onDeactivated(() => {
 
 watch(portfolioRefreshCounter, () => {
   updatePositions({ portfolioSource: 'fresh', preemptPortfolio: true })
+  void refreshLocks(false)
 })
 watch(showAllLabelEntries, (showAll) => {
   isShowAllPositions.value = showAll
@@ -147,8 +148,6 @@ watch(showAllLabelEntries, (showAll) => {
     </div>
 
     <PortfolioShowAllHint />
-
-    <PortfolioDiagnosticsBanner />
 
     <PortfolioRampingBanner />
 
