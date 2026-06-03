@@ -78,7 +78,6 @@ const load = async () => {
 
 const loadExposureUsdPrices = async () => {
   const loadId = ++priceLoadId
-  const marketDataResolved = isMarketDataResolved.value
   const results = await Promise.all(exposureList.value.map(async (exposure) => {
     const exposureVault = getExposureVaultByAddress(exposure.address)
     if (!exposureVault) return null
@@ -100,11 +99,11 @@ const loadExposureUsdPrices = async () => {
     if (!result) return
 
     const { exposure, allocationUsd, capUsd } = result
-    if (allocationUsd !== undefined || marketDataResolved) {
-      newPrices.set(exposure.address, allocationUsd ?? 0)
+    if (allocationUsd !== undefined) {
+      newPrices.set(exposure.address, allocationUsd)
     }
-    if (!isUnlimitedCap(exposure) && (capUsd !== undefined || marketDataResolved)) {
-      newCapPrices.set(exposure.address, capUsd ?? 0)
+    if (!isUnlimitedCap(exposure) && capUsd !== undefined) {
+      newCapPrices.set(exposure.address, capUsd)
     }
   })
   exposureUsdPrices.value = newPrices
