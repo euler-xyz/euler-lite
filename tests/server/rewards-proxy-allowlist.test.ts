@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  isAllowedFuulClaimChecksBody,
   isAllowedFuulProxyRequest,
   isAllowedIncentraProxyRequest,
   isAllowedMerklProxyRequest,
@@ -12,25 +11,19 @@ const params = (query = '') =>
   new URL(`https://app.example/${query ? `?${query}` : ''}`).searchParams
 
 describe('rewards proxy allowlists', () => {
-  it('allows only the SDK-owned Fuul URL and body shapes', () => {
+  it('allows only the SDK-owned Fuul URL shapes', () => {
     expect(isAllowedFuulProxyRequest('GET', 'incentives', params('protocol=euler&chain_id=1'))).toBe(true)
     expect(isAllowedFuulProxyRequest('GET', 'incentives', params('protocol=euler-looping&chain_id=1'))).toBe(true)
-    expect(isAllowedFuulProxyRequest('HEAD', 'totals', params(`user_identifier=${ACCOUNT}&user_identifier_type=evm_address`))).toBe(true)
-    expect(isAllowedFuulProxyRequest('POST', 'claim-checks', params())).toBe(true)
-    expect(isAllowedFuulClaimChecksBody(JSON.stringify({
-      userIdentifier: ACCOUNT,
-      userIdentifierType: 'evm_address',
-    }))).toBe(true)
+    expect(isAllowedFuulProxyRequest('GET', 'claimable-rewards', params(`protocol=euler&user_address=${ACCOUNT}&chain_id=1`))).toBe(true)
 
     expect(isAllowedFuulProxyRequest('GET', 'rewards', params('chain_id=1'))).toBe(false)
     expect(isAllowedFuulProxyRequest('GET', 'incentives', params('protocol=other&chain_id=1'))).toBe(false)
     expect(isAllowedFuulProxyRequest('GET', 'incentives', params('protocol=euler&chain_id=1&debug=true'))).toBe(false)
+    expect(isAllowedFuulProxyRequest('GET', 'claimable-rewards', params(`protocol=euler&user_address=${ACCOUNT}&chain_id=1&debug=true`))).toBe(false)
+    expect(isAllowedFuulProxyRequest('GET', 'claimable-rewards', params(`protocol=euler-looping&user_address=${ACCOUNT}&chain_id=1`))).toBe(false)
+    expect(isAllowedFuulProxyRequest('HEAD', 'totals', params(`user_identifier=${ACCOUNT}&user_identifier_type=evm_address`))).toBe(false)
+    expect(isAllowedFuulProxyRequest('POST', 'claim-checks', params())).toBe(false)
     expect(isAllowedFuulProxyRequest('GET', 'claim-checks', params())).toBe(false)
-    expect(isAllowedFuulClaimChecksBody(JSON.stringify({
-      userIdentifier: ACCOUNT,
-      userIdentifierType: 'evm_address',
-      debug: true,
-    }))).toBe(false)
   })
 
   it('allows only the two Incentra POST endpoints used by the SDK', () => {

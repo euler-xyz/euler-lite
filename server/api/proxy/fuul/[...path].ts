@@ -3,20 +3,16 @@
  *
  * The SDK's rewardsDirectAdapter constructs URLs like
  *   `${fuulApiUrl}/incentives?protocol=euler&chain_id=1`
- *   `${fuulTotalsUrl}?user_identifier=0x…&user_identifier_type=evm_address`
- *   `${fuulClaimChecksUrl}` (POST)
+ *   `${fuulApiUrl}/claimable-rewards?protocol=euler&user_address=0x…&chain_id=1`
  *
- * Point the SDK at `/api/proxy/fuul` (with `/api/proxy/fuul/totals` and
- * `/api/proxy/fuul/claim-checks` for the wallet-only paths) and this
- * handler rewrites to the real upstream (`FUUL_API_URL`, default
- * `https://api.fuul.xyz/api/v1`). TTL-cached server-side for cross-tab
- * sharing.
+ * Point the SDK at `/api/proxy/fuul` and this handler rewrites to the real
+ * upstream (`FUUL_API_URL`, default `https://api.fuul.xyz/api/v1`).
+ * TTL-cached server-side for cross-tab sharing.
  */
 import {
   createError,
   getMethod,
   getRequestURL,
-  readRawBody,
   setResponseHeaders,
   setResponseStatus,
 } from 'h3'
@@ -27,10 +23,7 @@ import {
   createProxyInFlight,
   forwardProxied,
 } from '~/server/utils/external-proxy'
-import {
-  isAllowedFuulClaimChecksBody,
-  isAllowedFuulProxyRequest,
-} from '~/server/utils/rewards-proxy-allowlist'
+import { isAllowedFuulProxyRequest } from '~/server/utils/rewards-proxy-allowlist'
 
 const PROXY_PREFIX = '/api/proxy/fuul/'
 
@@ -62,7 +55,7 @@ const readUpstreamBase = (): string => {
 
 export default defineEventHandler(async (event) => {
   const method = getMethod(event).toUpperCase()
-  if (method !== 'GET' && method !== 'HEAD' && method !== 'POST') {
+  if (method !== 'GET' && method !== 'HEAD') {
     throw createError({ statusCode: 405, statusMessage: 'Method not allowed' })
   }
 
@@ -77,11 +70,6 @@ export default defineEventHandler(async (event) => {
   }
 
   const target = `${readUpstreamBase()}/${rest}${requestUrl.search}`
-  const body = method === 'POST' ? (await readRawBody(event))?.toString() : undefined
-  if (method === 'POST' && !isAllowedFuulClaimChecksBody(body)) {
-    throw createError({ statusCode: 400, statusMessage: 'Fuul request body not allowed' })
-  }
-
   await rateLimiter.consume(event)
 
   try {
@@ -90,8 +78,7 @@ export default defineEventHandler(async (event) => {
       inFlight,
       method,
       target,
-      headers: { accept: 'application/json', ...(body ? { 'content-type': 'application/json' } : {}) },
-      body,
+      headers: { accept: 'application/json' },
       ctx: 'fuul-proxy',
     })
     setResponseStatus(event, res.status, res.statusText)
