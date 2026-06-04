@@ -2,8 +2,18 @@
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getPairBorrowVault, getPairCollateralVault } from '~/utils/borrow-pair'
+import { vaultOverviewPairOverviewKey } from '~/composables/useVaultOverviewPairOverview'
 
-defineProps<{ pair: AnyBorrowVaultPair | PortfolioBorrowPosition<VaultEntity>, desktopOverview?: boolean, collateralVaults?: (EVault | SecuritizeCollateralVault)[] }>()
+const props = defineProps<{
+  pair: AnyBorrowVaultPair | PortfolioBorrowPosition<VaultEntity>
+  desktopOverview?: boolean
+  collateralVaults?: (EVault | SecuritizeCollateralVault)[]
+}>()
+
+const overview = useVaultOverviewPairOverview(() => props.pair)
+provide(vaultOverviewPairOverviewKey, overview)
+
+const { showMultiplySection } = overview
 </script>
 
 <template>
@@ -11,8 +21,10 @@ defineProps<{ pair: AnyBorrowVaultPair | PortfolioBorrowPosition<VaultEntity>, d
     class="flex flex-col"
     :class="[desktopOverview ? 'gap-16' : 'gap-12']"
   >
-    <VaultOverviewPairBlockGeneral
-      :pair="pair"
+    <VaultOverviewPairBlockGeneral />
+    <VaultOverviewPairBlockBorrow />
+    <VaultOverviewPairBlockMultiply
+      v-if="showMultiplySection"
     />
     <VaultOverviewPairBlockTypes
       :pair="pair"
