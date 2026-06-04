@@ -49,7 +49,7 @@ export interface VaultMetadata {
   deprecationReason: string | null
   /** True if the vault is listed under any product's `deprecatedVaults` (or earn-vaults `deprecated: true`). */
   deprecated: boolean
-  /** True when the owning product has `isGovernanceLimited: true` (governor exists but no active risk management). False for vaults without a product. */
+  /** True when the owning product has the `governance limited` tag. False for vaults without a product. */
   governanceLimited: boolean
   /** The owning product slug from products.json (e.g. "euler-prime"), or null for vaults outside any product (escrow, earn-only entries, governor mismatch with no product). */
   productId: string | null
@@ -166,7 +166,7 @@ function buildEvkMetadata(
     portfolioNotice,
     deprecationReason,
     deprecated,
-    governanceLimited: product?.isGovernanceLimited === true,
+    governanceLimited: product?.governanceLimited === true,
     productId: product?.slug ?? null,
     asset: buildAsset(vault.asset, ctx.view.tokenLogos),
     entities,
@@ -203,7 +203,7 @@ function buildEarnMetadata(vault: EulerEarn, ctx: BuildContext): VaultMetadata |
     portfolioNotice,
     deprecationReason,
     deprecated,
-    governanceLimited: product?.isGovernanceLimited === true,
+    governanceLimited: product?.governanceLimited === true,
     productId: product?.slug ?? null,
     asset: buildAsset(vault.asset, ctx.view.tokenLogos),
     entities,

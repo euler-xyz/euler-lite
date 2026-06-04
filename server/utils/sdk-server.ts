@@ -62,6 +62,14 @@ const adapterConfigForSource = (source: VaultDataSource): Partial<EulerSDKConfig
   }
 }
 
+function resolveLabelsBaseUrl(): string {
+  const explicit = (process.env.NUXT_PUBLIC_CONFIG_LABELS_BASE_URL || '').trim().replace(/\/+$/, '')
+  if (explicit) return explicit
+  const repo = process.env.NUXT_PUBLIC_CONFIG_LABELS_REPO || 'euler-xyz/euler-labels'
+  const branch = process.env.NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH || 'master'
+  return `https://raw.githubusercontent.com/${repo}/refs/heads/${branch}`
+}
+
 const buildServerSdkConfig = (chainId: number): EulerSDKConfig => {
   const rpcUrl = resolveRpcUrl(chainId)
   if (!rpcUrl) throw new Error(`No RPC URL configured for chain ${chainId}`)
@@ -74,6 +82,7 @@ const buildServerSdkConfig = (chainId: number): EulerSDKConfig => {
   return {
     rpcUrls: { [chainId]: rpcUrl },
     v3ApiUrl,
+    eulerLabelsBaseUrl: resolveLabelsBaseUrl(),
     tokenlistApiBaseUrl: v3ApiUrl,
     ...(v3ApiKey ? { v3ApiKey } : {}),
     ...adapterConfigForSource(source),

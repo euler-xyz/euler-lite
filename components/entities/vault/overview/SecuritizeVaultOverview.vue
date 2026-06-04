@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { EVault, EVaultCollateral, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
-import { getProductByVault, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, getProductKeyByVault, isVaultGovernanceLimited } from '~/utils/eulerLabelsUtils'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
@@ -35,7 +35,7 @@ const description = computed(() => {
 })
 const entities = useEulerEntitiesOfVault(vault as unknown as EVault)
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault as unknown as EVault))
-const isGovernanceLimited = computed(() => product.isGovernanceLimited && isGovernorVerified.value)
+const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
 const marketProductKey = computed(() => getProductKeyByVault(vault.address))
 const marketProductName = computed(() => getProductByVault(vault.address).name)
 

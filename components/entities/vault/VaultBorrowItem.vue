@@ -7,7 +7,7 @@ import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { getVaultAvailableLiquidity, getVaultUtilization } from '~/utils/vault-display'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isVaultRecentlyAdded, isVaultKeyring, getUniqueEntitiesByVaults } from '~/utils/eulerLabelsUtils'
+import { isVaultGovernanceLimited, isVaultRecentlyAdded, isVaultKeyring, getUniqueEntitiesByVaults } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { VaultBorrowApyModal, VaultMaxRoeModal, VaultNetApyPairModal, VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
@@ -46,7 +46,6 @@ const entityDisplay = computed(() => {
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getBorrowRewardApy, getSupplyRewardApy, getLoopingRewardApy, hasSupplyRewards, hasBorrowRewards, hasLoopingRewards, getBorrowRewardCampaigns, getSupplyRewardCampaigns, getLoopingRewardCampaigns } = useRewardsApy()
-
 const collateralProduct = useEulerProductOfVault(
   computed(() => pair.collateral.address),
 )
@@ -55,7 +54,7 @@ const borrowProduct = useEulerProductOfVault(
 )
 
 const isAnyGovernanceLimited = computed(() =>
-  (collateralProduct.isGovernanceLimited || borrowProduct.isGovernanceLimited) && !isAnyGovernorUnverified.value,
+  (isVaultGovernanceLimited(pair.collateral.address) || isVaultGovernanceLimited(pair.borrow.address)) && !isAnyGovernorUnverified.value,
 )
 
 const isEscrowCollateral = computed(

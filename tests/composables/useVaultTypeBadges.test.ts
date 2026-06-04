@@ -15,15 +15,6 @@ const state = vi.hoisted(() => ({
   verifiedVaults: new Set<string>(),
 }))
 
-vi.mock('~/composables/useEulerLabels', () => ({
-  useEulerProductOfVault: (addressRef: { value?: string } | string) => ({
-    get isGovernanceLimited() {
-      const address = typeof addressRef === 'string' ? addressRef : addressRef.value
-      return !!address && state.governanceLimitedVaults.has(address.toLowerCase())
-    },
-  }),
-}))
-
 vi.mock('~/utils/eulerLabelsUtils', () => ({
   getEntitiesByEarnVault: (vault: { owner?: string }) =>
     vault.owner && state.earnOwners.has(vault.owner.toLowerCase()) ? [{}] : [],
@@ -31,6 +22,7 @@ vi.mock('~/utils/eulerLabelsUtils', () => ({
     vault.governorAdmin && state.entityGovernors.has(vault.governorAdmin.toLowerCase()) ? [{}] : [],
   isVaultKeyring: (address: string) => state.keyringVaults.has(address.toLowerCase()),
   isVaultAccessControlled: (address: string) => state.accessControlVaults.has(address.toLowerCase()),
+  isVaultGovernanceLimited: (address: string) => state.governanceLimitedVaults.has(address.toLowerCase()),
 }))
 
 vi.mock('~/composables/useVaultRegistry', () => ({

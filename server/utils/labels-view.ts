@@ -29,9 +29,7 @@ export interface ChainVaultsSnapshot {
   escrowVaults: EVault[]
 }
 
-export interface ProductEntryFull extends EulerLabelProduct {
-  isGovernanceLimited?: unknown
-}
+export type ProductEntryFull = EulerLabelProduct
 
 export interface VaultOverride {
   name?: unknown
@@ -66,7 +64,7 @@ export interface ProductDescriptor {
   description: string | null
   portfolioNotice: string | null
   deprecationReason: string | null
-  isGovernanceLimited: boolean
+  governanceLimited: boolean
   forceUnverified: boolean
   entityKeys: string[]
   vaultOverrides: Record<string, VaultOverride>
@@ -115,6 +113,10 @@ function uniqueAddresses(addresses: Iterable<string>): Address[] {
   return [...result.values()]
 }
 
+function hasTag(tags: unknown, tag: string): boolean {
+  return Array.isArray(tags) && tags.includes(tag)
+}
+
 // SDK builder shared with vaults-cache via server/utils/sdk-server.ts.
 const getSdk = (chainId: number): Promise<EulerSDK> => getServerSdk(chainId)
 
@@ -145,7 +147,7 @@ function buildProductDescriptors(products: Record<string, ProductEntryFull>): {
       description: strOrNull(product.description),
       portfolioNotice: strOrNull(product.portfolioNotice),
       deprecationReason: strOrNull(product.deprecationReason),
-      isGovernanceLimited: product.isGovernanceLimited === true,
+      governanceLimited: hasTag(product.tags, 'governance limited'),
       forceUnverified: strOrNull(product.deprecationReason)?.toLowerCase().includes('unrecognized entity') === true,
       entityKeys: declaredKeysOf(product.entity),
       vaultOverrides: overrides,

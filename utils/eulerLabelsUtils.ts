@@ -29,15 +29,11 @@ import {
   type EulerLabelAssetPatternRule,
   type EulerEarn,
 } from '@eulerxyz/euler-v2-sdk'
-import { eulerLabelProductEmpty, type EulerLabelProduct, type EulerLabelEntity, type EulerLabelPointReward } from '~/entities/euler/labels'
+import { eulerLabelProductEmpty, type EulerLabelEarnVaultEntry, type EulerLabelProduct, type EulerLabelEntity, type EulerLabelPointReward } from '~/entities/euler/labels'
 import { getCurrentEulerLabelsData, getEulerLabelWrapPairs } from '~/composables/useEulerLabels'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 
 const labels = () => getCurrentEulerLabelsData()
-
-type EulerLabelsWithRecentlyAdded = ReturnType<typeof getCurrentEulerLabelsData> & {
-  recentlyAddedEarnVaults?: Set<string>
-}
 
 const MAX_REGEX_INPUT_LEN = 128
 
@@ -98,16 +94,30 @@ export const getAssetRestricted = (assetAddress: string): string[] | undefined =
 export const getAssetPatternRules = (): EulerLabelAssetPatternRule[] =>
   labels().assetPatternRules
 
+const productHasTag = (product: EulerLabelProduct | undefined, tag: string): boolean =>
+  product?.tags?.includes(tag) ?? false
+
+const vaultOverrideHasTag = (
+  product: EulerLabelProduct | undefined,
+  normalizedVaultAddress: string,
+  tag: string,
+): boolean =>
+  product?.vaultOverrides?.[normalizedVaultAddress]?.tags?.includes(tag) ?? false
+
+const earnEntryHasTag = (entry: EulerLabelEarnVaultEntry | undefined, tag: string): boolean =>
+  entry?.tags?.includes(tag) ?? false
+
+const getEarnEntryByVault = (normalizedVaultAddress: string): EulerLabelEarnVaultEntry | undefined =>
+  labels().earnVaultEntries[normalizedVaultAddress.toLowerCase()] as EulerLabelEarnVaultEntry | undefined
+
 export const isVaultRecentlyAdded = (vaultAddress: string): boolean => {
   const normalized = normalizeAddress(vaultAddress)
-  const currentLabels = labels() as EulerLabelsWithRecentlyAdded
-  const productRecentlyAdded = Object.values(currentLabels.products).some(product =>
-    ((product as EulerLabelProduct).recentlyAddedVaults ?? []).some(address => normalizeAddress(address) === normalized),
+  const product = getEulerLabelProductByVault(labels(), normalized) as EulerLabelProduct | undefined
+  return (
+    productHasTag(product, 'recently added')
+    || vaultOverrideHasTag(product, normalized, 'recently added')
+    || earnEntryHasTag(getEarnEntryByVault(normalized), 'recently added')
   )
-  if (productRecentlyAdded) return true
-
-  const earnRecentlyAdded = currentLabels.recentlyAddedEarnVaults
-  return earnRecentlyAdded?.has(normalized) || earnRecentlyAdded?.has(normalized.toLowerCase()) || false
 }
 
 export const normalizeProducts = (data: Record<string, EulerLabelProduct>): { products: Record<string, EulerLabelProduct>, vaultAddresses: string[] } => {
@@ -117,14 +127,12 @@ export const normalizeProducts = (data: Record<string, EulerLabelProduct>): { pr
   Object.entries(data).forEach(([key, product]) => {
     const normalizedVaults = product.vaults.map(normalizeAddress)
     const normalizedDeprecated = (product.deprecatedVaults || []).map(normalizeAddress)
-    const normalizedRecentlyAdded = (product.recentlyAddedVaults || []).map(normalizeAddress)
     const fallbackReason = (product as EulerLabelProduct & { deprecateReason?: string }).deprecateReason
 
     normalized[key] = {
       ...product,
       vaults: normalizedVaults,
       deprecatedVaults: normalizedDeprecated,
-      recentlyAddedVaults: normalizedRecentlyAdded,
       deprecationReason: product.deprecationReason || fallbackReason,
     }
 
@@ -176,6 +184,12 @@ export const isProductKeyring = (productKey: string): boolean =>
 
 export const isVaultAccessControlled = (vaultAddress: string): boolean =>
   isEulerLabelVaultAccessControlled(labels(), vaultAddress)
+
+export const isVaultGovernanceLimited = (vaultAddress: string): boolean => {
+  const normalized = normalizeAddress(vaultAddress)
+  const product = getEulerLabelProductByVault(labels(), normalized) as EulerLabelProduct | undefined
+  return productHasTag(product, 'governance limited')
+}
 
 export type EulerLabelEntityVaultLike = {
   address?: string

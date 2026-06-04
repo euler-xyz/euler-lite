@@ -52,11 +52,9 @@ Structure: `Record<string, Product>` — keys are product identifiers (e.g. `"eu
     // Optional fields
     "deprecatedVaults": ["0xold1..."],           // Phased-out vault addresses (still verified, shown as deprecated)
     "deprecationReason": "Migrated to v2",       // Why deprecated — shown in warning banner. Supports URLs.
-    "isGovernanceLimited": true,                 // If true, shows "Limited risk management" in UI
+    "tags": ["keyring", "governance limited"],   // Product classification tags
     "notExplorable": true,                       // If true, hides ALL product vaults from lend/borrow/explore pages
     "block": ["US", "EU"],                       // Country codes/groups to hard-block (see geo-blocking.md)
-    "keyring": true,                               // All vaults require Keyring verification (see keyring-hooks.md)
-    "recentlyAddedVaults": ["0x1234...abcd"],    // Vault addresses to sort to top in discovery tables
     "vaultOverrides": {                          // Per-vault customizations (see below)
       "0x5678...ef01": {
         "description": "Custom description for this vault",
@@ -65,7 +63,8 @@ Structure: `Record<string, Product>` — keys are product identifiers (e.g. `"eu
         "block": ["US", "EU", "CH"],
         "restricted": ["JP"],
         "notExplorableLend": true,
-        "notExplorableBorrow": true
+        "notExplorableBorrow": true,
+        "tags": ["recently added"]
       }
     }
   }
@@ -84,12 +83,12 @@ Structure: `Record<string, Product>` — keys are product identifiers (e.g. `"eu
 | `vaults` | `string[]` | Yes | Active vault addresses (checksummed). These become "verified" vaults in the app. |
 | `deprecatedVaults` | `string[]` | No | Phased-out vault addresses. Still verified and viewable in portfolio, but hidden from discovery tables and shown with a deprecation warning. |
 | `deprecationReason` | `string` | No | Explanation for deprecation. Shown in a warning banner on vault overview. URLs are auto-linked. Also accepts legacy key `deprecateReason`. |
-| `isGovernanceLimited` | `boolean` | No | If `true`, shows "Limited risk management" text under the Risk Manager section on vault overview. The risk manager entity display is also faded to 20% opacity across all UI components (browse lists, vault overview, explore market cards) to visually convey limited active risk management. |
+| `tags` | `string[]` | No | Product classification tags. `keyring` marks all product vaults as requiring Keyring identity verification; `access control` marks vaults gated by an allowlist hook; `governance limited` shows "Limited risk management" and fades the risk manager entity display. |
 | `notExplorable` | `boolean` | No | If `true`, hides **all** vaults in this product from lend, borrow, and explore discovery pages. Takes precedence over per-vault `notExplorableLend`/`notExplorableBorrow`. Vaults remain accessible via direct URL. |
 | `block` | `string[]` | No | Country codes or group aliases (`EU`, `EEA`, `EFTA`) for hard geo-blocking. See [geo-blocking.md](./geo-blocking.md). |
-| `recentlyAddedVaults` | `string[]` | No | Subset of `vaults` to sort to the top in discovery tables. |
-| `keyring` | `boolean` | No | If `true`, all vaults in this product require Keyring identity verification. See [keyring-hooks.md](./keyring-hooks.md). |
 | `vaultOverrides` | `Record<string, VaultOverride>` | No | Per-vault customizations keyed by checksummed address. See next section. |
+
+Classification markers use a clean-cut tags schema. Product `isGovernanceLimited`, product `recentlyAddedVaults`, and earn-vault `recentlyAdded` are not supported by the current labels contract.
 
 #### Vault Override Fields
 
@@ -104,7 +103,7 @@ Per-vault overrides allow customizing behavior for individual vaults within a pr
 | `restricted` | `string[]` | Soft geo-restriction for this vault only. No product-level fallback. See [geo-blocking.md](./geo-blocking.md). |
 | `notExplorableLend` | `boolean` | If `true`, hides this vault from the **lend** discovery page. Product-level `notExplorable` takes precedence. |
 | `notExplorableBorrow` | `boolean` | If `true`, hides this vault from the **borrow** discovery page — both as a borrow vault and as collateral. Product-level `notExplorable` takes precedence. |
-| `keyring` | `boolean` | If `true`, this specific vault requires Keyring identity verification (overrides product-level). See [keyring-hooks.md](./keyring-hooks.md). |
+| `tags` | `string[]` | Vault classification tags. `keyring`, `access control`, and `recently added` apply to this specific vault. See [keyring-hooks.md](./keyring-hooks.md). |
 
 **Precedence rules**:
 - `block`: vault override replaces product-level (not additive)
@@ -195,7 +194,7 @@ Structure: `Array<string | EarnVaultEntry>` — each entry is either a plain add
     "address": "0xDetailedEarnVault...",          // Vault address (required)
     "block": ["US", "EU"],                        // Hard geo-blocking (country codes/groups)
     "restricted": ["JP"],                         // Soft geo-restriction
-    "recentlyAdded": true,                        // Sort to top in earn discovery table
+    "tags": ["recently added"],                   // Sort to top in earn discovery table
     "deprecated": true,                           // Mark as deprecated
     "deprecationReason": "Migrated to new vault", // Deprecation explanation
     "description": "Custom description",          // Vault description
@@ -211,11 +210,13 @@ Structure: `Array<string | EarnVaultEntry>` — each entry is either a plain add
 | `address` | `string` | Yes | Checksummed vault address |
 | `block` | `string[]` | No | Country codes/groups for hard geo-blocking (same syntax as products.json `block`) |
 | `restricted` | `string[]` | No | Country codes/groups for soft geo-restriction |
-| `recentlyAdded` | `boolean` | No | If `true`, sorts vault to top in earn discovery table |
+| `tags` | `string[]` | No | Earn-vault classification tags. `recently added` sorts the vault to the top in earn discovery. |
 | `deprecated` | `boolean` | No | If `true`, marks vault as deprecated (hidden from discovery, warning banner shown) |
 | `deprecationReason` | `string` | No | Explanation shown in deprecation warning banner |
 | `description` | `string` | No | Custom description displayed on earn vault items and overview pages |
 | `portfolioNotice` | `string` | No | Operational notice shown on portfolio position cards. Supports auto-linked URLs and **bold** formatting. |
+
+Classification markers use a clean-cut tags schema. Earn-vault `recentlyAdded` is not supported by the current labels contract.
 
 ---
 
@@ -319,7 +320,7 @@ Labels control which vaults appear on each discovery page:
 | Override `notExplorableLend: true` | Hidden | Visible | Visible |
 | Override `notExplorableBorrow: true` | Visible | Hidden (both sides) | Visible |
 | `deprecatedVaults` | Hidden | Hidden | Visible (dimmed) |
-| `recentlyAddedVaults` / `recentlyAdded` | Sorted to top | Sorted to top | Sorted to top |
+| `recently added` tag | Sorted to top | Sorted to top | Sorted to top |
 
 Product-level `notExplorable` always takes precedence over per-vault overrides. Vaults hidden from discovery are still accessible via direct URL and remain visible in the user's portfolio.
 
@@ -358,7 +359,7 @@ Entities are matched to vaults through two mechanisms:
 1. **Labels**: `product.entity` names the owning entity key(s), which are looked up in `entities.json`
 2. **Governor admin**: `vault.governorAdmin` is compared against entity `addresses` keys to identify the governing entity
 
-The governor admin must match an address in one of the product's declared entities for the vault to be considered "governor verified". If `isGovernanceLimited` is set, the vault shows "Limited risk management" text and the entity display is faded to 20% opacity across all UI surfaces (list items, overview pages, explore cards).
+The governor admin must match an address in one of the product's declared entities for the vault to be considered "governor verified". If the product has the `governance limited` tag, the vault shows "Limited risk management" text and the entity display is faded to 20% opacity across all UI surfaces (list items, overview pages, explore cards).
 
 ## Sentinel Address Labels
 

@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { __setEulerLabelsDataForTest } from '~/composables/useEulerLabels'
-import { getActiveProductVaultAddresses, getUniqueEntitiesByVaults, isVaultRecentlyAdded, normalizeProducts } from '~/utils/eulerLabelsUtils'
+import { getActiveProductVaultAddresses, getUniqueEntitiesByVaults, isVaultGovernanceLimited, isVaultRecentlyAdded, normalizeProducts } from '~/utils/eulerLabelsUtils'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 
 describe('normalizeProducts', () => {
-  it('normalizes recently added vault addresses for membership checks', () => {
+  it('normalizes active and deprecated vault addresses', () => {
     const lowerAddress = '0x8d3f9f9eb2f5e8b48efbb4074440d1e2a34bc365'
+    const deprecatedAddress = '0x0000000000000000000000000000000000000102'
 
     const { products } = normalizeProducts({
       test: {
@@ -14,11 +15,12 @@ describe('normalizeProducts', () => {
         entity: [],
         url: '',
         vaults: [lowerAddress],
-        recentlyAddedVaults: [lowerAddress],
+        deprecatedVaults: [deprecatedAddress],
       },
     })
 
-    expect(products.test.recentlyAddedVaults).toEqual([normalizeAddress(lowerAddress)])
+    expect(products.test.vaults).toEqual([normalizeAddress(lowerAddress)])
+    expect(products.test.deprecatedVaults).toEqual([normalizeAddress(deprecatedAddress)])
   })
 })
 
@@ -102,7 +104,7 @@ describe('getUniqueEntitiesByVaults', () => {
 })
 
 describe('isVaultRecentlyAdded', () => {
-  it('checks product recently-added vaults', () => {
+  it('checks product recently-added tags', () => {
     const address = '0x0000000000000000000000000000000000000201'
 
     __setEulerLabelsDataForTest({
@@ -113,7 +115,7 @@ describe('isVaultRecentlyAdded', () => {
           entity: [],
           url: '',
           vaults: [normalizeAddress(address)],
-          recentlyAddedVaults: [normalizeAddress(address)],
+          tags: ['recently added'],
         },
       },
     })
@@ -121,14 +123,63 @@ describe('isVaultRecentlyAdded', () => {
     expect(isVaultRecentlyAdded(address)).toBe(true)
   })
 
-  it('checks SDK Earn recently-added vaults', () => {
+  it('checks vault override recently-added tags', () => {
+    const address = '0x0000000000000000000000000000000000000202'
+
+    __setEulerLabelsDataForTest({
+      products: {
+        test: {
+          name: 'Test',
+          description: '',
+          entity: [],
+          url: '',
+          vaults: [normalizeAddress(address)],
+          vaultOverrides: {
+            [normalizeAddress(address)]: {
+              tags: ['recently added'],
+            },
+          },
+        },
+      },
+    })
+
+    expect(isVaultRecentlyAdded(address)).toBe(true)
+  })
+
+  it('checks Earn recently-added tags', () => {
     const lowerAddress = '0x8d3f9f9eb2f5e8b48efbb4074440d1e2a34bc365'
     const checksummedAddress = normalizeAddress(lowerAddress)
 
     __setEulerLabelsDataForTest({
-      recentlyAddedEarnVaults: new Set([lowerAddress]),
+      earnVaultEntries: {
+        [lowerAddress]: {
+          address: checksummedAddress,
+          tags: ['recently added'],
+        },
+      },
     })
 
     expect(isVaultRecentlyAdded(checksummedAddress)).toBe(true)
+  })
+})
+
+describe('isVaultGovernanceLimited', () => {
+  it('checks governance-limited product tags', () => {
+    const address = '0x0000000000000000000000000000000000000301'
+
+    __setEulerLabelsDataForTest({
+      products: {
+        test: {
+          name: 'Test',
+          description: '',
+          entity: [],
+          url: '',
+          vaults: [normalizeAddress(address)],
+          tags: ['governance limited'],
+        },
+      },
+    })
+
+    expect(isVaultGovernanceLimited(address)).toBe(true)
   })
 })
