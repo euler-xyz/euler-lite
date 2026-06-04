@@ -213,6 +213,10 @@ export const useWagmi = () => {
   }
 
   const syncRouteNetwork = async (targetChainId: number) => {
+    // The Zip Code demo (/zipcode/*) is chain-agnostic — never append ?network=.
+    if (route.path.startsWith('/zipcode')) {
+      return
+    }
     if (routeNetworkId.value === targetChainId || isRouterReplacing) {
       return
     }

@@ -1,20 +1,8 @@
 <script setup lang="ts">
-import { getDefaultPageRoute } from '~/entities/menu'
-
-const { enableEarnPage, enableLendPage, enableExplorePage } = useDeployConfig()
-const defaultPageRoute = getDefaultPageRoute(enableEarnPage, enableLendPage, enableExplorePage)
-
-const route = useRoute()
-const isOnboardingCompleted = useLocalStorage('is-onboarding-completed', false)
-// Non-blocking to avoid Suspense + pageTransition crash on direct navigation
-navigateTo(
-  {
-    name: isOnboardingCompleted.value ? defaultPageRoute : 'onboarding',
-    query: route.query,
-    hash: route.hash,
-  },
-  { replace: true },
-)
+// On the zipcode-demo branch the root lands on the Zip Code Finance demo.
+// The Euler app remains reachable at its own routes (/earn, /portfolio, …).
+// Non-blocking to avoid Suspense + pageTransition crash on direct navigation.
+navigateTo('/zipcode', { replace: true })
 </script>
 
 <template>

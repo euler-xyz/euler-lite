@@ -1,0 +1,224 @@
+// Zip Code Finance — scoped visual layer for the lender demo (spec §17).
+//
+// Everything lives under `.zipcode-theme`. We re-point the Euler design-token
+// CSS variables (which UiButton/UiInput/UiAlert/etc. consume) to the Zip Code
+// pale-green palette, so reused Euler components adopt the brand without any
+// fork. Custom properties inherit from the nearest ancestor that sets them, so
+// this subtree is immune to the global light/dark `data-theme` on <html>.
+//
+// The class is applied to layouts/zipcode.vue AND to each flow modal root
+// (modals render outside the layout, at the app root).
+
+.zipcode-theme {
+  // Brand palette (spec §17.2)
+  --zip-bg: #f6f8f4;
+  --zip-surface: #ffffff;
+  --zip-surface-muted: #eef5ef;
+  --zip-brand-soft: #c8f0d7;
+  --zip-brand: #76d99b;
+  --zip-brand-strong: #2fbf6a;
+  --zip-text: #102018;
+  --zip-text-muted: #68756d;
+  --zip-border: #dde7df;
+  --zip-warning: #c98225;
+  --zip-danger: #c94d4d;
+  --zip-info: #477c67;
+
+  // --- Re-point Euler tokens so reused components match the brand ----------
+  --accent-100: #eaf8ef;
+  --accent-300: #1f7a45;
+  --accent-400: #27a85c;
+  --accent-500: #2fbf6a;
+  --accent-600: #2fbf6a;
+  --accent-700: #27a85c;
+  --accent-rgb: 47, 191, 106;
+  --focus-ring: #2fbf6a;
+  --text-accent: #2fbf6a;
+
+  --bg-body: var(--zip-bg);
+  --bg-card: var(--zip-surface);
+  --bg-card-hover: var(--zip-surface-muted);
+  --bg-surface-secondary: var(--zip-surface-muted);
+
+  --c-text: var(--zip-text);
+  --text-primary: var(--zip-text);
+  --text-secondary: var(--zip-text-muted);
+  --text-tertiary: var(--zip-text-muted);
+  --text-muted: #97a39b;
+
+  --border-default: var(--zip-border);
+  --border-emphasis: #c9d6cc;
+  --border-subtle: rgba(16, 32, 24, 0.06);
+
+  // The app boots in dark theme, which hard-codes many --neutral-* and
+  // --ui-* component vars. Re-pin the light neutral ramp so reused Euler
+  // components (buttons, inputs, loaders) render light inside this subtree.
+  --neutral-50: #f4f7f3;
+  --neutral-100: #eef3ee;
+  --neutral-200: #e2eae3;
+  --neutral-300: #d4ddd6;
+  --neutral-400: #9aa79e;
+  --neutral-500: #68756d;
+  --neutral-600: #4c5953;
+  --neutral-700: #34403a;
+  --neutral-800: #1d2a23;
+  --neutral-900: #102018;
+
+  // Primary button — brand green, white text (dark theme hard-codes these).
+  --ui-button-primary-background-color: var(--zip-brand-strong);
+  --ui-button-primary-color: #ffffff;
+  --ui-button-primary-active-background-color: #27a85c;
+  --ui-button-primary-active-outline-color: #27a85c;
+  --ui-button-primary-focus-background-color: #27a85c;
+  --ui-button-primary-focus-active-background-color: #27a85c;
+  --ui-button-primary-disabled-background-color: var(--zip-surface-muted);
+  --ui-button-primary-disabled-color: #9aa79e;
+
+  // Stroke / secondary buttons → off-white surfaces with soft borders.
+  --ui-button-primary-stroke-background-color: var(--zip-surface);
+  --ui-button-primary-stroke-color: var(--zip-text);
+  --ui-button-primary-stroke-border-color: var(--zip-border);
+  --ui-button-primary-stroke-hover-background-color: var(--zip-surface-muted);
+  --ui-button-primary-stroke-active-background-color: var(--zip-surface-muted);
+  --ui-button-secondary-background-color: var(--zip-surface-muted);
+  --ui-button-secondary-color: var(--zip-text);
+  --ui-button-secondary-border-color: var(--zip-border);
+  --ui-button-secondary-hover-background-color: #e3ecE4;
+  --ui-button-secondary-ghost-color: var(--zip-text);
+  --ui-button-secondary-ghost-hover-background-color: var(--zip-surface-muted);
+
+  // Inputs → off-white field, soft border, brand focus.
+  --ui-input-background-color: var(--zip-surface);
+  --ui-input-color: var(--zip-text);
+  --ui-input-border-color: var(--zip-border);
+  --ui-input-placeholder-color: #9aa79e;
+  --ui-input-focus-border-color: var(--zip-brand-strong);
+  --ui-input-focus-outline-color: var(--zip-brand-strong);
+
+  // Base surface + subtle grid texture (spec §17.1)
+  color: var(--zip-text);
+  background-color: var(--zip-bg);
+  background-image:
+    linear-gradient(rgba(16, 32, 24, 0.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(16, 32, 24, 0.022) 1px, transparent 1px);
+  background-size: 32px 32px;
+  font-family: Inter, sans-serif;
+
+  ::selection {
+    background: var(--zip-brand-soft);
+  }
+}
+
+// --- Typography -------------------------------------------------------------
+// Serif display headings (Besley, already self-hosted). Numerals stay sans
+// (Inter) per the design notes — only use .zip-display on prose headings.
+.zip-display {
+  font-family: Besley, serif;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.08;
+  color: var(--zip-text);
+}
+
+.zip-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--zip-brand-strong);
+}
+
+.zip-muted {
+  color: var(--zip-text-muted);
+}
+
+// --- Surfaces ---------------------------------------------------------------
+.zip-card {
+  background-color: var(--zip-surface);
+  border: 1px solid var(--zip-border);
+  border-radius: 18px;
+  box-shadow:
+    0 1px 2px rgba(16, 32, 24, 0.04),
+    0 12px 28px rgba(16, 32, 24, 0.05);
+}
+
+.zip-card-muted {
+  background-color: var(--zip-surface-muted);
+  border: 1px solid var(--zip-border);
+  border-radius: 18px;
+}
+
+.zip-card-flat {
+  background-color: var(--zip-surface);
+  border: 1px solid var(--zip-border);
+  border-radius: 14px;
+}
+
+.zip-divider {
+  height: 1px;
+  background-color: var(--zip-border);
+}
+
+// --- Status pills -----------------------------------------------------------
+.zip-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  border: 1px solid transparent;
+}
+.zip-badge--neutral { background: var(--zip-surface-muted); color: var(--zip-text-muted); border-color: var(--zip-border); }
+.zip-badge--info { background: #e7f1ec; color: var(--zip-info); }
+.zip-badge--success { background: var(--zip-brand-soft); color: #1f7a45; }
+.zip-badge--warning { background: #f7ecd9; color: var(--zip-warning); }
+.zip-badge--danger { background: #f7e1e1; color: var(--zip-danger); }
+.zip-badge__dot { width: 6px; height: 6px; border-radius: 9999px; background: currentColor; }
+
+// --- Flow modal (rendered at app root, outside the layout) ------------------
+.zip-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.zip-modal-panel {
+  width: 100%;
+  max-width: 460px;
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  background-color: var(--zip-surface);
+  border: 1px solid var(--zip-border);
+  border-radius: 22px;
+  box-shadow: 0 24px 60px rgba(16, 32, 24, 0.22);
+}
+@media (max-width: 560px) {
+  .zip-modal-backdrop { padding: 0; align-items: flex-end; }
+  .zip-modal-panel { max-width: 100%; border-radius: 22px 22px 0 0; }
+}
+
+// --- Thin progress bar (spec §17.1) ----------------------------------------
+.zip-bar {
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--zip-surface-muted);
+  overflow: hidden;
+}
+.zip-bar__fill {
+  height: 100%;
+  border-radius: 9999px;
+  background: var(--zip-brand-strong);
+}
+
+// Reduced motion (spec §18)
+@media (prefers-reduced-motion: reduce) {
+  .zipcode-theme * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

@@ -16,6 +16,8 @@ export default defineNuxtConfig({
   imports: {
     dirs: [
       'composables/*/index.{ts,js,mjs,mts}',
+      // Zip Code demo composables live in a nested dir (composables/zipcode/*).
+      'composables/zipcode',
     ],
   },
   devtools: {
@@ -109,7 +111,7 @@ export default defineNuxtConfig({
     },
   },
 
-  css: ['~/assets/styles/main.scss'],
+  css: ['~/assets/styles/main.scss', '~/assets/styles/zipcode.scss'],
 
   runtimeConfig: {
     public: {

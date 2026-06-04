@@ -63,7 +63,15 @@ const isMenuVisible = ref(true)
 const isHeaderVisible = ref(true)
 let interval: NodeJS.Timeout | null = null
 
+// The Zip Code Finance demo lives under /zipcode/* and renders full-bleed with
+// its own chrome (layouts/zipcode.vue). When active we skip the Euler header,
+// bottom menu, the constraining page wrapper, and the onboarding redirect.
+const isZipcode = computed(() => route.path.startsWith('/zipcode'))
+
 const checkOnboarding = () => {
+  // Root redirects to the Zip Code demo on this branch; never gate it via the
+  // Euler onboarding flow.
+  if (isZipcode.value || route.path === '/') return
   const isOnboardingCompleted = useLocalStorage('is-onboarding-completed', false)
   if (!isOnboardingCompleted.value) {
     const isDeepLink = route.path !== '/' && route.path !== '/onboarding'
@@ -174,29 +182,40 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div
-    class="sticky top-0 z-[101]"
-  >
-    <SpyModeBanner />
-    <TheHeader v-if="isHeaderVisible" />
-  </div>
-  <main>
-    <section
-      class="flex justify-center pt-32 mobile:pt-16"
-      :class="isMenuVisible ? 'pb-[98px]' : 'pb-16'"
+  <!-- Zip Code demo: full-bleed, its own chrome via layouts/zipcode.vue -->
+  <NuxtLayout v-if="isZipcode">
+    <NuxtPage />
+  </NuxtLayout>
+
+  <!-- Euler app -->
+  <template v-else>
+    <div
+      class="sticky top-0 z-[101]"
     >
-      <div class="w-full max-w-container mx-16 mobile:px-16 mobile:mx-0">
-        <NuxtLayout>
-          <NuxtPage
-            :keepalive="{ include: ['ExplorePage', 'EarnPage', 'LendPage', 'BorrowPage', 'PortfolioPage'] }"
-          />
-        </NuxtLayout>
-      </div>
-    </section>
-  </main>
+      <SpyModeBanner />
+      <TheHeader v-if="isHeaderVisible" />
+    </div>
+    <main>
+      <section
+        class="flex justify-center pt-32 mobile:pt-16"
+        :class="isMenuVisible ? 'pb-[98px]' : 'pb-16'"
+      >
+        <div class="w-full max-w-container mx-16 mobile:px-16 mobile:mx-0">
+          <NuxtLayout>
+            <NuxtPage
+              :keepalive="{ include: ['ExplorePage', 'EarnPage', 'LendPage', 'BorrowPage', 'PortfolioPage'] }"
+            />
+          </NuxtLayout>
+        </div>
+      </section>
+    </main>
+    <Transition name="page">
+      <TheMenu v-show="isMenuVisible" />
+    </Transition>
+  </template>
+
+  <!-- Shared across both apps — must stay outside the branch so modals/toasts
+       render on /zipcode/* routes too. -->
   <UiModals />
   <UiToastContainer />
-  <Transition name="page">
-    <TheMenu v-show="isMenuVisible" />
-  </Transition>
 </template>

@@ -74,6 +74,11 @@ export default defineNuxtRouteMiddleware(async (to, from) => {
     return
   }
 
+  // Zip Code demo routes have no vault param; skip the vault-existence check.
+  if (to.path.startsWith('/zipcode')) {
+    return
+  }
+
   if (from && to.path === from.path) {
     const toVaultParam = normalizeParam(to.params?.vault)
     const fromVaultParam = normalizeParam(from.params?.vault)

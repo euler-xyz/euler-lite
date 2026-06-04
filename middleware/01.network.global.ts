@@ -11,6 +11,11 @@ export default defineNuxtRouteMiddleware((to) => {
     return
   }
 
+  // The Zip Code demo (/zipcode/*) is chain-agnostic; don't append ?network=.
+  if (to.path.startsWith('/zipcode')) {
+    return
+  }
+
   const { chainId, changeCurrentChainId } = useEulerAddresses()
 
   const rawChainParam = to.query.network ?? to.query.chainId
