@@ -312,7 +312,7 @@ const rampDownModalData = computed(() => ({
         >
           <VaultOverviewPairSection
             title="Borrow"
-            icon="arrow-down"
+            icon="arrow-big"
           >
             <div class="flex flex-col gap-12">
               <VaultOverviewLabelValue orientation="horizontal">
