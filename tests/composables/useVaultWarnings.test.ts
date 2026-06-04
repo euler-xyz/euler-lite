@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { getCollateralSupplyCapWarning, getUtilisationWarning } from '~/composables/useVaultWarnings'
+import { __setEulerLabelsDataForTest } from '~/composables/useEulerLabels'
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
+import { normalizeAddress } from '~/utils/normalizeAddress'
 
 const makeVault = (supplyCapUtilization: number): EVault =>
   ({
@@ -14,14 +16,20 @@ const makeUtilisedVault = (
   totalAssets: bigint,
   borrow: bigint,
   interestRateModelType: number = INTEREST_RATE_MODEL_TYPE.KINK,
+  address = '0x0000000000000000000000000000000000000001',
 ): EVault =>
   ({
+    address: normalizeAddress(address),
     totalAssets,
     borrow,
     interestRateModel: { type: interestRateModelType },
   }) as unknown as EVault
 
 describe('getUtilisationWarning', () => {
+  beforeEach(() => {
+    __setEulerLabelsDataForTest()
+  })
+
   it('returns the standard high utilisation warning for non-cyclical borrow markets', () => {
     const warning = getUtilisationWarning(makeUtilisedVault(100n, 95n), 'borrow')
 
@@ -69,6 +77,62 @@ describe('getUtilisationWarning', () => {
     )
 
     expect(warning).toBeNull()
+  })
+
+  it('suppresses high utilisation warnings for tagged vaults', () => {
+    const address = normalizeAddress('0x0000000000000000000000000000000000000501')
+
+    __setEulerLabelsDataForTest({
+      products: {
+        test: {
+          name: 'Test',
+          description: '',
+          entity: [],
+          url: '',
+          vaults: [address],
+          vaultOverrides: {
+            [address]: {
+              tags: ['suppress high utilisation warning'],
+            },
+          },
+        },
+      },
+    })
+
+    const warning = getUtilisationWarning(
+      makeUtilisedVault(100n, 95n, INTEREST_RATE_MODEL_TYPE.KINK, address),
+      'borrow',
+    )
+
+    expect(warning).toBeNull()
+  })
+
+  it('keeps critical utilisation warnings for tagged vaults', () => {
+    const address = normalizeAddress('0x0000000000000000000000000000000000000502')
+
+    __setEulerLabelsDataForTest({
+      products: {
+        test: {
+          name: 'Test',
+          description: '',
+          entity: [],
+          url: '',
+          vaults: [address],
+          tags: ['suppress high utilisation warning'],
+        },
+      },
+    })
+
+    const warning = getUtilisationWarning(
+      makeUtilisedVault(100n, 99n, INTEREST_RATE_MODEL_TYPE.KINK, address),
+      'borrow',
+    )
+
+    expect(warning).toEqual({
+      level: 'critical',
+      title: 'Critical utilisation',
+      message: 'Utilisation is critically high. Interest rates are very elevated. Available liquidity is near zero.',
+    })
   })
 })
 

@@ -191,6 +191,15 @@ export const isVaultGovernanceLimited = (vaultAddress: string): boolean => {
   return productHasTag(product, 'governance limited')
 }
 
+export const isVaultHighUtilisationWarningSuppressed = (vaultAddress: string): boolean => {
+  const normalized = normalizeAddress(vaultAddress)
+  const product = getEulerLabelProductByVault(labels(), normalized) as EulerLabelProduct | undefined
+  return (
+    productHasTag(product, 'suppress high utilisation warning')
+    || vaultOverrideHasTag(product, normalized, 'suppress high utilisation warning')
+  )
+}
+
 export type EulerLabelEntityVaultLike = {
   address?: string
   governorAdmin?: string
