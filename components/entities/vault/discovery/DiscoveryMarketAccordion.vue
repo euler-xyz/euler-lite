@@ -108,13 +108,14 @@ const formatUsdOrDisplay = (p: { hasPrice: boolean, usdValue: number, display: s
   p.hasPrice ? formatCompactUsdValue(p.usdValue) : p.display
 
 const loadVaultUsdValues = async (market: MarketGroup, { force = false }: { force?: boolean } = {}) => {
-  const newEntries = new Map(vaultUsdCache.value)
+  const existingEntries = vaultUsdCache.value
+  const marketEntries = new Map<string, VaultUsdCacheEntry>()
   const allVaults = [...market.vaults, ...market.externalCollateral].filter(isMatrixCompatibleVault)
 
   await Promise.all(
     allVaults.map(async (vault) => {
       const addr = getVaultAddress(vault).toLowerCase()
-      if (!addr || (!force && newEntries.has(addr))) return
+      if (!addr || (!force && existingEntries.has(addr))) return
       const totalAssets = 'totalAssets' in vault ? vault.totalAssets as bigint : 0n
       const borrow = 'totalBorrowed' in vault ? vault.totalBorrowed as bigint : 0n
       const supplyCapRaw = 'caps' in vault ? vault.caps.supplyCap : ('supplyCap' in vault ? vault.supplyCap as bigint : maxUint256)
@@ -132,7 +133,7 @@ const loadVaultUsdValues = async (market: MarketGroup, { force = false }: { forc
         borrowCapHasPrice ? formatAssetValue(borrowCapRaw, vault, 'off-chain') : null,
       ])
 
-      newEntries.set(addr, {
+      marketEntries.set(addr, {
         supply: formatUsdOrDisplay(supplyPrice),
         supplyUsd: supplyPrice.hasPrice ? supplyPrice.usdValue : 0,
         borrow: formatUsdOrDisplay(borrowPrice),
@@ -147,7 +148,7 @@ const loadVaultUsdValues = async (market: MarketGroup, { force = false }: { forc
     }),
   )
 
-  vaultUsdCache.value = newEntries
+  vaultUsdCache.value = new Map([...vaultUsdCache.value, ...marketEntries])
 }
 
 const loadExpandedVaultUsdValues = async () => {
