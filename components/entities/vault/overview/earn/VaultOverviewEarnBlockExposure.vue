@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { isEVault, type EVault, type EulerEarnStrategyInfo, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
-import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { formatNumber, compactNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
@@ -10,6 +9,7 @@ import { getStrategyHookWarning } from '~/composables/useVaultWarnings'
 import { DateTime } from 'luxon'
 import { getAddress } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
+import { getAssetUsdValue } from '~/utils/sdk-prices'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
@@ -21,7 +21,7 @@ const onExposureClick = (address: string) => {
 const { vault } = defineProps<{ vault: EulerEarn }>()
 
 const { getOrFetch } = useVaultRegistry()
-const { isEscrowLoadedOnce } = useVaults()
+const { isEscrowLoadedOnce, isMarketDataResolved } = useVaults()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
@@ -30,6 +30,7 @@ const exposureVaults: Ref<EVault[]> = ref([])
 const isLoading = ref(false)
 const exposureUsdPrices = ref<Map<string, number>>(new Map())
 const exposureCapUsdPrices = ref<Map<string, number>>(new Map())
+let priceLoadId = 0
 
 const UINT136_MAX = 2n ** 136n - 1n
 
@@ -76,24 +77,34 @@ const load = async () => {
 }
 
 const loadExposureUsdPrices = async () => {
-  const pricePromises = exposureList.value.map(async (exposure) => {
+  const loadId = ++priceLoadId
+  const results = await Promise.all(exposureList.value.map(async (exposure) => {
     const exposureVault = getExposureVaultByAddress(exposure.address)
-    if (!exposureVault) return { key: exposure.address, allocationUsd: 0, capUsd: 0 }
-    const [allocationUsd, capUsd] = await Promise.all([
-      getAssetUsdValueOrZero(exposure.allocatedAssets, exposureVault, 'off-chain'),
-      isUnlimitedCap(exposure)
-        ? Promise.resolve(0)
-        : getAssetUsdValueOrZero(exposure.allocationCap.current, exposureVault, 'off-chain'),
-    ])
-    return { key: exposure.address, allocationUsd, capUsd }
-  })
+    if (!exposureVault) return null
 
-  const results = await Promise.all(pricePromises)
+    const [allocationUsd, capUsd] = await Promise.all([
+      getAssetUsdValue(exposure.allocatedAssets, exposureVault, 'off-chain'),
+      isUnlimitedCap(exposure)
+        ? Promise.resolve(undefined)
+        : getAssetUsdValue(exposure.allocationCap.current, exposureVault, 'off-chain'),
+    ])
+
+    return { exposure, allocationUsd, capUsd }
+  }))
+  if (loadId !== priceLoadId) return
+
   const newPrices = new Map<string, number>()
   const newCapPrices = new Map<string, number>()
-  results.forEach(({ key, allocationUsd, capUsd }) => {
-    newPrices.set(key, allocationUsd)
-    newCapPrices.set(key, capUsd)
+  results.forEach((result) => {
+    if (!result) return
+
+    const { exposure, allocationUsd, capUsd } = result
+    if (allocationUsd !== undefined) {
+      newPrices.set(exposure.address, allocationUsd)
+    }
+    if (!isUnlimitedCap(exposure) && capUsd !== undefined) {
+      newCapPrices.set(exposure.address, capUsd)
+    }
   })
   exposureUsdPrices.value = newPrices
   exposureCapUsdPrices.value = newCapPrices
@@ -115,6 +126,11 @@ const exposureRows = computed(() => {
       hookWarning: strategyVault ? getStrategyHookWarning(strategyVault) : null,
     }
   })
+})
+
+watch(isMarketDataResolved, () => {
+  if (!exposureVaults.value.length) return
+  void loadExposureUsdPrices()
 })
 
 const getAllocationPercentage = (exposure: EulerEarnStrategyInfo) => {
