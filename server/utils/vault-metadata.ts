@@ -1,6 +1,7 @@
 import type { Address } from 'viem'
 import { createTtlCache } from './cache'
 import { tryChecksum } from './labels-helpers'
+import { resolveLabelsBaseUrl } from './labels-base-url'
 import {
   buildLabelsView,
   type EntityEntryFull,
@@ -74,14 +75,6 @@ function strOrNull(value: unknown): string | null {
 
 function strOrEmpty(value: unknown): string {
   return typeof value === 'string' ? value : ''
-}
-
-function resolveLabelsBaseUrl(): string {
-  const explicit = (process.env.NUXT_PUBLIC_CONFIG_LABELS_BASE_URL || '').trim().replace(/\/+$/, '')
-  if (explicit) return explicit
-  const repo = process.env.NUXT_PUBLIC_CONFIG_LABELS_REPO || 'euler-xyz/euler-labels'
-  const branch = process.env.NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH || 'master'
-  return `https://raw.githubusercontent.com/${repo}/refs/heads/${branch}`
 }
 
 function entityLogoUrl(fileName: string): string {

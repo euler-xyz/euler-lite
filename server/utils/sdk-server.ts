@@ -30,6 +30,7 @@ import {
   type VaultDataSource,
 } from '~/utils/api-url-env'
 import { resolveRpcUrl } from './rpc'
+import { resolveLabelsBaseUrl } from './labels-base-url'
 
 const sdkByChain = new Map<number, Promise<EulerSDK>>()
 
@@ -60,14 +61,6 @@ const adapterConfigForSource = (source: VaultDataSource): Partial<EulerSDKConfig
     case 'v3': return v3AdapterConfig
     default: return fallbackAdapterConfig
   }
-}
-
-function resolveLabelsBaseUrl(): string {
-  const explicit = (process.env.NUXT_PUBLIC_CONFIG_LABELS_BASE_URL || '').trim().replace(/\/+$/, '')
-  if (explicit) return explicit
-  const repo = process.env.NUXT_PUBLIC_CONFIG_LABELS_REPO || 'euler-xyz/euler-labels'
-  const branch = process.env.NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH || 'master'
-  return `https://raw.githubusercontent.com/${repo}/refs/heads/${branch}`
 }
 
 const buildServerSdkConfig = (chainId: number): EulerSDKConfig => {
