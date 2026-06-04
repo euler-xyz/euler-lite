@@ -161,7 +161,7 @@ onClickOutside(reference, () => {
     line-height: 20px;
     word-wrap: break-word;
     overflow-wrap: break-word;
-    hyphens: auto;
+    hyphens: none;
   }
 
   &__floating-divider {
