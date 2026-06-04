@@ -13,19 +13,25 @@ const { label, value, orientation = 'vertical', dataList, dataKey, dataField, da
 <template>
   <div
     class="flex gap-8"
-    :class="[orientation === 'horizontal' ? 'flex-row justify-between w-full' : 'flex flex-col']"
+    :class="[orientation === 'horizontal' ? 'flex-row justify-between items-center w-full min-w-0 gap-12' : 'flex flex-col']"
     data-id="data-point"
     :data-list="dataList"
     :data-key="dataKey"
     :data-field="dataField || label"
     :data-value="dataValue"
   >
-    <div class="text-p3 text-content-tertiary">
+    <div
+      class="text-p3 text-content-tertiary min-w-0"
+      :class="{ shrink: orientation === 'horizontal' }"
+    >
       <slot name="label">
         {{ label }}
       </slot>
     </div>
-    <div class="text-p2 text-content-primary">
+    <div
+      class="text-p2 text-content-primary"
+      :class="{ 'text-right shrink-0': orientation === 'horizontal' }"
+    >
       <slot>
         {{ value || '-' }}
       </slot>
