@@ -19,9 +19,11 @@ type BuildEulerSDKOptions = {
     rewardsBrevisApiUrl?: string
     rewardsBrevisProofsApiUrl?: string
     rewardsFuulApiUrl?: string
+    rewardsTurtleApiUrl?: string
     rewardsEnableMerkl?: boolean
     rewardsEnableBrevis?: boolean
     rewardsEnableFuul?: boolean
+    rewardsEnableTurtle?: boolean
   }
   rpcUrls?: Record<number, string>
   deploymentServiceConfig?: unknown
@@ -84,6 +86,7 @@ const importUseEulerSdk = async (
     enableMerkl: true,
     enableIncentra: true,
     enableFuul: true,
+    enableTurtle: true,
   }))
 
   return await import('~/composables/useEulerSdk')
@@ -186,6 +189,7 @@ describe('useEulerSdk', () => {
       rewardsBrevisApiUrl: '/api/proxy/incentra/sdk/v1/eulerCampaigns',
       rewardsBrevisProofsApiUrl: '/api/proxy/incentra/v1/getMerkleProofsBatch',
       rewardsFuulApiUrl: '/api/proxy/fuul',
+      rewardsTurtleApiUrl: '/api/proxy/turtle',
       accountVaultsSubgraphUrls: {
         1: '/api/proxy/subgraph/1',
       },
@@ -217,6 +221,7 @@ describe('useEulerSdk', () => {
       enableMerkl: false,
       enableIncentra: true,
       enableFuul: false,
+      enableTurtle: false,
     }))
 
     await expect(getEulerSdk()).resolves.toBe(sdk)
@@ -225,6 +230,7 @@ describe('useEulerSdk', () => {
     expect(options.config).toMatchObject({
       rewardsEnableMerkl: false,
       rewardsEnableFuul: false,
+      rewardsEnableTurtle: false,
     })
     expect(options.config.rewardsEnableBrevis).toBeUndefined()
   })

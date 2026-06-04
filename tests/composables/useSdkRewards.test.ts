@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
+import type { UserReward } from '@eulerxyz/euler-v2-sdk'
 
-const owner = '0x1000000000000000000000000000000000000000'
+const owner = '0x1000000000000000000000000000000000000000' as const
 
 const importUseSdkRewards = async () => {
   vi.resetModules()
 
-  const reward = {
+  const reward: UserReward = {
     chainId: 1,
     provider: 'merkl',
     token: {
@@ -22,6 +23,13 @@ const importUseSdkRewards = async () => {
     proof: [],
     claimAddress: '0x3000000000000000000000000000000000000000',
   }
+  const turtleReward: UserReward = {
+    ...reward,
+    provider: 'turtle',
+    campaignId: 'stream-1',
+    streamAddress: '0x4000000000000000000000000000000000000000',
+    timestamp: '2026-05-20T13:05:10Z',
+  }
   const refreshAllPositions = vi.fn(async () => {})
   const invalidateSdkQueries = vi.fn(async () => {})
   const buildClaimPlan = vi.fn(async () => [{ type: 'contractCall' }])
@@ -30,7 +38,7 @@ const importUseSdkRewards = async () => {
     invalidateSdkQueries,
   }))
   vi.stubGlobal('useEulerAccount', () => ({
-    portfolio: ref({ account: { userRewards: [reward] } }),
+    portfolio: ref({ account: { userRewards: [reward, turtleReward] } }),
     isPositionsLoading: ref(false),
     refreshAllPositions,
   }))
@@ -50,6 +58,7 @@ const importUseSdkRewards = async () => {
     invalidateSdkQueries,
     refreshAllPositions,
     reward,
+    turtleReward,
   }
 }
 
@@ -61,12 +70,36 @@ describe('useSdkRewards', () => {
   })
 
   it('reads rewards from the SDK portfolio account', async () => {
-    const { useSdkRewards, reward } = await importUseSdkRewards()
+    const { useSdkRewards, reward, turtleReward } = await importUseSdkRewards()
 
     const { rewards, isRewardsLoading } = useSdkRewards()
 
-    expect(rewards.value).toEqual([reward])
+    expect(rewards.value).toEqual([reward, turtleReward])
     expect(isRewardsLoading.value).toBe(false)
+  })
+
+  it('uses SDK reward planning for SDK-owned providers', async () => {
+    const { useSdkRewards, reward, buildClaimPlan } = await importUseSdkRewards()
+
+    const { buildClaimRewardPlan } = useSdkRewards()
+    await buildClaimRewardPlan(reward)
+
+    expect(buildClaimPlan).toHaveBeenCalledWith({
+      reward,
+      account: owner,
+    })
+  })
+
+  it('uses SDK reward planning for Turtle stream rewards', async () => {
+    const { useSdkRewards, turtleReward, buildClaimPlan } = await importUseSdkRewards()
+
+    const { buildClaimRewardPlan } = useSdkRewards()
+    await buildClaimRewardPlan(turtleReward)
+
+    expect(buildClaimPlan).toHaveBeenCalledWith({
+      reward: turtleReward,
+      account: owner,
+    })
   })
 
   it('force-refreshes user reward queries before rebuilding the portfolio', async () => {
@@ -80,6 +113,7 @@ describe('useSdkRewards', () => {
       'queryBrevisCampaigns',
       'queryBrevisUserProofs',
       'queryFuulClaimableRewards',
+      'queryTurtleMerkleProofs',
     ])
     expect(refreshAllPositions).toHaveBeenCalledWith(undefined, undefined, { source: 'fresh', preempt: true })
     expect(invalidateSdkQueries.mock.invocationCallOrder[0]).toBeLessThan(
@@ -106,6 +140,7 @@ describe('useSdkRewards', () => {
       'queryBrevisCampaigns',
       'queryBrevisUserProofs',
       'queryFuulClaimableRewards',
+      'queryTurtleMerkleProofs',
     ])
     expect(refreshAllPositions).toHaveBeenLastCalledWith(undefined, undefined, { source: 'fresh', preempt: true })
   })

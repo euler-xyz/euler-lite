@@ -45,6 +45,7 @@ export const useDeployConfig = () => {
     enableMerkl: isEnabled(rc.configEnableMerkl),
     enableIncentra: isEnabled(rc.configEnableIncentra),
     enableFuul: isEnabled(rc.configEnableFuul),
+    enableTurtle: isEnabled(rc.configEnableTurtle),
 
     // Migration announcement (opt-in: non-empty URL enables the modal)
     migrationAnnouncementUrl: rc.configMigrationAnnouncementUrl || '',

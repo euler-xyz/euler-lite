@@ -7,6 +7,7 @@ const USER_REWARD_QUERY_NAMES: EulerSDKQueryName[] = [
   'queryBrevisCampaigns',
   'queryBrevisUserProofs',
   'queryFuulClaimableRewards' as EulerSDKQueryName,
+  'queryTurtleMerkleProofs' as EulerSDKQueryName,
 ]
 const REWARD_CLAIM_REFRESH_RETRY_DELAYS_MS = [5_000, 30_000] as const
 
@@ -30,9 +31,11 @@ export const useSdkRewards = () => {
 
     const { getEulerSdk } = useEulerSdk()
     const sdk = await getEulerSdk()
+    const account = getAddress(walletAddress.value) as Address
+
     return sdk.rewardsService.buildClaimPlan({
       reward,
-      account: getAddress(walletAddress.value) as Address,
+      account,
     })
   }
 

@@ -11,12 +11,14 @@ const REWARD_PROVIDER_LABELS: Record<UserReward['provider'], string> = {
   merkl: 'Merkl',
   brevis: 'Incentra',
   fuul: 'Fuul',
+  turtle: 'Turtle',
 }
 
 const REWARD_PROVIDER_TYPES: Record<UserReward['provider'], 'reward' | 'brevis-reward' | 'fuul-reward'> = {
   merkl: 'reward',
   brevis: 'brevis-reward',
   fuul: 'fuul-reward',
+  turtle: 'reward',
 }
 
 const { reward } = defineProps<{ reward: UserReward }>()

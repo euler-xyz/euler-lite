@@ -94,6 +94,7 @@ const buildFuulProxyApiPath = (path = '') =>
   buildAppApiPath(`/api/proxy/fuul${path ? `/${path.replace(/^\/+/, '')}` : ''}`)
 const buildIncentraProxyApiPath = (path: string) =>
   buildAppApiPath(`/api/proxy/incentra/${path.replace(/^\/+/, '')}`)
+const buildTurtleProxyApiPath = () => buildAppApiPath('/api/proxy/turtle')
 // Exported so post-tx subgraph polling (useEulerTx) hits the exact same
 // endpoint the SDK's account/vault-type adapters read through. Polling the
 // upstream Goldsky URL directly would measure a different indexer head than
@@ -151,7 +152,7 @@ const adapterConfigForFastSource = (source: 'fallback' | 'onchain' | 'v3'): Part
 
 const buildSdkStaticConfig = (backend: SdkBackend) => {
   const rc = getPublicRuntimeConfig()
-  const { enableMerkl, enableIncentra, enableFuul } = useDeployConfig()
+  const { enableMerkl, enableIncentra, enableFuul, enableTurtle } = useDeployConfig()
   const oracleChecksBaseUrl = cleanUrl(rc.configOracleChecksBaseUrl)
   const swapApiUrl = cleanUrl(rc.swapApiUrl)
   const v3ApiUrl = buildV3ProxyApiPath()
@@ -193,6 +194,11 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
           rewardsFuulApiUrl: buildFuulProxyApiPath(),
         }
       : { rewardsEnableFuul: false }),
+    ...(enableTurtle
+      ? {
+          rewardsTurtleApiUrl: buildTurtleProxyApiPath(),
+        }
+      : { rewardsEnableTurtle: false }),
     // Goldsky subgraph: route every chain through `/api/proxy/subgraph/{id}`
     // so the browser never sees the upstream URL or hits api.goldsky.com
     // directly.
