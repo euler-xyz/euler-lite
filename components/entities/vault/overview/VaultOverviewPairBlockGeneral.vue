@@ -95,9 +95,17 @@ const formatLiquidityAmount = (amount: number) => {
   return formatNumber(amount, 1, 0)
 }
 
-watchEffect(async () => {
-  const liquidity = getVaultAvailableLiquidity(borrowVault.value)
-  const price = await formatAssetValue(liquidity, borrowVault.value, 'off-chain')
+watchEffect(async (onCleanup) => {
+  let cancelled = false
+  onCleanup(() => {
+    cancelled = true
+  })
+
+  const vault = borrowVault.value
+  const liquidity = getVaultAvailableLiquidity(vault)
+  const price = await formatAssetValue(liquidity, vault, 'off-chain')
+  if (cancelled) return
+
   availableLiquidityDisplay.value = {
     amount: price.hasPrice ? formatLiquidityAmount(price.assetAmount) : price.display,
     symbol: price.hasPrice ? price.assetSymbol : '',
