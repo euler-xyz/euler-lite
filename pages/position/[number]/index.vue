@@ -26,6 +26,7 @@ const { error } = useToast()
 const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = useEulerAccount()
+const { viewer, visibleBreakdown } = useApyVisibility()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, hasSupplyRewards, hasBorrowRewards, getSupplyRewardCampaigns, getBorrowRewardCampaigns } = useRewardsApy()
@@ -397,8 +398,13 @@ const timeToLiquidationDisplay = computed(() => {
   const result = formatTtl(getBorrowPositionTimeToLiquidation(position.value))
   return result?.display || '-'
 })
-// Net APY: sync computed so it tracks collateralValue, borrowMarketValue, and APY values
-const netAPY = computed(() => {
+const apyBreakdown = computed(() => position.value?.getApyBreakdown({ viewer: viewer.value }))
+const netApyBreakdown = computed(() => visibleBreakdown(apyBreakdown.value))
+const sdkRoeBreakdown = computed(() => position.value?.getRoeBreakdown({ viewer: viewer.value }))
+const visibleRoeBreakdown = computed(() => visibleBreakdown(sdkRoeBreakdown.value))
+
+// Local fallback for positions where the SDK breakdown is unavailable.
+const fallbackNetAPY = computed(() => {
   if (!position.value || !borrowVault.value) return 0
   return getNetAPY(
     collateralValue.value.usd,
@@ -409,8 +415,9 @@ const netAPY = computed(() => {
     borrowRewardAPY.value || null,
   )
 })
+const netAPY = computed(() => netApyBreakdown.value?.total ?? fallbackNetAPY.value)
 
-const roe = computed(() => {
+const fallbackRoe = computed(() => {
   if (!position.value || !borrowVault.value) return 0
   return getRoe(
     collateralValue.value.usd,
@@ -421,6 +428,7 @@ const roe = computed(() => {
     borrowRewardAPY.value || null,
   )
 })
+const roe = computed(() => visibleRoeBreakdown.value?.total ?? fallbackRoe.value)
 
 const supplyCampaignsForModal = computed(() => getSupplyRewardCampaigns(collateralVault.value?.address || ''))
 const borrowCampaignsForModal = computed(() => getBorrowRewardCampaigns(borrowVault.value?.address || '', collateralVault.value?.address || ''))
@@ -433,6 +441,7 @@ const positionMultiplier = computed(() => {
 
 const netApyModalData = computed(() => ({
   props: {
+    apyBreakdown: netApyBreakdown.value,
     supplyUSD: collateralValue.value.usd,
     borrowUSD: borrowMarketValue.value.usd,
     baseSupplyAPY: baseSupplyAPY.value,
@@ -449,6 +458,7 @@ const netApyModalData = computed(() => ({
 
 const roeModalData = computed(() => ({
   props: {
+    roeBreakdown: visibleRoeBreakdown.value,
     roe: roe.value,
     multiplier: Number.isFinite(positionMultiplier.value) ? positionMultiplier.value : 0,
     supplyAPY: collateralSupplyApy.value,

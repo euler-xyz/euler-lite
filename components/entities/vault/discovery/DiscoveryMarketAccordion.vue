@@ -31,6 +31,7 @@ const props = defineProps<{
   initialExpanded?: string[]
 }>()
 
+const { isMarketDataResolved } = useVaults()
 const route = useRoute()
 const { chainId } = useEulerAddresses()
 const shareLinkQuery = computed(() => {
@@ -106,14 +107,15 @@ const vaultUsdCache = ref<Map<string, VaultUsdCacheEntry>>(new Map())
 const formatUsdOrDisplay = (p: { hasPrice: boolean, usdValue: number, display: string }) =>
   p.hasPrice ? formatCompactUsdValue(p.usdValue) : p.display
 
-const loadVaultUsdValues = async (market: MarketGroup) => {
-  const newEntries = new Map(vaultUsdCache.value)
+const loadVaultUsdValues = async (market: MarketGroup, { force = false }: { force?: boolean } = {}) => {
+  const existingEntries = vaultUsdCache.value
+  const marketEntries = new Map<string, VaultUsdCacheEntry>()
   const allVaults = [...market.vaults, ...market.externalCollateral].filter(isMatrixCompatibleVault)
 
   await Promise.all(
     allVaults.map(async (vault) => {
       const addr = getVaultAddress(vault).toLowerCase()
-      if (!addr || newEntries.has(addr)) return
+      if (!addr || (!force && existingEntries.has(addr))) return
       const totalAssets = 'totalAssets' in vault ? vault.totalAssets as bigint : 0n
       const borrow = 'totalBorrowed' in vault ? vault.totalBorrowed as bigint : 0n
       const supplyCapRaw = 'caps' in vault ? vault.caps.supplyCap : ('supplyCap' in vault ? vault.supplyCap as bigint : maxUint256)
@@ -131,7 +133,7 @@ const loadVaultUsdValues = async (market: MarketGroup) => {
         borrowCapHasPrice ? formatAssetValue(borrowCapRaw, vault, 'off-chain') : null,
       ])
 
-      newEntries.set(addr, {
+      marketEntries.set(addr, {
         supply: formatUsdOrDisplay(supplyPrice),
         supplyUsd: supplyPrice.hasPrice ? supplyPrice.usdValue : 0,
         borrow: formatUsdOrDisplay(borrowPrice),
@@ -146,7 +148,13 @@ const loadVaultUsdValues = async (market: MarketGroup) => {
     }),
   )
 
-  vaultUsdCache.value = newEntries
+  vaultUsdCache.value = new Map([...vaultUsdCache.value, ...marketEntries])
+}
+
+const loadExpandedVaultUsdValues = async () => {
+  const expanded = props.markets.filter(market => isExpanded(market.id))
+  if (!expanded.length) return
+  await Promise.all(expanded.map(market => loadVaultUsdValues(market, { force: true })))
 }
 
 const onToggle = (market: MarketGroup) => {
@@ -154,6 +162,10 @@ const onToggle = (market: MarketGroup) => {
   toggleExpand(market.id)
   if (!wasExpanded) loadVaultUsdValues(market)
 }
+
+watch([() => props.markets, isMarketDataResolved], () => {
+  void loadExpandedVaultUsdValues()
+})
 
 // -- Matrix view selector (single dropdown spans Stats, Configuration,
 // Oracles, and the four numeric pair metrics) --

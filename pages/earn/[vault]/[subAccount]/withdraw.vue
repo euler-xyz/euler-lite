@@ -13,6 +13,7 @@ import { getAddress } from 'viem'
 import { OperationReviewModal } from '#components'
 import { FixedPoint } from '~/utils/fixed-point'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
+import { createRaceGuard } from '~/utils/race-guard'
 
 const router = useRouter()
 const route = useRoute()
@@ -20,7 +21,7 @@ const modal = useModal()
 const { error } = useToast()
 const { planWithdrawOrRedeem, executePlan } = useEulerTx()
 const { account: planAccount } = usePlanAccount()
-const { getEarnVault } = useVaults()
+const { getEarnVault, isMarketDataResolved } = useVaults()
 const { isConnected, address } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
@@ -54,6 +55,7 @@ const estimatesError = ref('')
 const assetsBalanceUsd = ref(0)
 const withdrawableAssetsUsd = ref(0)
 const deltaUsd = ref(0)
+const usdPriceGuard = createRaceGuard()
 
 const rewardApy = computed(() => getSupplyRewardApy(vault.value?.address || ''))
 const amountFixed = computed(() => {
@@ -227,15 +229,23 @@ load()
 
 // Update USD prices when vault or amounts change
 watchEffect(async () => {
+  const gen = usdPriceGuard.next()
+  void isMarketDataResolved.value
   if (!vault.value) {
     assetsBalanceUsd.value = 0
     withdrawableAssetsUsd.value = 0
     deltaUsd.value = 0
     return
   }
-  assetsBalanceUsd.value = await getAssetUsdValueOrZero(assetsBalance.value, vault.value, 'off-chain')
-  withdrawableAssetsUsd.value = await getAssetUsdValueOrZero(withdrawableAssets.value, vault.value, 'off-chain')
-  deltaUsd.value = await getAssetUsdValueOrZero(delta.value, vault.value, 'off-chain')
+  const [nextAssetsBalanceUsd, nextWithdrawableAssetsUsd, nextDeltaUsd] = await Promise.all([
+    getAssetUsdValueOrZero(assetsBalance.value, vault.value, 'off-chain'),
+    getAssetUsdValueOrZero(withdrawableAssets.value, vault.value, 'off-chain'),
+    getAssetUsdValueOrZero(delta.value, vault.value, 'off-chain'),
+  ])
+  if (usdPriceGuard.isStale(gen)) return
+  assetsBalanceUsd.value = nextAssetsBalanceUsd
+  withdrawableAssetsUsd.value = nextWithdrawableAssetsUsd
+  deltaUsd.value = nextDeltaUsd
 })
 
 watch([isConnected, effectiveAddress], async () => {

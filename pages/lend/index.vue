@@ -20,7 +20,7 @@ defineOptions({
   name: 'LendPage',
 })
 
-const { borrowList, isEVaultUpdating } = useVaults()
+const { borrowList, isEVaultUpdating, isMarketDataResolved } = useVaults()
 const { getVerifiedEVaults } = useVaultRegistry()
 const { chainId } = useEulerAddresses()
 const showAllLabelEntries = useShowAllLabelEntries()
@@ -68,6 +68,7 @@ useUrlQuerySync([
 const vaultUsdValues = ref<Map<string, number>>(new Map())
 const vaultLiquidityUsd = ref<Map<string, number>>(new Map())
 const vaultWalletUsd = ref<Map<string, number>>(new Map())
+let priceLoadId = 0
 
 const getDisplayedVaultSupplyApy = (vault: EVault): number => {
   const baseApy = getVaultSupplyApy(vault)
@@ -126,6 +127,7 @@ const borrowableVaults = computed(() => {
 // price-fetch cycle. Reading rewardsVersion.value establishes a reactive
 // dependency so this also re-runs when reward data loads asynchronously.
 const fetchLendPrices = useDebounceFn(async () => {
+  const loadId = ++priceLoadId
   const vaults = borrowableVaults.value
   if (!vaults.length) {
     isPricesReady.value = true
@@ -152,12 +154,15 @@ const fetchLendPrices = useDebounceFn(async () => {
       }),
     )
 
+    if (loadId !== priceLoadId) return
     vaultUsdValues.value = supplyValues
     vaultLiquidityUsd.value = liquidityValues
     vaultWalletUsd.value = walletValues
   }
   finally {
-    isPricesReady.value = true
+    if (loadId === priceLoadId) {
+      isPricesReady.value = true
+    }
   }
 }, DEBOUNCE_LIST_PRICE_FETCH_MS)
 
@@ -177,6 +182,7 @@ watchEffect(() => {
   // debounced fetcher. Values are re-read inside fetchLendPrices at execution
   // time to avoid closing over stale references.
   void rewardsVersion.value
+  void isMarketDataResolved.value
   void borrowableVaults.value
   if (!isActive.value) return
   fetchLendPrices()
