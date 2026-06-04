@@ -39,7 +39,8 @@ const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, getLoopingRewardCampaigns, hasSupplyRewards, hasBorrowRewards, hasLoopingRewards } = useRewardsApy()
 
-const isBorrowable = computed(() => borrowVault.value.isBorrowable)
+// Gate multiply metrics on this pair's borrow LTV, not vault-level borrowability.
+const showMultiplySection = computed(() => (pairBorrowLTV.value ?? 0) > 0)
 const isRestricted = computed(() => isAnyVaultBlockedByCountry(collateralVault.value.address, borrowVault.value.address))
 const isDeprecated = computed(() => isVaultDeprecated(collateralVault.value.address) || isVaultDeprecated(borrowVault.value.address))
 
@@ -87,6 +88,13 @@ const price = computed(() => {
 
   return nanoToValue(collateralPrice.amountOutMid, 18) / nanoToValue(borrowPrice.amountOutMid, 18)
 })
+
+const displayPrice = computed((): number | undefined => {
+  if (price.value === null) return undefined
+  return priceInvert.invertValue(price.value) ?? price.value
+})
+
+priceInvert.autoInvert(price)
 
 const availableLiquidityDisplay = ref({ amount: '-', symbol: '', usd: '' })
 const formatLiquidityAmount = (amount: number) => {
@@ -158,11 +166,11 @@ const rampDownModalData = computed(() => ({
 </script>
 
 <template>
-  <div class="bg-surface-secondary rounded-xl flex flex-col gap-20 p-20 shadow-card">
+  <div class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card">
     <p class="text-h3 text-content-primary">
       Overview
     </p>
-    <div class="flex flex-col gap-16">
+    <div class="flex flex-col gap-20">
       <div
         v-if="isDeprecated"
         class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
@@ -191,86 +199,90 @@ const rampDownModalData = computed(() => ({
           </p>
         </div>
       </div>
-      <div class="flex flex-col gap-20">
-        <div class="grid grid-cols-1 laptop:grid-cols-4 gap-x-20 gap-y-16">
-          <div class="flex flex-col gap-6">
-            <div class="text-[12px] leading-[16px] text-content-tertiary">
-              Price
-            </div>
-            <div class="text-[20px] leading-[28px] font-semibold tabular-nums text-content-primary">
-              <template v-if="price !== null">
-                {{ formatSignificant(priceInvert.invertValue(price), 4) }}
-                <span class="mt-2 flex items-center gap-4 text-p3 font-normal text-content-tertiary">
+      <div class="flex flex-col gap-12">
+        <div class="grid grid-cols-2 gap-x-32 gap-y-20">
+          <VaultOverviewLabelValue label="Price">
+            <template v-if="displayPrice !== undefined">
+              <div class="flex flex-col gap-2">
+                <span class="tabular-nums">
+                  {{ formatSignificant(displayPrice, 4) }}
+                </span>
+                <span
+                  v-if="priceInvert.displaySymbol"
+                  class="text-p3 text-content-muted flex items-center gap-4"
+                >
                   {{ priceInvert.displaySymbol }}
                   <button
                     type="button"
                     aria-label="Invert price display"
-                    class="text-content-tertiary hover:text-content-primary transition-colors inline-flex"
+                    class="text-content-tertiary hover:text-content-primary transition-colors inline-flex shrink-0"
                     @click.stop="priceInvert.toggle"
                   >
                     <SvgIcon
                       name="swap-horizontal"
-                      class="!w-14 !h-14"
+                      class="!w-12 !h-12"
                     />
                   </button>
                 </span>
-              </template>
-              <template v-else>
-                <span class="flex items-center text-warning-500">
-                  <SvgIcon
-                    name="warning"
-                    class="mr-4 !w-20 !h-20"
-                  />
-                  Unknown
-                </span>
-              </template>
-            </div>
-          </div>
-          <div class="flex flex-col gap-6">
-            <div class="text-[12px] leading-[16px] text-content-tertiary">
-              Available liquidity
-            </div>
+              </div>
+            </template>
+            <template v-else>
+              <span class="flex items-center text-warning-500">
+                <SvgIcon
+                  name="warning"
+                  class="mr-2 !w-20 !h-20"
+                />
+                Unknown
+              </span>
+            </template>
+          </VaultOverviewLabelValue>
+
+          <VaultOverviewLabelValue label="Available liquidity">
             <div class="flex flex-col gap-2">
-              <div class="flex items-baseline gap-4 text-[20px] leading-[28px] font-semibold tabular-nums text-content-primary">
+              <span class="flex items-baseline gap-4 tabular-nums">
                 {{ availableLiquidityDisplay.amount }}
                 <span
                   v-if="availableLiquidityDisplay.symbol"
-                  class="text-p3 text-content-tertiary"
+                  class="text-content-tertiary"
                 >
                   {{ availableLiquidityDisplay.symbol }}
                 </span>
-              </div>
-              <div
+              </span>
+              <span
                 v-if="availableLiquidityDisplay.usd"
                 class="text-p3 text-content-muted"
               >
                 {{ availableLiquidityDisplay.usd }}
-              </div>
+              </span>
             </div>
-          </div>
-          <div class="flex flex-col gap-6">
-            <div class="flex items-center gap-4 text-[12px] leading-[16px] text-content-tertiary">
-              Max LTV
-              <UiFootnote
-                title="Max LTV"
-                text="The maximum loan-to-value allowed for this collateral and borrow pair before new borrowing is restricted."
-                tooltip-placement="top-start"
-              />
-            </div>
-            <div class="text-[20px] leading-[28px] font-semibold tabular-nums text-content-primary">
-              {{ pairBorrowLTVPercent === null ? '-' : `${formatNumber(pairBorrowLTVPercent, 2)}%` }}
-            </div>
-          </div>
-          <div class="flex flex-col gap-6">
-            <div class="flex items-center gap-4 text-[12px] leading-[16px] text-content-tertiary">
-              Liquidation LTV
-              <UiFootnote
-                title="Liquidation LTV"
-                text="The loan-to-value where the position becomes eligible for liquidation. If this value is ramping, the current value can change over time."
-                tooltip-placement="top-start"
-              />
-            </div>
-            <div class="flex items-center gap-4 text-[20px] leading-[28px] font-semibold tabular-nums text-content-primary">
+          </VaultOverviewLabelValue>
+
+          <VaultOverviewLabelValue>
+            <template #label>
+              <span class="flex items-center gap-4">
+                Max LTV
+                <UiFootnote
+                  title="Max LTV"
+                  text="The maximum loan-to-value allowed for this collateral and borrow pair before new borrowing is restricted."
+                  tooltip-placement="top-start"
+                />
+              </span>
+            </template>
+            {{ pairBorrowLTVPercent === null ? '-' : `${formatNumber(pairBorrowLTVPercent, 2)}%` }}
+          </VaultOverviewLabelValue>
+
+          <VaultOverviewLabelValue>
+            <template #label>
+              <span class="flex items-center gap-4">
+                Liquidation LTV
+                <UiFootnote
+                  title="Liquidation LTV"
+                  text="The loan-to-value where the position becomes eligible for liquidation. If this value is ramping, the current value can change over time."
+                  tooltip-placement="top-start"
+                />
+              </span>
+            </template>
+            <span class="flex items-center gap-4">
               <UiModalPreviewTrigger
                 v-if="isRamping"
                 :component="VaultRampDownModal"
@@ -283,179 +295,171 @@ const rampDownModalData = computed(() => ({
                 />
               </UiModalPreviewTrigger>
               {{ currentLiquidationLTVPercent === null ? '-' : `${formatNumber(currentLiquidationLTVPercent, 2)}%` }}
-            </div>
-          </div>
-        </div>
-
-        <div class="h-px bg-line-subtle" />
-
-        <div class="flex items-center gap-6 text-[11px] leading-[16px] tracking-[0.08em] uppercase text-content-tertiary">
-          <SvgIcon
-            name="arrow-down"
-            class="!w-14 !h-14 opacity-85"
-          />
-          Borrow
-        </div>
-
-        <div class="grid grid-cols-1 laptop:grid-cols-3 gap-x-20 gap-y-16">
-          <div class="flex flex-col gap-6">
-            <div class="flex items-center gap-4 text-[12px] leading-[16px] text-content-tertiary">
-              Borrow APY
-              <UiModalPreviewTrigger
-                :component="VaultBorrowApyModal"
-                :modal-data="borrowApyModalData"
-                aria-label="Show borrow APY breakdown"
-              >
-                <SvgIcon
-                  class="!w-18 !h-18 text-content-muted cursor-pointer hover:text-content-secondary"
-                  name="info-circle"
-                  data-modal-trigger="borrow-apy"
-                />
-              </UiModalPreviewTrigger>
-            </div>
-            <div class="flex items-center gap-4 text-[20px] leading-[28px] font-semibold tabular-nums text-content-primary">
-              <UiModalPreviewTrigger
-                v-if="hasBorrowRewards(borrowVault.address, collateralVault.address)"
-                :component="VaultBorrowApyModal"
-                :modal-data="borrowApyModalData"
-                aria-label="Show borrow APY rewards breakdown"
-              >
-                <SvgIcon
-                  class="!w-20 !h-20 text-accent-500 cursor-pointer"
-                  name="sparks"
-                  data-modal-trigger="borrow-apy"
-                />
-              </UiModalPreviewTrigger>
-              {{ formatNumber(borrowApyWithRewards) }}%
-            </div>
-          </div>
-
-          <div class="flex flex-col gap-6">
-            <div class="flex items-center gap-4 text-[12px] leading-[16px] text-content-tertiary">
-              Collateral APY
-              <UiModalPreviewTrigger
-                :component="VaultSupplyApyModal"
-                :modal-data="supplyApyModalData"
-                aria-label="Show collateral APY breakdown"
-              >
-                <SvgIcon
-                  class="!w-18 !h-18 text-content-muted cursor-pointer hover:text-content-secondary"
-                  name="info-circle"
-                  data-modal-trigger="supply-apy"
-                />
-              </UiModalPreviewTrigger>
-            </div>
-            <div class="flex items-center gap-4 text-[20px] leading-[28px] font-semibold tabular-nums text-content-primary">
-              <VaultPoints :vault="collateralVault" />
-              <UiModalPreviewTrigger
-                v-if="hasSupplyRewards(collateralVault.address)"
-                :component="VaultSupplyApyModal"
-                :modal-data="supplyApyModalData"
-                aria-label="Show collateral APY rewards breakdown"
-              >
-                <SvgIcon
-                  class="!w-20 !h-20 text-accent-500 cursor-pointer"
-                  name="sparks"
-                  data-modal-trigger="supply-apy"
-                />
-              </UiModalPreviewTrigger>
-              {{ formatNumber(supplyApyWithRewards) }}%
-            </div>
-          </div>
-
-          <div class="flex flex-col gap-6">
-            <div class="flex items-center gap-4 text-[12px] leading-[16px] text-content-tertiary">
-              Net APY
-              <UiModalPreviewTrigger
-                :component="VaultNetApyPairModal"
-                :modal-data="netApyModalData"
-                aria-label="Show net APY breakdown"
-              >
-                <SvgIcon
-                  class="!w-18 !h-18 text-content-muted cursor-pointer hover:text-content-secondary"
-                  name="info-circle"
-                  data-modal-trigger="net-apy"
-                />
-              </UiModalPreviewTrigger>
-            </div>
-            <div class="flex items-center gap-4 text-[20px] leading-[28px] font-semibold tabular-nums text-accent-500">
-              <UiModalPreviewTrigger
-                v-if="hasSupplyRewards(collateralVault.address) || hasBorrowRewards(borrowVault.address, collateralVault.address) || hasLoopingRewards(borrowVault.address, collateralVault.address)"
-                :component="VaultNetApyPairModal"
-                :modal-data="netApyModalData"
-                aria-label="Show net APY rewards breakdown"
-              >
-                <SvgIcon
-                  class="!w-20 !h-20 text-accent-500 cursor-pointer"
-                  name="sparks"
-                  data-modal-trigger="net-apy"
-                />
-              </UiModalPreviewTrigger>
-              {{ formatNumber(netApy) }}%
-            </div>
-          </div>
+            </span>
+          </VaultOverviewLabelValue>
         </div>
 
         <div
-          v-if="isBorrowable"
-          class="h-px bg-line-subtle"
-        />
-
-        <div
-          v-if="isBorrowable"
-          class="flex items-center gap-6 text-[11px] leading-[16px] tracking-[0.08em] uppercase text-content-tertiary"
+          class="grid grid-cols-1 gap-12 min-w-0"
+          :class="{ 'laptop:grid-cols-2': showMultiplySection }"
         >
-          <SvgIcon
-            name="multiply"
-            class="!w-14 !h-14 opacity-85"
-          />
-          Multiply
-        </div>
+          <VaultOverviewPairSection
+            title="Borrow"
+            icon="arrow-down"
+          >
+            <div class="flex flex-col gap-12">
+              <VaultOverviewLabelValue orientation="horizontal">
+                <template #label>
+                  <span class="flex items-center gap-4">
+                    Supply APY
+                    <UiModalPreviewTrigger
+                      :component="VaultSupplyApyModal"
+                      :modal-data="supplyApyModalData"
+                      aria-label="Show supply APY breakdown"
+                    >
+                      <SvgIcon
+                        class="!w-20 !h-20 text-content-muted hover:text-content-secondary cursor-pointer"
+                        name="info-circle"
+                        data-modal-trigger="supply-apy"
+                      />
+                    </UiModalPreviewTrigger>
+                  </span>
+                </template>
+                <span class="flex items-center gap-4">
+                  <VaultPoints :vault="collateralVault" />
+                  <UiModalPreviewTrigger
+                    v-if="hasSupplyRewards(collateralVault.address)"
+                    :component="VaultSupplyApyModal"
+                    :modal-data="supplyApyModalData"
+                    aria-label="Show supply APY rewards breakdown"
+                  >
+                    <SvgIcon
+                      class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                      name="sparks"
+                      data-modal-trigger="supply-apy"
+                    />
+                  </UiModalPreviewTrigger>
+                  {{ formatNumber(supplyApyWithRewards) }}%
+                </span>
+              </VaultOverviewLabelValue>
 
-        <div
-          v-if="isBorrowable"
-          class="grid grid-cols-1 laptop:grid-cols-3 gap-x-20 gap-y-16"
-        >
-          <div class="flex flex-col gap-6">
-            <div class="text-[12px] leading-[16px] text-content-tertiary">
-              Max multiplier
-            </div>
-            <div class="text-[20px] leading-[28px] font-semibold tabular-nums text-content-primary">
-              {{ pairBorrowLTVPercent === null ? '-' : `${formatNumber(maxMultiplier, 2, 2)}x` }}
-            </div>
-          </div>
+              <VaultOverviewLabelValue orientation="horizontal">
+                <template #label>
+                  <span class="flex items-center gap-4">
+                    Borrow APY
+                    <UiModalPreviewTrigger
+                      :component="VaultBorrowApyModal"
+                      :modal-data="borrowApyModalData"
+                      aria-label="Show borrow APY breakdown"
+                    >
+                      <SvgIcon
+                        class="!w-20 !h-20 text-content-muted hover:text-content-secondary cursor-pointer"
+                        name="info-circle"
+                        data-modal-trigger="borrow-apy"
+                      />
+                    </UiModalPreviewTrigger>
+                  </span>
+                </template>
+                <span class="flex items-center gap-4">
+                  <UiModalPreviewTrigger
+                    v-if="hasBorrowRewards(borrowVault.address, collateralVault.address)"
+                    :component="VaultBorrowApyModal"
+                    :modal-data="borrowApyModalData"
+                    aria-label="Show borrow APY rewards breakdown"
+                  >
+                    <SvgIcon
+                      class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                      name="sparks"
+                      data-modal-trigger="borrow-apy"
+                    />
+                  </UiModalPreviewTrigger>
+                  {{ formatNumber(borrowApyWithRewards) }}%
+                </span>
+              </VaultOverviewLabelValue>
 
-          <div class="flex flex-col gap-6">
-            <div class="flex items-center gap-4 text-[12px] leading-[16px] text-content-tertiary">
-              Max ROE
-              <UiModalPreviewTrigger
-                :component="VaultMaxRoeModal"
-                :modal-data="maxRoeModalData"
-                aria-label="Show max ROE breakdown"
-              >
-                <SvgIcon
-                  class="!w-18 !h-18 text-content-muted cursor-pointer hover:text-content-secondary"
-                  name="info-circle"
-                  data-modal-trigger="max-roe"
-                />
-              </UiModalPreviewTrigger>
+              <VaultOverviewLabelValue orientation="horizontal">
+                <template #label>
+                  <span class="flex items-center gap-4">
+                    Net APY
+                    <UiModalPreviewTrigger
+                      :component="VaultNetApyPairModal"
+                      :modal-data="netApyModalData"
+                      aria-label="Show net APY breakdown"
+                    >
+                      <SvgIcon
+                        class="!w-20 !h-20 text-content-muted hover:text-content-secondary cursor-pointer"
+                        name="info-circle"
+                        data-modal-trigger="net-apy"
+                      />
+                    </UiModalPreviewTrigger>
+                  </span>
+                </template>
+                <span class="flex items-center gap-4 text-accent-600 font-semibold">
+                  <UiModalPreviewTrigger
+                    v-if="hasSupplyRewards(collateralVault.address) || hasBorrowRewards(borrowVault.address, collateralVault.address) || hasLoopingRewards(borrowVault.address, collateralVault.address)"
+                    :component="VaultNetApyPairModal"
+                    :modal-data="netApyModalData"
+                    aria-label="Show net APY rewards breakdown"
+                  >
+                    <SvgIcon
+                      class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                      name="sparks"
+                      data-modal-trigger="net-apy"
+                    />
+                  </UiModalPreviewTrigger>
+                  {{ formatNumber(netApy) }}%
+                </span>
+              </VaultOverviewLabelValue>
             </div>
-            <div class="flex items-center gap-4 text-[20px] leading-[28px] font-semibold tabular-nums text-accent-500">
-              <UiModalPreviewTrigger
-                v-if="hasSupplyRewards(collateralVault.address) || hasBorrowRewards(borrowVault.address, collateralVault.address) || hasLoopingRewards(borrowVault.address, collateralVault.address)"
-                :component="VaultMaxRoeModal"
-                :modal-data="maxRoeModalData"
-                aria-label="Show max ROE rewards breakdown"
-              >
-                <SvgIcon
-                  class="!w-20 !h-20 text-accent-500 cursor-pointer"
-                  name="sparks"
-                  data-modal-trigger="max-roe"
-                />
-              </UiModalPreviewTrigger>
-              {{ formatNumber(maxRoe) }}%
+          </VaultOverviewPairSection>
+
+          <VaultOverviewPairSection
+            v-if="showMultiplySection"
+            title="Multiply"
+            icon="multiply"
+          >
+            <div class="flex flex-col gap-12">
+              <VaultOverviewLabelValue
+                orientation="horizontal"
+                label="Max multiplier"
+                :value="pairBorrowLTVPercent === null ? '-' : `${formatNumber(maxMultiplier, 2, 2)}x`"
+              />
+
+              <VaultOverviewLabelValue orientation="horizontal">
+                <template #label>
+                  <span class="flex items-center gap-4">
+                    Max ROE
+                    <UiModalPreviewTrigger
+                      :component="VaultMaxRoeModal"
+                      :modal-data="maxRoeModalData"
+                      aria-label="Show max ROE breakdown"
+                    >
+                      <SvgIcon
+                        class="!w-20 !h-20 text-content-muted hover:text-content-secondary cursor-pointer"
+                        name="info-circle"
+                        data-modal-trigger="max-roe"
+                      />
+                    </UiModalPreviewTrigger>
+                  </span>
+                </template>
+                <span class="flex items-center gap-4 text-accent-600 font-semibold">
+                  <UiModalPreviewTrigger
+                    v-if="hasSupplyRewards(collateralVault.address) || hasBorrowRewards(borrowVault.address, collateralVault.address) || hasLoopingRewards(borrowVault.address, collateralVault.address)"
+                    :component="VaultMaxRoeModal"
+                    :modal-data="maxRoeModalData"
+                    aria-label="Show max ROE rewards breakdown"
+                  >
+                    <SvgIcon
+                      class="!w-20 !h-20 text-accent-500 cursor-pointer"
+                      name="sparks"
+                      data-modal-trigger="max-roe"
+                    />
+                  </UiModalPreviewTrigger>
+                  {{ formatNumber(maxRoe) }}%
+                </span>
+              </VaultOverviewLabelValue>
             </div>
-          </div>
+          </VaultOverviewPairSection>
         </div>
       </div>
     </div>
