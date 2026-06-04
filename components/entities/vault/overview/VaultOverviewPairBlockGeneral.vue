@@ -299,6 +299,13 @@ const rampDownModalData = computed(() => ({
           </VaultOverviewLabelValue>
         </div>
 
+        <div class="flex items-center gap-12 pt-8">
+          <p class="text-p4 uppercase tracking-[0.14em] text-content-muted whitespace-nowrap">
+            Rates & multiply
+          </p>
+          <div class="h-2 flex-1 bg-[var(--border-subtle)] opacity-70" />
+        </div>
+
         <div
           class="grid grid-cols-1 gap-12 min-w-0"
           :class="{ 'laptop:grid-cols-2': showMultiplySection }"
