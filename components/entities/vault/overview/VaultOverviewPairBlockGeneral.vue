@@ -63,6 +63,8 @@ const netApy = computed(() => supplyApyWithRewards.value - borrowApyWithRewards.
 const maxRoe = computed(() =>
   getMaxRoe(maxMultiplier.value, supplyApyWithRewards.value, borrowApyWithRewards.value, loopingRewardAPY.value),
 )
+const netApyClass = computed(() => netApy.value >= 0 ? 'text-accent-600' : 'text-error-500')
+const maxRoeClass = computed(() => maxRoe.value >= 0 ? 'text-accent-600' : 'text-error-500')
 
 const baseSupplyApy = computed(() => getVaultSupplyApy(collateralVault.value))
 const baseBorrowApy = computed(() => getVaultBorrowApy(borrowVault.value))
@@ -401,7 +403,10 @@ const rampDownModalData = computed(() => ({
                     </UiModalPreviewTrigger>
                   </span>
                 </template>
-                <span class="flex items-center gap-4 text-accent-600 font-semibold">
+                <span
+                  class="flex items-center gap-4 font-semibold"
+                  :class="netApyClass"
+                >
                   <UiModalPreviewTrigger
                     v-if="hasSupplyRewards(collateralVault.address) || hasBorrowRewards(borrowVault.address, collateralVault.address) || hasLoopingRewards(borrowVault.address, collateralVault.address)"
                     :component="VaultNetApyPairModal"
@@ -449,7 +454,10 @@ const rampDownModalData = computed(() => ({
                     </UiModalPreviewTrigger>
                   </span>
                 </template>
-                <span class="flex items-center gap-4 text-accent-600 font-semibold">
+                <span
+                  class="flex items-center gap-4 font-semibold"
+                  :class="maxRoeClass"
+                >
                   <UiModalPreviewTrigger
                     v-if="hasSupplyRewards(collateralVault.address) || hasBorrowRewards(borrowVault.address, collateralVault.address) || hasLoopingRewards(borrowVault.address, collateralVault.address)"
                     :component="VaultMaxRoeModal"
