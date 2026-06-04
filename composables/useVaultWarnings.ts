@@ -1,6 +1,6 @@
 import { isSecuritizeCollateralVault, type EVault, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
-import { isCyclicalNoteVault } from '~/utils/vault/classification'
 import { getVaultUtilization } from '~/utils/vault-display'
+import { isVaultCyclicalNote } from '~/utils/eulerLabelsUtils'
 import {
   findBlockingDisabledOp,
   getOpMeta,
@@ -104,7 +104,7 @@ export const getUtilisationWarning = (
   const level = getUtilisationLevel(utilisation)
   if (!level) return null
 
-  if (context !== 'repay' && isCyclicalNoteVault(vault)) {
+  if (context !== 'repay' && isVaultCyclicalNote(vault.address)) {
     return { level: 'info', tone: 'success', ...targetUtilisationMessage }
   }
 

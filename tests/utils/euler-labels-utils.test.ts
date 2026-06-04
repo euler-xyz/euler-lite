@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { __setEulerLabelsDataForTest } from '~/composables/useEulerLabels'
-import { getActiveProductVaultAddresses, getUniqueEntitiesByVaults, isVaultGovernanceLimited, isVaultRecentlyAdded, normalizeProducts } from '~/utils/eulerLabelsUtils'
+import {
+  getActiveProductVaultAddresses,
+  getUniqueEntitiesByVaults,
+  isVaultCyclicalNote,
+  isVaultGovernanceLimited,
+  isVaultRecentlyAdded,
+  normalizeProducts,
+} from '~/utils/eulerLabelsUtils'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 
 describe('normalizeProducts', () => {
@@ -181,5 +188,49 @@ describe('isVaultGovernanceLimited', () => {
     })
 
     expect(isVaultGovernanceLimited(address)).toBe(true)
+  })
+})
+
+describe('isVaultCyclicalNote', () => {
+  it('checks cyclical-note product tags', () => {
+    const address = '0x0000000000000000000000000000000000000401'
+
+    __setEulerLabelsDataForTest({
+      products: {
+        test: {
+          name: 'Test',
+          description: '',
+          entity: [],
+          url: '',
+          vaults: [normalizeAddress(address)],
+          tags: ['cyclical note'],
+        },
+      },
+    })
+
+    expect(isVaultCyclicalNote(address)).toBe(true)
+  })
+
+  it('checks cyclical-note vault override tags', () => {
+    const address = '0x0000000000000000000000000000000000000402'
+
+    __setEulerLabelsDataForTest({
+      products: {
+        test: {
+          name: 'Test',
+          description: '',
+          entity: [],
+          url: '',
+          vaults: [normalizeAddress(address)],
+          vaultOverrides: {
+            [normalizeAddress(address)]: {
+              tags: ['cyclical note'],
+            },
+          },
+        },
+      },
+    })
+
+    expect(isVaultCyclicalNote(address)).toBe(true)
   })
 })

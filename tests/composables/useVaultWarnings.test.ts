@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { getCollateralSupplyCapWarning, getUtilisationWarning } from '~/composables/useVaultWarnings'
+import { __setEulerLabelsDataForTest } from '~/composables/useEulerLabels'
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
+import { normalizeAddress } from '~/utils/normalizeAddress'
 
 const makeVault = (supplyCapUtilization: number): EVault =>
   ({
@@ -14,14 +16,20 @@ const makeUtilisedVault = (
   totalAssets: bigint,
   borrow: bigint,
   interestRateModelType: number = INTEREST_RATE_MODEL_TYPE.KINK,
+  address = '0x0000000000000000000000000000000000000001',
 ): EVault =>
   ({
+    address: normalizeAddress(address),
     totalAssets,
     borrow,
     interestRateModel: { type: interestRateModelType },
   }) as unknown as EVault
 
 describe('getUtilisationWarning', () => {
+  beforeEach(() => {
+    __setEulerLabelsDataForTest()
+  })
+
   it('returns the standard high utilisation warning for non-cyclical borrow markets', () => {
     const warning = getUtilisationWarning(makeUtilisedVault(100n, 95n), 'borrow')
 
@@ -33,10 +41,24 @@ describe('getUtilisationWarning', () => {
   })
 
   it.each(['borrow', 'lend', 'general'] as const)(
-    'returns target utilisation info for highly utilised cyclical note markets in %s context',
+    'returns target utilisation info for highly utilised cyclical-note-tagged markets in %s context',
     (context) => {
+      const address = normalizeAddress('0x0000000000000000000000000000000000000501')
+      __setEulerLabelsDataForTest({
+        products: {
+          test: {
+            name: 'Test',
+            description: '',
+            entity: [],
+            url: '',
+            vaults: [address],
+            tags: ['cyclical note'],
+          },
+        },
+      })
+
       const warning = getUtilisationWarning(
-        makeUtilisedVault(100n, 99n, INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY),
+        makeUtilisedVault(100n, 99n, INTEREST_RATE_MODEL_TYPE.KINK, address),
         context,
       )
 
@@ -50,8 +72,22 @@ describe('getUtilisationWarning', () => {
   )
 
   it('keeps liquidity constraint copy for highly utilised cyclical repay sources', () => {
+    const address = normalizeAddress('0x0000000000000000000000000000000000000502')
+    __setEulerLabelsDataForTest({
+      products: {
+        test: {
+          name: 'Test',
+          description: '',
+          entity: [],
+          url: '',
+          vaults: [address],
+          tags: ['cyclical note'],
+        },
+      },
+    })
+
     const warning = getUtilisationWarning(
-      makeUtilisedVault(100n, 99n, INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY),
+      makeUtilisedVault(100n, 99n, INTEREST_RATE_MODEL_TYPE.KINK, address),
       'repay',
     )
 
@@ -63,12 +99,39 @@ describe('getUtilisationWarning', () => {
   })
 
   it('does not show target utilisation info below the shared utilisation threshold', () => {
+    const address = normalizeAddress('0x0000000000000000000000000000000000000503')
+    __setEulerLabelsDataForTest({
+      products: {
+        test: {
+          name: 'Test',
+          description: '',
+          entity: [],
+          url: '',
+          vaults: [address],
+          tags: ['cyclical note'],
+        },
+      },
+    })
+
     const warning = getUtilisationWarning(
-      makeUtilisedVault(100n, 94n, INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY),
+      makeUtilisedVault(100n, 94n, INTEREST_RATE_MODEL_TYPE.KINK, address),
       'borrow',
     )
 
     expect(warning).toBeNull()
+  })
+
+  it('does not use cyclical IRM type as the target-utilisation classifier', () => {
+    const warning = getUtilisationWarning(
+      makeUtilisedVault(100n, 99n, INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY),
+      'borrow',
+    )
+
+    expect(warning).toEqual({
+      level: 'critical',
+      title: 'Critical utilisation',
+      message: 'Utilisation is critically high. Interest rates are very elevated. Available liquidity is near zero.',
+    })
   })
 })
 

@@ -1,8 +1,7 @@
 import { zeroAddress } from 'viem'
 import { isEVault, type EulerEarn, type EVault, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import type { Ref } from 'vue'
-import { isCyclicalNoteVault } from '~/utils/vault/classification'
-import { getEntitiesByEarnVault, getEntitiesByVault, isVaultAccessControlled, isVaultGovernanceLimited, isVaultKeyring } from '~/utils/eulerLabelsUtils'
+import { getEntitiesByEarnVault, getEntitiesByVault, isVaultAccessControlled, isVaultCyclicalNote, isVaultGovernanceLimited, isVaultKeyring } from '~/utils/eulerLabelsUtils'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 
 type VaultTypeBadgeVault = EVault | EulerEarn | SecuritizeCollateralVault
@@ -51,7 +50,7 @@ export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
 
   const isCyclicalNote = computed(() => {
     if (!isEVault(vault.value)) return false
-    return isCyclicalNoteVault(vault.value)
+    return isVaultCyclicalNote(vault.value.address)
   })
 
   const badges = computed<VaultTypeBadge[]>(() => {
