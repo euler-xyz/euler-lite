@@ -199,10 +199,11 @@ load()
         @click="onExposureClick(row.exposure.address)"
       >
         <div
-          class="px-16 pt-16 pb-12 border-b border-line-subtle flex items-center justify-between"
+          class="px-16 pt-16 pb-12 border-b border-line-subtle flex items-start justify-between gap-12 mobile:flex-wrap"
         >
           <template v-if="row.vault">
             <VaultLabelsAndAssets
+              class="min-w-0 flex-1 mobile:order-1"
               :vault="row.vault"
               :assets="[{
                 address: row.vault.asset.address,
@@ -220,7 +221,7 @@ load()
             </VaultLabelsAndAssets>
           </template>
           <template v-else>
-            <div class="flex items-center gap-12">
+            <div class="flex items-center gap-12 min-w-0 flex-1 mobile:order-1">
               <AssetAvatar
                 :asset="{ address: row.exposure.vault?.asset.address ?? row.exposure.address, symbol: row.exposure.vault?.asset.symbol ?? '' }"
                 size="40"
@@ -237,37 +238,39 @@ load()
           </template>
           <div
             v-if="row.vault"
-            class="flex flex-col items-end shrink-0"
+            class="flex flex-col items-end shrink-0 mobile:contents"
           >
-            <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-              Supply APY
-              <UiModalPreviewTrigger
-                :component="VaultSupplyApyModal"
-                :modal-data="getStrategySupplyApyModalData(row.vault)"
-                aria-label="Show supply APY breakdown"
-              >
-                <SvgIcon
-                  class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-                  name="info-circle"
-                />
-              </UiModalPreviewTrigger>
-            </div>
-            <div class="text-p2 flex items-center text-accent-600 font-semibold">
-              <UiModalPreviewTrigger
-                v-if="hasSupplyRewards(row.vault.address)"
-                :component="VaultSupplyApyModal"
-                :modal-data="getStrategySupplyApyModalData(row.vault)"
-                aria-label="Show supply APY rewards breakdown"
-              >
-                <SvgIcon
-                  class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
-                  name="sparks"
-                />
-              </UiModalPreviewTrigger>
-              {{ formatNumber(getStrategySupplyApy(row.vault)) }}%
+            <div class="flex flex-col items-end shrink-0 mobile:order-2">
+              <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+                Supply APY
+                <UiModalPreviewTrigger
+                  :component="VaultSupplyApyModal"
+                  :modal-data="getStrategySupplyApyModalData(row.vault)"
+                  aria-label="Show supply APY breakdown"
+                >
+                  <SvgIcon
+                    class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+                    name="info-circle"
+                  />
+                </UiModalPreviewTrigger>
+              </div>
+              <div class="text-p2 flex items-center text-accent-600 font-semibold">
+                <UiModalPreviewTrigger
+                  v-if="hasSupplyRewards(row.vault.address)"
+                  :component="VaultSupplyApyModal"
+                  :modal-data="getStrategySupplyApyModalData(row.vault)"
+                  aria-label="Show supply APY rewards breakdown"
+                >
+                  <SvgIcon
+                    class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
+                    name="sparks"
+                  />
+                </UiModalPreviewTrigger>
+                {{ formatNumber(getStrategySupplyApy(row.vault)) }}%
+              </div>
             </div>
             <VaultTypeBadges
-              class="justify-end mt-8"
+              class="justify-end mt-8 mobile:order-3 mobile:basis-full mobile:justify-end mobile:mt-0 mobile:pt-4"
               :vault="row.vault"
               summary-only
               @click.stop.prevent
