@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
-import { isCyclicalNoteVault } from '~/utils/vault/classification'
+import { isVaultCyclicalNote } from '~/utils/eulerLabelsUtils'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
 }>()
 const { vault } = defineProps<{ vault: EVault, desktopOverview?: boolean }>()
 
-const isCyclicalIRM = computed(() => isCyclicalNoteVault(vault))
+const isCyclicalIRM = computed(() => isVaultCyclicalNote(vault.address))
 </script>
 
 <template>

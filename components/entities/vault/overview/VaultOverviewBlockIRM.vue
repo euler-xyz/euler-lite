@@ -94,7 +94,6 @@ const irmTypeLabel = computed(() => {
   if (type === INTEREST_RATE_MODEL_TYPE.KINK) return 'Kink'
   if (type === INTEREST_RATE_MODEL_TYPE.ADAPTIVE_CURVE) return 'Adaptive'
   if (type === INTEREST_RATE_MODEL_TYPE.KINKY) return 'Kinky'
-  if (type === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY) return 'Cyclical note'
   return 'Interest Rate Model'
 })
 

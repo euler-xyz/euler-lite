@@ -29,15 +29,14 @@ export interface ChainVaultsSnapshot {
   escrowVaults: EVault[]
 }
 
-export interface ProductEntryFull extends EulerLabelProduct {
-  isGovernanceLimited?: unknown
-}
+export type ProductEntryFull = EulerLabelProduct
 
 export interface VaultOverride {
   name?: unknown
   description?: unknown
   portfolioNotice?: unknown
   deprecationReason?: unknown
+  tags?: unknown
 }
 
 export interface EntityEntryFull extends EulerLabelEntity {
@@ -66,7 +65,7 @@ export interface ProductDescriptor {
   description: string | null
   portfolioNotice: string | null
   deprecationReason: string | null
-  isGovernanceLimited: boolean
+  governanceLimited: boolean
   forceUnverified: boolean
   entityKeys: string[]
   vaultOverrides: Record<string, VaultOverride>
@@ -115,6 +114,18 @@ function uniqueAddresses(addresses: Iterable<string>): Address[] {
   return [...result.values()]
 }
 
+function hasTag(tags: unknown, tag: string): boolean {
+  return Array.isArray(tags) && tags.includes(tag)
+}
+
+function overrideHasTag(
+  overrides: Record<string, VaultOverride>,
+  address: Address,
+  tag: string,
+): boolean {
+  return hasTag(overrides[address]?.tags, tag)
+}
+
 // SDK builder shared with vaults-cache via server/utils/sdk-server.ts.
 const getSdk = (chainId: number): Promise<EulerSDK> => getServerSdk(chainId)
 
@@ -123,7 +134,7 @@ async function fetchTokenList(chainId: number): Promise<TokenListEntry[]> {
   return Array.isArray(data?.tokens) ? data.tokens : []
 }
 
-function buildProductDescriptors(products: Record<string, ProductEntryFull>): {
+export function buildProductDescriptors(products: Record<string, ProductEntryFull>): {
   productByVault: Map<Address, ProductDescriptor>
   deprecatedSet: Set<Address>
 } {
@@ -145,19 +156,23 @@ function buildProductDescriptors(products: Record<string, ProductEntryFull>): {
       description: strOrNull(product.description),
       portfolioNotice: strOrNull(product.portfolioNotice),
       deprecationReason: strOrNull(product.deprecationReason),
-      isGovernanceLimited: product.isGovernanceLimited === true,
+      governanceLimited: hasTag(product.tags, 'governance limited'),
       forceUnverified: strOrNull(product.deprecationReason)?.toLowerCase().includes('unrecognized entity') === true,
       entityKeys: declaredKeysOf(product.entity),
       vaultOverrides: overrides,
     }
+    const descriptorForVault = (addr: Address): ProductDescriptor => ({
+      ...desc,
+      governanceLimited: desc.governanceLimited || overrideHasTag(overrides, addr, 'governance limited'),
+    })
     for (const v of product.vaults ?? []) {
       const addr = tryChecksum(v)
-      if (addr) productByVault.set(addr, desc)
+      if (addr) productByVault.set(addr, descriptorForVault(addr))
     }
     for (const v of product.deprecatedVaults ?? []) {
       const addr = tryChecksum(v)
       if (addr) {
-        productByVault.set(addr, desc)
+        productByVault.set(addr, descriptorForVault(addr))
         deprecatedSet.add(addr)
       }
     }

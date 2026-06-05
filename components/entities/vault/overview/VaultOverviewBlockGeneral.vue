@@ -5,7 +5,7 @@ import type { Component } from 'vue'
 
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerEntitiesOfVault, useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { getProductByVault, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, getProductKeyByVault, isVaultGovernanceLimited } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { autoLink } from '~/utils/autoLink'
@@ -39,7 +39,7 @@ const isDeprecated = computed(() => {
 const deprecationReason = computed(() => isDeprecated.value ? product.deprecationReason || '' : '')
 const isRestricted = computed(() => isVaultBlockedByCountry(vault.address))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
-const isGovernanceLimited = computed(() => product.isGovernanceLimited && isGovernorVerified.value)
+const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
 
 // Count how many EVaults reference this vault as a borrowable collateral.
 // Use the registry directly, matching the baseline app. `borrowList` is

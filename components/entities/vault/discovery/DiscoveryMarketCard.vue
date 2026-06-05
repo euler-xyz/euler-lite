@@ -30,7 +30,7 @@ const { getBorrowRewardApy, getSupplyRewardApy, getLoopingRewardApy } = useRewar
 const { products } = useEulerLabels()
 
 const isGovernanceLimited = computed(() =>
-  props.market.source === 'product' && !!products[props.market.id]?.isGovernanceLimited,
+  props.market.source === 'product' && (products[props.market.id]?.tags?.includes('governance limited') ?? false),
 )
 
 const getProductDescription = (market: MarketGroup): string => {

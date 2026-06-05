@@ -16,11 +16,11 @@ Keyring vaults are flagged via the labels system (`products.json`):
 {
   "private-market": {
     "name": "Private Market",
-    "keyring": true,           // All vaults in this product require keyring
+    "tags": ["keyring"],       // All vaults in this product require keyring
     "vaults": ["0x1234..."],
     "vaultOverrides": {
       "0x5678...": {
-        "keyring": true        // Per-vault override (if product-level is false)
+        "tags": ["keyring"]    // Per-vault classification
       }
     }
   }
@@ -28,8 +28,8 @@ Keyring vaults are flagged via the labels system (`products.json`):
 ```
 
 Utility functions in `utils/eulerLabelsUtils.ts`:
-- `isVaultKeyring(vaultAddress)` — checks product-level or vault-override `keyring` flag
-- `isProductKeyring(productKey)` — checks product-level flag (for explore page)
+- `isVaultKeyring(vaultAddress)` — checks product-level or vault-override `keyring` tag
+- `isProductKeyring(productKey)` — checks the product-level `keyring` tag
 
 ### On-chain reads (zero hardcoded addresses)
 

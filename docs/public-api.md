@@ -163,7 +163,7 @@ interface VaultMetadata {
   portfolioNotice: string | null
   deprecationReason: string | null
   deprecated: boolean                        // true if listed under any product's deprecatedVaults or earn entry has deprecated: true
-  governanceLimited: boolean                 // true when the owning product has isGovernanceLimited: true (governor exists but no active risk management). False for vaults without a product.
+  governanceLimited: boolean                 // true when the owning product has the "governance limited" tag. False for vaults without a product.
   productId: string | null                   // product slug from products.json that owns this vault; null for escrow and for vaults with no product entry
   asset: {
     address: string                          // checksummed
