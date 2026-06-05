@@ -100,7 +100,7 @@ SWAP_API_URL=https://swap.euler.finance
 
 # Chain RPC endpoints (one per chain you want to enable)
 RPC_URL_1=https://your-ethereum-rpc.com
-NUXT_PUBLIC_SUBGRAPH_URI_1=https://your-subgraph.com
+SUBGRAPH_URL_1=https://your-subgraph.com
 ```
 
 ## Key External Services
@@ -127,7 +127,7 @@ NUXT_PUBLIC_SUBGRAPH_URI_1=https://your-subgraph.com
 
 - **Purpose**: Incentive campaign distribution
 - **Integration**: API for incentive campaigns
-- **Data Source**: Campaign APR data (claiming not yet available)
+- **Data Source**: Campaign APR data and claimable rewards
 
 ## 🆘 Common Issues
 
@@ -140,7 +140,7 @@ NUXT_PUBLIC_SUBGRAPH_URI_1=https://your-subgraph.com
 ### Blockchain Connection Issues
 
 - Verify `RPC_URL_<chainId>` env vars are set correctly
-- Ensure matching `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` exists for each chain
+- Ensure matching `SUBGRAPH_URL_<chainId>` or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` exists for each chain
 - Ensure RPC endpoints are accessible
 
 ### Wallet Connection Problems

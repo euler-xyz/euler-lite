@@ -132,7 +132,7 @@ The `/api/pyth/updates` endpoint proxies Pyth Hermes price update requests throu
 ## Troubleshooting
 
 - If the app fails to start, ensure Node 24+ and reinstall deps.
-- If blockchain calls fail, verify `RPC_URL_<chainId>` env vars and check that matching `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` is set.
+- If blockchain calls fail, verify `RPC_URL_<chainId>` env vars and check that matching `SUBGRAPH_URL_<chainId>` or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` is set.
 - If token logos don't load, verify `V3_API_URL` (or `EULER_SDK_V3_API_URL` / `NUXT_PUBLIC_V3_API_URL`) and, when required by the upstream, `EULER_SDK_V3_API_KEY`. Token data is fetched server-side via `/api/token-list` which aggregates Euler V3, Uniswap, DefiLlama, and Merkl sources with fallback.
 
 ---
