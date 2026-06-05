@@ -3,7 +3,7 @@ import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
-import { isVaultRecentlyAdded, isVaultKeyring } from '~/utils/eulerLabelsUtils'
+import { isVaultGovernanceLimited, isVaultRecentlyAdded, isVaultKeyring, isVaultCyclicalNote } from '~/utils/eulerLabelsUtils'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
@@ -12,7 +12,7 @@ import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { VaultSupplyApyModal, VaultCollateralExposureModal, UiModalPreviewTrigger } from '#components'
-import { isCyclicalNoteVault, isVaultBorrowable } from '~/utils/vault/classification'
+import { isVaultBorrowable } from '~/utils/vault/classification'
 import { getAddress } from 'viem'
 
 const { isConnected } = useWagmi()
@@ -25,7 +25,7 @@ const entities = useEulerEntitiesOfVault(vault)
 const { getVaultCategory, isVerifiedVault, get: registryGet } = useVaultRegistry()
 const isUnverified = computed(() => !isVerifiedVault(vault.address))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
-const isGovernanceLimited = computed(() => product.isGovernanceLimited && isGovernorVerified.value)
+const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
 const entityName = computed(() => {
   if (!isGovernorVerified.value || entities.length === 0) return ''
   if (entities.length === 1) return entities[0].name
@@ -114,7 +114,7 @@ const utilizationDisplay = computed(() => compactNumber(utilization.value, 2, 2)
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
 const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address))
 const isKeyring = computed(() => isVaultKeyring(vault.address))
-const isCyclicalNote = computed(() => isCyclicalNoteVault(vault))
+const isCyclicalNote = computed(() => isVaultCyclicalNote(vault.address))
 const utilisationWarning = computed(() => getUtilisationWarning(vault, 'lend'))
 const supplyCapWarning = computed(() => getSupplyCapWarning(vault))
 const statsGridCols = computed(() => {

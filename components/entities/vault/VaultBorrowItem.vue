@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
-import { isCyclicalNoteVault } from '~/utils/vault/classification'
 import { getUtilisationWarning, getBorrowCapWarning, getCollateralSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { getVaultAvailableLiquidity, getVaultUtilization } from '~/utils/vault-display'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isVaultRecentlyAdded, isVaultKeyring, getUniqueEntitiesByVaults } from '~/utils/eulerLabelsUtils'
+import { isVaultGovernanceLimited, isVaultRecentlyAdded, isVaultKeyring, isVaultCyclicalNote, getUniqueEntitiesByVaults } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { VaultBorrowApyModal, VaultMaxRoeModal, VaultNetApyPairModal, VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
@@ -46,7 +45,6 @@ const entityDisplay = computed(() => {
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getBorrowRewardApy, getSupplyRewardApy, getLoopingRewardApy, hasSupplyRewards, hasBorrowRewards, hasLoopingRewards, getBorrowRewardCampaigns, getSupplyRewardCampaigns, getLoopingRewardCampaigns } = useRewardsApy()
-
 const collateralProduct = useEulerProductOfVault(
   computed(() => pair.collateral.address),
 )
@@ -55,7 +53,7 @@ const borrowProduct = useEulerProductOfVault(
 )
 
 const isAnyGovernanceLimited = computed(() =>
-  (collateralProduct.isGovernanceLimited || borrowProduct.isGovernanceLimited) && !isAnyGovernorUnverified.value,
+  (isVaultGovernanceLimited(pair.collateral.address) || isVaultGovernanceLimited(pair.borrow.address)) && !isAnyGovernorUnverified.value,
 )
 
 const isEscrowCollateral = computed(
@@ -83,7 +81,7 @@ const isPairEffectivelyBlocked = computed(() => {
 
 const isRecentlyAdded = computed(() => isVaultRecentlyAdded(pair.collateral.address) || isVaultRecentlyAdded(pair.borrow.address))
 const isKeyring = computed(() => isVaultKeyring(pair.collateral.address) || isVaultKeyring(pair.borrow.address))
-const isCyclicalNote = computed(() => isCyclicalNoteVault(pair.borrow))
+const isCyclicalNote = computed(() => isVaultCyclicalNote(pair.borrow.address))
 
 const isAnyDeprecated = computed(() => {
   const collateralAddr = getAddress(pair.collateral.address)

@@ -1,6 +1,13 @@
 import { afterEach, describe, it, expect } from 'vitest'
 import { ContractFunctionRevertedError, encodeAbiParameters, type Hex } from 'viem'
-import { formatSimulationFailure, getTxErrorCode, getTxErrorMessage, shouldDiscardQuoteOnEstimateGasError } from '~/utils/tx-errors'
+import {
+  formatSimulationFailure,
+  getTxErrorCode,
+  getTxErrorMessage,
+  isNonBlockingApprovalSimulationError,
+  isNonBlockingApprovalSimulationFailure,
+  shouldDiscardQuoteOnEstimateGasError,
+} from '~/utils/tx-errors'
 import { clearOperationMeta, setOperationMeta } from '~/utils/operationGuardRegistry'
 
 const buildRevertError = (raw: Hex) =>
@@ -102,6 +109,156 @@ describe('formatSimulationFailure: friendly message mapping', () => {
       }],
     } as never
     expect(formatSimulationFailure(result)).toContain('E_SomethingUnmapped()')
+  })
+})
+
+describe('isNonBlockingApprovalSimulationFailure', () => {
+  const decodedEntry = (signature: string) => ({ signature, params: [] })
+  const requiredApprovalPlan = [{
+    type: 'requiredApproval',
+    token: '0x1111111111111111111111111111111111111111',
+    owner: '0x2222222222222222222222222222222222222222',
+    spender: '0x3333333333333333333333333333333333333333',
+    amount: 1n,
+  }] as never
+  const batchOnlyPlan = [{ type: 'evcBatch', items: [] }] as never
+
+  it('does not block approval-like failed batch items when the plan has approvals', () => {
+    const result = {
+      failedBatchItems: [{
+        index: 0,
+        error: '0x',
+        decodedError: [decodedEntry('E_TransferFromFailed()')],
+      }],
+    } as never
+
+    expect(isNonBlockingApprovalSimulationFailure(requiredApprovalPlan, result)).toBe(true)
+  })
+
+  it('does not block approval-like simulation errors for prepared plans', () => {
+    const prepared = {
+      __prepared: true,
+      plan: requiredApprovalPlan,
+      chainId: 1,
+      account: '0x2222222222222222222222222222222222222222',
+      usePermit2: true,
+      unlimitedApproval: false,
+    } as never
+    const result = {
+      simulationError: {
+        error: new Error('reverted'),
+        decoded: [decodedEntry('ERC20InsufficientAllowance(address,address,uint256,uint256)')],
+      },
+    } as never
+
+    expect(isNonBlockingApprovalSimulationFailure(prepared, result)).toBe(true)
+  })
+
+  it('requires approval or insufficiency context', () => {
+    const result = {
+      failedBatchItems: [{
+        index: 0,
+        error: '0x',
+        decodedError: [decodedEntry('E_TransferFromFailed()')],
+      }],
+    } as never
+
+    expect(isNonBlockingApprovalSimulationFailure(batchOnlyPlan, result)).toBe(false)
+  })
+
+  it('uses insufficiency diagnostics as context for approval-like failures', () => {
+    const result = {
+      failedBatchItems: [{
+        index: 0,
+        error: '0x',
+        decodedError: [decodedEntry('SAFE_TRANSFER_FROM_FAILED()')],
+      }],
+      insufficientDirectAllowances: [{
+        token: '0x1111111111111111111111111111111111111111',
+        amount: 1n,
+      }],
+    } as never
+
+    expect(isNonBlockingApprovalSimulationFailure(batchOnlyPlan, result)).toBe(true)
+  })
+
+  it('does not let derived account status failures block approval-like failed batch items', () => {
+    const result = {
+      failedBatchItems: [{
+        index: 0,
+        error: '0x9773bb71',
+        decodedError: [
+          decodedEntry('E_TransferFromFailed(bytes,bytes)'),
+          decodedEntry('AllowanceExpired(uint256)'),
+          decodedEntry('Expired()'),
+          decodedEntry('ERC20InsufficientAllowance(address,uint256,uint256)'),
+        ],
+      }],
+      accountStatusErrors: [{
+        account: '0x2222222222222222222222222222222222222222',
+        decoded: [decodedEntry('E_AccountLiquidity()')],
+      }],
+      insufficientPermit2Allowances: [{
+        token: '0x1111111111111111111111111111111111111111',
+        amount: 1n,
+      }],
+      insufficientDirectAllowances: [{
+        token: '0x1111111111111111111111111111111111111111',
+        amount: 1n,
+      }],
+    } as never
+
+    expect(isNonBlockingApprovalSimulationFailure(requiredApprovalPlan, result)).toBe(true)
+  })
+
+  it('keeps account status failures blocking when there is no approval-like primary failure', () => {
+    const result = {
+      accountStatusErrors: [{
+        account: '0x2222222222222222222222222222222222222222',
+        decoded: [decodedEntry('E_AccountLiquidity()')],
+      }],
+    } as never
+
+    expect(isNonBlockingApprovalSimulationFailure(requiredApprovalPlan, result)).toBe(false)
+  })
+
+  it('keeps non-approval protocol errors blocking', () => {
+    const result = {
+      failedBatchItems: [{
+        index: 0,
+        error: '0x',
+        decodedError: [decodedEntry('E_AccountLiquidity()')],
+      }],
+    } as never
+
+    expect(isNonBlockingApprovalSimulationFailure(requiredApprovalPlan, result)).toBe(false)
+  })
+
+  it('does not block thrown approval-like simulation errors when the plan has approvals', async () => {
+    expect(
+      await isNonBlockingApprovalSimulationError(
+        requiredApprovalPlan,
+        new Error('execution reverted: E_TransferFromFailed'),
+      ),
+    ).toBe(true)
+  })
+
+  it('requires approval context for thrown approval-like simulation errors', async () => {
+    expect(
+      await isNonBlockingApprovalSimulationError(
+        batchOnlyPlan,
+        new Error('execution reverted: E_TransferFromFailed'),
+      ),
+    ).toBe(false)
+  })
+
+  it('keeps thrown non-approval protocol errors blocking', async () => {
+    expect(
+      await isNonBlockingApprovalSimulationError(
+        requiredApprovalPlan,
+        new Error('execution reverted: E_AccountLiquidity'),
+      ),
+    ).toBe(false)
   })
 })
 

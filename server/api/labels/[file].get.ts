@@ -3,6 +3,7 @@ import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { createInFlightDedup } from '~/server/utils/in-flight'
+import { resolveLabelsFileUrl } from '~/server/utils/labels-base-url'
 import { reportStatus } from '~/server/utils/log'
 
 const CACHE_TTL_MS = 300_000
@@ -122,14 +123,7 @@ export function validateNode(node: unknown, path: string): void {
 }
 
 function getUpstreamUrl(scope: LabelScope, file: string): string {
-  const baseUrl = (process.env.NUXT_PUBLIC_CONFIG_LABELS_BASE_URL || '').trim().replace(/\/+$/, '')
-  if (baseUrl) {
-    return `${baseUrl}/${scope}/${file}`
-  }
-
-  const repo = process.env.NUXT_PUBLIC_CONFIG_LABELS_REPO || 'euler-xyz/euler-labels'
-  const branch = process.env.NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH || 'master'
-  return `https://raw.githubusercontent.com/${repo}/refs/heads/${branch}/${scope}/${file}`
+  return resolveLabelsFileUrl(scope, file)
 }
 
 /**

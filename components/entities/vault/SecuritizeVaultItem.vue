@@ -3,6 +3,7 @@ import type { SecuritizeCollateralVault, EVault } from '@eulerxyz/euler-v2-sdk'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
+import { isVaultGovernanceLimited } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
@@ -22,7 +23,7 @@ const entities = useEulerEntitiesOfVault(vault as unknown as EVault)
 
 const isUnverified = computed(() => !isVerifiedVault(vault.address))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault as unknown as EVault))
-const isGovernanceLimited = computed(() => product.isGovernanceLimited && isGovernorVerified.value)
+const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
 const entityName = computed(() => {
   if (!isGovernorVerified.value || entities.length === 0) return ''
   if (entities.length === 1) return entities[0].name

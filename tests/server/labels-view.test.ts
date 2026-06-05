@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildTokenLogoMap } from '~/server/utils/labels-view'
+import { buildProductDescriptors, buildTokenLogoMap } from '~/server/utils/labels-view'
 
 describe('buildTokenLogoMap', () => {
   it('keeps only http(s) logo URLs', () => {
@@ -18,5 +18,30 @@ describe('buildTokenLogoMap', () => {
     expect(map.has('0x4444444444444444444444444444444444444444')).toBe(false)
     expect(map.has('0x5555555555555555555555555555555555555555')).toBe(false)
     expect(map.has('0x6666666666666666666666666666666666666666')).toBe(false)
+  })
+})
+
+describe('buildProductDescriptors', () => {
+  it('applies governance-limited vault override tags per vault', () => {
+    const limitedVault = '0x0000000000000000000000000000000000000701'
+    const standardVault = '0x0000000000000000000000000000000000000702'
+
+    const { productByVault } = buildProductDescriptors({
+      test: {
+        name: 'Test',
+        description: '',
+        entity: [],
+        url: '',
+        vaults: [limitedVault, standardVault],
+        vaultOverrides: {
+          [limitedVault]: {
+            tags: ['governance limited'],
+          },
+        },
+      },
+    })
+
+    expect(productByVault.get(limitedVault)?.governanceLimited).toBe(true)
+    expect(productByVault.get(standardVault)?.governanceLimited).toBe(false)
   })
 })

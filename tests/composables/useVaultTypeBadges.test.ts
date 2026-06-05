@@ -11,17 +11,9 @@ const state = vi.hoisted(() => ({
   entityGovernors: new Set<string>(),
   governanceLimitedVaults: new Set<string>(),
   keyringVaults: new Set<string>(),
+  cyclicalNoteVaults: new Set<string>(),
   verifiedEarnVaults: new Set<string>(),
   verifiedVaults: new Set<string>(),
-}))
-
-vi.mock('~/composables/useEulerLabels', () => ({
-  useEulerProductOfVault: (addressRef: { value?: string } | string) => ({
-    get isGovernanceLimited() {
-      const address = typeof addressRef === 'string' ? addressRef : addressRef.value
-      return !!address && state.governanceLimitedVaults.has(address.toLowerCase())
-    },
-  }),
 }))
 
 vi.mock('~/utils/eulerLabelsUtils', () => ({
@@ -31,6 +23,8 @@ vi.mock('~/utils/eulerLabelsUtils', () => ({
     vault.governorAdmin && state.entityGovernors.has(vault.governorAdmin.toLowerCase()) ? [{}] : [],
   isVaultKeyring: (address: string) => state.keyringVaults.has(address.toLowerCase()),
   isVaultAccessControlled: (address: string) => state.accessControlVaults.has(address.toLowerCase()),
+  isVaultGovernanceLimited: (address: string) => state.governanceLimitedVaults.has(address.toLowerCase()),
+  isVaultCyclicalNote: (address: string) => state.cyclicalNoteVaults.has(address.toLowerCase()),
 }))
 
 vi.mock('~/composables/useVaultRegistry', () => ({
@@ -85,6 +79,7 @@ describe('useVaultTypeBadges', () => {
     state.entityGovernors.clear()
     state.governanceLimitedVaults.clear()
     state.keyringVaults.clear()
+    state.cyclicalNoteVaults.clear()
     state.verifiedEarnVaults.clear()
     state.verifiedVaults.clear()
     setupVaultsMock()
@@ -126,14 +121,10 @@ describe('useVaultTypeBadges', () => {
     expect(hasSummaryBadges.value).toBe(true)
   })
 
-  it.each([
-    INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY,
-    INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY_MONTHLY,
-  ])('summarizes verified cyclical IRM type %s as cyclical note', (interestRateModelType) => {
-    const vault = makeVault({
-      interestRateModel: makeInterestRateModel(interestRateModelType),
-    })
+  it('summarizes verified cyclical-note-tagged vaults as cyclical note', () => {
+    const vault = makeVault()
     verify(vault)
+    state.cyclicalNoteVaults.add(vault.address.toLowerCase())
 
     const { badges, summaryBadges } = useVaultTypeBadges(shallowRef(vault))
 
@@ -141,9 +132,9 @@ describe('useVaultTypeBadges', () => {
     expect(summaryBadges.value).toEqual(['cyclicalNote'])
   })
 
-  it('does not treat KINKY IRM as cyclical note', () => {
+  it('does not treat cyclical IRM type as cyclical note without a label tag', () => {
     const vault = makeVault({
-      interestRateModel: makeInterestRateModel(INTEREST_RATE_MODEL_TYPE.KINKY),
+      interestRateModel: makeInterestRateModel(INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY),
     })
     verify(vault)
 
