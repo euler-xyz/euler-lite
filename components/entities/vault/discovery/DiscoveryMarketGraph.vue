@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import type { MarketGroup, MiniDiagramData } from '~/entities/lend-discovery'
-import { isCyclicalNoteVault } from '~/utils/vault/classification'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
-import { isVaultDeprecated, isVaultKeyring } from '~/utils/eulerLabelsUtils'
+import { isVaultDeprecated, isVaultKeyring, isVaultCyclicalNote } from '~/utils/eulerLabelsUtils'
 import { stringToColor } from '~/utils/string-utils'
-import { getEnlargedDiagram, getArrow, getLabelPosition, getGraphConnectedAddresses, isNodeRampingDown, isExternalCollateral, findVault } from '~/utils/discoveryCalculations'
+import { getEnlargedDiagram, getArrow, getLabelPosition, getGraphConnectedAddresses, isNodeRampingDown, isExternalCollateral } from '~/utils/discoveryCalculations'
 
 const props = defineProps<{
   market: MarketGroup
@@ -35,7 +34,7 @@ const isGraphEdgeHighlighted = (fromAddr: string, toAddr: string): boolean => {
 }
 
 const isNodeCyclicalNote = (address: string): boolean => {
-  return isCyclicalNoteVault(findVault(props.market, address))
+  return isVaultCyclicalNote(address)
 }
 </script>
 

@@ -3,6 +3,7 @@ import { __setEulerLabelsDataForTest } from '~/composables/useEulerLabels'
 import {
   getActiveProductVaultAddresses,
   getUniqueEntitiesByVaults,
+  isVaultCyclicalNote,
   isVaultGovernanceLimited,
   isVaultHighUtilisationWarningSuppressed,
   isVaultRecentlyAdded,
@@ -232,5 +233,49 @@ describe('isVaultHighUtilisationWarningSuppressed', () => {
     })
 
     expect(isVaultHighUtilisationWarningSuppressed(address)).toBe(true)
+  })
+})
+
+describe('isVaultCyclicalNote', () => {
+  it('checks cyclical-note product tags', () => {
+    const address = '0x0000000000000000000000000000000000000401'
+
+    __setEulerLabelsDataForTest({
+      products: {
+        test: {
+          name: 'Test',
+          description: '',
+          entity: [],
+          url: '',
+          vaults: [normalizeAddress(address)],
+          tags: ['cyclical note'],
+        },
+      },
+    })
+
+    expect(isVaultCyclicalNote(address)).toBe(true)
+  })
+
+  it('checks cyclical-note vault override tags', () => {
+    const address = '0x0000000000000000000000000000000000000402'
+
+    __setEulerLabelsDataForTest({
+      products: {
+        test: {
+          name: 'Test',
+          description: '',
+          entity: [],
+          url: '',
+          vaults: [normalizeAddress(address)],
+          vaultOverrides: {
+            [normalizeAddress(address)]: {
+              tags: ['cyclical note'],
+            },
+          },
+        },
+      },
+    })
+
+    expect(isVaultCyclicalNote(address)).toBe(true)
   })
 })

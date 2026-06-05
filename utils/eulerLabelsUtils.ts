@@ -200,6 +200,15 @@ export const isVaultHighUtilisationWarningSuppressed = (vaultAddress: string): b
   )
 }
 
+export const isVaultCyclicalNote = (vaultAddress: string): boolean => {
+  const normalized = normalizeAddress(vaultAddress)
+  const product = getEulerLabelProductByVault(labels(), normalized) as EulerLabelProduct | undefined
+  return (
+    productHasTag(product, 'cyclical note')
+    || vaultOverrideHasTag(product, normalized, 'cyclical note')
+  )
+}
+
 export type EulerLabelEntityVaultLike = {
   address?: string
   governorAdmin?: string

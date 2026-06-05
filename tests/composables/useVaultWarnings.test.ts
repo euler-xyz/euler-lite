@@ -41,10 +41,24 @@ describe('getUtilisationWarning', () => {
   })
 
   it.each(['borrow', 'lend', 'general'] as const)(
-    'returns target utilisation info for highly utilised cyclical note markets in %s context',
+    'returns target utilisation info for highly utilised cyclical-note-tagged markets in %s context',
     (context) => {
+      const address = normalizeAddress('0x0000000000000000000000000000000000000501')
+      __setEulerLabelsDataForTest({
+        products: {
+          test: {
+            name: 'Test',
+            description: '',
+            entity: [],
+            url: '',
+            vaults: [address],
+            tags: ['cyclical note'],
+          },
+        },
+      })
+
       const warning = getUtilisationWarning(
-        makeUtilisedVault(100n, 99n, INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY),
+        makeUtilisedVault(100n, 99n, INTEREST_RATE_MODEL_TYPE.KINK, address),
         context,
       )
 
@@ -58,8 +72,22 @@ describe('getUtilisationWarning', () => {
   )
 
   it('keeps liquidity constraint copy for highly utilised cyclical repay sources', () => {
+    const address = normalizeAddress('0x0000000000000000000000000000000000000502')
+    __setEulerLabelsDataForTest({
+      products: {
+        test: {
+          name: 'Test',
+          description: '',
+          entity: [],
+          url: '',
+          vaults: [address],
+          tags: ['cyclical note'],
+        },
+      },
+    })
+
     const warning = getUtilisationWarning(
-      makeUtilisedVault(100n, 99n, INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY),
+      makeUtilisedVault(100n, 99n, INTEREST_RATE_MODEL_TYPE.KINK, address),
       'repay',
     )
 
@@ -71,8 +99,22 @@ describe('getUtilisationWarning', () => {
   })
 
   it('does not show target utilisation info below the shared utilisation threshold', () => {
+    const address = normalizeAddress('0x0000000000000000000000000000000000000503')
+    __setEulerLabelsDataForTest({
+      products: {
+        test: {
+          name: 'Test',
+          description: '',
+          entity: [],
+          url: '',
+          vaults: [address],
+          tags: ['cyclical note'],
+        },
+      },
+    })
+
     const warning = getUtilisationWarning(
-      makeUtilisedVault(100n, 94n, INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY),
+      makeUtilisedVault(100n, 94n, INTEREST_RATE_MODEL_TYPE.KINK, address),
       'borrow',
     )
 
@@ -125,6 +167,19 @@ describe('getUtilisationWarning', () => {
 
     const warning = getUtilisationWarning(
       makeUtilisedVault(100n, 99n, INTEREST_RATE_MODEL_TYPE.KINK, address),
+      'borrow',
+    )
+
+    expect(warning).toEqual({
+      level: 'critical',
+      title: 'Critical utilisation',
+      message: 'Utilisation is critically high. Interest rates are very elevated. Available liquidity is near zero.',
+    })
+  })
+
+  it('does not use cyclical IRM type as the target-utilisation classifier', () => {
+    const warning = getUtilisationWarning(
+      makeUtilisedVault(100n, 99n, INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY),
       'borrow',
     )
 

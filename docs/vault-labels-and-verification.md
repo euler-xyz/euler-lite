@@ -83,12 +83,12 @@ Structure: `Record<string, Product>` — keys are product identifiers (e.g. `"eu
 | `vaults` | `string[]` | Yes | Active vault addresses (checksummed). These become "verified" vaults in the app. |
 | `deprecatedVaults` | `string[]` | No | Phased-out vault addresses. Still verified and viewable in portfolio, but hidden from discovery tables and shown with a deprecation warning. |
 | `deprecationReason` | `string` | No | Explanation for deprecation. Shown in a warning banner on vault overview. URLs are auto-linked. Also accepts legacy key `deprecateReason`. |
-| `tags` | `string[]` | No | Product classification tags. `keyring` marks all product vaults as requiring Keyring identity verification; `access control` marks vaults gated by an allowlist hook; `governance limited` shows "Limited risk management" and fades the risk manager entity display; `suppress high utilisation warning` hides the high-utilisation warning while leaving critical utilisation warnings visible. |
+| `tags` | `string[]` | No | Product classification tags. `keyring` marks all product vaults as requiring Keyring identity verification; `access control` marks vaults gated by an allowlist hook; `governance limited` shows "Limited risk management" and fades the risk manager entity display; `suppress high utilisation warning` hides the high-utilisation warning while leaving critical utilisation warnings visible; `cyclical note` shows cyclical-note badges, target-utilisation copy, and the cyclical IRM overview. |
 | `notExplorable` | `boolean` | No | If `true`, hides **all** vaults in this product from lend, borrow, and explore discovery pages. Takes precedence over per-vault `notExplorableLend`/`notExplorableBorrow`. Vaults remain accessible via direct URL. |
 | `block` | `string[]` | No | Country codes or group aliases (`EU`, `EEA`, `EFTA`) for hard geo-blocking. See [geo-blocking.md](./geo-blocking.md). |
 | `vaultOverrides` | `Record<string, VaultOverride>` | No | Per-vault customizations keyed by checksummed address. See next section. |
 
-Classification markers use a clean-cut tags schema. Product `isGovernanceLimited`, product `recentlyAddedVaults`, and earn-vault `recentlyAdded` are not supported by the current labels contract.
+Classification markers use `tags`. Product `isGovernanceLimited`, product `recentlyAddedVaults`, and earn-vault `recentlyAdded` are not supported by the current labels contract.
 
 #### Vault Override Fields
 
@@ -103,7 +103,7 @@ Per-vault overrides allow customizing behavior for individual vaults within a pr
 | `restricted` | `string[]` | Soft geo-restriction for this vault only. No product-level fallback. See [geo-blocking.md](./geo-blocking.md). |
 | `notExplorableLend` | `boolean` | If `true`, hides this vault from the **lend** discovery page. Product-level `notExplorable` takes precedence. |
 | `notExplorableBorrow` | `boolean` | If `true`, hides this vault from the **borrow** discovery page — both as a borrow vault and as collateral. Product-level `notExplorable` takes precedence. |
-| `tags` | `string[]` | Vault classification tags. `keyring`, `access control`, `recently added`, and `suppress high utilisation warning` apply to this specific vault. See [keyring-hooks.md](./keyring-hooks.md). |
+| `tags` | `string[]` | Vault classification tags. `keyring`, `access control`, `recently added`, `suppress high utilisation warning`, and `cyclical note` apply to this specific vault. See [keyring-hooks.md](./keyring-hooks.md). |
 
 **Precedence rules**:
 - `block`: vault override replaces product-level (not additive)
