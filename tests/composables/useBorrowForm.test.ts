@@ -42,6 +42,7 @@ const { USER, SUB_ACCOUNT_A, SUB_ACCOUNT_B, VAULT, vault, planAccount, mocks } =
       preloadSubAccountSnapshot: vi.fn(),
       fetchSingleBalance: vi.fn(async () => 0n),
       runSimulation: vi.fn(),
+      modalOpen: vi.fn(),
     },
   }
 })
@@ -53,7 +54,7 @@ vi.mock('#components', () => ({
 
 vi.mock('~/components/ui/composables/useModal', () => ({
   useModal: () => ({
-    open: vi.fn(),
+    open: mocks.modalOpen,
     close: vi.fn(),
   }),
 }))
@@ -288,5 +289,19 @@ describe('useBorrowForm savings collateral', () => {
     expect(form.borrowActiveBalance.value).toBe(0n)
     expect(form.errorText.value).toBe('Savings position not found')
     expect(form.isSubmitDisabled.value).toBe(true)
+  })
+
+  it('opens the review modal after a non-blocking borrow simulation', async () => {
+    const positions = shallowRef<PortfolioSavingsPosition<VaultEntity>[]>([])
+    const form = makeForm(positions)
+    mocks.planBorrow.mockResolvedValue([{ type: 'requiredApproval' }, { type: 'evcBatch' }])
+    mocks.runSimulation.mockResolvedValue(true)
+
+    form.collateralAmount.value = '1'
+    form.borrowAmount.value = '1'
+    await form.submit()
+
+    expect(mocks.runSimulation).toHaveBeenCalled()
+    expect(mocks.modalOpen).toHaveBeenCalled()
   })
 })

@@ -1,5 +1,10 @@
 import type { SimulationStateOverrideOptions, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
-import { formatSimulationFailure, getTxErrorMessage } from '~/utils/tx-errors'
+import {
+  formatSimulationFailure,
+  getTxErrorMessage,
+  isNonBlockingApprovalSimulationError,
+  isNonBlockingApprovalSimulationFailure,
+} from '~/utils/tx-errors'
 
 export const useTransactionPlanSimulation = () => {
   const { simulatePlan, simulatePreparedPlan } = useEulerTx()
@@ -10,7 +15,10 @@ export const useTransactionPlanSimulation = () => {
     simulationError.value = ''
   }
 
-  const handleResult = (result: Awaited<ReturnType<typeof simulatePlan>>) => {
+  const handleResult = (
+    plan: TransactionPlan | TransactionPlanPrepared,
+    result: Awaited<ReturnType<typeof simulatePlan>>,
+  ) => {
     // canExecute is false when EITHER the simulated batch reverted OR the
     // user is just missing approvals/balances (diagnostics). We only want to
     // block Review on real reverts — the modal handles approval prompts and
@@ -22,6 +30,7 @@ export const useTransactionPlanSimulation = () => {
         || !!result.vaultStatusErrors?.length
         || !!result.simulationError
     if (hasHardFailure) {
+      if (isNonBlockingApprovalSimulationFailure(plan, result)) return true
       simulationError.value = formatSimulationFailure(result)
       return false
     }
@@ -32,9 +41,10 @@ export const useTransactionPlanSimulation = () => {
     clearSimulationError()
     isSimulating.value = true
     try {
-      return handleResult(await simulatePlan(plan, stateOverrideOptions))
+      return handleResult(plan, await simulatePlan(plan, stateOverrideOptions))
     }
     catch (e) {
+      if (await isNonBlockingApprovalSimulationError(plan, e)) return true
       // Transport / wagmi / SDK-side errors (RPC down, signTypedData rejected, etc.)
       simulationError.value = await getTxErrorMessage(e)
       return false
@@ -48,9 +58,10 @@ export const useTransactionPlanSimulation = () => {
     clearSimulationError()
     isSimulating.value = true
     try {
-      return handleResult(await simulatePreparedPlan(prepared, stateOverrideOptions))
+      return handleResult(prepared, await simulatePreparedPlan(prepared, stateOverrideOptions))
     }
     catch (e) {
+      if (await isNonBlockingApprovalSimulationError(prepared, e)) return true
       simulationError.value = await getTxErrorMessage(e)
       return false
     }
