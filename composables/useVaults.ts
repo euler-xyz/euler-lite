@@ -974,9 +974,11 @@ const getBorrowVaultPair = async (
   const collateralAddr = getAddress(collateralAddress)
   const borrowAddr = getAddress(borrowAddress)
 
-  // Wait for escrow vaults to load before checking registry
-  if (!isEscrowLoadedOnce.value) {
-    await until(isEscrowLoadedOnce).toBe(true)
+  // Wait for snapshot enrichment / RPC refresh before resolving a one-time
+  // direct-route pair; otherwise the page can capture vault instances before
+  // rewards and market data have been populated.
+  if (!isMarketDataResolved.value) {
+    await until(isMarketDataResolved).toBe(true)
   }
 
   const borrowType = getType(borrowAddr)
