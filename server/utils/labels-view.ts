@@ -36,6 +36,7 @@ export interface VaultOverride {
   description?: unknown
   portfolioNotice?: unknown
   deprecationReason?: unknown
+  tags?: unknown
 }
 
 export interface EntityEntryFull extends EulerLabelEntity {
@@ -117,6 +118,14 @@ function hasTag(tags: unknown, tag: string): boolean {
   return Array.isArray(tags) && tags.includes(tag)
 }
 
+function overrideHasTag(
+  overrides: Record<string, VaultOverride>,
+  address: Address,
+  tag: string,
+): boolean {
+  return hasTag(overrides[address]?.tags, tag)
+}
+
 // SDK builder shared with vaults-cache via server/utils/sdk-server.ts.
 const getSdk = (chainId: number): Promise<EulerSDK> => getServerSdk(chainId)
 
@@ -125,7 +134,7 @@ async function fetchTokenList(chainId: number): Promise<TokenListEntry[]> {
   return Array.isArray(data?.tokens) ? data.tokens : []
 }
 
-function buildProductDescriptors(products: Record<string, ProductEntryFull>): {
+export function buildProductDescriptors(products: Record<string, ProductEntryFull>): {
   productByVault: Map<Address, ProductDescriptor>
   deprecatedSet: Set<Address>
 } {
@@ -152,14 +161,18 @@ function buildProductDescriptors(products: Record<string, ProductEntryFull>): {
       entityKeys: declaredKeysOf(product.entity),
       vaultOverrides: overrides,
     }
+    const descriptorForVault = (addr: Address): ProductDescriptor => ({
+      ...desc,
+      governanceLimited: desc.governanceLimited || overrideHasTag(overrides, addr, 'governance limited'),
+    })
     for (const v of product.vaults ?? []) {
       const addr = tryChecksum(v)
-      if (addr) productByVault.set(addr, desc)
+      if (addr) productByVault.set(addr, descriptorForVault(addr))
     }
     for (const v of product.deprecatedVaults ?? []) {
       const addr = tryChecksum(v)
       if (addr) {
-        productByVault.set(addr, desc)
+        productByVault.set(addr, descriptorForVault(addr))
         deprecatedSet.add(addr)
       }
     }

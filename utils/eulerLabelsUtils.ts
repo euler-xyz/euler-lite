@@ -188,7 +188,10 @@ export const isVaultAccessControlled = (vaultAddress: string): boolean =>
 export const isVaultGovernanceLimited = (vaultAddress: string): boolean => {
   const normalized = normalizeAddress(vaultAddress)
   const product = getEulerLabelProductByVault(labels(), normalized) as EulerLabelProduct | undefined
-  return productHasTag(product, 'governance limited')
+  return (
+    productHasTag(product, 'governance limited')
+    || vaultOverrideHasTag(product, normalized, 'governance limited')
+  )
 }
 
 export const isVaultHighUtilisationWarningSuppressed = (vaultAddress: string): boolean => {

@@ -104,11 +104,11 @@ export const getUtilisationWarning = (
   const level = getUtilisationLevel(utilisation)
   if (!level) return null
 
-  if (level === 'high' && isVaultHighUtilisationWarningSuppressed(vault.address)) return null
-
   if (context !== 'repay' && isVaultCyclicalNote(vault.address)) {
     return { level: 'info', tone: 'success', ...targetUtilisationMessage }
   }
+
+  if (level === 'high' && isVaultHighUtilisationWarningSuppressed(vault.address)) return null
 
   const { title, message } = utilisationMessages[context][level]
   return { level, title, message }

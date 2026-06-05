@@ -190,6 +190,29 @@ describe('isVaultGovernanceLimited', () => {
 
     expect(isVaultGovernanceLimited(address)).toBe(true)
   })
+
+  it('checks governance-limited vault override tags', () => {
+    const address = '0x0000000000000000000000000000000000000302'
+
+    __setEulerLabelsDataForTest({
+      products: {
+        test: {
+          name: 'Test',
+          description: '',
+          entity: [],
+          url: '',
+          vaults: [normalizeAddress(address)],
+          vaultOverrides: {
+            [normalizeAddress(address)]: {
+              tags: ['governance limited'],
+            },
+          },
+        },
+      },
+    })
+
+    expect(isVaultGovernanceLimited(address)).toBe(true)
+  })
 })
 
 describe('isVaultHighUtilisationWarningSuppressed', () => {

@@ -149,6 +149,35 @@ describe('getUtilisationWarning', () => {
     expect(warning).toBeNull()
   })
 
+  it('keeps target utilisation info when cyclical-note vaults also suppress high utilisation warnings', () => {
+    const address = normalizeAddress('0x0000000000000000000000000000000000000504')
+
+    __setEulerLabelsDataForTest({
+      products: {
+        test: {
+          name: 'Test',
+          description: '',
+          entity: [],
+          url: '',
+          vaults: [address],
+          tags: ['cyclical note', 'suppress high utilisation warning'],
+        },
+      },
+    })
+
+    const warning = getUtilisationWarning(
+      makeUtilisedVault(100n, 95n, INTEREST_RATE_MODEL_TYPE.KINK, address),
+      'borrow',
+    )
+
+    expect(warning).toEqual({
+      level: 'info',
+      tone: 'success',
+      title: 'Target utilisation',
+      message: 'Cyclical Note markets are designed to run near full utilization. Withdrawal liquidity opens up at the end of each cycle, when borrowers are pushed to repay.',
+    })
+  })
+
   it('keeps critical utilisation warnings for tagged vaults', () => {
     const address = normalizeAddress('0x0000000000000000000000000000000000000502')
 
