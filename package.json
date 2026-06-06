@@ -39,7 +39,6 @@
     "@nuxt/eslint": "1.15.2",
     "@reown/appkit": "1.8.19",
     "@reown/appkit-adapter-wagmi": "1.8.19",
-    "@sentry/nuxt": "10.51.0",
     "@tanstack/query-core": "5.100.9",
     "@tanstack/vue-query": "5.100.9",
     "@vueuse/nuxt": "14.3.0",

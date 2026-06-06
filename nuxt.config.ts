@@ -3,7 +3,7 @@
 const themeBootstrapScript = '(function(){var theme="dark";try{theme=localStorage.getItem("theme")==="light"?"light":"dark"}catch(e){}document.documentElement.setAttribute("data-theme",theme);document.documentElement.style.colorScheme=theme})()'
 
 export default defineNuxtConfig({
-  modules: ['@nuxtjs/tailwindcss', '@nuxt/eslint', '@gvade/nuxt3-svg-sprite', '@vueuse/nuxt', '@sentry/nuxt/module'],
+  modules: ['@nuxtjs/tailwindcss', '@nuxt/eslint', '@gvade/nuxt3-svg-sprite', '@vueuse/nuxt'],
   ssr: false,
 
   components: [
@@ -169,12 +169,7 @@ export default defineNuxtConfig({
       browserVaultSource: '',
       executionRecordSdkQueries: '',
       swapApiUrl: '',
-      sentryDsn: '', // set via NUXT_PUBLIC_SENTRY_DSN
     },
-  },
-  sourcemap: {
-    server: false,
-    client: process.env.SENTRY_AUTH_TOKEN ? 'hidden' : false,
   },
 
   devServer: {
@@ -253,21 +248,6 @@ export default defineNuxtConfig({
 
   telemetry: false,
   eslint: { config: { stylistic: true } },
-
-  ...(process.env.SENTRY_AUTH_TOKEN
-    ? {
-        sentry: {
-          sourceMapsUploadOptions: {
-            org: 'euler',
-            project: 'euler-lite',
-            authToken: process.env.SENTRY_AUTH_TOKEN,
-            sourcemaps: {
-              filesToDeleteAfterUpload: ['**/*.map'],
-            },
-          },
-        },
-      }
-    : {}),
 
   svgSprite: {
     elementClass: 'icon',
