@@ -60,6 +60,7 @@
   "devDependencies": {
     "@nuxtjs/tailwindcss": "6.14.0",
     "@types/luxon": "3.7.1",
+    "@types/node": "24.12.4",
     "eslint": "9.39.4",
     "lint-staged": "16.4.0",
     "playwright": "1.59.1",
