@@ -61,7 +61,7 @@ const pairSymbols = computed(() => `External collateral/${borrowSymbol.value}`)
 
 <template>
   <div
-    class="block no-underline bg-surface rounded-xl border border-warning-200 shadow-card"
+    class="block no-underline bg-surface rounded-xl border border-line-subtle shadow-card"
     data-id="portfolio-list-item"
     data-list="borrow"
     data-state="unsupported-collateral"
