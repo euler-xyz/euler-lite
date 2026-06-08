@@ -161,18 +161,19 @@ const walletSwap = useWalletSwapRepay({
   borrowRewardApy,
   oraclePriceRatio,
 })
+const canUseWalletSwap = computed(() => Boolean(collateralVault.value) && walletSwap.needsSwap.value)
 
 const { guardWithPriceImpact: guardWithWalletSwapPriceImpact } = usePriceImpactGate({
   directPriceImpact: walletSwap.swapPriceImpact,
   shouldGateUnknown: computed(() =>
-    walletSwap.needsSwap.value
+    canUseWalletSwap.value
     && walletSwap.quotes.selectedQuote.value !== null
     && walletSwap.swapPriceImpact.value === null,
   ),
 })
 
 const isWalletSwapRestricted = computed(() =>
-  walletSwap.needsSwap.value && isVaultRestrictedByCountry(
+  canUseWalletSwap.value && isVaultRestrictedByCountry(
     borrowVault.value?.address || '',
     { counterpart: walletSwap.selectedAsset.value },
   ),
@@ -183,7 +184,7 @@ const isWalletSwapRestricted = computed(() =>
 // Soft-restrict does not apply: pay-with reduces exposure to that asset.
 // Pass the asset object (not just address) so symbol/name pattern rules apply.
 const isPayWithAssetBlocked = computed(() =>
-  walletSwap.needsSwap.value && isAssetBlockedByCountry(walletSwap.selectedAsset.value),
+  canUseWalletSwap.value && isAssetBlockedByCountry(walletSwap.selectedAsset.value),
 )
 
 const collateral = useCollateralSwapRepay({
@@ -239,8 +240,10 @@ const { guardWithPriceImpact: guardWithSavingsPriceImpact } = usePriceImpactGate
 const formTabs = computed(() => {
   const tabs = [
     { label: 'From wallet', value: 'wallet' },
-    { label: 'From collateral', value: 'collateral' },
   ]
+  if (collateralVault.value) {
+    tabs.push({ label: 'From collateral', value: 'collateral' })
+  }
   if (savings.savingsPositions.value.length > 0) {
     tabs.push({ label: 'From savings', value: 'savings' })
   }
@@ -251,7 +254,7 @@ const formTabs = computed(() => {
 const reviewRepayLabel = 'Review Repay'
 const reviewRepayDisabled = computed(() => {
   if (formTab.value === 'wallet') {
-    return walletSwap.needsSwap.value
+    return canUseWalletSwap.value
       ? (isWalletSwapRestricted.value || isPayWithAssetBlocked.value || walletSwap.isSubmitDisabled.value)
       : wallet.isSubmitDisabled.value
   }
@@ -261,7 +264,7 @@ const reviewRepayDisabled = computed(() => {
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (formTab.value === 'wallet') {
-    if (walletSwap.needsSwap.value) {
+    if (canUseWalletSwap.value) {
       if (isPayWithAssetBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
       if (isWalletSwapRestricted.value) return { message: 'Swapping into this vault is not available in your region', variant: 'warning' }
       if (walletSwap.disabledReason.value) return { message: walletSwap.disabledReason.value, variant: 'error' }
@@ -271,8 +274,8 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
       if (wallet.estimatesError.value) return { message: wallet.estimatesError.value, variant: 'error' }
     }
     if (simulationError.value) return { message: simulationError.value, variant: 'error' }
-    if (walletSwap.needsSwap.value && walletSwap.quotes.isLoading.value && +walletSwap.amount.value > 0) return { message: 'Fetching swap quotes...', variant: 'warning' }
-    if (walletSwap.needsSwap.value && !walletSwap.quotes.selectedQuote.value && +walletSwap.amount.value > 0) return { message: 'Select a swap quote to continue', variant: 'warning' }
+    if (canUseWalletSwap.value && walletSwap.quotes.isLoading.value && +walletSwap.amount.value > 0) return { message: 'Fetching swap quotes...', variant: 'warning' }
+    if (canUseWalletSwap.value && !walletSwap.quotes.selectedQuote.value && +walletSwap.amount.value > 0) return { message: 'Select a swap quote to continue', variant: 'warning' }
     return undefined
   }
   if (formTab.value === 'savings') {
@@ -291,7 +294,7 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 
 const activeHookWarning = computed(() => {
   if (formTab.value === 'wallet') {
-    return walletSwap.needsSwap.value
+    return canUseWalletSwap.value
       ? walletSwap.hookWarning.value
       : wallet.hookWarning.value
   }
@@ -302,7 +305,7 @@ const activeHookWarning = computed(() => {
 const onSubmitForm = async () => {
   if (isOperationBlocked.value) return
   if (formTab.value === 'wallet') {
-    if (walletSwap.needsSwap.value) {
+    if (canUseWalletSwap.value) {
       if (isWalletSwapRestricted.value || isPayWithAssetBlocked.value) return
       await guardWithWalletSwapPriceImpact(() => walletSwap.submit())
     }
@@ -323,6 +326,7 @@ const openSlippageSettings = () => {
 }
 
 const openWalletSwapTokenSelector = () => {
+  if (!collateralVault.value) return
   modal.open(SwapTokenSelector, {
     props: {
       currentAssetAddress: walletSwap.selectedAsset.value?.address || borrowVault.value?.asset.address,
@@ -439,8 +443,16 @@ watch(formTab, () => {
         <template v-if="formTab === 'wallet'">
           <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
             <div class="flex flex-col gap-16 w-full">
+              <UiAlert
+                v-if="!collateralVault"
+                title="External collateral"
+                description="Collateral details are unavailable for this position, but you can still repay the debt from your wallet."
+                variant="warning"
+                size="compact"
+              />
+
               <!-- Direct repay (no swap) -->
-              <template v-if="!walletSwap.needsSwap.value">
+              <template v-if="!canUseWalletSwap">
                 <AssetInput
                   v-if="borrowVault?.asset"
                   v-model="wallet.amount.value"
@@ -512,7 +524,10 @@ watch(formTab, () => {
               </template>
 
               <!-- Pay with token selector -->
-              <div class="flex items-center gap-8">
+              <div
+                v-if="collateralVault"
+                class="flex items-center gap-8"
+              >
                 <span class="text-p3 text-content-tertiary">Pay with</span>
                 <button
                   type="button"
@@ -533,7 +548,7 @@ watch(formTab, () => {
 
               <!-- Swap route selector (only when swapping) -->
               <SwapRouteSelector
-                v-if="walletSwap.needsSwap.value"
+                v-if="canUseWalletSwap"
                 :items="walletSwap.swapRouteItems.value"
                 :selected-provider="walletSwap.quotes.selectedProvider.value"
                 :status-label="walletSwap.quotes.statusLabel.value"
@@ -558,21 +573,21 @@ watch(formTab, () => {
                 size="compact"
               />
               <UiAlert
-                v-if="walletSwap.needsSwap.value && !isWalletSwapRestricted && !isPayWithAssetBlocked && walletSwap.disabledReason.value"
+                v-if="canUseWalletSwap && !isWalletSwapRestricted && !isPayWithAssetBlocked && walletSwap.disabledReason.value"
                 title="Error"
                 variant="error"
                 :description="walletSwap.disabledReason.value"
                 size="compact"
               />
               <UiAlert
-                v-show="walletSwap.needsSwap.value ? walletSwap.estimatesError.value : wallet.estimatesError.value"
+                v-show="canUseWalletSwap ? walletSwap.estimatesError.value : wallet.estimatesError.value"
                 title="Error"
                 variant="error"
-                :description="walletSwap.needsSwap.value ? walletSwap.estimatesError.value : wallet.estimatesError.value"
+                :description="canUseWalletSwap ? walletSwap.estimatesError.value : wallet.estimatesError.value"
                 size="compact"
               />
               <UiAlert
-                v-if="walletSwap.needsSwap.value && walletSwap.quotes.quoteError.value"
+                v-if="canUseWalletSwap && walletSwap.quotes.quoteError.value"
                 title="Swap quote"
                 variant="warning"
                 :description="walletSwap.quotes.quoteError.value"
@@ -589,14 +604,14 @@ watch(formTab, () => {
 
             <VaultFormInfoBlock
               v-if="collateralVault && borrowVault"
-              :loading="walletSwap.needsSwap.value ? walletSwap.isEstimatesLoading.value : wallet.isEstimatesLoading.value"
+              :loading="canUseWalletSwap ? walletSwap.isEstimatesLoading.value : wallet.isEstimatesLoading.value"
               variant="card"
               class="w-full laptop:max-w-[360px]"
             >
               <SummaryRow label="Net APY">
                 <SummaryValue
                   :before="formatNumber(netAPY)"
-                  :after="formatNumber(walletSwap.needsSwap.value ? walletSwap.estimateNetAPY.value : wallet.estimateNetAPY.value)"
+                  :after="formatNumber(canUseWalletSwap ? walletSwap.estimateNetAPY.value : wallet.estimateNetAPY.value)"
                   suffix="%"
                 />
               </SummaryRow>
@@ -611,8 +626,8 @@ watch(formTab, () => {
               <SummaryRow label="Liq. price">
                 <SummaryPriceValue
                   :before="walletPriceInvert.invertValue(liquidationPrice) != null ? formatSmartAmount(walletPriceInvert.invertValue(liquidationPrice)!) : undefined"
-                  :after="walletPriceInvert.invertValue(liqPriceFromHealth(nanoToValue((walletSwap.needsSwap.value ? walletSwap.estimateHealth.value : wallet.estimateHealth.value) ?? 0n, 18))) != null
-                    ? formatSmartAmount(walletPriceInvert.invertValue(liqPriceFromHealth(nanoToValue((walletSwap.needsSwap.value ? walletSwap.estimateHealth.value : wallet.estimateHealth.value) ?? 0n, 18)))!)
+                  :after="walletPriceInvert.invertValue(liqPriceFromHealth(nanoToValue((canUseWalletSwap ? walletSwap.estimateHealth.value : wallet.estimateHealth.value) ?? 0n, 18))) != null
+                    ? formatSmartAmount(walletPriceInvert.invertValue(liqPriceFromHealth(nanoToValue((canUseWalletSwap ? walletSwap.estimateHealth.value : wallet.estimateHealth.value) ?? 0n, 18)))!)
                     : undefined"
                   :symbol="walletPriceInvert.displaySymbol"
                   invertible
@@ -624,7 +639,7 @@ watch(formTab, () => {
                   :before="formatLiqBuffer(walletPriceInvert.invertValue(oraclePriceRatio), walletPriceInvert.invertValue(liquidationPrice))"
                   :after="formatLiqBuffer(
                     walletPriceInvert.invertValue(oraclePriceRatio),
-                    walletPriceInvert.invertValue(liqPriceFromHealth(nanoToValue((walletSwap.needsSwap.value ? walletSwap.estimateHealth.value : wallet.estimateHealth.value) ?? 0n, 18))),
+                    walletPriceInvert.invertValue(liqPriceFromHealth(nanoToValue((canUseWalletSwap ? walletSwap.estimateHealth.value : wallet.estimateHealth.value) ?? 0n, 18))),
                   )"
                   suffix="%"
                 />
@@ -632,18 +647,18 @@ watch(formTab, () => {
               <SummaryRow label="LTV">
                 <SummaryValue
                   :before="formatNumber(ltvToPercent(nanoToValue(position.userLTV ?? position.currentLTV ?? 0n, 18)))"
-                  :after="formatNumber(nanoToValue((walletSwap.needsSwap.value ? walletSwap.estimateUserLTV.value : wallet.estimateUserLTV.value) ?? 0n, 18))"
+                  :after="formatNumber(nanoToValue((canUseWalletSwap ? walletSwap.estimateUserLTV.value : wallet.estimateUserLTV.value) ?? 0n, 18))"
                   suffix="%"
                 />
               </SummaryRow>
               <SummaryRow label="Health score">
                 <SummaryValue
                   :before="formatHealthScore(nanoToValue(position.healthFactor ?? 0n, 18))"
-                  :after="formatHealthScore(nanoToValue((walletSwap.needsSwap.value ? walletSwap.estimateHealth.value : wallet.estimateHealth.value) ?? 0n, 18))"
+                  :after="formatHealthScore(nanoToValue((canUseWalletSwap ? walletSwap.estimateHealth.value : wallet.estimateHealth.value) ?? 0n, 18))"
                 />
               </SummaryRow>
               <SwapDetailsSummary
-                v-if="walletSwap.needsSwap.value && (walletSwap.swapEstimatedOutput.value || walletSwap.quotes.quoteError.value)"
+                v-if="canUseWalletSwap && (walletSwap.swapEstimatedOutput.value || walletSwap.quotes.quoteError.value)"
                 :input-display="walletSwap.swapInputDisplay.value"
                 :input-exact-display="walletSwap.swapInputExactDisplay.value"
                 :output-display="walletSwap.swapOutputDisplay.value"
@@ -658,7 +673,7 @@ watch(formTab, () => {
             <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
               <VaultFormInfoButton
                 :pair="position"
-                :disabled="isLoading || isSubmitting"
+                :disabled="isLoading || isSubmitting || !collateralVault"
               >
                 Pair information
               </VaultFormInfoButton>

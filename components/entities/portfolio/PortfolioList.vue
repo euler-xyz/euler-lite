@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { PortfolioBorrowPosition, PortfolioSavingsPosition, UserReward, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { isRenderablePortfolioBorrowPosition } from '~/utils/portfolioBorrowPosition'
 
 defineProps<{
   type: 'lend' | 'borrow' | 'earn' | 'sdk-rewards'
@@ -27,11 +28,19 @@ const getBorrowPositionKey = (position: PortfolioBorrowPosition<VaultEntity>) =>
       />
     </template>
     <template v-else-if="type === 'borrow'">
-      <PortfolioBorrowItem
+      <template
         v-for="position in items"
         :key="getBorrowPositionKey(position as PortfolioBorrowPosition<VaultEntity>)"
-        :position="position as PortfolioBorrowPosition<VaultEntity>"
-      />
+      >
+        <PortfolioBorrowItem
+          v-if="isRenderablePortfolioBorrowPosition(position as PortfolioBorrowPosition<VaultEntity>)"
+          :position="position as PortfolioBorrowPosition<VaultEntity>"
+        />
+        <PortfolioUnsupportedBorrowItem
+          v-else
+          :position="position as PortfolioBorrowPosition<VaultEntity>"
+        />
+      </template>
     </template>
     <template v-else-if="type === 'earn'">
       <PortfolioEarnItem
