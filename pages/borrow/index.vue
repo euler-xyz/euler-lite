@@ -60,18 +60,16 @@ const getActiveSortYieldScore = (pair: AnyBorrowVaultPair): number => {
   return Number.isFinite(maxRoe) ? maxRoe : getNetApy(pair)
 }
 
-const compareMaxRoeDesc = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair): number => {
+const compareMaxRoe = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair, direction: 'desc' | 'asc' = 'desc'): number => {
   const aValue = getSortMaxRoe(a)
   const bValue = getSortMaxRoe(b)
   const aFinite = Number.isFinite(aValue)
   const bFinite = Number.isFinite(bValue)
+  const directionFactor = direction === 'asc' ? -1 : 1
 
   if (!aFinite && !bFinite) {
-    const netApyDelta = getNetApy(b) - getNetApy(a)
+    const netApyDelta = (getNetApy(b) - getNetApy(a)) * directionFactor
     if (netApyDelta !== 0) return netApyDelta
-
-    const recentlyAddedDelta = compareRecentlyAddedPairBoost(a, b)
-    if (recentlyAddedDelta !== 0) return recentlyAddedDelta
 
     const liquidityDelta = comparePairLiquidityDesc(a, b)
     if (liquidityDelta !== 0) return liquidityDelta
@@ -82,11 +80,8 @@ const compareMaxRoeDesc = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair): number
   if (!aFinite) return 1
   if (!bFinite) return -1
 
-  const roeDelta = bValue - aValue
+  const roeDelta = (bValue - aValue) * directionFactor
   if (roeDelta !== 0) return roeDelta
-
-  const recentlyAddedDelta = compareRecentlyAddedPairBoost(a, b)
-  if (recentlyAddedDelta !== 0) return recentlyAddedDelta
 
   const liquidityDelta = comparePairLiquidityDesc(a, b)
   if (liquidityDelta !== 0) return liquidityDelta
@@ -469,9 +464,9 @@ const sortedBorrowList = computed(() => {
       break
     case 'Max ROE':
       sorted = [...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
-        return compareMaxRoeDesc(a, b)
+        return compareMaxRoe(a, b, sortDir.value)
       })
-      break
+      return applyDeprecatedPairSort(sorted)
     case 'Net APY':
       sorted = applyRecentlyAddedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
         return getNetApy(b) - getNetApy(a)

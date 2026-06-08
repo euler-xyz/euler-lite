@@ -19,7 +19,9 @@ export const normalizeTokenCategoryTags = (
   return normalized
 }
 
-const isCorrelatedCategory = (tag: string): boolean => tag !== 'other'
+const CORRELATED_CATEGORY_TAGS = new Set(['usd', 'eth', 'btc'])
+
+const isCorrelatedCategory = (tag: string): boolean => CORRELATED_CATEGORY_TAGS.has(tag)
 
 export const shareTokenCategory = (
   leftTags: TokenCategoryTagSource,

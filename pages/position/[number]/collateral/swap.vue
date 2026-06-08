@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { isSecuritizeCollateralVault, SwapperMode, type SwapQuote, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, isSecuritizeCollateralVault, SwapperMode, type SwapQuote, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber, getCollateralUsdValueOrZero } from '~/utils/sdk-prices'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
@@ -401,21 +401,49 @@ const borrowApy = computed(() => {
   const base = getVaultBorrowApy(borrowVault.value)
   return withVaultIntrinsicApy(base, borrowVault.value, enableIntrinsicApy.value) - getBorrowRewardApy(borrowVault.value.address, fromVault.value?.address)
 })
-const isRoeApplicable = computed(() =>
-  !!fromVault.value
-  && !!toVault.value
-  && !!borrowVault.value
-  && areTokenAddressesCorrelatedByTags(
-    fromVault.value.asset.address,
-    borrowVault.value.asset.address,
-    getTokenCategoryTags,
+const projectedCollateralVaults = computed<Array<EVault | SecuritizeCollateralVault>>(() => {
+  if (!position.value) return []
+
+  const sourceAddress = normalizeAddress(fromVault.value?.address)
+  const targetAddress = normalizeAddress(toVault.value?.address)
+  const removesSource = isMaxSwap.value
+  const vaults = new Map<string, EVault | SecuritizeCollateralVault>()
+
+  for (const collateralPosition of position.value.collaterals) {
+    const vault = collateralPosition.vault
+    if (!vault || (!isEVault(vault) && !isSecuritizeCollateralVault(vault))) continue
+    const address = normalizeAddress(vault.address)
+    if (!address) continue
+    if (removesSource && sourceAddress && address === sourceAddress) continue
+    vaults.set(address, vault as EVault | SecuritizeCollateralVault)
+  }
+
+  if (!vaults.size && fromVault.value) {
+    const address = normalizeAddress(fromVault.value.address)
+    if (address && !(removesSource && sourceAddress && address === sourceAddress)) {
+      vaults.set(address, fromVault.value)
+    }
+  }
+
+  if (toVault.value && targetAddress) {
+    vaults.set(targetAddress, toVault.value)
+  }
+
+  return [...vaults.values()]
+})
+const isRoeApplicable = computed(() => {
+  if (!toVault.value || !borrowVault.value) return false
+  const collaterals = projectedCollateralVaults.value
+  if (!collaterals.length) return false
+
+  return collaterals.every(collateral =>
+    areTokenAddressesCorrelatedByTags(
+      collateral.asset.address,
+      borrowVault.value!.asset.address,
+      getTokenCategoryTags,
+    ),
   )
-  && areTokenAddressesCorrelatedByTags(
-    toVault.value.asset.address,
-    borrowVault.value.asset.address,
-    getTokenCategoryTags,
-  ),
-)
+})
 
 // ── Collateral USD valuation (from liability vault's perspective) ─────────
 const getCollateralValueUsdLocal = async (amount: bigint) => {

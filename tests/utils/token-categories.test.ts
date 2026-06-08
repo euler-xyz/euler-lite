@@ -8,21 +8,22 @@ import {
 describe('token category helpers', () => {
   it('normalizes token category tags', () => {
     expect(
-      normalizeTokenCategoryTags([' Stablecoin ', 'STABLECOIN', '', 123, 'btc']),
-    ).toEqual(['stablecoin', 'btc'])
+      normalizeTokenCategoryTags([' USD ', 'USD', '', 123, 'btc']),
+    ).toEqual(['usd', 'btc'])
   })
 
-  it('requires a shared non-other category', () => {
-    expect(shareTokenCategory(['stablecoin'], ['Stablecoin'])).toBe(true)
+  it('requires a shared allowlisted category', () => {
+    expect(shareTokenCategory(['usd'], ['USD'])).toBe(true)
     expect(shareTokenCategory(['other'], ['other'])).toBe(false)
-    expect(shareTokenCategory(['stablecoin'], ['eth'])).toBe(false)
-    expect(shareTokenCategory(undefined, ['stablecoin'])).toBe(false)
+    expect(shareTokenCategory(['stablecoin'], ['stablecoin'])).toBe(false)
+    expect(shareTokenCategory(['usd'], ['eth'])).toBe(false)
+    expect(shareTokenCategory(undefined, ['usd'])).toBe(false)
   })
 
   it('compares addresses through a tag resolver', () => {
     const tags = new Map<string, string[]>([
-      ['0x0000000000000000000000000000000000000001', ['stablecoin']],
-      ['0x0000000000000000000000000000000000000002', ['STABLECOIN']],
+      ['0x0000000000000000000000000000000000000001', ['usd']],
+      ['0x0000000000000000000000000000000000000002', ['USD']],
       ['0x0000000000000000000000000000000000000003', ['other']],
     ])
     const getTags = (address: string) => tags.get(address.toLowerCase())

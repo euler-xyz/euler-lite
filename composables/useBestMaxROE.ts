@@ -1,7 +1,6 @@
 import type { MarketGroup } from '~/entities/lend-discovery'
-import { isEVault } from '@eulerxyz/euler-v2-sdk'
 import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
-import { type BestMaxRoeResult, getBorrowableVaults } from '~/utils/discoveryCalculations'
+import { type BestMaxRoeResult, getBorrowableVaults, getVaultAddress, getVaultAssetAddress, getVaultAssetSymbol } from '~/utils/discoveryCalculations'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import {
   computeSupplyApy,
@@ -9,6 +8,19 @@ import {
   sumBorrowRewardApr,
   sumLoopingRewardApr,
 } from '~/utils/collateralOptions'
+
+type LendRewardCampaign = { action?: string, apr?: number }
+type MaybeRewardedVault = {
+  rewards?: {
+    getActiveCampaigns: (params: { viewer: string | undefined }) => LendRewardCampaign[]
+  }
+}
+
+const getLendRewardCampaigns = (vault: unknown, viewer: string | undefined): LendRewardCampaign[] => {
+  if (!vault || typeof vault !== 'object' || !('rewards' in vault)) return []
+  return (vault as MaybeRewardedVault).rewards?.getActiveCampaigns({ viewer }) ?? []
+}
+
 /**
  * Computes the headline metric for each market group by iterating actual
  * collateral/liability pairs with LTV relationships. Correlated pairs use
@@ -29,7 +41,12 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
 
     const allVaults = [...group.vaults, ...group.externalCollateral]
     const knownAddresses = new Set(
-      allVaults.map(v => (isEVault(v) ? v.address : '').toLowerCase()).filter(Boolean),
+      allVaults.map(v => getVaultAddress(v).toLowerCase()).filter(Boolean),
+    )
+    const vaultsByAddress = new Map(
+      allVaults
+        .map(v => [getVaultAddress(v).toLowerCase(), v] as const)
+        .filter(([address]) => Boolean(address)),
     )
 
     const visibilitySettings = {
@@ -60,55 +77,55 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
         const colAddr = ltv.address.toLowerCase()
         if (!knownAddresses.has(colAddr)) continue
 
-        const collateral = allVaults.find(
-          v => isEVault(v) && v.address.toLowerCase() === colAddr,
-        )
-        if (!collateral || !isEVault(collateral)) continue
+        const collateral = vaultsByAddress.get(colAddr)
+        if (!collateral) continue
+        const collateralAddress = getVaultAddress(collateral)
 
         const supplyFinal = computeSupplyApy(collateral, viewer.value, visibilitySettings)
         const borrowFinal = computeBorrowApy(
           liability,
           viewer.value,
           visibilitySettings,
-          collateral.address,
+          collateralAddress,
         )
         const maxMultiplier = getMaxMultiplier(ltv.borrowLTV)
         const loopingRewards = enableRewardsApy.value
-          ? sumLoopingRewardApr(liability, viewer.value, collateral.address, maxMultiplier)
+          ? sumLoopingRewardApr(liability, viewer.value, collateralAddress, maxMultiplier)
           : 0
         const roe = getMaxRoe(maxMultiplier, supplyFinal, borrowFinal, loopingRewards)
+        const collateralLendCampaigns = getLendRewardCampaigns(collateral, viewer.value)
 
         const supplyHasRewards = enableRewardsApy.value
-          && (liability.rewards || collateral.rewards) !== undefined
-          && (sumBorrowRewardApr(liability, viewer.value, collateral.address) > 0
+          && (liability.rewards !== undefined || collateralLendCampaigns.length > 0)
+          && (sumBorrowRewardApr(liability, viewer.value, collateralAddress) > 0
             || loopingRewards > 0
-            || ((collateral.rewards?.getActiveCampaigns({ viewer: viewer.value }) ?? []).some(
+            || collateralLendCampaigns.some(
               c => c.action === 'LEND' && typeof c.apr === 'number' && c.apr > 0,
-            )))
+            ))
 
         const netApy = supplyFinal - borrowFinal + loopingRewards
         if (netApy > fallback) {
           fallback = netApy
           fallbackHasRewards = supplyHasRewards
-          fallbackPair = `${collateral.asset.symbol}/${liability.asset.symbol}`
+          fallbackPair = `${getVaultAssetSymbol(collateral)}/${liability.asset.symbol}`
           fallbackSupplyAPY = supplyFinal
           fallbackBorrowAPY = borrowFinal
           fallbackBorrowVaultAddress = liability.address
-          fallbackCollateralAddress = collateral.address
+          fallbackCollateralAddress = collateralAddress
         }
 
-        if (!areTokenAddressesCorrelatedByTags(collateral.asset.address, liability.asset.address, getTokenCategoryTags)) continue
+        if (!areTokenAddressesCorrelatedByTags(getVaultAssetAddress(collateral), liability.asset.address, getTokenCategoryTags)) continue
 
         if (roe > best) {
           best = roe
           bestHasRewards = supplyHasRewards
-          bestPair = `${collateral.asset.symbol}/${liability.asset.symbol}`
+          bestPair = `${getVaultAssetSymbol(collateral)}/${liability.asset.symbol}`
           bestMultiplier = maxMultiplier
           bestSupplyAPY = supplyFinal
           bestBorrowAPY = borrowFinal
           bestBorrowLTV = ltvToPercent(ltv.borrowLTV)
           bestBorrowVaultAddress = liability.address
-          bestCollateralAddress = collateral.address
+          bestCollateralAddress = collateralAddress
         }
       }
     }
