@@ -19,7 +19,7 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { SlippageSettingsModal, VaultUnverifiedDisclaimerModal } from '#components'
 import { getAddress } from 'viem'
-import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
+import { areRoeCollateralVaultsCorrelatedWithBorrow, mergeRoeCollateralVaults } from '~/utils/position-roe'
 
 const router = useRouter()
 const route = useRoute()
@@ -76,14 +76,6 @@ const borrowVault = computed(() => pair.value?.borrow)
 const collateralVault = computed(() => pair.value?.collateral)
 const isSecuritizeCollateral = computed(() => pair.value ? isSecuritizeBorrowPair(pair.value) : false)
 const pairAssets = computed(() => [collateralVault.value?.asset, borrowVault.value?.asset])
-const showMultiplyRoe = computed(() =>
-  areTokenAddressesCorrelatedByTags(
-    collateralVault.value?.asset.address,
-    borrowVault.value?.asset.address,
-    getTokenCategoryTags,
-  ),
-)
-
 // --- Shared functions ---
 const normalizeAddress = (addr?: string) => {
   if (!addr) return ''
@@ -179,6 +171,16 @@ const multiply = useMultiplyForm({
   isGeoBlocked,
   isMultiplyRestricted,
 })
+const showMultiplyRoe = computed(() =>
+  areRoeCollateralVaultsCorrelatedWithBorrow(
+    mergeRoeCollateralVaults([
+      collateralVault.value,
+      multiply.multiplySupplyVault.value,
+    ]),
+    borrowVault.value,
+    getTokenCategoryTags,
+  ),
+)
 
 const { guardWithPriceImpact: guardWithMultiplyPriceImpact } = usePriceImpactGate({
   directPriceImpact: multiply.multiplyPriceImpact,

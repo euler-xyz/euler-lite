@@ -8,7 +8,7 @@ import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/compos
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { isEVault, SwapperMode, type EVault, type PortfolioBorrowPosition, type SwapQuote, type TransactionPlan, type TransactionPlanPrepared, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
+import { areRoeCollateralVaultsCorrelatedWithBorrow, getPositionRoeCollateralVaults, mergeRoeCollateralVaults } from '~/utils/position-roe'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
@@ -96,14 +96,15 @@ const multiplyLongVault = computed<EVault | undefined>(() => {
 const multiplyShortVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
 const multiplySubAccount = computed(() => position.value?.subAccount || null)
 useOperationGuard(computed(() => [multiplySupplyVault.value?.address, multiplyLongVault.value?.address, multiplyShortVault.value?.address].filter(Boolean)))
+const projectedMultiplyCollateralVaults = computed(() =>
+  mergeRoeCollateralVaults([
+    ...getPositionRoeCollateralVaults(position.value, multiplyLongVault.value),
+    multiplySupplyVault.value,
+    multiplyLongVault.value,
+  ]),
+)
 const isMultiplyRoeApplicable = computed(() =>
-  !!multiplyLongVault.value
-  && !!multiplyShortVault.value
-  && areTokenAddressesCorrelatedByTags(
-    multiplyLongVault.value.asset.address,
-    multiplyShortVault.value.asset.address,
-    getTokenCategoryTags,
-  ),
+  areRoeCollateralVaultsCorrelatedWithBorrow(projectedMultiplyCollateralVaults.value, multiplyShortVault.value, getTokenCategoryTags),
 )
 
 const pairAssets = computed<VaultAsset[]>(() => {

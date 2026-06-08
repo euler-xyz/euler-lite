@@ -19,7 +19,7 @@ import { useCollateralSwapRepay } from '~/composables/repay/useCollateralSwapRep
 import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
+import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
 
 const _route = useRoute()
 const _router = useRouter()
@@ -237,24 +237,10 @@ const savings = useSavingsRepay({
 })
 
 const isPositionRoeApplicable = computed(() =>
-  positionCollateralVaults.value.length > 0
-  && !!borrowVault.value
-  && positionCollateralVaults.value.every(collateral =>
-    areTokenAddressesCorrelatedByTags(
-      collateral.asset.address,
-      borrowVault.value!.asset.address,
-      getTokenCategoryTags,
-    ),
-  ),
+  areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value, borrowVault.value, getTokenCategoryTags),
 )
 const isCollateralRepayRoeApplicable = computed(() =>
-  !!collateral.sourceVault.value
-  && !!borrowVault.value
-  && areTokenAddressesCorrelatedByTags(
-    collateral.sourceVault.value.asset.address,
-    borrowVault.value.asset.address,
-    getTokenCategoryTags,
-  ),
+  areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value, borrowVault.value, getTokenCategoryTags),
 )
 
 const { guardWithPriceImpact: guardWithCollateralPriceImpact } = usePriceImpactGate({

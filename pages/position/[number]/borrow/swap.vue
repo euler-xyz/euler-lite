@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { SwapperMode, type SecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type SwapQuote, type VaultEntity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
-import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
+import { areRoeCollateralVaultsCorrelatedWithBorrow, getPositionRoeCollateralVaults } from '~/utils/position-roe'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { useSwapDebtOptions } from '~/composables/useSwapDebtOptions'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
@@ -33,6 +33,9 @@ const fromVault = computed<EVault | undefined>(() => position.value ? position.v
 const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() => position.value ? position.value.collateralVault as EVault | SecuritizeCollateralVault | undefined : undefined)
 const toVault: Ref<EVault | undefined> = ref()
 useOperationGuard(computed(() => [fromVault.value?.address, toVault.value?.address, collateralVault.value?.address].filter(Boolean)))
+const positionCollateralVaults = computed(() =>
+  getPositionRoeCollateralVaults(position.value, collateralVault.value),
+)
 
 const { borrowOptions, borrowVaults } = useSwapDebtOptions({
   collateralVault: computed(() => collateralVault.value as EVault | undefined),
@@ -90,19 +93,8 @@ const toBorrowApy = computed(() => {
   return withVaultIntrinsicApy(base, toVault.value, enableIntrinsicApy.value) - getBorrowRewardApy(toVault.value.address, collateralVault.value?.address)
 })
 const isRoeApplicable = computed(() =>
-  !!collateralVault.value
-  && !!fromVault.value
-  && !!toVault.value
-  && areTokenAddressesCorrelatedByTags(
-    collateralVault.value.asset.address,
-    fromVault.value.asset.address,
-    getTokenCategoryTags,
-  )
-  && areTokenAddressesCorrelatedByTags(
-    collateralVault.value.asset.address,
-    toVault.value.asset.address,
-    getTokenCategoryTags,
-  ),
+  areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value, fromVault.value, getTokenCategoryTags)
+  && areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value, toVault.value, getTokenCategoryTags),
 )
 
 const supplyValueUsd = ref<number | null>(null)

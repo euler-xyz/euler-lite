@@ -125,6 +125,15 @@ const toTokenEntry = (token: TokenListItem): TokenEntry => ({
   ...(token.tags?.length ? { tags: token.tags } : {}),
 })
 
+const stripUntrustedTokenTags = (token: TokenEntry): TokenEntry => ({
+  chainId: token.chainId,
+  address: token.address,
+  name: token.name,
+  symbol: token.symbol,
+  decimals: token.decimals,
+  ...(token.logoURI ? { logoURI: token.logoURI } : {}),
+})
+
 function refreshEulerSdkTokenList(chainId: number): Promise<TokenEntry[]> {
   const key = String(chainId)
 
@@ -156,7 +165,8 @@ function refreshUniswap(): Promise<TokenEntry[]> {
     .then(async (resp) => {
       if (!resp.ok) throw new Error(`Uniswap upstream returned ${resp.status}`)
       const data = await resp.json()
-      const tokens: TokenEntry[] = data.tokens || []
+      const tokens: TokenEntry[] = (Array.isArray(data.tokens) ? data.tokens : [])
+        .map((token: TokenEntry) => stripUntrustedTokenTags(token))
       uniswapCache.set('all', tokens)
       reportStatus('token-list', 'uniswap:all', 'ok')
       return tokens

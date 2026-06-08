@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { isEVault, type EVault, type PortfolioBorrowPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
+import { areRoeCollateralVaultsCorrelatedWithBorrow, getPositionRoeCollateralVaults } from '~/utils/position-roe'
 
 defineOptions({
   name: 'PortfolioPage',
@@ -24,6 +26,7 @@ const { refresh: refreshFreshAccount } = useFreshAccount()
 const { rewards } = useSdkRewards()
 const { locks, refreshLocks } = useREULLocks()
 const { isConnected, address } = useWagmi()
+const { getTokenCategoryTags } = useTokenList()
 const { isLoaded: isBalancesLoaded, updateBalances } = useWallets()
 const { eulerLensAddresses } = useEulerAddresses()
 const { portfolioRefreshCounter } = usePortfolioRefresh()
@@ -71,6 +74,18 @@ const portfolioNetApyDisplay = computed(() =>
 )
 const portfolioRoeDisplay = computed(() =>
   Number.isFinite(portfolioRoe.value) ? `${formatNumber(portfolioRoe.value)}%` : '-',
+)
+const isPortfolioRoeApplicable = computed(() =>
+  borrowPositions.value.length > 0
+  && borrowPositions.value.every((position: PortfolioBorrowPosition<VaultEntity>) => {
+    const borrowVault = position.borrowVault
+    if (!isEVault(borrowVault)) return false
+    return areRoeCollateralVaultsCorrelatedWithBorrow(
+      getPositionRoeCollateralVaults(position),
+      borrowVault as EVault,
+      getTokenCategoryTags,
+    )
+  }),
 )
 const totalSuppliedDisplay = computed(() => {
   const { total, hasMissingPrices } = totalSuppliedValueInfo.value
@@ -179,7 +194,10 @@ watch(showAllLabelEntries, (showAll) => {
             </div>
           </BaseLoadableContent>
         </div>
-        <div class="flex justify-between items-center">
+        <div
+          v-if="isPortfolioRoeApplicable"
+          class="flex justify-between items-center"
+        >
           <div class="flex items-center gap-4 text-p2 text-content-secondary">
             ROE
             <UiFootnote
