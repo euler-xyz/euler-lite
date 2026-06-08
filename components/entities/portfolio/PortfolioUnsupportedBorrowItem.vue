@@ -11,6 +11,7 @@ import { formatCompactUsdValue, formatExactAmount, formatHealthScore, formatNumb
 import { ltvToPercent, nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { getBorrowPositionCollateralAddresses } from '~/utils/portfolioBorrowPosition'
 import { getBorrowPositionEffectiveLiquidationLTV, getBorrowPositionUserLTVPercent } from '~/utils/ltv'
+import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 
 const { position } = defineProps<{ position: PortfolioBorrowPosition<VaultEntity> }>()
 
@@ -69,8 +70,20 @@ const collateralValue = computed(() => toUsdAmount(position.totalCollateralValue
 const collateralValueDisplay = computed(() =>
   collateralValue.value.hasPrice ? formatCompactUsdValue(collateralValue.value.usd) : 'Unknown',
 )
+const netAssetValue = computed(() => {
+  if (!collateralValue.value.hasPrice || !borrowedValue.value.hasPrice) return { usd: 0, hasPrice: false }
+  return {
+    usd: collateralValue.value.usd - borrowedValue.value.usd,
+    hasPrice: true,
+  }
+})
+const netAssetValueDisplay = computed(() =>
+  netAssetValue.value.hasPrice ? formatCompactUsdValue(netAssetValue.value.usd) : '-',
+)
 
 const borrowLabel = computed(() => borrowVault.value?.shares.name ?? truncate(borrowAddress.value))
+const { name: borrowProductName } = useEulerProductOfVault(borrowAddress)
+const marketLabel = computed(() => borrowProductName || borrowLabel.value)
 const borrowSymbol = computed(() => borrowVault.value?.asset.symbol ?? truncate(borrowAddress.value))
 const unknownCollateralAsset = computed(() => ({
   address: '',
@@ -115,9 +128,9 @@ const pairSymbols = computed(() => `Unknown collateral/${borrowSymbol.value}`)
               data-id="data-point"
               :data-key="positionKey"
               data-field="name"
-              :data-value="`Unknown collateral / ${borrowLabel}`"
+              :data-value="marketLabel"
             >
-              <span>Unknown collateral</span>
+              <span>{{ marketLabel }}</span>
               <span
                 class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-error-100 text-error-500 text-p5"
                 title="This position uses collateral that Lite cannot resolve as a supported vault."
@@ -182,16 +195,18 @@ const pairSymbols = computed(() => `Unknown collateral/${borrowSymbol.value}`)
         />
         <div class="flex justify-between">
           <div class="text-content-tertiary text-p3">
-            Borrow vault
+            Net asset value
           </div>
-          <div
-            class="text-content-primary text-p3 text-right"
-            data-id="data-point"
-            :data-key="positionKey"
-            data-field="borrow-vault"
-            :data-value="borrowAddress"
-          >
-            {{ borrowLabel }}
+          <div class="flex justify-between gap-8 text-right">
+            <div
+              class="text-content-primary text-p3"
+              data-id="data-point"
+              :data-key="positionKey"
+              data-field="net-asset-value"
+              :data-value="netAssetValueDisplay"
+            >
+              {{ netAssetValueDisplay }}
+            </div>
           </div>
         </div>
         <div class="flex justify-between">
@@ -230,33 +245,6 @@ const pairSymbols = computed(() => `Unknown collateral/${borrowSymbol.value}`)
             :data-value="collateralValueDisplay"
           >
             {{ collateralValueDisplay }}
-          </div>
-        </div>
-        <div class="flex justify-between gap-16">
-          <div class="text-content-tertiary text-p3 shrink-0">
-            Collateral
-          </div>
-          <div
-            class="flex flex-col gap-4 items-end min-w-0 text-right"
-            data-id="data-point"
-            :data-key="positionKey"
-            data-field="collateral-addresses"
-            :data-value="collateralAddresses.join(',')"
-          >
-            <span
-              v-for="collateralAddress in collateralAddresses"
-              :key="collateralAddress"
-              class="text-content-primary text-p3 font-mono truncate max-w-full"
-              :title="collateralAddress"
-            >
-              {{ truncate(collateralAddress) }}
-            </span>
-            <span
-              v-if="collateralAddresses.length === 0"
-              class="text-warning-500 text-p3"
-            >
-              Unknown
-            </span>
           </div>
         </div>
         <div class="flex justify-between">
