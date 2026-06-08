@@ -54,6 +54,7 @@ export const areTokenAddressesCorrelatedByTags = (
   const left = normalizeComparableAddress(leftAddress)
   const right = normalizeComparableAddress(rightAddress)
   if (!left || !right) return false
+  if (left === right) return true
 
   return shareTokenCategory(
     getTokenCategoryTags(left),

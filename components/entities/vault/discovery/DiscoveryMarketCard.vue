@@ -7,13 +7,9 @@ import {
   getDeprecatedVaultCount,
   getUnknownCollateralCount,
   getMiniDiagram,
-  getBorrowableVaults,
-  findVault,
   type BestMaxRoeResult,
 } from '~/utils/discoveryCalculations'
-import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
-import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
-import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
+import { useBestMaxROE } from '~/composables/useBestMaxROE'
 import { VaultMaxRoeModal, UiModalPreviewTrigger } from '#components'
 
 const props = defineProps<{
@@ -25,11 +21,9 @@ defineEmits<{
   toggle: []
 }>()
 
-const { settings } = useUserSettings()
-const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
-const { getBorrowRewardApy, getSupplyRewardApy, getLoopingRewardApy } = useRewardsApy()
 const { products } = useEulerLabels()
-const { getTokenCategoryTags } = useTokenList()
+const bestRoeMarketGroups = computed(() => [props.market])
+const { getBestMaxROE } = useBestMaxROE(bestRoeMarketGroups)
 
 const isGovernanceLimited = computed(() =>
   props.market.source === 'product' && (products[props.market.id]?.tags?.includes('governance limited') ?? false),
@@ -40,102 +34,7 @@ const getProductDescription = (market: MarketGroup): string => {
   return products[market.id]?.description ?? ''
 }
 
-const getBestMaxRoe = (market: MarketGroup): BestMaxRoeResult => {
-  const borrowable = getBorrowableVaults(market)
-  let best = -Infinity
-  let bestHasRewards = false
-  let bestPair = ''
-  let bestMultiplier = 1
-  let bestSupplyAPY = 0
-  let bestBorrowAPY = 0
-  let bestBorrowLTV = 0
-  let bestBorrowVaultAddress = ''
-  let bestCollateralAddress = ''
-  let fallback = -Infinity
-  let fallbackHasRewards = false
-  let fallbackPair = ''
-  let fallbackSupplyAPY = 0
-  let fallbackBorrowAPY = 0
-  let fallbackBorrowVaultAddress = ''
-  let fallbackCollateralAddress = ''
-
-  for (const liability of borrowable) {
-    const borrowBase = getVaultBorrowApy(liability)
-    const borrowApy = withVaultIntrinsicApy(borrowBase, liability, enableIntrinsicApy.value)
-
-    for (const ltv of liability.collaterals) {
-      if (ltv.borrowLTV === 0) continue
-      const collateral = findVault(market, ltv.address)
-      if (!collateral) continue
-
-      const supplyBase = getVaultSupplyApy(collateral)
-      const supplyApy = withVaultIntrinsicApy(supplyBase, collateral, enableIntrinsicApy.value)
-      const supplyRewards = getSupplyRewardApy(collateral.address)
-      const borrowRewards = getBorrowRewardApy(liability.address, collateral.address)
-      const loopingRewards = getLoopingRewardApy(liability.address, collateral.address)
-
-      const supplyFinal = supplyApy + supplyRewards
-      const borrowFinal = borrowApy - borrowRewards
-      const multiplier = getMaxMultiplier(ltv.borrowLTV)
-      const roe = getMaxRoe(multiplier, supplyFinal, borrowFinal, loopingRewards)
-      const netApy = supplyFinal - borrowFinal + loopingRewards
-      const hasRewards = supplyRewards > 0 || borrowRewards > 0 || loopingRewards > 0
-
-      if (netApy > fallback) {
-        fallback = netApy
-        fallbackHasRewards = hasRewards
-        fallbackPair = `${collateral.asset.symbol}/${liability.asset.symbol}`
-        fallbackSupplyAPY = supplyFinal
-        fallbackBorrowAPY = borrowFinal
-        fallbackBorrowVaultAddress = liability.address
-        fallbackCollateralAddress = collateral.address
-      }
-
-      if (!areTokenAddressesCorrelatedByTags(collateral.asset.address, liability.asset.address, getTokenCategoryTags)) continue
-
-      if (roe > best) {
-        best = roe
-        bestHasRewards = hasRewards
-        bestPair = `${collateral.asset.symbol}/${liability.asset.symbol}`
-        bestMultiplier = multiplier
-        bestSupplyAPY = supplyFinal
-        bestBorrowAPY = borrowFinal
-        bestBorrowLTV = ltvToPercent(ltv.borrowLTV)
-        bestBorrowVaultAddress = liability.address
-        bestCollateralAddress = collateral.address
-      }
-    }
-  }
-
-  if (!(Number.isFinite(best) && best > -Infinity) && Number.isFinite(fallback) && fallback > -Infinity) {
-    return {
-      value: fallback,
-      metric: 'net-apy',
-      hasRewards: fallbackHasRewards,
-      pair: fallbackPair,
-      maxMultiplier: 1,
-      supplyAPY: fallbackSupplyAPY,
-      borrowAPY: fallbackBorrowAPY,
-      borrowLTV: 0,
-      borrowVaultAddress: fallbackBorrowVaultAddress,
-      collateralAddress: fallbackCollateralAddress,
-    }
-  }
-
-  const value = Number.isFinite(best) && best > -Infinity ? best : 0
-  return {
-    value,
-    metric: 'max-roe',
-    hasRewards: bestHasRewards,
-    pair: bestPair,
-    maxMultiplier: bestMultiplier,
-    supplyAPY: bestSupplyAPY,
-    borrowAPY: bestBorrowAPY,
-    borrowLTV: bestBorrowLTV,
-    borrowVaultAddress: bestBorrowVaultAddress,
-    collateralAddress: bestCollateralAddress,
-  }
-}
+const getBestMaxRoe = (market: MarketGroup): BestMaxRoeResult => getBestMaxROE(market.id)
 
 const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
   props: {

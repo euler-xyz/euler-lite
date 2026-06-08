@@ -42,4 +42,14 @@ describe('token category helpers', () => {
       ),
     ).toBe(false)
   })
+
+  it('treats the same token address as correlated even without category tags', () => {
+    expect(
+      areTokenAddressesCorrelatedByTags(
+        '0x0000000000000000000000000000000000000001',
+        '0x0000000000000000000000000000000000000001',
+        () => undefined,
+      ),
+    ).toBe(true)
+  })
 })

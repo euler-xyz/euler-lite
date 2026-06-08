@@ -70,7 +70,10 @@ const {
     { key: 'totalAvailableLiquidity', label: 'Available liquidity', shortLabel: 'Avail. liquidity', unit: 'usd' },
   ],
   (group, metric) => {
-    if (metric === 'bestMaxROE') return getBestMaxROE(group.id).value
+    if (metric === 'bestMaxROE') {
+      const best = getBestMaxROE(group.id)
+      return best.metric === 'max-roe' ? best.value : Number.NaN
+    }
     const val = group.metrics[metric as keyof typeof group.metrics]
     return typeof val === 'number' ? val : 0
   },
@@ -214,6 +217,14 @@ const compareMaxRoeMarketsDesc = (a: MarketGroup, b: MarketGroup): number => {
 
   const metricDelta = bBest.value - aBest.value
   if (metricDelta !== 0) return metricDelta
+
+  const recentlyAddedDelta = compareRecentlyAddedBoost(
+    a.metrics.hasRecentlyAdded,
+    a.metrics.totalAvailableLiquidity,
+    b.metrics.hasRecentlyAdded,
+    b.metrics.totalAvailableLiquidity,
+  )
+  if (recentlyAddedDelta !== 0) return recentlyAddedDelta
 
   const liquidityDelta = compareMarketLiquidityDesc(a, b)
   if (liquidityDelta !== 0) return liquidityDelta

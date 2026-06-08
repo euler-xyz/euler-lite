@@ -133,10 +133,9 @@ const getCellMetricValue = (
       return getMaxMultiplier(cell.ltv.borrowLTV)
     case 'net-apy':
       return computeEnhancedApys(cell, collateralAddr, liabilityAddr).netApy
-    case 'roe': {
-      const apys = computeEnhancedApys(cell, collateralAddr, liabilityAddr)
-      return isCorrelatedCell(collateralAddr, liabilityAddr) ? apys.roe : apys.netApy
-    }
+    case 'roe':
+      if (!isCorrelatedCell(collateralAddr, liabilityAddr)) return Number.NaN
+      return computeEnhancedApys(cell, collateralAddr, liabilityAddr).roe
     default:
       return 0
   }
@@ -147,6 +146,7 @@ const shouldShowSparkles = (
   liabilityAddr: string,
 ): boolean => {
   if (props.dotMetric !== 'net-apy' && props.dotMetric !== 'roe') return false
+  if (props.dotMetric === 'roe' && !isCorrelatedCell(collateralAddr, liabilityAddr)) return false
   const collateral = findVault(props.market, collateralAddr)
   const liability = findVault(props.market, liabilityAddr)
   const hasSupplyRewardsForCell = collateral
@@ -698,7 +698,10 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                 </template>
 
                 <!-- Numeric metrics: original rendering -->
-                <div class="inline-flex items-center justify-center gap-2">
+                <div
+                  v-if="dotMetric !== 'oracle'"
+                  class="inline-flex items-center justify-center gap-2"
+                >
                   <SvgIcon
                     v-if="
                       dotMetric === 'lltv'
@@ -714,6 +717,15 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                     class="!w-10 !h-10 text-accent-500 shrink-0"
                   />
                   <span
+                    v-if="
+                      Number.isFinite(
+                        getCellMetricValue(
+                          matrix.cells.get(row.address)!.get(col.address)!,
+                          row.address,
+                          col.address,
+                        ),
+                      )
+                    "
                     class="text-p5 whitespace-nowrap transition-all"
                     :class="[
                       selectedCell?.collateralAddr === row.address

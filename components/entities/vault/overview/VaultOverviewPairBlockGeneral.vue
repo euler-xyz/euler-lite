@@ -12,6 +12,7 @@ import {
   getPairBorrowLTV,
   getPairBorrowVault,
   getPairCollateralVault,
+  getPairCollateralVaults,
   getPairCurrentLiquidationLTV,
   getPairRampConfig,
 } from '~/utils/borrow-pair'
@@ -66,10 +67,12 @@ const maxRoe = computed(() =>
   getMaxRoe(maxMultiplier.value, supplyApyWithRewards.value, borrowApyWithRewards.value, loopingRewardAPY.value),
 )
 const showMaxRoe = computed(() =>
-  areTokenAddressesCorrelatedByTags(
-    collateralVault.value.asset.address,
-    borrowVault.value.asset.address,
-    getTokenCategoryTags,
+  getPairCollateralVaults(pair).every(collateral =>
+    areTokenAddressesCorrelatedByTags(
+      collateral.asset.address,
+      borrowVault.value.asset.address,
+      getTokenCategoryTags,
+    ),
   ),
 )
 const netApyClass = computed(() => netApy.value >= 0 ? 'text-accent-600' : 'text-error-500')

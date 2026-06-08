@@ -70,6 +70,9 @@ const compareMaxRoeDesc = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair): number
     const netApyDelta = getNetApy(b) - getNetApy(a)
     if (netApyDelta !== 0) return netApyDelta
 
+    const recentlyAddedDelta = compareRecentlyAddedPairBoost(a, b)
+    if (recentlyAddedDelta !== 0) return recentlyAddedDelta
+
     const liquidityDelta = comparePairLiquidityDesc(a, b)
     if (liquidityDelta !== 0) return liquidityDelta
 
@@ -81,6 +84,9 @@ const compareMaxRoeDesc = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair): number
 
   const roeDelta = bValue - aValue
   if (roeDelta !== 0) return roeDelta
+
+  const recentlyAddedDelta = compareRecentlyAddedPairBoost(a, b)
+  if (recentlyAddedDelta !== 0) return recentlyAddedDelta
 
   const liquidityDelta = comparePairLiquidityDesc(a, b)
   if (liquidityDelta !== 0) return liquidityDelta
@@ -371,14 +377,17 @@ const isPairRecentlyAdded = (pair: AnyBorrowVaultPair) =>
 
 const applyRecentlyAddedPairSort = (sorted: AnyBorrowVaultPair[]): AnyBorrowVaultPair[] => {
   return [...sorted].sort((a, b) => {
-    return compareRecentlyAddedBoost(
-      isPairRecentlyAdded(a),
-      pairLiquidityUsd.value.get(getPairKey(a)) ?? 0,
-      isPairRecentlyAdded(b),
-      pairLiquidityUsd.value.get(getPairKey(b)) ?? 0,
-    )
+    return compareRecentlyAddedPairBoost(a, b)
   })
 }
+
+const compareRecentlyAddedPairBoost = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair): number =>
+  compareRecentlyAddedBoost(
+    isPairRecentlyAdded(a),
+    pairLiquidityUsd.value.get(getPairKey(a)) ?? 0,
+    isPairRecentlyAdded(b),
+    pairLiquidityUsd.value.get(getPairKey(b)) ?? 0,
+  )
 
 const applyDeprecatedPairSort = (sorted: AnyBorrowVaultPair[]): AnyBorrowVaultPair[] => {
   return [...sorted].sort((a, b) => {
@@ -416,6 +425,9 @@ const sortedBorrowList = computed(() => {
 
         const scoreDelta = b.compositeScore - a.compositeScore
         if (scoreDelta !== 0) return scoreDelta
+
+        const recentlyAddedDelta = compareRecentlyAddedPairBoost(a.pair, b.pair)
+        if (recentlyAddedDelta !== 0) return recentlyAddedDelta
 
         const liquidityDelta = comparePairLiquidityDesc(a.pair, b.pair)
         if (liquidityDelta !== 0) return liquidityDelta
