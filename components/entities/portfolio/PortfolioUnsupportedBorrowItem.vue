@@ -13,7 +13,6 @@ import { getBorrowPositionCollateralAddresses } from '~/utils/portfolioBorrowPos
 
 const { position } = defineProps<{ position: PortfolioBorrowPosition<VaultEntity> }>()
 
-const route = useRoute()
 const { address } = useWagmi()
 const { portfolio, portfolioAddress } = useEulerAccount()
 const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
@@ -58,10 +57,6 @@ const collateralValueDisplay = computed(() =>
 const borrowLabel = computed(() => borrowVault.value?.shares.name ?? truncate(borrowAddress.value))
 const borrowSymbol = computed(() => borrowVault.value?.asset.symbol ?? truncate(borrowAddress.value))
 const pairSymbols = computed(() => `External collateral/${borrowSymbol.value}`)
-const repayLink = computed(() => ({
-  path: `/position/${subAccountIndex.value}/repay`,
-  query: { network: route.query.network },
-}))
 </script>
 
 <template>
@@ -124,13 +119,6 @@ const repayLink = computed(() => ({
             </div>
           </div>
           <div class="flex gap-16 items-start shrink-0">
-            <UiButton
-              :to="repayLink"
-              size="small"
-              variant="primary"
-            >
-              Repay
-            </UiButton>
             <div class="flex flex-col items-end">
               <div class="text-content-tertiary text-p3 mb-4">
                 Net APY
@@ -167,7 +155,7 @@ const repayLink = computed(() => ({
       <div class="flex flex-col gap-12 w-full">
         <UiAlert
           title="Unsupported external collateral"
-          description="This borrow is real, but its collateral is not a supported Euler vault in Lite. Debt is shown when available; pricing and risk details may be unavailable."
+          description="This borrow is real, but its collateral is not a supported Euler vault in Lite. This row is informational only; pricing, risk details, and actions are unavailable."
           variant="warning"
           size="compact"
         />

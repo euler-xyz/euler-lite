@@ -133,7 +133,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   })
 
   const submit = async () => {
-    if (isPreparing.value || isSubmitting.value || !position.value || !borrowVault.value) {
+    if (isPreparing.value || isSubmitting.value || !position.value || !borrowVault.value || !collateralVault.value) {
       return
     }
 
@@ -185,7 +185,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   const send = async () => {
     try {
       isSubmitting.value = true
-      if (!position.value || !borrowVault.value) return
+      if (!position.value || !borrowVault.value || !collateralVault.value) return
 
       const amountNano = valueToNano(amount.value, borrowVault.value.asset.decimals)
       const currentDebt = position.value.borrowed || 0n
@@ -352,6 +352,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
         walletRepayPercent.value = 0
       }
     }
+    if (!collateralVault.value) return
     updateSyncEstimates()
     if (!isEstimatesLoading.value) {
       isEstimatesLoading.value = true
