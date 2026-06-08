@@ -55,6 +55,11 @@ const getSortMaxRoe = (pair: AnyBorrowVaultPair) => {
   return supplyFinal + (maxMultiplier - 1) * (supplyFinal - borrowFinal) + loopingRewards
 }
 
+const getActiveSortYieldScore = (pair: AnyBorrowVaultPair): number => {
+  const maxRoe = getSortMaxRoe(pair)
+  return Number.isFinite(maxRoe) ? maxRoe : getNetApy(pair)
+}
+
 const compareMaxRoeDesc = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair): number => {
   const aValue = getSortMaxRoe(a)
   const bValue = getSortMaxRoe(b)
@@ -390,25 +395,32 @@ const sortedBorrowList = computed(() => {
       const list = [...filteredBorrowList.value]
 
       const scores = list.map((pair) => {
-        const maxRoe = getSortMaxRoe(pair)
+        const yieldScore = getActiveSortYieldScore(pair)
         const liquidityUsd = pairLiquidityUsd.value.get(getPairKey(pair)) ?? 0
-        return { pair, maxRoe, liquidityUsd }
+        return { pair, yieldScore, liquidityUsd }
       })
 
-      const maxMaxRoe = Math.max(...scores.map(s => s.maxRoe), 0)
+      const maxYieldScore = Math.max(...scores.map(s => s.yieldScore), 0)
       const maxLiquidity = Math.max(...scores.map(s => s.liquidityUsd), 0)
 
-      const scored = scores.map(({ pair, maxRoe, liquidityUsd }) => {
-        const normalizedRoe = maxMaxRoe === 0 ? 0 : maxRoe / maxMaxRoe
+      const scored = scores.map(({ pair, yieldScore, liquidityUsd }) => {
+        const normalizedYield = maxYieldScore === 0 ? 0 : yieldScore / maxYieldScore
         const normalizedLiquidity = maxLiquidity === 0 ? 0 : liquidityUsd / maxLiquidity
-        const roeBucket = maxRoe >= 0 ? 0 : 1
-        const compositeScore = normalizedRoe * normalizedLiquidity
-        return { pair, roeBucket, compositeScore }
+        const yieldBucket = yieldScore >= 0 ? 0 : 1
+        const compositeScore = normalizedYield * normalizedLiquidity
+        return { pair, yieldBucket, compositeScore }
       })
 
       scored.sort((a, b) => {
-        if (a.roeBucket !== b.roeBucket) return a.roeBucket - b.roeBucket
-        return b.compositeScore - a.compositeScore
+        if (a.yieldBucket !== b.yieldBucket) return a.yieldBucket - b.yieldBucket
+
+        const scoreDelta = b.compositeScore - a.compositeScore
+        if (scoreDelta !== 0) return scoreDelta
+
+        const liquidityDelta = comparePairLiquidityDesc(a.pair, b.pair)
+        if (liquidityDelta !== 0) return liquidityDelta
+
+        return comparePairNameAsc(a.pair, b.pair)
       })
 
       // Active sort ignores direction toggle
