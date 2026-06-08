@@ -73,7 +73,7 @@ const collateralValueDisplay = computed(() =>
 const borrowLabel = computed(() => borrowVault.value?.shares.name ?? truncate(borrowAddress.value))
 const borrowSymbol = computed(() => borrowVault.value?.asset.symbol ?? truncate(borrowAddress.value))
 const unknownCollateralAsset = computed(() => ({
-  address: primaryCollateralAddress.value,
+  address: '',
   symbol: 'Unknown collateral',
 }))
 const avatarAssets = computed(() =>
