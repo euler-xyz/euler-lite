@@ -7,9 +7,10 @@ import {
 } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 import { toUsdAmount } from '~/utils/sdk-prices'
-import { formatCompactUsdValue, formatExactAmount, truncate } from '~/utils/string-utils'
-import { roundAndCompactTokens } from '~/utils/crypto-utils'
+import { formatCompactUsdValue, formatExactAmount, formatHealthScore, formatNumber, truncate } from '~/utils/string-utils'
+import { ltvToPercent, nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { getBorrowPositionCollateralAddresses } from '~/utils/portfolioBorrowPosition'
+import { getBorrowPositionEffectiveLiquidationLTV, getBorrowPositionUserLTVPercent } from '~/utils/ltv'
 
 const { position } = defineProps<{ position: PortfolioBorrowPosition<VaultEntity> }>()
 
@@ -47,6 +48,21 @@ const borrowedCompactDisplay = computed(() => {
 const borrowedExactDisplay = computed(() => {
   if (!borrowVault.value) return ''
   return formatExactAmount(position.borrowed, borrowVault.value.shares.decimals, borrowVault.value.asset.symbol)
+})
+
+const health = computed(() => position.healthFactor)
+const hasQueryFailure = computed(() => position.borrow.liquidity === undefined)
+const liquidationLTV = computed(() => getBorrowPositionEffectiveLiquidationLTV(position))
+const liquidationLTVPercent = computed(() =>
+  liquidationLTV.value === undefined ? null : ltvToPercent(liquidationLTV.value),
+)
+const liquidationLTVDisplay = computed(() =>
+  liquidationLTVPercent.value === null ? '-' : `${liquidationLTVPercent.value}%`,
+)
+const userLTV = computed(() => getBorrowPositionUserLTVPercent(position) ?? null)
+const userLTVDisplay = computed(() => {
+  if (userLTV.value === null) return ''
+  return Number.isFinite(userLTV.value) ? formatNumber(userLTV.value, 2) : '∞'
 })
 
 const collateralValue = computed(() => toUsdAmount(position.totalCollateralValueUsd))
@@ -98,14 +114,14 @@ const pairSymbols = computed(() => `External collateral/${borrowSymbol.value}`)
             >
               <span>Unsupported collateral</span>
               <span
-                class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
+                class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-error-100 text-error-500 text-p5"
                 title="This position uses collateral that Lite cannot resolve as a supported vault."
               >
                 <SvgIcon
                   name="warning"
                   class="!w-14 !h-14"
                 />
-                Unverified
+                Unknown
               </span>
             </div>
             <div
@@ -243,20 +259,51 @@ const pairSymbols = computed(() => `External collateral/${borrowSymbol.value}`)
             Health score
           </div>
           <span
-            class="text-warning-500 text-p3"
+            class="text-content-primary text-p3"
             data-id="data-point"
             :data-key="positionKey"
             data-field="health-score"
-            data-value="Unknown"
+            :data-value="hasQueryFailure || health === undefined ? 'Unknown' : nanoToValue(health, 18)"
           >
-            Unknown
+            <span
+              v-if="hasQueryFailure || health === undefined"
+              class="text-warning-500"
+            >Unknown</span>
+            <template v-else>
+              {{ formatHealthScore(nanoToValue(health, 18)) }}
+            </template>
           </span>
         </div>
         <div class="flex justify-between">
           <div class="text-content-tertiary text-p3">
             Your LTV
           </div>
-          <span class="text-warning-500 text-p3">Unknown</span>
+          <template v-if="hasQueryFailure || userLTV === null">
+            <span class="text-warning-500 text-p3">Unknown</span>
+          </template>
+          <template v-else>
+            <div class="flex justify-between items-center gap-16">
+              <UiProgress
+                v-if="liquidationLTVPercent !== null"
+                style="width: 111px"
+                :model-value="userLTV"
+                :max="liquidationLTVPercent"
+                :color="userLTV >= (liquidationLTVPercent - 2) ? 'danger' : undefined"
+                size="small"
+              />
+              <div class="flex justify-between gap-8 text-right">
+                <div
+                  class="text-content-primary text-p3"
+                  data-id="data-point"
+                  :data-key="positionKey"
+                  data-field="ltv"
+                  :data-value="`${userLTV}/${liquidationLTVPercent ?? '-'}`"
+                >
+                  {{ userLTVDisplay }}/{{ liquidationLTVDisplay }}
+                </div>
+              </div>
+            </div>
+          </template>
         </div>
       </div>
     </div>
