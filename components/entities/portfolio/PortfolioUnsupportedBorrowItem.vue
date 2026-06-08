@@ -72,7 +72,14 @@ const collateralValueDisplay = computed(() =>
 
 const borrowLabel = computed(() => borrowVault.value?.shares.name ?? truncate(borrowAddress.value))
 const borrowSymbol = computed(() => borrowVault.value?.asset.symbol ?? truncate(borrowAddress.value))
-const pairSymbols = computed(() => `External collateral/${borrowSymbol.value}`)
+const unknownCollateralAsset = computed(() => ({
+  address: primaryCollateralAddress.value,
+  symbol: 'Unknown collateral',
+}))
+const avatarAssets = computed(() =>
+  borrowVault.value?.asset ? [unknownCollateralAsset.value, borrowVault.value.asset] : unknownCollateralAsset.value,
+)
+const pairSymbols = computed(() => `Unknown collateral/${borrowSymbol.value}`)
 </script>
 
 <template>
@@ -98,21 +105,19 @@ const pairSymbols = computed(() => `External collateral/${borrowSymbol.value}`)
           Position {{ subAccountIndex }}
         </div>
         <div class="flex gap-12 w-full">
-          <div class="flex w-40 h-40 items-center justify-center rounded-8 bg-warning-100 text-warning-500 shrink-0">
-            <SvgIcon
-              name="warning"
-              class="!w-22 !h-22"
-            />
-          </div>
+          <AssetAvatar
+            :asset="avatarAssets"
+            size="40"
+          />
           <div class="flex-grow min-w-0">
             <div
               class="text-content-tertiary text-p3 mb-4 flex items-center gap-4"
               data-id="data-point"
               :data-key="positionKey"
               data-field="name"
-              :data-value="`External collateral / ${borrowLabel}`"
+              :data-value="`Unknown collateral / ${borrowLabel}`"
             >
-              <span>Unsupported collateral</span>
+              <span>Unknown collateral</span>
               <span
                 class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-error-100 text-error-500 text-p5"
                 title="This position uses collateral that Lite cannot resolve as a supported vault."
