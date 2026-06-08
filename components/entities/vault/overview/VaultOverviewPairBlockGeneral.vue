@@ -16,9 +16,11 @@ import {
   getPairRampConfig,
 } from '~/utils/borrow-pair'
 import { getVaultAvailableLiquidity } from '~/utils/vault-display'
+import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
 import { VaultNetApyPairModal, VaultMaxRoeModal, VaultRampDownModal, VaultSupplyApyModal, VaultBorrowApyModal, UiModalPreviewTrigger } from '#components'
 
 const { pair } = defineProps<{ pair: AnyBorrowVaultPair | PortfolioBorrowPosition<VaultEntity> }>()
+const { getTokenCategoryTags } = useTokenList()
 
 const borrowVault = computed(() => getPairBorrowVault(pair))
 const collateralVault = computed(() => getPairCollateralVault(pair))
@@ -62,6 +64,13 @@ const maxMultiplier = computed(() => pairBorrowLTV.value === undefined ? 1 : get
 const netApy = computed(() => supplyApyWithRewards.value - borrowApyWithRewards.value + loopingRewardAPY.value)
 const maxRoe = computed(() =>
   getMaxRoe(maxMultiplier.value, supplyApyWithRewards.value, borrowApyWithRewards.value, loopingRewardAPY.value),
+)
+const showMaxRoe = computed(() =>
+  areTokenAddressesCorrelatedByTags(
+    collateralVault.value.asset.address,
+    borrowVault.value.asset.address,
+    getTokenCategoryTags,
+  ),
 )
 const netApyClass = computed(() => netApy.value >= 0 ? 'text-accent-600' : 'text-error-500')
 const maxRoeClass = computed(() => maxRoe.value >= 0 ? 'text-accent-600' : 'text-error-500')
@@ -437,7 +446,10 @@ const rampDownModalData = computed(() => ({
                 :value="pairBorrowLTVPercent === null ? '-' : `${formatNumber(maxMultiplier, 2, 2)}x`"
               />
 
-              <VaultOverviewLabelValue orientation="horizontal">
+              <VaultOverviewLabelValue
+                v-if="showMaxRoe"
+                orientation="horizontal"
+              >
                 <template #label>
                   <span class="flex items-center gap-4">
                     Max ROE

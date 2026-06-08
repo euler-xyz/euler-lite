@@ -13,11 +13,13 @@ import { VaultBorrowApyModal, VaultMaxRoeModal, VaultNetApyPairModal, VaultSuppl
 import { isSecuritizeBorrowPair, type AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { getAddress } from 'viem'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
+import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
 
 const { pair } = defineProps<{ pair: AnyBorrowVaultPair }>()
 const { enableEntityBranding } = useDeployConfig()
 const { isVaultGovernorVerified, isSecuritizeGovernorVerified } = useVaults()
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
+const { getTokenCategoryTags } = useTokenList()
 const pairKey = computed(() => `${pair.collateral.address.toLowerCase()}:${pair.borrow.address.toLowerCase()}`)
 
 const isAnyGovernorUnverified = computed(() => {
@@ -141,6 +143,13 @@ const netApy = computed(
 )
 const maxRoe = computed(() =>
   getMaxRoe(maxMultiplier.value, supplyApyWithRewards.value, borrowApyWithRewards.value, loopingRewardsAPY.value),
+)
+const showMaxRoe = computed(() =>
+  areTokenAddressesCorrelatedByTags(
+    pair.collateral.asset.address,
+    pair.borrow.asset.address,
+    getTokenCategoryTags,
+  ),
 )
 const maxLTV = computed(() => formatNumber(ltvToPercent(pair.ltv.borrowLTV), 2))
 const utilization = computed(() => getVaultUtilization(pair.borrow))
@@ -334,7 +343,10 @@ const linkPath = computed(() => ({
           </UiModalPreviewTrigger>
           {{ formatNumber(borrowApyWithRewards) }}%
         </div>
-        <div class="hidden mobile:!flex mobile:flex-col mobile:items-end mobile:mt-8">
+        <div
+          v-if="showMaxRoe"
+          class="hidden mobile:!flex mobile:flex-col mobile:items-end mobile:mt-8"
+        >
           <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
             Max ROE
             <UiModalPreviewTrigger
@@ -372,7 +384,10 @@ const linkPath = computed(() => ({
           </div>
         </div>
       </div>
-      <div class="flex flex-col items-end pr-16 py-16 pb-12 mobile:!hidden">
+      <div
+        v-if="showMaxRoe"
+        class="flex flex-col items-end pr-16 py-16 pb-12 mobile:!hidden"
+      >
         <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
           Max ROE
           <UiModalPreviewTrigger

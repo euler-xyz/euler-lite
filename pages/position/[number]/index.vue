@@ -18,6 +18,7 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getAddress, type Address, type Abi } from 'viem'
 import { eulerAccountLensABI } from '~/entities/euler/abis'
+import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
 
 const _route = useRoute()
 const router = useRouter()
@@ -30,6 +31,7 @@ const { viewer, visibleBreakdown } = useApyVisibility()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, hasSupplyRewards, hasBorrowRewards, getSupplyRewardCampaigns, getBorrowRewardCampaigns } = useRewardsApy()
+const { getTokenCategoryTags } = useTokenList()
 const { planTransfer, executePlan } = useEulerTx()
 const { account: planAccount } = usePlanAccount()
 const {
@@ -429,6 +431,16 @@ const fallbackRoe = computed(() => {
   )
 })
 const roe = computed(() => visibleRoeBreakdown.value?.total ?? fallbackRoe.value)
+const isRoeApplicable = computed(() => {
+  if (!borrowVault.value || !collateralItems.value.length) return false
+  return collateralItems.value.every(item =>
+    areTokenAddressesCorrelatedByTags(
+      item.vault.asset.address,
+      borrowVault.value!.asset.address,
+      getTokenCategoryTags,
+    ),
+  )
+})
 
 const supplyCampaignsForModal = computed(() => getSupplyRewardCampaigns(collateralVault.value?.address || ''))
 const borrowCampaignsForModal = computed(() => getBorrowRewardCampaigns(borrowVault.value?.address || '', collateralVault.value?.address || ''))
@@ -848,7 +860,10 @@ watch([isConnected, isSpyMode, address], () => {
               {{ Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
             </div>
           </div>
-          <div class="flex justify-between items-center">
+          <div
+            v-if="isRoeApplicable"
+            class="flex justify-between items-center"
+          >
             <div class="flex items-center gap-4 text-p2 text-content-secondary">
               ROE
               <UiModalPreviewTrigger

@@ -13,6 +13,7 @@ import {
 } from '~/utils/discoveryCalculations'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
 import { VaultMaxRoeModal, UiModalPreviewTrigger } from '#components'
 
 const props = defineProps<{
@@ -28,6 +29,7 @@ const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getBorrowRewardApy, getSupplyRewardApy, getLoopingRewardApy } = useRewardsApy()
 const { products } = useEulerLabels()
+const { getTokenCategoryTags } = useTokenList()
 
 const isGovernanceLimited = computed(() =>
   props.market.source === 'product' && (products[props.market.id]?.tags?.includes('governance limited') ?? false),
@@ -49,6 +51,13 @@ const getBestMaxRoe = (market: MarketGroup): BestMaxRoeResult => {
   let bestBorrowLTV = 0
   let bestBorrowVaultAddress = ''
   let bestCollateralAddress = ''
+  let fallback = -Infinity
+  let fallbackHasRewards = false
+  let fallbackPair = ''
+  let fallbackSupplyAPY = 0
+  let fallbackBorrowAPY = 0
+  let fallbackBorrowVaultAddress = ''
+  let fallbackCollateralAddress = ''
 
   for (const liability of borrowable) {
     const borrowBase = getVaultBorrowApy(liability)
@@ -69,10 +78,24 @@ const getBestMaxRoe = (market: MarketGroup): BestMaxRoeResult => {
       const borrowFinal = borrowApy - borrowRewards
       const multiplier = getMaxMultiplier(ltv.borrowLTV)
       const roe = getMaxRoe(multiplier, supplyFinal, borrowFinal, loopingRewards)
+      const netApy = supplyFinal - borrowFinal + loopingRewards
+      const hasRewards = supplyRewards > 0 || borrowRewards > 0 || loopingRewards > 0
+
+      if (netApy > fallback) {
+        fallback = netApy
+        fallbackHasRewards = hasRewards
+        fallbackPair = `${collateral.asset.symbol}/${liability.asset.symbol}`
+        fallbackSupplyAPY = supplyFinal
+        fallbackBorrowAPY = borrowFinal
+        fallbackBorrowVaultAddress = liability.address
+        fallbackCollateralAddress = collateral.address
+      }
+
+      if (!areTokenAddressesCorrelatedByTags(collateral.asset.address, liability.asset.address, getTokenCategoryTags)) continue
 
       if (roe > best) {
         best = roe
-        bestHasRewards = supplyRewards > 0 || borrowRewards > 0 || loopingRewards > 0
+        bestHasRewards = hasRewards
         bestPair = `${collateral.asset.symbol}/${liability.asset.symbol}`
         bestMultiplier = multiplier
         bestSupplyAPY = supplyFinal
@@ -84,9 +107,25 @@ const getBestMaxRoe = (market: MarketGroup): BestMaxRoeResult => {
     }
   }
 
+  if (!(Number.isFinite(best) && best > -Infinity) && Number.isFinite(fallback) && fallback > -Infinity) {
+    return {
+      value: fallback,
+      metric: 'net-apy',
+      hasRewards: fallbackHasRewards,
+      pair: fallbackPair,
+      maxMultiplier: 1,
+      supplyAPY: fallbackSupplyAPY,
+      borrowAPY: fallbackBorrowAPY,
+      borrowLTV: 0,
+      borrowVaultAddress: fallbackBorrowVaultAddress,
+      collateralAddress: fallbackCollateralAddress,
+    }
+  }
+
   const value = Number.isFinite(best) && best > -Infinity ? best : 0
   return {
     value,
+    metric: 'max-roe',
     hasRewards: bestHasRewards,
     pair: bestPair,
     maxMultiplier: bestMultiplier,
@@ -267,8 +306,9 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
           <div class="flex-1 min-w-0">
             <template v-if="bestRoe.value > 0">
               <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-                Max ROE
+                {{ bestRoe.metric === 'max-roe' ? 'Max ROE' : 'Net APY' }}
                 <UiModalPreviewTrigger
+                  v-if="bestRoe.metric === 'max-roe'"
                   :component="VaultMaxRoeModal"
                   :modal-data="getMaxRoeModalData(bestRoe)"
                   aria-label="Show max ROE breakdown"
@@ -283,11 +323,11 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
                 class="text-p2 text-content-primary flex items-center gap-4 min-w-0"
                 data-id="data-point"
                 :data-key="market.id"
-                data-field="best-max-roe"
+                :data-field="bestRoe.metric === 'max-roe' ? 'best-max-roe' : 'fallback-net-apy'"
                 :data-value="bestRoe.value"
               >
                 <UiModalPreviewTrigger
-                  v-if="bestRoe.hasRewards"
+                  v-if="bestRoe.metric === 'max-roe' && bestRoe.hasRewards"
                   :component="VaultMaxRoeModal"
                   :modal-data="getMaxRoeModalData(bestRoe)"
                   aria-label="Show max ROE rewards breakdown"
@@ -417,8 +457,9 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
           class="flex w-full justify-between"
         >
           <div class="text-content-tertiary text-p3 flex items-center gap-4 whitespace-nowrap">
-            Max ROE
+            {{ bestRoe.metric === 'max-roe' ? 'Max ROE' : 'Net APY' }}
             <UiModalPreviewTrigger
+              v-if="bestRoe.metric === 'max-roe'"
               :component="VaultMaxRoeModal"
               :modal-data="getMaxRoeModalData(bestRoe)"
               aria-label="Show max ROE breakdown"
@@ -432,7 +473,7 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
           <div class="text-p2 text-content-primary flex flex-wrap items-center justify-end gap-x-4">
             <span class="flex items-center gap-4 shrink-0">
               <UiModalPreviewTrigger
-                v-if="bestRoe.hasRewards"
+                v-if="bestRoe.metric === 'max-roe' && bestRoe.hasRewards"
                 :component="VaultMaxRoeModal"
                 :modal-data="getMaxRoeModalData(bestRoe)"
                 aria-label="Show max ROE rewards breakdown"

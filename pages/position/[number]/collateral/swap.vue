@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { isSecuritizeCollateralVault, type SwapQuote, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { isSecuritizeCollateralVault, SwapperMode, type SwapQuote, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber, getCollateralUsdValueOrZero } from '~/utils/sdk-prices'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
-import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
@@ -35,6 +35,7 @@ const { planCollateralChange } = useEulerTx()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
+const { getTokenCategoryTags } = useTokenList()
 const { isReady: isVaultsReady } = useVaults()
 const { getOrFetch } = useVaultRegistry()
 const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
@@ -400,6 +401,21 @@ const borrowApy = computed(() => {
   const base = getVaultBorrowApy(borrowVault.value)
   return withVaultIntrinsicApy(base, borrowVault.value, enableIntrinsicApy.value) - getBorrowRewardApy(borrowVault.value.address, fromVault.value?.address)
 })
+const isRoeApplicable = computed(() =>
+  !!fromVault.value
+  && !!toVault.value
+  && !!borrowVault.value
+  && areTokenAddressesCorrelatedByTags(
+    fromVault.value.asset.address,
+    borrowVault.value.asset.address,
+    getTokenCategoryTags,
+  )
+  && areTokenAddressesCorrelatedByTags(
+    toVault.value.asset.address,
+    borrowVault.value.asset.address,
+    getTokenCategoryTags,
+  ),
+)
 
 // ── Collateral USD valuation (from liability vault's perspective) ─────────
 const getCollateralValueUsdLocal = async (amount: bigint) => {
@@ -836,7 +852,10 @@ watch(() => cowSwapOrderStatus.orderStatus.value, (status) => {
             variant="card"
             class="w-full laptop:max-w-[360px]"
           >
-            <SummaryRow label="ROE">
+            <SummaryRow
+              v-if="isRoeApplicable"
+              label="ROE"
+            >
               <SummaryValue
                 :before="roeBefore !== null ? formatNumber(roeBefore) : undefined"
                 :after="roeAfter !== null && (quote || isSameAsset) ? formatNumber(roeAfter) : undefined"

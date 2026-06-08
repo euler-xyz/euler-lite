@@ -15,10 +15,19 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { getVaultAvailableLiquidity, getVaultUtilization } from '~/utils/vault-display'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
+import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
 
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy } = useRewardsApy()
+const { getTokenCategoryTags } = useTokenList()
+
+const isCorrelatedPair = (pair: AnyBorrowVaultPair) =>
+  areTokenAddressesCorrelatedByTags(
+    pair.collateral.asset.address,
+    pair.borrow.asset.address,
+    getTokenCategoryTags,
+  )
 
 const getNetApy = (pair: AnyBorrowVaultPair) => {
   const baseSupplyApy = getVaultSupplyApy(pair.collateral)
@@ -32,6 +41,8 @@ const getNetApy = (pair: AnyBorrowVaultPair) => {
 }
 
 const getSortMaxRoe = (pair: AnyBorrowVaultPair) => {
+  if (!isCorrelatedPair(pair)) return Number.NEGATIVE_INFINITY
+
   const borrowLTV = ltvToPercent(pair.ltv.borrowLTV)
   const maxMultiplier = Math.max(1, Math.floor(100 / (100 - borrowLTV) * 100) / 100)
   const baseSupplyApy = getVaultSupplyApy(pair.collateral)
@@ -42,6 +53,17 @@ const getSortMaxRoe = (pair: AnyBorrowVaultPair) => {
   const borrowFinal = borrowApy - getBorrowRewardApy(pair.borrow.address, pair.collateral.address)
   const loopingRewards = getLoopingRewardApy(pair.borrow.address, pair.collateral.address)
   return supplyFinal + (maxMultiplier - 1) * (supplyFinal - borrowFinal) + loopingRewards
+}
+
+const compareMaxRoeDesc = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair): number => {
+  const aValue = getSortMaxRoe(a)
+  const bValue = getSortMaxRoe(b)
+  const aFinite = Number.isFinite(aValue)
+  const bFinite = Number.isFinite(bValue)
+  if (!aFinite && !bFinite) return 0
+  if (!aFinite) return 1
+  if (!bFinite) return -1
+  return bValue - aValue
 }
 
 defineOptions({
@@ -394,7 +416,7 @@ const sortedBorrowList = computed(() => {
       break
     case 'Max ROE':
       sorted = applyRecentlyAddedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
-        return getSortMaxRoe(b) - getSortMaxRoe(a)
+        return compareMaxRoeDesc(a, b)
       }))
       break
     case 'Net APY':

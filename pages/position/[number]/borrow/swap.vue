@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, SwapQuote, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { SwapperMode, type SecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type SwapQuote, type VaultEntity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { useSwapDebtOptions } from '~/composables/useSwapDebtOptions'
-import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/utils/repayUtils'
@@ -21,6 +21,7 @@ const { account: planAccount } = usePlanAccount()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
+const { getTokenCategoryTags } = useTokenList()
 
 const positionIndex = usePositionIndex()
 
@@ -88,6 +89,21 @@ const toBorrowApy = computed(() => {
   const base = getVaultBorrowApy(toVault.value)
   return withVaultIntrinsicApy(base, toVault.value, enableIntrinsicApy.value) - getBorrowRewardApy(toVault.value.address, collateralVault.value?.address)
 })
+const isRoeApplicable = computed(() =>
+  !!collateralVault.value
+  && !!fromVault.value
+  && !!toVault.value
+  && areTokenAddressesCorrelatedByTags(
+    collateralVault.value.asset.address,
+    fromVault.value.asset.address,
+    getTokenCategoryTags,
+  )
+  && areTokenAddressesCorrelatedByTags(
+    collateralVault.value.asset.address,
+    toVault.value.asset.address,
+    getTokenCategoryTags,
+  ),
+)
 
 const supplyValueUsd = ref<number | null>(null)
 watchEffect(async () => {
@@ -480,7 +496,10 @@ const onToVaultChange = (selectedIndex: number) => {
             variant="card"
             class="w-full laptop:max-w-[360px]"
           >
-            <SummaryRow label="ROE">
+            <SummaryRow
+              v-if="isRoeApplicable"
+              label="ROE"
+            >
               <SummaryValue
                 :before="roeBefore !== null ? formatNumber(roeBefore) : undefined"
                 :after="roeAfter !== null && quote ? formatNumber(roeAfter) : undefined"

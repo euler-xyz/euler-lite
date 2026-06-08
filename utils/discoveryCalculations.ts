@@ -31,6 +31,7 @@ export interface CollateralMatrixData {
 
 export interface BestMaxRoeResult {
   value: number
+  metric: 'max-roe' | 'net-apy'
   hasRewards: boolean
   pair: string
   maxMultiplier: number

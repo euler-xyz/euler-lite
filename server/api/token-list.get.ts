@@ -18,6 +18,7 @@ interface TokenEntry {
   symbol: string
   decimals: number
   logoURI?: string
+  tags?: string[]
 }
 
 type QueryTokenList = (url: string) => Promise<TokenListItem[]>
@@ -121,6 +122,7 @@ const toTokenEntry = (token: TokenListItem): TokenEntry => ({
   symbol: token.symbol,
   decimals: token.decimals,
   logoURI: token.logoURI || undefined,
+  ...(token.tags?.length ? { tags: token.tags } : {}),
 })
 
 function refreshEulerSdkTokenList(chainId: number): Promise<TokenEntry[]> {

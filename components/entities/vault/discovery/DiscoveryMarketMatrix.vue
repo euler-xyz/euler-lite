@@ -16,6 +16,7 @@ import { getOracleRouteStepKey, useOracleAdapterPrices } from '~/composables/use
 import { getCollateralOracleRouteSteps, getDebtOracleRouteSteps, isOracleAdapterRouteStep } from '~/utils/oracle-route-steps'
 import type { MarketGroup } from '~/entities/lend-discovery'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
 import type { Address } from 'viem'
 import type { CSSProperties } from 'vue'
 
@@ -43,6 +44,7 @@ const {
 } = useRewardsApy()
 const { oracleAdapters, loadAllOracleAdapters } = useEulerLabels()
 const { chainId } = useEulerAddresses()
+const { getTokenCategoryTags } = useTokenList()
 
 const hoveredCell = ref<{
   collateralAddr: string
@@ -103,6 +105,20 @@ const computeEnhancedApys = (
   }
 }
 
+const isCorrelatedCell = (
+  collateralAddr: string,
+  liabilityAddr: string,
+): boolean => {
+  const collateral = findVault(props.market, collateralAddr)
+  const liability = findVault(props.market, liabilityAddr)
+  if (!collateral || !liability) return false
+  return areTokenAddressesCorrelatedByTags(
+    collateral.asset.address,
+    liability.asset.address,
+    getTokenCategoryTags,
+  )
+}
+
 const getCellMetricValue = (
   cell: MatrixCell,
   collateralAddr: string,
@@ -117,8 +133,10 @@ const getCellMetricValue = (
       return getMaxMultiplier(cell.ltv.borrowLTV)
     case 'net-apy':
       return computeEnhancedApys(cell, collateralAddr, liabilityAddr).netApy
-    case 'roe':
-      return computeEnhancedApys(cell, collateralAddr, liabilityAddr).roe
+    case 'roe': {
+      const apys = computeEnhancedApys(cell, collateralAddr, liabilityAddr)
+      return isCorrelatedCell(collateralAddr, liabilityAddr) ? apys.roe : apys.netApy
+    }
     default:
       return 0
   }
@@ -530,7 +548,14 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
               :data-borrow-address="col.address"
               :data-field="dotMetric"
               :data-present="!!matrix.cells.get(row.address)?.get(col.address)"
-              :data-value="matrix.cells.get(row.address)?.get(col.address) ? getCellMetricValue(matrix.cells.get(row.address)!.get(col.address)!, row.address, col.address) : undefined"
+              :data-value="
+                (() => {
+                  const cell = matrix.cells.get(row.address)?.get(col.address);
+                  if (!cell) return undefined;
+                  const value = getCellMetricValue(cell, row.address, col.address);
+                  return Number.isFinite(value) ? value : undefined;
+                })()
+              "
               :class="[
                 selectedCell?.collateralAddr === row.address
                   && selectedCell?.liabilityAddr === col.address
@@ -560,6 +585,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                     row.address,
                     col.address,
                   );
+                  if (!Number.isFinite(val)) return undefined;
                   return {
                     backgroundColor: getCellBgColor(
                       val,
@@ -672,10 +698,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                 </template>
 
                 <!-- Numeric metrics: original rendering -->
-                <div
-                  v-else
-                  class="inline-flex items-center justify-center gap-2"
-                >
+                <div class="inline-flex items-center justify-center gap-2">
                   <SvgIcon
                     v-if="
                       dotMetric === 'lltv'

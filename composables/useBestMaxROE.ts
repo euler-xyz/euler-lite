@@ -1,5 +1,6 @@
 import type { MarketGroup } from '~/entities/lend-discovery'
 import { isEVault } from '@eulerxyz/euler-v2-sdk'
+import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
 import { type BestMaxRoeResult, getBorrowableVaults } from '~/utils/discoveryCalculations'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import {
@@ -8,11 +9,11 @@ import {
   sumBorrowRewardApr,
   sumLoopingRewardApr,
 } from '~/utils/collateralOptions'
-
 /**
- * Computes the best max ROE for each market group by iterating all actual
- * collateral/liability pairs with LTV relationships. Uses leveraged return
- * (max ROE) instead of simple net APY spread.
+ * Computes the headline metric for each market group by iterating actual
+ * collateral/liability pairs with LTV relationships. Correlated pairs use
+ * leveraged return (max ROE); groups without a correlated pair fall back to
+ * the best visible net APY.
  *
  * Returns a reactive map of marketGroupId -> BestMaxRoeResult.
  */
@@ -21,6 +22,7 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
   const enableRewardsApy = computed(() => settings.value.enableRewardsApy)
   const { viewer } = useApyVisibility()
+  const { getTokenCategoryTags } = useTokenList()
 
   const computeForGroup = (group: MarketGroup): BestMaxRoeResult => {
     const borrowableVaults = getBorrowableVaults(group)
@@ -44,6 +46,13 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
     let bestBorrowLTV = 0
     let bestBorrowVaultAddress = ''
     let bestCollateralAddress = ''
+    let fallback = -Infinity
+    let fallbackHasRewards = false
+    let fallbackPair = ''
+    let fallbackSupplyAPY = 0
+    let fallbackBorrowAPY = 0
+    let fallbackBorrowVaultAddress = ''
+    let fallbackCollateralAddress = ''
 
     for (const liability of borrowableVaults) {
       for (const ltv of liability.collaterals) {
@@ -77,6 +86,19 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
               c => c.action === 'LEND' && typeof c.apr === 'number' && c.apr > 0,
             )))
 
+        const netApy = supplyFinal - borrowFinal + loopingRewards
+        if (netApy > fallback) {
+          fallback = netApy
+          fallbackHasRewards = supplyHasRewards
+          fallbackPair = `${collateral.asset.symbol}/${liability.asset.symbol}`
+          fallbackSupplyAPY = supplyFinal
+          fallbackBorrowAPY = borrowFinal
+          fallbackBorrowVaultAddress = liability.address
+          fallbackCollateralAddress = collateral.address
+        }
+
+        if (!areTokenAddressesCorrelatedByTags(collateral.asset.address, liability.asset.address, getTokenCategoryTags)) continue
+
         if (roe > best) {
           best = roe
           bestHasRewards = supplyHasRewards
@@ -91,9 +113,25 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
       }
     }
 
+    if (!(Number.isFinite(best) && best > -Infinity) && Number.isFinite(fallback) && fallback > -Infinity) {
+      return {
+        value: fallback,
+        metric: 'net-apy',
+        hasRewards: fallbackHasRewards,
+        pair: fallbackPair,
+        maxMultiplier: 1,
+        supplyAPY: fallbackSupplyAPY,
+        borrowAPY: fallbackBorrowAPY,
+        borrowLTV: 0,
+        borrowVaultAddress: fallbackBorrowVaultAddress,
+        collateralAddress: fallbackCollateralAddress,
+      }
+    }
+
     const value = Number.isFinite(best) && best > -Infinity ? best : 0
     return {
       value,
+      metric: 'max-roe',
       hasRewards: bestHasRewards,
       pair: bestPair,
       maxMultiplier: bestMultiplier,
@@ -119,6 +157,7 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
 
   const defaultResult: BestMaxRoeResult = {
     value: 0,
+    metric: 'max-roe',
     hasRewards: false,
     pair: '',
     maxMultiplier: 1,

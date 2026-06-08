@@ -24,6 +24,7 @@ import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { getBorrowPositionEffectiveLiquidationLTV, getBorrowPositionUserLTVPercent } from '~/utils/ltv'
+import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
 
 const { position } = defineProps<{ position: PortfolioBorrowPosition<VaultEntity> }>()
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
@@ -41,6 +42,7 @@ const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, getEligibleLoopingRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, getLoopingRewardCampaigns, hasSupplyRewards, hasBorrowRewards, isLoopingEligible } = useRewardsApy()
 const { viewer, visibleBreakdown, visibleTotal } = useApyVisibility()
+const { getTokenCategoryTags } = useTokenList()
 
 const borrowVault = computed(() => position.borrowVault as EVault)
 const collateralVault = computed(() => position.collateralVault as EVault | SecuritizeCollateralVault)
@@ -179,6 +181,17 @@ const hasRewards = computed(() =>
   || hasBorrowRewards(borrowVault.value.address || '', collateralVault.value.address || '')
   || loopingEligible.value,
 )
+const isRoeApplicable = computed(() => {
+  const collaterals = collateralItems.value.map(item => item.vault)
+  if (!collaterals.length || !borrowVault.value) return false
+  return collaterals.every(collateral =>
+    areTokenAddressesCorrelatedByTags(
+      collateral.asset.address,
+      borrowVault.value.asset.address,
+      getTokenCategoryTags,
+    ),
+  )
+})
 const collateralSupplyApy = computed(() => {
   return withVaultIntrinsicApy(
     getVaultSupplyApy(collateralVault.value),
@@ -415,7 +428,10 @@ const openPositionInformationModal = () => {
                 {{ netAPY !== undefined && Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
               </div>
             </div>
-            <div class="flex flex-col items-end">
+            <div
+              v-if="isRoeApplicable"
+              class="flex flex-col items-end"
+            >
               <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                 ROE
                 <UiModalPreviewTrigger

@@ -230,9 +230,14 @@ const sortedMarkets = computed(() => {
       return applyDeprecatedGroupSort(applyRecentlyAddedSort(scored.map(s => s.group)))
     }
     case 'Max ROE':
-      sorted = applyRecentlyAddedSort([...filteredMarkets.value].sort((a, b) =>
-        getBestMaxROE(b.id).value - getBestMaxROE(a.id).value,
-      ))
+      sorted = applyRecentlyAddedSort([...filteredMarkets.value].sort((a, b) => {
+        const aBest = getBestMaxROE(a.id)
+        const bBest = getBestMaxROE(b.id)
+        const aHasRoe = aBest.metric === 'max-roe' ? 1 : 0
+        const bHasRoe = bBest.metric === 'max-roe' ? 1 : 0
+        if (aHasRoe !== bHasRoe) return bHasRoe - aHasRoe
+        return bBest.value - aBest.value
+      }))
       break
     case 'Total Supply':
       sorted = applyRecentlyAddedSort([...filteredMarkets.value].sort((a, b) =>

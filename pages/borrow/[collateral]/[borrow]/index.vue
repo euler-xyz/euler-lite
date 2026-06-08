@@ -19,6 +19,7 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { SlippageSettingsModal, VaultUnverifiedDisclaimerModal } from '#components'
 import { getAddress } from 'viem'
+import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
 
 const router = useRouter()
 const route = useRoute()
@@ -26,6 +27,7 @@ const modal = useModal()
 const reviewBorrowLabel = 'Review Borrow'
 const reviewMultiplyLabel = 'Review Multiply'
 const { getBorrowVaultPair, updateVault } = useVaults()
+const { getTokenCategoryTags } = useTokenList()
 const { address, isConnected } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const { chainId } = useEulerAddresses()
@@ -74,6 +76,13 @@ const borrowVault = computed(() => pair.value?.borrow)
 const collateralVault = computed(() => pair.value?.collateral)
 const isSecuritizeCollateral = computed(() => pair.value ? isSecuritizeBorrowPair(pair.value) : false)
 const pairAssets = computed(() => [collateralVault.value?.asset, borrowVault.value?.asset])
+const showMultiplyRoe = computed(() =>
+  areTokenAddressesCorrelatedByTags(
+    collateralVault.value?.asset.address,
+    borrowVault.value?.asset.address,
+    getTokenCategoryTags,
+  ),
+)
 
 // --- Shared functions ---
 const normalizeAddress = (addr?: string) => {
@@ -848,7 +857,10 @@ watch(formTab, () => {
                       :loading="multiply.isMultiplyQuoteLoading.value"
                       variant="card"
                     >
-                      <SummaryRow label="ROE">
+                      <SummaryRow
+                        v-if="showMultiplyRoe"
+                        label="ROE"
+                      >
                         <SummaryValue
                           :after="multiply.multiplyRoeAfter.value !== null && multiply.multiplySwapReady.value ? formatNumber(multiply.multiplyRoeAfter.value) : (multiply.multiplyRoeBefore.value !== null ? formatNumber(multiply.multiplyRoeBefore.value) : undefined)"
                           suffix="%"

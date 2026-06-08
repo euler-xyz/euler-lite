@@ -19,6 +19,7 @@ import { useCollateralSwapRepay } from '~/composables/repay/useCollateralSwapRep
 import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
 
 const _route = useRoute()
 const _router = useRouter()
@@ -30,6 +31,7 @@ useFullBalances()
 const positionIndex = usePositionIndex()
 const { isPositionsLoading, isPositionsLoaded, isDepositsLoaded, refreshAllPositions: _refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
+const { getTokenCategoryTags } = useTokenList()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { eulerLensAddresses: _eulerLensAddresses } = useEulerAddresses()
@@ -217,6 +219,25 @@ const savings = useSavingsRepay({
   collateralSupplyApy,
   borrowApy,
 })
+
+const isPositionRoeApplicable = computed(() =>
+  !!collateralVault.value
+  && !!borrowVault.value
+  && areTokenAddressesCorrelatedByTags(
+    collateralVault.value.asset.address,
+    borrowVault.value.asset.address,
+    getTokenCategoryTags,
+  ),
+)
+const isCollateralRepayRoeApplicable = computed(() =>
+  !!collateral.sourceVault.value
+  && !!borrowVault.value
+  && areTokenAddressesCorrelatedByTags(
+    collateral.sourceVault.value.asset.address,
+    borrowVault.value.asset.address,
+    getTokenCategoryTags,
+  ),
+)
 
 const { guardWithPriceImpact: guardWithCollateralPriceImpact } = usePriceImpactGate({
   directPriceImpact: collateral.priceImpact,
@@ -769,7 +790,10 @@ watch(formTab, () => {
               variant="card"
               class="w-full laptop:max-w-[360px]"
             >
-              <SummaryRow label="ROE">
+              <SummaryRow
+                v-if="isCollateralRepayRoeApplicable"
+                label="ROE"
+              >
                 <SummaryValue
                   :before="collateral.roeBefore.value !== null ? formatNumber(collateral.roeBefore.value) : undefined"
                   :after="collateral.roeAfter.value !== null && (collateral.quotes.quote.value || collateral.isSameAsset.value) ? formatNumber(collateral.roeAfter.value) : undefined"
@@ -949,7 +973,10 @@ watch(formTab, () => {
               variant="card"
               class="w-full laptop:max-w-[360px]"
             >
-              <SummaryRow label="ROE">
+              <SummaryRow
+                v-if="isPositionRoeApplicable"
+                label="ROE"
+              >
                 <SummaryValue
                   :before="savings.roeBefore.value !== null ? formatNumber(savings.roeBefore.value) : undefined"
                   :after="savings.roeAfter.value !== null && (savings.quotes.quote.value || savings.isSameAsset.value) ? formatNumber(savings.roeAfter.value) : undefined"
