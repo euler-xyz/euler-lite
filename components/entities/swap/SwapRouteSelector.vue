@@ -1,23 +1,10 @@
 <script setup lang="ts">
-type SwapRouteBadgeTone = 'best' | 'worse'
-
-type SwapRouteItem = {
-  provider: string
-  amount: string
-  symbol: string
-  gasCostLabel?: string
-  netUsdLabel?: string
-  routeLabel?: string
-  isGasless?: boolean
-  badge?: {
-    label: string
-    tone: SwapRouteBadgeTone
-  }
-}
-
-const VISIBLE_COUNT = 3
-
-const isGaslessItem = (item: SwapRouteItem) => !!item.isGasless
+import type { SwapRouteItem } from '~/utils/swapRouteItems'
+import {
+  getVisibleSwapRouteItems,
+  isGaslessSwapRouteItem as isGaslessItem,
+  SWAP_ROUTE_VISIBLE_COUNT,
+} from '~/utils/swapRouteVisibility'
 
 const props = withDefaults(defineProps<{
   title?: string
@@ -41,23 +28,12 @@ const emit = defineEmits<{
 
 const expanded = ref(false)
 
-const hasMore = computed(() => props.items.length > VISIBLE_COUNT)
-const visibleItems = computed(() => {
-  if (expanded.value) return props.items
-
-  const top = props.items.slice(0, VISIBLE_COUNT)
-  // If a gasless (CoW) route exists but is below the visible cutoff, always
-  // surface it in the collapsed view so users see the gasless option without
-  // expanding the list.
-  if (top.some(isGaslessItem)) return top
-
-  const cow = props.items.find(isGaslessItem)
-  if (!cow) return top
-
-  return top.length >= VISIBLE_COUNT
-    ? [...top.slice(0, VISIBLE_COUNT - 1), cow]
-    : [...top, cow]
-})
+const hasMore = computed(() => props.items.length > SWAP_ROUTE_VISIBLE_COUNT)
+const visibleItems = computed(() => getVisibleSwapRouteItems(props.items, {
+  expanded: expanded.value,
+  promoteGasless: true,
+  visibleCount: SWAP_ROUTE_VISIBLE_COUNT,
+}))
 
 const onSelect = (provider: string) => {
   emit('select', provider)
