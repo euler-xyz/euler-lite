@@ -176,7 +176,7 @@ const pairSymbols = computed(() => `Unknown collateral/${borrowSymbol.value}`)
       <div class="flex flex-col gap-12 w-full">
         <UiAlert
           title="Unsupported external collateral"
-          description="This borrow is real, but its collateral is not a supported Euler vault in Lite. This row is informational only; pricing, risk details, and actions are unavailable."
+          description="This borrow is real, but its collateral is not a supported Euler vault in Lite. This row is informational only; some pricing details and actions are unavailable."
           variant="warning"
           size="compact"
         />
