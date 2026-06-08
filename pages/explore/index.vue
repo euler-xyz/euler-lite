@@ -198,6 +198,29 @@ const applyDeprecatedGroupSort = (sorted: MarketGroup[]): MarketGroup[] => {
   })
 }
 
+const compareMarketLiquidityDesc = (a: MarketGroup, b: MarketGroup): number =>
+  b.metrics.totalAvailableLiquidity - a.metrics.totalAvailableLiquidity
+
+const compareMarketNameAsc = (a: MarketGroup, b: MarketGroup): number =>
+  (a.name || a.id).localeCompare(b.name || b.id)
+
+const compareMaxRoeMarketsDesc = (a: MarketGroup, b: MarketGroup): number => {
+  const aBest = getBestMaxROE(a.id)
+  const bBest = getBestMaxROE(b.id)
+  const aHasRoe = aBest.metric === 'max-roe'
+  const bHasRoe = bBest.metric === 'max-roe'
+
+  if (aHasRoe !== bHasRoe) return aHasRoe ? -1 : 1
+
+  const metricDelta = bBest.value - aBest.value
+  if (metricDelta !== 0) return metricDelta
+
+  const liquidityDelta = compareMarketLiquidityDesc(a, b)
+  if (liquidityDelta !== 0) return liquidityDelta
+
+  return compareMarketNameAsc(a, b)
+}
+
 const sortedMarkets = computed(() => {
   let sorted: MarketGroup[]
   switch (sortBy.value) {
@@ -230,14 +253,7 @@ const sortedMarkets = computed(() => {
       return applyDeprecatedGroupSort(applyRecentlyAddedSort(scored.map(s => s.group)))
     }
     case 'Max ROE':
-      sorted = applyRecentlyAddedSort([...filteredMarkets.value].sort((a, b) => {
-        const aBest = getBestMaxROE(a.id)
-        const bBest = getBestMaxROE(b.id)
-        const aHasRoe = aBest.metric === 'max-roe' ? 1 : 0
-        const bHasRoe = bBest.metric === 'max-roe' ? 1 : 0
-        if (aHasRoe !== bHasRoe) return bHasRoe - aHasRoe
-        return bBest.value - aBest.value
-      }))
+      sorted = [...filteredMarkets.value].sort(compareMaxRoeMarketsDesc)
       break
     case 'Total Supply':
       sorted = applyRecentlyAddedSort([...filteredMarkets.value].sort((a, b) =>

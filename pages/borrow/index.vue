@@ -60,10 +60,27 @@ const compareMaxRoeDesc = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair): number
   const bValue = getSortMaxRoe(b)
   const aFinite = Number.isFinite(aValue)
   const bFinite = Number.isFinite(bValue)
-  if (!aFinite && !bFinite) return 0
+
+  if (!aFinite && !bFinite) {
+    const netApyDelta = getNetApy(b) - getNetApy(a)
+    if (netApyDelta !== 0) return netApyDelta
+
+    const liquidityDelta = comparePairLiquidityDesc(a, b)
+    if (liquidityDelta !== 0) return liquidityDelta
+
+    return comparePairNameAsc(a, b)
+  }
+
   if (!aFinite) return 1
   if (!bFinite) return -1
-  return bValue - aValue
+
+  const roeDelta = bValue - aValue
+  if (roeDelta !== 0) return roeDelta
+
+  const liquidityDelta = comparePairLiquidityDesc(a, b)
+  if (liquidityDelta !== 0) return liquidityDelta
+
+  return comparePairNameAsc(a, b)
 }
 
 defineOptions({
@@ -137,6 +154,18 @@ const pairBorrowedUsd = ref<Map<string, number>>(new Map())
 
 // Helper to create a unique key for a borrow pair
 const getPairKey = (pair: AnyBorrowVaultPair) => `${pair.collateral.address}-${pair.borrow.address}`
+
+const getPairSortName = (pair: AnyBorrowVaultPair): string =>
+  `${pair.collateral.asset.symbol}/${pair.borrow.asset.symbol}`
+
+const comparePairLiquidityDesc = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair): number =>
+  (pairLiquidityUsd.value.get(getPairKey(b)) ?? 0) - (pairLiquidityUsd.value.get(getPairKey(a)) ?? 0)
+
+const comparePairNameAsc = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair): number => {
+  const nameDelta = getPairSortName(a).localeCompare(getPairSortName(b))
+  if (nameDelta !== 0) return nameDelta
+  return getPairKey(a).localeCompare(getPairKey(b))
+}
 
 // Fetch USD values for all borrow pairs. Debounced to collapse the
 // bursts of registry updates streamed during loadVaults's RPC refresh
@@ -415,9 +444,9 @@ const sortedBorrowList = computed(() => {
       }))
       break
     case 'Max ROE':
-      sorted = applyRecentlyAddedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
+      sorted = [...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
         return compareMaxRoeDesc(a, b)
-      }))
+      })
       break
     case 'Net APY':
       sorted = applyRecentlyAddedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
