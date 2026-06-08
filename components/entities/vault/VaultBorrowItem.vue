@@ -217,6 +217,15 @@ const maxRoeModalData = computed(() => ({
   },
 }))
 
+const headlineMetricLabel = computed(() => showMaxRoe.value ? 'Max ROE' : 'Net APY')
+const headlineMetricValue = computed(() => showMaxRoe.value ? maxRoe.value : netApy.value)
+const headlineMetricModalComponent = computed(() => showMaxRoe.value ? VaultMaxRoeModal : VaultNetApyPairModal)
+const headlineMetricModalData = computed(() => showMaxRoe.value ? maxRoeModalData.value : netApyModalData.value)
+const headlineMetricField = computed(() => showMaxRoe.value ? 'max-roe' : 'fallback-net-apy')
+const headlineMetricTrigger = computed(() => showMaxRoe.value ? 'max-roe' : 'net-apy')
+const headlineMetricAriaLabel = computed(() => showMaxRoe.value ? 'Show max ROE breakdown' : 'Show net APY breakdown')
+const headlineMetricRewardsAriaLabel = computed(() => showMaxRoe.value ? 'Show max ROE rewards breakdown' : 'Show net APY rewards breakdown')
+
 const route = useRoute()
 
 const linkPath = computed(() => ({
@@ -343,21 +352,18 @@ const linkPath = computed(() => ({
           </UiModalPreviewTrigger>
           {{ formatNumber(borrowApyWithRewards) }}%
         </div>
-        <div
-          v-if="showMaxRoe"
-          class="hidden mobile:!flex mobile:flex-col mobile:items-end mobile:mt-8"
-        >
+        <div class="hidden mobile:!flex mobile:flex-col mobile:items-end mobile:mt-8">
           <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
-            Max ROE
+            {{ headlineMetricLabel }}
             <UiModalPreviewTrigger
-              :component="VaultMaxRoeModal"
-              :modal-data="maxRoeModalData"
-              aria-label="Show max ROE breakdown"
+              :component="headlineMetricModalComponent"
+              :modal-data="headlineMetricModalData"
+              :aria-label="headlineMetricAriaLabel"
             >
               <SvgIcon
                 class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
                 name="info-circle"
-                data-modal-trigger="max-roe"
+                :data-modal-trigger="headlineMetricTrigger"
               />
             </UiModalPreviewTrigger>
           </div>
@@ -365,40 +371,37 @@ const linkPath = computed(() => ({
             class="text-p2 text-accent-600 font-semibold flex items-center"
             data-id="data-point"
             :data-key="pairKey"
-            data-field="max-roe"
-            :data-value="maxRoe"
+            :data-field="headlineMetricField"
+            :data-value="headlineMetricValue"
           >
             <UiModalPreviewTrigger
               v-if="hasAnyRewards"
-              :component="VaultMaxRoeModal"
-              :modal-data="maxRoeModalData"
-              aria-label="Show max ROE rewards breakdown"
+              :component="headlineMetricModalComponent"
+              :modal-data="headlineMetricModalData"
+              :aria-label="headlineMetricRewardsAriaLabel"
             >
               <SvgIcon
                 class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
                 name="sparks"
-                data-modal-trigger="max-roe"
+                :data-modal-trigger="headlineMetricTrigger"
               />
             </UiModalPreviewTrigger>
-            {{ formatNumber(maxRoe, 2, 2) }}%
+            {{ formatNumber(headlineMetricValue, 2, 2) }}%
           </div>
         </div>
       </div>
-      <div
-        v-if="showMaxRoe"
-        class="flex flex-col items-end pr-16 py-16 pb-12 mobile:!hidden"
-      >
+      <div class="flex flex-col items-end pr-16 py-16 pb-12 mobile:!hidden">
         <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
-          Max ROE
+          {{ headlineMetricLabel }}
           <UiModalPreviewTrigger
-            :component="VaultMaxRoeModal"
-            :modal-data="maxRoeModalData"
-            aria-label="Show max ROE breakdown"
+            :component="headlineMetricModalComponent"
+            :modal-data="headlineMetricModalData"
+            :aria-label="headlineMetricAriaLabel"
           >
             <SvgIcon
               class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
               name="info-circle"
-              data-modal-trigger="max-roe"
+              :data-modal-trigger="headlineMetricTrigger"
             />
           </UiModalPreviewTrigger>
         </div>
@@ -406,22 +409,22 @@ const linkPath = computed(() => ({
           class="text-p2 text-accent-600 font-semibold flex items-center"
           data-id="data-point"
           :data-key="pairKey"
-          data-field="max-roe"
-          :data-value="maxRoe"
+          :data-field="headlineMetricField"
+          :data-value="headlineMetricValue"
         >
           <UiModalPreviewTrigger
             v-if="hasAnyRewards"
-            :component="VaultMaxRoeModal"
-            :modal-data="maxRoeModalData"
-            aria-label="Show max ROE rewards breakdown"
+            :component="headlineMetricModalComponent"
+            :modal-data="headlineMetricModalData"
+            :aria-label="headlineMetricRewardsAriaLabel"
           >
             <SvgIcon
               class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
               name="sparks"
-              data-modal-trigger="max-roe"
+              :data-modal-trigger="headlineMetricTrigger"
             />
           </UiModalPreviewTrigger>
-          {{ formatNumber(maxRoe, 2, 2) }}%
+          {{ formatNumber(headlineMetricValue, 2, 2) }}%
         </div>
       </div>
     </div>
