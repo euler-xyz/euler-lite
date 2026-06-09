@@ -1,10 +1,11 @@
 type UserSettings = {
   enableIntrinsicApy: boolean
   enableRewardsApy: boolean
+  enableBatchTransactions: boolean
 }
 
 const SETTINGS_KEY = 'user-settings'
-const defaults: UserSettings = { enableIntrinsicApy: true, enableRewardsApy: true }
+const defaults: UserSettings = { enableIntrinsicApy: true, enableRewardsApy: true, enableBatchTransactions: false }
 
 const settings = useLocalStorage<UserSettings>(SETTINGS_KEY, defaults)
 

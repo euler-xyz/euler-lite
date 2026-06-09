@@ -36,6 +36,22 @@ import {
 import { getNewSubAccount } from '~/composables/useSubAccounts'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 
+// Snapshot of all multiply inputs captured at "add to batch" time. The batch
+// re-simulates asynchronously (after the form may reset), so the plan must be
+// built from these captured values rather than the live reactive refs.
+export interface MultiplyBatchSnapshot {
+  supplyVault: EVault
+  longVault: EVault
+  shortVault: EVault
+  inputAmount: string
+  debtAmount: bigint
+  isSavingCollateral: boolean
+  savingFrom?: Address
+  savingAssets?: bigint
+  savingShares?: bigint
+  quote?: SwapQuote
+}
+
 export interface UseMultiplyFormOptions {
   pair: Ref<AnyBorrowVaultPair | undefined>
   borrowVault: ComputedRef<EVault | undefined>
@@ -76,7 +92,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const { depositPositions } = useEulerAccount()
   const { account: planAccount } = usePlanAccount()
   const { chainId } = useEulerAddresses()
-  const { fetchSingleBalance } = useWallets()
+  const { getBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
   const { settings } = useUserSettings()
@@ -156,13 +172,49 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       subAccountSnapshotApplied: Boolean(account),
     })
   }
+
+  // Build this multiply for the batch ("shopping cart"), against the prior layer's
+  // simulated `account`. Mirrors submitMultiply's plan build but from a captured
+  // snapshot (the batch re-simulates after the form resets) and forces
+  // subAccountSnapshotApplied so the layer account stays authoritative (no
+  // on-chain re-fetch). Same-asset multiply passes no quote; cross-asset needs a
+  // non-CoW quote (gated at the call site). New position ⇒ a fresh sub-account.
+  const buildMultiplyPlan = async (snap: MultiplyBatchSnapshot, account = planAccount.value): Promise<TransactionPlan> => {
+    const subAccount = (await resolvePendingSubAccount()) as Address
+    const supplyAmountNano = valueToNano(snap.inputAmount || '0', snap.supplyVault.asset.decimals)
+    let supplyShares: bigint | undefined
+    if (snap.isSavingCollateral && snap.savingFrom) {
+      supplyShares = snap.savingAssets === supplyAmountNano
+        ? snap.savingShares
+        : snap.supplyVault.convertToShares(supplyAmountNano)
+    }
+    const collateralShareSource = snap.isSavingCollateral && supplyShares && snap.savingFrom
+      ? { from: snap.savingFrom, shares: supplyShares }
+      : undefined
+    const collateralAmount = snap.isSavingCollateral ? 0n : supplyAmountNano
+    return planMultiply({
+      collateralVault: snap.supplyVault.address as Address,
+      collateralAmount,
+      collateralAsset: snap.supplyVault.asset.address as Address,
+      collateralShareSource,
+      longVault: snap.longVault.address as Address,
+      liabilityVault: snap.shortVault.address as Address,
+      liabilityAmount: snap.debtAmount,
+      receiver: subAccount,
+      swapQuote: snap.quote,
+      swapperMode: SwapperMode.EXACT_IN,
+      account,
+      subAccountSnapshotApplied: true,
+    })
+  }
   // --- Form state ---
   const multiplyInputAmount = ref('')
   const multiplier = ref(1)
   const multiplyLongAmount = ref('')
   const multiplyShortAmount = ref('')
   const multiplySupplyVault: Ref<EVault | undefined> = ref()
-  const multiplyAssetBalance: Ref<bigint> = ref(0n)
+  // Supply-asset wallet balance from the central wallet entity — reactive + layer-aware.
+  const multiplyAssetBalance = computed(() => multiplySupplyVault.value?.asset.address ? getBalance(multiplySupplyVault.value.asset.address as Address) : 0n)
   const isMultiplySavingCollateral = ref(false)
   // Sub-account of the savings position the user picked from the collateral
   // options modal. Without this, two savings positions of the same vault on
@@ -1055,14 +1107,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   }
 
   // --- Balance ---
-  const updateMultiplyAssetBalance = async () => {
-    if (multiplySupplyVault.value?.asset.address && (isConnected.value || isSpyMode.value)) {
-      multiplyAssetBalance.value = await fetchSingleBalance(multiplySupplyVault.value.asset.address)
-    }
-    else {
-      multiplyAssetBalance.value = 0n
-    }
-  }
+  // No-op kept for callers; multiplyAssetBalance is now a reactive computed.
+  const updateMultiplyAssetBalance = async () => {}
 
   // --- Init ---
   const initMultiplySupplyVault = (vault: EVault) => {
@@ -1129,15 +1175,6 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     },
     { immediate: true },
   )
-
-  watch(multiplySupplyVault, async (newVault) => {
-    if (newVault?.asset.address && (isConnected.value || isSpyMode.value)) {
-      multiplyAssetBalance.value = await fetchSingleBalance(newVault.asset.address)
-    }
-    else {
-      multiplyAssetBalance.value = 0n
-    }
-  })
 
   watch(multiplySelectedQuote, () => {
     clearMultiplySimulationError()
@@ -1279,6 +1316,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     onMultiplyCollateralChange,
     onRefreshMultiplyQuotes,
     submitMultiply,
+    buildMultiplyPlan, // Batch
     sendMultiply,
     updateMultiplyAssetBalance,
     initMultiplySupplyVault,

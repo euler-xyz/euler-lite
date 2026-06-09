@@ -1,6 +1,6 @@
-import { useAccount, useDisconnect, useBalance, useSwitchChain, useEnsName, useConfig } from '@wagmi/vue'
+import { useAccount, useDisconnect, useSwitchChain, useEnsName, useConfig } from '@wagmi/vue'
 import { connect as connectWallet, getConnectors } from '@wagmi/vue/actions'
-import { formatUnits, getAddress, isAddress, type Address } from 'viem'
+import { getAddress, isAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { truncate } from '~/utils/string-utils'
 import { useAddressScreen } from '~/composables/useAddressScreen'
@@ -38,9 +38,6 @@ function initializeWagmi() {
   const { data: ensName } = useEnsName({
     address: screenedWagmiAddress,
     chainId: chainId.value,
-  })
-  const { data: balanceData, isLoading: isLoadingBalance, refetch: refetchBalance } = useBalance({
-    address: screenedWagmiAddress,
   })
 
   // AppKit may be deferred-initialized (see plugins/00.wagmi.ts). Route
@@ -88,9 +85,6 @@ function initializeWagmi() {
     wagmiDisconnect,
     switchChain,
     ensName,
-    balanceData,
-    isLoadingBalance,
-    refetchBalance,
     modal,
     connectBaseAppInjectedWallet,
     isAddressScreened,
@@ -114,9 +108,6 @@ export const useWagmi = () => {
     wagmiDisconnect,
     switchChain,
     ensName,
-    balanceData,
-    isLoadingBalance,
-    refetchBalance,
     modal,
     connectBaseAppInjectedWallet,
     isAddressScreened,
@@ -145,16 +136,6 @@ export const useWagmi = () => {
   const shorterAddress = computed(() => address.value ? truncate(address.value, 3) : '')
 
   const displayName = computed(() => ensName.value || walletName.value)
-
-  const balance = computed(() => {
-    if (!balanceData.value) return 0
-    return Number.parseFloat(formatUnits(balanceData.value.value, balanceData.value.decimals))
-  })
-
-  const balanceFormatted = computed(() => {
-    if (!balanceData.value) return '0'
-    return formatUnits(balanceData.value.value, balanceData.value.decimals)
-  })
 
   const getMainPathForRoute = (): string | null => {
     const path = route.path
@@ -396,10 +377,6 @@ export const useWagmi = () => {
     connector,
     chain,
     chainId,
-    balance,
-    balanceFormatted,
-    isLoadingBalance,
-    refetchBalance,
     modal,
     connect,
     disconnect,

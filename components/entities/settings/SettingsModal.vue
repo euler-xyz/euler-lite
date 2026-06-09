@@ -58,6 +58,22 @@ defineEmits(['close'])
         />
       </div>
     </div>
+    <div class="mb-20 rounded-16 border border-line-default bg-card p-16">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-p2">
+            Batch transactions
+          </div>
+          <div class="text-p3 text-content-muted">
+            Queue multiple actions and execute them as one transaction
+          </div>
+        </div>
+        <UiSwitch
+          :model-value="settings.enableBatchTransactions"
+          @update:model-value="updateSetting('enableBatchTransactions', $event ?? false)"
+        />
+      </div>
+    </div>
     <Permit2Settings />
     <SlippageSettings />
   </BaseModalWrapper>

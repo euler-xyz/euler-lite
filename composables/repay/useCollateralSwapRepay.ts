@@ -3,7 +3,7 @@ import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import type { Ref, ComputedRef } from 'vue'
-import { formatUnits, zeroAddress, type Address, type Abi } from 'viem'
+import { formatUnits, zeroAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { cowSwapInboxExists } from '~/utils/cowswap-inbox'
@@ -14,7 +14,6 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { getAssetUsdValue, getAssetOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
 import { maxUint256 } from 'viem'
-import { eulerAccountLensABI } from '~/entities/euler/abis'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { useRepaySwapCore } from '~/composables/repay/useRepaySwapCore'
@@ -73,7 +72,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   // overrides without firing the balance branch.
   const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
   const buildRepayStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
-  const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig, chainId: currentChainId } = useEulerAddresses()
+  const { chainId: currentChainId } = useEulerAddresses()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { refreshAllPositions } = useEulerAccount()
   const { account: planAccount } = usePlanAccount()
@@ -339,7 +338,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   })
 
   // --- Balance ---
-  const updateSourceBalance = async () => {
+  const updateSourceBalance = () => {
     if (!position.value || !sourceVault.value) {
       sourceAssets.value = 0n
       sourceShares.value = 0n
@@ -347,29 +346,12 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     }
     const primaryAddress = normalizeAddressOrEmpty(position.value.collateralVault?.address)
     const targetAddress = normalizeAddressOrEmpty(sourceVault.value.address)
-    sourceAssets.value = targetAddress === primaryAddress ? (position.value.supplied || 0n) : 0n
-    sourceShares.value = 0n
-
-    try {
-      if (!isEulerAddressesReady.value) {
-        await loadEulerConfig()
-      }
-      const lensAddress = eulerLensAddresses.value?.accountLens
-      if (!lensAddress) {
-        throw new Error('Account lens address is not available')
-      }
-      const res = await rpcClient.value!.readContract({
-        address: lensAddress as Address,
-        abi: eulerAccountLensABI as Abi,
-        functionName: 'getVaultAccountInfo',
-        args: [position.value.subAccount, sourceVault.value.address],
-      }) as { assets: bigint, shares: bigint }
-      sourceAssets.value = res.assets
-      sourceShares.value = res.shares
-    }
-    catch (e) {
-      logWarn('collateralSwapRepay/loadBalance', e)
-    }
+    // Source collateral assets/shares from the (layer-aware) position rather than
+    // a direct lens read, so it reflects the active batch layer. Unheld ⇒ 0.
+    const match = position.value.collaterals.find(c =>
+      normalizeAddressOrEmpty(c.vaultAddress) === targetAddress)
+    sourceAssets.value = match?.assets ?? (targetAddress === primaryAddress ? (position.value.supplied || 0n) : 0n)
+    sourceShares.value = match?.shares ?? 0n
   }
 
   watch([sourceVault, position], () => {
@@ -719,5 +701,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     updateSourceBalance,
     initVault,
     resetOnTabSwitch,
+    // Batch
+    buildRepayPlan,
   }
 }

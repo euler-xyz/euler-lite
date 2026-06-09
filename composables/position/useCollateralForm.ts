@@ -20,10 +20,9 @@ import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { isOpDisabled, OP_DEPOSIT, OP_WITHDRAW } from '~/utils/vault-hooks'
 import { getHookDisabledWarning } from '~/composables/useVaultWarnings'
 import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
-import { type Address, type Abi, formatUnits, zeroAddress } from 'viem'
+import { type Address, formatUnits, zeroAddress } from 'viem'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
-import { eulerAccountLensABI } from '~/entities/euler/abis'
 import { SwapTokenSelector, SlippageSettingsModal, OperationReviewModal } from '#components'
 import type { ComputedRef } from 'vue'
 import { logWarn } from '~/utils/errorHandling'
@@ -139,8 +138,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const { runSimulation, runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
   const { isReady: isVaultsReady } = useVaults()
   const { getOrFetch } = useVaultRegistry()
-  const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
-  const { client: rpcClient } = useRpcClient()
+  const { isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
 
   // --- Shared reactive state ---
   const isLoading = ref(false)
@@ -319,18 +317,12 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       const vault = await getOrFetch(targetAddress) as EVault | SecuritizeCollateralVault | undefined
       selectedCollateral.value = vault || null
 
-      const lensAddress = eulerLensAddresses.value?.accountLens
-      if (!lensAddress) {
-        throw new Error('Account lens address is not available')
-      }
-
-      const res = await rpcClient.value!.readContract({
-        address: lensAddress as Address,
-        abi: eulerAccountLensABI as Abi,
-        functionName: 'getVaultAccountInfo',
-        args: [position.value.subAccount, targetAddress],
-      }) as Record<string, unknown>
-      selectedCollateralAssets.value = res.assets as bigint
+      // Collateral assets from the (layer-aware) position rather than a direct
+      // lens read, so the form reflects the active batch layer. Collateral the
+      // sub-account doesn't hold isn't in `collaterals` ⇒ 0.
+      const match = position.value.collaterals.find(c =>
+        normalizeAddressOrEmpty(c.vaultAddress) === targetAddress)
+      selectedCollateralAssets.value = match?.assets ?? 0n
     }
     catch (e) {
       logWarn(`collateral/${options.mode}`, e)

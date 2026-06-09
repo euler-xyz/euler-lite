@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
-import { maxUint256, type Address } from 'viem'
-import { vaultConvertToAssetsAbi } from '~/abis/vault'
+import { maxUint256 } from 'viem'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 
@@ -13,7 +12,6 @@ import { VaultHooksInfoModal } from '#components'
 
 const { vault } = defineProps<{ vault: EVault }>()
 
-const { client: rpcClient } = useRpcClient()
 const { getVaultCategory } = useVaultRegistry()
 
 const shareTokenExchangeRate: Ref<bigint | undefined> = ref()
@@ -60,16 +58,11 @@ watchEffect(async () => {
   borrowCapDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
 })
 
-const load = async () => {
+const load = () => {
   if (!showShareTokenExchangeRate.value) return
-
-  const client = rpcClient.value!
-  shareTokenExchangeRate.value = await client.readContract({
-    address: vault.address as Address,
-    abi: vaultConvertToAssetsAbi,
-    functionName: 'convertToAssets',
-    args: [1n * 10n ** BigInt(vault.shares.decimals)],
-  }) as bigint
+  // Share→asset exchange rate from the SDK vault entity (was a direct
+  // convertToAssets RPC read); the entity derives it from the same lens data.
+  shareTokenExchangeRate.value = vault.convertToAssets(1n * 10n ** BigInt(vault.shares.decimals))
 }
 
 load()

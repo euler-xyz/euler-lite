@@ -9,6 +9,7 @@ import { createAddressRefreshCoordinator } from '~/utils/address-refresh-coordin
 import { logWarn } from '~/utils/errorHandling'
 import { isVisiblePortfolioPosition } from '~/utils/portfolioVisibility'
 import { createRaceGuard } from '~/utils/race-guard'
+import { activeLayerPortfolioRef, activeLayerPortfolioAllRef } from '~/composables/useTxBatch'
 
 const visiblePortfolio: Ref<Portfolio<VaultEntity> | undefined> = shallowRef()
 const allPortfolio: Ref<Portfolio<VaultEntity> | undefined> = shallowRef()
@@ -20,11 +21,22 @@ const isDepositsLoading = ref(true)
 const isDepositsLoaded = ref(false)
 const isShowAllPositions = ref(false)
 
-const portfolio = computed(() => isShowAllPositions.value ? allPortfolio.value : visiblePortfolio.value)
+// Transparent layer overlay: when a non-zero batch layer is active, the
+// simulated portfolio is served for both the visible and all-positions views,
+// so the "Show all" toggle keeps working in simulated state exactly as on real
+// data. Layer 0 (no batch / base pointer) ⇒ refs are undefined ⇒ real data.
+const portfolio = computed(() => {
+  const overlay = isShowAllPositions.value ? activeLayerPortfolioAllRef.value : activeLayerPortfolioRef.value
+  return overlay ?? (isShowAllPositions.value ? allPortfolio.value : visiblePortfolio.value)
+})
 const borrowPositions = computed(() => portfolio.value?.borrows ?? [])
 const depositPositions = computed(() => portfolio.value?.savings ?? [])
-const allBorrowPositions = computed(() => allPortfolio.value?.borrows ?? borrowPositions.value)
-const allDepositPositions = computed(() => allPortfolio.value?.savings ?? depositPositions.value)
+// All-positions lists also follow the active layer (the simulated all-positions
+// projection), so position lookups by sub-account — used by the position pages —
+// reflect simulated deposits/withdrawals/borrows just like the portfolio view.
+const effectiveAllPortfolio = computed(() => activeLayerPortfolioAllRef.value ?? allPortfolio.value)
+const allBorrowPositions = computed(() => effectiveAllPortfolio.value?.borrows ?? borrowPositions.value)
+const allDepositPositions = computed(() => effectiveAllPortfolio.value?.savings ?? depositPositions.value)
 const hiddenBorrowCount = computed(() =>
   Math.max(0, allBorrowPositions.value.length - borrowPositions.value.length),
 )
@@ -50,7 +62,7 @@ const usdWadToNumber = (value: bigint | number | undefined): number => {
   return typeof value === 'bigint' ? Number(formatUnits(value, 18)) : value
 }
 
-const buildVisiblePortfolioPositionFilter = (): PortfolioPositionFilter<VaultEntity> => {
+export const buildVisiblePortfolioPositionFilter = (): PortfolioPositionFilter<VaultEntity> => {
   const { verifiedVaultAddresses, earnVaults } = useEulerLabels()
   const { escrowAddresses, getEscrowVaults } = useVaultRegistry()
 

@@ -48,7 +48,11 @@ type PositionCollateral = {
   assets: bigint
 }
 
-const position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined> = ref()
+// Layer-aware: tracks the active batch layer's portfolio so the overview
+// reflects simulated debt/collateral (a one-shot ref would freeze at real state).
+const position = computed<PortfolioBorrowPosition<VaultEntity> | undefined>(() =>
+  (!isConnected.value && !isSpyMode.value) ? undefined : getPositionBySubAccountIndex(+positionIndex),
+)
 const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const collateralItems = ref<PositionCollateral[]>([])
@@ -57,14 +61,27 @@ const disableCollateralErrorVault = ref<string | null>(null)
 
 const { isReady: isVaultsReady } = useVaults()
 const { getOrFetch } = useVaultRegistry()
-const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
-const { client: rpcClient } = useRpcClient()
+const { isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
 
 const borrowVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
 const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() => position.value ? position.value.collateralVault as EVault | SecuritizeCollateralVault | undefined : undefined)
 const positionCollateralAddresses = computed(() => position.value ? position.value.collateralVaults : [])
 const primaryCollateralAddress = computed(() => collateralVault.value ? getAddress(collateralVault.value.address) : '')
 const collateralCount = computed(() => positionCollateralAddresses.value.length || collateralItems.value.length)
+
+// Whether a specific vault of this position was modified by the active batch
+// layer — drives the dashed "simulated" border on that one box (the collateral
+// or borrow box), not the whole position / summary / risk.
+const { modifiedKeys } = useTxBatch()
+const isVaultModified = (vaultAddr?: string) => {
+  if (!position.value || !vaultAddr) return false
+  try {
+    return modifiedKeys.value.has(`${position.value.subAccount.toLowerCase()}:${getAddress(vaultAddr).toLowerCase()}`)
+  }
+  catch {
+    return false
+  }
+}
 const collateralSymbolLabel = computed(() => {
   if (!position.value) {
     return ''
@@ -586,34 +603,14 @@ const loadCollaterals = async () => {
 
     await until(isVaultsReady).toBe(true)
 
-    const lensAddress = eulerLensAddresses.value?.accountLens
-    if (!lensAddress) {
-      throw new Error('Account lens address is not available')
-    }
-
-    const client = rpcClient.value!
-
     const items = await Promise.all(
       orderedAddresses.map(async (address) => {
         try {
           const vault = await getOrFetch(address) as unknown as EVault | SecuritizeCollateralVault | undefined
-          let assets = 0n
-
-          try {
-            const res = await client.readContract({
-              address: lensAddress as Address,
-              abi: eulerAccountLensABI as Abi,
-              functionName: 'getAccountInfo',
-              args: [position.value!.subAccount, address],
-            }) as Record<string, Record<string, unknown>>
-            assets = res.vaultAccountInfo.assets as bigint
-          }
-          catch {
-            if (address === primaryAddress) {
-              assets = position.value!.supplied
-            }
-          }
-
+          // Assets from the (layer-aware) position rather than a direct lens
+          // read, so the overview reflects the active batch layer. Unheld ⇒ 0.
+          const match = position.value!.collaterals.find(c => getAddress(c.vaultAddress) === address)
+          const assets = match?.assets ?? (address === primaryAddress ? position.value!.supplied : 0n)
           return vault ? { vault, assets } : null
         }
         catch (e) {
@@ -711,6 +708,23 @@ const send = async (collateralAddress: string) => {
     isSubmitting.value = false
   }
 }
+// Rebuild the collateral display from the current (layer-aware) position so it
+// follows the active batch layer like the rest of the overview.
+const syncCollateralItems = async () => {
+  if (!position.value) {
+    collateralItems.value = []
+    return
+  }
+  collateralItems.value = [{
+    vault: collateralVault.value as EVault,
+    assets: position.value.supplied,
+  }]
+  // Load collaterals: always for multi-collateral, or when oracle failed (to get actual assets)
+  if (positionCollateralAddresses.value.length > 1 || hasQueryFailure.value) {
+    await loadCollaterals()
+  }
+}
+
 const load = async () => {
   // Redirect to portfolio if not connected and not in spy mode
   if (!isConnected.value && !isSpyMode.value) {
@@ -720,26 +734,18 @@ const load = async () => {
 
   try {
     await until(isPositionsLoaded).toBe(true)
-    position.value = getPositionBySubAccountIndex(+positionIndex)
-    if (position.value) {
-      collateralItems.value = [{
-        vault: collateralVault.value as EVault,
-        assets: position.value.supplied,
-      }]
-      // Load collaterals: always for multi-collateral, or when oracle failed (to get actual assets)
-      if (positionCollateralAddresses.value.length > 1 || hasQueryFailure.value) {
-        await loadCollaterals()
-      }
-    }
-    else {
-      collateralItems.value = []
-    }
+    await syncCollateralItems()
   }
   catch (e) {
     showError('Unable to load Position')
     console.warn(e)
   }
 }
+
+// Keep the collateral display in sync as the active batch layer changes.
+watch(position, () => {
+  void syncCollateralItems()
+})
 const borrowApyModalData = computed(() => {
   if (!borrowVault.value) return {}
   return {
@@ -1028,7 +1034,10 @@ watch([isConnected, isSpyMode, address], () => {
         <div class="mb-12 text-h4 text-neutral-800">
           Borrow
         </div>
-        <div class="rounded-12 bg-card border border-line-default shadow-card">
+        <div
+          class="rounded-12 bg-card border border-line-default shadow-card"
+          :class="{ '!border-2 !border-dashed !border-accent-600': isVaultModified(borrowVault?.address) }"
+        >
           <div class="flex justify-between items-center p-16 pb-12 border-b border-line-default">
             <VaultLabelsAndAssets
               :vault="borrowVault"
@@ -1248,6 +1257,7 @@ watch([isConnected, isSpyMode, address], () => {
             v-for="collateral in collateralRows"
             :key="collateral.vault.address"
             class="rounded-12 bg-card border border-line-default shadow-card cursor-pointer"
+            :class="{ '!border-2 !border-dashed !border-accent-600': isVaultModified(collateral.vault.address) }"
             @click="openCollateralInfoModal(asPositionCollateralVault(collateral.vault))"
           >
             <div class="flex justify-between items-center p-16 pb-12 border-b border-line-default">

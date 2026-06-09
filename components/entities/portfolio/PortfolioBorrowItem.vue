@@ -48,11 +48,23 @@ const { getTokenCategoryTags } = useTokenList()
 const borrowVault = computed(() => position.borrowVault as EVault)
 const collateralVault = computed(() => position.collateralVault as EVault | SecuritizeCollateralVault)
 const collateralAddresses = computed(() => position.collateralVaults)
-const primaryCollateralAddress = computed(() => collateralVault.value.address)
-const borrowAddress = computed(() => borrowVault.value.address)
+// A simulated "impossible" borrow (e.g. borrow with no collateral supplied) is a
+// valid position shape — the SDK leaves collateralVault undefined. Guard every
+// collateral dereference so the position still renders instead of crashing.
+const primaryCollateralAddress = computed(() => collateralVault.value?.address ?? '')
+const borrowAddress = computed(() => borrowVault.value?.address ?? '')
 const positionKey = computed(() =>
   `${position.subAccount.toLowerCase()}:${primaryCollateralAddress.value.toLowerCase()}:${borrowAddress.value.toLowerCase()}`,
 )
+// Dotted border when the active simulated batch layer modified this position's
+// borrow vault or any of its collateral vaults.
+const { modifiedKeys } = useTxBatch()
+const isSimulatedModified = computed(() => {
+  const sub = position.subAccount.toLowerCase()
+  return [borrowAddress.value, ...collateralAddresses.value].some(
+    v => modifiedKeys.value.has(`${sub}:${getAddress(v).toLowerCase()}`),
+  )
+})
 const supplied = computed(() => position.supplied)
 const borrowed = computed(() => position.borrowed)
 const health = computed(() => position.healthFactor)
@@ -83,9 +95,10 @@ const collateralItems = computed<PositionCollateral[]>(() => {
     }]
   })
 
-  return items.length
-    ? items
-    : [{ vault: collateralVault.value, assets: supplied.value }]
+  if (items.length) return items
+  return collateralVault.value
+    ? [{ vault: collateralVault.value, assets: supplied.value }]
+    : []
 })
 
 const hasQueryFailure = computed(() => position.borrow.liquidity === undefined)
@@ -106,10 +119,10 @@ const forcedLiquidationRelative = computed(() => {
 const utilisationWarning = computed(() => getUtilisationWarning(borrowVault.value, 'borrow'))
 const hasMultipleCollaterals = computed(() => collateralAddresses.value.length > 1)
 const collateralSymbolLabel = computed(() => {
-  const symbol = collateralVault.value.asset.symbol
+  const symbol = collateralVault.value?.asset.symbol ?? '—'
   return hasMultipleCollaterals.value ? `${symbol} & others` : symbol
 })
-const pairSymbols = computed(() => `${collateralSymbolLabel.value}/${borrowVault.value.asset.symbol}`)
+const pairSymbols = computed(() => `${collateralSymbolLabel.value}/${borrowVault.value?.asset.symbol ?? ''}`)
 
 const isGeoBlocked = computed(() => isAnyVaultBlockedByCountry(primaryCollateralAddress.value, borrowAddress.value))
 const getSymbolForAddress = (addr: string): string => {
@@ -118,7 +131,7 @@ const getSymbolForAddress = (addr: string): string => {
   }
   const item = collateralItems.value.find(c =>
     normalizeAddress(c.vault.address) === normalizeAddress(addr))
-  return item?.vault.asset.symbol ?? collateralVault.value.asset.symbol
+  return item?.vault.asset.symbol ?? collateralVault.value?.asset.symbol ?? ''
 }
 const prefixNotice = (notice: string, addr: string): string => {
   if (!isVaultNoticeSpecific(addr)) return notice
@@ -159,9 +172,9 @@ const collateralLabel = computed(() => {
   if (getVaultCategory(primaryCollateralAddress.value) === 'escrow') {
     return 'Escrowed collateral'
   }
-  return collateralProductName || collateralVault.value.shares.name
+  return collateralProductName || collateralVault.value?.shares.name || ''
 })
-const borrowLabel = computed(() => borrowProductName || borrowVault.value.shares.name)
+const borrowLabel = computed(() => borrowProductName || borrowVault.value?.shares.name || '')
 
 const pairName = computed(() => {
   if (collateralLabel.value === borrowLabel.value) {
@@ -169,22 +182,22 @@ const pairName = computed(() => {
   }
   return `${collateralLabel.value} / ${borrowLabel.value}`
 })
-const supplyRewardAPY = computed(() => getSupplyRewardApy(collateralVault.value.address || ''))
-const borrowRewardAPY = computed(() => getBorrowRewardApy(borrowVault.value.address || '', collateralVault.value.address || ''))
+const supplyRewardAPY = computed(() => getSupplyRewardApy(collateralVault.value?.address || ''))
+const borrowRewardAPY = computed(() => getBorrowRewardApy(borrowVault.value?.address || '', collateralVault.value?.address || ''))
 const actualMultiplier = computed(() => {
   const multiplier = position.multiplier
   return multiplier !== undefined && Number.isFinite(multiplier) ? multiplier : null
 })
 const rewardMultiplier = computed(() => actualMultiplier.value ?? 0)
 const loopingRewardAPY = computed(() =>
-  getEligibleLoopingRewardApy(borrowVault.value.address || '', collateralVault.value.address || '', rewardMultiplier.value),
+  getEligibleLoopingRewardApy(borrowVault.value?.address || '', collateralVault.value?.address || '', rewardMultiplier.value),
 )
 const loopingEligible = computed(() =>
-  isLoopingEligible(borrowVault.value.address || '', collateralVault.value.address || '', rewardMultiplier.value),
+  isLoopingEligible(borrowVault.value?.address || '', collateralVault.value?.address || '', rewardMultiplier.value),
 )
 const hasRewards = computed(() =>
-  hasSupplyRewards(collateralVault.value.address || '')
-  || hasBorrowRewards(borrowVault.value.address || '', collateralVault.value.address || '')
+  hasSupplyRewards(collateralVault.value?.address || '')
+  || hasBorrowRewards(borrowVault.value?.address || '', collateralVault.value?.address || '')
   || loopingEligible.value,
 )
 const isRoeApplicable = computed(() => {
@@ -219,9 +232,9 @@ const borrowApy = computed(() => withVaultIntrinsicApy(
 const collateralValue = computed<UsdAmount>(() => toUsdAmount(position.totalCollateralValueUsd))
 
 const collateralValueDisplay = computed(() => {
-  return collateralValue.value.hasPrice
-    ? formatCompactUsdValue(collateralValue.value.usd)
-    : `${roundAndCompactTokens(collateralItems.value[0]?.assets ?? supplied.value, BigInt(collateralVault.value.shares.decimals))} ${collateralVault.value.asset.symbol}`
+  if (collateralValue.value.hasPrice) return formatCompactUsdValue(collateralValue.value.usd)
+  if (!collateralVault.value) return '—'
+  return `${roundAndCompactTokens(collateralItems.value[0]?.assets ?? supplied.value, BigInt(collateralVault.value.shares.decimals))} ${collateralVault.value.asset.symbol}`
 })
 
 const borrowedValue = computed<UsdAmount>(() => toUsdAmount(position.borrow.borrowedValueUsd))
@@ -266,9 +279,9 @@ const intrinsicSupplyApy = computed(() => getVaultIntrinsicApy(collateralVault.v
 const intrinsicBorrowApy = computed(() => getVaultIntrinsicApy(borrowVault.value, enableIntrinsicApy.value))
 const baseSupplyApy = computed(() => getVaultSupplyApy(collateralVault.value))
 const baseBorrowApy = computed(() => getVaultBorrowApy(borrowVault.value))
-const supplyCampaignsForModal = computed(() => getSupplyRewardCampaigns(collateralVault.value.address))
-const borrowCampaignsForModal = computed(() => getBorrowRewardCampaigns(borrowVault.value.address, collateralVault.value.address))
-const loopingCampaignsForModal = computed(() => getLoopingRewardCampaigns(borrowVault.value.address, collateralVault.value.address))
+const supplyCampaignsForModal = computed(() => getSupplyRewardCampaigns(collateralVault.value?.address ?? ''))
+const borrowCampaignsForModal = computed(() => getBorrowRewardCampaigns(borrowVault.value?.address ?? '', collateralVault.value?.address ?? ''))
+const loopingCampaignsForModal = computed(() => getLoopingRewardCampaigns(borrowVault.value?.address ?? '', collateralVault.value?.address ?? ''))
 
 const userLTV = computed(() => getBorrowPositionUserLTVPercent(position) ?? null)
 const userLTVDisplay = computed(() => {
@@ -332,6 +345,7 @@ const openPositionInformationModal = () => {
   <NuxtLink
     :to="{ path: `/position/${subAccountIndex}`, query: { network: $route.query.network } }"
     class="block no-underline bg-surface rounded-xl border border-line-subtle shadow-card transition-all duration-default ease-default hover:shadow-card-hover hover:border-line-emphasis"
+    :class="{ '!border-2 !border-dashed !border-accent-600': isSimulatedModified }"
     data-id="portfolio-list-item"
     data-list="borrow"
     :data-key="positionKey"
@@ -355,7 +369,7 @@ const openPositionInformationModal = () => {
         </div>
         <div class="flex gap-12 w-full">
           <AssetAvatar
-            :asset="[collateralVault.asset, borrowVault.asset]"
+            :asset="collateralVault ? [collateralVault.asset, borrowVault.asset] : [borrowVault.asset]"
             size="40"
           />
           <div class="flex-grow min-w-0">
@@ -611,14 +625,17 @@ const openPositionInformationModal = () => {
                 {{ collateralValueDisplay }}
               </template>
               <UiExactAmount
-                v-else
+                v-else-if="collateralVault"
                 :exact="formatExactAmount(collateralItems[0]?.assets ?? supplied, collateralVault.shares.decimals, collateralVault.asset.symbol)"
               >
                 {{ collateralValueDisplay }}
               </UiExactAmount>
+              <template v-else>
+                {{ collateralValueDisplay }}
+              </template>
             </div>
             <UiExactAmount
-              v-if="collateralValue.hasPrice"
+              v-if="collateralValue.hasPrice && collateralVault"
               class="text-content-tertiary text-p3"
               :exact="formatExactAmount(collateralItems[0]?.assets ?? supplied, collateralVault.shares.decimals, collateralVault.asset.symbol)"
             >

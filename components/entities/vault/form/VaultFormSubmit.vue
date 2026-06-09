@@ -21,13 +21,39 @@ interface KeyringGuardState {
   cancelVerification: () => void
 }
 
-const props = defineProps<{ disabled?: boolean, loading?: boolean, disabledReason?: string, disabledReasonVariant?: DisabledReasonVariant }>()
+const props = defineProps<{
+  disabled?: boolean
+  loading?: boolean
+  disabledReason?: string
+  disabledReasonVariant?: DisabledReasonVariant
+  /** When defined, the form supports batching: a "+" segment is shown next to the
+   *  main button, enabled when `canAddToBatch` is true, emitting `add-to-batch`. */
+  canAddToBatch?: boolean
+}>()
+const emit = defineEmits<{ (e: 'add-to-batch'): void }>()
+const { settings } = useUserSettings()
+// The form opts into the "+ add to batch" affordance by binding `canAddToBatch`,
+// but the "+" only shows when batch transactions are enabled in settings.
+const supportsBatch = computed(() => props.canAddToBatch !== undefined && settings.value.enableBatchTransactions)
 const { isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { chainId: _chainId } = useEulerAddresses()
 const { chainId, switchChain, connect } = useWagmi()
 const { isResolvingStateOverrideHints } = useStateOverrideResolution()
+const { entryCount, clearBatch } = useTxBatch()
 const modal = useModal()
+
+// A non-empty batch blocks direct execution: the form would build & send its own
+// EVC tx, ignoring the queued batch. The user must clear the batch (or add this
+// op to it) first. The "Add to batch" button next to this one stays enabled.
+const BATCH_ACTIVE_REASON = 'A transaction batch is pending. Add this to the batch, or clear it from the batch drawer to execute directly.'
+const isBatchActive = computed(() => entryCount.value > 0)
+// When a batch is queued and the user could otherwise execute directly, the
+// batch state takes over the button area (ahead of the keyring/TOS/unverified
+// gateways, which are all just pre-steps to a direct execute).
+const batchBlocksDirect = computed(() =>
+  isBatchActive.value && hasActiveSession.value && !needToSwitchChain.value,
+)
 
 const keyringGuard = inject<KeyringGuardState | null>('keyring-guard', null)
 const tosGuard = inject<TosGuardState | null>('tos-guard', null)
@@ -60,13 +86,24 @@ const isLoading = computed(() => props.loading || isResolvingStateOverrideHints.
 const GENERIC_DISABLED_REASON = 'Complete the form fields above to continue.'
 
 const effectiveDisabledReason = computed(() => {
+  // Batch first: when the batch branch is rendered it's the relevant explanation,
+  // ahead of operation-block / TOS reasons (those gate direct execute, which the
+  // batch already blocks).
+  if (batchBlocksDirect.value) return BATCH_ACTIVE_REASON
   if (operationBlockReason.value) return operationBlockReason.value
   if (props.disabledReason) return props.disabledReason
   if (_disabled.value && !isLoading.value) return GENERIC_DISABLED_REASON
   return undefined
 })
 
+// Hovering the "+" shows a neutral "add to batch" hint in the same floating
+// tooltip; hovering the main button shows the (red/warning) disabled reason.
+const PLUS_TOOLTIP = 'Add this operation to the transaction batch'
+const isPlusHover = ref(false)
+const tooltipText = computed(() => isPlusHover.value ? PLUS_TOOLTIP : effectiveDisabledReason.value)
+
 const tooltipVariantClass = computed(() => {
+  if (isPlusHover.value) return '' // neutral — it's an informational hint, not an error
   if (operationBlockReason.value) return 'vault-form-submit__tooltip--warning'
   if (props.disabledReason && props.disabledReasonVariant) {
     return `vault-form-submit__tooltip--${props.disabledReasonVariant}`
@@ -75,7 +112,7 @@ const tooltipVariantClass = computed(() => {
 })
 
 const showTooltip = () => {
-  if (_disabled.value && !isLoading.value) {
+  if ((_disabled.value || batchBlocksDirect.value) && !isLoading.value) {
     isTooltipVisible.value = true
     // Defer update until after v-if mounts the floating element,
     // otherwise the first paint lands at the wrapper's origin.
@@ -83,6 +120,16 @@ const showTooltip = () => {
   }
 }
 const hideTooltip = () => {
+  if (isPlusHover.value) return // still hovering the "+" — keep its hint up
+  isTooltipVisible.value = false
+}
+const onPlusEnter = () => {
+  isPlusHover.value = true
+  isTooltipVisible.value = true
+  nextTick(update)
+}
+const onPlusLeave = () => {
+  isPlusHover.value = false
   isTooltipVisible.value = false
 }
 
@@ -143,70 +190,147 @@ const openTermsModal = () => {
     @mouseenter="showTooltip"
     @mouseleave="hideTooltip"
   >
-    <!-- Keyring verification flow replaces the button when verification is needed -->
-    <template v-if="showKeyringFlow && keyringGuard">
-      <div class="flex flex-col gap-12">
-        <KeyringAlert :is-expired="keyringGuard.isExpired" />
-        <KeyringVerificationFlow
-          :flow-state="keyringGuard.flowState"
-          :credential-cost="keyringGuard.credentialData?.cost"
-          @launch="keyringGuard.launchExtension()"
-          @check="keyringGuard.checkStatus()"
-          @cancel="keyringGuard.cancelVerification()"
-        />
-      </div>
-    </template>
+    <div class="flex flex-col gap-8">
+      <!-- A queued batch blocks direct execution. When this form can batch, the
+         primary action becomes "Add to batch" (Option B) rather than a disabled
+         execute button + a separate "+". Direct execute resumes once the batch
+         is cleared (link below). -->
+      <template v-if="batchBlocksDirect && supportsBatch">
+        <UiButton
+          size="large"
+          variant="primary"
+          :disabled="!canAddToBatch"
+          data-testid="add-to-batch"
+          @click="emit('add-to-batch')"
+        >
+          <span class="inline-flex items-center gap-6">
+            <span class="text-h5 leading-none">+</span>
+            Add to batch
+          </span>
+        </UiButton>
+      </template>
 
-    <!-- TOS acceptance flow -->
-    <template v-else-if="showTosFlow">
-      <UiButton
-        size="large"
-        variant="primary"
-        @click="openTermsModal"
-      >
-        Accept Terms Of Use
-      </UiButton>
-    </template>
+      <!-- Batch is pending but this form doesn't support batching: keep the
+         disabled execute button with the explanatory info icon. -->
+      <template v-else-if="batchBlocksDirect">
+        <UiButton
+          size="large"
+          variant="primary"
+          :disabled="true"
+          data-testid="batch-blocks-direct"
+        >
+          <span class="inline-flex items-center gap-6">
+            <slot />
+            <SvgIcon
+              name="info-circle"
+              class="!w-16 !h-16 opacity-80"
+            />
+          </span>
+        </UiButton>
+      </template>
 
-    <!-- Unverified vault acknowledgment flow -->
-    <template v-else-if="showUnverifiedVaultFlow">
-      <UiButton
-        size="large"
-        variant="red"
-        @click="openUnverifiedVaultModal"
-      >
-        Acknowledge Unverified Vault Risk
-      </UiButton>
-    </template>
+      <!-- Keyring verification flow replaces the button when verification is needed -->
+      <template v-else-if="showKeyringFlow && keyringGuard">
+        <div class="flex flex-col gap-12">
+          <KeyringAlert :is-expired="keyringGuard.isExpired" />
+          <KeyringVerificationFlow
+            :flow-state="keyringGuard.flowState"
+            :credential-cost="keyringGuard.credentialData?.cost"
+            @launch="keyringGuard.launchExtension()"
+            @check="keyringGuard.checkStatus()"
+            @cancel="keyringGuard.cancelVerification()"
+          />
+        </div>
+      </template>
 
-    <!-- Normal submit button -->
-    <template v-else>
-      <UiButton
-        v-bind="$attrs"
-        size="large"
-        type="submit"
-        :variant="needToSwitchChain ? 'red' : 'primary'"
-        :loading="isLoading"
-        :disabled="_disabled"
-        @click="onClick"
+      <!-- TOS acceptance flow -->
+      <template v-else-if="showTosFlow">
+        <UiButton
+          size="large"
+          variant="primary"
+          @click="openTermsModal"
+        >
+          Accept Terms Of Use
+        </UiButton>
+      </template>
+
+      <!-- Unverified vault acknowledgment flow -->
+      <template v-else-if="showUnverifiedVaultFlow">
+        <UiButton
+          size="large"
+          variant="red"
+          @click="openUnverifiedVaultModal"
+        >
+          Acknowledge Unverified Vault Risk
+        </UiButton>
+      </template>
+
+      <!-- Normal submit button -->
+      <template v-else>
+        <UiButton
+          v-bind="$attrs"
+          size="large"
+          type="submit"
+          :variant="needToSwitchChain ? 'red' : 'primary'"
+          :loading="isLoading"
+          :disabled="_disabled"
+          @click="onClick"
+        >
+          <template v-if="needToSwitchChain">
+            Switch chain
+          </template>
+          <slot v-else-if="hasActiveSession" />
+          <template v-else>
+            Connect wallet
+          </template>
+        </UiButton>
+      </template>
+
+      <!-- Labeled "Add to batch": the secondary action in the empty-batch state
+           (replaces the bare "+"). Becomes the primary full-width button once a
+           batch is pending — see the Option B branch above. -->
+      <button
+        v-if="supportsBatch && !batchBlocksDirect"
+        type="button"
+        class="w-full h-48 flex items-center justify-center gap-6 text-accent-500 text-h6 disabled:opacity-40 transition-opacity hover:opacity-80"
+        :disabled="!canAddToBatch"
+        data-testid="add-to-batch"
+        @click="emit('add-to-batch')"
+        @mouseenter="onPlusEnter"
+        @mouseleave="onPlusLeave"
       >
-        <template v-if="needToSwitchChain">
-          Switch chain
-        </template>
-        <slot v-else-if="hasActiveSession" />
-        <template v-else>
-          Connect wallet
-        </template>
-      </UiButton>
-      <div
-        v-if="isTooltipVisible && _disabled && !isLoading"
-        ref="floating"
-        :style="floatingStyles"
-        :class="['vault-form-submit__tooltip', tooltipVariantClass]"
+        <span class="text-h5 leading-none">+</span>
+        Add to batch
+      </button>
+    </div>
+
+    <!-- While a batch is pending, explain that direct execute is paused and offer
+         a one-click clear (so the user isn't stuck with a disabled action). -->
+    <p
+      v-if="batchBlocksDirect"
+      class="mt-8 text-center text-p3 text-content-tertiary"
+    >
+      Direct execute is paused while a batch is pending ·
+      <button
+        type="button"
+        class="text-accent-500 hover:text-accent-600"
+        data-testid="form-clear-batch"
+        @click="clearBatch"
       >
-        {{ effectiveDisabledReason }}
-      </div>
-    </template>
+        Clear batch
+      </button>
+    </p>
+
+    <!-- Shared disabled-reason tooltip: covers the normal disabled state AND the
+         batch-blocked button (info icon). Hovering the wrapper shows the reason. -->
+    <div
+      v-if="isTooltipVisible && tooltipText && !isLoading"
+      ref="floating"
+      :style="floatingStyles"
+      :class="['vault-form-submit__tooltip', tooltipVariantClass]"
+    >
+      {{ tooltipText }}
+    </div>
   </div>
 </template>
 

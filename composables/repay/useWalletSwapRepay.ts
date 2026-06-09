@@ -76,13 +76,15 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const { chainId } = useEulerAddresses()
   const { isConnected, address } = useWagmi()
   const { account: planAccount } = usePlanAccount()
-  const { fetchSingleBalance } = useWallets()
+  const { getBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { getVault: registryGetVault } = useVaultRegistry()
 
   // --- State ---
   const selectedAsset = ref<VaultAsset | undefined>()
-  const selectedAssetBalance = ref(0n)
+  // Pay-with balance from the central wallet entity (custom tokens are fed into
+  // it by useCustomTokenResolver), reactive + layer-aware.
+  const selectedAssetBalance = computed(() => selectedAsset.value?.address ? getBalance(selectedAsset.value.address as Address) : 0n)
   const isUnknownSwapToken = ref(false)
   const amount = ref('')
   const debtAmount = ref('')
@@ -599,10 +601,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     clearSimulationError()
     quotes.reset()
     resetDerivedState()
-
-    if (newAsset.address) {
-      selectedAssetBalance.value = await fetchSingleBalance(newAsset.address)
-    }
+    // selectedAssetBalance is a reactive computed over the wallet entity.
   }
 
   const onRefreshSwapQuotes = () => {
@@ -642,14 +641,11 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     onAmountInput()
   }
 
-  // Refresh selected asset balance and re-validate when wallet address changes
-  watch(address, async () => {
-    if (selectedAsset.value?.address) {
-      selectedAssetBalance.value = await fetchSingleBalance(selectedAsset.value.address)
-      if (needsSwap.value) {
-        updateSyncEstimates()
-        updateAsyncEstimates()
-      }
+  // Re-validate when wallet address changes (balance is a reactive computed).
+  watch(address, () => {
+    if (selectedAsset.value?.address && needsSwap.value) {
+      updateSyncEstimates()
+      updateAsyncEstimates()
     }
   })
 
@@ -881,5 +877,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     send,
     resetOnTabSwitch,
     initEstimates,
+    // Batch
+    buildRepayPlan,
   }
 }

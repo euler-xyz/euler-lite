@@ -239,6 +239,38 @@ The app will be available at `http://localhost:3000`.
 
 For HTTPS in local development, set `HTTPS_KEY` and `HTTPS_CERT` env vars pointing to your certificate files.
 
+#### Development with the SDK
+
+The committed dependency uses the npm version in `package.json` and `package-lock.json`. Keep those files pinned to a published `@eulerxyz/euler-v2-sdk` version unless the PR is intentionally updating the SDK dependency.
+
+For local Lite + SDK development, link the sibling SDK package without editing Lite package files:
+
+```bash
+cd ../euler-sdks/packages/euler-v2-sdk
+pnpm run build
+npm link
+
+cd ../../../euler-lite
+npm link @eulerxyz/euler-v2-sdk
+npm ls @eulerxyz/euler-v2-sdk --depth=0
+npm run dev
+```
+
+Rebuild the SDK after SDK source changes:
+
+```bash
+cd ../euler-sdks/packages/euler-v2-sdk
+pnpm run build
+```
+
+Return Lite to the committed npm package before final validation:
+
+```bash
+cd ../../../euler-lite
+npm ci
+npm ls @eulerxyz/euler-v2-sdk --depth=0
+```
+
 ### 5. Build for Production
 
 ```bash
@@ -261,6 +293,19 @@ docker run -p 3000:3000 \
 ```
 
 Doppler injects all environment variables at runtime. The server plugins scan the injected env vars and pass config to the client via `window.__APP_CONFIG__` and `window.__CHAIN_CONFIG__`.
+
+The Docker build uses the npm SDK version from `package-lock.json` by default. For a Lite PR that needs an unreleased SDK branch, pass the SDK branch as a build argument:
+
+```bash
+docker build \
+  --build-arg EULER_SDK_BRANCH=feat/sdk-branch \
+  --build-arg APP_PORT=3000 \
+  -t euler-lite .
+```
+
+When `EULER_SDK_BRANCH` is set, the builder clones `euler-xyz/euler-sdks`, builds `packages/euler-v2-sdk`, packs it, and installs that tarball with `--no-save` before running the Lite build. The committed Lite package files still point at the installed npm version.
+
+Railway PR builds use the same Dockerfile. Set `EULER_SDK_BRANCH` for previews that should consume an SDK branch; leave it unset for previews that should use the npm version in `package-lock.json`. If the SDK branch is in another readable repo, set `EULER_SDK_REPO` as well.
 
 To run without Doppler, override the `CMD` and pass env vars directly:
 

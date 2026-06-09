@@ -13,8 +13,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import type { SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { erc20Abi, formatUnits, getAddress, maxUint256, zeroAddress, type Address, type Abi } from 'viem'
-import { eulerAccountLensABI } from '~/entities/euler/abis'
+import { erc20Abi, formatUnits, getAddress, maxUint256, zeroAddress, type Address } from 'viem'
 import {
   COWSWAP_ORDER_DEADLINE_SECONDS,
   COWSWAP_PROVIDER_EXTRA_DATA,
@@ -38,13 +37,17 @@ const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { getTokenCategoryTags } = useTokenList()
 const { isReady: isVaultsReady } = useVaults()
 const { getOrFetch } = useVaultRegistry()
-const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
+const { isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
 const { client: rpcClient } = useRpcClient()
 
 const positionIndex = usePositionIndex()
 
 // ── Vaults & position ────────────────────────────────────────────────────
-const position: Ref<PortfolioBorrowPosition<VaultEntity> | null> = ref(null)
+// Layer-aware: tracks the active batch layer's portfolio so the form reflects
+// simulated collateral/debt (a one-shot ref would freeze at the real state).
+const position = computed<PortfolioBorrowPosition<VaultEntity> | null>(() =>
+  (!isConnected.value && !isSpyMode.value) ? null : (getPositionBySubAccountIndex(+positionIndex) || null),
+)
 const pairAssetsLabel = usePositionPairLabel(position)
 const selectedCollateral = ref<EVault | SecuritizeCollateralVault | null>(null)
 const selectedCollateralShares = ref(0n)
@@ -254,6 +257,56 @@ const {
   normalizeAddress, clearSimulationError, resetQuoteState,
 } = swap
 
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
+
+// Add this collateral swap (or same-asset migration) to the batch. CoW orders
+// can't be merged into an EVC batch, so they're excluded.
+const isCowSwapSelected = computed(() => isCowProvider(selectedProvider.value))
+const canAddToBatch = computed(() => {
+  if (!fromVault.value || !toVault.value || !position.value || !(+fromAmount.value)) return false
+  if (isSameAsset.value) return true
+  return !!selectedQuote.value && !isCowSwapSelected.value
+})
+const addToBatch = () => {
+  if (!canAddToBatch.value) return
+  const from = fromVault.value
+  const to = toVault.value
+  const pos = position.value
+  if (!from || !to || !pos) return
+  const fromAddr = from.address as Address
+  const toAddr = to.address as Address
+  const toAssetAddr = to.asset.address as Address
+  const positionAccount = pos.subAccount as Address
+  const amount = valueToNano(fromAmount.value, from.asset.decimals)
+  const isMax = isMaxSwap.value
+  const sameAsset = isSameAsset.value
+  const swapQuote = sameAsset ? undefined : selectedQuote.value ?? undefined
+  const label = sameAsset
+    ? `Migrate ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
+    : `Swap collateral ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
+  addBatchEntry({
+    label,
+    buildPlan: account => planCollateralChange({
+      fromVault: fromAddr,
+      toVault: toAddr,
+      amount,
+      positionAccount,
+      toAsset: toAssetAddr,
+      isMax,
+      enableCollateralTo: true,
+      disableCollateralFrom: isMax,
+      swapQuote,
+      swapperMode: SwapperMode.EXACT_IN,
+      account,
+    }),
+    subAccount: positionAccount,
+    review: { type: 'swap', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.EXACT_IN },
+  })
+  fromAmount.value = ''
+  redirectAfterAdd('/portfolio')
+}
+
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
@@ -299,20 +352,12 @@ const loadSelectedCollateral = async () => {
     const vault = await getOrFetch(targetAddress) as EVault | SecuritizeCollateralVault | undefined
     selectedCollateral.value = vault || null
 
-    const lensAddress = eulerLensAddresses.value?.accountLens
-    if (!lensAddress) {
-      throw new Error('Account lens address is not available')
-    }
-
-    const client = rpcClient.value!
-    const res = await client.readContract({
-      address: lensAddress as Address,
-      abi: eulerAccountLensABI as Abi,
-      functionName: 'getVaultAccountInfo',
-      args: [position.value.subAccount, targetAddress],
-    }) as { shares?: bigint, assets?: bigint }
-    selectedCollateralShares.value = res.shares ?? 0n
-    selectedCollateralAssets.value = res.assets ?? 0n
+    // Collateral assets/shares from the (layer-aware) position rather than a
+    // direct lens read, so the form reflects the active batch layer. Unheld ⇒ 0.
+    const match = position.value.collaterals.find(c =>
+      normalizeAddress(c.vaultAddress) === targetAddress)
+    selectedCollateralShares.value = match?.shares ?? 0n
+    selectedCollateralAssets.value = match?.assets ?? 0n
   }
   catch (e) {
     logWarn('collateralSwap/loadCollateral', e)
@@ -323,14 +368,9 @@ const loadSelectedCollateral = async () => {
 }
 
 const loadPosition = async () => {
-  if (!isConnected.value && !isSpyMode.value) {
-    position.value = null
-    return
-  }
+  if (!isConnected.value && !isSpyMode.value) return
   isLoading.value = true
   await until(isPositionsLoaded).toBe(true)
-
-  position.value = getPositionBySubAccountIndex(+positionIndex) || null
   await loadSelectedCollateral()
   isLoading.value = false
 }
@@ -872,6 +912,8 @@ watch(() => cowSwapOrderStatus.orderStatus.value, (status) => {
                 :loading="isSubmitting || isPreparing"
                 :disabled-reason="disabledReasonInfo?.message"
                 :disabled-reason-variant="disabledReasonInfo?.variant"
+                :can-add-to-batch="canAddToBatch"
+                @add-to-batch="addToBatch"
               >
                 {{ reviewSwapLabel }}
               </VaultFormSubmit>

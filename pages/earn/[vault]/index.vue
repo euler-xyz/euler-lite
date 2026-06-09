@@ -19,10 +19,12 @@ const route = useRoute()
 const modal = useModal()
 const { error } = useToast()
 const { planDeposit, executePlan } = useEulerTx()
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
 const { getEarnVault, updateEarnVault } = useVaults()
 const { isReady: isLabelsReady } = useEulerLabels()
-const { isConnected, address } = useWagmi()
+const { isConnected } = useWagmi()
 const { chainId } = useEulerAddresses()
 const shareLinkQuery = computed(() => {
   const network = route.query.network
@@ -31,7 +33,7 @@ const shareLinkQuery = computed(() => {
     network: Array.isArray(network) ? network[0] ?? chainId.value : network ?? chainId.value,
   }
 })
-const { fetchSingleBalance } = useWallets()
+const { getBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const vaultAddress = route.params.vault as string
 useOperationGuard([vaultAddress])
@@ -49,15 +51,10 @@ const plan = ref<TransactionPlan | null>(null)
 const vault: Ref<EulerEarn | undefined> = ref(undefined)
 const asset: Ref<VaultAsset | undefined> = ref(undefined)
 const estimateSupplyAPY = ref(0)
-const balance = ref(0n)
-
-const fetchBalance = async () => {
-  if (!asset.value?.address) {
-    balance.value = 0n
-    return
-  }
-  balance.value = await fetchSingleBalance(asset.value.address)
-}
+const earnVaultMarketLabel = computed(() => unref(name) || vault.value?.shares.name || '')
+// Wallet balance from the central (layer-aware) wallet entity — reactive, no
+// direct balanceOf.
+const balance = computed(() => asset.value?.address ? getBalance(asset.value.address as Address) : 0n)
 
 // Non-blocking to avoid Suspense + pageTransition crash on direct navigation
 ;(async () => {
@@ -70,9 +67,6 @@ const fetchBalance = async () => {
     }
     vault.value = await getEarnVault(vaultAddress)
     asset.value = vault.value?.asset
-
-    // Fetch fresh underlying asset balance for this specific vault
-    await fetchBalance()
 
     if (!useVaultRegistry().isVerifiedVault(vault.value.address)) {
       modal.open(VaultUnverifiedDisclaimerModal, {
@@ -165,6 +159,20 @@ const submit = async () => {
     isPreparing.value = false
   }
 }
+const addToBatch = () => {
+  if (!asset.value?.address || !(+amount.value)) return
+  const assetAddr = asset.value.address as Address
+  const amt = valueToNano(amount.value, asset.value.decimals)
+  const label = `Earn deposit ${amount.value} ${asset.value.symbol}`
+  addBatchEntry({
+    label,
+    buildPlan: account => planDeposit({ vaultAddress: vaultAddress as Address, assetAddress: assetAddr, amount: amt, account }),
+    review: { type: 'supply', asset: asset.value, amount: amount.value, marketLabel: earnVaultMarketLabel.value },
+  })
+  amount.value = ''
+  redirectAfterAdd('/portfolio/saving')
+}
+
 const send = async () => {
   try {
     isSubmitting.value = true
@@ -224,10 +232,6 @@ estimateSupplyAPY.value = getVaultSupplyApy(vault.value) + totalRewardsAPY.value
 watch(amount, () => {
   clearSimulationError()
   updateEstimates()
-})
-
-watch(address, () => {
-  fetchBalance()
 })
 </script>
 
@@ -379,6 +383,8 @@ watch(address, () => {
                 :disabled-reason="disabledReasonInfo?.message"
                 :disabled-reason-variant="disabledReasonInfo?.variant"
                 :loading="isSubmitting || isPreparing"
+                :can-add-to-batch="!!(+amount)"
+                @add-to-batch="addToBatch"
               >
                 Review Supply
               </VaultFormSubmit>

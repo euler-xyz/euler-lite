@@ -20,6 +20,10 @@ const showAllLabelEntries = useShowAllLabelEntries()
 // subgraph + accountLens round-trip.
 useEulerAccount()
 
+// Instantiate the batch store at app root so its simulation watchers stay
+// alive across navigation (mirrors useEulerAccount above).
+useTxBatch()
+
 const { theme } = useTheme()
 
 watch(theme, (newTheme) => {
@@ -176,6 +180,7 @@ onUnmounted(() => {
   </main>
   <UiModals />
   <UiToastContainer />
+  <BatchDrawer />
   <Transition name="page">
     <TheMenu v-show="isMenuVisible" />
   </Transition>

@@ -11,6 +11,7 @@ import { normalizeAddress } from '~/utils/normalizeAddress'
 import { isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { getAddress, type Address, zeroAddress, isAddress } from 'viem'
+import { isCowProvider } from '~/entities/cowswap'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 
 const route = useRoute()
@@ -154,6 +155,55 @@ const {
   swapRouteItems, swapRouteEmptyMessage,
   selectProvider, onFromInput, onToVaultChange, onRefreshQuotes, submit, openSlippageSettings,
 } = swap
+
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
+
+// Add this earn-position swap (or same-asset migration) to the batch. CoW
+// orders can't be merged into an EVC batch, so they're excluded.
+const isCowSwapSelected = computed(() => isCowProvider(selectedProvider.value))
+const canAddToBatch = computed(() => {
+  if (!fromVault.value || !toVault.value || !(+fromAmount.value)) return false
+  if (isSameAsset.value) return true
+  return !!selectedQuote.value && !isCowSwapSelected.value
+})
+const addToBatch = () => {
+  if (!canAddToBatch.value) return
+  const from = fromVault.value
+  const to = toVault.value
+  if (!from || !to) return
+  const positionAccount = (subAccount.value ?? effectiveAddress.value) as Address | undefined
+  if (!positionAccount) return
+  const fromAddr = from.address as Address
+  const toAddr = to.address as Address
+  const toAssetAddr = to.asset.address as Address
+  const amount = valueToNano(fromAmount.value, from.asset.decimals)
+  const isMax = assetsBalance.value > 0n && amount >= assetsBalance.value
+  const maxShares = isMax ? savingPosition.value?.shares : undefined
+  const sameAsset = isSameAsset.value
+  const swapQuote = sameAsset ? undefined : selectedQuote.value ?? undefined
+  const label = sameAsset
+    ? `Migrate ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
+    : `Swap ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
+  addBatchEntry({
+    label,
+    buildPlan: account => planCollateralChange({
+      fromVault: fromAddr,
+      toVault: toAddr,
+      amount,
+      positionAccount,
+      toAsset: toAssetAddr,
+      isMax,
+      maxShares,
+      swapQuote,
+      swapperMode: SwapperMode.EXACT_IN,
+      account,
+    }),
+    review: { type: 'swap', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.EXACT_IN },
+  })
+  fromAmount.value = ''
+  redirectAfterAdd('/portfolio/saving')
+}
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
@@ -357,6 +407,8 @@ watch([() => route.params.vault, () => route.query.to], () => {
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
               :loading="isSubmitting || isPreparing"
+              :can-add-to-batch="canAddToBatch"
+              @add-to-batch="addToBatch"
             >
               {{ reviewSwapLabel }}
             </VaultFormSubmit>

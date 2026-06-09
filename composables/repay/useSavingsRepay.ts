@@ -477,5 +477,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     updateSourceBalance,
     initVault,
     resetOnTabSwitch,
+    // Batch
+    buildRepayPlan,
   }
 }

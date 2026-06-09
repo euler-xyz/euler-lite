@@ -11,6 +11,7 @@ import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import type { SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { formatUnits, zeroAddress, type Address } from 'viem'
+import { isCowProvider } from '~/entities/cowswap'
 
 const route = useRoute()
 const { isConnected, address } = useWagmi()
@@ -26,7 +27,11 @@ const { getTokenCategoryTags } = useTokenList()
 const positionIndex = usePositionIndex()
 
 // ── Position & vaults ────────────────────────────────────────────────────
-const position: Ref<PortfolioBorrowPosition<VaultEntity> | null> = ref(null)
+// Layer-aware: tracks the active batch layer's portfolio so the form reflects
+// simulated debt/collateral (a one-shot ref would freeze at the real state).
+const position = computed<PortfolioBorrowPosition<VaultEntity> | null>(() =>
+  (!isConnected.value && !isSpyMode.value) ? null : (getPositionBySubAccountIndex(+positionIndex) || null),
+)
 
 const pairAssetsLabel = usePositionPairLabel(position)
 const fromVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
@@ -274,6 +279,52 @@ const {
   normalizeAddress, clearSimulationError, requestQuote,
 } = swap
 
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
+
+// Add this debt swap (or same-asset migration) to the batch. CoW orders can't
+// be merged into an EVC batch, so they're excluded.
+const isCowSwapSelected = computed(() => isCowProvider(selectedProvider.value))
+const canAddToBatch = computed(() => {
+  if (!fromVault.value || !toVault.value || !position.value || !(+fromAmount.value)) return false
+  if (isSameAsset.value) return true
+  return !!selectedQuote.value && !isCowSwapSelected.value
+})
+const addToBatch = () => {
+  if (!canAddToBatch.value) return
+  const from = fromVault.value
+  const to = toVault.value
+  const pos = position.value
+  if (!from || !to || !pos) return
+  const oldLiabilityVault = from.address as Address
+  const newLiabilityVault = to.address as Address
+  const newLiabilityAsset = to.asset.address as Address
+  const liabilityAccount = (pos.subAccount || address.value!) as Address
+  const amount = valueToNano(fromAmount.value, from.asset.decimals)
+  const sameAsset = isSameAsset.value
+  const swapQuote = sameAsset ? undefined : selectedQuote.value ?? undefined
+  const label = sameAsset
+    ? `Migrate debt ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
+    : `Swap debt ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
+  addBatchEntry({
+    label,
+    buildPlan: account => planDebtChange({
+      oldLiabilityVault,
+      newLiabilityVault,
+      liabilityAccount,
+      liabilityAmount: sameAsset ? undefined : amount,
+      newLiabilityAsset,
+      swapQuote,
+      swapperMode: SwapperMode.TARGET_DEBT,
+      account,
+    }),
+    subAccount: pos.subAccount as Address,
+    review: { type: 'swap-borrow', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.TARGET_DEBT },
+  })
+  fromAmount.value = ''
+  redirectAfterAdd('/portfolio')
+}
+
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
@@ -297,14 +348,9 @@ watchEffect(async () => {
 
 // ── Position loading ─────────────────────────────────────────────────────
 const loadPosition = async () => {
-  if (!isConnected.value && !isSpyMode.value) {
-    position.value = null
-    return
-  }
+  if (!isConnected.value && !isSpyMode.value) return
   isLoading.value = true
   await until(isPositionsLoaded).toBe(true)
-
-  position.value = getPositionBySubAccountIndex(+positionIndex) || null
   isLoading.value = false
 }
 
@@ -481,6 +527,8 @@ const onToVaultChange = (selectedIndex: number) => {
                 :loading="isSubmitting || isPreparing"
                 :disabled-reason="disabledReasonInfo?.message"
                 :disabled-reason-variant="disabledReasonInfo?.variant"
+                :can-add-to-batch="canAddToBatch"
+                @add-to-batch="addToBatch"
               >
                 {{ reviewSwapLabel }}
               </VaultFormSubmit>

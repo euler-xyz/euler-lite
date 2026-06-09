@@ -30,6 +30,9 @@ const { viewer, visibleTotal } = useApyVisibility()
 
 const vault = computed(() => position.vault!)
 const positionKey = computed(() => `${position.subAccount.toLowerCase()}:${vault.value.address.toLowerCase()}`)
+// Positions the active simulated batch layer modified get a dotted border.
+const { modifiedKeys } = useTxBatch()
+const isSimulatedModified = computed(() => modifiedKeys.value.has(positionKey.value))
 const utilisationWarning = computed(() => {
   if (isSecuritizeCollateralVault(vault.value)) return null
   return getUtilisationWarning(vault.value as EVault, 'lend')
@@ -106,6 +109,7 @@ const onClick = () => {
   <div
     v-if="isSecuritize"
     class="block no-underline bg-surface rounded-xl border border-line-subtle shadow-card cursor-pointer transition-all duration-default ease-default hover:shadow-card-hover hover:border-line-emphasis"
+    :class="{ '!border-2 !border-dashed !border-accent-600': isSimulatedModified }"
     data-id="portfolio-list-item"
     data-modal-trigger="vault-information"
     data-list="lend"
@@ -260,6 +264,7 @@ const onClick = () => {
   <div
     v-else
     class="block no-underline bg-surface rounded-xl border border-line-subtle shadow-card cursor-pointer transition-all duration-default ease-default hover:shadow-card-hover hover:border-line-emphasis"
+    :class="{ '!border-2 !border-dashed !border-accent-600': isSimulatedModified }"
     data-id="portfolio-list-item"
     data-modal-trigger="vault-information"
     data-list="lend"

@@ -13,7 +13,7 @@ import { formatNumber, compactNumber, formatUsdValue, formatCompactUsdValue } fr
 import { nanoToValue } from '~/utils/crypto-utils'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { VaultSupplyApyModal } from '#components'
-import { getAddress, type Address, maxUint256 } from 'viem'
+import { getAddress, maxUint256 } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 
@@ -21,7 +21,6 @@ const { vault } = defineProps<{ vault: SecuritizeCollateralVault, desktopOvervie
 const route = useRoute()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
-const { client: rpcClient } = useRpcClient()
 const { chainId } = useEulerAddresses()
 const { borrowList: _borrowList, isVaultGovernorVerified } = useVaults()
 const { getEVaults } = useVaultRegistry()
@@ -95,21 +94,11 @@ const supplyApyModalData = computed(() => ({
 // Risk parameters - fetch share token exchange rate (ERC4626 standard)
 const shareTokenExchangeRate: Ref<bigint | undefined> = ref()
 
-const loadRiskParameters = async () => {
+const loadRiskParameters = () => {
   try {
-    const client = rpcClient.value!
-    shareTokenExchangeRate.value = await client.readContract({
-      address: vault.address as Address,
-      abi: [{
-        type: 'function',
-        name: 'convertToAssets',
-        inputs: [{ name: 'shares', type: 'uint256' }],
-        outputs: [{ name: 'assets', type: 'uint256' }],
-        stateMutability: 'view',
-      }] as const,
-      functionName: 'convertToAssets',
-      args: [1n * 10n ** BigInt(vault.shares.decimals)],
-    }) as bigint
+    // Share→asset exchange rate from the SDK vault entity (was a direct
+    // convertToAssets RPC read); the entity derives it from the same data.
+    shareTokenExchangeRate.value = vault.convertToAssets(1n * 10n ** BigInt(vault.shares.decimals))
   }
   catch (e) {
     logWarn('SecuritizeVaultOverview/shareTokenExchangeRate', e)
