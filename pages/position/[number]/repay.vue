@@ -453,7 +453,6 @@ const openWalletSwapTokenSelector = () => {
     },
   })
 }
-
 const load = async () => {
   if (!isConnected.value && !isSpyMode.value) {
     return
