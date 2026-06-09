@@ -460,12 +460,12 @@ const linkPath = computed(() => ({
           class="text-p2 text-content-primary"
         >-</div>
       </div>
-      <div class="ml-auto grid grid-cols-[repeat(5,112px)] justify-end gap-x-24 pr-16 mobile:contents">
+      <div class="ml-auto grid grid-cols-[140px_repeat(4,112px)] justify-end gap-x-20 pr-16 mobile:contents">
         <div
           class="py-12 pb-12 text-right mobile:!p-0"
           :class="{ 'pl-16': !enableEntityBranding }"
         >
-          <div class="text-content-tertiary text-p3 mb-4 flex items-center justify-end gap-4">
+          <div class="text-content-tertiary text-p3 mb-4 flex items-center justify-end gap-4 whitespace-nowrap">
             Available liquidity
             <VaultWarningIcon
               :warning="[borrowCapInfo, supplyCapInfo]"
