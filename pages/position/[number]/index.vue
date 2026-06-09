@@ -72,7 +72,8 @@ const collateralCount = computed(() => positionCollateralAddresses.value.length 
 // Whether a specific vault of this position was modified by the active batch
 // layer — drives the dashed "simulated" border on that one box (the collateral
 // or borrow box), not the whole position / summary / risk.
-const { modifiedKeys } = useTxBatch()
+const { modifiedKeys, entryCount } = useTxBatch()
+const hasBatchEntries = computed(() => entryCount.value > 0)
 const isVaultModified = (vaultAddr?: string) => {
   if (!position.value || !vaultAddr) return false
   try {
@@ -161,6 +162,10 @@ const isPairFullyRestricted = computed(() => {
     && isVaultRestrictedByCountry(borrowVault.value.address)
     && isVaultRestrictedByCountry(collateralVault.value.address)
 })
+const isWithdrawBlockedByLiquidation = computed(() => isEligibleForLiquidation.value && !hasBatchEntries.value)
+const isWithdrawDisabled = computed(() =>
+  isWithdrawBlockedByLiquidation.value || isPositionGeoBlocked.value || isPairFullyRestricted.value || hasQueryFailure.value,
+)
 
 const borrowVaultNotice = computed(() => {
   if (!position.value) return ''
@@ -1419,7 +1424,7 @@ watch([isConnected, isSpyMode, address], () => {
                 </div>
               </div>
               <UiAlert
-                v-if="!hasNoBorrow && isEligibleForLiquidation"
+                v-if="!hasNoBorrow && isWithdrawBlockedByLiquidation"
                 class="my-12"
                 title="Liquidation risk"
                 description="Withdraw is disabled while this position is eligible for liquidation."
@@ -1448,8 +1453,8 @@ watch([isConnected, isSpyMode, address], () => {
                   size="medium"
                   variant="primary-stroke"
                   rounded
-                  :disabled="isEligibleForLiquidation || isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure"
-                  :to="isEligibleForLiquidation || isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure ? undefined : `/position/${positionIndex}/withdraw?collateral=${collateral.vault.address}`"
+                  :disabled="isWithdrawDisabled"
+                  :to="isWithdrawDisabled ? undefined : `/position/${positionIndex}/withdraw?collateral=${collateral.vault.address}`"
                 >
                   Withdraw
                 </UiButton>
