@@ -804,7 +804,15 @@ watch([isConnected, isSpyMode, address], () => {
         :vault="collateralVault"
         :assets="pairAssets"
         :assets-label="pairAssetsLabel"
-      />
+      >
+        <template #symbol-trailing>
+          <CorrelatedPairBadge
+            v-if="isRoeApplicable"
+            compact
+            title="All collateral assets in this position share a trusted price-correlation category with the borrow asset, so ROE is shown."
+          />
+        </template>
+      </VaultLabelsAndAssets>
 
       <UiAlert
         v-if="hasQueryFailure"
@@ -818,7 +826,11 @@ watch([isConnected, isSpyMode, address], () => {
         v-if="!hasNoBorrow"
         class="flex flex-col gap-16 laptop:flex-row laptop:items-stretch"
       >
-        <div class="flex flex-col gap-16 p-16 rounded-12 border border-line-default bg-card shadow-card laptop:flex-1">
+        <div
+          class="flex flex-col gap-16 p-16 rounded-12 border border-line-default bg-card shadow-card laptop:flex-1"
+          data-id="position-summary"
+          :data-correlated="isRoeApplicable"
+        >
           <div class="text-h4 text-content-primary">
             Position summary
           </div>

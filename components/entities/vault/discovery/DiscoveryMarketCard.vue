@@ -22,6 +22,7 @@ defineEmits<{
 }>()
 
 const { products } = useEulerLabels()
+const { getTokenCategoryTags } = useTokenList()
 const bestRoeMarketGroups = computed(() => [props.market])
 const { getBestMaxROE } = useBestMaxROE(bestRoeMarketGroups)
 
@@ -35,6 +36,29 @@ const getProductDescription = (market: MarketGroup): string => {
 }
 
 const getBestMaxRoe = (market: MarketGroup): BestMaxRoeResult => getBestMaxROE(market.id)
+
+const getCorrelatedPairCount = (market: MarketGroup): number => {
+  let count = 0
+  for (const liability of getBorrowableVaults(market)) {
+    for (const ltv of liability.collaterals) {
+      if (ltv.borrowLTV === 0) continue
+      const collateral = findVault(market, ltv.address)
+      if (!collateral) continue
+      if (
+        areTokenAddressesCorrelatedByTags(
+          collateral.asset.address,
+          liability.asset.address,
+          getTokenCategoryTags,
+        )
+      ) {
+        count++
+      }
+    }
+  }
+  return count
+}
+
+const correlatedPairCount = computed(() => getCorrelatedPairCount(props.market))
 
 const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
   props: {
@@ -137,6 +161,17 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
             data-field="pair-count"
             :data-value="diagram.pairCount"
           >{{ diagram.pairCount }} pairs</span>
+          <span
+            v-if="correlatedPairCount > 0"
+            class="text-accent-500 text-p5 mt-4"
+            data-id="data-point"
+            :data-key="market.id"
+            data-field="correlated-pair-count"
+            :data-value="correlatedPairCount"
+            title="Pairs eligible for Max ROE under the trusted correlation category rule."
+          >
+            {{ correlatedPairCount }} correlated
+          </span>
           <span
             v-if="getDeprecatedVaultCount(market) > 0"
             class="text-warning-500 text-p5 mt-4"

@@ -470,6 +470,13 @@ watch(
           :assets="pairAssets as VaultAsset[]"
           size="large"
         >
+          <template #symbol-trailing>
+            <CorrelatedPairBadge
+              v-if="showMultiplyRoe"
+              compact
+              title="This pair shares a trusted price-correlation category, so ROE is shown."
+            />
+          </template>
           <UiShareLinkButton
             class="-ml-4 !w-24 !h-24"
             :path="`/borrow/${collateralVault.address}/${borrowVault.address}`"

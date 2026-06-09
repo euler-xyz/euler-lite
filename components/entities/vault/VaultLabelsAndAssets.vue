@@ -147,13 +147,14 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
       </div>
 
       <p
-        class="text-p2 font-semibold text-content-primary"
+        class="flex items-center gap-8 text-p2 font-semibold text-content-primary"
         data-id="data-point"
         :data-key="pairVault ? `${vault.address.toLowerCase()}:${pairVault.address.toLowerCase()}` : vault.address.toLowerCase()"
         data-field="asset-symbols"
         :data-value="displayAssetsLabel"
       >
-        {{ displayAssetsLabel }}
+        <span>{{ displayAssetsLabel }}</span>
+        <slot name="symbol-trailing" />
       </p>
     </div>
   </div>

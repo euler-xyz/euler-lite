@@ -325,6 +325,7 @@ const openPositionInformationModal = () => {
     :data-sub-account="position.subAccount.toLowerCase()"
     :data-collateral-address="primaryCollateralAddress.toLowerCase()"
     :data-borrow-address="borrowAddress.toLowerCase()"
+    :data-correlated="isRoeApplicable"
   >
     <div class="flex py-16 px-16 pb-12 border-b border-line-default">
       <div
@@ -380,13 +381,18 @@ const openPositionInformationModal = () => {
               </span>
             </div>
             <div
-              class="text-h5 text-content-primary truncate"
+              class="text-h5 text-content-primary flex items-center gap-8 min-w-0"
               data-id="data-point"
               :data-key="positionKey"
               data-field="asset-symbols"
               :data-value="pairSymbols"
             >
-              {{ pairSymbols }}
+              <span class="truncate">{{ pairSymbols }}</span>
+              <CorrelatedPairBadge
+                v-if="isRoeApplicable"
+                compact
+                title="All collateral assets in this position share a trusted price-correlation category with the borrow asset, so ROE is shown."
+              />
             </div>
           </div>
           <div class="flex gap-16 items-start shrink-0">

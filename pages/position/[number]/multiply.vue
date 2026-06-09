@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
+import { getNetAPY } from '~/utils/vault/apy'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -315,6 +316,38 @@ const multiplyRoeAfter = computed(() => {
     nextSupplyValueUsd.value,
     nextBorrowValueUsd.value,
     multiplyWeightedSupplyApy.value,
+    multiplyBorrowApy.value,
+  )
+})
+const multiplyNetApyBefore = computed(() => {
+  if (
+    currentSupplyValueUsd.value === null
+    || currentBorrowValueUsd.value === null
+    || multiplyLongApy.value === null
+    || multiplyBorrowApy.value === null
+  ) {
+    return null
+  }
+  return getNetAPY(
+    currentSupplyValueUsd.value,
+    multiplyLongApy.value,
+    currentBorrowValueUsd.value,
+    multiplyBorrowApy.value,
+  )
+})
+const multiplyNetApyAfter = computed(() => {
+  if (
+    nextSupplyValueUsd.value === null
+    || nextBorrowValueUsd.value === null
+    || multiplyWeightedSupplyApy.value === null
+    || multiplyBorrowApy.value === null
+  ) {
+    return null
+  }
+  return getNetAPY(
+    nextSupplyValueUsd.value,
+    multiplyWeightedSupplyApy.value,
+    nextBorrowValueUsd.value,
     multiplyBorrowApy.value,
   )
 })
@@ -854,7 +887,15 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
           :assets="pairAssets"
           :assets-label="pairAssetsLabel"
           size="large"
-        />
+        >
+          <template #symbol-trailing>
+            <CorrelatedPairBadge
+              v-if="isMultiplyRoeApplicable"
+              compact
+              title="This pair shares a trusted price-correlation category, so ROE is shown."
+            />
+          </template>
+        </VaultLabelsAndAssets>
 
         <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
           <div class="flex flex-col gap-16 w-full">
@@ -955,6 +996,16 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
               <SummaryValue
                 :before="multiplyRoeBefore !== null ? formatNumber(multiplyRoeBefore) : undefined"
                 :after="multiplyRoeAfter !== null && multiplySwapReady ? formatNumber(multiplyRoeAfter) : undefined"
+                suffix="%"
+              />
+            </SummaryRow>
+            <SummaryRow
+              v-else
+              label="Net APY"
+            >
+              <SummaryValue
+                :before="multiplyNetApyBefore !== null ? formatNumber(multiplyNetApyBefore) : undefined"
+                :after="multiplyNetApyAfter !== null && multiplySwapReady ? formatNumber(multiplyNetApyAfter) : undefined"
                 suffix="%"
               />
             </SummaryRow>

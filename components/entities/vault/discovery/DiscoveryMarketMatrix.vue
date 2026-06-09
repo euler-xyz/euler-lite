@@ -133,9 +133,10 @@ const getCellMetricValue = (
       return getMaxMultiplier(cell.ltv.borrowLTV)
     case 'net-apy':
       return computeEnhancedApys(cell, collateralAddr, liabilityAddr).netApy
-    case 'roe':
-      if (!isCorrelatedCell(collateralAddr, liabilityAddr)) return Number.NaN
-      return computeEnhancedApys(cell, collateralAddr, liabilityAddr).roe
+    case 'roe': {
+      const apys = computeEnhancedApys(cell, collateralAddr, liabilityAddr)
+      return isCorrelatedCell(collateralAddr, liabilityAddr) ? apys.roe : Number.NaN
+    }
     default:
       return 0
   }
@@ -548,6 +549,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
               :data-borrow-address="col.address"
               :data-field="dotMetric"
               :data-present="!!matrix.cells.get(row.address)?.get(col.address)"
+              :data-correlated="matrix.cells.get(row.address)?.get(col.address) ? isCorrelatedCell(row.address, col.address) : undefined"
               :data-value="
                 (() => {
                   const cell = matrix.cells.get(row.address)?.get(col.address);
@@ -712,6 +714,12 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                     title="Liquidation LTV ramping down"
                   />
                   <SvgIcon
+                    v-if="dotMetric === 'roe' && isCorrelatedCell(row.address, col.address)"
+                    name="check-circle"
+                    class="!w-10 !h-10 text-success-500 shrink-0"
+                    title="Correlated pair"
+                  />
+                  <SvgIcon
                     v-if="shouldShowSparkles(row.address, col.address)"
                     name="sparks"
                     class="!w-10 !h-10 text-accent-500 shrink-0"
@@ -738,14 +746,20 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                     ]"
                   >
                     {{
-                      formatMetricValue(
-                        getCellMetricValue(
-                          matrix.cells.get(row.address)!.get(col.address)!,
-                          row.address,
-                          col.address,
-                        ),
-                        dotMetric,
-                      )
+                      Number.isFinite(getCellMetricValue(
+                        matrix.cells.get(row.address)!.get(col.address)!,
+                        row.address,
+                        col.address,
+                      ))
+                        ? formatMetricValue(
+                          getCellMetricValue(
+                            matrix.cells.get(row.address)!.get(col.address)!,
+                            row.address,
+                            col.address,
+                          ),
+                          dotMetric,
+                        )
+                        : 'N/A'
                     }}
                   </span>
                 </div>
