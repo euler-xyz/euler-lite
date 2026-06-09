@@ -65,7 +65,7 @@ defineEmits(['close'])
             Batch transactions
           </div>
           <div class="text-p3 text-content-muted">
-            Queue multiple actions and execute them as one transaction
+            Queue multiple actions into one atomic transaction
           </div>
         </div>
         <UiSwitch
