@@ -1,5 +1,29 @@
-import { describe, expect, it } from 'vitest'
-import { buildProductDescriptors, buildTokenLogoMap } from '~/server/utils/labels-view'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { buildProductDescriptors, buildTokenLogoMap, fetchTokenList } from '~/server/utils/labels-view'
+import { INTERNAL_FETCH_HEADERS } from '~/server/utils/internal-headers'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+describe('fetchTokenList', () => {
+  it('decorates the internal token-list fetch with the loopback sentinel', async () => {
+    const fetch = vi.fn().mockResolvedValue({
+      tokens: [
+        { address: '0x1111111111111111111111111111111111111111', logoURI: 'https://cdn.example/token.png' },
+      ],
+    })
+    vi.stubGlobal('$fetch', fetch)
+
+    await expect(fetchTokenList(1)).resolves.toEqual([
+      { address: '0x1111111111111111111111111111111111111111', logoURI: 'https://cdn.example/token.png' },
+    ])
+    expect(fetch).toHaveBeenCalledWith('/api/token-list', {
+      query: { chainId: 1 },
+      headers: INTERNAL_FETCH_HEADERS,
+    })
+  })
+})
 
 describe('buildTokenLogoMap', () => {
   it('keeps only http(s) logo URLs', () => {

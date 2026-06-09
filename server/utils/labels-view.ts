@@ -17,6 +17,7 @@ import {
 } from '@eulerxyz/euler-v2-sdk'
 import type { Address } from 'viem'
 import { createInFlightDedup } from './in-flight'
+import { INTERNAL_FETCH_HEADERS } from './internal-headers'
 import { buildEntityAddressSets, declaredKeysOf, tryChecksum } from './labels-helpers'
 import { logger } from './logger'
 import { getServerSdk } from './sdk-server'
@@ -129,8 +130,11 @@ function overrideHasTag(
 // SDK builder shared with vaults-cache via server/utils/sdk-server.ts.
 const getSdk = (chainId: number): Promise<EulerSDK> => getServerSdk(chainId)
 
-async function fetchTokenList(chainId: number): Promise<TokenListEntry[]> {
-  const data = await $fetch<TokenListResponse>('/api/token-list', { query: { chainId } })
+export async function fetchTokenList(chainId: number): Promise<TokenListEntry[]> {
+  const data = await $fetch<TokenListResponse>('/api/token-list', {
+    query: { chainId },
+    headers: INTERNAL_FETCH_HEADERS,
+  })
   return Array.isArray(data?.tokens) ? data.tokens : []
 }
 
