@@ -202,7 +202,7 @@ const formatWalletChange = (change: { delta: bigint, decimals: number, symbol: s
   const negative = change.delta < 0n
   const abs = negative ? -change.delta : change.delta
   const amount = formatSmartAmount(formatUnits(abs, change.decimals))
-  return `${negative ? '−' : '+'}${amount} ${change.symbol}`
+  return `${negative ? '−' : '+'}${amount}`
 }
 
 // Copy the exact batch calldata (one entry per on-chain tx: approvals + the EVC

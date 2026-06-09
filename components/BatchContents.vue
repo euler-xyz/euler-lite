@@ -46,7 +46,7 @@ const formatWalletChange = (change: { delta: bigint, decimals: number, symbol: s
   const negative = change.delta < 0n
   const abs = negative ? -change.delta : change.delta
   const amount = formatSmartAmount(formatUnits(abs, change.decimals))
-  return `${negative ? '−' : '+'}${amount} ${change.symbol}`
+  return `${negative ? '−' : '+'}${amount}`
 }
 
 // Eye toggle: peek at the real state (layer 0) vs the simulated end state
