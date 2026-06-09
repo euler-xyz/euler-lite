@@ -20,7 +20,7 @@ if ! command -v git >/dev/null 2>&1; then
 fi
 
 rm -rf "$SDK_DIR" "$SDK_PACK_DIR"
-git clone --filter=blob:none --no-checkout --depth=1 --branch "$EULER_SDK_BRANCH" "$SDK_REPO" "$SDK_DIR"
+git clone --filter=blob:none --depth=1 --branch "$EULER_SDK_BRANCH" "$SDK_REPO" "$SDK_DIR"
 
 cd "$SDK_DIR"
 SDK_PACKAGE_MANAGER="$(node -p "require('./package.json').packageManager || 'pnpm@11.10.0'")"
