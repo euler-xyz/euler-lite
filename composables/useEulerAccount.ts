@@ -9,7 +9,15 @@ import { createAddressRefreshCoordinator } from '~/utils/address-refresh-coordin
 import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
 import { createRaceGuard } from '~/utils/race-guard'
-import { activeLayerPortfolioRef, activeLayerPortfolioAllRef } from '~/composables/useTxBatch'
+import {
+  activeLayerPortfolioRef,
+  activeLayerPortfolioAllRef,
+  activeLayerRemovedBorrowPositionsRef,
+  activeLayerRemovedBorrowPositionsAllRef,
+  activeLayerRemovedDepositPositionsRef,
+  activeLayerRemovedDepositPositionsAllRef,
+  activeLayerRemovedKeysRef,
+} from '~/composables/useTxBatch'
 
 const visiblePortfolio: Ref<Portfolio<VaultEntity> | undefined> = shallowRef()
 const allPortfolio: Ref<Portfolio<VaultEntity> | undefined> = shallowRef()
@@ -31,6 +39,17 @@ const portfolio = computed(() => {
 })
 const borrowPositions = computed(() => portfolio.value?.borrows ?? [])
 const depositPositions = computed(() => portfolio.value?.savings ?? [])
+const removedBorrowPositions = computed(() =>
+  isShowAllPositions.value
+    ? activeLayerRemovedBorrowPositionsAllRef.value
+    : activeLayerRemovedBorrowPositionsRef.value,
+)
+const removedDepositPositions = computed(() =>
+  isShowAllPositions.value
+    ? activeLayerRemovedDepositPositionsAllRef.value
+    : activeLayerRemovedDepositPositionsRef.value,
+)
+const removedKeys = computed(() => activeLayerRemovedKeysRef.value)
 // All-positions lists also follow the active layer (the simulated all-positions
 // projection), so position lookups by sub-account — used by the position pages —
 // reflect simulated deposits/withdrawals/borrows just like the portfolio view.
@@ -256,6 +275,9 @@ export const useEulerAccount = () => {
     portfolioDiagnostics,
     borrowPositions,
     depositPositions,
+    removedBorrowPositions,
+    removedDepositPositions,
+    removedKeys,
     isPositionsLoading,
     isPositionsLoaded,
     isDepositsLoading,

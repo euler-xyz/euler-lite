@@ -4,6 +4,8 @@ import { Account, flattenBatchEntries, getEulerLabelProductByVault } from '@eule
 import type {
   IHasVaultAddress,
   Portfolio,
+  PortfolioBorrowPosition,
+  PortfolioSavingsPosition,
   TransactionPlan,
   VaultEntity,
 } from '@eulerxyz/euler-v2-sdk'
@@ -134,6 +136,16 @@ let tenderlyEnabledFetched = false
 export const activeLayerPortfolioRef = shallowRef<Portfolio<VaultEntity> | undefined>(undefined)
 /** All-positions overlay (for the "Show all" toggle). `undefined` ⇒ real data. */
 export const activeLayerPortfolioAllRef = shallowRef<Portfolio<VaultEntity> | undefined>(undefined)
+/** Removed borrow positions reconstructed from layer 0 for the visible projection. */
+export const activeLayerRemovedBorrowPositionsRef = shallowRef<PortfolioBorrowPosition<VaultEntity>[]>([])
+/** Removed borrow positions reconstructed from layer 0 for the all-positions projection. */
+export const activeLayerRemovedBorrowPositionsAllRef = shallowRef<PortfolioBorrowPosition<VaultEntity>[]>([])
+/** Removed deposit positions reconstructed from layer 0 for the visible projection. */
+export const activeLayerRemovedDepositPositionsRef = shallowRef<PortfolioSavingsPosition<VaultEntity>[]>([])
+/** Removed deposit positions reconstructed from layer 0 for the all-positions projection. */
+export const activeLayerRemovedDepositPositionsAllRef = shallowRef<PortfolioSavingsPosition<VaultEntity>[]>([])
+/** Position keys (`${subAccount}:${vault}`) fully removed by the active simulated layer. */
+export const activeLayerRemovedKeysRef = shallowRef<Set<string>>(new Set<string>())
 /**
  * Stitched wallet balances (lowercased token → absolute balance) for the active
  * layer's touched assets. `useWallets` returns these in place of the real
@@ -160,6 +172,22 @@ const syncOverlay = () => {
   const layer = activeLayer.value > 0 ? layers.value[activeLayer.value] : undefined
   activeLayerPortfolioRef.value = layer?.portfolio
   activeLayerPortfolioAllRef.value = layer?.portfolioAll
+  if (layer) {
+    const base = layers.value[0]
+    const removedKeys = buildRemovedPositionKeySets(layer.account, base?.account)
+    activeLayerRemovedKeysRef.value = removedKeys
+    activeLayerRemovedBorrowPositionsRef.value = getRemovedBorrowPositions(base?.portfolio, layer.portfolio, removedKeys)
+    activeLayerRemovedBorrowPositionsAllRef.value = getRemovedBorrowPositions(base?.portfolioAll, layer.portfolioAll, removedKeys)
+    activeLayerRemovedDepositPositionsRef.value = getRemovedDepositPositions(base?.portfolio, layer.portfolio, removedKeys)
+    activeLayerRemovedDepositPositionsAllRef.value = getRemovedDepositPositions(base?.portfolioAll, layer.portfolioAll, removedKeys)
+  }
+  else {
+    activeLayerRemovedKeysRef.value = new Set<string>()
+    activeLayerRemovedBorrowPositionsRef.value = []
+    activeLayerRemovedBorrowPositionsAllRef.value = []
+    activeLayerRemovedDepositPositionsRef.value = []
+    activeLayerRemovedDepositPositionsAllRef.value = []
+  }
 
   // Active layer's stitched wallet balances (absolute) for touched tokens.
   activeLayerWalletBalancesRef.value = layer?.walletBalances ?? {}
@@ -190,18 +218,13 @@ const describeExecError = (error: unknown): string => {
   return e?.shortMessage || e?.details || e?.message || String(error)
 }
 
-const fetchBaseAccountSnapshot = async (
+export const fetchBaseAccountSnapshot = async (
   sdk: Awaited<ReturnType<typeof getEulerSdkFresh>>,
   chainId: number,
   owner: Address,
 ): Promise<Account<IHasVaultAddress>> => {
   const fetched = await sdk.accountService.fetchAccount(chainId, owner, {
-    populateVaults: true,
-    populateMarketPrices: true,
-    populateUserRewards: true,
-    vaultFetchOptions: {
-      populateRewards: true,
-    },
+    populateAll: true,
   })
   return fetched.result as Account<IHasVaultAddress>
 }
@@ -336,6 +359,43 @@ const emptyModifiedPositionKeySets = (): ModifiedPositionKeySets => ({
 const positionModifiedKey = (subAccount: Address, vault: Address): string =>
   `${subAccount.toLowerCase()}:${vault.toLowerCase()}`
 
+const getAccountSubAccount = (
+  account: Account<IHasVaultAddress>,
+  subAccount: Address,
+) => {
+  const direct = account.subAccounts[subAccount]
+  if (direct) return direct
+  const normalized = subAccount.toLowerCase()
+  return Object.entries(account.subAccounts).find(([addr]) => {
+    try {
+      return getAddress(addr).toLowerCase() === normalized
+    }
+    catch {
+      return false
+    }
+  })?.[1]
+}
+
+const findAccountPosition = (
+  account: Account<IHasVaultAddress>,
+  subAccount: Address,
+  vault: Address,
+) => {
+  const sa = getAccountSubAccount(account, subAccount)
+  const normalizedVault = vault.toLowerCase()
+  return sa?.positions.find((position) => {
+    try {
+      return getAddress(position.vaultAddress).toLowerCase() === normalizedVault
+    }
+    catch {
+      return false
+    }
+  })
+}
+
+const hasPositionValue = (position: Pick<StitchPosition, 'shares' | 'borrowed'> | undefined): boolean =>
+  ((position?.shares ?? 0n) !== 0n) || ((position?.borrowed ?? 0n) !== 0n)
+
 export const buildModifiedPositionKeySets = (
   current: Account<IHasVaultAddress> | undefined,
   base: Account<IHasVaultAddress> | undefined,
@@ -363,6 +423,109 @@ export const buildModifiedPositionKeySets = (
   }
 
   return sets
+}
+
+export const buildRemovedPositionKeySets = (
+  current: Account<IHasVaultAddress> | undefined,
+  base: Account<IHasVaultAddress> | undefined,
+): Set<string> => {
+  const removed = new Set<string>()
+  if (!current || !base) return removed
+
+  for (const [addr, sa] of Object.entries(base.subAccounts)) {
+    if (!sa) continue
+    const subAccount = subAccountMapKey(addr)
+    for (const p of sa.positions) {
+      if (!hasPositionValue(p)) continue
+      const vault = getAddress(p.vaultAddress) as Address
+      const currentPosition = findAccountPosition(current, subAccount, vault)
+      if (!hasPositionValue(currentPosition)) {
+        removed.add(positionModifiedKey(subAccount, vault))
+      }
+    }
+  }
+
+  return removed
+}
+
+const getDepositPositionVaultAddress = (
+  position: PortfolioSavingsPosition<VaultEntity>,
+): Address => getAddress(position.position.vaultAddress) as Address
+
+const getBorrowPositionVaultAddress = (
+  position: PortfolioBorrowPosition<VaultEntity>,
+): Address => getAddress(position.borrow.vaultAddress) as Address
+
+const getBorrowPositionCollateralAddresses = (
+  position: PortfolioBorrowPosition<VaultEntity>,
+): Address[] => {
+  const addresses = new Set<Address>()
+  const add = (address: string | undefined) => {
+    if (!address) return
+    try {
+      addresses.add(getAddress(address) as Address)
+    }
+    catch { /* skip malformed address */ }
+  }
+
+  for (const address of position.collateralVaults ?? []) add(address)
+  add(position.collateral?.vaultAddress)
+  add(position.collateralVault?.address)
+
+  return Array.from(addresses)
+}
+
+const getBorrowPortfolioPositionKey = (position: PortfolioBorrowPosition<VaultEntity>): string => {
+  const subAccount = getAddress(position.subAccount).toLowerCase()
+  const borrow = getBorrowPositionVaultAddress(position).toLowerCase()
+  const collaterals = getBorrowPositionCollateralAddresses(position)
+    .map(address => address.toLowerCase())
+    .sort()
+    .join('|')
+  return `${subAccount}:${borrow}:${collaterals}`
+}
+
+const getDepositPortfolioPositionKey = (position: PortfolioSavingsPosition<VaultEntity>): string =>
+  positionModifiedKey(getAddress(position.subAccount) as Address, getDepositPositionVaultAddress(position))
+
+const isRemovedBorrowPosition = (
+  position: PortfolioBorrowPosition<VaultEntity>,
+  removedKeys: Set<string>,
+): boolean => {
+  const subAccount = getAddress(position.subAccount) as Address
+  const borrowKey = positionModifiedKey(subAccount, getBorrowPositionVaultAddress(position))
+  const collateralKeys = getBorrowPositionCollateralAddresses(position).map(vault =>
+    positionModifiedKey(subAccount, vault),
+  )
+  return removedKeys.has(borrowKey)
+    && collateralKeys.length > 0
+    && collateralKeys.every(key => removedKeys.has(key))
+}
+
+const getRemovedBorrowPositions = (
+  base: Portfolio<VaultEntity> | undefined,
+  current: Portfolio<VaultEntity> | undefined,
+  removedKeys: Set<string>,
+): PortfolioBorrowPosition<VaultEntity>[] => {
+  if (!base || !current) return []
+  const currentKeys = new Set(current.borrows.map(getBorrowPortfolioPositionKey))
+  return base.borrows.filter(position =>
+    !currentKeys.has(getBorrowPortfolioPositionKey(position))
+    && isRemovedBorrowPosition(position, removedKeys),
+  )
+}
+
+const getRemovedDepositPositions = (
+  base: Portfolio<VaultEntity> | undefined,
+  current: Portfolio<VaultEntity> | undefined,
+  removedKeys: Set<string>,
+): PortfolioSavingsPosition<VaultEntity>[] => {
+  if (!base || !current) return []
+  const currentKeys = new Set(current.savings.map(getDepositPortfolioPositionKey))
+  return base.savings.filter((position) => {
+    const key = getDepositPortfolioPositionKey(position)
+    return !currentKeys.has(key) && removedKeys.has(key)
+  })
 }
 
 export const stitchAccount = (
@@ -977,6 +1140,7 @@ export const useTxBatch = () => {
     modifiedKeys,
     modifiedBalanceKeys,
     modifiedDebtKeys,
+    removedKeys: activeLayerRemovedKeysRef,
     walletChanges,
     entryCount,
     marketByEntryId,

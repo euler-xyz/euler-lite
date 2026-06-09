@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Account, type IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
-import { buildModifiedPositionKeySets } from '~/composables/useTxBatch'
+import { buildModifiedPositionKeySets, buildRemovedPositionKeySets } from '~/composables/useTxBatch'
 
 const owner = getAddress('0x1000000000000000000000000000000000000000')
 const subAccount = getAddress('0x8A54C278D117854486db0F6460D901a180Fff517')
@@ -74,5 +74,51 @@ describe('buildModifiedPositionKeySets', () => {
     expect(modified.debt.has(key(borrowVault))).toBe(true)
     expect(modified.balance.has(key(borrowVault))).toBe(false)
     expect(modified.balance.has(key(collateralVault))).toBe(false)
+  })
+})
+
+describe('buildRemovedPositionKeySets', () => {
+  it('marks base positions missing from the active account as removed', () => {
+    const base = accountWithPositions([
+      position(collateralVault, 100n, 0n),
+      position(borrowVault, 0n, 50n),
+    ])
+    const current = accountWithPositions([
+      position(collateralVault, 100n, 0n),
+    ])
+
+    const removed = buildRemovedPositionKeySets(current, base)
+
+    expect(removed.has(key(borrowVault))).toBe(true)
+    expect(removed.has(key(collateralVault))).toBe(false)
+  })
+
+  it('marks active positions zeroed by the simulation as removed', () => {
+    const base = accountWithPositions([
+      position(collateralVault, 100n, 0n),
+    ])
+    const current = accountWithPositions([
+      position(collateralVault, 0n, 0n),
+    ])
+
+    const removed = buildRemovedPositionKeySets(current, base)
+
+    expect(removed.has(key(collateralVault))).toBe(true)
+  })
+
+  it('does not mark partial collateral or debt changes as removed', () => {
+    const base = accountWithPositions([
+      position(collateralVault, 100n, 0n),
+      position(borrowVault, 0n, 50n),
+    ])
+    const current = accountWithPositions([
+      position(collateralVault, 60n, 0n),
+      position(borrowVault, 0n, 20n),
+    ])
+
+    const removed = buildRemovedPositionKeySets(current, base)
+
+    expect(removed.has(key(collateralVault))).toBe(false)
+    expect(removed.has(key(borrowVault))).toBe(false)
   })
 })

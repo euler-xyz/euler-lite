@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Account, type IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
-import { stitchAccount } from '~/composables/useTxBatch'
+import { fetchBaseAccountSnapshot, stitchAccount } from '~/composables/useTxBatch'
 
 const owner = getAddress('0x1000000000000000000000000000000000000000')
 const subAccount = getAddress('0x8A54C278D117854486db0F6460D901a180Fff517')
@@ -54,5 +54,20 @@ describe('stitchAccount', () => {
     expect(Object.keys(stitched.subAccounts)).toEqual([subAccount])
     expect(stitched.getSubAccount(subAccount)?.positions).toHaveLength(1)
     expect(stitched.getSubAccount(subAccount)?.positions[0]?.shares).toBe(2n)
+  })
+})
+
+describe('fetchBaseAccountSnapshot', () => {
+  it('uses the same full population path as the normal portfolio read', async () => {
+    const expected = accountWithPosition(subAccount, subAccount, 1n)
+    const fetchAccount = vi.fn(async () => ({ result: expected, errors: [] }))
+    const sdk = {
+      accountService: { fetchAccount },
+    } as unknown as Parameters<typeof fetchBaseAccountSnapshot>[0]
+
+    const result = await fetchBaseAccountSnapshot(sdk, 1, owner)
+
+    expect(result).toBe(expected)
+    expect(fetchAccount).toHaveBeenCalledWith(1, owner, { populateAll: true })
   })
 })

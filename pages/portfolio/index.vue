@@ -4,15 +4,16 @@ import { getAddress } from 'viem'
 
 const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
-const { borrowPositions, isPositionsLoaded, portfolioAddress } = useEulerAccount()
+const { borrowPositions, removedBorrowPositions, isPositionsLoaded, portfolioAddress } = useEulerAccount()
 const { isReady } = useVaults()
 
 const hasActiveSession = computed(() => isConnected.value || isSpyMode.value)
 const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
 
 const sortedBorrowPositions = computed(() => {
-  if (!ownerAddress.value) return borrowPositions.value
-  return [...borrowPositions.value].sort((a, b) => {
+  const positions = [...removedBorrowPositions.value, ...borrowPositions.value]
+  if (!ownerAddress.value) return positions
+  return positions.sort((a, b) => {
     const indexA = getSubAccountIndex(getAddress(ownerAddress.value), getAddress(a.subAccount))
     const indexB = getSubAccountIndex(getAddress(ownerAddress.value), getAddress(b.subAccount))
     return indexA - indexB
