@@ -159,12 +159,12 @@ const submit = async () => {
     isPreparing.value = false
   }
 }
-const addToBatch = () => {
+const addToBatch = async () => {
   if (!asset.value?.address || !(+amount.value)) return
   const assetAddr = asset.value.address as Address
   const amt = valueToNano(amount.value, asset.value.decimals)
   const label = `Earn deposit ${amount.value} ${asset.value.symbol}`
-  addBatchEntry({
+  await addBatchEntry({
     label,
     buildPlan: account => planDeposit({ vaultAddress: vaultAddress as Address, assetAddress: assetAddr, amount: amt, account }),
     review: { type: 'supply', asset: asset.value, amount: amount.value, marketLabel: earnVaultMarketLabel.value },

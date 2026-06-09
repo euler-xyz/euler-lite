@@ -15,7 +15,7 @@ watch(entryCount, (count) => {
 <template>
   <div class="max-w-container mx-auto w-full px-16 pb-[112px]">
     <div class="flex items-center gap-8 py-16">
-      <span class="inline-flex items-center justify-center w-24 h-24 rounded-full bg-accent-600 text-white text-p3 font-semibold">
+      <span class="inline-flex items-center justify-center w-24 h-24 rounded-full bg-accent-600 text-black text-p3 font-semibold">
         {{ entryCount }}
       </span>
       <h1 class="text-h3 text-content-primary">

@@ -289,13 +289,13 @@ const submit = async () => {
 // Add this borrow to the transaction batch. Built against the active layer's
 // simulated account, so a borrow stacked on a simulated collateral deposit
 // borrows against that simulated collateral.
-const addToBatch = () => {
+const addToBatch = async () => {
   if (!borrowVault.value || !position.value || !(+borrowAmount.value)) return
   const vaultAddress = borrowVault.value.address as Address
   const amount = valueToNano(borrowAmount.value, borrowVault.value.shares.decimals)
   const borrowAccount = position.value.subAccount as Address
   const label = `Borrow ${borrowAmount.value} ${borrowVault.value.asset.symbol}`
-  addBatchEntry({
+  await addBatchEntry({
     label,
     // subAccountSnapshotApplied: the layer account passed by useTxBatch already
     // reflects the simulated (or freshly-fetched base) sub-account state, so the

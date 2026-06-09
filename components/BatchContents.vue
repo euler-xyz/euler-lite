@@ -193,7 +193,7 @@ const simEyeLabel = computed(() =>
       <!-- Primary action: open the batch review (approvals + details + execute) -->
       <button
         type="button"
-        class="w-full h-40 rounded-full bg-accent-600 hover:bg-accent-700 text-white text-p2 font-semibold shadow-accent-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
+        class="w-full h-40 rounded-12 bg-accent-600 hover:bg-accent-700 text-black text-p2 font-semibold shadow-accent-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
         :disabled="!entries.length || isSimulating"
         data-testid="batch-review"
         @click="openBatchReview"

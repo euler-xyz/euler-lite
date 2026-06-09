@@ -251,8 +251,8 @@ const multiplyDisabledReasonInfo = computed((): DisabledReasonInfo | undefined =
 
 // --- Batch ("shopping cart") ---
 // CoW swaps can't merge into an EVC batch, so the swap-borrow path requires a
-// non-CoW quote; the direct/savings paths just need a valid borrow. The capture
-// of the effective quote at add-time is what the entry's buildPlan replays.
+// non-CoW quote; the direct/savings paths just need a valid borrow. The
+// effective quote is captured into the fixed batch plan at add-time.
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const canAddBorrowToBatch = computed(() => {
@@ -266,7 +266,7 @@ const canAddBorrowToBatch = computed(() => {
   // Only the borrow amount is required to add to the batch — collateral can be
   // empty (e.g. borrowing against collateral an earlier batch step supplies).
   if (!(+borrow.borrowAmount.value)) return false
-  // Savings-sourced collateral needs a resolved position, else buildPlan throws.
+  // Savings-sourced collateral needs a resolved position, else plan capture throws.
   if (borrow.isSavingCollateral.value && !borrow.savingCollateral.value) return false
   if (borrow.borrowNeedsSwap.value) {
     return !!borrow.borrowSwapEffectiveQuote.value && !isCowProvider(borrow.borrowSwapSelectedProvider.value)
@@ -296,7 +296,7 @@ const addToBatch = async () => {
     quote: borrow.borrowNeedsSwap.value ? borrow.borrowSwapEffectiveQuote.value ?? undefined : undefined,
   }
   const label = `Borrow ${snap.borrowAmount} ${bVault.asset.symbol}`
-  addBatchEntry({ label, buildPlan: account => borrow.buildBorrowPlan(snap, account), subAccount, review: { type: 'borrow', asset: bVault.asset, amount: snap.borrowAmount } })
+  await addBatchEntry({ label, buildPlan: account => borrow.buildBorrowPlan(snap, account), subAccount, review: { type: 'borrow', asset: bVault.asset, amount: snap.borrowAmount } })
   borrow.collateralAmount.value = ''
   borrow.borrowAmount.value = ''
   redirectAfterAdd('/portfolio', { subAccount })
@@ -333,7 +333,7 @@ const addMultiplyToBatch = async () => {
     savingShares: multiply.multiplySavingBalance.value,
     quote: sameAsset ? undefined : multiply.multiplyEffectiveQuote.value ?? undefined,
   }
-  addBatchEntry({ label: `Multiply → ${longVault.asset.symbol}`, buildPlan: account => multiply.buildMultiplyPlan(snap, account), subAccount, multiply: true, review: { type: 'borrow', asset: shortVault.asset, amount: multiply.multiplyInputAmount.value, swapToAsset: longVault.asset } })
+  await addBatchEntry({ label: `Multiply → ${longVault.asset.symbol}`, buildPlan: account => multiply.buildMultiplyPlan(snap, account), subAccount, multiply: true, review: { type: 'borrow', asset: shortVault.asset, amount: multiply.multiplyInputAmount.value, swapToAsset: longVault.asset } })
   redirectAfterAdd('/portfolio', { subAccount })
 }
 

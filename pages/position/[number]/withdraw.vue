@@ -173,7 +173,7 @@ const canAddToBatch = computed(() => {
   if (needsSwap.value) return !!form.swapSelectedQuote.value && !isCowSwapSelected.value
   return true
 })
-const addToBatch = () => {
+const addToBatch = async () => {
   if (!canAddToBatch.value) return
   const v = form.collateralVault.value
   const a = form.asset.value
@@ -185,7 +185,7 @@ const addToBatch = () => {
   if (needsSwap.value) {
     const quote = form.swapEffectiveQuote.value
     if (!quote) return
-    addBatchEntry({
+    await addBatchEntry({
       label: `Withdraw-swap ${form.amount.value} ${a.symbol} → ${selectedOutputAsset.value?.symbol ?? ''}`,
       buildPlan: account => planWithdrawAndSwap({ swapQuote: quote, vaultAddress, assets, owner, account }),
       subAccount: pos.subAccount as Address,
@@ -193,7 +193,7 @@ const addToBatch = () => {
     })
   }
   else if (isFullCollateralWithdraw(assets)) {
-    addBatchEntry({
+    await addBatchEntry({
       label: `Withdraw ${form.amount.value} ${a.symbol}`,
       buildPlan: account => planRedeem({ vaultAddress, shares: maxUint256, owner, account }),
       subAccount: pos.subAccount as Address,
@@ -201,7 +201,7 @@ const addToBatch = () => {
     })
   }
   else {
-    addBatchEntry({
+    await addBatchEntry({
       label: `Withdraw ${form.amount.value} ${a.symbol}`,
       buildPlan: account => planWithdraw({ vaultAddress, assets, owner, account }),
       subAccount: pos.subAccount as Address,

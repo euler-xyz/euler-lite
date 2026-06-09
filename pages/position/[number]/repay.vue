@@ -204,7 +204,7 @@ const canAddToBatch = computed(() => {
   return false
 })
 
-const addToBatch = () => {
+const addToBatch = async () => {
   if (!canAddToBatch.value || !borrowVault.value || !position.value) return
   const borrowSymbol = borrowVault.value.asset.symbol
 
@@ -212,7 +212,7 @@ const addToBatch = () => {
     if (walletSwap.needsSwap.value) {
       const quote = walletSwap.quotes.selectedQuote.value ?? undefined
       const inSymbol = walletSwap.selectedAsset.value?.symbol ?? ''
-      addBatchEntry({
+      await addBatchEntry({
         label: `Repay-swap ${inSymbol} → ${borrowSymbol}`,
         buildPlan: account => walletSwap.buildRepayPlan(quote, account),
         subAccount: position.value.subAccount as Address,
@@ -227,7 +227,7 @@ const addToBatch = () => {
     const currentDebt = position.value.borrowed || 0n
     const isFullRepay = amountNano >= currentDebt || wallet.walletRepayPercent.value >= 100
     const receiver = position.value.subAccount as Address
-    addBatchEntry({
+    await addBatchEntry({
       label: `Repay ${wallet.amount.value} ${borrowSymbol}`,
       buildPlan: account => planRepayFromWallet({
         liabilityVault,
@@ -247,7 +247,7 @@ const addToBatch = () => {
   if (formTab.value === 'collateral') {
     const quote = collateral.isSameAsset.value ? undefined : collateral.quotes.selectedQuote.value ?? undefined
     const srcSymbol = collateral.sourceVault.value?.asset.symbol ?? ''
-    addBatchEntry({
+    await addBatchEntry({
       label: `Repay from ${srcSymbol} collateral → ${borrowSymbol}`,
       buildPlan: account => collateral.buildRepayPlan(quote, account),
       subAccount: position.value.subAccount as Address,
@@ -262,7 +262,7 @@ const addToBatch = () => {
   if (formTab.value === 'savings') {
     const quote = savings.isSameAsset.value ? undefined : savings.quotes.selectedQuote.value ?? undefined
     const srcSymbol = savings.sourceVault.value?.asset.symbol ?? ''
-    addBatchEntry({
+    await addBatchEntry({
       label: `Repay from ${srcSymbol} savings → ${borrowSymbol}`,
       buildPlan: account => savings.buildRepayPlan(quote, account),
       subAccount: position.value.subAccount as Address,

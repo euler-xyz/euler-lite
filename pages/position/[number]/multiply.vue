@@ -627,7 +627,7 @@ const canAddMultiplyToBatch = computed(() => {
   return !!multiplyEffectiveQuote.value
     && !isCowProviderOrQuote(multiplySelectedProvider.value, multiplyEffectiveQuote.value)
 })
-const addToBatch = () => {
+const addToBatch = async () => {
   if (!canAddMultiplyToBatch.value) return
   const sameAsset = multiplyIsSameAsset.value
   const quote = sameAsset ? undefined : multiplyEffectiveQuote.value ?? undefined
@@ -637,7 +637,7 @@ const addToBatch = () => {
   const short = multiplyShortVault.value!.address as Address
   const debtAmount = multiplyDebtAmountNano.value
   const receiver = multiplySubAccount.value as Address
-  addBatchEntry({
+  await addBatchEntry({
     label: `Multiply → ${multiplyLongVault.value!.asset.symbol}`,
     buildPlan: account => planMultiply({
       collateralVault: supply,

@@ -484,10 +484,9 @@ const send = async () => {
     isSubmitting.value = false
   }
 }
-// Add this withdraw to the transaction batch. The plan is built against the
-// active layer's simulated account (which holds the shares deposited by earlier
-// batch steps), so withdrawing on top of a simulated deposit works even though
-// the on-chain share balance shown by the form is still zero. Direct
+// Add this withdraw to the transaction batch. The plan is captured against the
+// current batch end-state, so withdrawing on top of a simulated deposit works
+// even though the on-chain share balance shown by the form is still zero. Direct
 // (non-swap), non-max withdraw by asset amount.
 const isCowSwapSelected = computed(() => isCowProviderOrQuote(swapSelectedProvider.value, swapSelectedQuote.value))
 const canAddToBatch = computed(() => {
@@ -496,13 +495,13 @@ const canAddToBatch = computed(() => {
   return true
 })
 
-const addToBatch = () => {
+const addToBatch = async () => {
   if (!canAddToBatch.value || !asset.value?.address) return
   if (needsSwap.value) {
     const quote = swapEffectiveQuote.value
     if (!quote) return
     const ownerAddr = (subAccount.value ?? effectiveAddress.value!) as Address
-    addBatchEntry({
+    await addBatchEntry({
       label: `Withdraw-swap ${amount.value} ${asset.value.symbol} → ${selectedOutputAsset.value?.symbol ?? ''}`,
       buildPlan: account => buildSwapWithdrawPlanFromQuote(quote, account),
       subAccount: ownerAddr,
@@ -517,7 +516,7 @@ const addToBatch = () => {
     // rounding dust and can under-withdraw once interest accrues by execution.
     const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
     const shares = sharesBalance.value
-    addBatchEntry({
+    await addBatchEntry({
       label: `Withdraw ${amount.value} ${asset.value.symbol}`,
       buildPlan: account => planWithdrawOrRedeem({ vaultAddress: vaultAddress as Address, owner: ownerAddr, isMax, shares, assets, account }),
       subAccount: ownerAddr,

@@ -23,7 +23,7 @@ const hasBatch = computed(() => entryCount.value > 0)
     >
       <div class="flex items-center justify-between">
         <span class="flex items-center gap-8 text-p2 font-semibold">
-          <span class="inline-flex items-center justify-center w-22 h-22 rounded-full bg-accent-600 text-white text-p3">
+          <span class="inline-flex items-center justify-center w-22 h-22 rounded-full bg-accent-600 text-black text-p3">
             {{ entryCount }}
           </span>
           Transaction batch

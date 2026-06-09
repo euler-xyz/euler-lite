@@ -179,7 +179,7 @@ const submit = async () => {
     isPreparing.value = false
   }
 }
-const addToBatch = () => {
+const addToBatch = async () => {
   if (!asset.value?.address || !(+amount.value)) return
   const assets = amountFixed.value.value
   const ownerAddr = (subAccount.value ?? effectiveAddress.value!) as `0x${string}`
@@ -188,7 +188,7 @@ const addToBatch = () => {
   // of withdraw(assets), so the position clears without share-price rounding dust.
   const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
   const shares = sharesBalance.value
-  addBatchEntry({
+  await addBatchEntry({
     label,
     buildPlan: account => planWithdrawOrRedeem({
       vaultAddress: vaultAddress as `0x${string}`,

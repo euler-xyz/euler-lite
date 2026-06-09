@@ -42,10 +42,7 @@ const label = computed(() => {
   <span class="truncate text-p2 text-content-primary">
     <template v-if="label.verb">
       {{ label.verb }}
-      <span
-        v-if="label.symbol"
-        class="text-content-secondary"
-      >{{ label.symbol }}</span>
+      <span v-if="label.symbol">{{ label.symbol }}</span>
     </template>
     <template v-else>{{ label.fallback }}</template>
   </span>

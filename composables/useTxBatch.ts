@@ -14,6 +14,7 @@ import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
 import { decodeBatchItemLabel } from '~/utils/stepDecoding'
 import { formatSimulationFailure } from '~/utils/tx-errors'
 import { logWarn } from '~/utils/errorHandling'
+import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
 
 /**
  * Transaction batch builder ("shopping cart") with layered simulated state.
@@ -32,18 +33,18 @@ import { logWarn } from '~/utils/errorHandling'
  * Layered data source (for now): prefix re-simulation against the stock SDK.
  * `layer[i] = simulateTransactionPlan(mergePlans(entries[0..i]))` — the final
  * simulated account of a prefix *is* the world after that prefix. Each entry's
- * plan is built against the previous layer's simulated account, so a withdraw
- * added after a deposit sees the deposit as if it were already mined. The
- * production path (one batch with interspersed lens reads + per-op errors,
- * exposed via a `layers` flag on `simulateTransactionPlan`) is a drop-in
- * replacement for `resimulate()` — the layer interface is unchanged.
+ * transaction plan is fixed at add-time against the current batch end-state;
+ * later resimulations only replay stored plans. The production path (one batch
+ * with interspersed lens reads + per-op errors, exposed via a `layers` flag on
+ * `simulateTransactionPlan`) is a drop-in replacement for `resimulate()` — the
+ * layer interface is unchanged.
  */
 
 export interface BatchEntry {
   id: string
   label: string
-  /** Builds this entry's plan against the simulated account of the previous layer. */
-  buildPlan: (account: Account<IHasVaultAddress>) => Promise<TransactionPlan>
+  /** Fixed transaction payload captured when the user added this entry. */
+  plan: TransactionPlan
   /** Props for the per-operation review modal (OperationReviewModal), captured at
    *  add-time so the batch can show the same review the form would — minus the
    *  execute button. The contextual plan is supplied from the simulation. */
@@ -57,6 +58,11 @@ export interface BatchEntry {
    *  by the plan alone (and same-asset multiply has no swap step at all). This
    *  lite-only flag lets the batch list label it "Multiply …". */
   multiply?: boolean
+}
+
+export interface BatchEntryInput extends Omit<BatchEntry, 'id' | 'plan'> {
+  /** Builds this entry once, at add-time, against the current batch end-state. */
+  buildPlan: (account: Account<IHasVaultAddress>) => Promise<TransactionPlan>
 }
 
 export interface BatchLayer {
@@ -90,9 +96,11 @@ export interface WalletShortfall {
 // --- module-scoped state (single shared cart for the session) ---
 const entries: Ref<BatchEntry[]> = ref([])
 const layers = shallowRef<BatchLayer[]>([])
-// Per-entry built plan (keyed by entry id) from the latest simulation — feeds the
-// per-operation review modal so it shows the operation in its batch context.
-const entryPlans = shallowRef<Record<string, TransactionPlan>>({})
+// Per-entry fixed plan (keyed by entry id), used by the review modal and by the
+// merged whole-batch plan. These are captured once when the entry is added.
+const entryPlans = computed<Record<string, TransactionPlan>>(() =>
+  Object.fromEntries(entries.value.map(entry => [entry.id, entry.plan])),
+)
 // Tokens the full batch would overdraw from the real wallet (execute-time gate).
 const walletShortfalls = shallowRef<WalletShortfall[]>([])
 const activeLayer = ref(0)
@@ -107,6 +115,7 @@ const drawerOpen = ref(true)
 // The merged plan from the most recent successful resimulation, reused by
 // executeBatch so the executed batch is exactly what was simulated.
 let lastMerged: TransactionPlan | null = null
+let baseAccountSnapshot: Account<IHasVaultAddress> | null = null
 
 // "Simulate on Tenderly" for the whole batch — runs the exact merged plan
 // through the server-side Tenderly endpoint and returns a shareable dashboard
@@ -142,6 +151,8 @@ export const activeLayerAccountRef = shallowRef<Account<IHasVaultAddress> | unde
 let idSeq = 0
 let resimToken = 0
 let scope: EffectScope | undefined
+let resimulatePromise: Promise<void> | null = null
+let addEntryQueue: Promise<void> = Promise.resolve()
 // Symbol/decimals for touched wallet tokens, for the wallet-changes summary.
 const walletAssetMeta: Record<string, { symbol: string, decimals: number }> = {}
 
@@ -177,6 +188,22 @@ const describeFailure = (sim: Parameters<typeof formatSimulationFailure>[0]): st
 const describeExecError = (error: unknown): string => {
   const e = error as { shortMessage?: string, details?: string, message?: string }
   return e?.shortMessage || e?.details || e?.message || String(error)
+}
+
+const fetchBaseAccountSnapshot = async (
+  sdk: Awaited<ReturnType<typeof getEulerSdkFresh>>,
+  chainId: number,
+  owner: Address,
+): Promise<Account<IHasVaultAddress>> => {
+  const fetched = await sdk.accountService.fetchAccount(chainId, owner, {
+    populateVaults: true,
+    populateMarketPrices: true,
+    populateUserRewards: true,
+    vaultFetchOptions: {
+      populateRewards: true,
+    },
+  })
+  return fetched.result as Account<IHasVaultAddress>
 }
 
 /**
@@ -215,27 +242,168 @@ const collectPlanTargets = (
   return { vaults, accounts }
 }
 
-const stitchAccount = (
+type RewardedVault = IHasVaultAddress & {
+  rewards?: unknown
+  populated?: { rewards?: boolean }
+}
+
+type RewardedPosition = {
+  vaultAddress: Address
+  vault?: RewardedVault
+  liquidity?: {
+    vaultAddress: Address
+    vault?: RewardedVault
+    collaterals?: Array<{
+      address: Address
+      vault?: RewardedVault
+    }>
+  }
+}
+
+type StitchPosition = { vaultAddress: Address, shares?: bigint, borrowed?: bigint }
+type StitchSubAccount = {
+  positions: StitchPosition[]
+  enabledControllers?: Address[]
+  enabledCollaterals?: Address[]
+  timestamp?: number
+  lastAccountStatusCheckTimestamp?: number
+  liquidity?: unknown
+  liabilityValueUsd?: number
+}
+
+const collectRewardedVaults = (account: Account<IHasVaultAddress>): Map<string, RewardedVault> => {
+  const byAddress = new Map<string, RewardedVault>()
+  const addVault = (vault: RewardedVault | undefined) => {
+    if (!vault?.rewards) return
+    byAddress.set(getAddress(vault.address).toLowerCase(), vault)
+  }
+
+  for (const subAccount of Object.values(account.subAccounts)) {
+    if (!subAccount) continue
+    for (const position of subAccount.positions as RewardedPosition[]) {
+      addVault(position.vault)
+      addVault(position.liquidity?.vault)
+      for (const collateral of position.liquidity?.collaterals ?? []) {
+        addVault(collateral.vault)
+      }
+    }
+  }
+
+  return byAddress
+}
+
+const subAccountMapKey = (account: string): Address => getAddress(account) as Address
+
+const mergePositionsByVault = (positions: StitchPosition[]): StitchPosition[] => {
+  const byVault = new Map<string, StitchPosition>()
+  for (const position of positions) {
+    byVault.set(getAddress(position.vaultAddress), position)
+  }
+  return Array.from(byVault.values())
+}
+
+const carryVaultRewards = (position: RewardedPosition, rewardedVaults: Map<string, RewardedVault>) => {
+  const carry = (vault: RewardedVault | undefined) => {
+    if (!vault || vault.rewards) return
+    const previous = rewardedVaults.get(getAddress(vault.address).toLowerCase())
+    if (!previous?.rewards) return
+    vault.rewards = previous.rewards
+    vault.populated = {
+      ...vault.populated,
+      rewards: previous.populated?.rewards ?? true,
+    }
+  }
+
+  carry(position.vault)
+  carry(position.liquidity?.vault)
+  for (const collateral of position.liquidity?.collaterals ?? []) {
+    carry(collateral.vault)
+  }
+}
+
+export interface ModifiedPositionKeySets {
+  any: Set<string>
+  balance: Set<string>
+  debt: Set<string>
+}
+
+const emptyModifiedPositionKeySets = (): ModifiedPositionKeySets => ({
+  any: new Set<string>(),
+  balance: new Set<string>(),
+  debt: new Set<string>(),
+})
+
+const positionModifiedKey = (subAccount: Address, vault: Address): string =>
+  `${subAccount.toLowerCase()}:${vault.toLowerCase()}`
+
+export const buildModifiedPositionKeySets = (
+  current: Account<IHasVaultAddress> | undefined,
+  base: Account<IHasVaultAddress> | undefined,
+): ModifiedPositionKeySets => {
+  const sets = emptyModifiedPositionKeySets()
+  if (!current || !base) return sets
+
+  for (const [addr, sa] of Object.entries(current.subAccounts)) {
+    if (!sa) continue
+    const subAccount = subAccountMapKey(addr)
+    const baseSa = base.subAccounts[subAccount]
+    for (const p of sa.positions) {
+      const vault = getAddress(p.vaultAddress) as Address
+      const bp = baseSa?.positions.find(x => getAddress(x.vaultAddress) === vault)
+      const key = positionModifiedKey(subAccount, vault)
+      if ((bp?.shares ?? 0n) !== (p.shares ?? 0n)) {
+        sets.balance.add(key)
+        sets.any.add(key)
+      }
+      if ((bp?.borrowed ?? 0n) !== (p.borrowed ?? 0n)) {
+        sets.debt.add(key)
+        sets.any.add(key)
+      }
+    }
+  }
+
+  return sets
+}
+
+export const stitchAccount = (
   prevFull: Account<IHasVaultAddress>,
   touched: Account<IHasVaultAddress>,
 ): Account<IHasVaultAddress> => {
+  const rewardedVaults = collectRewardedVaults(prevFull)
   // Shallow-clone every sub-account of the previous full account (copy the
   // positions array so we never mutate the source layer).
-  const mergedSubs: Record<string, unknown> = {}
+  const mergedSubs: Record<string, StitchSubAccount> = {}
   for (const [addr, sa] of Object.entries(prevFull.subAccounts)) {
-    if (sa) mergedSubs[addr] = { ...sa, positions: [...sa.positions] }
+    if (!sa) continue
+    const key = subAccountMapKey(addr)
+    const existing = mergedSubs[key]
+    mergedSubs[key] = {
+      ...sa,
+      ...(existing ?? {}),
+      positions: mergePositionsByVault([
+        ...(existing?.positions ?? []),
+        ...sa.positions,
+      ]),
+    }
   }
   for (const [addr, tsa] of Object.entries(touched.subAccounts)) {
     if (!tsa) continue
-    const existing = mergedSubs[addr] as { positions: { vaultAddress: Address }[] } | undefined
+    const key = subAccountMapKey(addr)
+    const existing = mergedSubs[key]
     if (!existing) {
-      mergedSubs[addr] = { ...tsa, positions: [...tsa.positions] }
+      for (const tp of tsa.positions) {
+        carryVaultRewards(tp as RewardedPosition, rewardedVaults)
+      }
+      mergedSubs[key] = { ...tsa, positions: mergePositionsByVault([...tsa.positions]) }
       continue
     }
-    const byVault = new Map<string, unknown>()
+    const byVault = new Map<string, StitchPosition>()
     for (const p of existing.positions) byVault.set(getAddress(p.vaultAddress), p)
-    for (const tp of tsa.positions) byVault.set(getAddress(tp.vaultAddress), tp)
-    mergedSubs[addr] = {
+    for (const tp of tsa.positions) {
+      carryVaultRewards(tp as RewardedPosition, rewardedVaults)
+      byVault.set(getAddress(tp.vaultAddress), tp)
+    }
+    mergedSubs[key] = {
       ...existing,
       // Post-op EVC state for this sub-account comes from the simulated layer.
       enabledControllers: tsa.enabledControllers,
@@ -250,7 +418,7 @@ const stitchAccount = (
       positions: Array.from(byVault.values()),
     }
   }
-  return new Account({
+  const account = new Account({
     chainId: prevFull.chainId,
     owner: prevFull.owner,
     isLockdownMode: touched.isLockdownMode,
@@ -259,6 +427,11 @@ const stitchAccount = (
     subAccounts: mergedSubs as any,
     populated: prevFull.populated,
   }) as Account<IHasVaultAddress>
+  account.userRewards = touched.populated.userRewards
+    ? touched.userRewards
+    : prevFull.userRewards
+  account.populated.userRewards = touched.populated.userRewards || prevFull.populated.userRewards
+  return account
 }
 
 // Project a layer's account into both portfolio views the UI can show:
@@ -337,6 +510,7 @@ export const useTxBatch = () => {
       simError.value = undefined
       walletShortfalls.value = []
       lastMerged = null
+      baseAccountSnapshot = null
       syncOverlay()
       return
     }
@@ -349,26 +523,14 @@ export const useTxBatch = () => {
     try {
       const sdk = await getEulerSdkFresh()
       const ownerAddr = getAddress(o)
-      // Fully populate the base account (vault entities + USD prices) so layer 0
-      // and the untouched positions stitched into later layers render with the
-      // same data the simulated (touched) positions carry.
-      const fetched = await sdk.accountService.fetchAccount(cid, ownerAddr, {
-        populateVaults: true,
-        populateMarketPrices: true,
-      })
-      const baseAccount = fetched.result as Account<IHasVaultAddress>
+      // Keep the real base state fixed for the lifetime of the cart. Entry plans
+      // are immutable add-time payloads; later real-state drift should not cause
+      // the whole batch to rebuild around a different base account.
+      const baseAccount = baseAccountSnapshot
+        ?? await fetchBaseAccountSnapshot(sdk, cid, ownerAddr)
+      baseAccountSnapshot = baseAccount
 
-      // Build every entry's plan, each against the best-known prior layer so
-      // share/max-based ops see earlier steps. (Fixed-amount deposit/withdraw
-      // plans are layer-independent, so the base account is a safe fallback.)
-      const cachedLayers = layers.value
-      const plans: TransactionPlan[] = []
-      for (let i = 0; i < entries.value.length; i++) {
-        const priorAccount = cachedLayers[i]?.account ?? baseAccount
-        plans.push(await entries.value[i].buildPlan(priorAccount))
-      }
-      // Expose each entry's contextual plan for its review modal.
-      entryPlans.value = Object.fromEntries(entries.value.map((e, i) => [e.id, plans[i]!]))
+      const plans = entries.value.map(entry => entry.plan)
 
       // One simulation, all layers. The SDK interleaves lens reads per
       // operation and returns simulatedAccounts = [base, afterOp0, afterOp1, …]
@@ -508,41 +670,123 @@ export const useTxBatch = () => {
     }
   }
 
+  const runResimulate = (): Promise<void> => {
+    const promise = resimulate()
+    resimulatePromise = promise.finally(() => {
+      if (resimulatePromise === promise) resimulatePromise = null
+    })
+    return resimulatePromise
+  }
+
   // Wire reactivity exactly once, in a detached scope that outlives any single
   // component (mirrors the pattern used by useEulerAccount).
   if (!scope) {
     scope = effectScope(true)
     scope.run(() => {
       // Any edit to the cart invalidates a prior Tenderly run (it simulated a
-      // different merged plan), so drop the stale URL before re-simulating.
+      // different fixed plan list), so drop the stale URL before re-simulating.
       watch(entries, () => {
         tenderly.clearSimulation()
-        void resimulate()
+        void runResimulate()
       })
       watch([activeLayer, layers], syncOverlay)
       // Reset the cart when the account or chain changes — layers would be stale.
       watch([owner, chainId], () => {
+        resimToken++
         entries.value = []
         layers.value = []
         activeLayer.value = 0
+        isSimulating.value = false
         simError.value = undefined
         walletShortfalls.value = []
+        lastMerged = null
+        baseAccountSnapshot = null
+        resimulatePromise = null
         tenderly.clearSimulation()
         syncOverlay()
       })
     })
   }
 
-  const addEntry = (entry: Omit<BatchEntry, 'id'>) => {
-    entries.value = [...entries.value, { ...entry, id: `entry-${++idSeq}` }]
+  const getEntryPlanningAccount = async (): Promise<Account<IHasVaultAddress>> => {
+    const getCurrentFinalLayer = () => (
+      entries.value.length > 0 && layers.value.length === entries.value.length + 1
+        ? layers.value[layers.value.length - 1]?.account
+        : undefined
+    )
+
+    const finalLayer = getCurrentFinalLayer()
+    if (finalLayer) return finalLayer
+
+    if (entries.value.length > 0) {
+      await (resimulatePromise ?? runResimulate())
+      const refreshedFinalLayer = getCurrentFinalLayer()
+      if (refreshedFinalLayer) return refreshedFinalLayer
+      throw new Error(simError.value ?? 'Batch simulation not loaded')
+    }
+
+    if (baseAccountSnapshot) return baseAccountSnapshot
+
+    const o = owner.value
+    const cid = chainId.value
+    if (!o || !cid) throw new Error('Account not loaded')
+    const sdk = await getEulerSdkFresh()
+    baseAccountSnapshot = await fetchBaseAccountSnapshot(sdk, cid, getAddress(o))
+    return baseAccountSnapshot
+  }
+
+  const addEntry = async (entry: BatchEntryInput) => {
+    const add = async () => {
+      const account = await getEntryPlanningAccount()
+      const plan = await entry.buildPlan(account)
+      const { buildPlan: _buildPlan, ...fixedEntry } = entry
+      entries.value = [...entries.value, { ...fixedEntry, plan, id: `entry-${++idSeq}` }]
+    }
+
+    const nextAdd = addEntryQueue.then(add, add)
+    addEntryQueue = nextAdd.catch(() => {})
+
+    try {
+      await nextAdd
+    }
+    catch (error) {
+      logWarn('useTxBatch/addEntry', error)
+      simError.value = error instanceof Error ? error.message : String(error)
+      throw error
+    }
   }
 
   const removeEntry = (id: string) => {
-    entries.value = entries.value.filter(entry => entry.id !== id)
+    const nextEntries = entries.value.filter(entry => entry.id !== id)
+    entries.value = nextEntries
+    if (nextEntries.length === 0) {
+      resimToken++
+      layers.value = []
+      activeLayer.value = 0
+      isSimulating.value = false
+      simError.value = undefined
+      walletShortfalls.value = []
+      lastMerged = null
+      baseAccountSnapshot = null
+      resimulatePromise = null
+      tenderly.clearSimulation()
+      syncOverlay()
+    }
   }
 
   const clearBatch = () => {
+    resimToken++
     entries.value = []
+    layers.value = []
+    activeLayer.value = 0
+    isSimulating.value = false
+    simError.value = undefined
+    walletShortfalls.value = []
+    lastMerged = null
+    baseAccountSnapshot = null
+    resimulatePromise = null
+    tenderly.clearSimulation()
+    syncOverlay()
   }
 
   const setActiveLayer = (layer: number) => {
@@ -701,29 +945,19 @@ export const useTxBatch = () => {
   })
 
   // Position keys (`${subAccount}:${vault}`, lowercased) whose state on the
-  // active layer differs from the real (layer 0) account — i.e. positions the
-  // simulation touched. The UI uses this to flag modified positions (e.g. a
-  // dotted border) without any layer awareness of its own.
-  const modifiedKeys = computed(() => {
-    const set = new Set<string>()
+  // active layer differs from the real (layer 0) account. Balance keys track
+  // share/supply changes; debt keys track borrowed changes. The position UI
+  // uses this to mark only the card surface that changed.
+  const modifiedPositionKeySets = computed(() => {
     const active = activeLayer.value
-    if (active <= 0) return set
+    if (active <= 0) return emptyModifiedPositionKeySets()
     const cur = layers.value[active]?.account
     const base = layers.value[0]?.account
-    if (!cur || !base) return set
-    for (const [addr, sa] of Object.entries(cur.subAccounts)) {
-      if (!sa) continue
-      const baseSa = base.subAccounts[addr as Address]
-      for (const p of sa.positions) {
-        const vault = getAddress(p.vaultAddress)
-        const bp = baseSa?.positions.find(x => getAddress(x.vaultAddress) === vault)
-        if (!bp || bp.shares !== p.shares || bp.borrowed !== p.borrowed) {
-          set.add(`${addr.toLowerCase()}:${vault.toLowerCase()}`)
-        }
-      }
-    }
-    return set
+    return buildModifiedPositionKeySets(cur, base)
   })
+  const modifiedKeys = computed(() => modifiedPositionKeySets.value.any)
+  const modifiedBalanceKeys = computed(() => modifiedPositionKeySets.value.balance)
+  const modifiedDebtKeys = computed(() => modifiedPositionKeySets.value.debt)
 
   return {
     entries,
@@ -741,6 +975,8 @@ export const useTxBatch = () => {
     hasInsufficientBalance,
     walletShortfalls,
     modifiedKeys,
+    modifiedBalanceKeys,
+    modifiedDebtKeys,
     walletChanges,
     entryCount,
     marketByEntryId,

@@ -290,7 +290,7 @@ const canAddToBatch = computed(() => {
   if (isSameAsset.value) return true
   return !!selectedQuote.value && !isCowSwapSelected.value
 })
-const addToBatch = () => {
+const addToBatch = async () => {
   if (!canAddToBatch.value) return
   const from = fromVault.value
   const to = toVault.value
@@ -306,7 +306,7 @@ const addToBatch = () => {
   const label = sameAsset
     ? `Migrate debt ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
     : `Swap debt ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
-  addBatchEntry({
+  await addBatchEntry({
     label,
     buildPlan: account => planDebtChange({
       oldLiabilityVault,

@@ -508,13 +508,13 @@ const canAddToBatch = computed(() => {
   return true
 })
 
-const addToBatch = () => {
+const addToBatch = async () => {
   if (!canAddToBatch.value || !asset.value?.address) return
   if (needsSwap.value) {
     const quote = swapEffectiveQuote.value
     if (!quote) return
     const fromSym = selectedAsset.value?.symbol ?? ''
-    addBatchEntry({
+    await addBatchEntry({
       label: `Swap-deposit ${amount.value} ${fromSym} → ${asset.value.symbol}`,
       buildPlan: account => buildSwapSupplyPlanFromQuote(quote, account),
       subAccount: address.value as Address | undefined,
@@ -524,7 +524,7 @@ const addToBatch = () => {
   else {
     const assetAddr = asset.value.address as Address
     const supplyAmount = valueToNano(amount.value, asset.value.decimals)
-    addBatchEntry({
+    await addBatchEntry({
       label: `Deposit ${amount.value} ${asset.value.symbol}`,
       buildPlan: account => planDeposit({ vaultAddress: vaultAddress as Address, assetAddress: assetAddr, amount: supplyAmount, account }),
       subAccount: address.value as Address | undefined,

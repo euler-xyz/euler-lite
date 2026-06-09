@@ -189,7 +189,7 @@ const canAddToBatch = computed(() => {
   if (needsSwap.value) return !!form.swapSelectedQuote.value && !isCowSwapSelected.value
   return true
 })
-const addToBatch = () => {
+const addToBatch = async () => {
   if (!canAddToBatch.value) return
   const a = form.asset.value
   const pos = form.position.value
@@ -204,7 +204,7 @@ const addToBatch = () => {
     if (isNative && !wrappedAddress) return
     const tokenIn = (wrappedAddress || sel.address) as Address
     const wrappedNativeInfo = isNative && wrappedAddress ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount } : undefined
-    addBatchEntry({
+    await addBatchEntry({
       label: `Swap-supply ${form.amount.value} ${sel.symbol} → ${a.symbol}`,
       buildPlan: account => planDepositWithSwap({ swapQuote: quote, amount: inputAmount, tokenIn, wrappedNativeInfo, account }),
       subAccount: pos.subAccount as Address,
@@ -215,7 +215,7 @@ const addToBatch = () => {
     const vaultAddress = form.collateralVault.value!.address as Address
     const assetAddress = a.address as Address
     const amount = valueToNano(form.amount.value, a.decimals)
-    addBatchEntry({
+    await addBatchEntry({
       label: `Supply ${form.amount.value} ${a.symbol}`,
       buildPlan: account => planDeposit({ vaultAddress, assetAddress, amount, receiver: pos.subAccount as Address, account }),
       subAccount: pos.subAccount as Address,

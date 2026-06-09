@@ -8,9 +8,9 @@ import { useTokenSymbolResolver } from '~/composables/useTokenSymbolResolver'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
-import { formatHealthScore, formatSmartAmount } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
+import { formatSmartAmount } from '~/utils/string-utils'
 import { logWarn } from '~/utils/errorHandling'
+import { buildBatchHealthSummary } from '~/utils/batchHealthSummary'
 
 // Whole-batch review: required approvals, then the operations as rows that roll
 // down to their details, the net wallet changes, a Tenderly simulation link,
@@ -139,24 +139,12 @@ const revertedSubAccounts = computed<Set<string>>(() => {
 // and list those that move (with their Position tag and before → after score).
 const healthSummary = computed<Array<{ label: string, before?: string, after: string }>>(() => {
   if (layers.value.length < 2) return []
-  const base = new Map(
-    (layers.value[0]?.portfolio?.borrows ?? []).map(p => [getAddress(p.subAccount).toLowerCase(), p.healthFactor]),
-  )
-  const finalBorrows = layers.value[layers.value.length - 1]?.portfolio?.borrows ?? []
-  const out: Array<{ label: string, before?: string, after: string }> = []
-  for (const pos of finalBorrows) {
-    const sub = getAddress(pos.subAccount).toLowerCase()
-    if (revertedSubAccounts.value.has(sub)) continue
-    const beforeHf = base.get(sub)
-    if (beforeHf !== undefined && beforeHf === pos.healthFactor) continue
-    const label = positionTag(pos.subAccount) ?? 'Position'
-    out.push({
-      label,
-      before: beforeHf !== undefined ? formatHealthScore(nanoToValue(beforeHf, 18)) : undefined,
-      after: formatHealthScore(nanoToValue(pos.healthFactor ?? 0n, 18)),
-    })
-  }
-  return out
+  return buildBatchHealthSummary({
+    basePortfolio: layers.value[0]?.portfolio,
+    finalPortfolio: layers.value[layers.value.length - 1]?.portfolio,
+    revertedSubAccounts: revertedSubAccounts.value,
+    positionTag,
+  })
 })
 
 // Roll-down: rows are collapsed by default; one row open at a time.

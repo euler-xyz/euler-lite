@@ -2,6 +2,10 @@
 const { isDark, toggleTheme } = useTheme()
 const { settings, updateSetting } = useUserSettings()
 
+const advancedFeatures = [
+  'Batch transactions: queue multiple actions into one atomic transaction',
+]
+
 defineEmits(['close'])
 </script>
 
@@ -59,16 +63,22 @@ defineEmits(['close'])
       </div>
     </div>
     <div class="mb-20 rounded-16 border border-line-default bg-card p-16">
-      <div class="flex items-center justify-between">
-        <div>
+      <div class="flex items-start justify-between gap-16">
+        <div class="min-w-0">
           <div class="text-p2">
-            Batch transactions
+            Enable advanced features
           </div>
-          <div class="text-p3 text-content-muted">
-            Queue multiple actions into one atomic transaction
-          </div>
+          <ul class="mt-6 list-disc pl-16 text-p3 text-content-muted">
+            <li
+              v-for="feature in advancedFeatures"
+              :key="feature"
+            >
+              {{ feature }}
+            </li>
+          </ul>
         </div>
         <UiSwitch
+          class="shrink-0"
           :model-value="settings.enableBatchTransactions"
           @update:model-value="updateSetting('enableBatchTransactions', $event ?? false)"
         />

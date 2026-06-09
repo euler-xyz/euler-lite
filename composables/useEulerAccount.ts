@@ -1,13 +1,13 @@
 import { formatUnits, getAddress, type Address } from 'viem'
 import { watch, computed, effectScope, onScopeDispose, ref, shallowRef, type EffectScope, type Ref, type WatchStopHandle } from 'vue'
-import { accountDiagnosticOwner, dataIssueLocation, type DataIssue, type Portfolio, type PortfolioBorrowPosition, type PortfolioPositionFilter, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { accountDiagnosticOwner, dataIssueLocation, type DataIssue, type Portfolio, type PortfolioBorrowPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import type { EulerLensAddresses } from '~/composables/useEulerAddresses'
 import { useVaults } from '~/composables/useVaults'
 import { useWallets } from '~/composables/useWallets'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createAddressRefreshCoordinator } from '~/utils/address-refresh-coordinator'
 import { logWarn } from '~/utils/errorHandling'
-import { isVisiblePortfolioPosition } from '~/utils/portfolioVisibility'
+import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
 import { createRaceGuard } from '~/utils/race-guard'
 import { activeLayerPortfolioRef, activeLayerPortfolioAllRef } from '~/composables/useTxBatch'
 
@@ -60,19 +60,6 @@ interface PortfolioRefreshOptions {
 const usdWadToNumber = (value: bigint | number | undefined): number => {
   if (value === undefined) return 0
   return typeof value === 'bigint' ? Number(formatUnits(value, 18)) : value
-}
-
-export const buildVisiblePortfolioPositionFilter = (): PortfolioPositionFilter<VaultEntity> => {
-  const { verifiedVaultAddresses, earnVaults } = useEulerLabels()
-  const { escrowAddresses, getEscrowVaults } = useVaultRegistry()
-
-  const visibleVaults = new Set<string>()
-  for (const vault of verifiedVaultAddresses.value) visibleVaults.add(getAddress(vault).toLowerCase())
-  for (const vault of earnVaults.value) visibleVaults.add(getAddress(vault).toLowerCase())
-  for (const vault of escrowAddresses.value) visibleVaults.add(getAddress(vault).toLowerCase())
-  for (const vault of getEscrowVaults()) visibleVaults.add(getAddress(vault.address).toLowerCase())
-
-  return (position, { account }) => isVisiblePortfolioPosition(position, account, visibleVaults)
 }
 
 export const useEulerAccount = () => {
