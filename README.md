@@ -307,6 +307,8 @@ When `EULER_SDK_BRANCH` is set, the builder clones `euler-xyz/euler-sdks`, build
 
 Railway PR builds use the same Dockerfile. Set `EULER_SDK_BRANCH` for previews that should consume an SDK branch; leave it unset for previews that should use the npm version in `package-lock.json`. If the SDK branch is in another readable repo, set `EULER_SDK_REPO` as well.
 
+The SDK preview build installs `pnpm@10` by default. Set `EULER_SDK_PNPM_VERSION` if the SDK branch requires another pnpm version.
+
 To run without Doppler, override the `CMD` and pass env vars directly:
 
 ```bash

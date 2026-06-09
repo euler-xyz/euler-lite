@@ -8,6 +8,7 @@ RUN npm ci
 COPY scripts/install-preview-sdk.sh scripts/install-preview-sdk.sh
 ARG EULER_SDK_BRANCH
 ARG EULER_SDK_REPO=https://github.com/euler-xyz/euler-sdks.git
+ARG EULER_SDK_PNPM_VERSION=10
 RUN chmod +x scripts/install-preview-sdk.sh && scripts/install-preview-sdk.sh
 
 COPY . .

@@ -23,15 +23,28 @@ rm -rf "$SDK_DIR" "$SDK_PACK_DIR"
 git clone --filter=blob:none --depth=1 --branch "$EULER_SDK_BRANCH" "$SDK_REPO" "$SDK_DIR"
 
 cd "$SDK_DIR"
-SDK_PACKAGE_MANAGER="$(node -p "require('./package.json').packageManager || 'pnpm@11.10.0'")"
+SDK_PACKAGE_MANAGER="$(node -p "require('./package.json').packageManager || ''")"
 SDK_PACKAGE_MANAGER_PACKAGE="${SDK_PACKAGE_MANAGER%%+*}"
+SDK_PNPM_PACKAGE="pnpm@${EULER_SDK_PNPM_VERSION:-10}"
 
-case "$SDK_PACKAGE_MANAGER_PACKAGE" in
+if [ -n "$SDK_PACKAGE_MANAGER_PACKAGE" ]; then
+  case "$SDK_PACKAGE_MANAGER_PACKAGE" in
+    pnpm@*|pnpm)
+      SDK_PNPM_PACKAGE="$SDK_PACKAGE_MANAGER_PACKAGE"
+      ;;
+    *)
+      echo "Unsupported SDK package manager: ${SDK_PACKAGE_MANAGER}" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+case "$SDK_PNPM_PACKAGE" in
   pnpm@*|pnpm)
-    npm install --global "$SDK_PACKAGE_MANAGER_PACKAGE"
+    npm install --global "$SDK_PNPM_PACKAGE"
     ;;
   *)
-    echo "Unsupported SDK package manager: ${SDK_PACKAGE_MANAGER}" >&2
+    echo "Unsupported SDK pnpm package: ${SDK_PNPM_PACKAGE}" >&2
     exit 1
     ;;
 esac
