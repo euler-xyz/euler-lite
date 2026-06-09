@@ -469,7 +469,7 @@ const linkPath = computed(() => ({
             Available liquidity
             <VaultWarningIcon
               :warning="[borrowCapInfo, supplyCapInfo]"
-              tooltip-placement="top-start"
+              tooltip-placement="top-end"
             />
           </div>
           <div
