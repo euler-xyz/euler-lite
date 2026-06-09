@@ -198,10 +198,11 @@ const addToBatch = () => {
       assets,
       account,
     }),
+    subAccount: ownerAddr,
     review: { type: 'withdraw', asset: asset.value, amount: amount.value, marketLabel: earnVaultMarketLabel.value },
   })
   amount.value = ''
-  redirectAfterAdd('/portfolio/saving')
+  redirectAfterAdd('/portfolio/saving', { subAccount: ownerAddr })
 }
 
 const send = async () => {

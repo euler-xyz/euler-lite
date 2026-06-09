@@ -517,6 +517,7 @@ const addToBatch = () => {
     addBatchEntry({
       label: `Swap-deposit ${amount.value} ${fromSym} → ${asset.value.symbol}`,
       buildPlan: account => buildSwapSupplyPlanFromQuote(quote, account),
+      subAccount: address.value as Address | undefined,
       review: { type: 'swap-supply', asset: selectedAsset.value, amount: amount.value, swapToAsset: asset.value, swapToAmount: swapEstimatedOutput.value, swapMode: SwapperMode.EXACT_IN },
     })
   }
@@ -526,11 +527,12 @@ const addToBatch = () => {
     addBatchEntry({
       label: `Deposit ${amount.value} ${asset.value.symbol}`,
       buildPlan: account => planDeposit({ vaultAddress: vaultAddress as Address, assetAddress: assetAddr, amount: supplyAmount, account }),
+      subAccount: address.value as Address | undefined,
       review: { type: 'supply', asset: asset.value, amount: amount.value },
     })
   }
   amount.value = ''
-  redirectAfterAdd('/portfolio/saving')
+  redirectAfterAdd('/portfolio/saving', { subAccount: address.value })
 }
 
 const send = async () => {

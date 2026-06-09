@@ -501,9 +501,11 @@ const addToBatch = () => {
   if (needsSwap.value) {
     const quote = swapEffectiveQuote.value
     if (!quote) return
+    const ownerAddr = (subAccount.value ?? effectiveAddress.value!) as Address
     addBatchEntry({
       label: `Withdraw-swap ${amount.value} ${asset.value.symbol} → ${selectedOutputAsset.value?.symbol ?? ''}`,
       buildPlan: account => buildSwapWithdrawPlanFromQuote(quote, account),
+      subAccount: ownerAddr,
       review: { type: 'swap-withdraw', asset: asset.value, amount: amount.value, swapToAsset: selectedOutputAsset.value, swapToAmount: swapEstimatedOutput.value },
     })
   }
@@ -518,11 +520,12 @@ const addToBatch = () => {
     addBatchEntry({
       label: `Withdraw ${amount.value} ${asset.value.symbol}`,
       buildPlan: account => planWithdrawOrRedeem({ vaultAddress: vaultAddress as Address, owner: ownerAddr, isMax, shares, assets, account }),
+      subAccount: ownerAddr,
       review: { type: 'withdraw', asset: asset.value, amount: amount.value },
     })
   }
   amount.value = ''
-  redirectAfterAdd('/portfolio/saving')
+  redirectAfterAdd('/portfolio/saving', { subAccount: subAccount.value ?? effectiveAddress.value })
 }
 
 const updateSyncEstimates = () => {

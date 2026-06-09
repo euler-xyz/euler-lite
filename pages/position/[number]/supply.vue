@@ -223,7 +223,7 @@ const addToBatch = () => {
     })
   }
   form.amount.value = ''
-  redirectAfterAdd('/portfolio')
+  redirectAfterAdd('/portfolio', { subAccount: pos.subAccount })
 }
 
 // Supply-specific: balance management

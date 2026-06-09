@@ -18,6 +18,10 @@ const sortedBorrowPositions = computed(() => {
     return indexA - indexB
   })
 })
+
+usePortfolioBatchScrollTarget(computed(() =>
+  sortedBorrowPositions.value.map(position => position.subAccount).join('|'),
+))
 </script>
 
 <template>

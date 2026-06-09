@@ -209,7 +209,7 @@ const addToBatch = () => {
     })
   }
   form.amount.value = ''
-  redirectAfterAdd('/portfolio')
+  redirectAfterAdd('/portfolio', { subAccount: pos.subAccount })
 }
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {

@@ -306,7 +306,7 @@ const addToBatch = () => {
     review: { type: 'borrow', asset: borrowVault.value.asset, amount: borrowAmount.value },
   })
   borrowAmount.value = ''
-  redirectAfterAdd('/portfolio')
+  redirectAfterAdd('/portfolio', { subAccount: borrowAccount })
 }
 
 const send = async () => {

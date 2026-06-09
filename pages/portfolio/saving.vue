@@ -38,6 +38,11 @@ watchEffect(async () => {
 watchEffect(async () => {
   sortedLendItems.value = await sortByUsdValue(lendItems.value)
 })
+
+usePortfolioBatchScrollTarget(computed(() => [
+  ...sortedEarnItems.value.map(position => position.subAccount),
+  ...sortedLendItems.value.map(position => position.subAccount),
+].join('|')))
 </script>
 
 <template>

@@ -304,7 +304,7 @@ const addToBatch = () => {
     review: { type: 'swap', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.EXACT_IN },
   })
   fromAmount.value = ''
-  redirectAfterAdd('/portfolio')
+  redirectAfterAdd('/portfolio', { subAccount: positionAccount })
 }
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {

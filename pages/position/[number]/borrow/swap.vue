@@ -322,7 +322,7 @@ const addToBatch = () => {
     review: { type: 'swap-borrow', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.TARGET_DEBT },
   })
   fromAmount.value = ''
-  redirectAfterAdd('/portfolio')
+  redirectAfterAdd('/portfolio', { subAccount: pos.subAccount as Address })
 }
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {

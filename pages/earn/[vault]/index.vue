@@ -24,7 +24,7 @@ const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
 const { getEarnVault, updateEarnVault } = useVaults()
 const { isReady: isLabelsReady } = useEulerLabels()
-const { isConnected } = useWagmi()
+const { isConnected, address } = useWagmi()
 const { chainId } = useEulerAddresses()
 const shareLinkQuery = computed(() => {
   const network = route.query.network
@@ -170,7 +170,7 @@ const addToBatch = () => {
     review: { type: 'supply', asset: asset.value, amount: amount.value, marketLabel: earnVaultMarketLabel.value },
   })
   amount.value = ''
-  redirectAfterAdd('/portfolio/saving')
+  redirectAfterAdd('/portfolio/saving', { subAccount: address.value })
 }
 
 const send = async () => {

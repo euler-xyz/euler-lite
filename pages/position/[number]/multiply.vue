@@ -656,7 +656,7 @@ const addToBatch = () => {
     multiply: true,
     review: { type: 'borrow', asset: multiplyShortVault.value!.asset, amount: multiplyShortAmount.value, swapToAsset: multiplyLongVault.value!.asset, swapMode: SwapperMode.EXACT_IN },
   })
-  redirectAfterAdd('/portfolio')
+  redirectAfterAdd('/portfolio', { subAccount: receiver })
 }
 
 const requestMultiplyQuote = useDebounceFn(async () => {

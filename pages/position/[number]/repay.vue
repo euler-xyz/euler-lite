@@ -219,7 +219,7 @@ const addToBatch = () => {
         review: { type: 'repay', asset: walletSwap.selectedAsset.value ?? borrowVault.value.asset, amount: walletSwap.amount.value, swapToAsset: borrowVault.value.asset },
       })
       walletSwap.amount.value = ''
-      redirectAfterAdd('/portfolio')
+      redirectAfterAdd('/portfolio', { subAccount: position.value.subAccount })
       return
     }
     const liabilityVault = borrowVault.value.address as Address
@@ -240,7 +240,7 @@ const addToBatch = () => {
       review: { type: 'repay', asset: borrowVault.value.asset, amount: wallet.amount.value },
     })
     wallet.amount.value = ''
-    redirectAfterAdd('/portfolio')
+    redirectAfterAdd('/portfolio', { subAccount: position.value.subAccount })
     return
   }
 
@@ -255,7 +255,7 @@ const addToBatch = () => {
     })
     collateral.amount.value = ''
     collateral.debtAmount.value = ''
-    redirectAfterAdd('/portfolio')
+    redirectAfterAdd('/portfolio', { subAccount: position.value.subAccount })
     return
   }
 
@@ -270,7 +270,7 @@ const addToBatch = () => {
     })
     savings.amount.value = ''
     savings.debtAmount.value = ''
-    redirectAfterAdd('/portfolio')
+    redirectAfterAdd('/portfolio', { subAccount: position.value.subAccount })
   }
 }
 
