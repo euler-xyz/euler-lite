@@ -54,10 +54,15 @@ const collateralAddress = route.params.collateral as string
 const borrowAddress = route.params.borrow as string
 useOperationGuard([collateralAddress, borrowAddress])
 
+const formTabFromQuery = (value: unknown): 'borrow' | 'multiply' | undefined => {
+  const tabValue = Array.isArray(value) ? value[0] : value
+  return tabValue === 'borrow' || tabValue === 'multiply' ? tabValue : undefined
+}
+
 // --- Shared state ---
 const balance = ref(0n)
 const tab = ref()
-const formTab = ref<'borrow' | 'multiply'>('borrow')
+const formTab = ref<'borrow' | 'multiply'>(formTabFromQuery(route.query.tab) ?? 'borrow')
 const pendingSubAccount = ref<string | null>(null)
 const isPendingSubAccountLoading = ref(false)
 let pendingSubAccountPromise: Promise<string> | null = null
@@ -431,6 +436,13 @@ watch(formTab, () => {
   borrow.resetOnTabSwitch()
   multiply.resetOnTabSwitch()
 })
+
+watch(
+  () => [route.params.collateral, route.params.borrow, route.query.tab],
+  () => {
+    formTab.value = formTabFromQuery(route.query.tab) ?? 'borrow'
+  },
+)
 </script>
 
 <template>

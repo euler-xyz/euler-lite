@@ -230,7 +230,10 @@ const route = useRoute()
 
 const linkPath = computed(() => ({
   path: `/borrow/${pair.collateral.address}/${pair.borrow.address}`,
-  query: { network: route.query.network },
+  query: {
+    network: route.query.network,
+    ...(showMaxRoe.value ? { tab: 'multiply' } : {}),
+  },
 }))
 </script>
 
