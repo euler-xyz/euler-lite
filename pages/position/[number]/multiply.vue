@@ -21,6 +21,7 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { SlippageSettingsModal, OperationReviewModal } from '#components'
 import { formatUnits, type Address } from 'viem'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
+import { reportClientEvent } from '~/utils/client-observability'
 
 const route = useRoute()
 const router = useRouter()
@@ -31,7 +32,7 @@ const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
 const { planMultiply, prepareTransactionPlan, executePreparedPlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
 const { account: planAccount } = usePlanAccount()
-const { eulerLensAddresses } = useEulerAddresses()
+const { eulerLensAddresses, chainId } = useEulerAddresses()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -654,6 +655,16 @@ const submitMultiply = async () => {
       }
       catch (e) {
         console.warn('[Multiply] failed to build plan', e)
+        void reportClientEvent({
+          event: 'tx_plan_build_failed',
+          flow: 'multiply',
+          phase: 'build',
+          chainId: chainId.value,
+          operationType: 'multiply',
+          vaultAddress: multiplyLongVault.value.address,
+          assetAddress: multiplyLongVault.value.asset.address,
+          quoteProvider: multiplyRoutedVia.value ?? undefined,
+        }, e)
         plan.value = null
         preparedPlan.value = null
       }
@@ -710,6 +721,16 @@ const sendMultiply = async () => {
   catch (e) {
     console.warn(e)
     error('Transaction failed')
+    void reportClientEvent({
+      event: 'tx_execute_failed',
+      flow: 'multiply',
+      phase: 'execute',
+      chainId: chainId.value,
+      operationType: 'multiply',
+      vaultAddress: multiplyLongVault.value?.address,
+      assetAddress: multiplyLongVault.value?.asset.address,
+      quoteProvider: multiplyRoutedVia.value ?? undefined,
+    }, e)
   }
   finally {
     isSubmitting.value = false

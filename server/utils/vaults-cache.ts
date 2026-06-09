@@ -31,6 +31,7 @@ import { createTtlCache } from './cache'
 import { createInFlightDedup } from '~/utils/in-flight'
 import { logger } from './logger'
 import { reportStatus } from './log'
+import { summarizeSdkIssue } from './observability'
 import { getServerSdk } from './sdk-server'
 import {
   LABEL_FILES,
@@ -213,7 +214,7 @@ export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot>
       { errors: escrow.errors, ctx: 'escrow' },
     ] as const) {
       for (const issue of errors as unknown[]) {
-        logger.warn({ ctx: 'vaults-cache', chainId, kind: ctx, issue }, 'sdk fetch issue')
+        logger.warn({ ctx: 'vaults-cache', chainId, kind: ctx, issue: summarizeSdkIssue(issue) }, 'sdk fetch issue')
       }
     }
 

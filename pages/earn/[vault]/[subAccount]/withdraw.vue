@@ -14,6 +14,7 @@ import { OperationReviewModal } from '#components'
 import { FixedPoint } from '~/utils/fixed-point'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import { createRaceGuard } from '~/utils/race-guard'
+import { reportClientEvent } from '~/utils/client-observability'
 
 const router = useRouter()
 const route = useRoute()
@@ -151,6 +152,13 @@ const submit = async () => {
     }
     catch (e) {
       console.warn('[OperationReviewModal] failed to build plan', e)
+      void reportClientEvent({
+        event: 'tx_plan_build_failed',
+        flow: 'earn_withdraw',
+        phase: 'build',
+        operationType: 'withdraw',
+        vaultAddress,
+      }, e)
       plan.value = null
     }
 
@@ -183,6 +191,13 @@ const send = async () => {
     isSubmitting.value = true
     if (!asset.value?.address) {
       console.error('No asset address')
+      void reportClientEvent({
+        event: 'client_invariant_missing',
+        flow: 'earn_withdraw',
+        phase: 'execute_precheck',
+        invariant: 'no_asset_address',
+        vaultAddress,
+      }, new Error('No asset address'))
       return
     }
 
@@ -197,6 +212,13 @@ const send = async () => {
   catch (e) {
     error('Transaction failed')
     console.error('Transaction error:', e)
+    void reportClientEvent({
+      event: 'tx_execute_failed',
+      flow: 'earn_withdraw',
+      phase: 'execute',
+      operationType: 'withdraw',
+      vaultAddress,
+    }, e)
   }
   finally {
     isSubmitting.value = false
