@@ -265,6 +265,9 @@ const userLTVDisplay = computed(() => {
   return Number.isFinite(userLTV.value) ? formatNumber(userLTV.value, 2) : '∞'
 })
 const actualMultiplier = computed(() => position.multiplier ?? 0)
+const actualMultiplierDisplay = computed(() =>
+  Number.isFinite(actualMultiplier.value) ? `${formatNumber(actualMultiplier.value, 2, 2)}x` : '-',
+)
 
 const netApyModalData = computed(() => ({
   props: {
@@ -391,7 +394,8 @@ const openPositionInformationModal = () => {
               <CorrelatedPairBadge
                 v-if="isRoeApplicable"
                 compact
-                title="All collateral assets in this position share a trusted price-correlation category with the borrow asset, so ROE is shown."
+                :label="actualMultiplierDisplay"
+                title="Correlated position. Effective multiplier at your LTV."
               />
             </div>
           </div>
