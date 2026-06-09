@@ -32,6 +32,7 @@ const { isPositionsLoading, isPositionsLoaded, isDepositsLoaded, refreshAllPosit
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
+const { areAssetsCorrelated } = useTokenCorrelation()
 const { eulerLensAddresses: _eulerLensAddresses } = useEulerAddresses()
 const { fetchSingleBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
@@ -217,6 +218,13 @@ const savings = useSavingsRepay({
   collateralSupplyApy,
   borrowApy,
 })
+
+const isCollateralRepayCorrelated = computed(() =>
+  !!collateral.sourceVault.value && !!borrowVault.value && areAssetsCorrelated(collateral.sourceVault.value.asset, borrowVault.value.asset),
+)
+const isSavingsRepayCorrelated = computed(() =>
+  !!savings.sourceVault.value && !!borrowVault.value && areAssetsCorrelated(savings.sourceVault.value.asset, borrowVault.value.asset),
+)
 
 const { guardWithPriceImpact: guardWithCollateralPriceImpact } = usePriceImpactGate({
   directPriceImpact: collateral.priceImpact,
@@ -769,7 +777,10 @@ watch(formTab, () => {
               variant="card"
               class="w-full laptop:max-w-[360px]"
             >
-              <SummaryRow label="ROE">
+              <SummaryRow
+                v-if="isCollateralRepayCorrelated"
+                label="ROE"
+              >
                 <SummaryValue
                   :before="collateral.roeBefore.value !== null ? formatNumber(collateral.roeBefore.value) : undefined"
                   :after="collateral.roeAfter.value !== null && (collateral.quotes.quote.value || collateral.isSameAsset.value) ? formatNumber(collateral.roeAfter.value) : undefined"
@@ -949,7 +960,10 @@ watch(formTab, () => {
               variant="card"
               class="w-full laptop:max-w-[360px]"
             >
-              <SummaryRow label="ROE">
+              <SummaryRow
+                v-if="isSavingsRepayCorrelated"
+                label="ROE"
+              >
                 <SummaryValue
                   :before="savings.roeBefore.value !== null ? formatNumber(savings.roeBefore.value) : undefined"
                   :after="savings.roeAfter.value !== null && (savings.quotes.quote.value || savings.isSameAsset.value) ? formatNumber(savings.roeAfter.value) : undefined"

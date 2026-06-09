@@ -27,6 +27,7 @@ import { getBorrowPositionEffectiveLiquidationLTV, getBorrowPositionUserLTVPerce
 
 const { position } = defineProps<{ position: PortfolioBorrowPosition<VaultEntity> }>()
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
+const { isBorrowPositionCorrelated, getAssetCorrelationLabel } = useTokenCorrelation()
 
 const { address } = useWagmi()
 const { portfolioAddress } = useEulerAccount()
@@ -84,6 +85,12 @@ const collateralItems = computed<PositionCollateral[]>(() => {
     ? items
     : [{ vault: collateralVault.value, assets: supplied.value }]
 })
+const isPositionCorrelated = computed(() =>
+  isBorrowPositionCorrelated(position),
+)
+const positionCorrelationCategory = computed(() =>
+  getAssetCorrelationLabel(collateralVault.value.asset.address, collateralVault.value.asset.symbol),
+)
 
 const hasQueryFailure = computed(() => position.borrow.liquidity === undefined)
 
@@ -252,6 +259,11 @@ const userLTVDisplay = computed(() => {
   return Number.isFinite(userLTV.value) ? formatNumber(userLTV.value, 2) : '∞'
 })
 const actualMultiplier = computed(() => position.multiplier ?? 0)
+const actualMultiplierDisplay = computed(() =>
+  Number.isFinite(actualMultiplier.value) && actualMultiplier.value > 0
+    ? `${formatNumber(actualMultiplier.value, 2, 2)}x`
+    : '',
+)
 
 const netApyModalData = computed(() => ({
   props: {
@@ -312,6 +324,7 @@ const openPositionInformationModal = () => {
     :data-sub-account="position.subAccount.toLowerCase()"
     :data-collateral-address="primaryCollateralAddress.toLowerCase()"
     :data-borrow-address="borrowAddress.toLowerCase()"
+    :data-correlated="isPositionCorrelated"
   >
     <div class="flex py-16 px-16 pb-12 border-b border-line-default">
       <div
@@ -365,6 +378,18 @@ const openPositionInformationModal = () => {
                 />
                 Deprecated
               </span>
+              <CorrelatedPairBadge
+                v-if="isPositionCorrelated"
+                compact
+                :category="positionCorrelationCategory"
+                title="This position uses assets from the same price-correlation category."
+              />
+              <CorrelatedPairBadge
+                v-if="isPositionCorrelated && actualMultiplierDisplay"
+                compact
+                :label="actualMultiplierDisplay"
+                title="Actual position multiplier"
+              />
             </div>
             <div
               class="text-h5 text-content-primary truncate"
@@ -415,7 +440,10 @@ const openPositionInformationModal = () => {
                 {{ netAPY !== undefined && Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
               </div>
             </div>
-            <div class="flex flex-col items-end">
+            <div
+              v-if="isPositionCorrelated"
+              class="flex flex-col items-end"
+            >
               <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                 ROE
                 <UiModalPreviewTrigger

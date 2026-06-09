@@ -7,13 +7,16 @@ import { CACHE_TTL_5MIN_MS } from '~/entities/tuning-constants'
 import { getChainById } from '~/entities/chainRegistry'
 import { createRaceGuard } from '~/utils/race-guard'
 
-interface TokenListEntry {
+export interface TokenListEntry {
   chainId: number
   address: string
   name: string
   symbol: string
   decimals: number
   logoURI?: string
+  category?: string
+  categories?: string[]
+  tags?: string[]
 }
 
 // Singleton state

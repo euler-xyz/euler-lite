@@ -9,9 +9,16 @@ import type { EVaultCollateral } from '@eulerxyz/euler-v2-sdk'
 import { formatNumber, formatSignificant } from '~/utils/string-utils'
 
 const { pair } = defineProps<{ pair: SecuritizeBorrowVaultPair }>()
+const { areAssetsCorrelated, getAssetCorrelationLabel } = useTokenCorrelation()
 
 const currentLiquidationLTV = computed(() => pair.ltv.currentLiquidationLTV)
 const isRamping = computed(() => pair.ltv.isLiquidationLTVRamping)
+const isPairCorrelated = computed(() =>
+  areAssetsCorrelated(pair.collateral.asset, pair.borrow.asset),
+)
+const pairCorrelationCategory = computed(() =>
+  getAssetCorrelationLabel(pair.collateral.asset.address, pair.collateral.asset.symbol),
+)
 
 const modal = useModal()
 const { settings } = useUserSettings()
@@ -94,6 +101,10 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
       Overview
     </p>
     <div class="flex flex-col items-start gap-24">
+      <CorrelatedPairBadge
+        v-if="isPairCorrelated"
+        :category="pairCorrelationCategory"
+      />
       <VaultOverviewLabelValue
         label="Price"
       >

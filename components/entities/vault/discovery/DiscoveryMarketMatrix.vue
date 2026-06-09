@@ -6,7 +6,7 @@ import {
   type EVault,
 } from '@eulerxyz/euler-v2-sdk'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
-import { findVault, formatMetricValue, getCellBgColor, isMatrixCompatibleVault, type CollateralMatrixData, type MatrixCell, type DotMetric, type EnhancedCellApys } from '~/utils/discoveryCalculations'
+import { formatMetricValue, getCellBgColor, isMatrixCompatibleVault, type CollateralMatrixData, type MatrixCell, type DotMetric, type EnhancedCellApys } from '~/utils/discoveryCalculations'
 import { getChecksStatus, OracleAdapterCheckSeverity, type OracleAdapterCheck } from '~/entities/oracle'
 import { getOracleProviderLogo } from '~/entities/oracle-providers'
 import { getExplorerLink } from '~/utils/block-explorer'
@@ -43,6 +43,7 @@ const {
 } = useRewardsApy()
 const { oracleAdapters, loadAllOracleAdapters } = useEulerLabels()
 const { chainId } = useEulerAddresses()
+const { areAssetsCorrelated } = useTokenCorrelation()
 
 const hoveredCell = ref<{
   collateralAddr: string
@@ -60,13 +61,42 @@ const isColumnHighlighted = (colAddr: string): boolean =>
   hoveredCell.value?.liabilityAddr === colAddr
   || props.selectedCell?.liabilityAddr === colAddr
 
+const matrixVaultsByAddress = computed(() => {
+  const result = new Map<string, EVault | SecuritizeCollateralVault>()
+  for (const vault of [...props.market.vaults, ...props.market.externalCollateral]) {
+    if (isMatrixCompatibleVault(vault)) result.set(vault.address.toLowerCase(), vault)
+  }
+  return result
+})
+
+const getMatrixVault = (address: string) =>
+  matrixVaultsByAddress.value.get(address.toLowerCase()) ?? null
+
+const cellKey = (collateralAddr: string, liabilityAddr: string): string =>
+  `${collateralAddr.toLowerCase()}:${liabilityAddr.toLowerCase()}`
+
+const correlatedCellKeys = computed(() => {
+  const result = new Set<string>()
+  for (const [collateralAddr, cols] of props.matrix.cells) {
+    const collateral = getMatrixVault(collateralAddr)
+    if (!collateral) continue
+    for (const liabilityAddr of cols.keys()) {
+      const liability = getMatrixVault(liabilityAddr)
+      if (liability && areAssetsCorrelated(collateral.asset, liability.asset)) {
+        result.add(cellKey(collateralAddr, liabilityAddr))
+      }
+    }
+  }
+  return result
+})
+
 const computeEnhancedApys = (
   cell: MatrixCell,
   collateralAddr: string,
   liabilityAddr: string,
 ): EnhancedCellApys => {
-  const collateral = findVault(props.market, collateralAddr)
-  const liability = findVault(props.market, liabilityAddr)
+  const collateral = getMatrixVault(collateralAddr)
+  const liability = getMatrixVault(liabilityAddr)
 
   let supplyApy = 0
   let supplyRewards = 0
@@ -118,10 +148,18 @@ const getCellMetricValue = (
     case 'net-apy':
       return computeEnhancedApys(cell, collateralAddr, liabilityAddr).netApy
     case 'roe':
+      if (!isCellCorrelated(collateralAddr, liabilityAddr)) return Number.NaN
       return computeEnhancedApys(cell, collateralAddr, liabilityAddr).roe
     default:
       return 0
   }
+}
+
+const isCellCorrelated = (
+  collateralAddr: string,
+  liabilityAddr: string,
+): boolean => {
+  return correlatedCellKeys.value.has(cellKey(collateralAddr, liabilityAddr))
 }
 
 const shouldShowSparkles = (
@@ -129,8 +167,9 @@ const shouldShowSparkles = (
   liabilityAddr: string,
 ): boolean => {
   if (props.dotMetric !== 'net-apy' && props.dotMetric !== 'roe') return false
-  const collateral = findVault(props.market, collateralAddr)
-  const liability = findVault(props.market, liabilityAddr)
+  if (props.dotMetric === 'roe' && !isCellCorrelated(collateralAddr, liabilityAddr)) return false
+  const collateral = getMatrixVault(collateralAddr)
+  const liability = getMatrixVault(liabilityAddr)
   const hasSupplyRewardsForCell = collateral
     ? hasSupplyRewards(collateral.address)
     : false
@@ -171,8 +210,8 @@ const cellOracleSteps = computed((): Map<string, OracleRouteStep[]> => {
 
   for (const [colAddr, rowCells] of props.matrix.cells) {
     for (const [liabAddr] of rowCells) {
-      const collateral = findVault(props.market, colAddr)
-      const liability = findVault(props.market, liabAddr)
+      const collateral = getMatrixVault(colAddr)
+      const liability = getMatrixVault(liabAddr)
       if (!collateral || !liability) continue
       if (!isMatrixCompatibleVault(collateral)) continue
       if (!isEVault(liability)) continue
@@ -190,7 +229,7 @@ const columnAssetOracleSteps = computed((): Map<string, OracleRouteStep[]> => {
   const result = new Map<string, OracleRouteStep[]>()
   if (props.dotMetric !== 'oracle') return result
   for (const col of props.matrix.columns) {
-    const liability = findVault(props.market, col.address)
+    const liability = getMatrixVault(col.address)
     if (!liability || !isEVault(liability)) continue
     const steps = getDebtOracleRouteSteps(liability)
     if (steps.length) result.set(col.address, steps)
@@ -306,7 +345,7 @@ const oraclePriceSourceVaults = computed<EVault[]>(() => {
   if (props.dotMetric !== 'oracle') return []
   const seen = new Map<string, EVault>()
   for (const col of props.matrix.columns) {
-    const liability = findVault(props.market, col.address)
+    const liability = getMatrixVault(col.address)
     if (liability && isEVault(liability)) {
       seen.set(liability.address.toLowerCase(), liability)
     }
@@ -318,7 +357,7 @@ const oraclePriceCollateralVaults = computed<(EVault | SecuritizeCollateralVault
   if (props.dotMetric !== 'oracle') return []
   const seen = new Map<string, EVault | SecuritizeCollateralVault>()
   for (const row of props.matrix.rows) {
-    const v = findVault(props.market, row.address)
+    const v = getMatrixVault(row.address)
     if (v && isMatrixCompatibleVault(v)) {
       seen.set(row.address.toLowerCase(), v)
     }
@@ -380,8 +419,8 @@ const onCellAdapterClick = (
     closeTooltip()
     return
   }
-  const liability = findVault(props.market, liabilityAddr)
-  const collateral = findVault(props.market, collateralAddr)
+  const liability = getMatrixVault(liabilityAddr)
+  const collateral = getMatrixVault(collateralAddr)
   if (!liability || !isEVault(liability)) return
   positionTooltip(event)
   tooltipContext.value = {
@@ -400,7 +439,7 @@ const onAssetAdapterClick = (
     closeTooltip()
     return
   }
-  const liability = findVault(props.market, liabilityAddr)
+  const liability = getMatrixVault(liabilityAddr)
   if (!liability || !isEVault(liability)) return
   positionTooltip(event)
   tooltipContext.value = {
@@ -530,7 +569,8 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
               :data-borrow-address="col.address"
               :data-field="dotMetric"
               :data-present="!!matrix.cells.get(row.address)?.get(col.address)"
-              :data-value="matrix.cells.get(row.address)?.get(col.address) ? getCellMetricValue(matrix.cells.get(row.address)!.get(col.address)!, row.address, col.address) : undefined"
+              :data-correlated="matrix.cells.get(row.address)?.get(col.address) ? isCellCorrelated(row.address, col.address) : undefined"
+              :data-value="matrix.cells.get(row.address)?.get(col.address) && Number.isFinite(getCellMetricValue(matrix.cells.get(row.address)!.get(col.address)!, row.address, col.address)) ? getCellMetricValue(matrix.cells.get(row.address)!.get(col.address)!, row.address, col.address) : undefined"
               :class="[
                 selectedCell?.collateralAddr === row.address
                   && selectedCell?.liabilityAddr === col.address
@@ -560,6 +600,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                     row.address,
                     col.address,
                   );
+                  if (!Number.isFinite(val)) return undefined;
                   return {
                     backgroundColor: getCellBgColor(
                       val,
@@ -686,6 +727,12 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                     title="Liquidation LTV ramping down"
                   />
                   <SvgIcon
+                    v-if="dotMetric === 'roe' && isCellCorrelated(row.address, col.address)"
+                    name="check-circle"
+                    class="!w-10 !h-10 text-success-500 shrink-0"
+                    title="Correlated pair"
+                  />
+                  <SvgIcon
                     v-if="shouldShowSparkles(row.address, col.address)"
                     name="sparks"
                     class="!w-10 !h-10 text-accent-500 shrink-0"
@@ -703,14 +750,20 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                     ]"
                   >
                     {{
-                      formatMetricValue(
-                        getCellMetricValue(
-                          matrix.cells.get(row.address)!.get(col.address)!,
-                          row.address,
-                          col.address,
-                        ),
-                        dotMetric,
-                      )
+                      Number.isFinite(getCellMetricValue(
+                        matrix.cells.get(row.address)!.get(col.address)!,
+                        row.address,
+                        col.address,
+                      ))
+                        ? formatMetricValue(
+                          getCellMetricValue(
+                            matrix.cells.get(row.address)!.get(col.address)!,
+                            row.address,
+                            col.address,
+                          ),
+                          dotMetric,
+                        )
+                        : 'N/A'
                     }}
                   </span>
                 </div>

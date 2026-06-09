@@ -35,6 +35,7 @@ const { planCollateralChange } = useEulerTx()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
+const { areAssetsCorrelated } = useTokenCorrelation()
 const { isReady: isVaultsReady } = useVaults()
 const { getOrFetch } = useVaultRegistry()
 const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
@@ -444,6 +445,13 @@ watchEffect(async () => {
 
 const roeBefore = computed(() => calculateRoe(supplyValueUsd.value, borrowValueUsd.value, fromSupplyApy.value, borrowApy.value))
 const roeAfter = computed(() => calculateRoe(nextSupplyValueUsd.value, borrowValueUsd.value, toSupplyApy.value, borrowApy.value))
+const isCurrentPairCorrelated = computed(() =>
+  !!fromVault.value && !!borrowVault.value && areAssetsCorrelated(fromVault.value.asset, borrowVault.value.asset),
+)
+const isTargetPairCorrelated = computed(() =>
+  !!toVault.value && !!borrowVault.value && areAssetsCorrelated(toVault.value.asset, borrowVault.value.asset),
+)
+const showRoeSummary = computed(() => isCurrentPairCorrelated.value || isTargetPairCorrelated.value)
 
 // ── Health metrics ───────────────────────────────────────────────────────
 const liqPriceInvert = usePriceInvert(
@@ -836,10 +844,13 @@ watch(() => cowSwapOrderStatus.orderStatus.value, (status) => {
             variant="card"
             class="w-full laptop:max-w-[360px]"
           >
-            <SummaryRow label="ROE">
+            <SummaryRow
+              v-if="showRoeSummary"
+              label="ROE"
+            >
               <SummaryValue
-                :before="roeBefore !== null ? formatNumber(roeBefore) : undefined"
-                :after="roeAfter !== null && (quote || isSameAsset) ? formatNumber(roeAfter) : undefined"
+                :before="isCurrentPairCorrelated && roeBefore !== null ? formatNumber(roeBefore) : undefined"
+                :after="isTargetPairCorrelated && roeAfter !== null && (quote || isSameAsset) ? formatNumber(roeAfter) : undefined"
                 suffix="%"
               />
             </SummaryRow>

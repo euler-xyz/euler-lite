@@ -19,6 +19,10 @@ import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy } = useRewardsApy()
+const { areAssetsCorrelated } = useTokenCorrelation()
+
+const isBorrowPairCorrelated = (pair: AnyBorrowVaultPair): boolean =>
+  areAssetsCorrelated(pair.collateral.asset, pair.borrow.asset)
 
 const getNetApy = (pair: AnyBorrowVaultPair) => {
   const baseSupplyApy = getVaultSupplyApy(pair.collateral)
@@ -310,6 +314,14 @@ const filteredBorrowList = computed(() => {
     .filter(matchesCustomFilters)
 })
 
+const correlatedFilteredCount = computed(() =>
+  filteredBorrowList.value.filter(isBorrowPairCorrelated).length,
+)
+
+const correlatedFilteredCountLabel = computed(() =>
+  `${correlatedFilteredCount.value} correlated market${correlatedFilteredCount.value === 1 ? '' : 's'}`,
+)
+
 const isPairRecentlyAdded = (pair: AnyBorrowVaultPair) =>
   isVaultRecentlyAdded(pair.collateral.address) || isVaultRecentlyAdded(pair.borrow.address)
 
@@ -412,11 +424,22 @@ const sortedBorrowList = computed(() => {
 
 <template>
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
-    <BasePageHeader
-      title="Borrow/Multiply"
-      description="Borrow against your assets in isolated lending markets."
-      class="mb-16"
-    />
+    <div class="mb-16 flex items-start justify-between gap-16 mobile:flex-col">
+      <BasePageHeader
+        title="Borrow/Multiply"
+        description="Borrow against your assets in isolated lending markets."
+      />
+      <div
+        v-if="correlatedFilteredCount > 0"
+        class="mt-8 inline-flex shrink-0 items-center gap-8 rounded-12 border border-line-default bg-surface-secondary px-12 py-8 text-p3 text-content-secondary mobile:mt-0"
+      >
+        <span
+          class="h-7 w-7 rounded-full bg-accent-500"
+          aria-hidden="true"
+        />
+        {{ correlatedFilteredCountLabel }}
+      </div>
+    </div>
 
     <div class="mb-16">
       <div class="flex justify-start items-center w-full gap-8 flex-wrap">

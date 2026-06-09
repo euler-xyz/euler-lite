@@ -21,6 +21,7 @@ const { account: planAccount } = usePlanAccount()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
+const { areAssetsCorrelated } = useTokenCorrelation()
 
 const positionIndex = usePositionIndex()
 
@@ -109,6 +110,13 @@ const nextBorrowValueUsd = ref<number | null>(null)
 
 const roeBefore = computed(() => calculateRoe(supplyValueUsd.value, currentBorrowValueUsd.value, collateralSupplyApy.value, fromBorrowApy.value))
 const roeAfter = computed(() => calculateRoe(supplyValueUsd.value, nextBorrowValueUsd.value, collateralSupplyApy.value, toBorrowApy.value))
+const isCurrentPairCorrelated = computed(() =>
+  !!collateralVault.value && !!fromVault.value && areAssetsCorrelated(collateralVault.value.asset, fromVault.value.asset),
+)
+const isTargetPairCorrelated = computed(() =>
+  !!collateralVault.value && !!toVault.value && areAssetsCorrelated(collateralVault.value.asset, toVault.value.asset),
+)
+const showRoeSummary = computed(() => isCurrentPairCorrelated.value || isTargetPairCorrelated.value)
 
 // ── Health metrics ───────────────────────────────────────────────────────
 const priceRatio = computed(() => {
@@ -480,10 +488,13 @@ const onToVaultChange = (selectedIndex: number) => {
             variant="card"
             class="w-full laptop:max-w-[360px]"
           >
-            <SummaryRow label="ROE">
+            <SummaryRow
+              v-if="showRoeSummary"
+              label="ROE"
+            >
               <SummaryValue
-                :before="roeBefore !== null ? formatNumber(roeBefore) : undefined"
-                :after="roeAfter !== null && quote ? formatNumber(roeAfter) : undefined"
+                :before="isCurrentPairCorrelated && roeBefore !== null ? formatNumber(roeBefore) : undefined"
+                :after="isTargetPairCorrelated && roeAfter !== null && quote ? formatNumber(roeAfter) : undefined"
                 suffix="%"
               />
             </SummaryRow>

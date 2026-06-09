@@ -18,6 +18,9 @@ interface TokenEntry {
   symbol: string
   decimals: number
   logoURI?: string
+  category?: string
+  categories?: string[]
+  tags?: string[]
 }
 
 type QueryTokenList = (url: string) => Promise<TokenListItem[]>
@@ -114,14 +117,27 @@ const getSdk = () => {
   return sdkPromise
 }
 
-const toTokenEntry = (token: TokenListItem): TokenEntry => ({
-  chainId: token.chainId,
-  address: token.address,
-  name: token.name,
-  symbol: token.symbol,
-  decimals: token.decimals,
-  logoURI: token.logoURI || undefined,
-})
+const stringArray = (value: unknown): string[] | undefined =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : undefined
+
+const toTokenEntry = (token: TokenListItem): TokenEntry => {
+  const meta = token as TokenListItem & {
+    category?: unknown
+    categories?: unknown
+    tags?: unknown
+  }
+  return {
+    chainId: token.chainId,
+    address: token.address,
+    name: token.name,
+    symbol: token.symbol,
+    decimals: token.decimals,
+    logoURI: token.logoURI || undefined,
+    ...(typeof meta.category === 'string' ? { category: meta.category } : {}),
+    ...(stringArray(meta.categories) ? { categories: stringArray(meta.categories) } : {}),
+    ...(stringArray(meta.tags) ? { tags: stringArray(meta.tags) } : {}),
+  }
+}
 
 function refreshEulerSdkTokenList(chainId: number): Promise<TokenEntry[]> {
   const key = String(chainId)

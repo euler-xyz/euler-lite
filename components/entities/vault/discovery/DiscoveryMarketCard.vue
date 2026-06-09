@@ -28,6 +28,7 @@ const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getBorrowRewardApy, getSupplyRewardApy, getLoopingRewardApy } = useRewardsApy()
 const { products } = useEulerLabels()
+const { areAssetsCorrelated } = useTokenCorrelation()
 
 const isGovernanceLimited = computed(() =>
   props.market.source === 'product' && (products[props.market.id]?.tags?.includes('governance limited') ?? false),
@@ -97,6 +98,22 @@ const getBestMaxRoe = (market: MarketGroup): BestMaxRoeResult => {
     collateralAddress: bestCollateralAddress,
   }
 }
+
+const getCorrelatedPairCount = (market: MarketGroup): number => {
+  let count = 0
+  for (const liability of getBorrowableVaults(market)) {
+    for (const ltv of liability.collaterals) {
+      if (ltv.borrowLTV === 0) continue
+      const collateral = findVault(market, ltv.address)
+      if (!collateral) continue
+      if (areAssetsCorrelated(collateral.asset, liability.asset)) count++
+    }
+  }
+  return count
+}
+
+const bestMaxRoe = computed(() => getBestMaxRoe(props.market))
+const correlatedPairCount = computed(() => getCorrelatedPairCount(props.market))
 
 const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
   props: {
@@ -200,6 +217,16 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
             :data-value="diagram.pairCount"
           >{{ diagram.pairCount }} pairs</span>
           <span
+            v-if="correlatedPairCount > 0"
+            class="text-success-600 text-p5 mt-4"
+            data-id="data-point"
+            :data-key="market.id"
+            data-field="correlated-pair-count"
+            :data-value="correlatedPairCount"
+          >
+            {{ correlatedPairCount }} correlated
+          </span>
+          <span
             v-if="getDeprecatedVaultCount(market) > 0"
             class="text-warning-500 text-p5 mt-4"
           >
@@ -260,51 +287,46 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
             {{ formatCompactUsdValue(market.metrics.totalAvailableLiquidity) }}
           </div>
         </div>
-        <template
-          v-for="(bestRoe, bestRoeIdx) in [getBestMaxRoe(market)]"
-          :key="'max-roe-' + bestRoeIdx"
-        >
+        <template v-if="bestMaxRoe.value > 0">
           <div class="flex-1 min-w-0">
-            <template v-if="bestRoe.value > 0">
-              <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-                Max ROE
-                <UiModalPreviewTrigger
-                  :component="VaultMaxRoeModal"
-                  :modal-data="getMaxRoeModalData(bestRoe)"
-                  aria-label="Show max ROE breakdown"
-                >
-                  <SvgIcon
-                    class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-                    name="info-circle"
-                  />
-                </UiModalPreviewTrigger>
-              </div>
-              <div
-                class="text-p2 text-content-primary flex items-center gap-4 min-w-0"
-                data-id="data-point"
-                :data-key="market.id"
-                data-field="best-max-roe"
-                :data-value="bestRoe.value"
+            <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+              Max ROE
+              <UiModalPreviewTrigger
+                :component="VaultMaxRoeModal"
+                :modal-data="getMaxRoeModalData(bestMaxRoe)"
+                aria-label="Show max ROE breakdown"
               >
-                <UiModalPreviewTrigger
-                  v-if="bestRoe.hasRewards"
-                  :component="VaultMaxRoeModal"
-                  :modal-data="getMaxRoeModalData(bestRoe)"
-                  aria-label="Show max ROE rewards breakdown"
-                >
-                  <SvgIcon
-                    name="sparks"
-                    class="!w-20 !h-20 text-accent-500 shrink-0 hover:text-accent-400 transition-colors cursor-pointer"
-                  />
-                </UiModalPreviewTrigger>
-                <span class="shrink-0">{{ formatNumber(bestRoe.value, 2, 2) }}%</span>
-                <span
-                  v-if="bestRoe.pair"
-                  class="text-p4 text-content-muted min-w-0"
-                  :class="isExpanded ? '' : 'truncate'"
-                >{{ bestRoe.pair }}</span>
-              </div>
-            </template>
+                <SvgIcon
+                  class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+                  name="info-circle"
+                />
+              </UiModalPreviewTrigger>
+            </div>
+            <div
+              class="text-p2 text-content-primary flex items-center gap-4 min-w-0"
+              data-id="data-point"
+              :data-key="market.id"
+              data-field="best-max-roe"
+              :data-value="bestMaxRoe.value"
+            >
+              <UiModalPreviewTrigger
+                v-if="bestMaxRoe.hasRewards"
+                :component="VaultMaxRoeModal"
+                :modal-data="getMaxRoeModalData(bestMaxRoe)"
+                aria-label="Show max ROE rewards breakdown"
+              >
+                <SvgIcon
+                  name="sparks"
+                  class="!w-20 !h-20 text-accent-500 shrink-0 hover:text-accent-400 transition-colors cursor-pointer"
+                />
+              </UiModalPreviewTrigger>
+              <span class="shrink-0">{{ formatNumber(bestMaxRoe.value, 2, 2) }}%</span>
+              <span
+                v-if="bestMaxRoe.pair"
+                class="text-p4 text-content-muted min-w-0"
+                :class="isExpanded ? '' : 'truncate'"
+              >{{ bestMaxRoe.pair }}</span>
+            </div>
           </div>
         </template>
       </div>
@@ -408,19 +430,15 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
           {{ formatCompactUsdValue(market.metrics.totalBorrowed) }}
         </div>
       </div>
-      <template
-        v-for="(bestRoe, bestRoeIdx) in [getBestMaxRoe(market)]"
-        :key="'max-roe-mobile-' + bestRoeIdx"
-      >
+      <template v-if="bestMaxRoe.value > 0">
         <div
-          v-if="bestRoe.value > 0"
           class="flex w-full justify-between"
         >
           <div class="text-content-tertiary text-p3 flex items-center gap-4 whitespace-nowrap">
             Max ROE
             <UiModalPreviewTrigger
               :component="VaultMaxRoeModal"
-              :modal-data="getMaxRoeModalData(bestRoe)"
+              :modal-data="getMaxRoeModalData(bestMaxRoe)"
               aria-label="Show max ROE breakdown"
             >
               <SvgIcon
@@ -432,9 +450,9 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
           <div class="text-p2 text-content-primary flex flex-wrap items-center justify-end gap-x-4">
             <span class="flex items-center gap-4 shrink-0">
               <UiModalPreviewTrigger
-                v-if="bestRoe.hasRewards"
+                v-if="bestMaxRoe.hasRewards"
                 :component="VaultMaxRoeModal"
-                :modal-data="getMaxRoeModalData(bestRoe)"
+                :modal-data="getMaxRoeModalData(bestMaxRoe)"
                 aria-label="Show max ROE rewards breakdown"
               >
                 <SvgIcon
@@ -442,13 +460,13 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
                   class="!w-20 !h-20 text-accent-500 shrink-0 hover:text-accent-400 transition-colors cursor-pointer"
                 />
               </UiModalPreviewTrigger>
-              {{ formatNumber(bestRoe.value, 2, 2) }}%
+              {{ formatNumber(bestMaxRoe.value, 2, 2) }}%
             </span>
             <span
-              v-if="bestRoe.pair"
+              v-if="bestMaxRoe.pair"
               class="text-p4 text-content-muted"
               :class="isExpanded ? '' : 'truncate max-w-[100px]'"
-            >{{ bestRoe.pair }}</span>
+            >{{ bestMaxRoe.pair }}</span>
           </div>
         </div>
       </template>

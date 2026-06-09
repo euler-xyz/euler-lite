@@ -12,6 +12,7 @@ import { isEVault, type EVault, type PortfolioBorrowPosition, type SwapQuote, ty
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
+import { getNetAPY } from '~/utils/vault/apy'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { computeMaxMultiplier } from '~/utils/multiply-math'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
@@ -35,6 +36,7 @@ const { eulerLensAddresses } = useEulerAddresses()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
+const { areAssetsCorrelated, getAssetCorrelationLabel } = useTokenCorrelation()
 const {
   runPreparedSimulation: runMultiplySimulation,
   simulationError: multiplySimulationError,
@@ -103,6 +105,12 @@ const pairAssets = computed<VaultAsset[]>(() => {
   return [multiplyLongVault.value.asset, multiplyShortVault.value.asset]
 })
 const pairAssetsLabel = usePositionPairLabel(position)
+const isPairCorrelated = computed(() =>
+  !!multiplyLongVault.value && !!multiplyShortVault.value && areAssetsCorrelated(multiplyLongVault.value.asset, multiplyShortVault.value.asset),
+)
+const pairCorrelationCategory = computed(() =>
+  getAssetCorrelationLabel(multiplyLongVault.value?.asset.address, multiplyLongVault.value?.asset.symbol),
+)
 
 const multiplyLongProduct = useEulerProductOfVault(computed(() => multiplyLongVault.value?.address || ''))
 const multiplyShortProduct = useEulerProductOfVault(computed(() => multiplyShortVault.value?.address || ''))
@@ -304,6 +312,38 @@ const multiplyRoeAfter = computed(() => {
     nextSupplyValueUsd.value,
     nextBorrowValueUsd.value,
     multiplyWeightedSupplyApy.value,
+    multiplyBorrowApy.value,
+  )
+})
+const multiplyNetApyBefore = computed(() => {
+  if (
+    currentSupplyValueUsd.value === null
+    || currentBorrowValueUsd.value === null
+    || multiplyLongApy.value === null
+    || multiplyBorrowApy.value === null
+  ) {
+    return null
+  }
+  return getNetAPY(
+    currentSupplyValueUsd.value,
+    multiplyLongApy.value,
+    currentBorrowValueUsd.value,
+    multiplyBorrowApy.value,
+  )
+})
+const multiplyNetApyAfter = computed(() => {
+  if (
+    nextSupplyValueUsd.value === null
+    || nextBorrowValueUsd.value === null
+    || multiplyWeightedSupplyApy.value === null
+    || multiplyBorrowApy.value === null
+  ) {
+    return null
+  }
+  return getNetAPY(
+    nextSupplyValueUsd.value,
+    multiplyWeightedSupplyApy.value,
+    nextBorrowValueUsd.value,
     multiplyBorrowApy.value,
   )
 })
@@ -844,6 +884,11 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
           :assets-label="pairAssetsLabel"
           size="large"
         />
+        <CorrelatedPairBadge
+          v-if="isPairCorrelated"
+          class="w-fit"
+          :category="pairCorrelationCategory"
+        />
 
         <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
           <div class="flex flex-col gap-16 w-full">
@@ -937,10 +982,23 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
             variant="card"
             class="w-full laptop:max-w-[360px]"
           >
-            <SummaryRow label="ROE">
+            <SummaryRow
+              v-if="isPairCorrelated"
+              label="ROE"
+            >
               <SummaryValue
                 :before="multiplyRoeBefore !== null ? formatNumber(multiplyRoeBefore) : undefined"
                 :after="multiplyRoeAfter !== null && multiplySwapReady ? formatNumber(multiplyRoeAfter) : undefined"
+                suffix="%"
+              />
+            </SummaryRow>
+            <SummaryRow
+              v-else
+              label="Net APY"
+            >
+              <SummaryValue
+                :before="multiplyNetApyBefore !== null ? formatNumber(multiplyNetApyBefore) : undefined"
+                :after="multiplyNetApyAfter !== null && multiplySwapReady ? formatNumber(multiplyNetApyAfter) : undefined"
                 suffix="%"
               />
             </SummaryRow>

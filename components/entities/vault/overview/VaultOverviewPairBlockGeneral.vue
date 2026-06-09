@@ -19,9 +19,16 @@ import { getVaultAvailableLiquidity } from '~/utils/vault-display'
 import { VaultNetApyPairModal, VaultMaxRoeModal, VaultRampDownModal, VaultSupplyApyModal, VaultBorrowApyModal, UiModalPreviewTrigger } from '#components'
 
 const { pair } = defineProps<{ pair: AnyBorrowVaultPair | PortfolioBorrowPosition<VaultEntity> }>()
+const { areAssetsCorrelated, getAssetCorrelationLabel } = useTokenCorrelation()
 
 const borrowVault = computed(() => getPairBorrowVault(pair))
 const collateralVault = computed(() => getPairCollateralVault(pair))
+const isPairCorrelated = computed(() =>
+  areAssetsCorrelated(collateralVault.value.asset, borrowVault.value.asset),
+)
+const pairCorrelationCategory = computed(() =>
+  getAssetCorrelationLabel(collateralVault.value.asset.address, collateralVault.value.asset.symbol),
+)
 const pairBorrowLTV = computed(() => getPairBorrowLTV(pair))
 const pairBorrowLTVPercent = computed(() =>
   pairBorrowLTV.value === undefined ? null : ltvToPercent(pairBorrowLTV.value),
@@ -202,6 +209,11 @@ const rampDownModalData = computed(() => ({
         </div>
       </div>
       <div class="flex flex-col gap-12">
+        <CorrelatedPairBadge
+          v-if="isPairCorrelated"
+          class="w-fit"
+          :category="pairCorrelationCategory"
+        />
         <div class="grid grid-cols-2 gap-x-32 gap-y-20">
           <VaultOverviewLabelValue label="Price">
             <template v-if="displayPrice !== undefined">
@@ -437,7 +449,9 @@ const rampDownModalData = computed(() => ({
                 :value="pairBorrowLTVPercent === null ? '-' : `${formatNumber(maxMultiplier, 2, 2)}x`"
               />
 
-              <VaultOverviewLabelValue orientation="horizontal">
+              <VaultOverviewLabelValue
+                orientation="horizontal"
+              >
                 <template #label>
                   <span class="flex items-center gap-4">
                     Max ROE

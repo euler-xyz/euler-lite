@@ -56,6 +56,7 @@ const { isReady: isVaultsReady } = useVaults()
 const { getOrFetch } = useVaultRegistry()
 const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
 const { client: rpcClient } = useRpcClient()
+const { areAssetsCorrelated, getAssetCorrelationLabel } = useTokenCorrelation()
 
 const borrowVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
 const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() => position.value ? position.value.collateralVault as EVault | SecuritizeCollateralVault | undefined : undefined)
@@ -79,6 +80,16 @@ const pairAssets = computed(() => {
   if (!collateralVault.value || !borrowVault.value) return []
   return [collateralVault.value.asset, borrowVault.value.asset]
 })
+const isPositionCorrelated = computed(() => {
+  if (!collateralVault.value || !borrowVault.value) return false
+  const collaterals = collateralItems.value.length
+    ? collateralItems.value.map(item => item.vault)
+    : [collateralVault.value]
+  return collaterals.every(vault => areAssetsCorrelated(vault.asset, borrowVault.value!.asset))
+})
+const positionCorrelationCategory = computed(() =>
+  getAssetCorrelationLabel(collateralVault.value?.asset.address, collateralVault.value?.asset.symbol),
+)
 const hasNoBorrow = computed(() => (position.value?.borrowed ?? 0n) === 0n)
 const hasQueryFailure = computed(() => !borrowVault.value || !collateralVault.value)
 const isEligibleForLiquidation = computed(() => position.value?.liquidatable ?? false)
@@ -793,6 +804,11 @@ watch([isConnected, isSpyMode, address], () => {
         :assets="pairAssets"
         :assets-label="pairAssetsLabel"
       />
+      <CorrelatedPairBadge
+        v-if="isPositionCorrelated"
+        class="w-fit"
+        :category="positionCorrelationCategory"
+      />
 
       <UiAlert
         v-if="hasQueryFailure"
@@ -848,7 +864,10 @@ watch([isConnected, isSpyMode, address], () => {
               {{ Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
             </div>
           </div>
-          <div class="flex justify-between items-center">
+          <div
+            v-if="isPositionCorrelated"
+            class="flex justify-between items-center"
+          >
             <div class="flex items-center gap-4 text-p2 text-content-secondary">
               ROE
               <UiModalPreviewTrigger
