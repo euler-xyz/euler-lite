@@ -79,7 +79,6 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | `TENDERLY_ACCESS_KEY`, `TENDERLY_ACCOUNT_SLUG`, `TENDERLY_PROJECT_SLUG` | Optional Tenderly simulation configuration. |
 | `FUUL_API_URL` or `NUXT_PUBLIC_FUUL_API_URL` | Optional Fuul API upstream override. |
 | `INCENTRA_API_URL` or `NUXT_PUBLIC_INCENTRA_API_URL` | Optional Incentra/Brevis API upstream override. |
-| `SENTRY_AUTH_TOKEN` | Build-time sourcemap upload token; do not set at runtime. |
 
 #### Branding & Feature Flags
 
