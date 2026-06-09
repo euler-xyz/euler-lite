@@ -6,8 +6,7 @@
       "height": 1000
     },
     "localStorage": {
-      "is-onboarding-completed": "true",
-      "migration-announcement-seen": "true"
+      "is-onboarding-completed": "true"
     },
     "waitFor": [
       "[data-id]"
