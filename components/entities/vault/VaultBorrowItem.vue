@@ -724,10 +724,7 @@ const linkPath = computed(() => ({
           </div>
         </div>
       </div>
-      <div
-        v-if="showMaxRoe"
-        class="flex w-full justify-between"
-      >
+      <div class="flex w-full justify-between">
         <div class="flex-1">
           <div class="text-content-tertiary text-p3 flex items-center gap-4">
             Supply APY
