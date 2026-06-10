@@ -22,6 +22,7 @@ const { marketGroups, isResolvingTVL, isReady: marketGroupsReady } = useMarketGr
 const { getBestMaxROE } = useBestMaxROE(marketGroups)
 const { isEVaultUpdating, isEarnUpdating, isSecuritizeUpdating, isEscrowUpdating } = useVaults()
 const { chainId } = useEulerAddresses()
+const { isLoading: isTokenListLoading } = useTokenList()
 const { entities } = useEulerLabels()
 const { enableEntityBranding } = useDeployConfig()
 
@@ -70,7 +71,10 @@ const {
     { key: 'totalAvailableLiquidity', label: 'Available liquidity', shortLabel: 'Avail. liquidity', unit: 'usd' },
   ],
   (group, metric) => {
-    if (metric === 'bestMaxROE') return getBestMaxROE(group.id).value
+    if (metric === 'bestMaxROE') {
+      const best = getBestMaxROE(group.id)
+      return best.metric === 'max-roe' ? best.value : Number.NaN
+    }
     const val = group.metrics[metric as keyof typeof group.metrics]
     return typeof val === 'number' ? val : 0
   },
@@ -198,6 +202,30 @@ const applyDeprecatedGroupSort = (sorted: MarketGroup[]): MarketGroup[] => {
   })
 }
 
+const compareMarketLiquidityDesc = (a: MarketGroup, b: MarketGroup): number =>
+  b.metrics.totalAvailableLiquidity - a.metrics.totalAvailableLiquidity
+
+const compareMarketNameAsc = (a: MarketGroup, b: MarketGroup): number =>
+  (a.name || a.id).localeCompare(b.name || b.id)
+
+const compareMaxRoeMarkets = (a: MarketGroup, b: MarketGroup, direction: 'desc' | 'asc' = 'desc'): number => {
+  const aBest = getBestMaxROE(a.id)
+  const bBest = getBestMaxROE(b.id)
+  const aHasRoe = aBest.metric === 'max-roe'
+  const bHasRoe = bBest.metric === 'max-roe'
+  const directionFactor = direction === 'asc' ? -1 : 1
+
+  if (aHasRoe !== bHasRoe) return aHasRoe ? -1 : 1
+
+  const metricDelta = (bBest.value - aBest.value) * directionFactor
+  if (metricDelta !== 0) return metricDelta
+
+  const liquidityDelta = compareMarketLiquidityDesc(a, b)
+  if (liquidityDelta !== 0) return liquidityDelta
+
+  return compareMarketNameAsc(a, b)
+}
+
 const sortedMarkets = computed(() => {
   let sorted: MarketGroup[]
   switch (sortBy.value) {
@@ -230,10 +258,8 @@ const sortedMarkets = computed(() => {
       return applyDeprecatedGroupSort(applyRecentlyAddedSort(scored.map(s => s.group)))
     }
     case 'Max ROE':
-      sorted = applyRecentlyAddedSort([...filteredMarkets.value].sort((a, b) =>
-        getBestMaxROE(b.id).value - getBestMaxROE(a.id).value,
-      ))
-      break
+      sorted = [...filteredMarkets.value].sort((a, b) => compareMaxRoeMarkets(a, b, sortDir.value))
+      return applyDeprecatedGroupSort(sorted)
     case 'Total Supply':
       sorted = applyRecentlyAddedSort([...filteredMarkets.value].sort((a, b) =>
         b.metrics.totalTVL - a.metrics.totalTVL,
@@ -258,7 +284,7 @@ const sortedMarkets = computed(() => {
 
 const isLoading = computed(() =>
   isEVaultUpdating.value || isEarnUpdating.value || isSecuritizeUpdating.value || isEscrowUpdating.value
-  || !marketGroupsReady.value || isResolvingTVL.value,
+  || isTokenListLoading.value || !marketGroupsReady.value || isResolvingTVL.value,
 )
 const { isSlow } = useSlowLoading(isLoading)
 </script>

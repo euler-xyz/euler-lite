@@ -1,13 +1,8 @@
 <script setup lang="ts">
 import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
-import { useModal } from '~/components/ui/composables/useModal'
-import { MigrationAnnouncementModal } from '#components'
 
 const route = useRoute()
 const router = useRouter()
-const { migrationAnnouncementUrl, migrationLegacyAppUrl } = useDeployConfig()
-const migrationAnnouncementSeen = useLocalStorage('migration-announcement-seen', false)
-const modal = useModal()
 
 const { loadEulerConfig, chainId } = useEulerAddresses()
 const { loadVaults, isReady: isVaultsReady, resetVaultsState, refreshVaults, setShowAllLabelEntries } = useVaults()
@@ -97,23 +92,8 @@ watch(route, () => {
   })
 }, { immediate: true })
 
-const checkMigrationAnnouncement = () => {
-  if (!migrationAnnouncementUrl || migrationAnnouncementSeen.value) return
-
-  modal.open(MigrationAnnouncementModal, {
-    isNotClosable: true,
-    onClose: () => { migrationAnnouncementSeen.value = true },
-    props: {
-      announcementUrl: migrationAnnouncementUrl,
-      legacyAppUrl: migrationLegacyAppUrl,
-    },
-  })
-}
-
 checkOnboarding()
 void loadEulerConfig()
-// onMounted (not synchronous like checkOnboarding) because the modal system requires the DOM
-onMounted(checkMigrationAnnouncement)
 
 watch([chainId, showAllLabelEntries], () => {
   setShowAllLabelEntries(showAllLabelEntries.value)

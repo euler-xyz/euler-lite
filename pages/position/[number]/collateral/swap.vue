@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { isSecuritizeCollateralVault, type SwapQuote, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, isSecuritizeCollateralVault, SwapperMode, type SwapQuote, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { areRoeCollateralVaultsCorrelatedWithBorrow, resolvePositionRoeCollateralVaults } from '~/utils/position-roe'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber, getCollateralUsdValueOrZero } from '~/utils/sdk-prices'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
-import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
@@ -35,6 +35,7 @@ const { planCollateralChange } = useEulerTx()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
+const { getTokenCategoryTags } = useTokenList()
 const { isReady: isVaultsReady } = useVaults()
 const { getOrFetch } = useVaultRegistry()
 const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
@@ -399,6 +400,53 @@ const borrowApy = computed(() => {
   if (!borrowVault.value) return null
   const base = getVaultBorrowApy(borrowVault.value)
   return withVaultIntrinsicApy(base, borrowVault.value, enableIntrinsicApy.value) - getBorrowRewardApy(borrowVault.value.address, fromVault.value?.address)
+})
+const projectedCollateralVaults = computed<Array<EVault | SecuritizeCollateralVault>>(() => {
+  if (!position.value) return []
+
+  const sourceAddress = normalizeAddress(fromVault.value?.address)
+  const targetAddress = normalizeAddress(toVault.value?.address)
+  const removesSource = isMaxSwap.value
+  const vaults = new Map<string, EVault | SecuritizeCollateralVault>()
+
+  for (const collateralPosition of position.value.collaterals) {
+    const vault = collateralPosition.vault
+    if (!vault || (!isEVault(vault) && !isSecuritizeCollateralVault(vault))) continue
+    const address = normalizeAddress(vault.address)
+    if (!address) continue
+    if (removesSource && sourceAddress && address === sourceAddress) continue
+    vaults.set(address, vault as EVault | SecuritizeCollateralVault)
+  }
+
+  if (!vaults.size && fromVault.value) {
+    const address = normalizeAddress(fromVault.value.address)
+    if (address && !(removesSource && sourceAddress && address === sourceAddress)) {
+      vaults.set(address, fromVault.value)
+    }
+  }
+
+  if (toVault.value && targetAddress) {
+    vaults.set(targetAddress, toVault.value)
+  }
+
+  return [...vaults.values()]
+})
+const positionRoeCollateralVaults = computed(() =>
+  resolvePositionRoeCollateralVaults(position.value, fromVault.value),
+)
+const hasSingleCollateralFullSwapRoeScope = computed(() =>
+  positionRoeCollateralVaults.value.isComplete
+  && positionRoeCollateralVaults.value.vaults.length === 1
+  && projectedCollateralVaults.value.length === 1
+  && isMaxSwap.value,
+)
+const isRoeApplicable = computed(() => {
+  if (!toVault.value || !borrowVault.value) return false
+  if (!hasSingleCollateralFullSwapRoeScope.value) return false
+  const collaterals = projectedCollateralVaults.value
+  if (!collaterals.length) return false
+
+  return areRoeCollateralVaultsCorrelatedWithBorrow(collaterals, borrowVault.value, getTokenCategoryTags)
 })
 
 // ── Collateral USD valuation (from liability vault's perspective) ─────────
@@ -836,7 +884,10 @@ watch(() => cowSwapOrderStatus.orderStatus.value, (status) => {
             variant="card"
             class="w-full laptop:max-w-[360px]"
           >
-            <SummaryRow label="ROE">
+            <SummaryRow
+              v-if="isRoeApplicable"
+              label="ROE"
+            >
               <SummaryValue
                 :before="roeBefore !== null ? formatNumber(roeBefore) : undefined"
                 :after="roeAfter !== null && (quote || isSameAsset) ? formatNumber(roeAfter) : undefined"

@@ -92,7 +92,7 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
   <div
     v-if="vault"
     :class="[size === 'large' ? 'gap-16' : 'gap-12']"
-    class="flex items-center"
+    class="flex items-center min-w-0"
     data-id="vault-header"
     :data-key="pairVault ? `${vault.address.toLowerCase()}:${pairVault.address.toLowerCase()}` : vault.address.toLowerCase()"
     :data-vault-address="vault.address.toLowerCase()"
@@ -108,10 +108,10 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
       :size="size === 'large' ? '46' : '38'"
     />
 
-    <div>
-      <div class="flex items-center gap-8 mb-4">
+    <div class="min-w-0">
+      <div class="flex flex-wrap items-center gap-8 mb-4 min-w-0">
         <span
-          class="text-content-tertiary"
+          class="text-content-tertiary min-w-0"
           data-id="data-point"
           :data-key="pairVault ? `${vault.address.toLowerCase()}:${pairVault.address.toLowerCase()}` : vault.address.toLowerCase()"
           data-field="name"
@@ -147,13 +147,14 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
       </div>
 
       <p
-        class="text-p2 font-semibold text-content-primary"
+        class="flex flex-wrap items-center gap-8 text-p2 font-semibold text-content-primary min-w-0"
         data-id="data-point"
         :data-key="pairVault ? `${vault.address.toLowerCase()}:${pairVault.address.toLowerCase()}` : vault.address.toLowerCase()"
         data-field="asset-symbols"
         :data-value="displayAssetsLabel"
       >
-        {{ displayAssetsLabel }}
+        <span class="min-w-0 truncate">{{ displayAssetsLabel }}</span>
+        <slot name="symbol-trailing" />
       </p>
     </div>
   </div>

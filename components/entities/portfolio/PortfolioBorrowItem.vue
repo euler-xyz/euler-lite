@@ -24,6 +24,8 @@ import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { getBorrowPositionEffectiveLiquidationLTV, getBorrowPositionUserLTVPercent } from '~/utils/ltv'
+import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
+import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 
 const { position } = defineProps<{ position: PortfolioBorrowPosition<VaultEntity> }>()
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
@@ -41,6 +43,7 @@ const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, getEligibleLoopingRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, getLoopingRewardCampaigns, hasSupplyRewards, hasBorrowRewards, isLoopingEligible } = useRewardsApy()
 const { viewer, visibleBreakdown, visibleTotal } = useApyVisibility()
+const { getTokenCategoryTags } = useTokenList()
 
 const borrowVault = computed(() => position.borrowVault as EVault)
 const collateralVault = computed(() => position.collateralVault as EVault | SecuritizeCollateralVault)
@@ -168,17 +171,38 @@ const pairName = computed(() => {
 })
 const supplyRewardAPY = computed(() => getSupplyRewardApy(collateralVault.value.address || ''))
 const borrowRewardAPY = computed(() => getBorrowRewardApy(borrowVault.value.address || '', collateralVault.value.address || ''))
+const actualMultiplier = computed(() => {
+  const multiplier = position.multiplier
+  return multiplier !== undefined && Number.isFinite(multiplier) ? multiplier : null
+})
+const rewardMultiplier = computed(() => actualMultiplier.value ?? 0)
 const loopingRewardAPY = computed(() =>
-  getEligibleLoopingRewardApy(borrowVault.value.address || '', collateralVault.value.address || '', actualMultiplier.value),
+  getEligibleLoopingRewardApy(borrowVault.value.address || '', collateralVault.value.address || '', rewardMultiplier.value),
 )
 const loopingEligible = computed(() =>
-  isLoopingEligible(borrowVault.value.address || '', collateralVault.value.address || '', actualMultiplier.value),
+  isLoopingEligible(borrowVault.value.address || '', collateralVault.value.address || '', rewardMultiplier.value),
 )
 const hasRewards = computed(() =>
   hasSupplyRewards(collateralVault.value.address || '')
   || hasBorrowRewards(borrowVault.value.address || '', collateralVault.value.address || '')
   || loopingEligible.value,
 )
+const isRoeApplicable = computed(() => {
+  const collaterals = collateralItems.value.map(item => item.vault)
+  if (!collaterals.length || !borrowVault.value) return false
+  if (collateralAddresses.value.length > collaterals.length) return false
+  return areRoeCollateralVaultsCorrelatedWithBorrow(collaterals, borrowVault.value, getTokenCategoryTags)
+})
+const correlatedBadgeTitle = computed(() => {
+  const category = getTokenAddressesCorrelationCategoryLabel(
+    [
+      ...collateralItems.value.map(item => item.vault.asset.address),
+      borrowVault.value.asset.address,
+    ],
+    getTokenCategoryTags,
+  )
+  return category ? `Correlated category: ${category}` : undefined
+})
 const collateralSupplyApy = computed(() => {
   return withVaultIntrinsicApy(
     getVaultSupplyApy(collateralVault.value),
@@ -251,7 +275,9 @@ const userLTVDisplay = computed(() => {
   if (userLTV.value === null) return ''
   return Number.isFinite(userLTV.value) ? formatNumber(userLTV.value, 2) : '∞'
 })
-const actualMultiplier = computed(() => position.multiplier ?? 0)
+const actualMultiplierDisplay = computed(() =>
+  actualMultiplier.value !== null ? `${formatNumber(actualMultiplier.value, 2, 2)}x` : '-',
+)
 
 const netApyModalData = computed(() => ({
   props: {
@@ -277,7 +303,7 @@ const roeModalData = computed(() => ({
   props: {
     roeBreakdown: visibleRoeBreakdown.value,
     roe: roe.value ?? 0,
-    multiplier: Number.isFinite(actualMultiplier.value) ? actualMultiplier.value : 0,
+    multiplier: actualMultiplier.value,
     supplyAPY: collateralSupplyApy.value,
     borrowAPY: borrowApy.value,
     supplyRewardAPY: supplyRewardAPY.value || null,
@@ -312,6 +338,7 @@ const openPositionInformationModal = () => {
     :data-sub-account="position.subAccount.toLowerCase()"
     :data-collateral-address="primaryCollateralAddress.toLowerCase()"
     :data-borrow-address="borrowAddress.toLowerCase()"
+    :data-correlated="isRoeApplicable"
   >
     <div class="flex py-16 px-16 pb-12 border-b border-line-default">
       <div
@@ -367,13 +394,26 @@ const openPositionInformationModal = () => {
               </span>
             </div>
             <div
-              class="text-h5 text-content-primary truncate"
+              class="text-h5 text-content-primary flex items-center gap-8 min-w-0"
               data-id="data-point"
               :data-key="positionKey"
               data-field="asset-symbols"
               :data-value="pairSymbols"
             >
-              {{ pairSymbols }}
+              <span class="truncate">{{ pairSymbols }}</span>
+              <span class="inline-flex items-center gap-4">
+                <CorrelatedPairBadge
+                  v-if="isRoeApplicable"
+                  compact
+                  :title="correlatedBadgeTitle"
+                />
+                <CorrelatedPairBadge
+                  v-if="isRoeApplicable && actualMultiplierDisplay !== '-'"
+                  compact
+                  :label="actualMultiplierDisplay"
+                  title="Effective multiplier at your LTV."
+                />
+              </span>
             </div>
           </div>
           <div class="flex gap-16 items-start shrink-0">
@@ -415,7 +455,10 @@ const openPositionInformationModal = () => {
                 {{ netAPY !== undefined && Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
               </div>
             </div>
-            <div class="flex flex-col items-end">
+            <div
+              v-if="isRoeApplicable"
+              class="flex flex-col items-end"
+            >
               <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                 ROE
                 <UiModalPreviewTrigger

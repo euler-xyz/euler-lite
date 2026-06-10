@@ -19,6 +19,8 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { SlippageSettingsModal, VaultUnverifiedDisclaimerModal } from '#components'
 import { getAddress } from 'viem'
+import { areRoeCollateralVaultsCorrelatedWithBorrow, mergeRoeCollateralVaults } from '~/utils/position-roe'
+import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 
 const router = useRouter()
 const route = useRoute()
@@ -26,6 +28,7 @@ const modal = useModal()
 const reviewBorrowLabel = 'Review Borrow'
 const reviewMultiplyLabel = 'Review Multiply'
 const { getBorrowVaultPair, updateVault } = useVaults()
+const { getTokenCategoryTags } = useTokenList()
 const { address, isConnected } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const { chainId } = useEulerAddresses()
@@ -52,10 +55,15 @@ const collateralAddress = route.params.collateral as string
 const borrowAddress = route.params.borrow as string
 useOperationGuard([collateralAddress, borrowAddress])
 
+const formTabFromQuery = (value: unknown): 'borrow' | 'multiply' | undefined => {
+  const tabValue = Array.isArray(value) ? value[0] : value
+  return tabValue === 'borrow' || tabValue === 'multiply' ? tabValue : undefined
+}
+
 // --- Shared state ---
 const balance = ref(0n)
 const tab = ref()
-const formTab = ref<'borrow' | 'multiply'>('borrow')
+const formTab = ref<'borrow' | 'multiply'>(formTabFromQuery(route.query.tab) ?? 'borrow')
 const pendingSubAccount = ref<string | null>(null)
 const isPendingSubAccountLoading = ref(false)
 let pendingSubAccountPromise: Promise<string> | null = null
@@ -74,7 +82,6 @@ const borrowVault = computed(() => pair.value?.borrow)
 const collateralVault = computed(() => pair.value?.collateral)
 const isSecuritizeCollateral = computed(() => pair.value ? isSecuritizeBorrowPair(pair.value) : false)
 const pairAssets = computed(() => [collateralVault.value?.asset, borrowVault.value?.asset])
-
 // --- Shared functions ---
 const normalizeAddress = (addr?: string) => {
   if (!addr) return ''
@@ -170,6 +177,29 @@ const multiply = useMultiplyForm({
   isGeoBlocked,
   isMultiplyRestricted,
 })
+const showMultiplyRoe = computed(() =>
+  areRoeCollateralVaultsCorrelatedWithBorrow(
+    mergeRoeCollateralVaults([
+      collateralVault.value,
+      multiply.multiplySupplyVault.value,
+    ]),
+    borrowVault.value,
+    getTokenCategoryTags,
+  ),
+)
+const correlatedBadgeTitle = computed(() => {
+  const category = getTokenAddressesCorrelationCategoryLabel(
+    [
+      ...mergeRoeCollateralVaults([
+        collateralVault.value,
+        multiply.multiplySupplyVault.value,
+      ]).map(vault => vault.asset.address),
+      borrowVault.value?.asset.address,
+    ],
+    getTokenCategoryTags,
+  )
+  return category ? `Correlated category: ${category}` : undefined
+})
 
 const { guardWithPriceImpact: guardWithMultiplyPriceImpact } = usePriceImpactGate({
   directPriceImpact: multiply.multiplyPriceImpact,
@@ -210,6 +240,7 @@ const multiplyDisabledReasonInfo = computed((): DisabledReasonInfo | undefined =
   if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
   if (isMultiplyRestricted.value) return { message: 'Multiply is not available for this pair in your region', variant: 'warning' }
   if (multiply.multiplyErrorText.value) return { message: multiply.multiplyErrorText.value, variant: 'error' }
+  if (multiply.multiplyCapErrorText.value) return { message: multiply.multiplyCapErrorText.value, variant: 'error' }
   if (multiply.multiplySimulationError.value) return { message: multiply.multiplySimulationError.value, variant: 'error' }
   if (!multiply.multiplyIsSameAsset.value && multiply.isMultiplyQuoteLoading.value && multiply.multiplyDebtAmountNano.value > 0n) return { message: 'Fetching swap quotes...', variant: 'warning' }
   if (!multiply.multiplyIsSameAsset.value && !multiply.multiplySelectedProvider.value && multiply.multiplyDebtAmountNano.value > 0n) return { message: 'Select a swap quote to continue', variant: 'warning' }
@@ -420,6 +451,13 @@ watch(formTab, () => {
   borrow.resetOnTabSwitch()
   multiply.resetOnTabSwitch()
 })
+
+watch(
+  () => [route.params.collateral, route.params.borrow, route.query.tab],
+  () => {
+    formTab.value = formTabFromQuery(route.query.tab) ?? 'borrow'
+  },
+)
 </script>
 
 <template>
@@ -447,6 +485,13 @@ watch(formTab, () => {
           :assets="pairAssets as VaultAsset[]"
           size="large"
         >
+          <template #symbol-trailing>
+            <CorrelatedPairBadge
+              v-if="showMultiplyRoe"
+              compact
+              :title="correlatedBadgeTitle"
+            />
+          </template>
           <UiShareLinkButton
             class="-ml-4 !w-24 !h-24"
             :path="`/borrow/${collateralVault.address}/${borrowVault.address}`"

@@ -16,6 +16,7 @@ import { getOracleRouteStepKey, useOracleAdapterPrices } from '~/composables/use
 import { getCollateralOracleRouteSteps, getDebtOracleRouteSteps, isOracleAdapterRouteStep } from '~/utils/oracle-route-steps'
 import type { MarketGroup } from '~/entities/lend-discovery'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
 import type { Address } from 'viem'
 import type { CSSProperties } from 'vue'
 
@@ -43,6 +44,7 @@ const {
 } = useRewardsApy()
 const { oracleAdapters, loadAllOracleAdapters } = useEulerLabels()
 const { chainId } = useEulerAddresses()
+const { getTokenCategoryTags } = useTokenList()
 
 const hoveredCell = ref<{
   collateralAddr: string
@@ -103,6 +105,20 @@ const computeEnhancedApys = (
   }
 }
 
+const isCorrelatedCell = (
+  collateralAddr: string,
+  liabilityAddr: string,
+): boolean => {
+  const collateral = findVault(props.market, collateralAddr)
+  const liability = findVault(props.market, liabilityAddr)
+  if (!collateral || !liability) return false
+  return areTokenAddressesCorrelatedByTags(
+    collateral.asset.address,
+    liability.asset.address,
+    getTokenCategoryTags,
+  )
+}
+
 const getCellMetricValue = (
   cell: MatrixCell,
   collateralAddr: string,
@@ -117,18 +133,29 @@ const getCellMetricValue = (
       return getMaxMultiplier(cell.ltv.borrowLTV)
     case 'net-apy':
       return computeEnhancedApys(cell, collateralAddr, liabilityAddr).netApy
-    case 'roe':
-      return computeEnhancedApys(cell, collateralAddr, liabilityAddr).roe
+    case 'roe': {
+      const apys = computeEnhancedApys(cell, collateralAddr, liabilityAddr)
+      return isCorrelatedCell(collateralAddr, liabilityAddr) ? apys.roe : Number.NaN
+    }
     default:
       return 0
   }
 }
+
+const isUnavailableRoeCell = (
+  collateralAddr: string,
+  liabilityAddr: string,
+): boolean =>
+  props.dotMetric === 'roe'
+  && !!props.matrix.cells.get(collateralAddr)?.get(liabilityAddr)
+  && !isCorrelatedCell(collateralAddr, liabilityAddr)
 
 const shouldShowSparkles = (
   collateralAddr: string,
   liabilityAddr: string,
 ): boolean => {
   if (props.dotMetric !== 'net-apy' && props.dotMetric !== 'roe') return false
+  if (props.dotMetric === 'roe' && !isCorrelatedCell(collateralAddr, liabilityAddr)) return false
   const collateral = findVault(props.market, collateralAddr)
   const liability = findVault(props.market, liabilityAddr)
   const hasSupplyRewardsForCell = collateral
@@ -530,7 +557,17 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
               :data-borrow-address="col.address"
               :data-field="dotMetric"
               :data-present="!!matrix.cells.get(row.address)?.get(col.address)"
-              :data-value="matrix.cells.get(row.address)?.get(col.address) ? getCellMetricValue(matrix.cells.get(row.address)!.get(col.address)!, row.address, col.address) : undefined"
+              :data-correlated="matrix.cells.get(row.address)?.get(col.address) ? isCorrelatedCell(row.address, col.address) : undefined"
+              :title="isUnavailableRoeCell(row.address, col.address) ? 'Max ROE only shown for correlated pairs.' : undefined"
+              :aria-label="isUnavailableRoeCell(row.address, col.address) ? 'Max ROE only shown for correlated pairs' : undefined"
+              :data-value="
+                (() => {
+                  const cell = matrix.cells.get(row.address)?.get(col.address);
+                  if (!cell) return undefined;
+                  const value = getCellMetricValue(cell, row.address, col.address);
+                  return Number.isFinite(value) ? value : undefined;
+                })()
+              "
               :class="[
                 selectedCell?.collateralAddr === row.address
                   && selectedCell?.liabilityAddr === col.address
@@ -560,6 +597,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                     row.address,
                     col.address,
                   );
+                  if (!Number.isFinite(val)) return undefined;
                   return {
                     backgroundColor: getCellBgColor(
                       val,
@@ -673,7 +711,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
 
                 <!-- Numeric metrics: original rendering -->
                 <div
-                  v-else
+                  v-if="dotMetric !== 'oracle'"
                   class="inline-flex items-center justify-center gap-2"
                 >
                   <SvgIcon
@@ -686,11 +724,32 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                     title="Liquidation LTV ramping down"
                   />
                   <SvgIcon
+                    v-if="dotMetric === 'roe' && isCorrelatedCell(row.address, col.address)"
+                    name="check-circle"
+                    class="!w-10 !h-10 text-success-500 shrink-0"
+                    title="Correlated pair"
+                  />
+                  <SvgIcon
                     v-if="shouldShowSparkles(row.address, col.address)"
                     name="sparks"
                     class="!w-10 !h-10 text-accent-500 shrink-0"
                   />
                   <span
+                    v-if="isUnavailableRoeCell(row.address, col.address)"
+                    class="text-p5 whitespace-nowrap text-content-muted"
+                  >
+                    -
+                  </span>
+                  <span
+                    v-else-if="
+                      Number.isFinite(
+                        getCellMetricValue(
+                          matrix.cells.get(row.address)!.get(col.address)!,
+                          row.address,
+                          col.address,
+                        ),
+                      )
+                    "
                     class="text-p5 whitespace-nowrap transition-all"
                     :class="[
                       selectedCell?.collateralAddr === row.address
@@ -703,14 +762,20 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                     ]"
                   >
                     {{
-                      formatMetricValue(
-                        getCellMetricValue(
-                          matrix.cells.get(row.address)!.get(col.address)!,
-                          row.address,
-                          col.address,
-                        ),
-                        dotMetric,
-                      )
+                      Number.isFinite(getCellMetricValue(
+                        matrix.cells.get(row.address)!.get(col.address)!,
+                        row.address,
+                        col.address,
+                      ))
+                        ? formatMetricValue(
+                          getCellMetricValue(
+                            matrix.cells.get(row.address)!.get(col.address)!,
+                            row.address,
+                            col.address,
+                          ),
+                          dotMetric,
+                        )
+                        : 'N/A'
                     }}
                   </span>
                 </div>
