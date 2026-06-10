@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { formatUnits } from 'viem'
 import { BatchReviewModal, OperationReviewModal } from '#components'
 import { useTxBatch, type BatchEntry } from '~/composables/useTxBatch'
 import { useModal } from '~/components/ui/composables/useModal'
-import { formatSmartAmount } from '~/utils/string-utils'
 
 // Shared batch body, used by the laptop floating drawer (BatchDrawer) and the
 // mobile full-page view (pages/batch.vue). The operation circle + label come
@@ -40,13 +38,6 @@ const openEntryReview = (entry: BatchEntry) => {
 const openBatchReview = () => {
   if (!entries.value.length) return
   modal.open(BatchReviewModal)
-}
-
-const formatWalletChange = (change: { delta: bigint, decimals: number, symbol: string }) => {
-  const negative = change.delta < 0n
-  const abs = negative ? -change.delta : change.delta
-  const amount = formatSmartAmount(formatUnits(abs, change.decimals))
-  return `${negative ? '−' : '+'}${amount}`
 }
 
 // Eye toggle: peek at the real state (layer 0) vs the simulated end state
@@ -128,30 +119,12 @@ const simEyeLabel = computed(() =>
 
     <!-- Wallet changes — the whole batch's net effect on the wallet, shown in
          both the simulated and real views. -->
-    <div
+    <BatchWalletChanges
       v-if="walletChanges.length"
-      class="mx-16 mb-4 rounded-12 bg-surface-elevated px-12 py-10"
+      :changes="walletChanges"
+      class="mx-16 mb-4"
       data-testid="batch-wallet-changes"
-    >
-      <p class="text-p3 text-content-tertiary mb-6">
-        Wallet changes
-      </p>
-      <ul class="flex flex-col gap-4">
-        <li
-          v-for="change in walletChanges"
-          :key="change.token"
-          class="flex items-center justify-between text-p3"
-        >
-          <span class="text-content-secondary">{{ change.symbol || 'Token' }}</span>
-          <span
-            class="tabular-nums"
-            :class="change.delta < 0n ? 'text-error-300' : 'text-accent-500'"
-          >
-            {{ formatWalletChange(change) }}
-          </span>
-        </li>
-      </ul>
-    </div>
+    />
 
     <!-- Top-level batch errors (revert / status-check) -->
     <BatchAlert

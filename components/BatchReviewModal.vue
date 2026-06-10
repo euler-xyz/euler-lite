@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { encodeFunctionData, formatUnits, getAddress } from 'viem'
+import { encodeFunctionData, getAddress } from 'viem'
 import { flattenBatchEntries, getSubAccountId, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdk } from '~/composables/useEulerSdk'
 import { useTxBatch } from '~/composables/useTxBatch'
@@ -8,7 +8,6 @@ import { useTokenSymbolResolver } from '~/composables/useTokenSymbolResolver'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
-import { formatSmartAmount } from '~/utils/string-utils'
 import { logWarn } from '~/utils/errorHandling'
 import { buildBatchHealthSummary } from '~/utils/batchHealthSummary'
 
@@ -186,13 +185,6 @@ onMounted(async () => {
   }
 })
 
-const formatWalletChange = (change: { delta: bigint, decimals: number, symbol: string }) => {
-  const negative = change.delta < 0n
-  const abs = negative ? -change.delta : change.delta
-  const amount = formatSmartAmount(formatUnits(abs, change.decimals))
-  return `${negative ? '−' : '+'}${amount}`
-}
-
 // Copy the exact batch calldata (one entry per on-chain tx: approvals + the EVC
 // batch), matching the per-operation review modals. Uses the prepared plan when
 // available so approval txs are included, else the simulated merged plan.
@@ -361,29 +353,10 @@ const handleExecute = async () => {
       </div>
 
       <!-- Wallet changes -->
-      <div
+      <BatchWalletChanges
         v-if="walletChanges.length"
-        class="bg-surface-elevated rounded-12 px-12 py-10"
-      >
-        <p class="text-p3 text-content-tertiary mb-6">
-          Wallet changes
-        </p>
-        <ul class="flex flex-col gap-4">
-          <li
-            v-for="change in walletChanges"
-            :key="change.token"
-            class="flex items-center justify-between text-p3"
-          >
-            <span class="text-content-secondary">{{ change.symbol || 'Token' }}</span>
-            <span
-              class="tabular-nums"
-              :class="change.delta < 0n ? 'text-error-300' : 'text-accent-500'"
-            >
-              {{ formatWalletChange(change) }}
-            </span>
-          </li>
-        </ul>
-      </div>
+        :changes="walletChanges"
+      />
 
       <!-- Health changes — resulting health score per position the batch moves -->
       <div
