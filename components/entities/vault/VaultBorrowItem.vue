@@ -460,7 +460,10 @@ const linkPath = computed(() => ({
           class="text-p2 text-content-primary"
         >-</div>
       </div>
-      <div class="ml-auto grid grid-cols-[140px_repeat(4,112px)] justify-end gap-x-20 pr-16 mobile:contents">
+      <div
+        class="ml-auto grid justify-end gap-x-20 pr-16 mobile:contents"
+        :class="showMaxRoe ? 'grid-cols-[140px_repeat(4,112px)]' : 'grid-cols-[140px_repeat(3,112px)]'"
+      >
         <div
           class="py-12 pb-12 text-right mobile:!p-0"
           :class="{ 'pl-16': !enableEntityBranding }"
@@ -523,7 +526,10 @@ const linkPath = computed(() => ({
             {{ formatNumber(supplyApyWithRewards, 2, 2) }}%
           </div>
         </div>
-        <div class="py-12 pb-12 text-right mobile:!p-0">
+        <div
+          v-if="showMaxRoe"
+          class="py-12 pb-12 text-right mobile:!p-0"
+        >
           <div class="text-content-tertiary text-p3 mb-4 flex items-center justify-end gap-4">
             Net APY
             <UiModalPreviewTrigger
