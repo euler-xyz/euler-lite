@@ -92,8 +92,12 @@ const toBorrowApy = computed(() => {
   const base = getVaultBorrowApy(toVault.value)
   return withVaultIntrinsicApy(base, toVault.value, enableIntrinsicApy.value) - getBorrowRewardApy(toVault.value.address, collateralVault.value?.address)
 })
-const isRoeApplicable = computed(() =>
+const hasSingleCollateralRoeScope = computed(() =>
   positionCollateralVaults.value.isComplete
+  && positionCollateralVaults.value.vaults.length === 1,
+)
+const isRoeApplicable = computed(() =>
+  hasSingleCollateralRoeScope.value
   && areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value.vaults, fromVault.value, getTokenCategoryTags)
   && areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value.vaults, toVault.value, getTokenCategoryTags),
 )

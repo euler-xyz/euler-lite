@@ -434,9 +434,15 @@ const projectedCollateralVaults = computed<Array<EVault | SecuritizeCollateralVa
 const positionRoeCollateralVaults = computed(() =>
   resolvePositionRoeCollateralVaults(position.value, fromVault.value),
 )
+const hasSingleCollateralFullSwapRoeScope = computed(() =>
+  positionRoeCollateralVaults.value.isComplete
+  && positionRoeCollateralVaults.value.vaults.length === 1
+  && projectedCollateralVaults.value.length === 1
+  && isMaxSwap.value,
+)
 const isRoeApplicable = computed(() => {
   if (!toVault.value || !borrowVault.value) return false
-  if (!positionRoeCollateralVaults.value.isComplete) return false
+  if (!hasSingleCollateralFullSwapRoeScope.value) return false
   const collaterals = projectedCollateralVaults.value
   if (!collaterals.length) return false
 
