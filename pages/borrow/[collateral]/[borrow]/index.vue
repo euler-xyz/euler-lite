@@ -878,10 +878,7 @@ watch(
                       :loading="multiply.isMultiplyQuoteLoading.value"
                       variant="card"
                     >
-                      <SummaryRow
-                        v-if="showMultiplyRoe"
-                        label="ROE"
-                      >
+                      <SummaryRow label="ROE">
                         <SummaryValue
                           :after="multiply.multiplyRoeAfter.value !== null && multiply.multiplySwapReady.value ? formatNumber(multiply.multiplyRoeAfter.value) : (multiply.multiplyRoeBefore.value !== null ? formatNumber(multiply.multiplyRoeBefore.value) : undefined)"
                           suffix="%"
