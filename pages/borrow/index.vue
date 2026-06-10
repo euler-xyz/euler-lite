@@ -367,14 +367,6 @@ const filteredBorrowList = computed(() => {
     .filter(matchesCustomFilters)
 })
 
-const correlatedFilteredCount = computed(() =>
-  filteredBorrowList.value.filter(isCorrelatedPair).length,
-)
-
-const correlatedFilteredCountLabel = computed(() =>
-  `${correlatedFilteredCount.value} correlated pair${correlatedFilteredCount.value === 1 ? '' : 's'}`,
-)
-
 const isPairRecentlyAdded = (pair: AnyBorrowVaultPair) =>
   isVaultRecentlyAdded(pair.collateral.address) || isVaultRecentlyAdded(pair.borrow.address)
 
@@ -495,19 +487,6 @@ const sortedBorrowList = computed(() => {
         title="Borrow/Multiply"
         description="Borrow against your assets in isolated lending markets."
       />
-      <div
-        v-if="correlatedFilteredCount > 0"
-        class="mt-8 inline-flex shrink-0 items-center gap-8 rounded-12 border border-line-default bg-surface-secondary px-12 py-8 text-p3 text-content-secondary mobile:mt-0"
-        data-id="borrow-correlated-pair-count"
-        :data-value="correlatedFilteredCount"
-        title="Pairs eligible for Max ROE under the trusted correlation category rule."
-      >
-        <SvgIcon
-          name="nodes"
-          class="!w-14 !h-14 text-content-muted"
-        />
-        {{ correlatedFilteredCountLabel }}
-      </div>
     </div>
 
     <div class="mb-16">
