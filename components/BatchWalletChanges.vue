@@ -57,10 +57,10 @@ const formatUsd = (change: BatchWalletChange): string | undefined => {
       <li
         v-for="change in changes"
         :key="change.token"
-        class="flex items-start justify-between text-p3"
+        class="flex items-center justify-between text-p3"
       >
         <span class="text-content-secondary">{{ change.symbol || 'Token' }}</span>
-        <span class="flex flex-col items-end">
+        <span class="flex items-baseline gap-6">
           <span
             class="tabular-nums"
             :class="change.delta < 0n ? 'text-error-300' : 'text-accent-500'"
@@ -71,7 +71,7 @@ const formatUsd = (change: BatchWalletChange): string | undefined => {
             v-if="formatUsd(change)"
             class="tabular-nums text-p4 text-content-tertiary"
           >
-            {{ formatUsd(change) }}
+            ({{ formatUsd(change) }})
           </span>
         </span>
       </li>
