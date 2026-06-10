@@ -8,7 +8,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
 import { calculateRoe, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
 import { computeMaxMultiplier, computeMinMultiplier, computeWeightedSupplyApy, computeLeverageDebt } from '~/utils/multiply-math'
-import { getPlanHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
+import { getPlanHookDisabledWarning, getUtilisationWarning, getSupplyCapWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { useMultiplyCollateralOptions } from '~/composables/useMultiplyCollateralOptions'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
@@ -620,6 +620,17 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const isSupplyCapReached = computed(() => multiplySupplyVault.value ? getIsSupplyCapReached(multiplySupplyVault.value) : false)
   const isBorrowCapReached = computed(() => multiplyShortVault.value ? getIsBorrowCapReached(multiplyShortVault.value) : false)
 
+  const multiplyCapErrorText = computed(() => {
+    if (!multiplyInputAmount.value || multiplyDebtAmountNano.value <= 0n) return null
+    if (isSupplyCapReached.value && multiplySupplyVault.value) {
+      return getSupplyCapWarning(multiplySupplyVault.value)?.message || 'The supply cap has been reached. New deposits will fail.'
+    }
+    if (isBorrowCapReached.value && multiplyShortVault.value) {
+      return getBorrowCapWarning(multiplyShortVault.value)?.message || 'The borrow cap has been reached. New borrows will fail.'
+    }
+    return null
+  })
+
   // Multiply supply side: savings-sourced transfers existing shares (OP_TRANSFER);
   // fresh-supply deposits new assets (OP_DEPOSIT). The short vault is always
   // borrowed from, and any swap path touches OP_SKIM on the long vault via the
@@ -664,9 +675,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
   // --- Warnings ---
   const multiplyFormWarnings = computed(() => {
-    if (!multiplyShortVault.value) return []
+    if (!multiplySupplyVault.value || !multiplyShortVault.value) return []
     return [
       getPlanHookDisabledWarning(multiplyPlannedOps.value),
+      getSupplyCapWarning(multiplySupplyVault.value),
       getUtilisationWarning(multiplyShortVault.value, 'borrow'),
       getBorrowCapWarning(multiplyShortVault.value),
     ]
@@ -1245,6 +1257,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
     // Validation
     multiplyErrorText,
+    multiplyCapErrorText,
     isMultiplySubmitDisabled,
     multiplyFormWarnings,
 

@@ -210,6 +210,7 @@ const multiplyDisabledReasonInfo = computed((): DisabledReasonInfo | undefined =
   if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
   if (isMultiplyRestricted.value) return { message: 'Multiply is not available for this pair in your region', variant: 'warning' }
   if (multiply.multiplyErrorText.value) return { message: multiply.multiplyErrorText.value, variant: 'error' }
+  if (multiply.multiplyCapErrorText.value) return { message: multiply.multiplyCapErrorText.value, variant: 'error' }
   if (multiply.multiplySimulationError.value) return { message: multiply.multiplySimulationError.value, variant: 'error' }
   if (!multiply.multiplyIsSameAsset.value && multiply.isMultiplyQuoteLoading.value && multiply.multiplyDebtAmountNano.value > 0n) return { message: 'Fetching swap quotes...', variant: 'warning' }
   if (!multiply.multiplyIsSameAsset.value && !multiply.multiplySelectedProvider.value && multiply.multiplyDebtAmountNano.value > 0n) return { message: 'Select a swap quote to continue', variant: 'warning' }
