@@ -170,11 +170,16 @@ const pairName = computed(() => {
 })
 const supplyRewardAPY = computed(() => getSupplyRewardApy(collateralVault.value.address || ''))
 const borrowRewardAPY = computed(() => getBorrowRewardApy(borrowVault.value.address || '', collateralVault.value.address || ''))
+const actualMultiplier = computed(() => {
+  const multiplier = position.multiplier
+  return multiplier !== undefined && Number.isFinite(multiplier) ? multiplier : null
+})
+const rewardMultiplier = computed(() => actualMultiplier.value ?? 0)
 const loopingRewardAPY = computed(() =>
-  getEligibleLoopingRewardApy(borrowVault.value.address || '', collateralVault.value.address || '', actualMultiplier.value),
+  getEligibleLoopingRewardApy(borrowVault.value.address || '', collateralVault.value.address || '', rewardMultiplier.value),
 )
 const loopingEligible = computed(() =>
-  isLoopingEligible(borrowVault.value.address || '', collateralVault.value.address || '', actualMultiplier.value),
+  isLoopingEligible(borrowVault.value.address || '', collateralVault.value.address || '', rewardMultiplier.value),
 )
 const hasRewards = computed(() =>
   hasSupplyRewards(collateralVault.value.address || '')
@@ -259,9 +264,8 @@ const userLTVDisplay = computed(() => {
   if (userLTV.value === null) return ''
   return Number.isFinite(userLTV.value) ? formatNumber(userLTV.value, 2) : '∞'
 })
-const actualMultiplier = computed(() => position.multiplier ?? 0)
 const actualMultiplierDisplay = computed(() =>
-  Number.isFinite(actualMultiplier.value) ? `${formatNumber(actualMultiplier.value, 2, 2)}x` : '-',
+  actualMultiplier.value !== null ? `${formatNumber(actualMultiplier.value, 2, 2)}x` : '-',
 )
 
 const netApyModalData = computed(() => ({
@@ -288,7 +292,7 @@ const roeModalData = computed(() => ({
   props: {
     roeBreakdown: visibleRoeBreakdown.value,
     roe: roe.value ?? 0,
-    multiplier: Number.isFinite(actualMultiplier.value) ? actualMultiplier.value : 0,
+    multiplier: actualMultiplier.value,
     supplyAPY: collateralSupplyApy.value,
     borrowAPY: borrowApy.value,
     supplyRewardAPY: supplyRewardAPY.value || null,

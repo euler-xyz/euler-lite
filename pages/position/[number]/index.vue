@@ -475,7 +475,7 @@ const roeModalData = computed(() => ({
   props: {
     roeBreakdown: visibleRoeBreakdown.value,
     roe: roe.value,
-    multiplier: positionMultiplier.value !== null && Number.isFinite(positionMultiplier.value) ? positionMultiplier.value : 0,
+    multiplier: positionMultiplier.value !== null && Number.isFinite(positionMultiplier.value) ? positionMultiplier.value : null,
     supplyAPY: collateralSupplyApy.value,
     borrowAPY: borrowApy.value,
     supplyRewardAPY: supplyRewardAPY.value || null,
