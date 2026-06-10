@@ -7,7 +7,6 @@
     },
     "localStorage": {
       "is-onboarding-completed": "true",
-      "migration-announcement-seen": "true",
       "permit2-enabled": "false",
       "swap-slippage": "5",
       "swap-slippage-set-at": "9999999999999"
