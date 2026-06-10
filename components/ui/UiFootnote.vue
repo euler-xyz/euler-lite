@@ -130,9 +130,10 @@ onClickOutside(reference, () => {
 
   &__floating {
     position: relative;
-    max-width: calc(800px / 2);
+    max-width: 400px;
     min-width: 200px;
     width: max-content;
+    white-space: normal;
     padding: 16px;
     border-radius: 12px;
     background-color: var(--ui-footnote-floating-background-color);
@@ -145,6 +146,7 @@ onClickOutside(reference, () => {
     flex-direction: column;
     gap: 4px;
     width: 100%;
+    text-align: left;
   }
 
   &__floating-title {

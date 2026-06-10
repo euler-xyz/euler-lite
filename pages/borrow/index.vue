@@ -15,10 +15,19 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { getVaultAvailableLiquidity, getVaultUtilization } from '~/utils/vault-display'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
+import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
 
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy } = useRewardsApy()
+const { getTokenCategoryTags, isLoading: isTokenListLoading } = useTokenList()
+
+const isCorrelatedPair = (pair: AnyBorrowVaultPair) =>
+  areTokenAddressesCorrelatedByTags(
+    pair.collateral.asset.address,
+    pair.borrow.asset.address,
+    getTokenCategoryTags,
+  )
 
 const getNetApy = (pair: AnyBorrowVaultPair) => {
   const baseSupplyApy = getVaultSupplyApy(pair.collateral)
@@ -32,6 +41,8 @@ const getNetApy = (pair: AnyBorrowVaultPair) => {
 }
 
 const getSortMaxRoe = (pair: AnyBorrowVaultPair) => {
+  if (!isCorrelatedPair(pair)) return Number.NEGATIVE_INFINITY
+
   const borrowLTV = ltvToPercent(pair.ltv.borrowLTV)
   const maxMultiplier = Math.max(1, Math.floor(100 / (100 - borrowLTV) * 100) / 100)
   const baseSupplyApy = getVaultSupplyApy(pair.collateral)
@@ -44,6 +55,40 @@ const getSortMaxRoe = (pair: AnyBorrowVaultPair) => {
   return supplyFinal + (maxMultiplier - 1) * (supplyFinal - borrowFinal) + loopingRewards
 }
 
+const getActiveSortYieldScore = (pair: AnyBorrowVaultPair): number => {
+  const maxRoe = getSortMaxRoe(pair)
+  return Number.isFinite(maxRoe) ? maxRoe : getNetApy(pair)
+}
+
+const compareMaxRoe = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair, direction: 'desc' | 'asc' = 'desc'): number => {
+  const aValue = getSortMaxRoe(a)
+  const bValue = getSortMaxRoe(b)
+  const aFinite = Number.isFinite(aValue)
+  const bFinite = Number.isFinite(bValue)
+  const directionFactor = direction === 'asc' ? -1 : 1
+
+  if (!aFinite && !bFinite) {
+    const netApyDelta = (getNetApy(b) - getNetApy(a)) * directionFactor
+    if (netApyDelta !== 0) return netApyDelta
+
+    const liquidityDelta = comparePairLiquidityDesc(a, b)
+    if (liquidityDelta !== 0) return liquidityDelta
+
+    return comparePairNameAsc(a, b)
+  }
+
+  if (!aFinite) return 1
+  if (!bFinite) return -1
+
+  const roeDelta = (bValue - aValue) * directionFactor
+  if (roeDelta !== 0) return roeDelta
+
+  const liquidityDelta = comparePairLiquidityDesc(a, b)
+  if (liquidityDelta !== 0) return liquidityDelta
+
+  return comparePairNameAsc(a, b)
+}
+
 defineOptions({
   name: 'BorrowPage',
 })
@@ -53,7 +98,7 @@ const { chainId } = useEulerAddresses()
 
 const isPricesReady = ref(false)
 const { entities, isReady: labelsReady } = useEulerLabels()
-const isLoading = computed(() => isEVaultUpdating.value || isEscrowUpdating.value || !labelsReady.value || !isPricesReady.value)
+const isLoading = computed(() => isEVaultUpdating.value || isEscrowUpdating.value || isTokenListLoading.value || !labelsReady.value || !isPricesReady.value)
 const { isSlow } = useSlowLoading(isLoading)
 const { enableEntityBranding } = useDeployConfig()
 const showAllLabelEntries = useShowAllLabelEntries()
@@ -115,6 +160,18 @@ const pairBorrowedUsd = ref<Map<string, number>>(new Map())
 
 // Helper to create a unique key for a borrow pair
 const getPairKey = (pair: AnyBorrowVaultPair) => `${pair.collateral.address}-${pair.borrow.address}`
+
+const getPairSortName = (pair: AnyBorrowVaultPair): string =>
+  `${pair.collateral.asset.symbol}/${pair.borrow.asset.symbol}`
+
+const comparePairLiquidityDesc = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair): number =>
+  (pairLiquidityUsd.value.get(getPairKey(b)) ?? 0) - (pairLiquidityUsd.value.get(getPairKey(a)) ?? 0)
+
+const comparePairNameAsc = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair): number => {
+  const nameDelta = getPairSortName(a).localeCompare(getPairSortName(b))
+  if (nameDelta !== 0) return nameDelta
+  return getPairKey(a).localeCompare(getPairKey(b))
+}
 
 // Fetch USD values for all borrow pairs. Debounced to collapse the
 // bursts of registry updates streamed during loadVaults's RPC refresh
@@ -315,14 +372,17 @@ const isPairRecentlyAdded = (pair: AnyBorrowVaultPair) =>
 
 const applyRecentlyAddedPairSort = (sorted: AnyBorrowVaultPair[]): AnyBorrowVaultPair[] => {
   return [...sorted].sort((a, b) => {
-    return compareRecentlyAddedBoost(
-      isPairRecentlyAdded(a),
-      pairLiquidityUsd.value.get(getPairKey(a)) ?? 0,
-      isPairRecentlyAdded(b),
-      pairLiquidityUsd.value.get(getPairKey(b)) ?? 0,
-    )
+    return compareRecentlyAddedPairBoost(a, b)
   })
 }
+
+const compareRecentlyAddedPairBoost = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair): number =>
+  compareRecentlyAddedBoost(
+    isPairRecentlyAdded(a),
+    pairLiquidityUsd.value.get(getPairKey(a)) ?? 0,
+    isPairRecentlyAdded(b),
+    pairLiquidityUsd.value.get(getPairKey(b)) ?? 0,
+  )
 
 const applyDeprecatedPairSort = (sorted: AnyBorrowVaultPair[]): AnyBorrowVaultPair[] => {
   return [...sorted].sort((a, b) => {
@@ -339,25 +399,35 @@ const sortedBorrowList = computed(() => {
       const list = [...filteredBorrowList.value]
 
       const scores = list.map((pair) => {
-        const maxRoe = getSortMaxRoe(pair)
+        const yieldScore = getActiveSortYieldScore(pair)
         const liquidityUsd = pairLiquidityUsd.value.get(getPairKey(pair)) ?? 0
-        return { pair, maxRoe, liquidityUsd }
+        return { pair, yieldScore, liquidityUsd }
       })
 
-      const maxMaxRoe = Math.max(...scores.map(s => s.maxRoe), 0)
+      const maxYieldScore = Math.max(...scores.map(s => s.yieldScore), 0)
       const maxLiquidity = Math.max(...scores.map(s => s.liquidityUsd), 0)
 
-      const scored = scores.map(({ pair, maxRoe, liquidityUsd }) => {
-        const normalizedRoe = maxMaxRoe === 0 ? 0 : maxRoe / maxMaxRoe
+      const scored = scores.map(({ pair, yieldScore, liquidityUsd }) => {
+        const normalizedYield = maxYieldScore === 0 ? 0 : yieldScore / maxYieldScore
         const normalizedLiquidity = maxLiquidity === 0 ? 0 : liquidityUsd / maxLiquidity
-        const roeBucket = maxRoe >= 0 ? 0 : 1
-        const compositeScore = normalizedRoe * normalizedLiquidity
-        return { pair, roeBucket, compositeScore }
+        const yieldBucket = yieldScore >= 0 ? 0 : 1
+        const compositeScore = normalizedYield * normalizedLiquidity
+        return { pair, yieldBucket, compositeScore }
       })
 
       scored.sort((a, b) => {
-        if (a.roeBucket !== b.roeBucket) return a.roeBucket - b.roeBucket
-        return b.compositeScore - a.compositeScore
+        if (a.yieldBucket !== b.yieldBucket) return a.yieldBucket - b.yieldBucket
+
+        const scoreDelta = b.compositeScore - a.compositeScore
+        if (scoreDelta !== 0) return scoreDelta
+
+        const recentlyAddedDelta = compareRecentlyAddedPairBoost(a.pair, b.pair)
+        if (recentlyAddedDelta !== 0) return recentlyAddedDelta
+
+        const liquidityDelta = comparePairLiquidityDesc(a.pair, b.pair)
+        if (liquidityDelta !== 0) return liquidityDelta
+
+        return comparePairNameAsc(a.pair, b.pair)
       })
 
       // Active sort ignores direction toggle
@@ -393,10 +463,10 @@ const sortedBorrowList = computed(() => {
       }))
       break
     case 'Max ROE':
-      sorted = applyRecentlyAddedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
-        return getSortMaxRoe(b) - getSortMaxRoe(a)
-      }))
-      break
+      sorted = [...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
+        return compareMaxRoe(a, b, sortDir.value)
+      })
+      return applyDeprecatedPairSort(sorted)
     case 'Net APY':
       sorted = applyRecentlyAddedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
         return getNetApy(b) - getNetApy(a)
@@ -412,11 +482,12 @@ const sortedBorrowList = computed(() => {
 
 <template>
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
-    <BasePageHeader
-      title="Borrow/Multiply"
-      description="Borrow against your assets in isolated lending markets."
-      class="mb-16"
-    />
+    <div class="mb-16 flex items-start justify-between gap-16 mobile:flex-col">
+      <BasePageHeader
+        title="Borrow/Multiply"
+        description="Borrow against your assets in isolated lending markets."
+      />
+    </div>
 
     <div class="mb-16">
       <div class="flex justify-start items-center w-full gap-8 flex-wrap">

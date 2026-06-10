@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, SwapQuote, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { SwapperMode, type SecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type SwapQuote, type VaultEntity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { areRoeCollateralVaultsCorrelatedWithBorrow, resolvePositionRoeCollateralVaults } from '~/utils/position-roe'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { useSwapDebtOptions } from '~/composables/useSwapDebtOptions'
-import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/utils/repayUtils'
@@ -21,6 +21,7 @@ const { account: planAccount } = usePlanAccount()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
+const { getTokenCategoryTags } = useTokenList()
 
 const positionIndex = usePositionIndex()
 
@@ -32,6 +33,9 @@ const fromVault = computed<EVault | undefined>(() => position.value ? position.v
 const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() => position.value ? position.value.collateralVault as EVault | SecuritizeCollateralVault | undefined : undefined)
 const toVault: Ref<EVault | undefined> = ref()
 useOperationGuard(computed(() => [fromVault.value?.address, toVault.value?.address, collateralVault.value?.address].filter(Boolean)))
+const positionCollateralVaults = computed(() =>
+  resolvePositionRoeCollateralVaults(position.value, collateralVault.value),
+)
 
 const { borrowOptions, borrowVaults } = useSwapDebtOptions({
   collateralVault: computed(() => collateralVault.value as EVault | undefined),
@@ -88,6 +92,15 @@ const toBorrowApy = computed(() => {
   const base = getVaultBorrowApy(toVault.value)
   return withVaultIntrinsicApy(base, toVault.value, enableIntrinsicApy.value) - getBorrowRewardApy(toVault.value.address, collateralVault.value?.address)
 })
+const hasSingleCollateralRoeScope = computed(() =>
+  positionCollateralVaults.value.isComplete
+  && positionCollateralVaults.value.vaults.length === 1,
+)
+const isRoeApplicable = computed(() =>
+  hasSingleCollateralRoeScope.value
+  && areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value.vaults, fromVault.value, getTokenCategoryTags)
+  && areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value.vaults, toVault.value, getTokenCategoryTags),
+)
 
 const supplyValueUsd = ref<number | null>(null)
 watchEffect(async () => {
@@ -480,7 +493,10 @@ const onToVaultChange = (selectedIndex: number) => {
             variant="card"
             class="w-full laptop:max-w-[360px]"
           >
-            <SummaryRow label="ROE">
+            <SummaryRow
+              v-if="isRoeApplicable"
+              label="ROE"
+            >
               <SummaryValue
                 :before="roeBefore !== null ? formatNumber(roeBefore) : undefined"
                 :after="roeAfter !== null && quote ? formatNumber(roeAfter) : undefined"

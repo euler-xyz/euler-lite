@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
+import { getNetAPY } from '~/utils/vault/apy'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
-import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
-import { isEVault, type EVault, type PortfolioBorrowPosition, type SwapQuote, type TransactionPlan, type TransactionPlanPrepared, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, SwapperMode, type EVault, type PortfolioBorrowPosition, type SwapQuote, type TransactionPlan, type TransactionPlanPrepared, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { areRoeCollateralVaultsCorrelatedWithBorrow, mergeRoeCollateralVaults, resolvePositionRoeCollateralVaults } from '~/utils/position-roe'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
@@ -21,6 +22,7 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { SlippageSettingsModal, OperationReviewModal } from '#components'
 import { formatUnits, type Address } from 'viem'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
+import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,6 +35,7 @@ const { planMultiply, prepareTransactionPlan, executePreparedPlan, prefetchPlugi
 const { account: planAccount } = usePlanAccount()
 const { eulerLensAddresses } = useEulerAddresses()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
+const { getTokenCategoryTags } = useTokenList()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const {
@@ -95,6 +98,30 @@ const multiplyLongVault = computed<EVault | undefined>(() => {
 const multiplyShortVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
 const multiplySubAccount = computed(() => position.value?.subAccount || null)
 useOperationGuard(computed(() => [multiplySupplyVault.value?.address, multiplyLongVault.value?.address, multiplyShortVault.value?.address].filter(Boolean)))
+const positionRoeCollateralVaults = computed(() =>
+  resolvePositionRoeCollateralVaults(position.value, multiplyLongVault.value),
+)
+const projectedMultiplyCollateralVaults = computed(() =>
+  mergeRoeCollateralVaults([
+    ...positionRoeCollateralVaults.value.vaults,
+    multiplySupplyVault.value,
+    multiplyLongVault.value,
+  ]),
+)
+const isMultiplyRoeApplicable = computed(() =>
+  positionRoeCollateralVaults.value.isComplete
+  && areRoeCollateralVaultsCorrelatedWithBorrow(projectedMultiplyCollateralVaults.value, multiplyShortVault.value, getTokenCategoryTags),
+)
+const correlatedBadgeTitle = computed(() => {
+  const category = getTokenAddressesCorrelationCategoryLabel(
+    [
+      ...projectedMultiplyCollateralVaults.value.map(vault => vault.asset.address),
+      multiplyShortVault.value?.asset.address,
+    ],
+    getTokenCategoryTags,
+  )
+  return category ? `Correlated category: ${category}` : undefined
+})
 
 const pairAssets = computed<VaultAsset[]>(() => {
   if (!multiplyLongVault.value || !multiplyShortVault.value) {
@@ -304,6 +331,38 @@ const multiplyRoeAfter = computed(() => {
     nextSupplyValueUsd.value,
     nextBorrowValueUsd.value,
     multiplyWeightedSupplyApy.value,
+    multiplyBorrowApy.value,
+  )
+})
+const multiplyNetApyBefore = computed(() => {
+  if (
+    currentSupplyValueUsd.value === null
+    || currentBorrowValueUsd.value === null
+    || multiplyLongApy.value === null
+    || multiplyBorrowApy.value === null
+  ) {
+    return null
+  }
+  return getNetAPY(
+    currentSupplyValueUsd.value,
+    multiplyLongApy.value,
+    currentBorrowValueUsd.value,
+    multiplyBorrowApy.value,
+  )
+})
+const multiplyNetApyAfter = computed(() => {
+  if (
+    nextSupplyValueUsd.value === null
+    || nextBorrowValueUsd.value === null
+    || multiplyWeightedSupplyApy.value === null
+    || multiplyBorrowApy.value === null
+  ) {
+    return null
+  }
+  return getNetAPY(
+    nextSupplyValueUsd.value,
+    multiplyWeightedSupplyApy.value,
+    nextBorrowValueUsd.value,
     multiplyBorrowApy.value,
   )
 })
@@ -843,7 +902,15 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
           :assets="pairAssets"
           :assets-label="pairAssetsLabel"
           size="large"
-        />
+        >
+          <template #symbol-trailing>
+            <CorrelatedPairBadge
+              v-if="isMultiplyRoeApplicable"
+              compact
+              :title="correlatedBadgeTitle"
+            />
+          </template>
+        </VaultLabelsAndAssets>
 
         <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
           <div class="flex flex-col gap-16 w-full">
@@ -937,10 +1004,23 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
             variant="card"
             class="w-full laptop:max-w-[360px]"
           >
-            <SummaryRow label="ROE">
+            <SummaryRow
+              v-if="isMultiplyRoeApplicable"
+              label="ROE"
+            >
               <SummaryValue
                 :before="multiplyRoeBefore !== null ? formatNumber(multiplyRoeBefore) : undefined"
                 :after="multiplyRoeAfter !== null && multiplySwapReady ? formatNumber(multiplyRoeAfter) : undefined"
+                suffix="%"
+              />
+            </SummaryRow>
+            <SummaryRow
+              v-else
+              label="Net APY"
+            >
+              <SummaryValue
+                :before="multiplyNetApyBefore !== null ? formatNumber(multiplyNetApyBefore) : undefined"
+                :after="multiplyNetApyAfter !== null && multiplySwapReady ? formatNumber(multiplyNetApyAfter) : undefined"
                 suffix="%"
               />
             </SummaryRow>

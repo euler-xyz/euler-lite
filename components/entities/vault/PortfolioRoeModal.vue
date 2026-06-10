@@ -24,7 +24,7 @@ const {
 } = defineProps<{
   roeBreakdown?: YieldApyBreakdown
   roe: number
-  multiplier: number
+  multiplier: number | null
   supplyAPY: number
   borrowAPY: number
   supplyRewardAPY?: number | null
@@ -58,6 +58,9 @@ const allRewardsInfo = computed(() => [
 ])
 
 const displayRoe = computed(() => roeBreakdown?.total ?? roe)
+const multiplierDisplay = computed(() =>
+  multiplier !== null && Number.isFinite(multiplier) ? `${formatNumber(multiplier, 2, 2)}x` : '-',
+)
 const hasIntrinsicContribution = computed(() => Math.abs(roeBreakdown?.intrinsicApy ?? 0) > 0)
 const hasRewardContribution = computed(() => Math.abs(roeBreakdown?.rewards ?? 0) > 0)
 const signedPrefix = (value: number) => value < 0 ? '- ' : '+ '
@@ -105,7 +108,7 @@ const handleClose = () => {
             </p>
           </div>
           <div class="text-h5">
-            {{ formatNumber(multiplier, 2, 2) }}x
+            {{ multiplierDisplay }}
           </div>
         </div>
         <div class="flex justify-between items-center">
@@ -256,7 +259,7 @@ const handleClose = () => {
             </p>
           </div>
           <div class="text-h5">
-            {{ formatNumber(multiplier, 2, 2) }}x
+            {{ multiplierDisplay }}
           </div>
         </div>
         <div class="flex justify-between items-center mb-16">
