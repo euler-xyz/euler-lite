@@ -13,7 +13,7 @@ import { VaultBorrowApyModal, VaultMaxRoeModal, VaultNetApyPairModal, VaultSuppl
 import { isSecuritizeBorrowPair, type AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { getAddress } from 'viem'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
+import { areTokenAddressesCorrelatedByTags, getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 
 const { pair } = defineProps<{ pair: AnyBorrowVaultPair }>()
 const { enableEntityBranding } = useDeployConfig()
@@ -161,6 +161,13 @@ const showMaxRoe = computed(() =>
     getTokenCategoryTags,
   ),
 )
+const correlatedBadgeTitle = computed(() => {
+  const category = getTokenAddressesCorrelationCategoryLabel(
+    [pair.collateral.asset.address, pair.borrow.asset.address],
+    getTokenCategoryTags,
+  )
+  return category ? `Correlated category: ${category}` : undefined
+})
 const maxLTV = computed(() => formatNumber(ltvToPercent(pair.ltv.borrowLTV), 2))
 const utilization = computed(() => getVaultUtilization(pair.borrow))
 const utilisationWarning = computed(() => getUtilisationWarning(pair.borrow, 'borrow'))
@@ -333,7 +340,7 @@ const linkPath = computed(() => ({
             <CorrelatedPairBadge
               v-if="showMaxRoe"
               compact
-              title="This pair shares a trusted price-correlation category, so Max ROE is shown."
+              :title="correlatedBadgeTitle"
             />
           </div>
         </div>

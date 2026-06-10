@@ -20,6 +20,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { SlippageSettingsModal, VaultUnverifiedDisclaimerModal } from '#components'
 import { getAddress } from 'viem'
 import { areRoeCollateralVaultsCorrelatedWithBorrow, mergeRoeCollateralVaults } from '~/utils/position-roe'
+import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 
 const router = useRouter()
 const route = useRoute()
@@ -186,6 +187,19 @@ const showMultiplyRoe = computed(() =>
     getTokenCategoryTags,
   ),
 )
+const correlatedBadgeTitle = computed(() => {
+  const category = getTokenAddressesCorrelationCategoryLabel(
+    [
+      ...mergeRoeCollateralVaults([
+        collateralVault.value,
+        multiply.multiplySupplyVault.value,
+      ]).map(vault => vault.asset.address),
+      borrowVault.value?.asset.address,
+    ],
+    getTokenCategoryTags,
+  )
+  return category ? `Correlated category: ${category}` : undefined
+})
 
 const { guardWithPriceImpact: guardWithMultiplyPriceImpact } = usePriceImpactGate({
   directPriceImpact: multiply.multiplyPriceImpact,
@@ -474,7 +488,7 @@ watch(
             <CorrelatedPairBadge
               v-if="showMultiplyRoe"
               compact
-              title="This pair shares a trusted price-correlation category, so ROE is shown."
+              :title="correlatedBadgeTitle"
             />
           </template>
           <UiShareLinkButton

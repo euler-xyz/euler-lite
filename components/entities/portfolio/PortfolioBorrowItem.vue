@@ -25,6 +25,7 @@ import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { getBorrowPositionEffectiveLiquidationLTV, getBorrowPositionUserLTVPercent } from '~/utils/ltv'
 import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
+import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 
 const { position } = defineProps<{ position: PortfolioBorrowPosition<VaultEntity> }>()
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
@@ -191,6 +192,16 @@ const isRoeApplicable = computed(() => {
   if (!collaterals.length || !borrowVault.value) return false
   if (collateralAddresses.value.length > collaterals.length) return false
   return areRoeCollateralVaultsCorrelatedWithBorrow(collaterals, borrowVault.value, getTokenCategoryTags)
+})
+const correlatedBadgeTitle = computed(() => {
+  const category = getTokenAddressesCorrelationCategoryLabel(
+    [
+      ...collateralItems.value.map(item => item.vault.asset.address),
+      borrowVault.value.asset.address,
+    ],
+    getTokenCategoryTags,
+  )
+  return category ? `Correlated category: ${category}` : undefined
 })
 const collateralSupplyApy = computed(() => {
   return withVaultIntrinsicApy(
@@ -394,7 +405,7 @@ const openPositionInformationModal = () => {
                 <CorrelatedPairBadge
                   v-if="isRoeApplicable"
                   compact
-                  title="Correlated position."
+                  :title="correlatedBadgeTitle"
                 />
                 <CorrelatedPairBadge
                   v-if="isRoeApplicable && actualMultiplierDisplay !== '-'"

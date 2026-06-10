@@ -22,6 +22,7 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { SlippageSettingsModal, OperationReviewModal } from '#components'
 import { formatUnits, type Address } from 'viem'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
+import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 
 const route = useRoute()
 const router = useRouter()
@@ -111,6 +112,16 @@ const isMultiplyRoeApplicable = computed(() =>
   positionRoeCollateralVaults.value.isComplete
   && areRoeCollateralVaultsCorrelatedWithBorrow(projectedMultiplyCollateralVaults.value, multiplyShortVault.value, getTokenCategoryTags),
 )
+const correlatedBadgeTitle = computed(() => {
+  const category = getTokenAddressesCorrelationCategoryLabel(
+    [
+      ...projectedMultiplyCollateralVaults.value.map(vault => vault.asset.address),
+      multiplyShortVault.value?.asset.address,
+    ],
+    getTokenCategoryTags,
+  )
+  return category ? `Correlated category: ${category}` : undefined
+})
 
 const pairAssets = computed<VaultAsset[]>(() => {
   if (!multiplyLongVault.value || !multiplyShortVault.value) {
@@ -896,7 +907,7 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
             <CorrelatedPairBadge
               v-if="isMultiplyRoeApplicable"
               compact
-              title="This pair shares a trusted price-correlation category, so ROE is shown."
+              :title="correlatedBadgeTitle"
             />
           </template>
         </VaultLabelsAndAssets>

@@ -19,33 +19,39 @@ export const normalizeTokenCategoryTags = (
   return normalized
 }
 
-const CORRELATED_CATEGORY_TAGS = new Set(['usd', 'eth', 'btc'])
+const CORRELATED_CATEGORY_LABELS: Record<string, string> = {
+  usd: 'USD',
+  eth: 'ETH',
+  btc: 'BTC',
+}
+
+const CORRELATED_CATEGORY_TAGS = new Set(Object.keys(CORRELATED_CATEGORY_LABELS))
 
 const isCorrelatedCategory = (tag: string): boolean => CORRELATED_CATEGORY_TAGS.has(tag)
+
+const correlatedCategories = (tags: TokenCategoryTagSource): string[] =>
+  normalizeTokenCategoryTags(tags).filter(isCorrelatedCategory)
+
+export const formatTokenCategoryLabel = (tag: string | null | undefined): string | undefined =>
+  tag ? CORRELATED_CATEGORY_LABELS[tag.trim().toLowerCase()] : undefined
 
 export const shareTokenCategory = (
   leftTags: TokenCategoryTagSource,
   rightTags: TokenCategoryTagSource,
 ): boolean => {
-  const left = normalizeTokenCategoryTags(leftTags).filter(isCorrelatedCategory)
-  if (!left.length) return false
-
-  const right = new Set(normalizeTokenCategoryTags(rightTags).filter(isCorrelatedCategory))
-  if (!right.size) return false
-
-  return left.some(tag => right.has(tag))
+  return getSharedTokenCategory([leftTags, rightTags]) !== null
 }
 
-export const shareCommonTokenCategory = (
+export const getSharedTokenCategory = (
   tagSources: readonly TokenCategoryTagSource[],
-): boolean => {
-  if (tagSources.length < 2) return false
+): string | null => {
+  if (tagSources.length < 2) return null
 
   let common: Set<string> | null = null
 
   for (const tags of tagSources) {
-    const correlated = normalizeTokenCategoryTags(tags).filter(isCorrelatedCategory)
-    if (!correlated.length) return false
+    const correlated = correlatedCategories(tags)
+    if (!correlated.length) return null
 
     if (common === null) {
       common = new Set(correlated)
@@ -53,11 +59,15 @@ export const shareCommonTokenCategory = (
     }
 
     common = new Set(correlated.filter(tag => common!.has(tag)))
-    if (!common.size) return false
+    if (!common.size) return null
   }
 
-  return (common?.size ?? 0) > 0
+  return common?.values().next().value ?? null
 }
+
+export const shareCommonTokenCategory = (
+  tagSources: readonly TokenCategoryTagSource[],
+): boolean => getSharedTokenCategory(tagSources) !== null
 
 const normalizeComparableAddress = (
   address: string | undefined | null,
@@ -97,4 +107,17 @@ export const areTokenAddressesInSameCorrelatedCategory = (
   if (normalized.every(address => address === normalized[0])) return true
 
   return shareCommonTokenCategory(normalized.map(address => getTokenCategoryTags(address)))
+}
+
+export const getTokenAddressesCorrelationCategoryLabel = (
+  addresses: readonly (string | undefined | null)[],
+  getTokenCategoryTags: (address: string) => TokenCategoryTagSource,
+): string | undefined => {
+  const normalized = addresses.map(normalizeComparableAddress)
+  if (normalized.some(address => !address)) return undefined
+  if (normalized.length < 2) return undefined
+
+  return formatTokenCategoryLabel(
+    getSharedTokenCategory(normalized.map(address => getTokenCategoryTags(address))),
+  )
 }

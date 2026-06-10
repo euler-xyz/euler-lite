@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   areTokenAddressesInSameCorrelatedCategory,
   areTokenAddressesCorrelatedByTags,
+  getSharedTokenCategory,
+  getTokenAddressesCorrelationCategoryLabel,
   normalizeTokenCategoryTags,
   shareCommonTokenCategory,
   shareTokenCategory,
@@ -16,6 +18,7 @@ describe('token category helpers', () => {
 
   it('requires a shared allowlisted category', () => {
     expect(shareTokenCategory(['usd'], ['USD'])).toBe(true)
+    expect(getSharedTokenCategory([['usd'], ['USD']])).toBe('usd')
     expect(shareTokenCategory(['other'], ['other'])).toBe(false)
     expect(shareTokenCategory(['stablecoin'], ['stablecoin'])).toBe(false)
     expect(shareTokenCategory(['usd'], ['eth'])).toBe(false)
@@ -73,6 +76,26 @@ describe('token category helpers', () => {
         getTags,
       ),
     ).toBe(false)
+    expect(
+      getTokenAddressesCorrelationCategoryLabel(
+        [
+          '0x0000000000000000000000000000000000000001',
+          '0x0000000000000000000000000000000000000002',
+          '0x0000000000000000000000000000000000000004',
+        ],
+        getTags,
+      ),
+    ).toBe('USD')
+    expect(
+      getTokenAddressesCorrelationCategoryLabel(
+        [
+          '0x0000000000000000000000000000000000000001',
+          '0x0000000000000000000000000000000000000005',
+          '0x0000000000000000000000000000000000000004',
+        ],
+        getTags,
+      ),
+    ).toBeUndefined()
   })
 
   it('treats an all-same address set as correlated even without category tags', () => {
@@ -108,5 +131,14 @@ describe('token category helpers', () => {
         () => undefined,
       ),
     ).toBe(true)
+    expect(
+      getTokenAddressesCorrelationCategoryLabel(
+        [
+          '0x0000000000000000000000000000000000000001',
+          '0x0000000000000000000000000000000000000001',
+        ],
+        () => undefined,
+      ),
+    ).toBeUndefined()
   })
 })

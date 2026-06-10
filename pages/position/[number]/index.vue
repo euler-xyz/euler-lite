@@ -19,6 +19,7 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getAddress, type Address, type Abi } from 'viem'
 import { eulerAccountLensABI } from '~/entities/euler/abis'
 import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
+import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 
 const _route = useRoute()
 const router = useRouter()
@@ -440,6 +441,16 @@ const isRoeApplicable = computed(() => {
     getTokenCategoryTags,
   )
 })
+const correlatedBadgeTitle = computed(() => {
+  const category = getTokenAddressesCorrelationCategoryLabel(
+    [
+      ...collateralItems.value.map(item => item.vault.asset.address),
+      borrowVault.value?.asset.address,
+    ],
+    getTokenCategoryTags,
+  )
+  return category ? `Correlated category: ${category}` : undefined
+})
 
 const supplyCampaignsForModal = computed(() => getSupplyRewardCampaigns(collateralVault.value?.address || ''))
 const borrowCampaignsForModal = computed(() => getBorrowRewardCampaigns(borrowVault.value?.address || '', collateralVault.value?.address || ''))
@@ -813,7 +824,7 @@ watch([isConnected, isSpyMode, address], () => {
             <CorrelatedPairBadge
               v-if="isRoeApplicable"
               compact
-              title="Correlated position."
+              :title="correlatedBadgeTitle"
             />
             <CorrelatedPairBadge
               v-if="isRoeApplicable && positionMultiplierDisplay !== '-'"

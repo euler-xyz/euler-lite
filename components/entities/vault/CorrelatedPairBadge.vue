@@ -6,7 +6,6 @@ const props = withDefaults(defineProps<{
 }>(), {
   compact: false,
   label: 'Correlated',
-  title: 'Assets share a trusted price-correlation category.',
 })
 </script>
 
@@ -14,7 +13,7 @@ const props = withDefaults(defineProps<{
   <span
     class="correlated-pair-badge inline-flex items-center rounded-8 whitespace-nowrap"
     :class="props.compact ? 'px-6 py-1' : 'px-8 py-2'"
-    :title="props.title"
+    :title="props.title || undefined"
   >
     {{ props.label }}
   </span>
