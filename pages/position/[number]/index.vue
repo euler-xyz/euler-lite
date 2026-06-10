@@ -18,7 +18,7 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getAddress, type Address, type Abi } from 'viem'
 import { eulerAccountLensABI } from '~/entities/euler/abis'
-import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
+import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
 
 const _route = useRoute()
 const router = useRouter()
@@ -433,12 +433,11 @@ const fallbackRoe = computed(() => {
 const roe = computed(() => visibleRoeBreakdown.value?.total ?? fallbackRoe.value)
 const isRoeApplicable = computed(() => {
   if (!borrowVault.value || !collateralItems.value.length) return false
-  return collateralItems.value.every(item =>
-    areTokenAddressesCorrelatedByTags(
-      item.vault.asset.address,
-      borrowVault.value!.asset.address,
-      getTokenCategoryTags,
-    ),
+  if (positionCollateralAddresses.value.length > collateralItems.value.length) return false
+  return areRoeCollateralVaultsCorrelatedWithBorrow(
+    collateralItems.value.map(item => item.vault),
+    borrowVault.value,
+    getTokenCategoryTags,
   )
 })
 
@@ -446,10 +445,14 @@ const supplyCampaignsForModal = computed(() => getSupplyRewardCampaigns(collater
 const borrowCampaignsForModal = computed(() => getBorrowRewardCampaigns(borrowVault.value?.address || '', collateralVault.value?.address || ''))
 
 const positionMultiplier = computed(() => {
+  if (!collateralValue.value.hasPrice || !borrowMarketValue.value.hasPrice) return null
   const equity = collateralValue.value.usd - borrowMarketValue.value.usd
-  if (equity <= 0) return 0
+  if (equity <= 0) return null
   return collateralValue.value.usd / equity
 })
+const positionMultiplierDisplay = computed(() =>
+  positionMultiplier.value !== null && Number.isFinite(positionMultiplier.value) ? `${formatNumber(positionMultiplier.value, 2, 2)}x` : '-',
+)
 
 const netApyModalData = computed(() => ({
   props: {
@@ -472,7 +475,7 @@ const roeModalData = computed(() => ({
   props: {
     roeBreakdown: visibleRoeBreakdown.value,
     roe: roe.value,
-    multiplier: Number.isFinite(positionMultiplier.value) ? positionMultiplier.value : 0,
+    multiplier: positionMultiplier.value !== null && Number.isFinite(positionMultiplier.value) ? positionMultiplier.value : 0,
     supplyAPY: collateralSupplyApy.value,
     borrowAPY: borrowApy.value,
     supplyRewardAPY: supplyRewardAPY.value || null,
@@ -806,11 +809,19 @@ watch([isConnected, isSpyMode, address], () => {
         :assets-label="pairAssetsLabel"
       >
         <template #symbol-trailing>
-          <CorrelatedPairBadge
-            v-if="isRoeApplicable"
-            compact
-            title="All collateral assets in this position share a trusted price-correlation category with the borrow asset, so ROE is shown."
-          />
+          <span class="inline-flex items-center gap-4">
+            <CorrelatedPairBadge
+              v-if="isRoeApplicable"
+              compact
+              title="Correlated position."
+            />
+            <CorrelatedPairBadge
+              v-if="isRoeApplicable && positionMultiplierDisplay !== '-'"
+              compact
+              :label="positionMultiplierDisplay"
+              title="Effective multiplier at your LTV."
+            />
+          </span>
         </template>
       </VaultLabelsAndAssets>
 

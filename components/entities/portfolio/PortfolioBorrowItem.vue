@@ -24,7 +24,7 @@ import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { getBorrowPositionEffectiveLiquidationLTV, getBorrowPositionUserLTVPercent } from '~/utils/ltv'
-import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
+import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
 
 const { position } = defineProps<{ position: PortfolioBorrowPosition<VaultEntity> }>()
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
@@ -184,13 +184,8 @@ const hasRewards = computed(() =>
 const isRoeApplicable = computed(() => {
   const collaterals = collateralItems.value.map(item => item.vault)
   if (!collaterals.length || !borrowVault.value) return false
-  return collaterals.every(collateral =>
-    areTokenAddressesCorrelatedByTags(
-      collateral.asset.address,
-      borrowVault.value.asset.address,
-      getTokenCategoryTags,
-    ),
-  )
+  if (collateralAddresses.value.length > collaterals.length) return false
+  return areRoeCollateralVaultsCorrelatedWithBorrow(collaterals, borrowVault.value, getTokenCategoryTags)
 })
 const collateralSupplyApy = computed(() => {
   return withVaultIntrinsicApy(
@@ -391,12 +386,19 @@ const openPositionInformationModal = () => {
               :data-value="pairSymbols"
             >
               <span class="truncate">{{ pairSymbols }}</span>
-              <CorrelatedPairBadge
-                v-if="isRoeApplicable"
-                compact
-                :label="actualMultiplierDisplay"
-                title="Correlated position. Effective multiplier at your LTV."
-              />
+              <span class="inline-flex items-center gap-4">
+                <CorrelatedPairBadge
+                  v-if="isRoeApplicable"
+                  compact
+                  title="Correlated position."
+                />
+                <CorrelatedPairBadge
+                  v-if="isRoeApplicable && actualMultiplierDisplay !== '-'"
+                  compact
+                  :label="actualMultiplierDisplay"
+                  title="Effective multiplier at your LTV."
+                />
+              </span>
             </div>
           </div>
           <div class="flex gap-16 items-start shrink-0">

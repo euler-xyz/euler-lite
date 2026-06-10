@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { isEVault, isSecuritizeCollateralVault, SwapperMode, type SwapQuote, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
+import { areRoeCollateralVaultsCorrelatedWithBorrow, resolvePositionRoeCollateralVaults } from '~/utils/position-roe'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber, getCollateralUsdValueOrZero } from '~/utils/sdk-prices'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
@@ -431,18 +431,16 @@ const projectedCollateralVaults = computed<Array<EVault | SecuritizeCollateralVa
 
   return [...vaults.values()]
 })
+const positionRoeCollateralVaults = computed(() =>
+  resolvePositionRoeCollateralVaults(position.value, fromVault.value),
+)
 const isRoeApplicable = computed(() => {
   if (!toVault.value || !borrowVault.value) return false
+  if (!positionRoeCollateralVaults.value.isComplete) return false
   const collaterals = projectedCollateralVaults.value
   if (!collaterals.length) return false
 
-  return collaterals.every(collateral =>
-    areTokenAddressesCorrelatedByTags(
-      collateral.asset.address,
-      borrowVault.value!.asset.address,
-      getTokenCategoryTags,
-    ),
-  )
+  return areRoeCollateralVaultsCorrelatedWithBorrow(collaterals, borrowVault.value, getTokenCategoryTags)
 })
 
 // ── Collateral USD valuation (from liability vault's perspective) ─────────

@@ -9,7 +9,7 @@ import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/compos
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { isEVault, SwapperMode, type EVault, type PortfolioBorrowPosition, type SwapQuote, type TransactionPlan, type TransactionPlanPrepared, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import { areRoeCollateralVaultsCorrelatedWithBorrow, getPositionRoeCollateralVaults, mergeRoeCollateralVaults } from '~/utils/position-roe'
+import { areRoeCollateralVaultsCorrelatedWithBorrow, mergeRoeCollateralVaults, resolvePositionRoeCollateralVaults } from '~/utils/position-roe'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
@@ -97,15 +97,19 @@ const multiplyLongVault = computed<EVault | undefined>(() => {
 const multiplyShortVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
 const multiplySubAccount = computed(() => position.value?.subAccount || null)
 useOperationGuard(computed(() => [multiplySupplyVault.value?.address, multiplyLongVault.value?.address, multiplyShortVault.value?.address].filter(Boolean)))
+const positionRoeCollateralVaults = computed(() =>
+  resolvePositionRoeCollateralVaults(position.value, multiplyLongVault.value),
+)
 const projectedMultiplyCollateralVaults = computed(() =>
   mergeRoeCollateralVaults([
-    ...getPositionRoeCollateralVaults(position.value, multiplyLongVault.value),
+    ...positionRoeCollateralVaults.value.vaults,
     multiplySupplyVault.value,
     multiplyLongVault.value,
   ]),
 )
 const isMultiplyRoeApplicable = computed(() =>
-  areRoeCollateralVaultsCorrelatedWithBorrow(projectedMultiplyCollateralVaults.value, multiplyShortVault.value, getTokenCategoryTags),
+  positionRoeCollateralVaults.value.isComplete
+  && areRoeCollateralVaultsCorrelatedWithBorrow(projectedMultiplyCollateralVaults.value, multiplyShortVault.value, getTokenCategoryTags),
 )
 
 const pairAssets = computed<VaultAsset[]>(() => {

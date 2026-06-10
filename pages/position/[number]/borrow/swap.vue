@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { SwapperMode, type SecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type SwapQuote, type VaultEntity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
-import { areRoeCollateralVaultsCorrelatedWithBorrow, getPositionRoeCollateralVaults } from '~/utils/position-roe'
+import { areRoeCollateralVaultsCorrelatedWithBorrow, resolvePositionRoeCollateralVaults } from '~/utils/position-roe'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { useSwapDebtOptions } from '~/composables/useSwapDebtOptions'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
@@ -34,7 +34,7 @@ const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>
 const toVault: Ref<EVault | undefined> = ref()
 useOperationGuard(computed(() => [fromVault.value?.address, toVault.value?.address, collateralVault.value?.address].filter(Boolean)))
 const positionCollateralVaults = computed(() =>
-  getPositionRoeCollateralVaults(position.value, collateralVault.value),
+  resolvePositionRoeCollateralVaults(position.value, collateralVault.value),
 )
 
 const { borrowOptions, borrowVaults } = useSwapDebtOptions({
@@ -93,8 +93,9 @@ const toBorrowApy = computed(() => {
   return withVaultIntrinsicApy(base, toVault.value, enableIntrinsicApy.value) - getBorrowRewardApy(toVault.value.address, collateralVault.value?.address)
 })
 const isRoeApplicable = computed(() =>
-  areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value, fromVault.value, getTokenCategoryTags)
-  && areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value, toVault.value, getTokenCategoryTags),
+  positionCollateralVaults.value.isComplete
+  && areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value.vaults, fromVault.value, getTokenCategoryTags)
+  && areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value.vaults, toVault.value, getTokenCategoryTags),
 )
 
 const supplyValueUsd = ref<number | null>(null)

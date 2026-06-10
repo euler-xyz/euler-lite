@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { isEVault, isSecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { getNetAPY } from '~/utils/vault/apy'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
@@ -19,7 +19,7 @@ import { useCollateralSwapRepay } from '~/composables/repay/useCollateralSwapRep
 import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
+import { areRoeCollateralVaultsCorrelatedWithBorrow, resolvePositionRoeCollateralVaults } from '~/utils/position-roe'
 
 const _route = useRoute()
 const _router = useRouter()
@@ -57,22 +57,9 @@ const walletBalance = ref(0n)
 // --- Shared computeds ---
 const borrowVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
 const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() => position.value ? position.value.collateralVault as EVault | SecuritizeCollateralVault | undefined : undefined)
-const positionCollateralVaults = computed<Array<EVault | SecuritizeCollateralVault>>(() => {
-  if (!position.value) return []
-
-  const collaterals = position.value.collaterals.flatMap((collateralPosition) => {
-    const vault = collateralPosition.vault
-    return vault && (isEVault(vault) || isSecuritizeCollateralVault(vault))
-      ? [vault]
-      : []
-  })
-
-  return collaterals.length
-    ? collaterals
-    : collateralVault.value
-      ? [collateralVault.value]
-      : []
-})
+const positionCollateralVaults = computed(() =>
+  resolvePositionRoeCollateralVaults(position.value, collateralVault.value),
+)
 useOperationGuard(computed(() => [borrowVault.value?.address].filter(Boolean)))
 const assets = computed<VaultAsset[]>(() => [collateralVault.value?.asset, borrowVault.value?.asset].filter((asset): asset is VaultAsset => !!asset))
 const assetsLabel = usePositionPairLabel(position)
@@ -237,10 +224,12 @@ const savings = useSavingsRepay({
 })
 
 const isPositionRoeApplicable = computed(() =>
-  areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value, borrowVault.value, getTokenCategoryTags),
+  positionCollateralVaults.value.isComplete
+  && areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value.vaults, borrowVault.value, getTokenCategoryTags),
 )
 const isCollateralRepayRoeApplicable = computed(() =>
-  areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value, borrowVault.value, getTokenCategoryTags),
+  positionCollateralVaults.value.isComplete
+  && areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value.vaults, borrowVault.value, getTokenCategoryTags),
 )
 
 const { guardWithPriceImpact: guardWithCollateralPriceImpact } = usePriceImpactGate({

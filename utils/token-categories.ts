@@ -36,6 +36,29 @@ export const shareTokenCategory = (
   return left.some(tag => right.has(tag))
 }
 
+export const shareCommonTokenCategory = (
+  tagSources: readonly TokenCategoryTagSource[],
+): boolean => {
+  if (tagSources.length < 2) return false
+
+  let common: Set<string> | null = null
+
+  for (const tags of tagSources) {
+    const correlated = normalizeTokenCategoryTags(tags).filter(isCorrelatedCategory)
+    if (!correlated.length) return false
+
+    if (common === null) {
+      common = new Set(correlated)
+      continue
+    }
+
+    common = new Set(correlated.filter(tag => common!.has(tag)))
+    if (!common.size) return false
+  }
+
+  return (common?.size ?? 0) > 0
+}
+
 const normalizeComparableAddress = (
   address: string | undefined | null,
 ): string => {
@@ -62,4 +85,16 @@ export const areTokenAddressesCorrelatedByTags = (
     getTokenCategoryTags(left),
     getTokenCategoryTags(right),
   )
+}
+
+export const areTokenAddressesInSameCorrelatedCategory = (
+  addresses: readonly (string | undefined | null)[],
+  getTokenCategoryTags: (address: string) => TokenCategoryTagSource,
+): boolean => {
+  const normalized = addresses.map(normalizeComparableAddress)
+  if (normalized.some(address => !address)) return false
+  if (normalized.length < 2) return false
+  if (normalized.every(address => address === normalized[0])) return true
+
+  return shareCommonTokenCategory(normalized.map(address => getTokenCategoryTags(address)))
 }
