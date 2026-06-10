@@ -66,7 +66,7 @@ defineEmits(['close'])
       <div class="flex items-start justify-between gap-16">
         <div class="min-w-0">
           <div class="text-p2">
-            Enable advanced features
+            Enable advanced mode
           </div>
           <ul class="mt-6 list-disc pl-16 text-p3 text-content-muted">
             <li
@@ -79,8 +79,8 @@ defineEmits(['close'])
         </div>
         <UiSwitch
           class="shrink-0"
-          :model-value="settings.enableBatchTransactions"
-          @update:model-value="updateSetting('enableBatchTransactions', $event ?? false)"
+          :model-value="settings.enableAdvancedMode"
+          @update:model-value="updateSetting('enableAdvancedMode', $event ?? false)"
         />
       </div>
     </div>

@@ -18,6 +18,13 @@ import { formatSimulationFailure } from '~/utils/tx-errors'
 import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
 
+export interface BatchWalletChange {
+  token: string
+  symbol: string
+  decimals: number
+  delta: bigint
+}
+
 /**
  * Transaction batch builder ("shopping cart") with layered simulated state.
  *
@@ -167,6 +174,48 @@ let resimulatePromise: Promise<void> | null = null
 let addEntryQueue: Promise<void> = Promise.resolve()
 // Symbol/decimals for touched wallet tokens, for the wallet-changes summary.
 const walletAssetMeta: Record<string, { symbol: string, decimals: number }> = {}
+
+const normalizeTokenKey = (token: string) => {
+  try {
+    return getAddress(token).toLowerCase()
+  }
+  catch {
+    return token.toLowerCase()
+  }
+}
+
+const registerReviewAssetMeta = (review?: Record<string, unknown>) => {
+  const asset = review?.asset as { address?: string, symbol?: string, decimals?: number } | undefined
+  if (!asset?.address) return
+  try {
+    walletAssetMeta[normalizeTokenKey(asset.address)] = {
+      symbol: asset.symbol ?? '',
+      decimals: Number(asset.decimals ?? 18),
+    }
+  }
+  catch {
+    // Review metadata is display-only; ignore malformed optional addresses.
+  }
+}
+
+export const buildWalletChanges = (
+  current: Record<string, bigint> | undefined,
+  base: Record<string, bigint> | undefined,
+  assetMeta: Record<string, { symbol: string, decimals: number }>,
+): BatchWalletChange[] => {
+  const out = new Map<string, BatchWalletChange>()
+
+  if (current && base) {
+    for (const token of Object.keys(current)) {
+      const delta = (current[token] ?? 0n) - (base[token] ?? 0n)
+      if (delta === 0n) continue
+      const meta = assetMeta[token]
+      out.set(token, { token, delta, symbol: meta?.symbol ?? '', decimals: meta?.decimals ?? 18 })
+    }
+  }
+
+  return [...out.values()].filter(change => change.delta !== 0n)
+}
 
 const syncOverlay = () => {
   const layer = activeLayer.value > 0 ? layers.value[activeLayer.value] : undefined
@@ -903,6 +952,7 @@ export const useTxBatch = () => {
       const account = await getEntryPlanningAccount()
       const plan = await entry.buildPlan(account)
       const { buildPlan: _buildPlan, ...fixedEntry } = entry
+      registerReviewAssetMeta(fixedEntry.review)
       entries.value = [...entries.value, { ...fixedEntry, plan, id: `entry-${++idSeq}` }]
     }
 
@@ -1068,18 +1118,10 @@ export const useTxBatch = () => {
   // visible whether the eye toggle is showing the simulated or the real state.
   const walletChanges = computed(() => {
     const last = layers.value.length - 1
-    if (last <= 0) return [] as Array<{ token: string, symbol: string, decimals: number, delta: bigint }>
-    const cur = layers.value[last]?.walletBalances
+    if (last <= 0) return [] as BatchWalletChange[]
+    const cur = last > 0 ? layers.value[last]?.walletBalances : undefined
     const base = layers.value[0]?.walletBalances
-    if (!cur || !base) return []
-    const out: Array<{ token: string, symbol: string, decimals: number, delta: bigint }> = []
-    for (const token of Object.keys(cur)) {
-      const delta = (cur[token] ?? 0n) - (base[token] ?? 0n)
-      if (delta === 0n) continue
-      const meta = walletAssetMeta[token]
-      out.push({ token, delta, symbol: meta?.symbol ?? '', decimals: meta?.decimals ?? 18 })
-    }
-    return out
+    return buildWalletChanges(cur, base, walletAssetMeta)
   })
   const activeLayerData = computed(() => layers.value[activeLayer.value])
   const entryCount = computed(() => entries.value.length)

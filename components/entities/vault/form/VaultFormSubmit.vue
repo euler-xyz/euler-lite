@@ -33,8 +33,8 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'add-to-batch'): void }>()
 const { settings } = useUserSettings()
 // The form opts into the "+ add to batch" affordance by binding `canAddToBatch`,
-// but the "+" only shows when batch transactions are enabled in settings.
-const supportsBatch = computed(() => props.canAddToBatch !== undefined && settings.value.enableBatchTransactions)
+// but the "+" only shows when advanced mode is enabled in settings.
+const supportsBatch = computed(() => props.canAddToBatch !== undefined && settings.value.enableAdvancedMode)
 const { isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { chainId: _chainId } = useEulerAddresses()

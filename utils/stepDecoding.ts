@@ -53,6 +53,9 @@ export interface StepDecodingContext {
 const VERIFY_AMOUNT_MIN_AND_SKIM_SELECTOR = toFunctionSelector('function verifyAmountMinAndSkim(address,address,uint256,uint256)')
 const VERIFY_AMOUNT_MIN_AND_TRANSFER_SELECTOR = toFunctionSelector('function verifyAmountMinAndTransfer(address,address,uint256,uint256)')
 const VERIFY_DEBT_MAX_SELECTOR = toFunctionSelector('function verifyDebtMax(address,address,uint256,uint256)')
+const MERKL_CLAIM_SELECTOR = toFunctionSelector('function claim(address[],address[],uint256[],bytes32[][])')
+const BREVIS_CLAIM_SELECTOR = toFunctionSelector('function claim(address,uint256[],uint64,bytes32[])')
+const FUUL_CLAIM_SELECTOR = toFunctionSelector('function claim((address,address,address,uint8,uint256,uint8,uint256,uint256,bytes32,bytes[])[])')
 
 const SELECTOR_LABELS: Record<string, string> = {
   [toFunctionSelector('function deposit(uint256,address)')]: 'Supply',
@@ -77,6 +80,9 @@ const SELECTOR_LABELS: Record<string, string> = {
   [toFunctionSelector('function transferFromSender(address,uint256,address)')]: 'Transfer from wallet',
   [toFunctionSelector('function deposit()')]: 'Wrap native currency',
   [toFunctionSelector('function createCredential(address,uint256,uint256,uint256,uint256,bytes,bytes,bytes)')]: 'Identity verification',
+  [MERKL_CLAIM_SELECTOR]: 'Claim',
+  [BREVIS_CLAIM_SELECTOR]: 'Claim',
+  [FUUL_CLAIM_SELECTOR]: 'Claim',
 }
 
 const MAX_UINT256 = 2n ** 256n - 1n
@@ -360,6 +366,10 @@ const resolveBatchItemAssetInfo = (
 
   if (label === 'Update price feeds') {
     return { symbol: ctx.asset.symbol, address: ctx.asset.address }
+  }
+
+  if (label === 'Claim') {
+    return { symbol: ctx.asset.symbol, address: ctx.asset.address, amount: ctx.amount }
   }
 
   return undefined

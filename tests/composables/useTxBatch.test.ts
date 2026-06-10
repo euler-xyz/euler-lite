@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Account, type IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
-import { fetchBaseAccountSnapshot, stitchAccount } from '~/composables/useTxBatch'
+import { buildWalletChanges, fetchBaseAccountSnapshot, stitchAccount } from '~/composables/useTxBatch'
 
 const owner = getAddress('0x1000000000000000000000000000000000000000')
 const subAccount = getAddress('0x8A54C278D117854486db0F6460D901a180Fff517')
@@ -69,5 +69,19 @@ describe('fetchBaseAccountSnapshot', () => {
 
     expect(result).toBe(expected)
     expect(fetchAccount).toHaveBeenCalledWith(1, owner, { populateAll: true })
+  })
+})
+
+describe('buildWalletChanges', () => {
+  it('uses simulated balance deltas', () => {
+    const token = getAddress('0x2000000000000000000000000000000000000000').toLowerCase()
+
+    const changes = buildWalletChanges(
+      { [token]: 15n },
+      { [token]: 10n },
+      { [token]: { symbol: 'USDC', decimals: 6 } },
+    )
+
+    expect(changes).toEqual([{ token, symbol: 'USDC', decimals: 6, delta: 5n }])
   })
 })
