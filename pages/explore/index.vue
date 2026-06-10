@@ -22,6 +22,7 @@ const { marketGroups, isResolvingTVL, isReady: marketGroupsReady } = useMarketGr
 const { getBestMaxROE } = useBestMaxROE(marketGroups)
 const { isEVaultUpdating, isEarnUpdating, isSecuritizeUpdating, isEscrowUpdating } = useVaults()
 const { chainId } = useEulerAddresses()
+const { isLoading: isTokenListLoading } = useTokenList()
 const { entities } = useEulerLabels()
 const { enableEntityBranding } = useDeployConfig()
 
@@ -283,7 +284,7 @@ const sortedMarkets = computed(() => {
 
 const isLoading = computed(() =>
   isEVaultUpdating.value || isEarnUpdating.value || isSecuritizeUpdating.value || isEscrowUpdating.value
-  || !marketGroupsReady.value || isResolvingTVL.value,
+  || isTokenListLoading.value || !marketGroupsReady.value || isResolvingTVL.value,
 )
 const { isSlow } = useSlowLoading(isLoading)
 </script>

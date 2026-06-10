@@ -142,6 +142,14 @@ const getCellMetricValue = (
   }
 }
 
+const isUnavailableRoeCell = (
+  collateralAddr: string,
+  liabilityAddr: string,
+): boolean =>
+  props.dotMetric === 'roe'
+  && !!props.matrix.cells.get(collateralAddr)?.get(liabilityAddr)
+  && !isCorrelatedCell(collateralAddr, liabilityAddr)
+
 const shouldShowSparkles = (
   collateralAddr: string,
   liabilityAddr: string,
@@ -550,6 +558,8 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
               :data-field="dotMetric"
               :data-present="!!matrix.cells.get(row.address)?.get(col.address)"
               :data-correlated="matrix.cells.get(row.address)?.get(col.address) ? isCorrelatedCell(row.address, col.address) : undefined"
+              :title="isUnavailableRoeCell(row.address, col.address) ? 'Max ROE only shown for correlated pairs.' : undefined"
+              :aria-label="isUnavailableRoeCell(row.address, col.address) ? 'Max ROE only shown for correlated pairs' : undefined"
               :data-value="
                 (() => {
                   const cell = matrix.cells.get(row.address)?.get(col.address);
@@ -725,7 +735,13 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                     class="!w-10 !h-10 text-accent-500 shrink-0"
                   />
                   <span
-                    v-if="
+                    v-if="isUnavailableRoeCell(row.address, col.address)"
+                    class="text-p5 whitespace-nowrap text-content-muted"
+                  >
+                    -
+                  </span>
+                  <span
+                    v-else-if="
                       Number.isFinite(
                         getCellMetricValue(
                           matrix.cells.get(row.address)!.get(col.address)!,

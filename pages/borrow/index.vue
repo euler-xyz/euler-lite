@@ -20,7 +20,7 @@ import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy } = useRewardsApy()
-const { getTokenCategoryTags } = useTokenList()
+const { getTokenCategoryTags, isLoading: isTokenListLoading } = useTokenList()
 
 const isCorrelatedPair = (pair: AnyBorrowVaultPair) =>
   areTokenAddressesCorrelatedByTags(
@@ -98,7 +98,7 @@ const { chainId } = useEulerAddresses()
 
 const isPricesReady = ref(false)
 const { entities, isReady: labelsReady } = useEulerLabels()
-const isLoading = computed(() => isEVaultUpdating.value || isEscrowUpdating.value || !labelsReady.value || !isPricesReady.value)
+const isLoading = computed(() => isEVaultUpdating.value || isEscrowUpdating.value || isTokenListLoading.value || !labelsReady.value || !isPricesReady.value)
 const { isSlow } = useSlowLoading(isLoading)
 const { enableEntityBranding } = useDeployConfig()
 const showAllLabelEntries = useShowAllLabelEntries()
