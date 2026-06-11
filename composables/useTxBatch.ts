@@ -333,31 +333,6 @@ const collectPlanTargets = (
   return { vaults, accounts }
 }
 
-// Off-chain APY metadata the lens reads don't carry: reward campaigns and the
-// asset's intrinsic (e.g. staking) yield. Both are populated on the base account
-// (fetchAccount populateAll) but absent on the simulated vaults decoded from the
-// per-layer lens block, so we copy them across when stitching — otherwise the
-// simulated portfolio's net APY / ROE and per-position supply/borrow costs would
-// drop rewards and intrinsic yield.
-type ApyMetaVault = IHasVaultAddress & {
-  rewards?: unknown
-  intrinsicApy?: unknown
-  populated?: { rewards?: boolean, intrinsicApy?: boolean }
-}
-
-type ApyMetaPosition = {
-  vaultAddress: Address
-  vault?: ApyMetaVault
-  liquidity?: {
-    vaultAddress: Address
-    vault?: ApyMetaVault
-    collaterals?: Array<{
-      address: Address
-      vault?: ApyMetaVault
-    }>
-  }
-}
-
 type StitchPosition = { vaultAddress: Address, shares?: bigint, borrowed?: bigint }
 type StitchSubAccount = {
   positions: StitchPosition[]
@@ -369,27 +344,6 @@ type StitchSubAccount = {
   liabilityValueUsd?: number
 }
 
-const collectApyMetaVaults = (account: Account<IHasVaultAddress>): Map<string, ApyMetaVault> => {
-  const byAddress = new Map<string, ApyMetaVault>()
-  const addVault = (vault: ApyMetaVault | undefined) => {
-    if (!vault || (!vault.rewards && !vault.intrinsicApy)) return
-    byAddress.set(getAddress(vault.address).toLowerCase(), vault)
-  }
-
-  for (const subAccount of Object.values(account.subAccounts)) {
-    if (!subAccount) continue
-    for (const position of subAccount.positions as ApyMetaPosition[]) {
-      addVault(position.vault)
-      addVault(position.liquidity?.vault)
-      for (const collateral of position.liquidity?.collaterals ?? []) {
-        addVault(collateral.vault)
-      }
-    }
-  }
-
-  return byAddress
-}
-
 const subAccountMapKey = (account: string): Address => getAddress(account) as Address
 
 const mergePositionsByVault = (positions: StitchPosition[]): StitchPosition[] => {
@@ -398,29 +352,6 @@ const mergePositionsByVault = (positions: StitchPosition[]): StitchPosition[] =>
     byVault.set(getAddress(position.vaultAddress), position)
   }
   return Array.from(byVault.values())
-}
-
-const carryVaultApyMeta = (position: ApyMetaPosition, sourceVaults: Map<string, ApyMetaVault>) => {
-  const carry = (vault: ApyMetaVault | undefined) => {
-    if (!vault) return
-    const source = sourceVaults.get(getAddress(vault.address).toLowerCase())
-    if (!source) return
-    // Carry each field independently; the simulated vault may already have one.
-    if (!vault.rewards && source.rewards) {
-      vault.rewards = source.rewards
-      vault.populated = { ...vault.populated, rewards: source.populated?.rewards ?? true }
-    }
-    if (!vault.intrinsicApy && source.intrinsicApy) {
-      vault.intrinsicApy = source.intrinsicApy
-      vault.populated = { ...vault.populated, intrinsicApy: source.populated?.intrinsicApy ?? true }
-    }
-  }
-
-  carry(position.vault)
-  carry(position.liquidity?.vault)
-  for (const collateral of position.liquidity?.collaterals ?? []) {
-    carry(collateral.vault)
-  }
 }
 
 export interface ModifiedPositionKeySets {
@@ -611,7 +542,9 @@ export const stitchAccount = (
   prevFull: Account<IHasVaultAddress>,
   touched: Account<IHasVaultAddress>,
 ): Account<IHasVaultAddress> => {
-  const apyMetaVaults = collectApyMetaVaults(prevFull)
+  // Reward + intrinsic-APY metadata is populated directly on the simulated
+  // vaults by simulateTransactionPlan (vaultFetchOptions), matching the base
+  // account's populateAll — so the stitch only has to merge positions here.
   // Shallow-clone every sub-account of the previous full account (copy the
   // positions array so we never mutate the source layer).
   const mergedSubs: Record<string, StitchSubAccount> = {}
@@ -633,16 +566,12 @@ export const stitchAccount = (
     const key = subAccountMapKey(addr)
     const existing = mergedSubs[key]
     if (!existing) {
-      for (const tp of tsa.positions) {
-        carryVaultApyMeta(tp as ApyMetaPosition, apyMetaVaults)
-      }
       mergedSubs[key] = { ...tsa, positions: mergePositionsByVault([...tsa.positions]) }
       continue
     }
     const byVault = new Map<string, StitchPosition>()
     for (const p of existing.positions) byVault.set(getAddress(p.vaultAddress), p)
     for (const tp of tsa.positions) {
-      carryVaultApyMeta(tp as ApyMetaPosition, apyMetaVaults)
       byVault.set(getAddress(tp.vaultAddress), tp)
     }
     mergedSubs[key] = {
@@ -763,7 +692,18 @@ export const useTxBatch = () => {
         cid,
         ownerAddr,
         merged,
-        { stateOverrides: true },
+        {
+          stateOverrides: true,
+          // Populate the simulated vaults with reward campaigns + intrinsic
+          // (e.g. staking) APY, exactly as the base account is via populateAll —
+          // so the simulated portfolio's net APY / ROE and per-position
+          // supply/borrow costs include them, including for vaults entered for
+          // the first time in the batch (which the base account can't supply).
+          // The chain-wide reward/intrinsic maps are cached (5-min staleTime,
+          // shared QueryClient already filled by the real portfolio load), so
+          // this adds no per-resim network cost in practice.
+          vaultFetchOptions: { populateRewards: true, populateIntrinsicApy: true },
+        },
       )
 
       if (token !== resimToken) return
