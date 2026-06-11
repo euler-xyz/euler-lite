@@ -1,6 +1,6 @@
 import { computed, effectScope, ref, shallowRef, watch, type EffectScope, type Ref } from 'vue'
-import { getAddress, type Address } from 'viem'
-import { Account, flattenBatchEntries, getEulerLabelProductByVault } from '@eulerxyz/euler-v2-sdk'
+import { formatUnits, getAddress, type Address } from 'viem'
+import { Account, getEulerLabelProductByVault } from '@eulerxyz/euler-v2-sdk'
 import type {
   IHasVaultAddress,
   Portfolio,
@@ -13,7 +13,8 @@ import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { getCurrentEulerLabelsData } from '~/composables/useEulerLabels'
 import { useTenderlySimulation } from '~/composables/useTenderlySimulation'
 import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
-import { decodeBatchItemLabel } from '~/utils/stepDecoding'
+import { buildPlanMarketLabel } from '~/utils/stepDecoding'
+import { formatSmartAmount } from '~/utils/string-utils'
 import { formatSimulationFailure } from '~/utils/tx-errors'
 import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
@@ -67,6 +68,10 @@ export interface BatchEntry {
    *  by the plan alone (and same-asset multiply has no swap step at all). This
    *  lite-only flag lets the batch list label it "Multiply …". */
   multiply?: boolean
+  /** Verbatim batch-row name, used as-is instead of the verb+symbol derived from
+   *  `review`. Refinance flows set this to "Refinance <collateral>/<borrow>" so
+   *  the row reads as the position it acts on rather than the swap leg's asset. */
+  nameOverride?: string
 }
 
 export interface BatchEntryInput extends Omit<BatchEntry, 'id' | 'plan'> {
@@ -87,6 +92,15 @@ export interface BatchLayer {
    * layer's simulated deposit/withdraw/borrow/repay applied.
    */
   walletBalances?: Record<string, bigint>
+  /**
+   * Raw simulated wallet balances (lowercased token → forged in-sim balance) for
+   * this layer, straight from the SDK. Unlike `walletBalances` these are NOT
+   * anchored to the real wallet or floored at zero, so the delta vs layer 0 is
+   * the true amount the batch moves — including any portion forged by state
+   * overrides when the wallet is underfunded. Used for the wallet-changes
+   * summary so an underfunded supply still shows the full pulled amount.
+   */
+  walletBalancesSim?: Record<string, bigint>
   /** True when this entry's operation reverted / can't execute in the batch. */
   failed: boolean
   error?: string
@@ -172,6 +186,11 @@ let resimToken = 0
 let scope: EffectScope | undefined
 let resimulatePromise: Promise<void> | null = null
 let addEntryQueue: Promise<void> = Promise.resolve()
+// Signatures of adds currently in flight. The "Add to batch" buttons stay
+// enabled across the async plan build, so a rapid double-click would otherwise
+// enqueue the same operation twice; we drop a duplicate while an identical add
+// is still being processed.
+const pendingAddSignatures = new Set<string>()
 // Symbol/decimals for touched wallet tokens, for the wallet-changes summary.
 const walletAssetMeta: Record<string, { symbol: string, decimals: number }> = {}
 
@@ -675,26 +694,6 @@ const projectPortfolio = (
   return { visible, all }
 }
 
-// The vault(s) an operation's core action targets, read off its plan. Used to
-// resolve which market (Euler label product) the operation belongs to. Same
-// action set the review-step decoder recognises.
-const VAULT_ACTION_LABELS = new Set(['Supply', 'Deposit', 'Withdraw', 'Borrow', 'Repay'])
-const collectVaultTargets = (plan?: TransactionPlan): Address[] => {
-  if (!plan) return []
-  const out: Address[] = []
-  for (const item of plan) {
-    if (item.type !== 'evcBatch') continue
-    for (const bi of flattenBatchEntries(item.items)) {
-      if (!VAULT_ACTION_LABELS.has(decodeBatchItemLabel(bi.data))) continue
-      try {
-        out.push(getAddress(bi.targetContract))
-      }
-      catch { /* skip malformed address */ }
-    }
-  }
-  return out
-}
-
 const getEntryMarketLabelOverride = (entry: BatchEntry): string | undefined => {
   const label = entry.review?.marketLabel
   return typeof label === 'string' && label.trim() ? label : undefined
@@ -865,6 +864,7 @@ export const useTxBatch = () => {
           portfolio: projected.visible,
           portfolioAll: projected.all,
           walletBalances: walletLayers[idx],
+          walletBalancesSim: simWb[idx] ?? {},
           failed,
           error: failed ? failedEntries.get(entryIdx) : undefined,
         }
@@ -948,6 +948,13 @@ export const useTxBatch = () => {
   }
 
   const addEntry = async (entry: BatchEntryInput) => {
+    // Ignore a rapid duplicate click while an identical add is still in flight
+    // (same target sub-account + label). Sequential re-adds are unaffected — the
+    // signature is released once the add settles.
+    const signature = `${entry.subAccount ?? ''}|${entry.label}`
+    if (pendingAddSignatures.has(signature)) return
+    pendingAddSignatures.add(signature)
+
     const add = async () => {
       const account = await getEntryPlanningAccount()
       const plan = await entry.buildPlan(account)
@@ -966,6 +973,9 @@ export const useTxBatch = () => {
       logWarn('useTxBatch/addEntry', error)
       simError.value = error instanceof Error ? error.message : String(error)
       throw error
+    }
+    finally {
+      pendingAddSignatures.delete(signature)
     }
   }
 
@@ -1099,6 +1109,17 @@ export const useTxBatch = () => {
   // funding). Surfaced as "Not enough balance" and blocks execution — the
   // simulation forges balances, so without this the cart would look executable.
   const hasInsufficientBalance = computed(() => walletShortfalls.value.length > 0)
+  // Human-readable shortfall, e.g. "Not enough wallet balance. Missing 0.01 wstETH".
+  // The batch still simulates (balances are forged) — this just explains why it
+  // can't execute, mirroring how a failed health check blocks an otherwise-valid
+  // simulation.
+  const insufficientBalanceMessage = computed(() => {
+    if (!walletShortfalls.value.length) return ''
+    const missing = walletShortfalls.value
+      .map(s => `${formatSmartAmount(formatUnits(s.amount, s.decimals))} ${s.symbol || 'token'}`)
+      .join(', ')
+    return `Not enough wallet balance. Missing ${missing}`
+  })
   // Whether the batch can actually be sent on-chain: no per-op revert, no
   // batch-level error (top-level revert or deferred status-check failure), no
   // real-wallet shortfall, and not mid-flight. The simulated state still renders
@@ -1116,35 +1137,32 @@ export const useTxBatch = () => {
   // summary of what the whole batch does to the wallet (deposited/withdrawn/…).
   // Computed against the last layer (not the active one) so the summary stays
   // visible whether the eye toggle is showing the simulated or the real state.
+  // Uses the raw simulated balances (not the zero-floored `walletBalances`), so
+  // an underfunded supply still shows the full amount pulled from the wallet —
+  // the part forged by state overrides included — rather than collapsing to 0.
   const walletChanges = computed(() => {
     const last = layers.value.length - 1
     if (last <= 0) return [] as BatchWalletChange[]
-    const cur = last > 0 ? layers.value[last]?.walletBalances : undefined
-    const base = layers.value[0]?.walletBalances
+    const cur = layers.value[last]?.walletBalancesSim
+    const base = layers.value[0]?.walletBalancesSim
     return buildWalletChanges(cur, base, walletAssetMeta)
   })
   const activeLayerData = computed(() => layers.value[activeLayer.value])
   const entryCount = computed(() => entries.value.length)
 
   // The context label each entry operates in. EVK entries derive it from the
-  // op's vault target(s) on its plan → label product; Earn entries can carry
-  // the Earn vault display name captured at add-time.
+  // op's vault target(s) on its plan → label product(s), joined with " / " when
+  // the op spans markets (same shape as the positions list's pair label); Earn
+  // entries can carry the Earn vault display name captured at add-time.
   const marketByEntryId = computed<Record<string, string>>(() => {
     const labels = getCurrentEulerLabelsData()
     const out: Record<string, string> = {}
     for (const entry of entries.value) {
-      const marketLabelOverride = getEntryMarketLabelOverride(entry)
-      if (marketLabelOverride) {
-        out[entry.id] = marketLabelOverride
-        continue
-      }
-      for (const addr of collectVaultTargets(entryPlans.value[entry.id])) {
-        const name = getEulerLabelProductByVault(labels, addr)?.name
-        if (name) {
-          out[entry.id] = name
-          break
-        }
-      }
+      const market = getEntryMarketLabelOverride(entry) ?? buildPlanMarketLabel(
+        entryPlans.value[entry.id],
+        addr => getEulerLabelProductByVault(labels, addr)?.name,
+      )
+      if (market) out[entry.id] = market
     }
     return out
   })
@@ -1178,6 +1196,7 @@ export const useTxBatch = () => {
     hasFailedOps,
     canExecuteBatch,
     hasInsufficientBalance,
+    insufficientBalanceMessage,
     walletShortfalls,
     modifiedKeys,
     modifiedBalanceKeys,

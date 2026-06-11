@@ -25,6 +25,11 @@ const OP_VERB: Record<string, string> = {
 }
 
 const label = computed(() => {
+  // Verbatim override (e.g. "Refinance USDC/wstETH") wins over the derived
+  // verb+symbol, so refinance rows name the position rather than the swap leg.
+  if (props.entry.nameOverride) {
+    return { verb: undefined, symbol: undefined, fallback: props.entry.nameOverride }
+  }
   const review = props.entry.review as { type?: string, asset?: { symbol?: string }, swapToAsset?: { symbol?: string } } | undefined
   const longSym = review?.swapToAsset?.symbol
   const shortSym = review?.asset?.symbol

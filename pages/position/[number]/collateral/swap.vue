@@ -282,11 +282,14 @@ const addToBatch = async () => {
   const isMax = isMaxSwap.value
   const sameAsset = isSameAsset.value
   const swapQuote = sameAsset ? undefined : selectedQuote.value ?? undefined
-  const label = sameAsset
-    ? `Migrate ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
-    : `Swap collateral ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
+  // Name the op after the original position pair (e.g. "Refinance BOLD/USDC",
+  // "BOLD & others/USDC" for multi-collateral), matching the positions list.
+  const pairLabel = pairAssetsLabel.value
+    ?? `${pos.collateralVault?.asset.symbol ?? '?'}/${pos.borrowVault?.asset.symbol ?? '?'}`
+  const label = `Refinance ${pairLabel}`
   await addBatchEntry({
     label,
+    nameOverride: label,
     buildPlan: account => planCollateralChange({
       fromVault: fromAddr,
       toVault: toAddr,

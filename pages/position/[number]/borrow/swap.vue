@@ -303,11 +303,14 @@ const addToBatch = async () => {
   const amount = valueToNano(fromAmount.value, from.asset.decimals)
   const sameAsset = isSameAsset.value
   const swapQuote = sameAsset ? undefined : selectedQuote.value ?? undefined
-  const label = sameAsset
-    ? `Migrate debt ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
-    : `Swap debt ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
+  // Name the op after the original position pair (e.g. "Refinance BOLD/USDC",
+  // "BOLD & others/USDC" for multi-collateral), matching the positions list.
+  const pairLabel = pairAssetsLabel.value
+    ?? `${pos.collateralVault?.asset.symbol ?? '?'}/${pos.borrowVault?.asset.symbol ?? '?'}`
+  const label = `Refinance ${pairLabel}`
   await addBatchEntry({
     label,
+    nameOverride: label,
     buildPlan: account => planDebtChange({
       oldLiabilityVault,
       newLiabilityVault,
@@ -361,6 +364,9 @@ watch([isPositionsLoaded, () => route.params.number], ([loaded]) => {
 }, { immediate: true })
 
 // ── Debt auto-fill ───────────────────────────────────────────────────────
+// `immediate` matters: `position` is a layer-aware computed that is already
+// populated when navigating here client-side (no currentDebt transition to
+// observe), so without it the amount only auto-fills on a full page load.
 watch([currentDebt, fromVault], () => {
   clearSimulationError()
   if (!position.value) return
@@ -368,7 +374,7 @@ watch([currentDebt, fromVault], () => {
   if (toVault.value) {
     requestQuote()
   }
-})
+}, { immediate: true })
 
 watch(borrowVaults, (vaults) => {
   if (!toVault.value) return
