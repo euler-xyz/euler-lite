@@ -333,20 +333,27 @@ const collectPlanTargets = (
   return { vaults, accounts }
 }
 
-type RewardedVault = IHasVaultAddress & {
+// Off-chain APY metadata the lens reads don't carry: reward campaigns and the
+// asset's intrinsic (e.g. staking) yield. Both are populated on the base account
+// (fetchAccount populateAll) but absent on the simulated vaults decoded from the
+// per-layer lens block, so we copy them across when stitching — otherwise the
+// simulated portfolio's net APY / ROE and per-position supply/borrow costs would
+// drop rewards and intrinsic yield.
+type ApyMetaVault = IHasVaultAddress & {
   rewards?: unknown
-  populated?: { rewards?: boolean }
+  intrinsicApy?: unknown
+  populated?: { rewards?: boolean, intrinsicApy?: boolean }
 }
 
-type RewardedPosition = {
+type ApyMetaPosition = {
   vaultAddress: Address
-  vault?: RewardedVault
+  vault?: ApyMetaVault
   liquidity?: {
     vaultAddress: Address
-    vault?: RewardedVault
+    vault?: ApyMetaVault
     collaterals?: Array<{
       address: Address
-      vault?: RewardedVault
+      vault?: ApyMetaVault
     }>
   }
 }
@@ -362,16 +369,16 @@ type StitchSubAccount = {
   liabilityValueUsd?: number
 }
 
-const collectRewardedVaults = (account: Account<IHasVaultAddress>): Map<string, RewardedVault> => {
-  const byAddress = new Map<string, RewardedVault>()
-  const addVault = (vault: RewardedVault | undefined) => {
-    if (!vault?.rewards) return
+const collectApyMetaVaults = (account: Account<IHasVaultAddress>): Map<string, ApyMetaVault> => {
+  const byAddress = new Map<string, ApyMetaVault>()
+  const addVault = (vault: ApyMetaVault | undefined) => {
+    if (!vault || (!vault.rewards && !vault.intrinsicApy)) return
     byAddress.set(getAddress(vault.address).toLowerCase(), vault)
   }
 
   for (const subAccount of Object.values(account.subAccounts)) {
     if (!subAccount) continue
-    for (const position of subAccount.positions as RewardedPosition[]) {
+    for (const position of subAccount.positions as ApyMetaPosition[]) {
       addVault(position.vault)
       addVault(position.liquidity?.vault)
       for (const collateral of position.liquidity?.collaterals ?? []) {
@@ -393,15 +400,19 @@ const mergePositionsByVault = (positions: StitchPosition[]): StitchPosition[] =>
   return Array.from(byVault.values())
 }
 
-const carryVaultRewards = (position: RewardedPosition, rewardedVaults: Map<string, RewardedVault>) => {
-  const carry = (vault: RewardedVault | undefined) => {
-    if (!vault || vault.rewards) return
-    const previous = rewardedVaults.get(getAddress(vault.address).toLowerCase())
-    if (!previous?.rewards) return
-    vault.rewards = previous.rewards
-    vault.populated = {
-      ...vault.populated,
-      rewards: previous.populated?.rewards ?? true,
+const carryVaultApyMeta = (position: ApyMetaPosition, sourceVaults: Map<string, ApyMetaVault>) => {
+  const carry = (vault: ApyMetaVault | undefined) => {
+    if (!vault) return
+    const source = sourceVaults.get(getAddress(vault.address).toLowerCase())
+    if (!source) return
+    // Carry each field independently; the simulated vault may already have one.
+    if (!vault.rewards && source.rewards) {
+      vault.rewards = source.rewards
+      vault.populated = { ...vault.populated, rewards: source.populated?.rewards ?? true }
+    }
+    if (!vault.intrinsicApy && source.intrinsicApy) {
+      vault.intrinsicApy = source.intrinsicApy
+      vault.populated = { ...vault.populated, intrinsicApy: source.populated?.intrinsicApy ?? true }
     }
   }
 
@@ -600,7 +611,7 @@ export const stitchAccount = (
   prevFull: Account<IHasVaultAddress>,
   touched: Account<IHasVaultAddress>,
 ): Account<IHasVaultAddress> => {
-  const rewardedVaults = collectRewardedVaults(prevFull)
+  const apyMetaVaults = collectApyMetaVaults(prevFull)
   // Shallow-clone every sub-account of the previous full account (copy the
   // positions array so we never mutate the source layer).
   const mergedSubs: Record<string, StitchSubAccount> = {}
@@ -623,7 +634,7 @@ export const stitchAccount = (
     const existing = mergedSubs[key]
     if (!existing) {
       for (const tp of tsa.positions) {
-        carryVaultRewards(tp as RewardedPosition, rewardedVaults)
+        carryVaultApyMeta(tp as ApyMetaPosition, apyMetaVaults)
       }
       mergedSubs[key] = { ...tsa, positions: mergePositionsByVault([...tsa.positions]) }
       continue
@@ -631,7 +642,7 @@ export const stitchAccount = (
     const byVault = new Map<string, StitchPosition>()
     for (const p of existing.positions) byVault.set(getAddress(p.vaultAddress), p)
     for (const tp of tsa.positions) {
-      carryVaultRewards(tp as RewardedPosition, rewardedVaults)
+      carryVaultApyMeta(tp as ApyMetaPosition, apyMetaVaults)
       byVault.set(getAddress(tp.vaultAddress), tp)
     }
     mergedSubs[key] = {

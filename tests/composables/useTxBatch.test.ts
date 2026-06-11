@@ -40,6 +40,34 @@ const accountWithPosition = (
   populated: { vaults: true, marketPrices: true, userRewards: true },
 })
 
+// Position carrying a resolved vault entity, with optional reward / intrinsic-APY
+// metadata — mirrors what the SDK populates on the base account but the
+// per-layer simulated vaults lack.
+const vaultEntity = (rewards?: unknown, intrinsicApy?: unknown) => ({
+  address: vault,
+  ...(rewards ? { rewards } : {}),
+  ...(intrinsicApy ? { intrinsicApy } : {}),
+  populated: { rewards: !!rewards, intrinsicApy: !!intrinsicApy },
+})
+
+const accountWithVaultPosition = (shares: bigint, vEntity: ReturnType<typeof vaultEntity>) =>
+  new Account<IHasVaultAddress>({
+    chainId: 1,
+    owner,
+    subAccounts: {
+      [subAccount]: {
+        timestamp: 0,
+        account: subAccount,
+        owner,
+        lastAccountStatusCheckTimestamp: 0,
+        enabledControllers: [],
+        enabledCollaterals: [],
+        positions: [{ ...position(subAccount, shares), vault: vEntity } as never],
+      },
+    },
+    populated: { vaults: true, marketPrices: true, userRewards: true },
+  })
+
 describe('stitchAccount', () => {
   it('merges simulated sub-accounts by canonical address key', () => {
     const base = accountWithPosition(subAccount, subAccount, 1n)
@@ -54,6 +82,29 @@ describe('stitchAccount', () => {
     expect(Object.keys(stitched.subAccounts)).toEqual([subAccount])
     expect(stitched.getSubAccount(subAccount)?.positions).toHaveLength(1)
     expect(stitched.getSubAccount(subAccount)?.positions[0]?.shares).toBe(2n)
+  })
+
+  it('carries reward and intrinsic-APY metadata onto the simulated position vault', () => {
+    const rewards = [{ id: 'campaign-1' }]
+    const intrinsicApy = { apy: 3.1, provider: 'lido' }
+    // Base vault has the off-chain APY metadata; the simulated (touched) vault,
+    // decoded from the per-layer lens block, has none.
+    const base = accountWithVaultPosition(1n, vaultEntity(rewards, intrinsicApy))
+    const touched = accountWithVaultPosition(2n, vaultEntity())
+
+    const stitched = stitchAccount(base, touched)
+
+    const stitchedVault = stitched.getSubAccount(subAccount)?.positions[0]?.vault as {
+      rewards?: unknown
+      intrinsicApy?: unknown
+      populated?: { rewards?: boolean, intrinsicApy?: boolean }
+    } | undefined
+
+    expect(stitched.getSubAccount(subAccount)?.positions[0]?.shares).toBe(2n)
+    expect(stitchedVault?.rewards).toEqual(rewards)
+    expect(stitchedVault?.intrinsicApy).toEqual(intrinsicApy)
+    expect(stitchedVault?.populated?.rewards).toBe(true)
+    expect(stitchedVault?.populated?.intrinsicApy).toBe(true)
   })
 })
 
