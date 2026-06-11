@@ -121,6 +121,32 @@ export const decodeBatchItemLabel = (data: string): string => {
   return SELECTOR_LABELS[selector] || 'Unknown operation'
 }
 
+// The vault(s) an operation's core action targets, read off its plan, resolved
+// to their market (Euler label product) names. Mirrors the positions list's
+// pair label: distinct markets are deduped in plan order and joined with " / ",
+// so a borrow operation spanning vaults from several markets shows all of them.
+const VAULT_ACTION_LABELS = new Set(['Supply', 'Deposit', 'Withdraw', 'Borrow', 'Repay'])
+
+export const buildPlanMarketLabel = (
+  plan: TransactionPlan | undefined,
+  getMarketName: (vaultAddress: string) => string | undefined,
+): string | undefined => {
+  if (!plan) return undefined
+  const names = new Set<string>()
+  for (const item of plan) {
+    if (item.type !== 'evcBatch') continue
+    for (const bi of flattenBatchEntries(item.items)) {
+      if (!VAULT_ACTION_LABELS.has(decodeBatchItemLabel(bi.data))) continue
+      try {
+        const name = getMarketName(getAddress(bi.targetContract))
+        if (name) names.add(name)
+      }
+      catch { /* skip malformed address */ }
+    }
+  }
+  return names.size ? [...names].join(' / ') : undefined
+}
+
 export const cleanStepLabel = (label: string): string => {
   return label
     .replace(/\s*via EVC$/i, '')

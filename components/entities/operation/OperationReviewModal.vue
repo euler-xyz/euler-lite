@@ -2,7 +2,7 @@
 import type { VaultAsset } from '~/types/asset'
 import { encodeFunctionData, getAddress, type Address } from 'viem'
 import { flattenBatchEntries, getEulerLabelProductByVault, getSubAccountId, type SwapperMode, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
-import { buildTransactionPlanDisplaySteps, decodeBatchItemLabel, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
+import { buildPlanMarketLabel, buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getEulerSdk } from '~/composables/useEulerSdk'
 import { getCurrentEulerLabelsData } from '~/composables/useEulerLabels'
@@ -206,25 +206,13 @@ const displaySteps = computed((): DisplayStep[] => {
 })
 
 // Batch operation details show this as a muted context line. EVK operations use
-// the label product name; Earn operations can pass the Earn vault display name.
-const VAULT_ACTION_LABELS = new Set(['Supply', 'Deposit', 'Withdraw', 'Borrow', 'Repay'])
+// the label product name(s) of the vaults the op touches, joined with " / " when
+// it spans markets (same shape as the positions list's pair label); Earn
+// operations can pass the Earn vault display name.
 const market = computed<string | undefined>(() => {
   if (marketLabel) return marketLabel
-  const currentPlan = reviewPlan.value
-  if (!currentPlan?.length) return undefined
   const labels = getCurrentEulerLabelsData()
-  for (const item of currentPlan) {
-    if (item.type !== 'evcBatch') continue
-    for (const bi of flattenBatchEntries(item.items)) {
-      if (!VAULT_ACTION_LABELS.has(decodeBatchItemLabel(bi.data))) continue
-      try {
-        const name = getEulerLabelProductByVault(labels, getAddress(bi.targetContract))?.name
-        if (name) return name
-      }
-      catch { /* skip malformed address */ }
-    }
-  }
-  return undefined
+  return buildPlanMarketLabel(reviewPlan.value, addr => getEulerLabelProductByVault(labels, addr)?.name)
 })
 
 // "Position N" / "Deposits" tag for the sub-account this operation targets,
