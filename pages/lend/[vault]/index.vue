@@ -532,7 +532,7 @@ const addToBatch = async () => {
     })
   }
   amount.value = ''
-  redirectAfterAdd('/portfolio/saving', { subAccount: address.value })
+  redirectAfterAdd('/portfolio/saving', { subAccount: address.value, vault: vaultAddress })
 }
 
 const send = async () => {

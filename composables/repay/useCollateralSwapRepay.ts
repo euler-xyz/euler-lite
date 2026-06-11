@@ -379,6 +379,24 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     { immediate: true },
   )
 
+  // Whether the current inputs repay the whole debt. Mirrors the full-repay
+  // branch in buildRepayPlan, where the plan opts into cleanup (remaining
+  // collateral shares are moved to the owner account).
+  const isFullRepay = computed(() => {
+    if (!position.value || !borrowVault.value || !sourceVault.value) return false
+    const currentDebt = getCurrentDebt()
+    if (currentDebt <= 0n) return false
+    if (core.isSameAsset.value) {
+      const debtNano = core.debtAmount.value
+        ? valueToNano(core.debtAmount.value, borrowVault.value.asset.decimals)
+        : valueToNano(core.amount.value, sourceVault.value.asset.decimals)
+      return debtNano >= currentDebt
+    }
+    if (core.direction.value !== SwapperMode.TARGET_DEBT) return false
+    if (!core.debtAmount.value) return true
+    return valueToNano(core.debtAmount.value, borrowVault.value.asset.decimals) >= currentDebt
+  })
+
   // --- Build / Submit / Send ---
   async function buildRepayPlan(quote?: SwapQuote, account = planAccount.value): Promise<TransactionPlan> {
     if (!position.value || !borrowVault.value || !sourceVault.value) {
@@ -688,6 +706,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     hookWarning,
     liquidityWarning,
     isRepayExceedsDebt: core.isRepayExceedsDebt,
+    isFullRepay,
     // Handlers
     onAmountInput: core.onAmountInput,
     onDebtInput: core.onDebtInput,

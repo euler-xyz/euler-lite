@@ -170,7 +170,7 @@ const addToBatch = async () => {
     review: { type: 'supply', asset: asset.value, amount: amount.value, marketLabel: earnVaultMarketLabel.value },
   })
   amount.value = ''
-  redirectAfterAdd('/portfolio/saving', { subAccount: address.value })
+  redirectAfterAdd('/portfolio/saving', { subAccount: address.value, vault: vaultAddress })
 }
 
 const send = async () => {

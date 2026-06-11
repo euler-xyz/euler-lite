@@ -1,9 +1,13 @@
 import { getAddress } from 'viem'
 
 export const BATCH_SCROLL_SUB_ACCOUNT_QUERY = 'batchSubAccount'
+export const BATCH_SCROLL_VAULT_QUERY = 'batchVault'
 
 interface BatchRedirectOptions {
   subAccount?: string | undefined
+  /** Vault address of the affected position — disambiguates the scroll target
+   *  when several positions live on the same sub-account (savings/earn lists). */
+  vault?: string | undefined
 }
 
 /**
@@ -24,6 +28,9 @@ export const useBatchRedirect = () => {
 
     if (options.subAccount) {
       query[BATCH_SCROLL_SUB_ACCOUNT_QUERY] = getAddress(options.subAccount).toLowerCase()
+      if (options.vault) {
+        query[BATCH_SCROLL_VAULT_QUERY] = getAddress(options.vault).toLowerCase()
+      }
     }
 
     router.replace({ path, query })

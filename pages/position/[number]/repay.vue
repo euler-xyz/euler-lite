@@ -34,7 +34,7 @@ const positionIndex = usePositionIndex()
 const { planRepayFromWallet } = useEulerTx()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
-const { isPositionsLoading, isPositionsLoaded, isDepositsLoaded, refreshAllPositions: _refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
+const { isPositionsLoading, isPositionsLoaded, isDepositsLoaded, refreshAllPositions: _refreshAllPositions, getPositionBySubAccountIndex, portfolioAddress } = useEulerAccount()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { getTokenCategoryTags } = useTokenList()
 const { settings } = useUserSettings()
@@ -204,6 +204,21 @@ const canAddToBatch = computed(() => {
   return false
 })
 
+// A full repay closes the position: the plan's cleanup moves the remaining
+// collateral shares to the owner account, so the position card the user was on
+// becomes a removed ghost. Land on the owner's deposit of the collateral vault
+// (where that collateral now lives) instead of the ghost.
+const redirectAfterRepayAdd = (isClosing: boolean) => {
+  if (isClosing && portfolioAddress.value) {
+    redirectAfterAdd('/portfolio/saving', {
+      subAccount: portfolioAddress.value,
+      vault: collateralVault.value?.address,
+    })
+    return
+  }
+  redirectAfterAdd('/portfolio', { subAccount: position.value?.subAccount })
+}
+
 const addToBatch = async () => {
   if (!canAddToBatch.value || !borrowVault.value || !position.value) return
   const borrowSymbol = borrowVault.value.asset.symbol
@@ -212,6 +227,7 @@ const addToBatch = async () => {
     if (walletSwap.needsSwap.value) {
       const quote = walletSwap.quotes.selectedQuote.value ?? undefined
       const inSymbol = walletSwap.selectedAsset.value?.symbol ?? ''
+      const isClosing = walletSwap.isFullRepay.value
       await addBatchEntry({
         label: `Repay-swap ${inSymbol} → ${borrowSymbol}`,
         buildPlan: account => walletSwap.buildRepayPlan(quote, account),
@@ -219,7 +235,7 @@ const addToBatch = async () => {
         review: { type: 'repay', asset: walletSwap.selectedAsset.value ?? borrowVault.value.asset, amount: walletSwap.amount.value, swapToAsset: borrowVault.value.asset },
       })
       walletSwap.amount.value = ''
-      redirectAfterAdd('/portfolio', { subAccount: position.value.subAccount })
+      redirectAfterRepayAdd(isClosing)
       return
     }
     const liabilityVault = borrowVault.value.address as Address
@@ -240,13 +256,14 @@ const addToBatch = async () => {
       review: { type: 'repay', asset: borrowVault.value.asset, amount: wallet.amount.value },
     })
     wallet.amount.value = ''
-    redirectAfterAdd('/portfolio', { subAccount: position.value.subAccount })
+    redirectAfterRepayAdd(isFullRepay)
     return
   }
 
   if (formTab.value === 'collateral') {
     const quote = collateral.isSameAsset.value ? undefined : collateral.quotes.selectedQuote.value ?? undefined
     const srcSymbol = collateral.sourceVault.value?.asset.symbol ?? ''
+    const isClosing = collateral.isFullRepay.value
     await addBatchEntry({
       label: `Repay from ${srcSymbol} collateral → ${borrowSymbol}`,
       buildPlan: account => collateral.buildRepayPlan(quote, account),
@@ -255,13 +272,14 @@ const addToBatch = async () => {
     })
     collateral.amount.value = ''
     collateral.debtAmount.value = ''
-    redirectAfterAdd('/portfolio', { subAccount: position.value.subAccount })
+    redirectAfterRepayAdd(isClosing)
     return
   }
 
   if (formTab.value === 'savings') {
     const quote = savings.isSameAsset.value ? undefined : savings.quotes.selectedQuote.value ?? undefined
     const srcSymbol = savings.sourceVault.value?.asset.symbol ?? ''
+    const isClosing = savings.isFullRepay.value
     await addBatchEntry({
       label: `Repay from ${srcSymbol} savings → ${borrowSymbol}`,
       buildPlan: account => savings.buildRepayPlan(quote, account),
@@ -270,7 +288,7 @@ const addToBatch = async () => {
     })
     savings.amount.value = ''
     savings.debtAmount.value = ''
-    redirectAfterAdd('/portfolio', { subAccount: position.value.subAccount })
+    redirectAfterRepayAdd(isClosing)
   }
 }
 

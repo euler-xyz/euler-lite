@@ -524,7 +524,7 @@ const addToBatch = async () => {
     })
   }
   amount.value = ''
-  redirectAfterAdd('/portfolio/saving', { subAccount: subAccount.value ?? effectiveAddress.value })
+  redirectAfterAdd('/portfolio/saving', { subAccount: subAccount.value ?? effectiveAddress.value, vault: vaultAddress })
 }
 
 const updateSyncEstimates = () => {
