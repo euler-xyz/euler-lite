@@ -15,6 +15,7 @@ const {
   isSimulating,
   simError,
   execError,
+  insufficientBalanceMessage,
   walletChanges,
   removeEntry,
   clearBatch,
@@ -126,11 +127,13 @@ const simEyeLabel = computed(() =>
       data-testid="batch-wallet-changes"
     />
 
-    <!-- Top-level batch errors (revert / status-check) -->
+    <!-- Top-level batch errors (revert / status-check / wallet shortfall). The
+         batch simulates fine (balances are forged) but can't execute — same
+         pattern as a failed health check. -->
     <BatchAlert
-      v-if="simError || execError"
+      v-if="simError || execError || insufficientBalanceMessage"
       class="mx-16 mb-4"
-      :message="execError || simError || ''"
+      :message="execError || simError || insufficientBalanceMessage"
     />
 
     <!-- Footer -->

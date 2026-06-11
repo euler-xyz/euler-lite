@@ -29,6 +29,7 @@ const {
   canExecuteBatch,
   hasFailedOps,
   hasInsufficientBalance,
+  insufficientBalanceMessage,
   executeBatch,
   prepareBatchPlan,
   getMergedPlan,
@@ -233,7 +234,7 @@ const isConfirmDisabled = computed(() =>
 const blockedReason = computed(() => {
   if (isSpyMode.value) return 'Connect a wallet to execute — disabled in spy mode'
   if (hasFailedOps.value) return 'Resolve the reverting operation to execute'
-  if (hasInsufficientBalance.value) return 'Not enough balance to execute this batch'
+  if (hasInsufficientBalance.value) return insufficientBalanceMessage.value || 'Not enough balance to execute this batch'
   if (simError.value) return 'This batch would revert — resolve the flagged error'
   return ''
 })
@@ -394,10 +395,10 @@ const handleExecute = async () => {
         :description="`This batch interacts with an unverified vault (${unverifiedVaultNames.join(', ')}). Proceeding with an unknown and unverified vault may pose security risks — such vaults could potentially be used for phishing attempts.`"
       />
 
-      <!-- Top-level batch error -->
+      <!-- Top-level batch error (revert / status-check / wallet shortfall) -->
       <BatchAlert
-        v-if="simError || execError"
-        :message="execError || simError || ''"
+        v-if="simError || execError || insufficientBalanceMessage"
+        :message="execError || simError || insufficientBalanceMessage"
       />
 
       <!-- Secondary actions: copy calldata + Tenderly -->
