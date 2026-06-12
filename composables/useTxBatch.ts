@@ -728,6 +728,13 @@ export const useTxBatch = () => {
       // layer's touched positions onto the previous full account. This preserves
       // the user's existing positions in vaults the batch never touched.
       const simAccounts = (sim.simulatedAccounts ?? []) as Account<IHasVaultAddress>[]
+      // Version guard: the builder needs one simulated account per operation on
+      // top of the pre-batch snapshot (the layered simulation API). An SDK build
+      // without it (e.g. the published 0.2.16-beta, which returns only the final
+      // account) would otherwise silently render the real state forever.
+      if (!simError.value && simAccounts.length < plans.length + 1) {
+        simError.value = 'Batch simulation did not return per-operation state layers — the installed @eulerxyz/euler-v2-sdk build does not support the batch builder.'
+      }
       const fullLayers: Account<IHasVaultAddress>[] = [baseAccount]
       for (let i = 1; i < simAccounts.length; i++) {
         fullLayers.push(stitchAccount(fullLayers[i - 1]!, simAccounts[i]!))
