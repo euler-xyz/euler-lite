@@ -181,6 +181,30 @@ const openTermsModal = () => {
     },
   })
 }
+
+// Adding to the batch must clear the same gates as a direct execute — a queued
+// op still gets executed. The TOS gate was sidesteppable via "Add to batch"
+// before; now the add is blocked by any active operation guard, and when terms
+// are required it routes through the acceptance modal first (accept → record →
+// add), so the user can't batch without accepting.
+const isAddToBatchBlocked = computed(() => isOperationBlocked.value && !showTosFlow.value)
+
+const handleAddToBatch = () => {
+  if (showTosFlow.value) {
+    modal.open(AcknowledgeTermsModal, {
+      props: {
+        onReject: () => modal.close(),
+        onAccept: () => {
+          tosGuard?.acceptTerms()
+          modal.close()
+          emit('add-to-batch')
+        },
+      },
+    })
+    return
+  }
+  emit('add-to-batch')
+}
 </script>
 
 <template>
@@ -199,9 +223,9 @@ const openTermsModal = () => {
         <UiButton
           size="large"
           variant="primary"
-          :disabled="!canAddToBatch"
+          :disabled="!canAddToBatch || isAddToBatchBlocked"
           data-testid="add-to-batch"
-          @click="emit('add-to-batch')"
+          @click="handleAddToBatch"
         >
           <span class="inline-flex items-center gap-6">
             <span class="text-h5 leading-none">+</span>
@@ -293,9 +317,9 @@ const openTermsModal = () => {
         v-if="supportsBatch && !batchBlocksDirect"
         type="button"
         class="w-full h-48 flex items-center justify-center gap-6 text-accent-500 text-h6 disabled:opacity-40 transition-opacity hover:opacity-80"
-        :disabled="!canAddToBatch"
+        :disabled="!canAddToBatch || isAddToBatchBlocked"
         data-testid="add-to-batch"
-        @click="emit('add-to-batch')"
+        @click="handleAddToBatch"
         @mouseenter="onPlusEnter"
         @mouseleave="onPlusLeave"
       >
