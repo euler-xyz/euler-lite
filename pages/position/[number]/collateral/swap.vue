@@ -39,6 +39,8 @@ const { isReady: isVaultsReady } = useVaults()
 const { getOrFetch } = useVaultRegistry()
 const { isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
 const { client: rpcClient } = useRpcClient()
+const { entryCount: batchEntryCount } = useTxBatch()
+const shouldIncludeCowSwapQuotes = computed(() => batchEntryCount.value === 0)
 
 const positionIndex = usePositionIndex()
 
@@ -144,7 +146,7 @@ const cowSwapOrderStatus = useCowSwapOrderStatus(
 const swap = useSwapPageLogic({
   amountField: 'amountOut',
   compare: 'max',
-  includeCowSwap: true,
+  includeCowSwap: () => shouldIncludeCowSwapQuotes.value,
   fromVault,
   toVault,
   balance,
@@ -166,7 +168,7 @@ const swap = useSwapPageLogic({
     const quoteDeadline = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
     const chainConfig = getCowSwapChainConfig(currentChainId.value ?? 0)
     let providerExtraData
-      = swapCollateralSharesAmountIn > 0n
+      = shouldIncludeCowSwapQuotes.value && swapCollateralSharesAmountIn > 0n
         ? COWSWAP_PROVIDER_EXTRA_DATA.collateralSwap(swapCollateralSharesAmountIn)
         : undefined
     if (providerExtraData && chainConfig) {

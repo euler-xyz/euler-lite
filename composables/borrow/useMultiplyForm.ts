@@ -94,6 +94,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const { chainId } = useEulerAddresses()
   const { getBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
+  const { entryCount: batchEntryCount } = useTxBatch()
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
   const { settings } = useUserSettings()
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -102,6 +103,25 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     simulationError: multiplySimulationError,
     clearSimulationError: clearMultiplySimulationError,
   } = useTransactionPlanSimulation()
+
+  // --- Form state ---
+  const multiplyInputAmount = ref('')
+  const multiplier = ref(1)
+  const multiplyLongAmount = ref('')
+  const multiplyShortAmount = ref('')
+  const multiplySupplyVault: Ref<EVault | undefined> = ref()
+  // Supply-asset wallet balance from the central wallet entity — reactive + layer-aware.
+  const multiplyAssetBalance = computed(() => multiplySupplyVault.value?.asset.address ? getBalance(multiplySupplyVault.value.asset.address as Address) : 0n)
+  const isMultiplySavingCollateral = ref(false)
+  // Sub-account of the savings position the user picked from the collateral
+  // options modal. Without this, two savings positions of the same vault on
+  // different sub-accounts look identical to `depositPositions.find(...)` and
+  // the form silently sources shares from whichever happened to be first.
+  const multiplySelectedSavingSubAccount = ref<string | undefined>(undefined)
+  const isMultiplySubmitting = ref(false)
+  const isMultiplyPreparing = ref(false)
+  const multiplyPlan = ref<TransactionPlan | null>(null)
+  const preparedMultiplyPlan = shallowRef<TransactionPlanPrepared | null>(null)
 
   const multiplyPriceInvert = usePriceInvert(
     () => multiplyShortVault.value?.asset.symbol,
@@ -130,7 +150,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   } = useSwapQuotesParallel({
     amountField: 'amountOut',
     compare: 'max',
-    includeCowSwap: () => !isMultiplySavingCollateral.value,
+    includeCowSwap: () => batchEntryCount.value === 0 && !isMultiplySavingCollateral.value,
     buildTxPlanForQuote: (quote, _provider, context) => buildMultiplyPlanFromQuote(quote, context.account),
     getStateOverrideOptions: () => buildMultiplyStateOverrideOptions(),
     // First quote in each sweep computes plugin prefetch (Pyth Hermes updates
@@ -207,25 +227,6 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       subAccountSnapshotApplied: true,
     })
   }
-  // --- Form state ---
-  const multiplyInputAmount = ref('')
-  const multiplier = ref(1)
-  const multiplyLongAmount = ref('')
-  const multiplyShortAmount = ref('')
-  const multiplySupplyVault: Ref<EVault | undefined> = ref()
-  // Supply-asset wallet balance from the central wallet entity — reactive + layer-aware.
-  const multiplyAssetBalance = computed(() => multiplySupplyVault.value?.asset.address ? getBalance(multiplySupplyVault.value.asset.address as Address) : 0n)
-  const isMultiplySavingCollateral = ref(false)
-  // Sub-account of the savings position the user picked from the collateral
-  // options modal. Without this, two savings positions of the same vault on
-  // different sub-accounts look identical to `depositPositions.find(...)` and
-  // the form silently sources shares from whichever happened to be first.
-  const multiplySelectedSavingSubAccount = ref<string | undefined>(undefined)
-  const isMultiplySubmitting = ref(false)
-  const isMultiplyPreparing = ref(false)
-  const multiplyPlan = ref<TransactionPlan | null>(null)
-  const preparedMultiplyPlan = shallowRef<TransactionPlanPrepared | null>(null)
-
   // --- Vault aliases ---
   const multiplyLongVault = computed(() => collateralVault.value)
   const multiplyShortVault = computed(() => borrowVault.value)
@@ -781,7 +782,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     // wrapper enables the borrow vault controller itself. Resolve it here so
     // the CoW quote is scoped to it; if unavailable we fall back to skipping
     // the CoW provider.
-    const shouldRequestCowSwap = !isMultiplySavingCollateral.value
+    const shouldRequestCowSwap = batchEntryCount.value === 0 && !isMultiplySavingCollateral.value
     const quoteDeadline = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
     const cowProviderExtraData = { ...COWSWAP_PROVIDER_EXTRA_DATA.openPosition }
     let cowAccount: Address | null = null

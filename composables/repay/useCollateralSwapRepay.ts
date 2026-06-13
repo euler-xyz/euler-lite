@@ -30,6 +30,7 @@ import { getPlanHookDisabledWarning, getUtilisationWarning, type VaultWarning } 
 import { COWSWAP_ORDER_DEADLINE_SECONDS, getCowSwapChainConfig, getCowSwapQuoteOrderAmounts, isCowProvider } from '~/entities/cowswap'
 import { type CowSwapClosePositionExecuteParams, useCowSwapClosePositionExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
 import { formatNumber, trimTrailingZeros } from '~/utils/string-utils'
+import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 
 interface UseCollateralSwapRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -77,6 +78,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const { refreshAllPositions } = useEulerAccount()
   const { account: planAccount } = usePlanAccount()
   const { client: rpcClient } = useRpcClient()
+  const { entryCount: batchEntryCount, getMergedPlan } = useTxBatch()
   const { settings } = useUserSettings()
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
@@ -96,6 +98,12 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     () => borrowVault.value?.asset.symbol,
   )
   const sourceProduct = useEulerProductOfVault(computed(() => sourceVault.value?.address || ''))
+  const buildBatchAwareGasEstimatePlan = async (candidatePlan: TransactionPlan): Promise<TransactionPlan> => {
+    const batchPlan = batchEntryCount.value > 0 ? getMergedPlan() : null
+    if (!batchPlan) return candidatePlan
+    const sdk = await getEulerSdkFresh()
+    return sdk.executionService.mergePlans([batchPlan, candidatePlan])
+  }
 
   // --- Collateral options ---
   const { collateralOptions: swapCollateralOptions, collateralVaults: swapCollateralVaults } = useSwapCollateralOptions({
@@ -138,8 +146,9 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     slippage,
     clearSimulationError,
     getCurrentDebt,
-    includeCowSwap: true,
+    includeCowSwap: () => batchEntryCount.value === 0,
     buildTxPlanForQuote: (quote, _provider, context) => buildRepayPlan(quote, context.account),
+    buildGasEstimatePlan: buildBatchAwareGasEstimatePlan,
     prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
     getPlanAccount: () => planAccount.value,
     getQuoteAccounts: () => {

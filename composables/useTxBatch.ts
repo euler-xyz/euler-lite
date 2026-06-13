@@ -70,7 +70,9 @@ export interface BatchEntry {
   multiply?: boolean
   /** Verbatim batch-row name, used as-is instead of the verb+symbol derived from
    *  `review`. Refinance flows set this to "Refinance <collateral>/<borrow>" so
-   *  the row reads as the position it acts on rather than the swap leg's asset. */
+   *  the row reads as the position it acts on rather than the swap leg's asset.
+   *  Wallet-swap repay also uses this to name the debt asset while the review keeps
+   *  the wallet input asset for step decoding. */
   nameOverride?: string
 }
 
@@ -333,7 +335,50 @@ const collectPlanTargets = (
   return { vaults, accounts }
 }
 
-type StitchPosition = { vaultAddress: Address, shares?: bigint, borrowed?: bigint }
+type PriceableVaultCollateral = {
+  address?: string
+  marketPriceUsd?: number
+}
+type PriceableVault = IHasVaultAddress & {
+  asset?: { decimals?: number }
+  collaterals?: PriceableVaultCollateral[]
+  marketPriceUsd?: number
+}
+type StitchLiquidityCollateral = {
+  address: Address
+  vault?: PriceableVault
+  value?: { borrowing?: bigint, liquidation?: bigint, oracleMid?: bigint }
+  marketPriceUsd?: number
+  valueUsd?: number
+}
+type StitchLiquidity = {
+  vaultAddress: Address
+  vault?: PriceableVault
+  unitOfAccount?: Address
+  daysToLiquidation?: unknown
+  liabilityValue?: { borrowing?: bigint, liquidation?: bigint, oracleMid?: bigint }
+  totalCollateralValue?: { borrowing?: bigint, liquidation?: bigint, oracleMid?: bigint }
+  collaterals: StitchLiquidityCollateral[]
+  liabilityValueUsd?: number
+  totalCollateralValueUsd?: number
+}
+type StitchPosition = {
+  account?: Address
+  vaultAddress: Address
+  vault?: PriceableVault
+  asset?: Address
+  shares?: bigint
+  assets?: bigint
+  borrowed?: bigint
+  isController?: boolean
+  isCollateral?: boolean
+  balanceForwarderEnabled?: boolean
+  rewardStreams?: unknown[]
+  liquidity?: StitchLiquidity
+  marketPriceUsd?: number
+  suppliedValueUsd?: number
+  borrowedValueUsd?: number
+}
 type StitchSubAccount = {
   positions: StitchPosition[]
   enabledControllers?: Address[]
@@ -352,6 +397,221 @@ const mergePositionsByVault = (positions: StitchPosition[]): StitchPosition[] =>
     byVault.set(getAddress(position.vaultAddress), position)
   }
   return Array.from(byVault.values())
+}
+
+const cloneLiquidityValue = (
+  value: StitchLiquidityCollateral['value'] | StitchLiquidity['liabilityValue'] | undefined,
+) => value ? { ...value } : undefined
+
+const cloneLiquidity = (liquidity: StitchLiquidity | undefined): StitchLiquidity | undefined =>
+  liquidity
+    ? {
+        ...liquidity,
+        liabilityValue: cloneLiquidityValue(liquidity.liabilityValue),
+        totalCollateralValue: cloneLiquidityValue(liquidity.totalCollateralValue),
+        collaterals: liquidity.collaterals.map(collateral => ({
+          ...collateral,
+          value: cloneLiquidityValue(collateral.value),
+        })),
+      }
+    : undefined
+
+const clonePosition = (position: StitchPosition): StitchPosition => ({
+  ...position,
+  rewardStreams: position.rewardStreams ? [...position.rewardStreams] : undefined,
+  liquidity: cloneLiquidity(position.liquidity),
+})
+
+const vaultMarketPrice = (vault: PriceableVault | undefined): number | undefined => {
+  const price = vault?.marketPriceUsd
+  return typeof price === 'number' && Number.isFinite(price) ? price : undefined
+}
+
+const vaultCollateralPrice = (collateral: PriceableVaultCollateral | undefined): number | undefined => {
+  const price = collateral?.marketPriceUsd
+  return typeof price === 'number' && Number.isFinite(price) ? price : undefined
+}
+
+const maybeAddressKey = (address: string | undefined): string | undefined => {
+  if (!address) return undefined
+  try {
+    return getAddress(address).toLowerCase()
+  }
+  catch {
+    return address.toLowerCase()
+  }
+}
+
+const mergeVaultPriceMetadata = (
+  touched: PriceableVault | undefined,
+  existing: PriceableVault | undefined,
+): PriceableVault | undefined => {
+  if (!touched) return existing
+  if (!existing) return touched
+
+  const existingCollaterals = existing.collaterals ?? []
+  const touchedCollaterals = touched.collaterals ?? []
+  const existingByAddress = new Map<string, PriceableVaultCollateral>()
+  for (const collateral of existingCollaterals) {
+    const key = maybeAddressKey(collateral.address)
+    if (key) existingByAddress.set(key, collateral)
+  }
+
+  const seen = new Set<string>()
+  const mergedCollaterals = touchedCollaterals.map((collateral) => {
+    const key = maybeAddressKey(collateral.address)
+    if (key) seen.add(key)
+    const existingCollateral = key ? existingByAddress.get(key) : undefined
+    const price = vaultCollateralPrice(collateral) ?? vaultCollateralPrice(existingCollateral)
+    return price === undefined || price === collateral.marketPriceUsd
+      ? collateral
+      : { ...collateral, marketPriceUsd: price }
+  })
+
+  for (const collateral of existingCollaterals) {
+    const key = maybeAddressKey(collateral.address)
+    if (key && seen.has(key)) continue
+    mergedCollaterals.push({ ...collateral })
+  }
+
+  const marketPriceUsd = vaultMarketPrice(touched) ?? vaultMarketPrice(existing)
+  const needsVaultPatch = mergedCollaterals.length !== touchedCollaterals.length
+    || mergedCollaterals.some((collateral, index) => collateral !== touchedCollaterals[index])
+    || (marketPriceUsd !== undefined && touched.marketPriceUsd === undefined)
+  if (!needsVaultPatch) return touched
+
+  return {
+    ...touched,
+    marketPriceUsd: touched.marketPriceUsd ?? marketPriceUsd,
+    collaterals: mergedCollaterals.length ? mergedCollaterals : touched.collaterals,
+  }
+}
+
+const vaultAssetDecimals = (vault: PriceableVault | undefined): number | undefined => {
+  const decimals = vault?.asset?.decimals
+  return typeof decimals === 'number' && Number.isInteger(decimals) && decimals >= 0 ? decimals : undefined
+}
+
+const tokenAmountToUsdValue = (
+  amount: bigint | undefined,
+  decimals: number | undefined,
+  priceUsd: number | undefined,
+): number | undefined => {
+  if (amount === undefined || decimals === undefined || priceUsd === undefined) return undefined
+  return Number(formatUnits(amount, decimals)) * priceUsd
+}
+
+const positionPriceUsd = (position: StitchPosition): number | undefined => {
+  const price = position.marketPriceUsd ?? vaultMarketPrice(position.vault)
+  return typeof price === 'number' && Number.isFinite(price) ? price : undefined
+}
+
+const hydratePositionMarketValues = (position: StitchPosition): StitchPosition => {
+  const price = positionPriceUsd(position)
+  const decimals = vaultAssetDecimals(position.vault)
+  if (price !== undefined) position.marketPriceUsd = price
+
+  const suppliedValueUsd = tokenAmountToUsdValue(position.assets, decimals, price)
+  if (suppliedValueUsd !== undefined) position.suppliedValueUsd = suppliedValueUsd
+  else if ((position.assets ?? 0n) === 0n && (position.shares ?? 0n) === 0n) position.suppliedValueUsd = 0
+
+  const borrowedValueUsd = tokenAmountToUsdValue(position.borrowed, decimals, price)
+  if ((position.borrowed ?? 0n) === 0n) position.borrowedValueUsd = undefined
+  else if (borrowedValueUsd !== undefined) position.borrowedValueUsd = borrowedValueUsd
+
+  return position
+}
+
+const mergePositionData = (
+  existing: StitchPosition | undefined,
+  touched: StitchPosition,
+): StitchPosition => {
+  const next = clonePosition(touched)
+  const sameSuppliedAmount = existing
+    && (existing.assets ?? 0n) === (next.assets ?? 0n)
+    && (existing.shares ?? 0n) === (next.shares ?? 0n)
+  const sameBorrowAmount = existing
+    && (existing.borrowed ?? 0n) === (next.borrowed ?? 0n)
+
+  next.vault = mergeVaultPriceMetadata(next.vault, existing?.vault)
+  next.marketPriceUsd = next.marketPriceUsd ?? vaultMarketPrice(next.vault) ?? existing?.marketPriceUsd ?? vaultMarketPrice(existing?.vault)
+  if (sameSuppliedAmount) next.suppliedValueUsd = next.suppliedValueUsd ?? existing?.suppliedValueUsd
+  if (sameBorrowAmount) next.borrowedValueUsd = next.borrowedValueUsd ?? existing?.borrowedValueUsd
+  if (!next.liquidity && existing?.liquidity && (next.borrowed ?? 0n) > 0n) {
+    next.liquidity = cloneLiquidity(existing.liquidity)
+  }
+  if ((next.borrowed ?? 0n) === 0n) {
+    next.liquidity = undefined
+  }
+
+  return hydratePositionMarketValues(next)
+}
+
+const positionByVault = (positions: StitchPosition[]): Map<string, StitchPosition> => {
+  const byVault = new Map<string, StitchPosition>()
+  for (const position of positions) {
+    byVault.set(getAddress(position.vaultAddress), position)
+  }
+  return byVault
+}
+
+const getPositionUsdValue = (position: StitchPosition | undefined): number | undefined => {
+  if (!position) return undefined
+  if (position.suppliedValueUsd !== undefined) return position.suppliedValueUsd
+  return tokenAmountToUsdValue(position.assets, vaultAssetDecimals(position.vault), positionPriceUsd(position))
+}
+
+const hydrateBorrowLiquidity = (
+  borrow: StitchPosition,
+  positions: StitchPosition[],
+  enabledCollaterals: Address[] | undefined,
+): void => {
+  const liquidity = borrow.liquidity
+  if (!liquidity || (borrow.borrowed ?? 0n) === 0n) return
+
+  const positionsByVault = positionByVault(positions)
+  liquidity.vault = liquidity.vault ?? borrow.vault
+  liquidity.liabilityValueUsd = borrow.borrowedValueUsd
+
+  const liquidityCollateralAddresses = liquidity.collaterals.map(collateral => getAddress(collateral.address))
+  const fallbackCollateralAddresses = (enabledCollaterals ?? []).map(address => getAddress(address))
+  const collateralAddresses = liquidityCollateralAddresses.length
+    ? liquidityCollateralAddresses
+    : fallbackCollateralAddresses
+
+  let totalCollateralValueUsd: number | undefined = collateralAddresses.length ? 0 : liquidity.totalCollateralValueUsd
+
+  for (const collateral of liquidity.collaterals) {
+    const collateralAddress = getAddress(collateral.address)
+    const collateralPosition = positionsByVault.get(collateralAddress)
+    collateral.vault = collateral.vault ?? collateralPosition?.vault
+    collateral.marketPriceUsd = collateral.marketPriceUsd ?? vaultMarketPrice(collateral.vault)
+
+    const valueUsd = getPositionUsdValue(collateralPosition)
+    if (valueUsd !== undefined) {
+      collateral.valueUsd = valueUsd
+    }
+  }
+
+  for (const collateralAddress of collateralAddresses) {
+    const valueUsd = getPositionUsdValue(positionsByVault.get(collateralAddress))
+    if (valueUsd === undefined) {
+      totalCollateralValueUsd = undefined
+      break
+    }
+    totalCollateralValueUsd = (totalCollateralValueUsd ?? 0) + valueUsd
+  }
+
+  liquidity.totalCollateralValueUsd = totalCollateralValueUsd
+}
+
+const hydrateStitchedPositions = (
+  positions: StitchPosition[],
+  enabledCollaterals: Address[] | undefined,
+): StitchPosition[] => {
+  for (const position of positions) hydratePositionMarketValues(position)
+  for (const position of positions) hydrateBorrowLiquidity(position, positions, enabledCollaterals)
+  return positions
 }
 
 export interface ModifiedPositionKeySets {
@@ -544,9 +804,9 @@ export const stitchAccount = (
 ): Account<IHasVaultAddress> => {
   // Reward + intrinsic-APY metadata is populated directly on the simulated
   // vaults by simulateTransactionPlan (vaultFetchOptions), matching the base
-  // account's populateAll — so the stitch only has to merge positions here.
-  // Shallow-clone every sub-account of the previous full account (copy the
-  // positions array so we never mutate the source layer).
+  // account's populateAll. The simulated account only contains the touched
+  // slice, so we merge positions first and then recompute USD fields that depend
+  // on the full sub-account context.
   const mergedSubs: Record<string, StitchSubAccount> = {}
   for (const [addr, sa] of Object.entries(prevFull.subAccounts)) {
     if (!sa) continue
@@ -557,7 +817,7 @@ export const stitchAccount = (
       ...(existing ?? {}),
       positions: mergePositionsByVault([
         ...(existing?.positions ?? []),
-        ...sa.positions,
+        ...sa.positions.map(position => clonePosition(position as StitchPosition)),
       ]),
     }
   }
@@ -566,14 +826,22 @@ export const stitchAccount = (
     const key = subAccountMapKey(addr)
     const existing = mergedSubs[key]
     if (!existing) {
-      mergedSubs[key] = { ...tsa, positions: mergePositionsByVault([...tsa.positions]) }
+      mergedSubs[key] = {
+        ...tsa,
+        positions: hydrateStitchedPositions(
+          mergePositionsByVault(tsa.positions.map(position => clonePosition(position as StitchPosition))),
+          tsa.enabledCollaterals,
+        ),
+      }
       continue
     }
     const byVault = new Map<string, StitchPosition>()
     for (const p of existing.positions) byVault.set(getAddress(p.vaultAddress), p)
     for (const tp of tsa.positions) {
-      byVault.set(getAddress(tp.vaultAddress), tp)
+      const vault = getAddress(tp.vaultAddress)
+      byVault.set(vault, mergePositionData(byVault.get(vault), tp as StitchPosition))
     }
+    const positions = hydrateStitchedPositions(Array.from(byVault.values()), tsa.enabledCollaterals)
     mergedSubs[key] = {
       ...existing,
       // Post-op EVC state for this sub-account comes from the simulated layer.
@@ -586,7 +854,7 @@ export const stitchAccount = (
       // them) reflect the post-op state, not the stale base-layer liquidity.
       liquidity: (tsa as { liquidity?: unknown }).liquidity,
       liabilityValueUsd: (tsa as { liabilityValueUsd?: number }).liabilityValueUsd,
-      positions: Array.from(byVault.values()),
+      positions,
     }
   }
   const account = new Account({
@@ -659,6 +927,7 @@ export const useTxBatch = () => {
       layers.value = []
       activeLayer.value = 0
       simError.value = undefined
+      execError.value = undefined
       walletShortfalls.value = []
       lastMerged = null
       baseAccountSnapshot = null
@@ -868,6 +1137,7 @@ export const useTxBatch = () => {
         activeLayer.value = 0
         isSimulating.value = false
         simError.value = undefined
+        execError.value = undefined
         walletShortfalls.value = []
         lastMerged = null
         baseAccountSnapshot = null
@@ -914,6 +1184,7 @@ export const useTxBatch = () => {
     pendingAddSignatures.add(signature)
 
     const add = async () => {
+      execError.value = undefined
       const account = await getEntryPlanningAccount()
       const plan = await entry.buildPlan(account)
       const { buildPlan: _buildPlan, ...fixedEntry } = entry
@@ -939,6 +1210,7 @@ export const useTxBatch = () => {
 
   const removeEntry = (id: string) => {
     const nextEntries = entries.value.filter(entry => entry.id !== id)
+    execError.value = undefined
     entries.value = nextEntries
     if (nextEntries.length === 0) {
       resimToken++
@@ -962,6 +1234,7 @@ export const useTxBatch = () => {
     activeLayer.value = 0
     isSimulating.value = false
     simError.value = undefined
+    execError.value = undefined
     walletShortfalls.value = []
     lastMerged = null
     baseAccountSnapshot = null
@@ -973,6 +1246,10 @@ export const useTxBatch = () => {
   const setActiveLayer = (layer: number) => {
     activeLayer.value = Math.max(0, Math.min(layer, layers.value.length - 1))
     syncOverlay()
+  }
+
+  const dismissExecutionError = () => {
+    execError.value = undefined
   }
 
   /** Lazily check (once) whether the server has Tenderly credentials configured,
@@ -1169,6 +1446,7 @@ export const useTxBatch = () => {
     addEntry,
     removeEntry,
     clearBatch,
+    dismissExecutionError,
     setActiveLayer,
     executeBatch,
     // Tenderly "Simulate on Tenderly" for the whole batch.

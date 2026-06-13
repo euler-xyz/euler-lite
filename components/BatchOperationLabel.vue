@@ -14,7 +14,7 @@ const OP_VERB: Record<string, string> = {
   'repay': 'Repay',
   'swap': 'Swap',
   'swap-supply': 'Swap',
-  'swap-withdraw': 'Swap',
+  'swap-withdraw': 'Withdraw',
   'swap-borrow': 'Swap',
   'transfer': 'Transfer',
   'reward': 'Claim',

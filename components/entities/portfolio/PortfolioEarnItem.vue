@@ -95,7 +95,7 @@ const onClick = () => {
   <div
     class="relative block overflow-hidden no-underline bg-surface rounded-xl border border-line-subtle shadow-card transition-all duration-default ease-default"
     :class="isSimulatedRemoved
-      ? '!border-2 !border-dashed !border-line-emphasis'
+      ? '!border !border-dashed !border-line-emphasis'
       : 'cursor-pointer hover:shadow-card-hover hover:border-line-emphasis'"
     data-id="portfolio-list-item"
     :data-modal-trigger="isSimulatedRemoved ? undefined : 'vault-information'"

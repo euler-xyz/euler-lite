@@ -19,6 +19,7 @@ const {
   walletChanges,
   removeEntry,
   clearBatch,
+  dismissExecutionError,
   setActiveLayer,
   entryPlans,
 } = useTxBatch()
@@ -38,7 +39,7 @@ const openEntryReview = (entry: BatchEntry) => {
 
 const openBatchReview = () => {
   if (!entries.value.length) return
-  modal.open(BatchReviewModal)
+  modal.open(BatchReviewModal, { onClose: dismissExecutionError })
 }
 
 // Eye toggle: peek at the real state (layer 0) vs the simulated end state

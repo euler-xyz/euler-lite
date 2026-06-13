@@ -1064,7 +1064,7 @@ watch([isConnected, isSpyMode, address], () => {
         </div>
         <div
           class="rounded-12 bg-card border border-line-default shadow-card"
-          :class="{ '!border-2 !border-dashed !border-accent-600': isBorrowVaultModified(borrowVault?.address) }"
+          :class="{ '!border !border-dashed !border-accent-600': isBorrowVaultModified(borrowVault?.address) }"
         >
           <div class="flex justify-between items-center p-16 pb-12 border-b border-line-default">
             <VaultLabelsAndAssets
@@ -1285,7 +1285,7 @@ watch([isConnected, isSpyMode, address], () => {
             v-for="collateral in collateralRows"
             :key="collateral.vault.address"
             class="rounded-12 bg-card border border-line-default shadow-card cursor-pointer"
-            :class="{ '!border-2 !border-dashed !border-accent-600': isCollateralVaultModified(collateral.vault.address) }"
+            :class="{ '!border !border-dashed !border-accent-600': isCollateralVaultModified(collateral.vault.address) }"
             @click="openCollateralInfoModal(asPositionCollateralVault(collateral.vault))"
           >
             <div class="flex justify-between items-center p-16 pb-12 border-b border-line-default">

@@ -359,9 +359,9 @@ const openPositionInformationModal = () => {
     class="relative block overflow-hidden no-underline bg-surface rounded-xl border border-line-subtle shadow-card transition-all duration-default ease-default"
     :class="[
       isSimulatedRemoved
-        ? '!border-2 !border-dashed !border-line-emphasis'
+        ? '!border !border-dashed !border-line-emphasis'
         : 'hover:shadow-card-hover hover:border-line-emphasis',
-      { '!border-2 !border-dashed !border-accent-600': isSimulatedModified },
+      { '!border !border-dashed !border-accent-600': isSimulatedModified },
     ]"
     data-id="portfolio-list-item"
     data-list="borrow"

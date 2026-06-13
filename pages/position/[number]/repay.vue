@@ -232,6 +232,7 @@ const addToBatch = async () => {
         label: `Repay-swap ${inSymbol} → ${borrowSymbol}`,
         buildPlan: account => walletSwap.buildRepayPlan(quote, account),
         subAccount: position.value.subAccount as Address,
+        nameOverride: `Repay ${borrowSymbol}`,
         review: { type: 'repay', asset: walletSwap.selectedAsset.value ?? borrowVault.value.asset, amount: walletSwap.amount.value, swapToAsset: borrowVault.value.asset },
       })
       walletSwap.amount.value = ''

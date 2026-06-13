@@ -41,6 +41,7 @@ const {
   tenderlyError,
   fetchTenderlyEnabled,
   simulateOnTenderly,
+  dismissExecutionError,
 } = useTxBatch()
 
 const { isSpyMode, spyAddress } = useSpyMode()
@@ -245,12 +246,17 @@ const handleExecute = async () => {
   // executeBatch clears the cart on success; close once nothing's left to do.
   if (!execError.value && entries.value.length === 0) emit('close')
 }
+
+const handleClose = () => {
+  dismissExecutionError()
+  emit('close')
+}
 </script>
 
 <template>
   <BaseModalWrapper
     title="Review batch"
-    @close="!isExecuting && emit('close')"
+    @close="!isExecuting && handleClose()"
   >
     <!-- Separator under the modal title -->
     <div class="-mx-16 mb-16 border-t border-line-default" />
