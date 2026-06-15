@@ -1,11 +1,12 @@
 import { computed, effectScope, ref, shallowRef, watch, type EffectScope, type Ref } from 'vue'
 import { formatUnits, getAddress, type Address } from 'viem'
-import { Account, getEulerLabelProductByVault } from '@eulerxyz/euler-v2-sdk'
+import { Account, fetchErc20SlotHints, getEulerLabelProductByVault } from '@eulerxyz/euler-v2-sdk'
 import type {
   IHasVaultAddress,
   Portfolio,
   PortfolioBorrowPosition,
   PortfolioSavingsPosition,
+  SlotHints,
   TransactionPlan,
   VaultEntity,
 } from '@eulerxyz/euler-v2-sdk'
@@ -195,6 +196,7 @@ let addEntryQueue: Promise<void> = Promise.resolve()
 const pendingAddSignatures = new Set<string>()
 // Symbol/decimals for touched wallet tokens, for the wallet-changes summary.
 const walletAssetMeta: Record<string, { symbol: string, decimals: number }> = {}
+let batchSlotHints: SlotHints = {}
 
 const normalizeTokenKey = (token: string) => {
   try {
@@ -216,6 +218,50 @@ const registerReviewAssetMeta = (review?: Record<string, unknown>) => {
   }
   catch {
     // Review metadata is display-only; ignore malformed optional addresses.
+  }
+}
+
+const collectRequiredApprovalTokens = (plan: TransactionPlan): Address[] => {
+  const tokens: Address[] = []
+  const seen = new Set<string>()
+  for (const item of plan) {
+    if (item.type !== 'requiredApproval') continue
+    try {
+      const token = getAddress(item.token) as Address
+      const key = token.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      tokens.push(token)
+    }
+    catch {
+      // Ignore malformed optional metadata; simulation can still use SDK fallbacks.
+    }
+  }
+  return tokens
+}
+
+const primeBatchSlotHintsFor = async (chainId: number, tokens: Address[]): Promise<void> => {
+  if (!tokens.length) return
+  try {
+    const sdk = await getEulerSdkFresh()
+    const provider = sdk.providerService?.getProvider(chainId)
+    if (!provider) return
+    const permit2Address = sdk.deploymentService.getDeployment(chainId).addresses.coreAddrs.permit2 as Address
+    const next: SlotHints = { ...batchSlotHints }
+    await Promise.all(tokens.map(async (token) => {
+      try {
+        next[token] = await fetchErc20SlotHints(provider, token, {
+          allowanceSpender: permit2Address,
+        })
+      }
+      catch (error) {
+        logWarn('useTxBatch/primeBatchSlotHintsFor', error)
+      }
+    }))
+    batchSlotHints = next
+  }
+  catch (error) {
+    logWarn('useTxBatch/primeBatchSlotHintsFor', error)
   }
 }
 
@@ -931,6 +977,7 @@ export const useTxBatch = () => {
       walletShortfalls.value = []
       lastMerged = null
       baseAccountSnapshot = null
+      batchSlotHints = {}
       syncOverlay()
       return
     }
@@ -963,6 +1010,7 @@ export const useTxBatch = () => {
         merged,
         {
           stateOverrides: true,
+          stateOverrideOptions: { slotHints: batchSlotHints },
           // Populate the simulated vaults with reward campaigns + intrinsic
           // (e.g. staking) APY, exactly as the base account is via populateAll —
           // so the simulated portfolio's net APY / ROE and per-position
@@ -1156,6 +1204,7 @@ export const useTxBatch = () => {
         walletShortfalls.value = []
         lastMerged = null
         baseAccountSnapshot = null
+        batchSlotHints = {}
         resimulatePromise = null
         tenderly.clearSimulation()
         syncOverlay()
@@ -1202,6 +1251,10 @@ export const useTxBatch = () => {
       execError.value = undefined
       const account = await getEntryPlanningAccount()
       const plan = await entry.buildPlan(account)
+      const cid = chainId.value
+      if (cid) {
+        await primeBatchSlotHintsFor(cid, collectRequiredApprovalTokens(plan))
+      }
       const { buildPlan: _buildPlan, ...fixedEntry } = entry
       registerReviewAssetMeta(fixedEntry.review)
       entries.value = [...entries.value, { ...fixedEntry, plan, id: `entry-${++idSeq}` }]
@@ -1236,6 +1289,7 @@ export const useTxBatch = () => {
       walletShortfalls.value = []
       lastMerged = null
       baseAccountSnapshot = null
+      batchSlotHints = {}
       resimulatePromise = null
       tenderly.clearSimulation()
       syncOverlay()
@@ -1253,6 +1307,7 @@ export const useTxBatch = () => {
     walletShortfalls.value = []
     lastMerged = null
     baseAccountSnapshot = null
+    batchSlotHints = {}
     resimulatePromise = null
     tenderly.clearSimulation()
     syncOverlay()

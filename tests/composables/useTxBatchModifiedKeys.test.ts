@@ -75,6 +75,19 @@ describe('buildModifiedPositionKeySets', () => {
     expect(modified.balance.has(key(borrowVault))).toBe(false)
     expect(modified.balance.has(key(collateralVault))).toBe(false)
   })
+
+  it('marks a newly supplied position as a balance change', () => {
+    const base = accountWithPositions([])
+    const current = accountWithPositions([
+      position(collateralVault, 100n, 0n),
+    ])
+
+    const modified = buildModifiedPositionKeySets(current, base)
+
+    expect(modified.balance.has(key(collateralVault))).toBe(true)
+    expect(modified.any.has(key(collateralVault))).toBe(true)
+    expect(modified.debt.has(key(collateralVault))).toBe(false)
+  })
 })
 
 describe('buildRemovedPositionKeySets', () => {
