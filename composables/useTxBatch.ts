@@ -1013,8 +1013,23 @@ export const useTxBatch = () => {
       // SDK wallet service) is the layer-0 base; each layer overlays the touched
       // assets' simulated balance. In-sim balances are forged, so the forge
       // cancels in the per-layer delta vs the pre-batch layer.
-      const simWb = (sim.simulatedWalletBalances ?? []) as Record<string, bigint>[]
-      const touchedTokens = simWb.length ? Object.keys(simWb[0] ?? {}) : []
+      const normalizeWalletKey = (token: string) => {
+        try {
+          return getAddress(token).toLowerCase()
+        }
+        catch {
+          return token.toLowerCase()
+        }
+      }
+      const normalizeWalletBalances = (balances: Record<string, bigint>) => {
+        const out: Record<string, bigint> = {}
+        for (const [token, balance] of Object.entries(balances)) {
+          out[normalizeWalletKey(token)] = balance
+        }
+        return out
+      }
+      const simWb = ((sim.simulatedWalletBalances ?? []) as Record<string, bigint>[]).map(normalizeWalletBalances)
+      const touchedTokens = simWb.length ? Array.from(new Set(Object.keys(simWb[0] ?? {}))) : []
       const realWallet: Record<string, bigint> = {}
       if (touchedTokens.length) {
         try {
@@ -1317,7 +1332,7 @@ export const useTxBatch = () => {
     // simError covers both a top-level EVC revert and a deferred status-check
     // failure; walletShortfalls covers an under-funded wallet. Either way the
     // real `batch` tx would revert, so refuse to send.
-    if (simError.value || walletShortfalls.value.length > 0) return
+    if (simError.value || walletShortfalls.value.length > 0 || hasFailedOps.value) return
     execError.value = undefined
     isExecuting.value = true
     try {

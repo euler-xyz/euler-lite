@@ -40,6 +40,7 @@ import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 // re-simulates asynchronously (after the form may reset), so the plan must be
 // built from these captured values rather than the live reactive refs.
 export interface MultiplyBatchSnapshot {
+  subAccount: Address
   supplyVault: EVault
   longVault: EVault
   shortVault: EVault
@@ -200,7 +201,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   // on-chain re-fetch). Same-asset multiply passes no quote; cross-asset needs a
   // non-CoW quote (gated at the call site). New position ⇒ a fresh sub-account.
   const buildMultiplyPlan = async (snap: MultiplyBatchSnapshot, account = planAccount.value): Promise<TransactionPlan> => {
-    const subAccount = (await resolvePendingSubAccount()) as Address
+    const subAccount = snap.subAccount
     const supplyAmountNano = valueToNano(snap.inputAmount || '0', snap.supplyVault.asset.decimals)
     let supplyShares: bigint | undefined
     if (snap.isSavingCollateral && snap.savingFrom) {

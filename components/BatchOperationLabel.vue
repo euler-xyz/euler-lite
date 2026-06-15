@@ -37,7 +37,7 @@ const label = computed(() => {
   const verb = isMultiply ? 'Multiply' : (review?.type ? OP_VERB[review.type] : undefined)
   // Multiply shows the long/short pair; same-asset multiply collapses to one symbol.
   const symbol = isMultiply
-    ? (longSym && longSym !== shortSym ? `${longSym}/${shortSym}` : (longSym || shortSym))
+    ? (longSym && shortSym && longSym !== shortSym ? `${longSym}/${shortSym}` : (longSym || shortSym))
     : shortSym
   return { verb, symbol, fallback: props.entry.label }
 })

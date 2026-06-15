@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { getSubAccountAddress, isSecuritizeCollateralVault, type EVault, type SecuritizeCollateralVault, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import { getSubAccountAddress, isSecuritizeCollateralVault, type EVault, type SecuritizeCollateralVault, type SwapQuote, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { getProjectedRates } from '~/utils/vault/apy'
 import { isSecuritizeVault } from '~/utils/vault/categories'
@@ -251,15 +251,24 @@ const swapOutputExactDisplay = computed(() => {
   return `${formatUnits(amountOut, Number(selectedOutputAsset.value.decimals))} ${selectedOutputAsset.value.symbol}`
 })
 
-async function buildSwapWithdrawPlanFromQuote(quote: import('@eulerxyz/euler-v2-sdk').SwapQuote, account = cachedAccount.value) {
-  if (!asset.value) throw new Error('Asset not loaded')
-  const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value.decimals).lte(amountFixed.value)
+interface SwapWithdrawPlanSnapshot {
+  asset: VaultAsset
+  owner: Address
+  shares: bigint
+  assets: bigint
+}
+
+async function buildSwapWithdrawPlanFromQuote(quote: SwapQuote, account = cachedAccount.value, snapshot?: SwapWithdrawPlanSnapshot) {
+  const inputAsset = snapshot?.asset ?? asset.value
+  if (!inputAsset) throw new Error('Asset not loaded')
   return planWithdrawOrRedeem({
     vaultAddress: vaultAddress as Address,
-    owner: (subAccount.value ?? effectiveAddress.value!) as Address,
-    isMax,
-    shares: sharesBalance.value,
-    assets: amountFixed.value.value,
+    owner: snapshot?.owner ?? (subAccount.value ?? effectiveAddress.value!) as Address,
+    // Swap quotes are fixed to an asset input amount; redeem-all can send more
+    // assets than the quote was built for.
+    isMax: false,
+    shares: snapshot?.shares ?? sharesBalance.value,
+    assets: snapshot?.assets ?? amountFixed.value.value,
     swapQuote: quote,
     account,
   })
@@ -490,6 +499,8 @@ const send = async () => {
 // (non-swap), non-max withdraw by asset amount.
 const isCowSwapSelected = computed(() => isCowProviderOrQuote(swapSelectedProvider.value, swapSelectedQuote.value))
 const canAddToBatch = computed(() => {
+  if (isOutputAssetBlocked.value || isOutputAssetRestricted.value) return false
+  if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as EVault, effectiveWithdrawOp.value)) return false
   if (!(+amount.value)) return false
   if (needsSwap.value) return !!swapSelectedQuote.value && !isCowSwapSelected.value
   return true
@@ -500,17 +511,28 @@ const addToBatch = async () => {
   if (needsSwap.value) {
     const quote = swapEffectiveQuote.value
     if (!quote) return
-    const ownerAddr = (subAccount.value ?? effectiveAddress.value!) as Address
+    const ownerAddr = (subAccount.value ?? effectiveAddress.value) as Address | undefined
+    if (!ownerAddr) return
+    const snap = {
+      asset: asset.value,
+      owner: ownerAddr,
+      shares: sharesBalance.value,
+      assets: amountFixed.value.value,
+    }
+    const amountLabel = amount.value
+    const outputAsset = selectedOutputAsset.value
+    const outputAmount = swapEstimatedOutput.value
     await addBatchEntry({
-      label: `Withdraw-swap ${amount.value} ${asset.value.symbol} → ${selectedOutputAsset.value?.symbol ?? ''}`,
-      buildPlan: account => buildSwapWithdrawPlanFromQuote(quote, account),
+      label: `Withdraw-swap ${amountLabel} ${asset.value.symbol} → ${outputAsset?.symbol ?? ''}`,
+      buildPlan: account => buildSwapWithdrawPlanFromQuote(quote, account, snap),
       subAccount: ownerAddr,
-      review: { type: 'swap-withdraw', asset: asset.value, amount: amount.value, swapToAsset: selectedOutputAsset.value, swapToAmount: swapEstimatedOutput.value },
+      review: { type: 'swap-withdraw', asset: asset.value, amount: amountLabel, swapToAsset: outputAsset, swapToAmount: outputAmount },
     })
   }
   else {
     const assets = valueToNano(amount.value, asset.value.decimals)
-    const ownerAddr = (subAccount.value ?? effectiveAddress.value!) as Address
+    const ownerAddr = (subAccount.value ?? effectiveAddress.value) as Address | undefined
+    if (!ownerAddr) return
     // A max withdraw must redeem the full share balance (redeem(full_balance))
     // rather than withdraw(assets): a fixed asset amount leaves share-price
     // rounding dust and can under-withdraw once interest accrues by execution.

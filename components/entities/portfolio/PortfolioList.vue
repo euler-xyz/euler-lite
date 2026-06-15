@@ -31,7 +31,7 @@ const getBorrowCollateralAddresses = (position: PortfolioBorrowPosition<VaultEnt
   for (const address of position.collateralVaults ?? []) add(address)
   add(position.collateral?.vaultAddress)
   add(position.collateralVault?.address)
-  return Array.from(addresses)
+  return Array.from(addresses).sort()
 }
 
 const isRemovedBorrowPosition = (position: PortfolioBorrowPosition<VaultEntity>) => {

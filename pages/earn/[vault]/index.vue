@@ -159,8 +159,9 @@ const submit = async () => {
     isPreparing.value = false
   }
 }
+const canAddToBatch = computed(() => !!(+amount.value) && !isGeoBlocked.value)
 const addToBatch = async () => {
-  if (!asset.value?.address || !(+amount.value)) return
+  if (!asset.value?.address || !canAddToBatch.value) return
   const assetAddr = asset.value.address as Address
   const amt = valueToNano(amount.value, asset.value.decimals)
   const label = `Earn deposit ${amount.value} ${asset.value.symbol}`
@@ -383,7 +384,7 @@ watch(amount, () => {
                 :disabled-reason="disabledReasonInfo?.message"
                 :disabled-reason-variant="disabledReasonInfo?.variant"
                 :loading="isSubmitting || isPreparing"
-                :can-add-to-batch="!!(+amount)"
+                :can-add-to-batch="canAddToBatch"
                 @add-to-batch="addToBatch"
               >
                 Review Supply

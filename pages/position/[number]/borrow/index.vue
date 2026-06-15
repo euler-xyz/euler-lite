@@ -289,8 +289,11 @@ const submit = async () => {
 // Add this borrow to the transaction batch. Built against the active layer's
 // simulated account, so a borrow stacked on a simulated collateral deposit
 // borrows against that simulated collateral.
+const canAddToBatch = computed(() =>
+  !reviewBorrowDisabled.value && !!borrowVault.value && !!position.value && !!(+borrowAmount.value),
+)
 const addToBatch = async () => {
-  if (!borrowVault.value || !position.value || !(+borrowAmount.value)) return
+  if (!canAddToBatch.value || !borrowVault.value || !position.value) return
   const vaultAddress = borrowVault.value.address as Address
   const amount = valueToNano(borrowAmount.value, borrowVault.value.shares.decimals)
   const borrowAccount = position.value.subAccount as Address
@@ -600,7 +603,7 @@ watch([collateralAmount, borrowAmount], async () => {
               :loading="isSubmitting || isPreparing"
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
-              :can-add-to-batch="!!(+borrowAmount)"
+              :can-add-to-batch="canAddToBatch"
               @add-to-batch="addToBatch"
             >
               Review Borrow

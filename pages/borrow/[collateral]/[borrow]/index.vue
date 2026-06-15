@@ -283,6 +283,7 @@ const addToBatch = async () => {
   // we reset the form below, so a lazy read of the reactive refs would see the
   // cleared values (an empty amount builds a no-op borrow).
   const snap: BorrowBatchSnapshot = {
+    subAccount,
     // The composable treats collateral as an EVault (see useBorrowForm construction).
     collateralVault: cVault as EVault,
     borrowVault: bVault,
@@ -322,6 +323,7 @@ const addMultiplyToBatch = async () => {
   const sameAsset = multiply.multiplyIsSameAsset.value
   const saving = multiply.multiplySavingPosition.value
   const snap: MultiplyBatchSnapshot = {
+    subAccount,
     supplyVault: supplyVault as EVault,
     longVault: longVault as EVault,
     shortVault: shortVault as EVault,

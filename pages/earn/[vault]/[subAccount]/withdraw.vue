@@ -179,10 +179,14 @@ const submit = async () => {
     isPreparing.value = false
   }
 }
+const canAddToBatch = computed(() =>
+  !!(+amount.value) && !reviewWithdrawDisabled.value && !!asset.value?.address && !!(subAccount.value ?? effectiveAddress.value),
+)
 const addToBatch = async () => {
-  if (!asset.value?.address || !(+amount.value)) return
+  if (!canAddToBatch.value || !asset.value?.address) return
   const assets = amountFixed.value.value
-  const ownerAddr = (subAccount.value ?? effectiveAddress.value!) as `0x${string}`
+  const ownerAddr = (subAccount.value ?? effectiveAddress.value) as `0x${string}` | undefined
+  if (!ownerAddr) return
   const label = `Earn withdraw ${amount.value} ${asset.value.symbol}`
   // Max withdraw → redeem the full share balance (redeem(full_balance)) instead
   // of withdraw(assets), so the position clears without share-price rounding dust.
@@ -371,7 +375,7 @@ watch(amount, () => {
               :disabled="reviewWithdrawDisabled"
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
-              :can-add-to-batch="!!(+amount)"
+              :can-add-to-batch="canAddToBatch"
               @add-to-batch="addToBatch"
             >
               Review Withdraw

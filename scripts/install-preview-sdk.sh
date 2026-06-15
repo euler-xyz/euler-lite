@@ -7,7 +7,14 @@ if [ -z "${EULER_SDK_BRANCH:-}" ]; then
   exit 0
 fi
 
-SDK_REPO="${EULER_SDK_REPO:-https://github.com/euler-xyz/euler-sdks.git}"
+case "$EULER_SDK_BRANCH" in
+  -*|*..*|*//*|*[!A-Za-z0-9._/-]*)
+    echo "Unsupported EULER_SDK_BRANCH value: ${EULER_SDK_BRANCH}" >&2
+    exit 1
+    ;;
+esac
+
+SDK_REPO="https://github.com/euler-xyz/euler-sdks.git"
 SDK_DIR="/tmp/euler-sdks"
 SDK_PACK_DIR="/tmp/euler-sdk-pack"
 

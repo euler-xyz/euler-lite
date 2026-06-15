@@ -27,9 +27,14 @@ export const useBatchRedirect = () => {
     else if (Array.isArray(network) && network[0]) query.network = network[0]
 
     if (options.subAccount) {
-      query[BATCH_SCROLL_SUB_ACCOUNT_QUERY] = getAddress(options.subAccount).toLowerCase()
-      if (options.vault) {
-        query[BATCH_SCROLL_VAULT_QUERY] = getAddress(options.vault).toLowerCase()
+      try {
+        query[BATCH_SCROLL_SUB_ACCOUNT_QUERY] = getAddress(options.subAccount).toLowerCase()
+        if (options.vault) {
+          query[BATCH_SCROLL_VAULT_QUERY] = getAddress(options.vault).toLowerCase()
+        }
+      }
+      catch {
+        // Ignore malformed scroll targets; the redirect itself should still happen.
       }
     }
 

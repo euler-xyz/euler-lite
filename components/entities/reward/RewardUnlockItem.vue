@@ -35,6 +35,10 @@ const plan = ref<TransactionPlan | null>(null)
 const reulToken = computed(() => getTokenByAddress(reulTokenContractAddress.value))
 const eulToken = computed(() => getTokenByAddress(eulTokenContractAddress.value))
 const walletChangeTokenAddress = computed(() => eulTokenContractAddress.value || reulTokenContractAddress.value)
+const walletChangeToken = computed(() => eulTokenContractAddress.value ? eulToken.value : reulToken.value)
+const walletChangeTokenSymbol = computed(() =>
+  walletChangeToken.value?.symbol ?? (eulTokenContractAddress.value ? 'EUL' : 'rEUL'),
+)
 const walletChangeTokenDecimals = computed(() => eulToken.value?.decimals ?? reulToken.value?.decimals ?? 18)
 const canAddToBatch = computed(() => settings.value.enableAdvancedMode)
 
@@ -93,7 +97,7 @@ const unlock = async () => {
 const getReviewProps = () => ({
   type: 'reul-unlock',
   asset: {
-    symbol: 'EUL',
+    symbol: walletChangeTokenSymbol.value,
     address: walletChangeTokenAddress.value,
     decimals: walletChangeTokenDecimals.value,
   },

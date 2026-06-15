@@ -394,12 +394,19 @@ const load = async () => {
   }
 }
 
-const buildSwapSupplyPlanFromQuote = async (quote: SwapQuote, account = planAccount.value): Promise<TransactionPlan> => {
-  if (!selectedAsset.value) {
+interface SwapSupplyPlanSnapshot {
+  selectedAsset: VaultAsset
+  amount: string
+}
+
+const buildSwapSupplyPlanFromQuote = async (quote: SwapQuote, account = planAccount.value, snapshot?: SwapSupplyPlanSnapshot): Promise<TransactionPlan> => {
+  const inputAsset = snapshot?.selectedAsset ?? selectedAsset.value
+  const inputValue = snapshot?.amount ?? amount.value
+  if (!inputAsset) {
     throw new Error('No selected asset')
   }
-  const isNative = isNativeCurrencyAddress(selectedAsset.value.address)
-  const inputAmount = valueToNano(amount.value || '0', selectedAsset.value.decimals)
+  const isNative = isNativeCurrencyAddress(inputAsset.address)
+  const inputAmount = valueToNano(inputValue || '0', inputAsset.decimals)
   const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
   if (isNative && !wrappedAddress) {
     throw new Error('Wrapped native token not found')
@@ -407,7 +414,7 @@ const buildSwapSupplyPlanFromQuote = async (quote: SwapQuote, account = planAcco
   return planDepositWithSwap({
     swapQuote: quote,
     amount: inputAmount,
-    tokenIn: (wrappedAddress || selectedAsset.value.address) as Address,
+    tokenIn: (wrappedAddress || inputAsset.address) as Address,
     wrappedNativeInfo: isNative && wrappedAddress
       ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
       : undefined,
@@ -503,6 +510,7 @@ const submit = async () => {
 // A CoW swap quote can't be batched (mergePlans/simulate reject cowSwap items).
 const isCowSwapSelected = computed(() => isCowProviderOrQuote(swapSelectedProvider.value, swapSelectedQuote.value))
 const canAddToBatch = computed(() => {
+  if (isGeoBlocked.value || isSwapRestricted.value || isSourceAssetBlocked.value) return false
   if (!(+amount.value) || isNativeWrap.value) return false
   if (needsSwap.value) return !!swapSelectedQuote.value && !isCowSwapSelected.value
   return true
@@ -514,11 +522,15 @@ const addToBatch = async () => {
     const quote = swapEffectiveQuote.value
     if (!quote) return
     const fromSym = selectedAsset.value?.symbol ?? ''
+    const swapAsset = selectedAsset.value
+    const swapAmount = amount.value
+    const swapOutput = swapEstimatedOutput.value
+    if (!swapAsset) return
     await addBatchEntry({
-      label: `Swap-deposit ${amount.value} ${fromSym} → ${asset.value.symbol}`,
-      buildPlan: account => buildSwapSupplyPlanFromQuote(quote, account),
+      label: `Swap-deposit ${swapAmount} ${fromSym} → ${asset.value.symbol}`,
+      buildPlan: account => buildSwapSupplyPlanFromQuote(quote, account, { selectedAsset: swapAsset, amount: swapAmount }),
       subAccount: address.value as Address | undefined,
-      review: { type: 'swap-supply', asset: selectedAsset.value, amount: amount.value, swapToAsset: asset.value, swapToAmount: swapEstimatedOutput.value, swapMode: SwapperMode.EXACT_IN },
+      review: { type: 'swap-supply', asset: swapAsset, amount: swapAmount, swapToAsset: asset.value, swapToAmount: swapOutput, swapMode: SwapperMode.EXACT_IN },
     })
   }
   else {

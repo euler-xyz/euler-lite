@@ -621,6 +621,7 @@ async function buildMultiplyPlanFromQuote(quote: SwapQuote, account = planAccoun
 // simulated earlier batch step). Same-asset multiply (no swap) routes through
 // planMultiplySameAsset; cross-asset needs a non-CoW quote (CoW can't merge).
 const canAddMultiplyToBatch = computed(() => {
+  if (isGeoBlocked.value || isMultiplyRestricted.value) return false
   if (multiplyDebtAmountNano.value <= 0n) return false
   if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value || !multiplySubAccount.value) return false
   if (multiplyIsSameAsset.value) return true

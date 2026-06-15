@@ -322,7 +322,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       // sub-account doesn't hold isn't in `collaterals` ⇒ 0.
       const match = position.value.collaterals.find(c =>
         normalizeAddressOrEmpty(c.vaultAddress) === targetAddress)
-      selectedCollateralAssets.value = match?.assets ?? 0n
+      selectedCollateralAssets.value = match?.assets ?? (targetAddress === primaryAddress ? position.value.supplied : 0n)
     }
     catch (e) {
       logWarn(`collateral/${options.mode}`, e)

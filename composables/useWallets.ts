@@ -162,8 +162,8 @@ export const useWallets = () => {
       }
       const wallet = walletFetch.result
 
-      // Only update if still on same chain
-      if (chainId.value === currentChainId) {
+      // Only update if still on the same chain and account.
+      if (chainId.value === currentChainId && balanceAddress.value && getAddress(balanceAddress.value) === targetAddress) {
         // Merge rather than replace: a vault-only-mode fetch shouldn't drop
         // full-mode balances we fetched earlier (e.g. from a swap page).
         // resetBalances() is called on chain switch and wallet-address

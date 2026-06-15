@@ -178,6 +178,7 @@ describe('useWalletSwapRepay', () => {
       account: shallowRef(planAccount),
     }))
     vi.stubGlobal('useWallets', () => ({
+      getBalance: vi.fn(() => 1_000n),
       fetchSingleBalance: vi.fn(async () => 1_000n),
     }))
     vi.stubGlobal('useTxFinalization', () => ({ finalizeTxAndRedirect: vi.fn() }))

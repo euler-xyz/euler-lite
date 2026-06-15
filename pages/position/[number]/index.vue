@@ -16,8 +16,7 @@ import { VaultOverviewModal, OperationReviewModal, VaultSupplyApyModal, VaultBor
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { getAddress, type Address, type Abi } from 'viem'
-import { eulerAccountLensABI } from '~/entities/euler/abis'
+import { getAddress, type Address } from 'viem'
 import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 
@@ -85,6 +84,17 @@ const hasModifiedKey = (keys: Set<string>, vaultAddr?: string) => {
 }
 const isCollateralVaultModified = (vaultAddr?: string) => hasModifiedKey(modifiedBalanceKeys.value, vaultAddr)
 const isBorrowVaultModified = (vaultAddr?: string) => hasModifiedKey(modifiedDebtKeys.value, vaultAddr)
+const hasPositionBatchChanges = computed(() => {
+  if (!position.value) return false
+  const vaultAddresses = new Set<string>()
+  if (borrowVault.value?.address) vaultAddresses.add(borrowVault.value.address)
+  if (collateralVault.value?.address) vaultAddresses.add(collateralVault.value.address)
+  for (const address of positionCollateralAddresses.value) vaultAddresses.add(address)
+  for (const vaultAddress of vaultAddresses) {
+    if (isCollateralVaultModified(vaultAddress) || isBorrowVaultModified(vaultAddress)) return true
+  }
+  return false
+})
 const collateralSymbolLabel = computed(() => {
   if (!position.value) {
     return ''
@@ -164,11 +174,9 @@ const isPairFullyRestricted = computed(() => {
     && isVaultRestrictedByCountry(borrowVault.value.address)
     && isVaultRestrictedByCountry(collateralVault.value.address)
 })
-const isWithdrawBlockedByLiquidation = computed(() => isEligibleForLiquidation.value && !hasBatchEntries.value)
+const isWithdrawBlockedByLiquidation = computed(() => isEligibleForLiquidation.value && !hasPositionBatchChanges.value)
 const isWithdrawDisabled = computed(() =>
-  !hasBatchEntries.value && (
-    isWithdrawBlockedByLiquidation.value || isPositionGeoBlocked.value || isPairFullyRestricted.value || hasQueryFailure.value
-  ),
+  isWithdrawBlockedByLiquidation.value || isPositionGeoBlocked.value || isPairFullyRestricted.value || hasQueryFailure.value,
 )
 const isMultiplyActionDisabled = computed(() =>
   !hasBatchEntries.value && (
@@ -1198,7 +1206,7 @@ watch([isConnected, isSpyMode, address], () => {
             </div>
             <VaultWarningBanner :warnings="positionWarnings" />
             <UiAlert
-              v-if="!hasBatchEntries && isEligibleForLiquidation"
+              v-if="!hasPositionBatchChanges && isEligibleForLiquidation"
               class="my-12"
               title="Liquidation risk"
               description="This position is eligible for liquidation. Multiply and borrow are disabled."
@@ -1214,7 +1222,7 @@ watch([isConnected, isSpyMode, address], () => {
               size="compact"
             />
             <UiAlert
-              v-if="!hasBatchEntries && (isPositionGeoBlocked || isPairFullyRestricted)"
+              v-if="isPositionGeoBlocked || isPairFullyRestricted"
               class="my-12"
               title="Region restricted"
               description="This pair is not available in your region. You can still repay existing debt."

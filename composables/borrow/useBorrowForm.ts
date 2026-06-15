@@ -29,6 +29,7 @@ import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 // re-simulates asynchronously (after the form may have been reset), so the plan
 // must be built from these captured values rather than the live reactive refs.
 export interface BorrowBatchSnapshot {
+  subAccount: Address
   collateralVault: EVault
   borrowVault: EVault
   collateralAmount: string
@@ -773,7 +774,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   // — by then the form may have been reset or changed — so it must take a snapshot
   // of every input captured at add-time, NOT read the live reactive refs.
   const buildBorrowPlan = async (snap: BorrowBatchSnapshot, account = planAccount.value): Promise<TransactionPlan> => {
-    const subAccount = (await resolvePendingSubAccount()) as Address
+    const subAccount = snap.subAccount
 
     if (snap.needsSwap) {
       if (!snap.quote || !snap.selectedAsset) throw new Error('No swap quote available')

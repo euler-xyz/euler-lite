@@ -361,8 +361,8 @@ const loadSelectedCollateral = async () => {
     // direct lens read, so the form reflects the active batch layer. Unheld ⇒ 0.
     const match = position.value.collaterals.find(c =>
       normalizeAddress(c.vaultAddress) === targetAddress)
-    selectedCollateralShares.value = match?.shares ?? 0n
-    selectedCollateralAssets.value = match?.assets ?? 0n
+    selectedCollateralShares.value = match?.shares ?? (targetAddress === primaryAddress ? (position.value.collateral?.shares ?? 0n) : 0n)
+    selectedCollateralAssets.value = match?.assets ?? (targetAddress === primaryAddress ? position.value.supplied : 0n)
   }
   catch (e) {
     logWarn('collateralSwap/loadCollateral', e)
