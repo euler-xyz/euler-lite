@@ -2,6 +2,7 @@ import { buildEulerSDK, createKeyringPlugin, createPythPlugin, IntrinsicApyServi
 import type { BuildQueryFn, EulerSDK, EulerSDKConfig } from '@eulerxyz/euler-v2-sdk'
 import { sdkBuildQuery, sdkFreshBuildQuery } from '~/utils/sdk-query-cache'
 import { createLiteTosPlugin } from '~/utils/sdk-tos'
+import { createLiteRlpTouPlugin } from '~/utils/sdk-rlp-tou'
 import { createYuzuIntrinsicApyService } from '~/utils/yuzu-intrinsic-apy'
 
 // sdk-keyring is loaded dynamically below to avoid a static import cycle:
@@ -279,6 +280,7 @@ const buildInstance = async ({ backend, buildQuery }: InstanceBuildArgs): Promis
         buildQuery,
       }),
       createLiteTosPlugin(),
+      createLiteRlpTouPlugin(),
     ],
   })
   configureAppProxies(sdk, buildQuery)

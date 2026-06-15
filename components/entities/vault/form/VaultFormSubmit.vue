@@ -5,9 +5,10 @@ import { flip, offset, shift, useFloating } from '@floating-ui/vue'
 import { isOperationBlocked, operationBlockReason } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonVariant } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
-import { AcknowledgeTermsModal, VaultUnverifiedDisclaimerModal } from '#components'
+import { AcknowledgeTermsModal, AcknowledgeRlpRedemptionTermsModal, VaultUnverifiedDisclaimerModal } from '#components'
 import type { KeyringFlowState, CredentialData } from '~/composables/useKeyring'
 import type { TosGuardState } from '~/composables/guards/useTosGuard'
+import type { RlpRedemptionTouGuardState } from '~/composables/guards/useRlpRedemptionTouGuard'
 import type { UnverifiedVaultGuardState } from '~/composables/guards/useUnverifiedVaultGuard'
 import { useStateOverrideResolution } from '~/composables/useStateOverrideOptions'
 
@@ -31,6 +32,7 @@ const modal = useModal()
 
 const keyringGuard = inject<KeyringGuardState | null>('keyring-guard', null)
 const tosGuard = inject<TosGuardState | null>('tos-guard', null)
+const rlpTouGuard = inject<RlpRedemptionTouGuardState | null>('rlp-redemption-tou-guard', null)
 const unverifiedVaultGuard = inject<UnverifiedVaultGuardState | null>('unverified-vault-guard', null)
 
 const reference = ref(null)
@@ -107,8 +109,18 @@ const showTosFlow = computed(() =>
   !showKeyringFlow.value && tosGuard?.isTermsRequired === true && !tosGuard?.tosLoadFailed,
 )
 
+const showRlpTouFlow = computed(() =>
+  !showKeyringFlow.value
+  && !showTosFlow.value
+  && rlpTouGuard?.isTermsRequired === true
+  && !rlpTouGuard?.tosLoadFailed,
+)
+
 const showUnverifiedVaultFlow = computed(() =>
-  !showKeyringFlow.value && !showTosFlow.value && unverifiedVaultGuard?.isAcknowledgmentRequired === true,
+  !showKeyringFlow.value
+  && !showTosFlow.value
+  && !showRlpTouFlow.value
+  && unverifiedVaultGuard?.isAcknowledgmentRequired === true,
 )
 
 const openUnverifiedVaultModal = () => {
@@ -129,6 +141,20 @@ const openTermsModal = () => {
       },
       onAccept: () => {
         tosGuard?.acceptTerms()
+        modal.close()
+      },
+    },
+  })
+}
+
+const openRlpTouModal = () => {
+  modal.open(AcknowledgeRlpRedemptionTermsModal, {
+    props: {
+      onReject: () => {
+        modal.close()
+      },
+      onAccept: () => {
+        rlpTouGuard?.acceptTerms()
         modal.close()
       },
     },
@@ -165,6 +191,17 @@ const openTermsModal = () => {
         @click="openTermsModal"
       >
         Accept Terms Of Use
+      </UiButton>
+    </template>
+
+    <!-- RLP redemption additional ToU acceptance flow -->
+    <template v-else-if="showRlpTouFlow">
+      <UiButton
+        size="large"
+        variant="primary"
+        @click="openRlpTouModal"
+      >
+        Accept RLP Redemption Terms
       </UiButton>
     </template>
 

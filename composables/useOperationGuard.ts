@@ -4,6 +4,7 @@ import type { Address } from 'viem'
 import { useKeyring, KeyringFlowState } from '~/composables/useKeyring'
 import { useTosGuard } from '~/composables/guards/useTosGuard'
 import { useUnverifiedVaultGuard } from '~/composables/guards/useUnverifiedVaultGuard'
+import { useRlpRedemptionTouGuard } from '~/composables/guards/useRlpRedemptionTouGuard'
 import { clearOperationMeta, registerOperationBlocker, setOperationMeta, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
 import { clearSdkKeyringCredential, setSdkKeyringCredential } from '~/utils/sdk-keyring'
 import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
@@ -22,6 +23,9 @@ export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | 
 
   // --- Unverified vault guard ---
   useUnverifiedVaultGuard(addresses)
+
+  // --- RLP redemption ToU guard (per-vault, on-chain signature) ---
+  useRlpRedemptionTouGuard(addresses)
 
   // --- Keyring guard ---
   const keyringVaultAddress = computed(() =>

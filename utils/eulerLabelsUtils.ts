@@ -212,6 +212,16 @@ export const isVaultCyclicalNote = (vaultAddress: string): boolean => {
   )
 }
 
+export const isVaultRlpRedemptionTou = (vaultAddress: string): boolean => {
+  const normalized = normalizeAddress(vaultAddress)
+  const product = getEulerLabelProductByVault(labels(), normalized) as EulerLabelProduct | undefined
+  return (
+    productHasTag(product, 'RLP redemption ToU')
+    || vaultOverrideHasTag(product, normalized, 'RLP redemption ToU')
+    || earnEntryHasTag(getEarnEntryByVault(normalized), 'RLP redemption ToU')
+  )
+}
+
 export type EulerLabelEntityVaultLike = {
   address?: string
   governorAdmin?: string

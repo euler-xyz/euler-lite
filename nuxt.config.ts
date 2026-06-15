@@ -118,6 +118,7 @@ export default defineNuxtConfig({
       configStargateUrl: '',
       configTosUrl: '',
       configTosMdUrl: '',
+      configRlpTouMdUrl: '',
       configPrivacyPolicyUrl: '',
       configRiskDisclosuresUrl: '',
       configMicaWhitepaperUrl: '',

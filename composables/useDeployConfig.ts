@@ -14,6 +14,7 @@ export const useDeployConfig = () => {
     stargateUrl: rc.configStargateUrl,
     tosUrl: rc.configTosUrl || 'https://www.euler.finance/terms',
     tosMdUrl: rc.configTosMdUrl,
+    rlpTouMdUrl: rc.configRlpTouMdUrl,
     privacyPolicyUrl: rc.configPrivacyPolicyUrl || 'https://www.euler.finance/privacy-policy',
     riskDisclosuresUrl: rc.configRiskDisclosuresUrl || 'https://www.euler.finance/risk-disclosures',
     micaWhitepaperUrl: rc.configMicaWhitepaperUrl || 'https://www.euler.finance/MICA-Whitepaper.pdf',
@@ -35,6 +36,7 @@ export const useDeployConfig = () => {
 
     // Feature flags: all enabled by default, set env var to 'false' to disable
     enableTosSignature: !!rc.configTosMdUrl,
+    enableRlpTouSignature: !!rc.configRlpTouMdUrl,
     enableEntityBranding: isEnabled(rc.configEnableEntityBranding),
     enableVaultType: isEnabled(rc.configEnableVaultType),
     enableEarnPage: isEnabled(rc.configEnableEarnPage),
