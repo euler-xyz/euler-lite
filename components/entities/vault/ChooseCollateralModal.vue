@@ -88,6 +88,11 @@ const incompatibleOptions = computed(() =>
 const incompatibleNote = computed(() =>
   incompatibleOptions.value[0]?.option.compatibilityWarning?.message ?? '',
 )
+const compatibleNote = computed(() => {
+  return title.toLowerCase().includes('debt')
+    ? 'Debt vaults accepting your current collateral'
+    : 'Collateral vaults accepted by your current debt'
+})
 
 // Only show group headers when there is an actual split to communicate.
 // If there are no incompatible options, the list stays flat.
@@ -109,7 +114,12 @@ const groupedRows = computed<GroupedRow[]>(() => {
     return rows
   }
 
-  rows.push({ kind: 'header', key: 'hdr-compatible', label: 'Compatible' })
+  rows.push({
+    kind: 'header',
+    key: 'hdr-compatible',
+    label: 'Compatible',
+    note: compatibleNote.value,
+  })
   pushOptions(compatibleOptions.value)
 
   rows.push({
