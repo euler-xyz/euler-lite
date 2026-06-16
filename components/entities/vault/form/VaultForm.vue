@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineProps<{ title?: string, description?: string, loading?: boolean, back?: boolean, backFallback?: string }>()
+defineProps<{ title?: string, description?: string, loading?: boolean, back?: boolean, backFallback?: string, backAlwaysFallback?: boolean }>()
 </script>
 
 <template>
@@ -16,6 +16,7 @@ defineProps<{ title?: string, description?: string, loading?: boolean, back?: bo
           v-if="back"
           class="tablet:hidden"
           :fallback="backFallback"
+          :always-fallback="backAlwaysFallback"
         />
         <h1
           v-if="title"

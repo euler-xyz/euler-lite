@@ -1486,10 +1486,12 @@ function getOperationVaultAddresses(): string[] {
     <BackButton
       class="hidden tablet:inline-flex tablet:absolute tablet:top-20 tablet:right-full tablet:mr-4"
       :fallback="`/position/${positionIndex}`"
+      always-fallback
     />
     <VaultForm
       back
       :back-fallback="`/position/${positionIndex}`"
+      back-always-fallback
       title="Refinance"
       description="Move debt, collateral, or both to new vaults in one transaction."
       class="flex flex-col gap-16 w-full"
