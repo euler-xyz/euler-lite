@@ -216,7 +216,9 @@ const debtSourceOperationAllowed = (target: EVault) => {
 }
 
 const eligibleDebtTargetVaults = computed(() =>
-  rawDebtTargetVaults.value.filter(vault => debtSourceOperationAllowed(vault)),
+  rawDebtTargetVaults.value.filter(vault =>
+    debtSourceOperationAllowed(vault) && hasCompatibleCollateralChoiceForDebt(vault),
+  ),
 )
 const eligibleDebtTargetAddressSet = computed(() =>
   new Set(eligibleDebtTargetVaults.value.map(vault => normalizeVaultAddress(vault.address))),
@@ -224,7 +226,9 @@ const eligibleDebtTargetAddressSet = computed(() =>
 const debtBridgeTargetVaults = computed(() =>
   rawAllDebtTargetVaults.value.filter((vault) => {
     const address = normalizeVaultAddress(vault.address)
-    return debtSourceOperationAllowed(vault) && !eligibleDebtTargetAddressSet.value.has(address)
+    return debtSourceOperationAllowed(vault)
+      && hasCompatibleCollateralChoiceForDebt(vault)
+      && !eligibleDebtTargetAddressSet.value.has(address)
   }),
 )
 const debtBridgeTargetAddressSet = computed(() =>
@@ -272,9 +276,34 @@ const collateralSourceOperationAllowed = (target: EVault) => {
     : !isOpDisabled(source, OP_WITHDRAW)
 }
 
+const hasCompatibleCollateralChoiceForDebt = (debtVault: EVault) => {
+  const currentCollateral = sourceCollateralVault.value
+  if (currentCollateral && isDebtCollateralCompatible(debtVault, currentCollateral)) {
+    return true
+  }
+  if (!canChangeCollateral.value) return false
+  return rawAllCollateralTargetVaults.value.some(collateralVault =>
+    collateralSourceOperationAllowed(collateralVault)
+    && isDebtCollateralCompatible(debtVault, collateralVault),
+  )
+}
+
+const hasCompatibleDebtChoiceForCollateral = (collateralVault: EVault | SecuritizeCollateralVault) => {
+  const currentDebt = sourceDebtVault.value
+  if (currentDebt && isDebtCollateralCompatible(currentDebt, collateralVault)) {
+    return true
+  }
+  return rawAllDebtTargetVaults.value.some(debtVault =>
+    debtSourceOperationAllowed(debtVault)
+    && isDebtCollateralCompatible(debtVault, collateralVault),
+  )
+}
+
 const eligibleCollateralTargetVaults = computed(() => {
   if (!canChangeCollateral.value) return []
-  return rawCollateralTargetVaults.value.filter(vault => collateralSourceOperationAllowed(vault))
+  return rawCollateralTargetVaults.value.filter(vault =>
+    collateralSourceOperationAllowed(vault) && hasCompatibleDebtChoiceForCollateral(vault),
+  )
 })
 const eligibleCollateralTargetAddressSet = computed(() =>
   new Set(eligibleCollateralTargetVaults.value.map(vault => normalizeVaultAddress(vault.address))),
@@ -283,7 +312,9 @@ const collateralBridgeTargetVaults = computed(() => {
   if (!canChangeCollateral.value) return []
   return rawAllCollateralTargetVaults.value.filter((vault) => {
     const address = normalizeVaultAddress(vault.address)
-    return collateralSourceOperationAllowed(vault) && !eligibleCollateralTargetAddressSet.value.has(address)
+    return collateralSourceOperationAllowed(vault)
+      && hasCompatibleDebtChoiceForCollateral(vault)
+      && !eligibleCollateralTargetAddressSet.value.has(address)
   })
 })
 const collateralBridgeTargetAddressSet = computed(() =>

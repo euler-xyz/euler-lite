@@ -72,6 +72,7 @@ const filteredOptions = computed(() => {
 type FilteredCollateralOption = { option: CollateralOption, idx: number }
 type GroupedRow
   = | { kind: 'header', key: string, label: string, note?: string }
+    | { kind: 'empty', key: string, message: string }
     | { kind: 'option', key: string, option: CollateralOption, idx: number }
 
 // Split the already-filtered list into the two display groups.
@@ -94,10 +95,10 @@ const compatibleNote = computed(() => {
     : 'Collateral vaults accepted by your current debt'
 })
 
-// Only show group headers when there is an actual split to communicate.
-// If there are no incompatible options, the list stays flat.
+// Keep group headers visible whenever options require migration, even if the
+// compatible bucket is empty, so the absence is explicit.
 const showGroups = computed(() =>
-  compatibleOptions.value.length > 0 && incompatibleOptions.value.length > 0,
+  incompatibleOptions.value.length > 0,
 )
 
 const groupedRows = computed<GroupedRow[]>(() => {
@@ -120,7 +121,16 @@ const groupedRows = computed<GroupedRow[]>(() => {
     label: 'Compatible',
     note: compatibleNote.value,
   })
-  pushOptions(compatibleOptions.value)
+  if (compatibleOptions.value.length) {
+    pushOptions(compatibleOptions.value)
+  }
+  else {
+    rows.push({
+      kind: 'empty',
+      key: 'empty-compatible',
+      message: 'No compatible vaults found',
+    })
+  }
 
   rows.push({
     kind: 'header',
@@ -180,7 +190,14 @@ const handleClose = () => {
         </div>
 
         <div
-          v-else
+          v-else-if="row.kind === 'empty'"
+          class="px-16 py-12 text-p3 text-content-tertiary"
+        >
+          {{ row.message }}
+        </div>
+
+        <div
+          v-else-if="row.kind === 'option'"
           data-id="collateral-option"
           :data-option-index="String(row.idx)"
           :data-option-label="getOptionLabel(row.option)"

@@ -28,7 +28,8 @@ export const useSwapDebtOptions = ({
       if (currentBorrowAddress && getAddress(vault.address) === currentBorrowAddress) {
         return false
       }
-      return vault.totalAssets > 0n
+      return vault.isBorrowable
+        && vault.totalAssets > 0n
         && vault.caps.borrowCap > 0n
         && vault.availableLiquidity > 0n
         && !isOpDisabled(vault, OP_BORROW)
