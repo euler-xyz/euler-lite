@@ -125,6 +125,28 @@ const evcDisableCollateralAbi = [{
   outputs: [],
 }] as const
 
+const evcEnableCollateralAbi = [{
+  type: 'function',
+  name: 'enableCollateral',
+  stateMutability: 'nonpayable',
+  inputs: [
+    { name: 'account', type: 'address' },
+    { name: 'collateral', type: 'address' },
+  ],
+  outputs: [],
+}] as const
+
+const evcEnableControllerAbi = [{
+  type: 'function',
+  name: 'enableController',
+  stateMutability: 'nonpayable',
+  inputs: [
+    { name: 'account', type: 'address' },
+    { name: 'controller', type: 'address' },
+  ],
+  outputs: [],
+}] as const
+
 const vaultDisableControllerAbi = [{
   type: 'function',
   name: 'disableController',
@@ -135,8 +157,8 @@ const vaultDisableControllerAbi = [{
 
 const DISABLE_COLLATERAL_SELECTOR = toFunctionSelector(evcDisableCollateralAbi[0])
 const DISABLE_CONTROLLER_SELECTOR = toFunctionSelector(vaultDisableControllerAbi[0])
-const ENABLE_COLLATERAL_SELECTOR = toFunctionSelector('function enableCollateral(address,address)')
-const ENABLE_CONTROLLER_SELECTOR = toFunctionSelector('function enableController(address,address)')
+const ENABLE_COLLATERAL_SELECTOR = toFunctionSelector(evcEnableCollateralAbi[0])
+const ENABLE_CONTROLLER_SELECTOR = toFunctionSelector(evcEnableControllerAbi[0])
 
 const CURRENT_STATE_OWNER = getAddress('0xcfe5660d6c55906EC8C488A466bd4f77F77eec88')
 const CURRENT_STATE_SELECTED_SUB_ACCOUNT = getAddress('0xcfe5660D6c55906Ec8c488A466bd4F77f77eeC8A')
@@ -545,14 +567,18 @@ describe('golden tx-plan parity: same-asset migrations', () => {
 
     const txs = await normalizeResolvedSdkPlan(sdk.mergePlans([collateralPlan, debtPlan]))
     const batch = getOnlyCanonicalBatch(txs)
-    const enableCollateralIndex = batch.findIndex(item =>
-      item.selector === ENABLE_COLLATERAL_SELECTOR
-      && item.targetContract === ADDR.evc,
-    )
-    const enableControllerIndex = batch.findIndex(item =>
-      item.selector === ENABLE_CONTROLLER_SELECTOR
-      && item.targetContract === ADDR.evc,
-    )
+    const enableCollateralIndex = batch.findIndex((item) => {
+      if (item.selector !== ENABLE_COLLATERAL_SELECTOR || item.targetContract !== ADDR.evc) return false
+      const decoded = decodeFunctionData({ abi: evcEnableCollateralAbi, data: item.data })
+      return getAddress(decoded.args[0]) === getAddress(ADDR.subAccount1)
+        && getAddress(decoded.args[1]) === getAddress(ADDR.vaultWeth)
+    })
+    const enableControllerIndex = batch.findIndex((item) => {
+      if (item.selector !== ENABLE_CONTROLLER_SELECTOR || item.targetContract !== ADDR.evc) return false
+      const decoded = decodeFunctionData({ abi: evcEnableControllerAbi, data: item.data })
+      return getAddress(decoded.args[0]) === getAddress(ADDR.subAccount1)
+        && getAddress(decoded.args[1]) === getAddress(ADDR.vaultUsdt)
+    })
 
     expect(enableCollateralIndex).toBeGreaterThanOrEqual(0)
     expect(enableControllerIndex).toBeGreaterThanOrEqual(0)

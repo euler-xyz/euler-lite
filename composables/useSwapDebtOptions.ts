@@ -74,7 +74,7 @@ export const useSwapDebtOptions = ({
 
   const allBorrowOptions = useReactiveMap(
     allBorrowVaults,
-    [viewer, enableIntrinsicApy, enableRewardsApy],
+    [viewer, enableIntrinsicApy, enableRewardsApy, collateralVault],
     buildBorrowOption,
   )
 

@@ -1450,7 +1450,7 @@ watch([isConnected, isSpyMode, address], () => {
                   variant="primary-stroke"
                   rounded
                   :disabled="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure"
-                  :to="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure ? undefined : `/position/${positionIndex}/borrow/swap`"
+                  :to="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure ? undefined : `/position/${positionIndex}/borrow/swap?collateral=${collateral.vault.address}`"
                 >
                   Refinance
                 </UiButton>

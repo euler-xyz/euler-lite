@@ -6,6 +6,7 @@ import { buildTransactionPlanDisplaySteps, type StepDecodingContext, type VaultL
 
 const verifier = '0x0000000000000000000000000000000000000001' as Address
 const account = '0x0000000000000000000000000000000000000002' as Address
+const swapper = '0x0000000000000000000000000000000000000003' as Address
 const usdcVault = '0x0000000000000000000000000000000000000011' as Address
 const daiVault = '0x0000000000000000000000000000000000000012' as Address
 const weethVault = '0x0000000000000000000000000000000000000013' as Address
@@ -175,13 +176,13 @@ describe('buildTransactionPlanDisplaySteps swap verifier rows', () => {
           batchItem(encodeFunctionData({
             abi: vaultAbi,
             functionName: 'withdraw',
-            args: [731_941n, account, account],
+            args: [731_941n, weethVault, account],
           }), usdcVault),
           batchItem(encodeFunctionData({
             abi: swapperAbi,
             functionName: 'multicall',
             args: [[]],
-          })),
+          }), swapper),
           batchItem(encodeFunctionData({
             abi: swapVerifierAbi,
             functionName: 'verifyAmountMinAndSkim',
@@ -196,7 +197,7 @@ describe('buildTransactionPlanDisplaySteps swap verifier rows', () => {
             abi: swapperAbi,
             functionName: 'multicall',
             args: [[]],
-          })),
+          }), swapper),
           batchItem(encodeFunctionData({
             abi: swapVerifierAbi,
             functionName: 'verifyDebtMax',

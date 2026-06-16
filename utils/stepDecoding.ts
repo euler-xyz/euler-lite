@@ -298,7 +298,17 @@ const resolveBatchItemAssetInfo = (
 
   if (label === 'Withdraw') {
     const resolved = resolveAmountFromCalldata(data, targetContract, getVault)
-    const vaultAsset = getVaultAssetInfo(data, targetContract, getVault)
+    let vaultAsset: StepAssetInfo | undefined
+    try {
+      const targetVault = getVault(getAddress(targetContract))
+      if (targetVault?.asset) {
+        vaultAsset = {
+          symbol: targetVault.asset.symbol,
+          address: targetVault.asset.address,
+        }
+      }
+    }
+    catch { /* ignore */ }
     const amount = resolved.isMax
       ? 'remaining'
       : resolved.decoded && resolved.amount

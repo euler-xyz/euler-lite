@@ -78,7 +78,7 @@ const { runPreparedSimulation, runSimulation, simulationError, clearSimulationEr
 const { settings } = useUserSettings()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { getTokenCategoryTags } = useTokenList()
-const { getVaultCategory } = useVaultRegistry()
+const { getVaultCategory, getVault } = useVaultRegistry()
 const cowSwapExecution = useCowSwapCollateralSwapExecution()
 const cowSwapOrderStatus = useCowSwapOrderStatus(
   computed(() => cowSwapExecution.orderUid.value),
@@ -98,9 +98,24 @@ const preparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
 const sourceDebtVault = computed<EVault | undefined>(() =>
   position.value ? position.value.borrowVault as EVault | undefined : undefined,
 )
-const sourceCollateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() =>
-  position.value ? position.value.collateralVault as EVault | SecuritizeCollateralVault | undefined : undefined,
+const selectedCollateralAddress = computed(() =>
+  typeof route.query.collateral === 'string' ? normalizeVaultAddress(route.query.collateral) : '',
 )
+const sourceCollateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() => {
+  const currentPosition = position.value
+  if (!currentPosition) return undefined
+
+  if (selectedCollateralAddress.value) {
+    const selectedCollateral = currentPosition.collaterals.find(collateral =>
+      normalizeVaultAddress(collateral.vaultAddress) === selectedCollateralAddress.value
+      || normalizeVaultAddress(collateral.vault?.address) === selectedCollateralAddress.value,
+    )
+    const selectedVault = selectedCollateral?.vault ?? getVault(selectedCollateralAddress.value)
+    if (selectedVault) return selectedVault as EVault | SecuritizeCollateralVault
+  }
+
+  return currentPosition.collateralVault as EVault | SecuritizeCollateralVault | undefined
+})
 const sourceCollateralEVault = computed<EVault | undefined>(() => {
   const vault = sourceCollateralVault.value
   if (!vault || isSecuritizeCollateralVault(vault)) return undefined
@@ -126,7 +141,6 @@ useOperationGuard(computed(() => [
 
 const pairAssetsLabel = usePositionPairLabel(position)
 const currentDebt = computed(() => position.value?.borrowed || 0n)
-const currentCollateralAssets = computed(() => position.value?.supplied || 0n)
 const sourceCollateralPosition = computed(() => {
   const sourceAddress = normalizeVaultAddress(sourceCollateralVault.value?.address)
   if (!sourceAddress) return null
@@ -140,6 +154,7 @@ const sourceCollateralPosition = computed(() => {
     ? primaryCollateral
     : null
 })
+const currentCollateralAssets = computed(() => sourceCollateralPosition.value?.assets ?? position.value?.supplied ?? 0n)
 const currentCollateralShares = computed(() => sourceCollateralPosition.value?.shares ?? 0n)
 const subAccount = computed<Address>(() =>
   (position.value?.subAccount || address.value || zeroAddress) as Address,
