@@ -19,6 +19,8 @@ import { useSwapQuotesParallel, type SwapQuotePlanContext } from '~/composables/
 import type { PlanRefinancePositionInput } from '~/composables/useEulerTx'
 import type { CowSwapCollateralSwapExecuteParams } from '~/composables/cowswap'
 import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus, openCowSwapReviewModal, buildApprovalSignSteps } from '~/composables/cowswap'
+import { useMorphoMigrationMarkets, type MorphoMigrationMarket } from '~/composables/useMorphoMigrationMarkets'
+import { MORPHO_CONNECTOR_ID } from '~/entities/migration/protocols'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
@@ -67,6 +69,9 @@ const { chainId: currentChainId } = useEulerAddresses()
 const { client: rpcClient } = useRpcClient()
 const {
   planRefinancePosition,
+  getMigrationAuthorization,
+  signMigrationAuthorization,
+  planCrossProtocolMigration,
   executePreparedPlan,
   executePlan,
   prepareTransactionPlan,
@@ -86,8 +91,10 @@ const cowSwapOrderStatus = useCowSwapOrderStatus(
   computed(() => cowSwapExecution.orderUid.value),
   currentChainId,
 )
+const chainId = currentChainId
 
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
+const enableCrossProtocolRefinance = computed(() => settings.value.enableCrossProtocolRefinance)
 const positionIndex = usePositionIndex()
 
 const position: Ref<PortfolioBorrowPosition<VaultEntity> | null> = ref(null)
@@ -96,6 +103,11 @@ const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const plan = shallowRef<TransactionPlan | null>(null)
 const preparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
+const showExternalTargets = ref(false)
+const selectedMorphoMarketId = ref('')
+const isPreparingExternal = ref(false)
+const externalPlan = shallowRef<TransactionPlan | null>(null)
+const externalPreparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
 
 const sourceDebtVault = computed<EVault | undefined>(() =>
   position.value ? position.value.borrowVault as EVault | undefined : undefined,
@@ -1190,6 +1202,150 @@ const effectiveQuoteFetchedAt = computed(() => {
   return fetched.length ? Math.min(...fetched) : null
 })
 
+const morphoOutboundInterestBufferBps = 1n
+const morphoBorrowAmountWithBuffer = computed(() =>
+  currentDebt.value > 0n
+    ? (currentDebt.value * (10_000n + morphoOutboundInterestBufferBps) + 9_999n) / 10_000n
+    : 0n,
+)
+const hasExternalMigrationSource = computed(() => !!sourceDebtVault.value && !!sourceCollateralEVault.value)
+const {
+  markets: morphoMarkets,
+  isLoading: isMorphoMarketsLoading,
+  error: morphoMarketsError,
+  load: reloadMorphoMarkets,
+} = useMorphoMigrationMarkets({
+  loanAsset: computed(() => sourceDebtVault.value?.asset.address),
+  collateralAsset: computed(() => sourceCollateralEVault.value?.asset.address),
+  enabled: computed(() => enableCrossProtocolRefinance.value && hasExternalMigrationSource.value),
+  minLiquidity: morphoBorrowAmountWithBuffer,
+})
+const showMorphoMigrationOption = computed(() =>
+  enableCrossProtocolRefinance.value
+  && hasExternalMigrationSource.value
+  && (isMorphoMarketsLoading.value || !!morphoMarketsError.value || morphoMarkets.value.length > 0),
+)
+const selectedMorphoMarket = computed<MorphoMigrationMarket | undefined>(() =>
+  morphoMarkets.value.find(market => market.id === selectedMorphoMarketId.value) ?? morphoMarkets.value[0],
+)
+const morphoTargetLabel = (market: MorphoMigrationMarket) =>
+  `${market.collateralAsset.symbol}/${market.loanAsset.symbol} · ${market.lltv !== null ? `${formatNumber(market.lltv)}% LLTV` : 'LLTV -'}`
+
+const externalCollateralValueUsd = ref<number | null>(null)
+watchEffect(async () => {
+  if (!sourceCollateralEVault.value) {
+    externalCollateralValueUsd.value = null
+    return
+  }
+  externalCollateralValueUsd.value = (await getAssetUsdValue(currentCollateralAssets.value, sourceCollateralEVault.value, 'off-chain')) ?? null
+})
+const externalDebtValueUsd = ref<number | null>(null)
+watchEffect(async () => {
+  if (!sourceDebtVault.value) {
+    externalDebtValueUsd.value = null
+    return
+  }
+  externalDebtValueUsd.value = (await getAssetUsdValue(morphoBorrowAmountWithBuffer.value, sourceDebtVault.value, 'off-chain')) ?? null
+})
+const morphoTargetLtv = computed(() => {
+  if (!selectedMorphoMarket.value) return null
+  if (!externalCollateralValueUsd.value || externalCollateralValueUsd.value <= 0 || externalDebtValueUsd.value === null) return null
+  return (externalDebtValueUsd.value / externalCollateralValueUsd.value) * 100
+})
+const morphoTargetHealth = computed(() => {
+  const market = selectedMorphoMarket.value
+  if (!market?.lltv || !morphoTargetLtv.value || morphoTargetLtv.value <= 0) return null
+  return market.lltv / morphoTargetLtv.value
+})
+const morphoTargetBorrowApy = computed(() => {
+  const market = selectedMorphoMarket.value
+  return market?.netBorrowApy ?? market?.borrowApy ?? null
+})
+const externalPlannedOps = computed<PlannedOp[]>(() => {
+  if (!sourceDebtVault.value || !sourceCollateralEVault.value) return []
+  return [
+    { vault: sourceCollateralEVault.value, op: OP_REDEEM },
+    { vault: sourceDebtVault.value, op: OP_REPAY },
+  ]
+})
+const externalHookWarning = computed(() => getPlanHookDisabledWarning(externalPlannedOps.value))
+const externalOwner = computed<Address | undefined>(() => {
+  if (isSpyMode.value || !address.value) return undefined
+  try {
+    return getAddress(address.value)
+  }
+  catch {
+    return undefined
+  }
+})
+const externalMigrationDisabledReason = computed(() => {
+  if (!isConnected.value) return 'Connect wallet to migrate'
+  if (isSpyMode.value) return 'Migration requires the connected wallet'
+  if (isGeoBlocked.value) return 'This operation is not available in your region'
+  if (!sourceCollateralEVault.value || !sourceDebtVault.value) return 'Morpho migration requires standard Euler collateral and debt vaults'
+  if (externalHookWarning.value) return externalHookWarning.value.message
+  if (!selectedMorphoMarket.value) return 'No compatible Morpho market'
+  if (morphoTargetHealth.value !== null && morphoTargetHealth.value <= 1) return 'Morpho target would be unhealthy'
+  if (simulationError.value) return simulationError.value
+  return null
+})
+const canReviewExternalMigration = computed(() =>
+  showExternalTargets.value
+  && !!externalOwner.value
+  && !!selectedMorphoMarket.value
+  && !externalMigrationDisabledReason.value
+  && !isMorphoMarketsLoading.value
+  && !isPreparingExternal.value
+  && !isSubmitting.value,
+)
+
+const buildMorphoMigrationPlan = async (): Promise<TransactionPlan> => {
+  if (!chainId.value || !externalOwner.value || !sourceDebtVault.value || !sourceCollateralEVault.value || !selectedMorphoMarket.value) {
+    throw new Error('Morpho migration inputs are incomplete')
+  }
+
+  const source = {
+    eulerAccount: subAccount.value,
+    borrowVault: sourceDebtVault.value.address as Address,
+    collateralVault: sourceCollateralEVault.value.address as Address,
+    debtAmount: currentDebt.value,
+  }
+  const externalTarget = {
+    interestBufferBps: morphoOutboundInterestBufferBps,
+  }
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 60)
+  const authorizationRequest = await getMigrationAuthorization({
+    direction: 'euler-to-external',
+    connectorId: MORPHO_CONNECTOR_ID,
+    chainId: chainId.value,
+    owner: externalOwner.value,
+    positionRef: selectedMorphoMarket.value.ref,
+    source,
+    externalTarget,
+    deadline,
+  })
+  const authorization = authorizationRequest
+    ? await signMigrationAuthorization(authorizationRequest)
+    : undefined
+
+  // The Morpho connector redeems Euler collateral before Euler debt is closed,
+  // then uses Swapper multicall to supply collateral, borrow on Morpho, repay
+  // Euler debt, and sweep excess loan asset. EVC defers the source account check
+  // until the batch ends, so any partial Morpho leg, stale oracle, or liquidity
+  // failure reverts the whole batch instead of leaving an intermediate state.
+  return planCrossProtocolMigration({
+    direction: 'euler-to-external',
+    connectorId: MORPHO_CONNECTOR_ID,
+    chainId: chainId.value,
+    owner: externalOwner.value,
+    positionRef: selectedMorphoMarket.value.ref,
+    source,
+    externalTarget,
+    authorization,
+    operationName: 'eulerToMorphoMigration',
+  })
+}
+
 const targetDebtVaultAddress = computed(() => typeof route.query.to === 'string' ? normalizeVaultAddress(route.query.to) : '')
 watch([debtTargetVaults, targetDebtVaultAddress], ([vaults, targetAddress]) => {
   if (!targetAddress || targetDebtVault.value) return
@@ -1207,6 +1363,37 @@ watch(collateralTargetVaults, (vaults) => {
   const exists = vaults.some(vault => normalizeVaultAddress(vault.address) === normalizeVaultAddress(targetCollateralVault.value?.address))
   if (!exists) targetCollateralVault.value = undefined
 })
+watch(showExternalTargets, (enabled) => {
+  if (!enabled) return
+  targetDebtVault.value = undefined
+  targetCollateralVault.value = undefined
+  clearSimulationError()
+})
+watch([targetDebtVault, targetCollateralVault], ([debt, collateral]) => {
+  if (showExternalTargets.value && (debt || collateral)) {
+    showExternalTargets.value = false
+  }
+})
+watch(enableCrossProtocolRefinance, (enabled) => {
+  if (!enabled) {
+    showExternalTargets.value = false
+    selectedMorphoMarketId.value = ''
+  }
+})
+watch(morphoMarkets, (markets) => {
+  if (!markets.length) {
+    selectedMorphoMarketId.value = ''
+    showExternalTargets.value = false
+    return
+  }
+  if (!selectedMorphoMarketId.value || !markets.some(market => market.id === selectedMorphoMarketId.value)) {
+    selectedMorphoMarketId.value = markets[0].id
+  }
+})
+watch(selectedMorphoMarket, () => {
+  clearSimulationError()
+})
+
 watch([targetCollateralVault, () => slippage.value, currentCollateralAssets], () => {
   clearSimulationError()
   resetCollateralQuotes()
@@ -1447,6 +1634,58 @@ watch(() => cowSwapOrderStatus.orderStatus.value, (status) => {
     }, 400)
   }
 })
+
+const reviewMorphoMigration = async () => {
+  if (isOperationBlocked.value || !canReviewExternalMigration.value || !sourceDebtVault.value) return
+  isPreparingExternal.value = true
+  clearSimulationError()
+  try {
+    externalPreparedPlan.value = null
+    externalPlan.value = await buildMorphoMigrationPlan()
+    externalPreparedPlan.value = await prepareTransactionPlan(externalPlan.value, { account: currentPlanAccount() })
+    const ok = await runPreparedSimulation(externalPreparedPlan.value, buildRefinanceStateOverrideOptions())
+    if (!ok) return
+
+    modal.open(OperationReviewModal, {
+      props: {
+        type: 'refinance',
+        asset: sourceDebtVault.value.asset,
+        amount: formatVaultAmount(currentDebt.value, sourceDebtVault.value),
+        prepared: externalPreparedPlan.value,
+        onConfirm: async () => {
+          await sendMorphoMigration()
+        },
+        submittingLabel: 'Migrating...',
+      },
+    })
+  }
+  catch (e) {
+    logWarn('refinance/morphoMigration', e)
+    showError(e instanceof Error ? e.message : 'Failed to build Morpho migration')
+  }
+  finally {
+    isPreparingExternal.value = false
+  }
+}
+
+const sendMorphoMigration = async () => {
+  if (!externalPreparedPlan.value) return
+  isSubmitting.value = true
+  try {
+    await executePreparedPlan(externalPreparedPlan.value)
+    modal.close()
+    setTimeout(() => {
+      router.replace({ path: '/portfolio', query: { network: route.query.network } })
+    }, 400)
+  }
+  catch (e) {
+    showError('Migration failed')
+    logWarn('refinance/morphoMigrationSend', e)
+  }
+  finally {
+    isSubmitting.value = false
+  }
+}
 
 const addToBatch = async () => {
   if (!canAddToBatch.value) return
@@ -1762,6 +2001,119 @@ function getOperationVaultAddresses(): string[] {
               @select="selectDebtProvider"
               @refresh="onRefreshDebtQuotes"
             />
+
+            <div
+              v-if="showMorphoMigrationOption"
+              class="rounded-8 border border-line-default bg-card p-16 flex flex-col gap-12"
+            >
+              <div class="flex items-center justify-between gap-12">
+                <div>
+                  <div class="text-h5 text-content-primary">
+                    Advanced
+                  </div>
+                  <div class="text-p3 text-content-tertiary mt-2">
+                    Euler -> Morpho
+                  </div>
+                </div>
+                <UiButton
+                  size="small"
+                  variant="secondary"
+                  rounded
+                  @click="showExternalTargets = !showExternalTargets"
+                >
+                  {{ showExternalTargets ? 'Hide' : 'Migrate out' }}
+                </UiButton>
+              </div>
+
+              <template v-if="showExternalTargets">
+                <UiAlert
+                  v-if="morphoMarketsError"
+                  title="Morpho markets"
+                  :description="morphoMarketsError"
+                  variant="warning"
+                  size="compact"
+                />
+                <BaseLoadableContent :loading="isMorphoMarketsLoading">
+                  <button
+                    v-for="market in morphoMarkets"
+                    :key="market.id"
+                    type="button"
+                    class="w-full rounded-8 border p-12 text-left transition-colors"
+                    :class="selectedMorphoMarket?.id === market.id ? 'border-accent-500' : 'border-line-default hover:border-neutral-400'"
+                    @click="selectedMorphoMarketId = market.id"
+                  >
+                    <div class="flex items-start justify-between gap-12">
+                      <div>
+                        <div class="text-p2 text-content-primary">
+                          {{ morphoTargetLabel(market) }}
+                        </div>
+                        <div class="text-p3 text-content-tertiary mt-2">
+                          Liquidity {{ formatVaultAmount(market.liquidityAssets, sourceDebtVault) }} {{ sourceDebtVault.asset.symbol }}
+                        </div>
+                      </div>
+                      <div class="text-p3 text-content-tertiary text-right">
+                        {{ market.netBorrowApy !== null || market.borrowApy !== null ? `${formatNumber((market.netBorrowApy ?? market.borrowApy ?? 0) * 100)}% APY` : 'APY -' }}
+                      </div>
+                    </div>
+                  </button>
+                </BaseLoadableContent>
+
+                <div class="grid grid-cols-2 gap-8">
+                  <SummaryRow label="Target LTV">
+                    <span class="text-p2 text-right">
+                      {{ morphoTargetLtv !== null ? `${formatNumber(morphoTargetLtv)}%` : '-' }}
+                    </span>
+                  </SummaryRow>
+                  <SummaryRow label="Health">
+                    <span class="text-p2 text-right">
+                      {{ morphoTargetHealth !== null ? formatHealthScore(morphoTargetHealth) : '-' }}
+                    </span>
+                  </SummaryRow>
+                  <SummaryRow label="LLTV">
+                    <span class="text-p2 text-right">
+                      {{ selectedMorphoMarket?.lltv !== null && selectedMorphoMarket?.lltv !== undefined ? `${formatNumber(selectedMorphoMarket.lltv)}%` : '-' }}
+                    </span>
+                  </SummaryRow>
+                  <SummaryRow label="Borrow APY">
+                    <span class="text-p2 text-right">
+                      {{ morphoTargetBorrowApy !== null ? `${formatNumber(morphoTargetBorrowApy * 100)}%` : '-' }}
+                    </span>
+                  </SummaryRow>
+                </div>
+
+                <UiAlert
+                  v-if="externalMigrationDisabledReason"
+                  title="Morpho migration"
+                  :description="externalMigrationDisabledReason"
+                  :variant="morphoTargetHealth !== null && morphoTargetHealth <= 1 ? 'error' : 'warning'"
+                  size="compact"
+                />
+
+                <div class="flex gap-8">
+                  <UiButton
+                    size="medium"
+                    variant="secondary"
+                    rounded
+                    :loading="isMorphoMarketsLoading"
+                    @click="reloadMorphoMarkets"
+                  >
+                    Refresh
+                  </UiButton>
+                  <UiButton
+                    class="flex-1"
+                    size="medium"
+                    variant="primary"
+                    rounded
+                    :disabled="!canReviewExternalMigration"
+                    :loading="isPreparingExternal || isSubmitting"
+                    :title="externalMigrationDisabledReason || undefined"
+                    @click="reviewMorphoMigration"
+                  >
+                    Review Morpho Migration
+                  </UiButton>
+                </div>
+              </template>
+            </div>
 
             <UiAlert
               v-if="isGeoBlocked"

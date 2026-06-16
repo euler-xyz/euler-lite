@@ -84,6 +84,22 @@ defineEmits(['close'])
         />
       </div>
     </div>
+    <div class="mb-20 rounded-16 border border-line-default bg-card p-16">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-p2">
+            Cross-protocol refinancing
+          </div>
+          <div class="text-p3 text-content-muted">
+            Show protocol migration forms
+          </div>
+        </div>
+        <UiSwitch
+          :model-value="settings.enableCrossProtocolRefinance"
+          @update:model-value="updateSetting('enableCrossProtocolRefinance', $event ?? false)"
+        />
+      </div>
+    </div>
     <Permit2Settings />
     <SlippageSettings />
   </BaseModalWrapper>

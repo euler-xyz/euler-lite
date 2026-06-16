@@ -22,6 +22,10 @@ import type {
   PlanWithdrawArgs,
   PlanMigrateSameAssetCollateralArgs,
   PlanMigrateSameAssetDebtArgs,
+  GetMigrationAuthorizationArgs,
+  MigrationAuthorizationRequest,
+  PlanMigrationArgs,
+  SignedMigrationAuthorization,
   PlanMultiplyWithSwapArgs,
   PlanMultiplySameAssetArgs,
   PlanTransferArgs,
@@ -956,6 +960,32 @@ export const useEulerTx = () => {
     return sdk.executionService.mergePlans(plans)
   }
 
+  const getMigrationAuthorization = async (input: GetMigrationAuthorizationArgs): Promise<MigrationAuthorizationRequest | undefined> => {
+    const sdk = await getEulerSdkFresh()
+    return sdk.positionMigrationService.getAuthorization(input)
+  }
+
+  const signMigrationAuthorization = async (
+    request: MigrationAuthorizationRequest,
+  ): Promise<SignedMigrationAuthorization> => {
+    if (isSpyMode.value) {
+      throw new Error('Authorization signatures are disabled in spy mode')
+    }
+    if (request.kind !== 'typedData') {
+      throw new Error('Transaction-based migration authorization is not supported in this flow')
+    }
+    const signature = await signTypedDataAsync(request.typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
+    return {
+      request,
+      signature: signature as Hex,
+    }
+  }
+
+  const planCrossProtocolMigration = async (input: PlanMigrationArgs): Promise<TransactionPlan> => {
+    const sdk = await getEulerSdkFresh()
+    return sdk.positionMigrationService.planMigration(input)
+  }
+
   const planWithdrawOrRedeem = (input: PlanWithdrawOrRedeemInput): Promise<TransactionPlan> => {
     if (input.isMax) {
       if (input.shares === undefined) {
@@ -1242,6 +1272,9 @@ export const useEulerTx = () => {
     planCollateralChange,
     planDebtChange,
     planRefinancePosition,
+    getMigrationAuthorization,
+    signMigrationAuthorization,
+    planCrossProtocolMigration,
     planWithdrawOrRedeem,
     simulatePlan,
     prepareTransactionPlan,
