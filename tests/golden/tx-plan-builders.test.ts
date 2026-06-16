@@ -135,6 +135,8 @@ const vaultDisableControllerAbi = [{
 
 const DISABLE_COLLATERAL_SELECTOR = toFunctionSelector(evcDisableCollateralAbi[0])
 const DISABLE_CONTROLLER_SELECTOR = toFunctionSelector(vaultDisableControllerAbi[0])
+const ENABLE_COLLATERAL_SELECTOR = toFunctionSelector('function enableCollateral(address,address)')
+const ENABLE_CONTROLLER_SELECTOR = toFunctionSelector('function enableController(address,address)')
 
 const CURRENT_STATE_OWNER = getAddress('0xcfe5660d6c55906EC8C488A466bd4f77F77eec88')
 const CURRENT_STATE_SELECTED_SUB_ACCOUNT = getAddress('0xcfe5660D6c55906Ec8c488A466bd4F77f77eeC8A')
@@ -508,6 +510,53 @@ describe('golden tx-plan parity: same-asset migrations', () => {
       maxShares: amount,
     })
     await expectPlansEqual(legacyTxs, plan)
+  })
+
+  it('merged refinance plan enables target collateral before target debt controller', async () => {
+    const collateralAmount = 2_000_000n
+    const debtAmount = 1_000_000n
+    const account = buildSdkAccount({
+      positions: [
+        { subAccount: ADDR.subAccount1, vault: ADDR.vaultDai, asset: ADDR.assetUsdc, shares: collateralAmount, assets: collateralAmount, isCollateral: true },
+        { subAccount: ADDR.subAccount1, vault: ADDR.vaultUsdc, asset: ADDR.assetUsdc, borrowed: debtAmount, isController: true },
+      ],
+    })
+    const sdk = buildSdkExecutionService()
+    const collateralPlan = sdk.planMigrateSameAssetCollateral({
+      account,
+      fromVault: ADDR.vaultDai,
+      toVault: ADDR.vaultWeth,
+      amount: collateralAmount,
+      positionAccount: ADDR.subAccount1,
+      fromAsset: ADDR.assetUsdc,
+      toAsset: ADDR.assetUsdc,
+      isMax: true,
+    })
+    const debtPlan = sdk.planMigrateSameAssetDebt({
+      account,
+      oldLiabilityVault: ADDR.vaultUsdc,
+      newLiabilityVault: ADDR.vaultUsdt,
+      liabilityAccount: ADDR.subAccount1,
+      liabilityAmount: debtAmount,
+      oldLiabilityAsset: ADDR.assetUsdc,
+      newLiabilityAsset: ADDR.assetUsdc,
+      sweepExcess: false,
+    })
+
+    const txs = await normalizeResolvedSdkPlan(sdk.mergePlans([collateralPlan, debtPlan]))
+    const batch = getOnlyCanonicalBatch(txs)
+    const enableCollateralIndex = batch.findIndex(item =>
+      item.selector === ENABLE_COLLATERAL_SELECTOR
+      && item.targetContract === ADDR.evc,
+    )
+    const enableControllerIndex = batch.findIndex(item =>
+      item.selector === ENABLE_CONTROLLER_SELECTOR
+      && item.targetContract === ADDR.evc,
+    )
+
+    expect(enableCollateralIndex).toBeGreaterThanOrEqual(0)
+    expect(enableControllerIndex).toBeGreaterThanOrEqual(0)
+    expect(enableCollateralIndex).toBeLessThan(enableControllerIndex)
   })
 })
 

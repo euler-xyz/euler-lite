@@ -1233,7 +1233,7 @@ watch([isConnected, isSpyMode, address], () => {
                 :disabled="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure"
                 :to="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure ? undefined : `/position/${positionIndex}/borrow/swap`"
               >
-                Refinance debt
+                Refinance
               </UiButton>
             </div>
           </div>
@@ -1450,9 +1450,9 @@ watch([isConnected, isSpyMode, address], () => {
                   variant="primary-stroke"
                   rounded
                   :disabled="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure"
-                  :to="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure ? undefined : `/position/${positionIndex}/collateral/swap?collateral=${collateral.vault.address}`"
+                  :to="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure ? undefined : `/position/${positionIndex}/borrow/swap`"
                 >
-                  Swap collateral
+                  Refinance
                 </UiButton>
               </div>
               <div

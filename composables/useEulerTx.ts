@@ -388,6 +388,13 @@ export interface PlanDebtChangeInput {
   account?: Account<IHasVaultAddress>
 }
 
+export interface PlanRefinancePositionInput {
+  collateral?: Omit<PlanCollateralChangeInput, 'account'>
+  debt?: Omit<PlanDebtChangeInput, 'account'>
+  /** Pre-fetched account snapshot. When provided, plan construction skips its own freshPlanContext fetch. */
+  account?: Account<IHasVaultAddress>
+}
+
 export interface PlanWithdrawOrRedeemInput {
   vaultAddress: Address
   owner: Address
@@ -892,6 +899,63 @@ export const useEulerTx = () => {
     })
   }
 
+  const planRefinancePosition = async (input: PlanRefinancePositionInput): Promise<TransactionPlan> => {
+    if (!input.collateral && !input.debt) {
+      throw new Error('planRefinancePosition: collateral or debt change is required')
+    }
+
+    const { sdk, account } = await freshPlanContext(input.account)
+    const plans: TransactionPlan[] = []
+
+    if (input.collateral) {
+      plans.push(
+        input.collateral.swapQuote
+          ? sdk.executionService.planSwapCollateral({
+              account,
+              swapQuote: input.collateral.swapQuote,
+              swapperMode: input.collateral.swapperMode,
+            })
+          : sdk.executionService.planMigrateSameAssetCollateral({
+              account,
+              fromVault: input.collateral.fromVault,
+              toVault: input.collateral.toVault,
+              amount: input.collateral.amount,
+              positionAccount: input.collateral.positionAccount,
+              fromAsset: input.collateral.fromAsset,
+              toAsset: input.collateral.toAsset,
+              isMax: input.collateral.isMax,
+              maxShares: input.collateral.maxShares,
+              enableCollateralTo: input.collateral.enableCollateralTo,
+              disableCollateralFrom: input.collateral.disableCollateralFrom,
+            }),
+      )
+    }
+
+    if (input.debt) {
+      plans.push(
+        input.debt.swapQuote
+          ? sdk.executionService.planSwapDebt({
+              account,
+              swapQuote: input.debt.swapQuote,
+              swapperMode: input.debt.swapperMode,
+            })
+          : sdk.executionService.planMigrateSameAssetDebt({
+              account,
+              oldLiabilityVault: input.debt.oldLiabilityVault,
+              newLiabilityVault: input.debt.newLiabilityVault,
+              liabilityAccount: input.debt.liabilityAccount,
+              liabilityAmount: input.debt.liabilityAmount,
+              oldLiabilityAsset: input.debt.oldLiabilityAsset,
+              newLiabilityAsset: input.debt.newLiabilityAsset,
+              sweepExcess: input.debt.sweepExcess,
+              transferRemainingSharesToOwner: input.debt.transferRemainingSharesToOwner,
+            }),
+      )
+    }
+
+    return sdk.executionService.mergePlans(plans)
+  }
+
   const planWithdrawOrRedeem = (input: PlanWithdrawOrRedeemInput): Promise<TransactionPlan> => {
     if (input.isMax) {
       if (input.shares === undefined) {
@@ -1167,6 +1231,7 @@ export const useEulerTx = () => {
     planRepayFromSource,
     planCollateralChange,
     planDebtChange,
+    planRefinancePosition,
     planWithdrawOrRedeem,
     simulatePlan,
     prepareTransactionPlan,

@@ -298,12 +298,13 @@ const resolveBatchItemAssetInfo = (
 
   if (label === 'Withdraw') {
     const resolved = resolveAmountFromCalldata(data, targetContract, getVault)
+    const vaultAsset = getVaultAssetInfo(data, targetContract, getVault)
     const amount = resolved.isMax
       ? 'remaining'
       : resolved.decoded && resolved.amount
         ? resolved.amount
         : ctx.amount
-    return { symbol: ctx.asset.symbol, address: ctx.asset.address, amount }
+    return { symbol: vaultAsset?.symbol ?? ctx.asset.symbol, address: vaultAsset?.address ?? ctx.asset.address, amount }
   }
 
   if (label === 'Wrap native currency') {
@@ -380,6 +381,8 @@ export function buildTransactionPlanDisplaySteps(
   let index = 0
   let lastWithdrawAmount: string | undefined
   let previousLabel = ''
+  let inferredSwapInput: StepAssetInfo | undefined
+  let pendingSwapStep: DisplayStep | undefined
 
   for (const item of plan) {
     if (item.type === 'requiredApproval') {
@@ -440,6 +443,9 @@ export function buildTransactionPlanDisplaySteps(
             toAssetInfo = { ...toAssetInfo, estimated: true }
           }
         }
+        else if (label === 'Swap' && inferredSwapInput) {
+          assetInfo = { ...inferredSwapInput }
+        }
         let displayLabel = label
         if (label === 'Transfer to account') {
           displayLabel = 'Transfer'
@@ -456,7 +462,7 @@ export function buildTransactionPlanDisplaySteps(
           : isWrapTransfer
             ? 'to wallet'
             : undefined
-        steps.push({
+        const step: DisplayStep = {
           index,
           label: displayLabel,
           labelSuffix,
@@ -464,7 +470,24 @@ export function buildTransactionPlanDisplaySteps(
           assetInfo,
           toAssetInfo,
           iconOnly: label === 'Update price feeds',
-        })
+        }
+        steps.push(step)
+        if (label === 'Withdraw' || label === 'Borrow') {
+          inferredSwapInput = assetInfo ? { ...assetInfo } : undefined
+        }
+        else if (label === 'Swap') {
+          pendingSwapStep = step
+          inferredSwapInput = undefined
+        }
+        else if ((label === 'Verify min received' || label === 'Verify max debt') && pendingSwapStep && assetInfo) {
+          pendingSwapStep.toAssetInfo = label === 'Verify max debt'
+            ? { symbol: assetInfo.symbol, address: assetInfo.address }
+            : { ...assetInfo }
+          if (label === 'Verify max debt' && pendingSwapStep.label === 'Swap') {
+            pendingSwapStep.label = 'Swap to repay'
+          }
+          pendingSwapStep = undefined
+        }
         previousLabel = label
       }
       continue

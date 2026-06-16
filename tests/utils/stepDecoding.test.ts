@@ -8,13 +8,26 @@ const verifier = '0x0000000000000000000000000000000000000001' as Address
 const account = '0x0000000000000000000000000000000000000002' as Address
 const usdcVault = '0x0000000000000000000000000000000000000011' as Address
 const daiVault = '0x0000000000000000000000000000000000000012' as Address
+const weethVault = '0x0000000000000000000000000000000000000013' as Address
+const wethVault = '0x0000000000000000000000000000000000000014' as Address
+const cbBtcVault = '0x0000000000000000000000000000000000000015' as Address
 const usdcAsset = '0x0000000000000000000000000000000000000021' as Address
 const daiAsset = '0x0000000000000000000000000000000000000022' as Address
+const weethAsset = '0x0000000000000000000000000000000000000023' as Address
+const wethAsset = '0x0000000000000000000000000000000000000024' as Address
+const cbBtcAsset = '0x0000000000000000000000000000000000000025' as Address
 
 const swapVerifierAbi = parseAbi([
   'function verifyAmountMinAndSkim(address vault,address receiver,uint256 amountMin,uint256 deadline)',
   'function verifyAmountMinAndTransfer(address asset,address receiver,uint256 amountMin,uint256 deadline)',
   'function verifyDebtMax(address vault,address account,uint256 amountMax,uint256 deadline)',
+])
+const vaultAbi = parseAbi([
+  'function withdraw(uint256 assets,address receiver,address owner)',
+  'function borrow(uint256 assets,address receiver)',
+])
+const swapperAbi = parseAbi([
+  'function multicall(bytes[] data)',
 ])
 
 const ctx: StepDecodingContext = {
@@ -53,13 +66,40 @@ const getVault: VaultLookup = (address) => {
       },
     }
   }
+  if (normalized === weethVault.toLowerCase()) {
+    return {
+      asset: {
+        symbol: 'weETH',
+        address: weethAsset,
+        decimals: 18,
+      },
+    }
+  }
+  if (normalized === wethVault.toLowerCase()) {
+    return {
+      asset: {
+        symbol: 'WETH',
+        address: wethAsset,
+        decimals: 18,
+      },
+    }
+  }
+  if (normalized === cbBtcVault.toLowerCase()) {
+    return {
+      asset: {
+        symbol: 'cbBTC',
+        address: cbBtcAsset,
+        decimals: 8,
+      },
+    }
+  }
   return undefined
 }
 
 const getLogoUrl = () => ''
 
-const batchItem = (data: Hex): EVCBatchItem => ({
-  targetContract: verifier,
+const batchItem = (data: Hex, targetContract: Address = verifier): EVCBatchItem => ({
+  targetContract,
   onBehalfOfAccount: account,
   value: 0n,
   data,
@@ -124,6 +164,72 @@ describe('buildTransactionPlanDisplaySteps swap verifier rows', () => {
         address: usdcAsset,
         amount: '1.234567',
       },
+    })
+  })
+
+  it('infers separate swap assets in a combined collateral and debt refinance batch', () => {
+    const steps = buildTransactionPlanDisplaySteps(
+      [{
+        type: 'evcBatch',
+        items: [
+          batchItem(encodeFunctionData({
+            abi: vaultAbi,
+            functionName: 'withdraw',
+            args: [731_941n, account, account],
+          }), usdcVault),
+          batchItem(encodeFunctionData({
+            abi: swapperAbi,
+            functionName: 'multicall',
+            args: [[]],
+          })),
+          batchItem(encodeFunctionData({
+            abi: swapVerifierAbi,
+            functionName: 'verifyAmountMinAndSkim',
+            args: [weethVault, account, 377_740_000_000_000n, 123n],
+          })),
+          batchItem(encodeFunctionData({
+            abi: vaultAbi,
+            functionName: 'borrow',
+            args: [395_140_000_000_000n, account],
+          }), wethVault),
+          batchItem(encodeFunctionData({
+            abi: swapperAbi,
+            functionName: 'multicall',
+            args: [[]],
+          })),
+          batchItem(encodeFunctionData({
+            abi: swapVerifierAbi,
+            functionName: 'verifyDebtMax',
+            args: [cbBtcVault, account, 0n, 123n],
+          })),
+        ],
+      }] satisfies TransactionPlan,
+      {
+        type: 'refinance',
+        asset: { symbol: 'cbBTC', address: cbBtcAsset, decimals: 8 },
+        amount: '0.00000994',
+      },
+      getVault,
+      getLogoUrl,
+    )
+
+    expect(steps[0]).toMatchObject({
+      label: 'Withdraw',
+      assetInfo: { symbol: 'USDC', address: usdcAsset, amount: '0.731941' },
+    })
+    expect(steps[1]).toMatchObject({
+      label: 'Swap',
+      assetInfo: { symbol: 'USDC', address: usdcAsset, amount: '0.731941' },
+      toAssetInfo: { symbol: 'weETH', address: weethAsset, amount: '0.00037774' },
+    })
+    expect(steps[3]).toMatchObject({
+      label: 'Borrow',
+      assetInfo: { symbol: 'WETH', address: wethAsset, amount: '0.00039514' },
+    })
+    expect(steps[4]).toMatchObject({
+      label: 'Swap to repay',
+      assetInfo: { symbol: 'WETH', address: wethAsset, amount: '0.00039514' },
+      toAssetInfo: { symbol: 'cbBTC', address: cbBtcAsset },
     })
   })
 })

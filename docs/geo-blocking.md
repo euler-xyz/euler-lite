@@ -350,7 +350,7 @@ For soft-restricted vaults, the behavior depends on the context:
 
 **Default selection**: `AssetInput.vue` watches the collateral options list and auto-advances past disabled options. If the first option is blocked/restricted/deprecated, the first enabled option is selected instead. This prevents a disabled vault from being pre-selected when a modal opens or a page loads.
 
-The three swap pages (`/lend/[vault]/swap`, `/position/[number]/collateral/swap`, `/position/[number]/borrow/swap`) also skip disabled vaults in their `syncToVault` fallback logic, using `getVaultTags(address, 'swap-target')` to find the first enabled vault.
+The swap/refinance pages (`/lend/[vault]/swap`, `/position/[number]/borrow/swap`) also skip disabled vaults in their `syncToVault` fallback logic, using `getVaultTags(address, 'swap-target')` to find the first enabled vault.
 
 ### Arbitrary-asset selector (`SwapTokenSelector`)
 
