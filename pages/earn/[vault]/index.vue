@@ -159,7 +159,7 @@ const submit = async () => {
     isPreparing.value = false
   }
 }
-const canAddToBatch = computed(() => !!(+amount.value) && !isGeoBlocked.value)
+const canAddToBatch = computed(() => !!(+amount.value) && !reviewSupplyDisabled.value)
 const addToBatch = async () => {
   if (!asset.value?.address || !canAddToBatch.value) return
   const assetAddr = asset.value.address as Address

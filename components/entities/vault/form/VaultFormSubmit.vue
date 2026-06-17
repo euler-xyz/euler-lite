@@ -100,10 +100,9 @@ const effectiveDisabledReason = computed(() => {
 // tooltip; hovering the main button shows the (red/warning) disabled reason.
 const PLUS_TOOLTIP = 'Add this operation to the transaction batch'
 const isPlusHover = ref(false)
-const tooltipText = computed(() => isPlusHover.value ? PLUS_TOOLTIP : effectiveDisabledReason.value)
 
 const tooltipVariantClass = computed(() => {
-  if (isPlusHover.value) return '' // neutral — it's an informational hint, not an error
+  if (isPlusHover.value && !isAddToBatchDisabled.value) return '' // neutral — it's an informational hint, not an error
   if (operationBlockReason.value) return 'vault-form-submit__tooltip--warning'
   if (props.disabledReason && props.disabledReasonVariant) {
     return `vault-form-submit__tooltip--${props.disabledReasonVariant}`
@@ -188,6 +187,29 @@ const openTermsModal = () => {
 // are required it routes through the acceptance modal first (accept → record →
 // add), so the user can't batch without accepting.
 const isAddToBatchBlocked = computed(() => isOperationBlocked.value && !showTosFlow.value)
+const isAddToBatchDisabled = computed(() => {
+  if (!props.canAddToBatch) return true
+  if (isAddToBatchBlocked.value) return true
+  if (isResolvingStateOverrideHints.value) return true
+  if (needToSwitchChain.value) return true
+  if (!hasActiveSession.value) return true
+  if (props.disabled) return true
+  return false
+})
+
+const addToBatchDisabledReason = computed(() => {
+  if (needToSwitchChain.value) return 'Switch to the correct chain before adding this operation to the batch.'
+  if (!hasActiveSession.value) return 'Connect a wallet before adding this operation to the batch.'
+  if (operationBlockReason.value) return operationBlockReason.value
+  if (props.disabledReason) return props.disabledReason
+  if (props.disabled || isResolvingStateOverrideHints.value || !props.canAddToBatch) return GENERIC_DISABLED_REASON
+  return undefined
+})
+
+const tooltipText = computed(() => {
+  if (!isPlusHover.value) return effectiveDisabledReason.value
+  return isAddToBatchDisabled.value ? addToBatchDisabledReason.value : PLUS_TOOLTIP
+})
 
 const handleAddToBatch = () => {
   if (showTosFlow.value) {
@@ -203,6 +225,7 @@ const handleAddToBatch = () => {
     })
     return
   }
+  if (isAddToBatchDisabled.value) return
   emit('add-to-batch')
 }
 </script>
@@ -223,7 +246,7 @@ const handleAddToBatch = () => {
         <UiButton
           size="large"
           variant="primary"
-          :disabled="!canAddToBatch || isAddToBatchBlocked"
+          :disabled="isAddToBatchDisabled"
           data-testid="add-to-batch"
           @click="handleAddToBatch"
         >
@@ -317,7 +340,7 @@ const handleAddToBatch = () => {
         v-if="supportsBatch && !batchBlocksDirect"
         type="button"
         class="w-full h-48 flex items-center justify-center gap-6 text-accent-500 text-h6 disabled:opacity-40 transition-opacity hover:opacity-80"
-        :disabled="!canAddToBatch || isAddToBatchBlocked"
+        :disabled="isAddToBatchDisabled"
         data-testid="add-to-batch"
         @click="handleAddToBatch"
         @mouseenter="onPlusEnter"

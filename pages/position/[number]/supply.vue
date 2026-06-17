@@ -185,6 +185,7 @@ const { name } = useEulerProductOfVault(computed(() => form.collateralVault.valu
 // deposit; native-wrap goes through the single-tx review path.
 const isCowSwapSelected = computed(() => isCowProviderOrQuote(form.swapSelectedProvider.value, form.swapSelectedQuote.value))
 const canAddToBatch = computed(() => {
+  if (form.submitDisabled.value) return false
   if (form.isGeoBlocked.value || form.isSwapRestricted.value || form.isInputAssetBlocked.value) return false
   if (!(+form.amount.value) || isNativeWrap.value || !form.collateralVault.value?.address || !form.position.value) return false
   if (needsSwap.value) return !!form.swapSelectedQuote.value && !isCowSwapSelected.value

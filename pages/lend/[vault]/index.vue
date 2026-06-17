@@ -510,6 +510,7 @@ const submit = async () => {
 // A CoW swap quote can't be batched (mergePlans/simulate reject cowSwap items).
 const isCowSwapSelected = computed(() => isCowProviderOrQuote(swapSelectedProvider.value, swapSelectedQuote.value))
 const canAddToBatch = computed(() => {
+  if (reviewSupplyDisabled.value) return false
   if (isGeoBlocked.value || isSwapRestricted.value || isSourceAssetBlocked.value) return false
   if (!(+amount.value) || isNativeWrap.value) return false
   if (needsSwap.value) return !!swapSelectedQuote.value && !isCowSwapSelected.value

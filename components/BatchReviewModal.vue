@@ -10,6 +10,7 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
 import { logWarn } from '~/utils/errorHandling'
 import { buildBatchHealthSummary } from '~/utils/batchHealthSummary'
+import { hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 
 // Whole-batch review: required approvals, then the operations as rows that roll
 // down to their details, the net wallet changes, a Tenderly simulation link,
@@ -32,7 +33,6 @@ const {
   insufficientBalanceMessage,
   executeBatch,
   prepareBatchPlan,
-  getMergedPlan,
   entryPlans,
   marketByEntryId,
   tenderlyEnabled,
@@ -46,7 +46,7 @@ const {
 
 const { isSpyMode, spyAddress } = useSpyMode()
 const { address: walletAddress, chainId: wagmiChainId } = useWagmi()
-const { chainId: addressesChainId } = useEulerAddresses()
+const { chainId: addressesChainId, eulerCoreAddresses } = useEulerAddresses()
 const { buildKnownSymbols, resolveSymbol } = useTokenSymbolResolver()
 const { getVault, isVerifiedVault } = useVaultRegistry()
 const { copied, copyToClipboard } = useClipboardCopy()
@@ -158,13 +158,17 @@ const toggle = (id: string) => {
 interface ResolvedApproval { type: string, token: string }
 const approvals = ref<Array<{ kind: 'approve' | 'permit', symbol: string }>>([])
 const isPreparing = ref(false)
-// The prepared plan (with approvals resolved) backs "Copy calldata"; falls back
-// to the simulated merged plan if preparation hasn't completed.
+const prepareError = ref('')
+// The prepared plan (with approvals resolved) backs "Copy calldata".
 const preparedPlanRef = ref<TransactionPlan | undefined>()
+const hasPermit2Approval = computed(() =>
+  hasPermit2TokenApproval(preparedPlanRef.value, eulerCoreAddresses.value?.permit2),
+)
 
 onMounted(async () => {
   void fetchTenderlyEnabled()
   isPreparing.value = true
+  prepareError.value = ''
   try {
     const prepared = await prepareBatchPlan()
     preparedPlanRef.value = prepared?.plan
@@ -181,6 +185,7 @@ onMounted(async () => {
   }
   catch (error) {
     logWarn('BatchReviewModal/prepare', error)
+    prepareError.value = 'Unable to prepare this batch. Resolve the preparation error before copying calldata or executing.'
   }
   finally {
     isPreparing.value = false
@@ -188,10 +193,13 @@ onMounted(async () => {
 })
 
 // Copy the exact batch calldata (one entry per on-chain tx: approvals + the EVC
-// batch), matching the per-operation review modals. Uses the prepared plan when
-// available so approval txs are included, else the simulated merged plan.
+// batch), matching the per-operation review modals. This requires the prepared
+// plan so approval txs are included.
+const isCalldataCopyDisabled = computed(() =>
+  isPreparing.value || !!prepareError.value || !preparedPlanRef.value?.length,
+)
 const copyCalldata = async () => {
-  const plan = preparedPlanRef.value ?? getMergedPlan()
+  const plan = preparedPlanRef.value
   if (!plan?.length) return
   try {
     const sdk = await getEulerSdk()
@@ -284,6 +292,14 @@ const handleClose = () => {
           </div>
         </div>
       </div>
+
+      <UiAlert
+        v-if="hasPermit2Approval"
+        variant="warning"
+        size="compact"
+        title="Infinite approval"
+        description="You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract that lets you approve once, then sign per-action permissions without new onchain approvals."
+      />
 
       <!-- Operations -->
       <div>
@@ -407,19 +423,28 @@ const handleClose = () => {
         :message="execError || simError || insufficientBalanceMessage"
       />
 
+      <UiAlert
+        v-if="prepareError"
+        variant="error"
+        size="compact"
+        title="Preparation failed"
+        :description="prepareError"
+      />
+
       <!-- Secondary actions: copy calldata + Tenderly -->
       <div class="flex items-center justify-center gap-16">
         <button
           type="button"
-          class="flex items-center gap-6 text-p3 text-content-primary transition-colors"
+          class="flex items-center gap-6 text-p3 text-content-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           data-testid="batch-copy-calldata"
+          :disabled="isCalldataCopyDisabled"
           @click="copyCalldata"
         >
           <SvgIcon
             :name="copied ? 'check' : 'copy'"
             class="!w-16 !h-16"
           />
-          {{ copied ? 'Copied!' : 'Copy calldata' }}
+          {{ copied ? 'Copied!' : isPreparing ? 'Preparing calldata…' : 'Copy calldata' }}
         </button>
         <template v-if="tenderlyEnabled">
           <a

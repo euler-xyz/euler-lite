@@ -184,6 +184,7 @@ const walletSwap = useWalletSwapRepay({
 // into an EVC batch, so swap routes via CoW are excluded.
 const canAddToBatch = computed(() => {
   if (!borrowVault.value || !position.value) return false
+  if (reviewRepayDisabled.value) return false
   if (formTab.value === 'wallet') {
     if (!(+wallet.amount.value) && !(+walletSwap.amount.value)) return false
     if (walletSwap.needsSwap.value) {
@@ -226,14 +227,22 @@ const addToBatch = async () => {
   if (formTab.value === 'wallet') {
     if (walletSwap.needsSwap.value) {
       const quote = walletSwap.quotes.selectedQuote.value ?? undefined
+      const swapAsset = walletSwap.selectedAsset.value
+      const swapAmount = walletSwap.amount.value
+      const swapDirection = walletSwap.direction.value
       const inSymbol = walletSwap.selectedAsset.value?.symbol ?? ''
       const isClosing = walletSwap.isFullRepay.value
+      if (!swapAsset) return
       await addBatchEntry({
         label: `Repay-swap ${inSymbol} → ${borrowSymbol}`,
-        buildPlan: account => walletSwap.buildRepayPlan(quote, account),
+        buildPlan: account => walletSwap.buildRepayPlan(quote, account, {
+          selectedAsset: swapAsset,
+          direction: swapDirection,
+          isFullRepay: isClosing,
+        }),
         subAccount: position.value.subAccount as Address,
         nameOverride: `Repay ${borrowSymbol}`,
-        review: { type: 'repay', asset: walletSwap.selectedAsset.value ?? borrowVault.value.asset, amount: walletSwap.amount.value, swapToAsset: borrowVault.value.asset },
+        review: { type: 'repay', asset: swapAsset, amount: swapAmount, swapToAsset: borrowVault.value.asset },
       })
       walletSwap.amount.value = ''
       redirectAfterRepayAdd(isClosing)
@@ -263,13 +272,25 @@ const addToBatch = async () => {
 
   if (formTab.value === 'collateral') {
     const quote = collateral.isSameAsset.value ? undefined : collateral.quotes.selectedQuote.value ?? undefined
-    const srcSymbol = collateral.sourceVault.value?.asset.symbol ?? ''
+    const sourceVault = collateral.sourceVault.value
+    const sourceAmount = collateral.amount.value
+    const sourceDebtAmount = collateral.debtAmount.value
+    const sourceDirection = collateral.direction.value
+    const isSameAsset = collateral.isSameAsset.value
+    const srcSymbol = sourceVault?.asset.symbol ?? ''
     const isClosing = collateral.isFullRepay.value
+    if (!sourceVault) return
     await addBatchEntry({
       label: `Repay from ${srcSymbol} collateral → ${borrowSymbol}`,
-      buildPlan: account => collateral.buildRepayPlan(quote, account),
+      buildPlan: account => collateral.buildRepayPlan(quote, account, {
+        sourceVault,
+        amount: sourceAmount,
+        debtAmount: sourceDebtAmount,
+        direction: sourceDirection,
+        isSameAsset,
+      }),
       subAccount: position.value.subAccount as Address,
-      review: { type: 'repay', asset: collateral.sourceVault.value?.asset ?? borrowVault.value.asset, amount: collateral.amount.value, swapToAsset: borrowVault.value.asset },
+      review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, swapToAsset: borrowVault.value.asset },
     })
     collateral.amount.value = ''
     collateral.debtAmount.value = ''
@@ -279,13 +300,27 @@ const addToBatch = async () => {
 
   if (formTab.value === 'savings') {
     const quote = savings.isSameAsset.value ? undefined : savings.quotes.selectedQuote.value ?? undefined
-    const srcSymbol = savings.sourceVault.value?.asset.symbol ?? ''
+    const sourceVault = savings.sourceVault.value
+    const sourceSubAccount = savings.selectedSavingSubAccount.value
+    const sourceAmount = savings.amount.value
+    const sourceDebtAmount = savings.debtAmount.value
+    const sourceDirection = savings.direction.value
+    const isSameAsset = savings.isSameAsset.value
+    const srcSymbol = sourceVault?.asset.symbol ?? ''
     const isClosing = savings.isFullRepay.value
+    if (!sourceVault) return
     await addBatchEntry({
       label: `Repay from ${srcSymbol} savings → ${borrowSymbol}`,
-      buildPlan: account => savings.buildRepayPlan(quote, account),
+      buildPlan: account => savings.buildRepayPlan(quote, account, {
+        sourceVault,
+        sourceSubAccount,
+        amount: sourceAmount,
+        debtAmount: sourceDebtAmount,
+        direction: sourceDirection,
+        isSameAsset,
+      }),
       subAccount: position.value.subAccount as Address,
-      review: { type: 'repay', asset: savings.sourceVault.value?.asset ?? borrowVault.value.asset, amount: savings.amount.value, swapToAsset: borrowVault.value.asset },
+      review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, swapToAsset: borrowVault.value.asset },
     })
     savings.amount.value = ''
     savings.debtAmount.value = ''

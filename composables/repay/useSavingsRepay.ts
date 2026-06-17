@@ -41,6 +41,15 @@ interface UseSavingsRepayOptions {
   borrowApy: ComputedRef<number>
 }
 
+interface SavingsRepayPlanSnapshot {
+  sourceVault?: EVault
+  sourceSubAccount?: string
+  amount?: string
+  debtAmount?: string
+  direction?: SwapperMode
+  isSameAsset?: boolean
+}
+
 export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   const {
     position,
@@ -292,25 +301,34 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   })
 
   // --- Build / Submit / Send ---
-  const buildRepayPlan = async (quote?: SwapQuote, account = planAccount.value): Promise<TransactionPlan> => {
-    if (!position.value || !borrowVault.value || !sourceVault.value) {
+  const buildRepayPlan = async (
+    quote?: SwapQuote,
+    account = planAccount.value,
+    snapshot: SavingsRepayPlanSnapshot = {},
+  ): Promise<TransactionPlan> => {
+    const source = snapshot.sourceVault ?? sourceVault.value
+    if (!position.value || !borrowVault.value || !source) {
       throw new Error('Position or vaults not loaded')
     }
 
-    const savingsPos = getSavingsPosition(sourceVault.value.address, selectedSavingSubAccount.value)
+    const sourceSubAccount = snapshot.sourceSubAccount ?? selectedSavingSubAccount.value
+    const savingsPos = getSavingsPosition(source.address, sourceSubAccount)
     if (!savingsPos) {
       throw new Error('Savings position not found')
     }
+    const sameAsset = snapshot.isSameAsset ?? core.isSameAsset.value
+    const amountInput = snapshot.amount ?? core.amount.value
+    const debtAmountInput = snapshot.debtAmount ?? core.debtAmount.value
 
     let isFullRepay: boolean
     let liabilityAmount = 0n
     let swapMode: SwapperMode | undefined
     let swapQuote: SwapQuote | undefined
 
-    if (core.isSameAsset.value) {
-      const debtNano = core.debtAmount.value
-        ? valueToNano(core.debtAmount.value, borrowVault.value.asset.decimals)
-        : valueToNano(core.amount.value, sourceVault.value.asset.decimals)
+    if (sameAsset) {
+      const debtNano = debtAmountInput
+        ? valueToNano(debtAmountInput, borrowVault.value.asset.decimals)
+        : valueToNano(amountInput, source.asset.decimals)
       const currentDebtVal = getCurrentDebt()
       isFullRepay = debtNano >= currentDebtVal
       liabilityAmount = isFullRepay ? maxUint256 : debtNano
@@ -320,11 +338,11 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
       if (!swapQuote) {
         throw new Error('No quote selected')
       }
-      swapMode = core.direction.value
+      swapMode = snapshot.direction ?? core.direction.value
       const currentDebt = getCurrentDebt()
       let targetDebt = 0n
-      if (swapMode === SwapperMode.TARGET_DEBT && core.debtAmount.value) {
-        const debtAmountNano = valueToNano(core.debtAmount.value, borrowVault.value.asset.decimals)
+      if (swapMode === SwapperMode.TARGET_DEBT && debtAmountInput) {
+        const debtAmountNano = valueToNano(debtAmountInput, borrowVault.value.asset.decimals)
         targetDebt = debtAmountNano >= currentDebt ? 0n : currentDebt - debtAmountNano
       }
       isFullRepay = targetDebt === 0n && swapMode === SwapperMode.TARGET_DEBT
@@ -334,9 +352,9 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
       liabilityVault: borrowVault.value.address as Address,
       liabilityAmount,
       receiver: position.value.subAccount as Address,
-      fromVault: sourceVault.value.address as Address,
+      fromVault: source.address as Address,
       fromAccount: savingsPos.subAccount as Address,
-      swapQuote: core.isSameAsset.value ? undefined : swapQuote,
+      swapQuote: sameAsset ? undefined : swapQuote,
       swapperMode: swapMode,
       cleanupOnMax: isFullRepay,
       account,
