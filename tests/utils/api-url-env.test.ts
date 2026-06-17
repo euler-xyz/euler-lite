@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_V3_API_URL, readResolvedV3ApiUrl, readV3ApiKey, readV3ApiUrl } from '~/utils/api-url-env'
+import { DEFAULT_V3_API_URL, readMerklApiKey, readResolvedV3ApiUrl, readV3ApiKey, readV3ApiUrl } from '~/utils/api-url-env'
 
 describe('api-url-env', () => {
   it('ignores non-V3 API URL variables', () => {
@@ -39,6 +39,17 @@ describe('api-url-env', () => {
     expect(readV3ApiKey({
       NUXT_PUBLIC_V3_API_KEY: 'public-key',
       VITE_EULER_V3_API_KEY: 'vite-key',
+    })).toBe('')
+  })
+
+  it('reads the server-side Merkl API key', () => {
+    expect(readMerklApiKey({})).toBe('')
+    expect(readMerklApiKey({ MERKL_API_KEY: 'merkl-secret' })).toBe('merkl-secret')
+  })
+
+  it('does not read public Merkl API key variables', () => {
+    expect(readMerklApiKey({
+      NUXT_PUBLIC_MERKL_API_KEY: 'public-key',
     })).toBe('')
   })
 
