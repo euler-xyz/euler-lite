@@ -184,7 +184,6 @@ const walletSwap = useWalletSwapRepay({
 // into an EVC batch, so swap routes via CoW are excluded.
 const canAddToBatch = computed(() => {
   if (!borrowVault.value || !position.value) return false
-  if (reviewRepayDisabled.value) return false
   if (formTab.value === 'wallet') {
     if (!(+wallet.amount.value) && !(+walletSwap.amount.value)) return false
     if (walletSwap.needsSwap.value) {

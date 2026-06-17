@@ -193,7 +193,6 @@ const isAddToBatchDisabled = computed(() => {
   if (isResolvingStateOverrideHints.value) return true
   if (needToSwitchChain.value) return true
   if (!hasActiveSession.value) return true
-  if (props.disabled) return true
   return false
 })
 
@@ -202,7 +201,7 @@ const addToBatchDisabledReason = computed(() => {
   if (!hasActiveSession.value) return 'Connect a wallet before adding this operation to the batch.'
   if (operationBlockReason.value) return operationBlockReason.value
   if (props.disabledReason) return props.disabledReason
-  if (props.disabled || isResolvingStateOverrideHints.value || !props.canAddToBatch) return GENERIC_DISABLED_REASON
+  if (isResolvingStateOverrideHints.value || !props.canAddToBatch) return GENERIC_DISABLED_REASON
   return undefined
 })
 
@@ -213,6 +212,12 @@ const tooltipText = computed(() => {
 
 const handleAddToBatch = () => {
   if (showTosFlow.value) {
+    if (
+      !props.canAddToBatch
+      || isResolvingStateOverrideHints.value
+      || needToSwitchChain.value
+      || !hasActiveSession.value
+    ) return
     modal.open(AcknowledgeTermsModal, {
       props: {
         onReject: () => modal.close(),

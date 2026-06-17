@@ -499,7 +499,6 @@ const send = async () => {
 // (non-swap), non-max withdraw by asset amount.
 const isCowSwapSelected = computed(() => isCowProviderOrQuote(swapSelectedProvider.value, swapSelectedQuote.value))
 const canAddToBatch = computed(() => {
-  if (reviewWithdrawDisabled.value) return false
   if (isOutputAssetBlocked.value || isOutputAssetRestricted.value) return false
   if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as EVault, effectiveWithdrawOp.value)) return false
   if (!(+amount.value)) return false

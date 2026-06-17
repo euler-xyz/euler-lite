@@ -286,7 +286,6 @@ const { redirectAfterAdd } = useBatchRedirect()
 // be merged into an EVC batch, so they're excluded.
 const isCowSwapSelected = computed(() => isCowProvider(selectedProvider.value))
 const canAddToBatch = computed(() => {
-  if (reviewSwapDisabled.value) return false
   if (!fromVault.value || !toVault.value || !position.value || !(+fromAmount.value)) return false
   if (isSameAsset.value) return true
   return !!selectedQuote.value && !isCowSwapSelected.value
