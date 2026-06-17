@@ -238,7 +238,7 @@ const copyCalldata = async () => {
 const hasTenderlyFailed = computed(() => Boolean(tenderlyUrl.value && tenderlyError.value))
 
 const isConfirmDisabled = computed(() =>
-  isSpyMode.value || isExecuting.value || isPreparing.value || isSimulating.value || !canExecuteBatch.value,
+  isSpyMode.value || isExecuting.value || isPreparing.value || isSimulating.value || !canExecuteBatch.value || !!prepareError.value,
 )
 const blockedReason = computed(() => {
   if (isSpyMode.value) return 'Connect a wallet to execute — disabled in spy mode'
