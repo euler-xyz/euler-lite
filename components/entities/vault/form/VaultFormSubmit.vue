@@ -2,7 +2,7 @@
 import { inject } from 'vue'
 import { flip, offset, shift, useFloating } from '@floating-ui/vue'
 
-import { isOperationBlocked, operationBlockReason } from '~/utils/operationGuardRegistry'
+import { isOperationBlocked, operationBlockerEntries, operationBlockReason } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonVariant } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { AcknowledgeTermsModal, VaultUnverifiedDisclaimerModal } from '#components'
@@ -181,24 +181,33 @@ const openTermsModal = () => {
   })
 }
 
-// Adding to the batch must clear the same gates as a direct execute — a queued
-// op still gets executed. The TOS gate was sidesteppable via "Add to batch"
-// before; now the add is blocked by any active operation guard, and when terms
-// are required it routes through the acceptance modal first (accept → record →
-// add), so the user can't batch without accepting.
-const isAddToBatchBlocked = computed(() => isOperationBlocked.value && !showTosFlow.value)
+// Adding to the batch stays permissive for form-level preflight checks, but it
+// must still clear operation blockers such as Keyring and unverified-vault
+// acknowledgements. TOS is special: the add path may open the TOS modal, then
+// continue only if no non-TOS blockers remain.
+const nonTosOperationBlockReason = computed(() =>
+  operationBlockerEntries.value.find(([key]) => key !== 'tos')?.[1],
+)
+const hasNonTosOperationBlocker = computed(() => !!nonTosOperationBlockReason.value)
+const isAddToBatchBaseDisabled = computed(() =>
+  !props.canAddToBatch
+  || isResolvingStateOverrideHints.value
+  || needToSwitchChain.value
+  || !hasActiveSession.value,
+)
+const isAddToBatchBlocked = computed(() =>
+  showTosFlow.value ? hasNonTosOperationBlocker.value : isOperationBlocked.value,
+)
 const isAddToBatchDisabled = computed(() => {
-  if (!props.canAddToBatch) return true
+  if (isAddToBatchBaseDisabled.value) return true
   if (isAddToBatchBlocked.value) return true
-  if (isResolvingStateOverrideHints.value) return true
-  if (needToSwitchChain.value) return true
-  if (!hasActiveSession.value) return true
   return false
 })
 
 const addToBatchDisabledReason = computed(() => {
   if (needToSwitchChain.value) return 'Switch to the correct chain before adding this operation to the batch.'
   if (!hasActiveSession.value) return 'Connect a wallet before adding this operation to the batch.'
+  if (showTosFlow.value && nonTosOperationBlockReason.value) return nonTosOperationBlockReason.value
   if (operationBlockReason.value) return operationBlockReason.value
   if (props.disabledReason) return props.disabledReason
   if (isResolvingStateOverrideHints.value || !props.canAddToBatch) return GENERIC_DISABLED_REASON
@@ -212,18 +221,14 @@ const tooltipText = computed(() => {
 
 const handleAddToBatch = () => {
   if (showTosFlow.value) {
-    if (
-      !props.canAddToBatch
-      || isResolvingStateOverrideHints.value
-      || needToSwitchChain.value
-      || !hasActiveSession.value
-    ) return
+    if (isAddToBatchBaseDisabled.value || hasNonTosOperationBlocker.value) return
     modal.open(AcknowledgeTermsModal, {
       props: {
         onReject: () => modal.close(),
         onAccept: () => {
           tosGuard?.acceptTerms()
           modal.close()
+          if (isAddToBatchBaseDisabled.value || hasNonTosOperationBlocker.value) return
           emit('add-to-batch')
         },
       },
