@@ -675,7 +675,6 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const isBorrowCapReached = computed(() => multiplyShortVault.value ? getIsBorrowCapReached(multiplyShortVault.value) : false)
 
   const multiplyCapErrorText = computed(() => {
-    if (!multiplyInputAmount.value || multiplyDebtAmountNano.value <= 0n) return null
     if (isSupplyCapReached.value && multiplySupplyVault.value) {
       return getSupplyCapWarning(multiplySupplyVault.value)?.message || 'The supply cap has been reached. New deposits will fail.'
     }

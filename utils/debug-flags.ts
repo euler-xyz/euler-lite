@@ -31,3 +31,8 @@ export const profOptIn: boolean = readFlag('prof', 'euler_prof')
 
 /** Verbose client logging — restores `warn`/`info`/`debug`. Opt in with `?verbose` or `localStorage.euler_verbose=1`. */
 export const verboseLogsOptIn: boolean = readFlag('verbose', 'euler_verbose')
+
+/** Disables list windowing so every row stays mounted. Needed by parity
+ * captures, which scrape the full list DOM. Opt in with `?fullrender` or
+ * `localStorage.euler_full_render=1`. */
+export const fullListRenderOptIn: boolean = readFlag('fullrender', 'euler_full_render')

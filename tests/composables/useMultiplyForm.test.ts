@@ -286,6 +286,11 @@ describe('useMultiplyForm cap validation', () => {
     const form = makeForm(vault)
 
     form.initMultiplySupplyVault(vault)
+    form.multiplyAssetBalance.value = 100n
+
+    expect(form.isMultiplySubmitDisabled.value).toBe(true)
+    expect(form.multiplyCapErrorText.value).toBe('The supply cap has been reached. New deposits will fail.')
+
     form.multiplyInputAmount.value = '1'
     form.multiplier.value = 2
 
