@@ -976,9 +976,14 @@ const getBorrowVaultPair = async (
 
   // Wait for snapshot enrichment / RPC refresh before resolving a one-time
   // direct-route pair; otherwise the page can capture vault instances before
-  // rewards and market data have been populated.
+  // rewards and market data have been populated.  Timeout prevents an
+  // indefinite hang when a superseded loadVaults generation never flips the
+  // flag back to true.
   if (!isMarketDataResolved.value) {
-    await until(isMarketDataResolved).toBe(true)
+    await Promise.race([
+      until(isMarketDataResolved).toBe(true),
+      new Promise<void>(resolve => setTimeout(resolve, 10_000)),
+    ])
   }
 
   const borrowType = getType(borrowAddr)
