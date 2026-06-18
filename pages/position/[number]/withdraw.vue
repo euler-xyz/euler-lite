@@ -169,6 +169,7 @@ const isFullCollateralWithdraw = (assetsNano: bigint) => {
 // Add this collateral withdrawal to the batch — direct or non-CoW swap-out.
 const isCowSwapSelected = computed(() => isCowProviderOrQuote(form.swapSelectedProvider.value, form.swapSelectedQuote.value))
 const canAddToBatch = computed(() => {
+  if (form.isGeoBlocked.value || form.isSwapRestricted.value || form.isOutputAssetBlocked.value || form.isOutputAssetRestricted.value) return false
   if (!(+form.amount.value) || !form.collateralVault.value?.address || !form.position.value) return false
   if (needsSwap.value) return !!form.swapSelectedQuote.value && !isCowSwapSelected.value
   return true
