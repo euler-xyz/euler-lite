@@ -187,6 +187,7 @@ const canAddToBatch = computed(() => {
   if (formTab.value === 'wallet') {
     if (!(+wallet.amount.value) && !(+walletSwap.amount.value)) return false
     if (walletSwap.needsSwap.value) {
+      if (isWalletSwapRestricted.value || isPayWithAssetBlocked.value) return false
       return !!walletSwap.quotes.selectedQuote.value && !isCowProvider(walletSwap.quotes.selectedProvider.value)
     }
     return !!(+wallet.amount.value)
