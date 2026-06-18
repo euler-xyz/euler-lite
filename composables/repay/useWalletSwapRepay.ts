@@ -44,6 +44,12 @@ interface UseWalletSwapRepayOptions {
   oraclePriceRatio: ComputedRef<number | null>
 }
 
+interface WalletSwapRepayPlanSnapshot {
+  selectedAsset?: VaultAsset
+  direction?: SwapperMode
+  isFullRepay?: boolean
+}
+
 export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const {
     position,
@@ -709,29 +715,35 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   })
 
   // --- Build plan ---
-  async function buildRepayPlan(quote?: SwapQuote, account = planAccount.value): Promise<TransactionPlan> {
+  async function buildRepayPlan(
+    quote?: SwapQuote,
+    account = planAccount.value,
+    snapshot: WalletSwapRepayPlanSnapshot = {},
+  ): Promise<TransactionPlan> {
     const swapQuote = quote || quotes.selectedQuote.value
-    if (!position.value || !borrowVault.value || !collateralVault.value || !swapQuote || !selectedAsset.value) {
+    const repaymentAsset = snapshot.selectedAsset ?? selectedAsset.value
+    if (!position.value || !borrowVault.value || !collateralVault.value || !swapQuote || !repaymentAsset) {
       throw new Error('Missing data for swap repay plan')
     }
 
-    const swapMode = direction.value
+    const swapMode = snapshot.direction ?? direction.value
     const inputAmount = getSwapInputAmount(swapQuote, swapMode)
 
-    const isNative = isNativeCurrencyAddress(selectedAsset.value.address)
+    const isNative = isNativeCurrencyAddress(repaymentAsset.address)
     const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
     if (isNative && !wrappedAddress) {
       throw new Error('Wrapped native token not found')
     }
+    const repayAll = snapshot.isFullRepay ?? isFullRepay.value
 
     return planSwapAndRepay({
       swapQuote,
       amount: inputAmount,
-      tokenIn: (wrappedAddress || selectedAsset.value.address) as Address,
+      tokenIn: (wrappedAddress || repaymentAsset.address) as Address,
       liabilityVault: borrowVault.value.address as Address,
       repayAccount: (position.value.subAccount || address.value || zeroAddress) as Address,
-      isMax: isFullRepay.value,
-      cleanupOnMax: isFullRepay.value,
+      isMax: repayAll,
+      cleanupOnMax: repayAll,
       wrappedNativeInfo: isNative && wrappedAddress
         ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
         : undefined,
