@@ -2,7 +2,7 @@
 import { inject } from 'vue'
 import { flip, offset, shift, useFloating } from '@floating-ui/vue'
 
-import { isOperationBlocked, operationBlockReason } from '~/utils/operationGuardRegistry'
+import { isOperationBlocked, operationBlockerEntries, operationBlockReason } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonVariant } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { AcknowledgeTermsModal, VaultUnverifiedDisclaimerModal } from '#components'
@@ -100,10 +100,9 @@ const effectiveDisabledReason = computed(() => {
 // tooltip; hovering the main button shows the (red/warning) disabled reason.
 const PLUS_TOOLTIP = 'Add this operation to the transaction batch'
 const isPlusHover = ref(false)
-const tooltipText = computed(() => isPlusHover.value ? PLUS_TOOLTIP : effectiveDisabledReason.value)
 
 const tooltipVariantClass = computed(() => {
-  if (isPlusHover.value) return '' // neutral — it's an informational hint, not an error
+  if (isPlusHover.value && !isAddToBatchDisabled.value) return '' // neutral — it's an informational hint, not an error
   if (operationBlockReason.value) return 'vault-form-submit__tooltip--warning'
   if (props.disabledReason && props.disabledReasonVariant) {
     return `vault-form-submit__tooltip--${props.disabledReasonVariant}`
@@ -182,27 +181,61 @@ const openTermsModal = () => {
   })
 }
 
-// Adding to the batch must clear the same gates as a direct execute — a queued
-// op still gets executed. The TOS gate was sidesteppable via "Add to batch"
-// before; now the add is blocked by any active operation guard, and when terms
-// are required it routes through the acceptance modal first (accept → record →
-// add), so the user can't batch without accepting.
-const isAddToBatchBlocked = computed(() => isOperationBlocked.value && !showTosFlow.value)
+// Adding to the batch stays permissive for form-level preflight checks, but it
+// must still clear operation blockers such as Keyring and unverified-vault
+// acknowledgements. TOS is special: the add path may open the TOS modal, then
+// continue only if no non-TOS blockers remain.
+const nonTosOperationBlockReason = computed(() =>
+  operationBlockerEntries.value.find(([key]) => key !== 'tos')?.[1],
+)
+const hasNonTosOperationBlocker = computed(() => !!nonTosOperationBlockReason.value)
+const isAddToBatchBaseDisabled = computed(() =>
+  !props.canAddToBatch
+  || isResolvingStateOverrideHints.value
+  || needToSwitchChain.value
+  || !hasActiveSession.value,
+)
+const isAddToBatchBlocked = computed(() =>
+  showTosFlow.value ? hasNonTosOperationBlocker.value : isOperationBlocked.value,
+)
+const isAddToBatchDisabled = computed(() => {
+  if (isAddToBatchBaseDisabled.value) return true
+  if (isAddToBatchBlocked.value) return true
+  return false
+})
+
+const addToBatchDisabledReason = computed(() => {
+  if (needToSwitchChain.value) return 'Switch to the correct chain before adding this operation to the batch.'
+  if (!hasActiveSession.value) return 'Connect a wallet before adding this operation to the batch.'
+  if (showTosFlow.value && nonTosOperationBlockReason.value) return nonTosOperationBlockReason.value
+  if (operationBlockReason.value) return operationBlockReason.value
+  if (props.disabledReason) return props.disabledReason
+  if (isResolvingStateOverrideHints.value || !props.canAddToBatch) return GENERIC_DISABLED_REASON
+  return undefined
+})
+
+const tooltipText = computed(() => {
+  if (!isPlusHover.value) return effectiveDisabledReason.value
+  return isAddToBatchDisabled.value ? addToBatchDisabledReason.value : PLUS_TOOLTIP
+})
 
 const handleAddToBatch = () => {
   if (showTosFlow.value) {
+    if (isAddToBatchBaseDisabled.value || hasNonTosOperationBlocker.value) return
     modal.open(AcknowledgeTermsModal, {
       props: {
         onReject: () => modal.close(),
         onAccept: () => {
           tosGuard?.acceptTerms()
           modal.close()
+          if (isAddToBatchBaseDisabled.value || hasNonTosOperationBlocker.value) return
           emit('add-to-batch')
         },
       },
     })
     return
   }
+  if (isAddToBatchDisabled.value) return
   emit('add-to-batch')
 }
 </script>
@@ -223,7 +256,7 @@ const handleAddToBatch = () => {
         <UiButton
           size="large"
           variant="primary"
-          :disabled="!canAddToBatch || isAddToBatchBlocked"
+          :disabled="isAddToBatchDisabled"
           data-testid="add-to-batch"
           @click="handleAddToBatch"
         >
@@ -317,7 +350,7 @@ const handleAddToBatch = () => {
         v-if="supportsBatch && !batchBlocksDirect"
         type="button"
         class="w-full h-48 flex items-center justify-center gap-6 text-accent-500 text-h6 disabled:opacity-40 transition-opacity hover:opacity-80"
-        :disabled="!canAddToBatch || isAddToBatchBlocked"
+        :disabled="isAddToBatchDisabled"
         data-testid="add-to-batch"
         @click="handleAddToBatch"
         @mouseenter="onPlusEnter"

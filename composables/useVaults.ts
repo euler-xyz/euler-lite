@@ -914,9 +914,14 @@ const getEscrowVault = async (address: string): Promise<EVault> => {
   const { getVault: registryGetVault, isEscrowVault: registryIsEscrow, isKnownEscrowAddress, set: registrySet } = useVaultRegistry()
   const normalizedAddress = getAddress(address)
 
-  // Wait for escrow loading to complete (address set populated, needed vaults loaded)
+  // Wait for escrow loading to complete (address set populated, needed vaults loaded).
+  // Timeout prevents an indefinite hang when a superseded loadVaults generation
+  // never flips the flag back to true.
   if (!isEscrowLoadedOnce.value) {
-    await until(isEscrowLoadedOnce).toBe(true)
+    await Promise.race([
+      until(isEscrowLoadedOnce).toBe(true),
+      new Promise<void>(resolve => setTimeout(resolve, 10_000)),
+    ])
   }
 
   // Check if already in registry with full vault info
@@ -976,9 +981,14 @@ const getBorrowVaultPair = async (
 
   // Wait for snapshot enrichment / RPC refresh before resolving a one-time
   // direct-route pair; otherwise the page can capture vault instances before
-  // rewards and market data have been populated.
+  // rewards and market data have been populated.  Timeout prevents an
+  // indefinite hang when a superseded loadVaults generation never flips the
+  // flag back to true.
   if (!isMarketDataResolved.value) {
-    await until(isMarketDataResolved).toBe(true)
+    await Promise.race([
+      until(isMarketDataResolved).toBe(true),
+      new Promise<void>(resolve => setTimeout(resolve, 10_000)),
+    ])
   }
 
   const borrowType = getType(borrowAddr)
