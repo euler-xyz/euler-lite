@@ -32,7 +32,7 @@ const emits = defineEmits(['close'])
       </ul>
 
       <p class="text-content-secondary text-p3">
-        Batching is new, so check each step carefully before executing.
+        You can enable or disable batching any time in settings under advanced features.
       </p>
 
       <a
