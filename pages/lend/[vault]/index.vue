@@ -516,7 +516,6 @@ const isCowSwapSelected = computed(() => isCowProviderOrQuote(swapSelectedProvid
 const canAddToBatch = computed(() => {
   if (isGeoBlocked.value || isSwapRestricted.value || isSourceAssetBlocked.value) return false
   if (!(+amount.value) || isNativeWrap.value) return false
-  if (activeBalance.value < valueToNano(amount.value, activeAsset.value?.decimals)) return false
   if (needsSwap.value) return !!swapSelectedQuote.value && !isCowSwapSelected.value
   return true
 })
