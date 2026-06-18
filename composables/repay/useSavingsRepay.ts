@@ -71,6 +71,8 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const { isConnected, address } = useWagmi()
+  const { isSpyMode, spyAddress } = useSpyMode()
+  const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
   const { planRepayFromSource, executePlan, prefetchPluginData } = useEulerTx()
   const { account: planAccount } = usePlanAccount()
   const { getVault: registryGetVault } = useVaultRegistry()
@@ -122,8 +124,8 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     getPlanAccount: () => planAccount.value,
     getQuoteAccounts: () => {
       const savingsPos = sourceVault.value ? getSavingsPosition(sourceVault.value.address, selectedSavingSubAccount.value) : undefined
-      const savingsSubAccount = (savingsPos?.subAccount || address.value || zeroAddress) as Address
-      const borrowSubAccount = (position.value?.subAccount || address.value || zeroAddress) as Address
+      const savingsSubAccount = (savingsPos?.subAccount || effectiveAddress.value || zeroAddress) as Address
+      const borrowSubAccount = (position.value?.subAccount || effectiveAddress.value || zeroAddress) as Address
       return { accountIn: savingsSubAccount, accountOut: borrowSubAccount }
     },
   })
@@ -242,7 +244,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
 
   // --- Submit disabled ---
   const isSubmitDisabled = computed(() => {
-    if (!isConnected.value) return false
+    if (!isConnected.value && !isSpyMode.value) return false
     if (findBlockingDisabledOp(savingsRepayPlannedOps.value)) return true
     if (!sourceVault.value || !borrowVault.value) return true
     if (!core.debtAmount.value && !core.amount.value) return true

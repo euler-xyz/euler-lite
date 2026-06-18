@@ -85,7 +85,7 @@ const withdrawableAssets = computed(() => getCashLimitedWithdrawAmount(
   vault.value,
 ))
 const isSubmitDisabled = computed(() => {
-  if (!isConnected.value) return false
+  if (!isConnected.value && !isSpyMode.value) return false
   return withdrawableAssets.value < amountFixed.value.value
     || isLoading.value
     || amountFixed.value.isZero() || amountFixed.value.isNegative()

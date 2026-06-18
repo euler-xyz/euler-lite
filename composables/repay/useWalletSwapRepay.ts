@@ -81,6 +81,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const buildRepayStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
   const { chainId } = useEulerAddresses()
   const { isConnected, address } = useWagmi()
+  const { isSpyMode, spyAddress } = useSpyMode()
+  const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
   const { account: planAccount } = usePlanAccount()
   const { getBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
@@ -315,7 +317,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   })
 
   const isSubmitDisabled = computed(() => {
-    if (!isConnected.value) return false
+    if (!isConnected.value && !isSpyMode.value) return false
     if (findBlockingDisabledOp(walletSwapRepayPlannedOps.value)) return true
     if (direction.value === SwapperMode.EXACT_IN && !(+amount.value)) return true
     if (direction.value === SwapperMode.TARGET_DEBT && !(+debtAmount.value)) return true
@@ -334,8 +336,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     }
 
     const currentDebt = getCurrentDebt()
-    const userAddr = (address.value || zeroAddress) as Address
-    const subAccount = (position.value.subAccount || address.value || zeroAddress) as Address
+    const userAddr = (effectiveAddress.value || zeroAddress) as Address
+    const subAccount = (position.value.subAccount || effectiveAddress.value || zeroAddress) as Address
     const isNative = isNativeCurrencyAddress(selectedAsset.value.address)
     const swapTokenIn = isNative
       ? resolveWrappedNativeAddress(chainId.value!)
@@ -741,7 +743,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       amount: inputAmount,
       tokenIn: (wrappedAddress || repaymentAsset.address) as Address,
       liabilityVault: borrowVault.value.address as Address,
-      repayAccount: (position.value.subAccount || address.value || zeroAddress) as Address,
+      repayAccount: (position.value.subAccount || effectiveAddress.value || zeroAddress) as Address,
       isMax: repayAll,
       cleanupOnMax: repayAll,
       wrappedNativeInfo: isNative && wrappedAddress

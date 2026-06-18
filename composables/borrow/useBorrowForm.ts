@@ -93,7 +93,9 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const { planBorrow, planSwapAndBorrow, executePlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
   const { account: planAccount } = usePlanAccount()
   const { address, isConnected } = useWagmi()
+  const { isSpyMode, spyAddress } = useSpyMode()
   const { chainId } = useEulerAddresses()
+  const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
   const { getBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
   // Form validates "Not enough balance" up front (see `errorText` / `isSubmitDisabled`),
@@ -460,7 +462,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   })
 
   const isSubmitDisabled = computed(() => {
-    if (!isConnected.value) return false
+    if (!isConnected.value && !isSpyMode.value) return false
     if (findBlockingDisabledOp(borrowPlannedOps.value)) return true
     if (isSavingCollateral.value && !savingCollateral.value) return true
     if (borrowActiveBalance.value < valueToNano(collateralAmount.value, borrowActiveAssetDecimals.value)) return true
@@ -498,8 +500,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       return
     }
 
-    const userAddr = (address.value || zeroAddress) as Address
-    const subAccountAddr = address.value
+    const userAddr = (effectiveAddress.value || zeroAddress) as Address
+    const subAccountAddr = effectiveAddress.value
       ? (await resolvePendingSubAccount()) as Address
       : userAddr
     await ensureBorrowSubAccountSnapshot(planAccount.value, subAccountAddr)
@@ -851,7 +853,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     if (isPreparing.value || isGeoBlocked.value || isBorrowRestricted.value || isBorrowSwapRestricted.value || isBorrowPayWithBlocked.value) return
     isPreparing.value = true
     try {
-      if (!isConnected.value) {
+      if (!isConnected.value && !isSpyMode.value) {
         isSubmitting.value = false
         return
       }

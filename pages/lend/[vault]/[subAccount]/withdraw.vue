@@ -155,7 +155,7 @@ const isOutputAssetRestricted = computed(() =>
   needsSwap.value && isAssetRestrictedByCountry(selectedOutputAsset.value, { counterpart: asset.value }),
 )
 const isSubmitDisabled = computed(() => {
-  if (!isConnected.value) return false
+  if (!isConnected.value && !isSpyMode.value) return false
   if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as EVault, effectiveWithdrawOp.value)) return true
   if (isOutputAssetBlocked.value || isOutputAssetRestricted.value) return true
   if (withdrawableAssets.value < amountFixed.value.value) return true
@@ -318,7 +318,7 @@ const requestSwapQuote = useDebounceFn(async () => {
     return
   }
 
-  const userAddr = (address.value || zeroAddress) as Address
+  const userAddr = (effectiveAddress.value || zeroAddress) as Address
   const subAccountAddr = subAccount.value
     ? (subAccount.value as Address)
     : userAddr
@@ -508,45 +508,48 @@ const canAddToBatch = computed(() => {
 
 const addToBatch = async () => {
   if (!canAddToBatch.value || !asset.value?.address) return
-  if (needsSwap.value) {
-    const quote = swapEffectiveQuote.value
-    if (!quote) return
-    const ownerAddr = (subAccount.value ?? effectiveAddress.value) as Address | undefined
-    if (!ownerAddr) return
-    const snap = {
-      asset: asset.value,
-      owner: ownerAddr,
-      shares: sharesBalance.value,
-      assets: amountFixed.value.value,
+  await guardWithPriceImpact(async () => {
+    if (!asset.value?.address) return
+    if (needsSwap.value) {
+      const quote = swapEffectiveQuote.value
+      if (!quote) return
+      const ownerAddr = (subAccount.value ?? effectiveAddress.value) as Address | undefined
+      if (!ownerAddr) return
+      const snap = {
+        asset: asset.value,
+        owner: ownerAddr,
+        shares: sharesBalance.value,
+        assets: amountFixed.value.value,
+      }
+      const amountLabel = amount.value
+      const outputAsset = selectedOutputAsset.value
+      const outputAmount = swapEstimatedOutput.value
+      await addBatchEntry({
+        label: `Withdraw-swap ${amountLabel} ${asset.value.symbol} → ${outputAsset?.symbol ?? ''}`,
+        buildPlan: account => buildSwapWithdrawPlanFromQuote(quote, account, snap),
+        subAccount: ownerAddr,
+        review: { type: 'swap-withdraw', asset: asset.value, amount: amountLabel, swapToAsset: outputAsset, swapToAmount: outputAmount },
+      })
     }
-    const amountLabel = amount.value
-    const outputAsset = selectedOutputAsset.value
-    const outputAmount = swapEstimatedOutput.value
-    await addBatchEntry({
-      label: `Withdraw-swap ${amountLabel} ${asset.value.symbol} → ${outputAsset?.symbol ?? ''}`,
-      buildPlan: account => buildSwapWithdrawPlanFromQuote(quote, account, snap),
-      subAccount: ownerAddr,
-      review: { type: 'swap-withdraw', asset: asset.value, amount: amountLabel, swapToAsset: outputAsset, swapToAmount: outputAmount },
-    })
-  }
-  else {
-    const assets = valueToNano(amount.value, asset.value.decimals)
-    const ownerAddr = (subAccount.value ?? effectiveAddress.value) as Address | undefined
-    if (!ownerAddr) return
-    // A max withdraw must redeem the full share balance (redeem(full_balance))
-    // rather than withdraw(assets): a fixed asset amount leaves share-price
-    // rounding dust and can under-withdraw once interest accrues by execution.
-    const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
-    const shares = sharesBalance.value
-    await addBatchEntry({
-      label: `Withdraw ${amount.value} ${asset.value.symbol}`,
-      buildPlan: account => planWithdrawOrRedeem({ vaultAddress: vaultAddress as Address, owner: ownerAddr, isMax, shares, assets, account }),
-      subAccount: ownerAddr,
-      review: { type: 'withdraw', asset: asset.value, amount: amount.value },
-    })
-  }
-  amount.value = ''
-  redirectAfterAdd('/portfolio/saving', { subAccount: subAccount.value ?? effectiveAddress.value, vault: vaultAddress })
+    else {
+      const assets = valueToNano(amount.value, asset.value.decimals)
+      const ownerAddr = (subAccount.value ?? effectiveAddress.value) as Address | undefined
+      if (!ownerAddr) return
+      // A max withdraw must redeem the full share balance (redeem(full_balance))
+      // rather than withdraw(assets): a fixed asset amount leaves share-price
+      // rounding dust and can under-withdraw once interest accrues by execution.
+      const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
+      const shares = sharesBalance.value
+      await addBatchEntry({
+        label: `Withdraw ${amount.value} ${asset.value.symbol}`,
+        buildPlan: account => planWithdrawOrRedeem({ vaultAddress: vaultAddress as Address, owner: ownerAddr, isMax, shares, assets, account }),
+        subAccount: ownerAddr,
+        review: { type: 'withdraw', asset: asset.value, amount: amount.value },
+      })
+    }
+    amount.value = ''
+    redirectAfterAdd('/portfolio/saving', { subAccount: subAccount.value ?? effectiveAddress.value, vault: vaultAddress })
+  })
 }
 
 const updateSyncEstimates = () => {

@@ -55,6 +55,8 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     onQuoteReceived,
   } = options
   const { address } = useWagmi()
+  const { isSpyMode, spyAddress } = useSpyMode()
+  const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
   const { chainId } = useEulerAddresses()
   const shouldIncludeCowSwap = () =>
     typeof options.includeCowSwap === 'function'
@@ -414,7 +416,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
       const sourceSharesAmount = await getClosePositionQuoteCollateralAmount()
       cowProviderExtraData.appData = buildClosePositionQuoteAppData(
         {
-          owner: (address.value || zeroAddress) as Address,
+          owner: (effectiveAddress.value || zeroAddress) as Address,
           account: accountIn,
           deadline: quoteDeadline,
           borrowVault: borrowVault.value.address as Address,

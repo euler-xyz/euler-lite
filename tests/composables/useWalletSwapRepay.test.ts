@@ -174,6 +174,10 @@ describe('useWalletSwapRepay', () => {
       address: ref(USER),
       isConnected: ref(true),
     }))
+    vi.stubGlobal('useSpyMode', () => ({
+      isSpyMode: ref(false),
+      spyAddress: ref(undefined),
+    }))
     vi.stubGlobal('usePlanAccount', () => ({
       account: shallowRef(planAccount),
     }))

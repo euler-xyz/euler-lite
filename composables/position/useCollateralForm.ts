@@ -127,7 +127,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const buildCollateralStateOverrideOptions = () =>
     buildStateOverrideOptions({ noBalanceOverride: options.mode === 'supply' })
   const { isConnected, address } = useWagmi()
-  const { isSpyMode } = useSpyMode()
+  const { isSpyMode, spyAddress } = useSpyMode()
+  const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
   const { account: planAccount } = usePlanAccount()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const positionIndex = usePositionIndex()
@@ -421,7 +422,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       return
     }
 
-    const userAddr = (address.value || zeroAddress) as Address
+    const userAddr = (effectiveAddress.value || zeroAddress) as Address
     const subAccountAddr = position.value?.subAccount
       ? (position.value.subAccount as Address)
       : userAddr
@@ -512,7 +513,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   })
 
   const isSubmitDisabled = computed(() => {
-    if (!isConnected.value) return false
+    if (!isConnected.value && !isSpyMode.value) return false
     if (collateralVault.value && isEVault(collateralVault.value) && isOpDisabled(collateralVault.value, collateralOp.value)) return true
     if (options.effectiveBalance.value < valueToNano(amount.value, options.effectiveAsset.value?.decimals)) return true
     if (isLoading.value || !(+amount.value) || !!estimatesError.value || isEstimatesLoading.value) return true

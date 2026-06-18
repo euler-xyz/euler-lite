@@ -630,34 +630,36 @@ const canAddMultiplyToBatch = computed(() => {
 })
 const addToBatch = async () => {
   if (!canAddMultiplyToBatch.value) return
-  const sameAsset = multiplyIsSameAsset.value
-  const quote = sameAsset ? undefined : multiplyEffectiveQuote.value ?? undefined
-  const supply = multiplySupplyVault.value!.address as Address
-  const supplyAsset = multiplySupplyVault.value!.asset.address as Address
-  const long = multiplyLongVault.value!.address as Address
-  const short = multiplyShortVault.value!.address as Address
-  const debtAmount = multiplyDebtAmountNano.value
-  const receiver = multiplySubAccount.value as Address
-  await addBatchEntry({
-    label: `Multiply → ${multiplyLongVault.value!.asset.symbol}`,
-    buildPlan: account => planMultiply({
-      collateralVault: supply,
-      collateralAmount: 0n,
-      collateralAsset: supplyAsset,
-      longVault: long,
-      liabilityVault: short,
-      liabilityAmount: debtAmount,
-      receiver,
-      swapQuote: quote,
-      swapperMode: SwapperMode.EXACT_IN,
-      account,
-      subAccountSnapshotApplied: true,
-    }),
-    subAccount: receiver,
-    multiply: true,
-    review: { type: 'borrow', asset: multiplyShortVault.value!.asset, amount: multiplyShortAmount.value, swapToAsset: multiplyLongVault.value!.asset, swapMode: SwapperMode.EXACT_IN },
+  await guardWithPriceImpact(async () => {
+    const sameAsset = multiplyIsSameAsset.value
+    const quote = sameAsset ? undefined : multiplyEffectiveQuote.value ?? undefined
+    const supply = multiplySupplyVault.value!.address as Address
+    const supplyAsset = multiplySupplyVault.value!.asset.address as Address
+    const long = multiplyLongVault.value!.address as Address
+    const short = multiplyShortVault.value!.address as Address
+    const debtAmount = multiplyDebtAmountNano.value
+    const receiver = multiplySubAccount.value as Address
+    await addBatchEntry({
+      label: `Multiply → ${multiplyLongVault.value!.asset.symbol}`,
+      buildPlan: account => planMultiply({
+        collateralVault: supply,
+        collateralAmount: 0n,
+        collateralAsset: supplyAsset,
+        longVault: long,
+        liabilityVault: short,
+        liabilityAmount: debtAmount,
+        receiver,
+        swapQuote: quote,
+        swapperMode: SwapperMode.EXACT_IN,
+        account,
+        subAccountSnapshotApplied: true,
+      }),
+      subAccount: receiver,
+      multiply: true,
+      review: { type: 'borrow', asset: multiplyShortVault.value!.asset, amount: multiplyShortAmount.value, swapToAsset: multiplyLongVault.value!.asset, swapMode: SwapperMode.EXACT_IN },
+    })
+    redirectAfterAdd('/portfolio', { subAccount: receiver })
   })
-  redirectAfterAdd('/portfolio', { subAccount: receiver })
 }
 
 const requestMultiplyQuote = useDebounceFn(async () => {
@@ -719,7 +721,7 @@ const submitMultiply = async () => {
   isPreparing.value = true
   try {
     await guardWithPriceImpact(async () => {
-      if (isSubmitting.value || !isConnected.value) {
+      if (isSubmitting.value || (!isConnected.value && !isSpyMode.value)) {
         return
       }
       if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
@@ -827,7 +829,7 @@ const sendMultiply = async () => {
 }
 
 const isMultiplySubmitDisabled = computed(() => {
-  if (!isConnected.value) return false
+  if (!isConnected.value && !isSpyMode.value) return false
   if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
     return true
   }
