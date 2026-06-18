@@ -9,6 +9,7 @@ import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/stri
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useCollateralForm } from '~/composables/position/useCollateralForm'
+import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
 import { getAddress, type Address, zeroAddress, maxUint256 } from 'viem'
@@ -174,43 +175,53 @@ const canAddToBatch = computed(() => {
   if (needsSwap.value) return !!form.swapSelectedQuote.value && !isCowSwapSelected.value
   return true
 })
+const { guardWithPriceImpact: guardWithAddToBatchPriceImpact } = usePriceImpactGate({
+  directPriceImpact: form.swapPriceImpact,
+  shouldGateUnknown: computed(() =>
+    needsSwap.value
+    && form.swapEffectiveQuote.value !== null
+    && form.swapPriceImpact.value === null,
+  ),
+})
 const addToBatch = async () => {
   if (!canAddToBatch.value) return
-  const v = form.collateralVault.value
-  const a = form.asset.value
-  const pos = form.position.value
-  if (!v?.address || !a?.address || !pos) return
-  const vaultAddress = v.address as Address
-  const assets = valueToNano(form.amount.value, a.decimals)
-  const owner = (pos.subAccount ?? address.value) as Address
-  if (needsSwap.value) {
-    const quote = form.swapEffectiveQuote.value
-    if (!quote) return
-    await addBatchEntry({
-      label: `Withdraw-swap ${form.amount.value} ${a.symbol} → ${selectedOutputAsset.value?.symbol ?? ''}`,
-      buildPlan: account => planWithdrawAndSwap({ swapQuote: quote, vaultAddress, assets, owner, account }),
-      subAccount: pos.subAccount as Address,
-      review: { type: 'swap-withdraw', asset: a, amount: form.amount.value, swapToAsset: selectedOutputAsset.value },
-    })
-  }
-  else if (isFullCollateralWithdraw(assets)) {
-    await addBatchEntry({
-      label: `Withdraw ${form.amount.value} ${a.symbol}`,
-      buildPlan: account => planRedeem({ vaultAddress, shares: maxUint256, owner, account }),
-      subAccount: pos.subAccount as Address,
-      review: { type: 'withdraw', asset: a, amount: form.amount.value },
-    })
-  }
-  else {
-    await addBatchEntry({
-      label: `Withdraw ${form.amount.value} ${a.symbol}`,
-      buildPlan: account => planWithdraw({ vaultAddress, assets, owner, account }),
-      subAccount: pos.subAccount as Address,
-      review: { type: 'withdraw', asset: a, amount: form.amount.value },
-    })
-  }
-  form.amount.value = ''
-  redirectAfterAdd('/portfolio', { subAccount: pos.subAccount })
+  await guardWithAddToBatchPriceImpact(async () => {
+    const v = form.collateralVault.value
+    const a = form.asset.value
+    const pos = form.position.value
+    if (!v?.address || !a?.address || !pos) return
+    const vaultAddress = v.address as Address
+    const assets = valueToNano(form.amount.value, a.decimals)
+    const owner = (pos.subAccount ?? address.value) as Address
+    if (needsSwap.value) {
+      const quote = form.swapEffectiveQuote.value
+      if (!quote) return
+      await addBatchEntry({
+        label: `Withdraw-swap ${form.amount.value} ${a.symbol} → ${selectedOutputAsset.value?.symbol ?? ''}`,
+        buildPlan: account => planWithdrawAndSwap({ swapQuote: quote, vaultAddress, assets, owner, account }),
+        subAccount: pos.subAccount as Address,
+        review: { type: 'swap-withdraw', asset: a, amount: form.amount.value, swapToAsset: selectedOutputAsset.value },
+      })
+    }
+    else if (isFullCollateralWithdraw(assets)) {
+      await addBatchEntry({
+        label: `Withdraw ${form.amount.value} ${a.symbol}`,
+        buildPlan: account => planRedeem({ vaultAddress, shares: maxUint256, owner, account }),
+        subAccount: pos.subAccount as Address,
+        review: { type: 'withdraw', asset: a, amount: form.amount.value },
+      })
+    }
+    else {
+      await addBatchEntry({
+        label: `Withdraw ${form.amount.value} ${a.symbol}`,
+        buildPlan: account => planWithdraw({ vaultAddress, assets, owner, account }),
+        subAccount: pos.subAccount as Address,
+        review: { type: 'withdraw', asset: a, amount: form.amount.value },
+      })
+    }
+    form.amount.value = ''
+    redirectAfterAdd('/portfolio', { subAccount: pos.subAccount })
+  })
 }
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {

@@ -13,7 +13,7 @@ const OP_VERB: Record<string, string> = {
   'borrow': 'Borrow',
   'repay': 'Repay',
   'swap': 'Swap',
-  'swap-supply': 'Swap',
+  'swap-supply': 'Deposit',
   'swap-withdraw': 'Withdraw',
   'swap-borrow': 'Swap',
   'transfer': 'Transfer',
@@ -38,7 +38,9 @@ const label = computed(() => {
   // Multiply shows the long/short pair; same-asset multiply collapses to one symbol.
   const symbol = isMultiply
     ? (longSym && shortSym && longSym !== shortSym ? `${longSym}/${shortSym}` : (longSym || shortSym))
-    : shortSym
+    : review?.type === 'swap-supply'
+      ? (longSym || shortSym)
+      : shortSym
   return { verb, symbol, fallback: props.entry.label }
 })
 </script>

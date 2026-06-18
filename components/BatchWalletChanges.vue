@@ -57,19 +57,19 @@ const formatUsd = (change: BatchWalletChange): string | undefined => {
       <li
         v-for="change in changes"
         :key="change.token"
-        class="flex items-center justify-between text-p3"
+        class="batch-wallet-changes__row text-p3"
       >
-        <span class="text-content-secondary">{{ change.symbol || 'Token' }}</span>
-        <span class="flex items-baseline gap-6">
+        <span class="batch-wallet-changes__symbol text-content-secondary">{{ change.symbol || 'Token' }}</span>
+        <span class="batch-wallet-changes__value">
           <span
-            class="tabular-nums"
+            class="batch-wallet-changes__amount tabular-nums"
             :class="change.delta < 0n ? 'text-error-300' : 'text-accent-500'"
           >
             {{ formatAmount(change) }}
           </span>
           <span
             v-if="formatUsd(change)"
-            class="tabular-nums text-p4 text-content-tertiary"
+            class="batch-wallet-changes__usd tabular-nums text-p4 text-content-tertiary"
           >
             ({{ formatUsd(change) }})
           </span>
@@ -78,3 +78,40 @@ const formatUsd = (change: BatchWalletChange): string | undefined => {
     </ul>
   </div>
 </template>
+
+<style scoped lang="scss">
+.batch-wallet-changes {
+  &__row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  &__symbol {
+    flex: 0 0 auto;
+    max-width: 42%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__value {
+    display: flex;
+    min-width: 0;
+    flex: 1 1 0;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: flex-end;
+    column-gap: 6px;
+    row-gap: 1px;
+    text-align: right;
+  }
+
+  &__amount,
+  &__usd {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+}
+</style>

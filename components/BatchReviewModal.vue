@@ -11,6 +11,7 @@ import { buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingCo
 import { logWarn } from '~/utils/errorHandling'
 import { buildBatchHealthSummary } from '~/utils/batchHealthSummary'
 import { hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
+import { formatNumber } from '~/utils/string-utils'
 
 // Whole-batch review: required approvals, then the operations as rows that roll
 // down to their details, the net wallet changes, a Tenderly simulation link,
@@ -112,6 +113,34 @@ const unverifiedVaultNames = computed<string[]>(() => {
   return [...names]
 })
 const hasUnverified = computed(() => unverifiedVaultNames.value.length > 0)
+
+interface REULUnlockInfo {
+  unlockableAmount: number
+  amountToBeBurned: number
+  maturityDate: string
+  daysUntilMaturity: number
+}
+
+const isREULUnlockInfo = (value: unknown): value is REULUnlockInfo => {
+  if (!value || typeof value !== 'object') return false
+  const info = value as Partial<REULUnlockInfo>
+  return typeof info.unlockableAmount === 'number'
+    && typeof info.amountToBeBurned === 'number'
+    && typeof info.maturityDate === 'string'
+    && typeof info.daysUntilMaturity === 'number'
+}
+
+const reulUnlockWarnings = computed<Array<{ id: string, description: string }>>(() =>
+  entries.value.flatMap((entry) => {
+    const review = entry.review as { type?: string, reulUnlockInfo?: unknown } | undefined
+    if (review?.type !== 'reul-unlock' || !isREULUnlockInfo(review.reulUnlockInfo)) return []
+    const info = review.reulUnlockInfo
+    return [{
+      id: entry.id,
+      description: `This batch includes an rEUL unlock that will unlock ${formatNumber(info.unlockableAmount, 6)} EUL, and ${formatNumber(info.amountToBeBurned, 6)} EUL will be permanently burned. To fully redeem your EUL rewards, wait for the 6-month vesting period to complete (${info.daysUntilMaturity} days remaining, maturity date: ${info.maturityDate}).`,
+    }]
+  }),
+)
 
 // Sub-accounts of entries that revert mid-batch (per-item revert: vault
 // liquidity, vault cap, etc.). The op rolls back so its position SHOULD be
@@ -374,6 +403,15 @@ const handleClose = () => {
           </div>
         </div>
       </div>
+
+      <UiAlert
+        v-for="warning in reulUnlockWarnings"
+        :key="warning.id"
+        variant="warning"
+        size="compact"
+        title="rEUL burn mechanics"
+        :description="warning.description"
+      />
 
       <!-- Wallet changes -->
       <BatchWalletChanges

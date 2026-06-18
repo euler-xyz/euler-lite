@@ -275,32 +275,34 @@ const canAddBorrowToBatch = computed(() => {
 })
 const addToBatch = async () => {
   if (!canAddBorrowToBatch.value) return
-  const cVault = collateralVault.value
-  const bVault = borrowVault.value
-  if (!cVault || !bVault) return
-  const subAccount = (await resolvePendingSubAccount()) as Address
-  // Capture every input by value NOW — the batch re-simulates asynchronously and
-  // we reset the form below, so a lazy read of the reactive refs would see the
-  // cleared values (an empty amount builds a no-op borrow).
-  const snap: BorrowBatchSnapshot = {
-    subAccount,
-    // The composable treats collateral as an EVault (see useBorrowForm construction).
-    collateralVault: cVault as EVault,
-    borrowVault: bVault,
-    collateralAmount: borrow.collateralAmount.value,
-    borrowAmount: borrow.borrowAmount.value,
-    needsSwap: borrow.borrowNeedsSwap.value,
-    selectedAsset: borrow.borrowSelectedAsset.value,
-    isSavingCollateral: borrow.isSavingCollateral.value,
-    savingCollateral: borrow.savingCollateral.value,
-    isBorrowNativeWrap: borrow.isBorrowNativeWrap.value,
-    quote: borrow.borrowNeedsSwap.value ? borrow.borrowSwapEffectiveQuote.value ?? undefined : undefined,
-  }
-  const label = `Borrow ${snap.borrowAmount} ${bVault.asset.symbol}`
-  await addBatchEntry({ label, buildPlan: account => borrow.buildBorrowPlan(snap, account), subAccount, review: { type: 'borrow', asset: bVault.asset, amount: snap.borrowAmount } })
-  borrow.collateralAmount.value = ''
-  borrow.borrowAmount.value = ''
-  redirectAfterAdd('/portfolio', { subAccount })
+  await guardWithBorrowSwapPriceImpact(async () => {
+    const cVault = collateralVault.value
+    const bVault = borrowVault.value
+    if (!cVault || !bVault) return
+    const subAccount = (await resolvePendingSubAccount()) as Address
+    // Capture every input by value NOW — the batch re-simulates asynchronously and
+    // we reset the form below, so a lazy read of the reactive refs would see the
+    // cleared values (an empty amount builds a no-op borrow).
+    const snap: BorrowBatchSnapshot = {
+      subAccount,
+      // The composable treats collateral as an EVault (see useBorrowForm construction).
+      collateralVault: cVault as EVault,
+      borrowVault: bVault,
+      collateralAmount: borrow.collateralAmount.value,
+      borrowAmount: borrow.borrowAmount.value,
+      needsSwap: borrow.borrowNeedsSwap.value,
+      selectedAsset: borrow.borrowSelectedAsset.value,
+      isSavingCollateral: borrow.isSavingCollateral.value,
+      savingCollateral: borrow.savingCollateral.value,
+      isBorrowNativeWrap: borrow.isBorrowNativeWrap.value,
+      quote: borrow.borrowNeedsSwap.value ? borrow.borrowSwapEffectiveQuote.value ?? undefined : undefined,
+    }
+    const label = `Borrow ${snap.borrowAmount} ${bVault.asset.symbol}`
+    await addBatchEntry({ label, buildPlan: account => borrow.buildBorrowPlan(snap, account), subAccount, review: { type: 'borrow', asset: bVault.asset, amount: snap.borrowAmount } })
+    borrow.collateralAmount.value = ''
+    borrow.borrowAmount.value = ''
+    redirectAfterAdd('/portfolio', { subAccount })
+  })
 }
 
 // --- Multiply tab → batch ---
@@ -315,28 +317,30 @@ const canAddMultiplyToBatch = computed(() => {
 })
 const addMultiplyToBatch = async () => {
   if (!canAddMultiplyToBatch.value) return
-  const supplyVault = multiply.multiplySupplyVault.value
-  const longVault = multiply.multiplyLongVault.value
-  const shortVault = multiply.multiplyShortVault.value
-  if (!supplyVault || !longVault || !shortVault) return
-  const subAccount = (await resolvePendingSubAccount()) as Address
-  const sameAsset = multiply.multiplyIsSameAsset.value
-  const saving = multiply.multiplySavingPosition.value
-  const snap: MultiplyBatchSnapshot = {
-    subAccount,
-    supplyVault: supplyVault as EVault,
-    longVault: longVault as EVault,
-    shortVault: shortVault as EVault,
-    inputAmount: multiply.multiplyInputAmount.value,
-    debtAmount: multiply.multiplyDebtAmountNano.value,
-    isSavingCollateral: multiply.isMultiplySavingCollateral.value,
-    savingFrom: saving?.subAccount as Address | undefined,
-    savingAssets: saving?.assets,
-    savingShares: multiply.multiplySavingBalance.value,
-    quote: sameAsset ? undefined : multiply.multiplyEffectiveQuote.value ?? undefined,
-  }
-  await addBatchEntry({ label: `Multiply → ${longVault.asset.symbol}`, buildPlan: account => multiply.buildMultiplyPlan(snap, account), subAccount, multiply: true, review: { type: 'borrow', asset: shortVault.asset, amount: multiply.multiplyInputAmount.value, swapToAsset: longVault.asset } })
-  redirectAfterAdd('/portfolio', { subAccount })
+  await guardWithMultiplyPriceImpact(async () => {
+    const supplyVault = multiply.multiplySupplyVault.value
+    const longVault = multiply.multiplyLongVault.value
+    const shortVault = multiply.multiplyShortVault.value
+    if (!supplyVault || !longVault || !shortVault) return
+    const subAccount = (await resolvePendingSubAccount()) as Address
+    const sameAsset = multiply.multiplyIsSameAsset.value
+    const saving = multiply.multiplySavingPosition.value
+    const snap: MultiplyBatchSnapshot = {
+      subAccount,
+      supplyVault: supplyVault as EVault,
+      longVault: longVault as EVault,
+      shortVault: shortVault as EVault,
+      inputAmount: multiply.multiplyInputAmount.value,
+      debtAmount: multiply.multiplyDebtAmountNano.value,
+      isSavingCollateral: multiply.isMultiplySavingCollateral.value,
+      savingFrom: saving?.subAccount as Address | undefined,
+      savingAssets: saving?.assets,
+      savingShares: multiply.multiplySavingBalance.value,
+      quote: sameAsset ? undefined : multiply.multiplyEffectiveQuote.value ?? undefined,
+    }
+    await addBatchEntry({ label: `Multiply → ${longVault.asset.symbol}`, buildPlan: account => multiply.buildMultiplyPlan(snap, account), subAccount, multiply: true, review: { type: 'borrow', asset: shortVault.asset, amount: multiply.multiplyInputAmount.value, swapToAsset: longVault.asset } })
+    redirectAfterAdd('/portfolio', { subAccount })
+  })
 }
 
 // --- Tabs ---

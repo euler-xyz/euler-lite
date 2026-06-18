@@ -6,6 +6,7 @@ import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
+import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import type { SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { isVaultDeprecated } from '~/utils/eulerLabelsUtils'
@@ -168,43 +169,53 @@ const canAddToBatch = computed(() => {
   if (isSameAsset.value) return true
   return !!selectedQuote.value && !isCowSwapSelected.value
 })
+const { guardWithPriceImpact: guardWithAddToBatchPriceImpact } = usePriceImpactGate({
+  directPriceImpact: priceImpact,
+  shouldGateUnknown: computed(() =>
+    !isSameAsset.value
+    && selectedQuote.value !== null
+    && priceImpact.value === null,
+  ),
+})
 const addToBatch = async () => {
   if (!canAddToBatch.value) return
-  const from = fromVault.value
-  const to = toVault.value
-  if (!from || !to) return
-  const positionAccount = (subAccount.value ?? effectiveAddress.value) as Address | undefined
-  if (!positionAccount) return
-  const fromAddr = from.address as Address
-  const toAddr = to.address as Address
-  const toAssetAddr = to.asset.address as Address
-  const amount = valueToNano(fromAmount.value, from.asset.decimals)
-  const isMax = assetsBalance.value > 0n && amount >= assetsBalance.value
-  const maxShares = isMax ? savingPosition.value?.shares : undefined
-  const sameAsset = isSameAsset.value
-  const swapQuote = sameAsset ? undefined : selectedQuote.value ?? undefined
-  const label = sameAsset
-    ? `Migrate ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
-    : `Swap ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
-  await addBatchEntry({
-    label,
-    buildPlan: account => planCollateralChange({
-      fromVault: fromAddr,
-      toVault: toAddr,
-      amount,
-      positionAccount,
-      toAsset: toAssetAddr,
-      isMax,
-      maxShares,
-      swapQuote,
-      swapperMode: SwapperMode.EXACT_IN,
-      account,
-    }),
-    subAccount: positionAccount,
-    review: { type: 'swap', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.EXACT_IN },
+  await guardWithAddToBatchPriceImpact(async () => {
+    const from = fromVault.value
+    const to = toVault.value
+    if (!from || !to) return
+    const positionAccount = (subAccount.value ?? effectiveAddress.value) as Address | undefined
+    if (!positionAccount) return
+    const fromAddr = from.address as Address
+    const toAddr = to.address as Address
+    const toAssetAddr = to.asset.address as Address
+    const amount = valueToNano(fromAmount.value, from.asset.decimals)
+    const isMax = assetsBalance.value > 0n && amount >= assetsBalance.value
+    const maxShares = isMax ? savingPosition.value?.shares : undefined
+    const sameAsset = isSameAsset.value
+    const swapQuote = sameAsset ? undefined : selectedQuote.value ?? undefined
+    const label = sameAsset
+      ? `Migrate ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
+      : `Swap ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
+    await addBatchEntry({
+      label,
+      buildPlan: account => planCollateralChange({
+        fromVault: fromAddr,
+        toVault: toAddr,
+        amount,
+        positionAccount,
+        toAsset: toAssetAddr,
+        isMax,
+        maxShares,
+        swapQuote,
+        swapperMode: SwapperMode.EXACT_IN,
+        account,
+      }),
+      subAccount: positionAccount,
+      review: { type: 'swap', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.EXACT_IN },
+    })
+    fromAmount.value = ''
+    redirectAfterAdd('/portfolio/saving', { subAccount: positionAccount, vault: toAddr })
   })
-  fromAmount.value = ''
-  redirectAfterAdd('/portfolio/saving', { subAccount: positionAccount, vault: toAddr })
 }
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {

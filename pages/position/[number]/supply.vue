@@ -8,6 +8,7 @@ import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/stri
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useCollateralForm } from '~/composables/position/useCollateralForm'
+import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { getAddress, type Address, zeroAddress } from 'viem'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
@@ -190,41 +191,51 @@ const canAddToBatch = computed(() => {
   if (needsSwap.value) return !!form.swapSelectedQuote.value && !isCowSwapSelected.value
   return true
 })
+const { guardWithPriceImpact: guardWithAddToBatchPriceImpact } = usePriceImpactGate({
+  directPriceImpact: form.swapPriceImpact,
+  shouldGateUnknown: computed(() =>
+    needsSwap.value
+    && form.swapEffectiveQuote.value !== null
+    && form.swapPriceImpact.value === null,
+  ),
+})
 const addToBatch = async () => {
   if (!canAddToBatch.value) return
-  const a = form.asset.value
-  const pos = form.position.value
-  if (!a?.address || !pos) return
-  if (needsSwap.value) {
-    const quote = form.swapEffectiveQuote.value
-    const sel = selectedAsset.value
-    if (!quote || !sel) return
-    const isNative = isNativeCurrencyAddress(sel.address)
-    const inputAmount = valueToNano(form.amount.value, sel.decimals)
-    const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
-    if (isNative && !wrappedAddress) return
-    const tokenIn = (wrappedAddress || sel.address) as Address
-    const wrappedNativeInfo = isNative && wrappedAddress ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount } : undefined
-    await addBatchEntry({
-      label: `Swap-supply ${form.amount.value} ${sel.symbol} → ${a.symbol}`,
-      buildPlan: account => planDepositWithSwap({ swapQuote: quote, amount: inputAmount, tokenIn, wrappedNativeInfo, account }),
-      subAccount: pos.subAccount as Address,
-      review: { type: 'swap-supply', asset: sel, amount: form.amount.value, swapToAsset: a },
-    })
-  }
-  else {
-    const vaultAddress = form.collateralVault.value!.address as Address
-    const assetAddress = a.address as Address
-    const amount = valueToNano(form.amount.value, a.decimals)
-    await addBatchEntry({
-      label: `Supply ${form.amount.value} ${a.symbol}`,
-      buildPlan: account => planDeposit({ vaultAddress, assetAddress, amount, receiver: pos.subAccount as Address, account }),
-      subAccount: pos.subAccount as Address,
-      review: { type: 'supply', asset: a, amount: form.amount.value },
-    })
-  }
-  form.amount.value = ''
-  redirectAfterAdd('/portfolio', { subAccount: pos.subAccount })
+  await guardWithAddToBatchPriceImpact(async () => {
+    const a = form.asset.value
+    const pos = form.position.value
+    if (!a?.address || !pos) return
+    if (needsSwap.value) {
+      const quote = form.swapEffectiveQuote.value
+      const sel = selectedAsset.value
+      if (!quote || !sel) return
+      const isNative = isNativeCurrencyAddress(sel.address)
+      const inputAmount = valueToNano(form.amount.value, sel.decimals)
+      const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
+      if (isNative && !wrappedAddress) return
+      const tokenIn = (wrappedAddress || sel.address) as Address
+      const wrappedNativeInfo = isNative && wrappedAddress ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount } : undefined
+      await addBatchEntry({
+        label: `Swap-supply ${form.amount.value} ${sel.symbol} → ${a.symbol}`,
+        buildPlan: account => planDepositWithSwap({ swapQuote: quote, amount: inputAmount, tokenIn, wrappedNativeInfo, account }),
+        subAccount: pos.subAccount as Address,
+        review: { type: 'swap-supply', asset: sel, amount: form.amount.value, swapToAsset: a },
+      })
+    }
+    else {
+      const vaultAddress = form.collateralVault.value!.address as Address
+      const assetAddress = a.address as Address
+      const amount = valueToNano(form.amount.value, a.decimals)
+      await addBatchEntry({
+        label: `Supply ${form.amount.value} ${a.symbol}`,
+        buildPlan: account => planDeposit({ vaultAddress, assetAddress, amount, receiver: pos.subAccount as Address, account }),
+        subAccount: pos.subAccount as Address,
+        review: { type: 'supply', asset: a, amount: form.amount.value },
+      })
+    }
+    form.amount.value = ''
+    redirectAfterAdd('/portfolio', { subAccount: pos.subAccount })
+  })
 }
 
 // Supply-specific: balance management

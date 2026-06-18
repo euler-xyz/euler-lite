@@ -92,7 +92,7 @@ const errorText = computed(() => {
   return null
 })
 const isSubmitDisabled = computed(() => {
-  if (!isConnected.value) return false
+  if (!isConnected.value && !isSpyMode.value) return false
   if (pair.value?.borrow && isOpDisabled(pair.value.borrow, OP_BORROW)) return true
 
   const currentSupplied = position.value?.supplied || 0n

@@ -11,6 +11,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import type { DisplayStep } from '~/utils/stepDecoding'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
+import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import type { SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { erc20Abi, formatUnits, getAddress, maxUint256, zeroAddress, type Address } from 'viem'
@@ -28,7 +29,8 @@ import { logWarn } from '~/utils/errorHandling'
 
 const route = useRoute()
 const { isConnected, address } = useWagmi()
-const { isSpyMode } = useSpyMode()
+const { isSpyMode, spyAddress } = useSpyMode()
+const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = useEulerAccount()
 const { planCollateralChange } = useEulerTx()
 const { settings } = useUserSettings()
@@ -160,7 +162,7 @@ const swap = useSwapPageLogic({
 
   buildQuoteRequest(amount) {
     if (!fromVault.value || !toVault.value || !position.value) return null
-    const account = (position.value.subAccount || address.value || zeroAddress) as Address
+    const account = (position.value.subAccount || effectiveAddress.value || zeroAddress) as Address
     // Per-provider CoW extras: SDK needs the shares-equivalent of the user's
     // asset input and the wrapper-encoded appData hash so the order can be
     // verified against the EVC permit by the wrapper contract.
@@ -176,7 +178,7 @@ const swap = useSwapPageLogic({
         ...providerExtraData,
         appData: buildCollateralSwapQuoteAppData(
           {
-            owner: (address.value || zeroAddress) as Address,
+            owner: (effectiveAddress.value || zeroAddress) as Address,
             account,
             deadline: quoteDeadline,
             fromVault: fromVault.value.address as Address,
@@ -271,46 +273,56 @@ const canAddToBatch = computed(() => {
   if (isSameAsset.value) return true
   return !!selectedQuote.value && !isCowSwapSelected.value
 })
+const { guardWithPriceImpact: guardWithAddToBatchPriceImpact } = usePriceImpactGate({
+  directPriceImpact: priceImpact,
+  shouldGateUnknown: computed(() =>
+    !isSameAsset.value
+    && selectedQuote.value !== null
+    && priceImpact.value === null,
+  ),
+})
 const addToBatch = async () => {
   if (!canAddToBatch.value) return
-  const from = fromVault.value
-  const to = toVault.value
-  const pos = position.value
-  if (!from || !to || !pos) return
-  const fromAddr = from.address as Address
-  const toAddr = to.address as Address
-  const toAssetAddr = to.asset.address as Address
-  const positionAccount = pos.subAccount as Address
-  const amount = valueToNano(fromAmount.value, from.asset.decimals)
-  const isMax = isMaxSwap.value
-  const sameAsset = isSameAsset.value
-  const swapQuote = sameAsset ? undefined : selectedQuote.value ?? undefined
-  // Name the op after the original position pair (e.g. "Refinance BOLD/USDC",
-  // "BOLD & others/USDC" for multi-collateral), matching the positions list.
-  const pairLabel = pairAssetsLabel.value
-    ?? `${pos.collateralVault?.asset.symbol ?? '?'}/${pos.borrowVault?.asset.symbol ?? '?'}`
-  const label = `Refinance ${pairLabel}`
-  await addBatchEntry({
-    label,
-    nameOverride: label,
-    buildPlan: account => planCollateralChange({
-      fromVault: fromAddr,
-      toVault: toAddr,
-      amount,
-      positionAccount,
-      toAsset: toAssetAddr,
-      isMax,
-      enableCollateralTo: true,
-      disableCollateralFrom: isMax,
-      swapQuote,
-      swapperMode: SwapperMode.EXACT_IN,
-      account,
-    }),
-    subAccount: positionAccount,
-    review: { type: 'swap', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.EXACT_IN },
+  await guardWithAddToBatchPriceImpact(async () => {
+    const from = fromVault.value
+    const to = toVault.value
+    const pos = position.value
+    if (!from || !to || !pos) return
+    const fromAddr = from.address as Address
+    const toAddr = to.address as Address
+    const toAssetAddr = to.asset.address as Address
+    const positionAccount = pos.subAccount as Address
+    const amount = valueToNano(fromAmount.value, from.asset.decimals)
+    const isMax = isMaxSwap.value
+    const sameAsset = isSameAsset.value
+    const swapQuote = sameAsset ? undefined : selectedQuote.value ?? undefined
+    // Name the op after the original position pair (e.g. "Refinance BOLD/USDC",
+    // "BOLD & others/USDC" for multi-collateral), matching the positions list.
+    const pairLabel = pairAssetsLabel.value
+      ?? `${pos.collateralVault?.asset.symbol ?? '?'}/${pos.borrowVault?.asset.symbol ?? '?'}`
+    const label = `Refinance ${pairLabel}`
+    await addBatchEntry({
+      label,
+      nameOverride: label,
+      buildPlan: account => planCollateralChange({
+        fromVault: fromAddr,
+        toVault: toAddr,
+        amount,
+        positionAccount,
+        toAsset: toAssetAddr,
+        isMax,
+        enableCollateralTo: true,
+        disableCollateralFrom: isMax,
+        swapQuote,
+        swapperMode: SwapperMode.EXACT_IN,
+        account,
+      }),
+      subAccount: positionAccount,
+      review: { type: 'swap', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.EXACT_IN },
+    })
+    fromAmount.value = ''
+    redirectAfterAdd('/portfolio', { subAccount: positionAccount })
   })
-  fromAmount.value = ''
-  redirectAfterAdd('/portfolio', { subAccount: positionAccount })
 }
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {

@@ -220,7 +220,7 @@ const redirectAfterRepayAdd = (isClosing: boolean) => {
   redirectAfterAdd('/portfolio', { subAccount: position.value?.subAccount })
 }
 
-const addToBatch = async () => {
+const addToBatchWithoutWarnings = async () => {
   if (!canAddToBatch.value || !borrowVault.value || !position.value) return
   const borrowSymbol = borrowVault.value.asset.symbol
 
@@ -326,6 +326,23 @@ const addToBatch = async () => {
     savings.debtAmount.value = ''
     redirectAfterRepayAdd(isClosing)
   }
+}
+
+const addToBatch = async () => {
+  if (!canAddToBatch.value) return
+  if (formTab.value === 'wallet' && walletSwap.needsSwap.value) {
+    await guardWithWalletSwapPriceImpact(addToBatchWithoutWarnings)
+    return
+  }
+  if (formTab.value === 'collateral') {
+    await guardWithCollateralPriceImpact(addToBatchWithoutWarnings)
+    return
+  }
+  if (formTab.value === 'savings') {
+    await guardWithSavingsPriceImpact(addToBatchWithoutWarnings)
+    return
+  }
+  await addToBatchWithoutWarnings()
 }
 
 const { guardWithPriceImpact: guardWithWalletSwapPriceImpact } = usePriceImpactGate({

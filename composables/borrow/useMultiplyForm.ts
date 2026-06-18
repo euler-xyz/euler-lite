@@ -85,6 +85,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const { planMultiply, prepareTransactionPlan, prefetchPluginData, executePlan, preloadSubAccountSnapshot } = useEulerTx()
   const { isConnected, address } = useWagmi()
   const { isSpyMode, spyAddress } = useSpyMode()
+  const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
   // State-override knobs: skip balance probing (form validates "Not enough
   // balance"), pass current wallet snapshot, and pre-prime slot hints when the
   // relevant assets resolve.
@@ -177,7 +178,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       ? { from: multiplySavingPosition.value.subAccount as Address, shares: supplySharesAmount }
       : undefined
     const collateralAmount = isMultiplySavingCollateral.value ? 0n : supplyAmountNano
-    const receiver = (quote.accountIn || address.value || zeroAddress) as Address
+    const receiver = (quote.accountIn || effectiveAddress.value || zeroAddress) as Address
     return planMultiply({
       collateralVault: multiplySupplyVault.value.address as Address,
       collateralAmount,
@@ -787,7 +788,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     const cowProviderExtraData = { ...COWSWAP_PROVIDER_EXTRA_DATA.openPosition }
     let cowAccount: Address | null = null
     const chainConfig = getCowSwapChainConfig(chainId.value ?? 0)
-    const cowOwner = (isSpyMode.value ? spyAddress.value : address.value) as Address | undefined
+    const cowOwner = effectiveAddress.value as Address | undefined
     if (shouldRequestCowSwap && chainConfig && cowOwner) {
       try {
         cowAccount = await getNewSubAccount(cowOwner, multiplyShortVault.value.address) as Address

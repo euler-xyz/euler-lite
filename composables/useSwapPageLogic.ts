@@ -97,6 +97,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const router = useRouter()
   const route = useRoute()
   const { isConnected } = useWagmi()
+  const { isSpyMode } = useSpyMode()
   const { executePlan, executePreparedPlan, prepareTransactionPlan, prefetchPluginData } = useEulerTx()
   const modal = useModal()
   const { error: showError } = useToast()
@@ -385,7 +386,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   })
 
   const isSubmitDisabled = computed(() => {
-    if (!isConnected.value) return false
+    if (!isConnected.value && !isSpyMode.value) return false
     if (!fromVault.value?.asset || !toVault.value?.asset) return true
     if (isSameAsset.value) {
       return isLoading.value || !(+fromAmount.value) || !!errorText.value || isSameVault.value

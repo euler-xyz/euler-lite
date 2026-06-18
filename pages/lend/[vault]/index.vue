@@ -83,7 +83,9 @@ const { getVault, getSecuritizeVault, getEscrowVault, updateVault, isEscrowLoade
 const { isReady: isLabelsReady } = useEulerLabels()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
 const { isConnected, address } = useWagmi()
+const { isSpyMode, spyAddress } = useSpyMode()
 const { chainId } = useEulerAddresses()
+const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const shareLinkQuery = computed(() => {
   const network = route.query.network
 
@@ -298,8 +300,9 @@ const errorText = computed(() => {
 })
 const isSupplyCapReached = computed(() => eVault.value ? getIsSupplyCapReached(eVault.value) : false)
 const assets = computed(() => [asset.value!])
+const hasActiveSession = computed(() => isConnected.value || isSpyMode.value)
 const isSubmitDisabled = computed(() => {
-  if (!isConnected.value) return false
+  if (!hasActiveSession.value) return false
   if (eVault.value && isOpDisabled(eVault.value, OP_DEPOSIT)) return true
   if (activeBalance.value < valueToNano(amount.value, activeAsset.value?.decimals)) return true
   if (isLoading.value || !(+amount.value)) return true
@@ -415,6 +418,7 @@ const buildSwapSupplyPlanFromQuote = async (quote: SwapQuote, account = planAcco
     swapQuote: quote,
     amount: inputAmount,
     tokenIn: (wrappedAddress || inputAsset.address) as Address,
+    enableCollateral: false,
     wrappedNativeInfo: isNative && wrappedAddress
       ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
       : undefined,
@@ -424,7 +428,7 @@ const buildSwapSupplyPlanFromQuote = async (quote: SwapQuote, account = planAcco
 
 const submit = async () => {
   if (isOperationBlocked.value) return
-  if (isPreparing.value || isGeoBlocked.value || isSwapRestricted.value || isSourceAssetBlocked.value) return
+  if (isPreparing.value || reviewSupplyDisabled.value) return
   isPreparing.value = true
   clearSimulationError()
   try {
@@ -512,39 +516,42 @@ const isCowSwapSelected = computed(() => isCowProviderOrQuote(swapSelectedProvid
 const canAddToBatch = computed(() => {
   if (isGeoBlocked.value || isSwapRestricted.value || isSourceAssetBlocked.value) return false
   if (!(+amount.value) || isNativeWrap.value) return false
+  if (activeBalance.value < valueToNano(amount.value, activeAsset.value?.decimals)) return false
   if (needsSwap.value) return !!swapSelectedQuote.value && !isCowSwapSelected.value
   return true
 })
 
 const addToBatch = async () => {
   if (!canAddToBatch.value || !asset.value?.address) return
-  if (needsSwap.value) {
-    const quote = swapEffectiveQuote.value
-    if (!quote) return
-    const fromSym = selectedAsset.value?.symbol ?? ''
-    const swapAsset = selectedAsset.value
-    const swapAmount = amount.value
-    const swapOutput = swapEstimatedOutput.value
-    if (!swapAsset) return
-    await addBatchEntry({
-      label: `Swap-deposit ${swapAmount} ${fromSym} → ${asset.value.symbol}`,
-      buildPlan: account => buildSwapSupplyPlanFromQuote(quote, account, { selectedAsset: swapAsset, amount: swapAmount }),
-      subAccount: address.value as Address | undefined,
-      review: { type: 'swap-supply', asset: swapAsset, amount: swapAmount, swapToAsset: asset.value, swapToAmount: swapOutput, swapMode: SwapperMode.EXACT_IN },
-    })
-  }
-  else {
-    const assetAddr = asset.value.address as Address
-    const supplyAmount = valueToNano(amount.value, asset.value.decimals)
-    await addBatchEntry({
-      label: `Deposit ${amount.value} ${asset.value.symbol}`,
-      buildPlan: account => planDeposit({ vaultAddress: vaultAddress as Address, assetAddress: assetAddr, amount: supplyAmount, account }),
-      subAccount: address.value as Address | undefined,
-      review: { type: 'supply', asset: asset.value, amount: amount.value },
-    })
-  }
-  amount.value = ''
-  redirectAfterAdd('/portfolio/saving', { subAccount: address.value, vault: vaultAddress })
+  await guardWithPriceImpact(async () => {
+    if (!asset.value?.address) return
+    if (needsSwap.value) {
+      const quote = swapEffectiveQuote.value
+      if (!quote) return
+      const swapAsset = selectedAsset.value
+      const swapAmount = amount.value
+      const swapOutput = swapEstimatedOutput.value
+      if (!swapAsset) return
+      await addBatchEntry({
+        label: `Deposit ${asset.value.symbol}`,
+        buildPlan: account => buildSwapSupplyPlanFromQuote(quote, account, { selectedAsset: swapAsset, amount: swapAmount }),
+        subAccount: effectiveAddress.value as Address | undefined,
+        review: { type: 'swap-supply', asset: swapAsset, amount: swapAmount, swapToAsset: asset.value, swapToAmount: swapOutput, swapMode: SwapperMode.EXACT_IN },
+      })
+    }
+    else {
+      const assetAddr = asset.value.address as Address
+      const supplyAmount = valueToNano(amount.value, asset.value.decimals)
+      await addBatchEntry({
+        label: `Deposit ${amount.value} ${asset.value.symbol}`,
+        buildPlan: account => planDeposit({ vaultAddress: vaultAddress as Address, assetAddress: assetAddr, amount: supplyAmount, account }),
+        subAccount: effectiveAddress.value as Address | undefined,
+        review: { type: 'supply', asset: asset.value, amount: amount.value },
+      })
+    }
+    amount.value = ''
+    redirectAfterAdd('/portfolio/saving', { subAccount: effectiveAddress.value, vault: vaultAddress })
+  })
 }
 
 const send = async () => {
@@ -707,7 +714,7 @@ const requestSwapQuote = useDebounceFn(async () => {
     return
   }
 
-  const userAddr = (address.value || zeroAddress) as Address
+  const userAddr = (effectiveAddress.value || zeroAddress) as Address
   const swapTokenIn = isNativeCurrencyAddress(selectedAsset.value.address)
     ? resolveWrappedNativeAddress(chainId.value!) || selectedAsset.value.address
     : selectedAsset.value.address
