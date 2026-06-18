@@ -332,7 +332,7 @@ const handleClose = () => {
             >
               <BatchMarketLabel
                 :market="marketByEntryId[entry.id]"
-                class="mb-8 px-12"
+                class="mt-6 px-12"
               />
               <!-- Same decoded operation steps the per-op review modal shows
                    (the builder row's (i) icon). -->
