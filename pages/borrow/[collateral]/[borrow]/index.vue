@@ -70,6 +70,7 @@ const pendingSubAccount = ref<string | null>(null)
 const isPendingSubAccountLoading = ref(false)
 let pendingSubAccountPromise: Promise<string> | null = null
 let unverifiedDisclaimerShown = false
+const effectiveOwner = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 
 // Load vault pair (non-blocking to avoid Suspense + pageTransition crash on direct navigation)
 const pair: Ref<AnyBorrowVaultPair | undefined> = ref()
@@ -95,7 +96,7 @@ const normalizeAddress = (addr?: string) => {
 
 const resolvePendingSubAccount = async (): Promise<string> => {
   if (pendingSubAccount.value) return pendingSubAccount.value
-  const owner = address.value || (isSpyMode.value ? spyAddress.value : undefined)
+  const owner = effectiveOwner.value
   if (!owner) throw new Error('Wallet not connected')
   if (!pendingSubAccountPromise) {
     isPendingSubAccountLoading.value = true
@@ -521,7 +522,7 @@ watch(pair, async (val) => {
   await updateBalance()
 }, { immediate: true })
 
-watch(address, () => {
+watch(effectiveOwner, () => {
   pendingSubAccount.value = null
   pendingSubAccountPromise = null
   updateBalance()

@@ -311,7 +311,7 @@ const addToBatch = async () => {
     const oldLiabilityVault = from.address as Address
     const newLiabilityVault = to.address as Address
     const newLiabilityAsset = to.asset.address as Address
-    const liabilityAccount = (pos.subAccount || address.value!) as Address
+    const liabilityAccount = (pos.subAccount || effectiveAddress.value || zeroAddress) as Address
     const amount = valueToNano(fromAmount.value, from.asset.decimals)
     const sameAsset = isSameAsset.value
     const swapQuote = sameAsset ? undefined : selectedQuote.value ?? undefined

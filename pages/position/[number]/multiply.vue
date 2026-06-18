@@ -721,7 +721,7 @@ const submitMultiply = async () => {
   isPreparing.value = true
   try {
     await guardWithPriceImpact(async () => {
-      if (isSubmitting.value || !isConnected.value) {
+      if (isSubmitting.value || (!isConnected.value && !isSpyMode.value)) {
         return
       }
       if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {

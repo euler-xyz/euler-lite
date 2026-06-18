@@ -501,7 +501,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     }
 
     const userAddr = (effectiveAddress.value || zeroAddress) as Address
-    const subAccountAddr = address.value
+    const subAccountAddr = effectiveAddress.value
       ? (await resolvePendingSubAccount()) as Address
       : userAddr
     await ensureBorrowSubAccountSnapshot(planAccount.value, subAccountAddr)
@@ -853,7 +853,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     if (isPreparing.value || isGeoBlocked.value || isBorrowRestricted.value || isBorrowSwapRestricted.value || isBorrowPayWithBlocked.value) return
     isPreparing.value = true
     try {
-      if (!isConnected.value) {
+      if (!isConnected.value && !isSpyMode.value) {
         isSubmitting.value = false
         return
       }
