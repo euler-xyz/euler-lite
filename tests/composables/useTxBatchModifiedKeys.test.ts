@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Account, type IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
 import {
+  buildScopedEntrySubAccounts,
   buildModifiedPositionKeySets,
   buildRemovedPositionKeySets,
   filterModifiedPositionKeySetsByOwner,
@@ -205,6 +206,24 @@ describe('position key filtering', () => {
       owner.toLowerCase(),
       new Set([owner.toLowerCase()]),
     )).toEqual(keys)
+  })
+
+  it('keeps owner keys when a position-scoped entry declares the owner affected', () => {
+    const sets = {
+      any: new Set([key(collateralVault, owner), key(collateralVault)]),
+      balance: new Set([key(collateralVault, owner), key(collateralVault)]),
+      debt: new Set<string>(),
+    }
+    const scoped = buildScopedEntrySubAccounts([{
+      subAccount,
+      affectedSubAccounts: [owner],
+    }])
+
+    expect(filterModifiedPositionKeySetsByOwner(
+      sets,
+      owner.toLowerCase(),
+      scoped,
+    )).toEqual(sets)
   })
 
   it('leaves keys unfiltered when the batch has an unscoped entry', () => {

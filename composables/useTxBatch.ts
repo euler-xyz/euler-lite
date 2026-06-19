@@ -64,6 +64,9 @@ export interface BatchEntry {
    *  batch rows show the same "Position N" tag as the portfolio. New positions
    *  (fresh deposits) leave this undefined and render no tag. */
   subAccount?: Address
+  /** Additional sub-accounts intentionally modified by this entry. Used when a
+   *  position-scoped operation also moves balances to the owner account. */
+  affectedSubAccounts?: Address[]
   /** Multiply flows set this. A multiply is a borrow(+swap) at the plan level, so
    *  it can't be told apart from a plain borrow or a borrow-with-collateral-swap
    *  by the plan alone (and same-asset multiply has no swap step at all). This
@@ -207,6 +210,32 @@ const normalizeTokenKey = (token: string) => {
   }
 }
 
+export const buildScopedEntrySubAccounts = (
+  batchEntries: Pick<BatchEntry, 'subAccount' | 'affectedSubAccounts'>[],
+): Set<string> | undefined => {
+  const set = new Set<string>()
+
+  for (const entry of batchEntries) {
+    const accounts = [
+      entry.subAccount,
+      ...(entry.affectedSubAccounts ?? []),
+    ].filter((account): account is Address => !!account)
+
+    if (!accounts.length) return undefined
+
+    for (const account of accounts) {
+      try {
+        set.add(getAddress(account).toLowerCase())
+      }
+      catch {
+        return undefined
+      }
+    }
+  }
+
+  return set
+}
+
 const registerReviewAssetMeta = (review?: Record<string, unknown>) => {
   const asset = review?.asset as { address?: string, symbol?: string, decimals?: number } | undefined
   if (!asset?.address) return
@@ -282,6 +311,27 @@ export const buildWalletChanges = (
   }
 
   return [...out.values()].filter(change => change.delta !== 0n)
+}
+
+export const collectWalletBalanceTokens = (
+  layers: Record<string, bigint>[],
+): string[] => Array.from(new Set(layers.flatMap(layer => Object.keys(layer))))
+
+export const buildWalletBalanceLayers = (
+  simulatedLayers: Record<string, bigint>[],
+  realWallet: Record<string, bigint>,
+): Record<string, bigint>[] => {
+  const touchedTokens = collectWalletBalanceTokens(simulatedLayers)
+  const baseWb = simulatedLayers[0] ?? {}
+  return simulatedLayers.map((wb) => {
+    const out: Record<string, bigint> = {}
+    for (const token of touchedTokens) {
+      const delta = (wb[token] ?? 0n) - (baseWb[token] ?? 0n)
+      const value = (realWallet[token] ?? 0n) + delta
+      out[token] = value < 0n ? 0n : value
+    }
+    return out
+  })
 }
 
 const syncOverlay = () => {
@@ -1267,7 +1317,7 @@ export const useTxBatch = () => {
         return out
       }
       const simWb = ((sim.simulatedWalletBalances ?? []) as Record<string, bigint>[]).map(normalizeWalletBalances)
-      const touchedTokens = simWb.length ? Array.from(new Set(Object.keys(simWb[0] ?? {}))) : []
+      const touchedTokens = collectWalletBalanceTokens(simWb)
       const realWallet: Record<string, bigint> = {}
       if (touchedTokens.length) {
         try {
@@ -1294,16 +1344,7 @@ export const useTxBatch = () => {
           }
         }
       }
-      const baseWb = simWb[0] ?? {}
-      const walletLayers: Record<string, bigint>[] = simWb.map((wb) => {
-        const out: Record<string, bigint> = {}
-        for (const t of touchedTokens) {
-          const delta = (wb[t] ?? 0n) - (baseWb[t] ?? 0n)
-          const v = (realWallet[t] ?? 0n) + delta
-          out[t] = v < 0n ? 0n : v
-        }
-        return out
-      })
+      const walletLayers = buildWalletBalanceLayers(simWb, realWallet)
 
       // Real-wallet shortfall: the SDK now computes this accurately from the
       // per-layer balances (running-min, nets out intra-batch funding). We just
@@ -1645,17 +1686,7 @@ export const useTxBatch = () => {
   const activeLayerData = computed(() => layers.value[activeLayer.value])
   const entryCount = computed(() => entries.value.length)
   const scopedEntrySubAccounts = computed<Set<string> | undefined>(() => {
-    const set = new Set<string>()
-    for (const entry of entries.value) {
-      if (!entry.subAccount) return undefined
-      try {
-        set.add(getAddress(entry.subAccount).toLowerCase())
-      }
-      catch {
-        return undefined
-      }
-    }
-    return set
+    return buildScopedEntrySubAccounts(entries.value)
   })
 
   // The context label each entry operates in. EVK entries derive it from the
