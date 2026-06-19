@@ -12,6 +12,7 @@ import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, compactNumber, formatUsdValue, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { normalizeAddress } from '~/utils/normalizeAddress'
+import { formatMarketAvailability } from '~/utils/vault-display'
 import { VaultSupplyApyModal } from '#components'
 import { getAddress, type Address, maxUint256 } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
@@ -265,7 +266,7 @@ const supplyCapPercentageDisplay = computed(() => {
               <UiIcon :name="borrowCount ? 'green-tick' : 'red-cross'" />
             </div>
             <span class="text-p2 text-content-primary">
-              {{ borrowCount ? `Yes in ${borrowCount} markets` : 'No' }}
+              {{ formatMarketAvailability(borrowCount) }}
             </span>
           </div>
         </VaultOverviewLabelValue>
@@ -275,7 +276,7 @@ const supplyCapPercentageDisplay = computed(() => {
               <UiIcon :name="collateralCount ? 'green-tick' : 'red-cross'" />
             </div>
             <span class="text-p2 text-content-primary">
-              {{ collateralCount ? `Yes in ${collateralCount} markets` : 'No' }}
+              {{ formatMarketAvailability(collateralCount) }}
             </span>
           </div>
         </VaultOverviewLabelValue>
