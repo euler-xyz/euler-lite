@@ -56,6 +56,10 @@ const borrowCount = computed(() => {
   return vault.collaterals.filter(ltv => ltv.borrowLTV > 0).length
 })
 
+const formatMarketAvailability = (count: number) => {
+  return count ? `Yes in ${count} ${count === 1 ? 'market' : 'markets'}` : 'No'
+}
+
 const propertyBadgeDetails: Record<VaultPropertyBadge, {
   component: Component
   description: string
@@ -206,7 +210,7 @@ watchEffect(async () => {
           <div class="flex items-center gap-8">
             <UiIcon :name="borrowCount ? 'green-tick' : 'red-cross'" />
             <span class="text-p2 text-content-primary">
-              {{ borrowCount ? `Yes in ${borrowCount} markets` : 'No' }}
+              {{ formatMarketAvailability(borrowCount) }}
             </span>
           </div>
         </VaultOverviewLabelValue>
@@ -214,7 +218,7 @@ watchEffect(async () => {
           <div class="flex items-center gap-8">
             <UiIcon :name="collateralCount ? 'green-tick' : 'red-cross'" />
             <span class="text-p2 text-content-primary">
-              {{ collateralCount ? `Yes in ${collateralCount} markets` : 'No' }}
+              {{ formatMarketAvailability(collateralCount) }}
             </span>
           </div>
         </VaultOverviewLabelValue>
