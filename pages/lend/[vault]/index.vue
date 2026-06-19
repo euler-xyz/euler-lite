@@ -28,6 +28,7 @@ import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultSupplyApyMod
 import { getProjectedRates } from '~/utils/vault/apy'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { getTxErrorMessage } from '~/utils/tx-errors'
+import { isCowProviderOrQuote } from '~/entities/cowswap'
 
 // Type definitions for vault display
 type VaultType = 'evk' | 'securitize'
@@ -68,6 +69,8 @@ const reviewSupplyLabel = 'Review Supply'
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
 const { planDeposit, planDepositWithSwap, prepareTransactionPlan, executePreparedPlan } = useEulerTx()
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
 // Page validates "Not enough balance" up front (see `errorText` / `isSubmitDisabled`),
 // so the simulator never needs to forge wallet balances — `noBalanceOverride: true`
@@ -80,7 +83,9 @@ const { getVault, getSecuritizeVault, getEscrowVault, updateVault, isEscrowLoade
 const { isReady: isLabelsReady } = useEulerLabels()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
 const { isConnected, address } = useWagmi()
+const { isSpyMode, spyAddress } = useSpyMode()
 const { chainId } = useEulerAddresses()
+const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const shareLinkQuery = computed(() => {
   const network = route.query.network
 
@@ -88,7 +93,7 @@ const shareLinkQuery = computed(() => {
     network: Array.isArray(network) ? network[0] ?? chainId.value : network ?? chainId.value,
   }
 })
-const { fetchSingleBalance } = useWallets()
+const { getBalance } = useWallets()
 const { runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const vaultAddress = route.params.vault as string
 useOperationGuard([vaultAddress])
@@ -109,7 +114,6 @@ const estimateSupplyAPY = ref(0)
 
 // Swap & deposit state
 const selectedAsset = ref<VaultAsset | undefined>()
-const selectedAssetBalance = ref(0n)
 const swapAssetUsdPrice = ref<number | undefined>()
 const isUnknownSwapToken = ref(false)
 const needsSwap = computed(() => {
@@ -155,7 +159,6 @@ const {
 // Vault data - only one will be populated based on type
 const eVault: Ref<EVault | undefined> = ref(undefined)
 const securitizeVault: Ref<SecuritizeCollateralVault | undefined> = ref(undefined)
-const balance = ref(0n)
 
 // Check if the active debt-pricing route uses Pyth oracles (requires fresh prices)
 const hasPythOracles = (v: EVault | undefined): boolean => {
@@ -283,20 +286,10 @@ const asset = computed(() => eVault.value?.asset || securitizeVault.value?.asset
 // For components that need the EVault type (VaultLabelsAndAssets, VaultPoints, etc.)
 const vault = computed(() => eVault.value)
 
-const fetchBalance = async () => {
-  if (!asset.value?.address) {
-    balance.value = 0n
-    return
-  }
-  balance.value = await fetchSingleBalance(asset.value.address)
-}
-const fetchSelectedAssetBalance = async () => {
-  if (!selectedAsset.value?.address) {
-    selectedAssetBalance.value = 0n
-    return
-  }
-  selectedAssetBalance.value = await fetchSingleBalance(selectedAsset.value.address)
-}
+// Wallet balances from the central (layer-aware) wallet entity — reactive, no
+// direct balanceOf.
+const balance = computed(() => asset.value?.address ? getBalance(asset.value.address as Address) : 0n)
+const selectedAssetBalance = computed(() => selectedAsset.value?.address ? getBalance(selectedAsset.value.address as Address) : 0n)
 const activeBalance = computed(() => (needsSwap.value || isNativeWrap.value) ? selectedAssetBalance.value : balance.value)
 const activeAsset = computed(() => (needsSwap.value || isNativeWrap.value) ? selectedAsset.value : asset.value)
 const errorText = computed(() => {
@@ -307,8 +300,9 @@ const errorText = computed(() => {
 })
 const isSupplyCapReached = computed(() => eVault.value ? getIsSupplyCapReached(eVault.value) : false)
 const assets = computed(() => [asset.value!])
+const hasActiveSession = computed(() => isConnected.value || isSpyMode.value)
 const isSubmitDisabled = computed(() => {
-  if (!isConnected.value) return false
+  if (!hasActiveSession.value) return false
   if (eVault.value && isOpDisabled(eVault.value, OP_DEPOSIT)) return true
   if (activeBalance.value < valueToNano(amount.value, activeAsset.value?.decimals)) return true
   if (isLoading.value || !(+amount.value)) return true
@@ -374,9 +368,6 @@ const isVaultVerified = computed(() => {
 const load = async () => {
   isLoading.value = true
   try {
-    // Fetch fresh underlying asset balance for this specific vault
-    await fetchBalance()
-
     if (features.value.hasInterestRate && eVault.value) {
       estimateSupplyAPY.value = getVaultSupplyApy(eVault.value) + totalRewardsAPY.value + intrinsicApy.value
     }
@@ -406,12 +397,19 @@ const load = async () => {
   }
 }
 
-const buildSwapSupplyPlanFromQuote = async (quote: SwapQuote, account = planAccount.value): Promise<TransactionPlan> => {
-  if (!selectedAsset.value) {
+interface SwapSupplyPlanSnapshot {
+  selectedAsset: VaultAsset
+  amount: string
+}
+
+const buildSwapSupplyPlanFromQuote = async (quote: SwapQuote, account = planAccount.value, snapshot?: SwapSupplyPlanSnapshot): Promise<TransactionPlan> => {
+  const inputAsset = snapshot?.selectedAsset ?? selectedAsset.value
+  const inputValue = snapshot?.amount ?? amount.value
+  if (!inputAsset) {
     throw new Error('No selected asset')
   }
-  const isNative = isNativeCurrencyAddress(selectedAsset.value.address)
-  const inputAmount = valueToNano(amount.value || '0', selectedAsset.value.decimals)
+  const isNative = isNativeCurrencyAddress(inputAsset.address)
+  const inputAmount = valueToNano(inputValue || '0', inputAsset.decimals)
   const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
   if (isNative && !wrappedAddress) {
     throw new Error('Wrapped native token not found')
@@ -419,7 +417,8 @@ const buildSwapSupplyPlanFromQuote = async (quote: SwapQuote, account = planAcco
   return planDepositWithSwap({
     swapQuote: quote,
     amount: inputAmount,
-    tokenIn: (wrappedAddress || selectedAsset.value.address) as Address,
+    tokenIn: (wrappedAddress || inputAsset.address) as Address,
+    enableCollateral: false,
     wrappedNativeInfo: isNative && wrappedAddress
       ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
       : undefined,
@@ -429,7 +428,7 @@ const buildSwapSupplyPlanFromQuote = async (quote: SwapQuote, account = planAcco
 
 const submit = async () => {
   if (isOperationBlocked.value) return
-  if (isPreparing.value || isGeoBlocked.value || isSwapRestricted.value || isSourceAssetBlocked.value) return
+  if (isPreparing.value || reviewSupplyDisabled.value) return
   isPreparing.value = true
   clearSimulationError()
   try {
@@ -507,6 +506,52 @@ const submit = async () => {
   finally {
     isPreparing.value = false
   }
+}
+
+// Add this deposit to the transaction batch. The plan is (re)built against the
+// active layer's simulated account inside useTxBatch, so a deposit added on top
+// of a previous batch step composes correctly. Direct (non-swap) deposits only.
+// A CoW swap quote can't be batched (mergePlans/simulate reject cowSwap items).
+const isCowSwapSelected = computed(() => isCowProviderOrQuote(swapSelectedProvider.value, swapSelectedQuote.value))
+const canAddToBatch = computed(() => {
+  if (isGeoBlocked.value || isSwapRestricted.value || isSourceAssetBlocked.value) return false
+  if (!(+amount.value) || isNativeWrap.value) return false
+  if (activeBalance.value < valueToNano(amount.value, activeAsset.value?.decimals)) return false
+  if (needsSwap.value) return !!swapSelectedQuote.value && !isCowSwapSelected.value
+  return true
+})
+
+const addToBatch = async () => {
+  if (!canAddToBatch.value || !asset.value?.address) return
+  await guardWithPriceImpact(async () => {
+    if (!asset.value?.address) return
+    if (needsSwap.value) {
+      const quote = swapEffectiveQuote.value
+      if (!quote) return
+      const swapAsset = selectedAsset.value
+      const swapAmount = amount.value
+      const swapOutput = swapEstimatedOutput.value
+      if (!swapAsset) return
+      await addBatchEntry({
+        label: `Deposit ${asset.value.symbol}`,
+        buildPlan: account => buildSwapSupplyPlanFromQuote(quote, account, { selectedAsset: swapAsset, amount: swapAmount }),
+        subAccount: effectiveAddress.value as Address | undefined,
+        review: { type: 'swap-supply', asset: swapAsset, amount: swapAmount, swapToAsset: asset.value, swapToAmount: swapOutput, swapMode: SwapperMode.EXACT_IN },
+      })
+    }
+    else {
+      const assetAddr = asset.value.address as Address
+      const supplyAmount = valueToNano(amount.value, asset.value.decimals)
+      await addBatchEntry({
+        label: `Deposit ${amount.value} ${asset.value.symbol}`,
+        buildPlan: account => planDeposit({ vaultAddress: vaultAddress as Address, assetAddress: assetAddr, amount: supplyAmount, account }),
+        subAccount: effectiveAddress.value as Address | undefined,
+        review: { type: 'supply', asset: asset.value, amount: amount.value },
+      })
+    }
+    amount.value = ''
+    redirectAfterAdd('/portfolio/saving', { subAccount: effectiveAddress.value, vault: vaultAddress })
+  })
 }
 
 const send = async () => {
@@ -669,7 +714,7 @@ const requestSwapQuote = useDebounceFn(async () => {
     return
   }
 
-  const userAddr = (address.value || zeroAddress) as Address
+  const userAddr = (effectiveAddress.value || zeroAddress) as Address
   const swapTokenIn = isNativeCurrencyAddress(selectedAsset.value.address)
     ? resolveWrappedNativeAddress(chainId.value!) || selectedAsset.value.address
     : selectedAsset.value.address
@@ -741,7 +786,6 @@ watch(
 )
 
 watch(selectedAsset, async () => {
-  fetchSelectedAssetBalance()
   if (needsSwap.value && amount.value) {
     resetSwapQuoteState()
     requestSwapQuote()
@@ -803,11 +847,6 @@ watch(amount, async () => {
     isEstimatesLoading.value = true
   }
   updateEstimates()
-})
-
-watch([address, isConnected, chainId, () => asset.value?.address], () => {
-  void fetchBalance()
-  void fetchSelectedAssetBalance()
 })
 </script>
 
@@ -1050,6 +1089,8 @@ watch([address, isConnected, chainId, () => asset.value?.address], () => {
                 :disabled-reason="disabledReasonInfo?.message"
                 :disabled-reason-variant="disabledReasonInfo?.variant"
                 :loading="isSubmitting || isPreparing"
+                :can-add-to-batch="canAddToBatch"
+                @add-to-batch="addToBatch"
               >
                 {{ reviewSupplyLabel }}
               </VaultFormSubmit>

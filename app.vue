@@ -1,8 +1,15 @@
 <script setup lang="ts">
 import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
+import { BatchAnnouncementModal } from '#components'
+import { useModal } from '~/components/ui/composables/useModal'
 
 const route = useRoute()
 const router = useRouter()
+const { enableBatchAnnouncement, batchAnnouncementUrl } = useDeployConfig()
+const isOnboardingCompleted = useLocalStorage('is-onboarding-completed', false)
+const batchAnnouncementSeen = useLocalStorage('batch-announcement-seen', false)
+const modal = useModal()
+let isBatchAnnouncementOpen = false
 
 const { loadEulerConfig, chainId } = useEulerAddresses()
 const { loadVaults, isReady: isVaultsReady, resetVaultsState, refreshVaults, setShowAllLabelEntries } = useVaults()
@@ -19,6 +26,10 @@ const showAllLabelEntries = useShowAllLabelEntries()
 // imports the composable, making first detail-page visit wait on the full
 // subgraph + accountLens round-trip.
 useEulerAccount()
+
+// Instantiate the batch store at app root so its simulation watchers stay
+// alive across navigation (mirrors useEulerAccount above).
+useTxBatch()
 
 const { theme } = useTheme()
 
@@ -59,7 +70,6 @@ const isHeaderVisible = ref(true)
 let interval: NodeJS.Timeout | null = null
 
 const checkOnboarding = () => {
-  const isOnboardingCompleted = useLocalStorage('is-onboarding-completed', false)
   if (!isOnboardingCompleted.value) {
     const isDeepLink = route.path !== '/' && route.path !== '/onboarding'
     if (isDeepLink) {
@@ -68,6 +78,12 @@ const checkOnboarding = () => {
     }
     router.push('/onboarding')
   }
+}
+
+const getIsOnboardingCompleted = () => {
+  if (isOnboardingCompleted.value) return true
+  if (!import.meta.client) return false
+  return window.localStorage.getItem('is-onboarding-completed') === 'true'
 }
 
 watch(route, () => {
@@ -92,8 +108,30 @@ watch(route, () => {
   })
 }, { immediate: true })
 
+const checkBatchAnnouncement = () => {
+  if (!enableBatchAnnouncement || batchAnnouncementSeen.value) return
+  if (isBatchAnnouncementOpen || route.name === 'onboarding') return
+  if (!getIsOnboardingCompleted()) return
+
+  isBatchAnnouncementOpen = true
+  modal.open(BatchAnnouncementModal, {
+    isNotClosable: true,
+    onClose: () => {
+      batchAnnouncementSeen.value = true
+      isBatchAnnouncementOpen = false
+    },
+    props: {
+      announcementUrl: batchAnnouncementUrl,
+    },
+  })
+}
+
 checkOnboarding()
 void loadEulerConfig()
+onMounted(checkBatchAnnouncement)
+watch(() => route.name, () => {
+  nextTick(checkBatchAnnouncement)
+})
 
 watch([chainId, showAllLabelEntries], () => {
   setShowAllLabelEntries(showAllLabelEntries.value)
@@ -176,6 +214,7 @@ onUnmounted(() => {
   </main>
   <UiModals />
   <UiToastContainer />
+  <BatchDrawer />
   <Transition name="page">
     <TheMenu v-show="isMenuVisible" />
   </Transition>

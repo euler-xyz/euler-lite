@@ -11,10 +11,10 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import type { DisplayStep } from '~/utils/stepDecoding'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
+import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import type { SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { erc20Abi, formatUnits, getAddress, maxUint256, zeroAddress, type Address, type Abi } from 'viem'
-import { eulerAccountLensABI } from '~/entities/euler/abis'
+import { erc20Abi, formatUnits, getAddress, maxUint256, zeroAddress, type Address } from 'viem'
 import {
   COWSWAP_ORDER_DEADLINE_SECONDS,
   COWSWAP_PROVIDER_EXTRA_DATA,
@@ -29,7 +29,8 @@ import { logWarn } from '~/utils/errorHandling'
 
 const route = useRoute()
 const { isConnected, address } = useWagmi()
-const { isSpyMode } = useSpyMode()
+const { isSpyMode, spyAddress } = useSpyMode()
+const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = useEulerAccount()
 const { planCollateralChange } = useEulerTx()
 const { settings } = useUserSettings()
@@ -38,13 +39,19 @@ const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { getTokenCategoryTags } = useTokenList()
 const { isReady: isVaultsReady } = useVaults()
 const { getOrFetch } = useVaultRegistry()
-const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
+const { isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
 const { client: rpcClient } = useRpcClient()
+const { entryCount: batchEntryCount } = useTxBatch()
+const shouldIncludeCowSwapQuotes = computed(() => batchEntryCount.value === 0)
 
 const positionIndex = usePositionIndex()
 
 // ── Vaults & position ────────────────────────────────────────────────────
-const position: Ref<PortfolioBorrowPosition<VaultEntity> | null> = ref(null)
+// Layer-aware: tracks the active batch layer's portfolio so the form reflects
+// simulated collateral/debt (a one-shot ref would freeze at the real state).
+const position = computed<PortfolioBorrowPosition<VaultEntity> | null>(() =>
+  (!isConnected.value && !isSpyMode.value) ? null : (getPositionBySubAccountIndex(+positionIndex) || null),
+)
 const pairAssetsLabel = usePositionPairLabel(position)
 const selectedCollateral = ref<EVault | SecuritizeCollateralVault | null>(null)
 const selectedCollateralShares = ref(0n)
@@ -141,7 +148,7 @@ const cowSwapOrderStatus = useCowSwapOrderStatus(
 const swap = useSwapPageLogic({
   amountField: 'amountOut',
   compare: 'max',
-  includeCowSwap: true,
+  includeCowSwap: () => shouldIncludeCowSwapQuotes.value,
   fromVault,
   toVault,
   balance,
@@ -155,7 +162,7 @@ const swap = useSwapPageLogic({
 
   buildQuoteRequest(amount) {
     if (!fromVault.value || !toVault.value || !position.value) return null
-    const account = (position.value.subAccount || address.value || zeroAddress) as Address
+    const account = (position.value.subAccount || effectiveAddress.value || zeroAddress) as Address
     // Per-provider CoW extras: SDK needs the shares-equivalent of the user's
     // asset input and the wrapper-encoded appData hash so the order can be
     // verified against the EVC permit by the wrapper contract.
@@ -163,7 +170,7 @@ const swap = useSwapPageLogic({
     const quoteDeadline = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
     const chainConfig = getCowSwapChainConfig(currentChainId.value ?? 0)
     let providerExtraData
-      = swapCollateralSharesAmountIn > 0n
+      = shouldIncludeCowSwapQuotes.value && swapCollateralSharesAmountIn > 0n
         ? COWSWAP_PROVIDER_EXTRA_DATA.collateralSwap(swapCollateralSharesAmountIn)
         : undefined
     if (providerExtraData && chainConfig) {
@@ -171,7 +178,7 @@ const swap = useSwapPageLogic({
         ...providerExtraData,
         appData: buildCollateralSwapQuoteAppData(
           {
-            owner: (address.value || zeroAddress) as Address,
+            owner: (effectiveAddress.value || zeroAddress) as Address,
             account,
             deadline: quoteDeadline,
             fromVault: fromVault.value.address as Address,
@@ -254,6 +261,70 @@ const {
   normalizeAddress, clearSimulationError, resetQuoteState,
 } = swap
 
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
+
+// Add this collateral swap (or same-asset migration) to the batch. CoW orders
+// can't be merged into an EVC batch, so they're excluded.
+const isCowSwapSelected = computed(() => isCowProvider(selectedProvider.value))
+const canAddToBatch = computed(() => {
+  if (isGeoBlocked.value) return false
+  if (!fromVault.value || !toVault.value || !position.value || !(+fromAmount.value)) return false
+  if (isSameAsset.value) return true
+  return !!selectedQuote.value && !isCowSwapSelected.value
+})
+const { guardWithPriceImpact: guardWithAddToBatchPriceImpact } = usePriceImpactGate({
+  directPriceImpact: priceImpact,
+  shouldGateUnknown: computed(() =>
+    !isSameAsset.value
+    && selectedQuote.value !== null
+    && priceImpact.value === null,
+  ),
+})
+const addToBatch = async () => {
+  if (!canAddToBatch.value) return
+  await guardWithAddToBatchPriceImpact(async () => {
+    const from = fromVault.value
+    const to = toVault.value
+    const pos = position.value
+    if (!from || !to || !pos) return
+    const fromAddr = from.address as Address
+    const toAddr = to.address as Address
+    const toAssetAddr = to.asset.address as Address
+    const positionAccount = pos.subAccount as Address
+    const amount = valueToNano(fromAmount.value, from.asset.decimals)
+    const isMax = isMaxSwap.value
+    const sameAsset = isSameAsset.value
+    const swapQuote = sameAsset ? undefined : selectedQuote.value ?? undefined
+    // Name the op after the original position pair (e.g. "Refinance BOLD/USDC",
+    // "BOLD & others/USDC" for multi-collateral), matching the positions list.
+    const pairLabel = pairAssetsLabel.value
+      ?? `${pos.collateralVault?.asset.symbol ?? '?'}/${pos.borrowVault?.asset.symbol ?? '?'}`
+    const label = `Refinance ${pairLabel}`
+    await addBatchEntry({
+      label,
+      nameOverride: label,
+      buildPlan: account => planCollateralChange({
+        fromVault: fromAddr,
+        toVault: toAddr,
+        amount,
+        positionAccount,
+        toAsset: toAssetAddr,
+        isMax,
+        enableCollateralTo: true,
+        disableCollateralFrom: isMax,
+        swapQuote,
+        swapperMode: SwapperMode.EXACT_IN,
+        account,
+      }),
+      subAccount: positionAccount,
+      review: { type: 'swap', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.EXACT_IN },
+    })
+    fromAmount.value = ''
+    redirectAfterAdd('/portfolio', { subAccount: positionAccount })
+  })
+}
+
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
@@ -299,20 +370,12 @@ const loadSelectedCollateral = async () => {
     const vault = await getOrFetch(targetAddress) as EVault | SecuritizeCollateralVault | undefined
     selectedCollateral.value = vault || null
 
-    const lensAddress = eulerLensAddresses.value?.accountLens
-    if (!lensAddress) {
-      throw new Error('Account lens address is not available')
-    }
-
-    const client = rpcClient.value!
-    const res = await client.readContract({
-      address: lensAddress as Address,
-      abi: eulerAccountLensABI as Abi,
-      functionName: 'getVaultAccountInfo',
-      args: [position.value.subAccount, targetAddress],
-    }) as { shares?: bigint, assets?: bigint }
-    selectedCollateralShares.value = res.shares ?? 0n
-    selectedCollateralAssets.value = res.assets ?? 0n
+    // Collateral assets/shares from the (layer-aware) position rather than a
+    // direct lens read, so the form reflects the active batch layer. Unheld ⇒ 0.
+    const match = position.value.collaterals.find(c =>
+      normalizeAddress(c.vaultAddress) === targetAddress)
+    selectedCollateralShares.value = match?.shares ?? (targetAddress === primaryAddress ? (position.value.collateral?.shares ?? 0n) : 0n)
+    selectedCollateralAssets.value = match?.assets ?? (targetAddress === primaryAddress ? position.value.supplied : 0n)
   }
   catch (e) {
     logWarn('collateralSwap/loadCollateral', e)
@@ -323,14 +386,9 @@ const loadSelectedCollateral = async () => {
 }
 
 const loadPosition = async () => {
-  if (!isConnected.value && !isSpyMode.value) {
-    position.value = null
-    return
-  }
+  if (!isConnected.value && !isSpyMode.value) return
   isLoading.value = true
   await until(isPositionsLoaded).toBe(true)
-
-  position.value = getPositionBySubAccountIndex(+positionIndex) || null
   await loadSelectedCollateral()
   isLoading.value = false
 }
@@ -872,6 +930,8 @@ watch(() => cowSwapOrderStatus.orderStatus.value, (status) => {
                 :loading="isSubmitting || isPreparing"
                 :disabled-reason="disabledReasonInfo?.message"
                 :disabled-reason-variant="disabledReasonInfo?.variant"
+                :can-add-to-batch="canAddToBatch"
+                @add-to-batch="addToBatch"
               >
                 {{ reviewSwapLabel }}
               </VaultFormSubmit>

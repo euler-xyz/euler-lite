@@ -35,6 +35,9 @@ export const clearOperationMeta = (key: string) => {
 /** Reactive: true when any blocker is active (e.g. keyring verification pending). */
 export const isOperationBlocked = computed(() => blockers.value.size > 0)
 
+/** Reactive: active blocker entries, preserving registration order. */
+export const operationBlockerEntries = computed(() => Array.from(blockers.value.entries()))
+
 /** Reactive: reason string from the first active blocker. */
 export const operationBlockReason = computed(() => {
   const first = blockers.value.values().next()

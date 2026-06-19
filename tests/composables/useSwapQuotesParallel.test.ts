@@ -197,4 +197,33 @@ describe('useSwapQuotesParallel', () => {
     expect(getSwapProviders).toHaveBeenNthCalledWith(1, { includeCowSwap: true })
     expect(getSwapProviders).toHaveBeenNthCalledWith(2, { includeCowSwap: false })
   })
+
+  it('removes existing CoW quote cards when callable includeCowSwap becomes false', async () => {
+    const includeCowSwap = ref(true)
+    const cowQuote = makeQuote('100', '300')
+    const otherQuote = makeQuote('100', '200')
+    getSwapProviders.mockResolvedValue(['cow', 'other'])
+    getSwapQuotes.mockImplementation(({ provider }: { provider: string }) =>
+      Promise.resolve([provider === 'cow' ? cowQuote : otherQuote]),
+    )
+
+    const quotes = useSwapQuotesParallel({
+      amountField: 'amountOut',
+      compare: 'max',
+      includeCowSwap: () => includeCowSwap.value,
+    })
+
+    await quotes.requestQuotes(requestParams)
+    await flushPromises()
+    await nextTick()
+
+    expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['cow', 'other'])
+
+    quotes.selectProvider('cow')
+    includeCowSwap.value = false
+    await nextTick()
+
+    expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['other'])
+    expect(quotes.selectedProvider.value).toBeNull()
+  })
 })

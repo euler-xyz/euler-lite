@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { isEVault, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { maxUint256, type Address } from 'viem'
 import type { VaultAsset } from '~/types/asset'
 import { getNetAPY } from '~/utils/vault/apy'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
@@ -20,22 +21,26 @@ import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { areRoeCollateralVaultsCorrelatedWithBorrow, resolvePositionRoeCollateralVaults } from '~/utils/position-roe'
+import { isCowProvider } from '~/entities/cowswap'
 
 const _route = useRoute()
 const _router = useRouter()
 const modal = useModal()
-const { isConnected, address } = useWagmi()
+const { isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
 const positionIndex = usePositionIndex()
-const { isPositionsLoading, isPositionsLoaded, isDepositsLoaded, refreshAllPositions: _refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
+const { planRepayFromWallet } = useEulerTx()
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
+const { isPositionsLoading, isPositionsLoaded, isDepositsLoaded, refreshAllPositions: _refreshAllPositions, getPositionBySubAccountIndex, portfolioAddress } = useEulerAccount()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { getTokenCategoryTags } = useTokenList()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { eulerLensAddresses: _eulerLensAddresses } = useEulerAddresses()
-const { fetchSingleBalance } = useWallets()
+const { getBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const { slippage } = useSlippage({
   fromSymbol: () => {
@@ -51,11 +56,19 @@ const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const formTab = ref<'wallet' | 'collateral' | 'savings'>('wallet')
 const plan = ref<TransactionPlan | null>(null)
-const position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined> = ref()
-const walletBalance = ref(0n)
+// Layer-aware: `getPositionBySubAccountIndex` reads the active batch layer's
+// portfolio, so the form's debt/collateral reflect the simulated state (e.g. a
+// repay added to the batch shows the reduced debt). Must be a computed, not a
+// one-shot ref, or it would freeze at the layer-0 (real) snapshot.
+const position = computed<PortfolioBorrowPosition<VaultEntity> | undefined>(() => {
+  if (!isConnected.value && !isSpyMode.value) return undefined
+  return getPositionBySubAccountIndex(+positionIndex)
+})
 
 // --- Shared computeds ---
 const borrowVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
+// Wallet balance of the debt asset from the central (layer-aware) wallet entity.
+const walletBalance = computed(() => borrowVault.value?.asset.address ? getBalance(borrowVault.value.asset.address as Address) : 0n)
 const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() => position.value ? position.value.collateralVault as EVault | SecuritizeCollateralVault | undefined : undefined)
 const positionCollateralVaults = computed(() =>
   resolvePositionRoeCollateralVaults(position.value, collateralVault.value),
@@ -166,6 +179,171 @@ const walletSwap = useWalletSwapRepay({
   borrowRewardApy,
   oraclePriceRatio,
 })
+
+// Add the current repay (any tab) to the batch. CoW orders can't be merged
+// into an EVC batch, so swap routes via CoW are excluded.
+const canAddToBatch = computed(() => {
+  if (!borrowVault.value || !position.value) return false
+  if (formTab.value === 'wallet') {
+    if (!(+wallet.amount.value) && !(+walletSwap.amount.value)) return false
+    if (walletSwap.needsSwap.value) {
+      if (isWalletSwapRestricted.value || isPayWithAssetBlocked.value) return false
+      return !!walletSwap.quotes.selectedQuote.value && !isCowProvider(walletSwap.quotes.selectedProvider.value)
+    }
+    return !!(+wallet.amount.value)
+  }
+  if (formTab.value === 'collateral') {
+    if (!collateral.sourceVault.value || !(+collateral.amount.value || +collateral.debtAmount.value)) return false
+    if (collateral.isSameAsset.value) return true
+    return !!collateral.quotes.selectedQuote.value && !isCowProvider(collateral.quotes.selectedProvider.value)
+  }
+  if (formTab.value === 'savings') {
+    if (!savings.sourceVault.value || !(+savings.amount.value || +savings.debtAmount.value)) return false
+    if (savings.isSameAsset.value) return true
+    return !!savings.quotes.selectedQuote.value && !isCowProvider(savings.quotes.selectedProvider.value)
+  }
+  return false
+})
+
+// A full repay closes the position: the plan's cleanup moves the remaining
+// collateral shares to the owner account, so the position card the user was on
+// becomes a removed ghost. Land on the owner's deposit of the collateral vault
+// (where that collateral now lives) instead of the ghost.
+const redirectAfterRepayAdd = (isClosing: boolean) => {
+  if (isClosing && portfolioAddress.value) {
+    redirectAfterAdd('/portfolio/saving', {
+      subAccount: portfolioAddress.value,
+      vault: collateralVault.value?.address,
+    })
+    return
+  }
+  redirectAfterAdd('/portfolio', { subAccount: position.value?.subAccount })
+}
+
+const addToBatchWithoutWarnings = async () => {
+  if (!canAddToBatch.value || !borrowVault.value || !position.value) return
+  const borrowSymbol = borrowVault.value.asset.symbol
+
+  if (formTab.value === 'wallet') {
+    if (walletSwap.needsSwap.value) {
+      const quote = walletSwap.quotes.selectedQuote.value ?? undefined
+      const swapAsset = walletSwap.selectedAsset.value
+      const swapAmount = walletSwap.amount.value
+      const swapDirection = walletSwap.direction.value
+      const inSymbol = walletSwap.selectedAsset.value?.symbol ?? ''
+      const isClosing = walletSwap.isFullRepay.value
+      if (!swapAsset) return
+      await addBatchEntry({
+        label: `Repay-swap ${inSymbol} → ${borrowSymbol}`,
+        buildPlan: account => walletSwap.buildRepayPlan(quote, account, {
+          selectedAsset: swapAsset,
+          direction: swapDirection,
+          isFullRepay: isClosing,
+        }),
+        subAccount: position.value.subAccount as Address,
+        nameOverride: `Repay ${borrowSymbol}`,
+        review: { type: 'repay', asset: swapAsset, amount: swapAmount, swapToAsset: borrowVault.value.asset },
+      })
+      walletSwap.amount.value = ''
+      redirectAfterRepayAdd(isClosing)
+      return
+    }
+    const liabilityVault = borrowVault.value.address as Address
+    const amountNano = valueToNano(wallet.amount.value, borrowVault.value.asset.decimals)
+    const currentDebt = position.value.borrowed || 0n
+    const isFullRepay = amountNano >= currentDebt || wallet.walletRepayPercent.value >= 100
+    const receiver = position.value.subAccount as Address
+    await addBatchEntry({
+      label: `Repay ${wallet.amount.value} ${borrowSymbol}`,
+      buildPlan: account => planRepayFromWallet({
+        liabilityVault,
+        liabilityAmount: isFullRepay ? maxUint256 : amountNano,
+        receiver,
+        cleanupOnMax: isFullRepay,
+        account,
+      }),
+      subAccount: position.value.subAccount as Address,
+      review: { type: 'repay', asset: borrowVault.value.asset, amount: wallet.amount.value },
+    })
+    wallet.amount.value = ''
+    redirectAfterRepayAdd(isFullRepay)
+    return
+  }
+
+  if (formTab.value === 'collateral') {
+    const quote = collateral.isSameAsset.value ? undefined : collateral.quotes.selectedQuote.value ?? undefined
+    const sourceVault = collateral.sourceVault.value
+    const sourceAmount = collateral.amount.value
+    const sourceDebtAmount = collateral.debtAmount.value
+    const sourceDirection = collateral.direction.value
+    const isSameAsset = collateral.isSameAsset.value
+    const srcSymbol = sourceVault?.asset.symbol ?? ''
+    const isClosing = collateral.isFullRepay.value
+    if (!sourceVault) return
+    await addBatchEntry({
+      label: `Repay from ${srcSymbol} collateral → ${borrowSymbol}`,
+      buildPlan: account => collateral.buildRepayPlan(quote, account, {
+        sourceVault,
+        amount: sourceAmount,
+        debtAmount: sourceDebtAmount,
+        direction: sourceDirection,
+        isSameAsset,
+      }),
+      subAccount: position.value.subAccount as Address,
+      review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, swapToAsset: borrowVault.value.asset },
+    })
+    collateral.amount.value = ''
+    collateral.debtAmount.value = ''
+    redirectAfterRepayAdd(isClosing)
+    return
+  }
+
+  if (formTab.value === 'savings') {
+    const quote = savings.isSameAsset.value ? undefined : savings.quotes.selectedQuote.value ?? undefined
+    const sourceVault = savings.sourceVault.value
+    const sourceSubAccount = savings.selectedSavingSubAccount.value
+    const sourceAmount = savings.amount.value
+    const sourceDebtAmount = savings.debtAmount.value
+    const sourceDirection = savings.direction.value
+    const isSameAsset = savings.isSameAsset.value
+    const srcSymbol = sourceVault?.asset.symbol ?? ''
+    const isClosing = savings.isFullRepay.value
+    if (!sourceVault) return
+    await addBatchEntry({
+      label: `Repay from ${srcSymbol} savings → ${borrowSymbol}`,
+      buildPlan: account => savings.buildRepayPlan(quote, account, {
+        sourceVault,
+        sourceSubAccount,
+        amount: sourceAmount,
+        debtAmount: sourceDebtAmount,
+        direction: sourceDirection,
+        isSameAsset,
+      }),
+      subAccount: position.value.subAccount as Address,
+      review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, swapToAsset: borrowVault.value.asset },
+    })
+    savings.amount.value = ''
+    savings.debtAmount.value = ''
+    redirectAfterRepayAdd(isClosing)
+  }
+}
+
+const addToBatch = async () => {
+  if (!canAddToBatch.value) return
+  if (formTab.value === 'wallet' && walletSwap.needsSwap.value) {
+    await guardWithWalletSwapPriceImpact(addToBatchWithoutWarnings)
+    return
+  }
+  if (formTab.value === 'collateral') {
+    await guardWithCollateralPriceImpact(addToBatchWithoutWarnings)
+    return
+  }
+  if (formTab.value === 'savings') {
+    await guardWithSavingsPriceImpact(addToBatchWithoutWarnings)
+    return
+  }
+  await addToBatchWithoutWarnings()
+}
 
 const { guardWithPriceImpact: guardWithWalletSwapPriceImpact } = usePriceImpactGate({
   directPriceImpact: walletSwap.swapPriceImpact,
@@ -346,19 +524,8 @@ const openWalletSwapTokenSelector = () => {
     },
   })
 }
-
-// --- Load / Fetch ---
-const fetchWalletBalance = async () => {
-  if (!isConnected.value || !borrowVault.value?.asset.address) {
-    walletBalance.value = 0n
-    return
-  }
-  walletBalance.value = await fetchSingleBalance(borrowVault.value.asset.address)
-}
-
 const load = async () => {
   if (!isConnected.value && !isSpyMode.value) {
-    position.value = undefined
     return
   }
   isLoading.value = true
@@ -366,8 +533,8 @@ const load = async () => {
   await until(isDepositsLoaded).toBe(true)
 
   try {
-    position.value = getPositionBySubAccountIndex(+positionIndex)
-    await fetchWalletBalance()
+    // `position` is a layer-aware computed now; load() only drives the one-shot
+    // form initialisation (estimates / vault selection) off the initial state.
     wallet.initEstimates()
     collateral.initVault(collateralVault.value && isEVault(collateralVault.value) ? collateralVault.value : undefined)
     savings.initVault()
@@ -385,14 +552,6 @@ const load = async () => {
 watch(isPositionsLoaded, (val) => {
   if (val) load()
 }, { immediate: true })
-
-watch(isConnected, () => {
-  fetchWalletBalance()
-})
-
-watch(address, () => {
-  fetchWalletBalance()
-})
 
 watch(formTab, () => {
   clearSimulationError()
@@ -681,6 +840,8 @@ watch(formTab, () => {
                 :loading="isSubmitting || isPreparing"
                 :disabled-reason="disabledReasonInfo?.message"
                 :disabled-reason-variant="disabledReasonInfo?.variant"
+                :can-add-to-batch="canAddToBatch"
+                @add-to-batch="addToBatch"
               >
                 {{ reviewRepayLabel }}
               </VaultFormSubmit>
@@ -869,6 +1030,8 @@ watch(formTab, () => {
                 :loading="isSubmitting || isPreparing"
                 :disabled-reason="disabledReasonInfo?.message"
                 :disabled-reason-variant="disabledReasonInfo?.variant"
+                :can-add-to-batch="canAddToBatch"
+                @add-to-batch="addToBatch"
               >
                 {{ reviewRepayLabel }}
               </VaultFormSubmit>
@@ -1052,6 +1215,8 @@ watch(formTab, () => {
                 :loading="isSubmitting || isPreparing"
                 :disabled-reason="disabledReasonInfo?.message"
                 :disabled-reason-variant="disabledReasonInfo?.variant"
+                :can-add-to-batch="canAddToBatch"
+                @add-to-batch="addToBatch"
               >
                 {{ reviewRepayLabel }}
               </VaultFormSubmit>

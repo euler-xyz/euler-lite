@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { getSubAccountAddress, isSecuritizeCollateralVault, type EVault, type SecuritizeCollateralVault, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import { getSubAccountAddress, isSecuritizeCollateralVault, type EVault, type SecuritizeCollateralVault, type SwapQuote, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { getProjectedRates } from '~/utils/vault/apy'
 import { isSecuritizeVault } from '~/utils/vault/categories'
@@ -26,6 +26,7 @@ import { FixedPoint } from '~/utils/fixed-point'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { createRaceGuard } from '~/utils/race-guard'
+import { isCowProviderOrQuote } from '~/entities/cowswap'
 
 const router = useRouter()
 const route = useRoute()
@@ -34,12 +35,13 @@ const { error } = useToast()
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
 const { planWithdrawOrRedeem, prepareTransactionPlan, executePreparedPlan, prefetchPluginData } = useEulerTx()
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
 const { account: cachedAccount } = useFreshAccount()
 const { getVault, getSecuritizeVault: _getSecuritizeVault, getEscrowVault: _getEscrowVault, isMarketDataResolved } = useVaults()
 const { isConnected, address } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
-const { fetchVaultShareBalance } = useWallets()
 const { runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const { getSupplyRewardApy } = useRewardsApy()
 const { settings } = useUserSettings()
@@ -74,8 +76,23 @@ const withdrawWarnings = computed(() => {
     getUtilisationWarning(vault.value as EVault, 'lend'),
   ]
 })
-const assetsBalance = ref(0n)
-const sharesBalance = ref(0n)
+// Share/asset balances come from the layer-aware account entity (usePlanAccount),
+// not a direct on-chain balanceOf — so they reflect fresh + simulated state.
+const { account: planAccount } = usePlanAccount()
+const sharePosition = computed(() => {
+  const acct = planAccount.value
+  const sub = subAccount.value
+  if (!acct || !sub || !vault.value?.address) return undefined
+  try {
+    const target = getAddress(vault.value.address)
+    return acct.getSubAccount(getAddress(sub))?.positions.find(p => getAddress(p.vaultAddress) === target)
+  }
+  catch {
+    return undefined
+  }
+})
+const sharesBalance = computed(() => sharePosition.value?.shares ?? 0n)
+const assetsBalance = computed(() => sharePosition.value?.assets ?? 0n)
 const delta = ref(0n)
 const estimateSupplyAPY = ref<number | bigint>(0)
 const estimatesError = ref('')
@@ -138,7 +155,7 @@ const isOutputAssetRestricted = computed(() =>
   needsSwap.value && isAssetRestrictedByCountry(selectedOutputAsset.value, { counterpart: asset.value }),
 )
 const isSubmitDisabled = computed(() => {
-  if (!isConnected.value) return false
+  if (!isConnected.value && !isSpyMode.value) return false
   if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as EVault, effectiveWithdrawOp.value)) return true
   if (isOutputAssetBlocked.value || isOutputAssetRestricted.value) return true
   if (withdrawableAssets.value < amountFixed.value.value) return true
@@ -234,15 +251,24 @@ const swapOutputExactDisplay = computed(() => {
   return `${formatUnits(amountOut, Number(selectedOutputAsset.value.decimals))} ${selectedOutputAsset.value.symbol}`
 })
 
-async function buildSwapWithdrawPlanFromQuote(quote: import('@eulerxyz/euler-v2-sdk').SwapQuote, account = cachedAccount.value) {
-  if (!asset.value) throw new Error('Asset not loaded')
-  const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value.decimals).lte(amountFixed.value)
+interface SwapWithdrawPlanSnapshot {
+  asset: VaultAsset
+  owner: Address
+  shares: bigint
+  assets: bigint
+}
+
+async function buildSwapWithdrawPlanFromQuote(quote: SwapQuote, account = cachedAccount.value, snapshot?: SwapWithdrawPlanSnapshot) {
+  const inputAsset = snapshot?.asset ?? asset.value
+  if (!inputAsset) throw new Error('Asset not loaded')
   return planWithdrawOrRedeem({
     vaultAddress: vaultAddress as Address,
-    owner: (subAccount.value ?? effectiveAddress.value!) as Address,
-    isMax,
-    shares: sharesBalance.value,
-    assets: amountFixed.value.value,
+    owner: snapshot?.owner ?? (subAccount.value ?? effectiveAddress.value!) as Address,
+    // Swap quotes are fixed to an asset input amount; redeem-all can send more
+    // assets than the quote was built for.
+    isMax: false,
+    shares: snapshot?.shares ?? sharesBalance.value,
+    assets: snapshot?.assets ?? amountFixed.value.value,
     swapQuote: quote,
     account,
   })
@@ -292,7 +318,7 @@ const requestSwapQuote = useDebounceFn(async () => {
     return
   }
 
-  const userAddr = (address.value || zeroAddress) as Address
+  const userAddr = (effectiveAddress.value || zeroAddress) as Address
   const subAccountAddr = subAccount.value
     ? (subAccount.value as Address)
     : userAddr
@@ -357,9 +383,8 @@ const load = async () => {
 
     asset.value = vault.value?.asset
 
-    // Always fetch fresh share balance directly from contract
-    await fetchShareBalance()
-    await updateBalance()
+    // Share/asset balances are reactive over the account entity; just seed delta.
+    updateBalance()
   }
   catch (e) {
     showError('Unable to load Vault')
@@ -369,22 +394,10 @@ const load = async () => {
     isLoading.value = false
   }
 }
-const fetchShareBalance = async () => {
-  if (!vault.value?.address) {
-    sharesBalance.value = 0n
-    return
-  }
-  sharesBalance.value = await fetchVaultShareBalance(vault.value.address, subAccount.value)
-}
-const updateBalance = async () => {
-  if (!vault.value || (!isConnected.value && !isSpyMode.value) || sharesBalance.value === 0n) {
-    assetsBalance.value = 0n
-    delta.value = 0n
-    return
-  }
-
-  assetsBalance.value = vault.value.convertToAssets(sharesBalance.value)
-  delta.value = assetsBalance.value
+// `assetsBalance`/`sharesBalance` are now reactive computeds over the account
+// entity, so this only refreshes the `delta` baseline used by the summary.
+const updateBalance = () => {
+  delta.value = (!isConnected.value && !isSpyMode.value) ? 0n : assetsBalance.value
 }
 const submit = async () => {
   if (isOperationBlocked.value) return
@@ -459,15 +472,10 @@ const send = async () => {
     if (!preparedPlan.value) return
     await executePreparedPlan(preparedPlan.value)
 
-    // The form stays mounted after the tx, but wallet-balance reads aren't
-    // auto-invalidated post-tx (sdk-query-policy: queryTokenBalances /
-    // queryBalanceOf carry a 1-min browsing stale time and no invalidateAfterTx),
-    // and `assetsBalance`/`sharesBalance` are one-shot refs set at load. Evict the
-    // balance queries and re-read so "Available for withdraw" reflects the new
-    // balance instead of the pre-withdraw amount.
+    // share/asset balances are reactive over the account entity, which refreshes
+    // after the tx; evict cached wallet token queries for the swap-output display.
     await invalidateSdkQueries(['queryTokenBalances', 'queryBalanceOf', 'queryNativeBalance'])
-    await fetchShareBalance()
-    await updateBalance()
+    updateBalance()
     amount.value = ''
     preparedPlan.value = null
     resetSwapQuoteState()
@@ -485,6 +493,65 @@ const send = async () => {
     isSubmitting.value = false
   }
 }
+// Add this withdraw to the transaction batch. The plan is captured against the
+// current batch end-state, so withdrawing on top of a simulated deposit works
+// even though the on-chain share balance shown by the form is still zero. Direct
+// (non-swap), non-max withdraw by asset amount.
+const isCowSwapSelected = computed(() => isCowProviderOrQuote(swapSelectedProvider.value, swapSelectedQuote.value))
+const canAddToBatch = computed(() => {
+  if (isOutputAssetBlocked.value || isOutputAssetRestricted.value) return false
+  if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as EVault, effectiveWithdrawOp.value)) return false
+  if (!(+amount.value)) return false
+  if (needsSwap.value) return !!swapSelectedQuote.value && !isCowSwapSelected.value
+  return true
+})
+
+const addToBatch = async () => {
+  if (!canAddToBatch.value || !asset.value?.address) return
+  await guardWithPriceImpact(async () => {
+    if (!asset.value?.address) return
+    if (needsSwap.value) {
+      const quote = swapEffectiveQuote.value
+      if (!quote) return
+      const ownerAddr = (subAccount.value ?? effectiveAddress.value) as Address | undefined
+      if (!ownerAddr) return
+      const snap = {
+        asset: asset.value,
+        owner: ownerAddr,
+        shares: sharesBalance.value,
+        assets: amountFixed.value.value,
+      }
+      const amountLabel = amount.value
+      const outputAsset = selectedOutputAsset.value
+      const outputAmount = swapEstimatedOutput.value
+      await addBatchEntry({
+        label: `Withdraw-swap ${amountLabel} ${asset.value.symbol} → ${outputAsset?.symbol ?? ''}`,
+        buildPlan: account => buildSwapWithdrawPlanFromQuote(quote, account, snap),
+        subAccount: ownerAddr,
+        review: { type: 'swap-withdraw', asset: asset.value, amount: amountLabel, swapToAsset: outputAsset, swapToAmount: outputAmount },
+      })
+    }
+    else {
+      const assets = valueToNano(amount.value, asset.value.decimals)
+      const ownerAddr = (subAccount.value ?? effectiveAddress.value) as Address | undefined
+      if (!ownerAddr) return
+      // A max withdraw must redeem the full share balance (redeem(full_balance))
+      // rather than withdraw(assets): a fixed asset amount leaves share-price
+      // rounding dust and can under-withdraw once interest accrues by execution.
+      const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
+      const shares = sharesBalance.value
+      await addBatchEntry({
+        label: `Withdraw ${amount.value} ${asset.value.symbol}`,
+        buildPlan: account => planWithdrawOrRedeem({ vaultAddress: vaultAddress as Address, owner: ownerAddr, isMax, shares, assets, account }),
+        subAccount: ownerAddr,
+        review: { type: 'withdraw', asset: asset.value, amount: amount.value },
+      })
+    }
+    amount.value = ''
+    redirectAfterAdd('/portfolio/saving', { subAccount: subAccount.value ?? effectiveAddress.value, vault: vaultAddress })
+  })
+}
+
 const updateSyncEstimates = () => {
   clearSimulationError()
   estimatesError.value = ''
@@ -542,11 +609,10 @@ const updateAsyncEstimates = useDebounceFn(async () => {
 
 load()
 
-watch([isConnected, effectiveAddress], async () => {
-  if (vault.value) {
-    await fetchShareBalance()
-    await updateBalance()
-  }
+// assetsBalance/sharesBalance are reactive over the account entity (incl. the
+// active batch layer); just keep the delta baseline in sync.
+watch([isConnected, effectiveAddress, assetsBalance], () => {
+  if (vault.value) updateBalance()
 })
 watch(amount, async () => {
   updateSyncEstimates()
@@ -753,6 +819,8 @@ watch(swapSelectedQuote, () => {
               :disabled="reviewWithdrawDisabled"
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
+              :can-add-to-batch="canAddToBatch"
+              @add-to-batch="addToBatch"
             >
               Review Withdraw
             </VaultFormSubmit>
