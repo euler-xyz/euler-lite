@@ -6,7 +6,7 @@ import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, getVaultTags } from '~/composables/useGeoBlock'
-import { useSwapQuotesParallel, type SwapQuotePlanAccount, type SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
+import { useSwapQuotesParallel, type SwapQuoteIncludeCowSwap, type SwapQuotePlanAccount, type SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import { getQuoteAmount, type SwapQuoteAmountField, type SwapQuoteCompare } from '~/utils/swapQuotes'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
@@ -62,7 +62,7 @@ export interface UseSwapPageLogicOptions {
   /** Override the displayed side marked as estimated in the review modal. */
   reviewSwapEstimatedSide?: 'input' | 'output'
   /** Include CowSwap provider in swap quotes (Ethereum mainnet etc.) */
-  includeCowSwap?: boolean
+  includeCowSwap?: SwapQuoteIncludeCowSwap
   /** Optional already-loaded Account for SDK plan/plugin processing. */
   getPlanAccount?: () => SwapQuotePlanAccount | undefined
 }
@@ -97,6 +97,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const router = useRouter()
   const route = useRoute()
   const { isConnected } = useWagmi()
+  const { isSpyMode } = useSpyMode()
   const { executePlan, executePreparedPlan, prepareTransactionPlan, prefetchPluginData } = useEulerTx()
   const modal = useModal()
   const { error: showError } = useToast()
@@ -385,7 +386,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   })
 
   const isSubmitDisabled = computed(() => {
-    if (!isConnected.value) return false
+    if (!isConnected.value && !isSpyMode.value) return false
     if (!fromVault.value?.asset || !toVault.value?.asset) return true
     if (isSameAsset.value) {
       return isLoading.value || !(+fromAmount.value) || !!errorText.value || isSameVault.value

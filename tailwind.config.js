@@ -98,6 +98,7 @@ module.exports = {
         },
         'error': {
           100: 'var(--error-100)',
+          300: 'var(--error-300)',
           500: 'var(--error-500)',
         },
       },

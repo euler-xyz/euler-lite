@@ -6,6 +6,10 @@ export const useDeployConfig = () => {
     const s = String(val)
     return s !== 'false' && s !== '0'
   }
+  const isExplicitlyEnabled = (val: unknown) => {
+    const s = String(val).toLowerCase()
+    return s === 'true' || s === '1'
+  }
   const labelsBaseUrl = (rc.configLabelsBaseUrl || '').trim().replace(/\/+$/, '')
 
   return {
@@ -45,6 +49,10 @@ export const useDeployConfig = () => {
     enableMerkl: isEnabled(rc.configEnableMerkl),
     enableIncentra: isEnabled(rc.configEnableIncentra),
     enableFuul: isEnabled(rc.configEnableFuul),
+    enableBatchAnnouncement: isExplicitlyEnabled(rc.configEnableBatchAnnouncement),
+
+    // Batch announcement (opt-in: enable flag shows the modal once per browser)
+    batchAnnouncementUrl: rc.configBatchAnnouncementUrl || '',
 
     // External token lists (defaults in server/api/token-list.get.ts)
     uniswapTokenListUrl: rc.configUniswapTokenListUrl || '',

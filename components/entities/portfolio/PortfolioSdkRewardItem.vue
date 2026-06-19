@@ -25,9 +25,11 @@ const rewardKey = computed(() =>
 )
 
 const { buildClaimRewardPlan, refreshRewards } = useSdkRewards()
+const { addEntry: addBatchEntry } = useTxBatch()
 const { executePlan } = useEulerTx()
 const { getTokenByAddress } = useTokenList()
 const { isSpyMode } = useSpyMode()
+const { settings } = useUserSettings()
 const modal = useModal()
 const { error } = useToast()
 const { chainId: walletChainId, switchChain } = useWagmi()
@@ -35,12 +37,14 @@ const { runSimulation, simulationError } = useTransactionPlanSimulation()
 
 const isClaiming = ref(false)
 const isPreparing = ref(false)
+const isAddingToBatch = ref(false)
 const plan = ref<TransactionPlan | null>(null)
 
 const rewardAmount = computed(() => Number(formatUnits(BigInt(reward.unclaimed), reward.token.decimals)))
 const rewardUsdValue = computed(() => rewardAmount.value * reward.tokenPrice)
 const providerLabel = computed(() => REWARD_PROVIDER_LABELS[reward.provider] ?? reward.provider)
 const planKind = computed(() => REWARD_PROVIDER_TYPES[reward.provider] ?? 'reward')
+const canAddToBatch = computed(() => settings.value.enableAdvancedMode)
 const isEulFamily = computed(() => ['rEUL', 'EUL'].includes(reward.token.symbol))
 const externalIconUrl = computed(() => {
   if (isEulFamily.value) return undefined
@@ -79,8 +83,38 @@ const claim = async () => {
   }
 }
 
+const onAddToBatchClick = async () => {
+  if (!canAddToBatch.value || isPreparing.value || isClaiming.value || isAddingToBatch.value) return
+  isAddingToBatch.value = true
+  try {
+    await ensureWalletOnClaimChain()
+    await addBatchEntry({
+      label: `Claim ${reward.token.symbol}`,
+      buildPlan: async () => buildClaimRewardPlan(reward),
+      review: {
+        type: planKind.value,
+        asset: {
+          symbol: reward.token.symbol,
+          address: reward.token.address,
+          decimals: reward.token.decimals,
+        },
+        assetIconUrl: externalIconUrl.value,
+        amount: rewardAmount.value,
+        submittingLabel: 'Claiming...',
+      },
+    })
+  }
+  catch (e) {
+    error('Failed to add to batch')
+    logWarn('PortfolioSdkRewardItem/onAddToBatchClick', e)
+  }
+  finally {
+    isAddingToBatch.value = false
+  }
+}
+
 const onClaimClick = async () => {
-  if (isPreparing.value) return
+  if (isPreparing.value || isAddingToBatch.value) return
   isPreparing.value = true
   try {
     await ensureWalletOnClaimChain()
@@ -188,14 +222,26 @@ const onClaimClick = async () => {
           </p>
         </div>
       </div>
-      <UiButton
-        rounded
-        :loading="isClaiming || isPreparing"
-        :disabled="isSpyMode"
-        @click="onClaimClick"
-      >
-        Claim
-      </UiButton>
+      <div :class="canAddToBatch ? 'grid grid-cols-2 gap-8' : 'grid grid-cols-1'">
+        <UiButton
+          rounded
+          :loading="isClaiming || isPreparing"
+          :disabled="isSpyMode || isAddingToBatch"
+          @click="onClaimClick"
+        >
+          Claim
+        </UiButton>
+        <UiButton
+          v-if="canAddToBatch"
+          rounded
+          variant="primary-stroke"
+          :loading="isAddingToBatch"
+          :disabled="isSpyMode || isClaiming || isPreparing"
+          @click="onAddToBatchClick"
+        >
+          Add to batch
+        </UiButton>
+      </div>
       <UiAlert
         v-if="simulationError"
         class="mt-12"

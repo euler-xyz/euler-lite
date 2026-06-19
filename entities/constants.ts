@@ -7,6 +7,7 @@ export const ERROR_MESSAGE_MAP: Record<string, string> = {
   E_BadSupplyCap: 'Supply cap is invalid.',
   E_BadBorrowCap: 'Borrow cap is invalid.',
   E_AccountLiquidity: 'Account liquidity too low for this action.',
+  E_InsufficientBalance: 'Not enough balance for this operation.',
   E_InsufficientCash: 'Not enough liquidity in the vault.',
   E_NotEnoughLiquidity: 'Not enough liquidity in the vault.',
   NotEnoughLiquidity: 'Not enough liquidity in the vault.',

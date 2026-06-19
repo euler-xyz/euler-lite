@@ -13,16 +13,19 @@ const modal = useModal()
 const { error } = useToast()
 const { isSpyMode } = useSpyMode()
 const { getTokenByAddress } = useTokenList()
-const { buildUnlockREULPlan, reulTokenContractAddress, refreshLocks } = useREULLocks()
+const { buildUnlockREULPlan, reulTokenContractAddress, eulTokenContractAddress, refreshLocks } = useREULLocks()
+const { addEntry: addBatchEntry } = useTxBatch()
 const { executePlan } = useEulerTx()
 const { chainId: siteChainId } = useEulerAddresses()
 const { chainId: walletChainId, switchChain } = useWagmi()
 const { runSimulation, simulationError } = useTransactionPlanSimulation()
+const { settings } = useUserSettings()
 const { item } = defineProps<{ item: REULLock }>()
 const itemKey = computed(() => item.timestamp.toString())
 
 const isUnlocking = ref(false)
 const isPreparing = ref(false)
+const isAddingToBatch = ref(false)
 const plan = ref<TransactionPlan | null>(null)
 
 // rEUL address is read from chain contract config (reulTokenContractAddress) —
@@ -30,6 +33,14 @@ const plan = ref<TransactionPlan | null>(null)
 // up in the unified token list like any other token; Merkl's reward-token
 // feed is one of the token-list sources and typically covers rEUL.
 const reulToken = computed(() => getTokenByAddress(reulTokenContractAddress.value))
+const eulToken = computed(() => getTokenByAddress(eulTokenContractAddress.value))
+const walletChangeTokenAddress = computed(() => eulTokenContractAddress.value || reulTokenContractAddress.value)
+const walletChangeToken = computed(() => eulTokenContractAddress.value ? eulToken.value : reulToken.value)
+const walletChangeTokenSymbol = computed(() =>
+  walletChangeToken.value?.symbol ?? (eulTokenContractAddress.value ? 'EUL' : 'rEUL'),
+)
+const walletChangeTokenDecimals = computed(() => eulToken.value?.decimals ?? reulToken.value?.decimals ?? 18)
+const canAddToBatch = computed(() => settings.value.enableAdvancedMode)
 
 const unlockableAmount = computed(() => {
   return nanoToValue(item.unlockableAmount, reulToken.value?.decimals)
@@ -83,8 +94,45 @@ const unlock = async () => {
   }
 }
 
+const getReviewProps = () => ({
+  type: 'reul-unlock',
+  asset: {
+    symbol: walletChangeTokenSymbol.value,
+    address: walletChangeTokenAddress.value,
+    decimals: walletChangeTokenDecimals.value,
+  },
+  amount: unlockableAmount.value,
+  reulUnlockInfo: {
+    unlockableAmount: unlockableAmount.value,
+    amountToBeBurned: amountToBeBurned.value,
+    maturityDate: formattedDate.value,
+    daysUntilMaturity: daysUntilMaturity.value,
+  },
+  submittingLabel: 'Unlocking...',
+})
+
+const onAddToBatchClick = async () => {
+  if (!canAddToBatch.value || isPreparing.value || isUnlocking.value || isAddingToBatch.value) return
+  isAddingToBatch.value = true
+  try {
+    await ensureWalletOnSiteChain()
+    await addBatchEntry({
+      label: 'Unlock rEUL',
+      buildPlan: async () => buildUnlockREULPlan([item.timestamp]),
+      review: getReviewProps(),
+    })
+  }
+  catch (e) {
+    error('Failed to add to batch')
+    logWarn('RewardUnlockItem/onAddToBatchClick', e)
+  }
+  finally {
+    isAddingToBatch.value = false
+  }
+}
+
 const onUnlockClick = async () => {
-  if (isPreparing.value) return
+  if (isPreparing.value || isAddingToBatch.value) return
   isPreparing.value = true
   try {
     await ensureWalletOnSiteChain()
@@ -108,21 +156,9 @@ const onUnlockClick = async () => {
     // Open the operation review modal (same pattern as reward claims)
     modal.open(OperationReviewModal, {
       props: {
-        type: 'reul-unlock',
-        asset: {
-          symbol: 'EUL',
-          address: reulTokenContractAddress.value,
-          decimals: reulToken.value?.decimals || 18,
-        },
+        ...getReviewProps(),
         amount: unlockableAmount.value,
         plan: plan.value || undefined,
-        reulUnlockInfo: {
-          unlockableAmount: unlockableAmount.value,
-          amountToBeBurned: amountToBeBurned.value,
-          maturityDate: formattedDate.value,
-          daysUntilMaturity: daysUntilMaturity.value,
-        },
-        submittingLabel: 'Unlocking...',
         onConfirm: async () => {
           await unlock()
         },
@@ -202,15 +238,26 @@ const onUnlockClick = async () => {
           </div>
         </div>
       </div>
-      <UiButton
-        variant="primary-stroke"
-        rounded
-        :loading="isUnlocking || isPreparing"
-        :disabled="isSpyMode"
-        @click="onUnlockClick"
-      >
-        Unlock
-      </UiButton>
+      <div :class="canAddToBatch ? 'grid grid-cols-2 gap-8' : 'grid grid-cols-1'">
+        <UiButton
+          rounded
+          :loading="isUnlocking || isPreparing"
+          :disabled="isSpyMode || isAddingToBatch"
+          @click="onUnlockClick"
+        >
+          Unlock
+        </UiButton>
+        <UiButton
+          v-if="canAddToBatch"
+          rounded
+          variant="primary-stroke"
+          :loading="isAddingToBatch"
+          :disabled="isSpyMode || isUnlocking || isPreparing"
+          @click="onAddToBatchClick"
+        >
+          Add to batch
+        </UiButton>
+      </div>
       <UiAlert
         v-if="simulationError"
         class="mt-12"

@@ -15,6 +15,12 @@ import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { ltvToPercent, nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { createRaceGuard } from '~/utils/race-guard'
+import {
+  formatBorrowMoreInputAmount,
+  getBorrowMoreAvailableLiquidityDisplay,
+  getBorrowMoreLtvHeadroomAmount,
+  getBorrowMoreMaxBorrowAmount,
+} from '~/utils/borrow-more'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
@@ -27,13 +33,15 @@ const _route = useRoute()
 const modal = useModal()
 const { error } = useToast()
 const { planBorrow, executePlan } = useEulerTx()
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
 const { getBorrowVaultPair } = useVaults()
 const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, getPositionBySubAccountIndex } = useEulerAccount()
 const positionIndex = usePositionIndex()
-const { fetchSingleBalance } = useWallets()
+const { getBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { settings } = useUserSettings()
@@ -47,7 +55,8 @@ const priceInvert = usePriceInvert(
 const ltv = ref(0)
 const borrowAmount = ref('')
 const collateralAmount = ref('')
-const balance = ref(0n)
+// Collateral wallet balance from the central (layer-aware) wallet entity.
+const balance = computed(() => collateralVault.value?.asset.address ? getBalance(collateralVault.value.asset.address as Address) : 0n)
 const isLoading = ref(false)
 const isSubmitting = ref(false)
 const isPreparing = ref(false)
@@ -58,7 +67,11 @@ const pair: Ref<BorrowVaultPair | undefined> = ref()
 const health = ref()
 const netAPY = ref()
 const liquidationPrice = ref()
-const position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined> = ref()
+// Layer-aware: tracks the active batch layer's portfolio so the form reflects
+// simulated debt/collateral (a one-shot ref would freeze at the real state).
+const position = computed<PortfolioBorrowPosition<VaultEntity> | undefined>(() =>
+  (!isConnected.value && !isSpyMode.value) ? undefined : getPositionBySubAccountIndex(+positionIndex),
+)
 const userLTV = ref(0)
 const currentNetAPY = ref<number>()
 const currentHealth = ref<number>()
@@ -85,7 +98,7 @@ const errorText = computed(() => {
   return null
 })
 const isSubmitDisabled = computed(() => {
-  if (!isConnected.value) return false
+  if (!isConnected.value && !isSpyMode.value) return false
   if (pair.value?.borrow && isOpDisabled(pair.value.borrow, OP_BORROW)) return true
 
   const currentSupplied = position.value?.supplied || 0n
@@ -163,14 +176,16 @@ const borrowApy = computed(() => withVaultIntrinsicApy(
   borrowVault.value,
   enableIntrinsicApy.value,
 ))
+const availableLiquidity = computed(() => borrowVault.value?.availableLiquidity)
+const availableLiquidityDisplay = computed(() => getBorrowMoreAvailableLiquidityDisplay(borrowVault.value))
 
 const load = async () => {
   if (!isConnected.value && !isSpyMode.value) {
-    position.value = undefined
     return
   }
   isLoading.value = true
-  position.value = getPositionBySubAccountIndex(+positionIndex)
+  // `position` is a layer-aware computed; load() only seeds the one-shot
+  // "before" baseline (current LTV/health/APY) off the initial real state.
   if (!position.value) {
     isLoading.value = false
     return
@@ -226,14 +241,9 @@ const load = async () => {
     isLoading.value = false
   }
 }
-const updateBalance = async () => {
-  if (!isConnected.value || !collateralVault.value?.asset.address) {
-    balance.value = 0n
-    isBalanceLoading.value = false
-    return
-  }
-
-  balance.value = await fetchSingleBalance(collateralVault.value.asset.address)
+// `balance` is now a reactive computed over the wallet entity; this just clears
+// the initial loading flag.
+const updateBalance = () => {
   isBalanceLoading.value = false
 }
 const submit = async () => {
@@ -284,6 +294,32 @@ const submit = async () => {
     isPreparing.value = false
   }
 }
+// Add this borrow to the transaction batch. Built against the active layer's
+// simulated account, so a borrow stacked on a simulated collateral deposit
+// borrows against that simulated collateral.
+const canAddToBatch = computed(() =>
+  !reviewBorrowDisabled.value && !!borrowVault.value && !!position.value && !!(+borrowAmount.value),
+)
+const addToBatch = async () => {
+  if (!canAddToBatch.value || !borrowVault.value || !position.value) return
+  const vaultAddress = borrowVault.value.address as Address
+  const amount = valueToNano(borrowAmount.value, borrowVault.value.shares.decimals)
+  const borrowAccount = position.value.subAccount as Address
+  const label = `Borrow ${borrowAmount.value} ${borrowVault.value.asset.symbol}`
+  await addBatchEntry({
+    label,
+    // subAccountSnapshotApplied: the layer account passed by useTxBatch already
+    // reflects the simulated (or freshly-fetched base) sub-account state, so the
+    // planner must NOT re-fetch it on-chain — that would clobber a simulated
+    // collateral deposit from an earlier batch step.
+    buildPlan: account => planBorrow({ vaultAddress, amount, borrowAccount, account, subAccountSnapshotApplied: true }),
+    subAccount: borrowAccount,
+    review: { type: 'borrow', asset: borrowVault.value.asset, amount: borrowAmount.value },
+  })
+  borrowAmount.value = ''
+  redirectAfterAdd('/portfolio', { subAccount: borrowAccount })
+}
+
 const send = async () => {
   try {
     isSubmitting.value = true
@@ -331,6 +367,25 @@ const computedBorrowAmount = computed(() => {
   if (additional.isZero() || additional.isNegative()) return '0'
   return trimTrailingZeros(additional.toString())
 })
+const ltvHeadroomAmount = computed((): bigint | undefined => {
+  if (!pair.value || !borrowVault.value || !position.value) return undefined
+  return getBorrowMoreLtvHeadroomAmount({
+    borrowed: position.value.borrowed || 0n,
+    borrowDecimals: borrowVault.value.shares.decimals,
+    assetDecimals: borrowVault.value.asset.decimals,
+    currentLtvPercent: currentUserLTV.value,
+    maxBorrowLtv: pair.value.ltv.borrowLTV,
+  })
+})
+const maxBorrowAmount = computed(() => getBorrowMoreMaxBorrowAmount({
+  availableLiquidity: availableLiquidity.value,
+  ltvHeadroom: ltvHeadroomAmount.value,
+}))
+const setMaxBorrowAmount = async () => {
+  if (!borrowVault.value || maxBorrowAmount.value === undefined) return
+  borrowAmount.value = formatBorrowMoreInputAmount(maxBorrowAmount.value, borrowVault.value.asset.decimals)
+  await onBorrowInput()
+}
 
 watch(computedBorrowAmount, (val) => {
   if (isLtvDriven.value && val !== null) {
@@ -472,9 +527,11 @@ watch([collateralAmount, borrowAmount], async () => {
               :label="`Borrow ${borrowVault.asset.symbol}`"
               :asset="borrowVault.asset"
               :vault="borrowVault"
+              :balance="maxBorrowAmount"
+              :maxable="maxBorrowAmount !== undefined"
+              :max-handler="setMaxBorrowAmount"
               @input="onBorrowInput"
             />
-
             <UiRange
               v-model="ltv"
               label="LTV"
@@ -523,6 +580,23 @@ watch([collateralAmount, borrowAmount], async () => {
             variant="card"
             class="w-full laptop:max-w-[360px]"
           >
+            <SummaryRow label="Available liquidity">
+              <UiExactAmount
+                v-if="availableLiquidityDisplay"
+                class="text-content-primary text-right"
+                :exact="availableLiquidityDisplay.exact"
+                data-field="available-liquidity"
+              >
+                {{ availableLiquidityDisplay.display }}
+              </UiExactAmount>
+              <span
+                v-else
+                class="text-warning-500"
+                data-field="available-liquidity"
+              >
+                Unknown
+              </span>
+            </SummaryRow>
             <SummaryRow label="Net APY">
               <SummaryValue
                 :before="currentNetAPY != null ? formatNumber(currentNetAPY) : undefined"
@@ -575,6 +649,8 @@ watch([collateralAmount, borrowAmount], async () => {
               :loading="isSubmitting || isPreparing"
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
+              :can-add-to-batch="canAddToBatch"
+              @add-to-batch="addToBatch"
             >
               Review Borrow
             </VaultFormSubmit>

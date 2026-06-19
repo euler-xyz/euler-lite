@@ -20,10 +20,9 @@ import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { isOpDisabled, OP_DEPOSIT, OP_WITHDRAW } from '~/utils/vault-hooks'
 import { getHookDisabledWarning } from '~/composables/useVaultWarnings'
 import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
-import { type Address, type Abi, formatUnits, zeroAddress } from 'viem'
+import { type Address, formatUnits, zeroAddress } from 'viem'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
-import { eulerAccountLensABI } from '~/entities/euler/abis'
 import { SwapTokenSelector, SlippageSettingsModal, OperationReviewModal } from '#components'
 import type { ComputedRef } from 'vue'
 import { logWarn } from '~/utils/errorHandling'
@@ -128,7 +127,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const buildCollateralStateOverrideOptions = () =>
     buildStateOverrideOptions({ noBalanceOverride: options.mode === 'supply' })
   const { isConnected, address } = useWagmi()
-  const { isSpyMode } = useSpyMode()
+  const { isSpyMode, spyAddress } = useSpyMode()
+  const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
   const { account: planAccount } = usePlanAccount()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const positionIndex = usePositionIndex()
@@ -139,8 +139,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const { runSimulation, runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
   const { isReady: isVaultsReady } = useVaults()
   const { getOrFetch } = useVaultRegistry()
-  const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
-  const { client: rpcClient } = useRpcClient()
+  const { isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
 
   // --- Shared reactive state ---
   const isLoading = ref(false)
@@ -319,18 +318,12 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       const vault = await getOrFetch(targetAddress) as EVault | SecuritizeCollateralVault | undefined
       selectedCollateral.value = vault || null
 
-      const lensAddress = eulerLensAddresses.value?.accountLens
-      if (!lensAddress) {
-        throw new Error('Account lens address is not available')
-      }
-
-      const res = await rpcClient.value!.readContract({
-        address: lensAddress as Address,
-        abi: eulerAccountLensABI as Abi,
-        functionName: 'getVaultAccountInfo',
-        args: [position.value.subAccount, targetAddress],
-      }) as Record<string, unknown>
-      selectedCollateralAssets.value = res.assets as bigint
+      // Collateral assets from the (layer-aware) position rather than a direct
+      // lens read, so the form reflects the active batch layer. Collateral the
+      // sub-account doesn't hold isn't in `collaterals` ⇒ 0.
+      const match = position.value.collaterals.find(c =>
+        normalizeAddressOrEmpty(c.vaultAddress) === targetAddress)
+      selectedCollateralAssets.value = match?.assets ?? (targetAddress === primaryAddress ? position.value.supplied : 0n)
     }
     catch (e) {
       logWarn(`collateral/${options.mode}`, e)
@@ -429,7 +422,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       return
     }
 
-    const userAddr = (address.value || zeroAddress) as Address
+    const userAddr = (effectiveAddress.value || zeroAddress) as Address
     const subAccountAddr = position.value?.subAccount
       ? (position.value.subAccount as Address)
       : userAddr
@@ -520,7 +513,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   })
 
   const isSubmitDisabled = computed(() => {
-    if (!isConnected.value) return false
+    if (!isConnected.value && !isSpyMode.value) return false
     if (collateralVault.value && isEVault(collateralVault.value) && isOpDisabled(collateralVault.value, collateralOp.value)) return true
     if (options.effectiveBalance.value < valueToNano(amount.value, options.effectiveAsset.value?.decimals)) return true
     if (isLoading.value || !(+amount.value) || !!estimatesError.value || isEstimatesLoading.value) return true

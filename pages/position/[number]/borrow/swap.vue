@@ -8,13 +8,16 @@ import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/stri
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
+import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import type { SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { formatUnits, zeroAddress, type Address } from 'viem'
+import { isCowProvider } from '~/entities/cowswap'
 
 const route = useRoute()
 const { isConnected, address } = useWagmi()
-const { isSpyMode } = useSpyMode()
+const { isSpyMode, spyAddress } = useSpyMode()
+const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = useEulerAccount()
 const { planDebtChange } = useEulerTx()
 const { account: planAccount } = usePlanAccount()
@@ -26,7 +29,11 @@ const { getTokenCategoryTags } = useTokenList()
 const positionIndex = usePositionIndex()
 
 // ── Position & vaults ────────────────────────────────────────────────────
-const position: Ref<PortfolioBorrowPosition<VaultEntity> | null> = ref(null)
+// Layer-aware: tracks the active batch layer's portfolio so the form reflects
+// simulated debt/collateral (a one-shot ref would freeze at the real state).
+const position = computed<PortfolioBorrowPosition<VaultEntity> | null>(() =>
+  (!isConnected.value && !isSpyMode.value) ? null : (getPositionBySubAccountIndex(+positionIndex) || null),
+)
 
 const pairAssetsLabel = usePositionPairLabel(position)
 const fromVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
@@ -214,7 +221,7 @@ const swap = useSwapPageLogic({
     if (!fromVault.value || !toVault.value || !position.value) return null
     const debtAmount = currentDebt.value
     if (amount > debtAmount) return null
-    const liabilityAccount = (position.value.subAccount || address.value || zeroAddress) as Address
+    const liabilityAccount = (position.value.subAccount || effectiveAddress.value || zeroAddress) as Address
     return {
       params: {
         tokenIn: toVault.value.asset.address as Address,
@@ -274,6 +281,66 @@ const {
   normalizeAddress, clearSimulationError, requestQuote,
 } = swap
 
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
+
+// Add this debt swap (or same-asset migration) to the batch. CoW orders can't
+// be merged into an EVC batch, so they're excluded.
+const isCowSwapSelected = computed(() => isCowProvider(selectedProvider.value))
+const canAddToBatch = computed(() => {
+  if (isGeoBlocked.value) return false
+  if (!fromVault.value || !toVault.value || !position.value || !(+fromAmount.value)) return false
+  if (isSameAsset.value) return true
+  return !!selectedQuote.value && !isCowSwapSelected.value
+})
+const { guardWithPriceImpact: guardWithAddToBatchPriceImpact } = usePriceImpactGate({
+  directPriceImpact: priceImpact,
+  shouldGateUnknown: computed(() =>
+    !isSameAsset.value
+    && selectedQuote.value !== null
+    && priceImpact.value === null,
+  ),
+})
+const addToBatch = async () => {
+  if (!canAddToBatch.value) return
+  await guardWithAddToBatchPriceImpact(async () => {
+    const from = fromVault.value
+    const to = toVault.value
+    const pos = position.value
+    if (!from || !to || !pos) return
+    const oldLiabilityVault = from.address as Address
+    const newLiabilityVault = to.address as Address
+    const newLiabilityAsset = to.asset.address as Address
+    const liabilityAccount = (pos.subAccount || effectiveAddress.value || zeroAddress) as Address
+    const amount = valueToNano(fromAmount.value, from.asset.decimals)
+    const sameAsset = isSameAsset.value
+    const swapQuote = sameAsset ? undefined : selectedQuote.value ?? undefined
+    // Name the op after the original position pair (e.g. "Refinance BOLD/USDC",
+    // "BOLD & others/USDC" for multi-collateral), matching the positions list.
+    const pairLabel = pairAssetsLabel.value
+      ?? `${pos.collateralVault?.asset.symbol ?? '?'}/${pos.borrowVault?.asset.symbol ?? '?'}`
+    const label = `Refinance ${pairLabel}`
+    await addBatchEntry({
+      label,
+      nameOverride: label,
+      buildPlan: account => planDebtChange({
+        oldLiabilityVault,
+        newLiabilityVault,
+        liabilityAccount,
+        liabilityAmount: sameAsset ? undefined : amount,
+        newLiabilityAsset,
+        swapQuote,
+        swapperMode: SwapperMode.TARGET_DEBT,
+        account,
+      }),
+      subAccount: pos.subAccount as Address,
+      review: { type: 'swap-borrow', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.TARGET_DEBT },
+    })
+    fromAmount.value = ''
+    redirectAfterAdd('/portfolio', { subAccount: pos.subAccount as Address })
+  })
+}
+
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
@@ -297,14 +364,9 @@ watchEffect(async () => {
 
 // ── Position loading ─────────────────────────────────────────────────────
 const loadPosition = async () => {
-  if (!isConnected.value && !isSpyMode.value) {
-    position.value = null
-    return
-  }
+  if (!isConnected.value && !isSpyMode.value) return
   isLoading.value = true
   await until(isPositionsLoaded).toBe(true)
-
-  position.value = getPositionBySubAccountIndex(+positionIndex) || null
   isLoading.value = false
 }
 
@@ -315,6 +377,9 @@ watch([isPositionsLoaded, () => route.params.number], ([loaded]) => {
 }, { immediate: true })
 
 // ── Debt auto-fill ───────────────────────────────────────────────────────
+// `immediate` matters: `position` is a layer-aware computed that is already
+// populated when navigating here client-side (no currentDebt transition to
+// observe), so without it the amount only auto-fills on a full page load.
 watch([currentDebt, fromVault], () => {
   clearSimulationError()
   if (!position.value) return
@@ -322,7 +387,7 @@ watch([currentDebt, fromVault], () => {
   if (toVault.value) {
     requestQuote()
   }
-})
+}, { immediate: true })
 
 watch(borrowVaults, (vaults) => {
   if (!toVault.value) return
@@ -481,6 +546,8 @@ const onToVaultChange = (selectedIndex: number) => {
                 :loading="isSubmitting || isPreparing"
                 :disabled-reason="disabledReasonInfo?.message"
                 :disabled-reason-variant="disabledReasonInfo?.variant"
+                :can-add-to-batch="canAddToBatch"
+                @add-to-batch="addToBatch"
               >
                 {{ reviewSwapLabel }}
               </VaultFormSubmit>

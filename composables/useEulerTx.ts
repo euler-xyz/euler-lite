@@ -989,6 +989,16 @@ export const useEulerTx = () => {
     })
   }
 
+  // Real on-chain gas estimate for a plan. Throws (with the decoded revert
+  // reason) if the transaction would revert, so callers can surface it before
+  // asking the user to sign.
+  const estimateGasForPlan = async (plan: TransactionPlan): Promise<bigint> => {
+    const owner = requireOwner()
+    const cid = requireChainId()
+    const sdk = await getEulerSdk()
+    return sdk.executionService.estimateGasForTransactionPlan(cid, owner, plan)
+  }
+
   /**
    * Resolve each plugin's prefetch payload for a representative plan once per
    * form-load. Pass the returned record to prepare/simulate/estimate via the
@@ -1170,6 +1180,7 @@ export const useEulerTx = () => {
     planWithdrawOrRedeem,
     simulatePlan,
     prepareTransactionPlan,
+    estimateGasForPlan,
     prefetchPluginData,
     simulatePreparedPlan,
     executePlan,
