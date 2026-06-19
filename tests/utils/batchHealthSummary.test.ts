@@ -5,17 +5,30 @@ import { buildBatchHealthSummary } from '~/utils/batchHealthSummary'
 
 const WAD = 10n ** 18n
 const subAccount = getAddress('0x8A54C278D117854486db0F6460D901a180Fff517')
+const otherSubAccount = getAddress('0x7B54C278D117854486db0F6460D901a180Fff516')
 const oldController = getAddress('0x1111111111111111111111111111111111111111')
 const newController = getAddress('0x2222222222222222222222222222222222222222')
+const collateralVault = getAddress('0x3333333333333333333333333333333333333333')
+
+const changedKey = (
+  vault: Address,
+  account: Address = subAccount,
+): string => `${account.toLowerCase()}:${vault.toLowerCase()}`
 
 const borrowPosition = (
   controller: Address,
   healthFactor: bigint,
+  options: {
+    account?: Address
+    collateralVaults?: Address[]
+  } = {},
 ): PortfolioBorrowPosition<VaultEntity> => ({
-  subAccount,
+  subAccount: options.account ?? subAccount,
   healthFactor,
   borrowVault: { address: controller } as VaultEntity,
   borrow: { vaultAddress: controller } as PortfolioBorrowPosition<VaultEntity>['borrow'],
+  collateralVaults: options.collateralVaults ?? [],
+  collaterals: (options.collateralVaults ?? []).map(vaultAddress => ({ vaultAddress })),
 } as PortfolioBorrowPosition<VaultEntity>)
 
 const portfolio = (
@@ -82,5 +95,54 @@ describe('buildBatchHealthSummary', () => {
       finalPortfolio: unknownHealthPortfolio(),
       positionTag,
     })).toEqual([])
+  })
+
+  it('omits raw health changes for positions the batch did not touch', () => {
+    expect(buildBatchHealthSummary({
+      basePortfolio: portfolio(oldController, 2n * WAD),
+      finalPortfolio: portfolio(oldController, 3n * WAD),
+      changedPositionKeys: new Set([changedKey(newController, otherSubAccount)]),
+      positionTag,
+    })).toEqual([])
+  })
+
+  it('omits touched positions when the displayed health does not change', () => {
+    expect(buildBatchHealthSummary({
+      basePortfolio: portfolio(oldController, 1021_000_000_000_000_000n),
+      finalPortfolio: portfolio(oldController, 1024_000_000_000_000_000n),
+      changedPositionKeys: new Set([changedKey(oldController)]),
+      positionTag,
+    })).toEqual([])
+  })
+
+  it('shows health changes caused by collateral removed from the final position', () => {
+    const basePortfolio = {
+      borrows: [borrowPosition(oldController, 2n * WAD, { collateralVaults: [collateralVault] })],
+      account: {
+        getSubAccount: () => ({
+          enabledControllers: [oldController],
+        }),
+      },
+    } as unknown as Portfolio<VaultEntity>
+
+    const finalPortfolio = {
+      borrows: [borrowPosition(oldController, 3n * WAD)],
+      account: {
+        getSubAccount: () => ({
+          enabledControllers: [oldController],
+        }),
+      },
+    } as unknown as Portfolio<VaultEntity>
+
+    expect(buildBatchHealthSummary({
+      basePortfolio,
+      finalPortfolio,
+      changedPositionKeys: new Set([changedKey(collateralVault)]),
+      positionTag,
+    })).toEqual([{
+      label: 'Position 1',
+      before: '2.00',
+      after: '3.00',
+    }])
   })
 })

@@ -879,7 +879,7 @@ export const buildModifiedPositionKeySets = (
   for (const [addr, sa] of Object.entries(current.subAccounts)) {
     if (!sa) continue
     const subAccount = subAccountMapKey(addr)
-    const baseSa = base.subAccounts[subAccount]
+    const baseSa = getAccountSubAccount(base, subAccount)
     for (const p of sa.positions) {
       const vault = getAddress(p.vaultAddress) as Address
       const bp = baseSa?.positions.find(x => getAddress(x.vaultAddress) === vault)
@@ -920,6 +920,27 @@ export const buildRemovedPositionKeySets = (
 
   return removed
 }
+
+export const filterPositionKeysBySubAccounts = (
+  keys: Set<string>,
+  subAccounts?: Set<string>,
+): Set<string> => {
+  if (!subAccounts?.size) return new Set(keys)
+
+  return new Set([...keys].filter((key) => {
+    const [subAccount] = key.split(':')
+    return !!subAccount && subAccounts.has(subAccount)
+  }))
+}
+
+export const filterModifiedPositionKeySetsBySubAccounts = (
+  sets: ModifiedPositionKeySets,
+  subAccounts?: Set<string>,
+): ModifiedPositionKeySets => ({
+  any: filterPositionKeysBySubAccounts(sets.any, subAccounts),
+  balance: filterPositionKeysBySubAccounts(sets.balance, subAccounts),
+  debt: filterPositionKeysBySubAccounts(sets.debt, subAccounts),
+})
 
 const getDepositPositionVaultAddress = (
   position: PortfolioSavingsPosition<VaultEntity>,
@@ -1611,6 +1632,19 @@ export const useTxBatch = () => {
   })
   const activeLayerData = computed(() => layers.value[activeLayer.value])
   const entryCount = computed(() => entries.value.length)
+  const scopedEntrySubAccounts = computed<Set<string> | undefined>(() => {
+    const set = new Set<string>()
+    for (const entry of entries.value) {
+      if (!entry.subAccount) return undefined
+      try {
+        set.add(getAddress(entry.subAccount).toLowerCase())
+      }
+      catch {
+        return undefined
+      }
+    }
+    return set
+  })
 
   // The context label each entry operates in. EVK entries derive it from the
   // op's vault target(s) on its plan → label product(s), joined with " / " when
@@ -1638,7 +1672,10 @@ export const useTxBatch = () => {
     if (active <= 0) return emptyModifiedPositionKeySets()
     const cur = layers.value[active]?.account
     const base = layers.value[0]?.account
-    return buildModifiedPositionKeySets(cur, base)
+    return filterModifiedPositionKeySetsBySubAccounts(
+      buildModifiedPositionKeySets(cur, base),
+      scopedEntrySubAccounts.value,
+    )
   })
   const modifiedKeys = computed(() => modifiedPositionKeySets.value.any)
   const modifiedBalanceKeys = computed(() => modifiedPositionKeySets.value.balance)
