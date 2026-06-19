@@ -10,7 +10,7 @@ const newController = getAddress('0x2222222222222222222222222222222222222222')
 
 const borrowPosition = (
   controller: Address,
-  healthFactor: bigint,
+  healthFactor: bigint | undefined,
 ): PortfolioBorrowPosition<VaultEntity> => ({
   subAccount,
   healthFactor,
@@ -20,7 +20,7 @@ const borrowPosition = (
 
 const portfolio = (
   controller: Address,
-  healthFactor: bigint,
+  healthFactor: bigint | undefined,
 ): Portfolio<VaultEntity> => ({
   borrows: [borrowPosition(controller, healthFactor)],
   account: {
@@ -62,5 +62,25 @@ describe('buildBatchHealthSummary', () => {
       finalPortfolio: portfolio(oldController, 2n * WAD),
       positionTag,
     })).toEqual([])
+  })
+
+  it('omits unchanged unknown health for the same controller', () => {
+    expect(buildBatchHealthSummary({
+      basePortfolio: portfolio(oldController, undefined),
+      finalPortfolio: portfolio(oldController, undefined),
+      positionTag,
+    })).toEqual([])
+  })
+
+  it('formats changed unknown health as unavailable instead of zero', () => {
+    expect(buildBatchHealthSummary({
+      basePortfolio: portfolio(oldController, 2n * WAD),
+      finalPortfolio: portfolio(oldController, undefined),
+      positionTag,
+    })).toEqual([{
+      label: 'Position 1',
+      before: '2.00',
+      after: '-',
+    }])
   })
 })

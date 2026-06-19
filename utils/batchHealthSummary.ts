@@ -58,6 +58,9 @@ const getBorrowPositionKey = (
   return `${subAccount}:${controller ?? 'unknown-controller'}`
 }
 
+const formatOptionalHealthFactor = (healthFactor?: bigint): string =>
+  formatHealthScore(healthFactor === undefined ? undefined : nanoToValue(healthFactor, 18))
+
 export const buildBatchHealthSummary = ({
   basePortfolio,
   finalPortfolio,
@@ -78,13 +81,14 @@ export const buildBatchHealthSummary = ({
     if (subAccount && revertedSubAccounts.has(subAccount)) continue
 
     const key = getBorrowPositionKey(finalPortfolio, position)
+    const hasBefore = key ? base.has(key) : false
     const beforeHf = key ? base.get(key) : undefined
-    if (beforeHf !== undefined && beforeHf === position.healthFactor) continue
+    if (hasBefore && beforeHf === position.healthFactor) continue
 
     out.push({
       label: positionTag(position.subAccount) ?? 'Position',
-      before: beforeHf !== undefined ? formatHealthScore(nanoToValue(beforeHf, 18)) : undefined,
-      after: formatHealthScore(nanoToValue(position.healthFactor ?? 0n, 18)),
+      before: hasBefore ? formatOptionalHealthFactor(beforeHf) : undefined,
+      after: formatOptionalHealthFactor(position.healthFactor),
     })
   }
 
