@@ -20,7 +20,7 @@ This document covers the per-host proxies, the vault snapshot pipeline, the warm
 | `server/api/proxy/subgraph/[chainId].post.ts` | Proxies the per-chain Goldsky subgraph |
 | `server/api/labels/[file].get.ts` | Query-shape labels endpoint (`?chainId=X`) — used internally |
 | `server/api/labels/[chainId]/[file].get.ts` | Path-shape labels endpoint — matches the SDK's default URL template |
-| `server/api/v3/[...path].ts` | Rate-limited V3 backend proxy for SDK browser endpoints (`/api/v3` → `v3.euler.finance/v3`) |
+| `server/api/v3/[...path].ts` | Rate-limited V3 backend proxy for SDK browser endpoints (`/api/v3/...` → `v3.euler.finance/v3/...`) |
 | `server/api/vaults.get.ts` | Per-chain consolidated vault snapshot endpoint |
 | `server/utils/vaults-cache.ts` | `refreshChainVaults` + `vaultsCache` |
 | `server/utils/sdk-server.ts` | Lazy per-chain server-side SDK builder |
