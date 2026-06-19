@@ -35,12 +35,20 @@ const inputEl = useTemplateRef<HTMLInputElement>('inputEl')
 const modal = useModal()
 const isFocused = ref(false)
 const emitInputTimeout = ref<ReturnType<typeof setTimeout> | null>(null)
+const lastEmittedInputValue = ref(model.value)
+
+const emitInputIfChanged = () => {
+  if (lastEmittedInputValue.value === model.value) return
+  lastEmittedInputValue.value = model.value
+  emits('input')
+}
+
 const emitInputDebounced = () => {
   if (emitInputTimeout.value) {
     clearTimeout(emitInputTimeout.value)
   }
   emitInputTimeout.value = setTimeout(() => {
-    emits('input')
+    emitInputIfChanged()
     emitInputTimeout.value = null
   }, 250)
 }
@@ -50,7 +58,7 @@ const emitInputNow = () => {
     clearTimeout(emitInputTimeout.value)
     emitInputTimeout.value = null
   }
-  emits('input')
+  emitInputIfChanged()
 }
 
 const matchesSelectedSubAccount = (a?: string, b?: string) => {

@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { encodeFunctionData, getAddress } from 'viem'
 import { flattenBatchEntries, getSubAccountId, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdk } from '~/composables/useEulerSdk'
-import { useTxBatch } from '~/composables/useTxBatch'
+import { buildModifiedPositionKeySets, buildRemovedPositionKeySets, filterPositionKeysByOwner, useTxBatch } from '~/composables/useTxBatch'
 import { useTokenSymbolResolver } from '~/composables/useTokenSymbolResolver'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
@@ -53,6 +53,14 @@ const { getVault, isVerifiedVault } = useVaultRegistry()
 const { copied, copyToClipboard } = useClipboardCopy()
 const owner = computed(() => (isSpyMode.value ? spyAddress.value : walletAddress.value) || '')
 const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
+const ownerSubAccountKey = computed(() => {
+  try {
+    return owner.value ? getAddress(owner.value).toLowerCase() : undefined
+  }
+  catch {
+    return undefined
+  }
+})
 
 // Sub-account → tag. Sub-account 0 is the main account (Earn deposits / base
 // collateral), labelled "Deposits"; numbered borrow positions are "Position N".
@@ -164,6 +172,28 @@ const revertedSubAccounts = computed<Set<string>>(() => {
   return set
 })
 
+const scopedEntrySubAccounts = computed<Set<string> | undefined>(() => {
+  const set = new Set<string>()
+  for (const entry of entries.value) {
+    if (!entry.subAccount) return undefined
+    try {
+      set.add(getAddress(entry.subAccount).toLowerCase())
+    }
+    catch {
+      return undefined
+    }
+  }
+  return set
+})
+
+const changedPositionKeys = computed<Set<string>>(() => {
+  const base = layers.value[0]?.account
+  const final = layers.value[layers.value.length - 1]?.account
+  const keys = new Set(buildModifiedPositionKeySets(final, base).any)
+  for (const key of buildRemovedPositionKeySets(final, base)) keys.add(key)
+  return filterPositionKeysByOwner(keys, ownerSubAccountKey.value, scopedEntrySubAccounts.value)
+})
+
 // Resulting health per position the batch changes: compare each borrow
 // position's health factor on the real (layer 0) vs the final simulated layer,
 // and list those that move (with their Position tag and before → after score).
@@ -172,6 +202,7 @@ const healthSummary = computed<Array<{ label: string, before?: string, after: st
   return buildBatchHealthSummary({
     basePortfolio: layers.value[0]?.portfolio,
     finalPortfolio: layers.value[layers.value.length - 1]?.portfolio,
+    changedPositionKeys: changedPositionKeys.value,
     revertedSubAccounts: revertedSubAccounts.value,
     positionTag,
   })
