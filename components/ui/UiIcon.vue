@@ -29,9 +29,12 @@ const icon = ref({
   class: '',
 })
 
-icon.value = await useSprite(props.name)
-
+let spriteRequestId = 0
 watch(() => props.name, async (name) => {
-  icon.value = await useSprite(name)
-})
+  const requestId = ++spriteRequestId
+  const nextIcon = await useSprite(name)
+  if (requestId === spriteRequestId) {
+    icon.value = nextIcon
+  }
+}, { immediate: true })
 </script>

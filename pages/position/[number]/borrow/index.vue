@@ -15,6 +15,12 @@ import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { ltvToPercent, nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { createRaceGuard } from '~/utils/race-guard'
+import {
+  formatBorrowMoreInputAmount,
+  getBorrowMoreAvailableLiquidityDisplay,
+  getBorrowMoreLtvHeadroomAmount,
+  getBorrowMoreMaxBorrowAmount,
+} from '~/utils/borrow-more'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
@@ -170,6 +176,8 @@ const borrowApy = computed(() => withVaultIntrinsicApy(
   borrowVault.value,
   enableIntrinsicApy.value,
 ))
+const availableLiquidity = computed(() => borrowVault.value?.availableLiquidity)
+const availableLiquidityDisplay = computed(() => getBorrowMoreAvailableLiquidityDisplay(borrowVault.value))
 
 const load = async () => {
   if (!isConnected.value && !isSpyMode.value) {
@@ -359,6 +367,25 @@ const computedBorrowAmount = computed(() => {
   if (additional.isZero() || additional.isNegative()) return '0'
   return trimTrailingZeros(additional.toString())
 })
+const ltvHeadroomAmount = computed((): bigint | undefined => {
+  if (!pair.value || !borrowVault.value || !position.value) return undefined
+  return getBorrowMoreLtvHeadroomAmount({
+    borrowed: position.value.borrowed || 0n,
+    borrowDecimals: borrowVault.value.shares.decimals,
+    assetDecimals: borrowVault.value.asset.decimals,
+    currentLtvPercent: currentUserLTV.value,
+    maxBorrowLtv: pair.value.ltv.borrowLTV,
+  })
+})
+const maxBorrowAmount = computed(() => getBorrowMoreMaxBorrowAmount({
+  availableLiquidity: availableLiquidity.value,
+  ltvHeadroom: ltvHeadroomAmount.value,
+}))
+const setMaxBorrowAmount = async () => {
+  if (!borrowVault.value || maxBorrowAmount.value === undefined) return
+  borrowAmount.value = formatBorrowMoreInputAmount(maxBorrowAmount.value, borrowVault.value.asset.decimals)
+  await onBorrowInput()
+}
 
 watch(computedBorrowAmount, (val) => {
   if (isLtvDriven.value && val !== null) {
@@ -500,9 +527,11 @@ watch([collateralAmount, borrowAmount], async () => {
               :label="`Borrow ${borrowVault.asset.symbol}`"
               :asset="borrowVault.asset"
               :vault="borrowVault"
+              :balance="maxBorrowAmount"
+              :maxable="maxBorrowAmount !== undefined"
+              :max-handler="setMaxBorrowAmount"
               @input="onBorrowInput"
             />
-
             <UiRange
               v-model="ltv"
               label="LTV"
@@ -551,6 +580,23 @@ watch([collateralAmount, borrowAmount], async () => {
             variant="card"
             class="w-full laptop:max-w-[360px]"
           >
+            <SummaryRow label="Available liquidity">
+              <UiExactAmount
+                v-if="availableLiquidityDisplay"
+                class="text-content-primary text-right"
+                :exact="availableLiquidityDisplay.exact"
+                data-field="available-liquidity"
+              >
+                {{ availableLiquidityDisplay.display }}
+              </UiExactAmount>
+              <span
+                v-else
+                class="text-warning-500"
+                data-field="available-liquidity"
+              >
+                Unknown
+              </span>
+            </SummaryRow>
             <SummaryRow label="Net APY">
               <SummaryValue
                 :before="currentNetAPY != null ? formatNumber(currentNetAPY) : undefined"
