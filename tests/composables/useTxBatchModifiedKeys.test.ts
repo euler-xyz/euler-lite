@@ -4,8 +4,8 @@ import { getAddress, type Address } from 'viem'
 import {
   buildModifiedPositionKeySets,
   buildRemovedPositionKeySets,
-  filterModifiedPositionKeySetsBySubAccounts,
-  filterPositionKeysBySubAccounts,
+  filterModifiedPositionKeySetsByOwner,
+  filterPositionKeysByOwner,
 } from '~/composables/useTxBatch'
 
 const owner = getAddress('0x1000000000000000000000000000000000000000')
@@ -159,37 +159,61 @@ describe('buildRemovedPositionKeySets', () => {
 })
 
 describe('position key filtering', () => {
-  it('filters raw position keys to scoped sub-accounts', () => {
+  it('filters only owner sub-account keys when scoped entries target another position', () => {
     const keys = new Set([
+      key(collateralVault, owner),
       key(collateralVault),
       key(borrowVault, otherSubAccount),
     ])
 
-    expect(filterPositionKeysBySubAccounts(keys, new Set([subAccount.toLowerCase()]))).toEqual(new Set([
+    expect(filterPositionKeysByOwner(
+      keys,
+      owner.toLowerCase(),
+      new Set([subAccount.toLowerCase()]),
+    )).toEqual(new Set([
       key(collateralVault),
+      key(borrowVault, otherSubAccount),
     ]))
   })
 
-  it('filters all modified key sets to scoped sub-accounts', () => {
+  it('filters owner keys from all modified key sets', () => {
     const sets = {
-      any: new Set([key(collateralVault), key(borrowVault, otherSubAccount)]),
-      balance: new Set([key(collateralVault)]),
+      any: new Set([key(collateralVault, owner), key(collateralVault), key(borrowVault, otherSubAccount)]),
+      balance: new Set([key(collateralVault, owner), key(collateralVault)]),
       debt: new Set([key(borrowVault, otherSubAccount)]),
     }
 
-    expect(filterModifiedPositionKeySetsBySubAccounts(sets, new Set([subAccount.toLowerCase()]))).toEqual({
-      any: new Set([key(collateralVault)]),
+    expect(filterModifiedPositionKeySetsByOwner(
+      sets,
+      owner.toLowerCase(),
+      new Set([subAccount.toLowerCase()]),
+    )).toEqual({
+      any: new Set([key(collateralVault), key(borrowVault, otherSubAccount)]),
       balance: new Set([key(collateralVault)]),
-      debt: new Set(),
+      debt: new Set([key(borrowVault, otherSubAccount)]),
     })
+  })
+
+  it('keeps owner keys when owner sub-account is explicitly scoped', () => {
+    const keys = new Set([
+      key(collateralVault, owner),
+      key(borrowVault, otherSubAccount),
+    ])
+
+    expect(filterPositionKeysByOwner(
+      keys,
+      owner.toLowerCase(),
+      new Set([owner.toLowerCase()]),
+    )).toEqual(keys)
   })
 
   it('leaves keys unfiltered when the batch has an unscoped entry', () => {
     const keys = new Set([
+      key(collateralVault, owner),
       key(collateralVault),
       key(borrowVault, otherSubAccount),
     ])
 
-    expect(filterPositionKeysBySubAccounts(keys, undefined)).toEqual(keys)
+    expect(filterPositionKeysByOwner(keys, owner.toLowerCase(), undefined)).toEqual(keys)
   })
 })

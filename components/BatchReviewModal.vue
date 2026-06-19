@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { encodeFunctionData, getAddress } from 'viem'
 import { flattenBatchEntries, getSubAccountId, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdk } from '~/composables/useEulerSdk'
-import { buildModifiedPositionKeySets, buildRemovedPositionKeySets, filterPositionKeysBySubAccounts, useTxBatch } from '~/composables/useTxBatch'
+import { buildModifiedPositionKeySets, buildRemovedPositionKeySets, filterPositionKeysByOwner, useTxBatch } from '~/composables/useTxBatch'
 import { useTokenSymbolResolver } from '~/composables/useTokenSymbolResolver'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
@@ -53,6 +53,14 @@ const { getVault, isVerifiedVault } = useVaultRegistry()
 const { copied, copyToClipboard } = useClipboardCopy()
 const owner = computed(() => (isSpyMode.value ? spyAddress.value : walletAddress.value) || '')
 const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
+const ownerSubAccountKey = computed(() => {
+  try {
+    return owner.value ? getAddress(owner.value).toLowerCase() : undefined
+  }
+  catch {
+    return undefined
+  }
+})
 
 // Sub-account → tag. Sub-account 0 is the main account (Earn deposits / base
 // collateral), labelled "Deposits"; numbered borrow positions are "Position N".
@@ -183,7 +191,7 @@ const changedPositionKeys = computed<Set<string>>(() => {
   const final = layers.value[layers.value.length - 1]?.account
   const keys = new Set(buildModifiedPositionKeySets(final, base).any)
   for (const key of buildRemovedPositionKeySets(final, base)) keys.add(key)
-  return filterPositionKeysBySubAccounts(keys, scopedEntrySubAccounts.value)
+  return filterPositionKeysByOwner(keys, ownerSubAccountKey.value, scopedEntrySubAccounts.value)
 })
 
 // Resulting health per position the batch changes: compare each borrow

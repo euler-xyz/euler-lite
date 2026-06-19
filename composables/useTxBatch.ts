@@ -921,25 +921,29 @@ export const buildRemovedPositionKeySets = (
   return removed
 }
 
-export const filterPositionKeysBySubAccounts = (
+export const filterPositionKeysByOwner = (
   keys: Set<string>,
-  subAccounts?: Set<string>,
+  ownerSubAccount?: string,
+  scopedSubAccounts?: Set<string>,
 ): Set<string> => {
-  if (!subAccounts?.size) return new Set(keys)
+  if (!ownerSubAccount || !scopedSubAccounts?.size || scopedSubAccounts.has(ownerSubAccount)) {
+    return new Set(keys)
+  }
 
   return new Set([...keys].filter((key) => {
     const [subAccount] = key.split(':')
-    return !!subAccount && subAccounts.has(subAccount)
+    return subAccount !== ownerSubAccount
   }))
 }
 
-export const filterModifiedPositionKeySetsBySubAccounts = (
+export const filterModifiedPositionKeySetsByOwner = (
   sets: ModifiedPositionKeySets,
-  subAccounts?: Set<string>,
+  ownerSubAccount?: string,
+  scopedSubAccounts?: Set<string>,
 ): ModifiedPositionKeySets => ({
-  any: filterPositionKeysBySubAccounts(sets.any, subAccounts),
-  balance: filterPositionKeysBySubAccounts(sets.balance, subAccounts),
-  debt: filterPositionKeysBySubAccounts(sets.debt, subAccounts),
+  any: filterPositionKeysByOwner(sets.any, ownerSubAccount, scopedSubAccounts),
+  balance: filterPositionKeysByOwner(sets.balance, ownerSubAccount, scopedSubAccounts),
+  debt: filterPositionKeysByOwner(sets.debt, ownerSubAccount, scopedSubAccounts),
 })
 
 const getDepositPositionVaultAddress = (
@@ -1141,6 +1145,14 @@ export const useTxBatch = () => {
   )
   const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
   const { prepareTransactionPlan, executePreparedPlan, estimateGasForPlan } = useEulerTx()
+  const ownerSubAccountKey = computed(() => {
+    try {
+      return owner.value ? getAddress(owner.value).toLowerCase() : undefined
+    }
+    catch {
+      return undefined
+    }
+  })
 
   const resimulate = async () => {
     const token = ++resimToken
@@ -1672,8 +1684,9 @@ export const useTxBatch = () => {
     if (active <= 0) return emptyModifiedPositionKeySets()
     const cur = layers.value[active]?.account
     const base = layers.value[0]?.account
-    return filterModifiedPositionKeySetsBySubAccounts(
+    return filterModifiedPositionKeySetsByOwner(
       buildModifiedPositionKeySets(cur, base),
+      ownerSubAccountKey.value,
       scopedEntrySubAccounts.value,
     )
   })
