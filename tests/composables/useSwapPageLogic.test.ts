@@ -133,6 +133,9 @@ describe('useSwapPageLogic', () => {
     vi.stubGlobal('useWagmi', () => ({
       isConnected: ref(true),
     }))
+    vi.stubGlobal('useSpyMode', () => ({
+      isSpyMode: ref(false),
+    }))
     vi.stubGlobal('useEulerTx', () => ({
       executePlan: captured.executePlan,
       executePreparedPlan: captured.executePreparedPlan,
