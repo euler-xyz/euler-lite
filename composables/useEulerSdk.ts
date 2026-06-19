@@ -82,7 +82,8 @@ const buildAppApiPath = (path: string) => {
   return `${requestUrl?.origin ?? ''}${path}`
 }
 
-const buildV3ProxyApiPath = () => buildAppApiPath('/api/v3')
+// The SDK appends `/v3/...` paths, so the same-origin base is `/api`.
+const buildV3ProxyApiPath = () => buildAppApiPath('/api')
 // Per-host proxies wrap the SDK's direct upstream calls so they (1) share
 // one server-side TTL cache across browser tabs, (2) take the cold-TLS
 // hit once at proxy startup rather than on every user, and (3) keep

@@ -13,6 +13,7 @@ const DEPRECATED_EVAULT = '0x0000000000000000000000000000000000000104'
 const VISIBLE_WETH_EVAULT = '0xD8b27CF359b7D15710a5BE299AF6e7Bf904984C2'
 const HIDDEN_WETH_LENDING_EVAULT = '0x2ff5F1Ca35f5100226ac58E1BFE5aac56919443B'
 const HIDDEN_TELOSC_WORMHOLE_EVAULT = '0x2e6Dff8907aFdA5D62A278e21B2e65c8595D746E'
+const BASE_EARN_VAULT = '0x8bF41Ad2b816F7c220b22F4BCD63fC2A35Ab4247'
 
 const makeVault = (address: string): EVault => ({
   address: getAddress(address),
@@ -20,8 +21,10 @@ const makeVault = (address: string): EVault => ({
 }) as unknown as EVault
 
 const fetchVaults = vi.fn()
+const fetchEarnVaults = vi.fn()
 const fetchVerifiedVaultAddresses = vi.fn()
 const fetchVaultTypes = vi.fn()
+const chainId = ref(1)
 
 describe('useVaults EVault verification metadata', () => {
   beforeEach(() => {
@@ -29,16 +32,19 @@ describe('useVaults EVault verification metadata', () => {
       errors: [],
       result: addresses.map(address => makeVault(address)),
     }))
+    fetchEarnVaults.mockResolvedValue({ errors: [], result: [] })
     fetchVerifiedVaultAddresses.mockResolvedValue([])
     fetchVaultTypes.mockResolvedValue({})
+    chainId.value = 1
 
     vi.stubGlobal('useEulerAddresses', () => ({
-      chainId: ref(1),
+      chainId,
     }))
     vi.stubGlobal('useEulerLabels', useEulerLabels)
     vi.stubGlobal('useEulerSdk', () => ({
       getEulerSdk: vi.fn(async () => ({
         eVaultService: { fetchVaults, fetchVerifiedVaultAddresses },
+        eulerEarnService: { fetchVaults: fetchEarnVaults },
         vaultMetaService: { fetchVaultTypes },
       })),
     }))
@@ -138,6 +144,22 @@ describe('useVaults EVault verification metadata', () => {
       getAddress(LABELED_EVAULT),
       getAddress(DEPRECATED_EVAULT),
     ])
+  })
+
+  it('does not fetch stale Earn vault addresses after a chain switch invalidates the load', async () => {
+    chainId.value = 8453
+    __setEulerLabelsDataForTest({
+      earnVaults: [getAddress(BASE_EARN_VAULT)],
+    })
+    fetchVaultTypes.mockImplementationOnce(async () => {
+      chainId.value = 1
+      useVaults().resetVaultsState()
+      return {}
+    })
+
+    await useVaults().loadVaults()
+
+    expect(fetchEarnVaults).not.toHaveBeenCalled()
   })
 
   it('keeps dynamically resolved off-label EVaults out of verified EVault lists', async () => {
