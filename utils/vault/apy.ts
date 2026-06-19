@@ -37,6 +37,7 @@ export const getProjectedRates = async (
     address: eulerLensAddresses.value.vaultLens as Address,
     abi: eulerVaultLensABI,
     functionName: 'getVaultInterestRateModelInfo',
+    authorizationList: undefined,
     args: [vaultAddress as Address, [adjustedCash], [adjustedBorrows]],
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic lens contract return
   }) as Record<string, any>
