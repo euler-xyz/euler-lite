@@ -35,6 +35,7 @@ const readHookTargetField = async <T>(
       address: hookTarget,
       abi: keyringHookTargetAbi,
       functionName: functionName as 'policyId' | 'keyring' | 'checkKeyringCredentialOrWildCard',
+      authorizationList: undefined,
     }) as T
   }
   catch (err) {
@@ -104,6 +105,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
           address: ht,
           abi: keyringHookTargetAbi,
           functionName: 'checkKeyringCredentialOrWildCard',
+          authorizationList: undefined,
           args: [user],
         }).catch(() => false) as Promise<boolean>,
       ])
@@ -125,6 +127,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
               address: kca,
               abi: kAbi,
               functionName: 'entityExp',
+              authorizationList: undefined,
               args: [BigInt(pid), user],
             })
             expiration.value = exp as bigint

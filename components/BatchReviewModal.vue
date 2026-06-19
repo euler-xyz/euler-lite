@@ -83,7 +83,7 @@ const stepsByEntryId = computed<Record<string, DisplayStep[]>>(() => {
   const out: Record<string, DisplayStep[]> = {}
   for (const entry of entries.value) {
     const plan = entryPlans.value[entry.id]
-    const ctx = entry.review as StepDecodingContext | undefined
+    const ctx = entry.review as unknown as StepDecodingContext | undefined
     if (!plan?.length || !ctx) continue
     try {
       out[entry.id] = buildTransactionPlanDisplaySteps(plan, ctx, getVault, getAssetLogoUrl)

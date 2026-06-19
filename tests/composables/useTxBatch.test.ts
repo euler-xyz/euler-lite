@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
-import { buildWalletChanges, fetchBaseAccountSnapshot, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
+import { buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
 
 const owner = getAddress('0x1000000000000000000000000000000000000000')
 const subAccount = getAddress('0x8A54C278D117854486db0F6460D901a180Fff517')
@@ -456,6 +456,24 @@ describe('buildWalletChanges', () => {
     )
 
     expect(changes).toEqual([{ token, symbol: 'USDC', decimals: 6, delta: 5n }])
+  })
+})
+
+describe('buildWalletBalanceLayers', () => {
+  it('includes tokens that first appear after a later withdraw layer', () => {
+    const token = getAddress('0x2000000000000000000000000000000000000000').toLowerCase()
+
+    const layers = buildWalletBalanceLayers([
+      {},
+      {},
+      { [token]: 42n },
+    ], { [token]: 0n })
+
+    expect(layers).toEqual([
+      { [token]: 0n },
+      { [token]: 0n },
+      { [token]: 42n },
+    ])
   })
 })
 

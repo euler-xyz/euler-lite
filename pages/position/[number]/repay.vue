@@ -220,6 +220,22 @@ const redirectAfterRepayAdd = (isClosing: boolean) => {
   redirectAfterAdd('/portfolio', { subAccount: position.value?.subAccount })
 }
 
+const getAffectedSubAccounts = (...accounts: Array<string | undefined | null>): Address[] | undefined => {
+  const seen = new Set<string>()
+  const result: Address[] = []
+  for (const account of accounts) {
+    if (!account) continue
+    const key = account.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(account as Address)
+  }
+  return result.length ? result : undefined
+}
+
+const getFullRepayAffectedSubAccounts = (isClosing: boolean, ...accounts: Array<string | undefined | null>) =>
+  getAffectedSubAccounts(...accounts, isClosing ? portfolioAddress.value : undefined)
+
 const addToBatchWithoutWarnings = async () => {
   if (!canAddToBatch.value || !borrowVault.value || !position.value) return
   const borrowSymbol = borrowVault.value.asset.symbol
@@ -241,6 +257,7 @@ const addToBatchWithoutWarnings = async () => {
           isFullRepay: isClosing,
         }),
         subAccount: position.value.subAccount as Address,
+        affectedSubAccounts: getFullRepayAffectedSubAccounts(isClosing),
         nameOverride: `Repay ${borrowSymbol}`,
         review: { type: 'repay', asset: swapAsset, amount: swapAmount, swapToAsset: borrowVault.value.asset },
       })
@@ -263,6 +280,7 @@ const addToBatchWithoutWarnings = async () => {
         account,
       }),
       subAccount: position.value.subAccount as Address,
+      affectedSubAccounts: getFullRepayAffectedSubAccounts(isFullRepay),
       review: { type: 'repay', asset: borrowVault.value.asset, amount: wallet.amount.value },
     })
     wallet.amount.value = ''
@@ -290,6 +308,7 @@ const addToBatchWithoutWarnings = async () => {
         isSameAsset,
       }),
       subAccount: position.value.subAccount as Address,
+      affectedSubAccounts: getFullRepayAffectedSubAccounts(isClosing),
       review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, swapToAsset: borrowVault.value.asset },
     })
     collateral.amount.value = ''
@@ -320,6 +339,7 @@ const addToBatchWithoutWarnings = async () => {
         isSameAsset,
       }),
       subAccount: position.value.subAccount as Address,
+      affectedSubAccounts: getFullRepayAffectedSubAccounts(isClosing, sourceSubAccount),
       review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, swapToAsset: borrowVault.value.asset },
     })
     savings.amount.value = ''

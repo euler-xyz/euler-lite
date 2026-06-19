@@ -31,7 +31,7 @@ export default defineEventHandler(async (event) => {
 
   const requestUrl = getRequestURL(event)
   const urlValidation = validateV3ProxyUrl(method, requestUrl)
-  if (!urlValidation.ok) {
+  if (urlValidation.ok === false) {
     throw createError({ statusCode: urlValidation.statusCode, statusMessage: urlValidation.statusMessage })
   }
   rateLimiter.consume(event, method === 'POST' ? 5 : 1)

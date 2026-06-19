@@ -178,7 +178,7 @@ describe('useVaultTypeBadges', () => {
       governorAdmin: zeroAddress,
     })
 
-    const { badges, governanceType, hasSummaryBadges, isVerified, summaryBadges } = useVaultTypeBadges(ref(vault))
+    const { badges, governanceType, hasSummaryBadges, isVerified, summaryBadges } = useVaultTypeBadges(shallowRef(vault))
 
     expect(governanceType.value).toBe('ungoverned')
     expect(isVerified.value).toBe(false)

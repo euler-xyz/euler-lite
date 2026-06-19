@@ -68,6 +68,7 @@ export const useTosGuard = () => {
         address: tosSignerAddress.value,
         abi: tosSignerReadAbi,
         functionName: 'lastTermsOfUseSignatureTimestamp',
+        authorizationList: undefined,
         args: [address.value as Address, data.tosMessageHash],
       })
       hasSigned.value = (lastSignTimestamp as bigint) > 0
