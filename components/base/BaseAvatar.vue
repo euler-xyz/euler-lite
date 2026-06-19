@@ -12,11 +12,12 @@ const isInlineImage = (src: string) => src.startsWith('data:image/')
 defineOptions({
   inheritAttrs: false,
 })
-const { src, fallbackSrc, label } = defineProps<{ src?: string | string[], fallbackSrc?: string | string[], label?: string | string[] }>()
+const props = defineProps<{ src?: string | string[], fallbackSrc?: string | string[], label?: string | string[] }>()
+const listFromProp = (value?: string | string[]): string[] => Array.isArray(value) ? value : [value || '']
 const images = computed(() => {
-  const srcs = !src || typeof src === 'string' ? [src || ''] : [...src]
-  const fallbacks = !fallbackSrc || typeof fallbackSrc === 'string' ? [fallbackSrc || ''] : [...fallbackSrc]
-  const labels = !label || typeof label === 'string' ? [label || ''] : [...label]
+  const srcs = listFromProp(props.src)
+  const fallbacks = listFromProp(props.fallbackSrc)
+  const labels = listFromProp(props.label)
   return srcs.map((s, index) => {
     const fb = fallbacks[index] || ''
     const effectiveSrc = (fb && fallbackRedirects.get(s) === fb) ? fb : s

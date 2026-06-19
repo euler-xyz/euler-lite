@@ -37,7 +37,7 @@ export const getPublicClient = (rpcUrl: string): PublicClient => {
         wait: 100,
       },
     }),
-  })
+  }) as PublicClient
 
   clientCache.set(rpcUrl, client)
   return client

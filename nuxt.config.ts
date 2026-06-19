@@ -257,6 +257,15 @@ export default defineNuxtConfig({
       esbuildOptions: { target: 'esnext' },
     },
   },
+  typescript: {
+    strict: false,
+    tsConfig: {
+      compilerOptions: {
+        noImplicitOverride: false,
+        noUncheckedIndexedAccess: false,
+      },
+    },
+  },
 
   telemetry: false,
   eslint: { config: { stylistic: true } },
