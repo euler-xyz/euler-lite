@@ -30,6 +30,18 @@ const portfolio = (
   },
 } as unknown as Portfolio<VaultEntity>)
 
+const unknownHealthPortfolio = (): Portfolio<VaultEntity> => ({
+  borrows: [{
+    ...borrowPosition(oldController, 0n),
+    healthFactor: undefined,
+  }],
+  account: {
+    getSubAccount: () => ({
+      enabledControllers: [oldController],
+    }),
+  },
+} as unknown as Portfolio<VaultEntity>)
+
 const positionTag = () => 'Position 1'
 
 describe('buildBatchHealthSummary', () => {
@@ -60,6 +72,14 @@ describe('buildBatchHealthSummary', () => {
     expect(buildBatchHealthSummary({
       basePortfolio: portfolio(oldController, 2n * WAD),
       finalPortfolio: portfolio(oldController, 2n * WAD),
+      positionTag,
+    })).toEqual([])
+  })
+
+  it('omits positions whose health is unknown before and after', () => {
+    expect(buildBatchHealthSummary({
+      basePortfolio: unknownHealthPortfolio(),
+      finalPortfolio: unknownHealthPortfolio(),
       positionTag,
     })).toEqual([])
   })

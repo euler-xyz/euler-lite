@@ -79,12 +79,13 @@ export const buildBatchHealthSummary = ({
 
     const key = getBorrowPositionKey(finalPortfolio, position)
     const beforeHf = key ? base.get(key) : undefined
+    if (beforeHf === undefined && position.healthFactor === undefined) continue
     if (beforeHf !== undefined && beforeHf === position.healthFactor) continue
 
     out.push({
       label: positionTag(position.subAccount) ?? 'Position',
       before: beforeHf !== undefined ? formatHealthScore(nanoToValue(beforeHf, 18)) : undefined,
-      after: formatHealthScore(nanoToValue(position.healthFactor ?? 0n, 18)),
+      after: position.healthFactor !== undefined ? formatHealthScore(nanoToValue(position.healthFactor, 18)) : 'Unknown',
     })
   }
 

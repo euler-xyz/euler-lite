@@ -383,11 +383,15 @@ const collectPlanTargets = (
 
 type PriceableVaultCollateral = {
   address?: string
+  borrowLTV?: number
+  liquidationLTV?: number
   marketPriceUsd?: number
+  vault?: PriceableVault
 }
 type PriceableVault = IHasVaultAddress & {
   asset?: { decimals?: number }
   collaterals?: PriceableVaultCollateral[]
+  getCollateralRiskPrice?: (collateralVault: PriceableVault) => { priceBorrowing: bigint, priceLiquidation: bigint } | undefined
   marketPriceUsd?: number
 }
 type StitchLiquidityCollateral = {
@@ -446,7 +450,7 @@ const mergePositionsByVault = (positions: StitchPosition[]): StitchPosition[] =>
 }
 
 const cloneLiquidityValue = (
-  value: StitchLiquidityCollateral['value'] | StitchLiquidity['liabilityValue'] | undefined,
+  value: StitchLiquidityCollateral['value'] | StitchLiquidity['liabilityValue'] | StitchLiquidity['totalCollateralValue'] | undefined,
 ) => value ? { ...value } : undefined
 
 const cloneLiquidity = (liquidity: StitchLiquidity | undefined): StitchLiquidity | undefined =>
@@ -488,6 +492,12 @@ const maybeAddressKey = (address: string | undefined): string | undefined => {
   }
 }
 
+const cloneWithPrototype = <T extends object>(source: T, patch: Partial<T>): T => {
+  const clone = Object.create(Object.getPrototypeOf(source)) as T
+  Object.defineProperties(clone, Object.getOwnPropertyDescriptors(source))
+  return Object.assign(clone, patch)
+}
+
 const mergeVaultPriceMetadata = (
   touched: PriceableVault | undefined,
   existing: PriceableVault | undefined,
@@ -526,11 +536,10 @@ const mergeVaultPriceMetadata = (
     || (marketPriceUsd !== undefined && touched.marketPriceUsd === undefined)
   if (!needsVaultPatch) return touched
 
-  return {
-    ...touched,
+  return cloneWithPrototype(touched, {
     marketPriceUsd: touched.marketPriceUsd ?? marketPriceUsd,
     collaterals: mergedCollaterals.length ? mergedCollaterals : touched.collaterals,
-  }
+  })
 }
 
 const vaultAssetDecimals = (vault: PriceableVault | undefined): number | undefined => {
@@ -607,6 +616,122 @@ const getPositionUsdValue = (position: StitchPosition | undefined): number | und
   return tokenAmountToUsdValue(position.assets, vaultAssetDecimals(position.vault), positionPriceUsd(position))
 }
 
+const WAD = 10n ** 18n
+const LTV_DECIMALS = 12n
+const LTV_SCALE = 10n ** LTV_DECIMALS
+
+const ltvToWad = (ltv: number | undefined): bigint | undefined => {
+  if (ltv === undefined || !Number.isFinite(ltv)) return undefined
+  return BigInt(Math.round(ltv * Number(LTV_SCALE))) * (WAD / LTV_SCALE)
+}
+
+const applyLtv = (value: bigint, ltv: number | undefined): bigint | undefined => {
+  const ltvWad = ltvToWad(ltv)
+  return ltvWad === undefined ? undefined : (value * ltvWad) / WAD
+}
+
+const tokenAmountToRiskValue = (
+  amount: bigint | undefined,
+  decimals: number | undefined,
+  price: bigint | undefined,
+): bigint | undefined => {
+  if (amount === undefined || decimals === undefined || price === undefined) return undefined
+  return (amount * price) / (10n ** BigInt(decimals))
+}
+
+const USD_SCALE = 1_000_000_000n
+
+const numberToUsdScaledBigint = (value: number | undefined): bigint | undefined => {
+  if (value === undefined || !Number.isFinite(value) || value < 0) return undefined
+  return BigInt(Math.round(value * Number(USD_SCALE)))
+}
+
+type RiskValueScale = {
+  valueUsd: bigint
+  oracleMid: bigint
+}
+
+const buildRiskValueScale = (liquidity: StitchLiquidity): RiskValueScale | undefined => {
+  const liabilityUsd = numberToUsdScaledBigint(liquidity.liabilityValueUsd)
+  if (liabilityUsd !== undefined && liabilityUsd > 0n && (liquidity.liabilityValue?.oracleMid ?? 0n) > 0n) {
+    return { valueUsd: liabilityUsd, oracleMid: liquidity.liabilityValue!.oracleMid! }
+  }
+
+  const collateralUsd = numberToUsdScaledBigint(liquidity.totalCollateralValueUsd)
+  if (collateralUsd !== undefined && collateralUsd > 0n && (liquidity.totalCollateralValue?.oracleMid ?? 0n) > 0n) {
+    return { valueUsd: collateralUsd, oracleMid: liquidity.totalCollateralValue!.oracleMid! }
+  }
+
+  return undefined
+}
+
+const usdValueToRiskValue = (
+  valueUsd: number | undefined,
+  scale: RiskValueScale | undefined,
+): bigint | undefined => {
+  const scaledUsd = numberToUsdScaledBigint(valueUsd)
+  if (scaledUsd === undefined || scale === undefined || scale.valueUsd === 0n) return undefined
+  return (scaledUsd * scale.oracleMid) / scale.valueUsd
+}
+
+const getBorrowCollateralMeta = (
+  borrowVault: PriceableVault | undefined,
+  collateralAddress: Address,
+): PriceableVaultCollateral | undefined =>
+  borrowVault?.collaterals?.find(collateral => maybeAddressKey(collateral.address) === collateralAddress.toLowerCase())
+
+const getEffectiveLiquidationLtv = (collateral: PriceableVaultCollateral | undefined): number | undefined => {
+  const current = (collateral as { currentLiquidationLTV?: number } | undefined)?.currentLiquidationLTV
+  return typeof current === 'number' && Number.isFinite(current) ? current : collateral?.liquidationLTV
+}
+
+const liquidityRatio = (value: bigint | undefined, oracleMid: bigint | undefined): bigint | undefined => {
+  if (value === undefined || oracleMid === undefined || oracleMid === 0n) return undefined
+  return (value * WAD) / oracleMid
+}
+
+const applyRatio = (value: bigint, ratio: bigint | undefined): bigint | undefined =>
+  ratio === undefined ? undefined : (value * ratio) / WAD
+
+const buildCurrentCollateralLiquidityValue = (
+  borrow: StitchPosition,
+  collateralPosition: StitchPosition | undefined,
+  existing: StitchLiquidityCollateral | undefined,
+  scale: RiskValueScale | undefined,
+): StitchLiquidityCollateral['value'] | undefined => {
+  const borrowVault = borrow.vault
+  const collateralAddress = collateralPosition?.vaultAddress ?? existing?.address
+  const collateralMeta = collateralAddress
+    ? getBorrowCollateralMeta(borrowVault, getAddress(collateralAddress) as Address)
+    : undefined
+  const collateralVault = collateralPosition?.vault ?? existing?.vault ?? collateralMeta?.vault
+  if (!borrowVault || !collateralVault) return cloneLiquidityValue(existing?.value)
+
+  const riskPrice = borrowVault.getCollateralRiskPrice?.(collateralVault)
+  const decimals = vaultAssetDecimals(collateralVault)
+  const valueUsd = getPositionUsdValue(collateralPosition) ?? existing?.valueUsd
+  const oracleMid = tokenAmountToRiskValue(collateralPosition?.assets, decimals, riskPrice?.priceLiquidation)
+    ?? (existing ? usdValueToRiskValue(valueUsd, scale) : undefined)
+  if (oracleMid === undefined) return cloneLiquidityValue(existing?.value)
+
+  const borrowingBase = tokenAmountToRiskValue(collateralPosition?.assets, decimals, riskPrice?.priceBorrowing) ?? oracleMid
+  const borrowingRatio = ltvToWad(collateralMeta?.borrowLTV)
+    ?? liquidityRatio(existing?.value?.borrowing, existing?.value?.oracleMid)
+  const liquidationRatio = ltvToWad(getEffectiveLiquidationLtv(collateralMeta))
+    ?? liquidityRatio(existing?.value?.liquidation, existing?.value?.oracleMid)
+  return {
+    borrowing: applyRatio(borrowingBase, borrowingRatio) ?? applyLtv(borrowingBase, collateralMeta?.borrowLTV) ?? existing?.value?.borrowing ?? oracleMid,
+    liquidation: applyRatio(oracleMid, liquidationRatio) ?? applyLtv(oracleMid, getEffectiveLiquidationLtv(collateralMeta)) ?? existing?.value?.liquidation ?? oracleMid,
+    oracleMid,
+  }
+}
+
+const zeroLiquidityValue = (): NonNullable<StitchLiquidityCollateral['value']> => ({
+  borrowing: 0n,
+  liquidation: 0n,
+  oracleMid: 0n,
+})
+
 const hydrateBorrowLiquidity = (
   borrow: StitchPosition,
   positions: StitchPosition[],
@@ -619,35 +744,67 @@ const hydrateBorrowLiquidity = (
   liquidity.vault = liquidity.vault ?? borrow.vault
   liquidity.liabilityValueUsd = borrow.borrowedValueUsd
 
-  const liquidityCollateralAddresses = liquidity.collaterals.map(collateral => getAddress(collateral.address))
-  const fallbackCollateralAddresses = (enabledCollaterals ?? []).map(address => getAddress(address))
-  const collateralAddresses = liquidityCollateralAddresses.length
-    ? liquidityCollateralAddresses
-    : fallbackCollateralAddresses
+  const existingCollaterals = new Map<string, StitchLiquidityCollateral>()
+  for (const collateral of liquidity.collaterals) {
+    existingCollaterals.set(getAddress(collateral.address).toLowerCase(), collateral)
+  }
+  const enabledCollateralKeys = enabledCollaterals?.map(address => getAddress(address).toLowerCase())
+  const enabledCollateralSet = enabledCollateralKeys ? new Set(enabledCollateralKeys) : undefined
+  const collateralAddresses: Address[] = []
+  const seen = new Set<string>()
+  const addCollateralAddress = (address: string, requireEnabledOrValue: boolean) => {
+    const key = getAddress(address).toLowerCase()
+    if (seen.has(key)) return
+    const collateralPosition = positionsByVault.get(getAddress(address))
+    const hasBalance = hasPositionValue(collateralPosition)
+    const isEnabled = enabledCollateralSet?.has(key) ?? true
+    if (requireEnabledOrValue && enabledCollateralSet && !isEnabled && !hasBalance) return
+    if (requireEnabledOrValue && enabledCollateralSet && !isEnabled) return
+    if (requireEnabledOrValue && !hasBalance && !existingCollaterals.has(key)) return
+    seen.add(key)
+    collateralAddresses.push(getAddress(address) as Address)
+  }
+  for (const collateral of liquidity.collaterals) addCollateralAddress(collateral.address, true)
+  for (const collateral of enabledCollateralKeys ?? []) addCollateralAddress(collateral, false)
 
   let totalCollateralValueUsd: number | undefined = collateralAddresses.length ? 0 : liquidity.totalCollateralValueUsd
-
-  for (const collateral of liquidity.collaterals) {
-    const collateralAddress = getAddress(collateral.address)
-    const collateralPosition = positionsByVault.get(collateralAddress)
-    collateral.vault = collateral.vault ?? collateralPosition?.vault
-    collateral.marketPriceUsd = collateral.marketPriceUsd ?? vaultMarketPrice(collateral.vault)
-
-    const valueUsd = getPositionUsdValue(collateralPosition)
-    if (valueUsd !== undefined) {
-      collateral.valueUsd = valueUsd
-    }
-  }
+  const totalCollateralValue = collateralAddresses.length
+    ? { borrowing: 0n, liquidation: 0n, oracleMid: 0n }
+    : cloneLiquidityValue(liquidity.totalCollateralValue)
+  const nextCollaterals: StitchLiquidityCollateral[] = []
+  const riskValueScale = buildRiskValueScale(liquidity)
 
   for (const collateralAddress of collateralAddresses) {
-    const valueUsd = getPositionUsdValue(positionsByVault.get(collateralAddress))
+    const key = collateralAddress.toLowerCase()
+    const existing = existingCollaterals.get(key)
+    const collateralPosition = positionsByVault.get(collateralAddress)
+    const collateralMeta = getBorrowCollateralMeta(borrow.vault, collateralAddress)
+    const value = buildCurrentCollateralLiquidityValue(borrow, collateralPosition, existing, riskValueScale) ?? zeroLiquidityValue()
+    const vault = existing?.vault ?? collateralPosition?.vault ?? collateralMeta?.vault
+    const valueUsd = getPositionUsdValue(collateralPosition) ?? existing?.valueUsd
+    nextCollaterals.push({
+      ...(existing ? { ...existing } : { address: collateralAddress }),
+      address: collateralAddress,
+      vault,
+      marketPriceUsd: existing?.marketPriceUsd ?? vaultMarketPrice(vault) ?? collateralMeta?.marketPriceUsd,
+      value,
+      valueUsd: valueUsd ?? existing?.valueUsd,
+    })
+
+    if (totalCollateralValue) {
+      totalCollateralValue.borrowing = (totalCollateralValue.borrowing ?? 0n) + (value.borrowing ?? 0n)
+      totalCollateralValue.liquidation = (totalCollateralValue.liquidation ?? 0n) + (value.liquidation ?? 0n)
+      totalCollateralValue.oracleMid = (totalCollateralValue.oracleMid ?? 0n) + (value.oracleMid ?? 0n)
+    }
     if (valueUsd === undefined) {
       totalCollateralValueUsd = undefined
-      break
+      continue
     }
     totalCollateralValueUsd = (totalCollateralValueUsd ?? 0) + valueUsd
   }
 
+  liquidity.collaterals = nextCollaterals
+  if (totalCollateralValue) liquidity.totalCollateralValue = totalCollateralValue
   liquidity.totalCollateralValueUsd = totalCollateralValueUsd
 }
 
