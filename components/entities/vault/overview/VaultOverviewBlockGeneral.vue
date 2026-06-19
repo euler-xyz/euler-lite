@@ -10,6 +10,7 @@ import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { autoLink } from '~/utils/autoLink'
 import { normalizeAddress } from '~/utils/normalizeAddress'
+import { formatMarketAvailability } from '~/utils/vault-display'
 import type { VaultTypeBadge } from '~/composables/useVaultTypeBadges'
 import { AccessControlBadge, CyclicalNoteBadge, GovernanceLimitedBadge, KeyringBadge } from '#components'
 
@@ -55,10 +56,6 @@ const collateralCount = computed(() => {
 const borrowCount = computed(() => {
   return vault.collaterals.filter(ltv => ltv.borrowLTV > 0).length
 })
-
-const formatMarketAvailability = (count: number) => {
-  return count ? `Yes in ${count} ${count === 1 ? 'market' : 'markets'}` : 'No'
-}
 
 const propertyBadgeDetails: Record<VaultPropertyBadge, {
   component: Component
