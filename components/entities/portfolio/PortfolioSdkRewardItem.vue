@@ -14,11 +14,11 @@ const REWARD_PROVIDER_LABELS: Record<UserReward['provider'], string> = {
   turtle: 'Turtle',
 }
 
-const REWARD_PROVIDER_TYPES: Record<UserReward['provider'], 'reward' | 'brevis-reward' | 'fuul-reward'> = {
+const REWARD_PROVIDER_TYPES: Record<UserReward['provider'], 'reward' | 'brevis-reward' | 'fuul-reward' | 'turtle-reward'> = {
   merkl: 'reward',
   brevis: 'brevis-reward',
   fuul: 'fuul-reward',
-  turtle: 'reward',
+  turtle: 'turtle-reward',
 }
 
 const { reward } = defineProps<{ reward: UserReward }>()
@@ -62,6 +62,11 @@ const ensureWalletOnClaimChain = async () => {
 }
 
 const claim = async () => {
+  if (isSpyMode.value) {
+    error('Exit spy mode to claim rewards')
+    return
+  }
+
   try {
     isClaiming.value = true
 
@@ -82,6 +87,11 @@ const claim = async () => {
 }
 
 const onClaimClick = async () => {
+  if (isSpyMode.value) {
+    error('Exit spy mode to claim rewards')
+    return
+  }
+
   if (isPreparing.value) return
   isPreparing.value = true
   try {

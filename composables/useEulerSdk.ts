@@ -126,7 +126,7 @@ const onchainAdapterConfig: Partial<EulerSDKConfig> = {
   eVaultServiceAdapter: 'onchain',
   eulerEarnServiceAdapter: 'onchain',
   vaultTypeAdapter: 'subgraph',
-  rewardsServiceAdapter: 'direct',
+  rewardsServiceAdapter: 'fallback',
 }
 
 // Per-chain subgraph URL map → server proxy. The proxy resolves the real

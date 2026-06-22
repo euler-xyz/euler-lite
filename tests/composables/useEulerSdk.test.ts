@@ -24,6 +24,11 @@ type BuildEulerSDKOptions = {
     rewardsEnableBrevis?: boolean
     rewardsEnableFuul?: boolean
     rewardsEnableTurtle?: boolean
+    accountServiceAdapter?: string
+    eVaultServiceAdapter?: string
+    eulerEarnServiceAdapter?: string
+    vaultTypeAdapter?: string
+    rewardsServiceAdapter?: string
   }
   rpcUrls?: Record<number, string>
   deploymentServiceConfig?: unknown
@@ -201,6 +206,33 @@ describe('useEulerSdk', () => {
       eulerEarnServiceAdapter: 'fallback',
       vaultTypeAdapter: 'fallback',
       rewardsServiceAdapter: 'fallback',
+    })
+  })
+
+  it('keeps fresh portfolio reads onchain while resolving rewards through fallback', async () => {
+    const chainIds = ref([8453])
+    const sdk = createMockSdk('fresh')
+    const buildEulerSDK = vi.fn().mockResolvedValue(sdk)
+    vi.stubGlobal('useRuntimeConfig', () => ({
+      public: {
+        configEulerChainsUrl: '',
+        configLabelsBaseUrl: '',
+        configOracleChecksBaseUrl: '',
+      },
+    }))
+
+    const { getEulerSdkFresh } = await importUseEulerSdk(chainIds, buildEulerSDK)
+    await expect(getEulerSdkFresh()).resolves.toBe(sdk)
+
+    const options = buildEulerSDK.mock.calls[0]?.[0] as BuildEulerSDKOptions
+    expect(options.config).toMatchObject({
+      accountServiceAdapter: 'onchain',
+      eVaultServiceAdapter: 'onchain',
+      eulerEarnServiceAdapter: 'onchain',
+      vaultTypeAdapter: 'subgraph',
+      rewardsServiceAdapter: 'fallback',
+      rewardsTurtleApiUrl: '/api/proxy/turtle',
+      v3ApiUrl: '/api/v3',
     })
   })
 
