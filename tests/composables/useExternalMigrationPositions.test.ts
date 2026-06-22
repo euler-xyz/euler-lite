@@ -5,6 +5,7 @@ import { isExternalMigrationDustPosition, useExternalMigrationPositions, type Ex
 
 const eulerSdkMock = vi.hoisted(() => ({
   fetchAssetUsdPriceByAddress: vi.fn(),
+  getConnectorProtocolAddress: vi.fn(),
   getEulerSdk: vi.fn(),
 }))
 
@@ -116,15 +117,22 @@ describe('useExternalMigrationPositions', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     eulerSdkMock.fetchAssetUsdPriceByAddress.mockReset()
+    eulerSdkMock.getConnectorProtocolAddress.mockReset()
     eulerSdkMock.getEulerSdk.mockReset()
     eulerSdkMock.fetchAssetUsdPriceByAddress.mockImplementation(async (_chainId: number, asset: Address) => {
       if (getAddress(asset) === WETH) return priceResult('2500')
       if (getAddress(asset) === USDC) return priceResult('1')
       return undefined
     })
+    eulerSdkMock.getConnectorProtocolAddress.mockImplementation((connectorId: string, chainId: number) =>
+      connectorId === 'aave' && chainId === 8453 ? AAVE_POOL : undefined,
+    )
     eulerSdkMock.getEulerSdk.mockResolvedValue({
       priceService: {
         fetchAssetUsdPriceByAddress: eulerSdkMock.fetchAssetUsdPriceByAddress,
+      },
+      positionMigrationService: {
+        getConnectorProtocolAddress: eulerSdkMock.getConnectorProtocolAddress,
       },
     })
 

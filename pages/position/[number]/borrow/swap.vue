@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import {
+  AAVE_CONNECTOR_ID,
   isSecuritizeCollateralVault,
+  MORPHO_CONNECTOR_ID,
   SwapperMode,
   type EVault,
   type EulerMigrationTarget,
@@ -26,7 +28,6 @@ import type { CowSwapCollateralSwapExecuteParams } from '~/composables/cowswap'
 import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus, openCowSwapReviewModal, buildApprovalSignSteps } from '~/composables/cowswap'
 import { useMorphoMigrationMarkets, type MorphoMigrationMarket } from '~/composables/useMorphoMigrationMarkets'
 import { useExternalMigrationPositions, type ExternalMigrationCandidate } from '~/composables/useExternalMigrationPositions'
-import { AAVE_CONNECTOR_ID, MORPHO_CONNECTOR_ID } from '~/entities/migration/protocols'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'

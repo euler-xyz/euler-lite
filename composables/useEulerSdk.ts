@@ -1,9 +1,8 @@
-import { buildEulerSDK, createKeyringPlugin, createPythPlugin, IntrinsicApyService, IntrinsicApyV3Adapter, MorphoPositionMigrationConnector } from '@eulerxyz/euler-v2-sdk'
+import { buildEulerSDK, createKeyringPlugin, createPythPlugin, IntrinsicApyService, IntrinsicApyV3Adapter } from '@eulerxyz/euler-v2-sdk'
 import type { BuildQueryFn, EulerSDK, EulerSDKConfig } from '@eulerxyz/euler-v2-sdk'
 import { sdkBuildQuery, sdkFreshBuildQuery } from '~/utils/sdk-query-cache'
 import { createLiteTosPlugin } from '~/utils/sdk-tos'
 import { createYuzuIntrinsicApyService } from '~/utils/yuzu-intrinsic-apy'
-import { MORPHO_BLUE_ADDRESSES } from '~/entities/migration/protocols'
 
 // sdk-keyring is loaded dynamically below to avoid a static import cycle:
 // useEulerSdk -> sdk-keyring -> eulerLabelsUtils -> useEulerLabels ->
@@ -245,13 +244,6 @@ const configureAppProxies = (sdk: EulerSDK, buildQuery: BuildQueryFn) => {
       return response.json()
     },
     oracleAdapterService,
-  ))
-
-  sdk.positionMigrationService.registerConnector(new MorphoPositionMigrationConnector(
-    sdk.deploymentService,
-    sdk.providerService,
-    sdk.executionService,
-    { morphoAddresses: MORPHO_BLUE_ADDRESSES },
   ))
 }
 

@@ -1,7 +1,6 @@
 import { getAddress, type Address } from 'viem'
 import type { MaybeRefOrGetter } from 'vue'
-import type { MorphoMarketParams } from '@eulerxyz/euler-v2-sdk'
-import { MORPHO_CONNECTOR_ID } from '~/entities/migration/protocols'
+import { MORPHO_CONNECTOR_ID, type MorphoMarketParams } from '@eulerxyz/euler-v2-sdk'
 import { logWarn } from '~/utils/errorHandling'
 
 export interface MorphoMigrationMarket {

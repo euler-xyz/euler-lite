@@ -1,7 +1,7 @@
 import type { Ref } from 'vue'
+import { AAVE_CONNECTOR_ID, MORPHO_CONNECTOR_ID } from '@eulerxyz/euler-v2-sdk'
 import { erc20Abi, getAddress, type Address } from 'viem'
 import { getEulerSdk } from '~/composables/useEulerSdk'
-import { AAVE_CONNECTOR_ID, AAVE_POOL_ADDRESSES, MORPHO_CONNECTOR_ID } from '~/entities/migration/protocols'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { logWarn } from '~/utils/errorHandling'
 
@@ -80,6 +80,20 @@ const compareMigrationPositions = (a: ExternalMigrationCandidate, b: ExternalMig
   if (aValue === null && bValue !== null) return 1
   const protocol = a.protocol.localeCompare(b.protocol)
   return protocol || a.id.localeCompare(b.id)
+}
+
+const getExternalProtocolAddress = async (
+  connectorId: string,
+  targetChainId: number,
+): Promise<Address | undefined> => {
+  try {
+    const sdk = await getEulerSdk()
+    return sdk.positionMigrationService.getConnectorProtocolAddress(connectorId, targetChainId)
+  }
+  catch (err) {
+    logWarn(`externalMigration/${connectorId}ProtocolAddress`, err)
+    return undefined
+  }
 }
 
 export const isExternalMigrationDustPosition = (position: ExternalMigrationCandidate): boolean => {
@@ -495,7 +509,7 @@ export const useExternalMigrationPositions = (options: {
 
   const fetchAaveMigrationPositions = async (targetChainId: number, targetOwner: Address): Promise<AaveMigrationCandidate[]> => {
     const client = rpcClient.value
-    const pool = AAVE_POOL_ADDRESSES[targetChainId]
+    const pool = await getExternalProtocolAddress(AAVE_CONNECTOR_ID, targetChainId)
     if (!client || !pool) return []
 
     const [configurationResult, reservesResult] = await readContractsAllowFailure(client, [
