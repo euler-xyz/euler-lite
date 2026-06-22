@@ -1,5 +1,5 @@
 import { encodeFunctionData, type Address, type Hex, type StateOverride } from 'viem'
-import { flattenBatchEntries, type EVCBatchItem, type EulerSDK, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { flattenBatchEntries, mergeStateOverrides, type EVCBatchItem, type EulerSDK, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 
 export type TenderlyStateOverride = {
   address: Address
@@ -39,11 +39,13 @@ export const buildTenderlySimulationPayload = async ({
   owner,
   chainId,
   sdk,
+  extraStateOverrides,
 }: {
   plan: TransactionPlan
   owner: Address
   chainId?: number
   sdk: EulerSDK
+  extraStateOverrides?: StateOverride
 }): Promise<TenderlySimulationPayload | undefined> => {
   const batchItem = findFirstEvcBatch(plan)
   if (batchItem && batchItem.type === 'evcBatch') {
@@ -53,11 +55,15 @@ export const buildTenderlySimulationPayload = async ({
     const evcAddress = sdk.deploymentService.getDeployment(chainId).addresses.coreAddrs.evc
     const data = sdk.executionService.encodeBatch(items)
     const value = items.reduce((sum, it) => sum + it.value, 0n)
-    const stateOverrides = await sdk.executionService.deriveStateOverrides(
+    const derivedStateOverrides = await sdk.executionService.deriveStateOverrides(
       chainId,
       owner,
       plan,
     )
+    const stateOverrides = mergeStateOverrides([
+      ...derivedStateOverrides,
+      ...(extraStateOverrides ?? []),
+    ])
 
     return {
       chainId,
@@ -82,6 +88,6 @@ export const buildTenderlySimulationPayload = async ({
       args: contractCall.args,
     }),
     value: contractCall.value.toString(),
-    stateOverrides: [],
+    stateOverrides: toTenderlyStateOverrides(extraStateOverrides ?? []),
   }
 }

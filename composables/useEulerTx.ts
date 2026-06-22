@@ -27,6 +27,7 @@ import type {
   MigrationAuthorizationRequest,
   MigrationPosition,
   PlanMigrationArgs,
+  PlanMigrationSimulationResult,
   SignedMigrationAuthorization,
   PlanMultiplyWithSwapArgs,
   PlanMultiplySameAssetArgs,
@@ -993,6 +994,11 @@ export const useEulerTx = () => {
     return sdk.positionMigrationService.planMigration(input)
   }
 
+  const planCrossProtocolMigrationSimulation = async (input: PlanMigrationArgs): Promise<PlanMigrationSimulationResult> => {
+    const sdk = await getEulerSdkFresh()
+    return sdk.positionMigrationService.planMigrationSimulation(input)
+  }
+
   const planWithdrawOrRedeem = (input: PlanWithdrawOrRedeemInput): Promise<TransactionPlan> => {
     if (input.isMax) {
       if (input.shares === undefined) {
@@ -1073,12 +1079,13 @@ export const useEulerTx = () => {
     plan: TransactionPlan,
     options?: {
       account?: PrefetchPluginAccount
+      chainId?: number
       prefetch?: PluginPrefetchData
     },
   ): Promise<TransactionPlanPrepared> => {
     return profAsync('sdk', 'prepareTransactionPlan', async () => {
       const owner = requireOwner()
-      const cid = requireChainId()
+      const cid = options?.chainId ?? requireChainId()
       const sdk = await getEulerSdk()
       return sdk.executionService.prepareTransactionPlan({
         plan,
@@ -1283,6 +1290,7 @@ export const useEulerTx = () => {
     getMigrationAuthorization,
     signMigrationAuthorization,
     planCrossProtocolMigration,
+    planCrossProtocolMigrationSimulation,
     planWithdrawOrRedeem,
     simulatePlan,
     prepareTransactionPlan,

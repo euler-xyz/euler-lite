@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
-import { encodeFunctionData, getAddress, type Address } from 'viem'
+import { encodeFunctionData, getAddress, type Address, type StateOverride } from 'viem'
 import { flattenBatchEntries, getEulerLabelProductByVault, getSubAccountId, type SwapperMode, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { buildPlanMarketLabel, buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -22,7 +22,7 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, displaySteps: providedDisplaySteps, signatureSteps: providedSignatureSteps, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
+const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, tenderlyPrepared, tenderlyPlan, tenderlyStateOverrides, displaySteps: providedDisplaySteps, signatureSteps: providedSignatureSteps, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
   type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'refinance' | 'migration' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
@@ -33,6 +33,12 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
   /** Pre-prepared envelope. When set, the modal renders immediately — no
    *  in-modal plugin/approval-resolution round-trip. */
   prepared?: TransactionPlanPrepared
+  /** Tenderly-only prepared plan. Used for display-only reviews that need a pre-signature simulation path. */
+  tenderlyPrepared?: TransactionPlanPrepared
+  /** Tenderly-only raw plan fallback. */
+  tenderlyPlan?: TransactionPlan
+  /** Additional simulation overrides required by the Tenderly-only plan. */
+  tenderlyStateOverrides?: StateOverride
   /** Optional caller-provided display rows for flows whose semantic actions are
    *  hidden inside protocol-specific multicalls, or whose plan is built after a
    *  confirm-time wallet authorization. */
@@ -90,6 +96,8 @@ const prepareError = ref('')
 const tenderlyLocalError = ref('')
 const isPreparingPlan = ref(false)
 const reviewPlan = computed(() => preparedPlan.value)
+const tenderlyReviewPlan = computed(() => reviewPlan.value ?? tenderlyPrepared?.plan ?? tenderlyPlan)
+const tenderlyChainId = computed(() => prepared?.chainId ?? tenderlyPrepared?.chainId ?? currentChainId.value)
 let prepareRequestId = 0
 
 fetchTenderlyEnabled().then((enabled) => {
@@ -157,7 +165,7 @@ watch(
 )
 
 const handleTenderlySimulate = async () => {
-  const currentPlan = reviewPlan.value
+  const currentPlan = tenderlyReviewPlan.value
   if (!currentPlan || !walletAddress.value) return
   tenderlyLocalError.value = ''
   clearTenderly()
@@ -168,8 +176,9 @@ const handleTenderlySimulate = async () => {
     const payload = await buildTenderlySimulationPayload({
       plan: currentPlan,
       owner,
-      chainId: currentChainId.value,
+      chainId: tenderlyChainId.value,
       sdk,
+      extraStateOverrides: tenderlyStateOverrides,
     })
 
     if (!payload) {
@@ -356,6 +365,7 @@ const hasPermit2Approval = computed(() => {
 })
 
 const usesPermit2 = computed(() => hasPermit2Signature(reviewPlan.value) || hasPermit2Approval.value)
+const hasTenderlyPlan = computed(() => !!tenderlyReviewPlan.value?.length)
 
 const hasTenderlyFailedSimulation = computed(() => {
   return !!(tenderlyUrl.value && tenderlyError.value)
@@ -421,10 +431,11 @@ const confirmLabel = computed(() => {
       </div>
 
       <div
-        v-if="reviewPlan?.length && !hideExecute"
+        v-if="(reviewPlan?.length || hasTenderlyPlan) && !hideExecute"
         class="flex items-center justify-center gap-16"
       >
         <button
+          v-if="reviewPlan?.length"
           type="button"
           class="flex items-center gap-6 text-p3 text-content-primary hover:text-content-primary transition-colors"
           @click="copyCalldata"

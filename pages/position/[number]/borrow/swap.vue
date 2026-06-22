@@ -15,7 +15,7 @@ import {
   type TransactionPlanPrepared,
   type VaultEntity,
 } from '@eulerxyz/euler-v2-sdk'
-import { erc20Abi, formatUnits, getAddress, maxUint256, zeroAddress, type Address } from 'viem'
+import { erc20Abi, formatUnits, getAddress, maxUint256, zeroAddress, type Address, type StateOverride } from 'viem'
 import { OperationReviewModal, SlippageSettingsModal } from '#components'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useSwapDebtOptions } from '~/composables/useSwapDebtOptions'
@@ -82,6 +82,7 @@ const {
   getMigrationAuthorization,
   signMigrationAuthorization,
   planCrossProtocolMigration,
+  planCrossProtocolMigrationSimulation,
   executePreparedPlan,
   executePlan,
   prepareTransactionPlan,
@@ -1966,11 +1967,12 @@ const getMorphoMigrationAuthorizationRequest = async (
   if (!chainId.value || !morphoMigrationOwner.value || !selectedMorphoMarket.value) {
     throw new Error('Morpho migration inputs are incomplete')
   }
+  const migrationChainId = selectedMorphoMarket.value.chainId
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 60)
   return getMigrationAuthorization({
     direction: 'euler-to-external',
     connectorId: MORPHO_CONNECTOR_ID,
-    chainId: chainId.value,
+    chainId: migrationChainId,
     owner: morphoMigrationOwner.value,
     positionRef: selectedMorphoMarket.value.ref,
     source: input.source,
@@ -1983,6 +1985,7 @@ const buildMorphoMigrationPlan = async (): Promise<TransactionPlan> => {
   if (!chainId.value || !morphoMigrationOwner.value || !selectedMorphoMarket.value) {
     throw new Error('Morpho migration inputs are incomplete')
   }
+  const migrationChainId = selectedMorphoMarket.value.chainId
   const input = buildMorphoMigrationInput()
   const authorizationRequest = await getMorphoMigrationAuthorizationRequest(input)
   morphoMigrationNeedsAuthorization.value = !!authorizationRequest
@@ -1998,7 +2001,7 @@ const buildMorphoMigrationPlan = async (): Promise<TransactionPlan> => {
   return planCrossProtocolMigration({
     direction: 'euler-to-external',
     connectorId: MORPHO_CONNECTOR_ID,
-    chainId: chainId.value,
+    chainId: migrationChainId,
     owner: morphoMigrationOwner.value,
     positionRef: selectedMorphoMarket.value.ref,
     source: input.source,
@@ -2006,6 +2009,29 @@ const buildMorphoMigrationPlan = async (): Promise<TransactionPlan> => {
     authorization,
     operationName: 'eulerToMorphoMigration',
   })
+}
+
+const buildMorphoMigrationTenderlySimulation = async (
+  input: ReturnType<typeof buildMorphoMigrationInput>,
+): Promise<PreparedMigrationTenderlySimulation> => {
+  if (!chainId.value || !morphoMigrationOwner.value || !selectedMorphoMarket.value) {
+    throw new Error('Morpho migration inputs are incomplete')
+  }
+  const migrationChainId = selectedMorphoMarket.value.chainId
+  const result = await planCrossProtocolMigrationSimulation({
+    direction: 'euler-to-external',
+    connectorId: MORPHO_CONNECTOR_ID,
+    chainId: migrationChainId,
+    owner: morphoMigrationOwner.value,
+    positionRef: selectedMorphoMarket.value.ref,
+    source: input.source,
+    externalTarget: input.externalTarget,
+    operationName: 'eulerToMorphoMigration',
+  })
+  return {
+    prepared: await prepareTransactionPlan(result.plan, { account: currentPlanAccount(), chainId: migrationChainId }),
+    stateOverrides: result.stateOverrides,
+  }
 }
 
 const inboundMigrationDisabledReason = computed(() => {
@@ -2056,6 +2082,11 @@ type InboundExternalMigrationInput = {
   debtSwapQuote?: SwapQuote
 }
 
+type PreparedMigrationTenderlySimulation = {
+  prepared: TransactionPlanPrepared
+  stateOverrides: StateOverride
+}
+
 const buildInboundExternalMigrationInput = async (): Promise<InboundExternalMigrationInput> => {
   const source = externalPosition.value
   if (!chainId.value || !inboundExternalOwner.value || !source || !targetCollateralVault.value) {
@@ -2073,7 +2104,7 @@ const buildInboundExternalMigrationInput = async (): Promise<InboundExternalMigr
   const eulerAccount = await resolveInboundExternalEulerAccount()
   const position = await getMigrationPosition({
     connectorId: source.connectorId,
-    chainId: chainId.value,
+    chainId: source.chainId,
     owner: inboundExternalOwner.value,
     positionRef: source.ref,
   })
@@ -2102,11 +2133,12 @@ const getInboundExternalMigrationAuthorizationRequest = async (
   if (!chainId.value || !inboundExternalOwner.value) {
     throw new Error('Migration inputs are incomplete')
   }
+  const migrationChainId = input.position.chainId
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 60)
   return getMigrationAuthorization({
     direction: 'external-to-euler',
     connectorId: input.source.connectorId,
-    chainId: chainId.value,
+    chainId: migrationChainId,
     owner: inboundExternalOwner.value,
     position: input.position,
     positionRef: input.source.ref,
@@ -2120,6 +2152,7 @@ const buildInboundExternalMigrationPlan = async (): Promise<TransactionPlan> => 
     throw new Error('Migration inputs are incomplete')
   }
   const input = await buildInboundExternalMigrationInput()
+  const migrationChainId = input.position.chainId
   const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input)
   inboundExternalAuthorizationConnector.value = authorizationRequest ? input.source.connectorId : null
   const authorization = authorizationRequest
@@ -2129,7 +2162,7 @@ const buildInboundExternalMigrationPlan = async (): Promise<TransactionPlan> => 
   return planCrossProtocolMigration({
     direction: 'external-to-euler',
     connectorId: input.source.connectorId,
-    chainId: chainId.value,
+    chainId: migrationChainId,
     owner: inboundExternalOwner.value,
     position: input.position,
     positionRef: input.source.ref,
@@ -2139,6 +2172,31 @@ const buildInboundExternalMigrationPlan = async (): Promise<TransactionPlan> => 
     debtSwapQuote: input.debtSwapQuote,
     operationName: `${input.source.connectorId}ToEulerMigration`,
   })
+}
+
+const buildInboundExternalMigrationTenderlySimulation = async (
+  input: InboundExternalMigrationInput,
+): Promise<PreparedMigrationTenderlySimulation> => {
+  if (!chainId.value || !inboundExternalOwner.value) {
+    throw new Error('Migration inputs are incomplete')
+  }
+  const migrationChainId = input.position.chainId
+  const result = await planCrossProtocolMigrationSimulation({
+    direction: 'external-to-euler',
+    connectorId: input.source.connectorId,
+    chainId: migrationChainId,
+    owner: inboundExternalOwner.value,
+    position: input.position,
+    positionRef: input.source.ref,
+    target: input.eulerTarget,
+    collateralSwapQuote: input.collateralSwapQuote,
+    debtSwapQuote: input.debtSwapQuote,
+    operationName: `${input.source.connectorId}ToEulerMigration`,
+  })
+  return {
+    prepared: await prepareTransactionPlan(result.plan, { account: currentPlanAccount(), chainId: migrationChainId }),
+    stateOverrides: result.stateOverrides,
+  }
 }
 
 const targetDebtVaultAddress = computed(() =>
@@ -2518,6 +2576,7 @@ const reviewMorphoMigration = async () => {
     const input = buildMorphoMigrationInput()
     const authorizationRequest = await getMorphoMigrationAuthorizationRequest(input)
     morphoMigrationNeedsAuthorization.value = !!authorizationRequest
+    const tenderlySimulation = await buildMorphoMigrationTenderlySimulation(input)
 
     modal.open(OperationReviewModal, {
       props: {
@@ -2526,6 +2585,8 @@ const reviewMorphoMigration = async () => {
         amount: formatVaultAmount(currentDebt.value, sourceDebtVault.value),
         signatureSteps: buildMorphoMigrationSignatureSteps(),
         displaySteps: buildMorphoMigrationDisplaySteps(),
+        tenderlyPrepared: tenderlySimulation.prepared,
+        tenderlyStateOverrides: tenderlySimulation.stateOverrides,
         allowConfirmWithoutPlan: true,
         onConfirm: async () => {
           await sendMorphoMigration()
@@ -2548,8 +2609,9 @@ const sendMorphoMigration = async () => {
   clearSimulationError()
   try {
     externalPreparedPlan.value = null
+    const migrationChainId = selectedMorphoMarket.value?.chainId
     externalPlan.value = await buildMorphoMigrationPlan()
-    externalPreparedPlan.value = await prepareTransactionPlan(externalPlan.value, { account: currentPlanAccount() })
+    externalPreparedPlan.value = await prepareTransactionPlan(externalPlan.value, { account: currentPlanAccount(), chainId: migrationChainId })
     const ok = await runPreparedSimulation(externalPreparedPlan.value, buildRefinanceStateOverrideOptions())
     if (!ok) return
     await executePreparedPlan(externalPreparedPlan.value)
@@ -2580,6 +2642,7 @@ const reviewInboundExternalMigration = async () => {
     const input = await buildInboundExternalMigrationInput()
     const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input)
     inboundExternalAuthorizationConnector.value = authorizationRequest ? input.source.connectorId : null
+    const tenderlySimulation = await buildInboundExternalMigrationTenderlySimulation(input)
 
     modal.open(OperationReviewModal, {
       props: {
@@ -2588,6 +2651,8 @@ const reviewInboundExternalMigration = async () => {
         amount: formatUnits(reviewAsset.amount, Number(reviewAsset.decimals)),
         signatureSteps: buildInboundExternalMigrationSignatureSteps(),
         displaySteps: buildInboundExternalMigrationDisplaySteps(),
+        tenderlyPrepared: tenderlySimulation.prepared,
+        tenderlyStateOverrides: tenderlySimulation.stateOverrides,
         allowConfirmWithoutPlan: true,
         quoteFetchedAt: effectiveQuoteFetchedAt.value,
         onConfirm: async () => {
@@ -2611,8 +2676,9 @@ const sendInboundExternalMigration = async () => {
   clearSimulationError()
   try {
     inboundExternalPreparedPlan.value = null
+    const migrationChainId = externalPosition.value?.chainId
     inboundExternalPlan.value = await buildInboundExternalMigrationPlan()
-    inboundExternalPreparedPlan.value = await prepareTransactionPlan(inboundExternalPlan.value, { account: currentPlanAccount() })
+    inboundExternalPreparedPlan.value = await prepareTransactionPlan(inboundExternalPlan.value, { account: currentPlanAccount(), chainId: migrationChainId })
     const ok = await runPreparedSimulation(inboundExternalPreparedPlan.value, buildRefinanceStateOverrideOptions())
     if (!ok) return
     await executePreparedPlan(inboundExternalPreparedPlan.value)
