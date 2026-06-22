@@ -1,7 +1,8 @@
 import type { Ref } from 'vue'
-import { getAddress, type Address } from 'viem'
-import { getMorphoMarketId, type MorphoMarketParams } from '@eulerxyz/euler-v2-sdk'
-import { MORPHO_BLUE_ADDRESSES, MORPHO_CONNECTOR_ID, MORPHO_POSITION_FALLBACK_MARKET_IDS } from '~/entities/migration/protocols'
+import { erc20Abi, getAddress, type Address } from 'viem'
+import { getEulerSdk } from '~/composables/useEulerSdk'
+import { AAVE_CONNECTOR_ID, AAVE_POOL_ADDRESSES, MORPHO_CONNECTOR_ID } from '~/entities/migration/protocols'
+import { nanoToValue } from '~/utils/crypto-utils'
 import { logWarn } from '~/utils/errorHandling'
 
 export interface ExternalMigrationAsset {
@@ -10,23 +11,85 @@ export interface ExternalMigrationAsset {
   decimals: number
 }
 
-export interface MorphoMigrationCandidate {
-  connectorId: typeof MORPHO_CONNECTOR_ID
-  protocol: 'Morpho'
+export type ExternalMigrationAssetAmount = ExternalMigrationAsset & {
+  amount: bigint
+  amountUsd: number | null
+}
+
+interface ExternalMigrationStateKey {
+  owner?: Address
+  chainId?: number
+}
+
+type BaseMigrationCandidate<
+  TConnector extends string,
+  TProtocol extends string,
+  TRef,
+  TDebt extends ExternalMigrationAssetAmount | null = ExternalMigrationAssetAmount,
+> = {
+  connectorId: TConnector
+  protocol: TProtocol
   id: string
   chainId: number
   owner: Address
-  ref: MorphoMarketParams
-  debt: ExternalMigrationAsset & {
-    amount: bigint
-    amountUsd: number | null
-  }
-  collateral: ExternalMigrationAsset & {
-    amount: bigint
-    amountUsd: number | null
-  }
+  ref: TRef
+  debt: TDebt
+  collateral: ExternalMigrationAssetAmount
   borrowApy: number | null
   lltv: number | null
+  disabledReason?: string
+}
+
+export type MorphoMarketParams = {
+  loanToken: Address
+  collateralToken: Address
+  oracle: Address
+  irm: Address
+  lltv: bigint
+}
+
+export type AavePositionRef = {
+  collateralAsset: Address
+  debtAsset?: Address
+  pool: Address
+}
+
+export type MorphoMigrationCandidate = BaseMigrationCandidate<typeof MORPHO_CONNECTOR_ID, 'Morpho', MorphoMarketParams>
+export type AaveMigrationCandidate = BaseMigrationCandidate<typeof AAVE_CONNECTOR_ID, 'Aave V3', AavePositionRef, ExternalMigrationAssetAmount | null> & {
+  raw: {
+    variableDebt: bigint
+    stableDebt: bigint
+  }
+}
+export type ExternalMigrationCandidate = MorphoMigrationCandidate | AaveMigrationCandidate
+
+export const EXTERNAL_MIGRATION_DUST_USD = 0.01
+
+const getMigrationPositionSortValue = (position: ExternalMigrationCandidate): number | null => {
+  const collateralUsd = position.collateral.amountUsd
+  if (collateralUsd === null) return null
+  const debtUsd = position.debt?.amountUsd ?? null
+  return debtUsd === null ? collateralUsd : collateralUsd - debtUsd
+}
+
+const compareMigrationPositions = (a: ExternalMigrationCandidate, b: ExternalMigrationCandidate) => {
+  const aValue = getMigrationPositionSortValue(a)
+  const bValue = getMigrationPositionSortValue(b)
+  if (aValue !== null && bValue !== null && aValue !== bValue) return bValue - aValue
+  if (aValue !== null && bValue === null) return -1
+  if (aValue === null && bValue !== null) return 1
+  const protocol = a.protocol.localeCompare(b.protocol)
+  return protocol || a.id.localeCompare(b.id)
+}
+
+export const isExternalMigrationDustPosition = (position: ExternalMigrationCandidate): boolean => {
+  const collateralUsd = position.collateral.amountUsd
+  if (collateralUsd === null) return false
+  if (!position.debt) return collateralUsd <= EXTERNAL_MIGRATION_DUST_USD
+
+  const debtUsd = position.debt.amountUsd
+  if (debtUsd === null) return false
+  return collateralUsd <= EXTERNAL_MIGRATION_DUST_USD && debtUsd <= EXTERNAL_MIGRATION_DUST_USD
 }
 
 interface MorphoApiAsset {
@@ -80,73 +143,94 @@ query LiteMorphoMigrationPositions($chainId: Int!, $address: String!) {
 }
 `
 
-const MORPHO_LISTED_MARKETS_QUERY = `#graphql
-query LiteMorphoMigrationFallbackMarkets($chainIds: [Int!], $fallbackMarketIds: [String!]) {
-  markets(first: 100, where: { chainId_in: $chainIds, listed: true, borrowAssets_gte: "1" }) {
-    items {
-      marketId
-      lltv
-      irmAddress
-      oracle { address }
-      loanAsset { address symbol decimals }
-      collateralAsset { address symbol decimals }
-      state { borrowApy }
-    }
-  }
-  fallbackMarkets: markets(first: 20, where: { chainId_in: $chainIds, uniqueKey_in: $fallbackMarketIds }) {
-    items {
-      marketId
-      lltv
-      irmAddress
-      oracle { address }
-      loanAsset { address symbol decimals }
-      collateralAsset { address symbol decimals }
-      state { borrowApy }
-    }
-  }
-}
-`
-
-const MORPHO_POSITION_ABI = [
+const AAVE_POOL_DISCOVERY_ABI = [
   {
     type: 'function',
-    name: 'position',
+    name: 'getUserConfiguration',
     stateMutability: 'view',
-    inputs: [
-      { name: 'id', type: 'bytes32' },
-      { name: 'user', type: 'address' },
-    ],
+    inputs: [{ name: 'user', type: 'address' }],
     outputs: [
-      { name: 'supplyShares', type: 'uint256' },
-      { name: 'borrowShares', type: 'uint128' },
-      { name: 'collateral', type: 'uint128' },
+      {
+        name: '',
+        type: 'tuple',
+        components: [{ name: 'data', type: 'uint256' }],
+      },
     ],
   },
   {
     type: 'function',
-    name: 'market',
+    name: 'getReservesList',
     stateMutability: 'view',
-    inputs: [
-      { name: 'id', type: 'bytes32' },
-    ],
+    inputs: [],
+    outputs: [{ name: '', type: 'address[]' }],
+  },
+  {
+    type: 'function',
+    name: 'getReserveData',
+    stateMutability: 'view',
+    inputs: [{ name: 'asset', type: 'address' }],
     outputs: [
-      { name: 'totalSupplyAssets', type: 'uint128' },
-      { name: 'totalSupplyShares', type: 'uint128' },
-      { name: 'totalBorrowAssets', type: 'uint128' },
-      { name: 'totalBorrowShares', type: 'uint128' },
-      { name: 'lastUpdate', type: 'uint128' },
-      { name: 'fee', type: 'uint128' },
+      {
+        name: '',
+        type: 'tuple',
+        components: [
+          {
+            name: 'configuration',
+            type: 'tuple',
+            components: [{ name: 'data', type: 'uint256' }],
+          },
+          { name: 'liquidityIndex', type: 'uint128' },
+          { name: 'currentLiquidityRate', type: 'uint128' },
+          { name: 'variableBorrowIndex', type: 'uint128' },
+          { name: 'currentVariableBorrowRate', type: 'uint128' },
+          { name: 'currentStableBorrowRate', type: 'uint128' },
+          { name: 'lastUpdateTimestamp', type: 'uint40' },
+          { name: 'id', type: 'uint16' },
+          { name: 'aTokenAddress', type: 'address' },
+          { name: 'stableDebtTokenAddress', type: 'address' },
+          { name: 'variableDebtTokenAddress', type: 'address' },
+          { name: 'interestRateStrategyAddress', type: 'address' },
+          { name: 'accruedToTreasury', type: 'uint128' },
+          { name: 'unbacked', type: 'uint128' },
+          { name: 'isolationModeTotalDebt', type: 'uint128' },
+        ],
+      },
     ],
   },
 ] as const
 
-type MorphoPositionTuple = readonly [bigint, bigint, bigint]
-type MorphoMarketTuple = readonly [bigint, bigint, bigint, bigint, bigint, bigint]
-type MorphoMarketRefEntry = {
-  market: NonNullable<MorphoApiMarketPosition['market']>
-  ref: MorphoMarketParams
-  marketId: `0x${string}`
+const ERC20_METADATA_ABI = [
+  ...erc20Abi,
+  {
+    type: 'function',
+    name: 'symbol',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'string' }],
+  },
+  {
+    type: 'function',
+    name: 'decimals',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint8' }],
+  },
+] as const
+
+type AaveReserveTokens = {
+  aTokenAddress: Address
+  stableDebtTokenAddress: Address
+  variableDebtTokenAddress: Address
 }
+type ContractRead = {
+  address: Address
+  abi: readonly unknown[]
+  functionName: string
+  args?: readonly unknown[]
+}
+type ContractReadResult
+  = | { status: 'success', result: unknown }
+    | { status: 'failure', error: unknown }
 
 const parseBigIntAmount = (value: unknown): bigint => {
   if (typeof value === 'bigint') return value
@@ -169,6 +253,22 @@ const parseNumberOrNull = (value: unknown): number | null => {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+const parseUsdUnitPrice = (price: unknown): number | null => {
+  if (typeof price === 'number') return Number.isFinite(price) ? price : null
+  if (!price || typeof price !== 'object' || !('amountOutMid' in price)) return null
+
+  const amountOutMid = (price as { amountOutMid?: unknown }).amountOutMid
+  try {
+    if (typeof amountOutMid === 'bigint') return nanoToValue(amountOutMid, 18)
+    if (typeof amountOutMid === 'string') return nanoToValue(BigInt(amountOutMid), 18)
+    if (typeof amountOutMid === 'number' && Number.isFinite(amountOutMid)) return amountOutMid / 1e18
+  }
+  catch {
+    return null
+  }
+  return null
+}
+
 const parseAsset = (asset: MorphoApiAsset | null | undefined): ExternalMigrationAsset | null => {
   if (!asset?.address || !asset.symbol || asset.decimals === undefined) return null
   const decimals = Number(asset.decimals)
@@ -180,22 +280,147 @@ const parseAsset = (asset: MorphoApiAsset | null | undefined): ExternalMigration
   }
 }
 
-const toAssetsUp = (shares: bigint, totalAssets: bigint, totalShares: bigint): bigint => {
-  if (shares === 0n || totalAssets === 0n || totalShares === 0n) return 0n
-  return (shares * totalAssets + totalShares - 1n) / totalShares
+const readContractsAllowFailure = async (
+  client: NonNullable<ReturnType<typeof useRpcClient>['client']['value']>,
+  contracts: readonly ContractRead[],
+  context: string,
+): Promise<ContractReadResult[]> => {
+  try {
+    return await client.multicall({
+      contracts: contracts as Parameters<typeof client.multicall>[0]['contracts'],
+      allowFailure: true,
+    }) as ContractReadResult[]
+  }
+  catch (err) {
+    logWarn(context, err)
+    return Promise.all(contracts.map(async (contract) => {
+      try {
+        return {
+          status: 'success',
+          result: await client.readContract(contract as Parameters<typeof client.readContract>[0]),
+        } satisfies ContractReadResult
+      }
+      catch (readErr) {
+        return {
+          status: 'failure',
+          error: readErr,
+        } satisfies ContractReadResult
+      }
+    }))
+  }
 }
 
-const marketToRef = (market: MorphoApiMarketPosition['market']): MorphoMarketParams | null => {
-  const loanAsset = parseAsset(market?.loanAsset)
-  const collateralAsset = parseAsset(market?.collateralAsset)
-  if (!loanAsset || !collateralAsset || !market?.oracle?.address || !market.irmAddress) return null
-  return {
-    loanToken: loanAsset.address,
-    collateralToken: collateralAsset.address,
-    oracle: getAddress(market.oracle.address),
-    irm: getAddress(market.irmAddress),
-    lltv: parseBigIntAmount(market.lltv),
+const getReadResult = (result: ContractReadResult | undefined): unknown | undefined =>
+  result?.status === 'success' ? result.result : undefined
+
+const getAavePositionId = (positionRef: AavePositionRef): string =>
+  positionRef.debtAsset
+    ? [
+        AAVE_CONNECTOR_ID,
+        getAddress(positionRef.pool),
+        getAddress(positionRef.collateralAsset),
+        getAddress(positionRef.debtAsset),
+        'variable',
+      ].join(':')
+    : [
+        AAVE_CONNECTOR_ID,
+        getAddress(positionRef.pool),
+        getAddress(positionRef.collateralAsset),
+        'supply',
+      ].join(':')
+
+const parseAaveUserConfigurationData = (result: unknown): bigint => {
+  if (typeof result === 'bigint') return result
+  if (Array.isArray(result)) return parseBigIntAmount(result[0])
+  if (result && typeof result === 'object' && 'data' in result) {
+    return parseBigIntAmount((result as { data?: unknown }).data)
   }
+  return 0n
+}
+
+const hasAaveBorrowBit = (data: bigint, reserveIndex: number) =>
+  ((data >> BigInt(reserveIndex * 2)) & 1n) === 1n
+
+const hasAaveCollateralBit = (data: bigint, reserveIndex: number) =>
+  ((data >> BigInt(reserveIndex * 2 + 1)) & 1n) === 1n
+
+const parseAaveReserveTokens = (result: unknown): AaveReserveTokens | null => {
+  const reserve = result as {
+    aTokenAddress?: Address
+    stableDebtTokenAddress?: Address
+    variableDebtTokenAddress?: Address
+    [index: number]: unknown
+  } | null | undefined
+  if (!reserve) return null
+  try {
+    return {
+      aTokenAddress: getAddress((reserve.aTokenAddress ?? reserve[8]) as Address),
+      stableDebtTokenAddress: getAddress((reserve.stableDebtTokenAddress ?? reserve[9]) as Address),
+      variableDebtTokenAddress: getAddress((reserve.variableDebtTokenAddress ?? reserve[10]) as Address),
+    }
+  }
+  catch {
+    return null
+  }
+}
+
+const parseAaveAsset = (
+  address: Address,
+  symbolResult: unknown,
+  decimalsResult: unknown,
+): ExternalMigrationAsset => {
+  const symbol = typeof symbolResult === 'string' && symbolResult ? symbolResult : `${address.slice(0, 6)}...${address.slice(-4)}`
+  const decimals = typeof decimalsResult === 'number'
+    ? decimalsResult
+    : typeof decimalsResult === 'bigint'
+      ? Number(decimalsResult)
+      : 18
+  return {
+    address,
+    symbol,
+    decimals: Number.isInteger(decimals) && decimals >= 0 ? decimals : 18,
+  }
+}
+
+const fetchAaveAssetUsdPrices = async (
+  targetChainId: number,
+  assets: readonly Address[],
+): Promise<Map<string, number | null>> => {
+  const uniqueAssets = [...new Set(assets.map(asset => asset.toLowerCase()))].map(asset => getAddress(asset))
+  const prices = new Map<string, number | null>()
+  if (!uniqueAssets.length) return prices
+
+  let sdk: Awaited<ReturnType<typeof getEulerSdk>>
+  try {
+    sdk = await getEulerSdk()
+  }
+  catch (err) {
+    logWarn('externalMigration/aavePriceService', err)
+    uniqueAssets.forEach(asset => prices.set(asset.toLowerCase(), null))
+    return prices
+  }
+
+  await Promise.all(uniqueAssets.map(async (asset) => {
+    try {
+      const price = await sdk.priceService.fetchAssetUsdPriceByAddress(targetChainId, asset)
+      prices.set(asset.toLowerCase(), parseUsdUnitPrice(price))
+    }
+    catch (err) {
+      logWarn('externalMigration/aavePrice', err)
+      prices.set(asset.toLowerCase(), null)
+    }
+  }))
+  return prices
+}
+
+const getAaveAmountUsd = (
+  amount: bigint,
+  asset: ExternalMigrationAsset,
+  usdPricesByAsset: Map<string, number | null>,
+): number | null => {
+  const unitPrice = usdPricesByAsset.get(asset.address.toLowerCase())
+  if (unitPrice === undefined || unitPrice === null) return null
+  return nanoToValue(amount, asset.decimals) * unitPrice
 }
 
 const toMorphoCandidate = (
@@ -250,9 +475,12 @@ export const useExternalMigrationPositions = (options: {
   const { chainId } = useEulerAddresses()
   const { client: rpcClient } = useRpcClient()
 
-  const positions = ref<MorphoMigrationCandidate[]>([])
-  const isLoading = ref(false)
-  const error = ref('')
+  const positions = useState<ExternalMigrationCandidate[]>('external-migration:positions', () => [])
+  const isLoading = useState('external-migration:is-loading', () => false)
+  const error = useState('external-migration:error', () => '')
+  const hasLoaded = useState('external-migration:has-loaded', () => false)
+  const lastLoadedAt = useState<number | null>('external-migration:last-loaded-at', () => null)
+  const loadedFor = useState<ExternalMigrationStateKey>('external-migration:loaded-for', () => ({}))
 
   const owner = computed<Address | undefined>(() => {
     const raw = isSpyMode.value ? spyAddress.value : address.value
@@ -265,193 +493,301 @@ export const useExternalMigrationPositions = (options: {
     }
   })
 
-  const fetchOnchainFallbackPositions = async (targetChainId: number, targetOwner: Address): Promise<MorphoMigrationCandidate[]> => {
+  const fetchAaveMigrationPositions = async (targetChainId: number, targetOwner: Address): Promise<AaveMigrationCandidate[]> => {
     const client = rpcClient.value
-    const morpho = MORPHO_BLUE_ADDRESSES[targetChainId]
-    if (!client || !morpho) return []
+    const pool = AAVE_POOL_ADDRESSES[targetChainId]
+    if (!client || !pool) return []
 
-    const res = await fetch('/api/proxy/morpho', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        query: MORPHO_LISTED_MARKETS_QUERY,
-        variables: {
-          chainIds: [targetChainId],
-          fallbackMarketIds: MORPHO_POSITION_FALLBACK_MARKET_IDS[targetChainId] ?? [],
-        },
-      }),
-    })
-    if (!res.ok) throw new Error(`Morpho markets request failed: ${res.status}`)
-    const body = await res.json()
-    if (body.errors?.length) throw new Error(body.errors[0]?.message || 'Morpho markets returned an error')
+    const [configurationResult, reservesResult] = await readContractsAllowFailure(client, [
+      {
+        address: pool,
+        abi: AAVE_POOL_DISCOVERY_ABI,
+        functionName: 'getUserConfiguration',
+        args: [targetOwner],
+      },
+      {
+        address: pool,
+        abi: AAVE_POOL_DISCOVERY_ABI,
+        functionName: 'getReservesList',
+      },
+    ], 'externalMigration/aaveDiscoveryRootMulticall')
 
-    const marketsById = new Map<string, NonNullable<MorphoApiMarketPosition['market']>>()
-    ;([
-      ...(body.data?.markets?.items ?? []),
-      ...(body.data?.fallbackMarkets?.items ?? []),
-    ] as NonNullable<MorphoApiMarketPosition['market']>[]).forEach((market) => {
-      if (market.marketId) marketsById.set(market.marketId, market)
-    })
-    const markets = [...marketsById.values()]
-    const refs = markets
-      .map((market) => {
-        const ref = marketToRef(market)
-        return ref ? { market, ref, marketId: getMorphoMarketId(ref) } : null
-      })
-      .filter((entry): entry is MorphoMarketRefEntry => !!entry)
-
-    if (!refs.length) return []
-
-    const readSnapshots = async (): Promise<({ position: MorphoPositionTuple, market: MorphoMarketTuple } | null)[]> => {
-      const contracts = refs.flatMap(entry => [
-        {
-          address: morpho,
-          abi: MORPHO_POSITION_ABI,
-          functionName: 'position',
-          args: [entry.marketId, targetOwner],
-        },
-        {
-          address: morpho,
-          abi: MORPHO_POSITION_ABI,
-          functionName: 'market',
-          args: [entry.marketId],
-        },
-      ] as const)
-
-      try {
-        const results = await client.multicall({
-          contracts,
-          allowFailure: true,
-        })
-
-        return refs.map((_, index) => {
-          const positionResult = results[index * 2]
-          const marketResult = results[index * 2 + 1]
-          if (positionResult?.status !== 'success' || marketResult?.status !== 'success') return null
-          return {
-            position: positionResult.result as MorphoPositionTuple,
-            market: marketResult.result as MorphoMarketTuple,
-          }
-        })
-      }
-      catch (err) {
-        // Local same-origin RPC clients do not always carry viem chain metadata,
-        // so multicall can be unavailable even though direct reads work.
-        logWarn('externalMigration/morphoFallbackMulticall', err)
-        return Promise.all(refs.map(async (entry) => {
+    const userConfiguration = parseAaveUserConfigurationData(getReadResult(configurationResult))
+    const reservesRaw = getReadResult(reservesResult)
+    const reserves = Array.isArray(reservesRaw)
+      ? reservesRaw.flatMap((asset) => {
           try {
-            const [position, market] = await Promise.all([
-              client.readContract({
-                address: morpho,
-                abi: MORPHO_POSITION_ABI,
-                functionName: 'position',
-                args: [entry.marketId, targetOwner],
-              }),
-              client.readContract({
-                address: morpho,
-                abi: MORPHO_POSITION_ABI,
-                functionName: 'market',
-                args: [entry.marketId],
-              }),
-            ])
-            return {
-              position: position as MorphoPositionTuple,
-              market: market as MorphoMarketTuple,
-            }
+            return [getAddress(asset as Address)]
           }
-          catch (readErr) {
-            logWarn('externalMigration/morphoFallbackRead', readErr)
-            return null
+          catch {
+            return []
           }
-        }))
+        })
+      : []
+    if (userConfiguration === 0n || reserves.length === 0) return []
+
+    const collateralAssets = reserves.filter((_, index) => hasAaveCollateralBit(userConfiguration, index))
+    const debtAssets = reserves.filter((_, index) => hasAaveBorrowBit(userConfiguration, index))
+    if (!collateralAssets.length) return []
+
+    const activeAssets = [...new Set([...collateralAssets, ...debtAssets].map(asset => asset.toLowerCase()))]
+      .map(asset => getAddress(asset))
+
+    const reserveDataResults = await readContractsAllowFailure(
+      client,
+      activeAssets.map(asset => ({
+        address: pool,
+        abi: AAVE_POOL_DISCOVERY_ABI,
+        functionName: 'getReserveData',
+        args: [asset],
+      })),
+      'externalMigration/aaveReserveMulticall',
+    )
+    const reserveTokensByAsset = new Map<Address, AaveReserveTokens>()
+    activeAssets.forEach((asset, index) => {
+      const tokens = parseAaveReserveTokens(getReadResult(reserveDataResults[index]))
+      if (tokens) reserveTokensByAsset.set(asset, tokens)
+    })
+
+    const metadataResults = await readContractsAllowFailure(
+      client,
+      activeAssets.flatMap(asset => [
+        {
+          address: asset,
+          abi: ERC20_METADATA_ABI,
+          functionName: 'symbol',
+        },
+        {
+          address: asset,
+          abi: ERC20_METADATA_ABI,
+          functionName: 'decimals',
+        },
+      ]),
+      'externalMigration/aaveMetadataMulticall',
+    )
+    const assetsByAddress = new Map<Address, ExternalMigrationAsset>()
+    activeAssets.forEach((asset, index) => {
+      assetsByAddress.set(asset, parseAaveAsset(
+        asset,
+        getReadResult(metadataResults[index * 2]),
+        getReadResult(metadataResults[index * 2 + 1]),
+      ))
+    })
+
+    const balanceReadEntries: { kind: 'collateral' | 'variableDebt' | 'stableDebt', asset: Address }[] = [
+      ...collateralAssets.map(asset => ({ kind: 'collateral' as const, asset })),
+      ...debtAssets.flatMap(asset => [
+        { kind: 'variableDebt' as const, asset },
+        { kind: 'stableDebt' as const, asset },
+      ]),
+    ]
+    const balanceResults = await readContractsAllowFailure(
+      client,
+      balanceReadEntries.flatMap((entry) => {
+        const tokens = reserveTokensByAsset.get(entry.asset)
+        if (!tokens) return []
+        const address = entry.kind === 'collateral'
+          ? tokens.aTokenAddress
+          : entry.kind === 'variableDebt'
+            ? tokens.variableDebtTokenAddress
+            : tokens.stableDebtTokenAddress
+        return [{
+          address,
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [targetOwner],
+        }]
+      }),
+      'externalMigration/aaveBalancesMulticall',
+    )
+
+    let resultIndex = 0
+    const collateralAmounts = new Map<Address, bigint>()
+    const debtAmounts = new Map<Address, { variableDebt: bigint, stableDebt: bigint }>()
+    for (const entry of balanceReadEntries) {
+      if (!reserveTokensByAsset.has(entry.asset)) continue
+      const amount = parseBigIntAmount(getReadResult(balanceResults[resultIndex]))
+      resultIndex += 1
+      if (entry.kind === 'collateral') {
+        collateralAmounts.set(entry.asset, amount)
+        continue
       }
+      const debt = debtAmounts.get(entry.asset) ?? { variableDebt: 0n, stableDebt: 0n }
+      if (entry.kind === 'variableDebt') debt.variableDebt = amount
+      else debt.stableDebt = amount
+      debtAmounts.set(entry.asset, debt)
     }
 
-    const snapshots = await readSnapshots()
+    const usdPricesByAsset = await fetchAaveAssetUsdPrices(targetChainId, activeAssets)
 
-    const candidates: MorphoMigrationCandidate[] = []
-    refs.forEach((entry, index) => {
-      const snapshot = snapshots[index]
-      if (!snapshot) return
+    const candidates: AaveMigrationCandidate[] = []
+    for (const collateralAsset of collateralAssets) {
+      const collateralAmount = collateralAmounts.get(collateralAsset) ?? 0n
+      const collateral = assetsByAddress.get(collateralAsset)
+      if (collateralAmount <= 0n || !collateral) continue
 
-      const { position, market } = snapshot
-      const debtAmount = toAssetsUp(position[1], market[2], market[3])
-      const collateralAmount = position[2]
-      if (debtAmount <= 0n || collateralAmount <= 0n) return
+      if (!debtAssets.length) {
+        const ref: AavePositionRef = {
+          collateralAsset,
+          pool,
+        }
+        candidates.push({
+          connectorId: AAVE_CONNECTOR_ID,
+          protocol: 'Aave V3',
+          id: getAavePositionId(ref),
+          chainId: targetChainId,
+          owner: targetOwner,
+          ref,
+          debt: null,
+          collateral: {
+            ...collateral,
+            amount: collateralAmount,
+            amountUsd: getAaveAmountUsd(collateralAmount, collateral, usdPricesByAsset),
+          },
+          borrowApy: null,
+          lltv: null,
+          raw: {
+            variableDebt: 0n,
+            stableDebt: 0n,
+          },
+        })
+        continue
+      }
 
-      const loanAsset = parseAsset(entry.market.loanAsset)
-      const collateralAsset = parseAsset(entry.market.collateralAsset)
-      if (!loanAsset || !collateralAsset) return
+      for (const debtAsset of debtAssets) {
+        const debt = debtAmounts.get(debtAsset) ?? { variableDebt: 0n, stableDebt: 0n }
+        const debtAmount = debt.variableDebt + debt.stableDebt
+        const debtMeta = assetsByAddress.get(debtAsset)
+        if (debtAmount <= 0n || !debtMeta) continue
 
-      candidates.push({
-        connectorId: MORPHO_CONNECTOR_ID,
-        protocol: 'Morpho',
-        id: entry.marketId,
-        chainId: targetChainId,
-        owner: targetOwner,
-        ref: entry.ref,
-        debt: {
-          ...loanAsset,
-          amount: debtAmount,
-          amountUsd: null,
-        },
-        collateral: {
-          ...collateralAsset,
-          amount: collateralAmount,
-          amountUsd: null,
-        },
-        borrowApy: parseNumberOrNull(entry.market.state?.borrowApy),
-        lltv: entry.ref.lltv > 0n ? Number(entry.ref.lltv) / 1e16 : null,
-      })
-    })
+        const ref: AavePositionRef = {
+          collateralAsset,
+          debtAsset,
+          pool,
+        }
+        candidates.push({
+          connectorId: AAVE_CONNECTOR_ID,
+          protocol: 'Aave V3',
+          id: getAavePositionId(ref),
+          chainId: targetChainId,
+          owner: targetOwner,
+          ref,
+          debt: {
+            ...debtMeta,
+            amount: debtAmount,
+            amountUsd: getAaveAmountUsd(debtAmount, debtMeta, usdPricesByAsset),
+          },
+          collateral: {
+            ...collateral,
+            amount: collateralAmount,
+            amountUsd: getAaveAmountUsd(collateralAmount, collateral, usdPricesByAsset),
+          },
+          borrowApy: null,
+          lltv: null,
+          raw: debt,
+          ...(debt.stableDebt > 0n ? { disabledReason: 'Aave stable debt migration is not supported yet.' } : {}),
+        })
+      }
+    }
 
     return candidates
   }
 
-  const load = async () => {
-    if (options.enabled && !options.enabled.value) {
-      positions.value = []
-      error.value = ''
-      isLoading.value = false
-      return
-    }
-    if (!owner.value || !chainId.value) {
-      positions.value = []
-      return
-    }
-
-    isLoading.value = true
-    error.value = ''
+  const fetchMorphoMigrationPositions = async (targetChainId: number, targetOwner: Address): Promise<MorphoMigrationCandidate[]> => {
     try {
       const res = await fetch('/api/proxy/morpho', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           query: MORPHO_USER_POSITIONS_QUERY,
-          variables: { chainId: chainId.value, address: owner.value },
+          variables: { chainId: targetChainId, address: targetOwner },
         }),
       })
       if (!res.ok) throw new Error(`Morpho API request failed: ${res.status}`)
       const body = await res.json()
       if (body.errors?.length) throw new Error(body.errors[0]?.message || 'Morpho API returned an error')
       const rows = (body.data?.userByAddress?.marketPositions ?? []) as MorphoApiMarketPosition[]
-      const indexedPositions = rows
-        .map((row: MorphoApiMarketPosition) => toMorphoCandidate(chainId.value, owner.value!, row))
+      return rows
+        .map((row: MorphoApiMarketPosition) => toMorphoCandidate(targetChainId, targetOwner, row))
         .filter((row: MorphoMigrationCandidate | null): row is MorphoMigrationCandidate => !!row)
-      const byId = new Map<string, MorphoMigrationCandidate>(indexedPositions.map(position => [position.id, position]))
-      const fallbackPositions = await fetchOnchainFallbackPositions(chainId.value, owner.value)
-      fallbackPositions.forEach((position) => {
-        if (!byId.has(position.id)) byId.set(position.id, position)
-      })
-      positions.value = [...byId.values()]
     }
     catch (err) {
+      logWarn('externalMigration/morphoIndexedPositions', err)
+      throw err
+    }
+  }
+
+  const resetForMissingOwner = () => {
+    positions.value = []
+    error.value = ''
+    hasLoaded.value = false
+    lastLoadedAt.value = null
+    loadedFor.value = {}
+    isLoading.value = false
+  }
+
+  const load = async (loadOptions: { force?: boolean } = {}) => {
+    if (options.enabled && !options.enabled.value) {
+      return
+    }
+    if (!owner.value || !chainId.value) {
+      resetForMissingOwner()
+      return
+    }
+
+    const targetOwner = owner.value
+    const targetChainId = chainId.value
+    const loadedKeyMatches = loadedFor.value.owner === targetOwner && loadedFor.value.chainId === targetChainId
+    if (!loadOptions.force && loadedKeyMatches && (hasLoaded.value || isLoading.value)) {
+      return
+    }
+
+    if (!loadedKeyMatches) {
       positions.value = []
-      error.value = err instanceof Error ? err.message : 'Failed to load Morpho positions'
-      logWarn('externalMigration/morphoPositions', err)
+      error.value = ''
+      hasLoaded.value = false
+      lastLoadedAt.value = null
+      loadedFor.value = { owner: targetOwner, chainId: targetChainId }
+    }
+
+    isLoading.value = true
+    error.value = ''
+    try {
+      const [morphoResult, aaveResult] = await Promise.allSettled([
+        fetchMorphoMigrationPositions(targetChainId, targetOwner),
+        fetchAaveMigrationPositions(targetChainId, targetOwner),
+      ])
+      const nextPositions = [
+        ...(aaveResult.status === 'fulfilled' ? aaveResult.value : []),
+        ...(morphoResult.status === 'fulfilled' ? morphoResult.value : []),
+      ].sort(compareMigrationPositions)
+      const firstError = morphoResult.status === 'rejected'
+        ? morphoResult.reason
+        : aaveResult.status === 'rejected'
+          ? aaveResult.reason
+          : undefined
+      if (morphoResult.status === 'rejected') logWarn('externalMigration/morphoPositions', morphoResult.reason)
+      if (aaveResult.status === 'rejected') logWarn('externalMigration/aavePositions', aaveResult.reason)
+      if (firstError && nextPositions.length === 0) {
+        throw firstError
+      }
+      if (loadedFor.value.owner !== targetOwner || loadedFor.value.chainId !== targetChainId) return
+      positions.value = nextPositions
+      hasLoaded.value = true
+      lastLoadedAt.value = Date.now()
+    }
+    catch (err) {
+      if (loadedFor.value.owner !== targetOwner || loadedFor.value.chainId !== targetChainId) return
+      positions.value = []
+      error.value = err instanceof Error ? err.message : 'Failed to load external positions'
+      hasLoaded.value = true
+      lastLoadedAt.value = Date.now()
+      logWarn('externalMigration/positions', err)
     }
     finally {
-      isLoading.value = false
+      if (loadedFor.value.owner === targetOwner && loadedFor.value.chainId === targetChainId) {
+        isLoading.value = false
+      }
     }
   }
 
@@ -464,6 +800,8 @@ export const useExternalMigrationPositions = (options: {
     positions,
     isLoading,
     error,
+    hasLoaded,
+    lastLoadedAt,
     load,
   }
 }

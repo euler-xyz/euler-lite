@@ -26,6 +26,9 @@ const showAllLabelEntries = useShowAllLabelEntries()
 // imports the composable, making first detail-page visit wait on the full
 // subgraph + accountLens round-trip.
 useEulerAccount()
+// Start migratable-position discovery from the same app-root lifecycle so the
+// Portfolio Migrate tab can appear from preloaded shared state.
+useExternalMigrationPositions()
 
 // Instantiate the batch store at app root so its simulation watchers stay
 // alive across navigation (mirrors useEulerAccount above).
@@ -102,6 +105,7 @@ watch(route, () => {
       'position-number-repay',
       'position-number-supply',
       'position-number-borrow',
+      'position-number-borrow-swap',
       'position-number-withdraw',
     ].includes(route.name as string)
     isHeaderVisible.value = true

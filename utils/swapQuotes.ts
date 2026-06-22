@@ -1,6 +1,6 @@
 import { SwapperMode, type SwapQuote, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 
-export type SwapQuoteAmountField = 'amountIn' | 'amountOut'
+export type SwapQuoteAmountField = 'amountIn' | 'amountOut' | 'amountInMax' | 'amountOutMin'
 export type SwapQuoteCompare = 'max' | 'min'
 
 export type SwapQuoteCard = {

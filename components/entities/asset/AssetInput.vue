@@ -18,11 +18,19 @@ const props = defineProps<{
   balance?: bigint
   balanceLoading?: boolean
   collateralOptions?: CollateralOption[]
+  collateralModalProductName?: string
   collateralModalTitle?: string
   collateralModalApyLabel?: string
+  collateralModalCompatibleLabel?: string
+  collateralModalIncompatibleLabel?: string
+  collateralModalCompatibleEmptyMessage?: string
+  collateralModalCompatibleNote?: string
+  collateralModalForceOpen?: boolean
   readonly?: boolean
   priceOverride?: number // USD unit price for assets without a vault (e.g., swap-to-deposit)
   swappable?: boolean // When true, asset pill shows dropdown arrow and emits click-asset
+  assetSelectorPlaceholder?: string
+  assetSelectorSelected?: boolean
   selectedSource?: string // Matches CollateralOption.type (e.g. 'wallet' / 'saving' / 'vault') for the source-chip indicator
   selectedSubAccount?: string // Disambiguates between multiple savings positions on different sub-accounts
   selectedVaultAddress?: string // Disambiguates same sub-account positions across different vaults (e.g. wallet rows)
@@ -165,6 +173,10 @@ const onBlur = () => {
     emitInputNow()
   }
 }
+const showAssetSelectorAsset = computed(() => props.assetSelectorSelected !== false)
+const showAssetSelectorArrow = computed(() =>
+  props.swappable || props.collateralModalForceOpen || (props.collateralOptions?.length ?? 0) > 1,
+)
 
 onBeforeUnmount(() => {
   if (emitInputTimeout.value) {
@@ -173,17 +185,23 @@ onBeforeUnmount(() => {
   }
 })
 const openChooseCollateralModal = () => {
-  if ((props.collateralOptions?.length ?? 0) < 2) {
+  const optionsCount = props.collateralOptions?.length ?? 0
+  const canOpen = props.collateralModalForceOpen ? optionsCount > 0 : optionsCount >= 2
+  if (!canOpen) {
     return
   }
   modal.open(ChooseCollateralModal, {
     props: {
-      productName: props.desc,
+      productName: props.collateralModalProductName || props.desc || '',
       symbol: props.asset.symbol,
       collateralOptions: props.collateralOptions,
       selected: selectedIdx.value,
       title: props.collateralModalTitle,
       apyLabel: props.collateralModalApyLabel,
+      compatibleLabel: props.collateralModalCompatibleLabel,
+      incompatibleLabel: props.collateralModalIncompatibleLabel,
+      compatibleEmptyMessage: props.collateralModalCompatibleEmptyMessage,
+      compatibleNote: props.collateralModalCompatibleNote,
       onSave: (selectedIndex: number, selectedOption: CollateralOption) => {
         selectedIdx.value = selectedIndex
         emits('change-collateral', selectedIndex, selectedOption)
@@ -262,32 +280,44 @@ const openChooseCollateralModal = () => {
         class="bg-card text-p3 font-semibold gap-8 flex items-center justify-center px-12 min-h-36 py-6 rounded-[40px] whitespace-nowrap cursor-pointer shrink-0"
         @click="swappable ? emits('click-asset') : openChooseCollateralModal()"
       >
-        <AssetAvatar
-          :asset="asset"
-          size="20"
-        />
-        <div class="flex flex-col items-start">
+        <template v-if="showAssetSelectorAsset">
+          <AssetAvatar
+            :asset="asset"
+            size="20"
+          />
+          <div class="flex flex-col items-start">
+            <span class="flex items-center gap-8">
+              {{ asset.symbol }}
+              <SvgIcon
+                v-if="showAssetSelectorArrow"
+                class="text-content-tertiary !w-16 !h-16"
+                name="arrow-down"
+              />
+            </span>
+            <span
+              v-if="selectedSource === 'wallet' && (collateralOptions?.length ?? 0) > 1"
+              class="text-[10px] leading-[12px] text-accent-600"
+            >
+              Wallet balance
+            </span>
+            <span
+              v-else-if="selectedSource === 'saving' && (collateralOptions?.length ?? 0) > 1"
+              class="text-[10px] leading-[12px] text-yellow-600"
+            >
+              Savings balance
+            </span>
+          </div>
+        </template>
+        <template v-else>
           <span class="flex items-center gap-8">
-            {{ asset.symbol }}
+            {{ assetSelectorPlaceholder || 'Select asset' }}
             <SvgIcon
-              v-if="swappable || (collateralOptions?.length ?? 0) > 1"
+              v-if="showAssetSelectorArrow"
               class="text-content-tertiary !w-16 !h-16"
               name="arrow-down"
             />
           </span>
-          <span
-            v-if="selectedSource === 'wallet' && (collateralOptions?.length ?? 0) > 1"
-            class="text-[10px] leading-[12px] text-accent-600"
-          >
-            Wallet balance
-          </span>
-          <span
-            v-else-if="selectedSource === 'saving' && (collateralOptions?.length ?? 0) > 1"
-            class="text-[10px] leading-[12px] text-yellow-600"
-          >
-            Savings balance
-          </span>
-        </div>
+        </template>
       </div>
     </div>
     <div

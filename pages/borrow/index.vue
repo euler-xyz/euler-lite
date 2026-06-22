@@ -19,7 +19,6 @@ import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
 
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
-const enableCrossProtocolRefinance = computed(() => settings.value.enableCrossProtocolRefinance)
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy } = useRewardsApy()
 const { getTokenCategoryTags, isLoading: isTokenListLoading } = useTokenList()
 
@@ -488,20 +487,6 @@ const sortedBorrowList = computed(() => {
         title="Borrow/Multiply"
         description="Borrow against your assets in isolated lending markets."
       />
-    </div>
-
-    <div
-      v-if="enableCrossProtocolRefinance"
-      class="mb-16 flex justify-end"
-    >
-      <UiButton
-        size="small"
-        variant="secondary"
-        rounded
-        to="/borrow/migrate"
-      >
-        Advanced: Migrate from elsewhere
-      </UiButton>
     </div>
 
     <div class="mb-16">

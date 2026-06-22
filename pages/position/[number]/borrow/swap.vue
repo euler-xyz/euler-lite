@@ -3,6 +3,9 @@ import {
   isSecuritizeCollateralVault,
   SwapperMode,
   type EVault,
+  type EulerMigrationTarget,
+  type MigrationAuthorizationRequest,
+  type MigrationPosition,
   type PortfolioBorrowPosition,
   type SecuritizeCollateralVault,
   type SwapQuote,
@@ -16,23 +19,27 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useSwapDebtOptions } from '~/composables/useSwapDebtOptions'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
 import { useSwapQuotesParallel, type SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
+import { useReactiveMap } from '~/composables/useReactiveMap'
 import type { PlanRefinancePositionInput } from '~/composables/useEulerTx'
+import { getNewSubAccount } from '~/composables/useSubAccounts'
 import type { CowSwapCollateralSwapExecuteParams } from '~/composables/cowswap'
 import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus, openCowSwapReviewModal, buildApprovalSignSteps } from '~/composables/cowswap'
 import { useMorphoMigrationMarkets, type MorphoMigrationMarket } from '~/composables/useMorphoMigrationMarkets'
-import { MORPHO_CONNECTOR_ID } from '~/entities/migration/protocols'
+import { useExternalMigrationPositions, type ExternalMigrationCandidate } from '~/composables/useExternalMigrationPositions'
+import { AAVE_CONNECTOR_ID, MORPHO_CONNECTOR_ID } from '~/entities/migration/protocols'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
-import { getQuoteAmount } from '~/utils/swapQuotes'
+import { getQuoteAmount, getSwapInputAmount } from '~/utils/swapQuotes'
 import { isSameUnderlyingAsset } from '~/utils/vault-utils'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
-import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
+import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros, formatUsdValue } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/utils/repayUtils'
 import { ltvToPercent, nanoToValue } from '~/utils/crypto-utils'
-import { getVaultProductName } from '~/utils/eulerLabelsUtils'
+import { getVaultProductName, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
+import { buildCollateralOption, computeSupplyApy } from '~/utils/collateralOptions'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 import type { DisplayStep } from '~/utils/stepDecoding'
@@ -47,6 +54,7 @@ import {
 import {
   isOpDisabled,
   OP_BORROW,
+  OP_DEPOSIT,
   OP_REDEEM,
   OP_REPAY,
   OP_REPAY_WITH_SHARES,
@@ -65,10 +73,11 @@ const { error: showError } = useToast()
 const { isConnected, address } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex, refreshAllPositions } = useEulerAccount()
-const { chainId: currentChainId } = useEulerAddresses()
+const { chainId: currentChainId, eulerPeripheryAddresses } = useEulerAddresses()
 const { client: rpcClient } = useRpcClient()
 const {
   planRefinancePosition,
+  getMigrationPosition,
   getMigrationAuthorization,
   signMigrationAuthorization,
   planCrossProtocolMigration,
@@ -84,8 +93,11 @@ const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions
 const { runPreparedSimulation, runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const { settings } = useUserSettings()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
+const { viewer } = useApyVisibility()
 const { getTokenCategoryTags } = useTokenList()
-const { getVaultCategory, getVault } = useVaultRegistry()
+const { borrowList } = useVaults()
+const { getVaultCategory, getVault, getVerifiedEVaults } = useVaultRegistry()
+const showAllLabelEntries = useShowAllLabelEntries()
 const cowSwapExecution = useCowSwapCollateralSwapExecution()
 const cowSwapOrderStatus = useCowSwapOrderStatus(
   computed(() => cowSwapExecution.orderUid.value),
@@ -94,8 +106,26 @@ const cowSwapOrderStatus = useCowSwapOrderStatus(
 const chainId = currentChainId
 
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
+const enableRewardsApy = computed(() => settings.value.enableRewardsApy)
 const enableCrossProtocolRefinance = computed(() => settings.value.enableCrossProtocolRefinance)
 const positionIndex = usePositionIndex()
+const externalSourceId = computed(() => typeof route.query.source === 'string' ? route.query.source : '')
+const isExternalSourceRoute = computed(() => positionIndex === 'external' && !!externalSourceId.value)
+const refinanceBackFallback = computed(() => {
+  if (!isExternalSourceRoute.value) return positionDetailsFallback.value
+  const network = typeof route.query.network === 'string' ? route.query.network : ''
+  return network ? `/portfolio/migrate?network=${network}` : '/portfolio/migrate'
+})
+const {
+  positions: externalPositions,
+  owner: inboundExternalOwner,
+  isLoading: isExternalPositionsLoading,
+  error: externalPositionsError,
+  load: loadExternalPositions,
+} = useExternalMigrationPositions()
+const POST_MIGRATION_REFRESH_DELAYS_MS = [0, 5_000, 15_000, 30_000] as const
+const inboundExternalEulerAccount = shallowRef<Address | null>(null)
+const inboundExternalEulerAccountKey = ref('')
 
 const position: Ref<PortfolioBorrowPosition<VaultEntity> | null> = ref(null)
 const isLoading = ref(false)
@@ -108,9 +138,80 @@ const selectedMorphoMarketId = ref('')
 const isPreparingExternal = ref(false)
 const externalPlan = shallowRef<TransactionPlan | null>(null)
 const externalPreparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
+const morphoMigrationNeedsAuthorization = ref(false)
+const inboundExternalPlan = shallowRef<TransactionPlan | null>(null)
+const inboundExternalPreparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
+const inboundExternalAuthorizationConnector = ref<string | null>(null)
+
+const externalPosition = computed<ExternalMigrationCandidate | undefined>(() => {
+  if (!isExternalSourceRoute.value) return undefined
+  const owner = inboundExternalOwner.value
+  const activeChainId = chainId.value
+  if (!owner || !activeChainId) return undefined
+  return externalPositions.value.find(candidate =>
+    candidate.id === externalSourceId.value
+    && candidate.chainId === activeChainId
+    && sameAssetAddress(candidate.owner, owner),
+  )
+})
+const externalCollateralAsset = computed(() => externalPosition.value?.collateral ?? null)
+const externalDebtAsset = computed(() => externalPosition.value?.debt ?? null)
+const inboundExternalOwnerMatchesSource = computed(() => {
+  const owner = inboundExternalOwner.value
+  const sourceOwner = externalPosition.value?.owner
+  if (!owner || !sourceOwner) return true
+  return sameAssetAddress(owner, sourceOwner)
+})
+const externalIsSupplyOnly = computed(() => isExternalSourceRoute.value && !externalDebtAsset.value)
+const externalCollateralVaultLabel = computed(() => externalIsSupplyOnly.value ? 'Lend vault' : 'Collateral vault')
+const externalCollateralVaultPlaceholder = computed(() => externalIsSupplyOnly.value ? 'Select lend vault' : 'Select collateral vault')
+const externalCollateralOptionsEmptyTitle = computed(() => externalIsSupplyOnly.value ? 'No lend options' : 'No collateral options')
+const externalCollateralCompatibleLabel = computed(() => {
+  if (!externalIsSupplyOnly.value) return undefined
+  const symbol = externalCollateralAsset.value?.symbol
+  return symbol ? `${symbol} vaults` : 'Same asset vaults'
+})
+const externalCollateralIncompatibleLabel = computed(() =>
+  externalIsSupplyOnly.value ? 'Other vaults' : undefined,
+)
+const externalCollateralCompatibleEmptyMessage = computed(() =>
+  externalIsSupplyOnly.value ? 'No compatible vaults exist, but you can swap.' : undefined,
+)
+const externalCollateralOptionsEmptyDescription = computed(() =>
+  externalIsSupplyOnly.value
+    ? 'There are no Euler lend vaults available for this external supply position.'
+    : 'There are no Euler collateral vaults with compatible configuration for this external position.',
+)
+const inboundBorrowAmountWithBuffer = computed(() => {
+  const debt = externalDebtAsset.value?.amount ?? 0n
+  return debt > 0n ? (debt * 10_100n) / 10_000n : 0n
+})
+const externalSourcePairLabel = computed(() => {
+  const collateral = externalCollateralAsset.value?.symbol ?? ''
+  const debt = externalDebtAsset.value?.symbol ?? ''
+  return debt ? `${collateral}/${debt}` : `${collateral} supply`
+})
+const toExternalInputAsset = (asset?: ExternalMigrationCandidate['collateral'] | null) => ({
+  address: asset?.address ?? zeroAddress,
+  name: asset?.symbol || 'Asset',
+  symbol: asset?.symbol || '',
+  decimals: asset?.decimals ?? 18,
+})
+const externalCollateralInputAsset = computed(() =>
+  targetCollateralVault.value?.asset ?? toExternalInputAsset(externalCollateralAsset.value),
+)
+const externalDebtInputAsset = computed(() =>
+  targetDebtVault.value?.asset ?? toExternalInputAsset(externalDebtAsset.value),
+)
+const externalCollateralVaultDescription = computed(() =>
+  targetCollateralVault.value ? getVaultDisplayName(targetCollateralVault.value) : undefined,
+)
+const externalDebtVaultDescription = computed(() =>
+  targetDebtVault.value ? getVaultDisplayName(targetDebtVault.value) : undefined,
+)
 
 const sourceDebtVault = computed<EVault | undefined>(() =>
-  position.value ? position.value.borrowVault as EVault | undefined : undefined,
+  !isExternalSourceRoute.value && position.value ? position.value.borrowVault as EVault | undefined : undefined,
 )
 const selectedCollateralAddress = computed(() =>
   typeof route.query.collateral === 'string' ? normalizeVaultAddress(route.query.collateral) : '',
@@ -164,7 +265,9 @@ useOperationGuard(computed(() => [
 ].filter(Boolean)))
 
 const pairAssetsLabel = usePositionPairLabel(position)
-const currentDebt = computed(() => position.value?.borrowed || 0n)
+const currentDebt = computed(() =>
+  isExternalSourceRoute.value ? externalDebtAsset.value?.amount ?? 0n : position.value?.borrowed || 0n,
+)
 const sourceCollateralPosition = computed(() => {
   const sourceAddress = normalizeVaultAddress(sourceCollateralVault.value?.address)
   if (!sourceAddress) return null
@@ -178,23 +281,39 @@ const sourceCollateralPosition = computed(() => {
     ? primaryCollateral
     : null
 })
-const currentCollateralAssets = computed(() => sourceCollateralPosition.value?.assets ?? position.value?.supplied ?? 0n)
-const currentCollateralShares = computed(() => sourceCollateralPosition.value?.shares ?? 0n)
+const currentCollateralAssets = computed(() =>
+  isExternalSourceRoute.value ? externalCollateralAsset.value?.amount ?? 0n : sourceCollateralPosition.value?.assets ?? position.value?.supplied ?? 0n,
+)
+const currentCollateralShares = computed(() =>
+  isExternalSourceRoute.value ? 0n : sourceCollateralPosition.value?.shares ?? 0n,
+)
 const subAccount = computed<Address>(() =>
-  (position.value?.subAccount || address.value || zeroAddress) as Address,
+  (isExternalSourceRoute.value ? address.value : position.value?.subAccount || address.value || zeroAddress) as Address,
 )
 const cowSwapOwner = computed<Address>(() =>
   (address.value || (isSpyMode.value ? spyAddress.value : undefined) || zeroAddress) as Address,
 )
 
-const hasDebtChange = computed(() => !!targetDebtVault.value && !!sourceDebtVault.value)
-const hasCollateralChange = computed(() => !!targetCollateralVault.value && !!sourceCollateralEVault.value)
+const hasDebtChange = computed(() =>
+  isExternalSourceRoute.value ? !!targetDebtVault.value && !!externalDebtAsset.value : !!targetDebtVault.value && !!sourceDebtVault.value,
+)
+const hasCollateralChange = computed(() =>
+  isExternalSourceRoute.value ? !!targetCollateralVault.value && !!externalCollateralAsset.value : !!targetCollateralVault.value && !!sourceCollateralEVault.value,
+)
 const hasAnyChange = computed(() => hasDebtChange.value || hasCollateralChange.value)
 const isSameDebtAsset = computed(() =>
-  !!targetDebtVault.value && isSameUnderlyingAsset(sourceDebtVault.value, targetDebtVault.value),
+  !!targetDebtVault.value && (
+    isExternalSourceRoute.value
+      ? sameAssetAddress(externalDebtAsset.value?.address, targetDebtVault.value.asset.address)
+      : isSameUnderlyingAsset(sourceDebtVault.value, targetDebtVault.value)
+  ),
 )
 const isSameCollateralAsset = computed(() =>
-  !!targetCollateralVault.value && isSameUnderlyingAsset(sourceCollateralEVault.value, targetCollateralVault.value),
+  !!targetCollateralVault.value && (
+    isExternalSourceRoute.value
+      ? sameAssetAddress(externalCollateralAsset.value?.address, targetCollateralVault.value.asset.address)
+      : isSameUnderlyingAsset(sourceCollateralEVault.value, targetCollateralVault.value)
+  ),
 )
 const debtNeedsSwap = computed(() => hasDebtChange.value && !isSameDebtAsset.value)
 const collateralNeedsSwap = computed(() => hasCollateralChange.value && !isSameCollateralAsset.value)
@@ -231,6 +350,7 @@ const {
 })
 
 const debtSourceOperationAllowed = (target: EVault) => {
+  if (isExternalSourceRoute.value) return true
   const source = sourceDebtVault.value
   if (!source) return false
   if (isSameUnderlyingAsset(source, target)) {
@@ -259,27 +379,33 @@ const debtBridgeTargetAddressSet = computed(() =>
   new Set(debtBridgeTargetVaults.value.map(vault => normalizeVaultAddress(vault.address))),
 )
 const debtTargetVaults = computed(() => [
-  ...eligibleDebtTargetVaults.value,
-  ...debtBridgeTargetVaults.value,
+  ...(isExternalSourceRoute.value
+    ? externalDebtTargetVaults.value
+    : [
+        ...eligibleDebtTargetVaults.value,
+        ...debtBridgeTargetVaults.value,
+      ]),
 ])
 const debtCompatibilityWarning = computed(() => ({
   title: 'Collateral migration required',
   message: 'These don\'t accept your current collateral. Pick one only if you also move collateral to a compatible vault.',
 }))
 const debtTargetOptions = computed(() =>
-  [
-    ...rawDebtTargetOptions.value.filter(option =>
-      option.vaultAddress && eligibleDebtTargetAddressSet.value.has(normalizeVaultAddress(option.vaultAddress)),
-    ),
-    ...rawAllDebtTargetOptions.value
-      .filter(option =>
-        option.vaultAddress && debtBridgeTargetAddressSet.value.has(normalizeVaultAddress(option.vaultAddress)),
-      )
-      .map(option => ({
-        ...option,
-        compatibilityWarning: debtCompatibilityWarning.value,
-      })),
-  ],
+  isExternalSourceRoute.value
+    ? externalDebtTargetOptions.value
+    : [
+        ...rawDebtTargetOptions.value.filter(option =>
+          option.vaultAddress && eligibleDebtTargetAddressSet.value.has(normalizeVaultAddress(option.vaultAddress)),
+        ),
+        ...rawAllDebtTargetOptions.value
+          .filter(option =>
+            option.vaultAddress && debtBridgeTargetAddressSet.value.has(normalizeVaultAddress(option.vaultAddress)),
+          )
+          .map(option => ({
+            ...option,
+            compatibilityWarning: debtCompatibilityWarning.value,
+          })),
+      ],
 )
 
 const {
@@ -292,7 +418,249 @@ const {
   liabilityVault: computed(() => effectiveDebtVault.value),
 })
 
+const uniqueVaults = <TVault extends EVault | SecuritizeCollateralVault>(vaults: TVault[]): TVault[] => {
+  const seen = new Set<string>()
+  const result: TVault[] = []
+  for (const vault of vaults) {
+    const address = normalizeVaultAddress(vault.address)
+    if (!address || seen.has(address)) continue
+    seen.add(address)
+    result.push(vault)
+  }
+  return result
+}
+
+const filterOptionsByVaults = (options: CollateralOption[], vaults: Array<EVault | SecuritizeCollateralVault>) => {
+  const byAddress = new Map(
+    options
+      .filter(option => option.vaultAddress)
+      .map(option => [normalizeVaultAddress(option.vaultAddress), option]),
+  )
+  return vaults
+    .map(vault => byAddress.get(normalizeVaultAddress(vault.address)))
+    .filter((option): option is CollateralOption => !!option)
+}
+
+const withCompatibilityWarning = (
+  options: CollateralOption[],
+  warning: CollateralOption['compatibilityWarning'],
+) => options.map(option => ({ ...option, compatibilityWarning: warning }))
+
+const externalSupplyOnlyTargetVaults = computed(() => {
+  if (!externalIsSupplyOnly.value) return []
+  const borrowableAddresses = new Set(
+    borrowList.value.map(pair => normalizeVaultAddress(pair.borrow.address)),
+  )
+  return getVerifiedEVaults(showAllLabelEntries.value).filter(vault =>
+    (showAllLabelEntries.value || !isVaultNotExplorableLend(vault.address))
+    && borrowableAddresses.has(normalizeVaultAddress(vault.address))
+    && !isOpDisabled(vault, OP_DEPOSIT),
+  )
+})
+
+const externalSupplyOnlyTargetOptions = useReactiveMap(
+  externalSupplyOnlyTargetVaults,
+  [viewer, enableIntrinsicApy, enableRewardsApy],
+  async (vault) => {
+    const apy = computeSupplyApy(vault, viewer.value, {
+      enableIntrinsicApy: enableIntrinsicApy.value,
+      enableRewardsApy: enableRewardsApy.value,
+    })
+    return buildCollateralOption({
+      vault,
+      type: 'vault',
+      amount: 0,
+      priceAmount: 0,
+      apy,
+      tagContext: 'swap-target',
+      showBalance: false,
+    })
+  },
+)
+const externalSupplyOnlySwapRequiredWarning = computed(() => ({
+  title: 'Swap required',
+  message: 'Migrate and swap',
+}))
+
+const externalInitialTargetPairs = computed(() => {
+  const collateralAsset = externalCollateralAsset.value
+  if (!isExternalSourceRoute.value || !collateralAsset) return []
+
+  const debtAsset = externalDebtAsset.value
+  const collateralVaults = debtAsset
+    ? rawAllCollateralTargetVaults.value.filter(vault =>
+        sameAssetAddress(vault.asset.address, collateralAsset.address),
+      )
+    : externalSupplyOnlyTargetVaults.value
+  if (!debtAsset) {
+    return collateralVaults.map(collateral => ({ collateral, debt: null as EVault | null }))
+  }
+
+  const debtVaults = rawAllDebtTargetVaults.value.filter(vault =>
+    sameAssetAddress(vault.asset.address, debtAsset.address),
+  )
+  const pairs: Array<{ debt: EVault, collateral: EVault }> = []
+  for (const debt of debtVaults) {
+    for (const collateral of collateralVaults) {
+      if (isDebtCollateralCompatible(debt, collateral)) {
+        pairs.push({ debt, collateral })
+      }
+    }
+  }
+  return pairs
+})
+
+const externalInitialCompatibleDebtTargetVaults = computed(() =>
+  uniqueVaults(externalInitialTargetPairs.value.map(pair => pair.debt).filter((vault): vault is EVault => !!vault)),
+)
+const externalInitialCompatibleCollateralTargetVaults = computed(() =>
+  uniqueVaults(externalInitialTargetPairs.value.map(pair => pair.collateral)),
+)
+const externalInitialCompatibleDebtTargetAddressSet = computed(() =>
+  new Set(externalInitialCompatibleDebtTargetVaults.value.map(vault => normalizeVaultAddress(vault.address))),
+)
+const externalInitialCompatibleCollateralTargetAddressSet = computed(() =>
+  new Set(externalInitialCompatibleCollateralTargetVaults.value.map(vault => normalizeVaultAddress(vault.address))),
+)
+const hasExternalCompatibleCollateralChoiceForDebt = (debtVault: EVault) =>
+  rawAllCollateralTargetVaults.value.some(collateralVault =>
+    isDebtCollateralCompatible(debtVault, collateralVault),
+  )
+const hasExternalCompatibleDebtChoiceForCollateral = (collateralVault: EVault | SecuritizeCollateralVault) =>
+  rawAllDebtTargetVaults.value.some(debtVault =>
+    isDebtCollateralCompatible(debtVault, collateralVault),
+  )
+const externalInitialDebtBridgeTargetVaults = computed(() => {
+  if (!isExternalSourceRoute.value || !externalDebtAsset.value || !externalCollateralAsset.value) return []
+  return rawAllDebtTargetVaults.value.filter((vault) => {
+    const address = normalizeVaultAddress(vault.address)
+    return hasExternalCompatibleCollateralChoiceForDebt(vault)
+      && !externalInitialCompatibleDebtTargetAddressSet.value.has(address)
+  })
+})
+const externalInitialCollateralBridgeTargetVaults = computed(() => {
+  if (!isExternalSourceRoute.value || !externalDebtAsset.value || !externalCollateralAsset.value) return []
+  return rawAllCollateralTargetVaults.value.filter((vault) => {
+    const address = normalizeVaultAddress(vault.address)
+    return hasExternalCompatibleDebtChoiceForCollateral(vault)
+      && !externalInitialCompatibleCollateralTargetAddressSet.value.has(address)
+  })
+})
+const externalInitialDebtCompatibilityWarning = computed(() => ({
+  title: 'Collateral vault selection required',
+  message: 'These need a compatible collateral vault selection too. Swap quotes are fetched when the debt asset changes.',
+}))
+const externalInitialCollateralCompatibilityWarning = computed(() => ({
+  title: 'Debt vault selection required',
+  message: 'These need a compatible debt vault selection too. Swap quotes are fetched when the collateral asset changes.',
+}))
+const externalInitialDebtTargetVaults = computed(() => [
+  ...externalInitialCompatibleDebtTargetVaults.value,
+  ...externalInitialDebtBridgeTargetVaults.value,
+])
+const externalInitialCollateralTargetVaults = computed(() => [
+  ...externalInitialCompatibleCollateralTargetVaults.value,
+  ...externalInitialCollateralBridgeTargetVaults.value,
+])
+const externalInitialDebtTargetOptions = computed(() => [
+  ...filterOptionsByVaults(rawAllDebtTargetOptions.value, externalInitialCompatibleDebtTargetVaults.value),
+  ...withCompatibilityWarning(
+    filterOptionsByVaults(rawAllDebtTargetOptions.value, externalInitialDebtBridgeTargetVaults.value),
+    externalInitialDebtCompatibilityWarning.value,
+  ),
+])
+const externalInitialCollateralTargetOptions = computed(() => {
+  if (externalIsSupplyOnly.value) {
+    const sourceAsset = externalCollateralAsset.value?.address
+    return externalSupplyOnlyTargetOptions.value.map((option) => {
+      if (sameAssetAddress(option.assetAddress, sourceAsset)) return option
+      return {
+        ...option,
+        compatibilityWarning: externalSupplyOnlySwapRequiredWarning.value,
+      }
+    })
+  }
+  return [
+    ...filterOptionsByVaults(rawAllCollateralTargetOptions.value, externalInitialCompatibleCollateralTargetVaults.value),
+    ...withCompatibilityWarning(
+      filterOptionsByVaults(rawAllCollateralTargetOptions.value, externalInitialCollateralBridgeTargetVaults.value),
+      externalInitialCollateralCompatibilityWarning.value,
+    ),
+  ]
+})
+const externalSelectedDebtBridgeTargetVaults = computed(() => {
+  if (!isExternalSourceRoute.value || !externalDebtAsset.value || !targetCollateralVault.value) return []
+  const compatibleAddressSet = new Set(rawDebtTargetVaults.value.map(vault => normalizeVaultAddress(vault.address)))
+  return rawAllDebtTargetVaults.value.filter((vault) => {
+    const address = normalizeVaultAddress(vault.address)
+    return hasExternalCompatibleCollateralChoiceForDebt(vault)
+      && !compatibleAddressSet.has(address)
+  })
+})
+const externalSelectedCollateralBridgeTargetVaults = computed(() => {
+  if (!isExternalSourceRoute.value || !externalCollateralAsset.value || !targetDebtVault.value) return []
+  const compatibleAddressSet = new Set(rawCollateralTargetVaults.value.map(vault => normalizeVaultAddress(vault.address)))
+  return rawAllCollateralTargetVaults.value.filter((vault) => {
+    const address = normalizeVaultAddress(vault.address)
+    return hasExternalCompatibleDebtChoiceForCollateral(vault)
+      && !compatibleAddressSet.has(address)
+  })
+})
+const externalSelectedDebtCompatibilityWarning = computed(() => ({
+  title: 'Collateral migration required',
+  message: 'These don\'t accept the selected collateral. Pick one only if you also move collateral to a compatible vault.',
+}))
+const externalSelectedCollateralCompatibilityWarning = computed(() => ({
+  title: 'Debt migration required',
+  message: 'These aren\'t accepted by the selected debt. Pick one only if you also move debt to a compatible vault.',
+}))
+const externalSelectedDebtTargetVaults = computed(() => [
+  ...rawDebtTargetVaults.value,
+  ...externalSelectedDebtBridgeTargetVaults.value,
+])
+const externalSelectedCollateralTargetVaults = computed(() => [
+  ...rawCollateralTargetVaults.value,
+  ...externalSelectedCollateralBridgeTargetVaults.value,
+])
+const externalSelectedDebtTargetOptions = computed(() => [
+  ...filterOptionsByVaults(rawDebtTargetOptions.value, rawDebtTargetVaults.value),
+  ...withCompatibilityWarning(
+    filterOptionsByVaults(rawAllDebtTargetOptions.value, externalSelectedDebtBridgeTargetVaults.value),
+    externalSelectedDebtCompatibilityWarning.value,
+  ),
+])
+const externalSelectedCollateralTargetOptions = computed(() => [
+  ...filterOptionsByVaults(rawCollateralTargetOptions.value, rawCollateralTargetVaults.value),
+  ...withCompatibilityWarning(
+    filterOptionsByVaults(rawAllCollateralTargetOptions.value, externalSelectedCollateralBridgeTargetVaults.value),
+    externalSelectedCollateralCompatibilityWarning.value,
+  ),
+])
+const externalDebtTargetVaults = computed(() => {
+  if (!isExternalSourceRoute.value || !externalDebtAsset.value) return []
+  return targetCollateralVault.value
+    ? externalSelectedDebtTargetVaults.value
+    : externalInitialDebtTargetVaults.value
+})
+const externalCollateralTargetVaults = computed(() => {
+  if (!isExternalSourceRoute.value || !externalCollateralAsset.value) return []
+  return targetDebtVault.value
+    ? externalSelectedCollateralTargetVaults.value
+    : externalInitialCollateralTargetVaults.value
+})
+const externalDebtTargetOptions = computed(() =>
+  targetCollateralVault.value
+    ? externalSelectedDebtTargetOptions.value
+    : externalInitialDebtTargetOptions.value,
+)
+const externalCollateralTargetOptions = computed(() =>
+  targetDebtVault.value
+    ? externalSelectedCollateralTargetOptions.value
+    : externalInitialCollateralTargetOptions.value,
+)
+
 const collateralSourceOperationAllowed = (target: EVault) => {
+  if (isExternalSourceRoute.value) return true
   const source = sourceCollateralEVault.value
   if (!source) return false
   return isSameUnderlyingAsset(source, target)
@@ -345,30 +713,37 @@ const collateralBridgeTargetAddressSet = computed(() =>
   new Set(collateralBridgeTargetVaults.value.map(vault => normalizeVaultAddress(vault.address))),
 )
 const collateralTargetVaults = computed(() => [
-  ...eligibleCollateralTargetVaults.value,
-  ...collateralBridgeTargetVaults.value,
+  ...(isExternalSourceRoute.value
+    ? externalCollateralTargetVaults.value
+    : [
+        ...eligibleCollateralTargetVaults.value,
+        ...collateralBridgeTargetVaults.value,
+      ]),
 ])
 const collateralCompatibilityWarning = computed(() => ({
   title: 'Debt migration required',
   message: 'These aren\'t accepted by your current debt. Pick one only if you also move debt to a compatible vault.',
 }))
 const collateralTargetOptions = computed(() =>
-  [
-    ...rawCollateralTargetOptions.value.filter(option =>
-      option.vaultAddress && eligibleCollateralTargetAddressSet.value.has(normalizeVaultAddress(option.vaultAddress)),
-    ),
-    ...rawAllCollateralTargetOptions.value
-      .filter(option =>
-        option.vaultAddress && collateralBridgeTargetAddressSet.value.has(normalizeVaultAddress(option.vaultAddress)),
-      )
-      .map(option => ({
-        ...option,
-        compatibilityWarning: collateralCompatibilityWarning.value,
-      })),
-  ],
+  isExternalSourceRoute.value
+    ? externalCollateralTargetOptions.value
+    : [
+        ...rawCollateralTargetOptions.value.filter(option =>
+          option.vaultAddress && eligibleCollateralTargetAddressSet.value.has(normalizeVaultAddress(option.vaultAddress)),
+        ),
+        ...rawAllCollateralTargetOptions.value
+          .filter(option =>
+            option.vaultAddress && collateralBridgeTargetAddressSet.value.has(normalizeVaultAddress(option.vaultAddress)),
+          )
+          .map(option => ({
+            ...option,
+            compatibilityWarning: collateralCompatibilityWarning.value,
+          })),
+      ],
 )
 
 const currentDebtOption = computed<CollateralOption | null>(() => {
+  if (isExternalSourceRoute.value) return null
   const vault = sourceDebtVault.value
   if (!vault) return null
   const option = makeVaultOption(vault, fromBorrowApy.value ?? undefined, 'Keep current debt')
@@ -387,6 +762,7 @@ const debtSelectionVaults = computed(() => [
 ])
 
 const currentCollateralOption = computed<CollateralOption | null>(() => {
+  if (isExternalSourceRoute.value) return null
   const vault = sourceCollateralVault.value
   if (!vault) return null
   const option = makeVaultOption(vault, fromSupplyApy.value ?? undefined, 'Keep current collateral')
@@ -405,7 +781,7 @@ const collateralSelectionVaults = computed(() => [
 ])
 
 const { slippage } = useSlippage({
-  fromSymbol: () => sourceCollateralVault.value?.asset.symbol || sourceDebtVault.value?.asset.symbol,
+  fromSymbol: () => externalCollateralAsset.value?.symbol || externalDebtAsset.value?.symbol || sourceCollateralVault.value?.asset.symbol || sourceDebtVault.value?.asset.symbol,
   toSymbol: () => targetCollateralVault.value?.asset.symbol || targetDebtVault.value?.asset.symbol,
 })
 
@@ -675,6 +1051,237 @@ const debtRouteItems = computed(() => {
 })
 const swapRouteEmptyMessage = 'Enter amount to fetch quotes'
 
+const {
+  sortedQuoteCards: externalCollateralQuoteCardsSorted,
+  selectedProvider: externalCollateralSelectedProvider,
+  selectedQuote: selectedExternalCollateralQuote,
+  effectiveQuote: externalCollateralQuote,
+  effectiveQuoteFetchedAt: externalCollateralQuoteFetchedAt,
+  isLoading: isExternalCollateralQuoteLoading,
+  quoteError: externalCollateralQuoteError,
+  statusLabel: externalCollateralQuotesStatusLabel,
+  getQuoteDiffPct: getExternalCollateralQuoteDiffPct,
+  reset: resetExternalCollateralQuotes,
+  requestQuotes: requestExternalCollateralQuotesNow,
+  selectProvider: selectExternalCollateralProvider,
+} = useSwapQuotesParallel({
+  amountField: 'amountOut',
+  compare: 'max',
+})
+
+const {
+  sortedQuoteCards: externalDebtQuoteCardsSorted,
+  selectedProvider: externalDebtSelectedProvider,
+  selectedQuote: selectedExternalDebtQuote,
+  effectiveQuote: externalDebtQuote,
+  effectiveQuoteFetchedAt: externalDebtQuoteFetchedAt,
+  isLoading: isExternalDebtQuoteLoading,
+  quoteError: externalDebtQuoteError,
+  statusLabel: externalDebtQuotesStatusLabel,
+  getQuoteDiffPct: getExternalDebtQuoteDiffPct,
+  reset: resetExternalDebtQuotes,
+  requestQuotes: requestExternalDebtQuotesNow,
+  selectProvider: selectExternalDebtProvider,
+} = useSwapQuotesParallel({
+  amountField: 'amountIn',
+  compare: 'min',
+})
+
+const externalQuoteOwner = computed<Address>(() =>
+  (inboundExternalOwner.value || address.value || zeroAddress) as Address,
+)
+
+const inboundExternalAccountSeedVault = computed(() =>
+  externalIsSupplyOnly.value
+    ? undefined
+    : targetDebtVault.value
+      || externalInitialCompatibleDebtTargetVaults.value[0]
+      || externalInitialDebtTargetVaults.value[0],
+)
+
+const resolveInboundExternalEulerAccount = async () => {
+  if (!inboundExternalOwner.value) {
+    throw new Error('Migration target account is incomplete')
+  }
+  const owner = getAddress(inboundExternalOwner.value) as Address
+  if (externalIsSupplyOnly.value) {
+    inboundExternalEulerAccount.value = owner
+    inboundExternalEulerAccountKey.value = `${chainId.value ?? 'unknown'}:${owner}:${externalSourceId.value}:supply`
+    return owner
+  }
+
+  const key = `${chainId.value ?? 'unknown'}:${owner}:${externalSourceId.value}`
+  if (inboundExternalEulerAccount.value && inboundExternalEulerAccountKey.value === key) {
+    return inboundExternalEulerAccount.value
+  }
+
+  const account = await getNewSubAccount(owner, inboundExternalAccountSeedVault.value?.address) as Address
+  inboundExternalEulerAccount.value = account
+  inboundExternalEulerAccountKey.value = key
+  return account
+}
+
+const requestExternalCollateralQuotes = useDebounceFn(async () => {
+  const sourceAsset = externalCollateralAsset.value
+  const targetVault = targetCollateralVault.value
+  if (!isExternalSourceRoute.value || !collateralNeedsSwap.value || !sourceAsset || !targetVault || !inboundExternalOwner.value || currentCollateralAssets.value <= 0n) {
+    resetExternalCollateralQuotes()
+    return
+  }
+  const eulerAccount = await resolveInboundExternalEulerAccount()
+  await requestExternalCollateralQuotesNow({
+    tokenIn: sourceAsset.address as Address,
+    tokenOut: targetVault.asset.address as Address,
+    accountIn: zeroAddress as Address,
+    accountOut: eulerAccount,
+    amount: currentCollateralAssets.value,
+    vaultIn: zeroAddress as Address,
+    receiver: targetVault.address as Address,
+    origin: externalQuoteOwner.value,
+    slippage: slippage.value,
+    swapperMode: SwapperMode.EXACT_IN,
+    isRepay: false,
+    targetDebt: 0n,
+    currentDebt: 0n,
+    unusedInputReceiver: externalQuoteOwner.value,
+  })
+}, 500)
+
+const requestExternalDebtQuotes = useDebounceFn(async () => {
+  const sourceDebt = externalDebtAsset.value
+  const targetVault = targetDebtVault.value
+  const swapper = eulerPeripheryAddresses.value?.swapper
+  if (!isExternalSourceRoute.value || !debtNeedsSwap.value || !sourceDebt || !targetVault || !swapper || !inboundExternalOwner.value || currentDebt.value <= 0n) {
+    resetExternalDebtQuotes()
+    return
+  }
+  const eulerAccount = await resolveInboundExternalEulerAccount()
+  await requestExternalDebtQuotesNow({
+    tokenIn: targetVault.asset.address as Address,
+    tokenOut: sourceDebt.address as Address,
+    accountIn: eulerAccount,
+    accountOut: eulerAccount,
+    amount: currentDebt.value,
+    vaultIn: targetVault.address as Address,
+    receiver: swapper as Address,
+    origin: externalQuoteOwner.value,
+    slippage: slippage.value,
+    swapperMode: SwapperMode.TARGET_DEBT,
+    isRepay: true,
+    targetDebt: 0n,
+    currentDebt: currentDebt.value,
+    skipSweepDepositOut: true,
+  })
+}, 500)
+
+const onRefreshExternalCollateralQuotes = () => {
+  resetExternalCollateralQuotes()
+  void requestExternalCollateralQuotes()
+}
+const onRefreshExternalDebtQuotes = () => {
+  resetExternalDebtQuotes()
+  void requestExternalDebtQuotes()
+}
+
+const externalCollateralRouteItems = computed(() => {
+  const vault = targetCollateralVault.value
+  if (!vault) return []
+  return buildSwapRouteItems({
+    quoteCards: externalCollateralQuoteCardsSorted.value,
+    getQuoteDiffPct: getExternalCollateralQuoteDiffPct,
+    decimals: Number(vault.asset.decimals),
+    symbol: vault.asset.symbol,
+    formatAmount: formatSmartAmount,
+    amountField: 'amountOut',
+    compare: 'max',
+    diffPrefix: '-',
+  })
+})
+const externalDebtRouteItems = computed(() => {
+  const vault = targetDebtVault.value
+  if (!vault) return []
+  return buildSwapRouteItems({
+    quoteCards: externalDebtQuoteCardsSorted.value,
+    getQuoteDiffPct: getExternalDebtQuoteDiffPct,
+    decimals: Number(vault.asset.decimals),
+    symbol: vault.asset.symbol,
+    formatAmount: formatSmartAmount,
+    amountField: 'amountIn',
+    compare: 'min',
+    diffPrefix: '+',
+  })
+})
+const activeCollateralQuote = computed(() =>
+  isExternalSourceRoute.value ? externalCollateralQuote.value : collateralQuote.value,
+)
+const activeDebtQuote = computed(() =>
+  isExternalSourceRoute.value ? externalDebtQuote.value : debtQuote.value,
+)
+const activeSelectedCollateralQuote = computed(() =>
+  isExternalSourceRoute.value ? selectedExternalCollateralQuote.value : selectedCollateralQuote.value,
+)
+const activeSelectedDebtQuote = computed(() =>
+  isExternalSourceRoute.value ? selectedExternalDebtQuote.value : selectedDebtQuote.value,
+)
+const activeCollateralRouteItems = computed(() =>
+  isExternalSourceRoute.value ? externalCollateralRouteItems.value : collateralRouteItems.value,
+)
+const activeDebtRouteItems = computed(() =>
+  isExternalSourceRoute.value ? externalDebtRouteItems.value : debtRouteItems.value,
+)
+const activeCollateralSelectedProvider = computed(() =>
+  isExternalSourceRoute.value ? externalCollateralSelectedProvider.value : collateralSelectedProvider.value,
+)
+const activeDebtSelectedProvider = computed(() =>
+  isExternalSourceRoute.value ? externalDebtSelectedProvider.value : debtSelectedProvider.value,
+)
+const activeCollateralQuotesStatusLabel = computed(() =>
+  isExternalSourceRoute.value ? externalCollateralQuotesStatusLabel.value : collateralQuotesStatusLabel.value,
+)
+const activeDebtQuotesStatusLabel = computed(() =>
+  isExternalSourceRoute.value ? externalDebtQuotesStatusLabel.value : debtQuotesStatusLabel.value,
+)
+const isActiveCollateralQuoteLoading = computed(() =>
+  isExternalSourceRoute.value ? isExternalCollateralQuoteLoading.value : isCollateralQuoteLoading.value,
+)
+const isActiveDebtQuoteLoading = computed(() =>
+  isExternalSourceRoute.value ? isExternalDebtQuoteLoading.value : isDebtQuoteLoading.value,
+)
+const activeCollateralQuoteError = computed(() =>
+  isExternalSourceRoute.value ? externalCollateralQuoteError.value : collateralQuoteError.value,
+)
+const activeDebtQuoteError = computed(() =>
+  isExternalSourceRoute.value ? externalDebtQuoteError.value : debtQuoteError.value,
+)
+const selectActiveCollateralProvider = (provider: string) => {
+  if (isExternalSourceRoute.value) {
+    selectExternalCollateralProvider(provider)
+    return
+  }
+  selectCollateralProvider(provider)
+}
+const selectActiveDebtProvider = (provider: string) => {
+  if (isExternalSourceRoute.value) {
+    selectExternalDebtProvider(provider)
+    return
+  }
+  selectDebtProvider(provider)
+}
+const onRefreshActiveCollateralQuotes = () => {
+  if (isExternalSourceRoute.value) {
+    onRefreshExternalCollateralQuotes()
+    return
+  }
+  onRefreshCollateralQuotes()
+}
+const onRefreshActiveDebtQuotes = () => {
+  if (isExternalSourceRoute.value) {
+    onRefreshExternalDebtQuotes()
+    return
+  }
+  onRefreshDebtQuotes()
+}
+
 const fromSupplyApy = computed(() => {
   const vault = sourceCollateralVault.value
   if (!vault) return null
@@ -724,8 +1331,8 @@ const nextCollateralAmountNano = computed<bigint | null>(() => {
   if (!hasCollateralChange.value) return currentCollateralAssets.value
   if (!targetCollateralVault.value) return null
   if (isSameCollateralAsset.value) return currentCollateralAssets.value
-  if (!collateralQuote.value) return null
-  return BigInt(collateralQuote.value.amountOut || 0)
+  if (!activeCollateralQuote.value) return null
+  return BigInt(activeCollateralQuote.value.amountOut || 0)
 })
 
 const currentCollateralLegs = computed<RefinanceCollateralLeg[]>(() =>
@@ -786,8 +1393,8 @@ const nextDebtAmountNano = computed<bigint | null>(() => {
   if (!hasDebtChange.value) return currentDebt.value
   if (!targetDebtVault.value) return null
   if (isSameDebtAsset.value) return currentDebt.value
-  if (!debtQuote.value) return null
-  return BigInt(debtQuote.value.amountIn || 0)
+  if (!activeDebtQuote.value) return null
+  return BigInt(activeDebtQuote.value.amountIn || 0)
 })
 
 const areRoeLegsApplicable = (legs: readonly RefinanceCollateralLeg[], debtVault: EVault | undefined) =>
@@ -967,6 +1574,7 @@ const currentLiqDisplaySymbol = computed(() => {
 })
 
 const pairCompatibilityError = computed(() => {
+  if (externalIsSupplyOnly.value) return null
   if (!hasAnyChange.value || !effectiveDebtVault.value || !effectiveCollateralVault.value) return null
   return isDebtCollateralCompatible(effectiveDebtVault.value, effectiveCollateralVault.value)
     ? null
@@ -978,16 +1586,19 @@ const collateralCowDebtSwapError = computed(() =>
     : null,
 )
 const hasAllRequiredQuotes = computed(() =>
-  (!collateralNeedsSwap.value || !!selectedCollateralQuote.value)
-  && (!debtNeedsSwap.value || !!selectedDebtQuote.value),
+  (!collateralNeedsSwap.value || !!activeSelectedCollateralQuote.value)
+  && (!debtNeedsSwap.value || !!activeSelectedDebtQuote.value),
 )
 const healthError = computed(() => {
+  if (isExternalSourceRoute.value) return null
   if (!hasAnyChange.value || !hasAllRequiredQuotes.value || nextHealth.value === null) return null
   if (!Number.isFinite(nextHealth.value)) return null
   return nextHealth.value <= 1 ? 'Refinance would make position unhealthy' : null
 })
 const borrowCapacityError = computed(() => {
+  if (externalIsSupplyOnly.value) return null
   if (!hasAnyChange.value || !hasAllRequiredQuotes.value) return null
+  if (!effectiveDebtVault.value) return null
   if (!nextBorrowLtv.value || nextBorrowLtv.value <= 0) {
     return 'Selected debt vault does not accept the selected collateral'
   }
@@ -1010,6 +1621,15 @@ onUnmounted(() => {
 
 const plannedOps = computed<PlannedOp[]>(() => {
   const steps: PlannedOp[] = []
+  if (isExternalSourceRoute.value) {
+    if (targetCollateralVault.value) {
+      steps.push({ vault: targetCollateralVault.value, op: OP_DEPOSIT })
+    }
+    if (targetDebtVault.value) {
+      steps.push({ vault: targetDebtVault.value, op: OP_BORROW })
+    }
+    return steps
+  }
   if (hasCollateralChange.value && sourceCollateralEVault.value && targetCollateralVault.value) {
     steps.push({
       vault: sourceCollateralEVault.value,
@@ -1088,8 +1708,11 @@ const directPriceImpact = computed(() => {
   return Math.min(...impacts)
 })
 const shouldGateUnknownPriceImpact = computed(() =>
-  (collateralNeedsSwap.value && !!selectedCollateralQuote.value && collateralPriceImpact.value === null)
-  || (debtNeedsSwap.value && !!selectedDebtQuote.value && debtPriceImpact.value === null),
+  !isExternalSourceRoute.value
+  && (
+    (collateralNeedsSwap.value && !!activeSelectedCollateralQuote.value && collateralPriceImpact.value === null)
+    || (debtNeedsSwap.value && !!activeSelectedDebtQuote.value && debtPriceImpact.value === null)
+  ),
 )
 const { guardWithPriceImpact } = usePriceImpactGate({
   directPriceImpact,
@@ -1098,7 +1721,8 @@ const { guardWithPriceImpact } = usePriceImpactGate({
 
 const isGeoBlocked = computed(() => isAnyVaultBlockedByCountry(...getOperationVaultAddresses()))
 const validationError = computed(() => {
-  if (!hasAnyChange.value) return 'Choose a new collateral vault, debt vault, or both'
+  if (isExternalSourceRoute.value) return inboundMigrationDisabledReason.value
+  if (!hasAnyChange.value) return 'Select a new collateral vault, debt vault, or both'
   if (collateralMigrationDisabledReason.value && targetCollateralVault.value) return collateralMigrationDisabledReason.value
   if (hookWarning.value) return hookWarning.value.message
   if (collateralCowDebtSwapError.value) return collateralCowDebtSwapError.value
@@ -1134,7 +1758,7 @@ const canAddToBatch = computed(() => {
 })
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value) return false
-  if (isLoading.value || isSubmitting.value) return true
+  if (isLoading.value || isExternalPositionsLoading.value || isSubmitting.value) return true
   if (validationError.value) return true
   if (!hasAllRequiredQuotes.value) return true
   return !!simulationError.value
@@ -1142,62 +1766,81 @@ const isSubmitDisabled = computed(() => {
 const isReviewButtonDisabled = computed(() => isSubmitDisabled.value || isPreparing.value)
 const reviewRefinanceDisabled = computed(() => isGeoBlocked.value || isReviewButtonDisabled.value)
 const reviewRefinanceLabel = computed(() => {
-  if (!hasAnyChange.value) return 'Choose Vaults'
+  if (isExternalSourceRoute.value) {
+    if (!targetCollateralVault.value || (externalDebtAsset.value && !targetDebtVault.value)) return 'Select Vaults'
+    if (!hasAllRequiredQuotes.value) return 'Select Quotes'
+    return 'Review Migration'
+  }
+  if (!hasAnyChange.value) return 'Select Vaults'
   if (!hasAllRequiredQuotes.value) return 'Select Quotes'
   return 'Review Refinance'
 })
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
   if (validationError.value) return { message: validationError.value, variant: validationError.value === healthError.value ? 'error' : 'warning' }
-  if (collateralQuoteError.value && collateralNeedsSwap.value) return { message: collateralQuoteError.value, variant: 'warning' }
-  if (debtQuoteError.value && debtNeedsSwap.value) return { message: debtQuoteError.value, variant: 'warning' }
+  if (activeCollateralQuoteError.value && collateralNeedsSwap.value) return { message: activeCollateralQuoteError.value, variant: 'warning' }
+  if (activeDebtQuoteError.value && debtNeedsSwap.value) return { message: activeDebtQuoteError.value, variant: 'warning' }
   if (simulationError.value) return { message: simulationError.value, variant: 'error' }
-  if (collateralNeedsSwap.value && isCollateralQuoteLoading.value) return { message: 'Fetching collateral swap quotes...', variant: 'warning' }
-  if (debtNeedsSwap.value && isDebtQuoteLoading.value) return { message: 'Fetching debt swap quotes...', variant: 'warning' }
-  if (collateralNeedsSwap.value && !selectedCollateralQuote.value) return { message: 'Select a collateral swap quote to continue', variant: 'warning' }
-  if (debtNeedsSwap.value && !selectedDebtQuote.value) return { message: 'Select a debt swap quote to continue', variant: 'warning' }
+  if (collateralNeedsSwap.value && isActiveCollateralQuoteLoading.value) return { message: 'Fetching collateral swap quotes...', variant: 'warning' }
+  if (debtNeedsSwap.value && isActiveDebtQuoteLoading.value) return { message: 'Fetching debt swap quotes...', variant: 'warning' }
+  if (collateralNeedsSwap.value && !activeSelectedCollateralQuote.value) return { message: 'Select a collateral swap quote to continue', variant: 'warning' }
+  if (debtNeedsSwap.value && !activeSelectedDebtQuote.value) return { message: 'Select a debt swap quote to continue', variant: 'warning' }
   return undefined
 })
 
 const debtDisplayAmount = computed({
-  get: () => formatVaultAmount(
-    debtNeedsSwap.value && !debtQuote.value ? 0n : nextDebtAmountNano.value ?? currentDebt.value,
-    effectiveDebtVault.value,
-  ),
+  get: () => debtNeedsSwap.value && !activeDebtQuote.value
+    ? ''
+    : formatVaultAmount(nextDebtAmountNano.value ?? currentDebt.value, effectiveDebtVault.value),
   set: () => {},
 })
 const collateralDisplayAmount = computed({
-  get: () => formatVaultAmount(
-    collateralNeedsSwap.value && !collateralQuote.value ? 0n : nextCollateralAmountNano.value ?? currentCollateralAssets.value,
-    effectiveCollateralVault.value,
-  ),
+  get: () => collateralNeedsSwap.value && !activeCollateralQuote.value
+    ? ''
+    : formatVaultAmount(nextCollateralAmountNano.value ?? currentCollateralAssets.value, effectiveCollateralVault.value),
+  set: () => {},
+})
+const externalCollateralDisplayAmount = computed({
+  get: () => targetCollateralVault.value ? collateralDisplayAmount.value : '',
+  set: () => {},
+})
+const externalDebtDisplayAmount = computed({
+  get: () => targetDebtVault.value ? debtDisplayAmount.value : '',
   set: () => {},
 })
 
 const collateralSwapSummary = computed(() =>
-  collateralQuote.value && sourceCollateralEVault.value && targetCollateralVault.value
-    ? buildQuoteSummary(collateralQuote.value, sourceCollateralEVault.value, targetCollateralVault.value, 'amountIn', 'amountOut')
+  activeCollateralQuote.value && targetCollateralVault.value
+    ? isExternalSourceRoute.value && externalCollateralAsset.value
+      ? buildAssetQuoteSummary(activeCollateralQuote.value, externalCollateralAsset.value, targetCollateralVault.value.asset, 'amountIn', 'amountOut')
+      : sourceCollateralEVault.value
+        ? buildQuoteSummary(activeCollateralQuote.value, sourceCollateralEVault.value, targetCollateralVault.value, 'amountIn', 'amountOut')
+        : null
     : null,
 )
 const debtSwapSummary = computed(() =>
-  debtQuote.value && sourceDebtVault.value && targetDebtVault.value
-    ? buildQuoteSummary(debtQuote.value, targetDebtVault.value, sourceDebtVault.value, 'amountIn', 'amountOut')
+  activeDebtQuote.value && targetDebtVault.value
+    ? isExternalSourceRoute.value && externalDebtAsset.value
+      ? buildAssetQuoteSummary(activeDebtQuote.value, targetDebtVault.value.asset, externalDebtAsset.value, 'amountIn', 'amountOut')
+      : sourceDebtVault.value
+        ? buildQuoteSummary(activeDebtQuote.value, targetDebtVault.value, sourceDebtVault.value, 'amountIn', 'amountOut')
+        : null
     : null,
 )
 const refinanceSwapReviewInfo = computed(() => {
-  if (!collateralNeedsSwap.value || debtNeedsSwap.value || !collateralQuote.value || !targetCollateralVault.value) return {}
+  if (!collateralNeedsSwap.value || debtNeedsSwap.value || !activeCollateralQuote.value || !targetCollateralVault.value) return {}
   return {
     swapToAsset: targetCollateralVault.value.asset,
-    swapToAmount: trimTrailingZeros(formatUnits(BigInt(collateralQuote.value.amountOut || 0), Number(targetCollateralVault.value.asset.decimals))),
+    swapToAmount: trimTrailingZeros(formatUnits(BigInt(activeCollateralQuote.value.amountOut || 0), Number(targetCollateralVault.value.asset.decimals))),
     swapMode: SwapperMode.EXACT_IN,
   }
 })
-const collateralRoutedVia = computed(() => getRoutedVia(collateralSelectedProvider.value, collateralQuote.value))
-const debtRoutedVia = computed(() => getRoutedVia(debtSelectedProvider.value, debtQuote.value))
+const collateralRoutedVia = computed(() => getRoutedVia(activeCollateralSelectedProvider.value, activeCollateralQuote.value))
+const debtRoutedVia = computed(() => getRoutedVia(activeDebtSelectedProvider.value, activeDebtQuote.value))
 const effectiveQuoteFetchedAt = computed(() => {
   const fetched = [
-    collateralNeedsSwap.value ? collateralQuoteFetchedAt.value : null,
-    debtNeedsSwap.value ? debtQuoteFetchedAt.value : null,
+    collateralNeedsSwap.value ? (isExternalSourceRoute.value ? externalCollateralQuoteFetchedAt.value : collateralQuoteFetchedAt.value) : null,
+    debtNeedsSwap.value ? (isExternalSourceRoute.value ? externalDebtQuoteFetchedAt.value : debtQuoteFetchedAt.value) : null,
   ].filter((value): value is number => typeof value === 'number')
   return fetched.length ? Math.min(...fetched) : null
 })
@@ -1269,7 +1912,7 @@ const externalPlannedOps = computed<PlannedOp[]>(() => {
   ]
 })
 const externalHookWarning = computed(() => getPlanHookDisabledWarning(externalPlannedOps.value))
-const externalOwner = computed<Address | undefined>(() => {
+const morphoMigrationOwner = computed<Address | undefined>(() => {
   if (isSpyMode.value || !address.value) return undefined
   try {
     return getAddress(address.value)
@@ -1291,7 +1934,7 @@ const externalMigrationDisabledReason = computed(() => {
 })
 const canReviewExternalMigration = computed(() =>
   showExternalTargets.value
-  && !!externalOwner.value
+  && !!morphoMigrationOwner.value
   && !!selectedMorphoMarket.value
   && !externalMigrationDisabledReason.value
   && !isMorphoMarketsLoading.value
@@ -1299,8 +1942,8 @@ const canReviewExternalMigration = computed(() =>
   && !isSubmitting.value,
 )
 
-const buildMorphoMigrationPlan = async (): Promise<TransactionPlan> => {
-  if (!chainId.value || !externalOwner.value || !sourceDebtVault.value || !sourceCollateralEVault.value || !selectedMorphoMarket.value) {
+const buildMorphoMigrationInput = () => {
+  if (!chainId.value || !morphoMigrationOwner.value || !sourceDebtVault.value || !sourceCollateralEVault.value || !selectedMorphoMarket.value) {
     throw new Error('Morpho migration inputs are incomplete')
   }
 
@@ -1313,17 +1956,35 @@ const buildMorphoMigrationPlan = async (): Promise<TransactionPlan> => {
   const externalTarget = {
     interestBufferBps: morphoOutboundInterestBufferBps,
   }
+  return { source, externalTarget }
+}
+
+const getMorphoMigrationAuthorizationRequest = async (
+  input: ReturnType<typeof buildMorphoMigrationInput>,
+): Promise<MigrationAuthorizationRequest | undefined> => {
+  if (!chainId.value || !morphoMigrationOwner.value || !selectedMorphoMarket.value) {
+    throw new Error('Morpho migration inputs are incomplete')
+  }
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 60)
-  const authorizationRequest = await getMigrationAuthorization({
+  return getMigrationAuthorization({
     direction: 'euler-to-external',
     connectorId: MORPHO_CONNECTOR_ID,
     chainId: chainId.value,
-    owner: externalOwner.value,
+    owner: morphoMigrationOwner.value,
     positionRef: selectedMorphoMarket.value.ref,
-    source,
-    externalTarget,
+    source: input.source,
+    externalTarget: input.externalTarget,
     deadline,
   })
+}
+
+const buildMorphoMigrationPlan = async (): Promise<TransactionPlan> => {
+  if (!chainId.value || !morphoMigrationOwner.value || !selectedMorphoMarket.value) {
+    throw new Error('Morpho migration inputs are incomplete')
+  }
+  const input = buildMorphoMigrationInput()
+  const authorizationRequest = await getMorphoMigrationAuthorizationRequest(input)
+  morphoMigrationNeedsAuthorization.value = !!authorizationRequest
   const authorization = authorizationRequest
     ? await signMigrationAuthorization(authorizationRequest)
     : undefined
@@ -1337,16 +1998,151 @@ const buildMorphoMigrationPlan = async (): Promise<TransactionPlan> => {
     direction: 'euler-to-external',
     connectorId: MORPHO_CONNECTOR_ID,
     chainId: chainId.value,
-    owner: externalOwner.value,
+    owner: morphoMigrationOwner.value,
     positionRef: selectedMorphoMarket.value.ref,
-    source,
-    externalTarget,
+    source: input.source,
+    externalTarget: input.externalTarget,
     authorization,
     operationName: 'eulerToMorphoMigration',
   })
 }
 
-const targetDebtVaultAddress = computed(() => typeof route.query.to === 'string' ? normalizeVaultAddress(route.query.to) : '')
+const inboundMigrationDisabledReason = computed(() => {
+  if (!isExternalSourceRoute.value) return null
+  if (!isConnected.value) return 'Connect wallet to migrate'
+  if (isSpyMode.value) return 'Migration requires the connected wallet'
+  if (isExternalPositionsLoading.value) return 'Loading external position'
+  if (externalPositionsError.value && !externalPosition.value) return externalPositionsError.value
+  if (!externalPosition.value) return 'External position not found'
+  if (!inboundExternalOwnerMatchesSource.value) return 'Connected wallet does not match this migration source'
+  if (externalPosition.value.disabledReason) return externalPosition.value.disabledReason
+  if (!targetCollateralVault.value) return externalIsSupplyOnly.value ? 'Select a lend vault' : 'Select a collateral vault'
+  if (externalDebtAsset.value && !targetDebtVault.value) return 'Select a debt vault'
+  if (hookWarning.value) return hookWarning.value.message
+  if (debtLiquidityError.value) return debtLiquidityError.value
+  if (collateralSupplyCapError.value) return collateralSupplyCapError.value
+  if (pairCompatibilityError.value) return pairCompatibilityError.value
+  if (borrowCapacityError.value) return borrowCapacityError.value
+  if (collateralNeedsSwap.value && isExternalCollateralQuoteLoading.value) return 'Fetching collateral swap quotes...'
+  if (debtNeedsSwap.value && isExternalDebtQuoteLoading.value) return 'Fetching debt swap quotes...'
+  if (collateralNeedsSwap.value && !selectedExternalCollateralQuote.value) return 'Select a collateral swap quote to continue'
+  if (debtNeedsSwap.value && !selectedExternalDebtQuote.value) return 'Select a debt swap quote to continue'
+  if (collateralNeedsSwap.value && selectedExternalCollateralQuote.value && getQuoteAmount(selectedExternalCollateralQuote.value, 'amountOut') <= 0n) {
+    return 'Selected collateral swap route has no output'
+  }
+  if (debtNeedsSwap.value && selectedExternalDebtQuote.value && getQuoteAmount(selectedExternalDebtQuote.value, 'amountOut') <= 0n) {
+    return 'Selected debt swap route has no output'
+  }
+  if (debtNeedsSwap.value && selectedExternalDebtQuote.value && getQuoteAmount(selectedExternalDebtQuote.value, 'amountOutMin') < currentDebt.value) {
+    return 'Selected debt swap route does not cover the external debt'
+  }
+  if (isGeoBlocked.value) return 'This operation is not available in your region'
+  if (simulationError.value) return simulationError.value
+  return null
+})
+const canReviewInboundExternalMigration = computed(() =>
+  isExternalSourceRoute.value
+  && !inboundMigrationDisabledReason.value
+  && !isPreparing.value
+  && !isSubmitting.value,
+)
+
+type InboundExternalMigrationInput = {
+  source: ExternalMigrationCandidate
+  position: MigrationPosition
+  eulerTarget: EulerMigrationTarget
+  collateralSwapQuote?: SwapQuote
+  debtSwapQuote?: SwapQuote
+}
+
+const buildInboundExternalMigrationInput = async (): Promise<InboundExternalMigrationInput> => {
+  const source = externalPosition.value
+  if (!chainId.value || !inboundExternalOwner.value || !source || !targetCollateralVault.value) {
+    throw new Error('Migration inputs are incomplete')
+  }
+  if (!inboundExternalOwnerMatchesSource.value) {
+    throw new Error('Connected wallet does not match this migration source')
+  }
+  if (source.debt && !targetDebtVault.value) throw new Error('Migration inputs are incomplete')
+  const collateralSwapQuote = isSameCollateralAsset.value ? undefined : selectedExternalCollateralQuote.value ?? undefined
+  const debtSwapQuote = !source.debt || isSameDebtAsset.value ? undefined : selectedExternalDebtQuote.value ?? undefined
+  if (!isSameCollateralAsset.value && !collateralSwapQuote) throw new Error('No collateral swap quote selected')
+  if (source.debt && !isSameDebtAsset.value && !debtSwapQuote) throw new Error('No debt swap quote selected')
+
+  const eulerAccount = await resolveInboundExternalEulerAccount()
+  const position = await getMigrationPosition({
+    connectorId: source.connectorId,
+    chainId: chainId.value,
+    owner: inboundExternalOwner.value,
+    positionRef: source.ref,
+  })
+  const eulerTarget: EulerMigrationTarget = {
+    eulerAccount,
+    collateralVault: targetCollateralVault.value.address as Address,
+  }
+  if (collateralSwapQuote) {
+    eulerTarget.minCollateralAssets = getQuoteAmount(collateralSwapQuote, 'amountOutMin')
+  }
+  if (source.debt && targetDebtVault.value) {
+    eulerTarget.borrowVault = targetDebtVault.value.address as Address
+    eulerTarget.borrowAmount = debtSwapQuote
+      ? getSwapInputAmount(debtSwapQuote, SwapperMode.TARGET_DEBT)
+      : inboundBorrowAmountWithBuffer.value
+  }
+  const input: InboundExternalMigrationInput = { source, position, eulerTarget }
+  if (collateralSwapQuote) input.collateralSwapQuote = collateralSwapQuote
+  if (debtSwapQuote) input.debtSwapQuote = debtSwapQuote
+  return input
+}
+
+const getInboundExternalMigrationAuthorizationRequest = async (
+  input: InboundExternalMigrationInput,
+): Promise<MigrationAuthorizationRequest | undefined> => {
+  if (!chainId.value || !inboundExternalOwner.value) {
+    throw new Error('Migration inputs are incomplete')
+  }
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 60)
+  return getMigrationAuthorization({
+    direction: 'external-to-euler',
+    connectorId: input.source.connectorId,
+    chainId: chainId.value,
+    owner: inboundExternalOwner.value,
+    position: input.position,
+    positionRef: input.source.ref,
+    target: input.eulerTarget,
+    deadline,
+  })
+}
+
+const buildInboundExternalMigrationPlan = async (): Promise<TransactionPlan> => {
+  if (!chainId.value || !inboundExternalOwner.value) {
+    throw new Error('Migration inputs are incomplete')
+  }
+  const input = await buildInboundExternalMigrationInput()
+  const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input)
+  inboundExternalAuthorizationConnector.value = authorizationRequest ? input.source.connectorId : null
+  const authorization = authorizationRequest
+    ? await signMigrationAuthorization(authorizationRequest)
+    : undefined
+
+  return planCrossProtocolMigration({
+    direction: 'external-to-euler',
+    connectorId: input.source.connectorId,
+    chainId: chainId.value,
+    owner: inboundExternalOwner.value,
+    position: input.position,
+    positionRef: input.source.ref,
+    target: input.eulerTarget,
+    authorization,
+    collateralSwapQuote: input.collateralSwapQuote,
+    debtSwapQuote: input.debtSwapQuote,
+    operationName: `${input.source.connectorId}ToEulerMigration`,
+  })
+}
+
+const targetDebtVaultAddress = computed(() =>
+  isExternalSourceRoute.value || typeof route.query.to !== 'string' ? '' : normalizeVaultAddress(route.query.to),
+)
 watch([debtTargetVaults, targetDebtVaultAddress], ([vaults, targetAddress]) => {
   if (!targetAddress || targetDebtVault.value) return
   const vault = vaults.find(candidate => normalizeVaultAddress(candidate.address) === targetAddress)
@@ -1394,6 +2190,21 @@ watch(selectedMorphoMarket, () => {
   clearSimulationError()
 })
 
+watch(isExternalSourceRoute, (enabled) => {
+  if (enabled) void loadExternalPositions()
+}, { immediate: true })
+watch(externalPosition, () => {
+  if (!isExternalSourceRoute.value) return
+  targetDebtVault.value = undefined
+  targetCollateralVault.value = undefined
+  clearSimulationError()
+  resetCollateralQuotes()
+  resetDebtQuotes()
+  resetExternalCollateralQuotes()
+  resetExternalDebtQuotes()
+  inboundExternalAuthorizationConnector.value = null
+})
+
 watch([targetCollateralVault, () => slippage.value, currentCollateralAssets], () => {
   clearSimulationError()
   resetCollateralQuotes()
@@ -1404,7 +2215,24 @@ watch([targetDebtVault, () => slippage.value, currentDebt], () => {
   resetDebtQuotes()
   void requestDebtQuotes()
 })
+watch([targetCollateralVault, () => slippage.value, currentCollateralAssets, externalCollateralAsset, inboundExternalOwner], () => {
+  clearSimulationError()
+  resetExternalCollateralQuotes()
+  void requestExternalCollateralQuotes()
+})
+watch([targetDebtVault, () => slippage.value, currentDebt, externalDebtAsset, eulerPeripheryAddresses, inboundExternalOwner], () => {
+  clearSimulationError()
+  resetExternalDebtQuotes()
+  void requestExternalDebtQuotes()
+})
+watch([inboundExternalOwner, externalPosition], () => {
+  inboundExternalEulerAccount.value = null
+  inboundExternalEulerAccountKey.value = ''
+})
 watch([selectedCollateralQuote, selectedDebtQuote], () => {
+  clearSimulationError()
+})
+watch([selectedExternalCollateralQuote, selectedExternalDebtQuote], () => {
   clearSimulationError()
 })
 watch(
@@ -1429,6 +2257,11 @@ watch(
 )
 
 const loadPosition = async () => {
+  if (isExternalSourceRoute.value) {
+    position.value = null
+    isLoading.value = false
+    return
+  }
   if (!isConnected.value && !isSpyMode.value) {
     position.value = null
     return
@@ -1440,6 +2273,7 @@ const loadPosition = async () => {
 }
 
 watch([isPositionsLoaded, () => route.params.number], ([loaded]) => {
+  if (isExternalSourceRoute.value) return
   if (loaded) void loadPosition()
 }, { immediate: true })
 
@@ -1459,7 +2293,12 @@ const resolveSelectedVault = <T extends EVault | SecuritizeCollateralVault>(
 const onDebtVaultChange = (selectedIndex: number, selectedOption?: CollateralOption) => {
   clearSimulationError()
   const selected = resolveSelectedVault(debtSelectionVaults.value, selectedIndex, selectedOption)
-  if (!selected || !sourceDebtVault.value) return
+  if (!selected) return
+  if (isExternalSourceRoute.value) {
+    targetDebtVault.value = selected as EVault
+    return
+  }
+  if (!sourceDebtVault.value) return
   if (normalizeVaultAddress(selected.address) === normalizeVaultAddress(sourceDebtVault.value.address)) {
     targetDebtVault.value = undefined
     return
@@ -1470,7 +2309,14 @@ const onDebtVaultChange = (selectedIndex: number, selectedOption?: CollateralOpt
 const onCollateralVaultChange = (selectedIndex: number, selectedOption?: CollateralOption) => {
   clearSimulationError()
   const selected = resolveSelectedVault(collateralSelectionVaults.value, selectedIndex, selectedOption)
-  if (!selected || !sourceCollateralVault.value) return
+  if (!selected) return
+  if (isExternalSourceRoute.value) {
+    if (!isSecuritizeCollateralVault(selected)) {
+      targetCollateralVault.value = selected as EVault
+    }
+    return
+  }
+  if (!sourceCollateralVault.value) return
   if (normalizeVaultAddress(selected.address) === normalizeVaultAddress(sourceCollateralVault.value.address)) {
     targetCollateralVault.value = undefined
     return
@@ -1479,6 +2325,20 @@ const onCollateralVaultChange = (selectedIndex: number, selectedOption?: Collate
     targetCollateralVault.value = selected as EVault
   }
 }
+
+const externalDebtCompatibleNote = computed(() => {
+  const debt = externalDebtAsset.value?.symbol
+  const collateral = externalCollateralAsset.value?.symbol
+  if (!debt || !collateral || targetCollateralVault.value) return undefined
+  return `Debt vaults matching ${debt} with LTV support for ${collateral} collateral`
+})
+const externalCollateralCompatibleNote = computed(() => {
+  if (externalIsSupplyOnly.value) return ''
+  const collateral = externalCollateralAsset.value?.symbol
+  const debt = externalDebtAsset.value?.symbol
+  if (!collateral || !debt || targetDebtVault.value) return undefined
+  return `Collateral vaults matching ${collateral} and accepted by ${debt} debt vaults`
+})
 
 const openSlippageSettings = () => {
   modal.open(SlippageSettingsModal)
@@ -1623,6 +2483,18 @@ const submitCowSwapCollateralSwap = async () => {
   })
 }
 
+function schedulePostMigrationRefreshes() {
+  const refreshAddress = address.value || inboundExternalOwner.value || ''
+  for (const delay of POST_MIGRATION_REFRESH_DELAYS_MS) {
+    setTimeout(() => {
+      void loadExternalPositions({ force: true })
+      if (refreshAddress) {
+        void refreshAllPositions(undefined, refreshAddress)
+      }
+    }, delay)
+  }
+}
+
 watch(() => cowSwapOrderStatus.orderStatus.value, (status) => {
   if (!status?.terminal) return
   if (status.type === 'traded' || status.type === 'fulfilled') {
@@ -1641,17 +2513,19 @@ const reviewMorphoMigration = async () => {
   clearSimulationError()
   try {
     externalPreparedPlan.value = null
-    externalPlan.value = await buildMorphoMigrationPlan()
-    externalPreparedPlan.value = await prepareTransactionPlan(externalPlan.value, { account: currentPlanAccount() })
-    const ok = await runPreparedSimulation(externalPreparedPlan.value, buildRefinanceStateOverrideOptions())
-    if (!ok) return
+    externalPlan.value = null
+    const input = buildMorphoMigrationInput()
+    const authorizationRequest = await getMorphoMigrationAuthorizationRequest(input)
+    morphoMigrationNeedsAuthorization.value = !!authorizationRequest
 
     modal.open(OperationReviewModal, {
       props: {
-        type: 'refinance',
+        type: 'migration',
         asset: sourceDebtVault.value.asset,
         amount: formatVaultAmount(currentDebt.value, sourceDebtVault.value),
-        prepared: externalPreparedPlan.value,
+        signatureSteps: buildMorphoMigrationSignatureSteps(),
+        displaySteps: buildMorphoMigrationDisplaySteps(),
+        allowConfirmWithoutPlan: true,
         onConfirm: async () => {
           await sendMorphoMigration()
         },
@@ -1669,10 +2543,16 @@ const reviewMorphoMigration = async () => {
 }
 
 const sendMorphoMigration = async () => {
-  if (!externalPreparedPlan.value) return
   isSubmitting.value = true
+  clearSimulationError()
   try {
+    externalPreparedPlan.value = null
+    externalPlan.value = await buildMorphoMigrationPlan()
+    externalPreparedPlan.value = await prepareTransactionPlan(externalPlan.value, { account: currentPlanAccount() })
+    const ok = await runPreparedSimulation(externalPreparedPlan.value, buildRefinanceStateOverrideOptions())
+    if (!ok) return
     await executePreparedPlan(externalPreparedPlan.value)
+    schedulePostMigrationRefreshes()
     modal.close()
     setTimeout(() => {
       router.replace({ path: '/portfolio', query: { network: route.query.network } })
@@ -1681,6 +2561,69 @@ const sendMorphoMigration = async () => {
   catch (e) {
     showError('Migration failed')
     logWarn('refinance/morphoMigrationSend', e)
+  }
+  finally {
+    isSubmitting.value = false
+  }
+}
+
+const reviewInboundExternalMigration = async () => {
+  const reviewAsset = externalDebtAsset.value ?? externalCollateralAsset.value
+  if (isOperationBlocked.value || !canReviewInboundExternalMigration.value || !reviewAsset) return
+  isPreparing.value = true
+  clearSimulationError()
+  try {
+    inboundExternalPreparedPlan.value = null
+    inboundExternalAuthorizationConnector.value = null
+    inboundExternalPlan.value = null
+    const input = await buildInboundExternalMigrationInput()
+    const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input)
+    inboundExternalAuthorizationConnector.value = authorizationRequest ? input.source.connectorId : null
+
+    modal.open(OperationReviewModal, {
+      props: {
+        type: 'migration',
+        asset: reviewAsset,
+        amount: formatUnits(reviewAsset.amount, Number(reviewAsset.decimals)),
+        signatureSteps: buildInboundExternalMigrationSignatureSteps(),
+        displaySteps: buildInboundExternalMigrationDisplaySteps(),
+        allowConfirmWithoutPlan: true,
+        quoteFetchedAt: effectiveQuoteFetchedAt.value,
+        onConfirm: async () => {
+          await sendInboundExternalMigration()
+        },
+        submittingLabel: 'Migrating...',
+      },
+    })
+  }
+  catch (err) {
+    logWarn('externalMigration/review', err)
+    showError(err instanceof Error ? err.message : 'Failed to prepare migration')
+  }
+  finally {
+    isPreparing.value = false
+  }
+}
+
+const sendInboundExternalMigration = async () => {
+  isSubmitting.value = true
+  clearSimulationError()
+  try {
+    inboundExternalPreparedPlan.value = null
+    inboundExternalPlan.value = await buildInboundExternalMigrationPlan()
+    inboundExternalPreparedPlan.value = await prepareTransactionPlan(inboundExternalPlan.value, { account: currentPlanAccount() })
+    const ok = await runPreparedSimulation(inboundExternalPreparedPlan.value, buildRefinanceStateOverrideOptions())
+    if (!ok) return
+    await executePreparedPlan(inboundExternalPreparedPlan.value)
+    schedulePostMigrationRefreshes()
+    modal.close()
+    setTimeout(() => {
+      router.replace({ path: '/portfolio/migrate', query: { network: route.query.network } })
+    }, 400)
+  }
+  catch (err) {
+    showError(err instanceof Error ? err.message : 'Migration failed')
+    logWarn('externalMigration/send', err)
   }
   finally {
     isSubmitting.value = false
@@ -1731,6 +2674,10 @@ const addToBatch = async () => {
 
 const submit = async () => {
   if (isOperationBlocked.value) return
+  if (isExternalSourceRoute.value) {
+    await reviewInboundExternalMigration()
+    return
+  }
   if (isPreparing.value || isGeoBlocked.value || isSubmitDisabled.value) return
   isPreparing.value = true
   try {
@@ -1815,6 +2762,11 @@ function normalizeVaultAddress(addr?: string): string {
   }
 }
 
+function sameAssetAddress(a?: string, b?: string): boolean {
+  if (!a || !b) return false
+  return normalizeVaultAddress(a) === normalizeVaultAddress(b)
+}
+
 function isDebtCollateralCompatible(
   debtVault: EVault,
   collateralVault: EVault | SecuritizeCollateralVault,
@@ -1850,6 +2802,34 @@ function formatVaultAmount(amount: bigint | null | undefined, vault?: EVault | S
   return trimTrailingZeros(formatUnits(amount, Number(vault.asset.decimals)))
 }
 
+function formatExternalAssetAmount(asset?: ExternalMigrationCandidate['collateral'] | null): string {
+  if (!asset) return '-'
+  return `${formatSmartAmount(formatUnits(asset.amount, Number(asset.decimals)))} ${asset.symbol}`
+}
+
+function formatExternalRawAmount(
+  amount: bigint | null | undefined,
+  asset?: { decimals: number | bigint, symbol: string } | null,
+): string {
+  if (amount === null || amount === undefined || !asset) return '-'
+  return `${formatSmartAmount(formatUnits(amount, Number(asset.decimals)))} ${asset.symbol}`
+}
+
+function formatExternalAssetUsd(asset?: ExternalMigrationCandidate['collateral'] | null): string {
+  if (!asset || asset.amountUsd === null) return '-'
+  return formatUsdValue(asset.amountUsd)
+}
+
+function getVaultDisplayName(vault?: EVault | SecuritizeCollateralVault): string {
+  if (!vault) return 'Select Euler vault'
+  return getVaultProductName(vault.address) || vault.shares.name || vault.asset.symbol
+}
+
+function getVaultMarketAssetLabel(vault?: EVault | SecuritizeCollateralVault): string {
+  if (!vault) return '-'
+  return `${getVaultDisplayName(vault)} · ${vault.asset.symbol}`
+}
+
 function convertVaultSharesToAssets(vault: EVault, sharesAmount: bigint): bigint {
   if (sharesAmount <= 0n) return 0n
   if (vault.totalShares <= 0n) return sharesAmount
@@ -1880,6 +2860,234 @@ function buildQuoteSummary(
   }
 }
 
+function buildAssetQuoteSummary(
+  quote: SwapQuote,
+  inputAsset: { decimals: number | bigint, symbol: string },
+  outputAsset: { decimals: number | bigint, symbol: string },
+  inputField: 'amountIn' | 'amountOut',
+  outputField: 'amountIn' | 'amountOut',
+) {
+  const input = formatUnits(getQuoteAmount(quote, inputField), Number(inputAsset.decimals))
+  const output = formatUnits(getQuoteAmount(quote, outputField), Number(outputAsset.decimals))
+  return {
+    from: `${formatSmartAmount(input)} ${inputAsset.symbol}`,
+    to: `${formatSmartAmount(output)} ${outputAsset.symbol}`,
+    fromExact: `${input} ${inputAsset.symbol}`,
+    toExact: `${output} ${outputAsset.symbol}`,
+  }
+}
+
+type MigrationReviewAsset = {
+  address: string
+  symbol: string
+  decimals: number | bigint
+}
+
+function formatMigrationStepAmount(
+  amount: bigint | null | undefined,
+  asset: MigrationReviewAsset,
+): string | undefined {
+  if (amount === null || amount === undefined) return undefined
+  return trimTrailingZeros(formatUnits(amount, Number(asset.decimals)))
+}
+
+function migrationStepAssetInfo(
+  asset: MigrationReviewAsset,
+  amount?: bigint | null,
+  estimated = false,
+): NonNullable<DisplayStep['assetInfo']> {
+  return {
+    symbol: asset.symbol,
+    address: asset.address,
+    amount: formatMigrationStepAmount(amount, asset),
+    estimated: estimated || undefined,
+  }
+}
+
+function getQuoteOutputAmount(quote: SwapQuote): bigint {
+  const amountOutMin = getQuoteAmount(quote, 'amountOutMin')
+  return amountOutMin > 0n ? amountOutMin : getQuoteAmount(quote, 'amountOut')
+}
+
+function buildMorphoMigrationSignatureSteps(): DisplayStep[] {
+  if (!morphoMigrationNeedsAuthorization.value) return []
+  return [{
+    index: 1,
+    label: 'Sign Morpho authorization',
+    isSeparateTx: false,
+  }]
+}
+
+function buildMorphoMigrationDisplaySteps(): DisplayStep[] {
+  const debtVault = sourceDebtVault.value
+  const collateralVault = sourceCollateralEVault.value
+  if (!debtVault || !collateralVault || !selectedMorphoMarket.value) return []
+
+  const steps: DisplayStep[] = []
+  const pushStep = (
+    label: string,
+    assetInfo?: DisplayStep['assetInfo'],
+    toAssetInfo?: DisplayStep['toAssetInfo'],
+    labelSuffix?: string,
+  ) => {
+    steps.push({
+      index: steps.length + 1,
+      label,
+      labelSuffix,
+      isSeparateTx: false,
+      assetInfo,
+      toAssetInfo,
+    })
+  }
+
+  pushStep(
+    'Withdraw Euler collateral',
+    migrationStepAssetInfo(collateralVault.asset, currentCollateralAssets.value),
+  )
+  pushStep(
+    'Supply collateral to Morpho',
+    migrationStepAssetInfo(collateralVault.asset, currentCollateralAssets.value),
+  )
+  pushStep(
+    'Borrow on Morpho',
+    migrationStepAssetInfo(debtVault.asset, currentDebt.value, true),
+  )
+  pushStep(
+    'Repay Euler debt',
+    migrationStepAssetInfo(debtVault.asset, currentDebt.value),
+  )
+
+  return steps
+}
+
+function buildInboundExternalMigrationSignatureSteps(): DisplayStep[] {
+  const sourceCollateral = externalCollateralAsset.value
+  if (!sourceCollateral) return []
+  if (inboundExternalAuthorizationConnector.value === AAVE_CONNECTOR_ID) {
+    return [{
+      index: 1,
+      label: 'Sign Aave permit',
+      isSeparateTx: false,
+      assetInfo: migrationStepAssetInfo(sourceCollateral, sourceCollateral.amount),
+    }]
+  }
+  if (inboundExternalAuthorizationConnector.value === MORPHO_CONNECTOR_ID) {
+    return [{
+      index: 1,
+      label: 'Sign Morpho authorization',
+      isSeparateTx: false,
+    }]
+  }
+  return []
+}
+
+function buildInboundExternalMigrationDisplaySteps(): DisplayStep[] {
+  const source = externalPosition.value
+  const sourceCollateral = externalCollateralAsset.value
+  const sourceDebt = externalDebtAsset.value
+  const targetCollateral = targetCollateralVault.value
+  const targetDebt = targetDebtVault.value
+  if (!source || !sourceCollateral || !targetCollateral || (sourceDebt && !targetDebt)) return []
+
+  const steps: DisplayStep[] = []
+  const pushStep = (
+    label: string,
+    assetInfo?: DisplayStep['assetInfo'],
+    toAssetInfo?: DisplayStep['toAssetInfo'],
+    labelSuffix?: string,
+  ) => {
+    steps.push({
+      index: steps.length + 1,
+      label,
+      labelSuffix,
+      isSeparateTx: false,
+      assetInfo,
+      toAssetInfo,
+    })
+  }
+
+  const debtSwapQuote = debtNeedsSwap.value ? selectedExternalDebtQuote.value : null
+  const collateralSwapQuote = collateralNeedsSwap.value ? selectedExternalCollateralQuote.value : null
+
+  if (sourceDebt && targetDebt) {
+    const borrowAmount = debtSwapQuote
+      ? getSwapInputAmount(debtSwapQuote, SwapperMode.TARGET_DEBT)
+      : inboundBorrowAmountWithBuffer.value
+
+    pushStep(
+      'Enable controller',
+      migrationStepAssetInfo(targetDebt.asset),
+    )
+    pushStep(
+      'Enable collateral',
+      migrationStepAssetInfo(targetCollateral.asset),
+    )
+    pushStep(
+      'Borrow on Euler',
+      migrationStepAssetInfo(targetDebt.asset, borrowAmount),
+    )
+
+    if (debtSwapQuote) {
+      pushStep(
+        `Swap for ${source.protocol} debt`,
+        migrationStepAssetInfo(targetDebt.asset, getSwapInputAmount(debtSwapQuote, SwapperMode.TARGET_DEBT), true),
+        migrationStepAssetInfo(sourceDebt, sourceDebt.amount),
+      )
+    }
+
+    pushStep(
+      `Repay ${source.protocol} debt`,
+      migrationStepAssetInfo(sourceDebt, sourceDebt.amount),
+    )
+  }
+
+  if (source.connectorId === AAVE_CONNECTOR_ID) {
+    pushStep(
+      'Transfer Aave collateral',
+      migrationStepAssetInfo(sourceCollateral, sourceCollateral.amount),
+      undefined,
+      'to Euler Swapper',
+    )
+    pushStep(
+      'Withdraw Aave collateral',
+      migrationStepAssetInfo(sourceCollateral, sourceCollateral.amount),
+    )
+  }
+  else {
+    pushStep(
+      'Withdraw Morpho collateral',
+      migrationStepAssetInfo(sourceCollateral, sourceCollateral.amount),
+    )
+  }
+
+  if (collateralSwapQuote) {
+    pushStep(
+      sourceDebt ? 'Swap and supply collateral' : 'Swap and lend',
+      migrationStepAssetInfo(sourceCollateral, sourceCollateral.amount),
+      migrationStepAssetInfo(targetCollateral.asset, getQuoteOutputAmount(collateralSwapQuote), true),
+    )
+    pushStep(
+      'Verify min received',
+      migrationStepAssetInfo(targetCollateral.asset, getQuoteOutputAmount(collateralSwapQuote)),
+    )
+  }
+  else {
+    pushStep(
+      sourceDebt ? 'Supply collateral to Euler' : 'Lend on Euler',
+      migrationStepAssetInfo(targetCollateral.asset, sourceCollateral.amount),
+    )
+  }
+
+  if (sourceDebt && targetDebt && !debtSwapQuote) {
+    pushStep(
+      'Repay excess Euler debt',
+      { ...migrationStepAssetInfo(targetDebt.asset), amount: 'remaining' },
+    )
+  }
+
+  return steps
+}
+
 function getRoutedVia(provider: string | null, quote: SwapQuote | null): string | null {
   if (!provider) return quote ? 'Not selected' : null
   if (!quote?.route?.length) return provider
@@ -1887,6 +3095,13 @@ function getRoutedVia(provider: string | null, quote: SwapQuote | null): string 
 }
 
 function getOperationVaultAddresses(): string[] {
+  if (isExternalSourceRoute.value) {
+    const addresses: Array<string | undefined> = [
+      targetDebtVault.value?.address,
+      targetCollateralVault.value?.address,
+    ]
+    return addresses.filter((value): value is string => !!value)
+  }
   const addresses: Array<string | undefined> = [
     sourceDebtVault.value?.address,
     sourceCollateralVault.value?.address,
@@ -1901,20 +3116,323 @@ function getOperationVaultAddresses(): string[] {
   <div class="relative flex gap-32">
     <BackButton
       class="hidden tablet:inline-flex tablet:absolute tablet:top-20 tablet:right-full tablet:mr-4"
-      :fallback="positionDetailsFallback"
+      :fallback="refinanceBackFallback"
       always-fallback
     />
     <VaultForm
       back
-      :back-fallback="positionDetailsFallback"
+      :back-fallback="refinanceBackFallback"
       back-always-fallback
-      title="Refinance"
-      description="Move debt, collateral, or both to new vaults in one transaction."
+      :title="isExternalSourceRoute ? 'Migrate to Euler' : 'Refinance'"
+      :description="isExternalSourceRoute ? 'Select Euler vaults for this external source position.' : 'Move debt, collateral, or both to new vaults in one transaction.'"
       class="flex flex-col gap-16 w-full"
-      :loading="isLoading || isPositionsLoading"
+      :loading="isExternalSourceRoute ? isExternalPositionsLoading : isLoading || isPositionsLoading"
+      :scroll-mode="isExternalSourceRoute ? 'page' : 'contained'"
       @submit.prevent="submit"
     >
-      <template v-if="sourceDebtVault && sourceCollateralVault && effectiveDebtVault && effectiveCollateralVault">
+      <template v-if="isExternalSourceRoute">
+        <BaseLoadableContent :loading="isExternalPositionsLoading">
+          <template v-if="externalPosition">
+            <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
+              <div class="flex flex-col gap-16 w-full">
+                <section class="flex flex-col gap-12">
+                  <h2 class="text-h5 text-content-primary">
+                    Source
+                  </h2>
+                  <div class="rounded-12 border border-line-default bg-card p-12">
+                    <PortfolioMigrateRow
+                      :position="externalPosition"
+                      :loading="isSubmitting || isPreparing"
+                      :disabled-reason="validationError || undefined"
+                      :show-action="false"
+                      :hoverable="false"
+                    />
+                  </div>
+                </section>
+
+                <section class="flex flex-col gap-12">
+                  <h2 class="text-h5 text-content-primary">
+                    {{ externalIsSupplyOnly ? 'Select target vault' : 'Select target vaults' }}
+                  </h2>
+
+                  <AssetInput
+                    v-model="externalCollateralDisplayAmount"
+                    :desc="externalCollateralVaultDescription"
+                    :label="externalCollateralVaultLabel"
+                    :asset="externalCollateralInputAsset"
+                    :vault="targetCollateralVault"
+                    :balance="currentCollateralAssets"
+                    :collateral-options="collateralSelectionOptions"
+                    collateral-modal-product-name="Euler"
+                    :collateral-modal-title="externalCollateralVaultPlaceholder"
+                    collateral-modal-apy-label="Supply APY"
+                    :collateral-modal-compatible-label="externalCollateralCompatibleLabel"
+                    :collateral-modal-incompatible-label="externalCollateralIncompatibleLabel"
+                    :collateral-modal-compatible-empty-message="externalCollateralCompatibleEmptyMessage"
+                    :collateral-modal-compatible-note="externalCollateralCompatibleNote"
+                    collateral-modal-force-open
+                    selected-source="vault"
+                    :selected-vault-address="targetCollateralVault?.address"
+                    :asset-selector-placeholder="externalCollateralVaultPlaceholder"
+                    :asset-selector-selected="!!targetCollateralVault"
+                    :readonly="true"
+                    @change-collateral="onCollateralVaultChange"
+                  />
+
+                  <UiAlert
+                    v-if="!collateralSelectionOptions.length && !isExternalPositionsLoading"
+                    :title="externalCollateralOptionsEmptyTitle"
+                    :description="externalCollateralOptionsEmptyDescription"
+                    variant="warning"
+                    size="compact"
+                  />
+
+                  <SwapRouteSelector
+                    v-if="targetCollateralVault && collateralNeedsSwap"
+                    title="Select collateral swap route"
+                    :items="activeCollateralRouteItems"
+                    :selected-provider="activeCollateralSelectedProvider"
+                    :status-label="activeCollateralQuotesStatusLabel"
+                    :is-loading="isActiveCollateralQuoteLoading"
+                    :empty-message="swapRouteEmptyMessage"
+                    @select="selectActiveCollateralProvider"
+                    @refresh="onRefreshActiveCollateralQuotes"
+                  />
+
+                  <AssetInput
+                    v-if="externalDebtAsset"
+                    v-model="externalDebtDisplayAmount"
+                    :desc="externalDebtVaultDescription"
+                    label="Debt vault"
+                    :asset="externalDebtInputAsset"
+                    :vault="targetDebtVault"
+                    :balance="currentDebt"
+                    :collateral-options="debtSelectionOptions"
+                    collateral-modal-product-name="Euler"
+                    collateral-modal-title="Select debt vault"
+                    collateral-modal-apy-label="Borrow APY"
+                    :collateral-modal-compatible-note="externalDebtCompatibleNote"
+                    collateral-modal-force-open
+                    selected-source="vault"
+                    :selected-vault-address="targetDebtVault?.address"
+                    asset-selector-placeholder="Select debt vault"
+                    :asset-selector-selected="!!targetDebtVault"
+                    :readonly="true"
+                    @change-collateral="onDebtVaultChange"
+                  />
+                </section>
+
+                <UiAlert
+                  v-if="externalDebtAsset && !debtSelectionOptions.length && !isExternalPositionsLoading"
+                  title="No debt options"
+                  description="There are no Euler debt vaults with compatible configuration for this external position."
+                  variant="warning"
+                  size="compact"
+                />
+
+                <SwapRouteSelector
+                  v-if="targetDebtVault && debtNeedsSwap"
+                  title="Select debt swap route"
+                  :items="activeDebtRouteItems"
+                  :selected-provider="activeDebtSelectedProvider"
+                  :status-label="activeDebtQuotesStatusLabel"
+                  :is-loading="isActiveDebtQuoteLoading"
+                  :empty-message="swapRouteEmptyMessage"
+                  @select="selectActiveDebtProvider"
+                  @refresh="onRefreshActiveDebtQuotes"
+                />
+
+                <UiAlert
+                  v-if="validationError"
+                  title="Migration"
+                  :description="validationError"
+                  :variant="validationError === simulationError ? 'error' : 'warning'"
+                  size="compact"
+                />
+                <UiAlert
+                  v-if="activeCollateralQuoteError && collateralNeedsSwap"
+                  title="Collateral swap quote"
+                  variant="warning"
+                  :description="activeCollateralQuoteError"
+                  size="compact"
+                />
+                <UiAlert
+                  v-if="activeDebtQuoteError && debtNeedsSwap"
+                  title="Debt swap quote"
+                  variant="warning"
+                  :description="activeDebtQuoteError"
+                  size="compact"
+                />
+                <UiAlert
+                  v-if="simulationError"
+                  title="Error"
+                  variant="error"
+                  :description="simulationError"
+                  size="compact"
+                />
+
+                <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
+                  <VaultFormSubmit
+                    :disabled="reviewRefinanceDisabled"
+                    :loading="isSubmitting || isPreparing"
+                    :disabled-reason="disabledReasonInfo?.message"
+                    :disabled-reason-variant="disabledReasonInfo?.variant"
+                  >
+                    {{ reviewRefinanceLabel }}
+                  </VaultFormSubmit>
+                </div>
+              </div>
+
+              <VaultFormInfoBlock
+                :loading="(collateralNeedsSwap && isActiveCollateralQuoteLoading) || (debtNeedsSwap && isActiveDebtQuoteLoading)"
+                variant="card"
+                class="w-full laptop:max-w-[360px]"
+              >
+                <SummaryRow label="Source">
+                  <span class="text-p2 text-right">
+                    {{ externalPosition.protocol }}
+                  </span>
+                </SummaryRow>
+                <SummaryRow label="Position">
+                  <span class="text-p2 text-right">
+                    {{ externalSourcePairLabel }}
+                  </span>
+                </SummaryRow>
+                <SummaryRow :label="externalIsSupplyOnly ? 'Lend target' : 'Collateral target'">
+                  <span class="text-p2 text-right">
+                    {{ targetCollateralVault ? getVaultMarketAssetLabel(targetCollateralVault) : '-' }}
+                  </span>
+                </SummaryRow>
+                <SummaryRow
+                  v-if="externalDebtAsset"
+                  label="Debt target"
+                >
+                  <span class="text-p2 text-right">
+                    {{ targetDebtVault ? getVaultMarketAssetLabel(targetDebtVault) : '-' }}
+                  </span>
+                </SummaryRow>
+                <SummaryRow label="Collateral">
+                  <span class="text-p2 text-right">
+                    {{ formatExternalAssetAmount(externalCollateralAsset) }}
+                  </span>
+                </SummaryRow>
+                <SummaryRow label="Collateral value">
+                  <span class="text-p2 text-right">
+                    {{ formatExternalAssetUsd(externalCollateralAsset) }}
+                  </span>
+                </SummaryRow>
+                <SummaryRow
+                  v-if="externalDebtAsset"
+                  label="Debt"
+                >
+                  <span class="text-p2 text-right">
+                    {{ formatExternalRawAmount(inboundBorrowAmountWithBuffer, externalDebtAsset) }}
+                  </span>
+                </SummaryRow>
+                <SummaryRow
+                  v-if="externalDebtAsset"
+                  label="Debt value"
+                >
+                  <span class="text-p2 text-right">
+                    {{ formatExternalAssetUsd(externalDebtAsset) }}
+                  </span>
+                </SummaryRow>
+                <SummaryRow
+                  v-if="nextLtv !== null && hasAllRequiredQuotes"
+                  label="Target LTV"
+                >
+                  <span class="text-p2 text-right">
+                    {{ formatNumber(nextLtv) }}%
+                  </span>
+                </SummaryRow>
+                <SummaryRow
+                  v-if="nextHealth !== null && hasAllRequiredQuotes"
+                  label="Target health"
+                >
+                  <span class="text-p2 text-right">
+                    {{ formatHealthScore(nextHealth) }}
+                  </span>
+                </SummaryRow>
+                <SummaryRow
+                  v-if="nextBorrowLtv !== null && hasAllRequiredQuotes"
+                  label="Borrow LTV"
+                >
+                  <span class="text-p2 text-right">
+                    {{ formatNumber(nextBorrowLtv) }}%
+                  </span>
+                </SummaryRow>
+
+                <template v-if="collateralNeedsSwap && collateralSwapSummary">
+                  <SummaryRow label="Collateral swap">
+                    <p class="text-p2 text-right">
+                      <UiExactAmount
+                        :exact="`${collateralSwapSummary.fromExact} -> ${collateralSwapSummary.toExact}`"
+                        align="end"
+                      >
+                        {{ collateralSwapSummary.from }} -> {{ collateralSwapSummary.to }}
+                      </UiExactAmount>
+                    </p>
+                  </SummaryRow>
+                  <SummaryRow
+                    v-if="collateralRoutedVia"
+                    label="Collateral route"
+                  >
+                    <p class="text-p2 text-right">
+                      {{ collateralRoutedVia }}
+                    </p>
+                  </SummaryRow>
+                </template>
+
+                <template v-if="debtNeedsSwap && debtSwapSummary">
+                  <SummaryRow label="Debt swap">
+                    <p class="text-p2 text-right">
+                      <UiExactAmount
+                        :exact="`${debtSwapSummary.fromExact} -> ${debtSwapSummary.toExact}`"
+                        align="end"
+                      >
+                        {{ debtSwapSummary.from }} -> {{ debtSwapSummary.to }}
+                      </UiExactAmount>
+                    </p>
+                  </SummaryRow>
+                  <SummaryRow
+                    v-if="debtRoutedVia"
+                    label="Debt route"
+                  >
+                    <p class="text-p2 text-right">
+                      {{ debtRoutedVia }}
+                    </p>
+                  </SummaryRow>
+                </template>
+
+                <SummaryRow
+                  v-if="collateralNeedsSwap || debtNeedsSwap"
+                  label="Slippage tolerance"
+                >
+                  <button
+                    type="button"
+                    class="flex items-center gap-6 text-p2"
+                    @click="openSlippageSettings"
+                  >
+                    <span>{{ formatNumber(slippage, 2, 0) }}%</span>
+                    <SvgIcon
+                      name="edit"
+                      class="!w-16 !h-16 text-accent-600"
+                    />
+                  </button>
+                </SummaryRow>
+              </VaultFormInfoBlock>
+            </div>
+          </template>
+          <UiAlert
+            v-else
+            title="External position"
+            :description="externalPositionsError || 'This external migration position was not found for the active wallet and network.'"
+            variant="warning"
+            size="compact"
+          />
+        </BaseLoadableContent>
+      </template>
+      <template v-else-if="sourceDebtVault && sourceCollateralVault && effectiveDebtVault && effectiveCollateralVault">
         <VaultLabelsAndAssets
           :vault="sourceDebtVault"
           :assets="[sourceCollateralVault.asset, sourceDebtVault.asset]"

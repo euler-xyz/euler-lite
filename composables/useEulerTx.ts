@@ -23,7 +23,9 @@ import type {
   PlanMigrateSameAssetCollateralArgs,
   PlanMigrateSameAssetDebtArgs,
   GetMigrationAuthorizationArgs,
+  GetMigrationPositionArgs,
   MigrationAuthorizationRequest,
+  MigrationPosition,
   PlanMigrationArgs,
   SignedMigrationAuthorization,
   PlanMultiplyWithSwapArgs,
@@ -965,6 +967,11 @@ export const useEulerTx = () => {
     return sdk.positionMigrationService.getAuthorization(input)
   }
 
+  const getMigrationPosition = async (input: GetMigrationPositionArgs): Promise<MigrationPosition> => {
+    const sdk = await getEulerSdkFresh()
+    return sdk.positionMigrationService.getPosition(input)
+  }
+
   const signMigrationAuthorization = async (
     request: MigrationAuthorizationRequest,
   ): Promise<SignedMigrationAuthorization> => {
@@ -1272,6 +1279,7 @@ export const useEulerTx = () => {
     planCollateralChange,
     planDebtChange,
     planRefinancePosition,
+    getMigrationPosition,
     getMigrationAuthorization,
     signMigrationAuthorization,
     planCrossProtocolMigration,

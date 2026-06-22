@@ -22,8 +22,8 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel } = defineProps<{
-  type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'refinance' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
+const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, displaySteps: providedDisplaySteps, signatureSteps: providedSignatureSteps, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
+  type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'refinance' | 'migration' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
   amount: number | string
@@ -33,6 +33,12 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
   /** Pre-prepared envelope. When set, the modal renders immediately — no
    *  in-modal plugin/approval-resolution round-trip. */
   prepared?: TransactionPlanPrepared
+  /** Optional caller-provided display rows for flows whose semantic actions are
+   *  hidden inside protocol-specific multicalls, or whose plan is built after a
+   *  confirm-time wallet authorization. */
+  displaySteps?: DisplayStep[]
+  /** Optional wallet-signature rows shown separately before transaction rows. */
+  signatureSteps?: DisplayStep[]
   supplyingAssetForBorrow?: VaultAsset
   supplyingAmount?: number | string
   swapToAsset?: VaultAsset
@@ -51,6 +57,8 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
   hideExecute?: boolean
   /** Overrides the inferred Euler product name for non-product contexts, such as Earn vaults. */
   marketLabel?: string
+  /** Allow display-step-only reviews when the executable plan needs a confirm-time wallet authorization first. */
+  allowConfirmWithoutPlan?: boolean
 }>()
 
 const { address: walletAddress, chainId: currentChainId } = useWagmi()
@@ -101,7 +109,7 @@ onUnmounted(() => {
 })
 
 watch(
-  () => [prepared, plan, walletAddress.value, currentChainId.value] as const,
+  () => [prepared, plan, walletAddress.value, currentChainId.value, allowConfirmWithoutPlan] as const,
   async () => {
     const requestId = ++prepareRequestId
     prepareError.value = ''
@@ -117,6 +125,7 @@ watch(
 
     if (!plan?.length) {
       isPreparingPlan.value = false
+      if (allowConfirmWithoutPlan) return
       prepareError.value = 'Transaction plan is unavailable. Close this review and try again.'
       return
     }
@@ -194,7 +203,13 @@ const handleConfirm = async () => {
   }
 }
 
-const displaySteps = computed((): DisplayStep[] => {
+const isWalletSignatureStep = (step: DisplayStep) =>
+  step.label === 'Sign permit2 message'
+
+const rawDisplaySteps = computed((): DisplayStep[] => {
+  if (providedDisplaySteps?.length) {
+    return providedDisplaySteps
+  }
   const currentPlan = reviewPlan.value
   if (!currentPlan?.length) return []
   const ctx: StepDecodingContext = {
@@ -229,6 +244,20 @@ const positionTag = computed<string | undefined>(() => {
     return undefined
   }
 })
+
+const displaySteps = computed((): DisplayStep[] => {
+  const steps = providedSignatureSteps?.length
+    ? rawDisplaySteps.value
+    : rawDisplaySteps.value.filter(step => !isWalletSignatureStep(step))
+  return steps.map((step, idx) => ({ ...step, index: idx + 1 }))
+})
+
+const signatureSteps = computed((): DisplayStep[] =>
+  (providedSignatureSteps?.length
+    ? providedSignatureSteps
+    : rawDisplaySteps.value.filter(isWalletSignatureStep)
+  ).map((step, idx) => ({ ...step, index: idx + 1 })),
+)
 
 const copyCalldata = async () => {
   const currentPlan = reviewPlan.value
@@ -295,6 +324,8 @@ const btnLabel = computed(() => {
       return 'Transfer'
     case 'refinance':
       return 'Refinance'
+    case 'migration':
+      return 'Migrate'
     case 'reul-unlock':
       return 'Unlock'
     case 'reward':
@@ -337,7 +368,8 @@ const isSwapQuoteStale = computed(() => {
 })
 
 const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract used to authorize future transfers with signatures. Each future transfer still requires your explicit signature and can be limited by amount and duration.'
-const isConfirmDisabled = computed(() => isSpyMode.value || internalSubmitting.value || isPreparingPlan.value || isResolvingStateOverrideHints.value || !!prepareError.value || !reviewPlan.value?.length)
+const hasDisplayOnlyConfirmation = computed(() => allowConfirmWithoutPlan && (displaySteps.value.length > 0 || signatureSteps.value.length > 0))
+const isConfirmDisabled = computed(() => isSpyMode.value || internalSubmitting.value || isPreparingPlan.value || isResolvingStateOverrideHints.value || !!prepareError.value || (!reviewPlan.value?.length && !hasDisplayOnlyConfirmation.value))
 const isTenderlyPreparing = computed(() => isTenderlySimulating.value || isResolvingStateOverrideHints.value)
 const confirmLabel = computed(() => {
   if (isSpyMode.value) return 'Spy mode (read-only)'
@@ -370,10 +402,21 @@ const confirmLabel = computed(() => {
           </span>
         </div>
         <div
-          v-if="displaySteps.length"
+          v-if="signatureSteps.length || displaySteps.length"
           class="bg-surface-secondary rounded-12 p-12 flex flex-col gap-8"
         >
-          <OperationStepsList :steps="displaySteps" />
+          <OperationStepsList
+            v-if="signatureSteps.length"
+            :steps="signatureSteps"
+          />
+          <div
+            v-if="signatureSteps.length && displaySteps.length"
+            class="border-t border-border-primary my-4"
+          />
+          <OperationStepsList
+            v-if="displaySteps.length"
+            :steps="displaySteps"
+          />
         </div>
       </div>
 

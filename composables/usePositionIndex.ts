@@ -7,6 +7,10 @@ export function usePositionIndex(): string {
   const route = useRoute()
   const router = useRouter()
   const raw = route.params.number as string
+  if (raw === 'external' && route.path.endsWith('/borrow/swap')) {
+    return raw
+  }
+
   const parsed = Number(raw)
 
   if (!Number.isInteger(parsed) || parsed < 0 || parsed > 255) {
