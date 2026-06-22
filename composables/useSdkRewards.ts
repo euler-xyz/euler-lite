@@ -19,9 +19,15 @@ let delayedRefreshTimers: ReturnType<typeof setTimeout>[] = []
 
 export const useSdkRewards = () => {
   const { portfolio, isPositionsLoading, refreshAllPositions } = useEulerAccount()
+  const { chainId } = useEulerAddresses()
   const { address: walletAddress } = useWagmi()
 
-  const rewards = computed<UserReward[]>(() => portfolio.value?.account.userRewards ?? [])
+  const rewards = computed<UserReward[]>(() => {
+    const items = portfolio.value?.account.userRewards ?? []
+    const currentChainId = chainId.value
+    if (!currentChainId) return items
+    return items.filter(reward => reward.chainId === currentChainId)
+  })
   const isRewardsLoading = computed(() => isPositionsLoading.value)
 
   const buildClaimRewardPlan = async (reward: UserReward): Promise<TransactionPlan> => {

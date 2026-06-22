@@ -7,6 +7,7 @@ const owner = '0x1000000000000000000000000000000000000000' as Address
 
 const importUseSdkRewards = async () => {
   vi.resetModules()
+  const currentChainId = ref(1)
 
   const reward: UserReward = {
     chainId: 1,
@@ -31,6 +32,14 @@ const importUseSdkRewards = async () => {
     streamAddress: '0x4000000000000000000000000000000000000000' as Address,
     timestamp: '2026-05-20T13:05:10Z',
   }
+  const crossChainTurtleReward: UserReward = {
+    ...turtleReward,
+    chainId: 11155111,
+    token: {
+      ...turtleReward.token,
+      chainId: 11155111,
+    },
+  }
   const refreshAllPositions = vi.fn(async () => {})
   const invalidateSdkQueries = vi.fn(async () => {})
   const rewardClaimPlan = [{ type: 'evcBatch', items: [] }]
@@ -40,9 +49,12 @@ const importUseSdkRewards = async () => {
     invalidateSdkQueries,
   }))
   vi.stubGlobal('useEulerAccount', () => ({
-    portfolio: ref({ account: { userRewards: [reward, turtleReward] } }),
+    portfolio: ref({ account: { userRewards: [reward, turtleReward, crossChainTurtleReward] } }),
     isPositionsLoading: ref(false),
     refreshAllPositions,
+  }))
+  vi.stubGlobal('useEulerAddresses', () => ({
+    chainId: currentChainId,
   }))
   vi.stubGlobal('useWagmi', () => ({
     address: ref(owner),
@@ -62,6 +74,8 @@ const importUseSdkRewards = async () => {
     rewardClaimPlan,
     reward,
     turtleReward,
+    crossChainTurtleReward,
+    currentChainId,
   }
 }
 
@@ -72,13 +86,22 @@ describe('useSdkRewards', () => {
     vi.resetModules()
   })
 
-  it('reads rewards from the SDK portfolio account', async () => {
+  it('reads rewards from the SDK portfolio account on the selected chain', async () => {
     const { useSdkRewards, reward, turtleReward } = await importUseSdkRewards()
 
     const { rewards, isRewardsLoading } = useSdkRewards()
 
     expect(rewards.value).toEqual([reward, turtleReward])
     expect(isRewardsLoading.value).toBe(false)
+  })
+
+  it('updates visible rewards when the selected chain changes', async () => {
+    const { useSdkRewards, crossChainTurtleReward, currentChainId } = await importUseSdkRewards()
+
+    const { rewards } = useSdkRewards()
+    currentChainId.value = 11155111
+
+    expect(rewards.value).toEqual([crossChainTurtleReward])
   })
 
   it('builds reward claim plans through the SDK default EVC path', async () => {
