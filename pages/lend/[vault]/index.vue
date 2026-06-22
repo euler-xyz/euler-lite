@@ -549,7 +549,7 @@ const addToBatch = async () => {
         label: `Deposit ${asset.value.symbol}`,
         buildPlan: account => buildSwapSupplyPlanFromQuote(quote, account, { selectedAsset: swapAsset, amount: swapAmount }),
         subAccount: effectiveAddress.value as Address | undefined,
-        review: { type: 'swap-supply', asset: swapAsset, amount: swapAmount, swapToAsset: asset.value, swapToAmount: swapOutput, swapMode: SwapperMode.EXACT_IN },
+        review: { type: 'swap-supply', asset: swapAsset, amount: swapAmount, swapToAsset: asset.value, swapToAmount: swapOutput, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: swapEffectiveQuoteFetchedAt.value },
       })
     }
     else {

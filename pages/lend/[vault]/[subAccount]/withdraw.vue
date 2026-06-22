@@ -528,7 +528,7 @@ const addToBatch = async () => {
         label: `Withdraw-swap ${amountLabel} ${asset.value.symbol} → ${outputAsset?.symbol ?? ''}`,
         buildPlan: account => buildSwapWithdrawPlanFromQuote(quote, account, snap),
         subAccount: ownerAddr,
-        review: { type: 'swap-withdraw', asset: asset.value, amount: amountLabel, swapToAsset: outputAsset, swapToAmount: outputAmount },
+        review: { type: 'swap-withdraw', asset: asset.value, amount: amountLabel, swapToAsset: outputAsset, swapToAmount: outputAmount, quoteFetchedAt: swapEffectiveQuoteFetchedAt.value },
       })
     }
     else {

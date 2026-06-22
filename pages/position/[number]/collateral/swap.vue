@@ -318,7 +318,7 @@ const addToBatch = async () => {
         account,
       }),
       subAccount: positionAccount,
-      review: { type: 'swap', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.EXACT_IN },
+      review: { type: 'swap', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: sameAsset ? null : effectiveQuoteFetchedAt.value },
     })
     fromAmount.value = ''
     redirectAfterAdd('/portfolio', { subAccount: positionAccount })

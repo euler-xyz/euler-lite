@@ -1196,6 +1196,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     borrowSwapQuoteError,
     borrowSwapQuotesStatusLabel,
     borrowSwapEffectiveQuote,
+    borrowSwapEffectiveQuoteFetchedAt,
     selectBorrowSwapQuote,
 
     // Unknown token warning

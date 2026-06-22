@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { encodeFunctionData, getAddress } from 'viem'
 import { flattenBatchEntries, getSubAccountId, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdk } from '~/composables/useEulerSdk'
@@ -51,6 +51,9 @@ const { chainId: addressesChainId, eulerCoreAddresses } = useEulerAddresses()
 const { buildKnownSymbols, resolveSymbol } = useTokenSymbolResolver()
 const { getVault, isVerifiedVault } = useVaultRegistry()
 const { copied, copyToClipboard } = useClipboardCopy()
+const nowMs = ref(Date.now())
+const staleQuoteThresholdMs = 3 * 60 * 1000
+let nowTimer: ReturnType<typeof setInterval> | undefined
 const owner = computed(() => (isSpyMode.value ? spyAddress.value : walletAddress.value) || '')
 const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
 const ownerSubAccountKey = computed(() => {
@@ -150,6 +153,14 @@ const reulUnlockWarnings = computed<Array<{ id: string, description: string }>>(
   }),
 )
 
+const hasStaleSwapQuote = computed(() =>
+  entries.value.some((entry) => {
+    const quoteFetchedAt = entry.review?.quoteFetchedAt
+    return typeof quoteFetchedAt === 'number'
+      && nowMs.value - quoteFetchedAt > staleQuoteThresholdMs
+  }),
+)
+
 // Sub-accounts of entries that revert mid-batch (per-item revert: vault
 // liquidity, vault cap, etc.). The op rolls back so its position SHOULD be
 // unchanged, but in some cases the layer's reported health factor still drifts
@@ -226,6 +237,10 @@ const hasPermit2Approval = computed(() =>
 )
 
 onMounted(async () => {
+  nowTimer = setInterval(() => {
+    nowMs.value = Date.now()
+  }, 1000)
+
   void fetchTenderlyEnabled()
   isPreparing.value = true
   prepareError.value = ''
@@ -249,6 +264,12 @@ onMounted(async () => {
   }
   finally {
     isPreparing.value = false
+  }
+})
+
+onUnmounted(() => {
+  if (nowTimer) {
+    clearInterval(nowTimer)
   }
 })
 
@@ -442,6 +463,14 @@ const handleClose = () => {
         size="compact"
         title="rEUL burn mechanics"
         :description="warning.description"
+      />
+
+      <UiAlert
+        v-if="hasStaleSwapQuote"
+        variant="warning"
+        size="compact"
+        title="Stale swap quote"
+        description="This batch includes a swap quote which is more than 3 minutes old. Consider refreshing it to get the best execution price"
       />
 
       <!-- Wallet changes -->
