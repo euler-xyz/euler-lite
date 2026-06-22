@@ -232,7 +232,7 @@ describe('useEulerSdk', () => {
       vaultTypeAdapter: 'subgraph',
       rewardsServiceAdapter: 'fallback',
       rewardsTurtleApiUrl: '/api/proxy/turtle',
-      v3ApiUrl: '/api/v3',
+      v3ApiUrl: '/api',
     })
   })
 

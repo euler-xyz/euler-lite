@@ -160,6 +160,7 @@ export default defineNuxtConfig({
       configEnableMerkl: '',
       configEnableIncentra: '',
       configEnableFuul: '',
+      configEnableTurtle: '',
       // Batch announcement: set to 'true' to show a one-time modal.
       configEnableBatchAnnouncement: '',
       configBatchAnnouncementUrl: '',

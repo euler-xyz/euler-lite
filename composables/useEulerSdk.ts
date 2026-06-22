@@ -49,16 +49,17 @@ const pythProxyFetch: typeof fetch = (input, init) => {
  *     for hot reads, longer for catalogue data). Consumed by UI surfaces:
  *     vault lists, portfolio display, prices, rewards.
  *
- *   - `getEulerSdkFresh()`  — "slow" / plan-time instance. Always uses on-chain
- *     adapters directly (no fallback wrapping) regardless of the browser
- *     source, so the Account/Vault state used to build a transaction plan
- *     reflects the latest block. Uses `sdkFreshBuildQuery`, which forces a
- *     zero stale time on plan-critical queries (account, vault info, balances,
- *     allowances, pyth update data) while letting catalogue / labels / prices
- *     fall through to the same QueryClient cache that the fast instance fills.
- *     The fresh instance's refetches write back to the shared cache, so a
- *     subsequent fast read sees the just-refreshed value within its own
- *     staleness window. Consumed by `useEulerTx` planners and simulate/execute.
+ *   - `getEulerSdkFresh()`  — "slow" / plan-time instance. Account and vault
+ *     adapters are pinned to on-chain/subgraph reads regardless of the browser
+ *     source, so transaction planning reflects the latest block. Rewards use
+ *     fallback so V3 reward rows can be paired with direct claim-proof data.
+ *     Uses `sdkFreshBuildQuery`, which forces a zero stale time on plan-critical
+ *     queries (account, vault info, balances, allowances, pyth update data)
+ *     while letting catalogue / labels / prices fall through to the same
+ *     QueryClient cache that the fast instance fills. The fresh instance's
+ *     refetches write back to the shared cache, so a subsequent fast read sees
+ *     the just-refreshed value within its own staleness window. Consumed by
+ *     `useEulerTx` planners and simulate/execute.
  */
 
 type SdkInstance = { sdk: EulerSDK }
@@ -324,9 +325,11 @@ export const getEulerSdk = async (): Promise<EulerSDK> => {
   return sdk
 }
 
-/** "Slow"/plan-time instance: always onchain adapters regardless of the
- *  browser source, with zero stale-time on plan-critical queries. Used by
- *  useEulerTx for plan construction, simulate, and execute. */
+/** "Slow"/plan-time instance: account and vault adapters stay onchain/subgraph
+ *  regardless of browser source, with zero stale-time on plan-critical queries.
+ *  Rewards use fallback so claim planning can combine V3 rows with direct
+ *  provider proof data. Used by useEulerTx for plan construction, simulate,
+ *  and execute. */
 export const getEulerSdkFresh = async (): Promise<EulerSDK> => {
   const { sdk } = await lookupInstance('fresh', 'onchain', sdkFreshBuildQuery)
   return sdk

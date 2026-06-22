@@ -46,7 +46,7 @@ const rewardAmount = computed(() => Number(formatUnits(BigInt(reward.unclaimed),
 const rewardUsdValue = computed(() => rewardAmount.value * reward.tokenPrice)
 const providerLabel = computed(() => REWARD_PROVIDER_LABELS[reward.provider] ?? reward.provider)
 const planKind = computed(() => REWARD_PROVIDER_TYPES[reward.provider] ?? 'reward')
-const canAddToBatch = computed(() => settings.value.enableAdvancedMode)
+const canAddToBatch = computed(() => settings.value.enableAdvancedMode && reward.provider !== 'turtle')
 const isEulFamily = computed(() => ['rEUL', 'EUL'].includes(reward.token.symbol))
 const externalIconUrl = computed(() => {
   if (isEulFamily.value) return undefined
@@ -91,6 +91,7 @@ const claim = async () => {
 }
 
 const onAddToBatchClick = async () => {
+  if (reward.provider === 'turtle') return
   if (!canAddToBatch.value || isPreparing.value || isClaiming.value || isAddingToBatch.value) return
   isAddingToBatch.value = true
   try {
