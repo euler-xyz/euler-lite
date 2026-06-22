@@ -36,7 +36,7 @@
     "@floating-ui/vue": "1.1.11",
     "@gvade/nuxt3-svg-sprite": "1.0.3",
     "@keyringnetwork/keyring-connect-sdk": "3.2.0",
-    "@nuxt/eslint": "1.15.2",
+    "@nuxt/eslint": "1.16.0",
     "@reown/appkit": "1.8.20",
     "@reown/appkit-adapter-wagmi": "1.8.20",
     "@tanstack/query-core": "5.101.0",
