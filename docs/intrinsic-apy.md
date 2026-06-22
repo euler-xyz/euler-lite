@@ -32,7 +32,7 @@ The SDK's `intrinsicApyService` is what actually pulls the data from V3 (`/v3/ap
 │   sdk.intrinsicApyService.fetchChainIntrinsicApys(chainId)          │
 └───────────────────────────────────┬───────────────────────────────┘
                                     │ V3 batched/paginated reads via
-                                    │  /api/v3/v3/apys/intrinsic
+                                    │  /api/v3/apys/intrinsic
                                     ▼
                               euler v3 backend
                        (DefiLlama, Pendle, Securitize, …)

@@ -3,7 +3,7 @@ import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { COWSWAP_ORDER_DEADLINE_SECONDS, COWSWAP_PROVIDER_EXTRA_DATA, buildClosePositionQuoteAppData, getCowSwapChainConfig } from '~/entities/cowswap'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
-import type { SwapQuotePlanAccount, SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
+import type { SwapQuoteIncludeCowSwap, SwapQuotePlanAccount, SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
 import { valueToNano } from '~/utils/crypto-utils'
 import { trimTrailingZeros } from '~/utils/string-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
@@ -31,8 +31,9 @@ export interface UseRepaySwapCoreOptions {
   getCurrentDebt: () => bigint
   getQuoteAccounts: () => QuoteAccounts
   onQuoteReceived?: (amountOut: bigint, direction: SwapperMode) => boolean
-  includeCowSwap?: boolean
+  includeCowSwap?: SwapQuoteIncludeCowSwap
   buildTxPlanForQuote: (quote: SwapQuote, provider: string, context: SwapQuotePlanContext) => Promise<TransactionPlan>
+  buildGasEstimatePlan?: (candidatePlan: TransactionPlan) => Promise<TransactionPlan> | TransactionPlan
   prefetchPluginData?: (plan: TransactionPlan, account: SwapQuotePlanAccount) => Promise<PluginPrefetchData>
   getPlanAccount?: () => SwapQuotePlanAccount | undefined
 }
@@ -54,7 +55,13 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     onQuoteReceived,
   } = options
   const { address } = useWagmi()
+  const { isSpyMode, spyAddress } = useSpyMode()
+  const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
   const { chainId } = useEulerAddresses()
+  const shouldIncludeCowSwap = () =>
+    typeof options.includeCowSwap === 'function'
+      ? options.includeCowSwap()
+      : options.includeCowSwap === true
 
   // --- State ---
   const amount = ref('')
@@ -65,8 +72,9 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
   // --- Quotes ---
   const quotes = useSwapRepayQuotes({
     direction,
-    includeCowSwap: options.includeCowSwap,
+    includeCowSwap: shouldIncludeCowSwap,
     buildTxPlanForQuote: options.buildTxPlanForQuote,
+    buildGasEstimatePlan: options.buildGasEstimatePlan,
     prefetchPluginData: options.prefetchPluginData,
     getPlanAccount: options.getPlanAccount,
   })
@@ -197,7 +205,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     amount.value = ''
     direction.value = SwapperMode.TARGET_DEBT
     const currentDebt = getCurrentDebt()
-    let amountNano = 0n
+    let amountNano: bigint
     try {
       amountNano = valueToNano(debtAmount.value || '0', borrowVault.value?.asset.decimals)
     }
@@ -403,12 +411,12 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     // quote engine forwards it as `providerExtraData` for CoW providers.
     const quoteDeadline = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
     const cowProviderExtraData = { ...COWSWAP_PROVIDER_EXTRA_DATA.closePosition }
-    const chainConfig = options.includeCowSwap ? getCowSwapChainConfig(chainId.value ?? 0) : undefined
+    const chainConfig = shouldIncludeCowSwap() ? getCowSwapChainConfig(chainId.value ?? 0) : undefined
     if (chainConfig) {
       const sourceSharesAmount = await getClosePositionQuoteCollateralAmount()
       cowProviderExtraData.appData = buildClosePositionQuoteAppData(
         {
-          owner: (address.value || zeroAddress) as Address,
+          owner: (effectiveAddress.value || zeroAddress) as Address,
           account: accountIn,
           deadline: quoteDeadline,
           borrowVault: borrowVault.value.address as Address,
@@ -477,7 +485,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
       debtPercent.value = 0
       return
     }
-    let amountNano = 0n
+    let amountNano: bigint
     try {
       amountNano = valueToNano(debtAmount.value || '0', borrowVault.value.asset.decimals)
     }

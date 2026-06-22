@@ -13,6 +13,10 @@ const V3_API_KEY_ENV_KEYS = [
   'EULER_V3_API_KEY',
 ] as const
 
+const MERKL_API_KEY_ENV_KEYS = [
+  'MERKL_API_KEY',
+] as const
+
 const SERVER_VAULT_CACHE_SOURCE_ENV_KEYS = [
   'SERVER_VAULT_CACHE_SOURCE',
 ] as const
@@ -75,6 +79,17 @@ export function readV3ApiUrl(env: NodeJS.ProcessEnv = process.env): string {
 
 export function readV3ApiKey(env: NodeJS.ProcessEnv = process.env): string {
   return firstEnv(env, V3_API_KEY_ENV_KEYS)
+}
+
+/**
+ * Server-only Merkl API key. Merkl works anonymously (10 req/sec), but all of
+ * Lite's Merkl traffic egresses from the single `/api/proxy/merkl` origin, so
+ * that shared anonymous quota is the binding limit. When set, the proxy sends
+ * it as `X-API-Key` for a higher quota. Never read from a public/`NUXT_PUBLIC_`
+ * variable — the key must not reach the browser.
+ */
+export function readMerklApiKey(env: NodeJS.ProcessEnv = process.env): string {
+  return firstEnv(env, MERKL_API_KEY_ENV_KEYS)
 }
 
 export function readResolvedV3ApiUrl(env: NodeJS.ProcessEnv = process.env): string {

@@ -13,14 +13,15 @@ import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/stri
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { ltvToPercent } from '~/utils/crypto-utils'
-import { useBorrowForm } from '~/composables/borrow/useBorrowForm'
-import { useMultiplyForm } from '~/composables/borrow/useMultiplyForm'
+import { useBorrowForm, type BorrowBatchSnapshot } from '~/composables/borrow/useBorrowForm'
+import { useMultiplyForm, type MultiplyBatchSnapshot } from '~/composables/borrow/useMultiplyForm'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { SlippageSettingsModal, VaultUnverifiedDisclaimerModal } from '#components'
-import { getAddress } from 'viem'
+import { getAddress, type Address } from 'viem'
 import { areRoeCollateralVaultsCorrelatedWithBorrow, mergeRoeCollateralVaults } from '~/utils/position-roe'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
+import { isCowProvider, isCowProviderOrQuote } from '~/entities/cowswap'
 
 const router = useRouter()
 const route = useRoute()
@@ -29,7 +30,7 @@ const reviewBorrowLabel = 'Review Borrow'
 const reviewMultiplyLabel = 'Review Multiply'
 const { getBorrowVaultPair, updateVault } = useVaults()
 const { getTokenCategoryTags } = useTokenList()
-const { address, isConnected } = useWagmi()
+const { address } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const { chainId } = useEulerAddresses()
 const shareLinkQuery = computed(() => {
@@ -46,7 +47,7 @@ const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { eulerLensAddresses: _eulerLensAddresses } = useEulerAddresses()
-const { fetchSingleBalance } = useWallets()
+const { getBalance } = useWallets()
 const openSlippageSettings = () => {
   modal.open(SlippageSettingsModal)
 }
@@ -61,13 +62,15 @@ const formTabFromQuery = (value: unknown): 'borrow' | 'multiply' | undefined => 
 }
 
 // --- Shared state ---
-const balance = ref(0n)
+// Collateral wallet balance from the central (layer-aware) wallet entity.
+const balance = computed(() => collateralVault.value?.asset.address ? getBalance(collateralVault.value.asset.address as Address) : 0n)
 const tab = ref()
 const formTab = ref<'borrow' | 'multiply'>(formTabFromQuery(route.query.tab) ?? 'borrow')
 const pendingSubAccount = ref<string | null>(null)
 const isPendingSubAccountLoading = ref(false)
 let pendingSubAccountPromise: Promise<string> | null = null
 let unverifiedDisclaimerShown = false
+const effectiveOwner = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 
 // Load vault pair (non-blocking to avoid Suspense + pageTransition crash on direct navigation)
 const pair: Ref<AnyBorrowVaultPair | undefined> = ref()
@@ -93,7 +96,7 @@ const normalizeAddress = (addr?: string) => {
 
 const resolvePendingSubAccount = async (): Promise<string> => {
   if (pendingSubAccount.value) return pendingSubAccount.value
-  const owner = address.value || (isSpyMode.value ? spyAddress.value : undefined)
+  const owner = effectiveOwner.value
   if (!owner) throw new Error('Wallet not connected')
   if (!pendingSubAccountPromise) {
     isPendingSubAccountLoading.value = true
@@ -247,6 +250,100 @@ const multiplyDisabledReasonInfo = computed((): DisabledReasonInfo | undefined =
   return undefined
 })
 
+// --- Batch ("shopping cart") ---
+// CoW swaps can't merge into an EVC batch, so the swap-borrow path requires a
+// non-CoW quote; the direct/savings paths just need a valid borrow. The
+// effective quote is captured into the fixed batch plan at add-time.
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
+const canAddBorrowToBatch = computed(() => {
+  // Region/geo blocks are hard legal restrictions, so they still gate the batch.
+  // Real-wallet guards (insufficient balance, vault liquidity) are intentionally
+  // NOT checked here: an earlier batch step may supply the funds, and the layered
+  // simulation flags the entry if it genuinely can't execute. This is why the
+  // button stays enabled even when Review is blocked by "Not enough balance".
+  if (isGeoBlocked.value || isBorrowRestricted.value || borrow.isBorrowSwapRestricted.value || borrow.isBorrowPayWithBlocked.value) return false
+  if (!borrowVault.value || !collateralVault.value) return false
+  // Only the borrow amount is required to add to the batch — collateral can be
+  // empty (e.g. borrowing against collateral an earlier batch step supplies).
+  if (!(+borrow.borrowAmount.value)) return false
+  // Savings-sourced collateral needs a resolved position, else plan capture throws.
+  if (borrow.isSavingCollateral.value && !borrow.savingCollateral.value) return false
+  if (borrow.borrowNeedsSwap.value) {
+    return !!borrow.borrowSwapEffectiveQuote.value && !isCowProvider(borrow.borrowSwapSelectedProvider.value)
+  }
+  return true
+})
+const addToBatch = async () => {
+  if (!canAddBorrowToBatch.value) return
+  await guardWithBorrowSwapPriceImpact(async () => {
+    const cVault = collateralVault.value
+    const bVault = borrowVault.value
+    if (!cVault || !bVault) return
+    const subAccount = (await resolvePendingSubAccount()) as Address
+    // Capture every input by value NOW — the batch re-simulates asynchronously and
+    // we reset the form below, so a lazy read of the reactive refs would see the
+    // cleared values (an empty amount builds a no-op borrow).
+    const snap: BorrowBatchSnapshot = {
+      subAccount,
+      // The composable treats collateral as an EVault (see useBorrowForm construction).
+      collateralVault: cVault as EVault,
+      borrowVault: bVault,
+      collateralAmount: borrow.collateralAmount.value,
+      borrowAmount: borrow.borrowAmount.value,
+      needsSwap: borrow.borrowNeedsSwap.value,
+      selectedAsset: borrow.borrowSelectedAsset.value,
+      isSavingCollateral: borrow.isSavingCollateral.value,
+      savingCollateral: borrow.savingCollateral.value,
+      isBorrowNativeWrap: borrow.isBorrowNativeWrap.value,
+      quote: borrow.borrowNeedsSwap.value ? borrow.borrowSwapEffectiveQuote.value ?? undefined : undefined,
+    }
+    const label = `Borrow ${snap.borrowAmount} ${bVault.asset.symbol}`
+    await addBatchEntry({ label, buildPlan: account => borrow.buildBorrowPlan(snap, account), subAccount, review: { type: 'borrow', asset: bVault.asset, amount: snap.borrowAmount } })
+    borrow.collateralAmount.value = ''
+    borrow.borrowAmount.value = ''
+    redirectAfterAdd('/portfolio', { subAccount })
+  })
+}
+
+// --- Multiply tab → batch ---
+// Same-asset multiply needs no quote; cross-asset needs a non-CoW quote (CoW
+// can't merge into an EVC batch). Region/geo blocks gate it like direct execute.
+const canAddMultiplyToBatch = computed(() => {
+  if (isGeoBlocked.value || isMultiplyRestricted.value) return false
+  if (multiply.multiplyDebtAmountNano.value <= 0n) return false
+  if (!multiply.multiplySupplyVault.value || !multiply.multiplyLongVault.value || !multiply.multiplyShortVault.value) return false
+  if (multiply.multiplyIsSameAsset.value) return true
+  return !!multiply.multiplyEffectiveQuote.value && !isCowProviderOrQuote(multiply.multiplySelectedProvider.value, multiply.multiplyEffectiveQuote.value)
+})
+const addMultiplyToBatch = async () => {
+  if (!canAddMultiplyToBatch.value) return
+  await guardWithMultiplyPriceImpact(async () => {
+    const supplyVault = multiply.multiplySupplyVault.value
+    const longVault = multiply.multiplyLongVault.value
+    const shortVault = multiply.multiplyShortVault.value
+    if (!supplyVault || !longVault || !shortVault) return
+    const subAccount = (await resolvePendingSubAccount()) as Address
+    const sameAsset = multiply.multiplyIsSameAsset.value
+    const saving = multiply.multiplySavingPosition.value
+    const snap: MultiplyBatchSnapshot = {
+      subAccount,
+      supplyVault: supplyVault as EVault,
+      longVault: longVault as EVault,
+      shortVault: shortVault as EVault,
+      inputAmount: multiply.multiplyInputAmount.value,
+      debtAmount: multiply.multiplyDebtAmountNano.value,
+      isSavingCollateral: multiply.isMultiplySavingCollateral.value,
+      savingFrom: saving?.subAccount as Address | undefined,
+      savingAssets: saving?.assets,
+      savingShares: multiply.multiplySavingBalance.value,
+      quote: sameAsset ? undefined : multiply.multiplyEffectiveQuote.value ?? undefined,
+    }
+    await addBatchEntry({ label: `Multiply → ${longVault.asset.symbol}`, buildPlan: account => multiply.buildMultiplyPlan(snap, account), subAccount, multiply: true, review: { type: 'borrow', asset: shortVault.asset, amount: multiply.multiplyInputAmount.value, swapToAsset: longVault.asset } })
+    redirectAfterAdd('/portfolio', { subAccount })
+  })
+}
+
 // --- Tabs ---
 const formTabs = computed(() => [
   { label: 'Borrow', value: 'borrow' },
@@ -296,25 +393,9 @@ watch(tabs, (next) => {
 }, { immediate: true })
 
 // --- Balance ---
-const updateBalance = async () => {
-  if (!isConnected.value && !isSpyMode.value) {
-    balance.value = 0n
-    multiply.multiplyAssetBalance.value = 0n
-    return
-  }
-
-  if (collateralVault.value?.asset.address) {
-    balance.value = await fetchSingleBalance(collateralVault.value.asset.address)
-  }
-  else {
-    balance.value = 0n
-  }
-
-  await Promise.all([
-    multiply.updateMultiplyAssetBalance(),
-    borrow.updateBorrowSwapAssetBalance(),
-  ])
-}
+// `balance` and the form composables' asset balances are now reactive computeds
+// over the central (layer-aware) wallet entity, so there's nothing to fetch.
+const updateBalance = async () => {}
 
 // --- Submit dispatcher ---
 const onSubmit = async () => {
@@ -441,7 +522,7 @@ watch(pair, async (val) => {
   await updateBalance()
 }, { immediate: true })
 
-watch(address, () => {
+watch(effectiveOwner, () => {
   pendingSubAccount.value = null
   pendingSubAccountPromise = null
   updateBalance()
@@ -983,6 +1064,8 @@ watch(
                 :disabled-reason="borrowDisabledReasonInfo?.message"
                 :disabled-reason-variant="borrowDisabledReasonInfo?.variant"
                 :loading="borrow.isSubmitting.value || borrow.isPreparing.value"
+                :can-add-to-batch="canAddBorrowToBatch"
+                @add-to-batch="addToBatch"
               >
                 {{ reviewBorrowLabel }}
               </VaultFormSubmit>
@@ -992,6 +1075,8 @@ watch(
                 :disabled-reason="multiplyDisabledReasonInfo?.message"
                 :disabled-reason-variant="multiplyDisabledReasonInfo?.variant"
                 :loading="multiply.isMultiplySubmitting.value || multiply.isMultiplyPreparing.value"
+                :can-add-to-batch="canAddMultiplyToBatch"
+                @add-to-batch="addMultiplyToBatch"
               >
                 {{ reviewMultiplyLabel }}
               </VaultFormSubmit>

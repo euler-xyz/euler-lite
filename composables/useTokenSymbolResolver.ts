@@ -54,6 +54,7 @@ export const useTokenSymbolResolver = () => {
       address: address as Address,
       abi: erc20SymbolAbi,
       functionName: 'symbol',
+      authorizationList: undefined,
     })
       .then((symbol: string) => {
         const updated = new Map(resolvedSymbols.value)

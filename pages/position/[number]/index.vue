@@ -605,6 +605,7 @@ const loadCollaterals = async () => {
               abi: eulerAccountLensABI as Abi,
               functionName: 'getAccountInfo',
               args: [position.value!.subAccount, address],
+              authorizationList: undefined,
             }) as Record<string, Record<string, unknown>>
             assets = res.vaultAccountInfo.assets as bigint
           }

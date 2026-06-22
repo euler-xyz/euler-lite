@@ -12,8 +12,9 @@ import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, compactNumber, formatUsdValue, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { normalizeAddress } from '~/utils/normalizeAddress'
+import { formatMarketAvailability } from '~/utils/vault-display'
 import { VaultSupplyApyModal } from '#components'
-import { getAddress, type Address, maxUint256 } from 'viem'
+import { getAddress, maxUint256 } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 
@@ -21,7 +22,6 @@ const { vault } = defineProps<{ vault: SecuritizeCollateralVault, desktopOvervie
 const route = useRoute()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
-const { client: rpcClient } = useRpcClient()
 const { chainId } = useEulerAddresses()
 const { borrowList: _borrowList, isVaultGovernorVerified } = useVaults()
 const { getEVaults } = useVaultRegistry()
@@ -95,21 +95,11 @@ const supplyApyModalData = computed(() => ({
 // Risk parameters - fetch share token exchange rate (ERC4626 standard)
 const shareTokenExchangeRate: Ref<bigint | undefined> = ref()
 
-const loadRiskParameters = async () => {
+const loadRiskParameters = () => {
   try {
-    const client = rpcClient.value!
-    shareTokenExchangeRate.value = await client.readContract({
-      address: vault.address as Address,
-      abi: [{
-        type: 'function',
-        name: 'convertToAssets',
-        inputs: [{ name: 'shares', type: 'uint256' }],
-        outputs: [{ name: 'assets', type: 'uint256' }],
-        stateMutability: 'view',
-      }] as const,
-      functionName: 'convertToAssets',
-      args: [1n * 10n ** BigInt(vault.shares.decimals)],
-    }) as bigint
+    // Share→asset exchange rate from the SDK vault entity (was a direct
+    // convertToAssets RPC read); the entity derives it from the same data.
+    shareTokenExchangeRate.value = vault.convertToAssets(1n * 10n ** BigInt(vault.shares.decimals))
   }
   catch (e) {
     logWarn('SecuritizeVaultOverview/shareTokenExchangeRate', e)
@@ -265,7 +255,7 @@ const supplyCapPercentageDisplay = computed(() => {
               <UiIcon :name="borrowCount ? 'green-tick' : 'red-cross'" />
             </div>
             <span class="text-p2 text-content-primary">
-              {{ borrowCount ? `Yes in ${borrowCount} markets` : 'No' }}
+              {{ formatMarketAvailability(borrowCount) }}
             </span>
           </div>
         </VaultOverviewLabelValue>
@@ -275,7 +265,7 @@ const supplyCapPercentageDisplay = computed(() => {
               <UiIcon :name="collateralCount ? 'green-tick' : 'red-cross'" />
             </div>
             <span class="text-p2 text-content-primary">
-              {{ collateralCount ? `Yes in ${collateralCount} markets` : 'No' }}
+              {{ formatMarketAvailability(collateralCount) }}
             </span>
           </div>
         </VaultOverviewLabelValue>

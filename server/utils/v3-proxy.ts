@@ -33,11 +33,16 @@ type V3ProxyValidationResult
     | { ok: false, statusCode: number, statusMessage: string }
 
 const cleanBasePath = (pathname: string) => pathname.replace(/\/+$/, '')
+const normalizeV3ProxyPath = (pathname: string) => pathname.startsWith('/v3/')
+  ? pathname
+  : `/v3${pathname.startsWith('/') ? pathname : `/${pathname}`}`
 
 export function getV3ProxyPath(requestUrl: URL): string {
-  return requestUrl.pathname.startsWith(V3_API_PROXY_URL)
+  const path = requestUrl.pathname.startsWith(V3_API_PROXY_URL)
     ? requestUrl.pathname.slice(V3_API_PROXY_URL.length) || '/'
     : requestUrl.pathname
+
+  return normalizeV3ProxyPath(path)
 }
 
 export function isV3ProxyPathAllowed(pathname: string): boolean {

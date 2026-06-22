@@ -1257,6 +1257,7 @@ const submitCowSwapCollateralSwap = async () => {
         abi: erc20Abi,
         functionName: 'allowance',
         args: [address.value as Address, chainConfig.vaultRelayer],
+        authorizationList: undefined,
       }) as bigint
     }
   }

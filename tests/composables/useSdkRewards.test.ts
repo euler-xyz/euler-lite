@@ -1,16 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
+import type { Address } from 'viem'
+import type { UserReward } from '@eulerxyz/euler-v2-sdk'
 
-const owner = '0x1000000000000000000000000000000000000000'
+const owner = '0x1000000000000000000000000000000000000000' as Address
 
 const importUseSdkRewards = async () => {
   vi.resetModules()
 
-  const reward = {
+  const reward: UserReward = {
     chainId: 1,
     provider: 'merkl',
     token: {
-      address: '0x2000000000000000000000000000000000000000',
+      address: '0x2000000000000000000000000000000000000000' as Address,
       chainId: 1,
       symbol: 'EUL',
       name: 'EUL',
@@ -20,11 +22,12 @@ const importUseSdkRewards = async () => {
     accumulated: '100',
     unclaimed: '100',
     proof: [],
-    claimAddress: '0x3000000000000000000000000000000000000000',
+    claimAddress: '0x3000000000000000000000000000000000000000' as Address,
   }
   const refreshAllPositions = vi.fn(async () => {})
   const invalidateSdkQueries = vi.fn(async () => {})
-  const buildClaimPlan = vi.fn(async () => [{ type: 'contractCall' }])
+  const rewardClaimPlan = [{ type: 'evcBatch', items: [] }]
+  const buildClaimPlan = vi.fn(async () => rewardClaimPlan)
 
   vi.doMock('~/utils/sdk-query-cache', () => ({
     invalidateSdkQueries,
@@ -49,6 +52,7 @@ const importUseSdkRewards = async () => {
     buildClaimPlan,
     invalidateSdkQueries,
     refreshAllPositions,
+    rewardClaimPlan,
     reward,
   }
 }
@@ -67,6 +71,18 @@ describe('useSdkRewards', () => {
 
     expect(rewards.value).toEqual([reward])
     expect(isRewardsLoading.value).toBe(false)
+  })
+
+  it('builds reward claim plans through the SDK default EVC path', async () => {
+    const { useSdkRewards, buildClaimPlan, rewardClaimPlan, reward } = await importUseSdkRewards()
+
+    const { buildClaimRewardPlan } = useSdkRewards()
+    await expect(buildClaimRewardPlan(reward)).resolves.toBe(rewardClaimPlan)
+
+    expect(buildClaimPlan).toHaveBeenCalledWith({
+      reward,
+      account: owner,
+    })
   })
 
   it('force-refreshes user reward queries before rebuilding the portfolio', async () => {

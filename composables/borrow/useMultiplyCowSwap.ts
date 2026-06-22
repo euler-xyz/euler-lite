@@ -195,6 +195,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
           address: supplyVault.asset.address as Address,
           abi: erc20Abi,
           functionName: 'allowance',
+          authorizationList: undefined,
           args: [address.value as Address, supplyVault.address as Address],
         }) as bigint
 
@@ -203,6 +204,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
             address: shortVault.asset.address as Address,
             abi: erc20Abi,
             functionName: 'allowance',
+            authorizationList: undefined,
             args: [address.value as Address, chainConfig.vaultRelayer],
           }) as bigint
         }
@@ -246,7 +248,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     idx = sellTokenApproval.nextIndex
 
     signSteps.push({ index: idx++, label: 'Sign EVC permit', isSeparateTx: false })
-    signSteps.push({ index: idx++, label: 'Sign CoW order', isSeparateTx: false })
+    signSteps.push({ index: idx, label: 'Sign CoW order', isSeparateTx: false })
 
     const collateralVaultName = options.multiplySupplyProduct.value.name || undefined
     const borrowVaultName = options.multiplyShortProduct.value.name || undefined
@@ -257,7 +259,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
       { index: wIdx++, label: 'Supply', isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: options.multiplyInputAmount.value } },
       { index: wIdx++, label: 'Borrow', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: borrowAmountStr } },
       { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: borrowAmountStr }, toAssetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: options.multiplyLongAmount.value } },
-      { index: wIdx++, label: 'Verify min received', isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: swapOutMinAmount } },
+      { index: wIdx, label: 'Verify min received', isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: swapOutMinAmount } },
     ]
 
     const walletWarningsDescription

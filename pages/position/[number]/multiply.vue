@@ -10,6 +10,7 @@ import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { isEVault, SwapperMode, type EVault, type PortfolioBorrowPosition, type SwapQuote, type TransactionPlan, type TransactionPlanPrepared, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { areRoeCollateralVaultsCorrelatedWithBorrow, mergeRoeCollateralVaults, resolvePositionRoeCollateralVaults } from '~/utils/position-roe'
+import { isCowProviderOrQuote } from '~/entities/cowswap'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
@@ -32,6 +33,8 @@ const { address, isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
 const { planMultiply, prepareTransactionPlan, executePreparedPlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
 const { eulerLensAddresses } = useEulerAddresses()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
@@ -53,7 +56,11 @@ const priceInvert = usePriceInvert(
 )
 
 const positionIndex = usePositionIndex()
-const position: Ref<PortfolioBorrowPosition<VaultEntity> | null> = ref(null)
+// Layer-aware: tracks the active batch layer's portfolio so the form reflects
+// simulated debt/collateral (a one-shot ref would freeze at the real state).
+const position = computed<PortfolioBorrowPosition<VaultEntity> | null>(() =>
+  (!isConnected.value && !isSpyMode.value) ? null : (getPositionBySubAccountIndex(+positionIndex) || null),
+)
 
 const isLoading = ref(false)
 const isSubmitting = ref(false)
@@ -609,6 +616,52 @@ async function buildMultiplyPlanFromQuote(quote: SwapQuote, account = planAccoun
   })
 }
 
+// Batch the multiply. subAccountSnapshotApplied: true keeps the layer account
+// authoritative (no on-chain sub-account re-fetch that would clobber a
+// simulated earlier batch step). Same-asset multiply (no swap) routes through
+// planMultiplySameAsset; cross-asset needs a non-CoW quote (CoW can't merge).
+const canAddMultiplyToBatch = computed(() => {
+  if (isGeoBlocked.value || isMultiplyRestricted.value) return false
+  if (multiplyDebtAmountNano.value <= 0n) return false
+  if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value || !multiplySubAccount.value) return false
+  if (multiplyIsSameAsset.value) return true
+  return !!multiplyEffectiveQuote.value
+    && !isCowProviderOrQuote(multiplySelectedProvider.value, multiplyEffectiveQuote.value)
+})
+const addToBatch = async () => {
+  if (!canAddMultiplyToBatch.value) return
+  await guardWithPriceImpact(async () => {
+    const sameAsset = multiplyIsSameAsset.value
+    const quote = sameAsset ? undefined : multiplyEffectiveQuote.value ?? undefined
+    const supply = multiplySupplyVault.value!.address as Address
+    const supplyAsset = multiplySupplyVault.value!.asset.address as Address
+    const long = multiplyLongVault.value!.address as Address
+    const short = multiplyShortVault.value!.address as Address
+    const debtAmount = multiplyDebtAmountNano.value
+    const receiver = multiplySubAccount.value as Address
+    await addBatchEntry({
+      label: `Multiply → ${multiplyLongVault.value!.asset.symbol}`,
+      buildPlan: account => planMultiply({
+        collateralVault: supply,
+        collateralAmount: 0n,
+        collateralAsset: supplyAsset,
+        longVault: long,
+        liabilityVault: short,
+        liabilityAmount: debtAmount,
+        receiver,
+        swapQuote: quote,
+        swapperMode: SwapperMode.EXACT_IN,
+        account,
+        subAccountSnapshotApplied: true,
+      }),
+      subAccount: receiver,
+      multiply: true,
+      review: { type: 'borrow', asset: multiplyShortVault.value!.asset, amount: multiplyShortAmount.value, swapToAsset: multiplyLongVault.value!.asset, swapMode: SwapperMode.EXACT_IN },
+    })
+    redirectAfterAdd('/portfolio', { subAccount: receiver })
+  })
+}
+
 const requestMultiplyQuote = useDebounceFn(async () => {
   multiplyQuoteError.value = null
 
@@ -668,7 +721,7 @@ const submitMultiply = async () => {
   isPreparing.value = true
   try {
     await guardWithPriceImpact(async () => {
-      if (isSubmitting.value || !isConnected.value) {
+      if (isSubmitting.value || (!isConnected.value && !isSpyMode.value)) {
         return
       }
       if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
@@ -776,7 +829,7 @@ const sendMultiply = async () => {
 }
 
 const isMultiplySubmitDisabled = computed(() => {
-  if (!isConnected.value) return false
+  if (!isConnected.value && !isSpyMode.value) return false
   if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
     return true
   }
@@ -817,12 +870,8 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 })
 
 const loadPosition = async () => {
-  if (!isConnected.value && !isSpyMode.value) {
-    position.value = null
-    return
-  }
+  if (!isConnected.value && !isSpyMode.value) return
   isLoading.value = true
-  position.value = getPositionBySubAccountIndex(+positionIndex) || null
   if (!position.value) {
     multiplySupplyVault.value = undefined
     resetMultiplyQuoteState()
@@ -994,6 +1043,8 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
               :loading="isSubmitting || isPreparing"
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
+              :can-add-to-batch="canAddMultiplyToBatch"
+              @add-to-batch="addToBatch"
             >
               Review Multiply
             </VaultFormSubmit>

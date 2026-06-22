@@ -63,6 +63,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   const { planRepayFromWallet, executePlan } = useEulerTx()
   const { account: planAccount } = usePlanAccount()
   const { isConnected } = useWagmi()
+  const { isSpyMode } = useSpyMode()
   const { finalizeTxAndRedirect } = useTxFinalization()
 
   const amount = ref('')
@@ -127,7 +128,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   const hookWarning = computed(() => getPlanHookDisabledWarning(walletRepayPlannedOps.value))
 
   const isSubmitDisabled = computed(() => {
-    if (!isConnected.value) return false
+    if (!isConnected.value && !isSpyMode.value) return false
     if (findBlockingDisabledOp(walletRepayPlannedOps.value)) return true
     return !(+amount.value) || !!estimatesError.value || isEstimatesLoading.value
   })
@@ -339,7 +340,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     if (position.value && borrowVault.value) {
       const currentDebt = position.value.borrowed || 0n
       if (currentDebt > 0n) {
-        let amountNano = 0n
+        let amountNano: bigint
         try {
           amountNano = valueToNano(amount.value || '0', borrowVault.value.asset.decimals)
         }

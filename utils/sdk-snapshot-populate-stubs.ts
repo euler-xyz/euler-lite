@@ -133,10 +133,10 @@ export const buildSnapshotRewardsService = (
   fetchUserRewards: notImplemented('fetchUserRewards'),
   fetchFuulTotals: notImplemented('fetchFuulTotals'),
   fetchFuulClaimChecks: notImplemented('fetchFuulClaimChecks'),
+  fetchRewardStreams: notImplemented('fetchRewardStreams'),
   buildClaimPlan: notImplemented('buildClaimPlan'),
   buildClaimPlans: notImplemented('buildClaimPlans'),
   buildClaimAllPlan: notImplemented('buildClaimAllPlan'),
-  fetchRewardStreams: notImplemented('fetchRewardStreams'),
   buildRewardStreamClaimPlan: notImplemented('buildRewardStreamClaimPlan'),
 })
 

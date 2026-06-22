@@ -21,6 +21,7 @@ import { INTERNAL_FETCH_HEADERS } from './internal-headers'
 import { buildEntityAddressSets, declaredKeysOf, tryChecksum } from './labels-helpers'
 import { logger } from './logger'
 import { getServerSdk } from './sdk-server'
+import { isSdkErrorDiagnostic } from './sdk-diagnostics'
 import type { VerificationLabels } from '~/utils/vault/governor-verification'
 
 export interface ChainVaultsSnapshot {
@@ -276,7 +277,9 @@ async function buildSnapshot(
   ])
 
   for (const issue of [...evk.errors, ...securitize.errors, ...earn.errors]) {
-    logger.warn({ ctx: 'labels-view', chainId, issue }, 'sdk vault fetch issue')
+    if (isSdkErrorDiagnostic(issue)) {
+      logger.error({ ctx: 'labels-view', chainId, issue }, 'sdk vault fetch issue')
+    }
   }
 
   const evkVaults = (evk.result.filter(Boolean) as EVault[]).map(vault =>
@@ -298,7 +301,9 @@ async function buildSnapshot(
     ? await sdk.eVaultService.fetchVaults(chainId, referencedEscrowAddresses, vaultOptions)
     : { result: [], errors: [] }
   for (const issue of fetchedEscrow.errors) {
-    logger.warn({ ctx: 'labels-view', chainId, issue }, 'sdk escrow fetch issue')
+    if (isSdkErrorDiagnostic(issue)) {
+      logger.error({ ctx: 'labels-view', chainId, issue }, 'sdk escrow fetch issue')
+    }
   }
 
   const escrowVaults = [

@@ -68,6 +68,7 @@ export const useTosGuard = () => {
         address: tosSignerAddress.value,
         abi: tosSignerReadAbi,
         functionName: 'lastTermsOfUseSignatureTimestamp',
+        authorizationList: undefined,
         args: [address.value as Address, data.tosMessageHash],
       })
       hasSigned.value = (lastSignTimestamp as bigint) > 0
@@ -162,10 +163,12 @@ export const useTosGuard = () => {
     }
   })
 
+  // NOTE: deliberately no signature clear on unmount. The acceptance is
+  // session-scoped per (chain, account) — `sessionAccepted` survives navigation
+  // — and the batch flow executes from the drawer/portfolio after the form page
+  // (and its guard) is gone. Clearing here would strip signTermsOfUse from the
+  // prepared batch. Account/chain switches are handled by the watches above.
   onUnmounted(() => {
-    if (address.value && chainId.value) {
-      clearLiteTosSignature({ chainId: chainId.value, account: address.value as Address })
-    }
     unregisterOperationBlocker('tos')
   })
 

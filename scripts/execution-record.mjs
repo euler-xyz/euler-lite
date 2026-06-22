@@ -505,7 +505,7 @@ async function preflightV3Proxy({ appUrl, fixture }) {
   const address = Object.values(fixture.vaults ?? {}).find(Boolean)
   if (!address) return
 
-  const endpoint = `${appUrl}/api/v3/v3/resolve/vaults`
+  const endpoint = `${appUrl}/api/v3/resolve/vaults`
   let response
   let lastError
   for (let attempt = 1; attempt <= 3; attempt++) {
@@ -537,7 +537,7 @@ async function preflightV3Proxy({ appUrl, fixture }) {
     const stagingHint = response.status === 401
       ? ' If this run points at v3staging.eul.dev, start Nuxt with V3_API_KEY= so a production key from .env is not forwarded to staging.'
       : ''
-    throw new Error(`Lite app V3 proxy preflight failed: POST /api/v3/v3/resolve/vaults returned ${response.status} ${response.statusText}.${stagingHint}${body ? ` Body: ${body.slice(0, 500)}` : ''}`)
+    throw new Error(`Lite app V3 proxy preflight failed: POST /api/v3/resolve/vaults returned ${response.status} ${response.statusText}.${stagingHint}${body ? ` Body: ${body.slice(0, 500)}` : ''}`)
   }
 
   const json = await response.json().catch(() => null)
@@ -557,7 +557,7 @@ async function preflightSwapApi({ swapApiUrl, chainId }) {
     response = await fetch(endpoint)
   }
   catch (error) {
-    throw new Error(`Swap API preflight failed: ${String(error?.message ?? error)}`)
+    throw new Error(`Swap API preflight failed: ${String(error?.message ?? error)}`, { cause: error })
   }
 
   if (!response.ok) {
@@ -1231,7 +1231,7 @@ function attachNetworkRecorder(page, network) {
     const request = response.request()
     if (!shouldCaptureUrl(response.url()) && !ids.has(request)) return
     const id = ids.get(request) ?? nextId++
-    let body = null
+    let body
     try {
       const text = await response.text()
       body = parseCapturedBody(text, response.url())

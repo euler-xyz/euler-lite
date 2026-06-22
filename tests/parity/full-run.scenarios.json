@@ -6,7 +6,8 @@
       "height": 1000
     },
     "localStorage": {
-      "is-onboarding-completed": "true"
+      "is-onboarding-completed": "true",
+      "euler_full_render": "1"
     },
     "waitFor": [
       "[data-id]"

@@ -2,8 +2,24 @@ import { type Address, getAddress, zeroAddress } from 'viem'
 import { useVaults } from '~/composables/useVaults'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getEulerSdk } from '~/composables/useEulerSdk'
+import { activeLayerWalletBalancesRef } from '~/composables/useTxBatch'
 import { logWarn } from '~/utils/errorHandling'
 import { FULL_BALANCES_TTL_MS } from '~/entities/tuning-constants'
+
+// When a simulated batch layer is active, return its stitched wallet balance for
+// a touched token in place of the real balance. No-op for untouched tokens or
+// the base layer (ref empty), so wallet reads stay transparent.
+const applyLayerOverlay = (tokenAddress: string, realBalance: bigint): bigint => {
+  let key: string
+  try {
+    key = getAddress(tokenAddress).toLowerCase()
+  }
+  catch {
+    key = tokenAddress.toLowerCase()
+  }
+  const simulated = activeLayerWalletBalancesRef.value[key]
+  return simulated !== undefined ? simulated : realBalance
+}
 
 // Singleton state
 const balances = shallowRef(new Map<string, bigint>())
@@ -110,6 +126,9 @@ export const useWallets = () => {
       }
     }
 
+    // Always fetch the native (gas) balance via the SDK (zero address) so
+    // `nativeBalance` is populated alongside the ERC20 balances.
+    addresses.add(zeroAddress)
     const includesNativeCurrency = addresses.delete(zeroAddress)
     const tokenAddresses = [...addresses] as Address[]
     if (!tokenAddresses.length && !includesNativeCurrency) {
@@ -143,8 +162,8 @@ export const useWallets = () => {
       }
       const wallet = walletFetch.result
 
-      // Only update if still on same chain
-      if (chainId.value === currentChainId) {
+      // Only update if still on the same chain and account.
+      if (chainId.value === currentChainId && balanceAddress.value && getAddress(balanceAddress.value) === targetAddress) {
         // Merge rather than replace: a vault-only-mode fetch shouldn't drop
         // full-mode balances we fetched earlier (e.g. from a swap page).
         // resetBalances() is called on chain switch and wallet-address
@@ -216,18 +235,28 @@ export const useWallets = () => {
   }
 
   const getBalance = (tokenAddress: Address): bigint => {
+    let real: bigint
     try {
-      const normalized = getAddress(tokenAddress)
-      return balances.value.get(normalized) || 0n
+      real = balances.value.get(getAddress(tokenAddress)) || 0n
     }
     catch {
-      return balances.value.get(tokenAddress) || 0n
+      real = balances.value.get(tokenAddress) || 0n
     }
+    return applyLayerOverlay(tokenAddress, real)
   }
 
+  // SDK-sourced native (gas) balance, reactive + layer-aware. `updateBalances`
+  // always requests the zero address, so this reflects the connected/spy
+  // wallet's native balance (was previously a separate wagmi `useBalance`).
+  const nativeBalance = computed(() => getBalance(zeroAddress))
+
   /**
-   * Fetch a single token balance directly via balanceOf.
-   * Use this for supply/deposit pages to avoid triggering the full batch query.
+   * Resolve a single token's balance via the SDK wallet service and merge it
+   * into the central wallet entity, so `getBalance(token)` (reactive, layer-
+   * aware) reflects it afterwards. Reserved for arbitrary/custom swap tokens the
+   * routine `updateBalances` sweep doesn't cover — known vault assets and
+   * positions/shares are read from the wallet/account entities directly. Returns
+   * the layer-aware balance.
    */
   const fetchSingleBalance = async (tokenAddress: string): Promise<bigint> => {
     if ((!isConnected.value && !isSpyMode.value) || !balanceAddress.value || !tokenAddress) {
@@ -240,30 +269,12 @@ export const useWallets = () => {
       const walletFetch = await sdk.walletService.fetchWallet(chainId.value, balanceAddress.value as Address, [
         { asset: normalized as Address, spenders: [] },
       ])
-      return walletFetch.result.getBalance(normalized as Address)
-    }
-    catch {
-      return 0n
-    }
-  }
-
-  /**
-   * Fetch vault share balance via balanceOf on the vault address.
-   * Use this for savings/deposit positions where user holds vault shares.
-   */
-  const fetchVaultShareBalance = async (vaultAddress: string, subAccount?: string): Promise<bigint> => {
-    if ((!isConnected.value && !isSpyMode.value) || !balanceAddress.value || !vaultAddress) {
-      return 0n
-    }
-    try {
-      const balanceOfAddress = subAccount || balanceAddress.value
-      const normalized = getAddress(vaultAddress) as Address
-      const sdk = await getEulerSdk()
-      if (!chainId.value) return 0n
-      const walletFetch = await sdk.walletService.fetchWallet(chainId.value, balanceOfAddress as Address, [
-        { asset: normalized, spenders: [] },
-      ])
-      return walletFetch.result.getBalance(normalized)
+      const real = walletFetch.result.getBalance(normalized as Address)
+      // Feed the central wallet entity so getBalance() sees this token too.
+      const merged = new Map(balances.value)
+      merged.set(normalized, real)
+      balances.value = merged
+      return applyLayerOverlay(normalized, real)
     }
     catch {
       return 0n
@@ -286,10 +297,10 @@ export const useWallets = () => {
     isLoaded,
     isLoading,
     getBalance,
+    nativeBalance,
     updateBalances,
     resetBalances,
     fetchSingleBalance,
-    fetchVaultShareBalance,
   }
 }
 

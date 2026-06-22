@@ -35,22 +35,30 @@ const inputEl = useTemplateRef<HTMLInputElement>('inputEl')
 const modal = useModal()
 const isFocused = ref(false)
 const emitInputTimeout = ref<ReturnType<typeof setTimeout> | null>(null)
+const lastEmittedInputValue = ref(model.value)
+
+const emitInputIfChanged = (force = false) => {
+  if (!force && lastEmittedInputValue.value === model.value) return
+  lastEmittedInputValue.value = model.value
+  emits('input')
+}
+
 const emitInputDebounced = () => {
   if (emitInputTimeout.value) {
     clearTimeout(emitInputTimeout.value)
   }
   emitInputTimeout.value = setTimeout(() => {
-    emits('input')
+    emitInputIfChanged()
     emitInputTimeout.value = null
   }, 250)
 }
 
-const emitInputNow = () => {
+const emitInputNow = (force = false) => {
   if (emitInputTimeout.value) {
     clearTimeout(emitInputTimeout.value)
     emitInputTimeout.value = null
   }
-  emits('input')
+  emitInputIfChanged(force)
 }
 
 const matchesSelectedSubAccount = (a?: string, b?: string) => {
@@ -128,7 +136,9 @@ const setMax = () => {
     return
   }
   model.value = trimTrailingZeros(formatUnits(props.balance ?? 0n, Number(props.asset.decimals)))
-  emitInputNow()
+  // Max is an explicit command. The parent may have reset this model since
+  // the last emitted input, so do not suppress the handler by cached value.
+  emitInputNow(true)
   if (inputEl.value) {
     inputEl.value.value = model.value || ''
   }
