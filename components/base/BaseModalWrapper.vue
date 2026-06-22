@@ -163,7 +163,7 @@ const dragStyle = computed(() => ({
               aria-hidden="true"
             >
               <SvgIcon
-                class="ui-button__icon-svg"
+                class="ui-button__icon-svg text-content-secondary"
                 name="close"
               />
             </div>

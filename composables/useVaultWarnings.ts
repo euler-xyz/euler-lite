@@ -1,6 +1,6 @@
 import { isSecuritizeCollateralVault, type EVault, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
-import { isCyclicalNoteVault } from '~/utils/vault/classification'
 import { getVaultUtilization } from '~/utils/vault-display'
+import { isVaultCyclicalNote, isVaultHighUtilisationWarningSuppressed } from '~/utils/eulerLabelsUtils'
 import {
   findBlockingDisabledOp,
   getOpMeta,
@@ -104,16 +104,23 @@ export const getUtilisationWarning = (
   const level = getUtilisationLevel(utilisation)
   if (!level) return null
 
-  if (context !== 'repay' && isCyclicalNoteVault(vault)) {
+  if (context !== 'repay' && isVaultCyclicalNote(vault.address)) {
     return { level: 'info', tone: 'success', ...targetUtilisationMessage }
   }
+
+  if (level === 'high' && isVaultHighUtilisationWarningSuppressed(vault.address)) return null
 
   const { title, message } = utilisationMessages[context][level]
   return { level, title, message }
 }
 
 export const getSupplyCapWarning = (vault: EVault): VaultWarning | null => {
-  const percentage = vault.caps.supplyCapUtilization
+  // Securitize (and other non-EVK) collateral vaults have no `caps`, so they
+  // carry no supply-cap warning. Guard against callers that may pass such a vault
+  // (e.g. the multiply supply vault / borrow collateral, which are typed EVault
+  // but can hold a SecuritizeCollateralVault at runtime) so `caps` access can't throw.
+  const percentage = vault?.caps?.supplyCapUtilization
+  if (percentage == null) return null
   const level = getCapLevel(percentage)
   if (!level) return null
 
@@ -156,9 +163,8 @@ export const getCollateralSupplyCapWarning = (vault: EVault | SecuritizeCollater
 }
 
 export const getIsSupplyCapReached = (vault: EVault): boolean => {
-  const percentage = vault.caps.supplyCapUtilization
-
-  return percentage >= 100
+  // No `caps` (e.g. a Securitize collateral vault) ⇒ no supply cap to reach.
+  return (vault?.caps?.supplyCapUtilization ?? 0) >= 100
 }
 
 export const getBorrowCapWarning = (vault: EVault): VaultWarning | null => {

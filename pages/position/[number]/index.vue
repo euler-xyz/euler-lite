@@ -16,8 +16,9 @@ import { VaultOverviewModal, OperationReviewModal, VaultSupplyApyModal, VaultBor
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { getAddress, type Address, type Abi } from 'viem'
-import { eulerAccountLensABI } from '~/entities/euler/abis'
+import { getAddress, type Address } from 'viem'
+import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
+import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 
 const _route = useRoute()
 const router = useRouter()
@@ -30,6 +31,7 @@ const { viewer, visibleBreakdown } = useApyVisibility()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, hasSupplyRewards, hasBorrowRewards, getSupplyRewardCampaigns, getBorrowRewardCampaigns } = useRewardsApy()
+const { getTokenCategoryTags } = useTokenList()
 const { planTransfer, executePlan } = useEulerTx()
 const { account: planAccount } = usePlanAccount()
 const {
@@ -45,7 +47,11 @@ type PositionCollateral = {
   assets: bigint
 }
 
-const position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined> = ref()
+// Layer-aware: tracks the active batch layer's portfolio so the overview
+// reflects simulated debt/collateral (a one-shot ref would freeze at real state).
+const position = computed<PortfolioBorrowPosition<VaultEntity> | undefined>(() =>
+  (!isConnected.value && !isSpyMode.value) ? undefined : getPositionBySubAccountIndex(+positionIndex),
+)
 const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const collateralItems = ref<PositionCollateral[]>([])
@@ -54,14 +60,41 @@ const disableCollateralErrorVault = ref<string | null>(null)
 
 const { isReady: isVaultsReady } = useVaults()
 const { getOrFetch } = useVaultRegistry()
-const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
-const { client: rpcClient } = useRpcClient()
+const { isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
 
 const borrowVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
 const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() => position.value ? position.value.collateralVault as EVault | SecuritizeCollateralVault | undefined : undefined)
 const positionCollateralAddresses = computed(() => position.value ? position.value.collateralVaults : [])
 const primaryCollateralAddress = computed(() => collateralVault.value ? getAddress(collateralVault.value.address) : '')
 const collateralCount = computed(() => positionCollateralAddresses.value.length || collateralItems.value.length)
+
+// Whether a specific vault of this position was modified by the active batch
+// layer — drives the dashed "simulated" border on that one box (the collateral
+// or borrow box), not the whole position / summary / risk.
+const { modifiedBalanceKeys, modifiedDebtKeys, entryCount } = useTxBatch()
+const hasBatchEntries = computed(() => entryCount.value > 0)
+const hasModifiedKey = (keys: Set<string>, vaultAddr?: string) => {
+  if (!position.value || !vaultAddr) return false
+  try {
+    return keys.has(`${position.value.subAccount.toLowerCase()}:${getAddress(vaultAddr).toLowerCase()}`)
+  }
+  catch {
+    return false
+  }
+}
+const isCollateralVaultModified = (vaultAddr?: string) => hasModifiedKey(modifiedBalanceKeys.value, vaultAddr)
+const isBorrowVaultModified = (vaultAddr?: string) => hasModifiedKey(modifiedDebtKeys.value, vaultAddr)
+const hasPositionBatchChanges = computed(() => {
+  if (!position.value) return false
+  const vaultAddresses = new Set<string>()
+  if (borrowVault.value?.address) vaultAddresses.add(borrowVault.value.address)
+  if (collateralVault.value?.address) vaultAddresses.add(collateralVault.value.address)
+  for (const address of positionCollateralAddresses.value) vaultAddresses.add(address)
+  for (const vaultAddress of vaultAddresses) {
+    if (isCollateralVaultModified(vaultAddress) || isBorrowVaultModified(vaultAddress)) return true
+  }
+  return false
+})
 const collateralSymbolLabel = computed(() => {
   if (!position.value) {
     return ''
@@ -141,6 +174,29 @@ const isPairFullyRestricted = computed(() => {
     && isVaultRestrictedByCountry(borrowVault.value.address)
     && isVaultRestrictedByCountry(collateralVault.value.address)
 })
+const isWithdrawBlockedByLiquidation = computed(() => isEligibleForLiquidation.value && !hasPositionBatchChanges.value)
+const isWithdrawDisabled = computed(() =>
+  isWithdrawBlockedByLiquidation.value || isPositionGeoBlocked.value || isPairFullyRestricted.value || hasQueryFailure.value,
+)
+const isMultiplyActionDisabled = computed(() =>
+  !hasBatchEntries.value && (
+    isEligibleForLiquidation.value || isOverBorrowLTV.value || isPositionGeoBlocked.value || isMultiplyRestricted.value || hasQueryFailure.value
+  ),
+)
+const isBorrowActionDisabled = computed(() =>
+  !hasBatchEntries.value && (
+    isEligibleForLiquidation.value || isOverBorrowLTV.value || isPositionGeoBlocked.value || isBorrowRestricted.value || hasQueryFailure.value
+  ),
+)
+const isRefinanceDebtDisabled = computed(() =>
+  !hasBatchEntries.value && (isPositionGeoBlocked.value || isPairFullyRestricted.value || hasQueryFailure.value),
+)
+const isSupplyActionDisabled = computed(() =>
+  !hasBatchEntries.value && (isPositionGeoBlocked.value || isPairFullyRestricted.value),
+)
+const isSwapCollateralActionDisabled = computed(() =>
+  !hasBatchEntries.value && (isPositionGeoBlocked.value || isPairFullyRestricted.value || hasQueryFailure.value),
+)
 
 const borrowVaultNotice = computed(() => {
   if (!position.value) return ''
@@ -429,15 +485,38 @@ const fallbackRoe = computed(() => {
   )
 })
 const roe = computed(() => visibleRoeBreakdown.value?.total ?? fallbackRoe.value)
+const isRoeApplicable = computed(() => {
+  if (!borrowVault.value || !collateralItems.value.length) return false
+  if (positionCollateralAddresses.value.length > collateralItems.value.length) return false
+  return areRoeCollateralVaultsCorrelatedWithBorrow(
+    collateralItems.value.map(item => item.vault),
+    borrowVault.value,
+    getTokenCategoryTags,
+  )
+})
+const correlatedBadgeTitle = computed(() => {
+  const category = getTokenAddressesCorrelationCategoryLabel(
+    [
+      ...collateralItems.value.map(item => item.vault.asset.address),
+      borrowVault.value?.asset.address,
+    ],
+    getTokenCategoryTags,
+  )
+  return category ? `Correlated category: ${category}` : undefined
+})
 
 const supplyCampaignsForModal = computed(() => getSupplyRewardCampaigns(collateralVault.value?.address || ''))
 const borrowCampaignsForModal = computed(() => getBorrowRewardCampaigns(borrowVault.value?.address || '', collateralVault.value?.address || ''))
 
 const positionMultiplier = computed(() => {
+  if (!collateralValue.value.hasPrice || !borrowMarketValue.value.hasPrice) return null
   const equity = collateralValue.value.usd - borrowMarketValue.value.usd
-  if (equity <= 0) return 0
+  if (equity <= 0) return null
   return collateralValue.value.usd / equity
 })
+const positionMultiplierDisplay = computed(() =>
+  positionMultiplier.value !== null && Number.isFinite(positionMultiplier.value) ? `${formatNumber(positionMultiplier.value, 2, 2)}x` : '-',
+)
 
 const netApyModalData = computed(() => ({
   props: {
@@ -460,7 +539,7 @@ const roeModalData = computed(() => ({
   props: {
     roeBreakdown: visibleRoeBreakdown.value,
     roe: roe.value,
-    multiplier: Number.isFinite(positionMultiplier.value) ? positionMultiplier.value : 0,
+    multiplier: positionMultiplier.value !== null && Number.isFinite(positionMultiplier.value) ? positionMultiplier.value : null,
     supplyAPY: collateralSupplyApy.value,
     borrowAPY: borrowApy.value,
     supplyRewardAPY: supplyRewardAPY.value || null,
@@ -560,34 +639,14 @@ const loadCollaterals = async () => {
 
     await until(isVaultsReady).toBe(true)
 
-    const lensAddress = eulerLensAddresses.value?.accountLens
-    if (!lensAddress) {
-      throw new Error('Account lens address is not available')
-    }
-
-    const client = rpcClient.value!
-
     const items = await Promise.all(
       orderedAddresses.map(async (address) => {
         try {
           const vault = await getOrFetch(address) as unknown as EVault | SecuritizeCollateralVault | undefined
-          let assets = 0n
-
-          try {
-            const res = await client.readContract({
-              address: lensAddress as Address,
-              abi: eulerAccountLensABI as Abi,
-              functionName: 'getAccountInfo',
-              args: [position.value!.subAccount, address],
-            }) as Record<string, Record<string, unknown>>
-            assets = res.vaultAccountInfo.assets as bigint
-          }
-          catch {
-            if (address === primaryAddress) {
-              assets = position.value!.supplied
-            }
-          }
-
+          // Assets from the (layer-aware) position rather than a direct lens
+          // read, so the overview reflects the active batch layer. Unheld ⇒ 0.
+          const match = position.value!.collaterals.find(c => getAddress(c.vaultAddress) === address)
+          const assets = match?.assets ?? (address === primaryAddress ? position.value!.supplied : 0n)
           return vault ? { vault, assets } : null
         }
         catch (e) {
@@ -685,6 +744,23 @@ const send = async (collateralAddress: string) => {
     isSubmitting.value = false
   }
 }
+// Rebuild the collateral display from the current (layer-aware) position so it
+// follows the active batch layer like the rest of the overview.
+const syncCollateralItems = async () => {
+  if (!position.value) {
+    collateralItems.value = []
+    return
+  }
+  collateralItems.value = [{
+    vault: collateralVault.value as EVault,
+    assets: position.value.supplied,
+  }]
+  // Load collaterals: always for multi-collateral, or when oracle failed (to get actual assets)
+  if (positionCollateralAddresses.value.length > 1 || hasQueryFailure.value) {
+    await loadCollaterals()
+  }
+}
+
 const load = async () => {
   // Redirect to portfolio if not connected and not in spy mode
   if (!isConnected.value && !isSpyMode.value) {
@@ -694,26 +770,18 @@ const load = async () => {
 
   try {
     await until(isPositionsLoaded).toBe(true)
-    position.value = getPositionBySubAccountIndex(+positionIndex)
-    if (position.value) {
-      collateralItems.value = [{
-        vault: collateralVault.value as EVault,
-        assets: position.value.supplied,
-      }]
-      // Load collaterals: always for multi-collateral, or when oracle failed (to get actual assets)
-      if (positionCollateralAddresses.value.length > 1 || hasQueryFailure.value) {
-        await loadCollaterals()
-      }
-    }
-    else {
-      collateralItems.value = []
-    }
+    await syncCollateralItems()
   }
   catch (e) {
     showError('Unable to load Position')
     console.warn(e)
   }
 }
+
+// Keep the collateral display in sync as the active batch layer changes.
+watch(position, () => {
+  void syncCollateralItems()
+})
 const borrowApyModalData = computed(() => {
   if (!borrowVault.value) return {}
   return {
@@ -792,7 +860,23 @@ watch([isConnected, isSpyMode, address], () => {
         :vault="collateralVault"
         :assets="pairAssets"
         :assets-label="pairAssetsLabel"
-      />
+      >
+        <template #symbol-trailing>
+          <span class="inline-flex items-center gap-4">
+            <CorrelatedPairBadge
+              v-if="isRoeApplicable"
+              compact
+              :title="correlatedBadgeTitle"
+            />
+            <CorrelatedPairBadge
+              v-if="isRoeApplicable && positionMultiplierDisplay !== '-'"
+              compact
+              :label="positionMultiplierDisplay"
+              title="Effective multiplier at your LTV."
+            />
+          </span>
+        </template>
+      </VaultLabelsAndAssets>
 
       <UiAlert
         v-if="hasQueryFailure"
@@ -806,7 +890,11 @@ watch([isConnected, isSpyMode, address], () => {
         v-if="!hasNoBorrow"
         class="flex flex-col gap-16 laptop:flex-row laptop:items-stretch"
       >
-        <div class="flex flex-col gap-16 p-16 rounded-12 border border-line-default bg-card shadow-card laptop:flex-1">
+        <div
+          class="flex flex-col gap-16 p-16 rounded-12 border border-line-default bg-card shadow-card laptop:flex-1"
+          data-id="position-summary"
+          :data-correlated="isRoeApplicable"
+        >
           <div class="text-h4 text-content-primary">
             Position summary
           </div>
@@ -848,7 +936,10 @@ watch([isConnected, isSpyMode, address], () => {
               {{ Number.isFinite(netAPY) ? `${formatNumber(netAPY)}%` : '-' }}
             </div>
           </div>
-          <div class="flex justify-between items-center">
+          <div
+            v-if="isRoeApplicable"
+            class="flex justify-between items-center"
+          >
             <div class="flex items-center gap-4 text-p2 text-content-secondary">
               ROE
               <UiModalPreviewTrigger
@@ -979,7 +1070,10 @@ watch([isConnected, isSpyMode, address], () => {
         <div class="mb-12 text-h4 text-neutral-800">
           Borrow
         </div>
-        <div class="rounded-12 bg-card border border-line-default shadow-card">
+        <div
+          class="rounded-12 bg-card border border-line-default shadow-card"
+          :class="{ '!border !border-dashed !border-accent-600': isBorrowVaultModified(borrowVault?.address) }"
+        >
           <div class="flex justify-between items-center p-16 pb-12 border-b border-line-default">
             <VaultLabelsAndAssets
               :vault="borrowVault"
@@ -1112,7 +1206,7 @@ watch([isConnected, isSpyMode, address], () => {
             </div>
             <VaultWarningBanner :warnings="positionWarnings" />
             <UiAlert
-              v-if="isEligibleForLiquidation"
+              v-if="!hasPositionBatchChanges && isEligibleForLiquidation"
               class="my-12"
               title="Liquidation risk"
               description="This position is eligible for liquidation. Multiply and borrow are disabled."
@@ -1120,7 +1214,7 @@ watch([isConnected, isSpyMode, address], () => {
               size="compact"
             />
             <UiAlert
-              v-if="isOverBorrowLTV && !isEligibleForLiquidation"
+              v-if="!hasBatchEntries && isOverBorrowLTV && !isEligibleForLiquidation"
               class="my-12"
               title="LTV limit reached"
               description="Your current LTV exceeds the borrow limit. Repay debt or supply more collateral to borrow again."
@@ -1136,7 +1230,7 @@ watch([isConnected, isSpyMode, address], () => {
               size="compact"
             />
             <UiAlert
-              v-if="!isPositionGeoBlocked && !isPairFullyRestricted && (isBorrowRestricted || isMultiplyRestricted)"
+              v-if="!hasBatchEntries && !isPositionGeoBlocked && !isPairFullyRestricted && (isBorrowRestricted || isMultiplyRestricted)"
               class="my-12"
               title="Asset restricted"
               description="Some operations on this pair are restricted in your region. Supply, withdraw, and repay remain available."
@@ -1152,8 +1246,8 @@ watch([isConnected, isSpyMode, address], () => {
                 size="medium"
                 variant="primary"
                 rounded
-                :disabled="isEligibleForLiquidation || isOverBorrowLTV || isPositionGeoBlocked || isMultiplyRestricted || hasQueryFailure"
-                :to="isEligibleForLiquidation || isOverBorrowLTV || isPositionGeoBlocked || isMultiplyRestricted || hasQueryFailure ? undefined : `/position/${positionIndex}/multiply`"
+                :disabled="isMultiplyActionDisabled"
+                :to="isMultiplyActionDisabled ? undefined : `/position/${positionIndex}/multiply`"
               >
                 Multiply
               </UiButton>
@@ -1162,8 +1256,8 @@ watch([isConnected, isSpyMode, address], () => {
                 size="medium"
                 variant="primary-stroke"
                 rounded
-                :disabled="isEligibleForLiquidation || isOverBorrowLTV || isPositionGeoBlocked || isBorrowRestricted || hasQueryFailure"
-                :to="isEligibleForLiquidation || isOverBorrowLTV || isPositionGeoBlocked || isBorrowRestricted || hasQueryFailure ? undefined : `/position/${positionIndex}/borrow`"
+                :disabled="isBorrowActionDisabled"
+                :to="isBorrowActionDisabled ? undefined : `/position/${positionIndex}/borrow`"
               >
                 Borrow
               </UiButton>
@@ -1181,8 +1275,8 @@ watch([isConnected, isSpyMode, address], () => {
                 size="medium"
                 variant="primary-stroke"
                 rounded
-                :disabled="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure"
-                :to="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure ? undefined : `/position/${positionIndex}/borrow/swap`"
+                :disabled="isRefinanceDebtDisabled"
+                :to="isRefinanceDebtDisabled ? undefined : `/position/${positionIndex}/borrow/swap`"
               >
                 Refinance debt
               </UiButton>
@@ -1199,6 +1293,7 @@ watch([isConnected, isSpyMode, address], () => {
             v-for="collateral in collateralRows"
             :key="collateral.vault.address"
             class="rounded-12 bg-card border border-line-default shadow-card cursor-pointer"
+            :class="{ '!border !border-dashed !border-accent-600': isCollateralVaultModified(collateral.vault.address) }"
             @click="openCollateralInfoModal(asPositionCollateralVault(collateral.vault))"
           >
             <div class="flex justify-between items-center p-16 pb-12 border-b border-line-default">
@@ -1360,7 +1455,7 @@ watch([isConnected, isSpyMode, address], () => {
                 </div>
               </div>
               <UiAlert
-                v-if="!hasNoBorrow && isEligibleForLiquidation"
+                v-if="!hasNoBorrow && isWithdrawBlockedByLiquidation"
                 class="my-12"
                 title="Liquidation risk"
                 description="Withdraw is disabled while this position is eligible for liquidation."
@@ -1378,8 +1473,8 @@ watch([isConnected, isSpyMode, address], () => {
                   size="medium"
                   variant="primary"
                   rounded
-                  :disabled="isPositionGeoBlocked || isPairFullyRestricted"
-                  :to="isPositionGeoBlocked || isPairFullyRestricted ? undefined : `/position/${positionIndex}/supply?collateral=${collateral.vault.address}`"
+                  :disabled="isSupplyActionDisabled"
+                  :to="isSupplyActionDisabled ? undefined : `/position/${positionIndex}/supply?collateral=${collateral.vault.address}`"
                 >
                   Supply
                 </UiButton>
@@ -1389,8 +1484,8 @@ watch([isConnected, isSpyMode, address], () => {
                   size="medium"
                   variant="primary-stroke"
                   rounded
-                  :disabled="isEligibleForLiquidation || isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure"
-                  :to="isEligibleForLiquidation || isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure ? undefined : `/position/${positionIndex}/withdraw?collateral=${collateral.vault.address}`"
+                  :disabled="isWithdrawDisabled"
+                  :to="isWithdrawDisabled ? undefined : `/position/${positionIndex}/withdraw?collateral=${collateral.vault.address}`"
                 >
                   Withdraw
                 </UiButton>
@@ -1400,8 +1495,8 @@ watch([isConnected, isSpyMode, address], () => {
                   size="medium"
                   variant="primary-stroke"
                   rounded
-                  :disabled="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure"
-                  :to="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure ? undefined : `/position/${positionIndex}/collateral/swap?collateral=${collateral.vault.address}`"
+                  :disabled="isSwapCollateralActionDisabled"
+                  :to="isSwapCollateralActionDisabled ? undefined : `/position/${positionIndex}/collateral/swap?collateral=${collateral.vault.address}`"
                 >
                   Swap collateral
                 </UiButton>

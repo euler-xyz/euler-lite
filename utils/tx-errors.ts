@@ -1,6 +1,13 @@
 import { BaseError, ContractFunctionRevertedError, decodeAbiParameters, formatUnits, type Hex } from 'viem'
 import { decodeSmartContractErrors } from '@eulerxyz/euler-v2-sdk'
-import type { DecodedSmartContractError, SimulateBatchResult, SimulationInsufficientRequirement, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import type {
+  DecodedSmartContractError,
+  SimulateBatchResult,
+  SimulationInsufficientRequirement,
+  TransactionPlan,
+  TransactionPlanPrepared,
+  VaultEntity,
+} from '@eulerxyz/euler-v2-sdk'
 import { ERROR_MESSAGE_MAP, ERROR_SIGNATURE_MAP } from '~/entities/constants'
 import { getOperationMeta } from '~/utils/operationGuardRegistry'
 import { getChainById } from '~/entities/chainRegistry'
@@ -161,6 +168,116 @@ const formatDecodedError = (decoded: DecodedSmartContractError): string => {
   const name = decoded.signature.split('(')[0] ?? decoded.signature
   if (!decoded.params.length) return `${name}()`
   return `${name}(${decoded.params.map(formatDecodedParam).join(', ')})`
+}
+
+const NON_BLOCKING_APPROVAL_SIMULATION_ERRORS = new Set([
+  '0x9773bb71',
+  'e_transferfromfailed',
+  'insufficient_allowance',
+  'e_insufficientallowance',
+  'erc20insufficientallowance',
+  'transferfromfailed',
+  'transfer_from_failed',
+  'transferfailed',
+  'transfer_failed',
+  'safetransferfailed',
+  'safe_transfer_failed',
+  'safetransferfromfailed',
+  'safe_transfer_from_failed',
+  'insufficient_balance',
+  'e_insufficientbalance',
+  'erc20insufficientbalance',
+])
+
+const BLOCKING_SIMULATION_ERROR_PREFIXES = [
+  'swapper_',
+  'swapverifier_',
+  'erc4626exceeded',
+]
+
+const BLOCKING_SIMULATION_ERRORS = new Set([
+  'e_accountliquidity',
+  'e_insufficientcash',
+  'e_notenoughliquidity',
+  'notenoughliquidity',
+  'slippageexceeded',
+])
+
+const decodedErrorName = (decoded: DecodedSmartContractError): string =>
+  (decoded.signature.split('(')[0] || decoded.signature).toLowerCase()
+
+const isBlockingSimulationErrorName = (name: string) =>
+  BLOCKING_SIMULATION_ERRORS.has(name)
+  || BLOCKING_SIMULATION_ERROR_PREFIXES.some(prefix => name.startsWith(prefix))
+
+const isApprovalLikeSimulationErrorName = (name: string) =>
+  NON_BLOCKING_APPROVAL_SIMULATION_ERRORS.has(name)
+  || name.includes('allowance')
+  || name.includes('transferfrom')
+
+const isNonBlockingApprovalErrorChain = (chain: readonly DecodedSmartContractError[]): boolean => {
+  if (!chain.length) return false
+  const names = chain.map(decodedErrorName)
+  return names.some(isApprovalLikeSimulationErrorName)
+    && !names.some(isBlockingSimulationErrorName)
+}
+
+const hasSimulationInsufficiencyDiagnostics = <T extends VaultEntity>(result: SimulateBatchResult<T>) =>
+  !!result.insufficientWalletAssets?.length
+  || !!result.insufficientPermit2Allowances?.length
+  || !!result.insufficientDirectAllowances?.length
+
+const planItems = (plan: TransactionPlan | TransactionPlanPrepared): TransactionPlan =>
+  Array.isArray(plan) ? plan : plan.plan
+
+const planHasRequiredApproval = (plan: TransactionPlan | TransactionPlanPrepared) =>
+  planItems(plan).some(item => item.type === 'requiredApproval')
+
+const errorSelector = (error: Hex | undefined): string | undefined =>
+  error?.slice(0, 10).toLowerCase()
+
+export const isNonBlockingApprovalSimulationFailure = <T extends VaultEntity>(
+  plan: TransactionPlan | TransactionPlanPrepared,
+  result: SimulateBatchResult<T>,
+): boolean => {
+  const failedBatchItems = result.failedBatchItems ?? []
+  const hasSimulationFailure = !!failedBatchItems.length || !!result.simulationError
+  if (!hasSimulationFailure) return false
+
+  const hasApprovalOrBalanceContext = planHasRequiredApproval(plan) || hasSimulationInsufficiencyDiagnostics(result)
+  if (!hasApprovalOrBalanceContext) return false
+
+  const failedItemsAreNonBlocking = failedBatchItems.every((item) => {
+    const selector = errorSelector(item.error)
+    return (selector !== undefined && NON_BLOCKING_APPROVAL_SIMULATION_ERRORS.has(selector))
+      || isNonBlockingApprovalErrorChain(item.decodedError)
+  })
+  const simulationErrorIsNonBlocking = result.simulationError
+    ? isNonBlockingApprovalErrorChain(result.simulationError.decoded)
+    : true
+
+  return failedItemsAreNonBlocking && simulationErrorIsNonBlocking
+}
+
+export const isNonBlockingApprovalSimulationError = async (
+  plan: TransactionPlan | TransactionPlanPrepared,
+  error: unknown,
+): Promise<boolean> => {
+  if (!planHasRequiredApproval(plan)) return false
+
+  const localCode = extractErrorCode(error)
+  if (localCode) {
+    const name = localCode.toLowerCase()
+    return isApprovalLikeSimulationErrorName(name) && !isBlockingSimulationErrorName(name)
+  }
+
+  try {
+    const decoded = await decodeSmartContractErrors(error)
+    return isNonBlockingApprovalErrorChain(decoded)
+  }
+  catch {
+    return false
+  }
 }
 
 // The SDK returns the decoded chain in nesting order (outer wrapper first,

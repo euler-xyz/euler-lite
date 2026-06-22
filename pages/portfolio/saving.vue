@@ -3,15 +3,20 @@ import type { PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-s
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 
 const { isConnected } = useWagmi()
-const { depositPositions, isDepositsLoaded } = useEulerAccount()
+const { depositPositions, removedDepositPositions, isDepositsLoaded } = useEulerAccount()
 const { isReady } = useVaults()
 const { isEarnVault } = useVaultRegistry()
 
-const earnItems = computed(() => depositPositions.value.filter((p) => {
+const displayedDepositPositions = computed(() => [
+  ...removedDepositPositions.value,
+  ...depositPositions.value,
+])
+
+const earnItems = computed(() => displayedDepositPositions.value.filter((p) => {
   const vault = p.vault
   return vault ? isEarnVault(vault.address) : false
 }))
-const lendItems = computed(() => depositPositions.value.filter((p) => {
+const lendItems = computed(() => displayedDepositPositions.value.filter((p) => {
   const vault = p.vault
   return vault ? !isEarnVault(vault.address) : false
 }))
@@ -38,6 +43,11 @@ watchEffect(async () => {
 watchEffect(async () => {
   sortedLendItems.value = await sortByUsdValue(lendItems.value)
 })
+
+usePortfolioBatchScrollTarget(computed(() => [
+  ...sortedEarnItems.value.map(position => position.subAccount),
+  ...sortedLendItems.value.map(position => position.subAccount),
+].join('|')))
 </script>
 
 <template>

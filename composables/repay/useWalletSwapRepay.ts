@@ -44,6 +44,12 @@ interface UseWalletSwapRepayOptions {
   oraclePriceRatio: ComputedRef<number | null>
 }
 
+interface WalletSwapRepayPlanSnapshot {
+  selectedAsset?: VaultAsset
+  direction?: SwapperMode
+  isFullRepay?: boolean
+}
+
 export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const {
     position,
@@ -75,14 +81,18 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const buildRepayStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
   const { chainId } = useEulerAddresses()
   const { isConnected, address } = useWagmi()
+  const { isSpyMode, spyAddress } = useSpyMode()
+  const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
   const { account: planAccount } = usePlanAccount()
-  const { fetchSingleBalance } = useWallets()
+  const { getBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { getVault: registryGetVault } = useVaultRegistry()
 
   // --- State ---
   const selectedAsset = ref<VaultAsset | undefined>()
-  const selectedAssetBalance = ref(0n)
+  // Pay-with balance from the central wallet entity (custom tokens are fed into
+  // it by useCustomTokenResolver), reactive + layer-aware.
+  const selectedAssetBalance = computed(() => selectedAsset.value?.address ? getBalance(selectedAsset.value.address as Address) : 0n)
   const isUnknownSwapToken = ref(false)
   const amount = ref('')
   const debtAmount = ref('')
@@ -307,7 +317,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   })
 
   const isSubmitDisabled = computed(() => {
-    if (!isConnected.value) return false
+    if (!isConnected.value && !isSpyMode.value) return false
     if (findBlockingDisabledOp(walletSwapRepayPlannedOps.value)) return true
     if (direction.value === SwapperMode.EXACT_IN && !(+amount.value)) return true
     if (direction.value === SwapperMode.TARGET_DEBT && !(+debtAmount.value)) return true
@@ -326,8 +336,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     }
 
     const currentDebt = getCurrentDebt()
-    const userAddr = (address.value || zeroAddress) as Address
-    const subAccount = (position.value.subAccount || address.value || zeroAddress) as Address
+    const userAddr = (effectiveAddress.value || zeroAddress) as Address
+    const subAccount = (position.value.subAccount || effectiveAddress.value || zeroAddress) as Address
     const isNative = isNativeCurrencyAddress(selectedAsset.value.address)
     const swapTokenIn = isNative
       ? resolveWrappedNativeAddress(chainId.value!)
@@ -599,10 +609,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     clearSimulationError()
     quotes.reset()
     resetDerivedState()
-
-    if (newAsset.address) {
-      selectedAssetBalance.value = await fetchSingleBalance(newAsset.address)
-    }
+    // selectedAssetBalance is a reactive computed over the wallet entity.
   }
 
   const onRefreshSwapQuotes = () => {
@@ -642,14 +649,11 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     onAmountInput()
   }
 
-  // Refresh selected asset balance and re-validate when wallet address changes
-  watch(address, async () => {
-    if (selectedAsset.value?.address) {
-      selectedAssetBalance.value = await fetchSingleBalance(selectedAsset.value.address)
-      if (needsSwap.value) {
-        updateSyncEstimates()
-        updateAsyncEstimates()
-      }
+  // Re-validate when wallet address changes (balance is a reactive computed).
+  watch(address, () => {
+    if (selectedAsset.value?.address && needsSwap.value) {
+      updateSyncEstimates()
+      updateAsyncEstimates()
     }
   })
 
@@ -713,29 +717,35 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   })
 
   // --- Build plan ---
-  async function buildRepayPlan(quote?: SwapQuote, account = planAccount.value): Promise<TransactionPlan> {
+  async function buildRepayPlan(
+    quote?: SwapQuote,
+    account = planAccount.value,
+    snapshot: WalletSwapRepayPlanSnapshot = {},
+  ): Promise<TransactionPlan> {
     const swapQuote = quote || quotes.selectedQuote.value
-    if (!position.value || !borrowVault.value || !collateralVault.value || !swapQuote || !selectedAsset.value) {
+    const repaymentAsset = snapshot.selectedAsset ?? selectedAsset.value
+    if (!position.value || !borrowVault.value || !collateralVault.value || !swapQuote || !repaymentAsset) {
       throw new Error('Missing data for swap repay plan')
     }
 
-    const swapMode = direction.value
+    const swapMode = snapshot.direction ?? direction.value
     const inputAmount = getSwapInputAmount(swapQuote, swapMode)
 
-    const isNative = isNativeCurrencyAddress(selectedAsset.value.address)
+    const isNative = isNativeCurrencyAddress(repaymentAsset.address)
     const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
     if (isNative && !wrappedAddress) {
       throw new Error('Wrapped native token not found')
     }
+    const repayAll = snapshot.isFullRepay ?? isFullRepay.value
 
     return planSwapAndRepay({
       swapQuote,
       amount: inputAmount,
-      tokenIn: (wrappedAddress || selectedAsset.value.address) as Address,
+      tokenIn: (wrappedAddress || repaymentAsset.address) as Address,
       liabilityVault: borrowVault.value.address as Address,
-      repayAccount: (position.value.subAccount || address.value || zeroAddress) as Address,
-      isMax: isFullRepay.value,
-      cleanupOnMax: isFullRepay.value,
+      repayAccount: (position.value.subAccount || effectiveAddress.value || zeroAddress) as Address,
+      isMax: repayAll,
+      cleanupOnMax: repayAll,
       wrappedNativeInfo: isNative && wrappedAddress
         ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
         : undefined,
@@ -881,5 +891,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     send,
     resetOnTabSwitch,
     initEstimates,
+    // Batch
+    buildRepayPlan,
   }
 }

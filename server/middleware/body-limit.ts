@@ -1,15 +1,13 @@
 import { createError, getRequestURL } from 'h3'
 
-// 1 MB for RPC, 2 MB for Tenderly, 5 MB for Sentry session replay
+// 1 MB for RPC, 2 MB for Tenderly
 const RPC_LIMIT = 1 * 1024 * 1024
 const TENDERLY_LIMIT = 2 * 1024 * 1024
-const SENTRY_LIMIT = 5 * 1024 * 1024
 const DEFAULT_LIMIT = 1 * 1024 * 1024
 
 function getLimit(pathname: string): number {
   if (pathname.startsWith('/api/tenderly/')) return TENDERLY_LIMIT
   if (pathname.startsWith('/api/rpc/')) return RPC_LIMIT
-  if (pathname === '/api/sentry-tunnel') return SENTRY_LIMIT
   return DEFAULT_LIMIT
 }
 

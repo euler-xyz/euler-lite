@@ -41,7 +41,7 @@ cp .env.example .env
 | `APPKIT_PROJECT_ID` or `NUXT_PUBLIC_APP_KIT_PROJECT_ID` | Reown (WalletConnect) project ID                |
 | `NUXT_PUBLIC_APP_URL`                | Your app's public URL                                       |
 | `RPC_URL_<chainId>`                  | RPC endpoint per chain (e.g. `RPC_URL_1` for Ethereum)      |
-| `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` | Subgraph URI per chain                                      |
+| `SUBGRAPH_URL_<chainId>` or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` | Subgraph URI per chain. `SUBGRAPH_URL_*` is server-only and preferred; `NUXT_PUBLIC_SUBGRAPH_URI_*` remains supported for existing deployments. |
 
 #### API URLs
 
@@ -52,7 +52,34 @@ cp .env.example .env
 | `SWAP_API_URL` or `NUXT_PUBLIC_SWAP_API_URL` | —           | Euler swap API                        |
 | `PYTH_HERMES_URL` or `NUXT_PUBLIC_PYTH_HERMES_URL` | `https://hermes.pyth.network` | Pyth oracle endpoint (proxied via `/api/pyth/updates`) |
 
-> **Doppler compatibility:** If your secret manager injects `NUXT_PUBLIC_*` prefixed URL names (e.g. `NUXT_PUBLIC_V3_API_URL`), the server accepts those forms automatically. V3 API keys should use server-side names such as `EULER_SDK_V3_API_KEY`.
+> **Doppler compatibility:** If your secret manager injects prefixed URL names, the server also accepts `EULER_SDK_V3_API_URL` and `NUXT_PUBLIC_V3_API_URL`. V3 API keys should use server-side names such as `EULER_SDK_V3_API_KEY`.
+
+#### SDK Data Source Controls
+
+Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for vault reads, portfolio data, prices, rewards, and transaction plans. These controls select which SDK adapter path is used for cached browsing reads and the server-side vault snapshot:
+
+| Variable | Default | Description |
+| -------- | ------- | ----------- |
+| `SERVER_VAULT_CACHE_SOURCE` | `fallback` | Server snapshot builder adapter chain: `fallback`, `onchain`, or `v3`. |
+| `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` | `fallback` | Browser "fast" SDK adapter chain: `fallback`, `onchain`, or `v3`. The plan-time SDK is always on-chain. |
+| `DISABLE_SERVER_VAULT_CACHE` | `false` | Set to `true` to disable `/api/vaults` snapshots and let the browser fall through to the normal RPC pipeline. |
+| `DEPRECATED_CHAINS` | — | Comma-separated chain IDs shown collapsed in the chain selector and skipped by startup warm-cache cycles. |
+
+`fallback` uses V3 first and on-chain reads second. If no V3 URL is configured, Lite passes `disableV3: true` to the SDK so fallback reads go straight on-chain.
+
+#### Optional Server Controls
+
+| Variable | Description |
+| -------- | ----------- |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated allowlist for `/api/*`; falls back to `NUXT_PUBLIC_APP_URL`. |
+| `CSP_EXTRA_CONNECT_SRC` | Extra `connect-src` origins for development or staging endpoints. |
+| `DEV_GEO_COUNTRY` | Local/preview country fallback when Cloudflare geo headers are absent. Do not set in production behind Cloudflare. |
+| `WALLET_SCREENING_URI` | Optional server-side wallet screening endpoint proxied by `/api/screen-address`. |
+| `STABLEWATCH_API_KEY` | Optional server-side Stablewatch key for intrinsic APY data. |
+| `MERKL_API_KEY` | Optional server-side Merkl key. The Merkl API works anonymously (10 req/sec shared across all users via `/api/proxy/merkl`); set this to send `X-API-Key` upstream for a higher quota. Server-only — never exposed to the browser. |
+| `TENDERLY_ACCESS_KEY`, `TENDERLY_ACCOUNT_SLUG`, `TENDERLY_PROJECT_SLUG` | Optional Tenderly simulation configuration. |
+| `FUUL_API_URL` or `NUXT_PUBLIC_FUUL_API_URL` | Optional Fuul API upstream override. |
+| `INCENTRA_API_URL` or `NUXT_PUBLIC_INCENTRA_API_URL` | Optional Incentra/Brevis API upstream override. |
 
 #### Branding & Feature Flags
 
@@ -100,14 +127,14 @@ Chains are configured dynamically at runtime. Each chain requires two env vars:
 ```bash
 # Ethereum Mainnet
 RPC_URL_1=https://your-rpc-endpoint.com
-NUXT_PUBLIC_SUBGRAPH_URI_1=https://api.goldsky.com/.../euler-simple-mainnet/latest/gn
+SUBGRAPH_URL_1=https://api.goldsky.com/.../euler-simple-mainnet/latest/gn
 
 # Arbitrum
 RPC_URL_42161=https://your-arbitrum-rpc.com
-NUXT_PUBLIC_SUBGRAPH_URI_42161=https://api.goldsky.com/.../euler-simple-arbitrum/latest/gn
+SUBGRAPH_URL_42161=https://api.goldsky.com/.../euler-simple-arbitrum/latest/gn
 ```
 
-The app scans for `RPC_URL_<chainId>` env vars at server startup and automatically enables those chains. No code changes needed to add or remove chains.
+The app scans for `RPC_URL_<chainId>` env vars at server startup and automatically enables those chains. The SDK subgraph adapters call the same-origin `/api/proxy/subgraph/<chainId>` route, which resolves `SUBGRAPH_URL_<chainId>` first and `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` second. No code changes needed to add or remove chains.
 
 #### Base App In-App Browser
 
@@ -117,7 +144,7 @@ To make Base mainnet available in that environment, configure the same runtime c
 
 ```bash
 RPC_URL_8453=https://your-base-rpc.com
-NUXT_PUBLIC_SUBGRAPH_URI_8453=https://api.goldsky.com/.../euler-simple-base/latest/gn
+SUBGRAPH_URL_8453=https://api.goldsky.com/.../euler-simple-base/latest/gn
 ```
 
 ### 3. Customize Your Instance
@@ -213,6 +240,38 @@ The app will be available at `http://localhost:3000`.
 
 For HTTPS in local development, set `HTTPS_KEY` and `HTTPS_CERT` env vars pointing to your certificate files.
 
+#### Development with the SDK
+
+The committed dependency uses the npm version in `package.json` and `package-lock.json`. Keep those files pinned to a published `@eulerxyz/euler-v2-sdk` version unless the PR is intentionally updating the SDK dependency.
+
+For local Lite + SDK development, link the sibling SDK package without editing Lite package files:
+
+```bash
+cd ../euler-sdks/packages/euler-v2-sdk
+pnpm run build
+npm link
+
+cd ../../../euler-lite
+npm link @eulerxyz/euler-v2-sdk
+npm ls @eulerxyz/euler-v2-sdk --depth=0
+npm run dev
+```
+
+Rebuild the SDK after SDK source changes:
+
+```bash
+cd ../euler-sdks/packages/euler-v2-sdk
+pnpm run build
+```
+
+Return Lite to the committed npm package before final validation:
+
+```bash
+cd ../../../euler-lite
+npm ci
+npm ls @eulerxyz/euler-v2-sdk --depth=0
+```
+
 ### 5. Build for Production
 
 ```bash
@@ -236,6 +295,21 @@ docker run -p 3000:3000 \
 
 Doppler injects all environment variables at runtime. The server plugins scan the injected env vars and pass config to the client via `window.__APP_CONFIG__` and `window.__CHAIN_CONFIG__`.
 
+The Docker build uses the npm SDK version from `package-lock.json` by default. For a Lite PR that needs an unreleased SDK branch, pass the SDK branch as a build argument:
+
+```bash
+docker build \
+  --build-arg EULER_SDK_BRANCH=feat/sdk-branch \
+  --build-arg APP_PORT=3000 \
+  -t euler-lite .
+```
+
+When `EULER_SDK_BRANCH` is set, the builder clones `euler-xyz/euler-sdks`, builds `packages/euler-v2-sdk`, packs it, and installs that tarball with `--no-save` before running the Lite build. The committed Lite package files still point at the installed npm version.
+
+Railway PR builds use the same Dockerfile. Set `EULER_SDK_BRANCH` for previews that should consume a branch from `https://github.com/euler-xyz/euler-sdks.git`; leave it unset for previews that should use the npm version in `package-lock.json`.
+
+The SDK preview build installs `pnpm@10` by default. Set `EULER_SDK_PNPM_VERSION` if the SDK branch requires another pnpm version.
+
 To run without Doppler, override the `CMD` and pass env vars directly:
 
 ```bash
@@ -245,7 +319,7 @@ docker run -p 3000:3000 \
   -e SWAP_API_URL=https://swap.euler.finance \
   -e APPKIT_PROJECT_ID=your-project-id \
   -e RPC_URL_1=https://your-rpc.com \
-  -e NUXT_PUBLIC_SUBGRAPH_URI_1=https://your-subgraph.com \
+  -e SUBGRAPH_URL_1=https://your-subgraph.com \
   euler-lite node .output/server/index.mjs
 ```
 
@@ -305,7 +379,7 @@ Before deploying:
 - [ ] Copied `.env.example` to `.env` and filled in values
 - [ ] Set `APPKIT_PROJECT_ID` and `NUXT_PUBLIC_APP_URL`
 - [ ] Set `V3_API_URL`, optional `EULER_SDK_V3_API_KEY`, and `SWAP_API_URL`
-- [ ] Added at least one `RPC_URL_<chainId>` with matching `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`
+- [ ] Added at least one `RPC_URL_<chainId>` with matching `SUBGRAPH_URL_<chainId>` or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`
 - [ ] Configured branding via `NUXT_PUBLIC_CONFIG_*` env vars (title, description, logo, social links, social share image)
 - [ ] Customized theme colors in `assets/styles/variables.scss` (THEME CONFIGURATION section)
 - [ ] Replaced favicon files in `public/favicons/`
@@ -332,7 +406,7 @@ Before deploying:
 ### No Chains Available
 
 - Ensure at least one `RPC_URL_<chainId>` env var is set
-- Each chain needs a matching `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`
+- Each chain needs a matching `SUBGRAPH_URL_<chainId>` or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`
 
 ## Additional Resources
 

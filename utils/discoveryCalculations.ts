@@ -6,7 +6,7 @@ import { maxUint256 } from 'viem'
 import type { AnyVault } from '~/composables/useVaultRegistry'
 
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
-import { getEntitiesByVault, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
+import { getEntitiesByVault, isVaultCyclicalNote, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import { formatNumber, compactNumber, truncate } from '~/utils/string-utils'
 import { formatHookedOpsSummary, getHookedOperationMetas, getVaultHookedOperations, hasAnyHookedOperation, isVaultEffectivelyPaused } from '~/utils/vault-hooks'
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
@@ -31,6 +31,7 @@ export interface CollateralMatrixData {
 
 export interface BestMaxRoeResult {
   value: number
+  metric: 'max-roe' | 'net-apy'
   hasRewards: boolean
   pair: string
   maxMultiplier: number
@@ -741,8 +742,6 @@ const getIrmTypeLabel = (t: number | undefined): string => {
   if (t === INTEREST_RATE_MODEL_TYPE.KINK) return 'Kink'
   if (t === INTEREST_RATE_MODEL_TYPE.ADAPTIVE_CURVE) return 'Adaptive'
   if (t === INTEREST_RATE_MODEL_TYPE.KINKY) return 'Kinky'
-  if (t === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY) return 'Cyclical note'
-  if (t === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY_MONTHLY) return 'Cyclical note'
   return '—'
 }
 
@@ -793,7 +792,9 @@ export const CONFIG_ROWS: AttributeRow[] = [
     getValue: (vault) => {
       if (!isEVault(vault) || isEscrow(vault)) return NA_CELL
       const t = vault.interestRateModel.type
-      const label = getIrmTypeLabel(typeof t === 'number' ? t : undefined)
+      const label = isVaultCyclicalNote(vault.address)
+        ? 'Cyclical note'
+        : getIrmTypeLabel(typeof t === 'number' ? t : undefined)
       return { display: label, kind: 'text', hint: vault.interestRateModel.address }
     },
   },

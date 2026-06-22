@@ -26,6 +26,7 @@ vi.mock('~/utils/eulerLabelsUtils', () => ({
     if (vault.address === '0xSecuritize') return [{ name: 'Securitize', logo: 'securitize.png' }]
     return []
   },
+  isVaultCyclicalNote: () => false,
   isVaultDeprecated: () => false,
 }))
 

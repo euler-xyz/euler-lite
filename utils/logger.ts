@@ -8,7 +8,7 @@ import { verboseLogsOptIn } from './debug-flags'
  * under `entities/`, `services/`, and the cross-cutting helpers in `utils/`).
  *
  * - **On the client (browser)** emits via `console.*` so logs surface in
- *   DevTools and Sentry breadcrumb hooks intercept them.
+ *   DevTools and userland console hooks can intercept them.
  * - **On the server (Node)** emits a single JSON line per call to stdout.
  *   Fargate ships every stdout line as one BetterStack row, and the JSON
  *   shape matches the pino logger in `~/server/utils/logger` so structured
@@ -173,7 +173,7 @@ const emitBrowser = (level: Level, fields: Fields, msg: string | undefined): voi
   if (LEVEL_PRIORITY[level] < BROWSER_MIN_LEVEL) return
   const method = consoleMethodFor(level)
   // Look up console.* at call time, not module load, so test spies and any
-  // userland console replacement (Sentry breadcrumbs etc.) take effect.
+  // userland console replacement can take effect.
   // eslint-disable-next-line no-console
   console[method](formatPrefix(fields), msg ?? '', projectFields(fields))
 }

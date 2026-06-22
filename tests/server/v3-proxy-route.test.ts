@@ -90,7 +90,7 @@ describe('/api/v3 proxy route', () => {
     }
     const event = makeEvent(
       'POST',
-      'https://app.example/api/v3/v3/evk/vaults/batch',
+      'https://app.example/api/v3/evk/vaults/batch',
       JSON.stringify(requestBody),
     )
 
@@ -110,7 +110,7 @@ describe('/api/v3 proxy route', () => {
   it('rejects disallowed paths before consuming rate-limit budget', async () => {
     const event = makeEvent(
       'GET',
-      `https://app.example/api/v3/v3/admin?chainId=1&account=${ACCOUNT}`,
+      `https://app.example/api/v3/admin?chainId=1&account=${ACCOUNT}`,
     )
 
     await expect(handler(event)).rejects.toMatchObject({

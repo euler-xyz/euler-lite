@@ -5,11 +5,12 @@ import type { Component } from 'vue'
 
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerEntitiesOfVault, useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { getProductByVault, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, getProductKeyByVault, isVaultGovernanceLimited } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { autoLink } from '~/utils/autoLink'
 import { normalizeAddress } from '~/utils/normalizeAddress'
+import { formatMarketAvailability } from '~/utils/vault-display'
 import type { VaultTypeBadge } from '~/composables/useVaultTypeBadges'
 import { AccessControlBadge, CyclicalNoteBadge, GovernanceLimitedBadge, KeyringBadge } from '#components'
 
@@ -39,7 +40,7 @@ const isDeprecated = computed(() => {
 const deprecationReason = computed(() => isDeprecated.value ? product.deprecationReason || '' : '')
 const isRestricted = computed(() => isVaultBlockedByCountry(vault.address))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
-const isGovernanceLimited = computed(() => product.isGovernanceLimited && isGovernorVerified.value)
+const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
 
 // Count how many EVaults reference this vault as a borrowable collateral.
 // Use the registry directly, matching the baseline app. `borrowList` is
@@ -206,7 +207,7 @@ watchEffect(async () => {
           <div class="flex items-center gap-8">
             <UiIcon :name="borrowCount ? 'green-tick' : 'red-cross'" />
             <span class="text-p2 text-content-primary">
-              {{ borrowCount ? `Yes in ${borrowCount} markets` : 'No' }}
+              {{ formatMarketAvailability(borrowCount) }}
             </span>
           </div>
         </VaultOverviewLabelValue>
@@ -214,7 +215,7 @@ watchEffect(async () => {
           <div class="flex items-center gap-8">
             <UiIcon :name="collateralCount ? 'green-tick' : 'red-cross'" />
             <span class="text-p2 text-content-primary">
-              {{ collateralCount ? `Yes in ${collateralCount} markets` : 'No' }}
+              {{ formatMarketAvailability(collateralCount) }}
             </span>
           </div>
         </VaultOverviewLabelValue>

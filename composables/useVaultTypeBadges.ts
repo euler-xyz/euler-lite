@@ -1,9 +1,7 @@
 import { zeroAddress } from 'viem'
 import { isEVault, type EulerEarn, type EVault, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import type { Ref } from 'vue'
-import { isCyclicalNoteVault } from '~/utils/vault/classification'
-import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { getEntitiesByEarnVault, getEntitiesByVault, isVaultAccessControlled, isVaultKeyring } from '~/utils/eulerLabelsUtils'
+import { getEntitiesByEarnVault, getEntitiesByVault, isVaultAccessControlled, isVaultCyclicalNote, isVaultGovernanceLimited, isVaultKeyring } from '~/utils/eulerLabelsUtils'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 
 type VaultTypeBadgeVault = EVault | EulerEarn | SecuritizeCollateralVault
@@ -17,7 +15,6 @@ export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
   const { getVaultCategory } = useVaultRegistry()
 
   const addressRef = computed(() => vault.value.address)
-  const product = useEulerProductOfVault(addressRef)
 
   const isEarn = computed(() => vault.value.type === 'EulerEarn')
   const isSecuritize = computed(() => vault.value.type === 'SecuritizeCollateral')
@@ -48,13 +45,18 @@ export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
   })
 
   const isGovernanceLimited = computed(() =>
-    product.isGovernanceLimited && isVerified.value,
+    isVaultGovernanceLimited(addressRef.value) && isVerified.value,
   )
 
   const isCyclicalNote = computed(() => {
     if (!isEVault(vault.value)) return false
-    return isCyclicalNoteVault(vault.value)
+    return isVaultCyclicalNote(vault.value.address)
   })
+
+  const shouldSummarizeAsUnknown = computed(() =>
+    governanceType.value === 'unknown'
+    || (!isVerified.value && !['escrow', 'ungoverned'].includes(governanceType.value)),
+  )
 
   const badges = computed<VaultTypeBadge[]>(() => {
     const result: VaultTypeBadge[] = [governanceType.value]
@@ -71,7 +73,7 @@ export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
   const summaryBadges = computed<VaultTypeSummaryBadge[]>(() => {
     const result: VaultTypeSummaryBadge[] = []
 
-    if (!isVerified.value || governanceType.value === 'unknown') result.push('unknown')
+    if (shouldSummarizeAsUnknown.value) result.push('unknown')
     if (badges.value.includes('private')) result.push('private')
     if (badges.value.includes('accessControl')) result.push('accessControl')
     if (badges.value.includes('cyclicalNote')) result.push('cyclicalNote')

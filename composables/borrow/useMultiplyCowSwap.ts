@@ -195,6 +195,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
           address: supplyVault.asset.address as Address,
           abi: erc20Abi,
           functionName: 'allowance',
+          authorizationList: undefined,
           args: [address.value as Address, supplyVault.address as Address],
         }) as bigint
 
@@ -203,6 +204,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
             address: shortVault.asset.address as Address,
             abi: erc20Abi,
             functionName: 'allowance',
+            authorizationList: undefined,
             args: [address.value as Address, chainConfig.vaultRelayer],
           }) as bigint
         }

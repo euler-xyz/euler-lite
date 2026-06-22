@@ -53,6 +53,9 @@ export interface StepDecodingContext {
 const VERIFY_AMOUNT_MIN_AND_SKIM_SELECTOR = toFunctionSelector('function verifyAmountMinAndSkim(address,address,uint256,uint256)')
 const VERIFY_AMOUNT_MIN_AND_TRANSFER_SELECTOR = toFunctionSelector('function verifyAmountMinAndTransfer(address,address,uint256,uint256)')
 const VERIFY_DEBT_MAX_SELECTOR = toFunctionSelector('function verifyDebtMax(address,address,uint256,uint256)')
+const MERKL_CLAIM_SELECTOR = toFunctionSelector('function claim(address[],address[],uint256[],bytes32[][])')
+const BREVIS_CLAIM_SELECTOR = toFunctionSelector('function claim(address,uint256[],uint64,bytes32[])')
+const FUUL_CLAIM_SELECTOR = toFunctionSelector('function claim((address,address,address,uint8,uint256,uint8,uint256,uint256,bytes32,bytes[])[])')
 
 const SELECTOR_LABELS: Record<string, string> = {
   [toFunctionSelector('function deposit(uint256,address)')]: 'Supply',
@@ -77,6 +80,9 @@ const SELECTOR_LABELS: Record<string, string> = {
   [toFunctionSelector('function transferFromSender(address,uint256,address)')]: 'Transfer from wallet',
   [toFunctionSelector('function deposit()')]: 'Wrap native currency',
   [toFunctionSelector('function createCredential(address,uint256,uint256,uint256,uint256,bytes,bytes,bytes)')]: 'Identity verification',
+  [MERKL_CLAIM_SELECTOR]: 'Claim',
+  [BREVIS_CLAIM_SELECTOR]: 'Claim',
+  [FUUL_CLAIM_SELECTOR]: 'Claim',
 }
 
 const MAX_UINT256 = 2n ** 256n - 1n
@@ -113,6 +119,32 @@ export const getDefaultSwapEstimatedSide = (swapMode: SwapperMode): SwapEstimate
 export const decodeBatchItemLabel = (data: string): string => {
   const selector = data.slice(0, 10).toLowerCase()
   return SELECTOR_LABELS[selector] || 'Unknown operation'
+}
+
+// The vault(s) an operation's core action targets, read off its plan, resolved
+// to their market (Euler label product) names. Mirrors the positions list's
+// pair label: distinct markets are deduped in plan order and joined with " / ",
+// so a borrow operation spanning vaults from several markets shows all of them.
+const VAULT_ACTION_LABELS = new Set(['Supply', 'Deposit', 'Withdraw', 'Borrow', 'Repay'])
+
+export const buildPlanMarketLabel = (
+  plan: TransactionPlan | undefined,
+  getMarketName: (vaultAddress: string) => string | undefined,
+): string | undefined => {
+  if (!plan) return undefined
+  const names = new Set<string>()
+  for (const item of plan) {
+    if (item.type !== 'evcBatch') continue
+    for (const bi of flattenBatchEntries(item.items)) {
+      if (!VAULT_ACTION_LABELS.has(decodeBatchItemLabel(bi.data))) continue
+      try {
+        const name = getMarketName(getAddress(bi.targetContract))
+        if (name) names.add(name)
+      }
+      catch { /* skip malformed address */ }
+    }
+  }
+  return names.size ? [...names].join(' / ') : undefined
 }
 
 export const cleanStepLabel = (label: string): string => {
@@ -361,6 +393,10 @@ const resolveBatchItemAssetInfo = (
 
   if (label === 'Update price feeds') {
     return { symbol: ctx.asset.symbol, address: ctx.asset.address }
+  }
+
+  if (label === 'Claim') {
+    return { symbol: ctx.asset.symbol, address: ctx.asset.address, amount: ctx.amount }
   }
 
   return undefined

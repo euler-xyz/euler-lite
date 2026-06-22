@@ -25,6 +25,23 @@ import { getVaultTags, isVaultRestrictedByCountry, isAssetBlockedByCountry } fro
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 
+// Snapshot of all borrow inputs captured at "add to batch" time. The batch
+// re-simulates asynchronously (after the form may have been reset), so the plan
+// must be built from these captured values rather than the live reactive refs.
+export interface BorrowBatchSnapshot {
+  subAccount: Address
+  collateralVault: EVault
+  borrowVault: EVault
+  collateralAmount: string
+  borrowAmount: string
+  needsSwap: boolean
+  selectedAsset?: VaultAsset
+  isSavingCollateral: boolean
+  savingCollateral?: PortfolioSavingsPosition<VaultEntity>
+  isBorrowNativeWrap: boolean
+  quote?: SwapQuote
+}
+
 export interface UseBorrowFormOptions {
   pair: Ref<AnyBorrowVaultPair | undefined>
   borrowVault: ComputedRef<EVault | undefined>
@@ -76,9 +93,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const { planBorrow, planSwapAndBorrow, executePlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
   const { account: planAccount } = usePlanAccount()
   const { address, isConnected } = useWagmi()
-  const { isSpyMode } = useSpyMode()
+  const { isSpyMode, spyAddress } = useSpyMode()
   const { chainId } = useEulerAddresses()
-  const { fetchSingleBalance } = useWallets()
+  const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
+  const { getBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
   // Form validates "Not enough balance" up front (see `errorText` / `isSubmitDisabled`),
   // so the simulator never needs to forge wallet balances — `noBalanceOverride: true`
@@ -190,7 +208,9 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   // Swap state
   const borrowSelectedAsset = ref<VaultAsset | undefined>()
-  const borrowSelectedAssetBalance = ref(0n)
+  // Pay-with balance from the central wallet entity (custom tokens fed in by
+  // useCustomTokenResolver) — reactive + layer-aware.
+  const borrowSelectedAssetBalance = computed(() => borrowSelectedAsset.value?.address ? getBalance(borrowSelectedAsset.value.address as Address) : 0n)
   const borrowSwapAssetUsdPrice = ref<number | undefined>()
 
   // --- Computed: prices ---
@@ -442,7 +462,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   })
 
   const isSubmitDisabled = computed(() => {
-    if (!isConnected.value) return false
+    if (!isConnected.value && !isSpyMode.value) return false
     if (findBlockingDisabledOp(borrowPlannedOps.value)) return true
     if (isSavingCollateral.value && !savingCollateral.value) return true
     if (borrowActiveBalance.value < valueToNano(collateralAmount.value, borrowActiveAssetDecimals.value)) return true
@@ -480,8 +500,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       return
     }
 
-    const userAddr = (address.value || zeroAddress) as Address
-    const subAccountAddr = address.value
+    const userAddr = (effectiveAddress.value || zeroAddress) as Address
+    const subAccountAddr = effectiveAddress.value
       ? (await resolvePendingSubAccount()) as Address
       : userAddr
     await ensureBorrowSubAccountSnapshot(planAccount.value, subAccountAddr)
@@ -689,12 +709,151 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     })
   }
 
+  // Standard (non-swap) borrow plan, shared by submit/send and the batch path.
+  // `account` is the snapshot the plan builds against (live for submit, the prior
+  // layer for batch); `subAccountSnapshotApplied` tells planBorrow whether the
+  // sub-account snapshot is already on `account` (true for batch — see below).
+  const buildStandardBorrowPlan = async (
+    account: Account<IHasVaultAddress> | undefined,
+    subAccountAddr: Address,
+    subAccountSnapshotApplied: boolean,
+  ): Promise<TransactionPlan> => {
+    if (!collateralVault.value || !borrowVault.value) {
+      throw new Error('Missing vault data')
+    }
+    let collateralAmountForPlan = collateralAmountFixed.value.toFormat({ decimals: Number(collateralVault.value.shares.decimals) }).value
+    let selectedSavingsCollateral: PortfolioSavingsPosition<VaultEntity> | undefined
+    if (isSavingCollateral.value) {
+      selectedSavingsCollateral = savingCollateral.value
+      if (!selectedSavingsCollateral) {
+        throw new Error('Savings position not found')
+      }
+      if (selectedSavingsCollateral.assets === collateralAmountForPlan) {
+        collateralAmountForPlan = selectedSavingsCollateral.shares
+      }
+      else {
+        collateralAmountForPlan = collateralVault.value.convertToShares(collateralAmountForPlan)
+      }
+    }
+    const borrowAmountNano = borrowAmountFixed.value.toFormat({ decimals: Number(borrowVault.value.shares.decimals) }).value
+    return isSavingCollateral.value
+      ? planBorrow({
+          vaultAddress: borrowVault.value.address as Address,
+          amount: borrowAmountNano,
+          borrowAccount: subAccountAddr,
+          account,
+          subAccountSnapshotApplied,
+          collateral: {
+            vault: collateralVault.value.address as Address,
+            amount: collateralAmountForPlan,
+            source: 'savings',
+            from: selectedSavingsCollateral!.subAccount as Address,
+          },
+        })
+      : planBorrow({
+          vaultAddress: borrowVault.value.address as Address,
+          amount: borrowAmountNano,
+          borrowAccount: subAccountAddr,
+          account,
+          subAccountSnapshotApplied,
+          collateral: {
+            vault: collateralVault.value.address as Address,
+            asset: collateralVault.value.asset.address as Address,
+            amount: collateralAmountForPlan,
+            wrappedNativeInfo: isBorrowNativeWrap.value
+              ? { wrappedTokenAddress: resolveWrappedNativeAddress(chainId.value!)!, nativeAmount: collateralAmountForPlan }
+              : undefined,
+          },
+        })
+  }
+
+  // Build this form's plan for the batch ("shopping cart"), against the prior
+  // layer's simulated `account`. CoW swaps can't merge into an EVC batch and are
+  // gated out at the call site. `subAccountSnapshotApplied: true` keeps the layer
+  // account authoritative (no on-chain re-fetch that would clobber earlier steps).
+  //
+  // Unlike submit/send, this runs *asynchronously* inside the batch's resimulation
+  // — by then the form may have been reset or changed — so it must take a snapshot
+  // of every input captured at add-time, NOT read the live reactive refs.
+  const buildBorrowPlan = async (snap: BorrowBatchSnapshot, account = planAccount.value): Promise<TransactionPlan> => {
+    const subAccount = snap.subAccount
+
+    if (snap.needsSwap) {
+      if (!snap.quote || !snap.selectedAsset) throw new Error('No swap quote available')
+      const isNative = isNativeCurrencyAddress(snap.selectedAsset.address)
+      const inputAmount = valueToNano(snap.collateralAmount || '0', snap.selectedAsset.decimals)
+      const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
+      if (isNative && !wrappedAddress) throw new Error('Wrapped native token not found')
+      const borrowAmountNano = valueToNano(snap.borrowAmount || '0', snap.borrowVault.shares.decimals)
+      return planSwapAndBorrow({
+        swapQuote: snap.quote,
+        amount: inputAmount,
+        tokenIn: (wrappedAddress || snap.selectedAsset.address) as Address,
+        collateralVault: snap.collateralVault.address as Address,
+        borrowVault: snap.borrowVault.address as Address,
+        borrowAmount: borrowAmountNano,
+        borrowAccount: subAccount,
+        account,
+        subAccountSnapshotApplied: true,
+        wrappedNativeInfo: isNative && wrappedAddress
+          ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
+          : undefined,
+      })
+    }
+
+    // Standard borrow (fresh-deposit or savings-sourced collateral; collateral
+    // amount may be 0 for a pure borrow against an earlier batch step's collateral).
+    let collateralAmountForPlan = FixedPoint.fromValue(
+      valueToNano(snap.collateralAmount || '0', snap.collateralVault.asset.decimals),
+      Number(snap.collateralVault.asset.decimals),
+    ).toFormat({ decimals: Number(snap.collateralVault.shares.decimals) }).value
+    if (snap.isSavingCollateral) {
+      if (!snap.savingCollateral) throw new Error('Savings position not found')
+      collateralAmountForPlan = snap.savingCollateral.assets === collateralAmountForPlan
+        ? snap.savingCollateral.shares
+        : snap.collateralVault.convertToShares(collateralAmountForPlan)
+    }
+    const borrowAmountNano = FixedPoint.fromValue(
+      valueToNano(snap.borrowAmount || '0', snap.borrowVault.asset.decimals),
+      Number(snap.borrowVault.asset.decimals),
+    ).toFormat({ decimals: Number(snap.borrowVault.shares.decimals) }).value
+    return snap.isSavingCollateral
+      ? planBorrow({
+          vaultAddress: snap.borrowVault.address as Address,
+          amount: borrowAmountNano,
+          borrowAccount: subAccount,
+          account,
+          subAccountSnapshotApplied: true,
+          collateral: {
+            vault: snap.collateralVault.address as Address,
+            amount: collateralAmountForPlan,
+            source: 'savings',
+            from: snap.savingCollateral!.subAccount as Address,
+          },
+        })
+      : planBorrow({
+          vaultAddress: snap.borrowVault.address as Address,
+          amount: borrowAmountNano,
+          borrowAccount: subAccount,
+          account,
+          subAccountSnapshotApplied: true,
+          collateral: {
+            vault: snap.collateralVault.address as Address,
+            asset: snap.collateralVault.asset.address as Address,
+            amount: collateralAmountForPlan,
+            wrappedNativeInfo: snap.isBorrowNativeWrap
+              ? { wrappedTokenAddress: resolveWrappedNativeAddress(chainId.value!)!, nativeAmount: collateralAmountForPlan }
+              : undefined,
+          },
+        })
+  }
+
   const submit = async () => {
     if (isOperationBlocked.value) return
     if (isPreparing.value || isGeoBlocked.value || isBorrowRestricted.value || isBorrowSwapRestricted.value || isBorrowPayWithBlocked.value) return
     isPreparing.value = true
     try {
-      if (!isConnected.value) {
+      if (!isConnected.value && !isSpyMode.value) {
         isSubmitting.value = false
         return
       }
@@ -849,53 +1008,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       }
       else {
         // Standard borrow path
-        let collateralAmountForPlan = collateralAmountFixed.value.toFormat({ decimals: Number(collateralVault.value.shares.decimals) }).value
-        let selectedSavingsCollateral: PortfolioSavingsPosition<VaultEntity> | undefined
-        if (isSavingCollateral.value) {
-          selectedSavingsCollateral = savingCollateral.value
-          if (!selectedSavingsCollateral) {
-            throw new Error('Savings position not found')
-          }
-          if (selectedSavingsCollateral.assets === collateralAmountForPlan) {
-            collateralAmountForPlan = selectedSavingsCollateral.shares
-          }
-          else {
-            collateralAmountForPlan = collateralVault.value.convertToShares(collateralAmountForPlan)
-          }
-        }
-        const borrowAmountNano = borrowAmountFixed.value.toFormat({ decimals: Number(borrowVault.value.shares.decimals) }).value
         const subAccountAddr = (await resolvePendingSubAccount()) as Address
         const account = planAccount.value
         const subAccountSnapshotApplied = await ensureBorrowSubAccountSnapshot(account, subAccountAddr)
-        txPlan = isSavingCollateral.value
-          ? await planBorrow({
-              vaultAddress: borrowVault.value.address as Address,
-              amount: borrowAmountNano,
-              borrowAccount: subAccountAddr,
-              account,
-              subAccountSnapshotApplied,
-              collateral: {
-                vault: collateralVault.value.address as Address,
-                amount: collateralAmountForPlan,
-                source: 'savings',
-                from: selectedSavingsCollateral!.subAccount as Address,
-              },
-            })
-          : await planBorrow({
-              vaultAddress: borrowVault.value.address as Address,
-              amount: borrowAmountNano,
-              borrowAccount: subAccountAddr,
-              account,
-              subAccountSnapshotApplied,
-              collateral: {
-                vault: collateralVault.value.address as Address,
-                asset: collateralVault.value.asset.address as Address,
-                amount: collateralAmountForPlan,
-                wrappedNativeInfo: isBorrowNativeWrap.value
-                  ? { wrappedTokenAddress: resolveWrappedNativeAddress(chainId.value!)!, nativeAmount: collateralAmountForPlan }
-                  : undefined,
-              },
-            })
+        txPlan = await buildStandardBorrowPlan(account, subAccountAddr, subAccountSnapshotApplied)
       }
       await executePlan(txPlan)
       await finalizeTxAndRedirect()
@@ -910,14 +1026,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   }
 
   // --- Actions: balance ---
-  const updateBorrowSwapAssetBalance = async () => {
-    if (borrowSelectedAsset.value?.address && (isConnected.value || isSpyMode.value)) {
-      borrowSelectedAssetBalance.value = await fetchSingleBalance(borrowSelectedAsset.value.address)
-    }
-    else {
-      borrowSelectedAssetBalance.value = 0n
-    }
-  }
+  // No-op kept for callers; borrowSelectedAssetBalance is now a reactive computed.
+  const updateBorrowSwapAssetBalance = async () => {}
 
   // Pre-prime slot hints for assets this form touches (collateral, borrow,
   // selected pay-with token). Hits run once per token; the SDK module-scope
@@ -956,12 +1066,6 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   })
 
   watch(borrowSelectedAsset, async () => {
-    if (borrowSelectedAsset.value?.address && (isConnected.value || isSpyMode.value)) {
-      borrowSelectedAssetBalance.value = await fetchSingleBalance(borrowSelectedAsset.value.address)
-    }
-    else {
-      borrowSelectedAssetBalance.value = 0n
-    }
     if (borrowNeedsSwap.value && collateralAmount.value) {
       resetBorrowSwapQuoteState()
       if (+collateralAmount.value > 0) {
@@ -1057,6 +1161,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     borrowActiveBalance,
     borrowActiveAssetDecimals,
     borrowNeedsSwap,
+    isBorrowNativeWrap,
 
     // Computed: collateral options
     collateralOptions,
@@ -1111,6 +1216,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     onRefreshBorrowSwapQuotes,
     submit,
     send,
+    buildBorrowPlan, // Batch
     updateEstimates: () => {
       updateSyncEstimates()
       updateAsyncEstimates()

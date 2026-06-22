@@ -1,5 +1,29 @@
-import { describe, expect, it } from 'vitest'
-import { buildTokenLogoMap } from '~/server/utils/labels-view'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { buildProductDescriptors, buildTokenLogoMap, fetchTokenList } from '~/server/utils/labels-view'
+import { INTERNAL_FETCH_HEADERS } from '~/server/utils/internal-headers'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+describe('fetchTokenList', () => {
+  it('decorates the internal token-list fetch with the loopback sentinel', async () => {
+    const fetch = vi.fn().mockResolvedValue({
+      tokens: [
+        { address: '0x1111111111111111111111111111111111111111', logoURI: 'https://cdn.example/token.png' },
+      ],
+    })
+    vi.stubGlobal('$fetch', fetch)
+
+    await expect(fetchTokenList(1)).resolves.toEqual([
+      { address: '0x1111111111111111111111111111111111111111', logoURI: 'https://cdn.example/token.png' },
+    ])
+    expect(fetch).toHaveBeenCalledWith('/api/token-list', {
+      query: { chainId: 1 },
+      headers: INTERNAL_FETCH_HEADERS,
+    })
+  })
+})
 
 describe('buildTokenLogoMap', () => {
   it('keeps only http(s) logo URLs', () => {
@@ -18,5 +42,30 @@ describe('buildTokenLogoMap', () => {
     expect(map.has('0x4444444444444444444444444444444444444444')).toBe(false)
     expect(map.has('0x5555555555555555555555555555555555555555')).toBe(false)
     expect(map.has('0x6666666666666666666666666666666666666666')).toBe(false)
+  })
+})
+
+describe('buildProductDescriptors', () => {
+  it('applies governance-limited vault override tags per vault', () => {
+    const limitedVault = '0x0000000000000000000000000000000000000701'
+    const standardVault = '0x0000000000000000000000000000000000000702'
+
+    const { productByVault } = buildProductDescriptors({
+      test: {
+        name: 'Test',
+        description: '',
+        entity: [],
+        url: '',
+        vaults: [limitedVault, standardVault],
+        vaultOverrides: {
+          [limitedVault]: {
+            tags: ['governance limited'],
+          },
+        },
+      },
+    })
+
+    expect(productByVault.get(limitedVault)?.governanceLimited).toBe(true)
+    expect(productByVault.get(standardVault)?.governanceLimited).toBe(false)
   })
 })

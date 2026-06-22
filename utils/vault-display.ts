@@ -34,3 +34,7 @@ export const getVaultUtilization = (vault: any): number => {
 
   return Number(((Number(totalBorrowed) / Number(totalAssets)) * 100).toFixed(2))
 }
+
+export const formatMarketAvailability = (count: number) => {
+  return count ? `Yes in ${count} ${count === 1 ? 'market' : 'markets'}` : 'No'
+}

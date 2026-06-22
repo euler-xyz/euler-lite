@@ -34,15 +34,19 @@ export type SwapQuotePlanAccount = Account<IHasVaultAddress> | Address
 export type SwapQuotePlanContext = {
   account?: Account<IHasVaultAddress>
 }
+export type SwapQuoteIncludeCowSwap = boolean | (() => boolean)
 
 type SwapQuotesParallelOptions = {
   amountField: SwapQuoteAmountField
   compare: SwapQuoteCompare
   /** Surface CoW Protocol as a quote source (Ethereum mainnet etc.). */
-  includeCowSwap?: boolean | (() => boolean)
+  includeCowSwap?: SwapQuoteIncludeCowSwap
   /** Build a TransactionPlan from a quote so the composable can run gas
    *  estimation and discard quotes that fail with swapper/verifier reverts. */
   buildTxPlanForQuote?: (quote: SwapQuote, provider: string, context: SwapQuotePlanContext) => Promise<TransactionPlan>
+  /** Optionally wrap the quote plan before gas estimation. Batch flows use this
+   *  to estimate the real atomic transaction: existing batch + candidate quote. */
+  buildGasEstimatePlan?: (candidatePlan: TransactionPlan) => Promise<TransactionPlan> | TransactionPlan
   /** Forwarded to `sdk.executionService.estimateGasForTransactionPlan` so the
    *  per-quote estimate can skip balance overrides, reuse the wallet snapshot
    *  the form already holds, and take precomputed storage-slot hints. */
@@ -275,6 +279,10 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     )
   }
 
+  const buildGasEstimatePlan = async (candidatePlan: TransactionPlan): Promise<TransactionPlan> => {
+    return await options.buildGasEstimatePlan?.(candidatePlan) ?? candidatePlan
+  }
+
   const enrichQuoteCard = async (
     provider: string,
     quote: SwapQuote,
@@ -282,20 +290,21 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     client: PublicClient | null,
     gasPricePromise: Promise<bigint | undefined>,
   ): Promise<SwapQuoteCard | null> => {
+    const amountUsdPromise = getAmountUsd(quote).catch(() => undefined)
+
     // CoW intents settle off-chain — gas cost is genuinely zero from the
     // user's perspective. Mark the card so the route selector renders
-    // "Gasless". Do not block route visibility on auxiliary USD pricing.
+    // "Gasless".
     if (isCowProviderOrQuote(provider, quote)) {
       return {
         provider,
         quote,
+        amountUsd: await amountUsdPromise,
         gasCostNative: 0n,
         gasCostUsd: 0,
         isGasless: true,
       }
     }
-
-    const amountUsdPromise = getAmountUsd(quote).catch(() => undefined)
 
     if (!client || !options.buildTxPlanForQuote) {
       return { provider, quote, amountUsd: await amountUsdPromise }
@@ -310,7 +319,11 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
       plan = await profAsync(`quote:${provider}`, 'buildTxPlanForQuote', () => options.buildTxPlanForQuote!(quote, provider, getPlanContext(account)))
       const prefetch = await profAsync(`quote:${provider}`, 'sweepPrefetch', () => ensureSweepPrefetch(plan, account))
       prepared = await profAsync(`quote:${provider}`, 'prepareTxPlan', () => preparePlanForQuote(plan, account, prefetch))
-      gas = await profAsync(`quote:${provider}`, 'estimateTxPlanGas', () => estimateTxPlanGas(prepared))
+      const gasPlan = await profAsync(`quote:${provider}`, 'buildGasEstimatePlan', () => buildGasEstimatePlan(plan))
+      const gasPrepared = gasPlan === plan
+        ? prepared
+        : await profAsync(`quote:${provider}`, 'prepareGasEstimatePlan', () => preparePlanForQuote(gasPlan, account, undefined))
+      gas = await profAsync(`quote:${provider}`, 'estimateTxPlanGas', () => estimateTxPlanGas(gasPrepared))
     }
     catch (err) {
       if (shouldDiscardQuoteOnEstimateGasError(err)) {
@@ -551,6 +564,25 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     selectedProvider.value = provider
     userSelectedProvider = provider
   }
+
+  const hideCowQuoteCards = () => {
+    const withoutCow = quoteCards.value.filter(card => !isCowProviderOrQuote(card.provider, card.quote))
+    if (withoutCow.length === quoteCards.value.length) return
+
+    quoteCards.value = sortQuoteCards(withoutCow, options.amountField, options.compare)
+    if (selectedProvider.value && isCowProvider(selectedProvider.value)) {
+      selectedProvider.value = null
+    }
+    if (userSelectedProvider && isCowProvider(userSelectedProvider)) {
+      userSelectedProvider = null
+    }
+  }
+
+  watch(() => shouldIncludeCowSwap(), (includeCowSwap) => {
+    if (includeCowSwap === false) {
+      hideCowQuoteCards()
+    }
+  })
 
   watch(quoteCards, (next) => {
     if (!next.length) {

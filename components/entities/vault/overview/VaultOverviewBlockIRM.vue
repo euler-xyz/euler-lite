@@ -34,8 +34,8 @@ ChartJS.register(
 
 const { vault } = defineProps<{ vault: EVault }>()
 
-const chartData = ref<ChartData<'line'> | null>(null)
-const chartOptions = ref<ChartOptions<'line'> | null>(null)
+const chartData = shallowRef<ChartData<'line', number[], string> | null>(null)
+const chartOptions = shallowRef<ChartOptions<'line'> | null>(null)
 const isLoading = ref(true)
 const hasError = ref(false)
 
@@ -94,7 +94,6 @@ const irmTypeLabel = computed(() => {
   if (type === INTEREST_RATE_MODEL_TYPE.KINK) return 'Kink'
   if (type === INTEREST_RATE_MODEL_TYPE.ADAPTIVE_CURVE) return 'Adaptive'
   if (type === INTEREST_RATE_MODEL_TYPE.KINKY) return 'Kinky'
-  if (type === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY) return 'Cyclical note'
   return 'Interest Rate Model'
 })
 
@@ -259,6 +258,7 @@ const fetchAdaptiveBorrowAPY = async (wadPerSec: bigint): Promise<number | null>
       address: utilsLens as Address,
       abi: eulerUtilsLensABI as Abi,
       functionName: 'computeAPYs',
+      authorizationList: undefined,
       // cash/borrows don't influence borrowAPY; interestFee only affects supplyAPY.
       args: [borrowSPY, 1n, 0n, 0n],
     }) as readonly [bigint, bigint]
@@ -287,6 +287,7 @@ const fetchIRMData = async (kinkFraction: number | null) => {
       address: eulerLensAddresses.value.vaultLens as Address,
       abi: eulerVaultLensABI as Abi,
       functionName: 'getVaultInterestRateModelInfo',
+      authorizationList: undefined,
       args: [vault.address, cashData, borrowsData],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic lens contract return
     }) as Record<string, any>

@@ -7,7 +7,7 @@
     },
     "localStorage": {
       "is-onboarding-completed": "true",
-      "migration-announcement-seen": "true"
+      "euler_full_render": "1"
     },
     "waitFor": [
       "[data-id]"

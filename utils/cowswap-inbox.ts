@@ -41,6 +41,7 @@ export const cowSwapInboxExists = async (params: {
       address: params.wrapperAddress,
       abi: INBOX_LOOKUP_ABI,
       functionName: 'getInboxAddressAndDomainSeparator',
+      authorizationList: undefined,
       args: [params.owner, params.subaccount],
     })) as [Address, `0x${string}`]
     const inboxCode = await params.client.getCode({ address: inboxAddress })

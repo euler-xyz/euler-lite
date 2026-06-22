@@ -184,7 +184,7 @@ watch(showAllLabelEntries, (showAll) => {
             ROE
             <UiFootnote
               title="Portfolio ROE"
-              text="Return on equity across all positions. Calculated as total net yield divided by total equity (supplied value minus borrowed value)."
+              text="Account-level return on equity. Calculated as total net yield divided by total equity, where equity is supplied value minus borrowed value."
               tooltip-placement="bottom-start"
               class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
             />

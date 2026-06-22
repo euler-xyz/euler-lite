@@ -31,16 +31,19 @@ export const useCustomTokenResolver = () => {
           address,
           abi: erc20SymbolAbi,
           functionName: 'symbol',
+          authorizationList: undefined,
         }).catch(() => null),
         rpcClient.value!.readContract({
           address,
           abi: erc20DecimalsAbi,
           functionName: 'decimals',
+          authorizationList: undefined,
         }).catch(() => null),
         rpcClient.value!.readContract({
           address,
           abi: erc20NameAbi,
           functionName: 'name',
+          authorizationList: undefined,
         }).catch(() => null),
         fetchSingleBalance(input).catch(() => 0n),
       ])

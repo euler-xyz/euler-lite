@@ -18,6 +18,7 @@ interface TokenEntry {
   symbol: string
   decimals: number
   logoURI?: string
+  tags?: string[]
 }
 
 type QueryTokenList = (url: string) => Promise<TokenListItem[]>
@@ -121,6 +122,16 @@ const toTokenEntry = (token: TokenListItem): TokenEntry => ({
   symbol: token.symbol,
   decimals: token.decimals,
   logoURI: token.logoURI || undefined,
+  ...(token.tags?.length ? { tags: token.tags } : {}),
+})
+
+const stripUntrustedTokenTags = (token: TokenEntry): TokenEntry => ({
+  chainId: token.chainId,
+  address: token.address,
+  name: token.name,
+  symbol: token.symbol,
+  decimals: token.decimals,
+  ...(token.logoURI ? { logoURI: token.logoURI } : {}),
 })
 
 function refreshEulerSdkTokenList(chainId: number): Promise<TokenEntry[]> {
@@ -154,7 +165,8 @@ function refreshUniswap(): Promise<TokenEntry[]> {
     .then(async (resp) => {
       if (!resp.ok) throw new Error(`Uniswap upstream returned ${resp.status}`)
       const data = await resp.json()
-      const tokens: TokenEntry[] = data.tokens || []
+      const tokens: TokenEntry[] = (Array.isArray(data.tokens) ? data.tokens : [])
+        .map((token: TokenEntry) => stripUntrustedTokenTags(token))
       uniswapCache.set('all', tokens)
       reportStatus('token-list', 'uniswap:all', 'ok')
       return tokens
