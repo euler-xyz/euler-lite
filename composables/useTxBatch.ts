@@ -78,12 +78,24 @@ export interface BatchEntry {
    *  Wallet-swap repay also uses this to name the debt asset while the review keeps
    *  the wallet input asset for step decoding. */
   nameOverride?: string
+  /** Stable claim identifier for reward rows already queued in the batch. */
+  rewardClaimKey?: string
 }
 
-export interface BatchEntryInput extends Omit<BatchEntry, 'id' | 'plan'> {
-  /** Builds this entry once, at add-time, against the current batch end-state. */
-  buildPlan: (account: Account<IHasVaultAddress>) => Promise<TransactionPlan>
-}
+type BatchEntryInputBase = Omit<BatchEntry, 'id' | 'plan'>
+
+export type BatchEntryInput = BatchEntryInputBase & (
+  {
+    /** Builds this entry once, at add-time, against the current batch end-state. */
+    buildPlan: (account: Account<IHasVaultAddress>) => Promise<TransactionPlan>
+    requiresPlanningAccount?: true
+  } | {
+    /** Builds this entry once, at add-time, without a simulated account snapshot. */
+    buildPlan: () => Promise<TransactionPlan>
+    /** Set false for standalone plans that do not need the current simulated account. */
+    requiresPlanningAccount: false
+  }
+)
 
 export interface BatchLayer {
   /** Simulated account snapshot after this layer's entry (layer 0 = real). */
@@ -1481,13 +1493,14 @@ export const useTxBatch = () => {
 
     const add = async () => {
       execError.value = undefined
-      const account = await getEntryPlanningAccount()
-      const plan = await entry.buildPlan(account)
+      const plan = entry.requiresPlanningAccount === false
+        ? await entry.buildPlan()
+        : await entry.buildPlan(await getEntryPlanningAccount())
       const cid = chainId.value
       if (cid) {
         await primeBatchSlotHintsFor(cid, collectRequiredApprovalTokens(plan))
       }
-      const { buildPlan: _buildPlan, ...fixedEntry } = entry
+      const { buildPlan: _buildPlan, requiresPlanningAccount: _requiresPlanningAccount, ...fixedEntry } = entry
       registerReviewAssetMeta(fixedEntry.review)
       entries.value = [...entries.value, { ...fixedEntry, plan, id: `entry-${++idSeq}` }]
     }
