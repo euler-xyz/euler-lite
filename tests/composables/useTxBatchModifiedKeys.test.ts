@@ -15,6 +15,7 @@ const owner = getAddress('0x1000000000000000000000000000000000000000')
 const subAccount = getAddress('0x8A54C278D117854486db0F6460D901a180Fff517')
 const otherSubAccount = getAddress('0x7B54C278D117854486db0F6460D901a180Fff516')
 const collateralVault = getAddress('0x797Dd80692C3B2daDAbcE8e30C07fDE5307d48A9')
+const zeroBalanceCollateralVault = getAddress('0x4000000000000000000000000000000000000000')
 const borrowVault = getAddress('0x859160Db5841E5cfB8D3f144C6b3381A85A4b410')
 const targetCollateralVault = getAddress('0x2000000000000000000000000000000000000000')
 const targetBorrowVault = getAddress('0x3000000000000000000000000000000000000000')
@@ -181,7 +182,7 @@ describe('buildRemovedPositionKeySets', () => {
 
 describe('getRemovedBorrowPositions', () => {
   it('suppresses the old pair when a full refinance replaces it on the same sub-account', () => {
-    const basePosition = borrowPortfolioPosition()
+    const basePosition = borrowPortfolioPosition(subAccount, borrowVault, [collateralVault, zeroBalanceCollateralVault])
     const base = borrowPortfolio([basePosition])
     const current = borrowPortfolio([
       borrowPortfolioPosition(subAccount, targetBorrowVault, [targetCollateralVault]),
@@ -189,6 +190,7 @@ describe('getRemovedBorrowPositions', () => {
     const removedKeys = new Set([
       key(borrowVault),
       key(collateralVault),
+      key(zeroBalanceCollateralVault),
     ])
     const refinanceReplacementBorrowPositionKeys = buildRefinanceReplacementBorrowPositionKeys([{
       subAccount,
@@ -197,7 +199,7 @@ describe('getRemovedBorrowPositions', () => {
         collateralChanged: true,
         debtChanged: true,
         sourceDebtVault: borrowVault,
-        sourceCollateralVaults: [collateralVault],
+        sourceCollateralVaults: [collateralVault, zeroBalanceCollateralVault],
       },
     }])
 

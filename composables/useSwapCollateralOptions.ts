@@ -48,34 +48,33 @@ export const useSwapCollateralOptions = ({
     return [...unique.values()]
   }
 
+  const getBorrowableCollateralCandidates = () => {
+    // Without liability vault, show borrowable vaults + all escrow vaults
+    const borrowable = new Set(
+      borrowList.value.map(pair => getAddress(pair.borrow.address)),
+    )
+    // Get verified EVaults that are borrowable and non-escrow
+    const standardVaults = getVerifiedEVaults()
+      .filter(vault => getVaultCategory(vault.address) !== 'escrow')
+      .filter(vault => borrowable.has(getAddress(vault.address)))
+    // Get all escrow vaults (always valid as collateral, already have verified: true)
+    const escrowVaults = getEscrowVaults()
+
+    return [...standardVaults, ...escrowVaults]
+  }
+
   const baseCollateralCandidates = computed(() => {
     const current = currentVault.value
     const currentAddress = current ? getAddress(current.address) : null
     const liability = liabilityVault?.value
 
-    let candidates: EVault[] = []
-
-    if (liability) {
+    const candidates = liability
       // When we have a liability vault, get collaterals from LTV configuration
-      candidates = liability.collaterals
-        .filter(ltv => ltv.borrowLTV > 0)
-        .map(ltv => registryGetVault(ltv.address) as EVault | undefined)
-        .filter((vault): vault is EVault => Boolean(vault))
-    }
-    else {
-      // Without liability vault, show borrowable vaults + all escrow vaults
-      const borrowable = new Set(
-        borrowList.value.map(pair => getAddress(pair.borrow.address)),
-      )
-      // Get verified EVaults that are borrowable and non-escrow
-      const standardVaults = getVerifiedEVaults()
-        .filter(vault => getVaultCategory(vault.address) !== 'escrow')
-        .filter(vault => borrowable.has(getAddress(vault.address)))
-      // Get all escrow vaults (always valid as collateral, already have verified: true)
-      const escrowVaults = getEscrowVaults()
-
-      candidates = [...standardVaults, ...escrowVaults]
-    }
+      ? liability.collaterals
+          .filter(ltv => ltv.borrowLTV > 0)
+          .map(ltv => registryGetVault(ltv.address) as EVault | undefined)
+          .filter((vault): vault is EVault => Boolean(vault))
+      : getBorrowableCollateralCandidates()
 
     return filterTargetCollateralCandidates(candidates, currentAddress)
   })

@@ -144,7 +144,7 @@ export const useWallets = () => {
     isFetching.value = true
 
     try {
-      const targetAddress = balanceAddress.value as Address
+      const targetAddress = getAddress(balanceAddress.value as Address)
       const sdk = await getEulerSdk()
       const assetsWithSpenders = tokenAddresses.map(asset => ({ asset, spenders: [] }))
       if (includesNativeCurrency) {

@@ -14,7 +14,7 @@ const { productName, symbol, collateralOptions, selected = 0, title = 'Select co
   selected?: number
   title?: string
   apyLabel?: string
-  onSave: (selectedIndex: number) => void
+  onSave: (selectedIndex: number, selectedOption: CollateralOption) => void
 }>()
 
 const { isEscrowVault } = useVaultRegistry()
@@ -77,7 +77,7 @@ type GroupedRow
 
 // Split the already-filtered list into the two display groups.
 // NOTE: each entry keeps its ORIGINAL `idx` from collateralOptions. Selection
-// (selectedIdx) and onSave(idx) depend on it, so never re-index here.
+// and existing callers depend on it, so never re-index here.
 const compatibleOptions = computed(() =>
   filteredOptions.value.filter(({ option }) => !option.compatibilityWarning),
 )
@@ -214,7 +214,7 @@ const handleClose = () => {
             selectedIdx === row.idx && !row.option.disabled ? 'bg-card-hover' : '',
           ]"
           @click="
-            if (!row.option.disabled) { selectedIdx = row.idx;onSave(row.idx) }
+            if (!row.option.disabled) { selectedIdx = row.idx;onSave(row.idx, row.option) }
           "
         >
           <AssetAvatar

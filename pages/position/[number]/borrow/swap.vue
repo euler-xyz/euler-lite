@@ -103,6 +103,14 @@ const sourceDebtVault = computed<EVault | undefined>(() =>
 const selectedCollateralAddress = computed(() =>
   typeof route.query.collateral === 'string' ? normalizeVaultAddress(route.query.collateral) : '',
 )
+const positionDetailsFallback = computed(() => {
+  const query = new URLSearchParams()
+  const network = route.query.network
+  if (typeof network === 'string') query.set('network', network)
+  else if (Array.isArray(network) && network[0]) query.set('network', network[0])
+  const search = query.toString()
+  return `/position/${positionIndex}${search ? `?${search}` : ''}`
+})
 const sourceCollateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() => {
   const currentPosition = position.value
   if (!currentPosition) return undefined
@@ -112,8 +120,10 @@ const sourceCollateralVault = computed<EVault | SecuritizeCollateralVault | unde
       normalizeVaultAddress(collateral.vaultAddress) === selectedCollateralAddress.value
       || normalizeVaultAddress(collateral.vault?.address) === selectedCollateralAddress.value,
     )
-    const selectedVault = selectedCollateral?.vault ?? getVault(selectedCollateralAddress.value)
-    if (selectedVault) return selectedVault as EVault | SecuritizeCollateralVault
+    if (selectedCollateral) {
+      const selectedVault = selectedCollateral.vault ?? getVault(selectedCollateralAddress.value)
+      if (selectedVault) return selectedVault as EVault | SecuritizeCollateralVault
+    }
   }
 
   return currentPosition.collateralVault as EVault | SecuritizeCollateralVault | undefined
@@ -714,6 +724,22 @@ const currentCollateralLegs = computed<RefinanceCollateralLeg[]>(() =>
       amount: collateral.assets,
     })),
 )
+const sourceCollateralVaultAddresses = computed(() => {
+  const currentPosition = position.value
+  if (!currentPosition) return []
+
+  const addresses = new Set<string>()
+  const addAddress = (address: string | undefined) => {
+    const normalized = normalizeVaultAddress(address)
+    if (normalized) addresses.add(normalized)
+  }
+
+  for (const address of currentPosition.collateralVaults ?? []) addAddress(address)
+  addAddress(currentPosition.collateral?.vaultAddress)
+  addAddress(currentPosition.collateralVault?.address)
+
+  return Array.from(addresses)
+})
 
 const nextCollateralLegs = computed<RefinanceCollateralLeg[]>(() => {
   if (!hasCollateralChange.value) return currentCollateralLegs.value
@@ -1230,9 +1256,22 @@ watch([isPositionsLoaded, () => route.params.number], ([loaded]) => {
   if (loaded) void loadPosition()
 }, { immediate: true })
 
-const onDebtVaultChange = (selectedIndex: number) => {
+const resolveSelectedVault = <T extends EVault | SecuritizeCollateralVault>(
+  vaults: T[],
+  selectedIndex: number,
+  selectedOption?: CollateralOption,
+): T | undefined => {
+  const selectedAddress = normalizeVaultAddress(selectedOption?.vaultAddress)
+  if (selectedAddress) {
+    const selected = vaults.find(vault => normalizeVaultAddress(vault.address) === selectedAddress)
+    if (selected) return selected
+  }
+  return vaults[selectedIndex]
+}
+
+const onDebtVaultChange = (selectedIndex: number, selectedOption?: CollateralOption) => {
   clearSimulationError()
-  const selected = debtSelectionVaults.value[selectedIndex]
+  const selected = resolveSelectedVault(debtSelectionVaults.value, selectedIndex, selectedOption)
   if (!selected || !sourceDebtVault.value) return
   if (normalizeVaultAddress(selected.address) === normalizeVaultAddress(sourceDebtVault.value.address)) {
     targetDebtVault.value = undefined
@@ -1241,9 +1280,9 @@ const onDebtVaultChange = (selectedIndex: number) => {
   targetDebtVault.value = selected as EVault
 }
 
-const onCollateralVaultChange = (selectedIndex: number) => {
+const onCollateralVaultChange = (selectedIndex: number, selectedOption?: CollateralOption) => {
   clearSimulationError()
-  const selected = collateralSelectionVaults.value[selectedIndex]
+  const selected = resolveSelectedVault(collateralSelectionVaults.value, selectedIndex, selectedOption)
   if (!selected || !sourceCollateralVault.value) return
   if (normalizeVaultAddress(selected.address) === normalizeVaultAddress(sourceCollateralVault.value.address)) {
     targetCollateralVault.value = undefined
@@ -1443,7 +1482,7 @@ const addToBatch = async () => {
         collateralChanged,
         debtChanged,
         sourceDebtVault: sourceDebtVault.value.address,
-        sourceCollateralVaults: currentCollateralLegs.value.map(leg => leg.vault.address),
+        sourceCollateralVaults: sourceCollateralVaultAddresses.value,
         ...swapReviewInfo,
       },
     })
@@ -1623,12 +1662,12 @@ function getOperationVaultAddresses(): string[] {
   <div class="relative flex gap-32">
     <BackButton
       class="hidden tablet:inline-flex tablet:absolute tablet:top-20 tablet:right-full tablet:mr-4"
-      :fallback="`/position/${positionIndex}`"
+      :fallback="positionDetailsFallback"
       always-fallback
     />
     <VaultForm
       back
-      :back-fallback="`/position/${positionIndex}`"
+      :back-fallback="positionDetailsFallback"
       back-always-fallback
       title="Refinance"
       description="Move debt, collateral, or both to new vaults in one transaction."

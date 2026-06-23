@@ -323,7 +323,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
   // --- Submit disabled ---
   const isSubmitDisabled = computed(() => {
-    if (!isConnected.value && !isSpyMode.value) return false
+    if (!isConnected.value && !isSpyMode.value) return true
     if (findBlockingDisabledOp(collateralSwapRepayPlannedOps.value)) return true
     if (!sourceVault.value || !borrowVault.value) return true
     if (!core.debtAmount.value && !core.amount.value) return true

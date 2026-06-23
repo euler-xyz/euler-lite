@@ -42,6 +42,13 @@ const {
 } = useTransactionPlanSimulation()
 
 const positionIndex = usePositionIndex()
+const buildRefinanceRoute = (collateralAddress: string) => {
+  const query: Record<string, string> = { collateral: collateralAddress }
+  const network = _route.query.network
+  if (typeof network === 'string') query.network = network
+  else if (Array.isArray(network) && network[0]) query.network = network[0]
+  return { path: `/position/${positionIndex}/borrow/swap`, query }
+}
 
 type PositionCollateral = {
   vault: EVault | SecuritizeCollateralVault
@@ -630,7 +637,7 @@ const loadCollaterals = async (sequence: number) => {
       orderedAddresses.map(async (address) => {
         try {
           const vault = await getOrFetch(address) as unknown as EVault | SecuritizeCollateralVault | undefined
-          let assets = 0n
+          let assets: bigint | undefined
 
           try {
             const res = await client.readContract({
@@ -646,9 +653,16 @@ const loadCollaterals = async (sequence: number) => {
             if (address === primaryAddress) {
               assets = primarySupplied
             }
+            else {
+              const matchedCollateral = position.value!.collaterals?.find((collateral) => {
+                const collateralAddress = collateral.vaultAddress || collateral.vault?.address
+                return collateralAddress ? getAddress(collateralAddress) === address : false
+              })
+              assets = matchedCollateral?.assets
+            }
           }
 
-          return vault ? { vault, assets } : null
+          return vault && assets !== undefined ? { vault, assets } : null
         }
         catch (e) {
           console.warn('[Position] failed to load collateral vault', address, e)
@@ -762,10 +776,13 @@ const load = async () => {
     if (sequence !== loadSequence) return
     position.value = getPositionBySubAccountIndex(+positionIndex)
     if (position.value) {
-      collateralItems.value = [{
-        vault: collateralVault.value as EVault,
-        assets: position.value.supplied,
-      }]
+      const initialCollateralVault = collateralVault.value
+      collateralItems.value = initialCollateralVault
+        ? [{
+            vault: initialCollateralVault,
+            assets: position.value.supplied,
+          }]
+        : []
       // Load collaterals: always for multi-collateral, or when oracle failed (to get actual assets)
       if (positionCollateralAddresses.value.length > 1 || hasQueryFailure.value) {
         await loadCollaterals(sequence)
@@ -1495,7 +1512,7 @@ watch([isConnected, isSpyMode, address, activeLayerData], () => {
                   variant="primary-stroke"
                   rounded
                   :disabled="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure"
-                  :to="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure ? undefined : `/position/${positionIndex}/borrow/swap?collateral=${collateral.vault.address}`"
+                  :to="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure ? undefined : buildRefinanceRoute(collateral.vault.address)"
                 >
                   Refinance
                 </UiButton>
