@@ -560,10 +560,10 @@ onMounted(() => {
                    pair matrix with the corresponding dotMetric. -->
               <div
                 v-if="getExpandedView(market.id) === 'matrix'"
-                class="relative"
+                class="matrix-view-select relative"
               >
                 <div
-                  class="ui-select__field"
+                  class="ui-select__field matrix-view-select__field"
                   data-id="discovery-matrix-view-select"
                   :data-key="market.id"
                   :data-market-id="market.id"
@@ -572,12 +572,12 @@ onMounted(() => {
                 >
                   <UiIcon
                     name="filter"
-                    class="ui-select__icon"
+                    class="ui-select__icon matrix-view-select__icon"
                   />
-                  <span class="ui-select__text">{{ MATRIX_VIEW_OPTIONS.find(o => o.id === getMatrixView(market.id))?.label }}</span>
+                  <span class="ui-select__text matrix-view-select__text">{{ MATRIX_VIEW_OPTIONS.find(o => o.id === getMatrixView(market.id))?.label }}</span>
                   <UiIcon
                     name="arrow-down"
-                    class="ui-select__arrow"
+                    class="ui-select__arrow matrix-view-select__arrow"
                     :style="isMatrixDropdownOpen(market.id) ? 'transform: rotate(180deg)' : ''"
                   />
                 </div>
@@ -799,3 +799,54 @@ onMounted(() => {
     </article>
   </div>
 </template>
+
+<style scoped lang="scss">
+.matrix-view-select {
+  width: fit-content;
+  max-width: 100%;
+
+  &__field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 36px;
+    width: fit-content;
+    max-width: 100%;
+    color: var(--ui-select-field-color);
+    font-size: 14px;
+    font-weight: 400;
+    white-space: nowrap;
+    padding: 6px 16px;
+    background: var(--ui-select-field-background-color);
+    border: 1px solid var(--neutral-300);
+    border-radius: 100px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-shadow: var(--ui-input-shadow);
+
+    &:hover {
+      border-color: var(--neutral-400);
+      background: var(--neutral-50);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+    }
+  }
+
+  &__icon,
+  &__arrow {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+  }
+
+  &__text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__arrow {
+    margin-left: 2px;
+    margin-right: -4px;
+  }
+}
+</style>
