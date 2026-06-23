@@ -275,6 +275,7 @@ const {
   isSameAsset, sameVaultError, errorText, quote,
   isGeoBlocked, reviewSwapDisabled, reviewSwapLabel, simulationError,
   isQuoteLoading, quoteError, quotesStatusLabel, selectedProvider, selectedQuote,
+  effectiveQuoteFetchedAt,
   fromProduct, toProduct, swapPriceInvert, currentPrice, swapSummary, priceImpact, routedVia,
   swapRouteItems, swapRouteEmptyMessage,
   selectProvider, onFromInput: _onFromInput, onRefreshQuotes, submit, openSlippageSettings,
@@ -334,7 +335,7 @@ const addToBatch = async () => {
         account,
       }),
       subAccount: pos.subAccount as Address,
-      review: { type: 'swap-borrow', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.TARGET_DEBT },
+      review: { type: 'swap-borrow', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.TARGET_DEBT, quoteFetchedAt: sameAsset ? null : effectiveQuoteFetchedAt.value },
     })
     fromAmount.value = ''
     redirectAfterAdd('/portfolio', { subAccount: pos.subAccount as Address })
