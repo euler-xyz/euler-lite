@@ -16,6 +16,7 @@ import { getVaultAvailableLiquidity, getVaultUtilization } from '~/utils/vault-d
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
 import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
+import { formatCompactUsdValue } from '~/utils/string-utils'
 
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -98,8 +99,6 @@ const { chainId } = useEulerAddresses()
 
 const isPricesReady = ref(false)
 const { entities, isReady: labelsReady } = useEulerLabels()
-const isLoading = computed(() => isEVaultUpdating.value || isEscrowUpdating.value || isTokenListLoading.value || !labelsReady.value || !isPricesReady.value)
-const { isSlow } = useSlowLoading(isLoading)
 const { enableEntityBranding } = useDeployConfig()
 const showAllLabelEntries = useShowAllLabelEntries()
 
@@ -137,6 +136,14 @@ const selectedMarkets = ref<string[]>([])
 const selectedRiskManagers = ref<string[]>([])
 const sortBy = ref<string>('Active')
 const sortDir = ref<'desc' | 'asc'>('desc')
+const MIN_BORROW_LIQUIDITY_USD = 1000
+const defaultBorrowLiquidityFilter = {
+  id: 'borrow-min-liquidity-usd',
+  metric: 'liquidity',
+  operator: 'gt',
+  value: MIN_BORROW_LIQUIDITY_USD,
+  label: `Avail. liquidity > ${formatCompactUsdValue(MIN_BORROW_LIQUIDITY_USD)}`,
+} as const
 
 useUrlQuerySync([
   { ref: searchQuery, default: '', queryKey: 'search' },
@@ -157,9 +164,31 @@ watch(sortBy, (newSortBy) => {
 // Cache for USD values used in sorting (keyed by pair identifier: collateral+borrow address)
 const pairLiquidityUsd = ref<Map<string, number>>(new Map())
 const pairBorrowedUsd = ref<Map<string, number>>(new Map())
+let priceLoadId = 0
 
 // Helper to create a unique key for a borrow pair
 const getPairKey = (pair: AnyBorrowVaultPair) => `${pair.collateral.address}-${pair.borrow.address}`
+
+const areBorrowPriceValuesReady = computed(() => {
+  if (!isPricesReady.value) return false
+
+  const liquidityValues = pairLiquidityUsd.value
+  const borrowedValues = pairBorrowedUsd.value
+
+  return activeBorrowList.value.every((pair) => {
+    const key = getPairKey(pair)
+    return liquidityValues.has(key) && borrowedValues.has(key)
+  })
+})
+
+const isLoading = computed(() =>
+  isEVaultUpdating.value
+  || isEscrowUpdating.value
+  || isTokenListLoading.value
+  || !labelsReady.value
+  || !areBorrowPriceValuesReady.value,
+)
+const { isSlow } = useSlowLoading(isLoading)
 
 const getPairSortName = (pair: AnyBorrowVaultPair): string =>
   `${pair.collateral.asset.symbol}/${pair.borrow.asset.symbol}`
@@ -179,6 +208,7 @@ const comparePairNameAsc = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair): numbe
 // this is the most expensive price-fetch watcher in the app because
 // pair count is combinatorial in collaterals × borrow vaults.
 const fetchBorrowPrices = useDebounceFn(async () => {
+  const loadId = ++priceLoadId
   const pairs = borrowList.value
   if (!pairs.length) {
     isPricesReady.value = true
@@ -199,11 +229,14 @@ const fetchBorrowPrices = useDebounceFn(async () => {
         borrowedValues.set(key, borrowed)
       }),
     )
+    if (loadId !== priceLoadId) return
     pairLiquidityUsd.value = liquidityValues
     pairBorrowedUsd.value = borrowedValues
   }
   finally {
-    isPricesReady.value = true
+    if (loadId === priceLoadId) {
+      isPricesReady.value = true
+    }
   }
 }, DEBOUNCE_LIST_PRICE_FETCH_MS)
 
@@ -283,6 +316,7 @@ const {
       default: return 0
     }
   },
+  [defaultBorrowLiquidityFilter],
 )
 
 watch(chainId, (newChainId, oldChainId) => {

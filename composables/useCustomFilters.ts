@@ -7,9 +7,10 @@ export type { CustomFilter, FilterMetricOption, FilterMetricUnit }
 export const useCustomFilters = <T>(
   metrics: FilterMetricOption[],
   getValue: (item: T, metric: string) => number,
+  initialFilters: CustomFilter[] = [],
 ) => {
   const modal = useModal()
-  const customFilters = ref<CustomFilter[]>([])
+  const customFilters = ref<CustomFilter[]>([...initialFilters])
 
   const addCustomFilter = (filter: CustomFilter) => {
     customFilters.value = [...customFilters.value, filter]
@@ -20,7 +21,7 @@ export const useCustomFilters = <T>(
   }
 
   const clearCustomFilters = () => {
-    customFilters.value = []
+    customFilters.value = [...initialFilters]
   }
 
   const openCustomFilterModal = () => {
